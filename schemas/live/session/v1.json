@@ -359,6 +359,10 @@
       "type": "number",
       "description": "Epoch milliseconds"
     },
+    "permissionMode": {
+      "description": "How it asks before it acts (default, acceptEdits, plan, bypassPermissions…), as its hooks last said",
+      "type": "string"
+    },
     "host": {
       "description": "The host it's from, for a session on another machine",
       "type": "string"

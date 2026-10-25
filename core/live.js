@@ -258,6 +258,9 @@ class LiveSession {
     // its turns' calls counted so far, by turn and model.
     this.usageStamp = null;
     this.usageCounted = new Map();
+    // How it asks before it acts (plan, bypassPermissions…), as its hooks
+    // last said.
+    this.permissionMode = null;
     this.recentTools = [];
     this.errorStreak = 0;
   }
@@ -467,6 +470,8 @@ class LiveSession {
       lastTurnEndAt: this.lastTurnEndAt || null,
       interruptedAt: this.interruptedAt || null,
       lastEventAt: this.lastEventAt,
+      // How it asks before it acts, once its hooks have said.
+      ...(this.permissionMode ? { permissionMode: this.permissionMode } : {}),
     };
   }
 }
@@ -762,6 +767,13 @@ export class LiveTelemetry extends EventEmitter {
     const event = body.hook_event_name;
     if (event === "Notification") s.hookNeed = { text: clip(body.message ?? "Claude needs your attention", 200), ts };
     else if (["UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"].includes(event)) s.hookNeed = null;
+    // How it asks before it acts, as every hook says it: Grok Build's
+    // permissionMode, Claude Code's permission_mode. A subagent's isn't its
+    // session's.
+    if (!body.subagentType) {
+      const mode = typeof body.permissionMode === "string" ? body.permissionMode : body.permission_mode;
+      if (typeof mode === "string" && mode) s.permissionMode = mode;
+    }
     if (mapperOf(s.app).turnEnds === false && !body.subagentType) {
       s.hookAt = ts;
       if (["Stop", "StopCancelled", "StopFailure"].includes(event) && s.turn.active) {

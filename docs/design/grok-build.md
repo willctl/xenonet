@@ -185,8 +185,14 @@ XenoNet tells by the `grok` command or its folder.
 The hooks run `xenonet hook grok`, which posts the event to
 `/api/hook/grok`. Grok's payload has camelCase keys (`sessionId`,
 `toolName`, `toolInput`, `stopHookActive`), with the event in Claude
-Code's spelling in `hook_event_name`. XenoNet answers in Claude Code's
-format, which Grok reads, but Grok doesn't hear an answer at every event:
+Code's spelling in `hook_event_name`. Every event also says how the
+session asks before it acts (`permissionMode`: `default`, `acceptEdits`,
+`auto`, `dontAsk`, `bypassPermissions` or `plan`). The live tailer keeps
+the last one a session's own hooks said (a subagent's, with its
+`subagentType`, isn't the session's), and the session's panel shows it as
+its permissions, as it does Claude Code's (`permission_mode` in its
+hooks). XenoNet answers in Claude Code's format, which Grok reads, but
+Grok doesn't hear an answer at every event:
 
 | Event | What Grok does with an answer | What XenoNet answers |
 | --- | --- | --- |

@@ -402,6 +402,9 @@ pub struct Session {
     // its turns' calls counted so far, by turn and model.
     usage_stamp: Option<String>,
     usage_counted: HashMap<String, Counted>,
+    // How it asks before it acts (plan, bypassPermissions…), as its hooks
+    // last said.
+    permission_mode: Option<String>,
     recent_tools: Vec<ToolRec>,
     error_streak: f64,
     // Undefined (None) until the first reset.
@@ -458,6 +461,7 @@ impl Session {
             run_entry: None,
             usage_stamp: None,
             usage_counted: HashMap::new(),
+            permission_mode: None,
             recent_tools: Vec::new(),
             error_streak: 0.0,
             error_since: None,
@@ -832,7 +836,7 @@ impl Session {
         let today = self.daily.get(&str_tag(&day_key(now))).map_or(0.0, |(_, v)| *v);
         let last_message = self.last_message();
         let or_null = |v: f64| if v != 0.0 && !v.is_nan() { number(v) } else { Value::Null };
-        obj(vec![
+        let mut snap = obj(vec![
             ("id", Value::String(self.id.clone())),
             ("app", Value::String(self.app.clone())),
             ("status", self.status(now).into()),
@@ -854,7 +858,12 @@ impl Session {
             ("lastTurnEndAt", or_null(self.last_turn_end_at)),
             ("interruptedAt", or_null(self.interrupted_at)),
             ("lastEventAt", number(self.last_event_at)),
-        ])
+        ]);
+        // How it asks before it acts, once its hooks have said.
+        if let (Some(mode), Value::Object(m)) = (&self.permission_mode, &mut snap) {
+            m.insert("permissionMode".into(), Value::String(mode.clone()));
+        }
+        snap
     }
 
     fn new_uid(&mut self) -> u64 {
@@ -1269,6 +1278,16 @@ impl Telemetry {
             s.hook_need = obj(vec![("text", Value::String(clip_value(Some(&text), 200))), ("ts", number(now))]);
         } else if name.as_ref().and_then(Value::as_str).is_some_and(|n| ["UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"].contains(&n)) {
             s.hook_need = Value::Null;
+        }
+        // How it asks before it acts, as every hook says it: Grok Build's
+        // permissionMode, Claude Code's permission_mode. A subagent's isn't
+        // its session's.
+        if !truthy(opt_prop(body, "subagentType")) {
+            if let Some(Value::String(mode)) = opt_prop(body, "permissionMode").filter(|m| m.is_string()).or(opt_prop(body, "permission_mode")) {
+                if !mode.is_empty() {
+                    s.permission_mode = Some(mode.clone());
+                }
+            }
         }
         // An app whose lines don't say when a turn ends (Grok Build's) says
         // it in its hooks: Stop, and StopCancelled (you stopped it) and

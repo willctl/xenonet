@@ -45,6 +45,7 @@ export const LiveSession = define(
     lastTurnEndAt: ms.nullable(),
     interruptedAt: ms.nullable().optional().describe("When you stopped its last turn (a Claude interruption, or a Codex turn you aborted), until its next prompt: it waits on you, but isn't ready for review"),
     lastEventAt: ms,
+    permissionMode: z.string().optional().describe("How it asks before it acts (default, acceptEdits, plan, bypassPermissions…), as its hooks last said"),
     host: z.string().optional().describe("The host it's from, for a session on another machine"),
     stale: z.boolean().optional().describe("Its host isn't live: it's shown idle, as of when the host last was"),
   }),

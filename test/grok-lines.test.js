@@ -153,8 +153,15 @@ test("the live tailer follows a Grok Build session; its hooks end its turns, and
   await live.track(busyFile, { prime: false });
   s = of(busy);
   assert.deepEqual([s.status, s.lastMessage, s.context.used, s.context.window], ["thinking", "Renamed it.", 9000, 300000]);
+  assert.equal(of(busy).permissionMode, undefined, "no hook has said how it asks yet");
+  // Its hooks say how it asks before it acts; a subagent's don't speak for
+  // it.
+  live.noteHook(`grok:${busy}`, { hook_event_name: "PostToolUse", sessionId: busy, permissionMode: "plan" });
+  live.noteHook(`grok:${busy}`, { hook_event_name: "PostToolUse", sessionId: busy, permissionMode: "bypassPermissions", subagentType: "explore" });
+  assert.equal(of(busy).permissionMode, "plan");
   // Its hook says the turn ended.
-  live.noteHook(`grok:${busy}`, { hook_event_name: "Stop", sessionId: busy });
+  live.noteHook(`grok:${busy}`, { hook_event_name: "Stop", sessionId: busy, permissionMode: "acceptEdits" });
+  assert.equal(of(busy).permissionMode, "acceptEdits");
   assert.equal(of(busy).status, "idle");
   assert.ok(events.some((e) => e.kind === "turn-end" && e.sessionId === `grok:${busy}`));
   // Without hooks, a turn that's been quiet a while, with nothing in

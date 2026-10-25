@@ -494,6 +494,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("updated", `${timeAgo(node.updatedAt)} <span class="dim">· ${stamp(node.updatedAt)}</span>`) +
         row("created", stamp(node.createdAt)) +
         row("model", mono(node.model && `${node.model}${node.effort ? ` · ${node.effort}` : ""}`)) +
+        // How it asks before it acts, as its hooks last said (Grok Build's
+        // and Claude Code's), else as Claude desktop keeps it.
+        row("permissions", mono(liveById.get(node.id)?.permissionMode ?? node.permissionMode ?? null)) +
         row("branch", mono(node.branch)) +
         row("folder", mono(shortPath(node.cwd, 40))) +
         row("worktree", mono(node.worktree && shortPath(node.worktree, 40))) +
