@@ -963,7 +963,7 @@ impl Demo {
             let parent = s.get("parent").and_then(Value::as_u64).map(|p| format!("{}:{}", s_of(&self.sessions[p as usize], "app"), id_of(p as usize)));
             let subagent = flag(s, "subagent");
             let desktop = flag(s, "desktop");
-            out.push(json!({
+            let mut session = json!({
                 "id": format!("{app}:{}", id_of(i)),
                 "app": app,
                 "rawId": id_of(i),
@@ -986,7 +986,12 @@ impl Demo {
                 "parentId": parent,
                 "parentKind": parent.as_ref().map(|_| if subagent { "subagent" } else { "spawn" }),
                 "claudeAccount": if app == "claude" && desktop { demo_claude_account(s.get("project").and_then(Value::as_str)) } else { Value::Null },
-            }));
+            });
+            // A Grok Build subagent's type, as its parent's folder says it.
+            if app == "grok" && subagent {
+                session["agentKind"] = json!("explore");
+            }
+            out.push(session);
         }
         Ok(out)
     }

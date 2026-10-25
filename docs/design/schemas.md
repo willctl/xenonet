@@ -168,6 +168,7 @@ drift record and the rules; this is how they're built.
 | `spacexai/grok-build/session-summary` | `~/.grok/sessions/<encoded cwd>/<id>/summary.json`, a Grok Build session's index entry | `grok.js` | None in the file | `*` |
 | `spacexai/grok-build/update-line` | A line of a Grok Build session's `updates.jsonl`, a session update in its envelope | `live.js`, `stats.js` and `search.js`, through `lines.js`'s normalizer | None in the lines | `*` |
 | `spacexai/grok-build/usage` | `~/.grok/sessions/<encoded cwd>/<id>/usage.json`, a Grok Build session's token and cost ledger | `grok-usage.js`, for `live.js` and `stats.js` | None in the file | `*` |
+| `spacexai/grok-build/subagent-meta` | `~/.grok/sessions/<encoded cwd>/<id>/subagents/<subagent id>/meta.json`, a subagent a Grok Build session ran | `grok.js` | None in the file | `*` |
 
 Not covered, since the contracts don't list them: the Remote Control
 owner line `identities.js` finds in a transcript's first 64 KB, the

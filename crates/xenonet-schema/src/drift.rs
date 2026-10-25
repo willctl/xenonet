@@ -59,6 +59,7 @@ pub const SOURCES: &[(&str, &str)] = &[
     ("anysphere/cursor/hook-input", "Cursor's hook input"),
     ("spacexai/grok-build/session-summary", "Grok Build's session summaries"),
     ("spacexai/grok-build/update-line", "Grok Build's session updates"),
+    ("spacexai/grok-build/subagent-meta", "Grok Build's subagents' metadata"),
     ("spacexai/grok-build/usage", "Grok Build's usage ledgers"),
 ];
 

@@ -317,6 +317,16 @@ export const VENDOR = {
       { record: { timestamp: 1791201600, params: { update: { content: { type: "text" } } } }, drift: [["missing-field", "params.update.sessionUpdate"]] },
     ],
   },
+  "spacexai/grok-build/subagent-meta": {
+    fits: [
+      { subagent_id: "sa-1", parent_session_id: "019a3b5c-0000-7000-8000-00000000000a", child_session_id: "019a3b5c-0000-7000-8000-00000000000b", subagent_type: "explore", description: "Map the refund code", status: "completed", started_at: "2026-10-16T12:00:04Z", completed_at: "2026-10-16T12:00:08Z", duration_ms: 4000, tool_calls: 3, turns: 1 },
+      { subagent_id: "sa-2", parentSessionId: "019a3b5c-0000-7000-8000-00000000000a", childSessionId: "019a3b5c-0000-7000-8000-00000000000c", subagentType: "general-purpose", description: "Check contrast", status: "running", started_at: "2026-10-16T12:01:00Z" },
+    ],
+    odd: [
+      { record: { child_session_id: 5, subagent_type: "explore" }, drift: [["type-change", "child_session_id"]], strip: [["child_session_id"]] },
+      { record: { child_session_id: "x", subagent_type: ["explore"] }, drift: [["type-change", "subagent_type"]], strip: [["subagent_type"]] },
+    ],
+  },
   "spacexai/grok-build/usage": {
     fits: [
       {

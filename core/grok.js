@@ -6,7 +6,8 @@
 // id and folder, title, model, times, and the session it came from), read
 // leniently against its schema (vendor.js), and updates.jsonl its
 // conversation, which the line readers read (lines.js, events.js). A
-// subagent's session is one like any other, whose summary names its parent.
+// subagent's session is one like any other, whose summary names its parent,
+// and its parent's folder has a subagents/<id>/meta.json that names it.
 //
 // A session is grok:<session id> to the rest of XenoNet. The Rust has a twin
 // of the listing (crates/xenonet-sources/src/grok.rs), which the binary
@@ -24,6 +25,7 @@ import { grokTime } from "./grok-usage.js";
 export { grokTime };
 
 const summaries = reader("spacexai/grok-build/session-summary");
+const metas = reader("spacexai/grok-build/subagent-meta");
 
 // Text's first line, trimmed, at most n characters.
 function firstLine(s, n = 80) {
@@ -72,9 +74,31 @@ export function groupCwd(groupDir, name = path.basename(groupDir)) {
   }
 }
 
+const text = (v) => (typeof v === "string" && v ? v : null);
+
+// The subagents a session ran, from its folder's subagents/<id>/meta.json
+// (`id`: the session's own): each one's session (`child`), whose it is
+// (`parent`), its type and what it was asked to do. Grok writes the fields
+// in snake case; its cloud copy of them is in camel case, read too.
+function subagentsIn(dir, id) {
+  const out = [];
+  for (const name of dirsIn(path.join(dir, "subagents"))) {
+    const raw = readJson(path.join(dir, "subagents", name, "meta.json"));
+    if (raw === undefined) continue;
+    const m = metas.sample(raw);
+    if (!m || typeof m !== "object" || Array.isArray(m)) continue;
+    const child = text(m.child_session_id) ?? text(m.childSessionId);
+    if (child) out.push({ child, parent: text(m.parent_session_id) ?? text(m.parentSessionId) ?? id, type: text(m.subagent_type) ?? text(m.subagentType), description: text(m.description) });
+  }
+  return out;
+}
+
 // A session as the map lists it (session/v1), from its folder's summary
-// (`s`, {} when it has none yet), the group's folder and its updates file.
-function sessionOf(id, s, cwd, updates) {
+// (`s`, {} when it has none yet), the group's folder, its updates file, and
+// what its parent's folder says of it when it's a subagent (`sub`): whose
+// it is, its type (agentKind) and, for a title when it has none, what it
+// was asked to do.
+function sessionOf(id, s, cwd, updates, subs = new Map()) {
   const info = s.info && typeof s.info === "object" && !Array.isArray(s.info) ? s.info : {};
   const rawId = typeof info.id === "string" && info.id ? info.id : id;
   const where = typeof info.cwd === "string" && info.cwd ? info.cwd : cwd;
@@ -82,13 +106,14 @@ function sessionOf(id, s, cwd, updates) {
   // folder its work came from.
   const source = typeof s.source_workspace_dir === "string" && s.source_workspace_dir ? s.source_workspace_dir : null;
   const kind = typeof s.session_kind === "string" ? s.session_kind : null;
-  const parent = typeof s.parent_session_id === "string" && s.parent_session_id ? s.parent_session_id : null;
-  const subagent = !!kind?.startsWith("subagent");
+  const sub = subs.get(rawId) ?? null;
+  const parent = (typeof s.parent_session_id === "string" && s.parent_session_id ? s.parent_session_id : null) ?? sub?.parent ?? null;
+  const subagent = !!kind?.startsWith("subagent") || !!sub;
   return {
     id: `grok:${rawId}`,
     app: "grok",
     rawId,
-    title: firstLine(s.generated_title) || firstLine(s.session_summary) || "(untitled session)",
+    title: firstLine(s.generated_title) || firstLine(s.session_summary) || firstLine(sub?.description) || "(untitled session)",
     preview: firstLine(s.session_summary, 200) || null,
     cwd: source ?? where ?? null,
     worktree: source ? (where ?? null) : null,
@@ -102,6 +127,7 @@ function sessionOf(id, s, cwd, updates) {
     source: kind,
     parentId: parent ? `grok:${parent}` : null,
     parentKind: subagent && parent ? "subagent" : parent ? "fork" : null,
+    ...(sub?.type ? { agentKind: sub.type } : {}),
     // Background work: a run Grok marks hidden, or one run headless (grok
     // -p), as `codex exec` runs are for Codex. A subagent is its parent's.
     background: s.hidden === true || kind === "headless",
@@ -109,10 +135,13 @@ function sessionOf(id, s, cwd, updates) {
   };
 }
 
-// Grok Build's sessions, as XenoNet lists sessions (session/v1).
+// Grok Build's sessions, as XenoNet lists sessions (session/v1). A
+// subagent's session is linked to its parent by what either says: its
+// summary, or its parent's meta.json, which can be there first.
 export function listGrokSessions({ home = config.grokHome } = {}) {
   const root = path.join(home, "sessions");
-  const out = [];
+  const found = [];
+  const subs = new Map();
   for (const group of dirsIn(root)) {
     const groupDir = path.join(root, group);
     const cwd = groupCwd(groupDir, group);
@@ -128,10 +157,12 @@ export function listGrokSessions({ home = config.grokHome } = {}) {
       if (raw === undefined && !updates) continue;
       const s = raw === undefined ? {} : summaries.sample(raw);
       if (!s || typeof s !== "object" || Array.isArray(s)) continue;
-      out.push(sessionOf(id, s, cwd, updates));
+      found.push([id, s, cwd, updates]);
+      const own = typeof s.info?.id === "string" && s.info.id ? s.info.id : id;
+      for (const sub of subagentsIn(dir, own)) if (!subs.has(sub.child)) subs.set(sub.child, sub);
     }
   }
-  return out;
+  return found.map(([id, s, cwd, updates]) => sessionOf(id, s, cwd, updates, subs));
 }
 
 // Grok Build's sessions as a gatherer (core/blocks/gatherer.js): listed

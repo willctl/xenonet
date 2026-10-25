@@ -208,7 +208,7 @@ export const PROVIDERS = [
   {
     id: "spacexai/grok-build",
     name: "Grok Build",
-    sources: ["spacexai/grok-build/session-summary", "spacexai/grok-build/update-line", "spacexai/grok-build/usage"],
+    sources: ["spacexai/grok-build/session-summary", "spacexai/grok-build/update-line", "spacexai/grok-build/usage", "spacexai/grok-build/subagent-meta"],
     // Its releases on GitHub (tags like v1.0.50), which its installer
     // downloads.
     release: { github: "xai-org/grok-build" },

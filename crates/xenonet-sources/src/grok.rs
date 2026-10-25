@@ -105,10 +105,47 @@ fn number(v: Option<f64>) -> Value {
     v.map_or(Value::Null, xenonet_base::json::number)
 }
 
+/// A subagent a session ran, as its folder's `subagents/<id>/meta.json` says:
+/// its own session, whose it is, its type and what it was asked to do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Subagent {
+    pub child: String,
+    pub parent: String,
+    pub kind: Option<String>,
+    pub description: Option<Value>,
+}
+
+// The subagents a session ran, from its folder's subagents/<id>/meta.json
+// (`id`: the session's own). Grok writes the fields in snake case; its cloud
+// copy of them is in camel case, read too.
+fn subagents_in(dir: &Path, id: &str, sample: &mut dyn FnMut(&str, Value) -> Option<Value>) -> Vec<Subagent> {
+    let mut out = Vec::new();
+    for name in dirs_in(&dir.join("subagents")) {
+        let Some(raw) = std::fs::read_to_string(dir.join("subagents").join(&name).join("meta.json")).ok().and_then(|t| xenonet_base::json::parse(&t).ok()) else { continue };
+        let Some(m @ Value::Object(_)) = sample(META, raw) else { continue };
+        let either = |a: &str, b: &str| nonempty(m.get(a)).or_else(|| nonempty(m.get(b))).map(str::to_string);
+        if let Some(child) = either("child_session_id", "childSessionId") {
+            out.push(Subagent {
+                child,
+                parent: either("parent_session_id", "parentSessionId").unwrap_or_else(|| id.to_string()),
+                kind: either("subagent_type", "subagentType"),
+                description: nonempty(m.get("description")).map(|d| Value::String(d.to_string())),
+            });
+        }
+    }
+    out
+}
+
+/// The vendor sources a listing reads: summary.json's, and meta.json's.
+pub const SUMMARY: &str = "spacexai/grok-build/session-summary";
+pub const META: &str = "spacexai/grok-build/subagent-meta";
+
 // A session as the map lists it (session/v1), from its folder's summary
-// (`s`, {} when it has none yet), the group's folder, and its updates
-// file's time and size.
-fn session_of(id: &str, s: &Value, cwd: Option<&str>, updates: Option<(Option<f64>, f64)>) -> Value {
+// (`s`, {} when it has none yet), the group's folder, its updates file's
+// time and size, and what its parent's folder says of it when it's a
+// subagent (`sub`): whose it is, its type (agentKind) and, for a title when
+// it has none, what it was asked to do.
+fn session_of(id: &str, s: &Value, cwd: Option<&str>, updates: Option<(Option<f64>, f64)>, subs: &[Subagent]) -> Value {
     let info = s.get("info").filter(|i| i.is_object());
     let raw_id = nonempty(info.and_then(|i| i.get("id"))).unwrap_or(id).to_string();
     let here = nonempty(info.and_then(|i| i.get("cwd"))).or(cwd).map(str::to_string);
@@ -116,10 +153,13 @@ fn session_of(id: &str, s: &Value, cwd: Option<&str>, updates: Option<(Option<f6
     // the folder its work came from.
     let source = nonempty(s.get("source_workspace_dir")).map(str::to_string);
     let kind = text(s.get("session_kind"));
-    let parent = nonempty(s.get("parent_session_id"));
-    let subagent = kind.is_some_and(|k| k.starts_with("subagent"));
-    let title =
-        [first_line(s.get("generated_title"), 80), first_line(s.get("session_summary"), 80)].into_iter().find(|t| !t.is_empty()).unwrap_or_else(|| "(untitled session)".into());
+    let sub = subs.iter().find(|x| x.child == raw_id);
+    let parent = nonempty(s.get("parent_session_id")).or(sub.map(|x| x.parent.as_str()));
+    let subagent = kind.is_some_and(|k| k.starts_with("subagent")) || sub.is_some();
+    let title = [first_line(s.get("generated_title"), 80), first_line(s.get("session_summary"), 80), first_line(sub.and_then(|x| x.description.as_ref()), 80)]
+        .into_iter()
+        .find(|t| !t.is_empty())
+        .unwrap_or_else(|| "(untitled session)".into());
     let preview = first_line(s.get("session_summary"), 200);
     let updated = grok_time(s.get("last_active_at")).or_else(|| grok_time(s.get("updated_at"))).or_else(|| grok_time(s.get("created_at"))).or(updates.and_then(|u| u.0));
     let mut m = Map::new();
@@ -139,6 +179,9 @@ fn session_of(id: &str, s: &Value, cwd: Option<&str>, updates: Option<(Option<f6
     m.insert("source".into(), or_null(kind.map(str::to_string)));
     m.insert("parentId".into(), or_null(parent.map(|p| format!("grok:{p}"))));
     m.insert("parentKind".into(), or_null(parent.map(|_| if subagent { "subagent" } else { "fork" }.to_string())));
+    if let Some(k) = sub.and_then(|x| x.kind.clone()) {
+        m.insert("agentKind".into(), Value::String(k));
+    }
     // Background work: a run Grok marks hidden, or one run headless (grok
     // -p), as `codex exec` runs are for Codex. A subagent is its parent's.
     m.insert("background".into(), Value::Bool(s.get("hidden") == Some(&Value::Bool(true)) || kind == Some("headless")));
@@ -147,10 +190,14 @@ fn session_of(id: &str, s: &Value, cwd: Option<&str>, updates: Option<(Option<f6
 }
 
 /// Grok Build's sessions under `home` (GROK_HOME), as XenoNet lists
-/// sessions (session/v1).
-pub fn list_sessions(home: &str, sample: &mut dyn FnMut(Value) -> Option<Value>) -> Vec<Value> {
+/// sessions (session/v1). A subagent's session is linked to its parent by
+/// what either says: its summary, or its parent's meta.json, which can be
+/// there first. `sample` reads a record of a source (SUMMARY, META)
+/// leniently.
+pub fn list_sessions(home: &str, sample: &mut dyn FnMut(&str, Value) -> Option<Value>) -> Vec<Value> {
     let root = Path::new(home).join("sessions");
-    let mut out = Vec::new();
+    let mut found = Vec::new();
+    let mut subs: Vec<Subagent> = Vec::new();
     for group in dirs_in(&root) {
         let group_dir = root.join(&group);
         let cwd = group_cwd(&group_dir, &group);
@@ -163,15 +210,21 @@ pub fn list_sessions(home: &str, sample: &mut dyn FnMut(Value) -> Option<Value>)
             let s = match raw {
                 None if updates.is_none() => continue,
                 None => Value::Object(Map::new()),
-                Some(raw) => match sample(raw) {
+                Some(raw) => match sample(SUMMARY, raw) {
                     Some(s @ Value::Object(_)) => s,
                     _ => continue,
                 },
             };
-            out.push(session_of(&id, &s, cwd.as_deref(), updates));
+            let own = nonempty(s.get("info").filter(|i| i.is_object()).and_then(|i| i.get("id"))).unwrap_or(&id).to_string();
+            for sub in subagents_in(&dir, &own, sample) {
+                if !subs.iter().any(|x| x.child == sub.child) {
+                    subs.push(sub);
+                }
+            }
+            found.push((id, s, cwd.clone(), updates));
         }
     }
-    out
+    found.into_iter().map(|(id, s, cwd, updates)| session_of(&id, &s, cwd.as_deref(), updates, &subs)).collect()
 }
 
 // ---------- tokens and cost ----------
@@ -422,14 +475,25 @@ mod tests {
         let long = home.join("sessions").join("ledger-3f9a");
         write(&long.join(".cwd"), "/Users/ada/ledger\n");
         write(&long.join("h").join("summary.json"), &json!({ "info": { "id": "h" }, "session_summary": "Reconcile" }).to_string());
-        let mut sampled = 0;
-        let list = list_sessions(&home.to_string_lossy(), &mut |raw| {
-            sampled += 1;
+        // The session "a" ran "f", whose summary isn't written yet.
+        write(
+            &atlas.join("a").join("subagents").join("sa-1").join("meta.json"),
+            &json!({ "subagent_id": "sa-1", "parent_session_id": "a", "child_session_id": "f", "subagent_type": "explore", "description": "Map the refund code" }).to_string(),
+        );
+        write(&atlas.join("a").join("subagents").join("sa-2").join("meta.json"), "not json");
+        let mut sampled = Vec::new();
+        let list = list_sessions(&home.to_string_lossy(), &mut |source, raw| {
+            sampled.push(source.to_string());
             Some(raw)
         });
         let ids: Vec<&str> = list.iter().map(|s| s["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["grok:a", "grok:b", "grok:c", "grok:d", "grok:e", "grok:f", "grok:h"]);
-        assert_eq!(sampled, 6, "every summary is read leniently");
+        assert_eq!((sampled.iter().filter(|s| *s == SUMMARY).count(), sampled.iter().filter(|s| *s == META).count()), (6, 1), "every summary and meta.json is read leniently");
+        assert_eq!(
+            (list[5]["parentId"].as_str(), list[5]["parentKind"].as_str(), list[5]["agentKind"].as_str(), list[5]["title"].as_str()),
+            (Some("grok:a"), Some("subagent"), Some("explore"), Some("Map the refund code"))
+        );
+        assert!(list[1].get("agentKind").is_none(), "a subagent no meta.json names has no type");
         let a = &list[0];
         assert_eq!(
             (a["title"].as_str(), a["cwd"].as_str(), a["branch"].as_str(), a["model"].as_str(), a["updatedAt"].as_f64()),
@@ -439,11 +503,11 @@ mod tests {
         assert_eq!((list[2]["parentKind"].as_str(), list[2]["title"].as_str(), list[2]["preview"].as_str()), (Some("fork"), Some("Try a flag"), Some("Try a flag")));
         assert_eq!((list[3]["background"].as_bool(), list[1]["background"].as_bool()), (Some(true), Some(false)));
         assert_eq!((list[4]["cwd"].as_str(), list[4]["worktree"].as_str()), (Some("/Users/ada/atlas"), Some("/Users/ada/.grok/worktrees/atlas/wt")));
-        assert_eq!((list[5]["title"].as_str(), list[5]["cwd"].as_str()), (Some("(untitled session)"), Some("/Users/ada/atlas")));
+        assert_eq!(list[5]["cwd"].as_str(), Some("/Users/ada/atlas"));
         assert_eq!(list[6]["cwd"].as_str(), Some("/Users/ada/ledger"));
         assert_eq!(folder(&home.to_string_lossy(), "c"), Some(atlas.join("c")));
         // A summary the lenient read drops is passed over.
-        assert_eq!(list_sessions(&home.to_string_lossy(), &mut |_| None).len(), 1);
+        assert_eq!(list_sessions(&home.to_string_lossy(), &mut |_, _| None).len(), 1);
         std::fs::remove_dir_all(&home).unwrap();
     }
 

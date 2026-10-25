@@ -115,6 +115,18 @@ export function grokHome(dir) {
   json(path.join(at(atlas, IDS.sub), "summary.json"), { info: { id: IDS.sub, cwd: ATLAS }, session_summary: "", generated_title: "Map the refund code", created_at: iso(T + 4000), updated_at: iso(T + 8000), current_model_id: "grok-build", parent_session_id: IDS.main, session_kind: "subagent" });
   write(path.join(at(atlas, IDS.sub), "updates.jsonl"), jsonl([up(T + 4000, text("user_message_chunk", "Map the refund code"), { session: IDS.sub })]));
   json(path.join(at(atlas, IDS.sub), "usage.json"), USAGE.sub);
+  // What the main session's folder says of the subagent it ran.
+  json(path.join(at(atlas, IDS.main), "subagents", "sa-1", "meta.json"), {
+    subagent_id: "sa-1",
+    parent_session_id: IDS.main,
+    child_session_id: IDS.sub,
+    subagent_type: "explore",
+    description: "Map the refund code",
+    prompt: "Find where refunds are made and checked.",
+    status: "completed",
+    started_at: iso(T + 4000),
+    completed_at: iso(T + 8000),
+  });
   json(path.join(at(atlas, IDS.fork), "summary.json"), { info: { id: IDS.fork, cwd: ATLAS }, session_summary: "", generated_title: "Refunds, the careful version", title_is_manual: true, created_at: iso(T - 600e3), updated_at: iso(T - 60e3), current_model_id: "grok-build", parent_session_id: IDS.main, session_kind: "fork" });
   write(path.join(at(atlas, IDS.fork), "updates.jsonl"), jsonl([up(T - 600e3, text("user_message_chunk", "Try it with a feature flag."), { session: IDS.fork })]));
   json(path.join(at(atlas, IDS.fork), "usage.json"), USAGE.fork);

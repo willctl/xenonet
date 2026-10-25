@@ -52,7 +52,7 @@ export const Session = define(
     originator: nstr.optional(),
     nativeProjectId: nstr.optional().describe("The Codex desktop project it belongs to"),
     agentNickname: nstr.optional(),
-    agentKind: nstr.optional().describe("For a sub-agent thread: spawned, or the kind of background work"),
+    agentKind: nstr.optional().describe("For a Codex sub-agent thread: spawned, or the kind of background work; for a Grok Build subagent, its type (general-purpose, explore…)"),
     background: z.boolean().optional().describe("Background work (codex exec, reviews, compaction) the map leaves out unless asked"),
 
     // A run XenoNet has no reader of its own for.

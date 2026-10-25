@@ -20,10 +20,11 @@ const kindLabel = (n) => (n.kind === "project" && n.group ? "Group" : n.kind ===
 const ACTIVITY_LABEL = { active: "active", recent: "recent", idle: "idle" };
 // Why the scan made a folder a project or a group (see scanProjects).
 const VCS_NAME = { ".git": "git repo", ".hg": "Mercurial repo", ".jj": "Jujutsu repo", ".sl": "Sapling repo", ".svn": "Subversion checkout" };
-// Where a Grok Build session came from: a subagent's, or the kind of
-// session Grok says it is (a fork, a headless run), else Grok Build.
+// Where a Grok Build session came from: a subagent's, with its type when
+// its parent's folder says it (agentKind), or the kind of session Grok says
+// it is (a fork, a headless run), else Grok Build.
 function grokOrigin(n) {
-  if (n.parentKind === "subagent") return "Grok Build subagent";
+  if (n.parentKind === "subagent") return n.agentKind ? `Grok Build subagent · ${n.agentKind}` : "Grok Build subagent";
   return n.source ? `Grok Build · ${n.source}` : "Grok Build";
 }
 

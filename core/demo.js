@@ -548,6 +548,8 @@ export function demoSessions(app) {
       parentId: parent,
       parentKind: parent ? (s.subagent ? "subagent" : "spawn") : null,
       claudeAccount: app === "claude" && s.desktop ? demoClaudeAccount(s.project) : null,
+      // A Grok Build subagent's type, as its parent's folder says it.
+      ...(app === "grok" && s.subagent ? { agentKind: "explore" } : {}),
     }];
   });
 }

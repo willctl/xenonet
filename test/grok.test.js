@@ -26,12 +26,31 @@ test("Grok Build's sessions, from their folders", () => {
   }
   const main = byId[IDS.main];
   assert.deepEqual([main.title, main.cwd, main.branch, main.model, main.updatedAt, main.parentId], ["Add partial refunds", ATLAS, "feat/refunds", "grok-build", T + 14000, null]);
-  assert.deepEqual([byId[IDS.sub].parentId, byId[IDS.sub].parentKind, byId[IDS.sub].background], [`grok:${IDS.main}`, "subagent", false]);
+  assert.deepEqual([byId[IDS.sub].parentId, byId[IDS.sub].parentKind, byId[IDS.sub].background, byId[IDS.sub].agentKind], [`grok:${IDS.main}`, "subagent", false, "explore"]);
+  assert.equal(byId[IDS.fork].agentKind, undefined, "a session no meta.json names has no subagent type");
   assert.deepEqual([byId[IDS.fork].parentKind, byId[IDS.fork].title], ["fork", "Refunds, the careful version"]);
   assert.equal(byId[IDS.headless].background, true, "a headless run is background work");
   assert.deepEqual([byId[IDS.long].cwd, byId[IDS.long].title, byId[IDS.long].preview], [LONG, "Reconcile the ledger", "Reconcile the ledger"]);
   assert.deepEqual([byId[IDS.bare].title, typeof byId[IDS.bare].updatedAt], ["(untitled session)", "number"], "a session whose summary isn't written yet");
   assert.deepEqual(listGrokSessions({ home: path.join(dir, "nowhere") }), []);
+});
+
+test("a subagent's session is its parent's by what the parent's folder says, before its own summary does", () => {
+  const other = path.join(dir, "grok-meta");
+  const folder = (id) => path.join(other, "sessions", encodeURIComponent(ATLAS), id);
+  const write = (file, value) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value));
+  };
+  write(path.join(folder("p"), "summary.json"), { info: { id: "p", cwd: ATLAS }, generated_title: "Refunds" });
+  // Grok's cloud copy names them in camel case; a meta.json that isn't JSON
+  // is passed over.
+  write(path.join(folder("p"), "subagents", "sa-1", "meta.json"), { subagentId: "sa-1", parentSessionId: "p", childSessionId: "c", subagentType: "general-purpose", description: "Check the refund tests" });
+  write(path.join(folder("p"), "subagents", "sa-2", "meta.json"), "{");
+  write(path.join(folder("c"), "updates.jsonl"), "");
+  const c = listGrokSessions({ home: other }).find((s) => s.rawId === "c");
+  assert.deepEqual([c.parentId, c.parentKind, c.agentKind, c.title], ["grok:p", "subagent", "general-purpose", "Check the refund tests"]);
+  assert.ok(check("session/v1", c, { strict: true }).ok);
 });
 
 test("a group's folder, and Grok's times", () => {

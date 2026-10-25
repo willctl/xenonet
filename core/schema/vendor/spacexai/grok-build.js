@@ -46,6 +46,35 @@ export const SessionSummary = vendor(
   },
 );
 
+// ---------- subagents/<id>/meta.json ----------
+
+// What a session's folder says of a subagent it ran (the subagent module's
+// SubagentMeta, written in snake case; its cloud copy, subagent.json, is
+// in camel case, whose names XenoNet reads too).
+export const SubagentMeta = vendor(
+  "spacexai/grok-build/subagent-meta",
+  1,
+  open({
+    subagent_id: maybe(str),
+    parent_session_id: maybe(str).describe("The session that ran it"),
+    child_session_id: maybe(str).describe("The subagent's own session, in the sessions folder like any other"),
+    subagent_type: maybe(str).describe("general-purpose, explore, plan, or one of your own agents"),
+    description: maybe(str).describe("What it was asked to do, in a few words"),
+    status: maybe(str).describe("running, completed, failed or cancelled"),
+    started_at: maybe(str),
+    completed_at: maybe(str),
+    parentSessionId: maybe(str),
+    childSessionId: maybe(str),
+    subagentType: maybe(str),
+  }),
+  {
+    title: "A Grok Build subagent's metadata",
+    description:
+      "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/subagents/<subagent id>/meta.json: a subagent the session ran, with its own session's id, its type and what it was asked to do. Only the fields XenoNet reads are declared: never its prompt or output. The file carries no version, so the newest schema reads it.",
+    versions: "*",
+  },
+);
+
 // ---------- usage.json ----------
 
 // What a stretch of work used, as Grok Build's usage ledger sums it

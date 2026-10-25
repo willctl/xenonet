@@ -353,10 +353,7 @@ impl MapState {
                 "grok" => {
                     let (home, vendor) = (self.cfg.grok_home.clone(), self.vendor.clone());
                     Ok(Value::Array(
-                        crate::util::blocking(move || {
-                            xenonet_sources::grok::list_sessions(&home, &mut |raw| vendor.sample("spacexai/grok-build/session-summary", raw, None, None, 16))
-                        })
-                        .await,
+                        crate::util::blocking(move || xenonet_sources::grok::list_sessions(&home, &mut |source, raw| vendor.sample(source, raw, None, None, 16))).await,
                     ))
                 }
                 _ => Err(format!("XenoNet doesn't list {app}'s sessions")),

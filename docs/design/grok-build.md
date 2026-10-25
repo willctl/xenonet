@@ -36,6 +36,7 @@ Everything lives under `~/.grok`, or the folder `GROK_HOME` names.
 | `sessions/<group>/<session id>/` | One folder per session. The group is the working directory, URL-encoded. When that's over 255 bytes, the group is a slug and a hash, with the folder in a `.cwd` file inside it. |
 | `…/summary.json` | The session's index entry: `info` (its id and folder), `generated_title`, `title_is_manual`, `session_summary`, `created_at`, `updated_at`, `last_active_at`, `current_model_id`, `parent_session_id`, `session_kind`, `hidden`, `source_workspace_dir`, `head_branch` and more |
 | `…/updates.jsonl` | The conversation, one ACP session update a line, each in an envelope: `{ timestamp, method, params: { sessionId, update } }`, with the time in Unix seconds |
+| `…/subagents/<subagent id>/meta.json` | A subagent the session ran, in snake case: `subagent_id`, `parent_session_id`, `child_session_id` (the subagent's own session, in the sessions folder like any other), `subagent_type`, `description`, `prompt`, `status`, `started_at` and more. Grok's cloud copy, `subagent.json`, has the same in camel case. |
 | `…/usage.json` | The session's tokens and cost, written as each turn ends: `{ sessionId, updatedAt, session, turns: [{ turnNumber, endedAt, turnId, …usage }] }`, each usage with `inputTokens`, `outputTokens`, `cachedReadTokens`, `cacheCreationTokens`, `reasoningTokens`, `modelCalls`, `costUsdTicks` and the same by model (`modelUsage`) |
 | `hooks/*.json` | Your own hooks, which Grok runs without asking |
 | `config.toml` | Settings and MCP servers (`[mcp_servers.<name>]`) |
@@ -59,16 +60,22 @@ list` prints one folder's sessions, for people.
   `.cwd`. A session in one of Grok's worktrees (`source_workspace_dir`)
   belongs to the folder its work came from.
 - A session whose `session_kind` starts with `subagent` and names a
-  `parent_session_id` is that session's subagent. One with a parent and
-  another kind is a fork.
+  `parent_session_id` is that session's subagent, and so is one a
+  session's `subagents/*/meta.json` names as its `child_session_id`,
+  which Grok can write before the subagent's own summary. The meta.json
+  gives its type (`subagent_type`, the session's `agentKind`), which the
+  session's panel shows beside where it came from ("Grok Build subagent ·
+  explore", with its parent linked), and what it was asked to do, its
+  title until its summary has one. One with a parent and another kind is
+  a fork.
 - A session Grok marks `hidden`, or a `headless` one, is background work,
   as `codex exec` runs are.
 - A folder with `updates.jsonl` and no `summary.json` yet is a session being
   made. It shows untitled, at the time its updates were written.
 
-Both files, and `usage.json`, go through lenient schemas
-(`spacexai/grok-build/session-summary`, `spacexai/grok-build/update-line`
-and `spacexai/grok-build/usage`, in
+Both files, and `usage.json` and `meta.json`, go through lenient schemas
+(`spacexai/grok-build/session-summary`, `spacexai/grok-build/update-line`,
+`spacexai/grok-build/usage` and `spacexai/grok-build/subagent-meta`, in
 `core/schema/vendor/spacexai/grok-build.js`), so a change in Grok's
 formats shows as drift instead of quietly emptying the map. The daily
 provider drift check watches Grok Build's releases too.

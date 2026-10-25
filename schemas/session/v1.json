@@ -236,7 +236,7 @@
       ]
     },
     "agentKind": {
-      "description": "For a sub-agent thread: spawned, or the kind of background work",
+      "description": "For a Codex sub-agent thread: spawned, or the kind of background work; for a Grok Build subagent, its type (general-purpose, explore…)",
       "type": [
         "string",
         "null"

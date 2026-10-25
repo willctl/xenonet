@@ -1679,6 +1679,7 @@
     "parentId": "grok:0190d3e0-0000-7000-8000-000000000015",
     "parentKind": "subagent",
     "claudeAccount": null,
+    "agentKind": "explore",
     "kind": "session",
     "activity": "active",
     "fx": null,
