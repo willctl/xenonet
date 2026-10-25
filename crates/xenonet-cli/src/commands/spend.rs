@@ -33,13 +33,25 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
 
     if let Some(costs) = &costs {
         let per_hour = num(costs, "perHour");
-        print(format!(
-            "About {} today at API prices{}",
-            c::bold(money(amount(costs, "today"))),
-            if per_hour > 0.0 { format!(", {} an hour at this pace", money(amount(costs, "perHour"))) } else { String::new() }
-        ));
+        if amount(costs, "today").is_none() {
+            print("What today's work would cost isn't known: none of its calls has a price");
+        } else {
+            print(format!(
+                "About {} today at API prices{}",
+                c::bold(money(amount(costs, "today"))),
+                if per_hour > 0.0 { format!(", {} an hour at this pace", money(amount(costs, "perHour"))) } else { String::new() }
+            ));
+        }
         let by_app = costs.get("byApp").cloned().unwrap_or(Value::Null);
-        print(table(&[vec![c::dim("Claude Code"), money(amount(&by_app, "claude"))], vec![c::dim("Codex"), money(amount(&by_app, "codex"))]], Layout::indent(2)));
+        let mut rows = vec![vec![c::dim("Claude Code"), money(amount(&by_app, "claude"))], vec![c::dim("Codex"), money(amount(&by_app, "codex"))]];
+        // Grok Build's, once it worked today: what Grok recorded, or unknown
+        // when it recorded none.
+        match by_app.get("grok") {
+            Some(Value::Null) => rows.push(vec![c::dim("Grok Build"), format!("unknown {}", c::dim("(Grok recorded no cost)"))]),
+            Some(v) if v.as_f64().is_some_and(|n| n > 0.0) => rows.push(vec![c::dim("Grok Build"), money(v.as_f64())]),
+            _ => {}
+        }
+        print(table(&rows, Layout::indent(2)));
     } else if let Some(b) = &by_actor {
         print(format!("About {} today at API prices", c::bold(money(amount(b, "total")))));
     }

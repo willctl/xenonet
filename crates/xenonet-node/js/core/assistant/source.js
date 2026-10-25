@@ -21,7 +21,7 @@ export function stateSource({ state, actors = null, now = Date.now }) {
     const nodes = [...state.index.values()];
     const list = actors ? actors.list({ now: t }).actors : [];
     const v = native.asstView(
-      { t, nodes, live, actors: list, hasActors: !!actors, claude: native.asstSourceOf(health(state.claudeSessions), health(state.live?.tailer), t), codex: native.asstSourceOf(health(state.codexThreads), health(state.live?.tailer), t) },
+      { t, nodes, live, actors: list, hasActors: !!actors, claude: native.asstSourceOf(health(state.claudeSessions), health(state.live?.tailer), t), codex: native.asstSourceOf(health(state.codexThreads), health(state.live?.tailer), t), grok: native.asstSourceOf(health(state.grokSessions), health(state.live?.tailer), t) },
       (id) => state.homeOf(id) ?? null,
       product,
       (id) => !!actors?.isRegistered(id),

@@ -34,7 +34,15 @@ function counter(el, format = compact) {
     raf = shown === target ? 0 : requestAnimationFrame(step);
   };
   return (v) => {
-    target = v ?? 0;
+    // What isn't known shows as such (format's null), never as 0.
+    if (v == null) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      shown = target = 0;
+      el.textContent = format(null);
+      return;
+    }
+    target = v;
     if (!raf) raf = requestAnimationFrame(step);
   };
 }
@@ -235,8 +243,20 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     if (!c) return;
     setSpend(c.today);
     setPace(c.perHour);
-    el.title = [`About ${money(c.byApp.claude)} for Claude Code and ${money(c.byApp.codex)} for Codex today, at Anthropic's and OpenAI's API prices (checked ${c.checked}).`, c.unpriced.length ? `Not counted, with no price: ${c.unpriced.join(", ")}.` : "", "On a plan, the work costs the plan; this is what it would cost on the API."].filter(Boolean).join(" ");
+    el.title = [
+      `About ${money(c.byApp.claude)} for Claude Code and ${money(c.byApp.codex)} for Codex today, at Anthropic's and OpenAI's API prices (checked ${c.checked}).`,
+      grokCost(c.byApp.grok),
+      c.unpriced.length ? `Not counted, with no price: ${c.unpriced.join(", ")}.` : "",
+      "On a plan, the work costs the plan; this is what it would cost on the API.",
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
+
+  // Grok Build's cost is what Grok said its calls cost. It says nothing
+  // with a SuperGrok or X Premium sign-in, so then it isn't known. Nothing
+  // to say on a day without Grok Build's work, or from a XenoNet before it.
+  const grokCost = (v) => (v === null ? "Grok Build's cost today isn't known: Grok records one only with an API key." : v > 0 ? `About ${money(v)} for Grok Build, as Grok recorded it.` : "");
 
   // What each actor's work cost today, as GET /api/spend last said: the top
   // few, the rest under "more", and what no actor is tied to last. Drawn

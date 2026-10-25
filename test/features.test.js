@@ -150,7 +150,38 @@ test("transcript search: an index from before Codex's user_message events counte
   assert.equal(s.search("terraform")[0].sessionId, "codex:77777777-7777-7777-7777-777777777777");
   assert.equal(s.search("redis").length, 1, "Claude Code's transcripts stay as they were");
   assert.equal(st.docs, 2);
-  assert.equal(s.db.prepare("pragma user_version").get().user_version, 1);
+  assert.equal(s.db.prepare("pragma user_version").get().user_version, 2);
+  s.close();
+});
+
+test("transcript search: a Grok Build message is one record, which grows as its chunks come, read after read", async () => {
+  const dir = tmp();
+  const grok = path.join(dir, "grok");
+  const file = path.join(grok, "%2Fatlas", "019a3b5c-0000-7000-8000-00000000000a", "updates.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const chunk = (kind, text) => JSON.stringify({ timestamp: 1791201600, method: "session/update", params: { update: { sessionUpdate: kind, content: { type: "text", text } } } }) + "\n";
+  fs.writeFileSync(file, chunk("user_message_chunk", "Add refunds ") + chunk("user_message_chunk", "to the API.") + chunk("agent_message_chunk", "Refunds"));
+  const dbFile = path.join(dir, "search.sqlite");
+  // An index as an older XenoNet left it, with the first chunks alone.
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(dbFile);
+  db.exec(`create virtual table docs using fts5(text, session_id unindexed, app unindexed, role unindexed, ts unindexed, file unindexed, tokenize = 'porter unicode61 remove_diacritics 2');
+    create table files(path text primary key, size integer, mtime integer, offset integer, items integer not null default 0);
+    pragma user_version = 1;`);
+  db.prepare("insert into files(path, size, mtime, offset) values (?, ?, ?, ?)").run(file, fs.statSync(file).size, Math.floor(fs.statSync(file).mtimeMs), fs.statSync(file).size);
+  db.prepare("insert into docs(text, session_id, app, role, ts, file) values (?, ?, ?, ?, ?, ?)").run("Add refunds ", "grok:019a3b5c-0000-7000-8000-00000000000a", "grok", "user", 1791201600000, file);
+  db.close();
+
+  const s = new TranscriptSearch({ dbFile, grokRoot: grok });
+  await s.index();
+  const texts = () => s.db.prepare("select text from docs order by rowid").all().map((r) => r.text);
+  assert.deepEqual(texts(), ["Add refunds to the API.", "Refunds"], "made again, each message whole");
+  assert.equal(s.db.prepare("pragma user_version").get().user_version, 2);
+  // The reply goes on in the next read, from where the last one left it.
+  fs.appendFileSync(file, chunk("agent_message_chunk", " work now.") + chunk("agent_message_chunk", " Tests pass."));
+  await s.index();
+  assert.deepEqual(texts(), ["Add refunds to the API.", "Refunds work now. Tests pass."]);
+  assert.deepEqual(s.search("tests pass").map((r) => r.snippets[0].role), ["assistant"]);
   s.close();
 });
 test("digest summarizes per session; handoff brief carries goal, state and files", () => {

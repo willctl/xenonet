@@ -39,6 +39,8 @@ const SOURCES = [
   "anysphere/cursor/hook-input",
   "spacexai/grok-build/session-summary",
   "spacexai/grok-build/update-line",
+  "spacexai/grok-build/usage",
+  "spacexai/grok-build/subagent-meta",
 ];
 
 test("every vendor source the contracts list has a schema, read leniently, with the versions it was made for", () => {

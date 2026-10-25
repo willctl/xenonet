@@ -176,6 +176,63 @@ fn value(text: &str) -> Option<Value> {
     }
 }
 
+/// Every MCP server a file names in tables of its own
+/// (`[mcp_servers.<name>]` and `[mcp_servers.<name>.env]`), as JSON has
+/// them: `{ mcp_servers: { <name>: { command, args, url, enabled, env } } }`,
+/// each part only when it's written in a form XenoNet reads (a string, or a
+/// list of strings, as JSON writes them; true or false). What the MCP-info
+/// catalog reads of Grok Build's settings.
+pub fn mcp_servers(text: &str) -> Value {
+    let mut servers = Map::new();
+    for l in toml_lines(text) {
+        if l.path.first().map(String::as_str) != Some("mcp_servers") || l.path.len() < 2 {
+            continue;
+        }
+        let Value::Object(server) = servers.entry(l.path[1].clone()).or_insert_with(|| Value::Object(Map::new())) else { continue };
+        let (false, Some(key), Some(v)) = (l.header, &l.key, &l.value) else { continue };
+        let key: Vec<&str> = l.path[2..].iter().chain(key.iter()).map(String::as_str).collect();
+        match key.as_slice() {
+            [k @ ("command" | "args" | "url")] => {
+                if let Some(v) = value(v) {
+                    server.insert((*k).into(), v);
+                }
+            }
+            ["enabled"] => match js_trim(v) {
+                "true" => {
+                    server.insert("enabled".into(), Value::Bool(true));
+                }
+                "false" => {
+                    server.insert("enabled".into(), Value::Bool(false));
+                }
+                _ => {}
+            },
+            ["env", k] => {
+                if let Some(v @ Value::String(_)) = value(v) {
+                    if let Value::Object(env) = server.entry("env").or_insert_with(|| Value::Object(Map::new())) {
+                        env.insert((*k).into(), v);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Map::new();
+    out.insert("mcp_servers".into(), Value::Object(servers));
+    Value::Object(out)
+}
+
+/// A settings file the MCP-info catalog reads, as JSON has it: a
+/// config.toml (Grok Build's) as the MCP servers it names, the rest JSON;
+/// {} for one that isn't there or doesn't read.
+pub fn read_settings(file: Option<&str>) -> Value {
+    let Some(text) = file.and_then(|f| std::fs::read(f).ok()).map(|b| String::from_utf8_lossy(&b).into_owned()) else { return Value::Object(Map::new()) };
+    // By its name exactly, as JS's endsWith(".toml") has it.
+    if file.is_some_and(|f| std::path::Path::new(f).extension().is_some_and(|e| e == "toml")) {
+        return mcp_servers(&text);
+    }
+    xenonet_base::json::parse(&text).unwrap_or_else(|_| Value::Object(Map::new()))
+}
+
 /// Server `name` as the file has it: { command, args, env } from its
 /// tables (a part it doesn't have is null; one it has in a form XenoNet
 /// doesn't write is left out, as JS's undefined), or None when it has none.
@@ -266,5 +323,16 @@ mod tests {
             assert!(with_server(text, "xenonet", "/x", &[], &[]).is_err());
         }
         assert!(!foreign_server(MINE, "xenonet") && !foreign_server("[mcp_servers]\nother = {}", "xenonet"));
+    }
+
+    #[test]
+    fn every_server_as_json_has_them() {
+        let text = "[cli]\nx = 1\n[mcp_servers.lib]\ncommand = \"node\"\nargs = [\"a\"]\nenabled = true\n[mcp_servers.lib.env]\nTOKEN = \"t\"\nN = 5\n[mcp_servers.remote]\nurl = \"https://example.com\"\nenabled = no\ntimeout = 30\n";
+        assert_eq!(
+            mcp_servers(text),
+            serde_json::json!({ "mcp_servers": { "lib": { "command": "node", "args": ["a"], "enabled": true, "env": { "TOKEN": "t" } }, "remote": { "url": "https://example.com" } } })
+        );
+        assert_eq!(mcp_servers("[mcp_servers]\nlib = { command = \"x\" }"), serde_json::json!({ "mcp_servers": {} }));
+        assert_eq!(read_settings(None), serde_json::json!({}));
     }
 }

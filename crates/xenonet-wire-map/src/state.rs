@@ -353,10 +353,7 @@ impl MapState {
                 "grok" => {
                     let (home, vendor) = (self.cfg.grok_home.clone(), self.vendor.clone());
                     Ok(Value::Array(
-                        crate::util::blocking(move || {
-                            xenonet_sources::grok::list_sessions(&home, &mut |raw| vendor.sample("spacexai/grok-build/session-summary", raw, None, None, 16))
-                        })
-                        .await,
+                        crate::util::blocking(move || xenonet_sources::grok::list_sessions(&home, &mut |source, raw| vendor.sample(source, raw, None, None, 16))).await,
                     ))
                 }
                 _ => Err(format!("XenoNet doesn't list {app}'s sessions")),
@@ -1443,7 +1440,9 @@ impl State for MapState {
     fn assistant_sources(&self, now: f64) -> R<Value> {
         use crate::blocks::Block;
         let tail = self.live.block().health();
-        Ok(json!({ "claude": source_of(&self.claude_sessions.health(), &tail, now), "codex": source_of(&self.codex_threads.health(), &tail, now) }))
+        Ok(
+            json!({ "claude": source_of(&self.claude_sessions.health(), &tail, now), "codex": source_of(&self.codex_threads.health(), &tail, now), "grok": source_of(&self.grok_sessions.health(), &tail, now) }),
+        )
     }
     fn graph_version(&self) -> u64 {
         self.version.load(Ordering::SeqCst)

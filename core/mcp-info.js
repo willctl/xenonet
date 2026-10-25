@@ -5,10 +5,13 @@ import path from "node:path";
 import { config } from "./config.js";
 import { codexClient } from "./codex.js";
 import { discoverMcp } from "./mcp-discovery.js";
+import { mcpServers } from "./engine/toml.js";
 
 const object = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
 const text = (v, max = 4000) => typeof v === "string" ? v.slice(0, max) : null;
-const json = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return {}; } };
+// A settings file, as JSON has it: Grok Build's config.toml as the MCP
+// servers it names (engine/toml.js), the rest JSON.
+const json = (file) => { try { const t = fs.readFileSync(file, "utf8"); return file.endsWith(".toml") ? mcpServers(t) : JSON.parse(t); } catch { return {}; } };
 function publicUri(value) {
   const raw = text(value, 1000);
   if (!raw) return null;
@@ -97,6 +100,10 @@ export function createMcpInfo({ request = (method, params) => codexClient.reques
     for (const [cwd, project] of Object.entries(object(claude.projects))) if (using.some((s) => s.cwd === cwd)) add("Claude Code", "project", project.mcpServers);
     for (const cwd of new Set(using.map((s) => s.cwd).filter(Boolean))) add("Claude Code", "project", read(path.join(cwd, ".mcp.json")).mcpServers);
     if (settings.claudeDesktopDir) add("Claude Desktop", "user", read(path.join(settings.claudeDesktopDir, "claude_desktop_config.json")).mcpServers);
+    // Grok Build's: its config.toml's [mcp_servers.<name>] tables, yours and
+    // those in the folders where the server is used.
+    if (settings.grokHome) add("Grok Build", "user", read(path.join(settings.grokHome, "config.toml")).mcp_servers);
+    for (const cwd of new Set(using.map((s) => s.cwd).filter(Boolean))) add("Grok Build", "project", read(path.join(cwd, ".grok", "config.toml")).mcp_servers);
     const installed = read(path.join(settings.homeDir, ".claude", "plugins", "installed_plugins.json"));
     const pluginName = server.startsWith("plugin:") ? server.split(":")[1] : null;
     for (const [key, entries] of Object.entries(object(installed.plugins))) {

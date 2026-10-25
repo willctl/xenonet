@@ -10,7 +10,7 @@ const { codexClient } = await import(peer("codex.js"));
 const { discoverMcp } = await import(peer("mcp-discovery.js"));
 
 // What collecting reads of the settings, and of each session.
-const settingsOf = (s) => ({ claudeConfigFile: s?.claudeConfigFile, claudeDesktopDir: s?.claudeDesktopDir, homeDir: s?.homeDir });
+const settingsOf = (s) => ({ claudeConfigFile: s?.claudeConfigFile, claudeDesktopDir: s?.claudeDesktopDir, homeDir: s?.homeDir, grokHome: s?.grokHome });
 const sessionOf = (s) => s && { id: s.id, app: s.app, title: s.title, status: s.status, cwd: s.cwd, mcp: s.mcp };
 
 export const publicUrl = (value, originOnly = false) => native.appMcpPublicUrl(value == null ? null : String(value), !!originOnly) ?? null;

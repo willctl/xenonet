@@ -66,10 +66,10 @@ fn via(a: &Value) -> Value {
 }
 
 /// A view at `t`, from the map's nodes (state.index's values), the live
-/// state (state.liveSnapshot()), the registry's actors and the two apps'
-/// sources.
+/// state (state.liveSnapshot()), the registry's actors and the tailed
+/// apps' sources.
 #[expect(clippy::too_many_arguments, reason = "the JS's view and its inputs, which xenonet-node passes one by one")]
-pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors: bool, claude: Value, codex: Value, around: &mut dyn Around) -> Value {
+pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors: bool, claude: Value, codex: Value, grok: Value, around: &mut dyn Around) -> Value {
     let mut live_by_id: Map<String, Value> = Map::new();
     for s in live.get("sessions").and_then(Value::as_array).into_iter().flatten() {
         live_by_id.insert(s.get("id").map(xenonet_base::text::js_string).unwrap_or_default(), s.clone());
@@ -138,7 +138,7 @@ pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors:
     json!({
         "at": xenonet_base::json::number(t),
         "fixture": false,
-        "sources": { "claude": claude, "codex": codex },
+        "sources": { "claude": claude, "codex": codex, "grok": grok },
         "places": places.into_iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
         "sessions": sessions,
         "collisions": collisions,

@@ -18,7 +18,7 @@ use super::{
     categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
     slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
 };
-use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, Run};
+use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, OpenRun};
 use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, GrokLine, TypeError};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
@@ -267,11 +267,25 @@ fn drop_first<V>(m: &mut KMap<V>) {
     }
 }
 
+/// A day's calls: what they'd cost, their priced tokens, the models without
+/// a price, and whether any call had one.
 #[derive(Clone, Debug, Default)]
 struct Spend {
     cost: f64,
     tokens: f64,
     unpriced: Vec<String>,
+    priced: bool,
+}
+
+/// What a Grok Build turn's call counted so far (tokens by kind, and cost),
+/// so a turn written again adds only what's new.
+#[derive(Clone, Copy, Debug, Default)]
+struct Counted {
+    input: f64,
+    cache_read: f64,
+    cache_write: f64,
+    output: f64,
+    cost: f64,
 }
 
 /// A call in flight: its fields (name, ts) and the tool record of it the
@@ -302,6 +316,14 @@ impl Prompt {
 struct Message {
     text: Value,
     ts: Value,
+}
+
+/// What the open run of chunks (Grok Build's) began, which its later
+/// chunks carry on: the last prompt, or the last message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunEntry {
+    Prompt,
+    Message,
 }
 
 /// A recent tool call, for the stall check: { key, label, loopable, ok, ts }.
@@ -374,7 +396,15 @@ pub struct Session {
     // When its hooks last spoke, and what its mapper keeps of its file
     // (line_events.rs), for an app whose lines don't say when a turn ends.
     hook_at: f64,
-    line_run: Run,
+    line_run: Option<OpenRun>,
+    run_entry: Option<RunEntry>,
+    // Grok Build's usage.json as last read (its stamp), and what each of
+    // its turns' calls counted so far, by turn and model.
+    usage_stamp: Option<String>,
+    usage_counted: HashMap<String, Counted>,
+    // How it asks before it acts (plan, bypassPermissions…), as its hooks
+    // last said.
+    permission_mode: Option<String>,
     recent_tools: Vec<ToolRec>,
     error_streak: f64,
     // Undefined (None) until the first reset.
@@ -427,7 +457,11 @@ impl Session {
             question: Value::Null,
             hook_need: Value::Null,
             hook_at: 0.0,
-            line_run: Run::None,
+            line_run: None,
+            run_entry: None,
+            usage_stamp: None,
+            usage_counted: HashMap::new(),
+            permission_mode: None,
             recent_tools: Vec::new(),
             error_streak: 0.0,
             error_since: None,
@@ -462,6 +496,17 @@ impl Session {
     /// One call at API prices on its day, as the stats panel prices it.
     /// Two days are kept.
     pub fn add_call(&mut self, model: &Value, call: &Call, ts: f64) {
+        let parts = pricing::cost_parts(&string_of(Some(model)), Some(ts), &call.tokens);
+        self.priced(model, call, ts, parts.map(|c| c.total));
+    }
+
+    /// A call at what its app said it cost (Grok Build's turns), or, when
+    /// it didn't say (`cost` None), one without a price.
+    pub fn add_reported(&mut self, model: &Value, call: &Call, ts: f64, cost: Option<f64>) {
+        self.priced(model, call, ts, cost);
+    }
+
+    fn priced(&mut self, model: &Value, call: &Call, ts: f64, cost: Option<f64>) {
         let day = day_key(ts);
         let tag = str_tag(&day);
         if !self.spend.contains(&tag) {
@@ -471,9 +516,8 @@ impl Session {
             }
         }
         let name = string_of(Some(model));
-        let parts = pricing::cost_parts(&name, Some(ts), &call.tokens);
         let d = &mut self.spend.get_mut(&tag).expect("added above when missing, and the newest stays").1;
-        match parts {
+        match cost {
             None => {
                 let plain = pricing::plain_model(&name);
                 let unpriced = if !plain.is_empty() {
@@ -488,7 +532,8 @@ impl Session {
                 }
             }
             Some(c) => {
-                d.cost += c.total;
+                d.cost += c;
+                d.priced = true;
                 d.tokens += call.tokens.total();
             }
         }
@@ -529,6 +574,24 @@ impl Session {
             self.messages.remove(0);
         }
         Ok(())
+    }
+
+    /// The last prompt, now with the whole text its later chunks brought
+    /// (Grok Build's runs); the first prompt too, when it's that one.
+    pub fn extend_prompt(&mut self, text: &str) {
+        let Some(p) = self.prompts.last_mut() else { return };
+        p.text = Value::String(tail(text, 1200));
+        if let Some(first) = self.first_prompt.as_mut().filter(|f| f.seq == p.seq) {
+            first.text = p.text.clone();
+        }
+        self.texts += 1;
+    }
+
+    /// The last message, now with the whole text its later chunks brought.
+    pub fn extend_message(&mut self, text: &str) {
+        let Some(m) = self.messages.last_mut() else { return };
+        m.text = Value::String(tail(text, 1500));
+        self.texts += 1;
     }
 
     /// A turn's end; `interrupted` when you stopped it.
@@ -773,7 +836,7 @@ impl Session {
         let today = self.daily.get(&str_tag(&day_key(now))).map_or(0.0, |(_, v)| *v);
         let last_message = self.last_message();
         let or_null = |v: f64| if v != 0.0 && !v.is_nan() { number(v) } else { Value::Null };
-        obj(vec![
+        let mut snap = obj(vec![
             ("id", Value::String(self.id.clone())),
             ("app", Value::String(self.app.clone())),
             ("status", self.status(now).into()),
@@ -795,7 +858,12 @@ impl Session {
             ("lastTurnEndAt", or_null(self.last_turn_end_at)),
             ("interruptedAt", or_null(self.interrupted_at)),
             ("lastEventAt", number(self.last_event_at)),
-        ])
+        ]);
+        // How it asks before it acts, once its hooks have said.
+        if let (Some(mode), Value::Object(m)) = (&self.permission_mode, &mut snap) {
+            m.insert("permissionMode".into(), Value::String(mode.clone()));
+        }
+        snap
     }
 
     fn new_uid(&mut self) -> u64 {
@@ -962,9 +1030,9 @@ impl Telemetry {
                 // come (its runs of chunks).
                 let i = self.session(&f.session_id, "grok");
                 let o = GrokLine::new(raw);
-                let file = LineFile { run: std::cell::Cell::new(self.sessions[i].line_run), ..LineFile::new(Some(f.agent_id.clone())) };
+                let file = LineFile { run: std::cell::RefCell::new(self.sessions[i].line_run.take()), ..LineFile::new(Some(f.agent_id.clone())) };
                 let events = line_events::grok(&o, &file);
-                self.sessions[i].line_run = file.run.get();
+                self.sessions[i].line_run = file.run.into_inner();
                 self.refusal(app, f, &o.raw, &events, live, out);
                 self.claude_line(f, "grok", o.ts(), &events, live, now, out)
             }
@@ -993,6 +1061,64 @@ impl Telemetry {
                 ("model", model),
                 ("live", Value::Bool(live)),
             ])));
+        }
+    }
+
+    /// Whether a Grok Build session's usage.json was written since it was
+    /// last read (`stamp`, its size and time, as the reader makes it),
+    /// noting that it's read now. Grok writes it as each turn ends, before
+    /// the update that ends the turn, so whoever reads the lines asks after
+    /// each of a session's lines.
+    pub fn grok_usage_due(&mut self, id: &str, stamp: &str) -> bool {
+        let Some(i) = self.find(id) else { return false };
+        let s = &mut self.sessions[i];
+        if s.usage_stamp.as_deref() == Some(stamp) {
+            return false;
+        }
+        s.usage_stamp = Some(stamp.to_string());
+        true
+    }
+
+    /// A Grok Build session's usage.json and summary.json, as read (live.js's
+    /// applyGrokUsage): each of its turns' calls counted once, when the turn
+    /// ended, as Claude Code's calls are, at what Grok said it cost, or
+    /// without a price when it didn't say; and what a turn written again
+    /// adds (Grok folds what you send during a turn into it). A subagent's
+    /// are its parent's, whose turns count them, and a fork's turns from
+    /// before it are the session's it came from (grok.rs's usage_turns).
+    pub fn grok_usage(&mut self, id: &str, usage: Option<&Value>, summary: Option<&Value>, live: bool, out: &mut Vec<Emit>) {
+        let Some(i) = self.find(id) else { return };
+        if crate::grok::usage_subagent(summary) {
+            return;
+        }
+        for c in crate::grok::usage_turns(usage, summary) {
+            let s = &mut self.sessions[i];
+            let was = s.usage_counted.get(&c.key).copied().unwrap_or_default();
+            s.usage_counted.insert(c.key.clone(), Counted { input: c.input, cache_read: c.cache_read, cache_write: c.cache_write, output: c.output, cost: c.cost.unwrap_or(0.0) });
+            let (input, cache_read, cache_write, output) =
+                ((c.input - was.input).max(0.0), (c.cache_read - was.cache_read).max(0.0), (c.cache_write - was.cache_write).max(0.0), (c.output - was.output).max(0.0));
+            let n = input + cache_read + cache_write + output;
+            if n.is_nan() || n <= 0.0 {
+                continue;
+            }
+            let model = Value::String(c.model.clone());
+            s.model = model.clone();
+            s.tokens_output += output;
+            s.add_tokens(n, c.t, live);
+            let call = Call {
+                tokens: TokenUsage {
+                    input: Some(input),
+                    cache_read: Some(cache_read),
+                    cache_write_5m: Some(cache_write),
+                    cache_write_1h: Some(0.0),
+                    output: Some(output),
+                    speed: Speed::default(),
+                },
+            };
+            s.add_reported(&model, &call, c.t, c.cost.map(|cost| (cost - was.cost).max(0.0)));
+            if live {
+                out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "grok".into()), ("n", number(n)), ("ts", number(c.t))])));
+            }
         }
     }
 
@@ -1153,6 +1279,16 @@ impl Telemetry {
         } else if name.as_ref().and_then(Value::as_str).is_some_and(|n| ["UserPromptSubmit", "Stop", "SessionEnd", "PostToolUse"].contains(&n)) {
             s.hook_need = Value::Null;
         }
+        // How it asks before it acts, as every hook says it: Grok Build's
+        // permissionMode, Claude Code's permission_mode. A subagent's isn't
+        // its session's.
+        if !truthy(opt_prop(body, "subagentType")) {
+            if let Some(Value::String(mode)) = opt_prop(body, "permissionMode").filter(|m| m.is_string()).or(opt_prop(body, "permission_mode")) {
+                if !mode.is_empty() {
+                    s.permission_mode = Some(mode.clone());
+                }
+            }
+        }
         // An app whose lines don't say when a turn ends (Grok Build's) says
         // it in its hooks: Stop, and StopCancelled (you stopped it) and
         // StopFailure, where Stop doesn't run. A subagent's end isn't the
@@ -1250,6 +1386,16 @@ impl Telemetry {
                 }
             }
         }
+        // A chunk that carries on what its run began (Grok Build's).
+        if let Some((of, whole, meta)) = events.iter().find_map(|e| match &e.kind {
+            Kind::More { of, whole, meta, .. } => Some((*of, whole.as_str(), *meta)),
+            _ => None,
+        }) {
+            if !truthy(Some(&agent)) {
+                self.more(i, of, whole, meta, ts, live, now, out)?;
+            }
+            return Ok(());
+        }
         // What the line is: a reply, or what you (or a tool) said.
         let kind = events.iter().find(|e| !matches!(e.kind, Kind::Refusal(_))).map(|e| &*e.origin);
         if kind == Some("assistant") {
@@ -1336,6 +1482,9 @@ impl Telemetry {
             Some(Value::String(_)) => &[],
             _ => return Err(TypeError("o.blocks is not iterable".into())),
         };
+        if !has_agent {
+            self.sessions[i].run_entry = None;
+        }
         for b in list {
             let t = prop(Some(b), "type")?;
             if is_str(t, "tool_use") {
@@ -1349,6 +1498,7 @@ impl Telemetry {
                 };
                 if said && !has_agent {
                     self.sessions[i].add_message(text, ts)?;
+                    self.sessions[i].run_entry = Some(RunEntry::Message);
                     self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip_value(text, 72)))), ("ts", nv(ts))]), live, now, out);
                 }
             }
@@ -1502,6 +1652,9 @@ impl Telemetry {
             _ => None,
         });
         let unread = broken_at(events, Field::Text);
+        if prompt.is_some() && !has_agent {
+            self.sessions[i].run_entry = None;
+        }
         let gate = prompt.and_then(|p| p.claude.as_ref().map(|c| (c.meta, c.sidechain))).or(interrupted.flatten()).or(unread.map(|b| (b.meta, b.sidechain)));
         let Some((meta, sidechain)) = gate else { return Ok(()) };
         if truthy(meta) || truthy(sidechain) != has_agent {
@@ -1541,11 +1694,55 @@ impl Telemetry {
             }
             return Ok(());
         }
+        self.prompted(i, text, ts, live, now, out);
+        Ok(())
+    }
+
+    // What you asked: a turn begins.
+    fn prompted(&mut self, i: usize, text: &str, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
         s.turn_active = true;
         s.turn_started_at = Some(ts);
         s.add_prompt(text, ts);
+        s.run_entry = Some(RunEntry::Prompt);
         self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
+    }
+
+    // A chunk that carries on a prompt or a message (Grok Build's runs):
+    // the whole text so far takes the place of what was kept of it, or is
+    // kept now, once there's something in it, when its first chunks had
+    // nothing to say. The activity names it once, by its text when it's
+    // first kept. A thought carries on nothing the tailer keeps.
+    #[expect(clippy::too_many_arguments, reason = "a chunk's event and what claude_line worked out about it (session, time), handed down as the JS's closures saw them")]
+    fn more(&mut self, i: usize, of: &str, whole: &str, meta: bool, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        let s = &mut self.sessions[i];
+        s.last_event_at = js_max(s.last_event_at, ts);
+        match of {
+            "text" => {
+                if s.run_entry == Some(RunEntry::Message) {
+                    s.extend_message(whole);
+                    return Ok(());
+                }
+                if js_trim(whole).is_empty() {
+                    return Ok(());
+                }
+                let text = Value::String(whole.to_string());
+                s.add_message(Some(&text), ts)?;
+                s.run_entry = Some(RunEntry::Message);
+                self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip_value(Some(&text), 72)))), ("ts", nv(ts))]), live, now, out);
+            }
+            "prompt" => {
+                if s.run_entry == Some(RunEntry::Prompt) {
+                    s.extend_prompt(whole);
+                    return Ok(());
+                }
+                if meta || js_trim(whole).is_empty() || whole.starts_with('<') {
+                    return Ok(());
+                }
+                self.prompted(i, whole, ts, live, now, out);
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -2189,8 +2386,18 @@ impl Telemetry {
         let mut by_app: Vec<(String, f64, f64)> = apps::with("lines").map(|a| (a.id.clone(), 0.0, 0.0)).collect();
         let tailed = by_app.len();
         let mut unpriced: Vec<String> = Vec::new();
+        // The apps with a call today, and those with a price for one: an app
+        // with calls and no price costs what isn't known (null, never 0), and
+        // so does the day when no call today has one.
+        let (mut called, mut priced): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
         for s in &self.sessions {
             let Some((_, d)) = s.spend.get(&day) else { continue };
+            if !called.contains(&s.app.as_str()) {
+                called.push(&s.app);
+            }
+            if d.priced && !priced.contains(&s.app.as_str()) {
+                priced.push(&s.app);
+            }
             match by_app.iter_mut().find(|(app, _, _)| *app == s.app) {
                 Some(slot) => {
                     slot.1 += d.cost;
@@ -2213,9 +2420,16 @@ impl Telemetry {
             }
         }
         unpriced.sort_by(|a, b| jsstr::cmp_units(a, b));
-        let by_app_value: Map<String, Value> = by_app.iter().map(|(app, cost, _)| (app.clone(), number(*cost))).collect();
+        let unknown = |i: usize, app: &str| i < tailed && called.contains(&app) && !priced.contains(&app);
+        let by_app_value: Map<String, Value> =
+            by_app.iter().enumerate().map(|(i, (app, cost, _))| (app.clone(), if unknown(i, app) { Value::Null } else { number(*cost) })).collect();
+        let today = if !called.is_empty() && priced.is_empty() {
+            Value::Null
+        } else {
+            number(by_app.iter().enumerate().take(tailed).fold(0.0, |a, (i, x)| a + if unknown(i, &x.0) { 0.0 } else { x.1 }))
+        };
         obj(vec![
-            ("today", number(by_app.iter().take(tailed).fold(0.0, |a, x| a + x.1))),
+            ("today", today),
             ("byApp", Value::Object(by_app_value)),
             ("perHour", number(per_hour)),
             ("unpriced", Value::Array(unpriced.into_iter().map(Value::String).collect())),
@@ -2616,12 +2830,19 @@ impl Session {
             Some(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        let spend =
-            |d: &Spend| obj(vec![("cost", number(d.cost)), ("tokens", number(d.tokens)), ("unpriced", Value::Array(d.unpriced.iter().cloned().map(Value::String).collect()))]);
+        let spend = |d: &Spend| {
+            obj(vec![
+                ("cost", number(d.cost)),
+                ("tokens", number(d.tokens)),
+                ("unpriced", Value::Array(d.unpriced.iter().cloned().map(Value::String).collect())),
+                ("priced", Value::Bool(d.priced)),
+            ])
+        };
         let spend_of = |v: Option<Value>| Spend {
             cost: num_of(v.as_ref(), "cost"),
             tokens: num_of(v.as_ref(), "tokens"),
             unpriced: list_of(opt_prop(v.as_ref(), "unpriced")).iter().map(js_string).collect(),
+            priced: truthy(opt_prop(v.as_ref(), "priced")),
         };
         let seen = |(): &()| Value::Bool(true);
         let seen_of = |_: Option<Value>| ();

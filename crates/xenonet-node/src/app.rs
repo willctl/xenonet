@@ -386,7 +386,7 @@ struct Reader<'a> {
 impl Reader<'_> {
     fn read(&mut self, file: Option<&str>) -> Value {
         match &self.f {
-            None => file.and_then(|f| std::fs::read(f).ok()).and_then(|b| xenonet_base::json::parse(&String::from_utf8_lossy(&b)).ok()).unwrap_or_else(|| json!({})),
+            None => xenonet_engine::toml::read_settings(file),
             Some(f) => match f.call(file.map(String::from)) {
                 Ok(j) => j.0,
                 Err(e) => {

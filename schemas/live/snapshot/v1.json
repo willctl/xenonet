@@ -525,24 +525,39 @@
       "additionalProperties": {}
     },
     "costs": {
-      "description": "What today's calls would cost at API prices (core/pricing.js), in dollars",
+      "description": "What today's calls would cost at API prices (core/pricing.js), or at what their app said they cost (Grok Build's), in dollars",
       "type": "object",
       "properties": {
         "today": {
-          "type": "number",
-          "description": "Dollars"
+          "description": "Dollars; null when no call today has a price, so what it cost isn't known",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "byApp": {
           "type": "object",
           "properties": {
             "claude": {
-              "type": "number"
+              "description": "Dollars; null when the app's calls today have no price",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "codex": {
-              "type": "number"
+              "description": "Dollars; null when the app's calls today have no price",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "grok": {
-              "type": "number"
+              "description": "Dollars; null when the app's calls today have no price",
+              "type": [
+                "number",
+                "null"
+              ]
             }
           },
           "required": [
@@ -561,7 +576,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Models used today that XenoNet has no price for"
+          "description": "Models used today with no price: none in XenoNet's table, and none their app said"
         },
         "checked": {
           "type": "string",

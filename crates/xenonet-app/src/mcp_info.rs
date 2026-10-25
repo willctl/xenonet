@@ -423,13 +423,23 @@ pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, re
             }
         }
     }
-    for cwd in cwds {
-        let m = read(Some(&NATIVE.join(&[&cwd, ".mcp.json"])));
+    for cwd in &cwds {
+        let m = read(Some(&NATIVE.join(&[cwd, ".mcp.json"])));
         c.add("Claude Code", "project", raw(Some(&m), "mcpServers"));
     }
     if let Some(dir) = get(st, "claudeDesktopDir").filter(|d| truthy(Some(d))) {
         let m = read(Some(&NATIVE.join(&[&js_string(dir), "claude_desktop_config.json"])));
         c.add("Claude Desktop", "user", raw(Some(&m), "mcpServers"));
+    }
+    // Grok Build's: its config.toml's [mcp_servers.<name>] tables, yours and
+    // those in the folders where the server is used.
+    if let Some(dir) = get(st, "grokHome").filter(|d| truthy(Some(d))) {
+        let m = read(Some(&NATIVE.join(&[&js_string(dir), "config.toml"])));
+        c.add("Grok Build", "user", raw(Some(&m), "mcp_servers"));
+    }
+    for cwd in &cwds {
+        let m = read(Some(&NATIVE.join(&[cwd, ".grok", "config.toml"])));
+        c.add("Grok Build", "project", raw(Some(&m), "mcp_servers"));
     }
     let home = raw(st, "homeDir").map(js_string).unwrap_or_default();
     let installed = read(Some(&NATIVE.join(&[&home, ".claude", "plugins", "installed_plugins.json"])));

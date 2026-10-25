@@ -118,12 +118,19 @@ export class TranscriptSearch {
 
   // Indexes a transcript's lines, through its app's normalizer (lines.js);
   // lines that aren't JSON are left out. `userEvents`: see docsFromLine.
-  indexText(file, app, sessionId, text, { userEvents = false } = {}) {
-    return this.#index(file, app, sessionId, native.searchLines(String(text)), !!userEvents);
+  // `open`: a run of chunks left open where the last read ended, { run,
+  // doc }, left as the run open at the end of this text.
+  indexText(file, app, sessionId, text, { userEvents = false, open = { run: null, doc: null } } = {}) {
+    const run = new native.SearchRun(String(file), String(app), String(sessionId), !!userEvents);
+    if (open.run) run.resume({ run: open.run, doc: open.doc ?? null });
+    const n = this.#index(run, file, app, native.searchLines(String(text)));
+    const left = run.open;
+    open.run = left?.run ?? null;
+    open.doc = left?.doc ?? null;
+    return n;
   }
 
-  #index(file, app, sessionId, texts, userEvents) {
-    const run = new native.SearchRun(String(file), String(app), String(sessionId), userEvents);
+  #index(run, file, app, texts) {
     const lines = linesOf(app);
     const where = { file };
     for (const text of texts) {
@@ -141,8 +148,10 @@ export class TranscriptSearch {
     let lines = this.#core.begin(plan, text);
     if (lines === null) lines = this.#core.begin(plan, await readWhole(file));
     try {
-      const n = this.#index(file, app, plan.sessionId, lines, plan.userEvents);
-      this.#core.commit(plan);
+      // A run of chunks the last read left open goes on where it ended.
+      const run = native.SearchRun.forPlan(plan);
+      const n = this.#index(run, file, app, lines);
+      this.#core.commit(plan, run);
       return n;
     } catch (e) {
       this.#core.rollback();

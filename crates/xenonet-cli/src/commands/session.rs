@@ -68,19 +68,22 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
     print("");
     let unpriced = st.get("pricing").map(|p| list(p, "unpriced").iter().map(|v| crate::js::text(Some(v))).collect::<Vec<_>>()).unwrap_or_default();
     let total = amount(&tot, "cost").unwrap_or(0.0);
+    // Grok Build's cost is what Grok recorded, which it does with an API key.
+    let cost = if st.get("app").and_then(Value::as_str) == Some("grok") {
+        match amount(&tot, "cost") {
+            None => format!("{} {}", c::bold("unknown"), c::dim("Grok Build recorded no cost; it records one with an API key")),
+            Some(n) => format!("{} {}", c::bold(money(Some(n))), c::dim("as Grok Build recorded it")),
+        }
+    } else {
+        format!(
+            "{} {}",
+            c::bold(money(amount(&tot, "cost"))),
+            c::dim(format!("at API prices on the day, standard tier{}", if unpriced.is_empty() { String::new() } else { format!("; no price for {}", unpriced.join(", ")) }))
+        )
+    };
     print(table(
         &[
-            vec![
-                c::dim("Estimated cost"),
-                format!(
-                    "{} {}",
-                    c::bold(money(amount(&tot, "cost"))),
-                    c::dim(format!(
-                        "at API prices on the day, standard tier{}",
-                        if unpriced.is_empty() { String::new() } else { format!("; no price for {}", unpriced.join(", ")) }
-                    ))
-                ),
-            ],
+            vec![c::dim("Estimated cost"), cost],
             vec![
                 c::dim("Tokens"),
                 format!(

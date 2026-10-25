@@ -76,7 +76,8 @@
             "type": "string",
             "enum": [
               "claude",
-              "codex"
+              "codex",
+              "grok"
             ]
           }
         },
@@ -219,7 +220,8 @@
                     "type": "string",
                     "enum": [
                       "claude",
-                      "codex"
+                      "codex",
+                      "grok"
                     ]
                   },
                   "state": {
@@ -438,7 +440,7 @@
                 "properties": {
                   "session_id": {
                     "type": "string",
-                    "pattern": "^(claude|codex):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    "pattern": "^(claude|codex|grok):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                   },
                   "project_id": {
                     "type": "string",
@@ -448,7 +450,8 @@
                     "type": "string",
                     "enum": [
                       "claude",
-                      "codex"
+                      "codex",
+                      "grok"
                     ]
                   },
                   "label": {
@@ -590,7 +593,7 @@
                     "type": "array",
                     "items": {
                       "type": "string",
-                      "pattern": "^(claude|codex):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      "pattern": "^(claude|codex|grok):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                     }
                   },
                   "project_id": {
@@ -686,7 +689,7 @@
               "properties": {
                 "session_id": {
                   "type": "string",
-                  "pattern": "^(claude|codex):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  "pattern": "^(claude|codex|grok):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                 },
                 "project_id": {
                   "type": "string",
@@ -696,7 +699,8 @@
                   "type": "string",
                   "enum": [
                     "claude",
-                    "codex"
+                    "codex",
+                    "grok"
                   ]
                 },
                 "label": {
@@ -976,7 +980,7 @@
                             },
                             {
                               "type": "string",
-                              "pattern": "^(claude|codex):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              "pattern": "^(claude|codex|grok):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                             }
                           ]
                         },

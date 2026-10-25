@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/subagent-meta/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A Grok Build subagent's metadata",
+  "description": "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/subagents/<subagent id>/meta.json: a subagent the session ran, with its own session's id, its type and what it was asked to do. Only the fields XenoNet reads are declared: never its prompt or output. The file carries no version, so the newest schema reads it.",
+  "type": "object",
+  "properties": {
+    "subagent_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parent_session_id": {
+      "description": "The session that ran it",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "child_session_id": {
+      "description": "The subagent's own session, in the sessions folder like any other",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subagent_type": {
+      "description": "general-purpose, explore, plan, or one of your own agents",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "description": "What it was asked to do, in a few words",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "description": "running, completed, failed or cancelled",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parentSessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "childSessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subagentType": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": {},
+  "x-xenonet": {
+    "vendorVersions": "*",
+    "lenient": true
+  }
+}

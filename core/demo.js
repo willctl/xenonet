@@ -194,6 +194,11 @@ const cwdOf = (s) => (s.cwd ? path.join(HOME, ...s.cwd) : P(s.project));
 const MODELS = { claude: "claude-sonnet-4-5", codex: "gpt-5-codex", grok: "grok-build" };
 // The context window Grok Build reports in its usage updates.
 const GROK_WINDOW = 256000;
+// What a Grok Build session thinks before it answers.
+const GROK_THOUGHT = "Checking the change against what was asked before I answer.";
+// A reply as Grok Build streams it: a chunk a sentence. What you ask comes
+// whole.
+const sentences = (text) => text.split(/(?<=\. )/);
 
 class Writer {
   constructor(s, i) {
@@ -214,6 +219,7 @@ class Writer {
       this.dir = path.join(world.grokHome, "sessions", encodeURIComponent(this.cwd), this.id);
       this.file = path.join(this.dir, "updates.jsonl");
       this.started = null;
+      this.ledger = [];
     } else {
       const day = path.join(world.codexHome, "sessions", String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0"));
       this.file = path.join(day, `rollout-${iso(now).slice(0, 19).replace(/:/g, "-")}-${this.id}.jsonl`);
@@ -280,14 +286,17 @@ class Writer {
   }
 
   reply(text, ts) {
+    if (this.s.app === "grok") this.entries.push({ id: `${this.id}-thought-${this.turn}`, ts, role: "reasoning", text: GROK_THOUGHT });
     this.entries.push({ id: randomUUID(), ts, role: "assistant", text });
     if (this.s.app === "claude") {
       return this.write({ type: "assistant", timestamp: iso(ts), message: { id: `msg_${randomUUID()}`, model: MODELS.claude, stop_reason: "end_turn", usage: this.usage(), content: [{ type: "text", text }] } });
     }
     if (this.s.app === "grok") {
-      this.grok(ts, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-      this.usage();
+      this.grok(ts, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: GROK_THOUGHT } });
+      for (const piece of sentences(text)) this.grok(ts, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: piece } });
+      const u = this.usage();
       this.grok(ts, { sessionUpdate: "usage_update", used: this.ctx, size: GROK_WINDOW });
+      this.grokUsage(ts, u);
       return this.grokSummary(ts);
     }
     this.codexTokens(ts);
@@ -349,6 +358,20 @@ class Writer {
     const ok = kind !== "run" || b !== false;
     const content = kind === "edit" ? [{ type: "diff", path: file, oldText: b, newText: c }] : [{ type: "content", content: { type: "text", text: ok ? "ok" : "1 failed" } }];
     this.grok(ts + 3000, { sessionUpdate: "tool_call_update", toolCallId: id, status: ok ? "completed" : "failed", content });
+  }
+
+  // Its ledger beside the updates, as Grok writes it at each turn's end:
+  // the turn's tokens (a model call for each step and the reply, each with
+  // the context so far, most of it read from the cache), and no cost, as
+  // on a SuperGrok sign-in.
+  grokUsage(ts, u) {
+    const calls = this.s.turns[this.turn % this.s.turns.length].steps.length + 1;
+    const n = this.ledger.length + 1;
+    const row = { inputTokens: this.ctx * calls, outputTokens: u.output_tokens, cachedReadTokens: (this.ctx - 1200) * calls, cacheCreationTokens: 0, reasoningTokens: Math.round(u.output_tokens * 0.3), totalTokens: this.ctx * calls + u.output_tokens, modelCalls: calls };
+    this.ledger.push({ turnNumber: n, endedAt: iso(ts), turnId: "turn-" + n, ...row, turnCount: 1, primaryModelId: MODELS.grok, modelUsage: { [MODELS.grok]: row } });
+    const sum = (k) => this.ledger.reduce((a, t) => a + t[k], 0);
+    const session = { inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"), cachedReadTokens: sum("cachedReadTokens"), cacheCreationTokens: 0, reasoningTokens: sum("reasoningTokens"), totalTokens: sum("totalTokens"), modelCalls: sum("modelCalls"), turnCount: this.ledger.length, primaryModelId: MODELS.grok };
+    fs.writeFileSync(path.join(this.dir, "usage.json"), JSON.stringify({ sessionId: this.id, updatedAt: iso(ts), session, turns: this.ledger }, null, 2) + "\n");
   }
 
   // Its summary beside the updates, written when the session starts and
@@ -525,6 +548,8 @@ export function demoSessions(app) {
       parentId: parent,
       parentKind: parent ? (s.subagent ? "subagent" : "spawn") : null,
       claudeAccount: app === "claude" && s.desktop ? demoClaudeAccount(s.project) : null,
+      // A Grok Build subagent's type, as its parent's folder says it.
+      ...(app === "grok" && s.subagent ? { agentKind: "explore" } : {}),
     }];
   });
 }

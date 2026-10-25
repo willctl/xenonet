@@ -28,7 +28,7 @@ use crate::lines::{claude_kind_of, codex_kind_of, grok_kind_of, is_codex_prompt,
 use crate::refusals::detect::{claude_refusal, codex_refusal};
 use crate::wiki::to_str;
 use serde_json::Value;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use xenonet_base::text::{join, js_number, js_trim, js_trim_start, truthy, type_of};
 use xenonet_base::usage::{Figure, Speed, TokenUsage};
@@ -202,6 +202,16 @@ pub enum Kind<'a> {
         window: Js<'a>,
     },
     Limits(&'a Value),
+    /// Grok Build's: a chunk that carries on the message its run began:
+    /// which of the message's parts (`of`: prompt, text or thinking), this
+    /// chunk's text, the message's so far (`whole`), and whether a
+    /// prompt's isn't something you asked (`meta`).
+    More {
+        of: &'static str,
+        text: String,
+        whole: String,
+        meta: bool,
+    },
     Broken(Broken<'a>),
 }
 
@@ -217,25 +227,60 @@ pub struct LineEvent<'a> {
 /// What a reader keeps for a file: whose it is, and for Codex whether its
 /// prompts are its completed user messages (`items`), and whether to read
 /// every completed user message (`follow`), for a reader finding that out
-/// as the lines come; for Grok Build, what the line before was a chunk of
-/// (`run`), which the mapper keeps as the lines come.
+/// as the lines come; for Grok Build, the run of chunks still open
+/// (`run`), which the mapper keeps as the lines come, and whether the last
+/// line began it (`began`: where events.js's run is a new object).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LineFile {
     pub agent: Value,
     pub items: bool,
     pub follow: bool,
-    pub run: Cell<Run>,
+    pub run: RefCell<Option<OpenRun>>,
+    pub began: Cell<bool>,
 }
 
-/// What a Grok Build line was a chunk of: a run of chunks of one kind is
-/// one message.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// What a Grok Build chunk is a piece of: what you said, what the agent
+/// said, or what it thought. A run of chunks of one kind is one message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Run {
-    #[default]
-    None,
     User,
     Assistant,
     Thought,
+}
+
+impl Run {
+    /// Its name, as events.js's mapper keeps it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Run::User => "user",
+            Run::Assistant => "assistant",
+            Run::Thought => "thought",
+        }
+    }
+    fn named(name: &str) -> Option<Run> {
+        [Run::User, Run::Assistant, Run::Thought].into_iter().find(|r| r.name() == name)
+    }
+}
+
+/// A run of Grok Build chunks still open: its kind, what tells it from the
+/// next run of that kind (`key`), and its text so far.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenRun {
+    pub kind: Run,
+    pub key: String,
+    pub text: String,
+}
+
+impl OpenRun {
+    /// As events.js keeps it: { kind, key, text }.
+    pub fn to_value(&self) -> Value {
+        serde_json::json!({ "kind": self.kind.name(), "key": self.key, "text": self.text })
+    }
+    /// One kept as events.js keeps it; None for anything else.
+    pub fn from_value(v: &Value) -> Option<OpenRun> {
+        let kind = Run::named(v.get("kind")?.as_str()?)?;
+        Some(OpenRun { kind, key: v.get("key")?.as_str()?.to_string(), text: v.get("text")?.as_str()?.to_string() })
+    }
 }
 
 impl LineFile {
@@ -660,14 +705,40 @@ static TRUE: Value = Value::Bool(true);
 static FALSE: Value = Value::Bool(false);
 static NULL: Value = Value::Null;
 
+// Updates that say nothing of the conversation, which leave a run of
+// chunks open: the context's fill, the agent's plan, its mode and its
+// commands.
+const GROK_QUIET: [&str; 4] = ["usage_update", "plan", "current_mode_update", "available_commands_update"];
+
+// What tells two runs of the same kind apart, as Grok's own replay does:
+// whether you asked it, the prompt it's part of (`promptIndex`), and
+// whether it's an interjection, whose text chunks each begin one of their
+// own.
+fn grok_run_key(o: &GrokLine) -> String {
+    let m = o.update().get("_meta");
+    let p = match opt_prop(m, "promptIndex") {
+        Some(Value::Number(n)) => xenonet_base::json::number_string(n.as_f64().unwrap_or(f64::NAN)),
+        Some(Value::String(s)) => s.clone(),
+        _ => String::new(),
+    };
+    format!("{}|{p}|{}", o.not_asked(), opt_prop(m, "interjection") == Some(&TRUE))
+}
+
 /// A Grok Build session's line, as events (events.js's grok): Claude Code's
 /// shapes, with its origins (user for what you said and a tool's result,
 /// assistant for what the agent said and its tool calls), so the readers
-/// read them as they read Claude Code's. A run of chunks of the same kind
-/// is one message, which its first chunk speaks for: the chunks after it
-/// make no events (`file.run`). Its lines don't say when a turn ends, nor
-/// what a call cost.
+/// read them as they read Claude Code's: a reply's text, thinking and tool
+/// calls are an assistant line's blocks.
+///
+/// A chunk carries a piece of a message, and a run of chunks of one kind
+/// is one message (docs/design/blocks.md). Its first chunk makes the
+/// message's events, with that chunk's text; each chunk after it makes
+/// `More`, with the message's text so far. The mapper keeps the run open in
+/// `file.run`; a chunk of another kind or key, a tool call or its update,
+/// or one of Grok's own updates (a turn's end is one) ends it. Its lines
+/// don't say when a turn ends, nor what a call cost.
 pub fn grok<'a>(o: &'a GrokLine, file: &LineFile) -> Vec<LineEvent<'a>> {
+    file.began.set(false);
     let mut out = Out { t: f64::NAN, agent: file.agent.clone(), origin: Rc::from("undefined"), events: Vec::new() };
     let (t, kind, own) = match (o.ts(), o.kind(), o.own()) {
         (Ok(t), Ok(kind), Ok(own)) => (t, kind, own),
@@ -680,16 +751,38 @@ pub fn grok<'a>(o: &'a GrokLine, file: &LineFile) -> Vec<LineEvent<'a>> {
     out.origin = Rc::from(grok_kind_of(Some(&o.raw)));
     let kind = kind.and_then(Value::as_str);
     let run = match kind {
-        Some("user_message_chunk") => Run::User,
-        Some("agent_message_chunk") => Run::Assistant,
-        Some("agent_thought_chunk") => Run::Thought,
-        _ => Run::None,
+        Some("user_message_chunk") => Some(Run::User),
+        Some("agent_message_chunk") => Some(Run::Assistant),
+        Some("agent_thought_chunk") => Some(Run::Thought),
+        _ => None,
     };
-    let more = run != Run::None && run == file.run.get();
-    file.run.set(run);
-    if more || own {
+    let mut open = file.run.borrow_mut();
+    if own || (run.is_none() && !kind.is_some_and(|k| GROK_QUIET.contains(&k))) {
+        *open = None;
+    }
+    if own {
         return out.events;
     }
+    if let Some(run) = run {
+        let text = o.text();
+        let key = grok_run_key(o);
+        let u = Some(o.update());
+        let opens = opt_prop(opt_prop(u, "_meta"), "interjection") == Some(&TRUE) && is_str(opt_prop(opt_prop(u, "content"), "type"), "text");
+        if let Some(r) = open.as_mut().filter(|r| r.kind == run && r.key == key && !opens) {
+            r.text.push_str(&text);
+            let of = match run {
+                Run::User => "prompt",
+                Run::Thought => "thinking",
+                Run::Assistant => "text",
+            };
+            out.origin = Rc::from(if run == Run::User { "user" } else { "assistant" });
+            out.push(Kind::More { of, text, whole: r.text.clone(), meta: run == Run::User && o.not_asked() });
+            return out.events;
+        }
+        *open = Some(OpenRun { kind: run, key, text });
+        file.began.set(true);
+    }
+    drop(open);
     let u = Some(o.update());
     let done = |status: Js<'_>| is_str(status, "completed") || is_str(status, "failed");
     let call = || Kind::Call(Box::new(Call { message_id: Some(&NULL), model: Some(&NULL), effort: Some(&NULL), usage: None, total: None, last: None, window: None }));
@@ -700,7 +793,7 @@ pub fn grok<'a>(o: &'a GrokLine, file: &LineFile) -> Vec<LineEvent<'a>> {
             let claude = ClaudePrompt { command: None, meta: Some(meta), sidechain: Some(&FALSE), compact_summary: Some(&FALSE), interruption: false };
             out.push(Kind::Prompt(Prompt { text: o.text(), parts: Some(o.text_value()), claude: Some(claude) }));
         }
-        Some("agent_message_chunk") => {
+        Some("agent_message_chunk" | "agent_thought_chunk") => {
             out.origin = Rc::from("assistant");
             out.push(call());
             out.push(Kind::Said { parts: Some(o.blocks()), sidechain: Some(&FALSE) });
@@ -780,14 +873,19 @@ mod tests {
             text("user_message_chunk", "to the API."),
             text("agent_thought_chunk", "Hm."),
             text("agent_message_chunk", "On it."),
+            up(json!({ "sessionUpdate": "usage_update", "used": 9, "size": 20 })),
             text("agent_message_chunk", " Testing."),
             up(json!({ "sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute", "status": "in_progress", "rawInput": { "command": "npm test" } })),
             up(json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "failed" })),
             up(json!({ "sessionUpdate": "tool_call", "toolCallId": "c2", "kind": "read", "status": "completed" })),
             up(json!({ "sessionUpdate": "usage_update", "used": 10, "size": 20 })),
+            text("agent_message_chunk", "Done."),
             GrokLine::new(
                 json!({ "method": "_x.ai/session/update", "params": { "update": { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "x" } } } }),
             ),
+            text("agent_message_chunk", "Again."),
+            up(json!({ "sessionUpdate": "user_message_chunk", "content": { "type": "text", "text": "Next" }, "_meta": { "promptIndex": 1 } })),
+            up(json!({ "sessionUpdate": "user_message_chunk", "content": { "type": "text", "text": "Then" }, "_meta": { "promptIndex": 2 } })),
             GrokLine::new(Value::Null),
         ];
         let file = LineFile::default();
@@ -796,23 +894,36 @@ mod tests {
             evs.iter().map(|e| kinds(e)).collect::<Vec<_>>(),
             [
                 vec!["Prompt"],
-                vec![],
-                vec![],
+                vec!["More"],
                 vec!["Call", "Said"],
-                vec![],
+                vec!["Call", "Said"],
+                vec!["Context"],
+                vec!["More"],
                 vec!["Call", "Said", "Tool"],
                 vec!["Result"],
                 vec!["Call", "Said", "Tool", "Result"],
                 vec!["Context"],
+                vec!["Call", "Said"],
                 vec![],
+                vec!["Call", "Said"],
+                vec!["Prompt"],
+                vec!["Prompt"],
                 vec!["broken:line"],
             ]
             .map(|v| v.into_iter().map(String::from).collect::<Vec<_>>())
         );
         let Kind::Prompt(p) = &evs[0][0].kind else { panic!("a prompt") };
         assert_eq!((p.text.as_str(), &*evs[0][0].origin, evs[0][0].t), ("Add refunds ", "user", 1791201600000.0));
-        assert!(matches!(&evs[6][0].kind, Kind::Result { error: Some(true), .. }) && &*evs[6][0].origin == "user");
-        assert!(matches!(&evs[8][0].kind, Kind::Context { used: Some(u), .. } if **u == json!(10)) && &*evs[8][0].origin == "usage_update");
+        let Kind::More { of, text, whole, meta } = &evs[1][0].kind else { panic!("more of the prompt") };
+        assert_eq!((*of, text.as_str(), whole.as_str(), *meta, &*evs[1][0].origin), ("prompt", "to the API.", "Add refunds to the API.", false, "user"));
+        let Kind::Said { parts: Some(thought), .. } = &evs[2][1].kind else { panic!("a thought") };
+        assert_eq!(**thought, json!([{ "type": "thinking", "thinking": "Hm." }]));
+        let Kind::More { of, whole, .. } = &evs[5][0].kind else { panic!("more of the reply, past the usage update") };
+        assert_eq!((*of, whole.as_str(), &*evs[5][0].origin), ("text", "On it. Testing.", "assistant"));
+        assert!(matches!(&evs[7][0].kind, Kind::Result { error: Some(true), .. }) && &*evs[7][0].origin == "user");
+        assert!(matches!(&evs[9][0].kind, Kind::Context { used: Some(u), .. } if **u == json!(10)) && &*evs[9][0].origin == "usage_update");
+        assert_eq!(file.run.borrow().as_ref().map(|r| (r.kind, r.text.as_str())), Some((Run::User, "Then")), "the run left open");
+        assert_eq!(OpenRun::from_value(&file.run.borrow().as_ref().unwrap().to_value()).as_ref(), file.run.borrow().as_ref());
         assert!(!lines_end_turns("grok") && lines_end_turns("claude"));
     }
 

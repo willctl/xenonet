@@ -227,6 +227,16 @@ test("xenonet spend: today's estimate by app and by actor, with the rest unattri
     assert.equal(old.code, 0, old.stderr);
     assert.match(old.stdout, /About \$12\.40 today/);
     assert.match(old.stdout, /This XenoNet doesn't break the day down by actor\./);
+    // Grok Build's, at what Grok recorded, or unknown when it recorded
+    // none; and a day whose calls have no price at all isn't $0.
+    costs.byApp.grok = 0.42;
+    assert.match((await via(s, "GET /api/spend/actors", ["spend", ...port])).stdout, /\n  Codex {8}\$3\.30\n  Grok Build {3}\$0\.42\n/);
+    costs.byApp.grok = null;
+    assert.match((await via(s, "GET /api/spend/actors", ["spend", ...port])).stdout, /\n  Grok Build {3}unknown \(Grok recorded no cost\)\n/);
+    Object.assign(costs, { today: null, perHour: 0, byApp: { claude: 0, codex: 0, grok: null }, unpriced: ["grok-build"] });
+    const unknown = (await via(s, "GET /api/spend/actors", ["spend", ...port])).stdout;
+    assert.match(unknown, /^What today's work would cost isn't known: none of its calls has a price\n/);
+    assert.match(unknown, /Not counted, with no price: grok-build\./);
   } finally {
     s.close();
   }

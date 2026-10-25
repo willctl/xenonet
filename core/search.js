@@ -6,7 +6,10 @@
 // The index has a version (PRAGMA user_version). 1: the files table says
 // which Codex rollouts have a completed user message, since one with none
 // at all has its prompts in its user_message events (see lines.js); an
-// index from before is made again for Codex's rollouts.
+// index from before is made again for Codex's rollouts. 2: a Grok Build
+// session's message is one record of all its chunks, and the files table
+// keeps a run of chunks left open where a read ended (`run`); an index
+// from before is made again for Grok Build's sessions.
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -19,7 +22,7 @@ import { tailedOr, untailed } from "./apps.js";
 
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i;
 const MAX_TEXT = 6000;
-const VERSION = 1;
+const VERSION = 2;
 
 function textOf(content) {
   if (typeof content === "string") return content;
@@ -64,6 +67,13 @@ function docsOf(events) {
       case "item":
         if (e.type === "UserMessage" || e.type === "AgentMessage") return doc(e.type === "UserMessage" ? "user" : "assistant", textOf(e.item.content), e.t);
         break;
+      // A chunk that carries on a prompt or a reply (Grok Build's runs):
+      // the message's whole text so far, which takes the place of the
+      // record its first chunks made (`more`). Thinking isn't indexed, as
+      // Claude Code's isn't.
+      case "more":
+        if (e.of === "thinking" || e.meta) return [];
+        return doc(e.of === "prompt" ? "user" : "assistant", e.whole, e.t).map((d) => ({ ...d, more: true }));
       case "broken":
         if (reaches(e)) fail(e);
         break;
@@ -159,41 +169,52 @@ export class TranscriptSearch {
     this.db = new DatabaseSync(this.dbFile);
     this.db.exec(`
       create virtual table if not exists docs using fts5(text, session_id unindexed, app unindexed, role unindexed, ts unindexed, file unindexed, tokenize = 'porter unicode61 remove_diacritics 2');
-      create table if not exists files(path text primary key, size integer, mtime integer, offset integer, items integer not null default 0);
+      create table if not exists files(path text primary key, size integer, mtime integer, offset integer, items integer not null default 0, run text);
     `);
     this.#migrate();
     this.insert = this.db.prepare("insert into docs(text, session_id, app, role, ts, file) values (?, ?, ?, ?, ?, ?)");
-    this.getFile = this.db.prepare("select size, mtime, offset, items from files where path = ?");
-    this.putFile = this.db.prepare("insert into files(path, size, mtime, offset, items) values (?, ?, ?, ?, ?) on conflict(path) do update set size = excluded.size, mtime = excluded.mtime, offset = excluded.offset, items = excluded.items");
+    this.rewrite = this.db.prepare("update docs set text = ? where rowid = ?");
+    this.getFile = this.db.prepare("select size, mtime, offset, items, run from files where path = ?");
+    this.putFile = this.db.prepare("insert into files(path, size, mtime, offset, items, run) values (?, ?, ?, ?, ?, ?) on conflict(path) do update set size = excluded.size, mtime = excluded.mtime, offset = excluded.offset, items = excluded.items, run = excluded.run");
     this.dropFile = this.db.prepare("delete from docs where file = ?");
     return this.db;
   }
 
   // An index from before version 1 has no `items`, and took a Codex
   // rollout's prompts from its completed user messages alone: Codex's
-  // rollouts are indexed again, once.
+  // rollouts are indexed again, once. One from before version 2 has no
+  // `run`, and kept a Grok Build message's first chunk alone: Grok Build's
+  // sessions are indexed again, once.
   #migrate() {
-    if (this.db.prepare("pragma user_version").get().user_version >= VERSION) return;
+    const version = this.db.prepare("pragma user_version").get().user_version;
+    if (version >= VERSION) return;
     const columns = this.db.prepare("pragma table_info(files)").all().map((c) => c.name);
     this.db.exec("begin");
     try {
       if (!columns.includes("items")) this.db.exec("alter table files add column items integer not null default 0");
-      // The rollouts it found something in, and those under Codex's
-      // folders, which it may have found nothing in.
-      const found = this.db.prepare("select distinct file from docs where app = 'codex'").all();
-      this.db.exec("delete from docs where app = 'codex'");
-      const drop = this.db.prepare("delete from files where path = ?");
-      for (const { file } of found) drop.run(file);
-      const under = this.db.prepare("delete from files where substr(path, 1, ?) = ?");
-      for (const r of this.roots.filter((x) => x.app === "codex")) {
-        const prefix = r.dir.endsWith(path.sep) ? r.dir : r.dir + path.sep;
-        under.run(prefix.length, prefix);
-      }
+      if (!columns.includes("run")) this.db.exec("alter table files add column run text");
+      if (version < 1) this.#again("codex");
+      if (version < 2) this.#again("grok");
       this.db.exec(`pragma user_version = ${VERSION}`);
       this.db.exec("commit");
     } catch (e) {
       this.db.exec("rollback");
       throw e;
+    }
+  }
+
+  // An app's transcripts, to be indexed again: the files it found
+  // something in, and those under the app's folders, which it may have
+  // found nothing in.
+  #again(app) {
+    const found = this.db.prepare("select distinct file from docs where app = ?").all(app);
+    this.db.prepare("delete from docs where app = ?").run(app);
+    const drop = this.db.prepare("delete from files where path = ?");
+    for (const { file } of found) drop.run(file);
+    const under = this.db.prepare("delete from files where substr(path, 1, ?) = ?");
+    for (const r of this.roots.filter((x) => x.app === app)) {
+      const prefix = r.dir.endsWith(path.sep) ? r.dir : r.dir + path.sep;
+      under.run(prefix.length, prefix);
     }
   }
 
@@ -218,27 +239,46 @@ export class TranscriptSearch {
 
   // Indexes a transcript's lines, through its app's normalizer (lines.js);
   // lines that aren't JSON are left out. `userEvents`: see docsFromLine.
-  indexText(file, app, sessionId, text, { userEvents = false } = {}) {
+  // `open`: a run of chunks (Grok Build's) left open where the last read
+  // ended, { run, doc }: what the mapper kept of it, and the record its
+  // chunks so far made (a rowid, or null). It's left as the run open at
+  // the end of this text. Gives back how many records it added.
+  indexText(file, app, sessionId, text, { userEvents = false, open: carry = { run: null, doc: null } } = {}) {
     let n = 0;
     const seen = new Set();
     // Nothing of an app XenoNet doesn't tail is indexed.
     const mapper = mapperOf(app, null);
     if (!mapper) return 0;
-    const state = mapper.file({ items: !userEvents });
+    const state = mapper.file({ items: !userEvents, run: carry.run ?? null });
+    // The record of the run of chunks still open, which its later chunks
+    // write their whole text into.
+    let open = carry.doc ?? null;
     const where = { file };
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       const o = mapper.lines.line(line, where);
       if (!o) continue;
-      for (const d of docsOf(mapper.events(o, state))) {
+      const before = state.run;
+      const docs = docsOf(mapper.events(o, state));
+      if (!state.run || state.run !== before) open = null;
+      for (const d of docs) {
         const body = d.text.slice(0, MAX_TEXT);
         const key = body.slice(0, 200);
+        // The same text in a file is indexed once, as far as it's gone.
+        if (d.more && open != null) {
+          this.rewrite.run(body, open);
+          seen.add(key);
+          continue;
+        }
         if (seen.has(key)) continue;
         seen.add(key);
-        this.insert.run(body, sessionId, app, d.role, d.ts, file);
+        const { lastInsertRowid } = this.insert.run(body, sessionId, app, d.role, d.ts, file);
+        if (state.run) open = Number(lastInsertRowid);
         n++;
       }
     }
+    carry.run = state.run ?? null;
+    carry.doc = state.run ? open : null;
     return n;
   }
 
@@ -266,12 +306,19 @@ export class TranscriptSearch {
     }
     const offset = whole ? 0 : row.offset;
     const indexed = body();
+    // A run of chunks the last read left open goes on where it ended.
+    const open = { run: null, doc: null };
+    if (!whole && row.run) {
+      try {
+        Object.assign(open, JSON.parse(row.run));
+      } catch {}
+    }
     this.db.exec("begin");
     let n = 0;
     try {
       if (whole) this.dropFile.run(file);
-      n = this.indexText(file, app, sessionId, indexed, { userEvents: app === "codex" && !items });
-      this.putFile.run(file, st.size, mtime, zst ? st.size : offset + Buffer.byteLength(indexed), items ? 1 : 0);
+      n = this.indexText(file, app, sessionId, indexed, { userEvents: app === "codex" && !items, open });
+      this.putFile.run(file, st.size, mtime, zst ? st.size : offset + Buffer.byteLength(indexed), items ? 1 : 0, open.run ? JSON.stringify(open) : null);
       this.db.exec("commit");
     } catch (e) {
       this.db.exec("rollback");

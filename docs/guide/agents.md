@@ -37,6 +37,8 @@ Grok Build reads a hook's answer only at some events, so a Grok Build session he
 - An edit warning arrives with the edit's result, after the edit.
 - Messages arrive with tool results and at the end of a turn. Grok drops what a hook says when you send a prompt, and as its session closes, so messages wait for the session's next turn then.
 
+Grok Build records each turn's tokens in the session's `usage.json`, and what they cost only when you sign in with an API key. XenoNet counts them a turn at a time, as each turn ends. With a SuperGrok or X Premium sign-in, Token use, the session's stats and `xenonet spend` show Grok Build's cost as unknown, never as $0.
+
 XenoNet writes its MCP servers into `~/.grok/config.toml` itself, as `[mcp_servers.xenonet]` tables, and leaves the rest of the file as it was, comments included. Its hooks go in a file of their own, `~/.grok/hooks/xenonet.json`. `GROK_HOME` moves both. [Grok Build in XenoNet](../design/grok-build.md) has the details.
 
 ## From a terminal

@@ -47,7 +47,7 @@ pub const ERROR_CODES: [&str; 13] = [
     "INTERNAL_ERROR",
 ];
 const WARNING_CODES: [&str; 7] = ["SOURCE_DEGRADED", "SOURCE_UNAVAILABLE", "LIST_CAPPED", "PAGE_REDUCED", "STATS_UNAVAILABLE", "SERVED_FROM_CACHE", "FIXTURE_DATA"];
-const SOURCES: [&str; 2] = ["claude", "codex"];
+const SOURCES: [&str; 3] = ["claude", "codex", "grok"];
 const PRESENCES: [&str; 5] = ["working", "idle", "away", "offline", "unknown"];
 const PRESENCE_BASES: [&str; 4] = ["observed", "reported", "remote_request", "unknown"];
 const CONNECTION_STATES: [&str; 3] = ["connected", "not_connected", "none"];
@@ -73,7 +73,7 @@ fn project_id() -> String {
     format!("^prj_{UUID}$")
 }
 fn session_id() -> String {
-    format!("^(claude|codex):{UUID}$")
+    format!("^(claude|codex|grok):{UUID}$")
 }
 
 fn time() -> Z {
@@ -151,7 +151,7 @@ fn session_summary() -> Z {
     strict(vec![
         ("session_id", session()),
         ("project_id", project()),
-        ("app", enumeration(&["claude", "codex"])),
+        ("app", enumeration(&["claude", "codex", "grok"])),
         ("label", label()),
         ("status", enumeration(&STATUSES)),
         ("status_basis", enumeration(&STATUS_BASES)),

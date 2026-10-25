@@ -7,8 +7,13 @@
 // here, through the lines twin (a compressed archive is unpacked there, and
 // each line goes through the transcripts' normalizer), and Rust is handed
 // each line's record.
+import path from "node:path";
 import { native } from "../index.js";
 import { readLines } from "./lines.js";
+import { readGrokUsage } from "../../../../core/grok-usage.js";
+
+// The files beside a Grok Build session's updates that its stats read.
+const grokFiles = (updates) => ["usage.json", "summary.json"].map((name) => path.join(path.dirname(updates), name));
 
 const strings = (list) => [...list].map(String);
 
@@ -56,11 +61,15 @@ export function createStats({ transcripts }) {
   return async function stats(sessionId) {
     const files = await transcripts.files(sessionId);
     if (!files.length) return null;
-    const key = native.statsStamp(files.map((f) => String(f.file)));
+    // A Grok Build session's usage.json and summary.json count too, read
+    // here.
+    const grok = String(sessionId).startsWith("grok:");
+    const key = native.statsStamp([...files.map((f) => String(f.file)), ...(grok ? grokFiles(String(files[0].file)) : [])]);
     if (kept.hit(sessionId, key)) return cache.get(sessionId);
     const app = native.statsAppOf(sessionId);
     const read = await Promise.all(files.map(async (f) => ({ agentId: f.agentId, lines: (await readLines(f.file, app).catch(() => [])).map((o) => o.raw) })));
-    const stats = native.sessionStats(sessionId, read);
+    const { usage, summary } = grok ? readGrokUsage(path.dirname(String(files[0].file))) : { usage: null, summary: null };
+    const stats = native.sessionStats(sessionId, read, usage, summary);
     const gone = kept.keep(sessionId, key);
     cache.set(sessionId, stats);
     if (gone != null) cache.delete(gone);

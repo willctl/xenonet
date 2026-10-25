@@ -5,11 +5,14 @@ import { c, print, json, table, plural } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
 import { money } from "../../core/units.js";
 
-export const help = `About what today's work would cost at API prices: for Claude Code and for
-Codex, at this pace, and by actor. Each session counts for one actor at
-most: the one that reported it as a run, or started it, or started the
-session it came from. The rest is unattributed, including the sessions you
-start yourself, since XenoNet doesn't know which ones those are.
+export const help = `About what today's work would cost: Claude Code's and Codex's at API
+prices, Grok Build's at what Grok recorded, at this pace, and by actor.
+Grok records a cost only with an API key, so with a SuperGrok or X Premium
+sign-in its cost shows as unknown, never as nothing. Each session counts
+for one actor at most: the one that reported it as a run, or started it,
+or started the session it came from. The rest is unattributed, including
+the sessions you start yourself, since XenoNet doesn't know which ones
+those are.
 
 On a plan, the work costs the plan; this is what it would cost on the API.
 
@@ -27,8 +30,15 @@ export async function run(_args, flags) {
   if (!costs && !byActor) return print(c.dim("This XenoNet doesn't say what the day's work would cost."));
 
   if (costs) {
-    print(`About ${c.bold(money(costs.today))} today at API prices${costs.perHour > 0 ? `, ${money(costs.perHour)} an hour at this pace` : ""}`);
-    print(table([[c.dim("Claude Code"), money(costs.byApp.claude)], [c.dim("Codex"), money(costs.byApp.codex)]], { indent: 2 }));
+    if (costs.today == null) print(`What today's work would cost isn't known: none of its calls has a price`);
+    else print(`About ${c.bold(money(costs.today))} today at API prices${costs.perHour > 0 ? `, ${money(costs.perHour)} an hour at this pace` : ""}`);
+    const rows = [[c.dim("Claude Code"), money(costs.byApp.claude)], [c.dim("Codex"), money(costs.byApp.codex)]];
+    // Grok Build's, once it worked today: what Grok recorded, or unknown
+    // when it recorded none.
+    const grok = costs.byApp.grok;
+    if (grok === null) rows.push([c.dim("Grok Build"), `unknown ${c.dim("(Grok recorded no cost)")}`]);
+    else if (grok > 0) rows.push([c.dim("Grok Build"), money(grok)]);
+    print(table(rows, { indent: 2 }));
   } else if (byActor) print(`About ${c.bold(money(byActor.total))} today at API prices`);
 
   if (byActor) {

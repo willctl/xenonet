@@ -470,7 +470,10 @@ test("Token use says about what today's work would cost, and what the demo's mad
     return v?.shown && v.costs?.today > 0 && v.gauge ? v : null;
   });
   assert.ok(sp, "the estimate and the OpenRouter row show");
-  assert.deepEqual(sp.costs.unpriced, [], "the demo's models have prices");
+  // Grok Build records a cost only with an API key, and the demo's records
+  // none: its model is unpriced and its cost unknown, never zero.
+  assert.deepEqual(sp.costs.unpriced, ["grok-build"], "the demo's Claude Code and Codex models have prices");
+  assert.equal(sp.costs.byApp.grok, null);
   assert.match(sp.text, /about \$\d+\.\d\d today/i);
   assert.match(sp.gauge, /openrouter.*\$21\.40/i);
   assert.equal(sp.openrouter.limit, 50);

@@ -12,7 +12,10 @@
 //! The index has a version (PRAGMA user_version). 1: the files table says
 //! which Codex rollouts have a completed user message, since one with none
 //! at all has its prompts in its user_message events (see lines.rs); an
-//! index from before is made again for Codex's rollouts.
+//! index from before is made again for Codex's rollouts. 2: a Grok Build
+//! session's message is one record of all its chunks, and the files table
+//! keeps a run of chunks left open where a read ended (`run`); an index
+//! from before is made again for Grok Build's sessions.
 //!
 //! Reading the files stays with the caller (a compressed archive is
 //! unpacked there), and so does each line's way through the transcripts'
@@ -29,16 +32,16 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use xenonet_base::text::{js_number, js_trim, truthy};
 use xenonet_base::{fs as xfs, json, jsstr};
-use xenonet_sources::line_events::{self, Broken, Field, Kind, LineEvent, LineFile};
+use xenonet_sources::line_events::{self, Broken, Field, Kind, LineEvent, LineFile, OpenRun};
 use xenonet_sources::lines::{prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
 use xenonet_sources::wiki::{to_str_or_empty, Out};
 
 const MAX_TEXT: usize = 6000;
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
       create virtual table if not exists docs using fts5(text, session_id unindexed, app unindexed, role unindexed, ts unindexed, file unindexed, tokenize = 'porter unicode61 remove_diacritics 2');
-      create table if not exists files(path text primary key, size integer, mtime integer, offset integer, items integer not null default 0);
+      create table if not exists files(path text primary key, size integer, mtime integer, offset integer, items integer not null default 0, run text);
     ";
 
 /// What went wrong: what JS would throw reading a record, or SQLite's
@@ -80,12 +83,14 @@ fn nn(v: Js<'_>) -> Js<'_> {
 }
 
 /// A searchable record: whose words (user, assistant or subagent), what
-/// they said, and when.
+/// they said, and when; `more` when it's the whole text so far of a
+/// message whose first chunks made a record already (Grok Build's runs).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Doc {
     pub role: &'static str,
     pub text: String,
     pub ts: f64,
+    pub more: bool,
 }
 
 // `[...].join(sep)` of values: null and undefined as "", the rest as
@@ -122,7 +127,7 @@ fn doc(role: &'static str, text: String, ts: f64) -> Vec<Doc> {
     if skippable(&text) || !ts.is_finite() {
         Vec::new()
     } else {
-        vec![Doc { role, text, ts }]
+        vec![Doc { role, text, ts, more: false }]
     }
 }
 
@@ -190,6 +195,17 @@ pub fn docs_of(events: &[LineEvent<'_>]) -> Result<Vec<Doc>, TypeError> {
                     let role = if is_str(t, "UserMessage") { "user" } else { "assistant" };
                     return Ok(doc(role, text_of(field(it, "content"))?, e.t));
                 }
+            }
+            // A chunk that carries on a prompt or a reply (Grok Build's
+            // runs): the message's whole text so far, which takes the place
+            // of the record its first chunks made. Thinking isn't indexed, as
+            // Claude Code's isn't.
+            Kind::More { of, whole, meta, .. } => {
+                if *of == "thinking" || *meta {
+                    return Ok(Vec::new());
+                }
+                let role = if *of == "prompt" { "user" } else { "assistant" };
+                return Ok(doc(role, whole.clone(), e.t).into_iter().map(|d| Doc { more: true, ..d }).collect());
             }
             Kind::Broken(b) if reaches(b, &e.origin) => return Err(b.error()),
             _ => {}
@@ -381,6 +397,9 @@ pub struct Plan {
     known: bool,
     checked: bool,
     next_offset: f64,
+    /// A run of chunks (Grok Build's) the last read left open, as the files
+    /// row keeps it: { run, doc }.
+    open: Option<Value>,
 }
 
 /// What `begin` says: read the file whole first, or index these lines.
@@ -400,6 +419,26 @@ pub struct Run {
     line: LineFile,
     seen: HashSet<String>,
     pub n: f64,
+    // The record of the run of chunks still open (Grok Build's), which its
+    // later chunks write their whole text into.
+    open: Option<f64>,
+}
+
+impl Run {
+    /// Goes on from a run of chunks a read before left open: { run, doc },
+    /// as the files row keeps it.
+    pub fn resume(&mut self, open: Option<&Value>) {
+        let Some(v) = open else { return };
+        *self.line.run.borrow_mut() = v.get("run").and_then(OpenRun::from_value);
+        self.open = v.get("doc").and_then(Value::as_f64);
+    }
+
+    /// The run of chunks left open at the end of the text, as the files row
+    /// keeps it: { run, doc }; None when none is.
+    pub fn left_open(&self) -> Option<Value> {
+        let run = self.line.run.borrow();
+        run.as_ref().map(|r| serde_json::json!({ "run": r.to_value(), "doc": self.open.map_or(Value::Null, json::number) }))
+    }
 }
 
 pub struct Search {
@@ -468,32 +507,31 @@ impl Search {
 
     // An index from before version 1 has no `items`, and took a Codex
     // rollout's prompts from its completed user messages alone: Codex's
-    // rollouts are indexed again, once.
+    // rollouts are indexed again, once. One from before version 2 has no
+    // `run`, and kept a Grok Build message's first chunk alone: Grok Build's
+    // sessions are indexed again, once.
     fn migrate(&self) -> Result<(), Error> {
         let db = self.db()?;
         let version: Sql = db.query_row("pragma user_version", [], |r| r.get(0))?;
-        if sql_number(&version) >= VERSION as f64 {
+        let version = sql_number(&version);
+        if version >= VERSION as f64 {
             return Ok(());
         }
         let columns: Vec<Sql> = db.prepare("pragma table_info(files)")?.query_map([], |r| r.get("name"))?.collect::<Result<_, _>>()?;
+        let has = |name: &str| columns.iter().any(|c| matches!(c, Sql::Text(n) if n == name));
         db.execute_batch("begin")?;
         let step = || -> rusqlite::Result<()> {
-            if !columns.iter().any(|c| matches!(c, Sql::Text(n) if n == "items")) {
+            if !has("items") {
                 db.execute_batch("alter table files add column items integer not null default 0")?;
             }
-            // The rollouts it found something in, and those under Codex's
-            // folders, which it may have found nothing in.
-            let found: Vec<Sql> = db.prepare("select distinct file from docs where app = 'codex'")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
-            db.execute_batch("delete from docs where app = 'codex'")?;
-            let mut drop = db.prepare("delete from files where path = ?")?;
-            for f in found {
-                drop.execute([f])?;
+            if !has("run") {
+                db.execute_batch("alter table files add column run text")?;
             }
-            let mut under = db.prepare("delete from files where substr(path, 1, ?) = ?")?;
-            for r in self.roots.iter().filter(|r| r.app == "codex") {
-                let sep = std::path::MAIN_SEPARATOR;
-                let prefix = if r.dir.ends_with(sep) { r.dir.clone() } else { format!("{}{sep}", r.dir) };
-                under.execute((jsstr::len(&prefix) as f64, prefix))?;
+            if version < 1.0 {
+                self.again(db, "codex")?;
+            }
+            if version < 2.0 {
+                self.again(db, "grok")?;
             }
             db.execute_batch(&format!("pragma user_version = {VERSION}"))?;
             db.execute_batch("commit")
@@ -501,6 +539,25 @@ impl Search {
         if let Err(e) = step() {
             db.execute_batch("rollback")?;
             return Err(e.into());
+        }
+        Ok(())
+    }
+
+    // An app's transcripts, to be indexed again: the files it found
+    // something in, and those under the app's folders, which it may have
+    // found nothing in.
+    fn again(&self, db: &Connection, app: &str) -> rusqlite::Result<()> {
+        let found: Vec<Sql> = db.prepare("select distinct file from docs where app = ?")?.query_map([app], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        db.execute("delete from docs where app = ?", [app])?;
+        let mut drop = db.prepare("delete from files where path = ?")?;
+        for f in found {
+            drop.execute([f])?;
+        }
+        let mut under = db.prepare("delete from files where substr(path, 1, ?) = ?")?;
+        for r in self.roots.iter().filter(|r| r.app == app) {
+            let sep = std::path::MAIN_SEPARATOR;
+            let prefix = if r.dir.ends_with(sep) { r.dir.clone() } else { format!("{}{sep}", r.dir) };
+            under.execute((jsstr::len(&prefix) as f64, prefix))?;
         }
         Ok(())
     }
@@ -524,8 +581,10 @@ impl Search {
         let Some(session_id) = session_of(file, app) else { return Ok(None) };
         let Ok(st) = std::fs::metadata(file) else { return Ok(None) };
         let db = self.ready("get")?;
-        let row: Option<[Sql; 4]> =
-            db.prepare_cached("select size, mtime, offset, items from files where path = ?")?.query_row([file], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?])).optional()?;
+        let row: Option<[Sql; 5]> = db
+            .prepare_cached("select size, mtime, offset, items, run from files where path = ?")?
+            .query_row([file], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?]))
+            .optional()?;
         let size = st.len() as f64;
         let mtime = xfs::mtime_ms_of(&st).map_or(f64::NAN, f64::floor);
         if let Some([size_was, mtime_was, ..]) = &row {
@@ -542,7 +601,12 @@ impl Search {
         // is indexed again, whole, by those.
         let items = app == "codex" && !whole && row.as_ref().is_some_and(|r| sql_is(&r[3], 1.0));
         let known = row.is_some();
-        Ok(Some(Plan { file: file.into(), app: app.into(), session_id, size, mtime, zst, whole, offset, items, known, checked: false, next_offset: 0.0 }))
+        // A run of chunks the last read left open goes on where it ended.
+        let open = match row.as_ref().map(|r| &r[4]) {
+            Some(Sql::Text(t)) if !whole => json::parse(t).ok().filter(Value::is_object),
+            _ => None,
+        };
+        Ok(Some(Plan { file: file.into(), app: app.into(), session_id, size, mtime, zst, whole, offset, items, known, checked: false, next_offset: 0.0, open }))
     }
 
     /// Starts indexing what was read (all of it, or what was added since the
@@ -566,6 +630,9 @@ impl Search {
             }
         }
         let offset = if plan.whole { 0.0 } else { plan.offset };
+        if plan.whole {
+            plan.open = None;
+        }
         let indexed = &text[..body(text)];
         let db = self.ready("exec")?;
         db.execute_batch("begin")?;
@@ -586,19 +653,47 @@ impl Search {
     /// The documents of a text of a session's file: `user_events` as in
     /// docs_from_line.
     pub fn run(file: &str, app: &str, session_id: &str, user_events: bool) -> Run {
-        Run { file: file.into(), app: app.into(), session_id: session_id.into(), line: LineFile { items: !user_events, ..LineFile::default() }, seen: HashSet::new(), n: 0.0 }
+        Run {
+            file: file.into(),
+            app: app.into(),
+            session_id: session_id.into(),
+            line: LineFile { items: !user_events, ..LineFile::default() },
+            seen: HashSet::new(),
+            n: 0.0,
+            open: None,
+        }
+    }
+
+    /// The documents of a file's text, as `plan` reads it: from where the
+    /// last read left off, with the run of chunks it left open.
+    pub fn run_for(plan: &Plan) -> Run {
+        let mut run = Search::run(&plan.file, &plan.app, &plan.session_id, plan.app == "codex" && !plan.items);
+        run.resume(plan.open.as_ref());
+        run
     }
 
     /// Indexes a record of the text being indexed: each document once, by
-    /// how it starts.
+    /// how it starts; the whole text so far of a message whose first chunks
+    /// made a document already (Grok Build's runs) goes into that one.
     pub fn add(&self, run: &mut Run, raw: Value) -> Result<(), Error> {
-        for d in docs_in(raw, &run.app, &run.line)? {
+        let docs = docs_in(raw, &run.app, &run.line)?;
+        if run.line.run.borrow().is_none() || run.line.began.get() {
+            run.open = None;
+        }
+        for d in docs {
             let body = jsstr::head(&d.text, MAX_TEXT);
             let key = jsstr::head(&body, 200);
+            // The same text in a file is indexed once, as far as it's gone.
+            if let (true, Some(doc)) = (d.more, run.open) {
+                self.ready("run")?.prepare_cached("update docs set text = ? where rowid = ?")?.execute((body, doc))?;
+                run.seen.insert(key);
+                continue;
+            }
             if !run.seen.insert(key) {
                 continue;
             }
-            self.ready("run")?.prepare_cached("insert into docs(text, session_id, app, role, ts, file) values (?, ?, ?, ?, ?, ?)")?.execute((
+            let db = self.ready("run")?;
+            db.prepare_cached("insert into docs(text, session_id, app, role, ts, file) values (?, ?, ?, ?, ?, ?)")?.execute((
                 body,
                 &run.session_id,
                 &run.app,
@@ -606,16 +701,21 @@ impl Search {
                 d.ts,
                 &run.file,
             ))?;
+            if run.line.run.borrow().is_some() {
+                run.open = Some(db.last_insert_rowid() as f64);
+            }
             run.n += 1.0;
         }
         Ok(())
     }
 
-    /// Says where the file was read to, and commits.
-    pub fn commit(&self, plan: &Plan) -> Result<(), Error> {
+    /// Says where the file was read to, and the run of chunks `run` left
+    /// open there, and commits.
+    pub fn commit(&self, plan: &Plan, run: Option<&Run>) -> Result<(), Error> {
         let db = self.ready("run")?;
-        db.prepare_cached("insert into files(path, size, mtime, offset, items) values (?, ?, ?, ?, ?) on conflict(path) do update set size = excluded.size, mtime = excluded.mtime, offset = excluded.offset, items = excluded.items")?
-            .execute((&plan.file, plan.size, plan.mtime, plan.next_offset, if plan.items { 1.0 } else { 0.0 }))?;
+        let open = run.and_then(Run::left_open).map(|v| v.to_string());
+        db.prepare_cached("insert into files(path, size, mtime, offset, items, run) values (?, ?, ?, ?, ?, ?) on conflict(path) do update set size = excluded.size, mtime = excluded.mtime, offset = excluded.offset, items = excluded.items, run = excluded.run")?
+            .execute((&plan.file, plan.size, plan.mtime, plan.next_offset, if plan.items { 1.0 } else { 0.0 }, open))?;
         db.execute_batch("commit")?;
         Ok(())
     }
@@ -850,7 +950,7 @@ mod tests {
             for l in lines {
                 s.add(&mut run, json::parse(l).unwrap()).unwrap();
             }
-            s.commit(&plan).unwrap();
+            s.commit(&plan, Some(&run)).unwrap();
             run.n
         };
         assert_eq!(index(&s), 1.0);
@@ -871,6 +971,50 @@ mod tests {
         assert_eq!(rows[0][0].1, Out::Str("real".into()), "a JS number goes in as a double");
         s.close();
         assert_eq!(s.search("mailgun", 30.0).unwrap_err(), Error::Sql(NOT_OPEN.into()));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_grok_message_is_one_document_across_reads() {
+        let d = tmp("grok");
+        let root = d.join("sessions");
+        let dir = root.join("%2Fa").join("019a3b5c-0000-7000-8000-00000000000a");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("updates.jsonl");
+        let chunk = |kind: &str, text: &str| {
+            format!(
+                "{}\n",
+                json!({ "timestamp": 1791201600, "method": "session/update", "params": { "update": { "sessionUpdate": kind, "content": { "type": "text", "text": text } } } })
+            )
+        };
+        std::fs::write(&file, chunk("user_message_chunk", "Add refunds ") + &chunk("user_message_chunk", "to the API.") + &chunk("agent_message_chunk", "Refunds")).unwrap();
+        let mut s = Search::new(Some(&d.join("search.sqlite").to_string_lossy()), None, &[], Some(&root.to_string_lossy()));
+        s.connect().unwrap();
+        s.prepare().unwrap();
+        let f = file.to_string_lossy().into_owned();
+        let index = |s: &Search| -> f64 {
+            let Some(mut plan) = s.plan(&f, "grok").unwrap() else { return 0.0 };
+            let from = if plan.whole { 0 } else { plan.offset as usize };
+            let text = String::from_utf8_lossy(&std::fs::read(&f).unwrap()[from..]).into_owned();
+            let Begun::Lines(lines) = s.begin(&mut plan, &text).unwrap() else { panic!("read whole") };
+            let mut run = Search::run_for(&plan);
+            for l in lines {
+                s.add(&mut run, json::parse(l).unwrap()).unwrap();
+            }
+            s.commit(&plan, Some(&run)).unwrap();
+            run.n
+        };
+        let texts = |s: &Search| -> Vec<Out> { s.query(s.generation, "select text from docs order by rowid", &[], true).unwrap().into_iter().map(|r| r[0].1.clone()).collect() };
+        assert_eq!(index(&s), 2.0);
+        assert_eq!(texts(&s), [Out::Str("Add refunds to the API.".into()), Out::Str("Refunds".into())]);
+        // The reply goes on in the next read, from where the last one left it.
+        let more = chunk("agent_message_chunk", " work now.") + &chunk("tool_call", "x");
+        std::fs::write(&file, std::fs::read_to_string(&file).unwrap() + &more).unwrap();
+        assert_eq!(index(&s), 0.0, "no new document");
+        assert_eq!(texts(&s), [Out::Str("Add refunds to the API.".into()), Out::Str("Refunds work now.".into())]);
+        assert_eq!(s.search("work", 30.0).unwrap().len(), 1);
+        // Windows won't remove a database that's still open.
+        s.close();
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

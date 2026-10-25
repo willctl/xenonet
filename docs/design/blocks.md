@@ -447,6 +447,48 @@ their events, which stats and search, reading the whole file, leave out.
 An index from before Wave 3 has its Codex rollouts indexed again, once
 (search's `PRAGMA user_version` 1), for the events rule.
 
+### Grok Build updates
+
+Grok Build streams what you and the agent say as chunks, one ACP update a
+line (`user_message_chunk`, `agent_message_chunk`,
+`agent_thought_chunk`), and a run of chunks of one kind is one message.
+The mapper reads a line at a time, so it keeps the run open in its `file`
+state (`run`: its kind, a key, and its text so far), and the readers agree
+on this:
+
+- A run's first chunk makes the message's events, with that chunk's text,
+  as a Claude Code line would: a prompt, or a reply's `call` and `said`
+  (its text, or a thought as a `thinking` block).
+- Each chunk after it makes `more`: what it carries on (`of`: prompt, text
+  or thinking), its own text, and the message's text so far (`whole`, the
+  chunks joined as written). Each reader puts `whole` in place of what it
+  kept of the message, or keeps it then, when the run's first chunks had
+  nothing in them.
+- A run goes on past the updates that say nothing of the conversation (the
+  context's fill, the plan, the mode, the commands). Any other line ends
+  it: a chunk of another kind, a tool call or its update, or one of Grok's
+  own updates (its turn's end is one). So does a chunk of another key: a
+  prompt of another `promptIndex`, a chunk you didn't ask (a host turn, a
+  shell command), and each interjection's text, as Grok's own replay
+  splits them.
+
+| What | live | stats | search |
+|---|---|---|---|
+| A prompt | Its whole text (`prompts`, `firstPrompt`), and a turn begins at its first chunk with something in it | Its whole text, trimmed, names its turn | One record, its whole text |
+| A reply | Its whole text (`messages`, `lastMessage`) | None | One record, its whole text, rewritten as its chunks come |
+| A thought | None | None | None, as Claude Code's thinking isn't indexed |
+| Its chunks after the first | Each counts as a line of the turn (`lastEventAt`) | None | The record's text grows; the same text in a file is indexed once, as far as it's gone |
+| The activity feed | A message is named once, by its text when it's first kept: its first chunk's, clipped | None | None |
+| A run a read leaves open | The tailer keeps the run as the lines come (`lineFile`) | Read whole | Kept in the files table (`run`: the mapper's run and its record's rowid), and the next read goes on with it |
+
+The console's transcript of a Grok session (`grokEntries` in `grok.js`,
+`grok.rs`) reads the same events: a run is one entry at its first chunk's
+time, with its whole text, and a thought shows as reasoning, folded, as
+Claude Code's thinking does.
+
+An index from before whole messages has its Grok sessions indexed again,
+once (search's `PRAGMA user_version` 2).
+
 The console shows a Codex thread from the app-server's
 `thread/items/list`, and when it can't have that (this Mac's Codex
 answers "not supported yet", and the app-server may not start at all),

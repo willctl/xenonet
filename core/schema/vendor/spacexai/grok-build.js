@@ -46,6 +46,72 @@ export const SessionSummary = vendor(
   },
 );
 
+// ---------- subagents/<id>/meta.json ----------
+
+// What a session's folder says of a subagent it ran (the subagent module's
+// SubagentMeta, written in snake case; its cloud copy, subagent.json, is
+// in camel case, whose names XenoNet reads too).
+export const SubagentMeta = vendor(
+  "spacexai/grok-build/subagent-meta",
+  1,
+  open({
+    subagent_id: maybe(str),
+    parent_session_id: maybe(str).describe("The session that ran it"),
+    child_session_id: maybe(str).describe("The subagent's own session, in the sessions folder like any other"),
+    subagent_type: maybe(str).describe("general-purpose, explore, plan, or one of your own agents"),
+    description: maybe(str).describe("What it was asked to do, in a few words"),
+    status: maybe(str).describe("running, completed, failed or cancelled"),
+    started_at: maybe(str),
+    completed_at: maybe(str),
+    parentSessionId: maybe(str),
+    childSessionId: maybe(str),
+    subagentType: maybe(str),
+  }),
+  {
+    title: "A Grok Build subagent's metadata",
+    description:
+      "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/subagents/<subagent id>/meta.json: a subagent the session ran, with its own session's id, its type and what it was asked to do. Only the fields XenoNet reads are declared: never its prompt or output. The file carries no version, so the newest schema reads it.",
+    versions: "*",
+  },
+);
+
+// ---------- usage.json ----------
+
+// What a stretch of work used, as Grok Build's usage ledger sums it
+// (session/usage_file.rs's UsageSummary): inputTokens is the whole prompt,
+// cache reads and writes included; the cost is in ticks, 1e10 to the
+// dollar, and isn't there when no call said what it cost.
+const tokens = {
+  inputTokens: maybe(num).describe("The prompts' tokens, cache reads and writes included"),
+  outputTokens: maybe(num).describe("The replies' tokens, reasoning included"),
+  cachedReadTokens: maybe(num),
+  cacheCreationTokens: maybe(num),
+  reasoningTokens: maybe(num),
+  totalTokens: maybe(num).describe("inputTokens and outputTokens"),
+  modelCalls: maybe(num),
+  costUsdTicks: maybe(num).describe("What it cost, in ticks of 1e10 to the dollar; not there when no call said (a SuperGrok or X Premium sign-in)"),
+  costIsPartial: maybe(z.boolean()).describe("Some calls said what they cost, and some didn't"),
+  usageIsIncomplete: maybe(z.boolean()).describe("Some of it may not be counted, such as a subagent's"),
+};
+const summary = open({ ...tokens, turnCount: maybe(num), primaryModelId: maybe(str), modelUsage: maybe(z.record(str, open(tokens))).describe("The same, by model") });
+
+export const Usage = vendor(
+  "spacexai/grok-build/usage",
+  1,
+  open({
+    sessionId: maybe(str),
+    updatedAt: maybe(str),
+    session: summary.optional().describe("The whole session's, history it was resumed or forked from included"),
+    turns: maybe(z.array(open({ turnNumber: maybe(num), endedAt: maybe(str).describe("When the turn ended, RFC 3339"), turnId: maybe(str), ...summary.shape }))).describe("Each turn's, when it ended"),
+  }),
+  {
+    title: "A Grok Build session's usage",
+    description:
+      "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/usage.json, the session's token and cost ledger, written at the end of each turn: the session's totals and each turn's, each by model. A fork starts with a copy of its parent's. The file carries no version, so the newest schema reads it.",
+    versions: "*",
+  },
+);
+
 // ---------- a line of updates.jsonl ----------
 
 // A content block, as ACP has them: text, or an image or a resource.

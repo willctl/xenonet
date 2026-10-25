@@ -17,7 +17,7 @@ const running = (lastOk) => ({ health: () => ({ state: "running", lastOk }) });
 
 // XenoNet's state as the service holds it: `nodes` on the map, `live` the
 // tailer's sessions, and each block's health.
-function xenonet({ nodes, live = [], collisions = [], claude = running(T - 5000), codex = running(T - 9000), tailer = running(T - 1000) } = {}) {
+function xenonet({ nodes, live = [], collisions = [], claude = running(T - 5000), codex = running(T - 9000), grok = running(T - 7000), tailer = running(T - 1000) } = {}) {
   const s = {
     snapshots: 0,
     index: new Map(nodes.map((n) => [n.id, n])),
@@ -25,6 +25,7 @@ function xenonet({ nodes, live = [], collisions = [], claude = running(T - 5000)
     liveSnapshot: () => (s.snapshots++, { sessions: live, collisions }),
     claudeSessions: claude,
     codexThreads: codex,
+    grokSessions: grok,
     live: { tailer },
   };
   return s;
@@ -68,6 +69,7 @@ test("what a live session is doing goes in by kind and time: never a question's 
 test("each app's source: ready while its list and the tailer run, degraded when one has a problem, unavailable when the list failed, stopped or hasn't run", () => {
   const sources = (over) => stateSource({ state: xenonet({ nodes: MAP, ...over }), now: () => T }).view().sources;
   assert.deepEqual(sources({}).claude, { state: "ready", observedAt: T - 5000, coverage: "complete", reason: "ok" });
+  assert.deepEqual(sources({}).grok, { state: "ready", observedAt: T - 7000, coverage: "complete", reason: "ok" });
   // The tailer stopped a minute ago: what the list had, as of the older of
   // the two.
   const tailerDown = sources({ tailer: { health: () => ({ state: "failed", lastOk: T - 60e3 }) } });

@@ -63,7 +63,7 @@ pub fn fixture_view(t: f64) -> Value {
     json!({
         "at": num(t),
         "fixture": true,
-        "sources": { "claude": ready, "codex": ready },
+        "sources": { "claude": ready, "codex": ready, "grok": ready },
         "places": [[ATLAS, { "name": "atlas-api (made up)" }], [LEDGER, { "name": "ledger (made up)" }]],
         "sessions": [
             { "id": work, "app": "claude", "place": ATLAS, "title": "Add partial refunds (made up)", "updatedAt": num(since + 5e3), "archived": false, "live": work_live },

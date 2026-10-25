@@ -52,6 +52,9 @@ function bar(x, y, w, hgt, fill, round = true) {
 export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url) }) {
   let panel = null;
   let data = null;
+  // A cost, or what not having one means: a Grok Build session's that Grok
+  // didn't record isn't known, which "no price" (XenoNet has none) wouldn't say.
+  const price = (v) => (v == null && data?.app === "grok" ? "unknown" : money(v));
   let node = null;
   let timer = null;
   let tips = new Map();
@@ -127,7 +130,7 @@ export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url
       });
       const id = `turn:${i}`;
       tips.set(id, () => {
-        const rows = [[money(t.cost), true], [`Turn ${t.n} · ${clockOf(t.start)} · ${duration(t.end - t.start)}`]];
+        const rows = [[price(t.cost), true], [`Turn ${t.n} · ${clockOf(t.start)} · ${duration(t.end - t.start)}`]];
         for (const [m, v] of parts) rows.push([`${modelName(m)} ${money(v.cost)}`, false, modelColor(m)]);
         rows.push([`${tokens(t.tokens)} tokens · ${t.tools} tool calls${t.errors ? `, ${t.errors} failed` : ""}`]);
         if (data.compactions.some((c) => c >= t.start && c <= t.end)) rows.push(["Context compacted during this turn"]);
@@ -185,9 +188,9 @@ export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url
       const w = ((r.cost ?? 0) / max) * (W - left - right);
       out += `<text class="st-lab" x="${left - 10}" y="${yy + rowH / 2 + 4}" text-anchor="end">${h(r.model)}</text>`;
       out += bar(left, yy, Math.max(1, w), rowH, r.color);
-      out += `<text class="st-val" x="${left + w + 8}" y="${yy + rowH / 2 + 4}">${h(money(r.cost))} <tspan class="st-dim">· ${h(share(r.cost ?? 0, data.totals.cost ?? 0))}</tspan></text>`;
+      out += `<text class="st-val" x="${left + w + 8}" y="${yy + rowH / 2 + 4}">${h(price(r.cost))} <tspan class="st-dim">· ${h(share(r.cost ?? 0, data.totals.cost ?? 0))}</tspan></text>`;
       const id = `model:${i}`;
-      tips.set(id, () => [[money(r.cost), true], [r.model, false, r.color], [`${r.calls.toLocaleString()} calls · ${tokens(r.tokens)} tokens`], ...(r.from ? [[`${clockOf(r.from)} to ${clockOf(r.to)}${r.efforts?.length ? ` · effort ${r.efforts.join(", ")}` : ""}`]] : [])]);
+      tips.set(id, () => [[price(r.cost), true], [r.model, false, r.color], [`${r.calls.toLocaleString()} calls · ${tokens(r.tokens)} tokens`], ...(r.from ? [[`${clockOf(r.from)} to ${clockOf(r.to)}${r.efforts?.length ? ` · effort ${r.efforts.join(", ")}` : ""}`]] : [])]);
       out += `<rect class="st-hit" data-tip="${id}" x="0" y="${yy - 6}" width="${W}" height="${pitch}" tabindex="0"/>`;
     });
     return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Cost by model">${out}</svg>`;
@@ -209,7 +212,7 @@ export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url
       const hgt = (mins[i] / top$) * plotH;
       out += column(left + i * band + (band - bw) / 2, top + plotH - hgt, bw, Math.max(0.5, hgt), "var(--st-one)");
       const id = `time:${i}`;
-      tips.set(id, () => [[duration(t.end - t.start), true], [`Turn ${t.n} · ${clockOf(t.start)}`], [`${t.tools} tool calls · ${money(t.cost)}`], ...(t.prompt ? [[`"${t.prompt}"`]] : [])]);
+      tips.set(id, () => [[duration(t.end - t.start), true], [`Turn ${t.n} · ${clockOf(t.start)}`], [`${t.tools} tool calls · ${price(t.cost)}`], ...(t.prompt ? [[`"${t.prompt}"`]] : [])]);
       out += `<rect class="st-hit" data-tip="${id}" x="${left + i * band}" y="${top}" width="${band}" height="${plotH}"/>`;
       if (i % every === 0) out += `<text class="st-ax" x="${left + i * band + band / 2}" y="${H - 10}" text-anchor="middle">${h(t.n)}</text>`;
     });
@@ -268,9 +271,9 @@ export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url
 
   const table = (head, rows) => `<table class="st-table"><thead><tr>${head.map((x) => `<th>${h(x)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x) => `<td>${h(x)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   const TABLES = {
-    turns: () => table(["Turn", "Started", "Took", "Cost", "Tokens", "Tools", "Prompt"], data.turns.map((t) => [t.n, clockOf(t.start), duration(t.end - t.start), money(t.cost), tokens(t.tokens), t.tools, t.prompt ?? ""])),
-    kinds: () => table(["Kind", "Tokens", "Share", "Cost", "Share"], KINDS.map(([k, name]) => [name, tokens(data.kinds[k].tokens), share(data.kinds[k].tokens, data.totals.tokens), money(data.kinds[k].cost), share(data.kinds[k].cost ?? 0, data.totals.cost ?? 0)])),
-    models: () => table(["Model", "Calls", "Tokens", "Cost", "From", "To"], data.models.map((m) => [m.model, m.calls, tokens(m.tokens), money(m.cost), clockOf(m.from), clockOf(m.to)])),
+    turns: () => table(["Turn", "Started", "Took", "Cost", "Tokens", "Tools", "Prompt"], data.turns.map((t) => [t.n, clockOf(t.start), duration(t.end - t.start), price(t.cost), tokens(t.tokens), t.tools, t.prompt ?? ""])),
+    kinds: () => table(["Kind", "Tokens", "Share", "Cost", "Share"], KINDS.map(([k, name]) => [name, tokens(data.kinds[k].tokens), share(data.kinds[k].tokens, data.totals.tokens), price(data.kinds[k].cost), share(data.kinds[k].cost ?? 0, data.totals.cost ?? 0)])),
+    models: () => table(["Model", "Calls", "Tokens", "Cost", "From", "To"], data.models.map((m) => [m.model, m.calls, tokens(m.tokens), price(m.cost), clockOf(m.from), clockOf(m.to)])),
     time: () => table(["Turn", "Started", "Took"], data.turns.map((t) => [t.n, clockOf(t.start), duration(t.end - t.start)])),
     context: () => table(["Time", "Context", "Window"], data.context.map((p) => [clockOf(p.t), tokens(p.used), tokens(p.window)])),
     tools: () => table(["Tool", "Calls", "Failed", "Time"], data.tools.map((t) => [t.name, t.calls, t.errors, t.ms == null ? "" : duration(t.ms)])),
@@ -287,8 +290,21 @@ export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url
       ${body}${tableOnly ? "" : `<div class="st-chart" data-chart="${id}"></div>`}<div class="st-tablewrap">${TABLES[id]()}</div>
     </section>`;
 
+  // Where the cost comes from. Grok Build records each turn's tokens, and
+  // its cost only with an API key; XenoNet has no prices for its models.
+  const costSource = (d) => (d.app === "grok" ? (d.totals.cost == null ? "Grok recorded no cost" : "as Grok recorded it") : d.totals.cost == null ? "no API price for its models" : "at API prices on the day");
+  function costNote(d) {
+    if (d.app === "grok") return "Tokens and cost as Grok Build recorded them, a turn at a time, in its usage.json. It records a cost with an API key; with a SuperGrok or X Premium sign-in it records none, and the cost isn't known.";
+    const none = d.pricing.unpriced.length ? ` No price for ${d.pricing.unpriced.join(", ")}.` : "";
+    return `Estimated from the transcript at each model's API price on the day of each call, standard tier (batch and data residency not counted). On a subscription you paid the plan instead. Prices checked ${d.pricing.checked}.${none}`;
+  }
+
   function render() {
     const d = data;
+    // Grok Build records a turn's cost, or none: with none, there's no
+    // cost to draw, and it isn't known (never "no price", which says
+    // XenoNet lacks one); its cost isn't split by kind of token either.
+    const grok = d.app === "grok";
     const t = d.totals;
     const failed = d.tools.reduce((a, x) => a + x.errors, 0);
     const calls = d.tools.reduce((a, x) => a + x.calls, 0);
@@ -297,22 +313,22 @@ export function createStatsPanel({ modals, sfx, toast, read = (url) => fetch(url
     const kpi = (k, v, s, cls = "") => `<div class="st-kpi ${cls}"><div class="st-k">${h(k)}</div><div class="st-v">${h(v)}</div><div class="st-s">${h(s)}</div></div>`;
     panel.querySelector(".m-body").innerHTML = `
       <div class="st-kpis">
-        ${kpi("Estimated cost", money(t.cost), t.cost == null ? "no API price for its models" : "at API prices on the day", "hero")}
+        ${kpi("Estimated cost", price(t.cost), costSource(d), "hero")}
         ${kpi("Tokens", tokens(t.tokens), `${share(t.cacheRead, t.tokens)} read from cache`)}
         ${kpi("At work", duration(d.activeMs), `over ${duration(d.to - d.from)} · ${d.turns.length} turn${d.turns.length === 1 ? "" : "s"}`)}
         ${kpi("Tool calls", calls.toLocaleString(), failed ? `${failed} failed` : "none failed")}
         ${kpi("Model calls", t.calls.toLocaleString(), multi ? `${d.models.length} models` : [d.models[0]?.model ?? "—", ...(d.models[0]?.efforts ?? [])].join(" · "))}
       </div>
-      ${card("turns", multi ? "Cost per turn, by model" : "Cost per turn", multi ? legend(d.models.slice(0, MODEL_SLOTS).map((m) => [m.model, modelColor(m.model)]).concat(d.models.length > MODEL_SLOTS ? [["other models", "var(--st-other)"]] : [])) : "", { wide: true, sub: multi ? "" : d.models[0]?.model ?? "" })}
+      ${card("turns", multi ? "Cost per turn, by model" : "Cost per turn", multi ? legend(d.models.slice(0, MODEL_SLOTS).map((m) => [m.model, modelColor(m.model)]).concat(d.models.length > MODEL_SLOTS ? [["other models", "var(--st-other)"]] : [])) : "", { wide: true, sub: multi ? "" : d.models[0]?.model ?? "", tableOnly: grok && t.cost == null })}
       <div class="st-grid">
-        ${card("kinds", "Where the tokens went", legend(KINDS.map(([k, name]) => [`${name} · ${tokens(d.kinds[k].tokens)} · ${money(d.kinds[k].cost)}`, `var(--st-k-${k})`])), { sub: "cheapest to dearest", wide: !multi })}
+        ${card("kinds", "Where the tokens went", legend(KINDS.map(([k, name]) => [`${name} · ${tokens(d.kinds[k].tokens)}${grok && d.kinds[k].cost == null ? "" : ` · ${money(d.kinds[k].cost)}`}`, `var(--st-k-${k})`])), { sub: "cheapest to dearest", wide: !multi })}
         ${multi ? card("models", "Cost by model", "") : ""}
         ${card("time", "Turn length", "")}
         ${d.context.length > 1 ? card("context", "Context", "", { sub: "tokens in each call's prompt" }) : ""}
         ${d.tools.length ? card("tools", "Tool calls", "", { wide: true }) : ""}
         ${d.subagents.length ? card("subagents", "Subagents", `<p>${h(d.subagents.length)} subagent${d.subagents.length === 1 ? "" : "s"}, ${h(money(d.subagents.reduce((a, x) => a + x.cost, 0)))} of the cost</p>`, { wide: true, tableOnly: true }) : ""}
       </div>
-      <p class="st-note">Estimated from the transcript at each model's API price on the day of each call, standard tier (batch and data residency not counted). On a subscription you paid the plan instead. Prices checked ${h(d.pricing.checked)}.${d.pricing.unpriced.length ? ` No price for ${h(d.pricing.unpriced.join(", "))}.` : ""}</p>`;
+      <p class="st-note">${h(costNote(d))}</p>`;
     draw();
   }
 

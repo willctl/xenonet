@@ -21,7 +21,7 @@ export const LABEL_MAX = 240;
 export const LIVE_MS = 30e3;
 export const WINDOW_MS = 7 * 24 * 3600e3;
 export const LOOKBACK_MAX_MS = 30 * 24 * 3600e3;
-export const SOURCE_NAMES = ["claude", "codex"];
+export const SOURCE_NAMES = ["claude", "codex", "grok"];
 
 const iso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null);
 
