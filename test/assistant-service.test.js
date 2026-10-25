@@ -58,7 +58,7 @@ test("xenonet_status says who, where, what and how fresh, and nothing about the 
     assert.deepEqual(r.data.actor, { actor_id: "actor:dots", product_id: "dots", account_link_state: "unverified", participation: "read_only", messaging: "disabled" });
     assert.deepEqual([r.data.mode, r.data.connection, r.data.assistant_api, r.data.authorized_project_count, r.data.labels_enabled, r.data.data_mode, r.data.transport_scope, r.data.audience_label], ["read_only", "connected", 1, 1, false, "real", "owner_endpoint", "My dot"]);
     assert.equal(r.data.capabilities.length, 6);
-    assert.deepEqual(r.data.sources.map((s) => [s.source, s.state, s.coverage]), [["claude", "ready", "complete"], ["codex", "ready", "complete"]]);
+    assert.deepEqual(r.data.sources.map((s) => [s.source, s.state, s.coverage]), [["claude", "ready", "complete"], ["codex", "ready", "complete"], ["grok", "ready", "complete"]]);
     assert.equal(r.served_at, new Date(T).toISOString());
     assert.equal(r.observed_at, new Date(T - 1000).toISOString());
   } finally {
@@ -89,6 +89,30 @@ test("xenonet_projects and xenonet_sessions see only the places the grant names,
     assert.ok(!all.includes(S.hidden) && !all.includes(S.archived) && !all.includes(S.old));
   } finally {
     t.done();
+  }
+});
+
+test("a Grok Build session is listed like the others, and only it is unknown when Grok's source is down", async () => {
+  const id = "grok:019a3b5c-0000-7000-8000-00000000ab09";
+  const withGrok = (at, o) => {
+    const v = view(at, o);
+    v.sessions.push({ id, app: "grok", place: LEDGER, title: "Read the logs", updatedAt: at - 30e3, archived: false, live: { status: "tool", needsYou: null, stuck: null, turnStartedAt: at - MIN, lastTurnEndAt: null, interruptedAt: null, lastEventAt: at - 30e3 } });
+    return v;
+  };
+  const t = setup({ over: { projects: [LEDGER] }, views: (at) => withGrok(at) });
+  try {
+    const s = await t.ok("sessions");
+    assert.deepEqual(s.data.sessions.map((x) => [x.session_id, x.app, x.status]), [[id, "grok", "working"], [S.ledger, "codex", "idle"]]);
+  } finally {
+    t.done();
+  }
+  const down = setup({ over: { projects: [LEDGER] }, views: (at) => withGrok(at, { grok: "unavailable" }) });
+  try {
+    const r = await down.ok("sessions");
+    assert.deepEqual([r.partial, r.warnings], [true, [{ code: "SOURCE_UNAVAILABLE", source: "grok" }]]);
+    assert.deepEqual(r.data.sessions.map((x) => [x.app, x.status]), [["grok", "unknown"], ["codex", "idle"]]);
+  } finally {
+    down.done();
   }
 });
 

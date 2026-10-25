@@ -75,7 +75,7 @@ pub fn input_ok(tool: &str, args: &Value) -> bool {
     let cursor = |v: &Value| v.as_str().is_some_and(|s| re(&CURSOR, r"^[A-Za-z0-9_-]{1,900}\.[A-Za-z0-9_-]{43}$").is_match(s));
     let limit = |v: &Value| v.as_f64().is_some_and(|n| n.fract() == 0.0 && (1.0..=50.0).contains(&n));
     let project = |v: &Value| v.as_str().is_some_and(|s| re(&PROJECT, &format!("^prj_{UUID}$")).is_match(s));
-    let session = |v: &Value| v.as_str().is_some_and(|s| re(&SESSION, &format!("^(claude|codex):{UUID}$")).is_match(s));
+    let session = |v: &Value| v.as_str().is_some_and(|s| re(&SESSION, &format!("^(claude|codex|grok):{UUID}$")).is_match(s));
     let iso = |v: &Value| v.as_str().is_some_and(|s| re(&ISO, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z$").is_match(s));
     let list_of =
         |v: &Value, allowed: &[&str]| v.as_array().is_some_and(|a| !a.is_empty() && a.len() <= allowed.len() && a.iter().all(|x| x.as_str().is_some_and(|s| allowed.contains(&s))));
@@ -294,6 +294,7 @@ impl Reads {
             self.actors.is_some(),
             sources.get("claude").cloned().unwrap_or(Value::Null),
             sources.get("codex").cloned().unwrap_or(Value::Null),
+            sources.get("grok").cloned().unwrap_or(Value::Null),
             &mut around,
         );
         *self.view.locked() = Some((t, v.clone()));

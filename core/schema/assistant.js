@@ -35,7 +35,7 @@ export const ATTENTION_KINDS = ["waiting", "stalled", "collision", "turn_complet
 export const REASON_CODES = ["input_requested", "approval_requested", "repeated_failure", "inactive_mid_turn", "recent_overlap", "turn_ended", "unknown"];
 export const ERROR_CODES = ["NOT_AUTHORIZED", "NOT_FOUND", "GRANT_EXPIRED", "GRANT_REVOKED", "DISABLED", "INVALID_ARGUMENT", "CURSOR_EXPIRED", "SOURCE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "RATE_LIMITED", "INCOMPATIBLE_VERSION", "TIMEOUT", "INTERNAL_ERROR"];
 export const WARNING_CODES = ["SOURCE_DEGRADED", "SOURCE_UNAVAILABLE", "LIST_CAPPED", "PAGE_REDUCED", "STATS_UNAVAILABLE", "SERVED_FROM_CACHE", "FIXTURE_DATA"];
-export const SOURCES = ["claude", "codex"];
+export const SOURCES = ["claude", "codex", "grok"];
 export const PRESENCES = ["working", "idle", "away", "offline", "unknown"];
 export const PRESENCE_BASES = ["observed", "reported", "remote_request", "unknown"];
 export const CONNECTION_STATES = ["connected", "not_connected", "none"];
@@ -48,7 +48,7 @@ export const RELATIONS = ["works-on", "spawned", "edited", "messaged", "watches"
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 export const DEVICE_ID = new RegExp(`^dev_${UUID}$`);
 export const PROJECT_ID = new RegExp(`^prj_${UUID}$`);
-export const SESSION_ID = new RegExp(`^(claude|codex):${UUID}$`);
+export const SESSION_ID = new RegExp(`^(claude|codex|grok):${UUID}$`);
 export const REQUEST_ID = new RegExp(`^r_${UUID}$`);
 export const ATTENTION_ID = /^att_[0-9a-f]{24}$/;
 export const GRANT_ID = /^gr_[0-9a-f]{24}$/;
@@ -103,7 +103,7 @@ const SourceHealth = z.strictObject({
 export const SessionSummary = z.strictObject({
   session_id: SessionId,
   project_id: ProjectId,
-  app: z.enum(["claude", "codex"]),
+  app: z.enum(["claude", "codex", "grok"]),
   label: Label,
   status: z.enum(STATUSES),
   status_basis: z.enum(STATUS_BASES),

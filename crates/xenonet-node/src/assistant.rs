@@ -384,7 +384,7 @@ impl source::Around for JsAround<'_> {
     }
 }
 
-/// `x`: { t, nodes, live, actors, hasActors, claude, codex }.
+/// `x`: { t, nodes, live, actors, hasActors, claude, codex, grok }.
 #[napi(js_name = "asstView")]
 pub fn asst_view(x: Json, home_of: Function<'_, Json, Json>, product_of: Function<'_, Json, Json>, registered: Function<'_, Json, bool>) -> Result<Json> {
     let x = x.0;
@@ -398,6 +398,7 @@ pub fn asst_view(x: Json, home_of: Function<'_, Json, Json>, product_of: Functio
         x.get("hasActors") == Some(&json!(true)),
         get("claude"),
         get("codex"),
+        get("grok"),
         &mut a,
     );
     a.failed.map_or(Ok(Json(v)), Err)

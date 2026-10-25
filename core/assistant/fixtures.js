@@ -62,6 +62,7 @@ export function fixtureView(t = Date.now()) {
     sources: {
       claude: { state: "ready", observedAt: t, coverage: "complete", reason: "ok" },
       codex: { state: "ready", observedAt: t, coverage: "complete", reason: "ok" },
+      grok: { state: "ready", observedAt: t, coverage: "complete", reason: "ok" },
     },
     places: new Map([
       [P.atlas, { name: "atlas-api (made up)" }],

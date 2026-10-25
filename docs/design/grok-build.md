@@ -239,6 +239,12 @@ the values (`mcpServers` in `core/engine/toml.js`, `toml.rs`). Grok also
 reads `.grok/config.toml` in the folders between the repo's root and the
 session's; XenoNet reads only the session's own.
 
+### Cloud assistants
+
+The assistant protocol counts Grok Build as a source beside Claude Code
+and Codex (`SOURCES` in `core/schema/assistant.js`), and its session ids
+are `grok:<id>`. With no `~/.grok`, the source is ready with no sessions.
+
 ## The doctor
 
 `xenonet doctor` says whether Grok Build is installed (on PATH or in

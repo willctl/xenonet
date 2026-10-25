@@ -26,7 +26,7 @@ pub const LABEL_MAX: usize = 240;
 pub const LIVE_MS: f64 = 30e3;
 pub const WINDOW_MS: f64 = 7.0 * 24.0 * 3600e3;
 pub const LOOKBACK_MAX_MS: f64 = 30.0 * 24.0 * 3600e3;
-pub const SOURCE_NAMES: [&str; 2] = ["claude", "codex"];
+pub const SOURCE_NAMES: [&str; 3] = ["claude", "codex", "grok"];
 
 /// A time as an ISO string, or null for one that isn't a time after 1970.
 pub fn iso(v: Option<&Value>) -> Value {
@@ -189,9 +189,9 @@ pub fn stall_reason(reasons: Option<&Value>) -> &'static str {
     }
 }
 
-/// SESSION_ID in core/schema/assistant.js: `(claude|codex):<uuid>`.
+/// SESSION_ID in core/schema/assistant.js: `(claude|codex|grok):<uuid>`.
 pub fn is_session_id(s: &str) -> bool {
-    let Some(u) = s.strip_prefix("claude:").or_else(|| s.strip_prefix("codex:")) else { return false };
+    let Some(u) = s.strip_prefix("claude:").or_else(|| s.strip_prefix("codex:")).or_else(|| s.strip_prefix("grok:")) else { return false };
     let b = u.as_bytes();
     b.len() == 36 && b.iter().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { *c == b'-' } else { matches!(c, b'0'..=b'9' | b'a'..=b'f') })
 }

@@ -1440,7 +1440,9 @@ impl State for MapState {
     fn assistant_sources(&self, now: f64) -> R<Value> {
         use crate::blocks::Block;
         let tail = self.live.block().health();
-        Ok(json!({ "claude": source_of(&self.claude_sessions.health(), &tail, now), "codex": source_of(&self.codex_threads.health(), &tail, now) }))
+        Ok(
+            json!({ "claude": source_of(&self.claude_sessions.health(), &tail, now), "codex": source_of(&self.codex_threads.health(), &tail, now), "grok": source_of(&self.grok_sessions.health(), &tail, now) }),
+        )
     }
     fn graph_version(&self) -> u64 {
         self.version.load(Ordering::SeqCst)

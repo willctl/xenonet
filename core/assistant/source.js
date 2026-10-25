@@ -54,7 +54,7 @@ export function stateSource({ state, actors = null, now = Date.now }) {
     cached = {
       at: t,
       fixture: false,
-      sources: { claude: sourceOf(state.claudeSessions, state.live?.tailer, t), codex: sourceOf(state.codexThreads, state.live?.tailer, t) },
+      sources: { claude: sourceOf(state.claudeSessions, state.live?.tailer, t), codex: sourceOf(state.codexThreads, state.live?.tailer, t), grok: sourceOf(state.grokSessions, state.live?.tailer, t) },
       places,
       sessions,
       collisions: live.collisions.map((c) => ({ a: c.a, b: c.b, files: c.files?.length ?? 0, ts: c.ts ?? null })),

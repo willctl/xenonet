@@ -183,8 +183,8 @@ pub trait State: Send + Sync {
         pending(M)
     }
     /// The readers' health as the assistant's source reads it: `{ claude,
-    /// codex }`, each sourceOf(state.claudeSessions / codexThreads, the
-    /// live tailer).
+    /// codex, grok }`, each sourceOf(state.claudeSessions / codexThreads /
+    /// grokSessions, the live tailer).
     fn assistant_sources(&self, _now: f64) -> R<Value> {
         pending(M)
     }

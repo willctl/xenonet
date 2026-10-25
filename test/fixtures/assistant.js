@@ -64,13 +64,13 @@ export const ask = (over = {}) => ({
 });
 
 // A view of the made-up map, as source.js makes one, at `t`.
-export function view(t = T, { claude = "ready", codex = "ready", observedAgo = 1000 } = {}) {
+export function view(t = T, { claude = "ready", codex = "ready", grok = "ready", observedAgo = 1000 } = {}) {
   const src = (state) => ({ state, observedAt: state === "unavailable" ? null : t - observedAgo, coverage: state === "ready" ? "complete" : state === "degraded" ? "partial" : "unknown", reason: state === "ready" ? "ok" : "read_failed" });
   const live = (o) => ({ status: "idle", needsYou: null, stuck: null, turnStartedAt: null, lastTurnEndAt: null, interruptedAt: null, lastEventAt: t - 5 * MIN, ...o });
   return {
     at: t,
     fixture: false,
-    sources: { claude: src(claude), codex: src(codex) },
+    sources: { claude: src(claude), codex: src(codex), grok: src(grok) },
     places: new Map([
       [ATLAS, { name: "atlas-api  sk-live-CANARY0123456789abcdef" }],
       [LEDGER, { name: "ledger" }],
