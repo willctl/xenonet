@@ -1043,6 +1043,22 @@ async fn the_plugins_copy_of_a_hook_stands_by_while_connects_own_is_there() {
 }
 
 #[tokio::test]
+async fn claude_codes_hooks_pass_over_what_cursor_and_grok_send_them() {
+    let (ctx, f) = service(false);
+    let sid = "11111111-2222-3333-4444-555555555555";
+    for body in [
+        json!({ "session_id": sid, "hook_event_name": "SessionStart", "cursor_version": "3.19.7" }),
+        json!({ "session_id": sid, "hookEventName": "stop", "hook_event_name": "Stop", "reason": "end_turn" }),
+        json!({ "sessionId": sid, "hook_event_name": "Stop" }),
+    ] {
+        for route in ["/api/hook/claude", "/api/hook/claude/listen"] {
+            assert_eq!(go(&ctx, "POST", route, &[], Some(body.clone())).await.status, 204, "{route} {body}");
+        }
+    }
+    assert_eq!((f.was("check").len(), f.was("noteHook").len(), f.was("hook").len()), (0, 0, 0), "neither checked, noted nor heard");
+}
+
+#[tokio::test]
 async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
     let (ctx, f) = service(false);
     assert_eq!(go(&ctx, "POST", "/api/hook/claude", &[], Some(json!({ "session_id": "not-a-session" }))).await.status, 204);

@@ -119,3 +119,26 @@ test("the live tailer follows a Grok Build session; its hooks end its turns, and
   assert.deepEqual([s.status, s.lastTurnEndAt], ["idle", Math.floor((now - 120e3) / 1000) * 1000]);
   assert.equal(of(IDS.main), undefined, "a day-old session isn't in the snapshot");
 });
+
+test("a Grok Build session's edits count, in its own tools' names, so two sessions on one file collide", async () => {
+  const live = new LiveTelemetry({ claudeRoot: null, codexRoot: null, grokRoot: root, claudeDesktopDir: null });
+  const now = Date.now();
+  const own = (name) => ({ _meta: { "x.ai/tool": { version: 1, name, kind: "edit" } } });
+  const [a, b] = ["019a3b5c-0000-7000-8000-0000000000b1", "019a3b5c-0000-7000-8000-0000000000b2"];
+  const file = "/Users/ada/atlas/src/refunds.ts";
+  const write = (id, call) => {
+    const f = path.join(root, "edits", id, "updates.jsonl");
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, jsonl([up(now - 4000, text("user_message_chunk", "Fix refunds")), up(now - 3000, { sessionUpdate: "tool_call", toolCallId: `c-${id.slice(-2)}`, kind: "edit", status: "completed", locations: [{ path: file }], ...call })]));
+  };
+  write(a, { rawInput: { file_path: file, old_string: "partial", new_string: "full" }, ...own("search_replace") });
+  // A write names its file in locations alone.
+  write(b, { rawInput: { content: "export const refunds = [];" }, ...own("write") });
+  await live.start();
+  live.stop();
+  for (const id of [a, b]) assert.deepEqual(live.sessionNotes(`grok:${id}`).edits, [file], id);
+  const [c] = live.collisions(now).filter((x) => x.a.startsWith("grok:") && x.b.startsWith("grok:"));
+  assert.deepEqual([c?.a, c?.b, c?.files], [`grok:${a}`, `grok:${b}`, ["refunds.ts"]]);
+  const [d] = live.collisionDiffs(`grok:${a}`, `grok:${b}`);
+  assert.deepEqual([d.a[0].kind, d.a[0].diff, d.b[0].kind, d.b[0].diff], ["edit", "- partial\n+ full", "write", "+ export const refunds = [];"]);
+});

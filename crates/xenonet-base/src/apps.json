@@ -166,6 +166,13 @@
     "UserPromptSubmit"
    ]
   },
+  "editTools": [
+   "search_replace",
+   "write",
+   "edit",
+   "hashline_edit",
+   "apply_patch"
+  ],
   "has": [
    "lines",
    "sessions",

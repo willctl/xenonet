@@ -200,6 +200,19 @@ pub fn untailed(id: &str) -> String {
     format!("XenoNet doesn't read {name}'s transcripts")
 }
 
+/// Cursor and Grok Build run Claude Code's hooks too (Cursor's
+/// third-party configs, Grok's `[compat.claude]`), and Grok runs Cursor's,
+/// each with a payload of its own: Cursor's names its `cursor_version`, and
+/// Grok's keys are camelCase (`hookEventName`, and `sessionId` where Claude
+/// Code has `session_id`). Which of the two wrote a hook's input, or None
+/// for neither.
+pub fn hook_written_by(body: &Value) -> Option<&'static str> {
+    if body.get("cursor_version").is_some_and(Value::is_string) {
+        return Some("cursor");
+    }
+    (body.get("hookEventName").is_some() || (body.get("sessionId").is_some() && body.get("session_id").is_none())).then_some("grok")
+}
+
 /// An app's hook events, with their matchers; none for an app XenoNet
 /// doesn't connect.
 pub fn hook_events(id: &str) -> &'static [(String, Option<String>)] {
@@ -243,6 +256,21 @@ mod tests {
         assert!(app("opencode").unwrap().edits_with("multiedit"));
         assert_eq!(edit_tools("gemini-cli"), ["write_file", "replace"]);
         assert_eq!((edit_tools("claude"), edit_tools("nope")), (&[][..], &[][..]));
+        let sid = "0190d3e0-0000-7000-8000-0000000000aa";
+        for (body, by) in [
+            (serde_json::json!({ "session_id": sid, "hook_event_name": "Stop", "stop_hook_active": false }), None),
+            (serde_json::json!({ "session_id": sid, "hook_event_name": "SessionStart", "cursor_version": "3.19.7", "conversation_id": "c1" }), Some("cursor")),
+            (serde_json::json!({ "conversation_id": "c1", "hook_event_name": "sessionStart", "cursor_version": "3.19.7" }), Some("cursor")),
+            (serde_json::json!({ "sessionId": sid, "hookEventName": "stop", "hook_event_name": "Stop" }), Some("grok")),
+            (serde_json::json!({ "sessionId": sid, "hook_event_name": "Stop" }), Some("grok")),
+            (serde_json::json!({ "session_id": sid, "sessionId": sid, "hook_event_name": "Stop" }), None),
+            (serde_json::json!({ "session_id": sid, "cursor_version": 3 }), None),
+            (Value::Null, None),
+            (serde_json::json!({}), None),
+        ] {
+            assert_eq!(hook_written_by(&body), by, "{body}");
+        }
+        assert_eq!(edit_tools("grok"), ["search_replace", "write", "edit", "hashline_edit", "apply_patch"]);
         let observed = app("amp").unwrap();
         assert_eq!((observed.numbat.as_slice(), observed.has.is_empty()), (["amp".to_string()].as_slice(), true));
     }

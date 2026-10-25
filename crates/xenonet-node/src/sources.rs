@@ -62,8 +62,8 @@ pub fn live_patch_files(text: MaybeJson) -> Vec<String> {
 }
 
 #[napi(js_name = "liveClaudeEdits")]
-pub fn live_claude_edits(env: Env, name: String, input: MaybeJson) -> Result<Json> {
-    match live::claude_edits(&name, input.0.as_ref()) {
+pub fn live_claude_edits(env: Env, name: String, input: MaybeJson, app: Option<String>) -> Result<Json> {
+    match live::claude_edits(&name, input.0.as_ref(), app.as_deref().unwrap_or("claude")) {
         Ok(e) => Ok(Json(Value::Array(e))),
         Err(e) => thrown(env, e),
     }

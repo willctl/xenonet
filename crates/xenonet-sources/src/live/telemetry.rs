@@ -1439,7 +1439,7 @@ impl Telemetry {
             e.tool = Some(tool);
         }
         let edit_name = name.as_ref().and_then(Value::as_str).unwrap_or_default();
-        let edits = claude_edits(edit_name, input.as_ref())?;
+        let edits = claude_edits(edit_name, input.as_ref(), &s.app)?;
         if !edits.is_empty() {
             s.add_edits(&edits, ts)?;
         }

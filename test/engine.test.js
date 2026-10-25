@@ -227,6 +227,21 @@ test("hooks: Grok Build passes over what SessionStart and UserPromptSubmit say, 
   assert.match(warn.hookSpecificOutput.additionalContext, /Rate-limit the API/);
 });
 
+test("hooks: Grok Build's last Stop, as its session closes, leaves its mail unread; a turn's end takes it", async () => {
+  const { engine } = world(Date.now());
+  const G = "grok:019a3b5c-0000-7000-8000-00000000000b";
+  const input = { session_id: G.slice("grok:".length), cwd: "/w/atlas" };
+  await engine.hook("grok", "SessionStart", input);
+  const { id } = await engine.send(A, { to: G, text: "refunds.ts is mid-refactor." });
+  const unread = () => engine.snapshot().then((s) => s.messages.find((m) => m.id === id).to.every((d) => !d.seen));
+  // Grok reads no answer to the Stop it fires at session end.
+  for (const reason of ["channel_closed", "shutdown"]) assert.equal(await engine.hook("grok", "Stop", { ...input, reason }), null, reason);
+  assert.ok(await unread(), "nothing taken that Grok would drop");
+  const stop = await engine.hook("grok", "Stop", { ...input, reason: "end_turn" });
+  assert.deepEqual([stop.decision, /mid-refactor/.test(stop.reason)], ["block", true]);
+  assert.ok(!(await unread()));
+});
+
 test("hooks: a subagent's events keep the session's mail for its main thread", async () => {
   const { engine, store, t } = world(Date.now());
   const raw = (id) => id.split(":")[1];

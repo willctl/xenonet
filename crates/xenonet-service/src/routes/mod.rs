@@ -678,6 +678,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // permission prompts and notifications.
     if m == "POST" && route == "/api/hook/claude" {
         let body = req.json_body().await.unwrap_or_else(|_| json!({}));
+        // Cursor and Grok Build run Claude Code's hooks too, with payloads
+        // of their own. Such an event isn't a Claude Code session's: it's
+        // passed over, not refused.
+        if xenonet_base::apps::hook_written_by(&body).is_some() {
+            return Ok(Reply::empty(204));
+        }
         // XenoNet's plugin for Claude Code posts the same events as
         // connect's own hooks, marked via=plugin. While connect's hook for
         // an event is in Claude Code's settings, that one counts and the
@@ -763,7 +769,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // over. If the session stops waiting first, the message stays unread.
     if m == "POST" && route == "/api/hook/claude/listen" {
         let body = req.json_body().await.unwrap_or_else(|_| json!({}));
-        let sid = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s));
+        let sid = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s) && xenonet_base::apps::hook_written_by(&body).is_none());
         if let (Some("Stop"), Some(sid)) = (body.get("hook_event_name").and_then(Value::as_str), sid) {
             let me = format!("claude:{sid}");
             let verdict = cores.verify.check(req.peer, &me, true).await;

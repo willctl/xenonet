@@ -35,7 +35,7 @@ Grok Build reads a hook's answer only at some events, so a Grok Build session he
 
 - It doesn't hear who else works in its repo when it starts, since Grok ignores what a hook says then. The `peers` tool says.
 - An edit warning arrives with the edit's result, after the edit.
-- Messages arrive with tool results and at the end of a turn. Grok drops what a hook says when you send a prompt.
+- Messages arrive with tool results and at the end of a turn. Grok drops what a hook says when you send a prompt, and as its session closes, so messages wait for the session's next turn then.
 
 XenoNet writes its MCP servers into `~/.grok/config.toml` itself, as `[mcp_servers.xenonet]` tables, and leaves the rest of the file as it was, comments included. Its hooks go in a file of their own, `~/.grok/hooks/xenonet.json`. `GROK_HOME` moves both. [Grok Build in XenoNet](../design/grok-build.md) has the details.
 

@@ -82,7 +82,7 @@ events the tailer, stats and search read for every app.
 | `user_message_chunk` | A prompt. A run of chunks is one prompt. |
 | `agent_message_chunk` | The agent's message. A run of chunks is one message. |
 | `agent_thought_chunk` | Nothing, for now |
-| `tool_call` | A tool call. Its name is the one Grok gives its own tools (`_meta`'s `x.ai/tool`), or an MCP tool's `server__tool` title written `mcp__server__tool`, or else ACP's kind. Its input names its file as `file_path`, from the call's locations when the input doesn't. |
+| `tool_call` | A tool call. Its name is the one Grok gives its own tools (`_meta`'s `x.ai/tool`), or an MCP tool's `server__tool` title written `mcp__server__tool`, or else ACP's kind. Its input names its file as `file_path`, from the call's locations when the input doesn't. A call to one of Grok's edit tools (the registry's `editTools`: `search_replace`, `write`, `edit`, `hashline_edit`, `apply_patch`) is an edit: one given `content` is a write, another an edit, so the map draws collisions with it and other sessions are warned about the file. |
 | `tool_call_update` | How the call went, once it's completed or failed |
 | `usage_update` | How full the context is, and its window |
 | Grok's own `_x.ai/session/update` lines | Nothing |
@@ -127,11 +127,18 @@ format, which Grok reads, but Grok doesn't hear an answer at every event:
 | `UserPromptSubmit` | Throws away `additionalContext` | Nothing, and the session's messages stay unread |
 | `PreToolUse` (edits) | Gives `additionalContext` with the call's result | A warning when another session has a hand in the file |
 | `PostToolUse`, `PostToolUseFailure` | Gives `additionalContext` with the result | The session's messages |
-| `Stop` | Keeps the turn going with `decision: block` and the reason | The session's messages, unless the stop hook already ran this turn |
+| `Stop` | Keeps the turn going with `decision: block` and the reason. It also fires once as the session closes (`reason` `channel_closed` or `shutdown`), and reads no answer to that one | The session's messages, when `reason` is `end_turn` and the stop hook didn't already run this turn. At the session's close, nothing, so its messages wait for its next turn |
 | `StopCancelled`, `StopFailure`, `Notification`, `SessionEnd` | Nothing | Nothing. They tell the tailer when a turn ended or a permission prompt waits, and the engine when a session ended. |
 
 So a Grok Build session doesn't hear who else works in its repo when it
 starts. It finds them with the `peers` tool.
+
+Grok also runs Claude Code's hooks (`[compat.claude] hooks`, on unless you
+turn it off), with its own payload. XenoNet's Claude Code routes pass over
+an event with Grok's camelCase keys (`hookEventName`, or `sessionId`
+without `session_id`), unchecked, so a Grok session is heard once, on its
+own route (`hook_written_by` in `xenonet-base`'s apps, `hookWrittenBy` in
+`core/apps.js`).
 
 ### Which session is calling
 
@@ -180,8 +187,8 @@ SpaceXAI's always-on agent, stays an actor.
 - Tokens and cost. Grok Build keeps a `usage.json` ledger per session, which
   XenoNet doesn't read yet, so its sessions show no tokens or cost.
 - Renaming a session, by its `summary.json`'s title.
-- Questions waiting on you and edit collisions read from the updates, as
-  they are from Claude Code's transcripts.
+- Questions waiting on you read from the updates, as they are from Claude
+  Code's transcripts.
 - Whether a subagent's hook events carry its own session's id or its
   parent's. XenoNet answers a hook that names a `subagentType` as it answers
   a Claude Code subagent's, with edit warnings and no messages.

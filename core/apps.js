@@ -14,7 +14,8 @@
 //   connect    how XenoNet connects it: its config format, the hook
 //              events, each with a matcher when it takes one, and the
 //              events whose answers it passes over (unheard)
-//   editTools  for a native reader, the tools whose calls are edits
+//   editTools  the tools whose calls are edits, where they aren't Claude
+//              Code's: a native reader's, and Grok Build's own
 //   has        what XenoNet can do with it at most: lines (it tails its
 //              transcripts), sessions, native (an experimental reader),
 //              connect, delivery, processes, caller and open. What it can
@@ -86,6 +87,7 @@ export const APPS = [
       ],
       unheard: ["SessionStart", "UserPromptSubmit"],
     },
+    editTools: ["search_replace", "write", "edit", "hashline_edit", "apply_patch"],
     has: ["lines", "sessions", "connect", "processes", "caller"],
   },
   {
@@ -181,6 +183,14 @@ const orList = (ids) => (ids.length < 2 ? ids.join("") : `${ids.slice(0, -1).joi
 // (the tailed apps, unless it says): --app takes claude, codex or grok,
 // not "gemini-cli".
 export const appRefusal = (what, app, apps = TAILED) => `${what} takes ${orList(apps)}, not ${JSON.stringify(app)}`;
+
+// Cursor and Grok Build run Claude Code's hooks too (Cursor's third-party
+// configs, Grok's [compat.claude]), and Grok runs Cursor's, each with a
+// payload of its own: Cursor's names its cursor_version, and Grok's keys
+// are camelCase (hookEventName, and sessionId where Claude Code has
+// session_id). Which of the two wrote a hook's input, or null for neither.
+export const hookWrittenBy = (body) =>
+  typeof body?.cursor_version === "string" ? "cursor" : body?.hookEventName !== undefined || (body?.sessionId !== undefined && body?.session_id === undefined) ? "grok" : null;
 
 // What a reader of transcripts says of an app XenoNet doesn't tail.
 export const untailed = (app) => `XenoNet doesn't read ${Object.hasOwn(APP, app) ? APP[app].name : JSON.stringify(String(app))}'s transcripts`;
