@@ -1999,7 +1999,7 @@
    "status": {
     "watching": false,
     "files": 25,
-    "lines": 249,
+    "lines": 257,
     "errors": 0
    }
   },
@@ -3296,7 +3296,7 @@
     "sessionId": "grok:0190d3e0-0000-7000-8000-000000000016",
     "app": "grok",
     "kind": "message",
-    "detail": "All 23 pages pass. The sale badge was closest, at 4.6 to 1.",
+    "detail": "All 23 pages pass.",
     "ts": 1791028570000
    },
    {
@@ -6389,7 +6389,7 @@
   "status": {
    "watching": false,
    "files": 25,
-   "lines": 249,
+   "lines": 257,
    "errors": 0
   }
  }

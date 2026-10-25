@@ -159,19 +159,37 @@ export function grokFolder(rawId, { home = config.grokHome } = {}) {
 // ---------- the conversation ----------
 
 // A session's lines as the console shows them, oldest first, from their
-// events (events.js): what you asked, what the agent said, and each tool
-// call with how it went.
+// events (events.js): what you asked, what the agent said and thought (as
+// Claude Code's thinking shows, folded), and each tool call with how it
+// went. A run of chunks is one entry, at its first chunk's time, with the
+// whole text its chunks bring.
 export function grokEntries(lines) {
   const out = [];
   const calls = new Map();
   const file = grok.file();
+  // The entry of the run of chunks still open, which its later chunks
+  // carry on.
+  let open = null;
   for (const [n, o] of lines.entries()) {
     const ts = Number.isFinite(o.ts) ? o.ts : null;
-    for (const e of grok.events(o, file)) {
-      if (e.kind === "prompt" && !e.meta && e.text.trim()) out.push({ id: `update-${n}`, ts, role: "user", text: excerpt(e.text, 2500) });
+    const before = file.run;
+    const events = grok.events(o, file);
+    if (!file.run || file.run !== before) open = null;
+    const entry = (role, text) => {
+      const e = { id: `update-${n}`, ts, role, text: excerpt(text, 2500) };
+      out.push(e);
+      if (file.run) open = e;
+    };
+    for (const e of events) {
+      if (e.kind === "prompt" && !e.meta && e.text.trim()) entry("user", e.text);
       else if (e.kind === "said") {
         const text = e.parts.filter((b) => b.type === "text").map((b) => b.text).join("");
-        if (text.trim()) out.push({ id: `update-${n}`, ts, role: "assistant", text: excerpt(text, 2500) });
+        const thought = e.parts.filter((b) => b.type === "thinking").map((b) => b.thinking).join("");
+        if (text.trim()) entry("assistant", text);
+        if (thought.trim()) entry("reasoning", thought);
+      } else if (e.kind === "more") {
+        if (open) open.text = excerpt(e.whole, 2500);
+        else if (!e.meta && e.whole.trim()) entry(e.of === "prompt" ? "user" : e.of === "thinking" ? "reasoning" : "assistant", e.whole);
       } else if (e.kind === "tool") {
         const u = o.update;
         const entry = { id: String(e.id ?? `call-${n}`), ts, role: "tool", kind: "tool_use", title: typeof u.title === "string" && u.title ? u.title : e.name, text: "", status: null };

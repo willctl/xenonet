@@ -417,13 +417,16 @@ fn priority_tier(tier: Js<'_>) -> Result<bool, TypeError> {
 }
 
 /// What Codex says apart from its calls: the model, effort, tier and
-/// provider, and the total so far.
+/// provider, and the total so far; and the prompt of a run of chunks still
+/// open (Grok Build's), which its later chunks carry on, by where it is in
+/// the events.
 struct Rollout {
     model: Val,
     effort: Val,
     priority: bool,
     total: Prim,
     provider: Value,
+    prompt: Option<usize>,
 }
 
 /// Calls, prompts, turn ends and tool calls, in the order they happened,
@@ -438,8 +441,14 @@ pub fn session_events(app: &str, files: Vec<File>, ids: &mut EventIds) -> Result
     let ids = &mut ids.0;
     let mut events = Vec::new();
     let mut seen: HashSet<Key> = HashSet::new();
-    let mut said =
-        Rollout { model: ids.val(Some(&Value::String("unknown".into()))), effort: ids.val(Some(&Value::Null)), priority: false, total: Prim::Num(0.0), provider: Value::Null };
+    let mut said = Rollout {
+        model: ids.val(Some(&Value::String("unknown".into()))),
+        effort: ids.val(Some(&Value::Null)),
+        priority: false,
+        total: Prim::Num(0.0),
+        provider: Value::Null,
+        prompt: None,
+    };
     for f in files {
         let agent = ids.val(f.agent.as_ref());
         if codex {
@@ -590,6 +599,7 @@ fn line_events(evs: &[LineEvent<'_>], agent: &Val, seen: &mut HashSet<Key>, said
                 let Some(c) = &p.claude else {
                     let mut ev = Event::new(Kind::Prompt, t);
                     ev.text = Some(Value::String(p.text.clone()));
+                    said.prompt = Some(events.len());
                     events.push(ev);
                     continue;
                 };
@@ -603,13 +613,30 @@ fn line_events(evs: &[LineEvent<'_>], agent: &Val, seen: &mut HashSet<Key>, said
                     }
                     continue;
                 }
+                said.prompt = None;
                 if truthy(c.meta) || truthy(c.sidechain) || truthy(c.compact_summary) || c.interruption {
                     continue;
                 }
                 if let Some(text) = prompt_form(&p.text, c.command.as_ref()) {
                     let mut ev = Event::new(Kind::Prompt, t);
                     ev.text = Some(Value::String(text));
+                    said.prompt = Some(events.len());
                     events.push(ev);
+                }
+            }
+            // A chunk that carries on a prompt (Grok Build's runs): the
+            // prompt is its whole text, from its first chunk with something
+            // in it.
+            le::Kind::More { of: "prompt", whole, meta: false, .. } if !sub => {
+                let Some(text) = prompt_form(whole, None) else { continue };
+                match said.prompt {
+                    Some(at) => events[at].text = Some(Value::String(text)),
+                    None => {
+                        let mut ev = Event::new(Kind::Prompt, t);
+                        ev.text = Some(Value::String(text));
+                        said.prompt = Some(events.len());
+                        events.push(ev);
+                    }
                 }
             }
             le::Kind::Broken(b) if reaches(b, sub) => return Err(b.error()),

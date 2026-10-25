@@ -1346,6 +1346,8 @@
     "test/golden.test.js",
     "test/graph.test.js",
     "test/grok-bot-observer.test.js",
+    "test/grok-lines.test.js",
+    "test/grok.test.js",
     "test/harness.test.js",
     "test/hermes-files.test.js",
     "test/hermes-observer.test.js",

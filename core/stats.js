@@ -90,7 +90,9 @@ function sessionEvents(files, mapper) {
   // The message ids counted, in every file; and what Codex says apart from
   // its calls: the model, effort, tier and provider, and the total so far.
   const seen = new Set();
-  const set = { model: "unknown", effort: null, priority: false, total: 0, provider: null };
+  // `prompt`: the prompt event of a run of chunks still open (Grok
+  // Build's), which its later chunks carry on.
+  const set = { model: "unknown", effort: null, priority: false, total: 0, provider: null, prompt: null };
   for (const { lines, agentId } of files) {
     // A rollout's prompts are its completed user messages, or in one with
     // none at all, its user_message events (see lines.js).
@@ -170,9 +172,20 @@ function lineEvents(evs, seen, set, events) {
           if (e.text.trim()) events.push({ kind: "task", t, agentId, text: e.text });
           break;
         }
+        set.prompt = null;
         if (e.meta || e.sidechain || e.compactSummary || e.interruption) break;
         const text = "command" in e ? promptText(e) : e.text;
-        if (text) events.push({ kind: "prompt", t, text });
+        if (text) events.push((set.prompt = { kind: "prompt", t, text }));
+        break;
+      }
+      // A chunk that carries on a prompt (Grok Build's runs): the prompt is
+      // its whole text, from its first chunk with something in it.
+      case "more": {
+        if (e.of !== "prompt" || e.meta || agentId) break;
+        const text = promptText({ text: e.whole, command: null });
+        if (!text) break;
+        if (set.prompt) set.prompt.text = text;
+        else events.push((set.prompt = { kind: "prompt", t, text }));
         break;
       }
       case "broken":

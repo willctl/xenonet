@@ -18,7 +18,7 @@ use super::{
     categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
     slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
 };
-use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, Run};
+use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, OpenRun};
 use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, GrokLine, TypeError};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
@@ -304,6 +304,14 @@ struct Message {
     ts: Value,
 }
 
+/// What the open run of chunks (Grok Build's) began, which its later
+/// chunks carry on: the last prompt, or the last message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunEntry {
+    Prompt,
+    Message,
+}
+
 /// A recent tool call, for the stall check: { key, label, loopable, ok, ts }.
 #[derive(Clone, Debug)]
 struct ToolRec {
@@ -374,7 +382,8 @@ pub struct Session {
     // When its hooks last spoke, and what its mapper keeps of its file
     // (line_events.rs), for an app whose lines don't say when a turn ends.
     hook_at: f64,
-    line_run: Run,
+    line_run: Option<OpenRun>,
+    run_entry: Option<RunEntry>,
     recent_tools: Vec<ToolRec>,
     error_streak: f64,
     // Undefined (None) until the first reset.
@@ -427,7 +436,8 @@ impl Session {
             question: Value::Null,
             hook_need: Value::Null,
             hook_at: 0.0,
-            line_run: Run::None,
+            line_run: None,
+            run_entry: None,
             recent_tools: Vec::new(),
             error_streak: 0.0,
             error_since: None,
@@ -529,6 +539,24 @@ impl Session {
             self.messages.remove(0);
         }
         Ok(())
+    }
+
+    /// The last prompt, now with the whole text its later chunks brought
+    /// (Grok Build's runs); the first prompt too, when it's that one.
+    pub fn extend_prompt(&mut self, text: &str) {
+        let Some(p) = self.prompts.last_mut() else { return };
+        p.text = Value::String(tail(text, 1200));
+        if let Some(first) = self.first_prompt.as_mut().filter(|f| f.seq == p.seq) {
+            first.text = p.text.clone();
+        }
+        self.texts += 1;
+    }
+
+    /// The last message, now with the whole text its later chunks brought.
+    pub fn extend_message(&mut self, text: &str) {
+        let Some(m) = self.messages.last_mut() else { return };
+        m.text = Value::String(tail(text, 1500));
+        self.texts += 1;
     }
 
     /// A turn's end; `interrupted` when you stopped it.
@@ -962,9 +990,9 @@ impl Telemetry {
                 // come (its runs of chunks).
                 let i = self.session(&f.session_id, "grok");
                 let o = GrokLine::new(raw);
-                let file = LineFile { run: std::cell::Cell::new(self.sessions[i].line_run), ..LineFile::new(Some(f.agent_id.clone())) };
+                let file = LineFile { run: std::cell::RefCell::new(self.sessions[i].line_run.take()), ..LineFile::new(Some(f.agent_id.clone())) };
                 let events = line_events::grok(&o, &file);
-                self.sessions[i].line_run = file.run.get();
+                self.sessions[i].line_run = file.run.into_inner();
                 self.refusal(app, f, &o.raw, &events, live, out);
                 self.claude_line(f, "grok", o.ts(), &events, live, now, out)
             }
@@ -1250,6 +1278,16 @@ impl Telemetry {
                 }
             }
         }
+        // A chunk that carries on what its run began (Grok Build's).
+        if let Some((of, whole, meta)) = events.iter().find_map(|e| match &e.kind {
+            Kind::More { of, whole, meta, .. } => Some((*of, whole.as_str(), *meta)),
+            _ => None,
+        }) {
+            if !truthy(Some(&agent)) {
+                self.more(i, of, whole, meta, ts, live, now, out)?;
+            }
+            return Ok(());
+        }
         // What the line is: a reply, or what you (or a tool) said.
         let kind = events.iter().find(|e| !matches!(e.kind, Kind::Refusal(_))).map(|e| &*e.origin);
         if kind == Some("assistant") {
@@ -1336,6 +1374,9 @@ impl Telemetry {
             Some(Value::String(_)) => &[],
             _ => return Err(TypeError("o.blocks is not iterable".into())),
         };
+        if !has_agent {
+            self.sessions[i].run_entry = None;
+        }
         for b in list {
             let t = prop(Some(b), "type")?;
             if is_str(t, "tool_use") {
@@ -1349,6 +1390,7 @@ impl Telemetry {
                 };
                 if said && !has_agent {
                     self.sessions[i].add_message(text, ts)?;
+                    self.sessions[i].run_entry = Some(RunEntry::Message);
                     self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip_value(text, 72)))), ("ts", nv(ts))]), live, now, out);
                 }
             }
@@ -1502,6 +1544,9 @@ impl Telemetry {
             _ => None,
         });
         let unread = broken_at(events, Field::Text);
+        if prompt.is_some() && !has_agent {
+            self.sessions[i].run_entry = None;
+        }
         let gate = prompt.and_then(|p| p.claude.as_ref().map(|c| (c.meta, c.sidechain))).or(interrupted.flatten()).or(unread.map(|b| (b.meta, b.sidechain)));
         let Some((meta, sidechain)) = gate else { return Ok(()) };
         if truthy(meta) || truthy(sidechain) != has_agent {
@@ -1541,11 +1586,55 @@ impl Telemetry {
             }
             return Ok(());
         }
+        self.prompted(i, text, ts, live, now, out);
+        Ok(())
+    }
+
+    // What you asked: a turn begins.
+    fn prompted(&mut self, i: usize, text: &str, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
         s.turn_active = true;
         s.turn_started_at = Some(ts);
         s.add_prompt(text, ts);
+        s.run_entry = Some(RunEntry::Prompt);
         self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
+    }
+
+    // A chunk that carries on a prompt or a message (Grok Build's runs):
+    // the whole text so far takes the place of what was kept of it, or is
+    // kept now, once there's something in it, when its first chunks had
+    // nothing to say. The activity names it once, by its text when it's
+    // first kept. A thought carries on nothing the tailer keeps.
+    #[expect(clippy::too_many_arguments, reason = "a chunk's event and what claude_line worked out about it (session, time), handed down as the JS's closures saw them")]
+    fn more(&mut self, i: usize, of: &str, whole: &str, meta: bool, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        let s = &mut self.sessions[i];
+        s.last_event_at = js_max(s.last_event_at, ts);
+        match of {
+            "text" => {
+                if s.run_entry == Some(RunEntry::Message) {
+                    s.extend_message(whole);
+                    return Ok(());
+                }
+                if js_trim(whole).is_empty() {
+                    return Ok(());
+                }
+                let text = Value::String(whole.to_string());
+                s.add_message(Some(&text), ts)?;
+                s.run_entry = Some(RunEntry::Message);
+                self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip_value(Some(&text), 72)))), ("ts", nv(ts))]), live, now, out);
+            }
+            "prompt" => {
+                if s.run_entry == Some(RunEntry::Prompt) {
+                    s.extend_prompt(whole);
+                    return Ok(());
+                }
+                if meta || js_trim(whole).is_empty() || whole.starts_with('<') {
+                    return Ok(());
+                }
+                self.prompted(i, whole, ts, live, now, out);
+            }
+            _ => {}
+        }
         Ok(())
     }
 

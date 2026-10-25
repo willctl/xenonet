@@ -182,6 +182,21 @@ const MODEL_CODEX: &str = "gpt-5-codex";
 const MODEL_GROK: &str = "grok-build";
 /// The context window Grok Build reports in its usage updates.
 const GROK_WINDOW: u32 = 256_000;
+/// What a Grok Build session thinks before it answers.
+const GROK_THOUGHT: &str = "Checking the change against what was asked before I answer.";
+
+/// A reply as Grok Build streams it: a chunk a sentence, each ". " ending
+/// one (the JS's split at `(?<=\. )`). What you ask comes whole.
+fn sentences(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(i) = text[from..].find(". ") {
+        out.push(&text[from..from + i + 2]);
+        from += i + 2;
+    }
+    out.push(&text[from..]);
+    out
+}
 
 fn model(app: &str) -> &'static str {
     match app {
@@ -417,6 +432,9 @@ impl Writer {
     }
 
     fn reply(&mut self, text: &str, ts: f64, a: &mut dyn Around) {
+        if self.app == "grok" {
+            self.entries.push(json!({ "id": format!("{}-thought-{}", self.id, self.turn), "ts": n(ts), "role": "reasoning", "text": GROK_THOUGHT }));
+        }
         self.entries.push(json!({ "id": a.uuid(), "ts": n(ts), "role": "assistant", "text": text }));
         if self.app == "claude" {
             // In the JS's order: the message's id, then its usage.
@@ -425,7 +443,10 @@ impl Writer {
             return self.write(&[json!({ "type": "assistant", "timestamp": iso(ts), "message": { "id": id, "model": MODEL_CLAUDE, "stop_reason": "end_turn", "usage": usage, "content": [{ "type": "text", "text": text }] } })]);
         }
         if self.app == "grok" {
-            self.grok(ts, json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": text } }));
+            self.grok(ts, json!({ "sessionUpdate": "agent_thought_chunk", "content": { "type": "text", "text": GROK_THOUGHT } }));
+            for piece in sentences(text) {
+                self.grok(ts, json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": piece } }));
+            }
             self.usage(a);
             self.grok(ts, json!({ "sessionUpdate": "usage_update", "used": n(self.ctx), "size": GROK_WINDOW }));
             return self.grok_summary(ts);

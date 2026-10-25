@@ -181,12 +181,17 @@ pub fn folder(home: &str, raw_id: &str) -> Option<PathBuf> {
 }
 
 /// A session's lines as the console shows them, oldest first, from their
-/// events (line_events.rs): what you asked, what the agent said, and each
-/// tool call with how it went.
+/// events (line_events.rs): what you asked, what the agent said and
+/// thought (as Claude Code's thinking shows, folded), and each tool call
+/// with how it went. A run of chunks is one entry, at its first chunk's
+/// time, with the whole text its chunks bring.
 pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
     let mut out: Vec<Map<String, Value>> = Vec::new();
     let file = LineFile::default();
     let at = |o: &GrokLine| o.ts().ok().filter(|t| t.is_finite()).map_or(Value::Null, xenonet_base::json::number);
+    // Where the entry of the run of chunks still open is, which its later
+    // chunks carry on.
+    let mut open: Option<usize> = None;
     for (n, o) in lines.iter().enumerate() {
         let ts = at(o);
         let entry = |role: &str, text: &str| -> Map<String, Value> {
@@ -197,21 +202,52 @@ pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
             m.insert("text".into(), Value::String(units::excerpt(text, 2500)));
             m
         };
-        for e in line_events::grok(o, &file) {
+        let events = line_events::grok(o, &file);
+        let in_run = file.run.borrow().is_some();
+        if !in_run || file.began.get() {
+            open = None;
+        }
+        // An entry, which carries on the run when the line's in one.
+        let push = |out: &mut Vec<Map<String, Value>>, open: &mut Option<usize>, m: Map<String, Value>| {
+            out.push(m);
+            if in_run {
+                *open = Some(out.len() - 1);
+            }
+        };
+        for e in events {
             match &e.kind {
                 Kind::Prompt(p) => {
                     let asked = p.claude.as_ref().is_none_or(|c| c.meta != Some(&Value::Bool(true)));
                     if asked && !js_trim(&p.text).is_empty() {
-                        out.push(entry("user", &p.text));
+                        push(&mut out, &mut open, entry("user", &p.text));
                     }
                 }
                 Kind::Said { parts: Some(Value::Array(blocks)), .. } => {
-                    let said: String =
-                        blocks.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("text")).filter_map(|b| b.get("text").and_then(Value::as_str)).collect();
+                    let of = |kind: &str, field: &str| -> String {
+                        blocks.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some(kind)).filter_map(|b| b.get(field).and_then(Value::as_str)).collect()
+                    };
+                    let (said, thought) = (of("text", "text"), of("thinking", "thinking"));
                     if !js_trim(&said).is_empty() {
-                        out.push(entry("assistant", &said));
+                        push(&mut out, &mut open, entry("assistant", &said));
+                    }
+                    if !js_trim(&thought).is_empty() {
+                        push(&mut out, &mut open, entry("reasoning", &thought));
                     }
                 }
+                Kind::More { of, whole, meta, .. } => match open {
+                    Some(at) => {
+                        out[at].insert("text".into(), Value::String(units::excerpt(whole, 2500)));
+                    }
+                    None if !meta && !js_trim(whole).is_empty() => {
+                        let role = match *of {
+                            "prompt" => "user",
+                            "thinking" => "reasoning",
+                            _ => "assistant",
+                        };
+                        push(&mut out, &mut open, entry(role, whole));
+                    }
+                    None => {}
+                },
                 Kind::Tool { id, name, .. } => {
                     let title = nonempty(o.update().get("title")).map_or_else(|| name.map(js_string).unwrap_or_default(), str::to_string);
                     let mut m = Map::new();

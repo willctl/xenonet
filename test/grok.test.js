@@ -9,7 +9,7 @@ import path from "node:path";
 import { listGrokSessions, groupCwd, grokTime, grokFolder, grokEntries, readGrokSession } from "../core/grok.js";
 import { check, explain } from "../core/schema/index.js";
 import { GrokLine } from "../core/lines.js";
-import { grokHome, IDS, ATLAS, LONG, T, MAIN_UPDATES } from "./fixtures/grok.js";
+import { grokHome, IDS, ATLAS, LONG, T, MAIN_UPDATES, up, text } from "./fixtures/grok.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-grok-"));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -43,11 +43,20 @@ test("a group's folder, and Grok's times", () => {
 
 test("a session's conversation, a page at a time", async () => {
   const entries = grokEntries(MAIN_UPDATES.map((u) => new GrokLine(u)));
-  assert.deepEqual(entries.map((e) => e.role), ["user", "assistant", "tool", "tool", "tool", "assistant"]);
+  assert.deepEqual(entries.map((e) => e.role), ["user", "reasoning", "assistant", "tool", "tool", "tool", "assistant"]);
+  // A run of chunks is one entry, with all its text, at its first chunk.
+  assert.deepEqual(entries.slice(0, 3).map((e) => [e.id, e.text]), [
+    ["update-0", "Add partial refunds to the orders API."],
+    ["update-2", "Look at the refund route first."],
+    ["update-3", "I'll start with the tests. Then the route."],
+  ]);
   assert.deepEqual(entries.filter((e) => e.role === "tool").map((e) => [e.title, e.status]), [["Execute `npm test -- orders`", "completed"], ["Edit refunds.ts", "completed"], ["linear__save_issue", "failed"]]);
   const page = await readGrokSession(IDS.main, { home, limit: 4 });
-  assert.deepEqual([page.entries.length, page.cursor, page.total], [4, "4", 6]);
+  assert.deepEqual([page.entries.length, page.cursor, page.total], [4, "4", 7]);
   const rest = await readGrokSession(IDS.main, { home, limit: 4, cursor: page.cursor });
-  assert.deepEqual([rest.entries.map((e) => e.role), rest.cursor], [["user", "assistant"], null]);
+  assert.deepEqual([rest.entries.map((e) => e.role), rest.cursor], [["user", "reasoning", "assistant"], null]);
+  // A run whose first chunks say nothing begins with its first words.
+  const late = grokEntries([up(T, text("agent_message_chunk", "")), up(T + 1000, text("agent_message_chunk", "Done.")), up(T + 2000, text("agent_message_chunk", " All green."))].map((u) => new GrokLine(u)));
+  assert.deepEqual(late.map((e) => [e.id, e.role, e.text]), [["update-1", "assistant", "Done. All green."]]);
   await assert.rejects(readGrokSession("019a3b5c-0000-7000-8000-000000000999", { home }), /can't find/);
 });

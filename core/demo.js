@@ -194,6 +194,11 @@ const cwdOf = (s) => (s.cwd ? path.join(HOME, ...s.cwd) : P(s.project));
 const MODELS = { claude: "claude-sonnet-4-5", codex: "gpt-5-codex", grok: "grok-build" };
 // The context window Grok Build reports in its usage updates.
 const GROK_WINDOW = 256000;
+// What a Grok Build session thinks before it answers.
+const GROK_THOUGHT = "Checking the change against what was asked before I answer.";
+// A reply as Grok Build streams it: a chunk a sentence. What you ask comes
+// whole.
+const sentences = (text) => text.split(/(?<=\. )/);
 
 class Writer {
   constructor(s, i) {
@@ -280,12 +285,14 @@ class Writer {
   }
 
   reply(text, ts) {
+    if (this.s.app === "grok") this.entries.push({ id: `${this.id}-thought-${this.turn}`, ts, role: "reasoning", text: GROK_THOUGHT });
     this.entries.push({ id: randomUUID(), ts, role: "assistant", text });
     if (this.s.app === "claude") {
       return this.write({ type: "assistant", timestamp: iso(ts), message: { id: `msg_${randomUUID()}`, model: MODELS.claude, stop_reason: "end_turn", usage: this.usage(), content: [{ type: "text", text }] } });
     }
     if (this.s.app === "grok") {
-      this.grok(ts, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      this.grok(ts, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: GROK_THOUGHT } });
+      for (const piece of sentences(text)) this.grok(ts, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: piece } });
       this.usage();
       this.grok(ts, { sessionUpdate: "usage_update", used: this.ctx, size: GROK_WINDOW });
       return this.grokSummary(ts);

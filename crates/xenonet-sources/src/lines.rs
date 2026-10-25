@@ -299,6 +299,7 @@ impl GrokLine {
         let text = line.text();
         line.blocks = match kind.as_deref() {
             Some("agent_message_chunk") => serde_json::json!([{ "type": "text", "text": text }]),
+            Some("agent_thought_chunk") => serde_json::json!([{ "type": "thinking", "thinking": text }]),
             Some("tool_call") => {
                 let u = line.update();
                 let mut b = Map::new();
@@ -364,8 +365,8 @@ impl GrokLine {
     pub fn text_value(&self) -> &Value {
         &self.text
     }
-    /// A reply's blocks, in Claude Code's shapes: a chunk's text, or a tool
-    /// call as a tool_use.
+    /// A reply's blocks, in Claude Code's shapes: a chunk's text, a
+    /// thought's as thinking, or a tool call as a tool_use.
     pub fn blocks(&self) -> &Value {
         &self.blocks
     }

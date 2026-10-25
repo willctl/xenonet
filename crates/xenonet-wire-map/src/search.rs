@@ -98,9 +98,9 @@ impl TranscriptSearch {
             }
         };
         // A Codex rollout's prompts are its user_message events while it has
-        // no completed user message.
-        let user_events = plan.app == "codex" && !plan.items;
-        let mut run = Search::run(file, app, &plan.session_id, user_events);
+        // no completed user message; a run of chunks the last read left open
+        // goes on where it ended.
+        let mut run = Search::run_for(&plan);
         let mut sampling = Sampling::default();
         for l in &lines {
             let Some(raw) = self.vendor.line(tailed, l, &mut sampling) else { continue };
@@ -109,7 +109,7 @@ impl TranscriptSearch {
                 return Err(message(e));
             }
         }
-        core.commit(&plan).map_err(message)?;
+        core.commit(&plan, Some(&run)).map_err(message)?;
         Ok(run.n)
     }
 

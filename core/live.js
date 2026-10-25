@@ -248,6 +248,10 @@ class LiveSession {
     // (events.js), for an app whose lines don't say when a turn ends.
     this.hookAt = 0;
     this.lineFile = null;
+    // What the open run of chunks (Grok Build's) began, which its later
+    // chunks carry on: the last "prompt" or "message", or null for nothing
+    // kept yet.
+    this.runEntry = null;
     this.recentTools = [];
     this.errorStreak = 0;
   }
@@ -301,6 +305,17 @@ class LiveSession {
     if (!text?.trim()) return;
     this.messages.push({ text: tail(text, 1500), ts });
     if (this.messages.length > 4) this.messages.shift();
+  }
+
+  // The last prompt or message, now with the whole text its later chunks
+  // brought (Grok Build's runs).
+  extendPrompt(text) {
+    const p = this.prompts[this.prompts.length - 1];
+    if (p) p.text = tail(text, 1200);
+  }
+  extendMessage(text) {
+    const m = this.messages[this.messages.length - 1];
+    if (m) m.text = tail(text, 1500);
   }
 
   // A turn's end; `interrupted` when you stopped it.
@@ -741,6 +756,9 @@ export class LiveTelemetry extends EventEmitter {
       if (typeof ctx.used === "number") s.context.used = ctx.used;
       if (typeof ctx.window === "number" && ctx.window > 0) s.context.window = ctx.window;
     }
+    // A chunk that carries on what its run began (Grok Build's).
+    const more = events.find((e) => e.kind === "more");
+    if (more) return void (agentId || this.#more(s, more, ts, live));
     // What the line is: a reply, or what you (or a tool) said.
     const type = events.find((e) => e.kind !== "refusal" && !(e.kind === "broken" && e.at === "refusal"))?.origin;
     if (type === "assistant") this.#claudeAssistant(s, sub, agentId, events, ts, live);
@@ -778,10 +796,12 @@ export class LiveTelemetry extends EventEmitter {
     // aren't a list (or a string's characters) can't be read.
     const blocks = events.find((e) => e.kind === "said").parts;
     if (typeof blocks !== "string" && !Array.isArray(blocks)) fail(brokenAt(events, "blocks"));
+    if (!agentId) s.runEntry = null;
     for (const b of blocks) {
       if (b.type === "tool_use") this.#claudeToolUse(s, sub, agentId, b, ts, live);
       else if (b.type === "text" && b.text?.trim() && !agentId) {
         s.addMessage(b.text, ts);
+        s.runEntry = "message";
         this.activity(s, { kind: "message", detail: clip(b.text), ts }, live);
       }
     }
@@ -843,6 +863,7 @@ export class LiveTelemetry extends EventEmitter {
     const prompt = events.find((e) => e.kind === "prompt");
     const end = events.find((e) => e.kind === "turnEnd");
     const text = brokenAt(events, "text");
+    if (prompt && !agentId) s.runEntry = null;
     const line = prompt ?? end ?? text;
     if (!line || line.meta || !!line.sidechain !== !!agentId) return;
     if (text) fail(text);
@@ -860,9 +881,36 @@ export class LiveTelemetry extends EventEmitter {
       }
       return;
     }
+    this.#prompted(s, said, ts, live);
+  }
+
+  // What you asked: a turn begins.
+  #prompted(s, said, ts, live) {
     s.turn = { active: true, startedAt: ts };
     s.addPrompt(said, ts);
+    s.runEntry = "prompt";
     this.activity(s, { kind: "prompt", detail: clip(said, 90), ts }, live);
+  }
+
+  // A chunk that carries on a prompt or a message (Grok Build's runs): the
+  // whole text so far takes the place of what was kept of it, or is kept
+  // now, once there's something in it, when its first chunks had nothing
+  // to say. The activity names it once, by its text when it's first kept.
+  // A thought carries on nothing the tailer keeps.
+  #more(s, e, ts, live) {
+    s.lastEventAt = Math.max(s.lastEventAt, ts);
+    const whole = e.whole;
+    if (e.of === "text") {
+      if (s.runEntry === "message") return s.extendMessage(whole);
+      if (!whole.trim()) return;
+      s.addMessage(whole, ts);
+      s.runEntry = "message";
+      this.activity(s, { kind: "message", detail: clip(whole), ts }, live);
+    } else if (e.of === "prompt") {
+      if (s.runEntry === "prompt") return s.extendPrompt(whole);
+      if (e.meta || !whole.trim() || whole.startsWith("<")) return;
+      this.#prompted(s, whole, ts, live);
+    }
   }
 
   // You stopped the turn under way (in Claude Code, Esc or a tool use you

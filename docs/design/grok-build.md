@@ -79,16 +79,23 @@ events the tailer, stats and search read for every app.
 
 | ACP update | Events |
 | --- | --- |
-| `user_message_chunk` | A prompt. A run of chunks is one prompt. |
-| `agent_message_chunk` | The agent's message. A run of chunks is one message. |
-| `agent_thought_chunk` | Nothing, for now |
+| `user_message_chunk` | A prompt. A run of chunks is one prompt, all their text joined. |
+| `agent_message_chunk` | The agent's message. A run of chunks is one message, all their text joined. |
+| `agent_thought_chunk` | The agent's thinking, as Claude Code's is kept: shown folded in the session's transcript, and not indexed |
 | `tool_call` | A tool call. Its name is the one Grok gives its own tools (`_meta`'s `x.ai/tool`), or an MCP tool's `server__tool` title written `mcp__server__tool`, or else ACP's kind. Its input names its file as `file_path`, from the call's locations when the input doesn't. A call to one of Grok's edit tools (the registry's `editTools`: `search_replace`, `write`, `edit`, `hashline_edit`, `apply_patch`) is an edit: one given `content` is a write, another an edit, so the map draws collisions with it and other sessions are warned about the file. |
 | `tool_call_update` | How the call went, once it's completed or failed |
 | `usage_update` | How full the context is, and its window |
 | Grok's own `_x.ai/session/update` lines | Nothing |
 
-A run of chunks counts once, so a reply streamed in many chunks is one
-message. XenoNet keeps the first chunk's text of each run, for now.
+A run of chunks is one message with all its chunks' text, in the live
+tailer, stats, search and the session's transcript. The mapper reads a
+line at a time: a run's first chunk makes the message's events, and each
+chunk after it says what it adds and the message's text so far, which
+each reader puts in place of what it kept. A tool call, one of Grok's own
+updates (a turn's end is one), or a chunk of another kind or prompt ends
+the run; the context's fill doesn't. [blocks.md](blocks.md#grok-build-updates)
+has what each reader does with it. The activity feed names a message once,
+as it begins, by its first chunk's text.
 
 The updates don't say when a turn ends. Grok's hooks do. `Stop`,
 `StopCancelled` and `StopFailure` end it. A session XenoNet hasn't heard a
@@ -182,8 +189,6 @@ SpaceXAI's always-on agent, stays an actor.
 
 ## Still to do
 
-- Join a run of chunks into one message's text. The mapper reads a line at
-  a time, so for now a message's text is its first chunk's.
 - Tokens and cost. Grok Build keeps a `usage.json` ledger per session, which
   XenoNet doesn't read yet, so its sessions show no tokens or cost.
 - Renaming a session, by its `summary.json`'s title.

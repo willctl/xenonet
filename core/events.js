@@ -39,6 +39,9 @@
 //   compact    meta, sidechain
 //   context    used and window, as a token_count says them
 //   limits     rateLimits, as written
+//   more       Grok Build's: a chunk that carries on the message its run
+//              began; of (prompt, text or thinking), text (this chunk's),
+//              whole (the message's so far) and meta (a prompt's)
 //   broken     at: the field that couldn't be read; error: what reading it
 //              threw
 //
@@ -333,28 +336,69 @@ export const codex = {
 
 // ---------- Grok Build ----------
 
+// What a chunk is a piece of: what you said, what the agent said, or what
+// it thought.
+const GROK_RUNS = new Map([
+  ["user_message_chunk", "user"],
+  ["agent_message_chunk", "assistant"],
+  ["agent_thought_chunk", "thought"],
+]);
+// Updates that say nothing of the conversation, which leave a run of
+// chunks open: the context's fill, the agent's plan, its mode and its
+// commands.
+const GROK_QUIET = new Set(["usage_update", "plan", "current_mode_update", "available_commands_update"]);
+
+// What tells two runs of the same kind apart, as Grok's own replay does:
+// whether you asked it, the prompt it's part of (`promptIndex`), and
+// whether it's an interjection, whose text chunks each begin one of their
+// own.
+function grokRunKey(o) {
+  const m = o.update._meta;
+  const p = m?.promptIndex;
+  return `${o.notAsked}|${typeof p === "number" || typeof p === "string" ? p : ""}|${m?.interjection === true}`;
+}
+
 // Grok Build's events have Claude Code's shapes, and its origins (user for
 // what you said and a tool's result, assistant for what the agent said and
 // its tool calls), so the readers read them as they read Claude Code's: a
-// prompt is a user line's, and a reply's text and tool calls are an
-// assistant line's blocks. A chunk carries one block of a message, and a
-// run of chunks of the same kind is one message, which its first chunk
-// speaks for: the chunks after it make no events (`file.run` is the kind of
-// the line before). Its lines don't say when a turn ends (Grok's hooks do:
-// live.js), nor what a call cost (its usage.json does).
+// prompt is a user line's, and a reply's text, thinking and tool calls are
+// an assistant line's blocks.
+//
+// A chunk carries a piece of a message, and a run of chunks of one kind is
+// one message (docs/design/blocks.md). Its first chunk makes the message's
+// events, with that chunk's text. Each chunk after it makes `more`: what it
+// adds (`text`), the message's text so far (`whole`, its chunks joined as
+// written), and which of the message's parts it carries on (`of`: prompt,
+// text or thinking). The mapper keeps the run open in `file.run` ({ kind,
+// key, text }); a chunk of another kind or key, a tool call or its update,
+// or one of Grok's own updates (a turn's end is one) ends it. Its lines
+// don't say when a turn ends (Grok's hooks do: live.js), nor what a call
+// cost (its usage.json does: grok-usage.js).
 function grokEvents(o, base, file, out) {
   const kind = o.kind;
-  const run = kind === "user_message_chunk" ? "user" : kind === "agent_message_chunk" ? "assistant" : kind === "agent_thought_chunk" ? "thought" : null;
-  const more = run && run === file.run;
-  file.run = run;
-  if (more || o.own) return;
+  const run = GROK_RUNS.get(kind) ?? null;
+  const open = file.run;
+  if (o.own || (!run && !GROK_QUIET.has(kind))) file.run = null;
+  if (o.own) return;
+  if (run) {
+    const text = o.text;
+    const key = grokRunKey(o);
+    const opens = o.update._meta?.interjection === true && o.update.content?.type === "text";
+    if (open && open.kind === run && open.key === key && !opens) {
+      open.text += text;
+      const of = run === "user" ? "prompt" : run === "thought" ? "thinking" : "text";
+      out.push({ kind: "more", ...base, origin: run === "user" ? "user" : "assistant", of, text, whole: open.text, meta: run === "user" && o.notAsked });
+      return;
+    }
+    file.run = { kind: run, key, text };
+  }
   if (kind === "user_message_chunk") {
     const text = o.text;
     out.push({ kind: "prompt", ...base, origin: "user", text, parts: text, command: null, meta: o.notAsked, sidechain: false, compactSummary: false, interruption: false });
-  } else if (kind === "agent_message_chunk") {
+  } else if (kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
     const b = { ...base, origin: "assistant" };
     out.push({ kind: "call", ...b, messageId: null, model: null, effort: null, usage: null });
-    out.push({ kind: "said", ...b, parts: [{ type: "text", text: o.text }], sidechain: false });
+    out.push({ kind: "said", ...b, parts: [kind === "agent_message_chunk" ? { type: "text", text: o.text } : { type: "thinking", thinking: o.text }], sidechain: false });
   } else if (kind === "tool_call") {
     const u = o.update;
     const b = { ...base, origin: "assistant" };
@@ -381,9 +425,10 @@ export const grok = {
   sorted: false,
   // Its lines don't say when a turn ends.
   turnEnds: false,
-  // `run`: the kind of message the line before was a chunk of, which the
-  // mapper keeps as the lines come.
-  file: ({ agentId = null } = {}) => ({ agentId, run: null }),
+  // `run`: the run of chunks still open ({ kind, key, text }), which the
+  // mapper keeps as the lines come; a reader that reads a file in parts
+  // hands back the one it kept.
+  file: ({ agentId = null, run = null } = {}) => ({ agentId, run }),
   events(o, file = grok.file()) {
     const out = [];
     let base;

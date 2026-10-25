@@ -317,10 +317,26 @@ impl JsRun {
     pub fn new(file: String, app: String, session_id: String, user_events: bool) -> Self {
         JsRun { r: Search::run(&file, &app, &session_id, user_events) }
     }
+    /// The documents of a file's text as a plan reads it, with the run of
+    /// chunks the last read left open.
+    #[napi(factory, js_name = "forPlan")]
+    pub fn for_plan(plan: &JsPlan) -> Self {
+        JsRun { r: Search::run_for(&plan.p) }
+    }
+    /// Goes on from a run of chunks left open: { run, doc }.
+    #[napi]
+    pub fn resume(&mut self, open: MaybeJson) {
+        self.r.resume(open.0.as_ref());
+    }
     /// How many documents went in.
     #[napi(getter)]
     pub fn n(&self) -> f64 {
         self.r.n
+    }
+    /// The run of chunks left open at the end: { run, doc }, or null.
+    #[napi(getter)]
+    pub fn open(&self) -> Json {
+        Json(self.r.left_open().unwrap_or(Value::Null))
     }
 }
 
@@ -377,8 +393,8 @@ impl JsSearch {
         self.s.add(&mut run.r, raw.0).or_else(|e| failed(env, e))
     }
     #[napi]
-    pub fn commit(&self, env: Env, plan: &JsPlan) -> Result<()> {
-        self.s.commit(&plan.p).or_else(|e| failed(env, e))
+    pub fn commit(&self, env: Env, plan: &JsPlan, run: Option<&JsRun>) -> Result<()> {
+        self.s.commit(&plan.p, run.map(|r| &r.r)).or_else(|e| failed(env, e))
     }
     #[napi]
     pub fn rollback(&self, env: Env) -> Result<()> {
