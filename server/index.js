@@ -58,7 +58,7 @@ import { driftRoutes } from "./routes/drift.js";
 import { createConnections, fingerprintOf } from "../core/actors/connections.js";
 import { createRemotePresence } from "../core/actors/remote-presence.js";
 import { assistantDir } from "../core/assistant/credentials.js";
-import { ASKED, askedOr, appRefusal } from "../core/apps.js";
+import { ASKED, askedOr, appRefusal, hookWrittenBy } from "../core/apps.js";
 import { stateSource } from "../core/assistant/source.js";
 import { createAudit } from "../core/assistant/audit.js";
 import { createAssistantService } from "../core/assistant/service.js";
@@ -1131,6 +1131,13 @@ async function api(req, res, url) {
   // permission prompts and notifications.
   if (req.method === "POST" && route === "/api/hook/claude") {
     const body = await readJson(req).catch(() => ({}));
+    // Cursor and Grok Build run Claude Code's hooks too, with payloads of
+    // their own. Such an event isn't a Claude Code session's: it's passed
+    // over, not refused.
+    if (hookWrittenBy(body)) {
+      res.writeHead(204).end();
+      return;
+    }
     // XenoNet's plugin for Claude Code posts the same events as connect's
     // own hooks, marked via=plugin. While connect's hook for an event is in
     // Claude Code's settings, that one counts and the plugin's stands by, so
@@ -1184,7 +1191,7 @@ async function api(req, res, url) {
   // next turn.
   if (req.method === "POST" && route === "/api/hook/claude/listen") {
     const body = await readJson(req).catch(() => ({}));
-    if (body.hook_event_name === "Stop" && typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
+    if (!hookWrittenBy(body) && body.hook_event_name === "Stop" && typeof body.session_id === "string" && /^[0-9a-f-]{36}$/i.test(body.session_id)) {
       const me = `claude:${body.session_id}`;
       const ok = await verify.check(req.socket, me, { hook: true });
       if (!ok.ok) return send(res, 403, { error: ok.reason });

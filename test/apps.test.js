@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APPS, APP, TAILED, ASKED, appsWith, tailedApp, tailedOr, askedOr, appRefusal, untailed } from "../core/apps.js";
+import { APPS, APP, TAILED, ASKED, appsWith, tailedApp, tailedOr, askedOr, appRefusal, untailed, hookWrittenBy } from "../core/apps.js";
 import { SESSION_APPS, appOfSession } from "../core/schema/ids.js";
 import { check, explain } from "../core/schema/index.js";
 import { CAPABILITIES } from "../core/schema/app.js";
@@ -123,4 +123,19 @@ test("the fallbacks the live tailer and the normalizers keep: an app they don't 
     assert.equal(tailedApp(x, "claude"), tailed ? x : "claude", String(x));
     assert.equal(tailedApp(x, "codex"), tailed ? x : "codex", String(x));
   }
+});
+
+test("a hook's input says when Cursor or Grok Build wrote it, not Claude Code", () => {
+  const sid = "0190d3e0-0000-7000-8000-0000000000aa";
+  for (const [body, by] of [
+    [{ session_id: sid, hook_event_name: "Stop", stop_hook_active: false }, null],
+    [{ session_id: sid, hook_event_name: "SessionStart", cursor_version: "3.19.7", conversation_id: "c1" }, "cursor"],
+    [{ conversation_id: "c1", hook_event_name: "sessionStart", cursor_version: "3.19.7" }, "cursor"],
+    [{ sessionId: sid, hookEventName: "stop", hook_event_name: "Stop" }, "grok"],
+    [{ sessionId: sid, hook_event_name: "Stop" }, "grok"],
+    [{ session_id: sid, sessionId: sid, hook_event_name: "Stop" }, null],
+    [{ session_id: sid, cursor_version: 3 }, null],
+    [null, null],
+    [{}, null],
+  ]) assert.equal(hookWrittenBy(body), by, JSON.stringify(body));
 });

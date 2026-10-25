@@ -133,6 +133,13 @@ format, which Grok reads, but Grok doesn't hear an answer at every event:
 So a Grok Build session doesn't hear who else works in its repo when it
 starts. It finds them with the `peers` tool.
 
+Grok also runs Claude Code's hooks (`[compat.claude] hooks`, on unless you
+turn it off), with its own payload. XenoNet's Claude Code routes pass over
+an event with Grok's camelCase keys (`hookEventName`, or `sessionId`
+without `session_id`), unchecked, so a Grok session is heard once, on its
+own route (`hook_written_by` in `xenonet-base`'s apps, `hookWrittenBy` in
+`core/apps.js`).
+
 ### Which session is calling
 
 Grok Build runs a session's MCP servers with `GROK_SESSION_ID` set, so the

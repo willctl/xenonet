@@ -184,5 +184,13 @@ const orList = (ids) => (ids.length < 2 ? ids.join("") : `${ids.slice(0, -1).joi
 // not "gemini-cli".
 export const appRefusal = (what, app, apps = TAILED) => `${what} takes ${orList(apps)}, not ${JSON.stringify(app)}`;
 
+// Cursor and Grok Build run Claude Code's hooks too (Cursor's third-party
+// configs, Grok's [compat.claude]), and Grok runs Cursor's, each with a
+// payload of its own: Cursor's names its cursor_version, and Grok's keys
+// are camelCase (hookEventName, and sessionId where Claude Code has
+// session_id). Which of the two wrote a hook's input, or null for neither.
+export const hookWrittenBy = (body) =>
+  typeof body?.cursor_version === "string" ? "cursor" : body?.hookEventName !== undefined || (body?.sessionId !== undefined && body?.session_id === undefined) ? "grok" : null;
+
 // What a reader of transcripts says of an app XenoNet doesn't tail.
 export const untailed = (app) => `XenoNet doesn't read ${Object.hasOwn(APP, app) ? APP[app].name : JSON.stringify(String(app))}'s transcripts`;

@@ -454,6 +454,21 @@ test("Claude Code's hooks honor the sender's process identity", async () => {
   assert.equal((await hook({ session_id: id, hook_event_name: "SessionStart", cwd: root })).ok, true);
 });
 
+test("Claude Code's hooks pass over the events Cursor and Grok Build send them, unchecked", async () => {
+  const post = (route, body) => fetch(`${base}${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const id = "0190d3e0-0000-7000-8000-0000000000ac";
+  // Cursor runs Claude Code's command hooks with its own input; Grok Build
+  // runs them with camelCase keys. From this process, Claude Code's own
+  // would be refused where processes can be checked: these aren't asked.
+  for (const body of [
+    { session_id: id, hook_event_name: "SessionStart", cursor_version: "3.19.7" },
+    { session_id: id, hookEventName: "stop", hook_event_name: "Stop", reason: "end_turn" },
+    { sessionId: id, hook_event_name: "Stop" },
+  ]) {
+    for (const route of ["/api/hook/claude", "/api/hook/claude/listen"]) assert.equal((await post(route, body)).status, 204, `${route} ${JSON.stringify(body)}`);
+  }
+});
+
 test("XenoNet's plugin for Claude Code: its copy of an event stands by while connect's own hook for it is in Claude Code's settings", { skip: process.env.CLAUDE_CONFIG_DIR ? "Claude Code's settings are elsewhere" : false }, async () => {
   const hook = (body, query = "") => fetch(`${base}/api/hook/claude${query}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const id = "0190d3e0-0000-7000-8000-0000000000ab";

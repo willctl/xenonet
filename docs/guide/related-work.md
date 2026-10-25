@@ -69,7 +69,7 @@ XenoNet can read some other harnesses' sessions from their own records, without 
 }
 ```
 
-Then start XenoNet with `XENONET_CURSOR_EVENTS` set to that file (by default it reads `cursor-hooks.ndjson` in XenoNet's state folder). From each hook's input the hook keeps the conversation id, the Cursor version, the workspace folders, the edited file's path and how the session ended. It never keeps the prompt, an edit's text, a file's content, the model or your email. It always answers `{}` and never blocks the agent. A session ends at `sessionEnd`. This is tested with made-up hook input in the shape of Cursor's hooks reference, not yet in Cursor itself.
+Then start XenoNet with `XENONET_CURSOR_EVENTS` set to that file (by default it reads `cursor-hooks.ndjson` in XenoNet's state folder). From each hook's input the hook keeps the conversation id, the Cursor version, the workspace folders, the edited file's path and how the session ended. It never keeps the prompt, an edit's text, a file's content, the model or your email. It always answers `{}` and never blocks the agent. A session ends at `sessionEnd`. Cursor also runs Claude Code's hooks, its "third-party configs", so XenoNet's own Claude Code hooks fire from Cursor's sessions too. XenoNet passes over an event that names Cursor's `cursor_version`, and on macOS it also refuses a Claude Code hook that doesn't come from a Claude Code process. This is tested with made-up hook input in the shape of Cursor's hooks reference, not yet in Cursor itself.
 
 ## What XenoNet detects today
 
