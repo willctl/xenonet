@@ -40,6 +40,7 @@ test("a bundle installs the components that are missing, with the launcher, and 
   assert.equal(runtime.root, active, "a copy of the selected version, which keeps its path across updates");
   assert.deepEqual([runtime.exec, runtime.args], [path.join(active, BIN), ["serve"]], "the service's own binary, serving");
   assert.equal(fs.readFileSync(runtime.exec, "utf8"), fs.readFileSync(path.join(service.root, BIN), "utf8"));
+  assert.ok(fs.statSync(runtime.exec).mode & 0o100, "and the copy can run");
   assert.equal(fs.readFileSync(path.join(active, ".from"), "utf8"), `1.0.0-${service.sha256}`);
   const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
   assert.deepEqual([runtime.env.XENONET_RUNTIME_DIR, runtime.env.XENONET_LAUNCHER_BIN], [env.XENONET_RUNTIME_DIR, path.join(launcher, EXE)]);
