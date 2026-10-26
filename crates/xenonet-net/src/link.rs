@@ -3,6 +3,11 @@
 //! timer of 45 s and no overall timeout, and the up batches
 //! (`POST /net/v1/frames`) that empty the outbox.
 //!
+//! - Live means heard: each down request's answer, its headers and its
+//!   hello, must come within 35 s (a long-poll's 25 s wait and 10 s to
+//!   spare), and a stream that then brings nothing for 45 s is dropped.
+//!   Either puts the link offline, with the reason, so a gateway that
+//!   takes connections and says nothing isn't shown as live.
 //! - Backoff: 2 s, doubling to 60 s, with jitter, as the hosts link has.
 //! - The clock: a time the gateway refuses comes back with its own; the
 //!   link keeps the offset and signs again with it.
@@ -11,6 +16,9 @@
 //!   held may be gone.
 //! - Long-poll: after two streams that went quiet past a due ping, the
 //!   link asks with `&wait=25`, for proxies that hold streams back.
+//! - `connecting` is the first try's state alone: a try after that keeps
+//!   live, offline or refused, with its reason and since, until the hello
+//!   or another failure.
 //!
 //! The gateway's own host links the same way, in-process: its requests go
 //! straight to its own gateway's routes, signed as any host's are.
@@ -80,7 +88,8 @@ fn why(e: &reqwest::Error) -> String {
 
 impl Transport {
     /// One request: its answer, or why there was none. `timeout` covers
-    /// the whole of it; a stream has none.
+    /// the whole of it; a stream has none, and the down link sets its own
+    /// deadline for the answer's headers and hello.
     pub async fn request(&self, req: NetRequest, timeout: Option<Duration>) -> Result<NetReply, String> {
         match self {
             Transport::Local(gw) => match gw.upgrade() {
@@ -235,16 +244,30 @@ async fn down(n: Arc<Shared>, t: Transport) {
         if n.is_removed() || n.network().is_none() {
             return;
         }
+        let timing = n.timing();
         let (epoch, seq) = n.cursor();
-        let target = format!("/net/v1/link?epoch={}&after={seq}{}", epoch.unwrap_or_default(), if long_poll { "&wait=25" } else { "" });
+        let wait = if long_poll { format!("&wait={}", (timing.poll_ms / 1000).max(1)) } else { String::new() };
+        let target = format!("/net/v1/link?epoch={}&after={seq}{wait}", epoch.unwrap_or_default());
         let Ok((req, nonce)) = n.signed_request("GET", &target, Vec::new()) else { return };
         n.connecting();
-        let failed = match t.request(req, None).await {
-            Err(why) => Some(why),
-            Ok(reply) if reply.status == 200 => match read(&n, &t, reply.body, &nonce).await {
+        // The answer, its headers and its hello, comes by then or not at
+        // all: a gateway whose process a firewall blocks still has its
+        // connections taken by the kernel, and would hold a request with
+        // no deadline, and the link with it, for good. Dropping the
+        // request drops its connection.
+        let by = tokio::time::Instant::now() + Duration::from_millis(timing.answer_ms);
+        let failed = match tokio::time::timeout_at(by, t.request(req, None)).await {
+            Err(_) => Some(format!("the gateway didn't answer in {}", secs(timing.answer_ms))),
+            Ok(Err(why)) => Some(why),
+            Ok(Ok(reply)) if reply.status == 200 => match read(&n, &t, reply.body, &nonce, by).await {
                 Read::Done { quiet: q } => {
                     attempt = 0;
                     clock_tries = 0;
+                    if q {
+                        // Nothing heard for the idle time: not live, whatever
+                        // the next request finds.
+                        n.offline(&format!("nothing came from the gateway in {}", secs(timing.idle_ms)));
+                    }
                     if !long_poll {
                         quiet = if q { quiet + 1 } else { 0 };
                         if quiet >= 2 {
@@ -261,7 +284,7 @@ async fn down(n: Arc<Shared>, t: Transport) {
                     continue;
                 }
             },
-            Ok(reply) => match refusal(&n, &reply, &nonce) {
+            Ok(Ok(reply)) => match refusal(&n, &reply, &nonce) {
                 Refusal::Clock(now) => {
                     n.learn_offset(now);
                     clock_tries += 1;
@@ -287,7 +310,14 @@ async fn down(n: Arc<Shared>, t: Transport) {
     }
 }
 
-async fn read(n: &Arc<Shared>, t: &Transport, body: NetBody, nonce: &str) -> Read {
+/// Seconds, as a reason says them.
+fn secs(ms: u64) -> String {
+    format!("{} s", (ms as f64 / 1000.0).round())
+}
+
+/// The down answer: its hello by `hello_by`, then a line at least every
+/// idle time.
+async fn read(n: &Arc<Shared>, t: &Transport, body: NetBody, nonce: &str, hello_by: tokio::time::Instant) -> Read {
     let mut lines = Lines::default();
     let mut hello = false;
     let idle = Duration::from_millis(n.timing().idle_ms);
@@ -301,10 +331,11 @@ async fn read(n: &Arc<Shared>, t: &Transport, body: NetBody, nonce: &str) -> Rea
         NetBody::Stream(rx) => rx,
     };
     loop {
-        let chunk = match tokio::time::timeout(idle, rx.recv()).await {
+        let until = if hello { tokio::time::Instant::now() + idle } else { hello_by };
+        let chunk = match tokio::time::timeout_at(until, rx.recv()).await {
             Ok(Some(c)) => c,
             Ok(None) => return if hello { Read::Done { quiet: false } } else { Read::NoHello("the gateway's answer ended before its hello".into()) },
-            Err(_) => return if hello { Read::Done { quiet: true } } else { Read::NoHello("the gateway didn't say hello".into()) },
+            Err(_) => return if hello { Read::Done { quiet: true } } else { Read::NoHello(format!("the gateway didn't say hello in {}", secs(n.timing().answer_ms))) },
         };
         let got = match lines.push(&chunk) {
             Ok(g) => g,
