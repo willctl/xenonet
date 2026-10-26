@@ -28,6 +28,9 @@ pub const LAPSE_MS: f64 = 60e3;
 pub const FRAME_MS: f64 = 500.0;
 pub const GRAPH_MS: f64 = 1000.0;
 pub const LIVE_MS: f64 = 500.0;
+/// The host's load (a `system` event) goes into a body this often, while
+/// it shares it: within the bodies above, so it adds none.
+pub const SYSTEM_MS: f64 = 5000.0;
 /// Frames in one body, at most.
 pub const MAX_FRAMES: usize = 1000;
 const MAX_PATH: usize = 2048;

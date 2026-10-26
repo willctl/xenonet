@@ -119,6 +119,29 @@ test("the page hears how a host stands, not how it's reached; the command gets b
   w.hub.stop();
 });
 
+test("a host's load is kept, the latest only, for the Machines panel, and never goes to the page as an event", async () => {
+  const w = setup();
+  const seen = [];
+  w.hub.on("system", (d) => seen.push(d));
+  w.hub.start();
+  await w.settle();
+  assert.deepEqual(w.hub.systems(), [], "none until it sends one");
+  const { createDemoSystemStats } = await import("../core/system-stats.js");
+  const reading = await createDemoSystemStats({ now: () => w.clock.now() }).read();
+  // As a host's relay sends it: no history, no cores.
+  const { history: _, ...sent } = reading;
+  const { cores: __, ...cpu } = reading.cpu;
+  sent.cpu = cpu;
+  w.relay().json({ t: "event", name: "system", data: { ...sent, uptime: 1 } });
+  w.relay().json({ t: "event", name: "system", data: { ...sent, uptime: 2 } });
+  w.relay().json({ t: "event", name: "system", data: { ...sent, cpu: { ...sent.cpu, usage: 9 } } });
+  await w.settle();
+  const kept = w.hub.systems();
+  assert.deepEqual(kept.map((r) => [r.host, r.uptime, r.cpu.threads]), [["vm1", 2, 16]], "the latest that fits system/v1");
+  assert.deepEqual(seen, []);
+  w.hub.stop();
+});
+
 test("an offline host stays on the map from its cache, after a restart too, and forgetting it takes the cache", async () => {
   const w = setup();
   w.hub.start();

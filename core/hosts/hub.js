@@ -128,7 +128,7 @@ export function createHub({ hosts, cacheDir, root, home = null, demo = false, wi
   function start(entry, { simulated = false } = {}) {
     const cached = entry.key ? readCache(cacheDir, entry.key) : null;
     const link = new HostLink({ entry, sshConfig: hosts.sshConfig, root, demoOnly: demo, clock, tilde: shown, ...linkOptions });
-    const rt = { link, simulated, clean: cleanOnce(), snapshot: null, cached: false, cachedHello: null, doctor: null, engine: null, lastCacheAt: null, cacheTimer: null, cacheKey: null, skewMs: 0 };
+    const rt = { link, simulated, clean: cleanOnce(), snapshot: null, cached: false, cachedHello: null, doctor: null, engine: null, system: null, lastCacheAt: null, cacheTimer: null, cacheKey: null, skewMs: 0 };
     if (cached) {
       Object.assign(rt, { snapshot: { graph: cached.graph, live: cached.live, engine: cached.engine ?? null }, cached: true, cachedHello: cached.hello ?? null, cacheKey: entry.key });
       link.lastHeard = cached.savedAt;
@@ -166,6 +166,12 @@ export function createHub({ hosts, cacheDir, root, home = null, demo = false, wi
         const summary = isObject(data.summary) ? Object.fromEntries(["ok", "info", "warn", "fail", "skip"].map((k) => [k, Number.isInteger(data.summary[k]) && data.summary[k] >= 0 ? data.summary[k] : 0])) : null;
         rt.doctor = { at: Number.isFinite(data.at) ? data.at : null, summary, problems: (Array.isArray(data.problems) ? data.problems : []).filter(isObject).slice(0, 20).map((p) => ({ id: String(p.id ?? "").slice(0, 60), title: String(p.title ?? "").slice(0, 120), status: p.status === "fail" ? "fail" : "warn", detail: String(p.detail ?? "").slice(0, 300) })) };
         return hub.emit("hosts", forPage());
+      }
+      // A host's load, the latest kept for GET /api/system?hosts=1.
+      if (name === "system") {
+        const q = qualifyEvent(name, data, infoOf(rt));
+        if (q) rt.system = q;
+        return;
       }
       const q = qualifyEvent(name, data, infoOf(rt));
       if (q) return hub.emit(name, q);
@@ -367,6 +373,9 @@ export function createHub({ hosts, cacheDir, root, home = null, demo = false, wi
     graph,
     live,
     summary,
+    // The latest load each host sent (system/v1, under host), for GET
+    // /api/system?hosts=1.
+    systems: () => [...runtimes.values()].map((rt) => rt.system).filter(Boolean),
     list,
     detail,
     add,

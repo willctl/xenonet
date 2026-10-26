@@ -79,7 +79,17 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
     let p = studio.public();
     let pin = Pin { host: "studio".into(), key_id: p.key_id(), sign: p.sign_b64(), seal: p.seal_b64(), address: Some("127.0.0.1:1".into()) };
     files
-        .write_network(&NetFile { id: NET.into(), name: "home".into(), host: "studio".into(), founder: "studio".into(), gateway: pin, lan: None, titles_only: false, joined: T0 })
+        .write_network(&NetFile {
+            id: NET.into(),
+            name: "home".into(),
+            host: "studio".into(),
+            founder: "studio".into(),
+            gateway: pin,
+            lan: None,
+            titles_only: false,
+            share_load: true,
+            joined: T0,
+        })
         .unwrap();
     let clock = Arc::new(AtomicI64::new(T0 + 10 * MIN));
     let mut o = Options::new(&dir, "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));

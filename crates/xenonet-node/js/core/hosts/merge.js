@@ -13,13 +13,14 @@ const { GRAPH_NODES } = await import(peer("schema/graph.js"));
 const { Identity } = await import(peer("schema/identity.js"));
 const { LiveSession, LiveActivity } = await import(peer("schema/live.js"));
 const { EngineAgent, EngineMessage } = await import(peer("schema/engine.js"));
+const { SystemReading } = await import(peer("schema/system.js"));
 
 export const MAX_NODES = native.hostsMergeConstants().maxNodes;
 export const DEFAULT_WINDOWS = { activeWindowMs: 10 * 60e3, recentWindowMs: 24 * 3600e3, projectActiveMs: 3600e3 };
 
 const isObject = (v) => v != null && typeof v === "object" && !Array.isArray(v);
 const own = (o, k) => (typeof k === "string" && Object.hasOwn(o, k) ? o[k] : undefined);
-const SCHEMAS = { identity: Identity, "live-session": LiveSession, "live-activity": LiveActivity, "engine-agent": EngineAgent, "engine-message": EngineMessage };
+const SCHEMAS = { identity: Identity, "live-session": LiveSession, "live-activity": LiveActivity, "engine-agent": EngineAgent, "engine-message": EngineMessage, system: SystemReading };
 
 // The Rust's ask: the value checked against the schema of that kind and
 // copied with what it declares, or null.

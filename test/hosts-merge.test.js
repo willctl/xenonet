@@ -20,7 +20,7 @@ const { XenoNetState } = await import("../core/state.js");
 const { config } = await import("../core/config.js");
 const { world } = await import("../core/demo.js");
 const { check, explain } = await import("../core/schema/index.js");
-const { shapeGraph, shapeLive, homeScrubber } = await import("../core/hosts/relay.js");
+const { shapeGraph, shapeLive, shapeEvent, homeScrubber } = await import("../core/hosts/relay.js");
 const { mergeGraph, mergeLive, mergeSummary, qualifyGraph, qualifyEvent, qualifyEngine, eventNote, sameRepo, mergeIdentities, mergeLimits, remoteId, identityId, cleanNode, cleanOnce, MAX_NODES } = await import("../core/hosts/merge.js");
 const { parseSshAliases } = await import("../core/identities.js");
 const { declared } = await import("../core/hosts/declared.js");
@@ -294,6 +294,27 @@ test("what a host mustn't send is dropped: ids already qualified, a second core,
   const merged = mergeLive(state.liveSnapshot(), [{ info: live(), snapshot: { live: crowd } }]);
   assert.equal(merged.sessions.filter((x) => x.host === "demo-b").length, 1000);
   assert.equal(merged.collisions.filter((c) => c.a.startsWith("@")).length, 200);
+});
+
+test("a host's load leaves without its history or cores, and comes across with only what system/v1 declares, its time moved", async () => {
+  const { createDemoSystemStats } = await import("../core/system-stats.js");
+  const reading = await createDemoSystemStats({ now: () => NOW + 3 * MIN }).read();
+  const sent = shapeEvent("system", { ...reading, hosts: [{ host: "vm9" }], secret: "x" });
+  assert.deepEqual(Object.keys(sent), ["at", "platform", "arch", "uptime", "cpu", "memory", "gpus", "gpu", "hardware"]);
+  assert.deepEqual(sent.cpu, { model: "AMD Ryzen 7 7700X", threads: 16, ghz: 4.5, usage: reading.cpu.usage }, "no cores");
+  assert.equal(sent.history, undefined);
+  assert.deepEqual(sent.hardware, reading.hardware);
+  const h = live({ offsetMs: 3 * MIN });
+  const got = qualifyEvent("system", sent, h);
+  assert.equal(got.at, NOW, "its time moved to this clock");
+  assert.equal(got.host, "demo-b");
+  valid("system/v1", { ...reading, hosts: [got] }, "a reading with another machine's in it");
+  // What a host adds that system/v1 doesn't declare stays with it, and a
+  // host can't pass on another machine's readings.
+  const evil = qualifyEvent("system", { ...sent, hosts: [{ ...sent, host: "vm9" }], cpu: { ...sent.cpu, script: "<b>x</b>" } }, h);
+  assert.deepEqual([evil.hosts, evil.cpu.script], [undefined, undefined]);
+  assert.equal(qualifyEvent("system", { ...sent, cpu: { ...sent.cpu, usage: 7 } }, h), null, "a share past 1 isn't one");
+  assert.equal(qualifyEvent("system", { at: NOW }, h), null);
 });
 
 test("events and the engine come across qualified, and only the kinds the page draws", () => {

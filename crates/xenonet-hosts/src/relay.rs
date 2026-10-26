@@ -653,8 +653,48 @@ pub fn shape_event(name: &str, data: &Value, dropped: &HashSet<String>, detail: 
             m.insert("problems".into(), Value::Array(problems));
             Some(copy(&Value::Object(m)))
         }
+        // This machine's load (system/v1), for the console's Machines
+        // panel: the fields it declares, and not its history or each core,
+        // which the console draws for its own machine only.
+        "system" => Some(copy(&shape_system(data))),
         _ => None,
     }
+}
+
+/// The fields of `v` named, in that order, those it has; nothing for a
+/// value that isn't an object.
+fn pick(v: Option<&Value>, keys: &[&str]) -> Map<String, Value> {
+    let mut m = Map::new();
+    if let Some(Value::Object(o)) = v {
+        for k in keys {
+            if let Some(x) = o.get(*k) {
+                m.insert((*k).into(), x.clone());
+            }
+        }
+    }
+    m
+}
+
+/// The GPUs of a list, each with the fields named, at most 16.
+fn pick_gpus(v: Option<&Value>, keys: &[&str]) -> Value {
+    Value::Array(list(v).iter().take(16).map(|g| Value::Object(pick(Some(g), keys))).collect())
+}
+
+/// A system/v1 reading as it leaves: what the schema declares of it, with
+/// no history, no cores and no other machine's readings.
+fn shape_system(data: &Value) -> Value {
+    let mut out = pick(Some(data), &["at", "platform", "arch", "uptime"]);
+    out.insert("cpu".into(), Value::Object(pick(data.get("cpu"), &["model", "threads", "ghz", "usage"])));
+    out.insert("memory".into(), Value::Object(pick(data.get("memory"), &["total", "used"])));
+    out.insert("gpus".into(), pick_gpus(data.get("gpus"), &["index", "name", "usage", "memUsed", "memTotal", "temp", "shared"]));
+    out.insert("gpu".into(), data.get("gpu").cloned().unwrap_or(Value::Null));
+    let hw = data.get("hardware");
+    let mut h = pick(hw, &["platform", "arch"]);
+    h.insert("cpu".into(), Value::Object(pick(hw.and_then(|x| x.get("cpu")), &["model", "threads", "ghz"])));
+    h.insert("memory".into(), Value::Object(pick(hw.and_then(|x| x.get("memory")), &["total"])));
+    h.insert("gpus".into(), pick_gpus(hw.and_then(|x| x.get("gpus")), &["name", "memTotal", "shared"]));
+    out.insert("hardware".into(), Value::Object(h));
+    Value::Object(out)
 }
 
 // ---------- the console's reads ----------

@@ -232,13 +232,16 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             if flags.has("titlesOnly") {
                 body.insert("titlesOnly".into(), json!(flags.is_true("titlesOnly")));
             }
+            if flags.has("shareLoad") {
+                body.insert("shareLoad".into(), json!(flags.is_true("shareLoad")));
+            }
             if flags.is_false("lan") {
                 body.insert("lan".into(), Value::Null);
             } else if let Some(lan) = flags.str("lan") {
                 body.insert("lan".into(), json!(lan));
             }
             if body.is_empty() {
-                return Err(Fail::new("say what to set: --titles-only, --no-titles-only, --lan <ip:port> or --no-lan", 2));
+                return Err(Fail::new("say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --lan <ip:port> or --no-lan", 2));
             }
             let st = call(&s, "PUT", "/api/net/settings", Some(&Value::Object(body)))?;
             out(&st, &show_status)

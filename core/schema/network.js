@@ -306,6 +306,7 @@ export const NetworkState = define(
     rosterHead: B64.nullable(),
     rosterMismatch: z.array(HostId).describe("Hosts whose presence shows another roster head"),
     titlesOnly: z.boolean(),
+    shareLoad: z.boolean().optional().describe("Whether this machine sends its load (CPU, GPU, memory and what the parts are) to the window hosts' consoles that watch its map; on unless turned off"),
     queues: z.array(obj({ host: HostId, frames: count, bytes: count })).optional().describe("On the gateway's host: what waits at the gateway for each host"),
     epoch: B64.optional().describe("On the gateway's host: its queues' epoch, which hosts resume within"),
     joinClosedUntil: ms.nullable().optional().describe("On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open"),

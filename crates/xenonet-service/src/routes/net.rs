@@ -13,7 +13,8 @@
 //!   window host (a move of the gateway, or a window host's add), by the
 //!   id the state lists it under.
 //! - `POST gateway/take`, `POST gateway/set`: moving the gateway by hand.
-//! - `PUT settings`: titles only, and a LAN-only gateway's address.
+//! - `PUT settings`: titles only, whether this machine shares its load,
+//!   and a LAN-only gateway's address.
 //! - `GET svc`, `POST svc/publish`, `POST svc/unpublish`: the services this
 //!   host publishes to the network (`xenonet svc`). Other hosts reach them
 //!   at `/api/svc/…` (routes/svc.rs).
@@ -199,6 +200,7 @@ fn publish(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
 
 async fn settings(svc: &NetService, body: &Value) -> R<Value> {
     let titles = body.get("titlesOnly").and_then(Value::as_bool);
+    let load = body.get("shareLoad").and_then(Value::as_bool);
     let lan = match body.get("lan") {
         None => None,
         Some(Value::Null) => Some(None),
@@ -215,5 +217,5 @@ async fn settings(svc: &NetService, body: &Value) -> R<Value> {
             None => svc.unlisten(),
         }
     }
-    svc.node().settings(titles, lan.map(|l| l.map(|a| a.to_string())))
+    svc.node().settings(titles, load, lan.map(|l| l.map(|a| a.to_string())))
 }

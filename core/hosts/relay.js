@@ -299,9 +299,37 @@ export function shapeEvent(name, data, { dropped = new Set(), detail = false, co
     case "doctor":
       // How the host's own checks went, for its state on the console.
       return copy({ at: data.at, summary: data.summary, problems: (data.results ?? []).filter((r) => r.status === "warn" || r.status === "fail").map(({ id, title, status, detail: said }) => ({ id, title, status, detail: said })) });
+    case "system":
+      // This machine's load (system/v1), for the console's Machines panel:
+      // the fields it declares, and not its history or each core, which the
+      // console draws for its own machine only.
+      return copy(shapeSystem(data));
     default:
       return null;
   }
+}
+
+// The fields of `v` named, in that order, those it has; nothing for a value
+// that isn't an object.
+function pick(v, keys) {
+  const out = {};
+  if (v && typeof v === "object" && !Array.isArray(v)) for (const k of keys) if (Object.hasOwn(v, k)) out[k] = v[k];
+  return out;
+}
+const pickGpus = (v, keys) => (Array.isArray(v) ? v.slice(0, 16).map((g) => pick(g, keys)) : []);
+
+// A system/v1 reading as it leaves: what the schema declares of it, with no
+// history, no cores and no other machine's readings.
+function shapeSystem(data) {
+  const hw = data.hardware;
+  return {
+    ...pick(data, ["at", "platform", "arch", "uptime"]),
+    cpu: pick(data.cpu, ["model", "threads", "ghz", "usage"]),
+    memory: pick(data.memory, ["total", "used"]),
+    gpus: pickGpus(data.gpus, ["index", "name", "usage", "memUsed", "memTotal", "temp", "shared"]),
+    gpu: Object.hasOwn(data, "gpu") ? data.gpu : null,
+    hardware: { ...pick(hw, ["platform", "arch"]), cpu: pick(hw?.cpu, ["model", "threads", "ghz"]), memory: pick(hw?.memory, ["total"]), gpus: pickGpus(hw?.gpus, ["name", "memTotal", "shared"]) },
+  };
 }
 
 // ---------- the console's reads ----------

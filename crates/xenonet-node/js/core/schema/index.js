@@ -16,6 +16,7 @@ import "./host.js";
 import "./network.js";
 import "./assistant.js";
 import "./tray.js";
+import "./system.js";
 import "./vendor/index.js";
 
 export { define, schemaFor, schemaIds, jsonSchemas, schemaFiles } from "./registry.js";
