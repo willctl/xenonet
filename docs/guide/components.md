@@ -60,6 +60,8 @@ The tray isn't in the Updates panel or `xenonet update` yet. A newer disk image 
 
 Downloads are checked against the release manifest's size and SHA-256 hash. Each component is installed into a new version directory. The selected version changes only after validation. Old versions are retained so running MCP processes can finish and a failed service startup can return to the previous version.
 
+The service runs from `runtime/components/service/active`, a copy of the selected version's directory, not from the version directory itself. A first install, a Service update and a rollback each copy the version there while the service is stopped, and `active/.from` names the version it is. So the running `xenonet` keeps one path from version to version. A firewall that lets it accept connections, as a [network's gateway](network.md#starting-a-network) on a LAN or tailnet address needs, keeps letting it in after an update. When `active` isn't a copy of the selected version, because no update has made it yet or the copy failed, the service runs from the version's own directory.
+
 Unsigned component archives rely on GitHub's HTTPS release channel and checksums; they do not have a separate publisher signature. Stable releases are the only automatic update channel. Desktop's existing Windows signing and macOS notarization requirements still apply.
 
 ## Upgrading from 0.3.0

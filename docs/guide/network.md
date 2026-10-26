@@ -34,6 +34,8 @@ This machine is now the founder and the gateway. The other machines reach the ga
 
   or later, `xenonet net set --lan 192.168.1.5:48850`. XenoNet listens there over plain HTTP, never on `0.0.0.0`, and answers only the network's routes there. The frames are signed and sealed, so the LAN sees which machine talks to which, never what they say. An actor's token never crosses it, since `/mcp` and `/a2a` aren't served on that address.
 
+  Other machines connect to that address straight, so the gateway's firewall has to let the service in. The firewalls of macOS and Windows let a program in by its path, and the service runs from `runtime/components/service/active/bin/xenonet` in XenoNet's state folder, a path that stays the same across Service updates (see [components](components.md#updates)). On a Mac with the firewall on, macOS asks once whether `xenonet` may accept incoming connections: choose **Allow**. On Windows, a service that Task Scheduler starts never gets Windows Defender Firewall's question, so allow it yourself: **Windows Security › Firewall & network protection › Allow an app through firewall › Allow another app**, and pick `active\bin\xenonet.exe` under `runtime\components\service`. Until a Service update has made `active`, the service runs from its version's own folder, so allow it once more after that first update. On the gateway, `xenonet doctor` says whether the firewall lets the service in, and what to run when it doesn't.
+
 ## Adding a machine
 
 1. On a window host, open the palette and choose **Add a machine**. Give the new machine's id, and tick **I'll use a XenoNet window on it** if you will.
@@ -203,7 +205,7 @@ The gateway sees, for each frame, which machine sent it, which it's for, its kin
 ## Checking the network
 
 - `xenonet net status` shows the network, this machine, the gateway and its link, what waits for approval, and what waits in the outbox. `xenonet net hosts` lists the machines.
-- `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut.
+- `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut and, on a LAN or tailnet address, whether the firewall lets other machines in.
 
 A machine whose clock is off still links: it signs with the gateway's time, which it takes only from an answer the gateway signed. One more than a day off is refused, and the doctor says so.
 
