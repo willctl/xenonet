@@ -48,7 +48,8 @@ import { isActorId } from "./actors.js";
 import { youHere, createTargetWatch, createSaidEcho } from "./actors-model.js";
 import { createWindowCalls, createActorRequests, createActorTokens } from "./actor-requests.js";
 import { createRemoteConnections } from "./remote-panel.js";
-import { createHostFilters, decorate as decorateHosts, hostOfId } from "./hosts.js";
+import { createHostFilters, decorate as decorateHosts, hostOfId, setHere } from "./hosts.js";
+import { inNetwork } from "./network-model.js";
 import { chimes } from "./live-words.js";
 import { renamable } from "../core/rename.js";
 import "./hosts.css";
@@ -1003,12 +1004,20 @@ function applyGraph(graph = serverGraph) {
 // The network's other machines changed (network.js's view): drawn again
 // only when what the map shows of them did.
 function mapNetwork(view) {
+  // Network mode: this machine's sessions are labelled with its id, as the
+  // others' are with theirs (hosts.js), so every console reads the same.
+  const relabel = setHere(inNetwork(view.state) ? view.state.self?.id : null);
   const part = networkPart(view.state, view.agents);
   const key = partKey(part);
-  if (key === netKey) return;
+  if (key === netKey) {
+    if (relabel && serverGraph) applyGraph();
+    if (relabel && lastLive) applyLive(lastLive);
+    return;
+  }
   netKey = key;
   netPart = part;
   if (serverGraph) applyGraph();
+  if (relabel && lastLive) applyLive(lastLive);
 }
 
 function reveal(id) {

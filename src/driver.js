@@ -13,6 +13,7 @@ import { isActorId } from "./actors.js";
 import { formOf } from "./actors-model.js";
 import { tokenWords } from "./actor-requests.js";
 import { environmentState } from "./environment.js";
+import { hereId } from "./hosts.js";
 
 export const VERSION = 1;
 
@@ -74,6 +75,9 @@ export function createDriver(app) {
     // From another machine (hosts.js): which, and whether it's live; one in
     // your network says so, and for a session whether it waits on you.
     if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: n.network } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
+    // In network mode, this machine's are labelled too, for showing only:
+    // they have no host, which is what marks another machine's.
+    else if (n.kind !== "core" && n.kind !== "host" && hereId()) out.machine = { id: hereId(), here: true };
     return out;
   }
 
