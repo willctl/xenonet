@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createSystemStats, createDemoSystemStats, cpuModel, parseNvidia, parseIoreg, parseWindowsGpu, findNvidiaSmi, windowsGpuScript, HISTORY } from "../core/system-stats.js";
+import { check } from "../core/schema/index.js";
 
 const GB = 1024 ** 3;
 
@@ -158,6 +159,9 @@ test("AMD on Linux: the amdgpu driver's files", async () => {
   const stats = createSystemStats({ platform: "linux", env: { PATH: "" }, exists: () => false, osm, readdir: async () => ["card0", "card1", "card1-DP-1", "renderD128"], readFile: async (f) => (f in files ? files[f] : Promise.reject(new Error("ENOENT"))), wait: async () => osm.tick(0.2) });
   const r = await stats.read();
   assert.deepEqual([r.gpu, r.gpus], ["amdgpu", [{ index: 0, name: "AMD GPU", usage: 0.27, memUsed: 2 * GB, memTotal: 8 * GB, temp: null, shared: false }]]);
+  // What the parts are, for the Machines view, from what was read.
+  assert.deepEqual(r.hardware, { platform: "linux", arch: "x64", cpu: { model: "Intel Core i7-9700K", threads: 4, ghz: 3.6 }, memory: { total: 32 * GB }, gpus: [{ name: "AMD GPU", memTotal: 8 * GB, shared: false }] });
+  assert.deepEqual(check("system/v1", r, { strict: true }).issues, []);
   stats.stop();
 });
 
@@ -174,4 +178,7 @@ test("the demo's computer is made up, with a full history to draw", async () => 
   assert.equal(r.history.length, HISTORY);
   assert.ok(r.cpu.cores.every((c) => c >= 0 && c <= 1));
   assert.ok(r.gpus[0].memUsed < r.gpus[0].memTotal);
+  assert.deepEqual(r.hardware, { platform: "linux", arch: "x64", cpu: { model: "AMD Ryzen 7 7700X", threads: 16, ghz: 4.5 }, memory: { total: 64 * GB }, gpus: [{ name: "NVIDIA GeForce RTX 4080", memTotal: 16 * GB, shared: false }] });
+  const fits = check("system/v1", r, { strict: true });
+  assert.deepEqual([fits.issues, fits.undeclared], [[], []], "it fits system/v1, and has nothing it doesn't declare");
 });

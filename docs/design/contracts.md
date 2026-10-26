@@ -26,7 +26,8 @@ orchestrator's OK and a note to every lane it touches.
   `actor/events`, `actor/console`, `actor/requests`, `actor/tokens`,
   `drift/record`, `drift/log`, for hosts `host/list` and
   `host/hello`, `app`, an entry of the app registry (`core/apps.js`),
-  and for the tray app `tray/status` and `tray/event` (section 14).
+  for the tray app `tray/status` and `tray/event` (section 14), and
+  `system`, a computer's load as `GET /api/system` answers it.
 - Vendor schemas, at `vendor/<vendor>/<product>/<source>`:
 
 | Path | What |
