@@ -2,9 +2,11 @@
 // when it isn't. Sign-ins for Claude Code, Codex and Grok Build, the folders
 // XenoNet reads, the apps and tools it talks to, its own server, whether your
 // agents are connected to it, actors: tokens left in repos or expired, what
-// the observers read, and the process check they rely on; and the service
+// the observers read, and the process check they rely on; the service
 // started at login (ctx.login(), the supervisor's own review of it, which
-// only the Rust machines answer).
+// only the Rust machines answer); and on the network's gateway, whether its
+// firewall lets other machines in (ctx.network(), which only the service
+// answers).
 //
 // The xenonet command runs it (xenonet doctor). The server runs it every half
 // hour and reports new problems in the console and as a notification
@@ -104,6 +106,14 @@ export function machine(overrides = {}) {
       return { dir, said, version: launcherVersion(fs.readFileSync(entry, "utf8")), ships };
     },
     stateFile: (dir) => inspectState(dir),
+    // A file with its links followed, or null.
+    realpath: (p) => {
+      try {
+        return fs.realpathSync.native(p);
+      } catch {
+        return null;
+      }
+    },
     drift: () => (cacheDir ? (readDriftFile(path.join(cacheDir, DRIFT_FILE)) ?? { file: path.join(cacheDir, DRIFT_FILE), lookedAt: null, records: [] }) : null),
     base: null,
     health: null,
@@ -767,7 +777,137 @@ export const CHECKS = [
       return info("lingering is off: it starts when you log in, and stops when you log out", `To start it at boot instead, before anyone logs in, as a host needs, run loginctl enable-linger ${user} once. It may need an administrator.`);
     },
   },
+
+  // ---------- the network's gateway (docs/guide/network.md) ----------
+  {
+    id: "network.firewall",
+    group: "Network",
+    title: "Other machines can reach this gateway",
+    run: (ctx) => firewall(ctx),
+  },
 ];
+
+// On a LAN or tailnet address other machines connect to the network's
+// gateway straight, and the firewalls of macOS and Windows let a program
+// accept them by its path. On a Mac, socketfilterfw says whether the
+// firewall is on, blocks everything, or lets the service's program in;
+// --getappblocked says "permitted" of any path, even one that isn't there,
+// so the list of programs decides. It reads ctx.network() (this machine's
+// part in its network), the service's own program (self.exe) and the one a
+// restart runs (ctx.restartExe()), which only the service's machine
+// answers, and ctx.realpath().
+const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+
+// --getglobalstate's State: 0 off, 1 on, 2 on and blocking every incoming
+// connection; null when it doesn't say.
+const globalState = (text) => {
+  const m = /State\s*=\s*([0-9]+)/.exec(text);
+  return m ? Number(m[1]) : null;
+};
+
+// The programs --listapps lists, each with whether it may accept incoming
+// connections: after "Total number of apps = N", each is "N : <path>", and
+// "(Allow incoming connections)" or "(Block incoming connections)" after
+// it. Null when it isn't that.
+function listed(text) {
+  if (!/Total number of apps\s*=\s*[0-9]+/.test(text)) return null;
+  const out = [];
+  let name = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const entry = /^\s*[0-9]+\s*:\s(.*)$/.exec(raw);
+    const line = entry ? entry[1] : raw;
+    const verdict = /\(\s*(Allow|Block) incoming connections\s*\)/.exec(line);
+    if (entry) name = line.slice(0, verdict ? verdict.index : line.length).trimEnd();
+    if (name !== null && verdict) {
+      out.push([name, verdict[1] === "Allow"]);
+      name = null;
+    }
+  }
+  return out;
+}
+
+// A path for Terminal: under the home folder as "$HOME/…", which keeps the
+// account's name off the page; anywhere else in single quotes.
+function shellPath(p, home) {
+  const rest = home && p.startsWith(home) ? p.slice(home.length) : null;
+  if (rest?.startsWith("/")) return `"$HOME${rest.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("$", "\\$").replaceAll("`", "\\`")}"`;
+  return `'${p.replaceAll("'", "'\\''")}'`;
+}
+
+// How to let `paths` in on a Mac: the prompt macOS shows once, unless one
+// was blocked, which it doesn't ask about again; the commands; or System
+// Settings.
+function allowFix(paths, blocked, home) {
+  const commands = paths.map((p) => {
+    const q = shellPath(p, home);
+    return `sudo ${SOCKETFILTERFW} --add ${q} then sudo ${SOCKETFILTERFW} --unblockapp ${q}`;
+  });
+  return `${blocked ? "In Terminal: " : "macOS asks once whether xenonet may accept incoming connections: choose Allow. Or in Terminal: "}${commands.join(", then ")}. Or System Settings › Network › Firewall › Options.`;
+}
+
+// A program's standing in the list: true let in, false blocked, null not
+// listed. The firewall keeps the path it was given, so one listed under
+// another spelling of the same file counts too.
+async function listing(ctx, apps, file) {
+  const exact = apps.find(([p]) => p === file);
+  if (exact) return exact[1];
+  const name = file.split("/").pop();
+  for (const [p, allow] of apps.filter(([q]) => q.split("/").pop() === name)) {
+    const real = await ctx.realpath?.(p);
+    if (real != null && String(real) === file) return allow;
+  }
+  return null;
+}
+
+// What socketfilterfw said, when it said it: its output, or null.
+async function said(ctx, args) {
+  const r = await ctx.run(SOCKETFILTERFW, args, 5000);
+  if (r?.code !== 0 || r.timedOut) return null;
+  return String(r.stdout ?? "");
+}
+
+async function firewall(ctx) {
+  if (typeof ctx.network !== "function") return skip("needs XenoNet running");
+  const net = await ctx.network();
+  if (!net) return skip("this machine isn't in a network");
+  if (!net.gateway) return skip("this machine isn't the network's gateway");
+  const kind = typeof net.kind === "string" ? net.kind : null;
+  if (kind === null) return skip("the gateway has no address yet");
+  if (kind === "loopback") return skip("the gateway's address is on this computer alone, where no firewall stands in the way");
+  if (kind !== "lan") return skip("other machines reach the gateway through its tunnel, which connects on this computer, where no firewall stands in the way");
+  if (ctx.platform !== "darwin" && ctx.platform !== "win32") return skip("for macOS and Windows, whose firewalls let programs in by their path");
+  const exe = ctx.self?.exe ? String(ctx.self.exe) : null;
+  if (!exe) return info("XenoNet couldn't tell which program its service runs as");
+  const restart = await ctx.restartExe?.();
+  const next = restart && String(restart) !== exe ? String(restart) : null;
+  if (ctx.platform === "win32")
+    return info(
+      `XenoNet doesn't read Windows Defender Firewall's rules, which let a program in by its path; the service runs as ${tilde(exe, ctx.home)}`,
+      "If other machines can't reach this gateway, let that program in: Windows Security › Firewall & network protection › Allow an app through firewall › Allow another app. Updates keep its path.",
+    );
+  const home = ctx.home ?? "";
+  const stateText = await said(ctx, ["--getglobalstate"]);
+  const state = stateText === null ? null : globalState(stateText);
+  if (state === null) return info("XenoNet couldn't read whether the firewall is on", unreadable("socketfilterfw"));
+  if (state === 0) return ok("the firewall is off");
+  if (state === 2 || /enabled/i.test((await said(ctx, ["--getblockall"])) ?? "")) return warn("the firewall blocks every incoming connection, so no other machine can reach this gateway", "Turn off Block all incoming connections: System Settings › Network › Firewall › Options.");
+  const listText = await said(ctx, ["--listapps"]);
+  const apps = listText === null ? null : listed(listText);
+  if (!apps) return info("the firewall is on, and XenoNet couldn't read which programs it lets in", allowFix([exe], false, home));
+  const now = await listing(ctx, apps, exe);
+  const later = next ? await listing(ctx, apps, next) : now;
+  const [shown, after] = [tilde(exe, ctx.home), next ? tilde(next, ctx.home) : null];
+  if (now === true && later === true) return ok(`the firewall is on and lets ${shown} in${after ? `, and ${after}, which the service runs from after a restart` : ""}`);
+  let detail =
+    now === true && after
+      ? `the firewall lets ${shown} in, but after a restart the service runs from ${after}, which it hasn't let in`
+      : now === false
+        ? `the firewall blocks ${shown}, so other machines can't reach this gateway`
+        : `the firewall is on and hasn't let ${shown} in, so other machines can't reach this gateway`;
+  if (now !== true && after) detail += `; after a restart it runs from ${after}`;
+  const paths = [...(now !== true ? [exe] : []), ...(next && later !== true ? [next] : [])];
+  return warn(detail, allowFix(paths, now === false || later === false, home));
+}
 
 // The registration the service.* checks read (ctx.login(), as
 // xenonet-components' supervisor review sees it), or why there's none to

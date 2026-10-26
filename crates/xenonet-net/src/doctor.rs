@@ -218,6 +218,19 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
     out
 }
 
+/// What the doctor's firewall check (xenonet-doctor's firewall.rs) reads of
+/// the network: null when this machine isn't in one, else whether it's the
+/// network's gateway (as the roster says, or network.json when the roster
+/// can't be read), the gateway's address and its kind (address_kind).
+pub fn standing(dir: &Path) -> Value {
+    let d = Dir::new(dir);
+    let Ok(Some(net)) = d.read_network() else { return Value::Null };
+    let gateway = d.read_roster().map_or(net.gateway.host == net.host, |r| r.view().gateway == net.host);
+    let address = net.gateway.address.filter(|a| !a.is_empty());
+    let kind = address.as_deref().map(crate::files::address_kind);
+    json!({ "gateway": gateway, "address": address, "kind": kind })
+}
+
 fn files(d: &Dir, host: &str) -> Value {
     let roster = match d.read_roster() {
         Ok(r) => r,
@@ -254,6 +267,7 @@ mod tests {
     fn no_network_no_checks() {
         let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-none-{}", std::process::id()));
         assert_eq!(checks(&dir, 0.0).len(), 0);
+        assert_eq!(standing(&dir), Value::Null);
     }
 
     #[test]

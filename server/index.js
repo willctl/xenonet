@@ -703,7 +703,7 @@ async function api(req, res, url) {
   if (route === "/api/assistant" || route.startsWith("/api/assistant/")) return assistantRoute(req, res, url);
   if (await hostRoute(req, res, url)) return;
 
-  if (req.method === "GET" && route === "/api/health") return send(res, 200, { ok: true, name: NAME, version: VERSION, api: SERVICE_API, consoleApi: CONSOLE_API, capabilities: components ? CAPABILITIES : [], demo: config.demo, instance: INSTANCE, pid: process.pid, sources: state.sources, blocks: blocks() });
+  if (req.method === "GET" && route === "/api/health") return send(res, 200, { ok: true, name: NAME, version: VERSION, api: SERVICE_API, consoleApi: CONSOLE_API, capabilities: components ? CAPABILITIES : [], demo: config.demo, instance: INSTANCE, pid: process.pid, exe: fs.realpathSync.native(process.execPath), sources: state.sources, blocks: blocks() });
   // The error log (core/log.js), scrubbed as it was written: ?since= (ms),
   // ?level=error|warn|info, ?component=, ?code= (a prefix), ?summary=1 for
   // each code once with how often.

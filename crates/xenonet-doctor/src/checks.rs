@@ -52,10 +52,11 @@ pub const CHECKS: [(&str, &str, &str); 32] = [
     ("actors.checked", "Actors", "Actors' tokens are held to their processes"),
 ];
 
-/// Every check, in the order they run and show: CHECKS, then the service
-/// started at login's (login.rs).
+/// Every check, in the order they run and show: CHECKS, the service
+/// started at login's (login.rs), then the gateway's firewall's
+/// (firewall.rs).
 pub fn all() -> Vec<(&'static str, &'static str, &'static str)> {
-    CHECKS.iter().chain(crate::login::CHECKS.iter()).copied().collect()
+    CHECKS.iter().chain(crate::login::CHECKS.iter()).chain(crate::firewall::CHECKS.iter()).copied().collect()
 }
 
 fn verdict(status: &str, detail: impl Into<String>, fix: Option<String>) -> Value {
@@ -134,7 +135,7 @@ impl Ctx<'_> {
     async fn exists(&self, p: &str) -> Result<bool, Failure> {
         Ok(truthy(Some(&self.must("exists", json!([p])).await?)))
     }
-    async fn run(&self, file: &str, args: &[&str], ms: f64) -> Result<Value, Failure> {
+    pub(crate) async fn run(&self, file: &str, args: &[&str], ms: f64) -> Result<Value, Failure> {
         self.must("run", json!([file, args, ms])).await
     }
     // ctx.readText?.(p) ?? "": a small settings file's text.
@@ -178,7 +179,7 @@ fn no_actors(f: &Facts) -> Option<Value> {
     }
 }
 
-fn unreadable(tool: &str) -> String {
+pub(crate) fn unreadable(tool: &str) -> String {
     format!("{tool} answered in a way XenoNet doesn't read; update XenoNet, or report it with xenonet diagnose.")
 }
 
@@ -776,6 +777,7 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             Ok(ok(said))
         }
         id if crate::login::CHECKS.iter().any(|(c, ..)| *c == id) => crate::login::run(&c, id).await,
+        id if crate::firewall::CHECKS.iter().any(|(c, ..)| *c == id) => crate::firewall::run(&c, id).await,
         _ => Err(Failure::msg(format!("no such check: {id}"))),
     }
 }

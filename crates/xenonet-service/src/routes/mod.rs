@@ -169,6 +169,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
                 "demo": ctx.config.demo,
                 "instance": ctx.config.instance,
                 "pid": std::process::id(),
+                // The program this service is, as a firewall knows it.
+                "exe": xenonet_base::fs::running_exe(),
                 "sources": cores.state.sources().unwrap_or_else(|_| json!([])),
                 "blocks": cores.state.blocks().unwrap_or_else(|_| json!([])),
             }),

@@ -24,6 +24,18 @@ const OBSERVERS = () => [
   { product: "grok-bot", name: "Grok Bot", installed: true, on: true, recognized: null, sources: [{ name: "processes", file: null, state: "ok" }, { name: "app", file: "/Applications/Grok Bot.app", state: "ok" }] },
 ];
 
+// The service's program, and what socketfilterfw says on a Mac whose
+// firewall is on and lets that program in.
+const SERVICE_EXE = `${HOME}/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet`;
+const SFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+const said = (stdout) => ({ code: 0, stdout, stderr: "" });
+const listApps = (apps) => `Total number of apps = ${apps.length} \n${apps.map(([p, v], i) => `${i + 1} : ${p} \n             (${v} incoming connections)\n`).join("")}`;
+const FIREWALL = {
+  "socketfilterfw --getglobalstate": said("Firewall is enabled. (State = 1)\n"),
+  "socketfilterfw --getblockall": said("Firewall has block all state set to disabled.\n"),
+  "socketfilterfw --listapps": said(listApps([["/Applications/Spotify.app", "Allow"], [SERVICE_EXE, "Allow"], ["/Applications/Alacritty.app/Contents/MacOS/alacritty", "Block"]])),
+};
+
 // A machine where everything is in place; each test breaks one thing.
 function ctxWith(overrides = {}) {
   const bins = { claude: `${HOME}/.local/bin/claude`, codex: "/usr/local/bin/codex", grok: `${HOME}/.grok/bin/grok`, git: "/usr/bin/git", codesign: "/usr/bin/codesign", ...overrides.bins };
@@ -33,6 +45,7 @@ function ctxWith(overrides = {}) {
     "codex --version": { code: 0, stdout: "codex-cli 0.146.0\n", stderr: "" },
     "codex login status": { code: 0, stdout: "", stderr: "Logged in using ChatGPT\n" },
     "grok --version": { code: 0, stdout: "grok 1.0.50 (c58f321264ba)\n", stderr: "" },
+    ...FIREWALL,
     ...overrides.answers,
   };
   const dirs = { [`${HOME}/.claude/projects`]: ["-Users-ada-atlas"], [`${HOME}/.codex/sessions`]: ["2026"], [`${HOME}/.grok/sessions`]: ["%2FUsers%2Fada%2Fatlas"], [`${HOME}/.grok/auth.json`]: [], [`${HOME}/Projects`]: ["atlas", "ledger"], [`${HOME}/state`]: [], ...overrides.dirs };
@@ -55,7 +68,9 @@ function ctxWith(overrides = {}) {
     statfs: async () => ({ bavail: 50e6, bsize: 4096 }),
     paths: { claudeProjectsDir: `${HOME}/.claude/projects`, codexHome: `${HOME}/.codex`, grokHome: `${HOME}/.grok`, projectsDir: `${HOME}/Projects`, stateDir: `${HOME}/state` },
     readText: (p) => overrides.files?.[p] ?? null,
-    self: { port: 47840, name: "XenoNet" },
+    self: { port: 47840, name: "XenoNet", exe: SERVICE_EXE },
+    // The network's gateway, on a tailnet address.
+    network: () => ({ gateway: true, address: "100.64.0.7:48850", kind: "lan" }),
     health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: true, count: 4 }, { name: "wiki", ok: false, error: "Xenolith folder not found" }], blocks: BLOCKS() },
     live: { limits: { claude: { source: "anthropic" } } },
     connect: { port: 47840, apps: ["claude", "codex", "grok"].map((app) => ({ app, installed: true, changes: [{ id: "mcp", state: "present" }, { id: "hooks", state: "present" }], broken: [] })) },
@@ -162,6 +177,78 @@ test("the service started at login: on and current, off, or what to fix, with ho
   assert.match(host.fix, /sudo loginctl enable-linger ada\.$/);
   const unknown = (await linux({ linger: null, user: "" }))["service.boot"];
   assert.deepEqual([unknown.status, unknown.fix], ["info", "loginctl show-user $USER --property=Linger says."]);
+});
+
+test("the gateway's firewall on a Mac: off, letting the service in, or how to let it in", async () => {
+  const check = async ({ answers = {}, ctx = {} } = {}) => byId(await runDoctor(ctxWith({ answers, ctx }), { only: ["network.firewall"] }))["network.firewall"];
+  const shown = "~/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet";
+  const quoted = '"$HOME/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet"';
+  const allowed = await check();
+  assert.deepEqual([allowed.status, allowed.detail, allowed.title], ["ok", `the firewall is on and lets ${shown} in`, "Other machines can reach this gateway"]);
+  const off = await check({ answers: { "socketfilterfw --getglobalstate": said("Firewall is disabled. (State = 0)\n") } });
+  assert.deepEqual([off.status, off.detail], ["ok", "the firewall is off"]);
+  // Blocking every incoming connection, as either answer says it.
+  for (const answers of [{ "socketfilterfw --getblockall": said("Firewall has block all state set to enabled.\n") }, { "socketfilterfw --getglobalstate": said("Firewall is enabled. (State = 2)\n") }]) {
+    const all = await check({ answers });
+    assert.deepEqual(
+      [all.status, all.detail, all.fix],
+      ["warn", "the firewall blocks every incoming connection, so no other machine can reach this gateway", "Turn off Block all incoming connections: System Settings › Network › Firewall › Options."],
+    );
+  }
+  // Not listed: macOS asks once, or Terminal, with the path under $HOME.
+  const unlisted = await check({ answers: { "socketfilterfw --listapps": said(listApps([["/Applications/Spotify.app", "Allow"]])) } });
+  assert.deepEqual([unlisted.status, unlisted.detail], ["warn", `the firewall is on and hasn't let ${shown} in, so other machines can't reach this gateway`]);
+  assert.equal(
+    unlisted.fix,
+    `macOS asks once whether xenonet may accept incoming connections: choose Allow. Or in Terminal: sudo ${SFW} --add ${quoted} then sudo ${SFW} --unblockapp ${quoted}. Or System Settings › Network › Firewall › Options.`,
+  );
+  // Blocked once: macOS doesn't ask again.
+  const blocked = await check({ answers: { "socketfilterfw --listapps": said(listApps([[SERVICE_EXE, "Block"]])) } });
+  assert.deepEqual([blocked.status, blocked.detail], ["warn", `the firewall blocks ${shown}, so other machines can't reach this gateway`]);
+  assert.equal(blocked.fix, `In Terminal: sudo ${SFW} --add ${quoted} then sudo ${SFW} --unblockapp ${quoted}. Or System Settings › Network › Firewall › Options.`);
+  // An answer XenoNet can't read is a note, not a warning.
+  const garbled = await check({ answers: { "socketfilterfw --getglobalstate": said("Usage: socketfilterfw …\n") } });
+  assert.deepEqual([garbled.status, garbled.detail], ["info", "XenoNet couldn't read whether the firewall is on"]);
+  const refused = await check({ answers: { "socketfilterfw --listapps": { code: 1, stdout: "", stderr: "denied" } } });
+  assert.deepEqual([refused.status, refused.detail], ["info", "the firewall is on, and XenoNet couldn't read which programs it lets in"]);
+  assert.match(refused.fix, /^macOS asks once/);
+  // The same file, listed under another spelling of its path.
+  const spelled = `${HOME}/Library/../Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet`;
+  const same = await check({ answers: { "socketfilterfw --listapps": said(listApps([[spelled, "Allow"]])) }, ctx: { realpath: (p) => (p === spelled ? SERVICE_EXE : null) } });
+  assert.equal(same.status, "ok");
+  // Running from its version's folder, which the firewall lets in, while a
+  // restart runs active's: said before the restart moves it.
+  const versioned = `${HOME}/Library/Application Support/XenoNet/runtime/components/service/0.5.2-4f36d8c169f9c50b/bin/xenonet`;
+  const moving = await check({ answers: { "socketfilterfw --listapps": said(listApps([[versioned, "Allow"]])) }, ctx: { self: { port: 47840, name: "XenoNet", exe: versioned }, restartExe: () => SERVICE_EXE } });
+  assert.deepEqual(
+    [moving.status, moving.detail],
+    ["warn", `the firewall lets ~/Library/Application Support/XenoNet/runtime/components/service/0.5.2-4f36d8c169f9c50b/bin/xenonet in, but after a restart the service runs from ${shown}, which it hasn't let in`],
+  );
+  assert.ok(moving.fix.includes(`--add ${quoted}`) && !moving.fix.includes("0.5.2"), moving.fix);
+  const both = await check({ answers: { "socketfilterfw --listapps": said(listApps([[versioned, "Allow"], [SERVICE_EXE, "Allow"]])) }, ctx: { self: { port: 47840, name: "XenoNet", exe: versioned }, restartExe: () => SERVICE_EXE } });
+  assert.equal(both.status, "ok");
+  assert.match(both.detail, /, and ~\/.*\/active\/bin\/xenonet, which the service runs from after a restart$/);
+});
+
+test("the firewall's check is for the network's gateway on a LAN or tailnet address, on a Mac or Windows", async () => {
+  const check = async (ctx) => {
+    const r = byId(await runDoctor(ctxWith({ ctx }), { only: ["network.firewall"] }))["network.firewall"];
+    return [r.status, r.detail];
+  };
+  assert.deepEqual(await check({ network: undefined }), ["skip", "needs XenoNet running"]);
+  assert.deepEqual(await check({ network: () => null }), ["skip", "this machine isn't in a network"]);
+  assert.deepEqual(await check({ network: () => ({ gateway: false, address: "100.64.0.7:48850", kind: "lan" }) }), ["skip", "this machine isn't the network's gateway"]);
+  assert.deepEqual(await check({ network: () => ({ gateway: true, address: "net.example.com", kind: "tunnel" }) }), ["skip", "other machines reach the gateway through its tunnel, which connects on this computer, where no firewall stands in the way"]);
+  assert.deepEqual(await check({ network: () => ({ gateway: true, address: "127.0.0.1:48850", kind: "loopback" }) }), ["skip", "the gateway's address is on this computer alone, where no firewall stands in the way"]);
+  assert.deepEqual(await check({ network: () => ({ gateway: true, address: null, kind: null }) }), ["skip", "the gateway has no address yet"]);
+  assert.deepEqual(await check({ platform: "linux" }), ["skip", "for macOS and Windows, whose firewalls let programs in by their path"]);
+  assert.deepEqual(await check({ self: { port: 47840, name: "XenoNet" } }), ["info", "XenoNet couldn't tell which program its service runs as"]);
+  const windows = byId(await runDoctor(ctxWith({ ctx: { platform: "win32" } }), { only: ["network.firewall"] }))["network.firewall"];
+  assert.deepEqual(
+    [windows.status, windows.detail],
+    ["info", "XenoNet doesn't read Windows Defender Firewall's rules, which let a program in by its path; the service runs as ~/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet"],
+  );
+  assert.match(windows.fix, /Allow an app through firewall › Allow another app\. Updates keep its path\.$/);
 });
 
 test("sign-ins: signed out is a failure with the fix; no Claude Code skips what needs it", async () => {

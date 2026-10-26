@@ -196,6 +196,29 @@ pub async fn launcher() -> Result<Value, Value> {
     Ok(json!({ "dir": dir, "said": said, "version": xenonet_base::json::number(version), "ships": xenonet_base::json::number(ships) }))
 }
 
+/// The program a restart of the service runs (installed_runtime's
+/// service_root), when this service is an installed Service's: XenoNet Dev,
+/// or a binary named by XENONET_SERVICE_BIN, isn't started from there, so
+/// a restart doesn't move it. Null otherwise.
+pub fn restart_exe() -> Value {
+    use xenonet_components::{install, packages, runtime};
+    let env = fx::env_map();
+    let home = xenonet_service::config::home_dir(&|k| std::env::var(k).ok());
+    let m = runtime::Machine { platform: fx::platform().into(), arch: String::new(), home };
+    let dir = xenonet_base::paths::join(&packages::components_dir(&env, &m), "service");
+    let (Some(me), Ok(dir)) = (xenonet_base::fs::running_exe(), xenonet_base::fs::realpath_native(&dir)) else { return Value::Null };
+    if !std::path::Path::new(&me).starts_with(&dir) {
+        return Value::Null;
+    }
+    let Ok(Some(service)) = packages::current_component("service", &env, &m) else { return Value::Null };
+    if !install::has_binary(&service, &m.platform) {
+        return Value::Null;
+    }
+    let (root, _) = install::service_root(&service, &env, &m);
+    let exe = xenonet_base::paths::join_all(&[&root, "bin", runtime::bin_name(&m.platform)]);
+    xenonet_base::fs::realpath_native(&exe).map_or(Value::Null, Value::String)
+}
+
 /// inspectState(dir) (core/statefile.js): state.json's version and
 /// whether it fits its schema, and the files XenoNet moved aside.
 pub fn inspect_state(dir: &str) -> Value {
@@ -420,6 +443,11 @@ impl Machine {
             },
             "launcher" => launcher().await?,
             "stateFile" => inspect_state(&a(0)),
+            // The network's gateway, for the firewall's check: whether it's
+            // this machine, and its address.
+            "network" => xenonet_net::doctor::standing(&std::path::Path::new(&self.parts.config.state_dir).join("network")),
+            "restartExe" => restart_exe(),
+            "realpath" => xenonet_base::fs::realpath_native(&a(0)).map_or(Value::Null, Value::String),
             "drift" => {
                 let (file, looked, records) = self.parts.drift.locked().view();
                 json!({ "file": file, "lookedAt": looked.map_or(Value::Null, xenonet_base::json::number), "records": records })
@@ -497,7 +525,7 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
     let connect = if parts.config.demo { Value::Null } else { c.connect.preview().await.unwrap_or(Value::Null) };
     let state_load = c.store.load_report().unwrap_or(Value::Null);
     json!({
-        "self": { "port": parts.config.port, "name": parts.config.name },
+        "self": { "port": parts.config.port, "name": parts.config.name, "exe": xenonet_base::fs::running_exe() },
         "base": null,
         "baseName": null,
         "health": health,
