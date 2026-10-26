@@ -39,8 +39,14 @@ pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub struct Timing {
     pub ping_ms: u64,
     pub stream_ms: u64,
+    /// The most a stream may go without a line before the link drops it
+    /// and is offline: three pings missed.
     pub idle_ms: u64,
     pub poll_ms: u64,
+    /// How long a link request waits for the gateway's answer, its headers
+    /// and its hello: a long-poll's wait (`poll_ms`) and time to spare.
+    /// Past it the link drops the connection and is offline.
+    pub answer_ms: u64,
     pub backoff_min_ms: f64,
     pub backoff_max_ms: f64,
     /// How long a gateway that was moved keeps answering, so the hosts
@@ -50,7 +56,7 @@ pub struct Timing {
 
 impl Default for Timing {
     fn default() -> Self {
-        Timing { ping_ms: 15_000, stream_ms: 600_000, idle_ms: 45_000, poll_ms: 25_000, backoff_min_ms: 2000.0, backoff_max_ms: 60_000.0, handover_ms: 30_000 }
+        Timing { ping_ms: 15_000, stream_ms: 600_000, idle_ms: 45_000, poll_ms: 25_000, answer_ms: 35_000, backoff_min_ms: 2000.0, backoff_max_ms: 60_000.0, handover_ms: 30_000 }
     }
 }
 
@@ -95,7 +101,10 @@ pub fn now_ms() -> f64 {
 /// How the link stands.
 #[derive(Debug, Clone)]
 pub struct Status {
-    /// off, connecting, live, offline, refused or removed.
+    /// off, connecting, live, offline, refused or removed. Live means the
+    /// link hears the gateway: a stream that brings nothing for the idle
+    /// time, or a request whose answer doesn't come in time, puts it
+    /// offline (link.rs).
     pub state: &'static str,
     pub since: Option<f64>,
     pub reason: Option<String>,
@@ -387,9 +396,12 @@ impl Shared {
         }
     }
 
+    /// The link's first try since it started. A try after that leaves the
+    /// state as it stands: live stays live across a stream's routine end,
+    /// and offline or refused keeps its reason and since while the link
+    /// tries again, until the gateway's hello or another failure.
     pub fn connecting(&self) {
-        let state = self.status.locked().state;
-        if !matches!(state, "live" | "removed") {
+        if self.status.locked().state == "off" {
             self.set("connecting", None);
         }
     }

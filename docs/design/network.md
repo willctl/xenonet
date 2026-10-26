@@ -49,8 +49,8 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
 
 - The seam, keys, signing and sealing, frames, the roster chain, tickets,
   the gateway's routes, queues, epochs, `hello` and `gap`, the link with its
-  outbox, backoff, clock offset and long-poll, `xenonet net`, `/api/net/*`
-  and the doctor's checks.
+  outbox, backoff, answer and idle deadlines, clock offset and long-poll,
+  `xenonet net`, `/api/net/*` and the doctor's checks.
 - The engine across hosts: presence and `peers`, `@host:` targets and
   `machine:` selectors, receipts, replies, repo broadcasts across clones,
   claims across clones, the bypass hold, the framing, `whoami`, the
@@ -335,6 +335,10 @@ request to its handler by path before anything else is checked:
     minutes.
   - The host reconnects at once with the last `seq` it saw, read chunk by
     chunk with an idle timer of 45 s and no overall timeout.
+  - The answer to each down request, its headers and its `hello`, must
+    come within 35 s: a long-poll's 25 s wait and 10 s to spare. A
+    stream's come at once. Past that the host drops the connection and
+    tries again with the backoff.
 - **Up** (host to gateway): `POST /net/v1/frames` with a batch of frames.
   - The answer lists the ids it accepted.
   - The gateway remembers frame ids for a week and accepts a repeat as
@@ -344,6 +348,22 @@ request to its handler by path before anything else is checked:
   its first batch, or after 25 s, for proxies that buffer streams. The
   host switches to it after two streams that went quiet past a due ping.
 - **Backoff:** 2 s, doubling to 60 s, with jitter, as the hosts link has.
+- **How the link stands** (`xenonet net status`, the Network panel and
+  the doctor's link check):
+  - `connecting`: the first try since the link started.
+  - `live`: the gateway's `hello` came, and the link still hears it. It
+    stays live across a stream's routine end and the reconnect.
+  - `offline`, with the reason and since when: a stream brought nothing
+    for 45 s, a request's answer didn't come within 35 s, or the gateway
+    couldn't be reached. So a gateway that takes connections and says
+    nothing, as one behind a firewall that blocks its process does,
+    shows as offline within 50 s of the last line the host heard (a
+    ping's 15 s and an answer's 35 s), never as live. The tries after
+    that keep the state, its reason and its since until the `hello`.
+  - `refused` (the gateway refused this host, with why) and `removed`.
+
+  The gateway counts a long-polling host as linked for 40 s after its
+  last poll, longer than the host's 35 s for an answer.
 - **Epochs.** The gateway's `hello` carries an epoch: a random id made
   when the gateway's queue store is created. When a host sees a new epoch
   (the gateway moved, or lost its store), it resumes from 0 and drops
@@ -764,7 +784,8 @@ twins, are unchanged.
   dropped. Their constellations stay on the map, dimmed, as the hosts
   prototype does.
 - The doctor says "The network's gateway hasn't answered since 14:02",
-  with what it last saw: refused, no DNS, timed out, or a clock off.
+  with what it last saw: refused, no DNS, timed out, no answer or
+  `hello` within 35 s, nothing on the stream for 45 s, or a clock off.
 
 **At the gateway:**
 

@@ -92,7 +92,7 @@ fn actor_gateway(port: u16, service_port: u16) -> Arc<GatewayControl> {
 }
 
 fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
+    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
 }
 
 fn options(dir: &Path, who: &str) -> Options {

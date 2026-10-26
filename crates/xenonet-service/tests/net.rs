@@ -4,7 +4,7 @@
 // hosts on other machines would. Their /api/net routes are called as the
 // window calls them, and a test Sink stands in for the engine.
 //
-// Each test has its own ports among 48113-48121 (48112 is one nothing
+// Each test has its own ports among 48113-48125 (48112 is one nothing
 // answers on), never 47840-47842. NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
@@ -14,10 +14,12 @@ use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::io::{Read, Write as _};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use xenonet_base::log::Log;
-use xenonet_base::network::{Incoming, Kind, Outgoing, Sink, To};
+use xenonet_base::network::{Incoming, Kind, Net, Outgoing, Sink, To};
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_service::config::Config;
@@ -51,6 +53,10 @@ struct TestSink {
     links: Mutex<Vec<bool>>,
     removed: Mutex<Vec<String>>,
     gaps: Mutex<u32>,
+    /// When set, the link this host sends its presence through each time
+    /// the link comes up, as the engine does, and how many it sent.
+    presence: Mutex<Option<Weak<dyn Net>>>,
+    presences: AtomicU64,
 }
 
 impl Sink for TestSink {
@@ -60,6 +66,15 @@ impl Sink for TestSink {
     }
     fn linked(&self, up: bool) {
         self.links.lock().unwrap().push(up);
+        let net = self.presence.lock().unwrap().as_ref().and_then(Weak::upgrade);
+        if let Some(net) = net.filter(|_| up) {
+            let counter = self.presences.fetch_add(1, Ordering::SeqCst) + 1;
+            // Off the link's task, as the engine sends it from its own.
+            std::thread::spawn(move || {
+                let body = json!({ "schema": "network/presence/v1", "counter": counter, "full": true, "agents": [], "removed": [], "you": false, "roster": "" });
+                net.send(Outgoing { to: To::All, kind: Kind::Presence, body }).unwrap();
+            });
+        }
     }
     fn removed(&self, host: &str) {
         self.removed.lock().unwrap().push(host.into());
@@ -76,6 +91,10 @@ impl TestSink {
     fn up(&self) -> bool {
         self.links.lock().unwrap().last() == Some(&true)
     }
+    /// The counters of the presence that came from `host`.
+    fn presence_from(&self, host: &str) -> Vec<u64> {
+        self.got.lock().unwrap().iter().filter(|(f, k, _)| f == host && k == "presence").filter_map(|(_, _, b)| b["counter"].as_u64()).collect()
+    }
 }
 
 struct Host {
@@ -88,7 +107,7 @@ struct Host {
 }
 
 fn timing() -> Timing {
-    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
+    Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
 }
 
 fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
@@ -761,4 +780,183 @@ async fn relay_and_svc_frames_never_touch_the_gateways_store() {
     let answer = gw.handle(post(&[frame("svc", 0), frame("relay", 3)])).await.body_json();
     assert_eq!(answer["accepted"].as_array().unwrap().len(), 2, "taken, as live frames are: {answer}");
     assert_eq!((gw.held("laptop"), stored()), (0, 0), "and dropped");
+}
+
+/// What the firewall between laptop and the gateway does.
+const PASS: u8 = 0;
+/// Takes each connection and answers nothing, as a firewall that blocks
+/// the gateway's process leaves it once the kernel took the connection; a
+/// connection that was passing goes quiet for good.
+const SILENT: u8 = 1;
+/// Answers a new connection with a stream's headers, then nothing.
+const HEADERS: u8 = 2;
+
+/// A path to the gateway that a test can block. While it passes, `Host`
+/// is changed to the gateway's own address, which its LAN door wants; the
+/// two ports have as many digits, so nothing else moves.
+struct Firewall {
+    mode: Arc<AtomicU8>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Firewall {
+    async fn new(port: u16, gateway: u16) -> Firewall {
+        assert_eq!(port.to_string().len(), gateway.to_string().len());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+        let mode = Arc::new(AtomicU8::new(PASS));
+        let m = mode.clone();
+        let task = tokio::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                tokio::spawn(Firewall::connection(client, m.clone(), port, gateway));
+            }
+        });
+        Firewall { mode, task }
+    }
+
+    fn set(&self, mode: u8) {
+        self.mode.store(mode, Ordering::SeqCst);
+    }
+
+    async fn connection(mut client: tokio::net::TcpStream, mode: Arc<AtomicU8>, port: u16, gateway: u16) {
+        let mut buf = vec![0u8; 64 << 10];
+        let now = mode.load(Ordering::SeqCst);
+        if now != PASS {
+            if now == HEADERS {
+                let mut head = Vec::new();
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match client.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => head.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let _ = client.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ntransfer-encoding: chunked\r\n\r\n").await;
+            }
+            // Held open until the host gives up on it.
+            while matches!(client.read(&mut buf).await, Ok(n) if n > 0) {}
+            return;
+        }
+        let Ok(upstream) = tokio::net::TcpStream::connect(("127.0.0.1", gateway)).await else { return };
+        let (mut cr, mut cw) = client.into_split();
+        let (mut ur, mut uw) = upstream.into_split();
+        let (from, to) = (format!("127.0.0.1:{port}").into_bytes(), format!("127.0.0.1:{gateway}").into_bytes());
+        // Once either way sees the firewall shut, the connection passes
+        // nothing more, either way.
+        let shut = AtomicBool::new(false);
+        let closed = || {
+            if mode.load(Ordering::SeqCst) != PASS {
+                shut.store(true, Ordering::SeqCst);
+            }
+            shut.load(Ordering::SeqCst)
+        };
+        let up = async {
+            let mut buf = vec![0u8; 64 << 10];
+            while let Ok(n @ 1..) = cr.read(&mut buf).await {
+                if closed() {
+                    continue;
+                }
+                let mut chunk = buf[..n].to_vec();
+                let mut i = 0;
+                while i + from.len() <= chunk.len() {
+                    if chunk[i..i + from.len()] == from[..] {
+                        chunk[i..i + from.len()].copy_from_slice(&to);
+                    }
+                    i += 1;
+                }
+                if uw.write_all(&chunk).await.is_err() {
+                    break;
+                }
+            }
+        };
+        let down = async {
+            let mut buf = vec![0u8; 64 << 10];
+            while let Ok(n @ 1..) = ur.read(&mut buf).await {
+                if !closed() && cw.write_all(&buf[..n]).await.is_err() {
+                    break;
+                }
+            }
+        };
+        // Either side's end ends both: the gateway sees the host give up.
+        tokio::select! {
+            () = up => {}
+            () = down => {}
+        }
+    }
+}
+
+impl Drop for Firewall {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_gateway_that_takes_connections_and_says_nothing_puts_the_link_offline() {
+    // studio is the gateway on 48124. desk links to it; laptop links
+    // through a firewall on 48125, and sends its presence each time its
+    // link comes up, as its engine would.
+    let (lan, path) = (48124, 48125);
+    let a = Host::new("silent", "studio", 0.0, Caps::default()).await;
+    let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") }), true).await;
+    assert_eq!(s, 200, "{v}");
+    let fw = Firewall::new(path, lan).await;
+    let mut joined = Vec::new();
+    for (name, port) in [("laptop", path), ("desk", lan)] {
+        let (s, t) = a.call("POST", "/api/net/ticket", json!({ "host": name }), true).await;
+        assert_eq!(s, 200, "{t}");
+        let h = Host::new("silent", name, 0.0, Caps::default()).await;
+        if name == "laptop" {
+            *h.sink.presence.lock().unwrap() = Some(Arc::downgrade(&h.svc.net()));
+        }
+        let (s, v) = h.call("POST", "/api/net/join", json!({ "address": format!("127.0.0.1:{port}"), "ticket": t["ticket"] }), true).await;
+        assert_eq!(s, 200, "{v}");
+        joined.push(h);
+    }
+    let (c, b) = (joined.pop().unwrap(), joined.pop().unwrap());
+    for h in [&a, &b, &c] {
+        live(h, 3).await;
+    }
+    let online = |h: &Host, other: &str| h.svc.net().hosts().iter().any(|x| x.id == other && x.online);
+    // Its first went to studio alone: desk joined after.
+    until("laptop's presence at studio", 10, || a.sink.presence_from("laptop") == [1]).await;
+    until("each side sees the other online", 10, || online(&b, "studio") && online(&b, "desk") && online(&a, "laptop") && online(&c, "laptop")).await;
+    let was = b.state().await["gateway"]["since"].as_f64().unwrap();
+
+    // The firewall blocks the gateway's process: laptop's stream goes
+    // quiet, and its new requests are taken and never answered. Its link
+    // is offline within the idle time, and says why once a request has
+    // waited out its answer time (2.5 s and 4 s here).
+    let blocked = std::time::Instant::now();
+    fw.set(SILENT);
+    until_state(&b, "laptop offline", |s| s["gateway"]["link"] == "offline").await;
+    assert!(blocked.elapsed() < Duration::from_secs(6), "offline after {:?}", blocked.elapsed());
+    let st = until_state(&b, "the reason", |s| s["gateway"]["reason"].as_str().is_some_and(|r| r.contains("didn't answer in 4 s"))).await;
+    assert!(blocked.elapsed() < Duration::from_secs(12), "said why after {:?}", blocked.elapsed());
+    assert_eq!(st["gateway"]["link"], "offline", "{st}");
+    let since = st["gateway"]["since"].as_f64().unwrap();
+    assert!(since > was, "since it went offline: {st}");
+    assert!(!b.sink.up(), "the engine heard the link went down");
+    // The doctor reads it from link.json.
+    let doctor: std::collections::HashMap<String, Value> =
+        xenonet_net::doctor::checks(&b.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
+    assert_eq!(doctor["network.link"]["status"], "warn", "{:?}", doctor["network.link"]);
+    assert!(doctor["network.link"]["detail"].as_str().unwrap().contains("didn't answer"), "{:?}", doctor["network.link"]);
+    // The gateway saw laptop give up on its stream: the others see it
+    // offline, and laptop sees them offline too.
+    until("laptop offline at studio and desk", 15, || !online(&a, "laptop") && !online(&c, "laptop")).await;
+    assert!(!online(&b, "studio") && !online(&b, "desk"));
+
+    // It answers a stream's headers, then nothing: the hello's time runs
+    // out the same way. The tries in between keep the state and its since.
+    fw.set(HEADERS);
+    let st = until_state(&b, "no hello", |s| s["gateway"]["reason"].as_str().is_some_and(|r| r.contains("didn't say hello in 4 s"))).await;
+    assert_eq!((st["gateway"]["link"].clone(), st["gateway"]["since"].as_f64()), (json!("offline"), Some(since)), "{st}");
+
+    // The firewall lets it through again: laptop links up, its presence
+    // arrives, and each side sees the other online.
+    fw.set(PASS);
+    let st = until_state(&b, "laptop live again", |s| s["gateway"]["link"] == "live").await;
+    assert_eq!(st["gateway"]["reason"], Value::Null, "{st}");
+    assert!(b.sink.up());
+    until("laptop's second presence at studio and desk", 10, || a.sink.presence_from("laptop").contains(&2) && c.sink.presence_from("laptop").contains(&2)).await;
+    until("each side sees the other online again", 10, || online(&b, "studio") && online(&b, "desk") && online(&a, "laptop") && online(&c, "laptop")).await;
 }
