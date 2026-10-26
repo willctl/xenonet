@@ -38,7 +38,7 @@ fn each_commands_help_says_what_it_does_now() {
     assert!(doctor.contains("Claude Code, Codex and Grok Build installed,\nsigned in and connected"), "{doctor}");
     let only: String = doctor.lines().skip_while(|l| !l.contains("--only")).take(3).collect::<Vec<_>>().join(" ");
     let only = only.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(only.contains("xenonet, contracts, claude, codex, grok, system, agents, actors, service, or one check's id"), "{only}");
+    assert!(only.contains("xenonet, contracts, claude, codex, grok, system, agents, actors, service, network, or one check's id"), "{only}");
     assert!(help(&["hook", "--help"]).starts_with("xenonet hook <claude|codex|grok>\n\nPasses a Claude Code, Codex or Grok Build hook event"));
     let install = help(&["install", "--help"]);
     assert!(install.contains("Installs a small script that runs this xenonet binary."), "{install}");

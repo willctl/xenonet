@@ -211,6 +211,13 @@ pub fn realpath_native(p: &str) -> io::Result<String> {
     std::fs::canonicalize(p).map(|r| plain(r.to_string_lossy().into_owned()))
 }
 
+/// The running program's file, with its links followed (realpath_native):
+/// the path a firewall lets a program in by.
+pub fn running_exe() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    realpath_native(&exe.to_string_lossy()).ok()
+}
+
 // A path without the \\?\ (or \\?\UNC\) that marks a verbatim Windows
 // path, as libuv gives one back.
 fn plain(p: String) -> String {

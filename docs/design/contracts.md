@@ -575,6 +575,14 @@ one is a new version of it beside the old, never an edit:
   scripts and OpenAI's tunnel-client all run this path, so it never moves.
   `--launcher` prints `{launcher, protocol, tools, node}`: launcher 3, with
   no node.
+- The running Service, at
+  `<state>/runtime/components/service/active/bin/xenonet`: a copy of the
+  selected version's folder, which `active/.from` names
+  (`<version>-<sha256>`), swapped in through `active.next` and
+  `active.prev` with the service stopped whenever an install, update or
+  rollback selects a version. Firewalls let a program in by this path, so
+  it doesn't move between versions. When `active` isn't a copy of the
+  selected version, the service runs from that version's own folder.
 - Beside it, where an earlier XenoNet put one, the launcher that entries
   it wrote run: its own `node` and `cli/xenonet.js`
   (`core/components/launcher.cjs`, built into the binary). Its first line

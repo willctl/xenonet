@@ -8,6 +8,8 @@
 //! the version it should be, and rolls back if it doesn't. A record of the
 //! switch is kept until the new version answers, so an updater that
 //! crashed can finish it, or restore the previous one, on the next launch.
+//! The selected service runs from a copy of its version's folder, `active`,
+//! whose path stays the same from one version to the next.
 //!
 //! What it waits on is asked of whoever runs it (task.rs): { op: "connect"
 //! }, "request" and "close" (the service), "start" (a runtime), "check" (a
@@ -218,11 +220,108 @@ pub fn check_runtime(staged: &Value, platform: &str) -> Result<(), Failure> {
     Ok(())
 }
 
+/// The folder the selected Service runs from,
+/// `<runtime>/components/service/active`: a copy of the selected version's
+/// own folder. A firewall lets a program in by its path, so the service
+/// keeps one path across updates (docs/guide/components.md). Its `.from`
+/// file says which version it's a copy of, as the launcher's does.
+pub const ACTIVE: &str = "active";
+
+fn service_dir(env: &Env, m: &Machine) -> String {
+    NATIVE.join(&[&crate::packages::components_dir(env, m), "service"])
+}
+
+// What active/.from says of a copy of `selected`: its version and sha256.
+fn active_mark(selected: &Value) -> String {
+    format!("{}-{}", js_string(&selected["version"]), js_string(&selected["sha256"]))
+}
+
+/// Where the selected Service runs from: `active` when it's a copy of that
+/// version, with its binary. Otherwise its version's own folder, and why,
+/// unless there's no `active` at all, as before this version's first
+/// activation.
+pub fn service_root(service: &Value, env: &Env, m: &Machine) -> (String, Option<String>) {
+    let own = js_string(&service["root"]);
+    let active = NATIVE.join(&[&service_dir(env, m), ACTIVE]);
+    if !fsx::exists(&active) {
+        return (own, None);
+    }
+    let said = fsx::read_text(&NATIVE.join(&[&active, ".from"])).unwrap_or_default();
+    if said.is_empty() {
+        return (own, Some(format!("{ACTIVE} doesn't say which version it's a copy of")));
+    }
+    if said != active_mark(service) {
+        return (own, Some(format!("{ACTIVE} is a copy of {said}, not {}", active_mark(service))));
+    }
+    if !has_binary(&json!({ "root": active }), &m.platform) {
+        return (own, Some(format!("{ACTIVE} has no {}", bin_name(&m.platform))));
+    }
+    (active, None)
+}
+
+// Renames a folder; on Windows, which can hold a program a moment after it
+// exits, tried again for up to 30 s, as stage_package's last rename is.
+async fn rename_dir(io: &Io, from: &str, to: &str) -> Result<(), FsError> {
+    let until = xenonet_app::task::now_ms() + 30000.0;
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let code = xenonet_base::fs::code_of(&e);
+                if !cfg!(windows) || !matches!(code, Some("EPERM" | "EACCES" | "EBUSY")) || xenonet_app::task::now_ms() >= until {
+                    return Err(FsError::of(e, "rename", from));
+                }
+                io.sleep(250.0).await;
+            }
+        }
+    }
+}
+
+/// Makes `active` a copy of the selected Service, with the service stopped:
+/// what an activation cut short left (`active.next`, `active.prev`) goes,
+/// the version's folder is copied to `active.next` and marked, then
+/// `active` moves aside and `active.next` takes its place. An `active` of
+/// that version already stays as it is. A Service from before 0.4.0 runs
+/// from its own folder, so there's no `active`, nor with none selected.
+pub async fn activate_service(io: &Io, env: &Env, m: &Machine) -> Result<(), FsError> {
+    let dir = service_dir(env, m);
+    let at = |name: &str| NATIVE.join(&[&dir, name]);
+    let (active, next, prev) = (at(ACTIVE), at("active.next"), at("active.prev"));
+    fsx::rm_rf(&next)?;
+    fsx::rm_rf(&prev)?;
+    let selected = current_component("service", env, m)?;
+    let Some(selected) = selected.filter(|s| has_binary(s, &m.platform)) else { return fsx::rm_rf(&active) };
+    if service_root(&selected, env, m).0 == active {
+        return Ok(());
+    }
+    let from = js_string(&selected["root"]);
+    crate::tray::copy_tree(std::path::Path::new(&from), std::path::Path::new(&next)).map_err(|e| FsError::of(e, "copy", &from))?;
+    fsx::write_file(&NATIVE.join(&[&next, ".from"]), active_mark(&selected).as_bytes(), None)?;
+    if fsx::exists(&active) {
+        rename_dir(io, &active, &prev).await?;
+    }
+    fsx::rename(&next, &active)?;
+    // One that can't go now goes at the next activation.
+    let _ = fsx::rm_rf(&prev);
+    Ok(())
+}
+
+// activate_service, whose failure leaves the service to run from its
+// version's folder (service_root): it still starts, though a firewall may
+// ask about it again. So it's said, not thrown.
+async fn activate(io: &Io, env: &Env, m: &Machine) {
+    if let Err(e) = activate_service(io, env, m).await {
+        eprintln!("[xenonet] XenoNet Service runs from its version's folder this time: {}", e.message);
+    }
+}
+
 /// How to start the selected service: its xenonet binary, with `serve`,
 /// and the env it runs with (the runtime folder, and the launcher's binary
-/// when there is one). A Service from before 0.4.0 runs its node and
-/// server, as that XenoNet ran it, told of the node launcher its entries
-/// run, so an update that couldn't replace it can bring it back as it was.
+/// when there is one). It runs from `active` (service_root), or its
+/// version's folder when that isn't a copy of it. A Service from before
+/// 0.4.0 runs its node and server, as that XenoNet ran it, told of the
+/// node launcher its entries run, so an update that couldn't replace it
+/// can bring it back as it was.
 pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
     let m = &ctx.machine;
     let Some(service) = current_component("service", env, m)? else { return Err(Failure::msg("XenoNet Service is not installed. Use the bundle installer.")) };
@@ -234,6 +333,10 @@ pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
         run_env.insert("XENONET_LAUNCHER_BIN".into(), bin.clone());
     }
     if has_binary(&service, &m.platform) {
+        let (root, why) = service_root(&service, env, m);
+        if let Some(why) = why {
+            eprintln!("[xenonet] XenoNet Service runs from {root}: {why}");
+        }
         return Ok(json!({ "root": root, "exec": NATIVE.join(&[&root, "bin", bin_name(&m.platform)]), "args": ["serve"], "env": run_env }));
     }
     let dir = NATIVE.join(&[&runtime_dir(env, m), "launcher"]);
@@ -280,11 +383,15 @@ fn clear_journal(env: &Env, m: &Machine) -> Result<(), FsError> {
     fsx::rm_rf(&journal_file(env, m))
 }
 
-fn restore_selection(previous: Option<&Value>, env: &Env, m: &Machine) -> Result<(), FsError> {
+// Selects the previous service again, and runs it from `active`, with the
+// service stopped.
+async fn restore_selection(io: &Io, previous: Option<&Value>, env: &Env, m: &Machine) -> Result<(), FsError> {
     match previous.filter(|p| truthy(Some(p))) {
-        Some(p) => select_component("service", p, env, m),
-        None => fsx::rm_rf(&NATIVE.join(&[&runtime_dir(env, m), "components/service/current.json"])),
+        Some(p) => select_component("service", p, env, m)?,
+        None => fsx::rm_rf(&NATIVE.join(&[&runtime_dir(env, m), "components/service/current.json"]))?,
     }
+    activate(io, env, m).await;
+    Ok(())
 }
 
 /// The lifecycle's own settings: how long a service gets to stop.
@@ -398,7 +505,7 @@ async fn recover(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Fa
         }
         stop_service(io, env, life).await?;
     }
-    restore_selection(previous, env, m)?;
+    restore_selection(io, previous, env, m).await?;
     if let Some(p) = previous {
         start_version(io, &p["version"], env, ctx).await?;
     }
@@ -469,7 +576,13 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
         // in place.
         match old {
             Some(o) if component == "service" => earlier = Some((o, staged)),
-            _ => select_component(&component, &staged, env, m)?,
+            _ => {
+                select_component(&component, &staged, env, m)?;
+                // A first Service: nothing of it runs yet.
+                if component == "service" {
+                    activate(io, env, m).await;
+                }
+            }
         }
     }
     let launcher = install_launcher(env, ctx)?;
@@ -532,6 +645,7 @@ async fn switch_service(io: &Io, env: &Env, ctx: &Ctx, life: &Life, old: Option<
             stop_service(io, env, life).await?;
         }
         select_component("service", staged, env, m)?;
+        activate(io, env, m).await;
         start_version(io, &staged["version"], env, ctx).await?;
         clear_journal(env, m)?;
         Ok(())
@@ -545,7 +659,7 @@ async fn switch_service(io: &Io, env: &Env, ctx: &Ctx, life: &Life, old: Option<
             if truthy(Some(&live)) && live.get("version") != old.and_then(|o| o.get("version")) {
                 stop_service(io, env, life).await?;
             }
-            restore_selection(old, env, m)?;
+            restore_selection(io, old, env, m).await?;
             if let Some(o) = old {
                 start_version(io, &o["version"], env, ctx).await?;
             }
@@ -737,6 +851,9 @@ mod from_earlier {
         let launcher = p.runtime().join("launcher");
         assert_eq!(s.starts[0]["env"]["XENONET_LAUNCHER_BIN"], json!(launcher.join("xenonet").to_string_lossy()), "after the Tools, so it names their launcher");
         assert_eq!(runtime["args"], json!(["serve"]));
+        let active = p.runtime().join("components/service/active");
+        assert_eq!((runtime["root"].clone(), runtime["exec"].clone()), (json!(active.to_string_lossy()), json!(active.join("bin/xenonet").to_string_lossy())));
+        assert_eq!(s.starts[0]["exec"], runtime["exec"], "started from its copy");
         assert!(launcher_version(std::fs::read_to_string(launcher.join("cli/xenonet.js")).ok().as_deref()) >= 3.0, "0.3.0's entries now run the binary");
         assert_eq!(std::fs::read_to_string(PathBuf::from(js_string(&old["root"])).join("node")).unwrap(), "0.3.0's node", "the old files kept");
         assert!(!p.runtime().join("service-update.json").exists());
@@ -784,5 +901,38 @@ mod from_earlier {
             (json!(root.join("node").to_string_lossy()), json!([root.join("server/index.js").to_string_lossy()]))
         );
         assert!(!p.runtime().join("service-update.json").exists());
+        assert!(!p.runtime().join("components/service/active").exists(), "0.3.0 runs from its own folder");
+    }
+
+    #[test]
+    fn the_service_runs_from_one_folder_through_an_install_updates_and_a_rollback() {
+        let p = Place::new("active");
+        let svc = Rc::new(RefCell::new(Service::default()));
+        run(&p, &svc, "", bundle_task(&p, &p.bundle("0.4.0"))).unwrap();
+        let dir = p.runtime().join("components/service");
+        let mark = || std::fs::read_to_string(dir.join("active/.from")).unwrap();
+        assert_eq!(mark(), format!("0.4.0-{}", js_string(&p.selected("service")["sha256"])));
+        let update = |version: &str, failing: &str| {
+            let (file, item) = p.package("service", version);
+            let (env, ctx) = (p.env.clone(), p.ctx.clone());
+            run(&p, &svc, failing, Task::new(move |io| async move { activate_package(&io, &file, &item, &env, &ctx, &Life { stop_timeout: 0.0 }).await }))
+        };
+        update("0.5.0", "").unwrap();
+        assert!(mark().starts_with("0.5.0-"));
+        update("0.6.0", "0.6.0").unwrap_err();
+        assert!(mark().starts_with("0.5.0-"), "the rollback's copy");
+        // What a switch cut short left goes at the next.
+        std::fs::create_dir_all(dir.join("active.next/bin")).unwrap();
+        std::fs::create_dir_all(dir.join("active.prev")).unwrap();
+        update("0.6.1", "").unwrap();
+        assert!(mark().starts_with("0.6.1-"));
+        let exec = json!(dir.join("active/bin/xenonet").to_string_lossy());
+        let s = svc.borrow();
+        assert_eq!(s.starts.len(), 4);
+        assert!(s.starts.iter().all(|rt| rt["exec"] == exec && rt["root"] == json!(dir.join("active").to_string_lossy())), "{:?}", s.starts);
+        let mut left: Vec<String> =
+            std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with(char::is_numeric)).collect();
+        left.sort();
+        assert_eq!(left, ["active", "current.json"]);
     }
 }

@@ -217,9 +217,10 @@ fn ours(app: &str) -> bool {
     std::fs::read_to_string(plist_of(app)).is_ok_and(|t| t.contains(&format!("<string>{BUNDLE_ID}</string>")))
 }
 
-// Files and folders only, each file with its mode: a bundle of XenoNet's
-// has no links.
-fn copy_tree(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+/// Copies a folder: files and folders only, each file with its mode, as a
+/// clone where the disk can (APFS). A bundle or package of XenoNet's has no
+/// links.
+pub(crate) fn copy_tree(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;

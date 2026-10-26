@@ -459,6 +459,10 @@ async fn a_clock_five_minutes_off_still_links() {
     assert_eq!(a_checks["network.address"]["status"], "info");
     assert!(a_checks["network.address"]["detail"].as_str().unwrap().contains("this computer alone"));
     assert_eq!(a_checks["network.link"]["detail"], "this machine is the network's gateway");
+    // What the firewall check reads: a is the gateway, on this computer alone.
+    let standing = |h: &Host| xenonet_net::doctor::standing(&h.dir.join("state").join("network"));
+    assert_eq!((standing(&a)["gateway"].clone(), standing(&a)["kind"].clone()), (json!(true), json!("loopback")));
+    assert_eq!(standing(&b)["gateway"], json!(false));
 }
 
 async fn until_state(h: &Host, what: &str, ok: impl Fn(&Value) -> bool) -> Value {

@@ -67,6 +67,14 @@ export function machine(overrides = {}) {
       return { dir, said, version: launcherVersion(fs.readFileSync(entry, "utf8")), ships: launcherVersion(fs.readFileSync(LAUNCHER_SOURCE, "utf8")) };
     },
     stateFile: (dir) => inspectState(dir),
+    // A file with its links followed, or null.
+    realpath: (p) => {
+      try {
+        return fs.realpathSync.native(p);
+      } catch {
+        return null;
+      }
+    },
     drift: () => (cacheDir ? (readDriftFile(path.join(cacheDir, DRIFT_FILE)) ?? { file: path.join(cacheDir, DRIFT_FILE), lookedAt: null, records: [] }) : null),
     base: null,
     health: null,

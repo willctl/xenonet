@@ -3,5 +3,6 @@
 //! own state), and its verdict and words are here.
 
 pub mod checks;
+pub mod firewall;
 pub mod login;
 pub mod run;
