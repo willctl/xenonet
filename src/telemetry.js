@@ -175,10 +175,18 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     ctx.fillRect(W - 2 * pr, 0, 2 * pr, H);
   }
 
+  // OpenRouter's states that aren't a number: an icon, with the words for
+  // screen readers and the driver, since they don't fit the value column.
+  const GAUGE_ICON = {
+    key: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.8" cy="8" r="2.8" /><path d="M7.6 8h6.4M11.6 8v2.6M14 8v2" /></svg>',
+    "key-bad": '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.8" cy="8" r="2.8" /><path d="M7.6 8h6.4M11.6 8v2.6M14 8v2M2 13.5 13.5 2" /></svg>',
+    none: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="M4.2 11.8l7.6-7.6" /></svg>',
+  };
+
   // Just the bar and its value; the forecast and reset time are on hover.
-  function gauge(label, pct, sub, forecast, value = null, cls = "", setup = false) {
+  function gauge(label, pct, sub, forecast, value = null, cls = "", setup = false, icon = null) {
     const title = h([sub, forecast?.text].filter(Boolean).join(" · "));
-    if (pct == null) return `<${setup ? 'button type="button" data-openrouter-setup' : "div"} class="gauge off ${cls}${setup ? " setup" : ""}" title="${title}"><span class="g-k">${h(label)}</span><span class="g-bar"></span><span class="g-v">${h(value ?? "—")}</span></${setup ? "button" : "div"}>`;
+    if (pct == null) return `<${setup ? 'button type="button" data-openrouter-setup' : "div"} class="gauge off ${cls}${setup ? " setup" : ""}" title="${title}"><span class="g-k">${h(label)}</span><span class="g-bar"></span><span class="g-v${icon ? ` g-icon ${icon}` : ""}">${icon ? `${GAUGE_ICON[icon]}<span class="sr">${h(value)}</span>` : h(value ?? "—")}</span></${setup ? "button" : "div"}>`;
     const segs = 24;
     const lit = Math.round((Math.min(100, pct) / 100) * segs);
     const tone = pct > 90 ? "crit" : pct > 70 ? "warn" : "";
@@ -226,7 +234,7 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
   function openrouterGauge() {
     const o = spend?.openrouter;
     const view = openRouterView(o);
-    if (view) return gauge("openrouter", null, view.hint, null, view.value, "or", view.setup);
+    if (view) return gauge("openrouter", null, view.hint, null, view.value, "or", view.setup, view.icon);
     const spent = [o.today != null && `${money(o.today)} today`, o.week != null && `${money(o.week)} this week`, o.month != null && `${money(o.month)} this month`].filter(Boolean).join(", ");
     if (o.limit) {
       const used = Math.max(0, o.limit - (o.remaining ?? o.limit));
