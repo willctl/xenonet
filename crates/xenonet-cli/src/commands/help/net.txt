@@ -31,9 +31,12 @@ on and can't read them.
                                    and makes a ticket for it to join again
   xenonet net leave [--force]      asks to be taken out, then forgets the
                                    network here; this XenoNet carries on alone
-  xenonet net set [--titles-only | --no-titles-only] [--lan <ip:port>]
-                                   what this machine shares with the network,
-                                   and a LAN-only gateway's address
+  xenonet net set [--titles-only | --no-titles-only]
+                  [--share-load | --no-share-load] [--lan <ip:port>]
+                                   what this machine shares with the network
+                                   (its load: CPU, GPU, memory and the parts,
+                                   on by default), and a LAN-only gateway's
+                                   address
   xenonet net gateway take [--lan <ip:port>]
                                    makes this machine the network's gateway,
                                    at that LAN address or through the actor

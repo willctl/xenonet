@@ -152,6 +152,9 @@ struct Rt {
     cached: bool,
     cached_hello: Value,
     doctor: Value,
+    /// The latest load it sent (system/v1, under `host`), kept in memory
+    /// only: a network host's relay sends one every few seconds.
+    system: Option<Value>,
     last_cache_at: Option<f64>,
     cache_timer: Option<JoinHandle<()>>,
     cache_key: Option<String>,
@@ -624,6 +627,14 @@ impl HostHub {
                             let page = Self::for_page(st);
                             return self.emit("hosts", page);
                         }
+                        // A host's load, the latest kept for GET /api/system?hosts=1.
+                        if ename == "system" {
+                            let info = Self::info_of(rt);
+                            if let Some(q) = merge::qualify_event(&ename, &edata, &info, &mut MergeSchemas(&self.parts.schemas)) {
+                                rt.system = Some(q);
+                            }
+                            return;
+                        }
                         let info = Self::info_of(rt);
                         if let Some(q) = merge::qualify_event(&ename, &edata, &info, &mut MergeSchemas(&self.parts.schemas)) {
                             self.emit(&ename, q);
@@ -921,6 +932,7 @@ impl HostHub {
             cached: false,
             cached_hello: Value::Null,
             doctor: Value::Null,
+            system: None,
             last_cache_at: None,
             cache_timer: None,
             cache_key: None,
@@ -1403,6 +1415,10 @@ impl Hub for HubCore {
             return s;
         }
         merge::merge_summary(&s, &HostHub::pairs(&st), &mut MergeSchemas(&hub.parts.schemas))
+    }
+
+    fn systems(&self) -> Value {
+        Value::Array(self.0.st.locked().runtimes.iter().filter_map(|(_, rt)| rt.system.clone()).collect())
     }
 
     // XenoNet Dev's simulations (POST /api/dev/simulate).

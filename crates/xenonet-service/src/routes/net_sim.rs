@@ -14,7 +14,10 @@
 //! - GET /api/engine/state and GET /api/engine/agents, with the simulated
 //!   hosts' agents after this machine's own;
 //! - POST /api/actors/you/message to a simulated host's agent, which goes
-//!   into the simulated outbox while its host is away.
+//!   into the simulated outbox while its host is away;
+//! - GET /api/system?hosts=1, with a made-up reading for each other host,
+//!   each its own machine, so the Machines panel's sums aren't this one
+//!   counted again.
 //!
 //! With nothing simulated, every one of these is the real route's.
 
@@ -68,6 +71,7 @@ pub fn alone() -> Value {
         "rosterHead": null,
         "rosterMismatch": [],
         "titlesOnly": false,
+        "shareLoad": true,
     })
 }
 
@@ -157,6 +161,32 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             Ok(Some(Reply::json(200, state)))
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
+        // This machine's own reading, and a made-up one for each other host
+        // the simulation has: one that's away has its last, from when it
+        // was last heard from.
+        ("GET", "/api/system") if req.param("hosts") == Some("1") => {
+            let mut reading = ctx.cores.system.read().await?;
+            let Some(state) = simulated_net_state(ctx) else { return Ok(None) };
+            let me = state["self"]["id"].clone();
+            let now = ctx.now();
+            let hosts: Vec<Value> = state["hosts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|h| h["id"] != me)
+                .filter_map(|h| {
+                    let id = h["id"].as_str()?;
+                    let at = if h["online"] == true { now } else { h["seen"].as_f64().unwrap_or(now) };
+                    let mut r = made_up_reading(id, at)?;
+                    r["host"] = json!(id);
+                    Some(r)
+                })
+                .collect();
+            if reading.is_object() {
+                reading["hosts"] = Value::Array(hosts);
+            }
+            Ok(Some(Reply::json(200, reading)))
+        }
         ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave" | "/api/net/approve")
         | ("PUT", "/api/net/settings") => {
             if let Some(why) = ctx.from_window(req).await {
@@ -415,6 +445,7 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         "rosterHead": ROSTER_HEAD,
         "rosterMismatch": [],
         "titlesOnly": false,
+        "shareLoad": true,
         "simulated": true,
     });
     match kind {
@@ -456,6 +487,95 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         }
     }
     Some((state, agents))
+}
+
+// ---------- each machine's load, made up ----------
+
+/// A made-up machine's reading at `at`, as its relay would send it (no
+/// history, no cores), breathing slowly as the demo's own does, each on
+/// its own phase: studio an Apple M2 Ultra, laptop an M3 Pro, rack a Linux
+/// box with two NVIDIA cards. None for a host the simulation doesn't have.
+pub fn made_up_reading(host: &str, at: f64) -> Option<Value> {
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+    struct Box {
+        platform: &'static str,
+        arch: &'static str,
+        model: &'static str,
+        threads: u32,
+        ghz: f64,
+        ram: f64,
+        gpus: &'static [(&'static str, f64, bool)],
+        phase: f64,
+        cpu: f64,
+        gpu: f64,
+    }
+    let b = match host {
+        "studio" => Box {
+            platform: "darwin",
+            arch: "arm64",
+            model: "Apple M2 Ultra",
+            threads: 24,
+            ghz: 3.5,
+            ram: 128.0,
+            gpus: &[("Apple M2 Ultra · 76-core GPU", 0.0, true)],
+            phase: 0.4,
+            cpu: 0.22,
+            gpu: 0.31,
+        },
+        "laptop" => Box {
+            platform: "darwin",
+            arch: "arm64",
+            model: "Apple M3 Pro",
+            threads: 12,
+            ghz: 4.1,
+            ram: 36.0,
+            gpus: &[("Apple M3 Pro · 18-core GPU", 0.0, true)],
+            phase: 1.9,
+            cpu: 0.58,
+            gpu: 0.18,
+        },
+        "rack" => Box {
+            platform: "linux",
+            arch: "x64",
+            model: "AMD EPYC 7313P",
+            threads: 32,
+            ghz: 3.0,
+            ram: 128.0,
+            gpus: &[("NVIDIA RTX A4000", 16.0, false), ("NVIDIA RTX A4000", 16.0, false)],
+            phase: 3.1,
+            cpu: 0.12,
+            gpu: 0.64,
+        },
+        _ => return None,
+    };
+    let wave = |period: f64, phase: f64| ((at / period) * std::f64::consts::PI * 2.0 + b.phase + phase).sin();
+    let share = |v: f64| (v.clamp(0.0, 1.0) * 1000.0).round() / 1000.0;
+    let cpu = share(b.cpu + 0.12 * wave(37e3, 0.0) + 0.05 * wave(8.3e3, 1.1));
+    let mem = share(0.48 + 0.06 * wave(71e3, 0.5));
+    let ram = b.ram * GB;
+    let gpus: Vec<Value> = b
+        .gpus
+        .iter()
+        .enumerate()
+        .map(|(i, (name, vram, shared))| {
+            let usage = share(b.gpu + 0.2 * wave(51e3, i as f64 * 1.7) + 0.06 * wave(5.9e3, 0.3));
+            let (used, total) = if *shared { ((0.08 + 0.1 * usage) * ram, ram) } else { ((0.3 + 0.4 * usage) * vram * GB, vram * GB) };
+            let temp = if *shared { Value::Null } else { json!((48.0 + 30.0 * usage).round()) };
+            json!({ "index": i, "name": name, "usage": usage, "memUsed": used.round(), "memTotal": total, "temp": temp, "shared": shared })
+        })
+        .collect();
+    let mut r = json!({
+        "at": at,
+        "platform": b.platform,
+        "arch": b.arch,
+        "uptime": 9 * 86400 + 2 * 3600,
+        "cpu": { "model": b.model, "threads": b.threads, "ghz": b.ghz, "usage": cpu },
+        "memory": { "total": ram, "used": (mem * ram).round() },
+        "gpus": gpus,
+        "gpu": if b.platform == "darwin" { "ioreg" } else { "nvidia-smi" },
+    });
+    r["hardware"] = xenonet_app::system_stats::hardware_of(&r);
+    Some(r)
 }
 
 // ---------- the network's writes, on the simulated state ----------
@@ -615,6 +735,9 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             if let Some(on) = body.get("titlesOnly").and_then(Value::as_bool) {
                 sim.state["titlesOnly"] = json!(on);
+            }
+            if let Some(on) = body.get("shareLoad").and_then(Value::as_bool) {
+                sim.state["shareLoad"] = json!(on);
             }
             Reply::json(200, sim.state.clone())
         }
@@ -911,5 +1034,22 @@ mod tests {
         assert!(route(&ctx, &mut other).await.unwrap().is_none());
         assert_eq!(other.json(1024).await.unwrap()["to"], "actor:wren");
         clear(&ctx);
+    }
+
+    #[test]
+    fn each_made_up_machine_has_a_load_of_its_own_that_fits_system_v1() {
+        let doc = xenonet_base::json::parse(include_str!("../../../../schemas/system/v1.json")).unwrap();
+        let checker = xenonet_schema::check::compile(&[doc]).unwrap();
+        let now = 1_800_000_000_000.0;
+        let mut threads = Vec::new();
+        for host in ["studio", "laptop", "rack"] {
+            let r = made_up_reading(host, now).unwrap();
+            let c = checker.check(checker.root(0), &xenonet_schema::check::Data::from(&r), true);
+            assert!(c.ok(), "{host}: {r}");
+            threads.push(r["cpu"]["threads"].as_u64().unwrap());
+        }
+        assert_eq!(threads, [24, 12, 32], "each its own machine");
+        assert_eq!(made_up_reading("rack", now).unwrap()["gpus"].as_array().unwrap().len(), 2);
+        assert!(made_up_reading("desk", now).is_none());
     }
 }

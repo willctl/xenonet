@@ -25,6 +25,7 @@ export const ALONE = Object.freeze({
   rosterHead: null,
   rosterMismatch: [],
   titlesOnly: false,
+  shareLoad: true,
 });
 
 const list = (v) => (Array.isArray(v) ? v : []);

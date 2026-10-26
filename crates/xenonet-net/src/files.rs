@@ -42,6 +42,10 @@ pub struct NetFile {
     /// in LAN-only mode (never 0.0.0.0).
     pub lan: Option<String>,
     pub titles_only: bool,
+    /// Whether this host sends its load (CPU, GPU, memory and what the
+    /// parts are) to the window hosts' consoles that watch its map. On
+    /// unless the person turns it off.
+    pub share_load: bool,
     pub joined: i64,
 }
 
@@ -61,6 +65,7 @@ impl NetFile {
             },
             "lan": self.lan,
             "titlesOnly": self.titles_only,
+            "shareLoad": self.share_load,
             "joined": self.joined,
         })
     }
@@ -83,6 +88,7 @@ impl NetFile {
             },
             lan: v.get("lan").and_then(Value::as_str).map(str::to_string),
             titles_only: v.get("titlesOnly").and_then(Value::as_bool).unwrap_or(false),
+            share_load: v.get("shareLoad").and_then(Value::as_bool).unwrap_or(true),
             joined: v.get("joined").and_then(Value::as_i64).unwrap_or(0),
         })
     }

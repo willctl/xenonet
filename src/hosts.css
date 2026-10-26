@@ -75,6 +75,21 @@
   color: var(--muted);
 }
 .ev-title .host-tag { margin-right: 0; }
+/* This machine's mark in network mode: its id with a small "here", in the
+   accent, so it reads as a machine like the others and as the one you're at. */
+.host-tag.here { color: var(--text); border-color: rgb(var(--accent-rgb) / 0.4); }
+.host-tag.here i,
+.host-chip i.here {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.host-tag.here i { margin-left: 5px; }
+.host-chip i.here { margin-left: -2px; }
+.al-host.here { border-color: rgb(var(--accent-rgb) / 0.35); }
 
 .al-host {
   flex: none;

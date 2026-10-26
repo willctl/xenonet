@@ -13,6 +13,7 @@ import { isActorId } from "./actors.js";
 import { formOf } from "./actors-model.js";
 import { tokenWords } from "./actor-requests.js";
 import { environmentState } from "./environment.js";
+import { hereId } from "./hosts.js";
 
 export const VERSION = 1;
 
@@ -74,6 +75,9 @@ export function createDriver(app) {
     // From another machine (hosts.js): which, and whether it's live; one in
     // your network says so, and for a session whether it waits on you.
     if (n.host) Object.assign(out, { host: n.host, ...(n.stale ? { stale: true } : {}), ...(n.network ? { network: n.network } : {}), ...(n.presence ? { waits: !!n.presence.waits } : {}) });
+    // In network mode, this machine's are labelled too, for showing only:
+    // they have no host, which is what marks another machine's.
+    else if (n.kind !== "core" && n.kind !== "host" && hereId()) out.machine = { id: hereId(), here: true };
     return out;
   }
 
@@ -394,9 +398,33 @@ export function createDriver(app) {
 
     // This computer's load as the system panel shows it (system-panel.js):
     // whether it shows, the CPU, memory and GPU, where the GPU's figures
-    // come from, how much history it has, and its text. Read-only.
+    // come from, how much history it has, and its text. In network mode,
+    // also its title (Machines), the network's sums, each machine's part of
+    // each (network) and each machine (hosts). Read-only.
     system() {
       return app.system?.() ?? null;
+    },
+
+    // The Machines view (machines.js): with no options, how it stands.
+    // `open` opens it (at a machine: its key, @here or an id), `filter`
+    // ({ machines: [keys], platform, gpu, online }) filters it, its
+    // machines being the Filters chips, `sort` sorts it (name, cpu, gpu,
+    // ram, seen), `view` shows cards or table, and `close` closes it.
+    // Returns its state once the view has settled.
+    async machines({ open, at = null, filter, sort, view, close } = {}, opts) {
+      const m = app.machines;
+      if (!m) throw new Error("This page has no Machines view.");
+      if (close) {
+        const st = await act(() => m.close(), opts);
+        return { ...st, machines: m.state };
+      }
+      let st = null;
+      if (open || at) st = await act(() => m.open(at), opts);
+      if (filter || sort != null || view != null) {
+        if (!m.isOpen) throw new Error("Open the Machines view first: machines({ open: true })");
+        st = await act(() => m.set({ filter, sort, view }), opts);
+      }
+      return { ...(st ?? {}), machines: m.state };
     },
 
     // Spotify as the chip shows it (spotify-ui.js): whether it's connected,

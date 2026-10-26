@@ -2,7 +2,9 @@
 // (src/system-panel.js): the CPU (its model, how busy, each core), memory,
 // and the GPU (its name, how busy, its memory). Read only while a window
 // asks, every couple of seconds; a minute after the last ask, the GPU
-// reader stops too. None of it leaves the computer.
+// reader stops too. In a network, the service sends a reading every few
+// seconds to the window hosts' consoles that watch this machine's map,
+// unless it doesn't share its load (wire-app's hosts/relay.rs).
 //
 // CPU and memory come from Node. The GPU from what the system has:
 //   - NVIDIA's nvidia-smi (Windows, Linux), left running in its loop mode,
@@ -26,6 +28,17 @@ const STALE_MS = 15e3; // a GPU reading older than this isn't shown
 const MIB = 1024 * 1024;
 
 const frac = (part, whole) => (whole > 0 ? Math.min(1, Math.max(0, part / whole)) : 0);
+
+// What the parts are (system/v1's hardware), from the reading itself: the
+// console's Machines view shows it for each machine of a network, so no
+// other reader is needed.
+const hardwareOf = (r) => ({
+  platform: r.platform,
+  arch: r.arch,
+  cpu: { model: r.cpu.model, threads: r.cpu.threads, ghz: r.cpu.ghz },
+  memory: { total: r.memory.total },
+  gpus: r.gpus.map((g) => ({ name: g.name, memTotal: g.memTotal, shared: g.shared })),
+});
 const num = (s) => {
   const n = Number(String(s ?? "").trim());
   return String(s ?? "").trim() !== "" && Number.isFinite(n) ? n : null;
@@ -372,6 +385,7 @@ export function createSystemStats({ platform = process.platform, env = process.e
         if (history.length > HISTORY) history.shift();
       }
       last = { at, platform, arch: osm.arch?.() ?? null, uptime: Math.round(osm.uptime?.() ?? 0), cpu: c, memory, gpus: g ?? [], gpu: gpu ? (g == null ? "unavailable" : gpu.source) : null, history: history.slice() };
+      last.hardware = hardwareOf(last);
       lastAt = at;
       return last;
     },
@@ -405,7 +419,7 @@ export function createDemoSystemStats({ now = Date.now } = {}) {
         history.push({ at: t, cpu: h.cpu, gpu: h.gpu, mem: h.mem });
       }
       const cores = Array.from({ length: 16 }, (_, i) => Math.min(1, Math.max(0.02, s.cpu + 0.3 * wave(at, 3e3 + i * 410, i))));
-      return {
+      const r = {
         at,
         platform: "linux",
         arch: "x64",
@@ -416,6 +430,7 @@ export function createDemoSystemStats({ now = Date.now } = {}) {
         gpu: "demo",
         history,
       };
+      return { ...r, hardware: hardwareOf(r) };
     },
     stop() {},
   };

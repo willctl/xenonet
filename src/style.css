@@ -59,6 +59,21 @@
   --archived: #4a5868;
   --archived-rgb: 74 88 104;
   --cyan: var(--accent);
+  /* Each machine's color in a network (the load panel and the Machines
+     view): clear of the accent, the apps' colors and violet, which the
+     rings and the map use. */
+  --host-0: #6b8cff;
+  --host-0-rgb: 107 140 255;
+  --host-1: #ff79c6;
+  --host-1-rgb: 255 121 198;
+  --host-2: #efdfae;
+  --host-2-rgb: 239 223 174;
+  --host-3: #b9c3d2;
+  --host-3-rgb: 185 195 210;
+  --host-4: #2aa198;
+  --host-4-rgb: 42 161 152;
+  --host-5: #d08770;
+  --host-5-rgb: 208 135 112;
   --panel: rgb(var(--surface-rgb) / 0.58);
   --panel-solid: rgb(var(--surface-low-rgb) / 0.92);
   --line: rgb(var(--accent-rgb) / 0.22);
@@ -728,6 +743,69 @@ body.plain-panels .palette .p-backdrop {
   .sysmon .sm-more { display: none; }
   .sysmon .sm-cores { margin-bottom: 0; }
 }
+
+/* In a network (Machines): each machine's part of each ring, a row for
+   each machine, and this machine's cores under its id. */
+.sm-title { cursor: pointer; }
+.sm-title:hover,
+.sm-title:focus-visible { color: var(--text); outline: none; }
+.sysmon:not(.net) .sm-net { display: none; }
+.sm-stacks { display: grid; gap: 4px; margin: 6px 0 2px; }
+.sm-stack { display: grid; grid-template-columns: 26px minmax(0, 1fr) 30px; align-items: center; gap: 6px; }
+.sm-stack-k { font-family: var(--mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.sm-stack-v { font-family: var(--mono); font-size: 9.5px; text-align: right; color: var(--text); }
+.sm-stack[data-level="warn"] .sm-stack-v { color: var(--attention); }
+.sm-stack[data-level="crit"] .sm-stack-v { color: var(--danger); }
+.sm-stack-bar {
+  display: flex;
+  gap: 1px;
+  height: 7px;
+  padding: 1px;
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 0.2);
+  background: repeating-linear-gradient(90deg, rgb(var(--accent-rgb) / 0.07) 0 1px, transparent 1px 4px);
+}
+.sm-stack-bar i {
+  flex: none;
+  min-width: 0;
+  background: linear-gradient(90deg, var(--hc), rgb(var(--hc-rgb) / 0.55));
+  box-shadow: 0 0 6px rgb(var(--hc-rgb) / 0.45);
+  transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sm-busiest { margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 9px; color: var(--muted); }
+.sm-busiest:empty { display: none; }
+.sm-busiest b { margin-right: 6px; font-size: 8px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.sm-busiest em { font-style: normal; color: var(--text); }
+.sm-hosts { display: grid; gap: 1px; margin: 6px 0 2px; }
+.sm-host {
+  display: grid;
+  grid-template-columns: 6px 15px minmax(0, 1fr) 32px 32px 68px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border-left: 1px solid transparent;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text);
+  cursor: pointer;
+}
+.sm-host:hover,
+.sm-host:focus-visible { outline: none; border-left-color: var(--hc); background: rgb(var(--hc-rgb) / 0.08); }
+.sm-host.off { opacity: 0.45; }
+.sm-sw { width: 6px; height: 10px; background: var(--hc); box-shadow: 0 0 5px rgb(var(--hc-rgb) / 0.6); }
+.sm-host.quiet .sm-sw { background: transparent; box-shadow: inset 0 0 0 1px var(--hc); }
+.sm-os.sm-os-s { width: 15px; height: 15px; margin: -3px 0; filter: none; }
+.sm-host .sm-os-name { font-size: 7px; color: var(--dim); }
+.sm-host-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-host-v { text-align: right; color: var(--muted); }
+.sm-host-v small { margin-left: 1px; font-size: 7px; color: var(--dim); }
+.sm-host-why { grid-column: 4 / -1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; color: var(--dim); }
+.sysmon em.here,
+.sm-local em.here { margin-left: 5px; font-style: normal; font-size: 7.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.sm-note { margin: 4px 0 0; font-size: 9.5px; line-height: 1.35; color: var(--muted); }
+.sm-local { display: flex; align-items: baseline; gap: 0; margin: 8px 0 -4px; font-family: var(--mono); font-size: 9px; color: var(--muted); }
+.sm-local b { font-weight: 500; color: var(--text); }
+.sm-local span { margin-left: auto; font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+#sysmon-tick:not(:has(svg)) { font-size: 9.5px; }
 
 /* ---------- left column ---------- */
 
@@ -3581,6 +3659,63 @@ ol.d-list.id-signins li { cursor: default; }
 @media (max-width: 960px) {
   .st-grid { grid-template-columns: minmax(0, 1fr); }
   .st-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- the Machines view (src/machines.js) ---------- */
+
+.mc-kpis { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mc-filters { display: grid; gap: 6px; margin: 0 0 12px; }
+.mc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.mc-k { width: 70px; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+.mc-gap { width: 14px; }
+.mc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mc-chip:hover, .mc-chip:focus-visible { color: var(--text); border-color: var(--line-strong); }
+.mc-chip.on { color: var(--text); border-color: var(--line-strong); background: rgb(var(--accent-rgb) / 0.07); box-shadow: inset 0 -2px 0 var(--accent); }
+.mc-chip[style] .sm-sw { width: 6px; height: 10px; }
+.machines em.here { margin-left: 2px; font-style: normal; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.mc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+.mc-card { border-top: 2px solid var(--hc); }
+.mc-card.off { opacity: 0.55; }
+.mc-card header { align-items: center; }
+.mc-card header .sm-sw { flex: none; width: 6px; height: 14px; background: var(--hc); box-shadow: 0 0 6px rgb(var(--hc-rgb) / 0.6); }
+.mc-os { width: 22px; height: 22px; flex: none; color: var(--accent); }
+.mc-card header { margin-bottom: 2px; }
+.mc-meta { margin: 0 0 6px 34px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.mc-meta:empty { display: none; }
+.mc-rings { display: flex; gap: 14px; margin: 4px 0 10px; }
+.mc-ring { --c: var(--accent); --c-rgb: var(--accent-rgb); display: grid; justify-items: center; align-content: start; gap: 1px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.mc-ring[data-ring="gpu"] { --c: var(--codex); --c-rgb: var(--codex-rgb); }
+.mc-ring[data-ring="ram"] { --c: var(--violet); --c-rgb: var(--violet-rgb); }
+.mc-ring[data-level="warn"] { --c: var(--attention); --c-rgb: var(--attention-rgb); }
+.mc-ring[data-level="crit"] { --c: var(--danger); --c-rgb: var(--danger-rgb); }
+.mc-ring[data-level="off"] { --c: var(--dim); --c-rgb: var(--dim-rgb); }
+.mc-ring svg { width: 56px; height: 56px; overflow: visible; }
+.mc-ring .mc-track { fill: none; stroke: rgb(var(--c-rgb) / 0.14); stroke-width: 5; stroke-dasharray: 3.4 1.4; }
+.mc-ring .mc-fill { fill: none; stroke: var(--c); stroke-width: 5; filter: drop-shadow(0 0 3px rgb(var(--c-rgb) / 0.6)); transition: stroke-dasharray 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.mc-ring text { font-family: var(--mono); font-size: 12px; text-anchor: middle; fill: var(--bright); }
+.mc-ring span { letter-spacing: 0.2em; color: var(--c); }
+.mc-ring small { font-size: 9.5px; color: var(--muted); }
+.mc-hw { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 3px 10px; margin: 0 0 10px; font-size: 12.5px; }
+.mc-hw dt { grid-column: 1; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); padding-top: 2px; }
+.mc-hw dd { grid-column: 2; margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.mc-hw dd em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.mc-hw dd.dim { color: var(--muted); }
+.mc-none { margin: 4px 0 10px; font-size: 12.5px; color: var(--muted); }
+.mc-sessions { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.mc-sessions span { flex: 1; min-width: 0; }
+.mc-table td:first-child { color: var(--bright); }
+@media (max-width: 960px) {
+  .mc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ---------- films of the day (src/film.js) ---------- */

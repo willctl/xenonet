@@ -4,7 +4,7 @@
 // maps; no browser, no three.js.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { depthsOf, hostLayout, installHostLayout, standing, labelOf, hostVisual, whereText, whereHtml, sameHost, hostRows, tipText, hostTag, alertFrom, alertHostHtml, alertText, collisionFrom, hostOfId, createHostFilters, capHosts, decorate, HERE, STALE_LIGHT, HOST_SCALE, HOST_CAP } from "../src/hosts.js";
+import { depthsOf, hostLayout, installHostLayout, standing, labelOf, hostVisual, whereText, whereHtml, sameHost, hostRows, tipText, hostTag, alertFrom, alertHostHtml, alertText, collisionFrom, hostOfId, createHostFilters, capHosts, decorate, setHere, hereId, machineOf, HERE, STALE_LIGHT, HOST_SCALE, HOST_CAP } from "../src/hosts.js";
 
 // This machine: core → a group → a project → two sessions, one spawned by
 // the other. Each host: its host node → a project → a session.
@@ -213,6 +213,35 @@ test("the alert strip: where a remote alert is, as of when for a host that isn't
   assert.deepEqual(collisionFrom({ a: "claude:1", b: "codex:2" }), {});
   assert.equal(hostOfId("@vm1:project:~/x"), "vm1");
   assert.equal(hostOfId("claude:1"), null);
+});
+
+test("in network mode this machine's sessions are labelled with its id and here, for showing only", () => {
+  const index = new Map([["@vm1:core", { id: "@vm1:core", kind: "host", host: "vm1", state: "live" }]]);
+  const mine = { id: "claude:1", kind: "session", title: "Add refunds" };
+  const theirs = { id: "@vm1:claude:9", kind: "session", host: "vm1" };
+  assert.equal(setHere("studio"), true);
+  try {
+    assert.equal(hereId(), "studio");
+    assert.equal(whereText(mine, index), "on studio · here");
+    assert.match(whereHtml(mine, index), /insp-where live here.*on studio · here.*this machine/);
+    assert.match(hostTag(mine), /host-tag here.*studio<i>here<\/i>/);
+    assert.equal(tipText(mine, index), "on studio · here");
+    assert.equal(tipText({ id: "core", kind: "core" }, index), "", "not this machine's core");
+    assert.deepEqual(alertFrom(mine), { here: "studio" }, "never a host: that's what marks another machine's");
+    assert.match(alertHostHtml({ here: "studio" }), /al-host here">on studio · here/);
+    assert.deepEqual(collisionFrom({ a: "claude:1", b: "codex:2" }), { here: "studio" });
+    assert.deepEqual([machineOf(mine), machineOf(theirs)], [{ id: "studio", here: true }, { id: "vm1" }]);
+    // Another machine's say what they said before.
+    assert.equal(whereText(theirs, index), "on vm1 · live");
+    assert.deepEqual(alertFrom(theirs), { host: "vm1", stale: false, asOf: null });
+    assert.match(hostTag({ host: "<b>" }, "<i>"), /&lt;b&gt;/);
+    assert.match(hostTag(mine, "<i>"), /&lt;i&gt;/, "this machine's id, escaped too");
+  } finally {
+    assert.equal(setHere(null), true);
+  }
+  assert.equal(setHere(null), false, "no change");
+  assert.equal(hostTag(mine), "", "out of a network, as before");
+  assert.equal(machineOf(mine), null);
 });
 
 test("the machines' chips: one per machine with its sessions, and a filter that shows only some", () => {

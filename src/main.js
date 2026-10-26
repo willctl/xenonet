@@ -42,13 +42,15 @@ import { syncEnvironment } from "./environment.js";
 import { tildePath, escapeHtml } from "./format.js";
 import { createSpotifyChip } from "./spotify-ui.js";
 import { createSystemPanel } from "./system-panel.js";
+import { createMachinesView } from "./machines.js";
 import { createSheets } from "./sheets.js";
 import { createYou } from "./you.js";
 import { isActorId } from "./actors.js";
 import { youHere, createTargetWatch, createSaidEcho } from "./actors-model.js";
 import { createWindowCalls, createActorRequests, createActorTokens } from "./actor-requests.js";
 import { createRemoteConnections } from "./remote-panel.js";
-import { createHostFilters, decorate as decorateHosts, hostOfId } from "./hosts.js";
+import { createHostFilters, decorate as decorateHosts, hostOfId, setHere } from "./hosts.js";
+import { inNetwork } from "./network-model.js";
 import { chimes } from "./live-words.js";
 import { renamable } from "../core/rename.js";
 import "./hosts.css";
@@ -445,9 +447,10 @@ ambient.attach({ ear: () => scene.ear(), where: (id) => scene.where(id) });
 // it plays, XenoNet's music steps aside.
 const spotifyChip = createSpotifyChip({ el: document.getElementById("spotify"), calls: windowCalls, modals, toast: (m, b) => hud.toast(m, b), sfx, ambient });
 spotifyChip.refresh();
-// This computer's CPU, GPU and memory, between the status and Token use
-// panels (system-panel.js).
-const systemPanel = createSystemPanel({ el: document.getElementById("sysmon"), tick: document.getElementById("sysmon-tick"), drawn: () => scene.drawingState().fps > 0 });
+// The load, between the status and Token use panels (system-panel.js):
+// this computer's, or in a network every machine's; its title and its
+// machines' rows open the Machines view (machines.js).
+const systemPanel = createSystemPanel({ el: document.getElementById("sysmon"), tick: document.getElementById("sysmon-tick"), drawn: () => scene.drawingState().fps > 0, onOpen: (key) => machinesView.open(key) });
 
 const alerts = createAlerts({
   sfx,
@@ -478,6 +481,7 @@ const network = createNetwork({
   toast: (m, b) => hud.toast(m, b),
   onChange: (v) => {
     alerts.setRemote(v.waits);
+    systemPanel.setNetwork(v.state);
     mapNetwork(v);
   },
   message: (id) => messageTo(id),
@@ -488,6 +492,9 @@ const network = createNetwork({
 // What waits on you sounds only where you are, in a network: one rule for
 // this machine's waits and the others'.
 alerts.setChime(() => chimeHere(network.state));
+// The load panel's larger view: each machine's load, parts and sessions.
+// Its machine chips are the Filters chips.
+const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph: () => fullGraph, net: () => network.state });
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
@@ -666,7 +673,17 @@ const commandList = [
   { id: "mute", label: "Mute or unmute sound", key: "M", run: () => ambient.toggle() },
   // The decision model's OpenRouter key (core/decide.js): typed here once,
   // kept in your credential store, never shown again.
-  { id: "system-panel", label: "Show or hide this computer's load", keywords: "system cpu gpu ram memory vram load usage hardware stats monitor panel", run: () => { systemPanel.toggle(); hud.toast(systemPanel.on ? "Showing this computer's load" : "Hid this computer's load. Bring it back from the palette."); } },
+  {
+    id: "system-panel",
+    label: "Show or hide the load: This computer, or Machines in a network",
+    keywords: "system cpu gpu ram memory vram load usage hardware stats monitor panel machines network",
+    run: () => {
+      systemPanel.toggle();
+      const what = systemPanel.network ? "the machines' load" : "this computer's load";
+      hud.toast(systemPanel.on ? `Showing ${what}` : `Hid ${what}. Bring it back from the palette.`);
+    },
+  },
+  { id: "machines", label: "Machines: each machine's load, parts and sessions", keywords: "system cpu gpu ram memory vram load hardware network computers hosts laptop server compare", run: () => machinesView.open() },
   { id: "spotify", label: "Connect Spotify, or change what it does", keywords: "spotify music player play pause skip now playing volume duck", run: () => spotifyChip.open() },
   { id: "decision-key", label: "Set the OpenRouter key for decision models", keywords: "openrouter jev decide decision model key router typesafe", run: () => decisionKey() },
   { id: "route-task", label: "Route task", keywords: "jevrouter jev decision suggest agent specialist", run: () => integrationsPanel.open("routing") },
@@ -1003,12 +1020,20 @@ function applyGraph(graph = serverGraph) {
 // The network's other machines changed (network.js's view): drawn again
 // only when what the map shows of them did.
 function mapNetwork(view) {
+  // Network mode: this machine's sessions are labelled with its id, as the
+  // others' are with theirs (hosts.js), so every console reads the same.
+  const relabel = setHere(inNetwork(view.state) ? view.state.self?.id : null);
   const part = networkPart(view.state, view.agents);
   const key = partKey(part);
-  if (key === netKey) return;
+  if (key === netKey) {
+    if (relabel && serverGraph) applyGraph();
+    if (relabel && lastLive) applyLive(lastLive);
+    return;
+  }
   netKey = key;
   netPart = part;
   if (serverGraph) applyGraph();
+  if (relabel && lastLive) applyLive(lastLive);
 }
 
 function reveal(id) {
@@ -1392,6 +1417,7 @@ if (import.meta.env.DEV || desktop) {
     sound: () => ({ state: ambient.state, mode: ambient.mode, heard: ambient.heard() }),
     spotify: () => spotifyChip.state,
     system: () => systemPanel.state,
+    machines: machinesView,
     sheet: (id) => (id === undefined ? { current: sheets.current, narrow: sheets.narrow } : (sheets.show(id ?? ""), { current: sheets.current, narrow: sheets.narrow })),
     spend: () => ({ costs: telemetry.snapshot?.costs ?? null, openrouter: telemetry.spend?.openrouter ?? null, byActor: telemetry.spend?.actors ?? null, actors: telemetry.actorSpend, shown: !document.getElementById("spend").hidden, text: document.getElementById("spend").innerText.replace(/\s+/g, " ").trim(), gauge: document.querySelector("#gauges .gauge.or")?.innerText.replace(/\s+/g, " ").trim() ?? null }),
     refreshSpend: () => telemetry.refreshSpend(),

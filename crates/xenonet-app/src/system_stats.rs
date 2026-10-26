@@ -1,7 +1,9 @@
 //! core/system-stats.js: what the computer running XenoNet is doing, for
 //! the console's system panel: the CPU (its model, how busy, each core),
 //! memory, and the GPU (its name, how busy, its memory). Read only while a
-//! window asks; none of it leaves the computer.
+//! window asks. In a network, the service sends a reading every few
+//! seconds to the window hosts' consoles that watch this machine's map,
+//! unless it doesn't share its load (wire-app's hosts/relay.rs).
 //!
 //! The GPU comes from what the system has: NVIDIA's nvidia-smi left
 //! running in its loop mode, a Mac's IOAccelerator statistics (ioreg), the
@@ -73,6 +75,20 @@ pub fn cpu_model(model: &str) -> Option<String> {
 
 /// What nvidia-smi is asked for, a line a GPU.
 pub const NVIDIA_QUERY: &str = "index,name,utilization.gpu,memory.used,memory.total,temperature.gpu";
+
+/// What the parts are (system/v1's hardware), from the reading itself: the
+/// console's Machines view shows it for each machine of a network, so no
+/// other reader is needed.
+pub fn hardware_of(r: &Value) -> Value {
+    let gpus: Vec<Value> = r["gpus"].as_array().into_iter().flatten().map(|g| json!({ "name": g["name"], "memTotal": g["memTotal"], "shared": g["shared"] })).collect();
+    json!({
+        "platform": r["platform"],
+        "arch": r["arch"],
+        "cpu": { "model": r["cpu"]["model"], "threads": r["cpu"]["threads"], "ghz": r["cpu"]["ghz"] },
+        "memory": { "total": r["memory"]["total"] },
+        "gpus": gpus,
+    })
+}
 
 fn gpu(index: f64, name: &str, usage: Option<f64>, mem_used: Option<f64>, mem_total: Option<f64>, temp: Option<f64>, shared: bool) -> Value {
     json!({ "index": num_v(index), "name": name, "usage": opt(usage), "memUsed": opt(mem_used), "memTotal": opt(mem_total), "temp": opt(temp), "shared": shared })
@@ -527,7 +543,9 @@ impl Stats {
         };
         self.last_at = at;
         self.has_last = true;
-        json!({ "at": num_v(at), "platform": platform, "arch": arch, "uptime": num_v(js_round(uptime)), "cpu": cpu, "memory": { "total": num_v(total), "used": num_v(used) }, "gpus": gpus.unwrap_or_default(), "gpu": gpu, "history": self.history })
+        let mut r = json!({ "at": num_v(at), "platform": platform, "arch": arch, "uptime": num_v(js_round(uptime)), "cpu": cpu, "memory": { "total": num_v(total), "used": num_v(used) }, "gpus": gpus.unwrap_or_default(), "gpu": gpu, "history": self.history });
+        r["hardware"] = hardware_of(&r);
+        r
     }
 }
 
@@ -557,7 +575,7 @@ pub fn demo_reading(at: f64) -> Value {
         })
         .collect();
     let cores: Vec<Value> = (0..16).map(|i| num_v((cpu + 0.3 * wave(at, 3e3 + f64::from(i) * 410.0, f64::from(i))).clamp(0.02, 1.0))).collect();
-    json!({
+    let mut r = json!({
         "at": num_v(at),
         "platform": "linux",
         "arch": "x64",
@@ -567,7 +585,9 @@ pub fn demo_reading(at: f64) -> Value {
         "gpus": [{ "index": 0, "name": "NVIDIA GeForce RTX 4080", "usage": num_v(gpu_u), "memUsed": num_v(js_round((7.4 + 1.2 * wave(at, 30e3, 0.0)) * GB)), "memTotal": num_v(16.0 * GB), "temp": num_v(js_round(56.0 + 9.0 * gpu_u)), "shared": false }],
         "gpu": "demo",
         "history": history,
-    })
+    });
+    r["hardware"] = hardware_of(&r);
+    r
 }
 
 #[cfg(test)]

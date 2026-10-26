@@ -26,6 +26,7 @@ const ENGINE_MESSAGE: &str = include_str!("../../../../schemas/engine/message/v1
 const HOST_HELLO: &str = include_str!("../../../../schemas/host/hello/v1.json");
 const HOST_LIST: &str = include_str!("../../../../schemas/host/list/v1.json");
 const GRAPH: &str = include_str!("../../../../schemas/graph/v1.json");
+const SYSTEM: &str = include_str!("../../../../schemas/system/v1.json");
 
 /// The kinds of node another host's map may hold (graph.js's GRAPH_NODES):
 /// the core and host nodes are this machine's to make.
@@ -62,8 +63,8 @@ fn kind_of(node: &Value, docs: &[Value], by_uri: &HashMap<String, usize>) -> Opt
 
 impl HostSchemas {
     pub fn new() -> Self {
-        let mut docs: Vec<Value> = [SESSION, PROJECT, IDENTITY, LIVE_SESSION, LIVE_ACTIVITY, ENGINE_AGENT, ENGINE_MESSAGE, HOST_HELLO].iter().map(|t| parse(t)).collect();
-        let names = ["session-doc", "project-doc", "identity", "live-session", "live-activity", "engine-agent", "engine-message", "hello"];
+        let mut docs: Vec<Value> = [SESSION, PROJECT, IDENTITY, LIVE_SESSION, LIVE_ACTIVITY, ENGINE_AGENT, ENGINE_MESSAGE, HOST_HELLO, SYSTEM].iter().map(|t| parse(t)).collect();
+        let names = ["session-doc", "project-doc", "identity", "live-session", "live-activity", "engine-agent", "engine-message", "hello", "system"];
         let mut named: HashMap<String, usize> = names.iter().enumerate().map(|(i, n)| (n.to_string(), i)).collect();
         let by_uri_of = |docs: &[Value]| -> HashMap<String, usize> { docs.iter().enumerate().filter_map(|(i, d)| Some((d.get("$id")?.as_str()?.to_string(), i))).collect() };
         // A host entry: host/list/v1's hosts' items, as a document of its own.
@@ -334,6 +335,7 @@ impl merge::Schemas for MergeSchemas<'_> {
             merge::Kind::LiveActivity => "live-activity".into(),
             merge::Kind::EngineAgent => "engine-agent".into(),
             merge::Kind::EngineMessage => "engine-message".into(),
+            merge::Kind::System => "system".into(),
         };
         self.0.clean_named(&name, value)
     }
@@ -382,5 +384,22 @@ mod tests {
         assert_eq!(m.clean(merge::Kind::Node("session"), &json!({ "kind": "session" })), None, "one that doesn't pass is left out");
         let any = HostSchemas::any(&json!({ "a": [1, { "b": 2 }] }));
         assert_eq!(any, json!({}));
+    }
+
+    #[test]
+    fn a_hosts_load_fits_system_v1_and_keeps_only_what_it_declares() {
+        let s = HostSchemas::new();
+        let mut m = MergeSchemas(&s);
+        use merge::Schemas;
+        // The demo's reading, as this machine's own /api/system answers it.
+        let demo = xenonet_app::system_stats::demo_reading(1_800_000_000_000.0);
+        assert_eq!(m.clean(merge::Kind::System, &demo).as_ref(), Some(&demo), "it fits, with nothing it doesn't declare");
+        let mut sent = demo.clone();
+        sent["cpu"]["script"] = json!("<b>x</b>");
+        sent["hardware"]["serial"] = json!("C02XYZ");
+        let kept = m.clean(merge::Kind::System, &sent).unwrap();
+        assert!(kept["cpu"].get("script").is_none() && kept["hardware"].get("serial").is_none(), "{kept}");
+        sent["cpu"]["usage"] = json!(2);
+        assert_eq!(m.clean(merge::Kind::System, &sent), None, "a share past 1 isn't one");
     }
 }

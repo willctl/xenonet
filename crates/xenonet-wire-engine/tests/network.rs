@@ -298,6 +298,11 @@ async fn presence_puts_other_hosts_agents_in_peers_after_this_ones() {
         (json!("laptop"), json!(true), json!("fix/login"), json!("github.com/acme/atlas"))
     );
     assert!(far["seen"].is_number());
+    // Every row says which machine it's on, this one's too, for showing:
+    // the local one has no host, so nothing goes to it over the network.
+    let near = &repo[0];
+    assert_eq!((near["machine"].clone(), near["here"].clone(), near.get("host").cloned()), (json!("studio"), json!(true), None), "{near}");
+    assert_eq!((far["machine"].clone(), far.get("here").cloned()), (json!("laptop"), None));
     let machine = e.peers(A, "machine").await.unwrap();
     assert_eq!(ids(&machine), vec![A2.to_string(), format!("@laptop:{B}"), format!("@vm1:{C}")]);
     let me = e.whoami(A).await.unwrap();

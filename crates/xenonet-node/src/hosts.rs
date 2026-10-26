@@ -605,6 +605,7 @@ impl merge::Schemas for JsSchemas<'_> {
             merge::Kind::LiveActivity => "live-activity".into(),
             merge::Kind::EngineAgent => "engine-agent".into(),
             merge::Kind::EngineMessage => "engine-message".into(),
+            merge::Kind::System => "system".into(),
         };
         match self.clean.call((name, Json(value.clone())).into()) {
             Ok(Json(Value::Null)) => None,

@@ -1262,6 +1262,10 @@ impl Net for Shared {
         self.network().is_some_and(|n| n.titles_only)
     }
 
+    fn share_load(&self) -> bool {
+        self.network().is_some_and(|n| n.share_load)
+    }
+
     fn is_window_host(&self) -> bool {
         self.network().is_some_and(|n| self.roster().view_ref().is_some_and(|v| v.is_window(&n.host)))
     }
@@ -1502,6 +1506,7 @@ impl Node {
             gateway: Pin { host: host.into(), key_id: p.key_id(), sign: p.sign_b64(), seal: p.seal_b64(), address: lan.or(address).map(str::to_string) },
             lan: lan.map(str::to_string),
             titles_only: false,
+            share_load: true,
             joined: at,
         };
         self.adopt(net, key, roster)?;
@@ -1567,6 +1572,7 @@ impl Node {
             gateway: Pin { host: view.gateway.clone(), key_id: gw_keys.key_id(), sign: gw_keys.sign_b64(), seal: gw_keys.seal_b64(), address: Some(address.to_string()) },
             lan: None,
             titles_only: false,
+            share_load: true,
             joined: n.now() as i64,
         };
         let name = net.name.clone();
@@ -1718,14 +1724,18 @@ impl Node {
         Ok(t)
     }
 
-    /// Settings: titles only, and the LAN address the gateway listens on.
-    pub fn settings(&self, titles_only: Option<bool>, lan: Option<Option<String>>) -> R<Value> {
+    /// Settings: titles only, whether this host shares its load, and the
+    /// LAN address the gateway listens on.
+    pub fn settings(&self, titles_only: Option<bool>, share_load: Option<bool>, lan: Option<Option<String>>) -> R<Value> {
         let n = &self.shared;
         {
             let mut guard = n.net.writing();
             let net = guard.as_mut().ok_or_else(not_in)?;
             if let Some(t) = titles_only {
                 net.titles_only = t;
+            }
+            if let Some(s) = share_load {
+                net.share_load = s;
             }
             if let Some(lan) = lan {
                 if net.gateway.host != net.host {
@@ -1783,6 +1793,7 @@ impl Node {
                 "rosterHead": null,
                 "rosterMismatch": [],
                 "titlesOnly": false,
+                "shareLoad": true,
             });
         };
         let (view, head) = {
@@ -1849,6 +1860,7 @@ impl Node {
             "rosterHead": head,
             "rosterMismatch": n.roster_mismatch(),
             "titlesOnly": net.titles_only,
+            "shareLoad": net.share_load,
         });
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());

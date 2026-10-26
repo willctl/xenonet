@@ -142,6 +142,12 @@ pub trait Net: Send + Sync {
     fn titles_only(&self) -> bool {
         false
     }
+    /// Whether this host sends its load (CPU, GPU, memory and what the
+    /// parts are) to the window hosts' consoles that watch its map
+    /// (Settings → Network; section 7). Read at each send.
+    fn share_load(&self) -> bool {
+        true
+    }
     /// Whether this host is a window host in the roster: only one is shown
     /// other hosts' maps (section 7).
     fn is_window_host(&self) -> bool {

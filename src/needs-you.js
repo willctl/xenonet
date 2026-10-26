@@ -15,6 +15,7 @@ import { escapeHtml as h, timeAgo } from "./format.js";
 import { askedBy, asksFor, leftWords, JOINS_ALLOW, ARM_MS } from "./actor-requests.js";
 import { CAPABILITY_WORDS, PRODUCT_NAMES } from "./actors-model.js";
 import { gist } from "./alerts.js";
+import { hereId } from "./hosts.js";
 import { waitsWords, countOf } from "../core/needs-you.js";
 import "./needs-you.css";
 
@@ -76,7 +77,9 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
   function rowHtml(it, n) {
     const key = h(it.key);
     const mark = it.kind === "question" || it.kind === "permission" ? `<i class="sw ${h(it.app ?? "")}"></i>` : `<span class="ny-mark" title="${it.kind === "actor" ? "An actor" : "A program"}">◇</span>`;
-    const host = it.host ? `<span class="ny-host${it.stale ? " stale" : ""}">${it.stale ? `${h(it.host)} not live` : `on ${h(it.host)}`}</span>` : "";
+    // Its machine: another's, or in network mode this one's, marked here.
+    const session = it.kind === "question" || it.kind === "permission";
+    const host = it.host ? `<span class="ny-host${it.stale ? " stale" : ""}">${it.stale ? `${h(it.host)} not live` : `on ${h(it.host)}`}</span>` : session && hereId() ? `<span class="ny-host here">on ${h(hereId())} · here</span>` : "";
     let lines = "";
     let acts = "";
     if (it.kind === "question" || it.kind === "permission") {

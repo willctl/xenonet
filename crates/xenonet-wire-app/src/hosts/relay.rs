@@ -24,6 +24,9 @@
 //!   frames a minute go round), the map at most once a second and the live
 //!   state every half second within it, other events gathered in order, a
 //!   ping when it has been quiet for 15 s.
+//! - Every five seconds, unless this host doesn't share its load, its own
+//!   GET /api/system goes as a `system` event, inside those bodies, for
+//!   the console's Machines panel: without its history or each core.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -65,6 +68,8 @@ pub struct Timing {
     /// roster for hosts that came or went.
     pub renew_ms: f64,
     pub roster_ms: u64,
+    /// How often this machine's load goes to a console that watches it.
+    pub system_ms: f64,
 }
 
 impl Default for Timing {
@@ -79,6 +84,7 @@ impl Default for Timing {
             get_ms: core::GET_TIMEOUT_MS,
             renew_ms: wire::RENEW_MS,
             roster_ms: 3000,
+            system_ms: wire::SYSTEM_MS,
         }
     }
 }
@@ -285,8 +291,14 @@ impl RelaySink for RelayServer {
 
 /// A read's answer, back to its subscription's task.
 enum Read {
-    Get { id: u64, shape: Shape, answer: Result<(u16, Value), (String, u16)> },
+    Get {
+        id: u64,
+        shape: Shape,
+        answer: Result<(u16, Value), (String, u16)>,
+    },
     Snapshot(Result<[(u16, Value); 3], String>),
+    /// This machine's load (GET /api/system), for its `system` event.
+    System(Option<Value>),
 }
 
 /// One console's view of this host's map: what it shapes and what waits
@@ -309,6 +321,10 @@ struct Session {
     last_graph: f64,
     last_live: f64,
     last_sent: f64,
+    /// When this machine's load was last read for the console, and whether
+    /// a read is on its way.
+    last_system: f64,
+    reading_system: bool,
     /// Events were dropped while too many waited: a fresh snapshot is owed.
     gap: bool,
     ready: bool,
@@ -346,6 +362,8 @@ impl Session {
             last_graph: 0.0,
             last_live: 0.0,
             last_sent: 0.0,
+            last_system: 0.0,
+            reading_system: false,
             gap: false,
             ready: false,
             inflight: 0,
@@ -460,6 +478,13 @@ impl Session {
                 };
                 self.wait(frame);
             }
+            Read::System(reading) => {
+                self.reading_system = false;
+                // Read again as it goes: one turned off meanwhile stays here.
+                if let Some(r) = reading.filter(|_| self.net.share_load()) {
+                    self.event("system", &r);
+                }
+            }
             Read::Snapshot(s) => match s.and_then(|reads| self.p.snapshot(reads, now_ms())) {
                 Ok(frame) => {
                     // What came before the snapshot is in it.
@@ -492,6 +517,20 @@ impl Session {
         if self.gap {
             self.gap = false;
             self.snapshot(reads);
+        }
+        // This machine's load, every few seconds while it shares it: the
+        // setting is read each time, as titles only is at each get.
+        if self.ready && !self.reading_system && now - self.last_system >= self.timing.system_ms && self.net.share_load() {
+            self.last_system = now;
+            self.reading_system = true;
+            let (api, to) = (self.api.clone(), reads.clone());
+            tokio::spawn(async move {
+                let reading = match api.get("/api/system").await {
+                    Ok((200, body)) if body.is_object() => Some(body),
+                    _ => None,
+                };
+                let _ = to.send(Read::System(reading));
+            });
         }
         if now - self.last_sent < self.timing.frame_ms * subs as f64 {
             return;
@@ -621,6 +660,7 @@ mod tests {
         sent: Mutex<Vec<Outgoing>>,
         hosts: Mutex<Vec<Host>>,
         titles_only: Mutex<bool>,
+        share_load: Mutex<bool>,
     }
 
     impl Net for FakeNet {
@@ -636,6 +676,9 @@ mod tests {
         }
         fn titles_only(&self) -> bool {
             *self.titles_only.locked()
+        }
+        fn share_load(&self) -> bool {
+            *self.share_load.locked()
         }
     }
 
@@ -660,20 +703,28 @@ mod tests {
                 "/api/engine/state" => (200, json!({ "agents": [] })),
                 "/api/session/claude:abc/transcript" => (200, json!({ "entries": [{ "role": "user", "text": "in /home/nova/atlas" }] })),
                 "/api/session/claude:abc/stats" => (200, json!({ "calls": 3 })),
+                "/api/system" => (200, xenonet_app::system_stats::demo_reading(now_ms())),
                 _ => (404, json!({ "error": "not found" })),
             })
         }
     }
 
     fn server(titles_only: bool) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<Events>) {
+        server_with(titles_only, f64::INFINITY)
+    }
+
+    /// The same, sending its load every `system_ms`.
+    fn server_with(titles_only: bool, system_ms: f64) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<Events>) {
         let net = Arc::new(FakeNet {
             sent: Mutex::new(Vec::new()),
             hosts: Mutex::new(vec![Host { id: "studio".into(), window: true, online: true, seen: None }, Host { id: "desk".into(), window: false, online: true, seen: None }]),
             titles_only: Mutex::new(titles_only),
+            share_load: Mutex::new(true),
         });
         let api = Arc::new(FakeApi::default());
         let events = Arc::new(Events::new());
-        let timing = Timing { frame_ms: 20.0, graph_ms: 40.0, live_ms: 20.0, lapse_ms: 300.0, ping_ms: 200.0, watch_ms: 50, get_ms: 2000.0, renew_ms: 100.0, roster_ms: 100 };
+        let timing =
+            Timing { frame_ms: 20.0, graph_ms: 40.0, live_ms: 20.0, lapse_ms: 300.0, ping_ms: 200.0, watch_ms: 50, get_ms: 2000.0, renew_ms: 100.0, roster_ms: 100, system_ms };
         let parts = Parts {
             net: net.clone(),
             events: events.clone(),
@@ -845,6 +896,26 @@ mod tests {
         s.relay(ask("studio", true, &Op::Open));
         s.linked(false);
         assert_eq!(s.subscribed(), Vec::<(String, String)>::new());
+        s.stop();
+    }
+
+    #[tokio::test]
+    async fn its_load_goes_every_few_seconds_without_history_or_cores_while_it_shares_it() {
+        let (s, net, api, _) = server_with(false, 60.0);
+        s.relay(ask("studio", true, &Op::Open));
+        let loads = |net: &FakeNet| frames_to(net, "studio").into_iter().filter(|f| f["t"] == "event" && f["name"] == "system").collect::<Vec<_>>();
+        until("two readings", || loads(&net).len() >= 2).await;
+        let first = loads(&net).remove(0);
+        let d = &first["data"];
+        assert_eq!((d["platform"].clone(), d["cpu"]["threads"].clone(), d["hardware"]["gpus"][0]["name"].clone()), (json!("linux"), json!(16), json!("NVIDIA GeForce RTX 4080")));
+        assert!(d.get("history").is_none() && d["cpu"].get("cores").is_none(), "{d}");
+        // Off: none goes, and none is read.
+        *net.share_load.locked() = false;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let (sent, read) = (loads(&net).len(), api.read.locked().iter().filter(|p| *p == "/api/system").count());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert_eq!(loads(&net).len(), sent, "no more readings");
+        assert_eq!(api.read.locked().iter().filter(|p| *p == "/api/system").count(), read, "nor reads");
         s.stop();
     }
 

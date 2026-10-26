@@ -964,6 +964,10 @@ impl Engine {
         let mine: Vec<String> = list(me_view.field("editing")).iter().map(|e| rel(&me_view, &e.field("path"))).collect();
         let wide = scope.as_str() == Some("machine") || is_actor_agent(me);
         let sel = if !matches!(scope.as_str(), Some("repo" | "machine")) { parse_selector(scope) } else { None };
+        // In a network, every row says which machine it's on, this one's
+        // too (`here`): for showing only. `host` stays the mark of another
+        // machine's agent, which messages go to through the network.
+        let here = self.net.me().map(|m| m.host);
         let mut out = Vec::new();
         for a in self.agents(c, within_ms)? {
             if same(&a.field("id"), me) || !self.visible_to(c, me, &a)? {
@@ -982,6 +986,10 @@ impl Engine {
             let overlap: Vec<Arg> = list(a.field("editing")).iter().map(|e| rel(&a, &e.field("path"))).filter(|r| mine.contains(r)).map(Arg::text).collect();
             let mut a = a;
             push(&mut a, "overlap", Arg::List(overlap));
+            if let Some(h) = &here {
+                push(&mut a, "machine", Arg::text(h.clone()));
+                push(&mut a, "here", Arg::Bool(true));
+            }
             out.push(a);
         }
         // Then each other host's, in a network: in clones of this repo, or
@@ -999,6 +1007,8 @@ impl Engine {
                 if ok {
                     let mut a = a;
                     push(&mut a, "overlap", Arg::List(vec![]));
+                    let host = a.field("host");
+                    push(&mut a, "machine", host);
                     out.push(a);
                 }
             }

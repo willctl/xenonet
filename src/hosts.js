@@ -35,6 +35,23 @@ export const HERE = "@here";
 const idOf = (end) => (end && typeof end === "object" ? end.id : end);
 
 export const isRemote = (n) => typeof n?.host === "string" && n.host !== "";
+
+// This machine's id while it's in a network (network mode), which main.js
+// sets from the network's state; null on its own. It labels this
+// machine's sessions as the others' are labelled, with a "here" mark, and
+// is for showing only: `host` stays the mark of another machine's node,
+// which what opens, dismisses and messages things goes by.
+let here = null;
+export function setHere(id) {
+  const next = typeof id === "string" && id ? id : null;
+  const changed = next !== here;
+  here = next;
+  return changed;
+}
+export const hereId = () => here;
+// A node's machine, for showing: another machine's id, or this one's with
+// here: true in network mode; null for this machine's on its own.
+export const machineOf = (n, self = here) => (isRemote(n) ? { id: n.host } : self ? { id: self, here: true } : null);
 export const hostNodeId = (host) => `@${host}:core`;
 // The host a qualified id is from (contracts, section 2), or null.
 export const hostOfId = (id) => (typeof id === "string" && id.startsWith("@") && id.indexOf(":") > 1 ? id.slice(1, id.indexOf(":")) : null);
@@ -251,17 +268,20 @@ export function installHostLayout(graph, layout) {
 // The host node a remote node hangs from, from an index of the map.
 const hostOf = (n, index) => (isRemote(n) ? (index?.get(hostNodeId(n.host)) ?? null) : null);
 
-// "on vm1 · live", for a remote node; "" for one of this machine's.
-export function whereText(n, index, now = Date.now()) {
-  if (!isRemote(n) || n.kind === "host") return "";
+// "on vm1 · live", for a remote node; in network mode "on studio · here"
+// for one of this machine's; "" for one of this machine's on its own.
+export function whereText(n, index, now = Date.now(), self = here) {
+  if (n.kind === "host" || n.kind === "core") return "";
+  if (!isRemote(n)) return self ? `on ${self} · here` : "";
   const host = hostOf(n, index);
   return `on ${n.host} · ${host ? standing(host, now) : n.stale ? "not live" : "live"}`;
 }
 
-// The inspector's line saying where a remote node lives, escaped.
-export function whereHtml(n, index, now = Date.now()) {
-  const text = whereText(n, index, now);
+// The inspector's line saying where a node lives, escaped.
+export function whereHtml(n, index, now = Date.now(), self = here) {
+  const text = whereText(n, index, now, self);
   if (!text) return "";
+  if (!isRemote(n)) return `<div class="insp-where live here"><i class="host-dot live"></i>${h(text)}<span class="dim"> · this machine, in your network</span></div>`;
   const state = hostOf(n, index)?.state ?? (n.stale ? "offline" : "live");
   // A machine in your network shows what its presence says, and takes a
   // message from you; one over SSH is read-only.
@@ -306,32 +326,39 @@ export function hostRows(n, { row, mono }, now = Date.now()) {
   );
 }
 
-// What the tooltip adds for a node from another machine.
-export function tipText(n, index, now = Date.now()) {
+// What the tooltip adds for a node from another machine, or in network
+// mode one of this machine's.
+export function tipText(n, index, now = Date.now(), self = here) {
   if (n.kind === "host") return standing(n, now);
-  return isRemote(n) ? `on ${n.host}` : "";
+  if (isRemote(n)) return `on ${n.host}`;
+  return self && n.kind !== "core" ? `on ${self} · here` : "";
 }
 
-// The feed's and the active sessions' mark for a remote session, escaped.
-export const hostTag = (n) => (isRemote(n) ? `<span class="host-tag">${h(n.host)}</span>` : "");
+// The feed's, the active sessions' and search's mark for a session's
+// machine, escaped: a remote one's id, and in network mode this machine's
+// id with "here", so every console reads the same from any machine.
+export const hostTag = (n, self = here) =>
+  isRemote(n) ? `<span class="host-tag">${h(n.host)}</span>` : self ? `<span class="host-tag here" title="This machine">${h(self)}<i>here</i></span>` : "";
 
 // ---------- the alert strip ----------
 
-// What an alert carries about the machine its session is on.
-export function alertFrom(s) {
-  return isRemote(s) ? { host: s.host, stale: !!s.stale, asOf: s.needsYou?.asOf ?? null } : {};
+// What an alert carries about the machine its session is on: a remote
+// one's, or in network mode this one's id as `here`, for showing only.
+export function alertFrom(s, self = here) {
+  return isRemote(s) ? { host: s.host, stale: !!s.stale, asOf: s.needsYou?.asOf ?? null } : self ? { here: self } : {};
 }
 
-// The alert's mark for a remote session: where it is, and for a host that
-// isn't live, as of when.
+// The alert's mark for a session's machine: a remote one's, and for a host
+// that isn't live, as of when; this one's in network mode.
 export function alertHostHtml(it, now = Date.now()) {
-  if (!it.host) return "";
+  if (!it.host) return it.here ? `<span class="al-host here">on ${h(it.here)} · here</span>` : "";
   if (it.stale) return `<span class="al-host stale">as of ${h(when(it.asOf, now))}, ${h(it.host)} not live</span>`;
   return `<span class="al-host">on ${h(it.host)}</span>`;
 }
 
-// A collision on another machine: which machine, from its sessions' ids.
-export const collisionFrom = (c) => (hostOfId(c.a) ? { host: hostOfId(c.a), stale: false } : {});
+// A collision on another machine: which machine, from its sessions' ids;
+// in network mode, this one's.
+export const collisionFrom = (c, self = here) => (hostOfId(c.a) ? { host: hostOfId(c.a), stale: false } : self ? { here: self } : {});
 
 // A remote question's text stays on its machine unless the host opted in
 // to more; the alert says where to read it.
@@ -569,7 +596,8 @@ export function createHostFilters({ sfx = () => {}, onFilter = () => {}, mount =
       const host = hosts.find((x) => x.id === c.key);
       const part = c.capped ? `, ${c.capped.drawn} of its ${c.capped.of} nodes drawn until you look at it: select one, or click to show only its work.` : ". Click to show only its work.";
       const title = c.key === HERE ? `This machine: ${c.sessions} sessions on the map. Click to show only its work.` : `${c.label} · ${standing({ ...host, name: c.label }, now)}${host?.error ? ` · ${host.error}` : ""}\n${c.sessions} sessions on the map${part}`;
-      return `<button class="host-chip ${c.on ? "on" : ""}" data-host-key="${h(c.key)}" title="${h(title)}"><i class="host-dot ${h(c.state)}"></i><span class="host-label">${h(c.label)}</span><span class="count">${c.sessions}</span></button>`;
+      const mark = c.key === HERE && here ? `<i class="here">here</i>` : "";
+      return `<button class="host-chip ${c.on ? "on" : ""}" data-host-key="${h(c.key)}" title="${h(title)}"><i class="host-dot ${h(c.state)}"></i><span class="host-label">${h(c.label)}</span>${mark}<span class="count">${c.sessions}</span></button>`;
     };
     box.innerHTML = `
       <div class="host-head"><span class="sub-k">Machines</span>${selected.size ? `<button class="mini" data-host-clear title="Show every machine's work">show all</button>` : ""}</div>

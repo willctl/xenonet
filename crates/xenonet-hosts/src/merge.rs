@@ -44,6 +44,8 @@ pub enum Kind<'a> {
     LiveActivity,
     EngineAgent,
     EngineMessage,
+    /// system/v1: a host's load.
+    System,
 }
 
 /// What the merge asks of the JS around it: the schemas (zod's), and
@@ -1152,6 +1154,15 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
             Some(
                 json!({ "id": format!("@{h}:{}", slice16(&js_string(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }),
             )
+        }
+        // Its load: what system/v1 declares, without another machine's
+        // readings (it speaks for itself only), its time moved.
+        "system" => {
+            let Some(Value::Object(mut out)) = schemas.clean(Kind::System, data) else { return None };
+            out.shift_remove("hosts");
+            out.insert("at".into(), shift.at(data.get("at")));
+            out.insert("host".into(), json!(h));
+            Some(Value::Object(out))
         }
         _ => None,
     }

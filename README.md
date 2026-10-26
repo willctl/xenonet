@@ -103,8 +103,10 @@ On a Mac, use ⌘ wherever this page says Ctrl. The terminal's key stays
   it shows as unknown. With an OpenRouter key, it shows what the key has
   spent and how much of its limit is left.
 - The panel beside it shows this computer's load: CPU and each core, memory,
-  and the GPU and its memory. Turn it off with `Show or hide this computer's
-  load` in the palette.
+  and the GPU and its memory. In a [network](docs/guide/network.md) it's
+  every machine's: the network's totals, each machine's part, and a row for
+  each. Its title opens the Machines view, with each machine's parts and
+  sessions. Turn the panel off with `Show or hide the load` in the palette.
 - The map draws up to 60 frames a second while it moves, 30 at rest and
   fewer behind other apps, and stops while the window is hidden or
   minimized, covered by other windows on a Mac, or the screen is locked, so

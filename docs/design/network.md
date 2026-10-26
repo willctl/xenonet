@@ -94,6 +94,18 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
     every 20 s, and ends one that lapses after 60 s, whose host goes
     offline, is removed or stops being a window host, or when this host's
     own link drops.
+  - While a subscription runs, the serving relay reads this machine's own
+    `GET /api/system` every 5 s and sends it as a `system` event inside
+    the bodies it sends anyway, so it adds no relay frames. It's shaped to
+    the fields `system/v1` declares, without the history or each core, and
+    goes only while the host shares its load ("Share load with the
+    network", on by default; `shareLoad` in `network.json`), which is read
+    at each send. The console's hub qualifies it (`qualify_event`: checked
+    against `system/v1`, kept to its declared fields, its time moved, any
+    `hosts` it carries dropped), keeps the latest per host in memory, and
+    serves them at `GET /api/system?hosts=1` for the Machines panel.
+    Nothing about load goes in presence, so a console that isn't a window
+    host's sees other machines' load from no one.
   - The subscribing side is the hub, now always built: hosts.json's hosts
     over SSH with `XENONET_HOSTS=1`, and the roster's always, each a link
     whose transport is the network (`link::Start::Network`,
@@ -719,6 +731,10 @@ twins, are unchanged.
     is at most 8 MiB.
 - **Until a host's first snapshot comes,** a console draws it from
   presence: its agents, states and what waits on you.
+- **Each host's load** (CPU, GPU, memory, and what the parts are) goes
+  with its map as a `system` event every 5 s, to the window hosts'
+  consoles that watch it, unless the host turns "Share load with the
+  network" off. It carries no names, serials or OS version.
 
 ### 8. The operator at any host
 

@@ -1,0 +1,784 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/system/v1.json",
+  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "title": "A computer's load",
+  "description": "What a computer running XenoNet is doing: its CPU, memory and GPUs now and lately, and what the parts are.",
+  "type": "object",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "platform": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "arch": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 32
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "uptime": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Seconds since the computer started"
+    },
+    "cpu": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ghz": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "All of its threads, since the last reading"
+        },
+        "cores": {
+          "description": "Each thread's use; left out of a reading from another machine",
+          "maxItems": 1024,
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "A share, 0 to 1"
+          }
+        }
+      },
+      "required": [
+        "model",
+        "threads",
+        "ghz",
+        "usage"
+      ],
+      "additionalProperties": {}
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Bytes"
+        },
+        "used": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Bytes"
+        }
+      },
+      "required": [
+        "total",
+        "used"
+      ],
+      "additionalProperties": {}
+    },
+    "gpus": {
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "A share, 0 to 1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memUsed": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "description": "Bytes"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its own memory in use; for a GPU that shares the computer's memory (Apple's), the memory it uses of that"
+          },
+          "memTotal": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "description": "Bytes"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its own memory; for a shared one, the computer's"
+          },
+          "temp": {
+            "description": "°C, where the reader has it (NVIDIA's)",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "shared": {
+            "type": "boolean",
+            "description": "It shares the computer's memory, as Apple's GPUs do"
+          }
+        },
+        "required": [
+          "index",
+          "name",
+          "usage",
+          "memUsed",
+          "memTotal",
+          "temp",
+          "shared"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "gpu": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 32
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the GPU figures come from: nvidia-smi, ioreg, amdgpu, windows or demo; unavailable when that reader had nothing; null with no reader"
+    },
+    "history": {
+      "description": "The last few minutes, oldest first; left out of a reading from another machine",
+      "maxItems": 90,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "cpu": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "A share, 0 to 1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "A share, 0 to 1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mem": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "A share, 0 to 1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "at",
+          "cpu",
+          "gpu",
+          "mem"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "process.platform: darwin, linux, win32"
+        },
+        "arch": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cpu": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "threads": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Logical processors"
+            },
+            "ghz": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "model",
+            "threads",
+            "ghz"
+          ],
+          "additionalProperties": {}
+        },
+        "memory": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Bytes"
+            }
+          },
+          "required": [
+            "total"
+          ],
+          "additionalProperties": {}
+        },
+        "gpus": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "memTotal": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Bytes"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "shared": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "memTotal",
+              "shared"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "platform",
+        "arch",
+        "cpu",
+        "memory",
+        "gpus"
+      ],
+      "additionalProperties": {},
+      "description": "What the parts are, from what the readers read: no names, serials or OS version"
+    },
+    "hosts": {
+      "description": "With ?hosts=1: the latest reading each other machine in the network sent this console, its time moved to this clock. Only window hosts' consoles get them, while they watch, from machines that share their load",
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "number",
+            "description": "Epoch milliseconds"
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "arch": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uptime": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Seconds since the computer started"
+          },
+          "cpu": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "threads": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "ghz": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "usage": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "All of its threads, since the last reading"
+              },
+              "cores": {
+                "description": "Each thread's use; left out of a reading from another machine",
+                "maxItems": 1024,
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "A share, 0 to 1"
+                }
+              }
+            },
+            "required": [
+              "model",
+              "threads",
+              "ghz",
+              "usage"
+            ],
+            "additionalProperties": {}
+          },
+          "memory": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Bytes"
+              },
+              "used": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Bytes"
+              }
+            },
+            "required": [
+              "total",
+              "used"
+            ],
+            "additionalProperties": {}
+          },
+          "gpus": {
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "usage": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "A share, 0 to 1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "memUsed": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Bytes"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Its own memory in use; for a GPU that shares the computer's memory (Apple's), the memory it uses of that"
+                },
+                "memTotal": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Bytes"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Its own memory; for a shared one, the computer's"
+                },
+                "temp": {
+                  "description": "°C, where the reader has it (NVIDIA's)",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "shared": {
+                  "type": "boolean",
+                  "description": "It shares the computer's memory, as Apple's GPUs do"
+                }
+              },
+              "required": [
+                "index",
+                "name",
+                "usage",
+                "memUsed",
+                "memTotal",
+                "temp",
+                "shared"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the GPU figures come from: nvidia-smi, ioreg, amdgpu, windows or demo; unavailable when that reader had nothing; null with no reader"
+          },
+          "history": {
+            "description": "The last few minutes, oldest first; left out of a reading from another machine",
+            "maxItems": 90,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "number",
+                  "description": "Epoch milliseconds"
+                },
+                "cpu": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "A share, 0 to 1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "gpu": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "A share, 0 to 1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mem": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "A share, 0 to 1"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "at",
+                "cpu",
+                "gpu",
+                "mem"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "hardware": {
+            "type": "object",
+            "properties": {
+              "platform": {
+                "type": "string",
+                "maxLength": 32,
+                "description": "process.platform: darwin, linux, win32"
+              },
+              "arch": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cpu": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "threads": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Logical processors"
+                  },
+                  "ghz": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "model",
+                  "threads",
+                  "ghz"
+                ],
+                "additionalProperties": {}
+              },
+              "memory": {
+                "type": "object",
+                "properties": {
+                  "total": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Bytes"
+                  }
+                },
+                "required": [
+                  "total"
+                ],
+                "additionalProperties": {}
+              },
+              "gpus": {
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "memTotal": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Bytes"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "shared": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "memTotal",
+                    "shared"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": [
+              "platform",
+              "arch",
+              "cpu",
+              "memory",
+              "gpus"
+            ],
+            "additionalProperties": {},
+            "description": "What the parts are, from what the readers read: no names, serials or OS version"
+          },
+          "host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The machine's id in the network"
+          }
+        },
+        "required": [
+          "at",
+          "platform",
+          "arch",
+          "uptime",
+          "cpu",
+          "memory",
+          "gpus",
+          "gpu",
+          "hardware",
+          "host"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "at",
+    "platform",
+    "arch",
+    "uptime",
+    "cpu",
+    "memory",
+    "gpus",
+    "gpu",
+    "hardware"
+  ],
+  "additionalProperties": {}
+}

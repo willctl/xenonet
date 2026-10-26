@@ -729,7 +729,11 @@ async function api(req, res, url) {
 
   // This computer's CPU, memory and GPU, for the system panel
   // (core/system-stats.js), with the last few minutes of each.
-  if (req.method === "GET" && route === "/api/system") return send(res, 200, await system.read());
+  // With ?hosts=1, the latest each other machine sent (the Machines panel).
+  if (req.method === "GET" && route === "/api/system") {
+    const reading = await system.read();
+    return send(res, 200, url.searchParams.get("hosts") === "1" ? { ...reading, hosts: hub?.systems() ?? [] } : reading);
+  }
 
   // Themes (core/themes.js, and yours in the state folder's themes/): the
   // list, the one in use, a switch, and a copy of one to make your own; one

@@ -337,6 +337,10 @@
     "titlesOnly": {
       "type": "boolean"
     },
+    "shareLoad": {
+      "description": "Whether this machine sends its load (CPU, GPU, memory and what the parts are) to the window hosts' consoles that watch its map; on unless turned off",
+      "type": "boolean"
+    },
     "queues": {
       "description": "On the gateway's host: what waits at the gateway for each host",
       "type": "array",

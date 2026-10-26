@@ -134,6 +134,12 @@ pub trait Hub: Send + Sync {
     fn summary(&self, s: Value) -> Value {
         s
     }
+    /// The latest load each other host sent (system/v1, under `host`), for
+    /// GET /api/system?hosts=1: a network host's relay sends one every few
+    /// seconds while this console watches it, unless it doesn't share it.
+    fn systems(&self) -> Value {
+        Value::Array(Vec::new())
+    }
     /// The host-… simulations (dev only).
     fn simulate(&self, _kind: &str, _args: &Value) -> R<Option<Value>> {
         pending(HUB)

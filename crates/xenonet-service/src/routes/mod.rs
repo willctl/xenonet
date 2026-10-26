@@ -213,7 +213,13 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(if cores.actors.is_some() { Reply::json(200, cores.spend.actor_spend()?) } else { Reply::error(404, "this XenoNet has no actors") });
     }
     if m == "GET" && route == "/api/system" {
-        return Ok(Reply::json(200, cores.system.read().await?));
+        let mut reading = cores.system.read().await?;
+        // With ?hosts=1, the latest each other machine sent (the Machines
+        // panel), whether or not hosts over SSH are on.
+        if req.param("hosts") == Some("1") && reading.is_object() {
+            reading["hosts"] = cores.hub.as_ref().map_or_else(|| Value::Array(Vec::new()), |h| h.systems());
+        }
+        return Ok(Reply::json(200, reading));
     }
 
     if let Some(r) = themes::route(ctx, req).await? {

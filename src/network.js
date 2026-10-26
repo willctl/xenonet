@@ -191,6 +191,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <div class="panel-title sub"><span>This machine</span></div>
       <label class="net-check"><input type="checkbox" data-net-titles data-yours ${state.titlesOnly ? "checked" : ""}> Share with the network: titles only</label>
       <p class="pj-note">On, the other consoles see this machine's sessions by their titles alone: not the text of a question waiting, the last message, or why a session seems stuck.</p>
+      <label class="net-check"><input type="checkbox" data-net-load data-yours ${state.shareLoad !== false ? "checked" : ""}> Share load with the network</label>
+      <p class="pj-note">On, the window hosts' consoles see this machine's CPU, GPU and memory, and what its parts are, in their Machines panel while they watch it.</p>
       ${errorHtml(view.error)}
       <div class="m-foot"><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
   }
@@ -422,6 +424,17 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return refresh();
   }
 
+  async function shareLoad(on) {
+    const r = await calls.call("PUT", "/api/net/settings", { shareLoad: on });
+    if (!r.ok) {
+      failed(r);
+      return refresh();
+    }
+    sfx("toggle");
+    toast(on ? "The window hosts' consoles see this machine's load again." : "This machine's load stays here now.");
+    return refresh();
+  }
+
   async function onClick(e) {
     if (await secretClick(panel, e.target, (ok) => toast(ok ? "Line copied. Run it on the new machine." : "Couldn't copy it", !ok))) return;
     const t = e.target;
@@ -468,6 +481,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       panel.addEventListener("click", (e) => void onClick(e));
       panel.addEventListener("change", (e) => {
         if (e.target.matches("[data-net-titles]")) void titlesOnly(e.target.checked);
+        if (e.target.matches("[data-net-load]")) void shareLoad(e.target.checked);
       });
       panel.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" || !e.target.matches?.("input")) return;
@@ -536,13 +550,14 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       outbox: { frames: state.outbox.frames ?? 0, bytes: state.outbox.bytes ?? 0, oldest: state.outbox.oldest ?? null },
       mismatch: state.rosterMismatch,
       titlesOnly: !!state.titlesOnly,
+      shareLoad: state.shareLoad !== false,
       waits: remoteWaits(state, agents).filter((w) => w.kind === "remote-need").map((w) => ({ agent: w.id, host: w.host, text: w.text, chime: w.chime })),
       stuck: remoteWaits(state, agents).filter((w) => w.kind === "remote-stuck").map((w) => ({ agent: w.id, host: w.host, text: w.text })),
       join: joinState(),
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]") } : null,
     };
   }
 

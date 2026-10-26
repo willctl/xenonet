@@ -27,6 +27,7 @@ import { GRAPH_NODES } from "../schema/graph.js";
 import { Identity } from "../schema/identity.js";
 import { LiveSession, LiveActivity } from "../schema/live.js";
 import { EngineAgent, EngineMessage } from "../schema/engine.js";
+import { SystemReading } from "../schema/system.js";
 import { declared } from "./declared.js";
 import { APPS, TAILED, tailedOr } from "../apps.js";
 
@@ -578,6 +579,14 @@ export function qualifyEvent(name, data, host) {
       const from = remoteId(h, data.from);
       if (!from || (!Number.isSafeInteger(data.id) && typeof data.id !== "string")) return null;
       return { id: `@${h}:${String(data.id).slice(0, 64)}`, from, to: (Array.isArray(data.to) ? data.to : []).map((x) => remoteId(h, x)).filter(Boolean), target: str(data.target, 200), text: str(data.text, 4000) ?? "", ts: shift(data.ts), host: h };
+    }
+    // Its load: what system/v1 declares, without another machine's readings
+    // (it speaks for itself only), its time moved.
+    case "system": {
+      if (!SystemReading.safeParse(data).success) return null;
+      const out = declared(SystemReading, data);
+      delete out.hosts;
+      return Object.assign(out, { at: shift(data.at), host: h });
     }
     default:
       return null;

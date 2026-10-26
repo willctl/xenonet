@@ -31,6 +31,7 @@ const CONTRACT = [
   "network/handoff/v1", "network/operator/v1", "network/relay/v1", "network/svc/v1", "network/roster-entry/v1", "network/state/v1",
   "app/v1",
   "tray/status/v1", "tray/event/v1",
+  "system/v1",
 ];
 
 test("every internal schema the contracts list is defined", () => {

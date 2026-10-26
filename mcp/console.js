@@ -377,7 +377,7 @@ function buildServer() {
     "network",
     {
       title: "The network",
-      description: "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, and where you're at), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch and the titles-only setting. `open` shows the panel, `start` and `join` its forms, and `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the setting and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
+      description: "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, and where you're at), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch, and the titles-only and share-load settings. `open` shows the panel, `start` and `join` its forms, and `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the setting and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
       inputSchema: z.object({
         action: z.enum(["read", "open", "start", "join", "add", "message", "close"]).optional().describe("read (the default) says how the network stands without opening anything."),
         host: z.string().optional().describe("For add: the new machine's id."),
@@ -394,6 +394,35 @@ function buildServer() {
       if (action === "message") return reply(await s.driver("messageAs", to, text, { settle }));
       if (action === "add") return reply(await s.driver("network", "add", { host, window }, { settle }));
       return reply(await s.driver("network", action, null, { settle }));
+    },
+  );
+
+  tool(
+    "machines",
+    {
+      title: "Machines",
+      description: "The load panel's larger view: each machine's load now (CPU, GPU, memory), what its parts are (CPU model, threads, GHz, memory, each GPU, platform, arch) and its sessions on the map, with the network's totals. On its own that's this computer; in a network, every machine, this one marked here, and other machines' load only on a window host's console. `read` (the default) says how the view stands, and the panel's own reading: the network's sums and each machine's part of each. `open` opens it, at a machine (at: @here or its id). `filter` picks machines (machines: their keys, @here or ids, which are the Filters chips, so the map is filtered too; [] picks all), a platform (darwin, win32, linux), only those with a GPU and only those online, and sorts (name, cpu, gpu, ram, seen) or shows a table (view). `close` closes it. Returns the view's state, and the state once the view has settled when it changed.",
+      inputSchema: z.object({
+        action: z.enum(["read", "open", "filter", "close"]).optional().describe("read (the default) changes nothing."),
+        at: z.string().optional().describe("For open: the machine to show first, @here or its id."),
+        machines: z.array(z.string()).optional().describe("For filter: the machines to show, by key (@here or an id); [] shows all."),
+        platform: z.enum(["darwin", "win32", "linux", ""]).optional().describe("For filter: only this platform; empty for all."),
+        gpu: z.boolean().optional().describe("For filter: only machines with a GPU."),
+        online: z.boolean().optional().describe("For filter: only machines online."),
+        sort: z.enum(["name", "cpu", "gpu", "ram", "seen"]).optional().describe("For filter: the order."),
+        view: z.enum(["cards", "table"]).optional().describe("For filter: cards, or one table row a machine."),
+        settle: settleArg,
+        instance: instanceArg,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ action = "read", at, machines, platform, gpu, online, sort, view, settle, instance }) => {
+      const s = target(instance);
+      if (action === "read") return reply({ ...(await s.driver("machines", {})), system: await s.driver("system") });
+      if (action === "open") return reply(await s.driver("machines", { open: true, at: at ?? null }, { settle }));
+      if (action === "close") return reply(await s.driver("machines", { close: true }, { settle }));
+      const filter = Object.fromEntries(Object.entries({ machines, platform, gpu, online }).filter(([, v]) => v !== undefined));
+      return reply(await s.driver("machines", { ...(Object.keys(filter).length ? { filter } : {}), ...(sort ? { sort } : {}), ...(view ? { view } : {}) }, { settle }));
     },
   );
 

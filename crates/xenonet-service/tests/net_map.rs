@@ -7,7 +7,7 @@
 // transcript of laptop's through the window; an agent on studio can't, a
 // host that shares titles only keeps its transcripts, a gap brings a
 // fresh snapshot, and laptop's relay stops once studio's subscription
-// lapses.
+// lapses. Each machine's load comes with its map, unless it stops sharing it.
 //
 // NET_TEST_LOG=1 prints what each host logs.
 
@@ -151,7 +151,34 @@ fn timing() -> Timing {
 }
 
 fn relay_timing() -> RelayTiming {
-    RelayTiming { frame_ms: 50.0, graph_ms: 100.0, live_ms: 50.0, lapse_ms: 3000.0, ping_ms: 1000.0, watch_ms: 200, get_ms: 5000.0, renew_ms: 500.0, roster_ms: 300 }
+    RelayTiming {
+        frame_ms: 50.0,
+        graph_ms: 100.0,
+        live_ms: 50.0,
+        lapse_ms: 3000.0,
+        ping_ms: 1000.0,
+        watch_ms: 200,
+        get_ms: 5000.0,
+        renew_ms: 500.0,
+        roster_ms: 300,
+        system_ms: 200.0,
+    }
+}
+
+/// Each host's load: the demo's, with as many threads as `threads`, so
+/// each machine is told apart.
+struct Load {
+    threads: u32,
+}
+
+#[async_trait]
+impl cores::SystemStats for Load {
+    async fn read(&self) -> R<Value> {
+        let mut r = xenonet_app::system_stats::demo_reading(now_ms());
+        r["cpu"]["threads"] = json!(self.threads);
+        r["hardware"] = xenonet_app::system_stats::hardware_of(&r);
+        Ok(r)
+    }
 }
 
 fn options(dir: &Path, who: &str) -> Options {
@@ -192,6 +219,13 @@ impl Host {
         cores.state = map.clone();
         let peers = Arc::new(Peers::default());
         cores.verify = peers.clone();
+        cores.system = Arc::new(Load {
+            threads: match name {
+                "studio" => 24,
+                "laptop" => 12,
+                _ => 32,
+            },
+        });
         let schemas = Arc::new(HostSchemas::new());
         let hosts = Arc::new(HostsStore::new(&state, schemas.clone()));
         let emitter = Emitter::new();
@@ -298,6 +332,12 @@ fn node(g: &Value, id: &str) -> Option<Value> {
     g["nodes"].as_array().into_iter().flatten().find(|n| n["id"] == id).cloned()
 }
 
+/// When the latest load from `host` was read, in an answer of GET
+/// /api/system?hosts=1.
+fn of_now(v: &Value, host: &str) -> f64 {
+    v["hosts"].as_array().into_iter().flatten().find(|r| r["host"] == host).and_then(|r| r["at"].as_f64()).unwrap_or(0.0)
+}
+
 fn enc(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
@@ -338,6 +378,35 @@ async fn a_window_host_sees_another_hosts_map_and_opens_its_transcripts_from_the
     // desk isn't a window host: it subscribes to no one.
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(a.hub.relay_server().unwrap().subscribed().iter().all(|(h, _)| h != "desk"), "{:?}", a.hub.relay_server().unwrap().subscribed());
+
+    // Each machine's load comes with its map, for the Machines panel:
+    // laptop's and desk's, each its own, with no history or cores.
+    let loads = || async {
+        let (s, v) = a.call("GET", "/api/system?hosts=1", Value::Null, &[]).await;
+        assert_eq!(s, 200, "{v}");
+        v
+    };
+    until("laptop's and desk's load at studio", 10, || async {
+        let v = loads().await;
+        ["laptop", "desk"].iter().all(|h| v["hosts"].as_array().unwrap().iter().any(|r| r["host"] == *h))
+    })
+    .await;
+    let v = loads().await;
+    assert_eq!(v["cpu"]["threads"], 24, "studio's own");
+    let of = |h: &str| v["hosts"].as_array().unwrap().iter().find(|r| r["host"] == h).cloned().unwrap();
+    assert_eq!((of("laptop")["cpu"]["threads"].clone(), of("desk")["cpu"]["threads"].clone()), (json!(12), json!(32)));
+    assert!(of("laptop").get("history").is_none() && of("laptop")["cpu"].get("cores").is_none());
+    assert_eq!(of("laptop")["hardware"]["cpu"]["threads"], 12);
+    assert_eq!(a.call("GET", "/api/system", Value::Null, &[]).await.1.get("hosts"), None, "only when asked");
+    // laptop stops sharing its load: what studio has of it stops there.
+    let (s, st) = b.window("PUT", "/api/net/settings", json!({ "shareLoad": false })).await;
+    assert_eq!((s, st["shareLoad"].clone()), (200, json!(false)), "{st}");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let at = of_now(&loads().await, "laptop");
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(of_now(&loads().await, "laptop"), at, "no newer reading");
+    assert!(of_now(&loads().await, "desk") > of("desk")["at"].as_f64().unwrap(), "desk's goes on");
+    b.window("PUT", "/api/net/settings", json!({ "shareLoad": true })).await;
 
     // The transcript and stats, through the window.
     let path = format!("/api/session/{}/transcript", enc(&remote));
