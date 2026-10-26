@@ -341,6 +341,89 @@ test("net-founder with laptop's relay: laptop drawn from its own map's snapshot,
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));
 
+test("network mode: the load panel is Machines, the network's sums with each machine's part, this machine's sessions labelled here, and the Machines view's chips are the Filters chips", { timeout: limit(90000) }, shoot("network-machines", async () => {
+  const done = await s.simulate("net-founder", { b: "relay" });
+  assert.equal(done.relay?.ok, true, JSON.stringify(done));
+  // The made-up network: studio (here), laptop online with a load of its
+  // own, rack offline. The panel turns into the network's.
+  const sys = await until(async () => {
+    const v = await s.driver("system");
+    return v?.network?.counted === 2 && v.hosts?.length === 3 ? v : null;
+  }, 20000);
+  assert.ok(sys, JSON.stringify(await s.driver("system")));
+  assert.equal(sys.title, "Machines");
+  assert.match(await s.eval(`return document.querySelector("#sysmon .panel-title").textContent`), /Machines/);
+  const [studio, laptop, rack] = sys.hosts;
+  assert.deepEqual([studio.id, studio.here, studio.counted, laptop.id, laptop.counted, rack.id, rack.online, rack.counted], ["studio", true, true, "laptop", true, "rack", false, false]);
+  assert.notEqual(laptop.threads, studio.threads, "laptop is its own machine, not this one counted twice");
+  // The sums: every thread's busy share, all the memory, the mean of the GPUs.
+  const n = sys.network;
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.ok(near(n.cpu, (studio.cpu * studio.threads + laptop.cpu * laptop.threads) / (studio.threads + laptop.threads)), JSON.stringify(n));
+  assert.ok(near(n.ram.share, (studio.memory.used + laptop.memory.used) / (studio.memory.total + laptop.memory.total)));
+  assert.equal(n.gpu.count, 2);
+  assert.ok(near(n.gpu.mean, (studio.gpu + laptop.gpu) / 2));
+  assert.ok(near(n.gpu.vram.total, 16 * 1024 ** 3), "laptop's Apple GPU shares memory: not VRAM");
+  // The stacked bars: a segment each for studio and laptop, adding up to the ring.
+  for (const k of ["cpu", "gpu", "ram"]) {
+    assert.deepEqual(n.bars[k].map((b) => b.id), ["studio", "laptop"], k);
+    const sum = n.parts[k].reduce((a, p) => a + p.v, 0);
+    assert.ok(near(sum, k === "cpu" ? n.cpu : k === "gpu" ? n.gpu.mean : n.ram.share), k);
+  }
+  assert.match(sys.text, /rack since/, "rack dimmed, with since when");
+  // Each core and the trace stay this machine's, under its id.
+  assert.equal(sys.cpu.cores, 16);
+  assert.match(await s.eval(`return document.querySelector("#sysmon [data-local]").textContent`), /studio/);
+  await s.screenshot({ name: "e2e-network-machines-panel", inline: false });
+
+  // This machine's sessions carry its id with here, as laptop's carry laptop.
+  const local = (await s.driver("find", { kind: "session", query: "claude:", limit: 80 })).nodes.find((x) => !x.host);
+  assert.deepEqual(local?.machine, { id: "studio", here: true });
+  const tags = await until(async () => {
+    const t = await s.eval(`return [...document.querySelectorAll("#agents .host-tag")].map((e) => e.textContent)`);
+    return t.some((x) => /^studio\s*here$/.test(x)) && t.includes("laptop") ? t : null;
+  });
+  assert.ok(tags, "the active sessions say which machine each is on, this one's too");
+
+  // The Machines view, from the panel's title: its machine chips are the
+  // Filters chips.
+  await s.eval(`return (document.querySelector("#sysmon [data-sm-title]").click(), true)`);
+  const view = await until(async () => ((await s.driver("machines", {})).machines.kpis ? s.driver("machines", {}) : null));
+  assert.ok(view, "the view opened from the title");
+  const v = view.machines;
+  assert.deepEqual([v.kpis.machines, v.kpis.online, v.kpis.counted, v.kpis.gpus], [3, 2, 2, 2]);
+  assert.deepEqual(v.cards.map((c) => c.id).sort(), ["laptop", "rack", "studio"]);
+  assert.equal(v.cards.find((c) => c.id === "rack").hardware.gpus.length, 2, "an offline machine's parts, from its last reading");
+  const picked = await s.driver("machines", { filter: { machines: ["laptop"] } });
+  assert.deepEqual([picked.machines.filter.machines, picked.machines.shown], [["laptop"], ["laptop"]]);
+  assert.deepEqual((await s.driver("hosts")).filter, ["laptop"], "the same chip under Filters");
+  const linux = await s.driver("machines", { filter: { machines: [], platform: "linux", online: true }, sort: "cpu", view: "table" });
+  assert.deepEqual([linux.machines.shown, linux.machines.view], [["studio"], "table"]);
+  await s.screenshot({ name: "e2e-network-machines-view", inline: false });
+  await s.driver("machines", { filter: { platform: "", online: false }, view: "cards" });
+  await s.driver("machines", { close: true });
+  assert.deepEqual((await s.driver("hosts")).filter, []);
+
+  // Share load with the network, in this machine's Network panel.
+  const { network: panel } = await s.driver("network", "open");
+  assert.equal(panel.shareLoad, true);
+  await clickAt(panel.at.load, "Share load with the network");
+  assert.ok(await until(async () => (await served()).shareLoad === false), "turned off");
+  await clickAt((await network()).at.load, "Share load with the network");
+  assert.ok(await until(async () => (await served()).shareLoad === true), "and on again");
+  await s.driver("network", "close");
+
+  // On its own again: This computer, as before.
+  await simulate("net-none", {}, (x) => !x.inNetwork);
+  const alone = await until(async () => {
+    const x = await s.driver("system");
+    return x?.network === undefined && x.shown ? x : null;
+  }, 10000);
+  assert.ok(alone, "the panel is this computer's again");
+  assert.match(await s.eval(`return document.querySelector("#sysmon .panel-title").textContent`), /This computer/);
+  assert.equal((await s.driver("find", { kind: "session", query: "claude:", limit: 1 })).nodes[0]?.machine, undefined);
+}));
+
 test("what waits here sounds only where you are too, and everywhere is the rule's: one rule for this machine's waits and the others'", { timeout: limit(60000) }, shoot("network-chime", async () => {
   // A session here waits on you, and you're at laptop: neither it nor
   // laptop's sounds here.

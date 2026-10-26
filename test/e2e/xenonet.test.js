@@ -449,6 +449,10 @@ test("This computer's panel shows the demo's made-up load, each core and the sys
   assert.ok(sys, "the panel shows a reading");
   assert.deepEqual([sys.source, sys.platform, sys.cpu.cores, sys.gpu.name], ["demo", "linux", 16, "NVIDIA GeForce RTX 4080"]);
   assert.match(sys.text, /\d+% CPU/);
+  // On its own, this computer's: no network's sums, no machines' rows.
+  assert.deepEqual([sys.network, sys.hosts], [undefined, undefined]);
+  assert.match(sys.text, /^THIS COMPUTER/i);
+  assert.equal(await s.eval(`return document.querySelectorAll('#sysmon [data-machine]').length`), 0);
   assert.equal(await s.eval(`return document.querySelectorAll('#sysmon [data-cores] i').length`), 16, "a bar for each core");
   assert.equal(await s.eval(`return document.querySelector('#sysmon-tick svg')?.getAttribute('aria-label')`), "Linux", "the system's mark, not its name");
   await s.driver("command", "system-panel");
