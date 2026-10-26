@@ -205,6 +205,8 @@ The gateway sees, for each frame, which machine sent it, which it's for, its kin
 - `xenonet net status` shows the network, this machine, the gateway and its link, what waits for approval, and what waits in the outbox. `xenonet net hosts` lists the machines.
 - `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut.
 
+The link is `live` while this machine hears the gateway. It's `offline` when the gateway can't be reached, doesn't answer a request within 35 seconds, or sends nothing for 45 seconds, which is what a gateway behind a firewall that blocks XenoNet looks like. `xenonet net status`, the Network panel and the doctor then say since when and why. XenoNet keeps trying by itself, and the link is `live` again as soon as the gateway answers. `refused` means the gateway answered and turned this machine away; the reason says why.
+
 A machine whose clock is off still links: it signs with the gateway's time, which it takes only from an answer the gateway signed. One more than a day off is refused, and the doctor says so.
 
 ## Other machines over SSH
