@@ -36,8 +36,11 @@ test("a bundle installs the components that are missing, with the launcher, and 
   const runtime = await installBundle(first, { env, command: false });
   const service = currentComponent("service", env);
   assert.deepEqual([service.version, currentComponent("tools", env).version], ["1.0.0", "1.0.0"]);
-  assert.equal(runtime.root, service.root);
-  assert.deepEqual([runtime.exec, runtime.args], [path.join(service.root, BIN), ["serve"]], "the service's own binary, serving");
+  const active = path.join(env.XENONET_RUNTIME_DIR, "components", "service", "active");
+  assert.equal(runtime.root, active, "a copy of the selected version, which keeps its path across updates");
+  assert.deepEqual([runtime.exec, runtime.args], [path.join(active, BIN), ["serve"]], "the service's own binary, serving");
+  assert.equal(fs.readFileSync(runtime.exec, "utf8"), fs.readFileSync(path.join(service.root, BIN), "utf8"));
+  assert.equal(fs.readFileSync(path.join(active, ".from"), "utf8"), `1.0.0-${service.sha256}`);
   const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
   assert.deepEqual([runtime.env.XENONET_RUNTIME_DIR, runtime.env.XENONET_LAUNCHER_BIN], [env.XENONET_RUNTIME_DIR, path.join(launcher, EXE)]);
   assert.deepEqual([runtime.env.XENONET_LAUNCHER_ROOT, runtime.env.XENONET_LAUNCHER_EXEC], [undefined, undefined], "no node launcher to name");
@@ -74,7 +77,8 @@ test("a bundle never upgrades or restarts a service or Tools already installed",
   const before = currentComponent("service", env);
   const runtime = await installBundle(await bundle(dir, "bundle-2", [["service", "2.0.0"], ["tools", "2.0.0"]]), { env, command: false });
   assert.deepEqual([currentComponent("service", env).version, currentComponent("tools", env).version], ["1.0.0", "1.0.0"]);
-  assert.equal(runtime.root, before.root);
+  assert.equal(runtime.root, path.join(env.XENONET_RUNTIME_DIR, "components", "service", "active"));
+  assert.equal(fs.readFileSync(path.join(runtime.root, ".from"), "utf8"), `1.0.0-${before.sha256}`, "still a copy of 1.0.0");
   assert.deepEqual(fs.readdirSync(path.join(env.XENONET_RUNTIME_DIR, "components", "service")).filter((f) => f.startsWith("2.0.0")), [], "the newer one isn't even unpacked");
 });
 
@@ -243,6 +247,77 @@ test("the launcher's xenonet is a copy of the Tools' binary, made again only whe
   assert.ok(!fs.readdirSync(path.dirname(bin)).some((f) => f.endsWith(".tmp")));
 });
 
+// Where the service runs from: <runtime>/components/service/active, a copy
+// of the selected version, so a firewall that let it in keeps doing so
+// after an update.
+const activeOf = (env) => path.join(env.XENONET_RUNTIME_DIR, "components", "service", "active");
+const markOf = (env) => fs.readFileSync(path.join(activeOf(env), ".from"), "utf8");
+
+test("the service runs from one folder, a copy of the selected version, through an install, an update and a rollback", async (t) => {
+  const { dir, env } = workspace(t);
+  const svc = service(env, null, { failing: "1.2.0" });
+  // What each start ran: its root and binary, and what the binary was then.
+  const ran = [];
+  const start = svc.operations.start;
+  svc.operations.start = async (runtime) => {
+    ran.push([runtime.root, runtime.exec, fs.readFileSync(runtime.exec, "utf8")]);
+    return start(runtime);
+  };
+  for (const version of ["1.0.0", "1.1.0"]) {
+    const p = await pack(dir, "service", version, { bin: `binary ${version}` });
+    assert.equal((await activatePackage(p.file, p.item, { env, operations: svc.operations })).status, "updated");
+    assert.equal(markOf(env), `${version}-${p.item.sha256}`);
+  }
+  const broken = await pack(dir, "service", "1.2.0", { bin: "binary 1.2.0" });
+  await assert.rejects(activatePackage(broken.file, broken.item, { env, operations: svc.operations }), /previous version was restored/);
+  const [active, exec] = [activeOf(env), path.join(activeOf(env), BIN)];
+  assert.deepEqual(ran, [[active, exec, "binary 1.0.0"], [active, exec, "binary 1.1.0"], [active, exec, "binary 1.2.0"], [active, exec, "binary 1.1.0"]], "one path every time, holding the version started");
+  assert.equal(svc.state.version, "1.1.0");
+  assert.equal(markOf(env), `1.1.0-${currentComponent("service", env).sha256}`);
+  assert.deepEqual(fs.readdirSync(path.dirname(active)).filter((f) => !/^\d/.test(f)).sort(), ["active", "current.json"], "nothing left of the switches");
+  const runtime = installedRuntime(env);
+  assert.deepEqual([runtime.root, runtime.exec], [active, exec], "and a start from here runs the same");
+});
+
+test("an update cut short while it switched the service's folder leaves nothing behind once it's recovered", async (t) => {
+  const { env, journal } = await interrupted(t);
+  const dir = path.dirname(activeOf(env));
+  const previous = fs.readdirSync(dir).find((f) => f.startsWith("1.0.0-"));
+  // As the updater left it: the old copy moved aside, the new one half made.
+  fs.cpSync(path.join(dir, previous), path.join(dir, "active.prev"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "active.next", "bin"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "active.next", "bin", "half"), "");
+  const svc = service(env, null);
+  assert.equal(await recoverServiceUpdate({ env, operations: svc.operations }), "restored");
+  assert.deepEqual([svc.starts, svc.runtimes[0].root], [["1.0.0"], activeOf(env)]);
+  assert.equal(fs.readFileSync(path.join(activeOf(env), BIN), "utf8"), fs.readFileSync(path.join(dir, previous, BIN), "utf8"));
+  assert.equal(markOf(env), `1.0.0-${currentComponent("service", env).sha256}`);
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith("active")), ["active"]);
+  assert.equal(fs.existsSync(journal), false);
+});
+
+test("a start runs the version's own folder when active isn't a copy of it, and always the binary in the folder it names", async (t) => {
+  const { dir, env } = workspace(t);
+  const p = await pack(dir, "service", "1.0.0");
+  const own = (await stagePackage(p.file, p.item, { env })).root;
+  selectComponent("service", p.item, env);
+  const active = activeOf(env);
+  const runs = () => {
+    const r = installedRuntime(env);
+    assert.equal(r.exec, path.join(r.root, BIN), "root and exec agree");
+    return r.root;
+  };
+  assert.equal(runs(), own, "none yet, as before the first update to this version");
+  fs.cpSync(own, active, { recursive: true });
+  assert.equal(runs(), own, "a copy that doesn't say which it is");
+  fs.writeFileSync(path.join(active, ".from"), `0.9.0-${"0".repeat(64)}`);
+  assert.equal(runs(), own, "a copy of another version");
+  fs.writeFileSync(path.join(active, ".from"), `1.0.0-${p.item.sha256}`);
+  assert.equal(runs(), active);
+  fs.rmSync(path.join(active, BIN));
+  assert.equal(runs(), own, "one whose binary is gone");
+});
+
 // Moving from 0.3.0, whose packages were a node and XenoNet's JS
 // (earlierInstall lays one out as it left it).
 
@@ -257,7 +332,9 @@ test("a bundle replaces a Service and Tools from before 0.4.0, which have no bin
   assert.deepEqual([svc.starts, svc.state.version], [["0.4.0"], "0.4.0"], "started, and checked it answers as 0.4.0");
   const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
   assert.equal(svc.runtimes[0].env.XENONET_LAUNCHER_BIN, path.join(launcher, EXE), "after the Tools, so it names their launcher");
-  assert.deepEqual([runtime.exec, runtime.args], [path.join(now.root, BIN), ["serve"]]);
+  assert.deepEqual([runtime.exec, runtime.args], [path.join(activeOf(env), BIN), ["serve"]], "from its copy, which keeps its path");
+  assert.equal(svc.runtimes[0].exec, runtime.exec);
+  assert.equal(markOf(env), `0.4.0-${now.sha256}`);
   assert.equal(fs.readFileSync(path.join(launcher, EXE), "utf8"), fakeBin("0.4.0"));
   assert.ok(launcherVersion(fs.readFileSync(path.join(launcher, "cli", "xenonet.js"), "utf8")) >= 3, "the node launcher 0.3.0's entries run now runs the binary");
   assert.equal(fs.readFileSync(path.join(launcher, NODE), "utf8"), "0.3.0's node");

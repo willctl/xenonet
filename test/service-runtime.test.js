@@ -14,7 +14,7 @@ import { Readable } from "node:stream";
 import { rustBinary, missingBinary, serviceCommand, readyComponents, earlierNotice } from "../electron/service-runtime.js";
 import { installedRuntime } from "../core/components/install.js";
 import { currentComponent } from "../core/components/packages.js";
-import { NODE, posixOnly, pack, bundle, fakeService, earlierInstall } from "./harness/components.js";
+import { BIN, NODE, posixOnly, pack, bundle, fakeService, earlierInstall } from "./harness/components.js";
 
 // Each file that exists, with when it was written.
 const have = (files) => (f) => {
@@ -96,6 +96,8 @@ test("Desktop with a bundle over 0.3.0: the bundle's Service and Tools replace i
   assert.deepEqual([svc.stops, svc.starts, svc.state.version], [1, ["0.4.0"], "0.4.0"]);
   assert.equal(latest.asked, 0, "nothing downloaded: the bundle brought both");
   const installed = installedRuntime(env);
+  const active = path.join(env.XENONET_RUNTIME_DIR, "components", "service", "active");
+  assert.deepEqual([installed.root, installed.exec], [active, path.join(active, BIN)], "the copy that keeps its path across updates");
   assert.deepEqual(serviceCommand({ env: {}, installed }), { root: installed.root, exec: installed.exec, args: ["serve"] }, "and Desktop has a binary to run, not 'binary is missing'");
 });
 

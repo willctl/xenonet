@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { currentComponent, stagePackage, selectComponent, newer, withInstallLock, fitsHere, TRAY } from "./packages.js";
+import { currentComponent, stagePackage, selectComponent, newer, withInstallLock, fitsHere, componentsDir, TRAY } from "./packages.js";
 import { runtimeDir, ensureService, connectService, binName, launcherBin } from "./runtime.js";
 import { installCommand } from "../command.js";
 
@@ -100,6 +100,83 @@ export function checkRuntime(staged) {
   if (version !== staged.version) throw new Error("The new component command did not pass its startup check.");
 }
 
+// The folder the selected Service runs from, <runtime>/components/service/
+// active: a copy of the selected version's own folder. A firewall lets a
+// program in by its path, so the service keeps one path across updates
+// (docs/guide/components.md). Its .from file says which version it's a
+// copy of, as the launcher's does.
+const ACTIVE = "active";
+const serviceDir = (env) => path.join(componentsDir(env), "service");
+const activeMark = (selected) => `${selected.version}-${selected.sha256}`;
+
+// Where the selected Service runs from: `active` when it's a copy of that
+// version, with its binary. Otherwise its version's own folder, and why,
+// unless there's no `active` at all, as before this version's first
+// activation.
+function serviceRoot(service, env) {
+  const active = path.join(serviceDir(env), ACTIVE);
+  if (!fs.existsSync(active)) return { root: service.root, why: null };
+  let said = "";
+  try { said = fs.readFileSync(path.join(active, ".from"), "utf8"); } catch {}
+  if (!said) return { root: service.root, why: `${ACTIVE} doesn't say which version it's a copy of` };
+  if (said !== activeMark(service)) return { root: service.root, why: `${ACTIVE} is a copy of ${said}, not ${activeMark(service)}` };
+  if (!hasBinary({ root: active })) return { root: service.root, why: `${ACTIVE} has no ${binName()}` };
+  return { root: active, why: null };
+}
+
+// Copies a folder: files and folders only, each file with its mode, as a
+// clone where the disk can (APFS). A package of XenoNet's has no links.
+function copyTree(from, to) {
+  fs.mkdirSync(to);
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const [src, dst] = [path.join(from, entry.name), path.join(to, entry.name)];
+    if (entry.isDirectory()) copyTree(src, dst);
+    else if (entry.isFile()) fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE);
+    else throw new Error(`${src} isn't a file or a folder`);
+  }
+}
+
+// Renames a folder; on Windows, which can hold a program a moment after it
+// exits, tried again for up to 30 s, as stagePackage's last rename is.
+async function renameDir(from, to) {
+  for (const until = Date.now() + 30000;;) {
+    try { return fs.renameSync(from, to); }
+    catch (err) {
+      if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(err.code) || Date.now() >= until) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+// Makes `active` a copy of the selected Service, with the service stopped:
+// what an activation cut short left (active.next, active.prev) goes, the
+// version's folder is copied to active.next and marked, then `active` moves
+// aside and active.next takes its place. An `active` of that version
+// already stays as it is. A Service from before 0.4.0 runs from its own
+// folder, so there's no `active`, nor with none selected.
+async function activateService(env) {
+  const dir = serviceDir(env);
+  const [active, next, prev] = [ACTIVE, "active.next", "active.prev"].map((name) => path.join(dir, name));
+  for (const left of [next, prev]) fs.rmSync(left, { recursive: true, force: true });
+  const selected = currentComponent("service", env);
+  if (!selected || !hasBinary(selected)) return fs.rmSync(active, { recursive: true, force: true });
+  if (serviceRoot(selected, env).root === active) return;
+  copyTree(selected.root, next);
+  fs.writeFileSync(path.join(next, ".from"), activeMark(selected));
+  if (fs.existsSync(active)) await renameDir(active, prev);
+  fs.renameSync(next, active);
+  // One that can't go now goes at the next activation.
+  try { fs.rmSync(prev, { recursive: true, force: true }); } catch {}
+}
+
+// activateService, whose failure leaves the service to run from its
+// version's folder (serviceRoot): it still starts, though a firewall may ask
+// about it again. So it's said, not thrown.
+async function activate(env) {
+  try { await activateService(env); }
+  catch (err) { console.error(`[xenonet] XenoNet Service runs from its version's folder this time: ${err.message}`); }
+}
+
 const lifecycle = (overrides) => ({ connect: connectService, start: ensureService, check: checkRuntime, now: Date.now, pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), stopTimeout: 15000, ...overrides });
 const journalFile = (env) => path.join(runtimeDir(env), "service-update.json");
 function writeJournal(env, previous, next) {
@@ -109,9 +186,12 @@ function writeJournal(env, previous, next) {
   fs.renameSync(tmp, file);
 }
 function clearJournal(env) { fs.rmSync(journalFile(env), { force: true }); }
-function restoreSelection(previous, env) {
+// Selects the previous service again, and runs it from `active`, with the
+// service stopped.
+async function restoreSelection(previous, env) {
   if (previous) selectComponent("service", previous, env);
   else fs.rmSync(path.join(runtimeDir(env), "components/service/current.json"), { force: true });
+  await activate(env);
 }
 async function running(env, io) {
   const client = await io.connect({ env }).catch((err) => {
@@ -162,7 +242,7 @@ async function recover(env, io) {
     if (state.terminals.some((terminal) => !terminal.exited)) throw new Error("Close running terminals before recovering the interrupted service update.");
     await stopService(env, io);
   }
-  restoreSelection(record.previous, env);
+  await restoreSelection(record.previous, env);
   if (record.previous) await startVersion(record.previous.version, env, io);
   clearJournal(env);
   return "restored";
@@ -202,7 +282,11 @@ export async function installBundle(bundle, { env = process.env, command = true,
       // update switches it, once the Tools and the launcher it names are
       // in place.
       if (old && item.component === "service") earlier = { old, staged };
-      else selectComponent(item.component, staged, env);
+      else {
+        selectComponent(item.component, staged, env);
+        // A first Service: nothing of it runs yet.
+        if (item.component === "service") await activate(env);
+      }
     }
     const launcher = installLauncher(env);
     if (command && launcher?.bin) installCommand({ bin: launcher.bin, env });
@@ -213,15 +297,21 @@ export async function installBundle(bundle, { env = process.env, command = true,
 
 // How to start the selected service: its xenonet binary, with `serve`, and
 // the env it runs with (the runtime folder, and the launcher's binary when
-// there is one). A Service from before 0.4.0 runs its node and server, as
-// that XenoNet ran it, told of the node launcher its entries run, so an
-// update that couldn't replace it can bring it back as it was.
+// there is one). It runs from `active` (serviceRoot), or its version's
+// folder when that isn't a copy of it. A Service from before 0.4.0 runs its
+// node and server, as that XenoNet ran it, told of the node launcher its
+// entries run, so an update that couldn't replace it can bring it back as
+// it was.
 export function installedRuntime(env = process.env) {
   const service = currentComponent("service", env);
   if (!service) throw new Error("XenoNet Service is not installed. Use the bundle installer.");
   const launcher = installLauncher(env);
   const runEnv = { ...env, XENONET_RUNTIME_DIR: runtimeDir(env), ...(launcher?.bin ? { XENONET_LAUNCHER_BIN: launcher.bin } : {}) };
-  if (hasBinary(service)) return { root: service.root, exec: path.join(service.root, "bin", binName()), args: ["serve"], env: runEnv };
+  if (hasBinary(service)) {
+    const { root, why } = serviceRoot(service, env);
+    if (why) console.error(`[xenonet] XenoNet Service runs from ${root}: ${why}`);
+    return { root, exec: path.join(root, "bin", binName()), args: ["serve"], env: runEnv };
+  }
   const dir = path.join(runtimeDir(env), "launcher");
   const node = path.join(dir, earlierNode());
   const nodeLauncher = fs.existsSync(node) && fs.existsSync(path.join(dir, "cli", "xenonet.js")) ? { XENONET_LAUNCHER_EXEC: node, XENONET_LAUNCHER_ROOT: dir } : {};
@@ -239,6 +329,7 @@ async function switchService(env, io, old, staged) {
   try {
     if (state) await stopService(env, io);
     selectComponent("service", staged, env);
+    await activate(env);
     await startVersion(staged.version, env, io);
     clearJournal(env);
   }
@@ -247,7 +338,7 @@ async function switchService(env, io, old, staged) {
       // Do not finalize the new version when its startup check just failed.
       const live = await running(env, io);
       if (live && live.version !== old?.version) await stopService(env, io);
-      restoreSelection(old, env);
+      await restoreSelection(old, env);
       if (old) await startVersion(old.version, env, io);
       clearJournal(env);
     } catch (rollback) {
