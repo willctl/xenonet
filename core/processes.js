@@ -17,13 +17,17 @@
 import path from "node:path";
 import { APPS } from "./apps.js";
 
+// Claude desktop's own main executable on Windows (a path with / for \).
+const CLAUDE_DESKTOP = /\/AnthropicClaude\/app-[^/]+\/claude\.exe$/i;
+
 export const PROCESSES = {
   // The CLI, the native install under ~/.local/share/claude/versions, or
   // the one Claude desktop runs from its claude.app; on Windows claude.exe,
-  // but for Claude desktop's own, which is called that too and lives in its
-  // AnthropicClaude folder.
+  // but for Claude desktop's own main executable, which is called that too:
+  // AnthropicClaude\app-<version>\claude.exe. The Claude Code Claude desktop
+  // runs, from elsewhere in that folder, is Claude Code.
   claude: {
-    program: (p, base) => base === "claude" || (base === "claude.exe" && !p.includes("/AnthropicClaude/")) || /\/claude\/versions\/[^/]+$/.test(p),
+    program: (p, base) => base === "claude" || (base === "claude.exe" && !CLAUDE_DESKTOP.test(p)) || /\/claude\/versions\/[^/]+$/.test(p),
     script: (args) => /@anthropic-ai\/claude-code\/cli\.js/.test(args),
     pinsByHook: true,
   },

@@ -15,6 +15,13 @@ test("agentOf: the agent apps by their program path, and Node by its arguments",
   assert.equal(agentOf("/Applications/Claude.app/Contents/MacOS/claude"), "claude");
   assert.equal(agentOf("/opt/homebrew/bin/codex"), "codex");
   assert.equal(agentOf("/path/codex-aarch64-apple-darwin"), "codex");
+  // Windows: Claude desktop's own main executable isn't Claude Code, in any
+  // case of its folders; the Claude Code it runs is.
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe"), null);
+  assert.equal(agentOf("C:/users/me/appdata/local/anthropicclaude/APP-1.2.3/claude.exe"), null);
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\resources\\claude-code\\claude.exe"), "claude");
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.0\\claude.exe"), "claude");
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe"), "codex");
   // Node and Bun are told apart only by what they run.
   assert.equal(agentOf("/usr/local/bin/node"), null);
   assert.equal(agentOf("/usr/local/bin/node", "node /x/@anthropic-ai/claude-code/cli.js"), "claude");

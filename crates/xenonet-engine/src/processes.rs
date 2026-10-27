@@ -28,10 +28,17 @@ pub struct Rules {
 
 // Claude Code: the CLI, the native install under
 // ~/.local/share/claude/versions, or the one Claude desktop runs from its
-// claude.app; on Windows claude.exe, but for Claude desktop's own, which is
-// called that too and lives in its AnthropicClaude folder.
+// claude.app; on Windows claude.exe, but for Claude desktop's own main
+// executable, which is called that too: AnthropicClaude\app-<version>\
+// claude.exe. The Claude Code Claude desktop runs, from elsewhere in that
+// folder, is Claude Code.
 fn claude_program(p: &str, base: &str) -> bool {
-    base == "claude" || (base == "claude.exe" && !p.contains("/AnthropicClaude/")) || re!(r"\/claude\/versions\/[^/]+$").is_match(p)
+    base == "claude" || (base == "claude.exe" && !claude_desktop(p)) || re!(r"\/claude\/versions\/[^/]+$").is_match(p)
+}
+/// Whether a path (with / for \) is Claude desktop's own main executable
+/// on Windows.
+fn claude_desktop(p: &str) -> bool {
+    re!(r"\/AnthropicClaude\/app-[^/]+\/claude\.exe$", i).is_match(p)
 }
 fn claude_script(args: &str) -> bool {
     args.contains("@anthropic-ai/claude-code/cli.js")
@@ -138,6 +145,14 @@ mod tests {
             ("C:\\Users\\me\\.grok\\bin\\grok.exe", Some("grok")),
             ("/usr/local/bin/agent", None),
             ("/usr/local/bin/grokker", None),
+            // Windows: Claude desktop's own main executable isn't Claude
+            // Code, in any case of its folders; the Claude Code it runs is.
+            ("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe", None),
+            ("C:/users/me/appdata/local/anthropicclaude/APP-1.2.3/claude.exe", None),
+            ("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\resources\\claude-code\\claude.exe", Some("claude")),
+            ("C:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.0\\claude.exe", Some("claude")),
+            ("C:\\Users\\me\\.local\\bin\\claude.exe", Some("claude")),
+            ("C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe", Some("codex")),
         ] {
             assert_eq!(agent_of(program, ""), agent, "{program}");
         }
