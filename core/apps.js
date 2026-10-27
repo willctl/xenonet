@@ -88,7 +88,7 @@ export const APPS = [
       unheard: ["SessionStart", "UserPromptSubmit"],
     },
     editTools: ["search_replace", "write", "edit", "hashline_edit", "apply_patch"],
-    has: ["lines", "sessions", "connect", "processes", "caller"],
+    has: ["lines", "sessions", "connect", "delivery", "processes", "caller"],
   },
   {
     id: "gemini-cli",

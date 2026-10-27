@@ -101,6 +101,8 @@ export function createWakes({ engine, actors, store, secrets, notify = () => {},
               held.notify = null;
               run(() => core.notifyDue(deps, id));
             };
+      // A sooner wake takes the place of a later one.
+      if (held[kind]) clearTimer(held[kind]);
       held[kind] = setTimer(due, ms);
       held[kind]?.unref?.();
       return !!held[kind];

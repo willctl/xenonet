@@ -72,6 +72,8 @@ pub fn event(ctx: &Arc<Ctx>, from: From, name: &str, data: Value) {
         (From::Engine, "receipt") => ctx.broadcast("message-receipt", &data),
         // A start you asked for: started, refused, or ended.
         (From::Engine, "start") => ctx.broadcast("start", &data),
+        // A copy of a session XenoNet forked to answer a message.
+        (From::Engine, "fork") => ctx.broadcast("fork", &data),
         // Claude Code on a machine needs a sign-in for XenoNet's runs.
         (From::Engine, "sign-in") => {
             ctx.broadcast("sign-in", &data);

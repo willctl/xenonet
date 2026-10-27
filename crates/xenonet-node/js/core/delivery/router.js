@@ -15,9 +15,9 @@ export class DeliveryRouter extends EventEmitter {
   #objs = new Map(); // key → its record's object, while Rust keeps it
   #deps;
 
-  constructor({ engine, policy, channels = null, opencode = null, tmux = null, resume = null, notify = () => {}, usage = () => null, now = () => Date.now(), ackMs = ACK_MS }) {
+  constructor({ engine, policy, channels = null, opencode = null, tmux = null, resume = null, notify = () => {}, usage = () => null, reach = () => ({}), now = () => Date.now(), ackMs = ACK_MS }) {
     super();
-    Object.assign(this, { engine, policy, channels, opencode, tmux, resume, notify, usage, now, ackMs });
+    Object.assign(this, { engine, policy, channels, opencode, tmux, resume, notify, usage, reach, now, ackMs });
     this.records = new Map(); // `${message}|${agent}` → record
     this.timers = new Map();
     this.#deps = {
@@ -69,6 +69,10 @@ export class DeliveryRouter extends EventEmitter {
   // Whether a session that ended can still be messaged.
   resumable(view) {
     return this.#core.resumable(this.#deps, view ?? null);
+  }
+
+  forkable(view) {
+    return this.#core.forkable(this.#deps, view ?? null);
   }
 
   // A wake for a session's listening Stop hook to hand a message over.

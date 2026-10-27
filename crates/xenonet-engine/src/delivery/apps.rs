@@ -38,6 +38,12 @@ fn claude_resume(id: &str, settings: &Arg) -> (String, Vec<Arg>) {
     ("claude".into(), args)
 }
 
+// grok -r <id> --output-format json --prompt-file <file>: Grok Build reads
+// a single turn's prompt from a file, which the deliverer writes and adds.
+fn grok_resume(id: &str, _: &Arg) -> (String, Vec<Arg>) {
+    ("grok".into(), ["-r", id, "--output-format", "json", "--prompt-file"].into_iter().map(Arg::text).collect())
+}
+
 // codex exec resume <id> -
 fn codex_resume(id: &str, _: &Arg) -> (String, Vec<Arg>) {
     ("codex".into(), vec![Arg::text("exec"), Arg::text("resume"), Arg::text(id), Arg::text("-")])
@@ -48,6 +54,7 @@ pub fn ways(id: &str) -> Option<Ways> {
     match id {
         "claude" => Some(Ways { resume: Some(claude_resume), marks: Some("CLAUDE"), channel: true, server: false }),
         "codex" => Some(Ways { resume: Some(codex_resume), marks: Some("CODEX_"), ..Ways::default() }),
+        "grok" => Some(Ways { resume: Some(grok_resume), marks: Some("GROK_"), ..Ways::default() }),
         "opencode" => Some(Ways { server: true, ..Ways::default() }),
         _ => None,
     }
@@ -82,7 +89,7 @@ mod tests {
     #[test]
     fn the_apps_delivery_reaches_and_how() {
         let ids: Vec<&str> = apps().iter().map(|(a, _)| a.id.as_str()).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode"]);
+        assert_eq!(ids, ["claude", "codex", "grok", "opencode"]);
         assert!(of("claude").unwrap().channel && !of("codex").unwrap().channel);
         assert!(of("opencode").unwrap().server && of("opencode").unwrap().resume.is_none());
         assert!(of("gemini-cli").is_none());

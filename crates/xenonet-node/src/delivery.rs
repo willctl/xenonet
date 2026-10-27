@@ -453,6 +453,24 @@ pub fn resume_plan(env: Env, deps: Object<'_>, agent: JsArg, settings: JsArg, cw
     }))
 }
 
+/// [command, args] for a copy of a Claude Code session, or null.
+#[napi(js_name = "resumeFork")]
+pub fn resume_fork(agent: JsArg, settings: JsArg) -> JsArg {
+    JsArg(resume::fork_command(&agent.0, &settings.0).map_or(Arg::Null, |(c, a)| Arg::List(vec![Arg::text(c), Arg::List(a)])))
+}
+
+/// { why } it can't, or { cmd: [app, args] }, for a fork.
+#[napi(js_name = "resumePlanFork")]
+pub fn resume_plan_fork(env: Env, deps: Object<'_>, agent: JsArg, settings: JsArg, cwd: JsArg) -> Result<JsArg> {
+    let out = resume::plan_fork(&mut SyncCalls::new(&env, &deps), &agent.0, &settings.0, &cwd.0);
+    let out = out.map_err(|t| rethrow(&env, t))?;
+    settle(&env);
+    Ok(JsArg(match out {
+        Err(why) => Arg::Obj(vec![("why".into(), Arg::text(why))]),
+        Ok((c, a)) => Arg::Obj(vec![("cmd".into(), Arg::List(vec![Arg::text(c), Arg::List(a)]))]),
+    }))
+}
+
 // ----- runs -----
 
 use xenonet_engine::delivery::runs;
@@ -653,6 +671,10 @@ impl RouterCore {
     #[napi]
     pub fn resumable(&self, env: Env, deps: Object<'_>, view: JsArg) -> Result<JsArg> {
         sync_done(env, self.inner.resumable(&mut SyncCalls::new(&env, &deps), &view.0)).map(JsArg)
+    }
+    #[napi]
+    pub fn forkable(&self, env: Env, deps: Object<'_>, view: JsArg) -> Result<bool> {
+        sync_done(env, self.inner.forkable(&mut SyncCalls::new(&env, &deps), &view.0))
     }
     #[napi]
     pub fn wake(&self, env: Env, deps: Object<'_>, from: JsArg, agent: JsArg) -> Result<JsArg> {

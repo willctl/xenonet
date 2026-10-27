@@ -12,7 +12,7 @@ import { Engine } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
 import { DeliveryPolicy } from "../core/delivery/policy.js";
 import { DeliveryRouter } from "../core/delivery/router.js";
-import { createResume, resumeCommand, resumeEnv } from "../core/delivery/resume.js";
+import { createResume, resumeCommand, resumeEnv, forkCommand, withPromptFile } from "../core/delivery/resume.js";
 import { planUsage } from "../core/delivery/usage.js";
 import { listenSettings, writeListenSettings, liveSetup } from "../core/delivery/setup.js";
 
@@ -22,7 +22,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Two Claude Code sessions in one folder, a policy, and a router whose
 // resume is a stand-in.
-function world({ limits = {}, resumed = [] } = {}) {
+function world({ limits = {}, resumed = [], wake = "consent" } = {}) {
   const t = { now: Date.now() };
   const now = () => t.now;
   const live = (lastEventAt) => ({ lastEventAt, edits: new Map(), status: () => "idle", needsYou: () => null });
@@ -34,8 +34,8 @@ function world({ limits = {}, resumed = [] } = {}) {
   const policy = new DeliveryPolicy({ now, limits });
   const repos = { of: async () => null };
   const engine = new Engine({ state, store, now, repos, policy });
-  const resume = { can: () => true, running: () => false, deliver: async (x) => (resumed.push(x), { ok: true, where: "pid 7" }) };
-  const router = new DeliveryRouter({ engine, policy, resume, now, ackMs: 50 });
+  const resume = { fork: true, can: () => true, running: () => false, deliver: async (x) => (resumed.push(x), { ok: true, where: "pid 7" }) };
+  const router = new DeliveryRouter({ engine, policy, resume, now, ackMs: 50, reach: () => ({ start: "you", wake }) });
   engine.delivery = router;
   return { t, engine, store, policy, router, resumed };
 }
@@ -168,4 +168,62 @@ test("a session that ended is resumed for a message only with your consent, and 
   await sleep(80);
   assert.equal(rec.state, "notified");
   assert.equal(w.store.unseen(B).length, 1, "unacked: the hooks hand it over next turn");
+});
+
+test("wake: network delivers at once: a session that ended is resumed without your allowance, and an idle one a process holds is answered by a copy", async () => {
+  const w = world({ wake: "network" });
+  w.store.ended(B, w.t.now);
+  assert.ok((await w.engine.agents()).some((a) => a.id === B && a.status === "ended"), "ended, and reachable");
+  const sent = await w.engine.send(A, { to: B, text: "pick this up" });
+  assert.equal(sent.to[0].delivery, "right away, in a turn XenoNet resumes it for");
+  await sleep(10);
+  assert.equal(w.router.list().find((r) => r.message === sent.id).how, "resume");
+  assert.equal(w.resumed[0].fork, undefined);
+  // A is open (its process holds it) and idle: a copy of it answers.
+  const toA = await w.engine.send(B, { to: A, text: "and you" });
+  assert.equal(toA.to[0].delivery, "right away, in a copy XenoNet forks from it, since it's open elsewhere");
+  await sleep(10);
+  const rec = w.router.list().find((r) => r.message === toA.id);
+  assert.deepEqual([rec.state, rec.how], ["live", "fork"]);
+  assert.deepEqual([w.resumed[1].agent, w.resumed[1].fork], [A, true]);
+  assert.match(w.resumed[1].text, /and you/);
+  // Under consent, an open session waits for its next turn, as before.
+  const c = world();
+  const later = await c.engine.send(B, { to: A, text: "later" });
+  assert.equal(later.to[0].delivery, "when it next starts a turn (it's idle now)");
+  await sleep(10);
+  assert.equal(c.router.list().find((r) => r.message === later.id).state, "next-turn");
+  assert.equal(c.resumed.length, 0);
+});
+
+test("a copy forks only from a Claude Code session, with its whole context; Grok Build reads its turn from a file only you can read", async () => {
+  assert.deepEqual(forkCommand(`claude:${ID}`, { settings: "/s/l.json" }), ["claude", ["-p", "--resume", ID, "--fork-session", "--output-format", "stream-json", "--verbose", "--settings", "/s/l.json"]]);
+  assert.equal(forkCommand(`codex:${ID}`), null);
+  assert.equal(forkCommand("claude:x"), null);
+  assert.deepEqual(resumeCommand(`grok:${ID}`), ["grok", ["-r", ID, "--output-format", "json", "--prompt-file"]]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-prompt-"));
+  const [args, input] = withPromptFile(["-r", ID, "--prompt-file"], "[XenoNet from Muse] hi", dir);
+  assert.equal(input, "", "nothing on standard input");
+  assert.equal(fs.readFileSync(args.at(-1), "utf8"), "[XenoNet from Muse] hi");
+  if (process.platform !== "win32") assert.equal(fs.statSync(args.at(-1)).mode & 0o777, 0o600);
+  assert.deepEqual(withPromptFile(["exec", "resume", ID, "-"], "hi", dir), [["exec", "resume", ID, "-"], "hi"], "others take standard input");
+  // A fork runs while the session does, under a key of its own.
+  const runs = [];
+  const spawn = (cmd, a, opts) => {
+    const child = new EventEmitter();
+    child.pid = 98;
+    child.stdin = new EventEmitter();
+    child.stdin.end = (text) => runs.push({ cmd, args: a, text, cwd: opts.cwd });
+    child.kill = () => child.emit("exit", null);
+    setImmediate(() => child.emit("spawn"));
+    return child;
+  };
+  const r = createResume({ spawn, find: (app) => app, exists: () => true });
+  await r.deliver({ agent: `claude:${ID}`, cwd: "/w", text: "first" });
+  assert.ok(r.running(`claude:${ID}`));
+  const out = await r.deliver({ agent: `claude:${ID}`, cwd: "/w", text: "a copy", fork: true });
+  assert.deepEqual(out, { ok: true, where: "pid 98" });
+  assert.deepEqual(runs[1], { cmd: "claude", args: ["-p", "--resume", ID, "--fork-session", "--output-format", "stream-json", "--verbose"], text: "a copy", cwd: "/w" });
+  assert.equal((await r.deliver({ agent: `codex:${ID}`, cwd: "/w", text: "x", fork: true })).why, "only Claude Code sessions can be forked");
+  fs.rmSync(dir, { recursive: true, force: true });
 });

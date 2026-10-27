@@ -19,8 +19,9 @@
 //!
 //! Messages in a burst make one wake. An actor is woken at most every 30
 //! seconds and 20 times an hour, and not again while the messages it was
-//! woken for wait unread, for ten minutes. A webhook that fails waits
-//! longer each time before the next try, up to half an hour. Before each
+//! woken for wait unread, for two minutes; still unread then, it's woken
+//! once more. A webhook that fails waits longer each time before the next
+//! try, up to half an hour. Before each
 //! call the URL is checked again, and its host must be the one set in
 //! XenoNet's window.
 //!
@@ -58,7 +59,7 @@ pub const PER_ACTOR_RATE: f64 = 20.0 / 3600.0;
 pub const PER_ACTOR_BURST: f64 = 5.0;
 /// Woken, and the messages it was woken for still unread: it's at them, or
 /// can't be, so it isn't woken again for this long.
-pub const UNREAD_HOLD_MS: f64 = 10.0 * 60e3;
+pub const UNREAD_HOLD_MS: f64 = 2.0 * 60e3;
 const TEST_GAP_MS: f64 = 5e3;
 /// All wakes together, whatever the actors: 120 an hour, 30 at once.
 const ALL_RATE: f64 = 120.0 / 3600.0;
@@ -285,8 +286,20 @@ struct State {
     notified_at: f64,
     tested_at: f64,
     woke: Option<Vec<Cell>>,
+    /// The next wake is the second look, two minutes after one: its last.
+    rechecking: bool,
+    /// When the wake timer set is due.
+    timer_at: f64,
     tokens: f64,
     tokens_at: f64,
+}
+
+// One message's id as another's: numbers by value.
+fn same_cell(a: &Cell, b: &Cell) -> bool {
+    match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
 }
 
 // An actor's state before its first wake, made at `t`.
@@ -304,6 +317,8 @@ fn new_state(t: f64) -> State {
         notified_at: 0.0,
         tested_at: 0.0,
         woke: None,
+        rechecking: false,
+        timer_at: 0.0,
         tokens: PER_ACTOR_BURST,
         tokens_at: t,
     }
@@ -476,7 +491,7 @@ impl Wakes {
 
     /// When its next wake may go: messages in a burst together, 30 seconds
     /// after the last, after a failure's wait, and not while the messages
-    /// it was last woken for wait unread, for ten minutes.
+    /// it was last woken for wait unread, for two minutes.
     fn next_at(&self, c: &mut dyn Calls, id: &str) -> Result<f64> {
         self.st(c, id)?;
         let unseen = self.unseen(id)?;
@@ -499,20 +514,25 @@ impl Wakes {
         Ok(if all.iter().any(|x| x.is_nan()) { f64::NAN } else { all.iter().copied().fold(f64::NEG_INFINITY, f64::max) })
     }
 
+    /// One timer an actor: a sooner wake (its messages read, and a new one
+    /// come) takes the place of a later one (the second look).
     fn schedule(&self, c: &mut dyn Calls, id: &str) -> Result<()> {
         self.st(c, id)?;
-        let (in_flight, timer) = self.with(id, |s| (s.in_flight, s.timer)).unwrap_or((false, false));
+        let (in_flight, timer, timer_at) = self.with(id, |s| (s.in_flight, s.timer, s.timer_at)).unwrap_or((false, false, 0.0));
         if in_flight {
             self.with(id, |s| s.again = true);
             return Ok(());
         }
-        if timer {
+        let at = self.next_at(c, id)?;
+        if timer && timer_at <= at {
             return Ok(());
         }
-        let at = self.next_at(c, id)?;
         let ms = at - Self::now(c)?;
         let set = c.call("", "setTimer", vec![Arg::text("wake"), Arg::text(id), Arg::num(ms)])?.truthy();
-        self.with(id, |s| s.timer = set);
+        self.with(id, |s| {
+            s.timer = set;
+            s.timer_at = at;
+        });
         Ok(())
     }
 
@@ -697,6 +717,14 @@ impl Wakes {
 
     fn fire_inner(&self, c: &mut dyn Calls, id: &str, slug: &str) -> Result<()> {
         let unseen = self.unseen(id)?;
+        // The second look, two minutes after a wake whose messages all wait
+        // unread: its last.
+        let recheck = self
+            .with(id, |s| {
+                let woke_unread = s.woke.as_ref().is_some_and(|w| !w.is_empty() && w.iter().all(|m| unseen.iter().any(|u| same_cell(u, m))));
+                std::mem::take(&mut s.rechecking) && woke_unread
+            })
+            .unwrap_or(false);
         if unseen.is_empty() || self.kind_of(slug)? != "webhook" || !Self::registered(c, id)? {
             return Ok(());
         }
@@ -720,7 +748,15 @@ impl Wakes {
         let went = self.call(c, id, slug, unseen.len(), t)?;
         let went = self.record(c, id, t, went, false)?;
         if went.field("ok").truthy() {
-            self.with(id, |s| s.woke = Some(unseen));
+            // Still unread when the hold is up: woken once more, then not
+            // again for these.
+            self.with(id, |s| {
+                s.woke = Some(unseen);
+                if !recheck {
+                    s.rechecking = true;
+                    s.again = true;
+                }
+            });
         }
         Ok(())
     }

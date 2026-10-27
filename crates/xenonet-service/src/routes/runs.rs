@@ -9,6 +9,9 @@
 //!   gateway, so nothing outside this machine reaches it but through the
 //!   network. Whether this machine or that one takes it is its start
 //!   setting's (core/delivery/reach.js).
+//! - `GET /api/runs/forks`: the copies of sessions XenoNet forked to answer
+//!   a message while the session was open elsewhere, each with the session
+//!   it came from, which the console links them to.
 
 use crate::cores::ok;
 use crate::ctx::{fail, pending_reply, Answer, Ctx};
@@ -22,6 +25,14 @@ const BODY: usize = 64 << 10;
 
 /// `/api/start` and `/api/runs/…`, or None for any other path.
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
+    // The copies XenoNet forked, each with its session: for the console.
+    if req.method == "GET" && req.path == "/api/runs/forks" {
+        return Some(Ok(match ctx.cores.engine.forks().await {
+            Ok(v) => Reply::json(200, v),
+            Err(e) if e.is_pending() => pending_reply(&e),
+            Err(e) => Reply::error(500, e.message),
+        }));
+    }
     if req.path != "/api/start" {
         return None;
     }

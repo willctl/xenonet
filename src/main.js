@@ -1005,11 +1005,28 @@ function keepIds() {
   return keep;
 }
 
+// Copies XenoNet forked from a busy session to answer a message: each is
+// linked to the session it came from, as its parent (a fork).
+const forks = new Map(); // copy → the session it came from
+function linkForks(graph) {
+  for (const n of graph.nodes) {
+    const parent = forks.get(n.id);
+    if (parent && !n.parentId) Object.assign(n, { parentId: parent, parentKind: "fork" });
+  }
+}
+fetch("/api/runs/forks")
+  .then((r) => (r.ok ? r.json() : { forks: [] }))
+  .then((r) => {
+    for (const f of r.forks ?? []) forks.set(f.child, f.parent);
+    if (forks.size && serverGraph) applyGraph();
+  }, () => {});
+
 function applyGraph(graph = serverGraph) {
   serverGraph = graph;
   graph = withNetwork(graph, netPart);
   fullGraph = graph;
   fullIndex = new Map(graph.nodes.map((n) => [n.id, n]));
+  linkForks(graph);
   decorateHosts(graph);
   hostFilters.setData(graph);
   identities.setData(graph);
@@ -1271,6 +1288,13 @@ events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data))
 events.addEventListener("net", () => network.heard());
 // A session you started: started, refused or ended, here or on another
 // machine. A line in the feed, and a toast for what didn't go.
+events.addEventListener("fork", (e) => {
+  const f = JSON.parse(e.data);
+  forks.set(f.child, f.parent);
+  if (serverGraph) applyGraph();
+  const parent = fullIndex.get(f.parent)?.title ?? f.parent;
+  hud.activity({ kind: "xenonet", title: "A copy answers", detail: `${f.child} answers a message for «${parent}», which is open elsewhere`, ts: Number.isFinite(f.at) ? f.at : Date.now() });
+});
 events.addEventListener("start", (e) => {
   const s = JSON.parse(e.data);
   const bad = s.state === "refused" || (s.state === "ended" && s.exit !== 0);

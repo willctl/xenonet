@@ -25,8 +25,9 @@
 //
 // Messages in a burst make one wake. An actor is woken at most every 30
 // seconds and 20 times an hour, and not again while the messages it was
-// woken for wait unread, for ten minutes, since any agent can write to it
-// and each wake may start a run its owner pays for. A webhook that fails
+// woken for wait unread, for two minutes, since any agent can write to it
+// and each wake may start a run its owner pays for. If they're still unread
+// then, it's woken once more. A webhook that fails
 // waits longer each time before the next try, up to half an hour.
 //
 // The credential store keeps a webhook's URL and key off disk and out of
@@ -50,7 +51,7 @@ export const STREAMS_PER_ACTOR = 4;
 export const PER_ACTOR = { rate: 20 / 3600, burst: 5 };
 // Woken, and the messages it was woken for still unread: it's at them, or
 // can't be, so it isn't woken again for this long.
-export const UNREAD_HOLD_MS = 10 * 60e3;
+export const UNREAD_HOLD_MS = 2 * 60e3;
 const TEST_GAP_MS = 5e3;
 // All wakes together, whatever the actors: 120 an hour, 30 at once.
 const ALL = { rate: 120 / 3600, burst: 30 };
@@ -134,7 +135,7 @@ export function createWakes({ engine, actors, store, secrets, notify = () => {},
   let allTokens = ALL.burst;
   let allAt = now();
   const slugOf = (id) => String(id).replace(/^actor:/, "");
-  const st = (id) => state.get(id) ?? state.set(id, { timer: null, notifyTimer: null, inFlight: false, again: false, testing: false, lastAt: null, last: null, failures: 0, notBefore: 0, notifiedAt: 0, testedAt: 0, woke: null, tokens: PER_ACTOR.burst, tokensAt: now() }).get(id);
+  const st = (id) => state.get(id) ?? state.set(id, { timer: null, notifyTimer: null, inFlight: false, again: false, testing: false, lastAt: null, last: null, failures: 0, notBefore: 0, notifiedAt: 0, testedAt: 0, timerAt: 0, woke: null, rechecking: false, tokens: PER_ACTOR.burst, tokensAt: now() }).get(id);
 
   const configs = () => {
     try {
@@ -179,7 +180,7 @@ export function createWakes({ engine, actors, store, secrets, notify = () => {},
 
   // When its next wake may go: messages in a burst together, 30 seconds
   // after the last, after a failure's wait, and not while the messages it
-  // was last woken for wait unread, for ten minutes.
+  // was last woken for wait unread, for two minutes.
   function nextAt(id) {
     const s = st(id);
     const unseen = new Set(store.unseen(id).map((m) => m.id));
@@ -188,15 +189,20 @@ export function createWakes({ engine, actors, store, secrets, notify = () => {},
     return Math.max(now() + COALESCE_MS, (s.lastAt ?? 0) + MIN_GAP_MS, s.notBefore, held, refill);
   }
 
+  // One timer an actor: a sooner wake (its messages read, and a new one
+  // come) takes the place of a later one (the second look).
   function schedule(id) {
     const s = st(id);
     if (s.inFlight) return void (s.again = true);
-    if (s.timer) return;
+    const at = nextAt(id);
+    if (s.timer && s.timerAt <= at) return;
+    if (s.timer) clearTimer(s.timer);
+    s.timerAt = at;
     s.timer = setTimer(() => {
       s.timer = null;
       if (s.inFlight) return void (s.again = true);
       fire(id).catch((err) => log("actor.wake", `${id}: ${err.message}`));
-    }, nextAt(id) - now());
+    }, at - now());
     s.timer?.unref?.();
   }
 
@@ -263,6 +269,10 @@ export function createWakes({ engine, actors, store, secrets, notify = () => {},
     let out = null;
     try {
       const unseen = store.unseen(id).map((m) => m.id);
+      // The second look, two minutes after a wake whose messages all wait
+      // unread: its last.
+      const recheck = s.rechecking && !!s.woke?.length && s.woke.every((m) => unseen.includes(m));
+      s.rechecking = false;
       if (!unseen.length || kindOf(slug) !== "webhook" || !actors.isRegistered(id)) return { ok: true, skipped: "nothing to wake it for" };
       // Its time may have moved since it was set: the actor's own limit, or
       // the messages it was last woken for still unread.
@@ -271,7 +281,12 @@ export function createWakes({ engine, actors, store, secrets, notify = () => {},
       if (!takeAll()) return (out = record(id, now(), { ok: false, why: "XenoNet sends at most 120 wakes an hour", reason: "XenoNet's limit of 120 wakes an hour" }));
       const t = now();
       out = record(id, t, await call(id, slug, unseen.length, t));
-      if (out.ok) s.woke = unseen;
+      if (out.ok) {
+        s.woke = unseen;
+        // Still unread when the hold is up: woken once more, then not
+        // again for these.
+        if (!recheck) Object.assign(s, { rechecking: true, again: true });
+      }
       return out;
     } finally {
       s.inFlight = false;

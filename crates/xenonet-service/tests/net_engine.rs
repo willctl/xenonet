@@ -1048,6 +1048,50 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once() {
+    const ENDED: &str = "claude:0190d3e0-0000-7000-8000-00000000d001";
+    const OPEN: &str = "claude:0190d3e0-0000-7000-8000-00000000d002";
+    let root = std::env::temp_dir().join(format!("xenonet-net-wake-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let work = root.join("desk").join("home").join("ledger");
+    std::fs::create_dir_all(&work).unwrap();
+    let t = now_ms();
+    // On desk: a session whose process has gone, and one its app holds,
+    // idle.
+    let mut ended = sess(ENDED, "Ledger fixtures", &work.to_string_lossy());
+    ended.live = json!({ "lastEventAt": t - 200e3, "endedAt": t - 100e3 });
+    let mut open = sess(OPEN, "Release notes", &work.to_string_lossy());
+    open.live = json!({ "status": "idle", "lastEventAt": t - 200e3 });
+    let (a, b, c) = three(&root, 48123, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
+    let mut desk = Stream::of(&c);
+    // desk lets the network wake its sessions: no allowance per session.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
+    assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
+    until("desk's ended session among its agents at laptop", 15, || async { b.peers(L1).await.contains(&format!("@desk:{ENDED}")) }).await;
+    // The one that ended is resumed for the message, at once.
+    b.agent(L1, "send", json!({ "to": format!("@desk:{ENDED}"), "text": "The fixtures moved." })).await;
+    let (args, prompt) = ran(&c, 1).await;
+    assert_eq!(&args[..3], ["-p", "--resume", ENDED.trim_start_matches("claude:")], "{args:?}");
+    assert!(!args.contains(&"--fork-session".to_string()), "{args:?}");
+    assert!(prompt.contains("The fixtures moved."), "{prompt}");
+    until("the delivered receipt at laptop", 15, || async { b.receipts().iter().any(|(who, r)| *who == format!("@desk:{ENDED}") && r.as_deref() == Some("delivered")) }).await;
+    // The one its app holds gets a copy, with its whole context, which the
+    // console links to it.
+    b.agent(L1, "send", json!({ "to": format!("@desk:{OPEN}"), "text": "Notes for 0.6?" })).await;
+    let (args, prompt) = ran(&c, 2).await;
+    assert_eq!(&args[..4], ["-p", "--resume", OPEN.trim_start_matches("claude:"), "--fork-session"], "{args:?}");
+    assert!(prompt.contains("Notes for 0.6?"), "{prompt}");
+    let fork = desk.next("fork", 10, |_| true).await;
+    assert_eq!((fork["parent"].as_str(), fork["child"].as_str()), (Some(OPEN), Some("claude:0190d3e0-0000-7000-8000-0000000f0f01")), "{fork}");
+    let (_, forks) = c.call("GET", "/api/runs/forks", Value::Null, &[]).await;
+    assert_eq!(forks["forks"], json!([{ "child": "claude:0190d3e0-0000-7000-8000-0000000f0f01", "parent": OPEN }]));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
 async fn until_value<F: std::future::Future<Output = Option<Value>>>(what: &str, secs: u64, mut get: impl FnMut() -> F) -> Value {
     let end = std::time::Instant::now() + Duration::from_secs(secs);
     loop {

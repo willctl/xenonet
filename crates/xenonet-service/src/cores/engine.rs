@@ -86,6 +86,11 @@ pub trait Engine: Send + Sync {
     async fn start(&self, _by: Value, _req: Value, _strong: bool) -> R<Value> {
         pending(ENGINE)
     }
+    /// The copies of sessions XenoNet forked to answer messages, each with
+    /// the session it came from: { forks: [{ child, parent }] }.
+    async fn forks(&self) -> R<Value> {
+        pending(ENGINE)
+    }
     /// `engine.store.markUnseen(me, ids)`.
     fn mark_unseen(&self, _me: &str, _ids: &Value) -> R<()> {
         pending(ENGINE)

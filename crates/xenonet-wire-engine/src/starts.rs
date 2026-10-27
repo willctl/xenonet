@@ -53,6 +53,9 @@ pub struct StartSide {
     asked: Mutex<HashMap<String, Asked>>,
     /// Requests from other machines already taken, by their mid.
     taken: Mutex<HashMap<String, f64>>,
+    /// Copies of sessions XenoNet forked to answer a message, each with the
+    /// session it came from: the last 200.
+    forks: Mutex<Vec<(String, String)>>,
 }
 
 /// One turn: of XENONET_RUNS_BIN's program when it names one (the tests'
@@ -182,6 +185,59 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
         std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, &answer));
     }
     Ok(json!({ "session": session, "pid": pid, "folder": folder, "app": app }))
+}
+
+/// The forks XenoNet made, newest last: each copy and the session it was
+/// forked from, for the console to link them.
+pub fn forks(w: &World) -> Vec<(String, String)> {
+    w.starts.forks.locked().clone()
+}
+
+/// Grok Build's prompt for a turn, in a file only its owner can read, in
+/// the runs folder: its path.
+pub fn prompt_file(w: &World, text: &str) -> Result<String, String> {
+    let f = std::path::Path::new(&w.setup.state_dir).join("runs").join(format!("{}.prompt", uuid()?));
+    write_private(&f, text).map_err(|e| format!("the prompt couldn't be written for Grok Build: {e}"))?;
+    Ok(f.to_string_lossy().into_owned())
+}
+
+/// After a resumed or forked turn starts: a fork's copy, once its stream
+/// names it, linked to the session it came from (the fork event); the
+/// prompt file taken away when the turn ends.
+pub fn after_resume(w: &World, runner: &Arc<Runner>, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
+    if fork_of.is_none() && prompt_file.is_none() {
+        return;
+    }
+    let Some(world) = w.arc() else { return };
+    let (runner, key, parent) = (runner.clone(), key.to_string(), fork_of.map(str::to_string));
+    let logs = std::path::Path::new(&w.setup.state_dir).join("runs");
+    std::thread::spawn(move || {
+        let mut named = parent.is_none();
+        loop {
+            std::thread::sleep(Duration::from_millis(400));
+            let Some(rec) = runner.list().into_iter().rev().find(|r| r.key == key && r.pid == Some(f64::from(pid))) else { break };
+            if !named {
+                let log = std::fs::read_to_string(logs.join(format!("{}.log", rec.id))).unwrap_or_default();
+                if let (Some(child), Some(parent)) = (starts::session_of("claude", &log), parent.as_deref()) {
+                    named = true;
+                    {
+                        let mut f = world.starts.forks.locked();
+                        f.push((child.clone(), parent.to_string()));
+                        let from = f.len().saturating_sub(200);
+                        f.drain(..from);
+                    }
+                    world.log("info", "fork", &format!("{child} answers a message for {parent}, which is open elsewhere"));
+                    world.emit(From::Engine, "fork", json!({ "child": child, "parent": parent, "at": ms(now_ms()) }));
+                }
+            }
+            if rec.end.is_some() {
+                break;
+            }
+        }
+        if let Some(f) = prompt_file {
+            let _ = std::fs::remove_file(f);
+        }
+    });
 }
 
 /// A file only its owner can read.

@@ -21,7 +21,7 @@
 //! are called as the JS called them.
 
 use super::policy::{framed, hash_text, is_you};
-use super::reach::{self, Action, Consent, Decision, Kind, Settings};
+use super::reach::{self, Action, Consent, Decision, Kind, Settings, Wake};
 use crate::peer::{list, opt_call, Calls, Result};
 use crate::sql::Arg;
 use crate::store::js_text;
@@ -152,11 +152,33 @@ impl Router {
         Ok(c.call("router.policy", "consented", vec![id.clone(), obj(vec![("remote", Arg::Bool(remote))])])?.truthy())
     }
 
-    /// Whether this machine lets `from` wake `agent` (`reach`): your
-    /// allowance for the session, here and for actors.
+    /// This machine's wake setting (`router.reach()`'s wake): network lets
+    /// any sender wake a session within the budgets.
+    fn wake_network(c: &mut dyn Calls) -> Result<bool> {
+        Ok(opt_call(c, "router", "reach", vec![])?.field("wake").as_str() == Some("network"))
+    }
+
+    /// Whether this machine lets `from` wake `agent` (`reach`): its wake
+    /// setting, else your allowance for the session, here and for actors.
     fn may_wake(c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Decision> {
         let consent = Consent { here: Self::consented(c, agent, false)?, remote: Self::consented(c, agent, true)? };
-        Ok(reach::decide(Action::Wake, &reach::sender_of(from), &js_text(agent), &Settings { consent, ..Settings::default() }))
+        let wake = if Self::wake_network(c)? { Wake::Network } else { Wake::Consent };
+        Ok(reach::decide(Action::Wake, &reach::sender_of(from), &js_text(agent), &Settings { consent, wake, ..Settings::default() }))
+    }
+
+    /// Whether a message to a Claude Code session that a process holds (its
+    /// app, its terminal, or a run XenoNet resumed) and that isn't at work
+    /// goes to a copy of it, forked with its whole context: under wake
+    /// network only, since the session itself can't take it now.
+    pub fn forkable(&self, c: &mut dyn Calls, view: &Arg) -> Result<bool> {
+        if !view.truthy() || view.field("ended").truthy() || view.field("status").as_str() == Some("working") {
+            return Ok(false);
+        }
+        let id = view.field("id");
+        if !js_text(&id).starts_with("claude:") || !truthy_at(c, "router.resume.fork")? || !c.call("router.resume", "can", vec![id])?.truthy() {
+            return Ok(false);
+        }
+        Self::wake_network(c)
     }
 
     /// Whether a session can be reached without hooks (an OpenCode run
@@ -190,11 +212,15 @@ impl Router {
         Ok(out)
     }
 
-    /// Whether a session that ended can still be messaged: you allowed it,
-    /// and a headless resume would start it for the message.
+    /// Whether a session that ended can still be messaged: you allowed it
+    /// (or wake is network), and a headless resume would start it for the
+    /// message.
     pub fn resumable(&self, c: &mut dyn Calls, view: &Arg) -> Result<Arg> {
         if !truthy_at(c, "router.resume")? || !view.field("ended").truthy() || !c.call("router.resume", "can", vec![view.field("id")])?.truthy() {
             return Ok(Arg::Bool(false));
+        }
+        if Self::wake_network(c)? {
+            return Ok(Arg::Bool(true));
         }
         c.call("router.policy", "consented", vec![view.field("id")])
     }
@@ -233,6 +259,9 @@ impl Router {
         }
         if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && Self::may_wake(c, from, &id)?.allowed() {
             return Ok(Some("right away, in a turn XenoNet resumes it for"));
+        }
+        if self.forkable(c, a)? && Self::may_wake(c, from, &id)?.allowed() {
+            return Ok(Some("right away, in a copy XenoNet forks from it, since it's open elsewhere"));
         }
         if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? && Self::may_wake(c, from, &id)?.allowed() {
             return Ok(Some("right away, through its OpenCode server"));
@@ -444,6 +473,31 @@ impl Router {
                         return success(self, c, "resume", vec![("where", r.field("where"))]);
                     }
                     tried.push(format!("resume: {}", js_text(&r.field("why"))));
+                }
+            } else if self.forkable(c, &view)? {
+                // 5. A copy of a Claude Code session a process holds, under
+                // wake network: it answers with the whole context, now.
+                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                    tried.push(format!("fork: {why}"));
+                } else {
+                    let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone()), ("fork", Arg::Bool(true))])]));
+                    c.call(
+                        "router.policy",
+                        "audit",
+                        vec![obj(vec![
+                            ("kind", Arg::text("forked")),
+                            ("message", m.field("id")),
+                            ("from", from.clone()),
+                            ("to", agent.clone()),
+                            ("ok", r.field("ok")),
+                            ("why", r.field("why").or(Arg::Null)),
+                            ("text", hash.clone()),
+                        ])],
+                    )?;
+                    if r.field("ok").truthy() {
+                        return success(self, c, "fork", vec![("where", r.field("where"))]);
+                    }
+                    tried.push(format!("fork: {}", js_text(&r.field("why"))));
                 }
             }
         }
