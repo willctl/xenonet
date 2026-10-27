@@ -100,7 +100,8 @@ pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
 /// that isn't one. `you_at` is the host the person is at (this one by
 /// default), for net-founder and net-remote-waiting; `variant`
 /// "ask", for net-founder, has a run on laptop wait for your Allow or Deny
-/// on a permission prompt; "titles-only" has the other machines share
+/// on a permission prompt, and "ask-env" one whose command may read the
+/// run's environment, with the Allow card's warning; "titles-only" has the other machines share
 /// titles only, so their
 /// agents carry no question's text, last message or stuck reason, and
 /// "relay", for net-founder, has laptop drawn from a relay snapshot: this
@@ -118,8 +119,13 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         "agents": agents.len(),
     });
     // "ask": a run XenoNet started on laptop asks to use a tool, for Needs
-    // you's Allow and Deny.
-    let asks = if variant == Some("ask") { vec![made_up_ask(ctx.now())] } else { Vec::new() };
+    // you's Allow and Deny; "ask-env", a tool call that may read the run's
+    // environment, with the warning.
+    let asks = match variant {
+        Some("ask") => vec![made_up_ask(ctx.now(), false)],
+        Some("ask-env") => vec![made_up_ask(ctx.now(), true)],
+        _ => Vec::new(),
+    };
     sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone() });
     for a in &asks {
         ctx.broadcast("ask", a);
@@ -768,8 +774,9 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
 }
 
 /// A permission prompt of a made-up run on laptop, as its machine would
-/// send it (asks.rs).
-fn made_up_ask(now: f64) -> Value {
+/// send it (asks.rs); `env`, one that may read the run's environment.
+fn made_up_ask(now: f64, env: bool) -> Value {
+    let (input, warning) = if env { ("printenv | grep -i token", json!(xenonet_engine::delivery::starts::ENV_WARNING)) } else { ("cargo test --package billing", Value::Null) };
     json!({
         "id": format!("ask_{}", random_uuid()),
         "host": "laptop",
@@ -778,7 +785,8 @@ fn made_up_ask(now: f64) -> Value {
         "run": format!("run_{}", random_uuid()),
         "title": "laptop · Tidy the billing tests",
         "tool": "Bash",
-        "input": "cargo test --package billing",
+        "input": input,
+        "warning": warning,
         "at": (now - 20e3) as i64,
         "until": (now + 580e3) as i64,
         "simulated": true,

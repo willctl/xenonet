@@ -33,11 +33,7 @@ pub const TARGET: &str = "xenonet:ask";
 pub const HOLD_MS: f64 = 10.0 * 60e3;
 /// Asks from other machines kept at most.
 const THERE_MAX: usize = 50;
-/// What the Allow card says of a call that may read the run's environment:
-/// Claude Code passes its own environment to its tools, so a token given
-/// to XenoNet's runs (`xenonet runs sign-in`) is readable there.
-pub const ENV_WARNING: &str =
-    "This may read the run's environment, which holds the Claude Code sign-in token you gave XenoNet's runs, if you gave one. Deny it unless the session may see that token.";
+pub use xenonet_engine::delivery::starts::ENV_WARNING;
 
 /// One ask, as Needs you shows it.
 #[derive(Clone, Debug)]

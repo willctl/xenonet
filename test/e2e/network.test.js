@@ -540,6 +540,18 @@ test("a run's permission prompt from another machine: in Needs you with Deny, an
     assert.ok(await until(async () => !(await ask())), `${decision} answers it, and it goes`);
     await s.driver("needsYou", "close");
   }
+  // One that may read the run's environment, where the runs' sign-in
+  // token is, says so on its row.
+  await simulate("net-founder", { b: "ask-env" }, (n) => n.hosts.some((x) => x.id === "laptop"));
+  const env = await until(ask);
+  assert.deepEqual([env.text, /may read the run's environment/.test(env.warning ?? "")], ["printenv | grep -i token", true], JSON.stringify(env));
+  await s.driver("needsYou", "open");
+  const warn = await s.eval(`return document.querySelector('[data-key="${env.key}"] [data-ny-warn]')?.textContent ?? null`);
+  assert.match(warn ?? "", /Deny it unless the session may see that token/);
+  await s.screenshot({ name: "e2e-network-ask-env", inline: false });
+  await clickOn(`[data-ny-deny="${env.key}"]`);
+  assert.ok(await until(async () => !(await ask())), "denied, it goes");
+  await s.driver("needsYou", "close");
 }));
 
 test("net-gateway-down says so: since when, why, and what waits in the outbox", { timeout: limit(60000) }, shoot("network-gateway-down", async () => {
