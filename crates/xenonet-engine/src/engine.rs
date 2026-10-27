@@ -466,10 +466,11 @@ fn brief_of(a: &Arg) -> Arg {
     b
 }
 
-/// When a message to another host gets there, in words.
-fn remote_way(a: &Arg) -> String {
-    let host = js_text(&a.field("host"));
-    if a.field("online").truthy() {
+/// When a message to another host gets there, in words, by whether the
+/// host is online now: the network's word, since only the agents its
+/// presence lists carry their own.
+fn remote_way(host: &str, online: bool) -> String {
+    if online {
         format!("through your XenoNet network, as soon as {host} has it; then as a session there gets messages")
     } else {
         format!("when {host} is back online: it waits in this machine's outbox")
@@ -1274,9 +1275,12 @@ impl Engine {
         }
         // How each will get it, asked before the router spends a wake on it.
         let mut ways = Vec::new();
+        let hosts = if networked { self.net.get().hosts() } else { Vec::new() };
         for r in &recipients {
             if r.field("host").truthy() {
-                ways.push(Arg::text(remote_way(r)));
+                let host = js_text(&r.field("host"));
+                let online = hosts.iter().any(|h| h.id == host && h.online);
+                ways.push(Arg::text(remote_way(&host, online)));
                 continue;
             }
             let w = opt_call(c, "engine.delivery", "way", vec![me.clone(), r.clone()])?;
@@ -2232,5 +2236,11 @@ mod tests {
         assert_eq!(ago(30e3), "just now");
         assert_eq!(ago(150e3), "3 min ago");
         assert_eq!(short("claude:0123456789abcdef"), "claude:01234567");
+    }
+
+    #[test]
+    fn a_message_to_another_host_waits_only_while_the_host_is_away() {
+        assert_eq!(remote_way("neo-rex", true), "through your XenoNet network, as soon as neo-rex has it; then as a session there gets messages");
+        assert_eq!(remote_way("neo-rex", false), "when neo-rex is back online: it waits in this machine's outbox");
     }
 }

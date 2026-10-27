@@ -729,6 +729,9 @@ async fn actors_reach_actors_on_other_machines() {
     a.ctx.cores.policy.grant(&wren, "by:kite by:grok", 3600e3).unwrap();
     let sent = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap();
     assert_eq!(sent["to"][0]["host"], "laptop", "{sent}");
+    // The answer says laptop is online, though kite isn't among the agents
+    // laptop's presence lists.
+    assert_eq!(sent["to"][0]["delivery"], "through your XenoNet network, as soon as laptop has it; then as a session there gets messages", "{sent}");
     let got = until_value("wren's message at kite", 10, || async {
         let got = b.ctx.cores.engine.inbox(&kite, Duration::ZERO).await.unwrap();
         got.as_array().unwrap().first().cloned()
@@ -748,6 +751,12 @@ async fn actors_reach_actors_on_other_machines() {
     // refuses one sent there, rather than storing it for no one.
     send(&a, &wren, json!({ "to": "@laptop:actor:grok", "text": "Anything new?" })).await.unwrap();
     until("grok's refusal at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:grok" && r.as_deref() == Some("refused")) }).await;
+
+    // While laptop is away, the answer says the message waits for it.
+    b.svc.stop();
+    until("laptop offline at studio", 15, || async { a.state().await["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "laptop" && h["online"] == false) }).await;
+    let later = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Still there?" })).await.unwrap();
+    assert_eq!(later["to"][0]["delivery"], "when laptop is back online: it waits in this machine's outbox", "{later}");
     drop((a, b));
     let _ = std::fs::remove_dir_all(root);
 }
