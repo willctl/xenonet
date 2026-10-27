@@ -89,6 +89,36 @@ passed on standard input. A resumed Claude Code turn listens afterwards,
 as above, so it can take an answer. Allowed sessions that ended stay among
 the ones you can message by name.
 
+XenoNet looks for the program in this order:
+
+- Claude Code: `claude` on your `PATH`, then the copy of Claude Code that
+  Claude desktop keeps in its own folder (`claude-code/<version>/…`, the
+  newest version whose build Claude desktop marked `.verified`), then the
+  path in `XENONET_CLAUDE_BIN`.
+- Codex: the path in `XENONET_CODEX_BIN`, then the `codex` the ChatGPT
+  desktop app ships, then `codex` on your `PATH`.
+
+On Windows, `PATH` is searched with each extension in `PATHEXT`, so an npm
+install's `claude.cmd` is found. A `.cmd` or `.bat` runs through
+`cmd.exe /d /s /c`, with cmd.exe taken from `%ComSpec%` (or
+`%SystemRoot%\System32`), never looked for in the session's folder, and
+each argument quoted once. XenoNet won't pass one an argument that
+contains `"`, `%` or `!`, or ends in `\`, since cmd.exe would read them.
+Each turn runs in a job object, so stopping it stops cmd.exe and
+everything it started, and the turns under way stop when XenoNet's
+service does.
+
+Each resumed turn's output goes to `runs/<id>.log` in XenoNet's state
+folder. A log keeps the first 1 MB, and logs older than a week are
+deleted. `delivery-runs.json`, beside it, records when each run started,
+its exit code and how long it took, and `timedOut` for one stopped at its
+limit. At most 4 turns run at once on a machine, one per session, and
+each is stopped after 30 minutes. A message that comes while 4 are running
+waits for the session's next turn. The records survive a restart, so a
+turn the previous XenoNet started still counts while its process runs. It
+goes by the process's id: if the system has given that id to another
+process, the turn still counts until its 30 minutes are up.
+
 ### OpenCode
 
 OpenCode's TUI runs an HTTP server only when it's told where to listen
@@ -159,10 +189,21 @@ xenonet live revoke hermes
 - A grant for one identity never shows another identity's sessions, so
   separate accounts stay apart.
 - An actor sees another actor only if its grant names it with `by:<slug>`.
+  That covers an actor of that name on any machine in your
+  [network](network.md), so for an actor on another machine, name the
+  machine too: `by:muse machine:laptop`.
 - `by:` matches what actors report they work on, so a grant can't use the
   actor's own slug: an actor's reports never widen its own scope.
 
 You and the sessions on this machine see everything, as before.
+
+## Who decides
+
+The machine a message arrives at decides what it lets in. A message from
+another machine is checked there before it's stored, and each way of
+waking a session is checked before it's used. Messages are open: the
+sender's machine has already checked its scope, and the guards below
+still hold. Waking a session needs your allowance for it.
 
 ## Guards
 
@@ -174,9 +215,10 @@ You and the sessions on this machine see everything, as before.
 | Per recipient | 30 messages a minute |
 | Fan-out | 25 recipients per message |
 | Duplicates | the same text to the same recipients within a minute is refused |
-| Loops | 24 messages between the same two agents in ten minutes, or a reply chain 6 deep, stops the thread until you step in |
-| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes, from XenoNet's live readings of Claude Code's and Codex's limits; `xenonet live` shows them. |
-| Consent | waking an OpenCode session, typing into any session, or resuming one that ended needs your allowance for that session, which expires |
+| Loops | 24 messages between the same two agents in ten minutes stops the thread until you step in. So does a reply chain 6 deep (`MAX_HOPS`), counted on every machine it crosses; a message sent without `reply_to` starts a new thread. |
+| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes, from XenoNet's live readings of Claude Code's and Codex's limits; `xenonet live` shows them. The counts are kept in `delivery-wakes.json` in the state folder, so restarting XenoNet doesn't reset them. |
+| Consent | waking an OpenCode session, typing into any session, or resuming one that ended needs your allowance for that session, which expires. When an actor sends, on this machine or another, the allowance has to cover actors (`xenonet live allow <session> --remote`). You need only the allowance itself, whether you write here or from another machine's console. |
+| Headless turns | at most 4 at once on a machine, one per session, 30 minutes each, each one logged |
 | Secrets | key- and token-like strings are redacted when a message crosses identities, or goes to or from an actor |
 | Framing | every delivered message names its sender and says it's another agent's message, not your user's instruction |
 | Audit | `xenonet live audit`: an append-only log of grants, consents, pauses, refusals, deliveries and typing, with message hashes, never text |
@@ -191,7 +233,7 @@ You and the sessions on this machine see everything, as before.
 | Typing into the wrong window | Per-session consent; pid, tty and foreground checks done twice; tmux only; one literal line |
 | Two agents in a loop, or a flood | Per-sender, per-recipient and per-pair limits, duplicate checks, reply depth, fan-out cap |
 | Wakes burning plan limits | Wake budgets per sender and session, and no wakes for a provider near its limit |
-| A resumed turn doing more than you expected | Only sessions you allowed, one turn per message, in the session's own folder, under Claude Code's or Codex's own permission settings for headless runs; every resume is audited |
+| A resumed turn doing more than you expected | Only sessions you allowed, one turn per message, in the session's own folder, under Claude Code's or Codex's own permission settings for headless runs; every resume is audited and its output logged |
 | A token or key passed along | Redaction across identities and actors |
 | Something goes wrong at scale | The pause switch in the CLI and the command palette |
 | Finding out what happened | The append-only audit log |

@@ -60,6 +60,12 @@ pub fn policy_is_you(id: JsArg) -> bool {
     policy::is_you(&id.0)
 }
 
+/// { host, slug }, or null for an id that isn't an actor's.
+#[napi(js_name = "policyActorOf")]
+pub fn policy_actor_of(id: JsArg) -> JsArg {
+    JsArg(policy::actor_of(&id.0).map_or(Arg::Null, |(host, slug)| Arg::Obj(vec![("host".into(), host.map_or(Arg::Null, Arg::Text)), ("slug".into(), Arg::Text(slug))])))
+}
+
 #[napi(js_name = "policyRedact")]
 pub fn policy_redact(text: String) -> JsArg {
     let (t, n) = policy::redact_secrets(&text);
@@ -308,6 +314,26 @@ impl TmuxCore {
     }
 }
 
+// ----- reach -----
+
+use xenonet_engine::delivery::reach;
+
+#[napi(js_name = "reachSender")]
+pub fn reach_sender(id: JsArg) -> JsArg {
+    JsArg(reach::sender_of(&id.0).to_arg())
+}
+
+/// { ok: true }, or { ok: false, why }.
+#[napi(js_name = "reachDecide")]
+pub fn reach_decide(action: String, sender: JsArg, target: JsArg, settings: JsArg) -> JsArg {
+    let Some(a) = reach::Action::parse(&action) else {
+        return JsArg(reach::Decision::Refuse(format!("nothing decides \"{action}\" here")).to_arg());
+    };
+    let consent = settings.0.field("consent");
+    let s = reach::Settings { consent: reach::Consent { here: consent.field("here").truthy(), remote: consent.field("remote").truthy() } };
+    JsArg(reach::decide(a, &reach::Sender::of(&sender.0), &xenonet_engine::store::js_text(&target.0), &s).to_arg())
+}
+
 // ----- resume -----
 
 use xenonet_engine::delivery::resume;
@@ -326,16 +352,74 @@ pub fn resume_command(agent: JsArg, settings: JsArg) -> JsArg {
     JsArg(resume::resume_command(&agent.0, &settings.0).map_or(Arg::Null, |(c, a)| Arg::List(vec![Arg::text(c), Arg::List(a)])))
 }
 
-/// { why } it can't, or { cmd: [command, args] }.
+/// { why } it can't, or { cmd: [app, args] }.
 #[napi(js_name = "resumePlan")]
-pub fn resume_plan(env: Env, deps: Object<'_>, agent: JsArg, settings: JsArg, cwd: JsArg, windows: bool) -> Result<JsArg> {
-    let out = resume::plan(&mut SyncCalls::new(&env, &deps), &agent.0, &settings.0, &cwd.0, windows);
+pub fn resume_plan(env: Env, deps: Object<'_>, agent: JsArg, settings: JsArg, cwd: JsArg) -> Result<JsArg> {
+    let out = resume::plan(&mut SyncCalls::new(&env, &deps), &agent.0, &settings.0, &cwd.0);
     let out = out.map_err(|t| rethrow(&env, t))?;
     settle(&env);
     Ok(JsArg(match out {
         Err(why) => Arg::Obj(vec![("why".into(), Arg::text(why))]),
         Ok((c, a)) => Arg::Obj(vec![("cmd".into(), Arg::List(vec![Arg::text(c), Arg::List(a)]))]),
     }))
+}
+
+// ----- runs -----
+
+use xenonet_engine::delivery::runs;
+
+#[napi(object)]
+pub struct RunsConstants {
+    pub cap: u32,
+    #[napi(js_name = "turnMs")]
+    pub turn_ms: f64,
+    #[napi(js_name = "logMax")]
+    pub log_max: u32,
+    #[napi(js_name = "keepMs")]
+    pub keep_ms: f64,
+}
+
+#[napi(js_name = "runsConstants")]
+pub fn runs_constants() -> RunsConstants {
+    RunsConstants { cap: runs::CAP as u32, turn_ms: runs::TURN_MS, log_max: runs::LOG_MAX as u32, keep_ms: runs::KEEP_MS }
+}
+
+#[napi(js_name = "runsCmdExe")]
+pub fn runs_cmd_exe(comspec: Option<String>, system_root: Option<String>) -> String {
+    runs::cmd_exe(comspec.as_deref(), system_root.as_deref())
+}
+
+/// { program, args, verbatim }, or { why }, with cmd.exe where the twin's
+/// %ComSpec% and %SystemRoot% say.
+#[napi(js_name = "runsLaunch")]
+pub fn runs_launch(program: String, args: Vec<String>, windows: bool, comspec: Option<String>, system_root: Option<String>) -> JsArg {
+    let cmd = runs::cmd_exe(comspec.as_deref(), system_root.as_deref());
+    JsArg(match runs::launch_with(&program, &args, windows, &cmd) {
+        Ok(l) => l.to_arg(),
+        Err(why) => Arg::Obj(vec![("why".into(), Arg::text(why))]),
+    })
+}
+
+fn runs_of(records: &JsArg) -> Vec<runs::Run> {
+    list(records.0.clone()).iter().filter_map(runs::run_of).collect()
+}
+
+/// null, or why a run for `key` may not start now, counting `also` (the
+/// keys of runs under way, record or not).
+#[napi(js_name = "runsAdmit")]
+pub fn runs_admit(records: JsArg, key: String, now: f64, cap: u32, alive: Function<'_, f64, bool>, also: Vec<String>) -> Option<String> {
+    runs::admit_with(&runs_of(&records), &also, &key, now, cap as usize, &mut |pid| alive.call(pid).unwrap_or(false))
+}
+
+#[napi(js_name = "runsKept")]
+pub fn runs_kept(records: JsArg, now: f64) -> crate::js::Json {
+    crate::js::Json(serde_json::Value::Array(runs::kept(&runs_of(&records), now).iter().map(runs::Run::to_json).collect()))
+}
+
+#[napi(js_name = "runsStaleLogs")]
+pub fn runs_stale_logs(files: JsArg, now: f64) -> Vec<String> {
+    let files: Vec<(String, f64)> = list(files.0).iter().map(runs::file_of).collect();
+    runs::stale_logs(&files, now)
 }
 
 // ----- setup -----

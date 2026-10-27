@@ -68,19 +68,22 @@ test("resume runs the session's own CLI on the same session, the message on stdi
     setImmediate(() => child.emit("spawn"));
     return child;
   };
-  const r = createResume({ spawn, env: { PATH: "/bin", CLAUDE_PID: "1" }, settings: () => "/s/listen.json", exists: () => true });
+  // The runner finds the program (runs.js); here it's the app's name.
+  const find = (app) => app;
+  const r = createResume({ spawn, find, env: { PATH: "/bin", CLAUDE_PID: "1" }, settings: () => "/s/listen.json", exists: () => true });
   const out = await r.deliver({ agent: `claude:${ID}`, cwd: "/w/atlas", text: "-rf [XenoNet from Muse] hi" });
   assert.deepEqual(out, { ok: true, where: "pid 99" });
   assert.deepEqual(runs[0], { cmd: "claude", args: ["-p", "--resume", ID, "--settings", "/s/listen.json"], cwd: "/w/atlas", env: { PATH: "/bin" }, text: "-rf [XenoNet from Muse] hi" });
   assert.ok(r.running(`claude:${ID}`));
   assert.match((await r.deliver({ agent: `claude:${ID}`, cwd: "/w/atlas", text: "again" })).why, /under way/, "one resumed turn at a time");
-  assert.match((await createResume({ spawn, exists: () => false }).deliver({ agent: `codex:${ID}`, cwd: "/gone", text: "x" })).why, /folder/);
+  assert.match((await createResume({ spawn, find, exists: () => false }).deliver({ agent: `codex:${ID}`, cwd: "/gone", text: "x" })).why, /folder/);
   const missing = () => {
     const child = new EventEmitter();
     setImmediate(() => child.emit("error", Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" })));
     return child;
   };
-  assert.match((await createResume({ spawn: missing, exists: () => true }).deliver({ agent: `claude:${ID}`, cwd: "/w", text: "x" })).why, /isn't installed/);
+  assert.match((await createResume({ spawn: missing, find, exists: () => true }).deliver({ agent: `claude:${ID}`, cwd: "/w", text: "x" })).why, /isn't installed/);
+  assert.equal((await createResume({ spawn, find: () => null, exists: () => true }).deliver({ agent: `claude:${ID}`, cwd: "/w", text: "x" })).why, "claude isn't installed here", "found nowhere");
 });
 
 test("the listen settings: a Stop hook to XenoNet's listen route, given longer than its window, written once", async () => {

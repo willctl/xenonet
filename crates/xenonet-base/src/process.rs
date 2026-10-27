@@ -27,6 +27,129 @@ impl Background for std::process::Command {
     }
 }
 
+/// A program XenoNet started and every process it starts in turn, which
+/// stop together. On Windows that's a job object, which also ends them all
+/// when XenoNet's handle to it closes: a headless turn there can be cmd.exe
+/// running a .cmd that runs node, and stopping cmd.exe alone would leave
+/// node running. Elsewhere it's the program itself.
+pub struct Tree {
+    #[cfg(windows)]
+    job: Option<Job>,
+}
+
+impl Tree {
+    /// The tree of a child just started. What it starts from now on is in
+    /// it too.
+    pub fn of(child: &std::process::Child) -> Tree {
+        #[cfg(windows)]
+        {
+            Tree { job: Job::new().filter(|j| j.assign(child)) }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = child;
+            Tree {}
+        }
+    }
+
+    /// Whether any process in it still runs besides the child itself, which
+    /// its starter waits on: none outside Windows.
+    pub fn others(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.job.as_ref().is_some_and(|j| j.active() > 0)
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
+    /// Stops it all, at once: the job on Windows (or the child, if it has
+    /// none), the child elsewhere (SIGKILL).
+    pub fn kill(&self, child: &mut std::process::Child) {
+        #[cfg(windows)]
+        {
+            if let Some(j) = &self.job {
+                j.kill();
+            }
+        }
+        let _ = child.kill();
+    }
+}
+
+/// A Windows job object whose processes end when its last handle closes
+/// (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).
+#[cfg(windows)]
+struct Job(isize);
+
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "job objects, which std doesn't wrap")]
+impl Job {
+    fn handle(&self) -> windows_sys::Win32::Foundation::HANDLE {
+        self.0 as windows_sys::Win32::Foundation::HANDLE
+    }
+
+    fn new() -> Option<Job> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: a job with no name and the default security; its limits
+        // are read from a local that outlives the call, with its own size.
+        unsafe {
+            let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if h.is_null() {
+                return None;
+            }
+            let job = Job(h as isize);
+            let size = size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+            (SetInformationJobObject(h, JobObjectExtendedLimitInformation, (&raw const info).cast(), size) != 0).then_some(job)
+        }
+    }
+
+    fn assign(&self, child: &std::process::Child) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        // SAFETY: both handles are open: the job's is this Job's own, and the
+        // child's is std's, which it holds until the child is dropped.
+        unsafe { windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(self.handle(), child.as_raw_handle().cast()) != 0 }
+    }
+
+    /// How many of its processes still run.
+    fn active(&self) -> u32 {
+        use windows_sys::Win32::System::JobObjects::{JobObjectBasicAccountingInformation, QueryInformationJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION};
+        let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        let size = size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32;
+        // SAFETY: the job's handle is open, and the answer goes to a local
+        // of the size given.
+        let ok = unsafe { QueryInformationJobObject(self.handle(), JobObjectBasicAccountingInformation, (&raw mut info).cast(), size, std::ptr::null_mut()) != 0 };
+        if ok {
+            info.ActiveProcesses
+        } else {
+            0
+        }
+    }
+
+    fn kill(&self) {
+        // SAFETY: the job's handle is open.
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.handle(), 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "closing the job's handle, which std doesn't wrap")]
+impl Drop for Job {
+    fn drop(&mut self) {
+        // SAFETY: the handle is this Job's own and closed once, here.
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.handle());
+        }
+    }
+}
+
 /// Whether `pid` is a running process. On unix that's kill(pid, 0), which
 /// sends nothing; on Windows, a process it can open that hasn't exited, as
 /// libuv's uv_kill(pid, 0) checks. A process that's there but another

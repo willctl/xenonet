@@ -72,7 +72,7 @@
                 ]
               },
               "receipt": {
-                "description": "For an agent on another host: what its host last said of it (stored, held, delivered, seen or refused); null before it said",
+                "description": "For an agent on another host: what its host last said of it (stored, held, delivered, seen or refused), or unread when it was stored there and no one read it in a week; null before it said",
                 "type": [
                   "string",
                   "null"

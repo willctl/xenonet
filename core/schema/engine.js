@@ -120,7 +120,7 @@ export const EngineMessage = define(
           id: AgentRef,
           seen: z.boolean(),
           host: nstr.optional().describe("For an agent on another host: its host"),
-          receipt: nstr.optional().describe("For an agent on another host: what its host last said of it (stored, held, delivered, seen or refused); null before it said"),
+          receipt: nstr.optional().describe("For an agent on another host: what its host last said of it (stored, held, delivered, seen or refused), or unread when it was stored there and no one read it in a week; null before it said"),
         }),
       ),
     }).describe("In the console's snapshot, GET /api/engine/state"),

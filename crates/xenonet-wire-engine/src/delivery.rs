@@ -9,6 +9,7 @@ use crate::engine::EngineCalls;
 use crate::exec::{self, Spec};
 use crate::js::Locked;
 use crate::js::{arg, at, json, list, no_method, now_ms, obj, text};
+use crate::runs::{Runner, Turn};
 use crate::world::World;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -265,10 +266,10 @@ impl Channels for ChannelsDriver {
 
 // ---------- the router and its ways in ----------
 
-/// A resumed turn's processes, by session.
-#[derive(Default)]
+/// Headless resume: the shared runner, and the settings file a resumed
+/// Claude Code turn listens with.
 pub struct Resumes {
-    running: Mutex<HashMap<String, u32>>,
+    pub runner: std::sync::Arc<Runner>,
     settings: Option<String>,
 }
 
@@ -290,7 +291,8 @@ pub struct RouterSide {
 }
 
 impl RouterSide {
-    pub fn new(demo: bool, listen_file: Option<String>) -> RouterSide {
+    /// `state_dir` is where the runs' logs and records go.
+    pub fn new(demo: bool, listen_file: Option<String>, state_dir: &std::path::Path) -> RouterSide {
         RouterSide {
             core: RouterCore::default(),
             objs: Mutex::new(Objs::default()),
@@ -298,7 +300,7 @@ impl RouterSide {
             opencode: OpenCode::new(10e3),
             tmux: Tmux { off: cfg!(windows) },
             // Made-up sessions are never resumed.
-            resume: (!demo).then(|| Resumes { running: Mutex::new(HashMap::new()), settings: listen_file }),
+            resume: (!demo).then(|| Resumes { runner: Runner::new(Some(state_dir.to_path_buf())), settings: listen_file }),
         }
     }
 
@@ -350,60 +352,22 @@ impl RouterCalls<'_> {
         let cwd = o.field("cwd");
         let settings = r.settings.clone().map_or(Arg::Null, Arg::Text);
         let mut pc = ResumePlanCalls { r };
-        let plan = match resume::plan(&mut pc, &agent, &settings, &cwd, windows()) {
+        let plan = match resume::plan(&mut pc, &agent, &settings, &cwd) {
             Ok(p) => p,
             Err(t) => return no(t.message),
         };
-        let (command, args) = match plan {
+        let (app, args) = match plan {
             Err(why) => return no(why.into()),
             Ok(c) => c,
         };
-        let env = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect());
-        let mut cmd = std::process::Command::new(&command);
-        xenonet_base::process::Background::no_window(&mut cmd);
-        cmd.args(args.iter().map(text))
-            .current_dir(text(&cwd))
-            .env_clear()
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        for (k, v) in env {
-            cmd.env(k, text(&v));
+        let env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
+        let (key, cwd) = (text(&agent), text(&cwd));
+        let args: Vec<String> = args.iter().map(text).collect();
+        let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: text(&o.field("text")) };
+        match r.runner.run(turn, &self.w.setup.home) {
+            Ok(pid) => obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(format!("pid {pid}")))]),
+            Err(why) => no(why),
         }
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return no(format!("{command} isn't installed here")),
-            Err(e) => return no(e.to_string()),
-        };
-        let pid = child.id();
-        let key = text(&agent);
-        r.running.locked().insert(key.clone(), pid);
-        if let Some(mut stdin) = child.stdin.take() {
-            let t = text(&o.field("text"));
-            std::thread::spawn(move || {
-                let _ = std::io::Write::write_all(&mut stdin, t.as_bytes());
-            });
-        }
-        // One turn, half an hour at most; then it's let go.
-        let w = self.w.arc();
-        std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + Duration::from_secs(30 * 60);
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) | Err(_) => break,
-                    Ok(None) if std::time::Instant::now() >= deadline => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break;
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(250)),
-                }
-            }
-            if let Some(r) = w.as_ref().and_then(|w| w.router.resume.as_ref()) {
-                r.running.locked().remove(&key);
-            }
-        });
-        obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(format!("pid {pid}")))])
     }
 }
 
@@ -414,7 +378,7 @@ struct ResumePlanCalls<'a> {
 impl Calls for ResumePlanCalls<'_> {
     fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
         match (path, method) {
-            ("", "running") => Ok(Arg::Bool(self.r.running.locked().contains_key(&text(&at(&args, 0))))),
+            ("", "running") => Ok(Arg::Bool(self.r.runner.running(&text(&at(&args, 0))))),
             ("", "exists") => Ok(Arg::Bool(std::path::Path::new(&text(&at(&args, 0))).exists())),
             _ => Err(no_method(path, method)),
         }

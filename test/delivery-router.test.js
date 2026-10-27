@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { DeliveryRouter } from "../core/delivery/router.js";
 import { DeliveryPolicy } from "../core/delivery/policy.js";
+import { decide, senderOf } from "../core/delivery/reach.js";
 import { Channels } from "../core/delivery/channel.js";
 import { createOpenCode, openCodeId, parsePs, listeningPorts } from "../core/delivery/opencode.js";
 import { createTmux } from "../core/delivery/tmux.js";
@@ -79,6 +80,36 @@ test("the sender hears how each message will get there: right away through a cha
   r.policy.allow(O);
   assert.equal(r.router.way("you", oc), "right away, through its OpenCode server");
   assert.equal(r.router.way("actor:muse", oc), null, "an actor needs remote consent");
+});
+
+test("reach: a message is open to every sender; a wake needs your allowance, which has to cover actors when one sends", () => {
+  const none = { consent: { here: false, remote: false } };
+  const here = { consent: { here: true, remote: false } };
+  const both = { consent: { here: true, remote: true } };
+  assert.deepEqual(senderOf("actor:you"), { kind: "you", id: "actor:you", host: null });
+  assert.deepEqual(senderOf("@studio:actor:muse"), { kind: "actor", id: "@studio:actor:muse", host: "studio" });
+  assert.deepEqual(senderOf(`@laptop:${A}`), { kind: "session", id: `@laptop:${A}`, host: "laptop" });
+  for (const id of ["you", "actor:you", A, `@laptop:${A}`, "actor:muse", "@studio:actor:muse"]) {
+    const s = senderOf(id);
+    assert.deepEqual(decide("message", s, B, none), { ok: true }, id);
+    assert.deepEqual(decide("wake", s, B, none), { ok: false, why: "no consent" }, id);
+    assert.deepEqual(decide("wake", s, B, both), { ok: true }, id);
+    assert.equal(decide("wake", s, B, here).ok, s.kind !== "actor", id);
+  }
+  assert.equal(decide("start", senderOf("you"), B, both).ok, false, "nothing else is decided yet");
+});
+
+test("an actor on another machine wakes a session only with your allowance for actors, as one here does", async () => {
+  const tmux = { deliver: async () => ({ ok: true, where: "%1" }) };
+  const r = rig({ tmux });
+  r.policy.allow(B);
+  const [far] = await r.router.route(msg({ to: [B], from: "@studio:actor:muse", fromName: "Muse on studio" }));
+  assert.match(far.why, /tmux: no consent/);
+  r.policy.allow(B, { remote: true });
+  const [typed] = await r.router.route(msg({ to: [B], from: "@studio:actor:muse", fromName: "Muse on studio", id: 2 }));
+  assert.match(typed.why, /only you or an actor with a token may type/, "its token was checked on its own machine, not here");
+  const [mine] = await r.router.route(msg({ to: [B], from: "actor:you", id: 3 }));
+  assert.equal(mine.how, "tmux");
 });
 
 test("no way in: the message waits for the next turn, is acked when the hooks hand it over, and else you're told after the ack time", async () => {

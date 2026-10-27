@@ -200,6 +200,27 @@ pub struct Shared {
     /// What this host's own presence last said of the person: whether
     /// they're here, and when they last worked at its console.
     me_you: Mutex<(bool, Option<f64>)>,
+    /// This host's own agents as its presence lists them, and whether each
+    /// waits on the person, for its row: `peers` has only the others.
+    me_agents: Mutex<BTreeMap<String, bool>>,
+}
+
+/// A presence's agents folded into what a host had: all of them on a full
+/// one, else those that changed and those it removed.
+fn fold_agents(agents: &mut BTreeMap<String, bool>, body: &Value) {
+    if body.get("full").and_then(Value::as_bool) == Some(true) {
+        agents.clear();
+    }
+    for a in body.get("agents").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(id) = a.get("id").and_then(Value::as_str) {
+            agents.insert(id.to_string(), a.get("waitsOnYou").and_then(Value::as_bool).unwrap_or(false));
+        }
+    }
+    for r in body.get("removed").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(id) = r.as_str() {
+            agents.remove(id);
+        }
+    }
 }
 
 const OPERATOR_ACTIONS: [&str; 4] = ["message", "ticket", "remove", "replace"];
@@ -934,13 +955,14 @@ impl Shared {
         Ok(())
     }
 
-    /// This host's own presence on its way out: what it says of the person
-    /// is kept for this host's row, and when they last worked here goes by
-    /// the gateway's clock, as the frame's time does.
+    /// This host's own presence on its way out: what it says of its agents
+    /// and the person is kept for this host's row, and when they last
+    /// worked here goes by the gateway's clock, as the frame's time does.
     fn own_presence(&self, mut body: Value) -> Value {
         let you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
         let at = body.get("youAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t > 0.0);
         *self.me_you.locked() = (you, at);
+        fold_agents(&mut self.me_agents.locked(), &body);
         if let Some(t) = at {
             body["youAt"] = json!((t + self.status.locked().offset_ms).round() as i64);
         }
@@ -957,19 +979,7 @@ impl Shared {
             return false;
         }
         p.counter = counter;
-        if body.get("full").and_then(Value::as_bool) == Some(true) {
-            p.agents.clear();
-        }
-        for a in body.get("agents").and_then(Value::as_array).into_iter().flatten() {
-            if let Some(id) = a.get("id").and_then(Value::as_str) {
-                p.agents.insert(id.to_string(), a.get("waitsOnYou").and_then(Value::as_bool).unwrap_or(false));
-            }
-        }
-        for r in body.get("removed").and_then(Value::as_array).into_iter().flatten() {
-            if let Some(id) = r.as_str() {
-                p.agents.remove(id);
-            }
-        }
+        fold_agents(&mut p.agents, body);
         p.you = body.get("you").and_then(Value::as_bool).unwrap_or(false);
         // Sent by the gateway's clock, kept by this one's, so consoles on
         // clocks that disagree still agree where the person last worked.
@@ -1377,6 +1387,7 @@ impl Node {
             pending: Mutex::new(Vec::new()),
             signed: Mutex::new(Vec::new()),
             me_you: Mutex::new((false, None)),
+            me_agents: Mutex::new(BTreeMap::new()),
         });
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()) }))
     }
@@ -1803,6 +1814,7 @@ impl Node {
         let s = n.status();
         let peers = n.peers();
         let me_you = *n.me_you.locked();
+        let me_agents = n.me_agents.locked().clone();
         let key_id = n.key().map(|k| k.key_id()).unwrap_or_default();
         let is_gateway = view.gateway == net.host;
         let gw = n.gateway();
@@ -1824,8 +1836,8 @@ impl Node {
                 "gateway": *id == view.gateway,
                 "online": if me { true } else { p.is_some_and(|p| p.online) },
                 "seen": if me { Some(now as i64) } else { p.and_then(|p| p.seen).map(|x| x as i64) },
-                "agents": p.map_or(0, |p| p.agents.len()),
-                "waitsOnYou": p.map_or(0, |p| p.agents.values().filter(|w| **w).count()),
+                "agents": if me { me_agents.len() } else { p.map_or(0, |p| p.agents.len()) },
+                "waitsOnYou": if me { me_agents.values().filter(|w| **w).count() } else { p.map_or(0, |p| p.agents.values().filter(|w| **w).count()) },
                 "you": if me { me_you.0 } else { p.is_some_and(|p| p.you) },
                 "youAt": if me { me_you.1 } else { p.and_then(|p| p.you_at) }.map(|t| t.round() as i64),
                 "platform": platform,

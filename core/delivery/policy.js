@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { parseSelector, matches, formatSelector } from "./selector.js";
-import { YOU } from "../schema/ids.js";
+import { YOU, parseActorId } from "../schema/ids.js";
 
 export const LIMITS = {
   perSenderPerMinute: 20,
@@ -33,7 +33,18 @@ export const LIMITS = {
 // You write as actor:you from XenoNet's window and command
 // (core/schema/ids.js), or as "you": never an actor here, so never scoped.
 export const isYou = (id) => id === "you" || id === YOU;
-const isActor = (id) => String(id).startsWith("actor:") && !isYou(id);
+
+// An actor's id as its host and slug: actor:<slug> is one on this machine
+// (host null), @<host>:actor:<slug> one on another machine in the network.
+// Null for anything else, and for you, who is never an actor here.
+export function actorOf(id) {
+  if (isYou(id)) return null;
+  const s = String(id);
+  if (s.startsWith("actor:")) return { host: null, slug: s.slice("actor:".length) };
+  const a = s.startsWith("@") ? parseActorId(s) : null;
+  return a?.host && a.slug !== "you" ? { host: a.host, slug: a.slug } : null;
+}
+const isActor = (id) => actorOf(id) != null;
 
 // Strings that look like keys or tokens: provider keys, GitHub and Slack
 // tokens, AWS key ids, JWTs, private key blocks, and NAME=value lines whose
@@ -83,7 +94,8 @@ export function framed({ id, from, verified, text, user = false }) {
 }
 
 export class DeliveryPolicy {
-  // `file`: where grants, consents and the pause switch persist (JSON).
+  // `file`: where grants, consents and the pause switch persist (JSON), with
+  // the wake budget's counts in delivery-wakes.json beside it.
   // `auditFile`: the append-only log. Both optional (in memory), as in tests.
   constructor({ file = null, auditFile = null, now = () => Date.now(), limits = {} } = {}) {
     this.file = file;
@@ -98,6 +110,11 @@ export class DeliveryPolicy {
       try {
         this.data = { ...this.data, ...JSON.parse(fs.readFileSync(file, "utf8")) };
       } catch {}
+      // The wake budget's counts, so a restart doesn't hand every sender
+      // and session a fresh budget.
+      try {
+        for (const [k, times] of Object.entries(JSON.parse(fs.readFileSync(this.#wakesFile(), "utf8")))) if (/^wt?:/.test(k) && Array.isArray(times)) this.hits.set(k, times.filter((t) => typeof t === "number"));
+      } catch {}
     }
   }
 
@@ -107,6 +124,28 @@ export class DeliveryPolicy {
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.data, null, 1), { mode: 0o600 });
     fs.renameSync(tmp, this.file);
+  }
+
+  // delivery-wakes.json, beside the policy's file.
+  #wakesFile() {
+    return path.join(path.dirname(this.file), "delivery-wakes.json");
+  }
+
+  // The wakes of the last hour, the only ones the budget counts.
+  #saveWakes() {
+    if (!this.file) return;
+    const t = this.now();
+    const keep = {};
+    for (const [k, times] of this.hits) {
+      const live = /^wt?:/.test(k) ? times.filter((x) => t - x < 3600e3) : [];
+      if (live.length) keep[k] = live;
+    }
+    try {
+      const file = this.#wakesFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify(keep), { mode: 0o600 });
+      fs.renameSync(`${file}.tmp`, file);
+    } catch {}
   }
 
   // ---------- the pause switch ----------
@@ -122,7 +161,7 @@ export class DeliveryPolicy {
 
   // ---------- scopes ----------
   grant(actor, selector, { ttlMs = this.limits.grantMs, by = "you" } = {}) {
-    if (!isActor(actor)) throw new Error("scopes are granted to actors (actor:<slug>)");
+    if (actorOf(actor)?.host !== null) throw new Error("scopes are granted to actors (actor:<slug>)");
     const sel = parseSelector(selector);
     if (!sel) throw new Error(`"${selector}" isn't a scope: use terms like project:xenonet identity:adal app:opencode`);
     if (!sel.terms.length && selector !== "all") throw new Error("say what the scope covers");
@@ -146,22 +185,32 @@ export class DeliveryPolicy {
 
   // The scope a caller works within: null for no limit (you, sessions on
   // this machine); for an actor its live grant, or { terms: null } to deny.
+  // An actor on another machine works within the scope its own machine
+  // granted it, which that machine checked before the message left: here
+  // it's open, and what this machine lets it do is reach.js's to decide.
   scopeOf(id) {
-    if (!isActor(id)) return null;
+    const a = actorOf(id);
+    if (!a || a.host) return null;
     const g = this.data.grants[id];
     if (!g || g.expiresAt <= this.now()) return { deny: true };
     return parseSelector(g.selector);
   }
 
   // Whether `caller` may see or reach an agent with these facts. Another
-  // actor is visible to an actor only if a grant names it (by:<slug>).
+  // actor, on this machine or another, is visible to an actor only if a
+  // grant names its slug (by:<slug>), and only on the machines the grant's
+  // machine: terms name, when it has any.
   visible(caller, facts) {
     const scope = this.scopeOf(caller);
     if (!scope) return true;
     if (scope.deny) return false;
-    if (facts.app === "actor") return scope.terms.some((t) => t.key === "by" && facts.id === `actor:${t.value}`);
+    if (facts.app === "actor") {
+      const other = actorOf(facts.id);
+      const on = { terms: scope.terms.filter((t) => t.key === "machine") };
+      return !!other && scope.terms.some((t) => t.key === "by" && t.value === other.slug) && matches(on, facts);
+    }
     // An actor's own reports of what it works on can't widen its own scope.
-    const self = String(caller).slice("actor:".length);
+    const self = actorOf(caller).slug;
     if (scope.terms.some((t) => t.key === "by" && t.value === self)) return false;
     return matches(scope, facts);
   }
@@ -244,6 +293,7 @@ export class DeliveryPolicy {
   spendWake(sender, target) {
     this.#take(`w:${sender}`, Infinity, 3600e3);
     this.#take(`wt:${target}`, Infinity, 3600e3);
+    this.#saveWakes();
   }
 
   // ---------- audit ----------
