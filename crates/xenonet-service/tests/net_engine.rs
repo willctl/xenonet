@@ -1161,6 +1161,25 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     assert_eq!(&args[..4], ["-p", "--resume", OPEN.trim_start_matches("claude:"), "--fork-session"], "{args:?}");
     assert!(prompt.contains("Notes for 0.6?"), "{prompt}");
     assert!(asks(&args), "a copy asks too: {args:?}");
+    // The copy asks at once, before XenoNet has read its id from its
+    // stream: it's held, not refused, until desk knows it.
+    let copy = "claude:0190d3e0-0000-7000-8000-0000000f0f01";
+    let held = {
+        let ctx = c.ctx.clone();
+        tokio::spawn(async move {
+            let body = json!({ "tool_name": "Bash", "input": { "command": "ls" }, "tool_use_id": "toolu_1" }).to_string();
+            let r = api(&ctx, Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", copy)], Some(&body))).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let shown = until_value("the copy's ask at desk", 10, || async {
+        let (_, v) = c.window("GET", "/api/runs/asks", Value::Null).await;
+        v["asks"].as_array().and_then(|a| a.iter().find(|x| x["session"] == copy).cloned())
+    })
+    .await;
+    c.window("POST", "/api/runs/answer", json!({ "ask": shown["id"], "decision": "deny" })).await;
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{answer}");
     let fork = desk.next("fork", 10, |_| true).await;
     assert_eq!((fork["parent"].as_str(), fork["child"].as_str()), (Some(OPEN), Some("claude:0190d3e0-0000-7000-8000-0000000f0f01")), "{fork}");
     let (_, forks) = c.call("GET", "/api/runs/forks", Value::Null, &[]).await;

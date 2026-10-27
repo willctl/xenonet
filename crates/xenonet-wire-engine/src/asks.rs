@@ -178,6 +178,24 @@ fn run_of(w: &World, me: &str) -> Option<String> {
     runner.list().into_iter().rev().find(|r| r.end.is_none() && (r.key == me || parent.as_deref() == Some(r.key.as_str()))).map(|r| r.id)
 }
 
+/// `run_of`, but a fork's copy is known only once its stream names it,
+/// which its watcher reads every 400 ms: while a fork runs, a caller that
+/// isn't known yet is looked for again, for three seconds at most, before
+/// it's refused.
+fn run_of_soon(w: &World, me: &str) -> Option<String> {
+    let end = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(run) = run_of(w, me) {
+            return Some(run);
+        }
+        let forking = w.router.resume.as_ref().is_some_and(|r| r.runner.list().iter().any(|r| r.end.is_none() && r.key.starts_with("fork:")));
+        if !forking || Instant::now() >= end {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The other machines that are window hosts: where an ask shows.
 fn window_hosts(w: &World) -> Vec<String> {
     net(w).hosts().into_iter().filter(|h| h.window).map(|h| h.id).collect()
@@ -213,7 +231,7 @@ fn to_windows(w: &World, me: &str, body: &Value) {
 /// hold runs out; then the answer Claude Code takes. Err(403) for a caller
 /// that isn't a run XenoNet started.
 pub fn ask(w: &World, me: &str, title: Option<&str>, body: &Value) -> Result<Value, (u16, String)> {
-    let Some(run) = run_of(w, me) else {
+    let Some(run) = run_of_soon(w, me) else {
         return Err((403, "only the sessions XenoNet runs ask through this tool; anyone else asks in its own app".into()));
     };
     let input = body.get("input").cloned().unwrap_or_else(|| json!({}));
