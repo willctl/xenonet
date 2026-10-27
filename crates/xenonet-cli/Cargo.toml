@@ -47,5 +47,10 @@ xenonet-wire-map.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The console's mode, so a token pasted at `xenonet runs sign-in` doesn't
+# show (std has no echo switch, and Windows has no stty).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [lints]
 workspace = true

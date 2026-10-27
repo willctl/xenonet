@@ -16,16 +16,75 @@ use std::io::{IsTerminal, Read};
 
 pub const HELP: &str = include_str!("help/runs.txt");
 
-/// Whether a terminal echoes what's typed: `stty` on macOS and Linux, so
-/// the token never shows. Windows' console has no `stty`; there the token
-/// shows as you paste it, as other keys do in `xenonet decide key`.
-#[cfg(unix)]
-fn echo(on: bool) {
-    let _ = std::process::Command::new("stty").arg(if on { "echo" } else { "-echo" }).stdin(std::process::Stdio::inherit()).status();
+/// The terminal's echo, off while the token is read, so it never shows,
+/// and back as it was when this is dropped, however the reading ends:
+/// `stty` on macOS and Linux, the console's mode on Windows.
+struct NoEcho {
+    #[cfg(windows)]
+    was: Option<(windows_sys::Win32::Foundation::HANDLE, windows_sys::Win32::System::Console::CONSOLE_MODE)>,
 }
 
-#[cfg(not(unix))]
-fn echo(_on: bool) {}
+#[cfg(unix)]
+impl NoEcho {
+    fn new() -> NoEcho {
+        stty("-echo");
+        NoEcho {}
+    }
+}
+
+#[cfg(unix)]
+impl Drop for NoEcho {
+    fn drop(&mut self) {
+        stty("echo");
+    }
+}
+
+#[cfg(unix)]
+fn stty(arg: &str) {
+    let _ = std::process::Command::new("stty").arg(arg).stdin(std::process::Stdio::inherit()).status();
+}
+
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "GetConsoleMode and SetConsoleMode, which std doesn't wrap")]
+impl NoEcho {
+    fn new() -> NoEcho {
+        use windows_sys::Win32::System::Console::{GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, STD_INPUT_HANDLE};
+        // SAFETY: GetStdHandle takes a constant and returns the process's
+        // standard input handle, or null or INVALID_HANDLE_VALUE, which
+        // GetConsoleMode then fails on; GetConsoleMode writes one u32 to a
+        // local that outlives the call; SetConsoleMode only reads its
+        // arguments.
+        unsafe {
+            let h = GetStdHandle(STD_INPUT_HANDLE);
+            let mut mode = 0;
+            if GetConsoleMode(h, &raw mut mode) == 0 || SetConsoleMode(h, mode & !ENABLE_ECHO_INPUT) == 0 {
+                return NoEcho { was: None };
+            }
+            NoEcho { was: Some((h, mode)) }
+        }
+    }
+}
+
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "SetConsoleMode, which std doesn't wrap")]
+impl Drop for NoEcho {
+    fn drop(&mut self) {
+        if let Some((h, mode)) = self.was {
+            // SAFETY: the handle and mode GetConsoleMode gave in new(); the
+            // standard input handle stays open for the process's life.
+            unsafe {
+                windows_sys::Win32::System::Console::SetConsoleMode(h, mode);
+            }
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+impl NoEcho {
+    fn new() -> NoEcho {
+        NoEcho {}
+    }
+}
 
 // The token, pasted at a terminal (up to Enter) or piped in.
 fn read_token() -> String {
@@ -33,9 +92,9 @@ fn read_token() -> String {
     let mut text = String::new();
     if tty {
         write("Paste the token claude setup-token printed, then Enter (it doesn't show): ");
-        echo(false);
+        let quiet = NoEcho::new();
         let _ = std::io::stdin().read_line(&mut text);
-        echo(true);
+        drop(quiet);
         write("\n");
     } else {
         let mut bytes = Vec::new();
