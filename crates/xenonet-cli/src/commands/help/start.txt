@@ -22,5 +22,5 @@ your console's Needs you, where you allow or deny them.
 
 From inside a session, the xenonet MCP server's start_session tool asks
 instead: this command is yours. It runs in a terminal on a Mac, where
-XenoNet tells you from an agent; on Linux and Windows it refuses, and you
-start sessions from XenoNet's window.
+XenoNet checks who signed the program that calls; on Linux and Windows it
+refuses, and you start sessions from XenoNet's window.

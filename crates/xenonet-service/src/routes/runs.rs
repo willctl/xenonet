@@ -97,9 +97,10 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
     if let Some(why) = ctx.from_you(req).await {
         return Err(Reply::coded(403, "yours", why));
     }
-    // Strong from the window's key, or from a terminal where process checks
-    // tell you from an agent: macOS. Anything weaker would be refused by
-    // whichever machine starts it, so it's refused here, saying why.
+    // Strong from the window's key, or from a terminal where the process
+    // checks also see who signed the program: macOS. Anything weaker would
+    // be refused by whichever machine starts it, so it's refused here,
+    // saying why.
     let strong = req.header("x-xenonet-window").is_some() || cfg!(target_os = "macos");
     if !strong {
         return Err(Reply::coded(403, "weak", AS_YOU));
