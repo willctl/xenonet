@@ -125,7 +125,10 @@ mod tests {
         assert_eq!(env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["CODEX_HOME", "CODEXX", "OPENCODE_X", "HOME"]);
         // Grok Build reads its prompt from a file the deliverer adds.
         let (grok, args) = resume_command(&Arg::text(format!("grok:{id}")), &Arg::Null).unwrap();
-        assert_eq!((grok.as_str(), args.iter().map(js_text).collect::<Vec<_>>()), ("grok", vec!["-r".into(), id.to_string(), "--output-format".into(), "json".into(), "--prompt-file".to_string()]));
+        assert_eq!(
+            (grok.as_str(), args.iter().map(js_text).collect::<Vec<_>>()),
+            ("grok", vec!["-r".into(), id.to_string(), "--output-format".into(), "json".into(), "--prompt-file".to_string()])
+        );
         let env = resume_env(vec![("GROK_SESSION_ID".into(), Arg::text("x")), ("GROK_HOME".into(), Arg::text("/g"))]);
         assert_eq!(env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["GROK_HOME"]);
     }

@@ -480,7 +480,11 @@ impl Router {
                 if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
                     tried.push(format!("fork: {why}"));
                 } else {
-                    let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone()), ("fork", Arg::Bool(true))])]));
+                    let r = caught(c.call(
+                        "router.resume",
+                        "deliver",
+                        vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone()), ("fork", Arg::Bool(true))])],
+                    ));
                     c.call(
                         "router.policy",
                         "audit",

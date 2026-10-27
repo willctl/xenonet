@@ -590,7 +590,9 @@ impl Engine for EngineDriver {
         Ok(serde_json::json!({ "host": host }))
     }
     async fn forks(&self) -> R<Value> {
-        Ok(serde_json::json!({ "forks": crate::starts::forks(&self.0).into_iter().map(|(child, parent)| serde_json::json!({ "child": child, "parent": parent })).collect::<Vec<_>>() }))
+        Ok(
+            serde_json::json!({ "forks": crate::starts::forks(&self.0).into_iter().map(|(child, parent)| serde_json::json!({ "child": child, "parent": parent })).collect::<Vec<_>>() }),
+        )
     }
     fn mark_unseen(&self, me: &str, ids: &Value) -> R<()> {
         crate::store::call(&self.0.store, "markUnseen", &[Arg::text(me), crate::js::arg(ids)]).map(|_| ()).map_err(|t| CoreError::new(t.message))

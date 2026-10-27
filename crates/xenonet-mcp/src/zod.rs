@@ -29,12 +29,23 @@ enum Check {
 #[derive(Clone)]
 enum Kind {
     Str(Vec<Check>),
-    Num { int: bool, min: Option<f64>, max: Option<f64> },
+    Num {
+        int: bool,
+        min: Option<f64>,
+        max: Option<f64>,
+    },
     Bool,
     Enum(Vec<&'static str>),
     Lit(Value),
-    Arr { item: Box<Z>, min: Option<usize>, max: Option<usize> },
-    Obj { shape: Vec<(&'static str, Z)>, strict: bool },
+    Arr {
+        item: Box<Z>,
+        min: Option<usize>,
+        max: Option<usize>,
+    },
+    Obj {
+        shape: Vec<(&'static str, Z)>,
+        strict: bool,
+    },
     /// z.record(z.string(), z.unknown()): any object, read as it is.
     Record,
     Opt(Box<Z>),

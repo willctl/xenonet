@@ -478,11 +478,17 @@ fn defs(actor: bool) -> Vec<Def> {
     ];
     if !actor {
         d.push(def("ask_gateway_token", "Ask for an actor's gateway token", "Asks your user to let an actor's app (Muse, say) reach XenoNet from outside this machine. It makes no token and returns none: it leaves a card in XenoNet's window, and the token is made, and shown masked, only when your user clicks Allow there. Nothing changes until then, and the actor's old token, if any, keeps working. Never ask your user to paste the token to you or into a chat: tell them to Allow the card and copy the token from the window straight into the app that needs it. The actor must be one XenoNet knows (peers lists them), and an ask lapses after ten minutes.", object(vec![("actor", string().describe("The actor's slug, such as muse (or its id, actor:muse)."))]), &write));
-        d.push(def("permission", "Answer a permission prompt", PERMISSION, object(vec![
-            ("tool_name", string().describe("The tool Claude Code asks to run.")),
-            ("input", record().describe("What it calls the tool with.")),
-            ("tool_use_id", string().optional()),
-        ]), &write));
+        d.push(def(
+            "permission",
+            "Answer a permission prompt",
+            PERMISSION,
+            object(vec![
+                ("tool_name", string().describe("The tool Claude Code asks to run.")),
+                ("input", record().describe("What it calls the tool with.")),
+                ("tool_use_id", string().optional()),
+            ]),
+            &write,
+        ));
     } else {
         d.push(def("actor_heartbeat", "Say you're here", "Tells XenoNet you're here and what you're doing. Set presence to working or idle (offline says goodbye), and status to one line that sessions and your user see, such as \"Triaging issues in atlas-api\". Send one at least as often as the heartbeat you registered with, or XenoNet shows you away. The answer says whether messages wait for you (unread).", object(vec![
             ("presence", enumeration(&["working", "idle", "offline"]).optional()),
@@ -571,7 +577,9 @@ impl ServerHandler for Sessions {
                 ];
                 ctx.call("handoff", &meta, body(&keys)).await
             }
-            "start_session" => ctx.call_route("/api/start", &meta, body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode")])).await,
+            "start_session" => {
+                ctx.call_route("/api/start", &meta, body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode")])).await
+            }
             "doctor" => ctx.doctor().await,
             "ask_gateway_token" => ctx.ask_gateway_token(&meta, a["actor"].as_str().unwrap_or_default()).await,
             "permission" => Ok(ctx.permission(&meta, &a).await),

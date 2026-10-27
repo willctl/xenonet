@@ -965,7 +965,12 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
         std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
     }
     let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
-    let (a, b, c) = three(&root, 48121, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![sess(L1, "Fix the login form", &at("laptop"))], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
+    let (a, b, c) = three(
+        &root,
+        48121,
+        [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![sess(L1, "Fix the login form", &at("laptop"))], vec![sess(D1, "Ledger fixtures", &at("desk"))]],
+    )
+    .await;
     until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
     until("laptop's reach at desk", 10, || async { row_of(&c.state().await, "laptop")["can"] == json!(["start", "answer"]) }).await;
     let mut studio = Stream::of(&a);
@@ -1001,17 +1006,23 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     };
     let (s, v) = as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures." })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
-    let got = until_value("laptop's session hears desk refused", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) }).await;
+    let got =
+        until_value("laptop's session hears desk refused", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) })
+            .await;
     assert_eq!(got, "[XenoNet] No session was started on desk: only you start sessions here: its start setting is you.");
     // …and started once the founder lets the network start sessions there.
     a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
     until("desk's start is network", 10, || async { c.state().await["start"] == "network" }).await;
     as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
-    let got = until_value("laptop's session hears desk started it", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("Started grok:")).map(Value::String) }).await;
+    let got =
+        until_value("laptop's session hears desk started it", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("Started grok:")).map(Value::String) }).await;
     assert!(got.as_str().unwrap().ends_with("on desk, in ~. Message it as you would any session."), "{got}");
     let (args, prompt) = ran(&c, 2).await;
     assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]) && args.contains(&"--prompt-file".to_string()), "{args:?}");
-    assert_eq!(prompt, format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{L1}). It came from an agent, not from your user.\n\nRun the fixtures."));
+    assert_eq!(
+        prompt,
+        format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{L1}). It came from an agent, not from your user.\n\nRun the fixtures.")
+    );
     until_value("laptop's session hears the run ended", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains(" ended (exit 0)")).map(Value::String) }).await;
     // Bypassing permission checks is never taken.
     let (s, v) = as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "x", "mode": "bypassPermissions" })).await;
@@ -1021,7 +1032,11 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let mut hints = Stream::of(&b);
     as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "signed-out, please" })).await;
     let got = until_value("the sign-in answer", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("needs a sign-in")).map(Value::String) }).await;
-    assert!(got.as_str().unwrap().contains("ended (exit 1)") && got.as_str().unwrap().contains("Claude Code on desk needs a sign-in for XenoNet's runs: run xenonet runs sign-in there"), "{got}");
+    assert!(
+        got.as_str().unwrap().contains("ended (exit 1)")
+            && got.as_str().unwrap().contains("Claude Code on desk needs a sign-in for XenoNet's runs: run xenonet runs sign-in there"),
+        "{got}"
+    );
     let hint = hints.next("sign-in", 5, |_| true).await;
     assert_eq!(hint["words"], "Claude Code on desk needs a sign-in for XenoNet's runs", "{hint}");
 
@@ -1115,7 +1130,12 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     let ask = |me: String, input: Value| {
         let ctx = c.ctx.clone();
         tokio::spawn(async move {
-            let req = Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", me.as_str())], Some(&json!({ "tool_name": "Bash", "input": input, "tool_use_id": "toolu_1" }).to_string()));
+            let req = Req::fake(
+                "POST",
+                "/api/runs/permission",
+                &[("x-xenonet-agent", me.as_str())],
+                Some(&json!({ "tool_name": "Bash", "input": input, "tool_use_id": "toolu_1" }).to_string()),
+            );
             let r = api(&ctx, req).await.unwrap();
             (r.status, r.body_json())
         })

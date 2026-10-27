@@ -18,10 +18,10 @@
 //! The requests sent from here are kept in memory: after a restart, a late
 //! answer to one is let go.
 
+use crate::js::{now_ms, Locked};
 use crate::network::{clip, ms, net, note, send, sender_kind};
 use crate::runs::{Runner, Turn};
 use crate::world::World;
-use crate::js::{now_ms, Locked};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -180,7 +180,11 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     };
     w.starts.history.locked().push((now, from.unwrap_or("").to_string()));
     let folder = xenonet_base::paths::tilde(&cwd, &w.setup.home);
-    w.log("info", "start", &format!("started {} in {folder} for {}", session.as_deref().unwrap_or("a Codex session"), from.map_or_else(|| "this machine".to_string(), str::to_string)));
+    w.log(
+        "info",
+        "start",
+        &format!("started {} in {folder} for {}", session.as_deref().unwrap_or("a Codex session"), from.map_or_else(|| "this machine".to_string(), str::to_string)),
+    );
     if let Some(world) = w.arc() {
         let runner = resumes.runner.clone();
         let (key, app, logs) = (key.clone(), app.clone(), runs.clone());
@@ -314,7 +318,18 @@ fn write_private(file: &std::path::Path, text: &str) -> std::io::Result<()> {
 /// Watches a started run until it ends: Codex's thread id once it says
 /// one, then how the run ended and whether Claude Code needs a sign-in.
 #[expect(clippy::too_many_arguments, reason = "the run's parts")]
-fn watch(w: &World, runner: &Runner, key: &str, pid: u32, app: &str, logs: &std::path::Path, mut session: Option<String>, folder: &str, prompt_file: Option<String>, answer: &Answer) {
+fn watch(
+    w: &World,
+    runner: &Runner,
+    key: &str,
+    pid: u32,
+    app: &str,
+    logs: &std::path::Path,
+    mut session: Option<String>,
+    folder: &str,
+    prompt_file: Option<String>,
+    answer: &Answer,
+) {
     let mine = |r: &xenonet_engine::delivery::runs::Run| r.key == key && r.pid == Some(f64::from(pid));
     let log_of = |id: &str| std::fs::read_to_string(logs.join(format!("{id}.log"))).unwrap_or_default();
     let ended = loop {
@@ -415,7 +430,17 @@ pub fn ask(w: &World, by: Value, req: &Value, strong: bool) -> Result<Value, (u1
     if text.chars().count() > 16000 {
         return Err((400, "that prompt is too long to send to another machine: keep it under 15,000 characters".into()));
     }
-    let method = if kind == "you" { if strong { "window" } else { "person" } } else if kind == "actor" { "token" } else { "session" };
+    let method = if kind == "you" {
+        if strong {
+            "window"
+        } else {
+            "person"
+        }
+    } else if kind == "actor" {
+        "token"
+    } else {
+        "session"
+    };
     let body = json!({
         "schema": "network/message/v1",
         "mid": mid,
@@ -432,7 +457,9 @@ pub fn ask(w: &World, by: Value, req: &Value, strong: bool) -> Result<Value, (u1
     });
     w.starts.asked.locked().insert(mid.clone(), Asked { by: by.clone(), host: host.clone(), at: now_ms() });
     send(w, To::Host(host.clone()), FrameKind::Message, body);
-    Ok(json!({ "request": mid, "host": host, "state": "sent", "way": format!("sent to {host}: the answer comes as a message, started or refused, and again when the session ends") }))
+    Ok(
+        json!({ "request": mid, "host": host, "state": "sent", "way": format!("sent to {host}: the answer comes as a message, started or refused, and again when the session ends") }),
+    )
 }
 
 fn start_receipt(w: &World, to: &str, mid: &str, state: &str, extra: &Value) {

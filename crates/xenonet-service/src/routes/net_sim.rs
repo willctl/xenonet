@@ -862,14 +862,20 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
             tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
             let started = json!({ "session": session, "folder": folder });
             let words = xenonet_engine::delivery::starts::answer_words("started", &machine, &started);
-            c.broadcast("start", &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }));
+            c.broadcast(
+                "start",
+                &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }),
+            );
             tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
             let ended = json!({ "session": session, "exit": 0, "minutes": 0 });
             let words = xenonet_engine::delivery::starts::answer_words("ended", &machine, &ended);
             c.broadcast("start", &json!({ "state": "ended", "host": machine, "session": session, "exit": 0, "minutes": 0, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }));
         });
     }
-    Ok(Some(Reply::json(200, json!({ "request": request, "host": machine, "state": "sent", "way": format!("sent to {machine}: the answer comes as a message, started or refused, and again when the session ends"), "simulated": true }))))
+    Ok(Some(Reply::json(
+        200,
+        json!({ "request": request, "host": machine, "state": "sent", "way": format!("sent to {machine}: the answer comes as a message, started or refused, and again when the session ends"), "simulated": true }),
+    )))
 }
 
 /// Who may start and wake sessions, set in the simulated state: this

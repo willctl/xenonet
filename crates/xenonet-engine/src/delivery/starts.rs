@@ -378,8 +378,14 @@ mod tests {
     #[test]
     fn the_answers_in_words() {
         let a = json!({ "session": "claude:0190d3e0-0000-7000-8000-00000000ab01", "folder": "~/src/atlas" });
-        assert_eq!(answer_words("started", "neo-rex", &a), "[XenoNet] Started claude:0190d3e0-0000-7000-8000-00000000ab01 on neo-rex, in ~/src/atlas. Message it as you would any session.");
-        assert_eq!(answer_words("refused", "neo-rex", &json!({ "reason": "only you start sessions here" })), "[XenoNet] No session was started on neo-rex: only you start sessions here.");
+        assert_eq!(
+            answer_words("started", "neo-rex", &a),
+            "[XenoNet] Started claude:0190d3e0-0000-7000-8000-00000000ab01 on neo-rex, in ~/src/atlas. Message it as you would any session."
+        );
+        assert_eq!(
+            answer_words("refused", "neo-rex", &json!({ "reason": "only you start sessions here" })),
+            "[XenoNet] No session was started on neo-rex: only you start sessions here."
+        );
         let ended = json!({ "session": "claude:x", "exit": 0, "minutes": 4 });
         assert_eq!(answer_words("ended", "this machine", &ended), "[XenoNet] claude:x ended (exit 0) after 4 min.");
         assert_eq!(sign_in_words("neo-rex"), "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");

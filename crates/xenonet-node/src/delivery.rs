@@ -396,8 +396,13 @@ pub fn starts_kept(history: J, now: f64) -> J {
 /// { ok: true, path } or { ok: false, why }.
 #[napi(js_name = "startsFolder")]
 pub fn starts_folder(asked: String, home: String, known: J, reported: Vec<String>) -> J {
-    let known: Vec<(String, String)> =
-        known.0.as_array().into_iter().flatten().map(|e| (e.get(0).and_then(V::as_str).unwrap_or("").to_string(), e.get(1).and_then(V::as_str).unwrap_or("").to_string())).collect();
+    let known: Vec<(String, String)> = known
+        .0
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| (e.get(0).and_then(V::as_str).unwrap_or("").to_string(), e.get(1).and_then(V::as_str).unwrap_or("").to_string()))
+        .collect();
     J(match starts::folder(&asked, &home, &known, &reported) {
         Ok(path) => j!({ "ok": true, "path": path }),
         Err(why) => j!({ "ok": false, "why": why }),

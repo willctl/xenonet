@@ -1725,11 +1725,7 @@ impl Node {
             return Err(NetError::new(403, "not-window", "a ticket is made on a window host"));
         }
         let Some(address) = net.gateway.address.clone() else {
-            return Err(NetError::new(
-                409,
-                "no-address",
-                "the gateway has no address yet: give it its tailnet or LAN address (xenonet net set --lan <ip:port>)",
-            ));
+            return Err(NetError::new(409, "no-address", "the gateway has no address yet: give it its tailnet or LAN address (xenonet net set --lan <ip:port>)"));
         };
         let code = ticket::make()?;
         let now = n.now() as i64;
