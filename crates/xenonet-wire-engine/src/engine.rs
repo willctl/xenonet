@@ -589,6 +589,10 @@ impl Engine for EngineDriver {
         let host = crate::asks::answer(&self.0, id, decision).map_err(|why| CoreError::status(409, why))?;
         Ok(serde_json::json!({ "host": host }))
     }
+    async fn answer_sent(&self, id: &str, decision: &str) -> R<()> {
+        crate::asks::answer_sent(&self.0, id, decision);
+        Ok(())
+    }
     async fn forks(&self) -> R<Value> {
         Ok(
             serde_json::json!({ "forks": crate::starts::forks(&self.0).into_iter().map(|(child, parent)| serde_json::json!({ "child": child, "parent": parent })).collect::<Vec<_>>() }),

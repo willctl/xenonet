@@ -164,8 +164,13 @@ async fn answer(ctx: &Ctx, req: &mut Req) -> Reply {
     };
     if let Some(host) = r.get("host").and_then(Value::as_str) {
         let Some(svc) = ctx.net.get() else { return Reply::coded(503, "no-network", "the network isn't available in this XenoNet") };
+        // The ask stays on this console until its answer is on the way, so
+        // a send that fails can be answered again.
         if let Err(e) = svc.node().operator(host, "answer", json!({ "ask": id, "decision": decision }), "window", true) {
             return Reply::coded(e.status, e.code, e.message);
+        }
+        if let Err(e) = ctx.cores.engine.answer_sent(&id, &decision).await {
+            return core_reply(Err(e));
         }
     }
     Reply::json(200, json!({ "ok": true, "ask": id, "decision": decision, "host": r.get("host").cloned().unwrap_or(Value::Null) }))

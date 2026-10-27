@@ -108,6 +108,11 @@ pub trait Engine: Send + Sync {
     async fn answer(&self, _id: &str, _decision: &str) -> R<Value> {
         pending(ENGINE)
     }
+    /// Another machine's ask, once the answer's frame is on its way: taken
+    /// off this console.
+    async fn answer_sent(&self, _id: &str, _decision: &str) -> R<()> {
+        pending(ENGINE)
+    }
     /// The copies of sessions XenoNet forked to answer messages, each with
     /// the session it came from: { forks: [{ child, parent }] }.
     async fn forks(&self) -> R<Value> {

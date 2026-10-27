@@ -283,10 +283,11 @@ pub fn decide(w: &World, id: &str, decision: &str, by: &str) -> bool {
     true
 }
 
-/// Your answer from this console: an ask here is answered at once; one from
-/// another machine is taken off here, and its host (Some) is where the
-/// service sends the `operator` frame that answers it. Err for one that
-/// isn't waiting.
+/// Your answer from this console: an ask here is answered at once; for one
+/// from another machine, its host (Some), where the service sends the
+/// `operator` frame that answers it. That ask stays until the frame is on
+/// its way (`answer_sent`), so a send that fails leaves it to answer again.
+/// Err for one that isn't waiting.
 pub fn answer(w: &World, id: &str, decision: &str) -> Result<Option<String>, String> {
     if !matches!(decision, "allow" | "deny") {
         return Err("the answer is allow or deny".into());
@@ -295,13 +296,24 @@ pub fn answer(w: &World, id: &str, decision: &str) -> Result<Option<String>, Str
     if decide(w, id, decision, &label) {
         return Ok(None);
     }
-    let side = &w.asks;
-    let mut there = side.there.locked();
-    let Some(i) = there.iter().position(|a| a.id == id) else { return Err("that ask isn't waiting: it was answered, or its time ran out".into()) };
-    let a = there.remove(i);
-    drop(there);
-    w.emit(From::Engine, "ask-done", json!({ "op": "done", "id": id, "decision": decision }));
-    Ok(a.host)
+    let now = now_ms();
+    let there = w.asks.there.locked();
+    let Some(a) = there.iter().find(|a| a.id == id && a.until > now) else { return Err("that ask isn't waiting: it was answered, or its time ran out".into()) };
+    Ok(a.host.clone())
+}
+
+/// Another machine's ask, once your answer's frame is on its way there:
+/// taken off this console.
+pub fn answer_sent(w: &World, id: &str, decision: &str) {
+    let had = {
+        let mut there = w.asks.there.locked();
+        let n = there.len();
+        there.retain(|a| a.id != id);
+        n != there.len()
+    };
+    if had {
+        w.emit(From::Engine, "ask-done", json!({ "op": "done", "id": id, "decision": decision }));
+    }
 }
 
 /// An ask from another machine (`message_in` routes the target here), or

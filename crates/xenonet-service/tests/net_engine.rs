@@ -1217,6 +1217,13 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
     assert_eq!((s, answer), (200, json!({ "behavior": "allow", "updatedInput": { "command": "npm test", "description": "Run the tests" } })));
     until("the ask gone at studio", 10, || async { shown(&a).await.is_empty() }).await;
+    // An answer whose frame can't go (to a machine that isn't in the
+    // network) leaves the ask on the console, to answer again.
+    let ghost = json!({ "op": "ask", "id": "ask_ghost", "session": "claude:x", "tool": "Bash", "input": "ls", "at": now_ms(), "until": now_ms() + 60e3 });
+    xenonet_wire_engine::asks::ask_in(&b.world, "ghost", &ghost.to_string());
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": "ask_ghost", "decision": "allow" })).await;
+    assert_ne!(s, 200, "{v}");
+    assert!(shown(&b).await.iter().any(|x| x["id"] == "ask_ghost"), "kept to answer again");
     // Nobody answers: a deny that says so, when the hold runs out.
     let (s, answer) = ask(run.clone(), json!({ "command": "rm -rf build" })).await.unwrap();
     assert_eq!((s, answer), (200, json!({ "behavior": "deny", "message": "nobody answered in a minute" })));
@@ -1228,7 +1235,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     SPOOFED.lock().unwrap().push(run.clone());
     let (s, v) = ask(run.clone(), json!({ "command": "ls" })).await.unwrap();
     assert_eq!((s, v["error"].clone()), (403, json!("the calling process isn't that session")), "{v}");
-    assert!(shown(&a).await.is_empty() && shown(&b).await.is_empty());
+    assert!(shown(&a).await.is_empty() && shown(&b).await.iter().all(|x| x["id"] == "ask_ghost"), "nothing of the spoof shows");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
