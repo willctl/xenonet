@@ -18,11 +18,14 @@ export async function run(args, flags) {
   // The stop file goes down before the stop: a supervisor waiting for the
   // port (a service Desktop started had it first) sees it and stays
   // stopped too, rather than starting its copy the moment the port is
-  // free. A stop that's refused takes it away again.
+  // free. A stop that's refused takes it away again. One that can't be
+  // written doesn't hold up the stop, as in the Rust command.
   const file = action === "stop" ? stopFile(env) : null;
   if (file) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ at: Date.now(), pid: process.pid }));
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ at: Date.now(), pid: process.pid }));
+    } catch {}
   }
   try {
     const client = await connectService({ env });
