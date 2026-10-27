@@ -46,6 +46,11 @@ pub struct NetFile {
     /// parts are) to the window hosts' consoles that watch its map. On
     /// unless the person turns it off.
     pub share_load: bool,
+    /// Who may start sessions here, and wake them for a message
+    /// (`xenonet_base::network::STARTS`, `WAKES`): you and your consent
+    /// unless the person widens them.
+    pub start: String,
+    pub wake: String,
     pub joined: i64,
 }
 
@@ -66,6 +71,8 @@ impl NetFile {
             "lan": self.lan,
             "titlesOnly": self.titles_only,
             "shareLoad": self.share_load,
+            "start": self.start,
+            "wake": self.wake,
             "joined": self.joined,
         })
     }
@@ -89,6 +96,8 @@ impl NetFile {
             lan: v.get("lan").and_then(Value::as_str).map(str::to_string),
             titles_only: v.get("titlesOnly").and_then(Value::as_bool).unwrap_or(false),
             share_load: v.get("shareLoad").and_then(Value::as_bool).unwrap_or(true),
+            start: v.get("start").and_then(Value::as_str).filter(|s| xenonet_base::network::STARTS.contains(s)).unwrap_or("you").to_string(),
+            wake: v.get("wake").and_then(Value::as_str).filter(|s| xenonet_base::network::WAKES.contains(s)).unwrap_or("consent").to_string(),
             joined: v.get("joined").and_then(Value::as_i64).unwrap_or(0),
         })
     }

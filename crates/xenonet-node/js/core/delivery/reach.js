@@ -3,7 +3,7 @@
 // where the message arrives.
 import { native } from "../../index.js";
 
-export const ACTIONS = ["message", "wake"];
+export const ACTIONS = ["message", "wake", "start"];
 
 export const senderOf = (id) => native.reachSender(id ?? null);
 

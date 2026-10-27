@@ -39,7 +39,9 @@ impl Emitter {
         self.0.get().and_then(Weak::upgrade)
     }
 
-    pub(crate) fn bind(&self, ctx: &Arc<Ctx>) {
+    /// Ties the emitter to the service once it's up: `xenonet serve` does,
+    /// and the tests that read the events.
+    pub fn bind(&self, ctx: &Arc<Ctx>) {
         let _ = self.0.set(Arc::downgrade(ctx));
     }
 }

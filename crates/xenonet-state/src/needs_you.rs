@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use xenonet_base::jsstr::cmp_units;
 use xenonet_base::text::{js_string, truthy};
 
-pub const KINDS: [&str; 6] = ["question", "permission", "actor", "request", "gateway", "requests"];
+pub const KINDS: [&str; 8] = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in"];
 
 fn s(v: &Value) -> Option<&str> {
     v.as_str()
@@ -28,6 +28,8 @@ pub fn waits_words(it: &Value) -> &'static str {
         },
         Some("request") => "asks to join XenoNet",
         Some("gateway") => "is asked for a gateway token",
+        Some("ask") => "wants to run a tool",
+        Some("sign-in") => "needs a sign-in for XenoNet's runs",
         Some("requests") => {
             if it.get("count").and_then(Value::as_f64) == Some(1.0) {
                 "asks to join XenoNet"
@@ -73,7 +75,10 @@ fn items(v: Option<&Value>) -> &[Value] {
 }
 
 /// The queue: `input` is { sessions, actors, requests, gatewayAsks,
-/// canDecide, waiting }, as needsYouQueue takes it.
+/// canDecide, waiting, asks, hints }, as needsYouQueue takes it. `asks` are
+/// the permission prompts of the runs XenoNet started, here or on another
+/// machine, which only the window answers; `hints` the machines whose
+/// Claude Code needs a sign-in for XenoNet's runs.
 pub fn needs_you_queue(input: &Value) -> Vec<Value> {
     let get = |k: &str| input.get(k);
     let can_decide = truthy(get("canDecide"));
@@ -122,6 +127,42 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         m.insert("since".into(), num(need.get("since")));
         m.insert("actions".into(), strings(if can_decide { &["show", "message"] } else { &["show"] }));
         out.push(Value::Object(m));
+    }
+    for h in items(get("hints")) {
+        let Some(host) = h.get("host").and_then(Value::as_str) else { continue };
+        let mut m = Map::new();
+        m.insert("key".into(), Value::String(format!("sign-in:{host}")));
+        m.insert("kind".into(), Value::String("sign-in".into()));
+        m.insert("id".into(), Value::String(host.into()));
+        m.insert("title".into(), Value::String(format!("Claude Code on {host}")));
+        m.insert("host".into(), Value::String(host.into()));
+        m.insert("text".into(), str_of(h.get("fix")));
+        m.insert("since".into(), num(h.get("since")));
+        m.insert("actions".into(), strings(&["dismiss"]));
+        out.push(Value::Object(m));
+    }
+    if can_decide {
+        for a in items(get("asks")) {
+            if !truthy(a.get("id")) {
+                continue;
+            }
+            let id = a["id"].clone();
+            let mut m = Map::new();
+            m.insert("key".into(), Value::String(format!("ask:{}", js_string(&id))));
+            m.insert("kind".into(), Value::String("ask".into()));
+            m.insert("id".into(), id.clone());
+            m.insert("title".into(), or_id(str_of(a.get("title")), &id));
+            m.insert("host".into(), str_of(a.get("host")));
+            m.insert("session".into(), str_of(a.get("session")));
+            m.insert("run".into(), str_of(a.get("run")));
+            m.insert("tool".into(), str_of(a.get("tool")));
+            m.insert("text".into(), str_of(a.get("input")));
+            m.insert("warning".into(), str_of(a.get("warning")));
+            m.insert("since".into(), num(a.get("at")));
+            m.insert("expiresAt".into(), num(a.get("until")));
+            m.insert("actions".into(), strings(&["allow", "deny"]));
+            out.push(Value::Object(m));
+        }
     }
     if can_decide {
         for (list, kind) in [("requests", "request"), ("gatewayAsks", "gateway")] {

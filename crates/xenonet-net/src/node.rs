@@ -125,6 +125,20 @@ impl Default for Status {
     }
 }
 
+/// A change to this machine's settings, made at its own keyboard: each
+/// setting that's Some is set.
+#[derive(Debug, Clone, Default)]
+pub struct Change {
+    pub titles_only: Option<bool>,
+    pub share_load: Option<bool>,
+    /// The gateway's LAN address, or None to take it away.
+    pub lan: Option<Option<String>>,
+    /// Who may start sessions here: off, you or network.
+    pub start: Option<String>,
+    /// Who may wake them: consent or network.
+    pub wake: Option<String>,
+}
+
 /// Another host, as presence and the gateway's pings tell of it.
 #[derive(Debug, Clone, Default)]
 pub struct Peer {
@@ -138,6 +152,11 @@ pub struct Peer {
     pub you_at: Option<f64>,
     pub roster: Option<String>,
     pub platform: Option<String>,
+    /// Who may start and wake sessions there, and the widenings that wait,
+    /// as its presence last said (`network/presence/v1`'s reach).
+    pub reach: Option<Value>,
+    /// What it takes beyond messages (`xenonet_base::network::CAN`).
+    pub can: Vec<String>,
 }
 
 /// A ticket this host made while it isn't the gateway's, which it signs
@@ -186,6 +205,9 @@ pub struct Shared {
     svc: Services,
     gateway: RwLock<Option<Arc<Gateway>>>,
     operator_nonces: Mutex<HashMap<String, f64>>,
+    /// Widenings of this host's settings another window host asked for,
+    /// waiting for a second one (operator.rs).
+    widens: Mutex<Vec<crate::operator::Widen>>,
     link_written: Mutex<f64>,
     /// Entries signed by too few, waiting for this host or another to approve.
     proposals: Mutex<Vec<Entry>>,
@@ -223,14 +245,12 @@ fn fold_agents(agents: &mut BTreeMap<String, bool>, body: &Value) {
     }
 }
 
-const OPERATOR_ACTIONS: [&str; 4] = ["message", "ticket", "remove", "replace"];
 /// The most this host's clock may be set off its own by the gateway's.
 const MAX_OFFSET_MS: f64 = 24.0 * 3600e3;
 /// A host frame dated this far past now, by the gateway's clock, is
 /// dropped; one older than the frame ids kept (a week) is too, since its
 /// id could be forgotten and the frame taken again.
 const AHEAD_MS: f64 = 5.0 * 60e3;
-const OPERATOR_MS: f64 = 60e3;
 const BATCH_BYTES: u64 = 900 << 10;
 const BATCH_FRAMES: u64 = 500;
 /// A relay body's JSON, at most: sealed and in base64url, a frame of it
@@ -916,6 +936,11 @@ impl Shared {
                 self.log("net.operator", &format!("an action from {} was refused: {why}", f.from));
                 return false;
             }
+            // Who may start and wake sessions here is this node's own.
+            if body.get("action").and_then(Value::as_str) == Some("settings") {
+                self.settings_in(&f.from, body.get("args").unwrap_or(&Value::Null));
+                return false;
+            }
         }
         if kind == Kind::Presence && !self.note_presence(&f.from, &body) {
             return false;
@@ -924,35 +949,40 @@ impl Shared {
         false
     }
 
-    /// Whether the person's action from another host may be acted on: its
-    /// host is a window host, the action is one another machine may do,
-    /// it's under a minute old, it's new, and it was checked strongly.
+    /// Whether the person's action from another host may be acted on
+    /// (operator.rs): by the gateway's clock, with the nonces seen lately.
     fn check_operator(&self, from: &str, window: bool, body: &Value) -> Result<(), String> {
-        if !window {
-            return Err(format!("{from} isn't a window host"));
-        }
-        let action = body.get("action").and_then(Value::as_str).unwrap_or("");
-        if !OPERATOR_ACTIONS.contains(&action) {
-            return Err(format!("{action} isn't done from another machine"));
-        }
-        let at = body.get("at").and_then(Value::as_f64).unwrap_or(0.0);
-        let now = self.gateway_now();
-        if (now - at).abs() > OPERATOR_MS {
-            return Err("it's more than a minute old".into());
-        }
-        let nonce = body.get("nonce").and_then(Value::as_str).unwrap_or("");
-        {
-            let mut seen = self.operator_nonces.locked();
-            seen.retain(|_, t| now - *t < 2.0 * OPERATOR_MS);
-            if nonce.is_empty() || seen.insert(format!("{from}|{nonce}"), now).is_some() {
-                return Err("it was seen before".into());
+        crate::operator::check(from, window, body, self.gateway_now(), &mut self.operator_nonces.locked())
+    }
+
+    /// Another window host's change to who may start and wake sessions
+    /// here (operator.rs): narrowing at once, widening with the founder or
+    /// a second window host.
+    fn settings_in(&self, from: &str, args: &Value) {
+        let founder = self.roster().view_ref().is_some_and(|v| v.founder == from);
+        let now = self.now();
+        let outcome = {
+            let mut guard = self.net.writing();
+            let Some(net) = guard.as_mut() else { return };
+            let mut widens = self.widens.locked();
+            let mut id = || crate::codec::nonce().map_or_else(|_| format!("wid_{}", now as i64), |n| format!("wid_{n}"));
+            let outcome = crate::operator::settings((&net.start, &net.wake), args, from, founder, &mut widens, now, &mut id);
+            if let Ok(crate::operator::Outcome::Set { start, wake } | crate::operator::Outcome::Waits { start, wake, .. }) = &outcome {
+                net.start.clone_from(start);
+                net.wake.clone_from(wake);
+                if let Err(e) = self.dir.write_network(net) {
+                    self.log("net.operator", &format!("{from}'s change to this machine's settings wasn't kept: {}", e.message));
+                }
             }
+            outcome
+        };
+        match outcome {
+            Ok(crate::operator::Outcome::Set { start, wake }) => self.log("net.settings", &format!("{from} set who may start sessions here to {start}, and wake them to {wake}")),
+            Ok(crate::operator::Outcome::Waits { widen, .. }) => {
+                self.log("net.settings", &format!("{from} asked to let the network {} sessions here: it waits for the founder or another window host", widen.setting));
+            }
+            Err(why) => self.log("net.settings", &format!("{from}'s change to this machine's settings was refused: {why}")),
         }
-        let checked = body.get("checked").and_then(Value::as_str);
-        if !matches!(checked, Some("window" | "person")) || body.get("strength").and_then(Value::as_str) != Some("strong") {
-            return Err(format!("it was checked {} on {from}, which isn't strong enough to act on", body.get("checked").and_then(Value::as_str).unwrap_or("not at all")));
-        }
-        Ok(())
     }
 
     /// This host's own presence on its way out: what it says of its agents
@@ -987,6 +1017,9 @@ impl Shared {
         p.you_at = body.get("youAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t > 0.0).map(|t| t - offset);
         // An empty head says nothing about the sender's roster: no mismatch.
         p.roster = body.get("roster").and_then(Value::as_str).filter(|r| !r.is_empty()).map(str::to_string);
+        // An older XenoNet says neither.
+        p.reach = body.get("reach").filter(|r| r.is_object()).cloned();
+        p.can = body.get("can").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).take(16).map(str::to_string).collect()).unwrap_or_default();
         true
     }
 
@@ -1280,6 +1313,17 @@ impl Net for Shared {
         self.network().is_some_and(|n| self.roster().view_ref().is_some_and(|v| v.is_window(&n.host)))
     }
 
+    fn reach(&self) -> xenonet_base::network::Reach {
+        let Some(n) = self.network() else { return xenonet_base::network::Reach::default() };
+        let now = self.now();
+        let pending = self.widens.locked().iter().filter(|w| now - w.at < crate::operator::WIDEN_MS).map(crate::operator::Widen::to_json).collect();
+        xenonet_base::network::Reach { start: n.start, wake: n.wake, pending }
+    }
+
+    fn host_can(&self, host: &str, what: &str) -> bool {
+        self.peers.locked().get(host).is_some_and(|p| p.can.iter().any(|c| c == what))
+    }
+
     fn hosts(&self) -> Vec<Host> {
         let Some(net) = self.network() else { return Vec::new() };
         let view = self.roster().view();
@@ -1381,6 +1425,7 @@ impl Node {
             svc: services,
             gateway: RwLock::new(None),
             operator_nonces: Mutex::new(HashMap::new()),
+            widens: Mutex::new(Vec::new()),
             link_written: Mutex::new(0.0),
             proposals: Mutex::new(Vec::new()),
             relink: Notify::new(),
@@ -1518,6 +1563,8 @@ impl Node {
             lan: lan.map(str::to_string),
             titles_only: false,
             share_load: true,
+            start: "you".into(),
+            wake: "consent".into(),
             joined: at,
         };
         self.adopt(net, key, roster)?;
@@ -1584,6 +1631,8 @@ impl Node {
             lan: None,
             titles_only: false,
             share_load: true,
+            start: "you".into(),
+            wake: "consent".into(),
             joined: n.now() as i64,
         };
         let name = net.name.clone();
@@ -1676,11 +1725,7 @@ impl Node {
             return Err(NetError::new(403, "not-window", "a ticket is made on a window host"));
         }
         let Some(address) = net.gateway.address.clone() else {
-            return Err(NetError::new(
-                409,
-                "no-address",
-                "the gateway has no address yet: turn the gateway on with a tunnel (xenonet gateway on --tunnel <kind>), or give it a LAN address (xenonet net set --lan <ip:port>)",
-            ));
+            return Err(NetError::new(409, "no-address", "the gateway has no address yet: give it its tailnet or LAN address (xenonet net set --lan <ip:port>)"));
         };
         let code = ticket::make()?;
         let now = n.now() as i64;
@@ -1735,10 +1780,18 @@ impl Node {
         Ok(t)
     }
 
-    /// Settings: titles only, whether this host shares its load, and the
-    /// LAN address the gateway listens on.
-    pub fn settings(&self, titles_only: Option<bool>, share_load: Option<bool>, lan: Option<Option<String>>) -> R<Value> {
+    /// Settings: titles only, whether this host shares its load, who may
+    /// start and wake sessions here, and the LAN address the gateway
+    /// listens on. At its own keyboard the person sets any of them.
+    pub fn settings(&self, change: Change) -> R<Value> {
+        let Change { titles_only, share_load, lan, start, wake } = change;
         let n = &self.shared;
+        if start.as_deref().is_some_and(|s| !xenonet_base::network::STARTS.contains(&s)) {
+            return Err(NetError::bad("start is off, you or network"));
+        }
+        if wake.as_deref().is_some_and(|w| !xenonet_base::network::WAKES.contains(&w)) {
+            return Err(NetError::bad("wake is consent or network"));
+        }
         {
             let mut guard = n.net.writing();
             let net = guard.as_mut().ok_or_else(not_in)?;
@@ -1747,6 +1800,16 @@ impl Node {
             }
             if let Some(s) = share_load {
                 net.share_load = s;
+            }
+            // Set here, a setting takes back what waits to widen it.
+            for (k, v) in [("start", start), ("wake", wake)] {
+                let Some(v) = v else { continue };
+                n.widens.locked().retain(|w| w.setting != k);
+                if k == "start" {
+                    net.start = v;
+                } else {
+                    net.wake = v;
+                }
             }
             if let Some(lan) = lan {
                 if net.gateway.host != net.host {
@@ -1771,6 +1834,48 @@ impl Node {
         }
         net.gateway.address = address.map(str::to_string);
         let _ = n.dir.write_network(net);
+    }
+
+    /// Who may start and wake sessions on another host, set from this
+    /// window host's console as you (`{ start?, wake? }`, or `{ approve }`
+    /// for a widening that waits there): an `operator` frame, which that
+    /// host checks (operator.rs). Only a window host sends one.
+    pub fn settings_on(&self, host: &str, args: &Value, checked: &str, strong: bool) -> R<Value> {
+        let n = &self.shared;
+        let net = n.network().ok_or_else(not_in)?;
+        if host == net.host {
+            return Err(NetError::bad("that's this machine: set its own settings without a host"));
+        }
+        {
+            let r = n.roster();
+            let v = r.view_ref().ok_or_else(not_in)?;
+            if v.member(host).is_none() {
+                return Err(NetError::new(404, "no-host", format!("{host} isn't in the network")));
+            }
+            if !v.is_window(&net.host) {
+                return Err(NetError::new(403, "not-window", "another machine's settings are changed from a window host"));
+            }
+        }
+        let keep = |k: &str| args.get(k).filter(|v| v.is_string()).cloned();
+        let mut a = serde_json::Map::new();
+        for k in ["start", "wake", "approve"] {
+            if let Some(v) = keep(k) {
+                a.insert(k.into(), v);
+            }
+        }
+        if a.is_empty() {
+            return Err(NetError::bad("say what to set: start or wake, or approve a change that waits"));
+        }
+        if a.get("start").and_then(Value::as_str).is_some_and(|s| !xenonet_base::network::STARTS.contains(&s)) {
+            return Err(NetError::bad("start is off, you or network"));
+        }
+        if a.get("wake").and_then(Value::as_str).is_some_and(|w| !xenonet_base::network::WAKES.contains(&w)) {
+            return Err(NetError::bad("wake is consent or network"));
+        }
+        self.operator(host, "settings", Value::Object(a), checked, strong)?;
+        let mut st = self.state();
+        st["sent"] = json!({ "host": host, "action": "settings" });
+        Ok(st)
     }
 
     /// An `operator` frame for another host: the person's action, with how
@@ -1805,6 +1910,8 @@ impl Node {
                 "rosterMismatch": [],
                 "titlesOnly": false,
                 "shareLoad": true,
+                "start": "you",
+                "wake": "consent",
             });
         };
         let (view, head) = {
@@ -1842,6 +1949,10 @@ impl Node {
                 "youAt": if me { me_you.1 } else { p.and_then(|p| p.you_at) }.map(|t| t.round() as i64),
                 "platform": platform,
                 "self": me,
+                // Who may start and wake sessions there, and what it takes:
+                // null and none for a host whose XenoNet doesn't say.
+                "reach": if me { n.reach().to_json() } else { p.and_then(|p| p.reach.clone()).unwrap_or(Value::Null) },
+                "can": if me { json!(xenonet_base::network::CAN) } else { json!(p.map(|p| p.can.clone()).unwrap_or_default()) },
             }));
         }
         // The gateway's host lists every ticket that waits; another window
@@ -1873,6 +1984,8 @@ impl Node {
             "rosterMismatch": n.roster_mismatch(),
             "titlesOnly": net.titles_only,
             "shareLoad": net.share_load,
+            "start": net.start,
+            "wake": net.wake,
         });
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());
@@ -1920,7 +2033,7 @@ impl Node {
             return Err(NetError::new(409, "already", "this machine is the network's gateway already"));
         }
         let Some(address) = lan.or(address).map(str::to_string) else {
-            return Err(NetError::new(409, "no-address", "give this machine an address first: a LAN address (--lan <ip:port>), or a tunnel (xenonet gateway on --tunnel <kind>)"));
+            return Err(NetError::new(409, "no-address", "give this machine an address first: use a tailnet or LAN address (--lan <ip:port>)"));
         };
         let m = view.member(&net.host).cloned().ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
         let mut e = n.roster().draft(

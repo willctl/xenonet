@@ -46,6 +46,8 @@ const MINUTE: f64 = 60e3;
 struct Sim {
     state: Value,
     agents: Vec<Value>,
+    /// Made-up permission prompts of runs on the other machines.
+    asks: Vec<Value>,
 }
 
 fn sims() -> &'static Mutex<HashMap<usize, Sim>> {
@@ -97,7 +99,10 @@ pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
 /// Puts the network into one of KINDS: what it made, or None for a kind
 /// that isn't one. `you_at` is the host the person is at (this one by
 /// default), for net-founder and net-remote-waiting; `variant`
-/// "titles-only" has the other machines share titles only, so their
+/// "ask", for net-founder, has a run on laptop wait for your Allow or Deny
+/// on a permission prompt, and "ask-env" one whose command may read the
+/// run's environment, with the Allow card's warning; "titles-only" has the other machines share
+/// titles only, so their
 /// agents carry no question's text, last message or stuck reason, and
 /// "relay", for net-founder, has laptop drawn from a relay snapshot: this
 /// machine's own map, served as laptop's by a relay over a network inside
@@ -113,7 +118,18 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         "hosts": state["hosts"].as_array().map_or(0, Vec::len),
         "agents": agents.len(),
     });
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents });
+    // "ask": a run XenoNet started on laptop asks to use a tool, for Needs
+    // you's Allow and Deny; "ask-env", a tool call that may read the run's
+    // environment, with the warning.
+    let asks = match variant {
+        Some("ask") => vec![made_up_ask(ctx.now(), false)],
+        Some("ask-env") => vec![made_up_ask(ctx.now(), true)],
+        _ => Vec::new(),
+    };
+    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone() });
+    for a in &asks {
+        ctx.broadcast("ask", a);
+    }
     let relay = kind == "net-founder" && variant == Some("relay");
     if let Some(h) = &ctx.cores.hub {
         if let Ok(Some(r)) = h.simulate("net-relay", &json!({ "id": "laptop", "off": !relay })) {
@@ -161,6 +177,9 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             Ok(Some(Reply::json(200, state)))
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
+        ("POST", "/api/start") => start(ctx, req).await,
+        ("GET", "/api/runs/asks") => asks(ctx, req, false).await,
+        ("POST", "/api/runs/answer") => asks(ctx, req, true).await,
         // This machine's own reading, and a made-up one for each other host
         // the simulation has: one that's away has its last, from when it
         // was last heard from.
@@ -372,6 +391,10 @@ fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bo
         "waitsOnYou": 0,
         "you": you,
         "platform": m.platform,
+        // rack runs an older XenoNet, which says neither: starts there are
+        // refused as too old.
+        "reach": if m.id == "rack" { Value::Null } else { json!({ "start": "you", "wake": "consent", "pending": [] }) },
+        "can": if m.id == "rack" { json!([]) } else { json!(xenonet_base::network::CAN) },
     })
 }
 
@@ -446,6 +469,8 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         "rosterMismatch": [],
         "titlesOnly": false,
         "shareLoad": true,
+        "start": "you",
+        "wake": "consent",
         "simulated": true,
     });
     match kind {
@@ -668,7 +693,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
                 return outside();
             }
             if sim.state["gateway"].is_null() {
-                return fail(409, "no-address", "The gateway has no address yet. Set a tunnel or a LAN address for it first.");
+                return fail(409, "no-address", "The gateway has no address yet. Give it its tailnet or LAN address first.");
             }
             if !is_host_id(&host) {
                 return fail(400, "bad-request", "A machine's id is 2 to 32 lowercase letters, digits and dashes, starting with a letter.");
@@ -739,10 +764,185 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             if let Some(on) = body.get("shareLoad").and_then(Value::as_bool) {
                 sim.state["shareLoad"] = json!(on);
             }
-            Reply::json(200, sim.state.clone())
+            match set_reach(&mut sim.state, body, now) {
+                Ok(()) => Reply::json(200, sim.state.clone()),
+                Err((status, code, why)) => fail(status, code, why),
+            }
         }
         _ => fail(404, "not-found", "not found"),
     }
+}
+
+/// A permission prompt of a made-up run on laptop, as its machine would
+/// send it (asks.rs); `env`, one that may read the run's environment.
+fn made_up_ask(now: f64, env: bool) -> Value {
+    let (input, warning) = if env { ("printenv | grep -i token", json!(xenonet_engine::delivery::starts::ENV_WARNING)) } else { ("cargo test --package billing", Value::Null) };
+    json!({
+        "id": format!("ask_{}", random_uuid()),
+        "host": "laptop",
+        "here": false,
+        "session": "claude:0190d3e0-0000-7000-8000-00000000a5c1",
+        "run": format!("run_{}", random_uuid()),
+        "title": "laptop · Tidy the billing tests",
+        "tool": "Bash",
+        "input": input,
+        "warning": warning,
+        "at": (now - 20e3) as i64,
+        "until": (now + 580e3) as i64,
+        "simulated": true,
+    })
+}
+
+/// The permission prompts waiting, with the made-up ones; and your answer
+/// to a made-up one, which goes nowhere but takes it off. Anything else is
+/// the real route's, with its body put back.
+async fn asks(ctx: &Arc<Ctx>, req: &mut Req, answer: bool) -> Result<Option<Reply>, CoreError> {
+    if !answer {
+        if let Some(why) = ctx.from_window(req).await {
+            return Ok(Some(Reply::coded(403, "yours", why)));
+        }
+        let mut real = ctx.cores.engine.asks().await.unwrap_or_else(|_| json!({ "asks": [] }));
+        let made: Vec<Value> = sims().locked().get(&key(ctx)).map(|s| s.asks.clone()).unwrap_or_default();
+        if let Some(list) = real["asks"].as_array_mut() {
+            list.extend(made);
+        }
+        return Ok(Some(Reply::json(200, real)));
+    }
+    let bytes = req.bytes(4 << 10).await?;
+    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let id = body.get("ask").and_then(Value::as_str).unwrap_or("").to_string();
+    let decision = body.get("decision").and_then(Value::as_str).unwrap_or("").to_string();
+    let made = sims().locked().get(&key(ctx)).is_some_and(|s| s.asks.iter().any(|a| a["id"] == id.as_str()));
+    if !made {
+        req.body = Body::Bytes(bytes);
+        return Ok(None);
+    }
+    if let Some(why) = ctx.from_window(req).await {
+        return Ok(Some(Reply::coded(403, "yours", why)));
+    }
+    if !matches!(decision.as_str(), "allow" | "deny") {
+        return Ok(Some(Reply::coded(400, "bad-request", "the answer is allow or deny")));
+    }
+    if let Some(s) = sims().locked().get_mut(&key(ctx)) {
+        s.asks.retain(|a| a["id"] != id.as_str());
+    }
+    ctx.broadcast("ask-done", &json!({ "op": "done", "id": id, "decision": decision, "simulated": true }));
+    Ok(Some(Reply::json(200, json!({ "ok": true, "ask": id, "decision": decision, "host": "laptop", "simulated": true }))))
+}
+
+/// A start on a made-up machine, from the window, answered as the real
+/// one would be: refused at once when the machine is away or its XenoNet
+/// too old (rack's), else sent; then, as the start event, started a
+/// moment later and ended a few seconds after. A start here, or anything
+/// that isn't the window's, goes on to the real route, with its body put
+/// back.
+async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError> {
+    let bytes = req.bytes(64 << 10).await?;
+    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let machine = body.get("machine").and_then(Value::as_str).unwrap_or("").to_string();
+    let Some(state) = simulated_net_state(ctx) else { return Ok(None) };
+    let row = state["hosts"].as_array().and_then(|l| l.iter().find(|h| h["id"] == machine.as_str() && h["self"] != true).cloned());
+    let Some(row) = row.filter(|_| !machine.is_empty() && state["self"]["id"] != machine.as_str()) else {
+        req.body = Body::Bytes(bytes);
+        return Ok(None);
+    };
+    if let Some(why) = ctx.from_window(req).await {
+        return Ok(Some(Reply::coded(403, "yours", why)));
+    }
+    let prompt = body.get("prompt").and_then(Value::as_str).map_or("", str::trim);
+    if prompt.is_empty() {
+        return Ok(Some(Reply::coded(400, "bad-request", "say what the new session should do: a prompt")));
+    }
+    if row["online"] != true {
+        return Ok(Some(Reply::coded(409, "refused", format!("{machine} is offline, so nothing was started: a start is never kept for later"))));
+    }
+    if !row["can"].as_array().is_some_and(|c| c.iter().any(|x| x == "start")) {
+        return Ok(Some(Reply::coded(409, "refused", format!("{machine}'s XenoNet is too old to start sessions: update it there"))));
+    }
+    let app = body.get("app").and_then(Value::as_str).filter(|a| ["claude", "codex", "grok"].contains(a)).unwrap_or("claude").to_string();
+    let folder = body.get("folder").and_then(Value::as_str).filter(|f| !f.is_empty()).unwrap_or("~").to_string();
+    let request = format!("msg_{}", random_uuid());
+    let session = (app != "codex").then(|| format!("{app}:{}", random_uuid()));
+    {
+        let c = ctx.clone();
+        let (machine, folder, session) = (machine.clone(), folder.clone(), session.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            let started = json!({ "session": session, "folder": folder });
+            let words = xenonet_engine::delivery::starts::answer_words("started", &machine, &started);
+            c.broadcast(
+                "start",
+                &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }),
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
+            let ended = json!({ "session": session, "exit": 0, "minutes": 0 });
+            let words = xenonet_engine::delivery::starts::answer_words("ended", &machine, &ended);
+            c.broadcast("start", &json!({ "state": "ended", "host": machine, "session": session, "exit": 0, "minutes": 0, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }));
+        });
+    }
+    Ok(Some(Reply::json(
+        200,
+        json!({ "request": request, "host": machine, "state": "sent", "way": format!("sent to {machine}: the answer comes as a message, started or refused, and again when the session ends"), "simulated": true }),
+    )))
+}
+
+/// Who may start and wake sessions, set in the simulated state: this
+/// machine's at once; another's (`host`) as that machine would take it
+/// (xenonet_net::operator): narrowing at once, widening to network at once
+/// from the founder, else waiting for a second window host, which the
+/// made-up laptop is when this machine is studio.
+fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'static str, String)> {
+    let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+    let me = state["self"]["id"].as_str().unwrap_or("").to_string();
+    let bad = |k: &str, v: &str, allowed: &[&str]| (!allowed.contains(&v)).then(|| (400, "bad-request", format!("{k} is one of {}", allowed.join(", "))));
+    for (k, allowed) in [("start", &xenonet_base::network::STARTS[..]), ("wake", &xenonet_base::network::WAKES[..])] {
+        if let Some(e) = text(k).and_then(|v| bad(k, &v, allowed)) {
+            return Err(e);
+        }
+    }
+    let host = text("host").filter(|h| *h != me);
+    let Some(host) = host else {
+        for k in ["start", "wake"] {
+            if let Some(v) = text(k) {
+                state[k] = json!(v);
+                if let Some(row) = state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == me.as_str())) {
+                    row["reach"][k] = json!(v);
+                }
+            }
+        }
+        return Ok(());
+    };
+    if state["self"]["window"] != true {
+        return Err((403, "not-window", "another machine's settings are changed from a window host".into()));
+    }
+    let founder = state["self"]["founder"] == true;
+    let Some(row) = state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == host.as_str())) else {
+        return Err((404, "no-host", format!("{host} isn't in the network")));
+    };
+    if row["reach"].is_null() {
+        // An older XenoNet ignores the frame: nothing changes there.
+        return Ok(());
+    }
+    if let Some(id) = text("approve") {
+        let pending = row["reach"]["pending"].as_array().cloned().unwrap_or_default();
+        if let Some(w) = pending.iter().find(|w| w["id"] == id.as_str()) {
+            let setting = w["setting"].as_str().unwrap_or("start").to_string();
+            row["reach"][setting.as_str()] = json!("network");
+            row["reach"]["pending"] = json!(pending.into_iter().filter(|w| w["id"] != id.as_str()).collect::<Vec<_>>());
+        }
+        return Ok(());
+    }
+    for k in ["start", "wake"] {
+        let Some(v) = text(k) else { continue };
+        let mut pending: Vec<Value> = row["reach"]["pending"].as_array().cloned().unwrap_or_default().into_iter().filter(|w| w["setting"] != k).collect();
+        if v != "network" || founder {
+            row["reach"][k] = json!(v);
+        } else if row["reach"][k] != "network" {
+            pending.push(json!({ "id": format!("wid_{k}_{}", now as i64), "setting": k, "value": "network", "by": me, "at": now as i64 }));
+        }
+        row["reach"]["pending"] = json!(pending);
+    }
+    Ok(())
 }
 
 // You, writing to a simulated host's agent from the window: checked as
@@ -906,7 +1106,7 @@ mod tests {
 
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents }
+        Sim { state, agents, asks: Vec::new() }
     }
 
     #[test]
@@ -929,6 +1129,33 @@ mod tests {
         assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": "a5" }), now).status, 429);
         let mut alone = sim("net-none");
         assert_eq!(apply(&mut alone, "/api/net/ticket", &json!({ "host": "desk" }), now).status, 409);
+    }
+
+    #[test]
+    fn start_and_wake_here_and_on_another_machine_as_it_would_take_them() {
+        let now = 1_000_000.0;
+        let reach = |s: &Sim, host: &str| s.state["hosts"].as_array().unwrap().iter().find(|h| h["id"] == host).unwrap()["reach"].clone();
+        // Here, at once.
+        let mut s = sim("net-founder");
+        let st = apply(&mut s, "/api/net/settings", &json!({ "start": "network", "wake": "network" }), now).body_json();
+        assert_eq!((st["start"].clone(), st["wake"].clone()), (json!("network"), json!("network")));
+        assert_eq!(apply(&mut s, "/api/net/settings", &json!({ "start": "everyone" }), now).status, 400);
+        // studio is the founder: laptop's start widens at once.
+        apply(&mut s, "/api/net/settings", &json!({ "host": "laptop", "start": "network" }), now);
+        assert_eq!(reach(&s, "laptop")["start"], "network");
+        // rack's XenoNet says nothing of its reach: it takes none.
+        assert_eq!(apply(&mut s, "/api/net/settings", &json!({ "host": "rack", "start": "off" }), now).status, 200);
+        assert!(reach(&s, "rack").is_null());
+        // At laptop, a window host but not the founder, a widening of
+        // studio's waits, and a narrowing doesn't.
+        let mut m = sim("net-member");
+        apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "wake": "network" }), now);
+        assert_eq!((reach(&m, "studio")["wake"].clone(), reach(&m, "studio")["pending"][0]["by"].clone()), (json!("consent"), json!("laptop")));
+        apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "start": "off" }), now);
+        assert_eq!(reach(&m, "studio")["start"], "off");
+        let id = reach(&m, "studio")["pending"][0]["id"].as_str().unwrap().to_string();
+        apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "approve": id }), now);
+        assert_eq!((reach(&m, "studio")["wake"].clone(), reach(&m, "studio")["pending"].clone()), (json!("network"), json!([])));
     }
 
     #[test]

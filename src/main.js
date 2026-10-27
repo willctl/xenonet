@@ -388,6 +388,8 @@ const hud = createHud({
   onMessageActor: (id) => messageTo(id),
   // And to a session, from its own panel.
   onMessageSession: (node) => messageTo(node.id),
+  // Another machine's node: Start a session there.
+  onStartSession: (node) => network.startSession({ host: node.host }),
   identities,
   actorOf: (id) => scene.actor(id),
   actorBeams: (id) => scene.actorLayer.targetsOf(id),
@@ -488,21 +490,43 @@ const network = createNetwork({
   // The gateway's tunnel or LAN address is set where the actor gateway's
   // is, in the Actors panel.
   gateway: () => openActors(),
+  // This machine's projects and folders on the map, for Start a session.
+  projects: () => [...fullIndex.values()].filter((n) => !n.host && (n.kind === "project" || n.kind === "zone") && n.path).map((n) => ({ id: n.id, name: n.name, path: n.path })),
 });
 // What waits on you sounds only where you are, in a network: one rule for
 // this machine's waits and the others'.
 alerts.setChime(() => chimeHere(network.state));
 // The load panel's larger view: each machine's load, parts and sessions.
 // Its machine chips are the Filters chips.
-const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph: () => fullGraph, net: () => network.state });
+const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph: () => fullGraph, net: () => network.state, onStart: (host) => network.startSession({ host }) });
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
 // permission, the actors waiting on you and the registrations waiting.
+// Machines whose Claude Code needs a sign-in for XenoNet's runs (the
+// sign-in event), until you dismiss them.
+const signIns = new Map(); // host → { host, fix, since }
+// The permission prompts of the runs XenoNet started, here and on other
+// machines (GET /api/runs/asks, with the window's key), for Allow and Deny.
+let runAsks = [];
+async function readAsks() {
+  const r = await windowCalls.call("GET", "/api/runs/asks").catch(() => null);
+  if (r?.ok) runAsks = Array.isArray(r.data.asks) ? r.data.asks : [];
+  needsYou.refresh();
+  return runAsks;
+}
+async function answerAsk(id, decision) {
+  const r = await windowCalls.call("POST", "/api/runs/answer", { ask: id, decision });
+  sfx(r.ok ? "success" : "error");
+  if (r.ok) runAsks = runAsks.filter((a) => a.id !== id);
+  else hud.toast(r.error ?? "That didn't go through", true);
+  needsYou.refresh();
+  return { ok: r.ok, error: r.error };
+}
 function needsYouNow() {
   const view = actorRequests.view();
   const sessions = (lastLive?.sessions ?? []).filter((s) => s.needsYou && hud.index.has(s.id)).map((s) => ({ id: s.id, app: s.app, title: hud.index.get(s.id)?.title ?? s.id, kind: s.needsYou.kind, text: s.needsYou.text, since: s.needsYou.since, host: s.host ?? null, stale: !!s.stale }));
-  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting });
+  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting, hints: [...signIns.values()], asks: runAsks });
 }
 // The Needs you panel (needs-you.js), which answers them: from the
 // palette, N, the strip's button and the tray's menu.
@@ -516,10 +540,12 @@ const needsYou = createNeedsYou({
   },
   select,
   openApp: openInApp,
-  ack,
+  // A sign-in hint goes when you dismiss it; a session's wait as the strip's ✓.
+  ack: (ids, it) => (it?.kind === "sign-in" ? void signIns.delete(it.id) : ack(ids)),
   message: (id) => messageTo(id),
-  decide: decideRequest,
-  armed: (id) => actorRequests.armed(id),
+  decide: (id, decision, it) => (it?.kind === "ask" ? answerAsk(id, decision) : decideRequest(id, decision)),
+  // A run's ask is armed by its row's own wait; a registration's as its card's.
+  armed: (id) => String(id).startsWith("ask_") || actorRequests.armed(id),
 });
 
 const updatesPanel = createUpdatesPanel({ modals, desktop, toast: (message) => hud.toast(message) });
@@ -1001,11 +1027,28 @@ function keepIds() {
   return keep;
 }
 
+// Copies XenoNet forked from a busy session to answer a message: each is
+// linked to the session it came from, as its parent (a fork).
+const forks = new Map(); // copy → the session it came from
+function linkForks(graph) {
+  for (const n of graph.nodes) {
+    const parent = forks.get(n.id);
+    if (parent && !n.parentId) Object.assign(n, { parentId: parent, parentKind: "fork" });
+  }
+}
+fetch("/api/runs/forks")
+  .then((r) => (r.ok ? r.json() : { forks: [] }))
+  .then((r) => {
+    for (const f of r.forks ?? []) forks.set(f.child, f.parent);
+    if (forks.size && serverGraph) applyGraph();
+  }, () => {});
+
 function applyGraph(graph = serverGraph) {
   serverGraph = graph;
   graph = withNetwork(graph, netPart);
   fullGraph = graph;
   fullIndex = new Map(graph.nodes.map((n) => [n.id, n]));
+  linkForks(graph);
   decorateHosts(graph);
   hostFilters.setData(graph);
   identities.setData(graph);
@@ -1265,6 +1308,43 @@ events.addEventListener("doctor", (e) => alerts.setDoctor(JSON.parse(e.data)));
 events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data)));
 // The network across machines changed: read it again (network.js).
 events.addEventListener("net", () => network.heard());
+// A session you started: started, refused or ended, here or on another
+// machine. A line in the feed, and a toast for what didn't go.
+// Claude Code on a machine needs a sign-in for XenoNet's runs: Needs you
+// says so, and a toast.
+// A run's permission prompt waits, here or on another machine: Needs you
+// lists it, and it chimes where you are; done, it goes.
+events.addEventListener("ask", (e) => {
+  const a = JSON.parse(e.data);
+  void readAsks();
+  if (chimeHere(network.state)) sfx("alert");
+  hud.toast(`${a.title ?? "A run"} wants to run ${a.tool ?? "a tool"}: Needs you has Allow and Deny`);
+});
+events.addEventListener("ask-done", () => void readAsks());
+void readAsks();
+events.addEventListener("sign-in", (e) => {
+  const s = JSON.parse(e.data);
+  if (typeof s.host !== "string") return;
+  const fresh = !signIns.has(s.host);
+  signIns.set(s.host, { host: s.host, fix: s.fix ?? s.words ?? "", since: signIns.get(s.host)?.since ?? (Number.isFinite(s.at) ? s.at : Date.now()) });
+  needsYou.refresh();
+  if (fresh) hud.toast(String(s.words ?? `Claude Code on ${s.host} needs a sign-in for XenoNet's runs`), true);
+});
+events.addEventListener("fork", (e) => {
+  const f = JSON.parse(e.data);
+  forks.set(f.child, f.parent);
+  if (serverGraph) applyGraph();
+  const parent = fullIndex.get(f.parent)?.title ?? f.parent;
+  hud.activity({ kind: "xenonet", title: "A copy answers", detail: `${f.child} answers a message for «${parent}», which is open elsewhere`, ts: Number.isFinite(f.at) ? f.at : Date.now() });
+});
+events.addEventListener("start", (e) => {
+  const s = JSON.parse(e.data);
+  const bad = s.state === "refused" || (s.state === "ended" && s.exit !== 0);
+  const words = String(s.words ?? "").replace(/^\[XenoNet\] /, "");
+  hud.activity({ kind: "xenonet", title: s.host && s.host !== "this machine" ? `Start on ${s.host}` : "Start", detail: words, bad, ts: Number.isFinite(s.at) ? s.at : Date.now() });
+  if (s.state !== "ended" || bad) hud.toast(words, bad);
+  network.heardStart?.(s);
+});
 // The theme (core/themes.js): the server's choice wins, and a change to it
 // (from the palette, another window, xenonet theme or an edit to a theme of
 // your own) is drawn in place, without a reload.

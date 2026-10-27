@@ -31,7 +31,7 @@ import { createOpenCode } from "../core/delivery/opencode.js";
 import { createTmux } from "../core/delivery/tmux.js";
 import { createResume } from "../core/delivery/resume.js";
 import { planUsage } from "../core/delivery/usage.js";
-import { writeListenSettings } from "../core/delivery/setup.js";
+import { writeListenSettings, serverName } from "../core/delivery/setup.js";
 import { actorRoutes, createActorCaller } from "./routes/actors.js";
 import { createActors, mapOf, CLOCK_MS } from "../core/actors/index.js";
 import { actorSpend } from "../core/actors/spend.js";
@@ -289,8 +289,9 @@ const deliveryRouter = new DeliveryRouter({
   opencode: createOpenCode(),
   tmux: createTmux(),
   // Made-up sessions are never resumed. The runs' logs and records go in
-  // the state folder.
-  resume: config.demo ? null : createResume({ settings: listenFile, dir: config.stateDir }),
+  // the state folder; a Claude Code turn asks its prompts of you through
+  // this instance's xenonet server.
+  resume: config.demo ? null : createResume({ settings: listenFile, dir: config.stateDir, server: serverName(config.port) }),
   // A provider at 90% of its plan takes no wakes: from the live readings.
   usage: (app) => planUsage({ ...state.live?.limits, claude: state.live?.claudeLimits?.() ?? null }, app),
   notify: ({ agent, title, from }) => {

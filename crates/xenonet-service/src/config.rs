@@ -45,6 +45,12 @@ pub struct Config {
     pub runtime_dir: String,
     /// The demo's made-up world, once it's made (core/demo.js createWorld).
     pub world: Option<Value>,
+    /// XENONET_RUNS_BIN: a program that stands in for Claude Code, Codex
+    /// and Grok Build in every run XenoNet starts, as the tests' fake.
+    pub runs_bin: Option<String>,
+    /// XENONET_PERMISSION_HOLD_MS: how long a run's permission prompt waits
+    /// for your answer; ten minutes when it's not set.
+    pub permission_hold_ms: Option<f64>,
 }
 
 /// How far above the service's port the actor gateway's is by default
@@ -174,6 +180,8 @@ impl Config {
             exec: set("XENONET_EXEC"),
             runtime_dir,
             world: None,
+            runs_bin: set("XENONET_RUNS_BIN"),
+            permission_hold_ms: set("XENONET_PERMISSION_HOLD_MS").and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0),
         }
     }
 

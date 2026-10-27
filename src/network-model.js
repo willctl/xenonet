@@ -26,6 +26,8 @@ export const ALONE = Object.freeze({
   rosterMismatch: [],
   titlesOnly: false,
   shareLoad: true,
+  start: "you",
+  wake: "consent",
 });
 
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -46,6 +48,32 @@ export function stateOf(raw) {
 }
 
 export const inNetwork = (s) => !!s?.network;
+
+// Who may start sessions on a machine and wake them, in the console's
+// words (network/state/v1's start and wake, and each host's reach).
+export const STARTS = ["off", "you", "network"];
+export const WAKES = ["consent", "network"];
+export const START_WORDS = { off: "Nobody", you: "You", network: "The network" };
+export const WAKE_WORDS = { consent: "Sessions you allowed", network: "The network" };
+
+// A host's reach as its row says, read leniently: null for a machine whose
+// XenoNet doesn't say (an older one), else { start, wake, pending }.
+export function reachOf(host) {
+  const r = host?.reach;
+  if (!r || typeof r !== "object") return null;
+  return {
+    start: STARTS.includes(r.start) ? r.start : "you",
+    wake: WAKES.includes(r.wake) ? r.wake : "consent",
+    pending: list(r.pending).filter((w) => w && typeof w.id === "string" && (w.setting === "start" || w.setting === "wake")),
+  };
+}
+
+// Whether a machine takes `what` from this one (start, answer): what its
+// presence says its XenoNet can do.
+export const hostCan = (host, what) => list(host?.can).includes(what);
+
+// A widening that waits on a machine, as a line.
+export const widenWords = (w, host) => `${w.by} asked to let the network ${w.setting} sessions on ${host}`;
 
 // A time as the console shows it: the clock today, the date before that.
 export function clock(ms, now = Date.now()) {

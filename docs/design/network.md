@@ -304,9 +304,11 @@ Why one, and why it's all right:
 
 **How it's reached:**
 
-- **Through the gateway's tunnel,** picked as today: Tailscale Funnel, a
-  Cloudflare tunnel, a quick Cloudflare tunnel, ngrok, or the person's own
-  address.
+- **Through the gateway's tunnel,** picked as today: a Cloudflare tunnel,
+  a quick Cloudflare tunnel, ngrok, or the person's own address. Tailscale
+  Funnel publishes only the actor gateway's `/mcp`, so a network on
+  Tailscale uses the gateway's tailnet address instead, and the doctor
+  warns about a Funnel name.
 - **On the LAN or tailnet only.** The gateway listens on an address the
   person picks from the machine's interfaces (never `0.0.0.0`), over
   plain HTTP.
@@ -765,7 +767,17 @@ twins, are unchanged.
   - message any session or actor, as you;
   - add a machine and remove a host, by the rules in section 3;
   - read a transcript or stats through the relay, from the window only,
-    unless that host shares titles only (section 7).
+    unless that host shares titles only (section 7);
+  - start a session there (below);
+  - change who may start and wake sessions there (`operator`, action
+    `settings`): narrowing (`off`, `you`, `consent`) from any window host;
+    widening to `network` from the founder, or waiting ten minutes on that
+    host for a second window host's `settings` with `approve` and the
+    widening's id. Each host's presence carries its settings
+    (`reach: { start, wake, pending }`) and what it takes (`can`), so every
+    window host's Network panel shows them and the widenings that wait;
+  - answer a run's permission prompt (`operator`, action `answer`,
+    `{ ask, decision }`).
 - **What stays on the machine itself:**
   - connecting or disconnecting its agents;
   - installing the always-on service;
@@ -783,7 +795,34 @@ twins, are unchanged.
   > From you, at studio's console.
 
   It can't approve a tool, as no message can. Answering a session's
-  permission question still happens in that session's own app.
+  permission question still happens in that session's own app, except for
+  the sessions XenoNet runs itself (below).
+- **Starting a session on another host.** A start is a `message` frame to
+  the reserved target `xenonet:start`, whose body is the request as JSON:
+  `{ request, by, folder, app, mode, prompt }`. No new frame kind: an old
+  host or gateway refuses unknown kinds, and an old host answers this
+  target as an id it doesn't have, which the sender reads as too old. The
+  receiving host decides (`reach::decide`):
+  - the sending host is a window host, whatever `by` says (only the
+    frame's signer can be checked);
+  - you need a strong check; a session or actor needs `start: network`;
+  - the folder is a project or folder of its map, a folder its sessions
+    report, or `~`; the app is claude, codex or grok; never
+    `bypassPermissions`;
+  - 20 starts an hour, 10 from one sending host, and the runner's cap.
+
+  The answers are receipts keyed by the frame's mid: `started { session,
+  pid, folder }`, `refused { reason }`, then `ended { exit, minutes }`. The
+  sender sends only to a host that's online and whose presence lists
+  `start`; a start is never kept for later, and one older than two minutes
+  when it arrives is refused.
+- **Permission prompts.** A Claude Code session XenoNet started runs with
+  `--permission-prompt-tool mcp__xenonet__permission`. The tool answers only
+  for a run in the runs table. The ask crosses as a `message` frame to
+  `xenonet:ask`, one to each window host (`To::Host`), never in presence;
+  done, a second one takes it back. Allow or Deny from another window host
+  is an `operator` frame's `answer`. The call is held ten minutes; no
+  answer is a deny.
 
 ### 9. When the gateway is down, and moving it
 

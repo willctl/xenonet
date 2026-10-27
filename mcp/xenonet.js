@@ -127,14 +127,17 @@ function caller(ctx) {
 
 const text = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 1) }] });
 
-async function call(op, ctx, body = {}) {
+const call = (op, ctx, body = {}) => callRoute(`/api/engine/${op}`, ctx, body);
+
+// A call to one of XenoNet's routes, as the session or the actor calling.
+async function callRoute(route, ctx, body = {}) {
   const me = caller(ctx);
   if (!me) throw new Error("XenoNet can't tell which session is calling; these tools work from Claude Code, Codex and Grok Build");
-  if (me.actor) return text(await asActor("POST", `/api/engine/${op}`, body));
+  if (me.actor) return text(await asActor("POST", route, body));
   try {
     // The agent's own process, so XenoNet can tell when it's gone: Claude Code
     // says which in CLAUDE_PID; Codex is this server's parent.
-    return text(await post(XENONET, `/api/engine/${op}`, { ...body, cwd: process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), pid: Number(process.env.CLAUDE_PID) || process.ppid }, { "x-xenonet-agent": me.id }));
+    return text(await post(XENONET, route, { ...body, cwd: process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), pid: Number(process.env.CLAUDE_PID) || process.ppid }, { "x-xenonet-agent": me.id }));
   } catch (err) {
     if (err.status) throw err;
     throw new Error("XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong.");
@@ -147,6 +150,20 @@ async function doctor() {
   const r = await checkup({ port: PORT });
   const notes = r.results.filter((x) => x.status !== "ok").map(({ title, status, detail, fix }) => ({ title, status, detail, ...(fix ? { fix } : {}) }));
   return text({ by: r.by ?? "this MCP server (XenoNet isn't running)", summary: r.summary, notes });
+}
+
+// A run's permission prompt: Claude Code calls the tool itself, and takes
+// allow or deny as JSON text. XenoNet answers only for the runs it started;
+// anything that goes wrong is a deny that says why.
+async function permission(ctx, body) {
+  const deny = (message) => ({ content: [{ type: "text", text: JSON.stringify({ behavior: "deny", message }) }] });
+  const me = caller(ctx);
+  if (!me || me.actor) return deny("XenoNet can't tell which session is calling");
+  try {
+    return { content: [{ type: "text", text: JSON.stringify(await post(XENONET, "/api/runs/permission", body, { "x-xenonet-agent": me.id })) }] };
+  } catch (err) {
+    return deny(err.status ? err.message : "XenoNet isn't running, so nobody can answer this prompt");
+  }
 }
 
 // A gateway token is never in an agent's context: the ask makes none and
@@ -165,6 +182,10 @@ async function askGatewayToken(ctx, actor) {
     throw new Error("XenoNet isn't running, so it can't show your user the ask. Your user can open it, and the doctor tool says what else is wrong.");
   }
 }
+
+const PERMISSION = "Only for the sessions XenoNet runs itself: Claude Code calls it, as its permission prompt tool, when its settings don't settle a tool call. XenoNet asks your user in its console, on every machine with a window, and answers allow or deny; with no answer in ten minutes, deny. Never call it yourself: any other session is refused.";
+
+const START_SESSION = "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once; whether the session started, and later how it ended, come to you as messages. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.";
 
 const scopeArg = z.string().optional().describe("repo, the default, is this repo and its worktrees. machine is every session and actor at work. Or a selector of key:value terms, all of which must hold: project:<name>, identity:<account>, app:<claude|codex|opencode|…>, machine:<name>, status:<idle|working|live>, by:<actor slug>, such as \"project:xenonet status:idle\".");
 
@@ -378,6 +399,22 @@ function buildServer(actor = null) {
     ({ accept, to, host, goal, done, next, files, branch, commit }, ctx) => call("handoff", ctx, { accept, to, host, goal, done, next, files, branch, commit }),
   );
   server.registerTool(
+    "start_session",
+    {
+      title: "Start a session",
+      description: START_SESSION,
+      inputSchema: z.object({
+        machine: z.string().optional().describe("Another machine in your XenoNet network, by its id; this one when left out."),
+        folder: z.string().optional().describe("A project or folder on that machine's map, by its id (project:…) or path, or ~, the default."),
+        app: z.enum(["claude", "codex", "grok"]).optional().describe("claude (Claude Code, the default), codex or grok (Grok Build)."),
+        prompt: z.string().describe("What the new session should do: its first prompt."),
+        mode: z.enum(["manual", "plan", "acceptEdits", "auto", "dontAsk"]).optional().describe("A permission mode; manual, the default, is your user's own settings. Codex takes none."),
+      }),
+      annotations: write,
+    },
+    ({ machine, folder, app, prompt, mode }, ctx) => callRoute("/api/start", ctx, { machine, folder, app, prompt, mode }),
+  );
+  server.registerTool(
     "doctor",
     {
       title: "Check XenoNet's setup",
@@ -397,6 +434,20 @@ function buildServer(actor = null) {
         annotations: write,
       },
       ({ actor }, ctx) => askGatewayToken(ctx, actor),
+    );
+    server.registerTool(
+      "permission",
+      {
+        title: "Answer a permission prompt",
+        description: PERMISSION,
+        inputSchema: z.object({
+          tool_name: z.string().describe("The tool Claude Code asks to run."),
+          input: z.record(z.string(), z.unknown()).describe("What it calls the tool with."),
+          tool_use_id: z.string().optional(),
+        }),
+        annotations: write,
+      },
+      ({ tool_name, input, tool_use_id }, ctx) => permission(ctx, { tool_name, input, tool_use_id }),
     );
   }
   if (servesActor()) registerActorTools(server, { write });

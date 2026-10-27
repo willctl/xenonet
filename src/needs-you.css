@@ -81,6 +81,14 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+.ny .ny-warn {
+  margin-top: 4px;
+  padding: 3px 6px;
+  border-left: 2px solid var(--attention);
+  background: rgba(var(--attention-rgb), 0.1);
+  font-size: 11px;
+  color: var(--text);
+}
 .ny .ny-asker {
   margin-top: 2px;
   font-size: 11px;

@@ -7,8 +7,8 @@ export const KINDS = native.needsYouKinds();
 
 export const waitsWords = (it) => native.waitsWords(it);
 
-export function needsYouQueue({ sessions = [], actors = [], requests = [], gatewayAsks = [], canDecide = false, waiting = 0 } = {}) {
-  return native.needsYouQueue({ sessions, actors, requests, gatewayAsks, canDecide, waiting });
+export function needsYouQueue({ sessions = [], actors = [], requests = [], gatewayAsks = [], canDecide = false, waiting = 0, asks = [], hints = [] } = {}) {
+  return native.needsYouQueue({ sessions, actors, requests, gatewayAsks, canDecide, waiting, asks, hints });
 }
 
 export const order = (a, b) => native.needsYouOrder(a, b);

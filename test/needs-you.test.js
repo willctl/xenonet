@@ -77,3 +77,29 @@ test("from /api/summary: its sessions, the actors that wait and how many program
   assert.deepEqual(queueOfSummary({ needsYou: [] }), [], "an older XenoNet's summary, without the rest");
   assert.deepEqual(queueOfSummary(null), []);
 });
+
+test("a run's permission prompt, from this machine or another, with Allow and Deny in the window alone; and a machine whose Claude Code needs a sign-in for XenoNet's runs", () => {
+  const ask = { id: "ask_1", host: "neo-rex", session: "claude:0190d3e0-0000-7000-8000-00000000000a", run: "run_1", title: "neo-rex · Fix the login form wants to run Bash", tool: "Bash", input: "npm test", at: T - 30e3, until: T + 570e3 };
+  const hint = { host: "neo-rex", fix: "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there", since: T - 60e3 };
+  const q = needsYouQueue({ asks: [ask, { host: "x" }], hints: [hint, { fix: "no host" }], canDecide: true });
+  assert.deepEqual(
+    q.map((it) => [it.key, it.kind, it.actions]),
+    [
+      ["sign-in:neo-rex", "sign-in", ["dismiss"]],
+      ["ask:ask_1", "ask", ["allow", "deny"]],
+    ],
+  );
+  assert.deepEqual([q[1].host, q[1].tool, q[1].text, q[1].run, q[1].expiresAt, q[1].warning], ["neo-rex", "Bash", "npm test", "run_1", T + 570e3, null]);
+  // One that may read the run's environment carries its machine's warning.
+  const env = needsYouQueue({ asks: [{ ...ask, input: "printenv", warning: "This may read the run's environment" }], canDecide: true });
+  assert.equal(env[0].warning, "This may read the run's environment");
+  assert.deepEqual([q[0].title, q[0].text], ["Claude Code on neo-rex", hint.fix]);
+  assert.equal(waitsWords(q[1]), "wants to run a tool");
+  assert.equal(waitsWords(q[0]), "needs a sign-in for XenoNet's runs");
+  // Without the window's key the hint shows, and no ask: only the window answers one.
+  assert.deepEqual(
+    needsYouQueue({ asks: [ask], hints: [hint] }).map((it) => it.kind),
+    ["sign-in"],
+  );
+  assert.equal(countOf(q), 2);
+});

@@ -86,6 +86,8 @@ struct Out {
     you_at: Option<f64>,
     /// The roster head the last presence carried.
     roster: String,
+    /// Who may start and wake sessions here, as the last presence said.
+    reach: Value,
     claims: BTreeMap<String, Value>,
     /// The roster head when the claims last went: a new one sends them all.
     claims_roster: String,
@@ -186,11 +188,11 @@ impl Sink for EngineSink {
     }
 }
 
-fn net(w: &World) -> Arc<dyn Net> {
+pub(crate) fn net(w: &World) -> Arc<dyn Net> {
     w.engine.net.get()
 }
 
-fn send(w: &World, to: To, kind: Kind, body: Value) {
+pub(crate) fn send(w: &World, to: To, kind: Kind, body: Value) {
     if let Err(e) = net(w).send(Outgoing { to, kind, body }) {
         w.log("warn", "net.send", &format!("a {} for the network wasn't queued: {e}", kind.as_str()));
     }
@@ -209,7 +211,7 @@ fn n(v: &Value, k: &str) -> Option<f64> {
 }
 
 /// At most `max` characters, as a schema's limit asks.
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
@@ -217,7 +219,7 @@ fn opt(v: Option<String>, max: usize) -> Value {
     v.map_or(Value::Null, |s| Value::String(clip(&s, max)))
 }
 
-fn ms(x: f64) -> Value {
+pub(crate) fn ms(x: f64) -> Value {
     if x.is_finite() && x >= 0.0 {
         json!(x.round() as i64)
     } else {
@@ -271,17 +273,23 @@ pub fn receive(w: &World, incoming: Incoming) {
     if net(w).me().is_none() {
         return;
     }
-    let Incoming { from, kind, body, from_window_host, .. } = incoming;
+    let Incoming { from, kind, body, from_window_host, at } = incoming;
     let _one = w.net.taking.locked();
     let done = match kind {
         Kind::Presence => presence_in(w, &from, &body),
         Kind::Claims => claims_in(w, &from, &body),
-        Kind::Message => message_in(w, &from, &body, from_window_host),
+        Kind::Message => message_in(w, &from, &body, from_window_host, at),
         Kind::Receipt => receipt_in(w, &from, &body),
         Kind::Handoff => handoff_in(w, &from, &body),
         // The person's actions from another console are the network's
-        // own (section 8); a message from them comes as a message.
-        Kind::Operator => Ok(()),
+        // own (section 8), but for your answer to a run's permission
+        // prompt; a message from them comes as a message.
+        Kind::Operator => {
+            if body.get("action").and_then(Value::as_str) == Some("answer") {
+                crate::asks::answer_in(w, &from, body.get("args").unwrap_or(&Value::Null));
+            }
+            Ok(())
+        }
         // The map's frames go to the relay and the hub, and services'
         // requests and answers to the network's services: never the engine.
         Kind::Relay | Kind::Svc => Ok(()),
@@ -436,6 +444,9 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
     // rosters notice it from each other's presence. A new head may be a
     // host that joined and has heard nothing yet, so the set goes in full.
     let roster = net(w).roster_head().unwrap_or_default();
+    // Who may start and wake sessions here, and what this XenoNet takes:
+    // a change to the settings goes out as one.
+    let reach = net(w).reach().to_json();
     let body = {
         let mut out = w.net.out.locked();
         let full = full || roster != out.roster;
@@ -447,7 +458,7 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
             (changed, gone)
         };
         let you_at = worked.or(out.you_at);
-        if !full && agents.is_empty() && removed.is_empty() && you == out.you && you_at == out.you_at && roster == out.roster {
+        if !full && agents.is_empty() && removed.is_empty() && you == out.you && you_at == out.you_at && roster == out.roster && reach == out.reach {
             return None;
         }
         out.counter = (out.counter + 1.0).max(now_ms().round());
@@ -455,7 +466,8 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
         out.you = you;
         out.you_at = you_at;
         out.roster.clone_from(&roster);
-        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster })
+        out.reach = reach.clone();
+        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster, "reach": reach, "can": xenonet_base::network::CAN })
     };
     send(w, To::All, Kind::Presence, body.clone());
     Some(body)
@@ -598,7 +610,7 @@ fn stub(id: &str) -> Value {
 
 // ---------- messages out ----------
 
-fn sender_kind(me: &str) -> &'static str {
+pub(crate) fn sender_kind(me: &str) -> &'static str {
     if me == YOU {
         "you"
     } else if parse_actor_id(me).is_some() {
@@ -708,7 +720,7 @@ fn envelope(from: &str, mid: &str, at: f64, sender: &str, kind: &str, name: Opti
     })
 }
 
-fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()> {
+fn message_in(w: &World, from: &str, b: &Value, window_host: bool, at: f64) -> Result<()> {
     let (Some(mid), Some(sender), Some(kind), Some(target), Some(body)) = (s(b, "mid"), s(b, "sender"), s(b, "senderKind"), s(b, "target"), s(b, "body")) else {
         return Err(Thrown::new("a message without its mid, sender, target or body"));
     };
@@ -719,6 +731,19 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
     };
     if !mid.starts_with("msg_") || !sender_ok || body.is_empty() || body.chars().count() > 16000 {
         return Err(Thrown::new("a message that isn't network/message/v1"));
+    }
+    // A start request: the starts' own (starts.rs), answered by receipts
+    // keyed by its mid. An older XenoNet refuses the target below.
+    if target == xenonet_engine::delivery::starts::TARGET {
+        let strong = b.get("auth").and_then(|a| a.get("strength")).and_then(Value::as_str) == Some("strong");
+        crate::starts::start_in(w, from, &mid, &kind, &sender, &body, strong, window_host, at);
+        return Ok(());
+    }
+    // A permission prompt of a run on another machine, for this console,
+    // or its end (asks.rs).
+    if target == crate::asks::TARGET {
+        crate::asks::ask_in(w, from, &body);
+        return Ok(());
     }
     let t = Arg::text(target.clone());
     if !(is_agent_id(&t) || is_actor_agent(&t)) {
@@ -859,6 +884,10 @@ fn receipt_in(w: &World, from: &str, b: &Value) -> Result<()> {
     let (Some(mid), Some(agent), Some(state)) = (s(b, "mid"), s(b, "agent"), s(b, "state")) else {
         return Err(Thrown::new("a receipt without its mid, agent or state"));
     };
+    // An answer to a start request sent from here.
+    if crate::starts::answer_in(w, from, &mid, b) {
+        return Ok(());
+    }
     let Some(m) = store(w, |s| s.message_by_mid(&mid, None))? else { return Ok(()) };
     let id = m.num("id").unwrap_or(f64::NAN);
     let who = format!("@{from}:{agent}");
@@ -1267,7 +1296,18 @@ fn body_of(r: &Row, op: &str, by: Option<&str>) -> Value {
 
 /// A note to a session here from XenoNet's network, as a message from
 /// `sender` (the handoff's maker, or the session that took it).
-fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) {
+pub(crate) fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) {
+    note_with(w, sender, target, words, host, false);
+}
+
+/// A note that waits for the session's next turn, and never wakes it: a
+/// start's started and ended, which a wake under `wake: network` would
+/// otherwise turn into a turn of their own.
+pub(crate) fn quiet_note(w: &World, sender: &str, target: &str, words: &str) {
+    note_with(w, sender, target, words, None, true);
+}
+
+fn note_with(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>, quiet: bool) {
     let mut env = Value::Null;
     if let Some(h) = host {
         if let Ok(mid) = new_id("msg") {
@@ -1291,6 +1331,9 @@ fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) 
         obj(vec![("id", Arg::Num(id)), ("from", Arg::text(sender)), ("to", Arg::List(vec![t.clone()])), ("target", t), ("text", Arg::text(words)), ("ts", Arg::Num(now))]);
     if !env.is_null() {
         push(&mut event, "verified", arg(&env["line"]));
+    }
+    if quiet {
+        push(&mut event, "quiet", Arg::Bool(true));
     }
     told(w, "message", &event);
 }

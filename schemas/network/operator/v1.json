@@ -16,7 +16,9 @@
         "message",
         "ticket",
         "remove",
-        "replace"
+        "replace",
+        "settings",
+        "answer"
       ]
     },
     "args": {
@@ -24,7 +26,8 @@
       "propertyNames": {
         "type": "string"
       },
-      "additionalProperties": {}
+      "additionalProperties": {},
+      "description": "For settings: { start?, wake? } or { approve } with a waiting widening's id. For answer: { ask, decision }, decision allow or deny"
     },
     "checked": {
       "type": "string",

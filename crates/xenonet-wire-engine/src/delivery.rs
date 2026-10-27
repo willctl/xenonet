@@ -270,7 +270,7 @@ impl Channels for ChannelsDriver {
 /// Claude Code turn listens with.
 pub struct Resumes {
     pub runner: std::sync::Arc<Runner>,
-    settings: Option<String>,
+    pub settings: Option<String>,
 }
 
 /// The router's records as JS objects, which route() and list() give and
@@ -287,7 +287,7 @@ pub struct RouterSide {
     timers: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     opencode: OpenCode,
     tmux: Tmux,
-    resume: Option<Resumes>,
+    pub resume: Option<Resumes>,
 }
 
 impl RouterSide {
@@ -352,7 +352,11 @@ impl RouterCalls<'_> {
         let cwd = o.field("cwd");
         let settings = r.settings.clone().map_or(Arg::Null, Arg::Text);
         let mut pc = ResumePlanCalls { r };
-        let plan = match resume::plan(&mut pc, &agent, &settings, &cwd) {
+        // A copy of a Claude Code session a process holds, or a turn of
+        // one whose process has gone.
+        let fork = o.field("fork").truthy();
+        let plan = if fork { resume::plan_fork(&mut pc, &agent, &settings, &cwd) } else { resume::plan(&mut pc, &agent, &settings, &cwd) };
+        let plan = match plan {
             Ok(p) => p,
             Err(t) => return no(t.message),
         };
@@ -360,13 +364,47 @@ impl RouterCalls<'_> {
             Err(why) => return no(why.into()),
             Ok(c) => c,
         };
-        let env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
-        let (key, cwd) = (text(&agent), text(&cwd));
-        let args: Vec<String> = args.iter().map(text).collect();
-        let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: text(&o.field("text")) };
-        match r.runner.run(turn, &self.w.setup.home) {
-            Ok(pid) => obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(format!("pid {pid}")))]),
-            Err(why) => no(why),
+        let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
+        // Claude Code signs in with the token you gave XenoNet's runs, and
+        // asks its permission prompts of you through this XenoNet's server,
+        // waiting a minute past the hold for your answer, as a start does.
+        if app == "claude" {
+            crate::starts::signed_env(self.w, &mut env);
+            env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
+            env.push(("MCP_TOOL_TIMEOUT".into(), crate::starts::mcp_tool_timeout_ms(self.w).to_string()));
+        }
+        let server = xenonet_engine::delivery::setup::server_name(&Arg::Num(f64::from(self.w.setup.port)));
+        let args = resume::with_permission_tool(&app, args, &server);
+        let parent = text(&agent);
+        let key = if fork { format!("fork:{parent}") } else { parent.clone() };
+        let cwd = text(&cwd);
+        let mut args: Vec<String> = args.iter().map(text).collect();
+        let mut input = text(&o.field("text"));
+        // Grok Build reads its prompt from a file of XenoNet's.
+        let prompt_file = if args.last().map(String::as_str) == Some("--prompt-file") {
+            match crate::starts::prompt_file(self.w, &input) {
+                Ok(f) => {
+                    args.push(f.clone());
+                    input.clear();
+                    Some(f)
+                }
+                Err(why) => return no(why),
+            }
+        } else {
+            None
+        };
+        let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: input };
+        match crate::starts::run_turn(self.w, &r.runner, turn) {
+            Ok(pid) => {
+                crate::starts::after_resume(self.w, &r.runner, &app, &key, pid, fork.then_some(parent.as_str()), prompt_file);
+                obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(if fork { format!("pid {pid}, a copy of the session") } else { format!("pid {pid}") }))])
+            }
+            Err(why) => {
+                if let Some(f) = prompt_file {
+                    let _ = std::fs::remove_file(f);
+                }
+                no(why)
+            }
         }
     }
 }
@@ -548,6 +586,11 @@ impl Calls for RouterCalls<'_> {
         match (path, method) {
             ("router", "now") => Ok(Arg::Num(now_ms())),
             ("router", "usage") => Ok(self.usage(&x(0))),
+            // Who may start and wake sessions here (Settings → Network).
+            ("router", "reach") => {
+                let r = crate::network::net(w).reach();
+                Ok(obj(vec![("start", Arg::text(r.start)), ("wake", Arg::text(r.wake))]))
+            }
             ("router", "notify") => {
                 w.emit(From::Delivery, "notify", json(&x(0)));
                 Ok(Arg::Undef)
@@ -631,12 +674,15 @@ impl Calls for RouterCalls<'_> {
             "router.ackMs" => Arg::Num(ACK_MS),
             "router.policy.data.consent" => self.w.policy.data().field("consent"),
             "router.policy.data" => self.w.policy.data(),
+            // A resume here can fork a copy of a Claude Code session too.
+            "router.resume.fork" => Arg::Bool(self.w.router.resume.is_some()),
             _ => Arg::Undef,
         })
     }
     fn kind(&mut self, path: &str) -> Result<String> {
         Ok(match path {
-            "router.opencode"
+            "router"
+            | "router.opencode"
             | "router.tmux"
             | "router.channels"
             | "router.policy"
@@ -660,6 +706,8 @@ impl Calls for RouterCalls<'_> {
             | "router.channels.push"
             | "router.engine.listening.has" => "function",
             "router.ackMs" => "number",
+            "router.reach" => "function",
+            "router.resume.fork" if self.w.router.resume.is_some() => "boolean",
             _ => "undefined",
         }
         .into())

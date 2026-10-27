@@ -20,6 +20,9 @@ export const DELIVERY = {
   claude: { resume: (id, { settings = null } = {}) => ["claude", ["-p", "--resume", id, ...(settings ? ["--settings", settings] : [])]], marks: "CLAUDE", channel: true },
   // codex exec resume <id> -
   codex: { resume: (id) => ["codex", ["exec", "resume", id, "-"]], marks: "CODEX_" },
+  // grok -r <id> --output-format json --prompt-file <file>: Grok Build reads
+  // a single turn's prompt from a file, which resume.js writes and adds.
+  grok: { resume: (id) => ["grok", ["-r", id, "--output-format", "json", "--prompt-file"]], marks: "GROK_" },
   opencode: { server: true },
 };
 

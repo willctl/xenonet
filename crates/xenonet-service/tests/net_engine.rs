@@ -43,12 +43,19 @@ const D2: &str = "claude:cccccccc-0002";
 const L2: &str = "claude:bbbbbbbb-0002";
 
 /// The person, at the window and at their own terminal; and any session
-/// is its own process.
+/// is its own process, but for those in SPOOFED.
 struct You;
+
+/// Ids whose calls come from a process that isn't that session, as the
+/// real verifier tells by the calling process's tree.
+static SPOOFED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 #[async_trait]
 impl cores::Verify for You {
-    async fn check(&self, _peer: Peer, _id: &str, _hook: bool) -> Value {
+    async fn check(&self, _peer: Peer, id: &str, _hook: bool) -> Value {
+        if SPOOFED.lock().unwrap().iter().any(|s| s == id) {
+            return json!({ "ok": false, "reason": "the calling process isn't that session" });
+        }
         json!({ "ok": true })
     }
     async fn person(&self, _peer: Peer) -> Value {
@@ -113,6 +120,66 @@ impl State for Map {
     fn add_block(&self, _health: Arc<dyn Fn() -> Value + Send + Sync>, _source: Option<String>) -> R<()> {
         Ok(())
     }
+}
+
+/// The program every run on a test machine starts, in place of the app's
+/// CLI: it keeps its arguments and its prompt (standard input, or Grok
+/// Build's prompt file) beside itself, says it isn't signed in when the
+/// prompt asks it to, waits 25 seconds when it says hold-on, and
+/// otherwise takes a second and ends well. With
+/// --fork-session it names its copy as Claude Code's stream does.
+fn fake_cli(dir: &Path) -> String {
+    let bin = dir.join("bin").join("fake-cli");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    let script = r#"#!/bin/sh
+here=$(dirname "$0")
+prompt=$(cat)
+file=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--prompt-file" ] && file="$a"
+  prev="$a"
+done
+[ -n "$file" ] && prompt=$(cat "$file")
+n=$(ls "$here" | grep -c '^args-')
+printf '%s\n' "$@" > "$here/args-$n"
+printf '%s' "$prompt" > "$here/prompt-$n"
+printf '%s' "$MCP_TOOL_TIMEOUT" > "$here/timeout-$n"
+case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
+case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
+case "$prompt" in *hold-on*) sleep 25 ;; esac
+sleep 1
+exit 0
+"#;
+    std::fs::write(&bin, script).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin.to_string_lossy().into_owned()
+}
+
+/// The `n`th run of the fake on `h`, once it has its prompt.
+async fn ran(h: &Host, n: usize) -> (Vec<String>, String) {
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let runs = fake_runs(h);
+        if let Some(r) = runs.get(n - 1).filter(|r| !r.1.is_empty()) {
+            return r.clone();
+        }
+        assert!(std::time::Instant::now() < end, "waited for run {n} on {}: {runs:?}", h.name);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// What the fake ran on `h`: each run's arguments and prompt, in order.
+fn fake_runs(h: &Host) -> Vec<(Vec<String>, String)> {
+    let bin = h.dir.join("bin");
+    let mut out = Vec::new();
+    for n in 0.. {
+        let Ok(args) = std::fs::read_to_string(bin.join(format!("args-{n}"))) else { break };
+        let prompt = std::fs::read_to_string(bin.join(format!("prompt-{n}"))).unwrap_or_default();
+        out.push((args.lines().map(str::to_string).collect(), prompt));
+    }
+    out
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -182,6 +249,9 @@ impl Host {
         let state = dir.join("state").to_string_lossy().into_owned();
         let on = actors || door.is_some();
         let actors = if on { "on" } else { "off" };
+        // Every run this machine starts runs the fake (`fake_cli`), never
+        // Claude Code, Codex or Grok Build.
+        let fake = fake_cli(&dir);
         let vars = [
             ("HOME", home.as_str()),
             ("XENONET_STATE_DIR", state.as_str()),
@@ -189,6 +259,9 @@ impl Host {
             ("XENONET_ACTORS", actors),
             ("XENONET_PORT", "47997"),
             ("HERMES_HOME", home.as_str()),
+            ("XENONET_RUNS_BIN", fake.as_str()),
+            // A permission prompt waits six seconds for an answer here.
+            ("XENONET_PERMISSION_HOLD_MS", "6000"),
         ];
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let mut config = Config::from(&[], &get);
@@ -203,6 +276,9 @@ impl Host {
         }));
         cores.verify = Arc::new(You);
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
+        // Its engine's events reach its console's stream, as they do in
+        // `xenonet serve`.
+        env.emitter.bind(&ctx);
         let svc = NetService::open(options(&dir, name)).unwrap();
         if let Some(plug) = &ctx.cores.on_net {
             plug(&svc);
@@ -770,6 +846,421 @@ async fn actors_reach_actors_on_other_machines() {
     let later = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Still there?" })).await.unwrap();
     assert_eq!(later["to"][0]["delivery"], "when laptop is back online: it waits in this machine's outbox", "{later}");
     drop((a, b));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// studio founds a network on `lan` (a window host and the gateway),
+/// laptop joins as a window host and desk as a server, each with
+/// `sessions`; all three linked.
+async fn three(root: &Path, lan: u16, sessions: [Vec<Sess>; 3]) -> (Host, Host, Host) {
+    let [sa, sb, sc] = sessions;
+    let a = Host::open("studio", root.join("studio"), sa, None).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
+    assert_eq!(s, 200, "{v}");
+    let (address, code) = ticket(&a, "laptop", true).await;
+    let b = Host::open("laptop", root.join("laptop"), sb, None).await;
+    join(&b, &address, &code).await;
+    live(&b, 2).await;
+    let (address, code) = ticket(&a, "desk", false).await;
+    let c = Host::open("desk", root.join("desk"), sc, None).await;
+    join(&c, &address, &code).await;
+    for h in [&a, &b, &c] {
+        live(h, 3).await;
+    }
+    (a, b, c)
+}
+
+/// A host's row in another's state.
+fn row_of(st: &Value, id: &str) -> Value {
+    st["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap_or(Value::Null)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_two() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-reach-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![]]).await;
+    let st = c.state().await;
+    assert_eq!((st["start"].clone(), st["wake"].clone()), (json!("you"), json!("consent")), "you, and your consent, by default");
+    // Each host's presence says what it is set to and what it takes.
+    until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["reach"]["start"] == "you" }).await;
+    assert_eq!(row_of(&a.state().await, "desk")["can"], json!(["start", "answer"]));
+    let desk = || async { c.state().await };
+
+    // laptop, a window host but not the founder, asks to let the network
+    // start sessions on desk: it waits there for a second window host.
+    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
+    assert_eq!((s, v["sent"]["host"].clone()), (200, json!("desk")), "{v}");
+    let widen = until_value("the widening waiting on desk", 10, || async {
+        let st = desk().await;
+        row_of(&st, "desk")["reach"]["pending"].as_array().and_then(|p| p.first().cloned())
+    })
+    .await;
+    assert_eq!((widen["setting"].clone(), widen["by"].clone()), (json!("start"), json!("laptop")), "{widen}");
+    assert_eq!(desk().await["start"], "you", "not yet");
+    // studio sees it on desk's row, and laptop can't approve its own.
+    until("the widening at studio", 10, || async { row_of(&a.state().await, "desk")["reach"]["pending"][0]["id"] == widen["id"] }).await;
+    b.window("PUT", "/api/net/settings", json!({ "host": "desk", "approve": widen["id"] })).await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(desk().await["start"], "you", "laptop asked for it, so laptop can't approve it");
+    let (s, _) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "approve": widen["id"] })).await;
+    assert_eq!(s, 200);
+    until("desk's start widened by studio's approval", 10, || async { desk().await["start"] == "network" }).await;
+    assert_eq!(row_of(&desk().await, "desk")["reach"]["pending"], json!([]));
+    // Narrowing: any window host, at once.
+    b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "off" })).await;
+    until("desk's start narrowed by laptop", 10, || async { desk().await["start"] == "off" }).await;
+    // The founder widens at once.
+    a.window("PUT", "/api/net/settings", json!({ "host": "desk", "wake": "network" })).await;
+    until("desk's wake widened by studio", 10, || async { desk().await["wake"] == "network" }).await;
+    until("desk's new reach at laptop", 10, || async { row_of(&b.state().await, "desk")["reach"] == json!({ "start": "off", "wake": "network", "pending": [] }) }).await;
+    // desk is no window host: it changes no other machine's settings.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "host": "laptop", "start": "off" })).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("not-window")), "{v}");
+    // At its own keyboard, desk sets either, and what's set isn't a value.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "start": "network", "wake": "consent" })).await;
+    assert_eq!((s, v["start"].clone(), v["wake"].clone()), (200, json!("network"), json!("consent")), "{v}");
+    let (s, _) = c.window("PUT", "/api/net/settings", json!({ "start": "everyone" })).await;
+    assert_eq!(s, 400);
+    // network.json keeps them.
+    let kept: Value = serde_json::from_str(&std::fs::read_to_string(c.dir.join("state").join("network").join("network.json")).unwrap()).unwrap();
+    assert_eq!((kept["start"].clone(), kept["wake"].clone()), (json!("network"), json!("consent")));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The console's event stream on `h`, for the events named `name`.
+struct Stream(tokio::sync::mpsc::UnboundedReceiver<bytes::Bytes>, Vec<(String, Value)>);
+
+impl Stream {
+    fn of(h: &Host) -> Stream {
+        Stream(h.ctx.events.subscribe(false), Vec::new())
+    }
+
+    /// The next `name` event whose data `ok` takes, within `secs`.
+    async fn next(&mut self, name: &str, secs: u64, ok: impl Fn(&Value) -> bool) -> Value {
+        let end = tokio::time::Instant::now() + Duration::from_secs(secs);
+        loop {
+            if let Some(i) = self.1.iter().position(|(n, d)| n == name && ok(d)) {
+                return self.1.remove(i).1;
+            }
+            let chunk = tokio::time::timeout_at(end, self.0.recv()).await.map_err(|_| format!("waited {secs} s for a {name} event")).unwrap().unwrap();
+            let text = String::from_utf8_lossy(&chunk).into_owned();
+            for block in text.split("\n\n") {
+                let ev = block.lines().find_map(|l| l.strip_prefix("event: ")).unwrap_or("");
+                let data = block.lines().find_map(|l| l.strip_prefix("data: ")).and_then(|d| serde_json::from_str(d).ok());
+                if let Some(d) = data {
+                    self.1.push((ev.to_string(), d));
+                }
+            }
+        }
+    }
+}
+
+/// A session's own call, by its header, to any route.
+async fn as_agent(h: &Host, me: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
+    h.call(method, path, body, &[("x-xenonet-agent", me)]).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_receipts() {
+    // laptop's session, by an id Claude Code could resume or copy.
+    const ASKER: &str = "claude:0190d3e0-0000-7000-8000-00000000b001";
+    let root = std::env::temp_dir().join(format!("xenonet-net-starts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    for h in ["studio", "laptop", "desk"] {
+        std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
+    }
+    let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
+    // laptop's session is idle in its app, which a wake under wake: network
+    // would answer with a copy.
+    let mut idle = sess(ASKER, "Fix the login form", &at("laptop"));
+    idle.live = json!({ "status": "idle", "lastEventAt": now_ms() - 200e3 });
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
+    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
+    assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
+    until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
+    until("laptop's reach at desk", 10, || async { row_of(&c.state().await, "laptop")["can"] == json!(["start", "answer"]) }).await;
+    let mut studio = Stream::of(&a);
+
+    // You, at studio's console: desk starts Claude Code in its home, with
+    // the first prompt framed and on standard input.
+    let (s, v) = a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "Look at the ledger." })).await;
+    assert_eq!((s, v["state"].clone(), v["host"].clone()), (200, json!("sent"), json!("desk")), "{v}");
+    let started = studio.next("start", 15, |d| d["state"] == "started").await;
+    assert_eq!(started["host"], "desk", "{started}");
+    let session = started["session"].as_str().unwrap().to_string();
+    assert!(session.starts_with("claude:"), "{started}");
+    assert_eq!(started["folder"], "~", "{started}");
+    let (args, prompt) = ran(&c, 1).await;
+    assert_eq!(&args[..3], ["-p", "--session-id", session.trim_start_matches("claude:")], "{args:?}");
+    assert!(args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1].ends_with("__permission")), "{args:?}");
+    assert_eq!(prompt, "[XenoNet] Started by you, at studio's console.\n\nLook at the ledger.");
+    let ended = studio.next("start", 15, |d| d["state"] == "ended").await;
+    assert_eq!((ended["session"].as_str(), ended["exit"].clone()), (Some(session.as_str()), json!(0)), "{ended}");
+
+    // Paused, desk starts nothing, even for you.
+    let (s, v) = c.window("POST", "/api/delivery/pause", json!({ "paused": true })).await;
+    assert_eq!((s, v["paused"].clone()), (200, json!(true)), "{v}");
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "Paused?" })).await;
+    let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
+    assert_eq!(refused["reason"], "XenoNet is paused here, so it starts nothing until it's resumed", "{refused}");
+    c.window("POST", "/api/delivery/pause", json!({ "paused": false })).await;
+    assert_eq!(fake_runs(&c).len(), 1);
+
+    // A start as you that studio couldn't check by its window key (from a
+    // terminal on Linux or Windows, had the route let it go) is refused by
+    // desk, which takes you only strongly checked.
+    let weak = xenonet_wire_engine::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
+    assert_eq!(weak.map(|v| v["state"].clone()), Ok(json!("sent")));
+    let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
+    assert_eq!(refused["reason"], "a start as you comes only from a window host's console, checked by its window key", "{refused}");
+    assert_eq!(fake_runs(&c).len(), 1);
+    // From a terminal, without the window's key: on a Mac its processes
+    // tell you from an agent; on Linux and Windows the route refuses at
+    // once, saying why, and sends nothing.
+    if !cfg!(target_os = "macos") {
+        let as_you = json!(xenonet_service::routes::runs::AS_YOU);
+        let (s, v) = a.call("POST", "/api/start", json!({ "machine": "desk", "prompt": "From a terminal" }), &[]).await;
+        assert_eq!((s, v["error"].clone()), (403, as_you.clone()), "{v}");
+        let (s, v) = a.call("PUT", "/api/net/settings", json!({ "host": "desk", "start": "off" }), &[]).await;
+        assert_eq!((s, v["error"].clone()), (403, as_you), "{v}");
+        assert_eq!(c.state().await["start"], "you");
+    }
+
+    // desk is no window host: whatever it says of who asks, nothing starts.
+    let mut desk = Stream::of(&c);
+    let (s, v) = c.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hi" })).await;
+    assert_eq!(s, 200, "{v}");
+    let refused = desk.next("start", 15, |d| d["state"] == "refused").await;
+    assert_eq!(refused["reason"], "desk isn't a window host, and only window hosts start sessions", "{refused}");
+    assert_eq!(fake_runs(&b).len(), 0);
+
+    // A session on laptop asks desk: refused while desk's start is you…
+    let inbox = |h: &Host, me: &'static str| {
+        let engine = h.ctx.cores.engine.clone();
+        async move { texts(&engine.inbox(me, Duration::ZERO).await.unwrap()) }
+    };
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures." })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let got =
+        until_value("laptop's session hears desk refused", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) })
+            .await;
+    assert_eq!(got, "[XenoNet] No session was started on desk: only you start sessions here: its start setting is you.");
+    // …and started once the founder lets the network start sessions there.
+    a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
+    until("desk's start is network", 10, || async { c.state().await["start"] == "network" }).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
+    let got =
+        until_value("laptop's session hears desk started it", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("Started grok:")).map(Value::String) }).await;
+    assert!(got.as_str().unwrap().ends_with("on desk, in ~. Message it as you would any session."), "{got}");
+    let (args, prompt) = ran(&c, 2).await;
+    assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]) && args.contains(&"--prompt-file".to_string()), "{args:?}");
+    assert_eq!(
+        prompt,
+        format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). It came from an agent, not from your user.\n\nRun the fixtures.")
+    );
+    until_value("laptop's session hears the run ended", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains(" ended (exit 0)")).map(Value::String) }).await;
+    // The same start again within the minute: a repeat, held by desk's
+    // limits on messages.
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
+    let got = until_value("laptop's session hears the repeat was held", 15, || async {
+        inbox(&b, ASKER).await.into_iter().find(|t| t.contains("asked for under a minute ago")).map(Value::String)
+    })
+    .await;
+    assert_eq!(got, "[XenoNet] No session was started on desk: the same start was asked for under a minute ago.");
+    assert_eq!(fake_runs(&c).len(), 2);
+    // Bypassing permission checks is never taken.
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "x", "mode": "bypassPermissions" })).await;
+    assert_eq!((s, v["error"].clone()), (400, json!("XenoNet never starts a session that bypasses its permission checks")), "{v}");
+
+    // A run Claude Code can't sign in for ends saying so, with a hint.
+    let mut hints = Stream::of(&b);
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "signed-out, please" })).await;
+    let got = until_value("the sign-in answer", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("needs a sign-in")).map(Value::String) }).await;
+    assert!(
+        got.as_str().unwrap().contains("ended (exit 1)")
+            && got.as_str().unwrap().contains("Claude Code on desk needs a sign-in for XenoNet's runs: run xenonet runs sign-in there"),
+        "{got}"
+    );
+    let hint = hints.next("sign-in", 5, |_| true).await;
+    assert_eq!(hint["words"], "Claude Code on desk needs a sign-in for XenoNet's runs", "{hint}");
+    // XenoNet's answers to laptop's session waited for its next turn: none
+    // of them woke it, though laptop's wake is network.
+    assert_eq!(fake_runs(&b).len(), 0, "{:?}", fake_runs(&b));
+
+    // An older XenoNet refuses the target as an id it doesn't have: that
+    // reads as too old.
+    let (_, v) = a.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hello" })).await;
+    let mid = v["request"].as_str().unwrap().to_string();
+    let _ = studio.next("start", 15, |d| d["state"] == "started").await;
+    xenonet_wire_engine::network::receive(
+        &a.world,
+        xenonet_base::network::Incoming {
+            from: "laptop".into(),
+            kind: xenonet_base::network::Kind::Receipt,
+            body: json!({ "schema": "network/receipt/v1", "mid": mid, "agent": "xenonet:start", "state": "refused", "reason": "no session or actor here has that id", "at": now_ms() as i64 }),
+            at: now_ms(),
+            from_window_host: true,
+        },
+    );
+    let old = studio.next("start", 10, |d| d["state"] == "refused").await;
+    assert_eq!(old["reason"], "laptop's XenoNet is too old to start sessions: update it there", "{old}");
+
+    // desk offline: answered at once, and nothing waits to start later.
+    c.svc.stop();
+    until("desk offline at studio", 15, || async { row_of(&a.state().await, "desk")["online"] == false }).await;
+    let (s, v) = a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "Later?" })).await;
+    assert_eq!((s, v["error"].clone()), (409, json!("desk is offline, so nothing was started: a start is never kept for later")), "{v}");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once() {
+    const ENDED: &str = "claude:0190d3e0-0000-7000-8000-00000000d001";
+    const OPEN: &str = "claude:0190d3e0-0000-7000-8000-00000000d002";
+    let root = std::env::temp_dir().join(format!("xenonet-net-wake-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let work = root.join("desk").join("home").join("ledger");
+    std::fs::create_dir_all(&work).unwrap();
+    let t = now_ms();
+    // On desk: a session whose process has gone, and one its app holds,
+    // idle.
+    let mut ended = sess(ENDED, "Ledger fixtures", &work.to_string_lossy());
+    ended.live = json!({ "lastEventAt": t - 200e3, "endedAt": t - 100e3 });
+    let mut open = sess(OPEN, "Release notes", &work.to_string_lossy());
+    open.live = json!({ "status": "idle", "lastEventAt": t - 200e3 });
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
+    let mut desk = Stream::of(&c);
+    // desk lets the network wake its sessions: no allowance per session.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
+    assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
+    until("desk's ended session among its agents at laptop", 15, || async { b.peers(L1).await.contains(&format!("@desk:{ENDED}")) }).await;
+    // The one that ended is resumed for the message, at once.
+    b.agent(L1, "send", json!({ "to": format!("@desk:{ENDED}"), "text": "The fixtures moved." })).await;
+    let (args, prompt) = ran(&c, 1).await;
+    assert_eq!(&args[..3], ["-p", "--resume", ENDED.trim_start_matches("claude:")], "{args:?}");
+    assert!(!args.contains(&"--fork-session".to_string()), "{args:?}");
+    assert!(prompt.contains("The fixtures moved."), "{prompt}");
+    // It asks its permission prompts of you, as a start does, and Claude
+    // Code waits on the tool a minute past the hold.
+    let asks = |args: &[String]| args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1] == "mcp__xenonet-47997__permission");
+    assert!(asks(&args), "{args:?}");
+    assert_eq!(std::fs::read_to_string(c.dir.join("bin").join("timeout-0")).unwrap(), "66000");
+    until("the delivered receipt at laptop", 15, || async { b.receipts().iter().any(|(who, r)| *who == format!("@desk:{ENDED}") && r.as_deref() == Some("delivered")) }).await;
+    // The one its app holds gets a copy, with its whole context, which the
+    // console links to it.
+    b.agent(L1, "send", json!({ "to": format!("@desk:{OPEN}"), "text": "Notes for 0.6?" })).await;
+    let (args, prompt) = ran(&c, 2).await;
+    assert_eq!(&args[..4], ["-p", "--resume", OPEN.trim_start_matches("claude:"), "--fork-session"], "{args:?}");
+    assert!(prompt.contains("Notes for 0.6?"), "{prompt}");
+    assert!(asks(&args), "a copy asks too: {args:?}");
+    // The copy asks at once, before XenoNet has read its id from its
+    // stream: it's held, not refused, until desk knows it.
+    let copy = "claude:0190d3e0-0000-7000-8000-0000000f0f01";
+    let held = {
+        let ctx = c.ctx.clone();
+        tokio::spawn(async move {
+            let body = json!({ "tool_name": "Bash", "input": { "command": "ls" }, "tool_use_id": "toolu_1" }).to_string();
+            let r = api(&ctx, Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", copy)], Some(&body))).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let shown = until_value("the copy's ask at desk", 10, || async {
+        let (_, v) = c.window("GET", "/api/runs/asks", Value::Null).await;
+        v["asks"].as_array().and_then(|a| a.iter().find(|x| x["session"] == copy).cloned())
+    })
+    .await;
+    c.window("POST", "/api/runs/answer", json!({ "ask": shown["id"], "decision": "deny" })).await;
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{answer}");
+    let fork = desk.next("fork", 10, |_| true).await;
+    assert_eq!((fork["parent"].as_str(), fork["child"].as_str()), (Some(OPEN), Some("claude:0190d3e0-0000-7000-8000-0000000f0f01")), "{fork}");
+    let (_, forks) = c.call("GET", "/api/runs/forks", Value::Null, &[]).await;
+    assert_eq!(forks["forks"], json!([{ "child": "claude:0190d3e0-0000-7000-8000-0000000f0f01", "parent": OPEN }]));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from_another() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-asks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("desk").join("home")).unwrap();
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
+    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
+    // You start a session on desk, a server, from studio's console.
+    let mut studio = Stream::of(&a);
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    let started = studio.next("start", 15, |d| d["state"] == "started").await;
+    let run = started["session"].as_str().unwrap().to_string();
+    // Its Claude Code asks to run a tool, through the permission tool: held
+    // on desk, and shown on both window hosts, never on desk itself.
+    let ask = |me: String, input: Value| {
+        let ctx = c.ctx.clone();
+        tokio::spawn(async move {
+            let req = Req::fake(
+                "POST",
+                "/api/runs/permission",
+                &[("x-xenonet-agent", me.as_str())],
+                Some(&json!({ "tool_name": "Bash", "input": input, "tool_use_id": "toolu_1" }).to_string()),
+            );
+            let r = api(&ctx, req).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let held = ask(run.clone(), json!({ "command": "npm test", "description": "Run the tests" }));
+    let shown = |h: &Host| {
+        let h = h.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", h.window_key.reveal())], None);
+            api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    let at_laptop = until_value("the ask at laptop", 10, || async { shown(&b).await.into_iter().find(|x| x["host"] == "desk") }).await;
+    assert_eq!((at_laptop["tool"].clone(), at_laptop["input"].clone(), at_laptop["session"].clone()), (json!("Bash"), json!("npm test"), json!(run)), "{at_laptop}");
+    assert!(at_laptop["title"].as_str().unwrap().starts_with("desk · "), "{at_laptop}");
+    until("the ask at studio", 10, || async { shown(&a).await.iter().any(|x| x["id"] == at_laptop["id"]) }).await;
+    // laptop answers Allow: the answer goes to desk as an operator frame,
+    // and the tool answers as Claude Code takes it.
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": at_laptop["id"], "decision": "allow" })).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer), (200, json!({ "behavior": "allow", "updatedInput": { "command": "npm test", "description": "Run the tests" } })));
+    until("the ask gone at studio", 10, || async { shown(&a).await.is_empty() }).await;
+    // An answer whose frame can't go (to a machine that isn't in the
+    // network) leaves the ask on the console, to answer again.
+    let ghost = json!({ "op": "ask", "id": "ask_ghost", "session": "claude:x", "tool": "Bash", "input": "ls", "at": now_ms(), "until": now_ms() + 60e3 });
+    xenonet_wire_engine::asks::ask_in(&b.world, "ghost", &ghost.to_string());
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": "ask_ghost", "decision": "allow" })).await;
+    assert_ne!(s, 200, "{v}");
+    assert!(shown(&b).await.iter().any(|x| x["id"] == "ask_ghost"), "kept to answer again");
+    // Nobody answers: a deny that says so, when the hold runs out.
+    let (s, answer) = ask(run.clone(), json!({ "command": "rm -rf build" })).await.unwrap();
+    assert_eq!((s, answer), (200, json!({ "behavior": "deny", "message": "nobody answered in a minute" })));
+    // A session XenoNet didn't start is refused.
+    let (s, v) = ask(D1.to_string(), json!({ "command": "ls" })).await.unwrap();
+    assert_eq!((s, v["code"].clone()), (403, json!("not-a-run")), "{v}");
+    // A caller that names the run but isn't its process is refused before
+    // anything is held or shown.
+    SPOOFED.lock().unwrap().push(run.clone());
+    let (s, v) = ask(run.clone(), json!({ "command": "ls" })).await.unwrap();
+    assert_eq!((s, v["error"].clone()), (403, json!("the calling process isn't that session")), "{v}");
+    assert!(shown(&a).await.is_empty() && shown(&b).await.iter().all(|x| x["id"] == "ask_ghost"), "nothing of the spoof shows");
+    drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
 

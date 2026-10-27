@@ -214,6 +214,86 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]*$",
       "description": "The hash of the sender's roster head, so hosts that see different rosters notice"
+    },
+    "reach": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "enum": [
+            "off",
+            "you",
+            "network"
+          ],
+          "description": "Who may start sessions there: nobody, you (from a window host's console), or the network (you, and the sessions and actors on window hosts)"
+        },
+        "wake": {
+          "type": "string",
+          "enum": [
+            "consent",
+            "network"
+          ],
+          "description": "Who may wake its sessions for a message: your consent per session, or any sender in the network, within the budgets"
+        },
+        "pending": {
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "setting": {
+                "type": "string",
+                "enum": [
+                  "start",
+                  "wake"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "const": "network"
+              },
+              "by": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}$",
+                "description": "The window host that asked"
+              },
+              "at": {
+                "type": "number",
+                "description": "Epoch milliseconds"
+              }
+            },
+            "required": [
+              "id",
+              "setting",
+              "value",
+              "by",
+              "at"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "Widenings to network another window host asked for, waiting ten minutes at most for the founder or a second window host to approve"
+        }
+      },
+      "required": [
+        "start",
+        "wake",
+        "pending"
+      ],
+      "additionalProperties": {}
+    },
+    "can": {
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 32
+      },
+      "description": "What the host's XenoNet takes beyond messages: start (a start request) and answer (an answer to a run's permission prompt). An older XenoNet says nothing"
     }
   },
   "required": [

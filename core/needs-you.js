@@ -24,7 +24,7 @@
 //
 // No Node here: the page imports it too.
 
-export const KINDS = ["question", "permission", "actor", "request", "gateway", "requests"];
+export const KINDS = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in"];
 
 // What each kind of item waits for, in a few words after its name.
 const ACTOR_WAITS = { question: "asks", permission: "needs permission", review: "is ready for review" };
@@ -34,6 +34,8 @@ export function waitsWords(it) {
   if (it.kind === "actor") return ACTOR_WAITS[it.waits] ?? "waits for you";
   if (it.kind === "request") return "asks to join XenoNet";
   if (it.kind === "gateway") return "is asked for a gateway token";
+  if (it.kind === "ask") return "wants to run a tool";
+  if (it.kind === "sign-in") return "needs a sign-in for XenoNet's runs";
   if (it.kind === "requests") return it.count === 1 ? "asks to join XenoNet" : "ask to join XenoNet";
   return "waits for you";
 }
@@ -48,7 +50,12 @@ const str = (v) => (typeof v === "string" ? v : v == null ? null : String(v));
 // requests, gatewayAsks: the window's view of registrations
 //              (src/actor-requests.js), with `canDecide`
 // waiting:  how many programs ask, for a window without the key
-export function needsYouQueue({ sessions = [], actors = [], requests = [], gatewayAsks = [], canDecide = false, waiting = 0 } = {}) {
+// asks:     the permission prompts of the runs XenoNet started, here or on
+//           another machine ({ id, host, session, run, title, tool, input,
+//           at, until }), which only the window answers
+// hints:    machines whose Claude Code needs a sign-in for XenoNet's runs
+//           ({ host, fix, since })
+export function needsYouQueue({ sessions = [], actors = [], requests = [], gatewayAsks = [], canDecide = false, waiting = 0, asks = [], hints = [] } = {}) {
   const items = [];
   for (const s of sessions ?? []) {
     if (!s?.id || (s.kind !== "question" && s.kind !== "permission")) continue;
@@ -78,6 +85,16 @@ export function needsYouQueue({ sessions = [], actors = [], requests = [], gatew
       since: num(a.needsYou.since),
       actions: canDecide ? ["show", "message"] : ["show"],
     });
+  }
+  for (const h of hints ?? []) {
+    if (typeof h?.host !== "string") continue;
+    items.push({ key: `sign-in:${h.host}`, kind: "sign-in", id: h.host, title: `Claude Code on ${h.host}`, host: h.host, text: str(h.fix), since: num(h.since), actions: ["dismiss"] });
+  }
+  if (canDecide) {
+    for (const a of asks ?? []) {
+      if (!a?.id) continue;
+      items.push({ key: `ask:${a.id}`, kind: "ask", id: a.id, title: str(a.title) ?? a.id, host: str(a.host), session: str(a.session), run: str(a.run), tool: str(a.tool), text: str(a.input), warning: str(a.warning), since: num(a.at), expiresAt: num(a.until), actions: ["allow", "deny"] });
+    }
   }
   if (canDecide) {
     for (const r of requests ?? []) if (r?.id) items.push({ key: `request:${r.id}`, kind: "request", id: r.id, title: str(r.name) ?? r.id, actor: str(r.actor), since: num(r.at), expiresAt: num(r.expiresAt), actions: ["allow", "deny"] });

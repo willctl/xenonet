@@ -78,16 +78,18 @@ headless run).
 
 ### Resuming a session that has ended
 
-A Claude Code or Codex session whose terminal closed, or whose headless run
-finished, has no process to take a message. If you allow it
-(`xenonet live allow <session>`), XenoNet starts it again for one turn
-with the message as its prompt: `claude -p --resume <id>` or
-`codex exec resume <id>`. The turn goes into the same session, so you see
-it when you next open it. XenoNet does this only while no process runs the
-session, one turn at a time, in the session's own folder, with the message
-passed on standard input. A resumed Claude Code turn listens afterwards,
-as above, so it can take an answer. Allowed sessions that ended stay among
-the ones you can message by name.
+A Claude Code, Codex or Grok Build session whose terminal closed, or
+whose headless run finished, has no process to take a message. If you
+allow it (`xenonet live allow <session>`), or the machine's wake setting is
+the network (below), XenoNet starts it again for one turn with the message
+as its prompt: `claude -p --resume <id>`, `codex exec resume <id>` or
+`grok -r <id>`. The turn goes into the same session, so you see it when you
+next open it. XenoNet does this only while no process runs the session, one
+turn at a time, in the session's own folder, with the message passed on
+standard input; Grok Build reads it from a file only you can read, which
+goes when the turn ends. A resumed Claude Code turn listens afterwards, as
+above, so it can take an answer. Sessions that ended and can be resumed
+stay among the ones you can message by name.
 
 XenoNet looks for the program in this order:
 
@@ -118,6 +120,64 @@ waits for the session's next turn. The records survive a restart, so a
 turn the previous XenoNet started still counts while its process runs. It
 goes by the process's id: if the system has given that id to another
 process, the turn still counts until its 30 minutes are up.
+
+### Delivering at once: wake
+
+Each machine has a wake setting (see [Who may start and wake
+sessions](network.md#who-may-start-and-wake-sessions)). Under the default,
+`consent`, a session is woken only with your allowance for it. Under
+`network`, a message that arrives for a session with no live way in is
+delivered at once, without a per-session allowance, within the wake budget:
+
+- a session whose process has gone is resumed, as above;
+- an idle Claude Code session that a process holds (its app, its terminal,
+  or a turn XenoNet resumed) gets a copy: `claude -p --resume <id>
+  --fork-session`, which answers with the session's whole context while the
+  session itself carries on. The copy's id comes from its first event, and
+  the console links the copy to its session as a fork, in its panel. One
+  copy at a time for each session.
+
+A session at work still gets the message from its hooks during its turn.
+Set the wake setting in the Network panel's This machine box, or with
+`xenonet net set --wake network`. A turn XenoNet resumes or forks runs with
+the sign-in you gave its runs, which the turn can read: under `network`,
+any sender can prompt one (see [Signing in for XenoNet's
+runs](#signing-in-for-xenonets-runs)).
+
+### Signing in for XenoNet's runs
+
+The turns XenoNet resumes, forks and [starts](network.md#starting-sessions)
+run headless, so they can't sign in by themselves. When Claude Code's own
+sign-in has expired ("OAuth session expired"), or a machine has only Claude
+desktop's Claude Code, give XenoNet a long-lived token there:
+
+```bash
+claude setup-token
+xenonet runs sign-in
+```
+
+Paste the token `claude setup-token` printed; it doesn't show as you paste
+it. XenoNet keeps it in your computer's credential store, as it keeps the
+OpenRouter key, and passes it to its own Claude Code runs alone, as
+`CLAUDE_CODE_OAUTH_TOKEN`. XenoNet never shows it again, and signing in is
+yours, refused from under an agent. `xenonet runs` says whether a token is
+kept, and `xenonet runs forget` takes it away.
+
+**The run it signs in can read it.** Claude Code passes its environment to
+the commands it runs, so the session XenoNet runs, and anyone who can
+prompt that session, can print the token with a command such as
+`printenv`. When such a call asks you first, its Allow card says so: one
+that may read the environment or names the token (`env`, `printenv`,
+`set`, PowerShell's `env:`, `/proc/self/environ`, `OAUTH_TOKEN`). Deny it
+unless the session may see the token. A call the session's settings or
+permission mode already allow doesn't ask, so it gets no card. Under `start: network` or `wake: network` (see [Who may
+start and wake sessions](network.md#who-may-start-and-wake-sessions)),
+that's anyone the setting lets in, so keep a token only on a machine whose
+settings you'd trust with it.
+
+A run whose output says Claude Code isn't signed in ends saying so, and
+Needs you shows "Claude Code on neo-rex needs a sign-in for XenoNet's
+runs", with what to run there.
 
 ### OpenCode
 
@@ -200,10 +260,12 @@ You and the sessions on this machine see everything, as before.
 ## Who decides
 
 The machine a message arrives at decides what it lets in. A message from
-another machine is checked there before it's stored, and each way of
-waking a session is checked before it's used. Messages are open: the
-sender's machine has already checked its scope, and the guards below
-still hold. Waking a session needs your allowance for it.
+another machine is checked there before it's stored, each way of waking a
+session is checked before it's used, and a start before anything runs.
+Messages are open: the sender's machine has already checked its scope, and
+the guards below still hold. Waking a session needs your allowance for it,
+unless the machine's wake setting is the network. Starting one follows the
+machine's start setting (see [Starting sessions](network.md#starting-sessions)).
 
 ## Guards
 
@@ -217,8 +279,8 @@ still hold. Waking a session needs your allowance for it.
 | Duplicates | the same text to the same recipients within a minute is refused |
 | Loops | 24 messages between the same two agents in ten minutes stops the thread until you step in. So does a reply chain 6 deep (`MAX_HOPS`), counted on every machine it crosses; a message sent without `reply_to` starts a new thread. |
 | Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes, from XenoNet's live readings of Claude Code's and Codex's limits; `xenonet live` shows them. The counts are kept in `delivery-wakes.json` in the state folder, so restarting XenoNet doesn't reset them. |
-| Consent | waking an OpenCode session, typing into any session, or resuming one that ended needs your allowance for that session, which expires. When an actor sends, on this machine or another, the allowance has to cover actors (`xenonet live allow <session> --remote`). You need only the allowance itself, whether you write here or from another machine's console. |
-| Headless turns | at most 4 at once on a machine, one per session, 30 minutes each, each one logged |
+| Consent | waking an OpenCode session, typing into any session, or resuming one that ended needs your allowance for that session, which expires, unless the machine's wake setting is the network. When an actor sends, on this machine or another, the allowance has to cover actors (`xenonet live allow <session> --remote`). You need only the allowance itself, whether you write here or from another machine's console. |
+| Headless turns | at most 4 at once on a machine, one per session, 30 minutes each, each one logged; 20 started sessions an hour on a machine, 10 for any one machine that asks |
 | Secrets | key- and token-like strings are redacted when a message crosses identities, or goes to or from an actor |
 | Framing | every delivered message names its sender and says it's another agent's message, not your user's instruction |
 | Audit | `xenonet live audit`: an append-only log of grants, consents, pauses, refusals, deliveries and typing, with message hashes, never text |

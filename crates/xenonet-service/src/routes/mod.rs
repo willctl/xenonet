@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod net;
 pub mod net_sim;
 pub mod refusals;
+pub mod runs;
 pub mod svc;
 pub mod themes;
 pub mod tray;
@@ -142,6 +143,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/assistant" || route.starts_with("/api/assistant/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
         return assistant::AssistantRoutes { ctx }.route(taken).await;
+    }
+    // Starting sessions, and the runs XenoNet starts: Rust-only too.
+    if route == "/api/start" || route.starts_with("/api/runs/") {
+        if let Some(a) = runs::route(ctx, req).await {
+            return a;
+        }
     }
     // The network across machines: Rust-only, with no JS twin.
     if route.starts_with("/api/net/") {

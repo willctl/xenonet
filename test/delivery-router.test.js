@@ -86,9 +86,10 @@ test("reach: a message is open to every sender; a wake needs your allowance, whi
   const none = { consent: { here: false, remote: false } };
   const here = { consent: { here: true, remote: false } };
   const both = { consent: { here: true, remote: true } };
-  assert.deepEqual(senderOf("actor:you"), { kind: "you", id: "actor:you", host: null });
-  assert.deepEqual(senderOf("@studio:actor:muse"), { kind: "actor", id: "@studio:actor:muse", host: "studio" });
-  assert.deepEqual(senderOf(`@laptop:${A}`), { kind: "session", id: `@laptop:${A}`, host: "laptop" });
+  const as = { window: true, strong: false };
+  assert.deepEqual(senderOf("actor:you"), { kind: "you", id: "actor:you", host: null, ...as });
+  assert.deepEqual(senderOf("@studio:actor:muse"), { kind: "actor", id: "@studio:actor:muse", host: "studio", ...as });
+  assert.deepEqual(senderOf(`@laptop:${A}`), { kind: "session", id: `@laptop:${A}`, host: "laptop", ...as });
   for (const id of ["you", "actor:you", A, `@laptop:${A}`, "actor:muse", "@studio:actor:muse"]) {
     const s = senderOf(id);
     assert.deepEqual(decide("message", s, B, none), { ok: true }, id);
@@ -96,7 +97,8 @@ test("reach: a message is open to every sender; a wake needs your allowance, whi
     assert.deepEqual(decide("wake", s, B, both), { ok: true }, id);
     assert.equal(decide("wake", s, B, here).ok, s.kind !== "actor", id);
   }
-  assert.equal(decide("start", senderOf("you"), B, both).ok, false, "nothing else is decided yet");
+  assert.equal(decide("start", senderOf("you"), B, both).ok, false, "a start as you needs a strong check");
+  assert.equal(decide("update", senderOf("you"), B, both).ok, false, "nothing else is decided");
 });
 
 test("an actor on another machine wakes a session only with your allowance for actors, as one here does", async () => {

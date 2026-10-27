@@ -28,9 +28,10 @@ export const ACK_MS = 60e3;
 const KEEP = 500;
 
 export class DeliveryRouter extends EventEmitter {
-  constructor({ engine, policy, channels = null, opencode = null, tmux = null, resume = null, notify = () => {}, usage = () => null, now = () => Date.now(), ackMs = ACK_MS }) {
+  // `reach()` is this machine's start and wake settings ({ start, wake }).
+  constructor({ engine, policy, channels = null, opencode = null, tmux = null, resume = null, notify = () => {}, usage = () => null, reach = () => ({}), now = () => Date.now(), ackMs = ACK_MS }) {
     super();
-    Object.assign(this, { engine, policy, channels, opencode, tmux, resume, notify, usage, now, ackMs });
+    Object.assign(this, { engine, policy, channels, opencode, tmux, resume, notify, usage, reach, now, ackMs });
     this.records = new Map(); // `${message}|${agent}` → record
     this.timers = new Map();
     engine.on("message", (m) => void this.route(m).catch((err) => this.emit("error", err)));
@@ -61,10 +62,26 @@ export class DeliveryRouter extends EventEmitter {
     return this.opencode.info(id).catch(() => null);
   }
 
-  // Whether a session that ended can still be messaged: you allowed it, and
-  // a headless resume would start it for the message.
+  // Whether a session that ended can still be messaged: you allowed it (or
+  // wake is network), and a headless resume would start it for the message.
   resumable(view) {
-    return !!this.resume && !!view?.ended && this.resume.can(view.id) && this.policy.consented(view.id);
+    return !!this.resume && !!view?.ended && this.resume.can(view.id) && (this.#wakeNetwork() || this.policy.consented(view.id));
+  }
+
+  // This machine's wake setting: network lets any sender wake a session,
+  // within the budgets.
+  #wakeNetwork() {
+    return this.reach?.()?.wake === "network";
+  }
+
+  // Whether a message to a Claude Code session that a process holds (its
+  // app, its terminal, or a run XenoNet resumed) and that isn't at work goes
+  // to a copy of it, forked with its whole context: under wake network
+  // only, since the session itself can't take it now.
+  forkable(view) {
+    if (!view || view.ended || view.status === "working" || !String(view.id).startsWith("claude:")) return false;
+    if (!this.resume?.fork || !this.resume.can(view.id)) return false;
+    return this.#wakeNetwork();
   }
 
   // A wake for a session's listening Stop hook to hand a message over (the
@@ -79,7 +96,7 @@ export class DeliveryRouter extends EventEmitter {
   // allowance for the session, here and for actors.
   #mayWake(from, agent) {
     const consent = { here: !!this.policy.consented(agent), remote: !!this.policy.consented(agent, { remote: true }) };
-    return decide("wake", senderOf(from), agent, { consent });
+    return decide("wake", senderOf(from), agent, { consent, wake: this.reach?.()?.wake });
   }
 
   // How a message from `from` would reach `a`, an agent as the engine lists
@@ -90,6 +107,7 @@ export class DeliveryRouter extends EventEmitter {
     if (this.engine.listening?.has(a.id)) return "right away: it's listening for messages";
     if (waysOf(a.app)?.channel && a.status === "idle" && this.channels?.live(a.id)) return "right away, through its channel";
     if (a.status === "ended" && this.resumable(a) && this.#mayWake(from, a.id).ok) return "right away, in a turn XenoNet resumes it for";
+    if (this.forkable(a) && this.#mayWake(from, a.id).ok) return "right away, in a copy XenoNet forks from it, since it's open elsewhere";
     if (waysOf(a.app)?.server && this.opencode && this.#mayWake(from, a.id).ok) return "right away, through its OpenCode server";
     return null;
   }
@@ -106,13 +124,21 @@ export class DeliveryRouter extends EventEmitter {
       this.records.set(`${m.id}|${agent}`, rec);
       while (this.records.size > KEEP) this.records.delete(this.records.keys().next().value);
       await this.#attempt(rec, m);
-      this.#arm(rec, m);
+      // A quiet note isn't one you're told about if no turn takes it.
+      if (!m.quiet) this.#arm(rec, m);
       out.push(rec);
     }
     return out;
   }
 
   async #attempt(rec, m) {
+    // XenoNet's own word to whoever asked it something (a start's answer):
+    // it waits for the next turn, and never wakes a session.
+    if (m.quiet) {
+      Object.assign(rec, { state: "next-turn", how: "hooks", why: "a note from XenoNet: it waits for the next turn" });
+      this.emit("delivery", { ...rec });
+      return false;
+    }
     const view = await this.engine.view(rec.agent).catch(() => null);
     const app = rec.agent.split(":")[0];
     const idle = !view || view.status === "idle" || view.status === "ended";
@@ -184,6 +210,17 @@ export class DeliveryRouter extends EventEmitter {
           this.policy.audit({ kind: "resumed", message: m.id, from: m.from, to: rec.agent, ok: r.ok, why: r.why ?? null, text: hashText(m.text) });
           if (r.ok) return success("resume", { where: r.where });
           tried.push(`resume: ${r.why}`);
+        }
+      } else if (this.forkable(view)) {
+        // 5. A copy of a Claude Code session a process holds, under wake
+        // network: it answers with the whole context, now.
+        const may = this.#mayWake(m.from, rec.agent);
+        if (!may.ok) tried.push(`fork: ${may.why}`);
+        else {
+          const r = await this.resume.deliver({ agent: rec.agent, cwd: view.cwd, text, fork: true }).catch((err) => ({ ok: false, why: err.message }));
+          this.policy.audit({ kind: "forked", message: m.id, from: m.from, to: rec.agent, ok: r.ok, why: r.why ?? null, text: hashText(m.text) });
+          if (r.ok) return success("fork", { where: r.where });
+          tried.push(`fork: ${r.why}`);
         }
       }
     }

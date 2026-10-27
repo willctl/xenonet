@@ -13,7 +13,12 @@ const NEAR: usize = 40;
 const HIDES: [&str; 4] = ["no_window", "NO_WINDOW", "0x0800_0000", "hide_window"];
 
 /// Commands that never run on Windows, by file and what they start.
-const UNIX_ONLY: [(&str, &str); 3] = [("xenonet-mcp/src/process.rs", "\"ps\""), ("xenonet-wire-map/src/git.rs", "xcode-select"), ("xenonet-wire-map/src/live.rs", "\"security\"")];
+const UNIX_ONLY: [(&str, &str); 4] = [
+    ("xenonet-mcp/src/process.rs", "\"ps\""),
+    ("xenonet-wire-map/src/git.rs", "xcode-select"),
+    ("xenonet-wire-map/src/live.rs", "\"security\""),
+    ("xenonet-cli/src/commands/runs.rs", "\"stty\""),
+];
 
 /// Programs started for you to use in your own terminal, by file and what
 /// they start. They inherit the console, and CREATE_NO_WINDOW would give

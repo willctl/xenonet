@@ -197,14 +197,22 @@ test("any agent can write to an actor, so its wakes are held: not again while wh
   await w.say("actor:kite");
   await w.pass(COALESCE_MS);
   assert.equal(w.calls.length, 1);
-  // Unread, so more messages wait their ten minutes.
-  for (let i = 0; i < 10; i++) {
+  // Unread, so more messages wait out the hold, two minutes.
+  assert.equal(UNREAD_HOLD_MS, 2 * 60e3);
+  for (let i = 0; i < 3; i++) {
     await w.say("actor:kite");
     await w.pass(MIN_GAP_MS);
   }
   assert.equal(w.calls.length, 1, "held while it hasn't read");
   await w.pass(UNREAD_HOLD_MS);
-  assert.equal(w.calls.length, 2, "then woken again");
+  assert.equal(w.calls.length, 2, "then woken once more");
+  // Still unread, and nothing new: that was the last look.
+  await w.pass(UNREAD_HOLD_MS * 3);
+  assert.equal(w.calls.length, 2, "not a third time");
+  // A new message, after the hold: woken for it.
+  await w.say("actor:kite");
+  await w.pass(UNREAD_HOLD_MS);
+  assert.equal(w.calls.length, 3, "woken for what's new");
   // Reading each time, an hour of messages every 31 seconds: 20 an hour,
   // after the five it may have at once.
   const before = w.calls.length;
