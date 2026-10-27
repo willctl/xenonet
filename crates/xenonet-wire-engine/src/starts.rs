@@ -153,7 +153,8 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     }
     // This machine's limits on messages hold for a start too: too fast
     // from one sender, a repeat of the same prompt.
-    let ask = obj(vec![("sender", Arg::text(sender.id.clone())), ("recipients", Arg::List(vec![Arg::text(TARGET)])), ("text", Arg::text(r.prompt.clone())), ("depth", Arg::num(0.0))]);
+    let ask =
+        obj(vec![("sender", Arg::text(sender.id.clone())), ("recipients", Arg::List(vec![Arg::text(TARGET)])), ("text", Arg::text(r.prompt.clone())), ("depth", Arg::num(0.0))]);
     match w.policy.call("checkSend", &[ask]) {
         Ok(_) => {}
         Err(xenonet_engine::delivery::policy::Fail::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
