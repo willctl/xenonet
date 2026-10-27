@@ -5,6 +5,9 @@
 // that don't cross identities. Made-up sessions and repos.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Engine } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
 import { Actors, mapOf } from "../core/actors/index.js";
@@ -183,6 +186,26 @@ test("consent and the wake budget: per session, expiring; a provider near its li
   assert.equal(p.wakeAllowed(A, B).why, "sender-wake-budget");
   t.now += 3601e3;
   assert.ok(p.wakeAllowed(A, B).ok);
+});
+
+test("the wake budget is kept beside the policy's file: a restart doesn't hand out a fresh one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-wakes-"));
+  const file = path.join(dir, "delivery.json");
+  const t = { now: 1e12 };
+  const limits = { wakesPerSenderPerHour: 2 };
+  const p = new DeliveryPolicy({ file, now: () => t.now, limits });
+  p.spendWake(A, C);
+  p.spendWake(A, D);
+  assert.equal(p.wakeAllowed(A, B).why, "sender-wake-budget");
+  const wakes = path.join(dir, "delivery-wakes.json");
+  if (process.platform !== "win32") assert.equal(fs.statSync(wakes).mode & 0o777, 0o600);
+  const again = new DeliveryPolicy({ file, now: () => t.now, limits });
+  assert.equal(again.wakeAllowed(A, B).why, "sender-wake-budget", "after a restart too");
+  t.now += 3601e3;
+  assert.ok(again.wakeAllowed(A, B).ok, "an hour on");
+  again.spendWake(B, C);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(wakes, "utf8"))).sort(), [`w:${B}`, `wt:${C}`], "only the last hour's are kept");
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("without a policy the engine works as it did", async () => {

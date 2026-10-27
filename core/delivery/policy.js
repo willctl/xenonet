@@ -94,7 +94,8 @@ export function framed({ id, from, verified, text, user = false }) {
 }
 
 export class DeliveryPolicy {
-  // `file`: where grants, consents and the pause switch persist (JSON).
+  // `file`: where grants, consents and the pause switch persist (JSON), with
+  // the wake budget's counts in delivery-wakes.json beside it.
   // `auditFile`: the append-only log. Both optional (in memory), as in tests.
   constructor({ file = null, auditFile = null, now = () => Date.now(), limits = {} } = {}) {
     this.file = file;
@@ -109,6 +110,11 @@ export class DeliveryPolicy {
       try {
         this.data = { ...this.data, ...JSON.parse(fs.readFileSync(file, "utf8")) };
       } catch {}
+      // The wake budget's counts, so a restart doesn't hand every sender
+      // and session a fresh budget.
+      try {
+        for (const [k, times] of Object.entries(JSON.parse(fs.readFileSync(this.#wakesFile(), "utf8")))) if (/^wt?:/.test(k) && Array.isArray(times)) this.hits.set(k, times.filter((t) => typeof t === "number"));
+      } catch {}
     }
   }
 
@@ -118,6 +124,28 @@ export class DeliveryPolicy {
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.data, null, 1), { mode: 0o600 });
     fs.renameSync(tmp, this.file);
+  }
+
+  // delivery-wakes.json, beside the policy's file.
+  #wakesFile() {
+    return path.join(path.dirname(this.file), "delivery-wakes.json");
+  }
+
+  // The wakes of the last hour, the only ones the budget counts.
+  #saveWakes() {
+    if (!this.file) return;
+    const t = this.now();
+    const keep = {};
+    for (const [k, times] of this.hits) {
+      const live = /^wt?:/.test(k) ? times.filter((x) => t - x < 3600e3) : [];
+      if (live.length) keep[k] = live;
+    }
+    try {
+      const file = this.#wakesFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify(keep), { mode: 0o600 });
+      fs.renameSync(`${file}.tmp`, file);
+    } catch {}
   }
 
   // ---------- the pause switch ----------
@@ -265,6 +293,7 @@ export class DeliveryPolicy {
   spendWake(sender, target) {
     this.#take(`w:${sender}`, Infinity, 3600e3);
     this.#take(`wt:${target}`, Infinity, 3600e3);
+    this.#saveWakes();
   }
 
   // ---------- audit ----------

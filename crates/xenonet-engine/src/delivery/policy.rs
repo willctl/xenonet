@@ -13,7 +13,8 @@
 //! What's kept is Rust's. The policy's own clock, limits and files are
 //! called as the JS called them, through `Calls`: "policy" is the twin (its
 //! now(), limits, file and auditFile, which a program may change), "fs"
-//! node:fs.
+//! node:fs. The wake budget's counts go in delivery-wakes.json beside the
+//! policy's file, so a restart doesn't hand every sender a fresh budget.
 
 use super::selector::{format_selector, matches, parse_selector, Selector};
 use crate::peer::{list, Calls, Thrown};
@@ -282,6 +283,7 @@ impl Policy {
         data.insert("consent".into(), json!({}));
         let mut p = Policy { data, ..Policy::default() };
         if let Some(file) = nonnull(c.get("policy.file")?).filter(Arg::truthy) {
+            let wakes = Self::wakes_file(&js_text(&file));
             if let Ok(text) = c.call("fs", "readFileSync", vec![file, Arg::text("utf8")]) {
                 if let Ok(v) = xenonet_base::json::parse(&js_text(&text)) {
                     for (k, v) in spread(&v) {
@@ -289,8 +291,58 @@ impl Policy {
                     }
                 }
             }
+            // The wake budget's counts, so a restart doesn't hand every
+            // sender and session a fresh budget.
+            if let Ok(text) = c.call("fs", "readFileSync", vec![Arg::text(wakes), Arg::text("utf8")]) {
+                if let Ok(Value::Object(m)) = xenonet_base::json::parse(&js_text(&text)) {
+                    for (k, times) in m {
+                        if let (true, Value::Array(times)) = (k.starts_with("w:") || k.starts_with("wt:"), times) {
+                            p.hits.insert(k, times.iter().filter_map(Value::as_f64).collect());
+                        }
+                    }
+                }
+            }
         }
         Ok(p)
+    }
+
+    /// delivery-wakes.json, beside the policy's file.
+    fn wakes_file(file: &str) -> String {
+        NATIVE.join(&[&NATIVE.dirname(file), "delivery-wakes.json"])
+    }
+
+    /// The wakes of the last hour, the only ones the budget counts.
+    fn save_wakes(&self, c: &mut dyn Calls) -> Result<()> {
+        let file = c.get("policy.file")?;
+        if !file.truthy() {
+            return Ok(());
+        }
+        let t = Self::now(c)?;
+        let mut keep = Map::new();
+        for (k, times) in &self.hits {
+            if !(k.starts_with("w:") || k.starts_with("wt:")) {
+                continue;
+            }
+            let live: Vec<Value> = times.iter().filter(|x| t - **x < 3600e3).map(|x| xenonet_base::json::number(*x)).collect();
+            if !live.is_empty() {
+                keep.insert(k.clone(), Value::Array(live));
+            }
+        }
+        let wakes = Self::wakes_file(&js_text(&file));
+        let tmp = format!("{wakes}.tmp");
+        let wrote = c
+            .call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(&wakes)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])
+            .and_then(|_| {
+                c.call(
+                    "fs",
+                    "writeFileSync",
+                    vec![Arg::text(tmp.clone()), Arg::text(stringify(&Value::Object(keep), 0)), Arg::Obj(vec![("mode".into(), Arg::num(f64::from(0o600)))])],
+                )
+            })
+            .and_then(|_| c.call("fs", "renameSync", vec![Arg::text(tmp), Arg::text(wakes)]));
+        // As the JS: a budget that can't be written is still kept in memory.
+        drop(wrote);
+        Ok(())
     }
 
     fn now(c: &mut dyn Calls) -> Result<f64> {
@@ -638,7 +690,7 @@ impl Policy {
     pub fn spend_wake(&mut self, c: &mut dyn Calls, sender: &Arg, target: &Arg) -> Result<()> {
         self.take(c, &format!("w:{}", js_text(sender)), f64::INFINITY, 3600e3)?;
         self.take(c, &format!("wt:{}", js_text(target)), f64::INFINITY, 3600e3)?;
-        Ok(())
+        self.save_wakes(c)
     }
 
     // ---------- audit ----------
