@@ -36,7 +36,7 @@ the internet.
 
    | Kind | XenoNet runs | Address | Why it's here |
    |---|---|---|---|
-   | `tailscale` | `tailscale funnel --bg --yes <port>`, once; Tailscale keeps it | the computer's tailnet name | many owners already have it |
+   | `tailscale` | `tailscale funnel --bg --yes --set-path /mcp http://127.0.0.1:<port>/mcp`, once; Tailscale keeps it | the computer's tailnet name, `/mcp` alone | many owners already have it |
    | `cloudflare` | `cloudflared tunnel --no-autoupdate run --url http://127.0.0.1:<port> <name>`, as its child | a name on the owner's domain | stable, free, own domain |
    | `cloudflare-quick` | `cloudflared tunnel --no-autoupdate --url …`, as its child | random, new at every start | nothing to sign up for |
    | `ngrok` | `ngrok http 127.0.0.1:<port> --log stdout --log-format json [--url https://<domain>]`, as its child | the owner's ngrok domain | free static domain |
@@ -50,18 +50,25 @@ the internet.
 3. **The command that matches the running Tailscale.** XenoNet looks for
    Tailscale on PATH, in the Mac app and in Homebrew's folders. It uses the
    copy whose version is the daemon's (`status --json` → `Version`).
-4. **What Funnel already serves is left alone.** Before it runs anything,
-   XenoNet reads `tailscale funnel status --json` for port 443 of the
-   computer's name:
+4. **Funnel publishes `/mcp` alone, and what it already serves is left
+   alone.** The network's routes (`/net/v1/…`) and A2A stay off the
+   internet, so a network whose gateway uses Funnel takes a tailnet or LAN
+   address, never the Funnel name. Before it runs anything, XenoNet reads
+   `tailscale funnel status --json` for port 443 of the computer's name:
    - **nothing there**: XenoNet sets it up;
-   - **this gateway**: nothing to do;
-   - **only `/`, pointing elsewhere** (another XenoNet, an old port): XenoNet
-     only replaces it on **Repair**;
+   - **this gateway's `/mcp` alone**: nothing to do;
+   - **this gateway's whole port** (`/`, as XenoNet set it up before
+     `/mcp` alone): XenoNet turns it off and sets `/mcp` up, without a
+     Repair;
+   - **one path, pointing elsewhere** (another XenoNet, an old port):
+     XenoNet only replaces it on **Repair**;
    - **other paths too**: XenoNet refuses, since `funnel` would put those on
      the internet with the gateway.
 
-   Turning the gateway off turns Funnel off only when it serves the gateway
-   alone.
+   The tunnel's view lists the paths Funnel puts on the internet
+   (`public`), the panel says them, and the doctor warns when they're more
+   than `/mcp`. Turning the gateway off turns Funnel off only when it
+   serves the gateway alone.
 5. **Checked from the internet side.** `server/gateway-reach.js` first
    asks public resolvers (1.1.1.1, 8.8.8.8, 9.9.9.9) for the name, so it
    gets the internet's answer rather than what MagicDNS or a hosts file

@@ -6,7 +6,8 @@
 //   tailscale         Tailscale Funnel: XenoNet runs `tailscale funnel --bg`
 //                     with the command that matches the Tailscale running,
 //                     and Tailscale keeps it across restarts. The address
-//                     is this computer's name on the owner's tailnet.
+//                     is this computer's name on the owner's tailnet. It
+//                     publishes the gateway's /mcp alone.
 //   cloudflare        a named Cloudflare Tunnel the owner made with
 //                     cloudflared, routed to a name on a domain of theirs:
 //                     XenoNet runs `cloudflared tunnel run` as its child.
@@ -37,7 +38,7 @@ export const KINDS = {
     stable: true,
     asks: {},
     needs: "Needs Tailscale signed in, with Funnel allowed for this computer in your tailnet's policy.",
-    note: "Funnel makes this computer's tailnet name public. Rename it in Tailscale first if the name says too much.",
+    note: "Funnel puts the gateway's /mcp alone on the internet, and makes this computer's tailnet name public. Rename it in Tailscale first if the name says too much.",
     docs: "https://tailscale.com/kb/1223/funnel",
   },
   cloudflare: {
@@ -138,20 +139,34 @@ export function tailscaleSelf(json) {
   return { up: true, version, host: normalHost(s.Self?.DNSName), funnel: caps.some((c) => c === "funnel" || String(c).startsWith("https://tailscale.com/cap/funnel")) };
 }
 
+// The one path Funnel publishes: the actor gateway's MCP endpoint. The
+// network's routes and A2A stay off the internet.
+export const FUNNEL_PATH = "/mcp";
+
+// The command that has Funnel publish the gateway's /mcp alone.
+export const funnelArgs = (port) => ["funnel", "--bg", "--yes", "--set-path", FUNNEL_PATH, `http://127.0.0.1:${port}${FUNNEL_PATH}`];
+
 // What `tailscale funnel status --json` serves on port 443 of this
-// computer's name: nothing, the gateway (on the internet, or the tailnet
-// only), something else at its root alone (which Repair may replace), or
-// other paths too, which Funnel would put on the internet with it.
+// computer's name: nothing, the gateway's /mcp alone (on the internet, or
+// the tailnet only), the gateway's whole port as an older XenoNet set it
+// up ("wide", which XenoNet narrows), something else at one path (which
+// Repair may replace), or other paths beside the gateway's, which Funnel
+// would put on the internet with it. `public` lists the paths on the
+// internet.
 export function funnelOf(conf, host, port) {
   const hp = `${host}:443`;
   const handlers = conf?.Web?.[hp]?.Handlers ?? {};
   const mounts = Object.keys(handlers);
-  if (!mounts.length) return { state: "none" };
-  const root = handlers["/"]?.Proxy ?? null;
-  const ours = (p) => String(p ?? "").replace("localhost", "127.0.0.1").replace(/\/$/, "") === `http://127.0.0.1:${port}`;
-  if (mounts.length > 1) return { state: "shared", target: mounts.join(", ") };
-  if (!root || !ours(root)) return { state: "elsewhere", target: root ?? mounts[0] };
-  return { state: conf?.AllowFunnel?.[hp] === true ? "ours" : "tailnet" };
+  const funnel = conf?.AllowFunnel?.[hp] === true;
+  const publicPaths = funnel ? mounts : [];
+  if (!mounts.length) return { state: "none", public: publicPaths };
+  const toUs = (m, path) => handlers[m]?.Proxy != null && String(handlers[m].Proxy).replace("localhost", "127.0.0.1").replace(/\/+$/, "") === `http://127.0.0.1:${port}${path}`;
+  const ours = (m) => (m === FUNNEL_PATH && toUs(m, FUNNEL_PATH)) || (m === "/" && toUs(m, ""));
+  if (mounts.some((m) => !ours(m))) {
+    if (mounts.length > 1) return { state: "shared", target: mounts.join(", "), public: publicPaths };
+    return { state: "elsewhere", target: handlers["/"]?.Proxy ?? mounts[0], public: publicPaths };
+  }
+  return { state: "/" in handlers ? "wide" : funnel ? "ours" : "tailnet", public: publicPaths };
 }
 
 // A line a tunnel tool wrote, as what XenoNet learns from it: the address it
@@ -213,6 +228,7 @@ export function createTunnel({ port, dir = null, onHost = () => {}, onReady = ()
   let failedAt = 0;
   // The Tailscale command XenoNet uses, as it last found it, for kinds().
   let tailscaleBin = null;
+  let publicPaths = null; // the paths Funnel put on the internet when last read
 
   const setState = (s, why = null) => {
     if (state.state === s && state.why === why) return;
@@ -263,7 +279,14 @@ export function createTunnel({ port, dir = null, onHost = () => {}, onReady = ()
     try {
       conf = JSON.parse(out.stdout || "{}");
     } catch {}
-    return funnelOf(conf, host, port);
+    const f = funnelOf(conf, host, port);
+    publicPaths = f.public;
+    return f;
+  }
+
+  async function funnelOff(bin) {
+    const out = await run(bin.path, ["funnel", "--yes", "--https=443", "off"], 10000);
+    if (!out.ok) log("gateway.tunnel", `tailscale funnel off failed: ${out.stderr.trim() || out.stdout.trim()}`);
   }
 
   async function tailscaleUp({ takeOver = false } = {}) {
@@ -277,13 +300,16 @@ export function createTunnel({ port, dir = null, onHost = () => {}, onReady = ()
     if (f.state === "shared") return setState("failed", `Tailscale already serves other paths on this computer's port 443 (${f.target}), and Funnel would put them on the internet with the gateway: pick another tunnel, or move them`);
     if (f.state === "elsewhere" && !takeOver) return setState("failed", `Tailscale Funnel on this computer already forwards to ${f.target}, not to this XenoNet's gateway: Repair points it here instead`);
     if (f.state !== "ours") {
-      const out = await run(bin.path, ["funnel", "--bg", "--yes", String(port)], 20000);
+      // The whole port, as an older XenoNet published it, or what Repair
+      // replaces: cleared first, so /mcp is all that's left.
+      if (f.state === "wide" || f.state === "elsewhere") await funnelOff(bin);
+      const out = await run(bin.path, funnelArgs(port), 20000);
       const said = `${out.stdout}\n${out.stderr}`;
       const link = /https:\/\/login\.tailscale\.com\/\S+/.exec(said)?.[0];
       if (link) return setState("failed", `Tailscale asks you to allow Funnel for this computer at ${link}; then Repair`);
       f = await funnelNow(bin, self.host);
       if (f.state !== "ours") return setState("failed", `tailscale funnel didn't take: ${said.trim().split("\n").at(-1) || "it said nothing"}`);
-      log("gateway.tunnel", `Tailscale Funnel forwards ${self.host} to port ${port}`);
+      log("gateway.tunnel", `Tailscale Funnel forwards ${self.host}${FUNNEL_PATH} alone to port ${port}`);
     }
     setState("up", null);
   }
@@ -293,9 +319,8 @@ export function createTunnel({ port, dir = null, onHost = () => {}, onReady = ()
     const ts = await tailscale();
     if (!ts.bin || !ts.self?.host) return;
     const f = await funnelNow(ts.bin, ts.self.host);
-    if (f.state !== "ours" && f.state !== "tailnet") return;
-    const out = await run(ts.bin.path, ["funnel", "--yes", "--https=443", "off"], 10000);
-    if (!out.ok) log("gateway.tunnel", `tailscale funnel off failed: ${out.stderr.trim() || out.stdout.trim()}`);
+    if (f.state === "ours" || f.state === "tailnet" || f.state === "wide") await funnelOff(ts.bin);
+    publicPaths = null;
   }
 
   // ---------- a child XenoNet runs ----------
@@ -452,7 +477,9 @@ export function createTunnel({ port, dir = null, onHost = () => {}, onReady = ()
     },
     view() {
       const k = want ? KINDS[want.kind] : null;
-      return { kind: want?.kind ?? null, label: k?.label ?? null, through: k?.through ?? null, state: state.state, why: state.why, since: state.since, pid: child?.pid ?? null, log: lines.slice(-6) };
+      // What's on the internet: Funnel's paths as last read, or null for a
+      // tunnel that forwards the gateway's whole port.
+      return { kind: want?.kind ?? null, label: k?.label ?? null, through: k?.through ?? null, state: state.state, why: state.why, since: state.since, pid: child?.pid ?? null, log: lines.slice(-6), public: want?.kind === "tailscale" ? (publicPaths ?? null) : null };
     },
     // Each kind, and whether its tool is on this computer.
     async kinds() {

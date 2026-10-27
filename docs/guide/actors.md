@@ -106,6 +106,8 @@ XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's
 | ngrok | `ngrok`, with your authtoken added | Your ngrok domain, if you give it |
 | Your own | Anything that forwards `https://<your name>/mcp` to the gateway's port and passes the Host header on | The name you give |
 
+What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's `/mcp` alone, and the panel says **public: /mcp alone**. The network's routes and A2A stay off the internet. Cloudflare's tunnels and ngrok forward the gateway's whole port, so they also carry the network's routes and, while it's on, A2A. For those, the panel says **public: its whole port**. If Funnel puts any other path on the internet, the panel shows it as a warning, `xenonet doctor` says which, and **Repair** sets Funnel back to `/mcp`. A Funnel that an older XenoNet set up for the whole port is narrowed to `/mcp` the next time XenoNet checks it.
+
 To set it up:
 
 1. In the Actors panel, under **actor gateway**, choose **Set up…** and pick a tunnel. The ones this computer has come first. XenoNet starts the tunnel, then checks that the address reaches the gateway from the internet side, and shows **Online** once it does.
@@ -131,7 +133,7 @@ When a message through the gateway reaches a session or actor here, XenoNet mark
 
 Agents built on frameworks that speak A2A, the Linux Foundation's agent-to-agent protocol, can reach the sessions here through the gateway. CrewAI, LangGraph's agent server, Microsoft Agent Framework, Google's ADK and Bedrock AgentCore speak it. XenoNet speaks version 1.0, over its JSON-RPC binding.
 
-It's off until you turn it on. Set the gateway up first, then in the Actors panel, under **actor gateway**, turn on **Let A2A agents reach XenoNet**. The gateway then also answers at:
+It's off until you turn it on. Set the gateway up first, with a tunnel other than Tailscale Funnel, which publishes `/mcp` alone. Then in the Actors panel, under **actor gateway**, turn on **Let A2A agents reach XenoNet**. The gateway then also answers at:
 
 - `https://<the gateway's address>/.well-known/agent-card.json`, XenoNet's Agent Card, which tells an agent how to call;
 - `https://<the gateway's address>/a2a`, where it calls.

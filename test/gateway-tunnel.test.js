@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import path from "node:path";
-import { createTunnel, tailscaleSelf, funnelOf, readLine, childArgs, findTools, KIND_IDS } from "../server/gateway-tunnel.js";
+import { createTunnel, tailscaleSelf, funnelOf, funnelArgs, readLine, childArgs, findTools, KIND_IDS } from "../server/gateway-tunnel.js";
 import { checkReach } from "../server/gateway-reach.js";
 import { handoff } from "../core/actors/handoff.js";
 
@@ -20,8 +20,10 @@ const BREW = "/opt/homebrew/bin/tailscale";
 
 const status = ({ state = "Running", version = "1.104.1-t7f4", funnel = true, host = `${HOST}.` } = {}) =>
   JSON.stringify({ BackendState: state, Version: version, Self: { DNSName: host, CapMap: funnel ? { funnel: null, "https://tailscale.com/cap/funnel-ports?ports=443,8443,10000": null } : {} } });
-const served = (proxy, { allow = true, more = false } = {}) =>
-  JSON.stringify({ TCP: { 443: { HTTPS: true } }, Web: { [`${HOST}:443`]: { Handlers: { "/": { Proxy: proxy }, ...(more ? { "/grafana": { Proxy: "http://127.0.0.1:3000" } } : {}) } } }, ...(allow ? { AllowFunnel: { [`${HOST}:443`]: true } } : {}) });
+const served = (proxy, { allow = true, more = false, at = "/" } = {}) =>
+  JSON.stringify({ TCP: { 443: { HTTPS: true } }, Web: { [`${HOST}:443`]: { Handlers: { [at]: { Proxy: proxy }, ...(more ? { "/grafana": { Proxy: "http://127.0.0.1:3000" } } : {}) } } }, ...(allow ? { AllowFunnel: { [`${HOST}:443`]: true } } : {}) });
+// Funnel as XenoNet sets it up: the gateway's /mcp alone.
+const mcpAlone = (opts = {}) => served(`http://127.0.0.1:${PORT}/mcp`, { at: "/mcp", ...opts });
 
 // A pretend computer with these Tailscale commands, whose funnel answers
 // as `funnel` says: every command run is in `ran`.
@@ -49,11 +51,18 @@ test("Tailscale's status and Funnel's settings, as the gateway needs them", () =
   assert.deepEqual(tailscaleSelf(status({ state: "NeedsLogin" })), { up: false, version: "1.104.1", why: "Tailscale isn't signed in on this computer" });
   assert.equal(tailscaleSelf(status({ state: "Stopped" })).why, "Tailscale is turned off on this computer");
   assert.equal(tailscaleSelf("not json").up, false);
-  assert.deepEqual(funnelOf({}, HOST, PORT), { state: "none" });
-  assert.deepEqual(funnelOf(JSON.parse(served(`http://127.0.0.1:${PORT}`)), HOST, PORT), { state: "ours" });
-  assert.deepEqual(funnelOf(JSON.parse(served(`http://localhost:${PORT}`, { allow: false })), HOST, PORT), { state: "tailnet" });
-  assert.deepEqual(funnelOf(JSON.parse(served("http://127.0.0.1:48852")), HOST, PORT), { state: "elsewhere", target: "http://127.0.0.1:48852" });
-  assert.deepEqual(funnelOf(JSON.parse(served(`http://127.0.0.1:${PORT}`, { more: true })), HOST, PORT), { state: "shared", target: "/, /grafana" });
+  assert.deepEqual(funnelOf({}, HOST, PORT), { state: "none", public: [] });
+  assert.deepEqual(funnelOf(JSON.parse(mcpAlone()), HOST, PORT), { state: "ours", public: ["/mcp"] });
+  assert.deepEqual(funnelOf(JSON.parse(served(`http://localhost:${PORT}/mcp/`, { at: "/mcp", allow: false })), HOST, PORT), { state: "tailnet", public: [] });
+  // The whole port, as XenoNet published it before /mcp alone.
+  assert.deepEqual(funnelOf(JSON.parse(served(`http://127.0.0.1:${PORT}`)), HOST, PORT), { state: "wide", public: ["/"] });
+  const both = JSON.parse(mcpAlone());
+  both.Web[`${HOST}:443`].Handlers["/"] = { Proxy: `http://localhost:${PORT}` };
+  assert.deepEqual(funnelOf(both, HOST, PORT), { state: "wide", public: ["/mcp", "/"] });
+  assert.deepEqual(funnelOf(JSON.parse(served("http://127.0.0.1:48852")), HOST, PORT), { state: "elsewhere", target: "http://127.0.0.1:48852", public: ["/"] });
+  assert.deepEqual(funnelOf(JSON.parse(served("http://127.0.0.1:48852/mcp", { at: "/mcp" })), HOST, PORT), { state: "elsewhere", target: "/mcp", public: ["/mcp"] });
+  assert.deepEqual(funnelOf(JSON.parse(served(`http://127.0.0.1:${PORT}`, { more: true })), HOST, PORT), { state: "shared", target: "/, /grafana", public: ["/", "/grafana"] });
+  assert.deepEqual(funnelArgs(PORT), ["funnel", "--bg", "--yes", "--set-path", "/mcp", `http://127.0.0.1:${PORT}/mcp`]);
 });
 
 test("each tool is found on PATH and where it's usually installed, whatever PATH a service started at login has", () => {
@@ -66,15 +75,16 @@ test("each tool is found on PATH and where it's usually installed, whatever PATH
   assert.deepEqual(KIND_IDS, ["tailscale", "cloudflare", "cloudflare-quick", "ngrok", "own"]);
 });
 
-test("Tailscale Funnel: set up with the command that matches the running Tailscale, the name learned, and nothing done when it's already there", async () => {
-  const ts = tailscaleHere({ onFunnel: () => ({ ok: true, stdout: "", stderr: "", conf: served(`http://127.0.0.1:${PORT}`) }) });
+test("Tailscale Funnel: set up with the command that matches the running Tailscale, publishing /mcp alone, the name learned, and nothing done when it's already there", async () => {
+  const ts = tailscaleHere({ onFunnel: (args) => (args.includes("off") ? { ok: true, stdout: "", stderr: "", conf: "{}" } : { ok: true, stdout: "", stderr: "", conf: mcpAlone() }) });
   const hosts = [];
   const tunnel = createTunnel({ port: PORT, env: { PATH: "" }, platform: "darwin", exists: ts.exists, run: ts.run, onHost: (h) => hosts.push(h) });
   const v = await tunnel.up({ kind: "tailscale" });
   assert.deepEqual([v.kind, v.state, v.why], ["tailscale", "up", null]);
   assert.deepEqual(hosts, [HOST]);
   // Homebrew's older command is passed over for the app's, which matches.
-  assert.deepEqual(ts.ran.find((r) => r[1] === "funnel" && r[2] === "--bg"), [APP, "funnel", "--bg", "--yes", String(PORT)]);
+  assert.deepEqual(ts.ran.find((r) => r[1] === "funnel" && r[2] === "--bg"), [APP, "funnel", "--bg", "--yes", "--set-path", "/mcp", `http://127.0.0.1:${PORT}/mcp`]);
+  assert.deepEqual(tunnel.view().public, ["/mcp"], "the view says what's on the internet");
   const before = ts.ran.length;
   await tunnel.ensure();
   assert.equal(ts.ran.slice(before).filter((r) => r[1] === "funnel" && r[2] !== "status").length, 0, "already set up: nothing run but status");
@@ -84,8 +94,19 @@ test("Tailscale Funnel: set up with the command that matches the running Tailsca
   assert.equal(tunnel.view().state, "off");
 });
 
+test("Tailscale Funnel: the whole port an older XenoNet published is narrowed to /mcp, without a Repair", async () => {
+  const ts = tailscaleHere({ funnel: served(`http://127.0.0.1:${PORT}`), onFunnel: (args) => (args.includes("off") ? { ok: true, stdout: "", stderr: "", conf: "{}" } : { ok: true, stdout: "", stderr: "", conf: mcpAlone() }) });
+  const tunnel = createTunnel({ port: PORT, env: { PATH: "" }, platform: "darwin", exists: ts.exists, run: ts.run });
+  const v = await tunnel.up({ kind: "tailscale" });
+  assert.deepEqual([v.state, v.why, v.public], ["up", null, ["/mcp"]]);
+  const changes = ts.ran.filter((r) => r[1] === "funnel" && r[2] !== "status").map((r) => r.slice(1));
+  assert.deepEqual(changes, [["funnel", "--yes", "--https=443", "off"], funnelArgs(PORT)], "the whole port off first, then /mcp alone");
+  // A port tunnel other than Funnel forwards it all: its view says so with null.
+  assert.equal(createTunnel({ port: PORT, env: { PATH: "" }, platform: "darwin", exists: () => false, run: ts.run }).view().public, null);
+});
+
 test("Tailscale Funnel: what it already forwards elsewhere is left alone until Repair, other paths never, and what Tailscale asks for is passed on", async () => {
-  const elsewhere = tailscaleHere({ funnel: served("http://127.0.0.1:48852"), onFunnel: () => ({ ok: true, stdout: "", stderr: "", conf: served(`http://127.0.0.1:${PORT}`) }) });
+  const elsewhere = tailscaleHere({ funnel: served("http://127.0.0.1:48852"), onFunnel: (args) => (args.includes("off") ? { ok: true, stdout: "", stderr: "", conf: "{}" } : { ok: true, stdout: "", stderr: "", conf: mcpAlone() }) });
   const t1 = createTunnel({ port: PORT, env: { PATH: "" }, platform: "darwin", exists: elsewhere.exists, run: elsewhere.run });
   assert.match((await t1.up({ kind: "tailscale" })).why, /already forwards to http:\/\/127\.0\.0\.1:48852, not to this XenoNet's gateway: Repair points it here/);
   assert.equal(elsewhere.ran.some((r) => r[2] === "--bg"), false);

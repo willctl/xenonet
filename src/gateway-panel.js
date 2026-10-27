@@ -30,8 +30,20 @@ const hostIn = (url) => {
 export const connected = (a, v) => !!a?.lastAt && a.lastAt >= (v.madeAt ?? 0) - 2000;
 export const waitWords = (done, name) => (done ? `${name} is connected` : `Waiting for ${name}'s first call…`);
 
-// The gateway at a glance: a dot and a word, its address, and the one
-// thing to do next.
+// What the tunnel puts on the internet: Funnel publishes /mcp alone, and
+// says so, or warns of the other paths it finds; a tunnel XenoNet runs
+// forwards the gateway's whole port, the network's routes with it. Of a
+// tunnel of your own, XenoNet knows only that it reaches /mcp.
+export function publicHtml(t) {
+  if (["cloudflare", "cloudflare-quick", "ngrok"].includes(t.kind)) return `<span data-ac-gateway-public="all">public: its whole port</span>`;
+  if (t.kind !== "tailscale") return "";
+  if (!Array.isArray(t.public)) return "";
+  const more = t.public.filter((p) => p !== "/mcp");
+  return more.length ? `<span class="warn" data-ac-gateway-public="more">public: ${h(t.public.join(", "))}</span>` : `<span data-ac-gateway-public="mcp">public: /mcp alone</span>`;
+}
+
+// The gateway at a glance: a dot and a word, its address, what's public,
+// and the one thing to do next.
 export function gatewayHtml(g, { canDecide }) {
   const yours = canDecide ? "" : "disabled";
   const t = g.tunnel ?? {};
@@ -47,7 +59,7 @@ export function gatewayHtml(g, { canDecide }) {
   const sub =
     state === "bad"
       ? `<span class="ac-gw-why" data-ac-gateway-problem>${g.host ? addrHtml(g.problem, g.host) : h(g.problem)}</span>`
-      : [t.through && `via ${h(t.through)}`, t.stable === false && `<span class="warn">new address each start</span>`, state === "ok" && r.at && `checked <span data-since="${h(r.at)}">${timeAgo(r.at)}</span>${r.local ? " on this computer" : ""}`, g.calls ? h(plural(g.calls, "call")) : null, state === "ok" && check].filter(Boolean).join(" · ");
+      : [t.through && `via ${h(t.through)}`, g.on && publicHtml(t), t.stable === false && `<span class="warn">new address each start</span>`, state === "ok" && r.at && `checked <span data-since="${h(r.at)}">${timeAgo(r.at)}</span>${r.local ? " on this computer" : ""}`, g.calls ? h(plural(g.calls, "call")) : null, state === "ok" && check].filter(Boolean).join(" · ");
   const acts = [
     state === "bad" ? btn("data-ac-gateway-repair", "Repair", { primary: true, title: "Set the tunnel up again, and check" }) : "",
     btn("data-ac-gateway-setup", "Change…", { title: "Pick another tunnel" }),

@@ -955,6 +955,17 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
     if let Some(p) = st.get("problem").filter(|v| truthy(Some(v))) {
         return Ok(warn(js_string(p), Some(fix)));
     }
+    // Funnel publishes /mcp alone: any other path it puts on the internet
+    // is a warning.
+    let tunnel = st.get("tunnel").cloned().unwrap_or(Value::Null);
+    let funnel = tunnel.get("kind").and_then(Value::as_str) == Some("tailscale");
+    let public: Vec<String> = list(tunnel.get("public")).iter().map(js_string).collect();
+    if funnel && public.iter().any(|p| p != "/mcp") {
+        return Ok(warn(
+            format!("Tailscale Funnel puts more than the gateway's /mcp on the internet: {}", public.join(", ")),
+            Some("In XenoNet's Actors panel, Repair sets Funnel back to /mcp alone. A path another program serves on port 443 has to move first."),
+        ));
+    }
     if st.get("reach").and_then(|r| r.get("state")).and_then(Value::as_str) != Some("ok") {
         return Ok(info(
             format!("it's on, at {}; XenoNet hasn't checked that address yet", st.get("host").filter(|v| !v.is_null()).map_or_else(|| "no address yet".into(), js_string)),
@@ -989,7 +1000,13 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     let through = st.get("tunnel").and_then(|t| t.get("through")).filter(|v| truthy(Some(v))).map_or(String::new(), |t| format!(" through {}", js_string(t)));
     let local = if truthy(st["reach"].get("local")) { ", checked on this computer alone" } else { "" };
-    Ok(ok(format!("reachable at {}{through}{local}", s(st.get("url")))))
+    // What's public: Funnel's /mcp alone, or a port tunnel's everything.
+    let public = match tunnel.get("kind").and_then(Value::as_str) {
+        Some("tailscale") if tunnel.get("public").is_some_and(Value::is_array) => ", with /mcp alone public",
+        Some("cloudflare" | "cloudflare-quick" | "ngrok") => ", with the gateway's whole port public",
+        _ => "",
+    };
+    Ok(ok(format!("reachable at {}{through}{public}{local}", s(st.get("url")))))
 }
 
 async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
