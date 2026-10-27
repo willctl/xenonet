@@ -60,6 +60,12 @@ pub fn policy_is_you(id: JsArg) -> bool {
     policy::is_you(&id.0)
 }
 
+/// { host, slug }, or null for an id that isn't an actor's.
+#[napi(js_name = "policyActorOf")]
+pub fn policy_actor_of(id: JsArg) -> JsArg {
+    JsArg(policy::actor_of(&id.0).map_or(Arg::Null, |(host, slug)| Arg::Obj(vec![("host".into(), host.map_or(Arg::Null, Arg::Text)), ("slug".into(), Arg::Text(slug))])))
+}
+
 #[napi(js_name = "policyRedact")]
 pub fn policy_redact(text: String) -> JsArg {
     let (t, n) = policy::redact_secrets(&text);
