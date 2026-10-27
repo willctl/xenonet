@@ -19,11 +19,13 @@ pub const HELP: &str = include_str!("help/runs.txt");
 /// Whether a terminal echoes what's typed: `stty` on macOS and Linux, so
 /// the token never shows. Windows' console has no `stty`; there the token
 /// shows as you paste it, as other keys do in `xenonet decide key`.
+#[cfg(unix)]
 fn echo(on: bool) {
-    if cfg!(unix) {
-        let _ = std::process::Command::new("stty").arg(if on { "echo" } else { "-echo" }).stdin(std::process::Stdio::inherit()).status();
-    }
+    let _ = std::process::Command::new("stty").arg(if on { "echo" } else { "-echo" }).stdin(std::process::Stdio::inherit()).status();
 }
+
+#[cfg(not(unix))]
+fn echo(_on: bool) {}
 
 // The token, pasted at a terminal (up to Enter) or piped in.
 fn read_token() -> String {

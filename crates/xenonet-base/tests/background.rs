@@ -13,7 +13,12 @@ const NEAR: usize = 40;
 const HIDES: [&str; 4] = ["no_window", "NO_WINDOW", "0x0800_0000", "hide_window"];
 
 /// Commands that never run on Windows, by file and what they start.
-const UNIX_ONLY: [(&str, &str); 3] = [("xenonet-mcp/src/process.rs", "\"ps\""), ("xenonet-wire-map/src/git.rs", "xcode-select"), ("xenonet-wire-map/src/live.rs", "\"security\"")];
+const UNIX_ONLY: [(&str, &str); 4] = [
+    ("xenonet-mcp/src/process.rs", "\"ps\""),
+    ("xenonet-wire-map/src/git.rs", "xcode-select"),
+    ("xenonet-wire-map/src/live.rs", "\"security\""),
+    ("xenonet-cli/src/commands/runs.rs", "\"stty\""),
+];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
