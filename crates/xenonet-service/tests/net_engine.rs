@@ -881,7 +881,8 @@ async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
-    let (a, b, c) = three(&root, 48120, [vec![], vec![], vec![]]).await;
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![]]).await;
     let st = c.state().await;
     assert_eq!((st["start"].clone(), st["wake"].clone()), (json!("you"), json!("consent")), "you, and your consent, by default");
     // Each host's presence says what it is set to and what it takes.
@@ -980,7 +981,8 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     // would answer with a copy.
     let mut idle = sess(ASKER, "Fix the login form", &at("laptop"));
     idle.live = json!({ "status": "idle", "lastEventAt": now_ms() - 200e3 });
-    let (a, b, c) = three(&root, 48121, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
     let (s, v) = b.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
     assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
     until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
@@ -1137,7 +1139,8 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     ended.live = json!({ "lastEventAt": t - 200e3, "endedAt": t - 100e3 });
     let mut open = sess(OPEN, "Release notes", &work.to_string_lossy());
     open.live = json!({ "status": "idle", "lastEventAt": t - 200e3 });
-    let (a, b, c) = three(&root, 48123, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
     let mut desk = Stream::of(&c);
     // desk lets the network wake its sessions: no allowance per session.
     let (s, v) = c.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
@@ -1196,7 +1199,8 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     std::fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
     std::fs::create_dir_all(root.join("desk").join("home")).unwrap();
-    let (a, b, c) = three(&root, 48124, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
     until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
     // You start a session on desk, a server, from studio's console.
     let mut studio = Stream::of(&a);
