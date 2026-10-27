@@ -160,7 +160,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             out(&st, &|st| {
                 print(format!("{} made the network {}, with this machine as {}", c::green("✓"), c::bold(t(&st["network"], "name")), t(&st["self"], "id")));
                 if str(&st["gateway"], "address").is_none_or(str::is_empty) {
-                    print(c::yellow("  The gateway has no address yet: xenonet gateway on --tunnel <kind>, or xenonet net set --lan <ip:port>."));
+                    print(c::yellow("  The gateway has no address yet: xenonet net set --lan <ip:port>, with this machine's tailnet or LAN address."));
                 }
                 print(c::dim("  Add a machine: xenonet net add-machine <id> on macOS, or Add a machine in XenoNet's window."));
             })

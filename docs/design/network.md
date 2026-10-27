@@ -304,9 +304,11 @@ Why one, and why it's all right:
 
 **How it's reached:**
 
-- **Through the gateway's tunnel,** picked as today: Tailscale Funnel, a
-  Cloudflare tunnel, a quick Cloudflare tunnel, ngrok, or the person's own
-  address.
+- **Through the gateway's tunnel,** picked as today: a Cloudflare tunnel,
+  a quick Cloudflare tunnel, ngrok, or the person's own address. Tailscale
+  Funnel publishes only the actor gateway's `/mcp`, so a network on
+  Tailscale uses the gateway's tailnet address instead, and the doctor
+  warns about a Funnel name.
 - **On the LAN or tailnet only.** The gateway listens on an address the
   person picks from the machine's interfaces (never `0.0.0.0`), over
   plain HTTP.

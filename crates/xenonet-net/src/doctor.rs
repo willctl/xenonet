@@ -199,7 +199,7 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
             "" => verdict(
                 "warn",
                 "the gateway has no address yet, so no other machine can join",
-                Some("Turn the gateway on with a tunnel (xenonet gateway on --tunnel <kind>), or give it a LAN address (xenonet net set --lan <ip:port>)."),
+                Some("Give the gateway its tailnet or LAN address (xenonet net set --lan <ip:port> on its host)."),
             ),
             "loopback" => verdict("info", format!("{address} is this computer alone: only XenoNets on it can join, which is for tests and same-machine use"), None),
             "lan" => verdict(
@@ -210,8 +210,15 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
             _ if address.ends_with(".trycloudflare.com") => verdict(
                 "warn",
                 format!("{address} is a quick Cloudflare tunnel, whose address changes every time it starts"),
-                Some("Use a named Cloudflare tunnel, Tailscale Funnel or ngrok's own domain for a network."),
+                Some("Give the gateway its tailnet or LAN address instead (xenonet net set --lan <ip:port> on its host)."),
             ),
+            // Funnel publishes only the actor gateway's /mcp, so a network's
+            // frames never get through a .ts.net name.
+            _ if crate::files::host_of(&address).trim_end_matches('.').to_ascii_lowercase().ends_with(".ts.net") => {
+                let whose = if gateway_here || net.gateway.host == net.host { "this machine's".to_string() } else { format!("{}'s", net.gateway.host) };
+                let fix = format!("Use {whose} tailnet address (xenonet net set --lan <tailnet ip:port> on the gateway's host).");
+                verdict("warn", format!("{address} is a Tailscale Funnel name: a network can't link through Funnel, which publishes only /mcp"), Some(fix.as_str()))
+            }
             _ => verdict("ok", format!("through a tunnel, at {address}"), None),
         },
     ));
@@ -268,6 +275,37 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-none-{}", std::process::id()));
         assert_eq!(checks(&dir, 0.0).len(), 0);
         assert_eq!(standing(&dir), Value::Null);
+    }
+
+    #[test]
+    fn a_funnel_name_is_no_address_for_a_network() {
+        let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-funnel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pin = |address: &str| crate::files::Pin { host: "studio".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: Some(address.into()) };
+        let net = |host: &str, address: &str| crate::files::NetFile {
+            id: "net_0".into(),
+            name: "home".into(),
+            host: host.into(),
+            founder: "studio".into(),
+            gateway: pin(address),
+            lan: None,
+            titles_only: false,
+            share_load: true,
+            joined: 0,
+        };
+        let address = |host: &str, a: &str| {
+            Dir::new(&dir).write_network(&net(host, a)).unwrap();
+            checks(&dir, 0.0).into_iter().find(|c| c.0 == "network.address").unwrap().2
+        };
+        let here = address("studio", "studio.example-tailnet.ts.net");
+        assert_eq!(here["status"], "warn");
+        assert!(here["detail"].as_str().unwrap().contains("can't link through Funnel, which publishes only /mcp"), "{here}");
+        assert!(here["fix"].as_str().unwrap().starts_with("Use this machine's tailnet address"), "{here}");
+        let there = address("laptop", "https://Studio.Example-Tailnet.ts.net/");
+        assert!(there["fix"].as_str().unwrap().starts_with("Use studio's tailnet address"), "{there}");
+        assert_eq!(address("laptop", "100.64.0.7:48114")["status"], "info", "a tailnet address is a LAN one");
+        assert_eq!(address("laptop", "gw.example.com")["status"], "ok");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

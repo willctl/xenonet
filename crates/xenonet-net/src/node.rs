@@ -1679,7 +1679,7 @@ impl Node {
             return Err(NetError::new(
                 409,
                 "no-address",
-                "the gateway has no address yet: turn the gateway on with a tunnel (xenonet gateway on --tunnel <kind>), or give it a LAN address (xenonet net set --lan <ip:port>)",
+                "the gateway has no address yet: give it its tailnet or LAN address (xenonet net set --lan <ip:port>)",
             ));
         };
         let code = ticket::make()?;
@@ -1920,7 +1920,7 @@ impl Node {
             return Err(NetError::new(409, "already", "this machine is the network's gateway already"));
         }
         let Some(address) = lan.or(address).map(str::to_string) else {
-            return Err(NetError::new(409, "no-address", "give this machine an address first: a LAN address (--lan <ip:port>), or a tunnel (xenonet gateway on --tunnel <kind>)"));
+            return Err(NetError::new(409, "no-address", "give this machine an address first: use a tailnet or LAN address (--lan <ip:port>)"));
         };
         let m = view.member(&net.host).cloned().ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
         let mut e = n.roster().draft(

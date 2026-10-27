@@ -668,7 +668,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
                 return outside();
             }
             if sim.state["gateway"].is_null() {
-                return fail(409, "no-address", "The gateway has no address yet. Set a tunnel or a LAN address for it first.");
+                return fail(409, "no-address", "The gateway has no address yet. Give it its tailnet or LAN address first.");
             }
             if !is_host_id(&host) {
                 return fail(400, "bad-request", "A machine's id is 2 to 32 lowercase letters, digits and dashes, starting with a letter.");
