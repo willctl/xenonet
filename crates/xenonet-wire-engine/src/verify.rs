@@ -29,7 +29,7 @@ impl Calls for VerifyCalls<'_> {
             ("procs", m) => procs::call(self.sys, m, &args),
             ("", "now") => Ok(Arg::Num(now_ms())),
             ("", "peerOf") => Ok(match self.peer {
-                Some(p) => crate::js::arg(&procs::peer_of(self.sys, p.local.port(), p.remote.port())),
+                Some(p) => crate::js::arg(&procs::peer_of(self.sys, p.conn, p.local.port(), p.remote.port())),
                 None => Arg::Null,
             }),
             _ => Err(no_method(path, method)),
@@ -175,7 +175,7 @@ mod tests {
     async fn a_request_with_no_process_to_see_passes_unchecked_or_is_refused_as_unseen() {
         let c = checks();
         // A loopback address with no connection behind it: nothing owns it.
-        let peer = Peer { remote: "127.0.0.1:9".parse().unwrap(), local: "127.0.0.1:1".parse().unwrap() };
+        let peer = Peer::new("127.0.0.1:9".parse().unwrap(), "127.0.0.1:1".parse().unwrap());
         let v = c.check(peer, "claude:0190d3e0-0000-7000-8000-000000000001", false).await;
         // No process on the other end: let through unchecked, as the JS did.
         assert_eq!(v["ok"], true, "{v}");
@@ -225,7 +225,7 @@ mod tests {
     }
 
     fn from(port: u16) -> Peer {
-        Peer { remote: format!("127.0.0.1:{port}").parse().unwrap(), local: "127.0.0.1:47842".parse().unwrap() }
+        Peer::new(format!("127.0.0.1:{port}").parse().unwrap(), "127.0.0.1:47842".parse().unwrap())
     }
 
     // The tray app in the home folder's Applications, started by launchd at

@@ -27,6 +27,9 @@ struct Slot {
 /// verifier, the observers and delivery.
 pub struct System {
     pub procs: Procs,
+    /// The process found on the other end of each connection, by its id
+    /// (`Peer::conn`), kept for the connection's next requests.
+    peers: Mutex<HashMap<u64, Value>>,
     running: Mutex<HashMap<String, Arc<Slot>>>,
     /// What runs a command: the system, or a test's made-up machine.
     runner: Runner,
@@ -54,7 +57,7 @@ impl System {
 
     /// The lookups with commands run by `runner`, as if on `platform`.
     pub fn with(platform: &str, runner: Runner) -> Arc<System> {
-        Arc::new(System { procs: Procs::new(platform), running: Mutex::new(HashMap::new()), runner })
+        Arc::new(System { procs: Procs::new(platform), peers: Mutex::new(HashMap::new()), running: Mutex::new(HashMap::new()), runner })
     }
 
     fn run(&self, c: &Call) -> Answer {
@@ -169,9 +172,22 @@ pub fn census(sys: &System) -> Result<Value> {
     Ok(json!({ "table": table_json(&t), "of": of }))
 }
 
-/// The process on the other end of a connection, by its ports, or null.
-pub fn peer_of(sys: &System, local_port: u16, remote_port: u16) -> Value {
-    sys.procs.peer(&mut sys.io(), Some(&Value::from(local_port)), Some(&Value::from(remote_port)), None).0
+/// The process on the other end of a connection (`conn`, by its ports), or
+/// null. What's found is kept for the connection's next requests, as
+/// core/procs.js keeps it on the socket, so a connection asks netstat (on
+/// Windows) once. Connection ids are never reused, so what's kept can't
+/// stand for another connection.
+pub fn peer_of(sys: &System, conn: u64, local_port: u16, remote_port: u16) -> Value {
+    let kept = sys.peers.locked().get(&conn).cloned();
+    let (pid, keep) = sys.procs.peer(&mut sys.io(), Some(&Value::from(local_port)), Some(&Value::from(remote_port)), kept.as_ref());
+    if keep {
+        let mut peers = sys.peers.locked();
+        if peers.len() > 1024 {
+            peers.clear();
+        }
+        peers.insert(conn, pid.clone());
+    }
+    pid
 }
 
 /// `procs.<method>(...args)`, as createProcs's object answers it.
@@ -240,6 +256,36 @@ pub fn kind(field: &str) -> &'static str {
 /// Whether a process runs, as the twins' `alive` asks.
 pub fn running(pid: &Arg) -> bool {
     pid.as_f64().is_some_and(alive)
+}
+
+#[cfg(test)]
+mod peers {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn a_connections_process_is_looked_up_once_and_kept_for_its_next_requests() {
+        // A made-up Windows, whose netstat names 22 for the connection from
+        // port 51000, and is counted.
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        let sys = System::with(
+            "win32",
+            Box::new(|c| {
+                ASKED.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(c.file, "netstat");
+                Ok("  TCP    127.0.0.1:51000        127.0.0.1:47840        ESTABLISHED     22\r\n".into())
+            }),
+        );
+        assert_eq!(peer_of(&sys, 7, 47840, 51000), json!(22));
+        assert_eq!(peer_of(&sys, 7, 47840, 51000), json!(22));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 1, "kept for the connection's next requests");
+        assert_eq!(peer_of(&sys, 8, 47840, 51000), json!(22));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 2, "another connection is looked up afresh");
+        // A lookup that found nothing isn't kept: it's tried again.
+        assert_eq!(peer_of(&sys, 9, 47840, 51001), Value::Null);
+        assert_eq!(peer_of(&sys, 9, 47840, 51001), Value::Null);
+        assert_eq!(ASKED.load(Ordering::SeqCst), 4);
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]
