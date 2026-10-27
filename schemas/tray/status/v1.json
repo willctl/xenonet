@@ -76,7 +76,9 @@
                   "actor",
                   "request",
                   "gateway",
-                  "requests"
+                  "requests",
+                  "ask",
+                  "sign-in"
                 ]
               },
               "id": {
