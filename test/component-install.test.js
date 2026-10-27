@@ -11,6 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { activatePackage, checkRuntime, hasBinary, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
@@ -246,6 +247,48 @@ test("the launcher's xenonet is a copy of the Tools' binary, made again only whe
   await activatePackage(next.file, next.item, { env, operations: service(env, { version: "1.0.0" }).operations });
   assert.equal(fs.readFileSync(bin, "utf8"), "binary 1.1.0");
   assert.ok(!fs.readdirSync(path.dirname(bin)).some((f) => f.endsWith(".tmp")));
+});
+
+test("copies of the launcher put aside while they ran are deleted on a later start, and nothing else beside it", async (t) => {
+  const { dir, env } = workspace(t);
+  const tools = await pack(dir, "tools", "1.0.0", { bin: "binary 1.0.0" });
+  selectComponent("tools", await stagePackage(tools.file, tools.item, { env }), env);
+  const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
+  fs.mkdirSync(launcher, { recursive: true });
+  for (const name of [`${EXE}.4242-1760000000000.old`, `${EXE}.7-1.old`, "notes.old", `${EXE}.from`]) fs.writeFileSync(path.join(launcher, name), "x");
+  const out = installLauncher(env);
+  assert.equal(out.pending, null);
+  assert.deepEqual(fs.readdirSync(launcher).sort(), [EXE, `${EXE}.from`, "notes.old"].sort());
+});
+
+// Windows won't replace a program that's running: the launcher runs as long
+// as an MCP server does. A running copy goes aside, the new Tools' binary
+// takes its name, and the old one goes once nothing runs it.
+test("the launcher is replaced while it runs, on Windows", { skip: process.platform !== "win32" && "Windows locks a running program" }, async (t) => {
+  const { dir, env } = workspace(t);
+  const first = await pack(dir, "tools", "1.0.0", { bin: "binary 1.0.0" });
+  selectComponent("tools", await stagePackage(first.file, first.item, { env }), env);
+  const bin = installLauncher(env).bin;
+  // A program that runs: this node, in the launcher's place.
+  fs.copyFileSync(process.execPath, bin);
+  const running = spawn(bin, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  t.after(() => running.kill());
+  await new Promise((resolve, reject) => running.once("spawn", resolve).once("error", reject));
+  const next = await pack(dir, "tools", "1.1.0", { bin: "binary 1.1.0" });
+  const updated = await activatePackage(next.file, next.item, { env, operations: service(env, { version: "1.0.0" }).operations });
+  assert.equal(updated.detail, "New commands use this version. Connected MCP processes keep running.");
+  assert.equal(fs.readFileSync(bin, "utf8"), "binary 1.1.0");
+  const aside = () => fs.readdirSync(path.dirname(bin)).filter((f) => f.endsWith(".old"));
+  assert.equal(aside().length, 1, "the running copy, put aside");
+  running.kill();
+  await new Promise((resolve) => (running.exitCode != null ? resolve() : running.once("exit", resolve)));
+  // Windows can hold a file a moment after its process exits (a virus
+  // scanner, say): a later start tries again.
+  for (let i = 0; i < 50 && aside().length; i++) {
+    installLauncher(env);
+    if (aside().length) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.deepEqual(aside(), [], "and deleted once it stopped");
 });
 
 // Where the service runs from: <runtime>/components/service/active, a copy

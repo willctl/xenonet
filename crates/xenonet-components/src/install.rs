@@ -91,39 +91,88 @@ pub fn write_launcher(entry: &str, source: &str) -> Result<bool, FsError> {
     }
 }
 
+/// Why the launcher's binary is still the old one when it couldn't be
+/// replaced, and when it will be.
+pub const LAUNCHER_PENDING: &str = "XenoNet replaces it the next time it starts, or the next time you run xenonet update";
+
+/// Puts `tmp` in `to`'s place (`rename` as fs.renameSync). Windows won't
+/// replace a program that's running, and the launcher runs as long as an
+/// MCP server or the xenonet command does, but it lets the running file be
+/// renamed: that copy goes aside, as `<to>.<pid>-<ms>.old`, the new one
+/// takes its name, and `sweep_aside` deletes the old one on a later start,
+/// once nothing runs it. If the new one can't take the name, the old one
+/// goes back.
+pub fn replace_file(tmp: &str, to: &str, rename: &mut dyn FnMut(&str, &str) -> Result<(), FsError>) -> Result<(), FsError> {
+    let first = match rename(tmp, to) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    if !fsx::exists(to) {
+        return Err(first);
+    }
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let aside = format!("{to}.{}-{ms}.old", std::process::id());
+    rename(to, &aside)?;
+    match rename(tmp, to) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = rename(&aside, to);
+            Err(e)
+        }
+    }
+}
+
+/// Whether `entry` is a copy of `name` that `replace_file` put aside.
+pub fn is_aside(entry: &str, name: &str) -> bool {
+    entry.strip_prefix(name).is_some_and(|rest| rest.starts_with('.')) && std::path::Path::new(entry).extension().is_some_and(|x| x == "old")
+}
+
+/// Deletes the copies `replace_file` put aside beside `to`. One still
+/// running (on Windows) stays until a later start.
+pub fn sweep_aside(to: &str) {
+    let (dir, name) = (NATIVE.dirname(to), NATIVE.basename(to, None));
+    for entry in fsx::read_dir_names(&dir).unwrap_or_default() {
+        if is_aside(&entry, &name) {
+            let _ = fsx::unlink(&NATIVE.join(&[&dir, &entry]));
+        }
+    }
+}
+
 /// Copies the Tools' binary to the launcher's, when it isn't the copy of
 /// these Tools already (its .from file says which it is), through a
 /// temporary file and a rename, so a hook starting meanwhile runs the old
-/// or the new. One in use that can't be replaced now (on Windows) is
-/// replaced next time.
-pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> bool {
+/// or the new; a launcher that's running is put aside first (see
+/// `replace_file`). Ok(true) when it was written, Ok(false) when there was
+/// nothing to do, and why not when it couldn't be.
+pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> Result<bool, String> {
+    sweep_aside(to);
     let from = NATIVE.join(&[&js_string(&tools["root"]), "bin", bin_name(platform)]);
     if !fsx::exists(&from) {
-        return false;
+        return Ok(false);
     }
     let source = format!("{}-{}", js_string(&tools["version"]), js_string(&tools["sha256"]));
     let marker = format!("{to}.from");
     if fsx::read_text(&marker).is_ok_and(|had| had == source) && fsx::exists(to) {
-        return false;
+        return Ok(false);
     }
     let tmp = format!("{to}.{}.tmp", std::process::id());
-    let copied = std::fs::copy(&from, &tmp).is_ok() && {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).is_ok()
+    let copied = std::fs::copy(&from, &tmp).map(|_| ()).map_err(|e| e.to_string());
+    #[cfg(unix)]
+    let copied = copied.and_then(|()| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())
+    });
+    let done = copied.and_then(|()| replace_file(&tmp, to, &mut fsx::rename).map_err(|e| e.message));
+    match done {
+        Ok(()) => {
+            let _ = fsx::write_file(&marker, source.as_bytes(), None);
+            Ok(true)
         }
-        #[cfg(not(unix))]
-        {
-            true
+        Err(why) => {
+            let _ = fsx::rm_rf(&tmp);
+            Err(why)
         }
-    };
-    if copied && fsx::rename(&tmp, to).is_ok() {
-        let _ = fsx::write_file(&marker, source.as_bytes(), None);
-        return true;
     }
-    let _ = fsx::rm_rf(&tmp);
-    false
 }
 
 /// The launcher, in the runtime folder, which never moves (hooks, MCP
@@ -131,19 +180,21 @@ pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> bool {
 /// binary, copied. A node launcher an earlier XenoNet put beside it, which
 /// the entries it wrote still run, gets this XenoNet's script, which runs
 /// the binary; XenoNet never puts a node there itself. None without Tools.
+/// `pending` says why the binary is still an earlier Tools' when it
+/// couldn't be replaced, and when it will be.
 pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> {
     let m = &ctx.machine;
     let Some(tools) = current_component("tools", env, m)? else { return Ok(None) };
     let dir = NATIVE.join(&[&runtime_dir(env, m), "launcher"]);
     let bin = launcher_bin(env, m);
     fsx::mkdir_p(&dir, None)?;
-    write_launcher_bin(&tools, &bin, &m.platform);
+    let pending = write_launcher_bin(&tools, &bin, &m.platform).err().map(|why| format!("the launcher couldn't be replaced ({why}); {LAUNCHER_PENDING}"));
     let entry = NATIVE.join(&[&dir, "cli", "xenonet.js"]);
     if fsx::exists(&NATIVE.join(&[&dir, earlier_node(&m.platform)])) && fsx::exists(&entry) {
         write_launcher(&entry, LAUNCHER_SCRIPT)?;
     }
     let bin = if fsx::exists(&bin) { json!(bin) } else { Value::Null };
-    Ok(Some(json!({ "bin": bin, "root": dir })))
+    Ok(Some(json!({ "bin": bin, "root": dir, "pending": pending })))
 }
 
 // Runs a program as spawnSync did: its output, and its exit code (None if
@@ -621,10 +672,12 @@ async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx
     io.ask(json!({ "op": "check", "staged": staged })).await.map_err(|_| Failure::Rethrow)?;
     if component == "tools" {
         select_component("tools", &staged, env, m)?;
-        install_launcher(env, ctx)?;
-        return Ok(
-            json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": "New commands use this version. Connected MCP processes keep running." }),
-        );
+        let pending = install_launcher(env, ctx)?.and_then(|l| l["pending"].as_str().map(str::to_string));
+        let detail = match pending {
+            Some(why) => format!("New commands use this version once the launcher is replaced: {why}. Connected MCP processes keep running."),
+            None => "New commands use this version. Connected MCP processes keep running.".into(),
+        };
+        return Ok(json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": detail }));
     }
     switch_service(io, env, ctx, life, old.as_ref(), &staged).await
 }
@@ -686,6 +739,108 @@ fn message(io: &Io, f: &Failure) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("xenonet-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_running_launcher_goes_aside_for_the_new_one() {
+        let dir = scratch("replace");
+        let (tmp, to) = (NATIVE.join(&[&dir, "xenonet.1.tmp"]), NATIVE.join(&[&dir, "xenonet"]));
+        std::fs::write(&tmp, "new").unwrap();
+        std::fs::write(&to, "old, running").unwrap();
+        // As Windows has it: a running program can be renamed, but not
+        // replaced.
+        let mut calls = Vec::new();
+        let mut windows = |from: &str, onto: &str| {
+            calls.push(format!("{} -> {}", NATIVE.basename(from, None), NATIVE.basename(onto, None)));
+            if fsx::exists(onto) {
+                return Err(fsx::coded("EPERM", format!("EPERM: operation not permitted, rename '{from}' -> '{onto}'")));
+            }
+            fsx::rename(from, onto)
+        };
+        replace_file(&tmp, &to, &mut windows).unwrap();
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "new");
+        let aside: Vec<String> = fsx::read_dir_names(&dir).unwrap().into_iter().filter(|n| is_aside(n, "xenonet")).collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(std::fs::read_to_string(NATIVE.join(&[&dir, &aside[0]])).unwrap(), "old, running");
+        assert_eq!(calls.len(), 3, "{calls:?}");
+        // A later start deletes it, and nothing else beside the launcher.
+        std::fs::write(NATIVE.join(&[&dir, "xenonet.from"]), "1.0.0").unwrap();
+        std::fs::write(NATIVE.join(&[&dir, "other.old"]), "not ours").unwrap();
+        sweep_aside(&to);
+        assert_eq!(fsx::read_dir_names(&dir).unwrap(), ["other.old", "xenonet", "xenonet.from"]);
+
+        // One that can't be renamed either stays as it was, and says why.
+        std::fs::write(&tmp, "newer").unwrap();
+        let mut locked = |from: &str, onto: &str| Err(fsx::coded("EBUSY", format!("EBUSY: resource busy or locked, rename '{from}' -> '{onto}'")));
+        assert!(replace_file(&tmp, &to, &mut locked).unwrap_err().message.contains("EBUSY"));
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "new");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Holds a copy of this test binary running, for the test below: it
+    /// runs this test alone, which waits while its file is there.
+    #[test]
+    #[ignore = "run by a_launcher_running_on_windows_is_replaced"]
+    fn hold_while_asked() {
+        if let Some(file) = std::env::var_os("XENONET_HOLD_FILE") {
+            let until = std::time::Instant::now() + Duration::from_secs(60);
+            while std::path::Path::new(&file).exists() && std::time::Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_launcher_running_on_windows_is_replaced() {
+        let dir = scratch("launcher-running");
+        let (tools, launcher) = (NATIVE.join(&[&dir, "tools"]), NATIVE.join(&[&dir, "launcher"]));
+        std::fs::create_dir_all(NATIVE.join(&[&tools, "bin"])).unwrap();
+        std::fs::create_dir_all(&launcher).unwrap();
+        std::fs::write(NATIVE.join(&[&tools, "bin", "xenonet.exe"]), "the new Tools' binary").unwrap();
+        let to = NATIVE.join(&[&launcher, "xenonet.exe"]);
+        // A program that runs from the launcher's path: this test binary.
+        std::fs::copy(std::env::current_exe().unwrap(), &to).unwrap();
+        let hold = NATIVE.join(&[&dir, "hold"]);
+        std::fs::write(&hold, "").unwrap();
+        let mut running = std::process::Command::new(&to)
+            .args(["--ignored", "--exact", "install::tests::hold_while_asked"])
+            .env("XENONET_HOLD_FILE", &hold)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        // Windows refuses a plain rename onto it.
+        std::fs::write(NATIVE.join(&[&launcher, "plain.tmp"]), "x").unwrap();
+        assert!(std::fs::rename(NATIVE.join(&[&launcher, "plain.tmp"]), &to).is_err(), "the running copy is locked");
+        let tools_json = json!({ "root": tools, "version": "1.1.0", "sha256": "ab" });
+        assert_eq!(write_launcher_bin(&tools_json, &to, "win32"), Ok(true));
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "the new Tools' binary");
+        let aside = || fsx::read_dir_names(&launcher).unwrap().into_iter().filter(|n| is_aside(n, "xenonet.exe")).count();
+        assert_eq!(aside(), 1, "the running copy, put aside");
+        sweep_aside(&to);
+        assert_eq!(aside(), 1, "kept while it runs");
+        std::fs::remove_file(&hold).unwrap();
+        running.wait().unwrap();
+        // Windows can hold a file a moment after its process exits (a virus
+        // scanner, say): a later start tries again.
+        for _ in 0..50 {
+            sweep_aside(&to);
+            if aside() == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(aside(), 0, "and deleted once it stopped");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn launcher_versions() {
