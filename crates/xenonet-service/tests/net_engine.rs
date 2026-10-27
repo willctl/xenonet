@@ -43,12 +43,19 @@ const D2: &str = "claude:cccccccc-0002";
 const L2: &str = "claude:bbbbbbbb-0002";
 
 /// The person, at the window and at their own terminal; and any session
-/// is its own process.
+/// is its own process, but for those in SPOOFED.
 struct You;
+
+/// Ids whose calls come from a process that isn't that session, as the
+/// real verifier tells by the calling process's tree.
+static SPOOFED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 #[async_trait]
 impl cores::Verify for You {
-    async fn check(&self, _peer: Peer, _id: &str, _hook: bool) -> Value {
+    async fn check(&self, _peer: Peer, id: &str, _hook: bool) -> Value {
+        if SPOOFED.lock().unwrap().iter().any(|s| s == id) {
+            return json!({ "ok": false, "reason": "the calling process isn't that session" });
+        }
         json!({ "ok": true })
     }
     async fn person(&self, _peer: Peer) -> Value {
@@ -1004,6 +1011,26 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     c.window("POST", "/api/delivery/pause", json!({ "paused": false })).await;
     assert_eq!(fake_runs(&c).len(), 1);
 
+    // A start as you that studio couldn't check by its window key (from a
+    // terminal on Linux or Windows, had the route let it go) is refused by
+    // desk, which takes you only strongly checked.
+    let weak = xenonet_wire_engine::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
+    assert_eq!(weak.map(|v| v["state"].clone()), Ok(json!("sent")));
+    let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
+    assert_eq!(refused["reason"], "a start as you comes only from a window host's console, checked by its window key", "{refused}");
+    assert_eq!(fake_runs(&c).len(), 1);
+    // From a terminal, without the window's key: on a Mac its processes
+    // tell you from an agent; on Linux and Windows the route refuses at
+    // once, saying why, and sends nothing.
+    if !cfg!(target_os = "macos") {
+        let as_you = json!(xenonet_service::routes::runs::AS_YOU);
+        let (s, v) = a.call("POST", "/api/start", json!({ "machine": "desk", "prompt": "From a terminal" }), &[]).await;
+        assert_eq!((s, v["error"].clone()), (403, as_you.clone()), "{v}");
+        let (s, v) = a.call("PUT", "/api/net/settings", json!({ "host": "desk", "start": "off" }), &[]).await;
+        assert_eq!((s, v["error"].clone()), (403, as_you), "{v}");
+        assert_eq!(c.state().await["start"], "you");
+    }
+
     // desk is no window host: whatever it says of who asks, nothing starts.
     let mut desk = Stream::of(&c);
     let (s, v) = c.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hi" })).await;
@@ -1196,6 +1223,12 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     // A session XenoNet didn't start is refused.
     let (s, v) = ask(D1.to_string(), json!({ "command": "ls" })).await.unwrap();
     assert_eq!((s, v["code"].clone()), (403, json!("not-a-run")), "{v}");
+    // A caller that names the run but isn't its process is refused before
+    // anything is held or shown.
+    SPOOFED.lock().unwrap().push(run.clone());
+    let (s, v) = ask(run.clone(), json!({ "command": "ls" })).await.unwrap();
+    assert_eq!((s, v["error"].clone()), (403, json!("the calling process isn't that session")), "{v}");
+    assert!(shown(&a).await.is_empty() && shown(&b).await.is_empty());
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
