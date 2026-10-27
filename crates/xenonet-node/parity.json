@@ -439,7 +439,13 @@
     "core/delivery/resume.js": {
       "rust": "crates/xenonet-engine/src/delivery/resume.rs",
       "differences": [
-        "Starting the resumed turn's process and watching it are the twin's."
+        "The resumed turn is the shared runner's (runs.js)."
+      ]
+    },
+    "core/delivery/runs.js": {
+      "rust": "crates/xenonet-engine/src/delivery/runs.rs",
+      "differences": [
+        "Starting the process, writing its log and keeping the records' file are the JS runner's, given Rust's decisions (how to launch, whether a run may start, which records and logs are kept)."
       ]
     },
     "core/delivery/router.js": {
@@ -1334,6 +1340,7 @@
     "test/delivery-opencode.test.js",
     "test/delivery-router.test.js",
     "test/delivery-routes.test.js",
+    "test/delivery-runs.test.js",
     "test/delivery-scopes.test.js",
     "test/delivery-wake.test.js",
     "test/demo-root.test.js",

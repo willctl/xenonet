@@ -26,6 +26,24 @@ export function bundledCodexBinaries({ env = process.env, platform = process.pla
   return native.bundledCodexBinaries(envOf(env), String(platform), String(homeDir), ...looks(exists, readdir), (f) => Number(mtime(f)));
 }
 
+export function bundledClaudeCode(desktopDir, { platform = process.platform, exists = fs.existsSync, readdir = fs.readdirSync, mtime = (f) => fs.statSync(f).mtimeMs } = {}) {
+  return native.bundledClaudeCode(String(desktopDir), String(platform), ...looks(exists, readdir), (f) => Number(mtime(f)));
+}
+
+const cliEnvOf = (env, platform, homeDir) => ({
+  path: String(env.PATH ?? ""),
+  pathext: env.PATHEXT ?? undefined,
+  claudeBin: env.XENONET_CLAUDE_BIN ?? undefined,
+  codexBin: env.XENONET_CODEX_BIN ?? undefined,
+  dirs: envOf(env),
+  platform: String(platform),
+  home: String(homeDir),
+});
+
+export function findCli(app, { env = process.env, platform = process.platform, homeDir = home, exists = fs.existsSync, readdir = fs.readdirSync, mtime = (f) => fs.statSync(f).mtimeMs, canRun = null } = {}) {
+  return native.findCli(String(app), cliEnvOf(env, platform, homeDir), ...looks(exists, readdir), (f) => Number(mtime(f)), canRun) ?? null;
+}
+
 export function findCodexBinary({ env = process.env } = {}) {
   if (env.XENONET_CODEX_BIN) return env.XENONET_CODEX_BIN;
   return bundledCodexBinaries({ env })[0] ?? "codex";

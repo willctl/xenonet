@@ -72,6 +72,71 @@ export function bundledCodexBinaries({ env = process.env, platform = process.pla
   return [];
 }
 
+// Two version folders' names in order: part by part between the dots,
+// numbers as numbers, anything else as text.
+function versionOrder(a, b) {
+  const [x, y] = [a.split("."), b.split(".")];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if (i >= x.length) return -1;
+    if (i >= y.length) return 1;
+    const digits = /^\d+$/.test(x[i]) && /^\d+$/.test(y[i]);
+    const o = digits ? Math.sign(Number(x[i]) - Number(y[i])) : x[i] < y[i] ? -1 : x[i] > y[i] ? 1 : 0;
+    if (o) return o;
+  }
+  return 0;
+}
+
+// The Claude Code that Claude desktop keeps a copy of, given Claude
+// desktop's folder (findClaudeDesktopDir): the newest version first, and
+// within one, the newest build.
+//   macOS:   <Claude>/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude
+//   Windows: <Claude>\claude-code\<version>\<build>\claude.exe, or in a
+//            folder inside the build
+export function bundledClaudeCode(desktopDir, { platform = process.platform, exists = fs.existsSync, readdir = fs.readdirSync, mtime = (f) => fs.statSync(f).mtimeMs } = {}) {
+  const list = (d) => {
+    try {
+      return [...readdir(d)].map(String);
+    } catch {
+      return null;
+    }
+  };
+  const root = path.join(desktopDir, "claude-code");
+  const out = [];
+  for (const v of (list(root) ?? []).sort((a, b) => versionOrder(b, a))) {
+    const dir = path.join(root, v);
+    const builds = list(dir);
+    if (!builds) continue;
+    const found = [];
+    for (const b of builds) {
+      const build = path.join(dir, b);
+      const candidates =
+        platform === "darwin" ? [path.join(build, "claude.app", "Contents", "MacOS", "claude")] : platform === "win32" ? [path.join(build, "claude.exe"), ...(list(build) ?? []).map((n) => path.join(build, n, "claude.exe"))] : [];
+      for (const f of candidates) if (exists(f)) found.push([f, mtime(f)]);
+    }
+    found.sort((a, b) => b[1] - a[1]);
+    out.push(...found.map(([f]) => f));
+  }
+  return out;
+}
+
+// The program to run for an app's CLI, or null when it isn't here.
+//   claude: on PATH (with PATHEXT on Windows, so an npm install's
+//           claude.cmd), then the Claude Code that Claude desktop keeps
+//           (bundledClaudeCode), then XENONET_CLAUDE_BIN
+//   codex:  XENONET_CODEX_BIN, then the one the ChatGPT desktop app ships
+//           (bundledCodexBinaries), then on PATH
+// `canRun` throws for a file on PATH that may not be run.
+export function findCli(app, { env = process.env, platform = process.platform, homeDir = home, exists = fs.existsSync, readdir = fs.readdirSync, mtime = (f) => fs.statSync(f).mtimeMs, canRun } = {}) {
+  const look = { env, platform, homeDir, exists, readdir, mtime };
+  const desktop = () => {
+    const dir = findClaudeDesktopDir(look);
+    return dir ? bundledClaudeCode(dir, look)[0] : undefined;
+  };
+  if (app === "claude") return onPath("claude", { env, platform, canRun }) ?? desktop() ?? (env.XENONET_CLAUDE_BIN || null);
+  if (app === "codex") return env.XENONET_CODEX_BIN || bundledCodexBinaries(look)[0] || onPath("codex", { env, platform, canRun });
+  return null;
+}
+
 // The codex to run: the one bundled with the desktop app when there is one,
 // so the protocol matches whatever is writing ~/.codex, else codex on PATH.
 // XENONET_CODEX_BIN overrides both.

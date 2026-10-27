@@ -150,6 +150,101 @@ pub fn bundled_codex_binaries(env: &Env, platform: &str, home: &str, look: &mut 
     }
 }
 
+/// Two version folders' names in order: part by part between the dots,
+/// numbers as numbers, anything else as text, as the JS compares them.
+fn version_order(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (x, y): (Vec<&str>, Vec<&str>) = (a.split('.').collect(), b.split('.').collect());
+    for i in 0..x.len().max(y.len()) {
+        let (Some(p), Some(q)) = (x.get(i), y.get(i)) else { return if i >= x.len() { Ordering::Less } else { Ordering::Greater } };
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+        let o = if digits(p) && digits(q) { p.parse::<f64>().unwrap_or(0.0).total_cmp(&q.parse::<f64>().unwrap_or(0.0)) } else { p.cmp(q) };
+        if o != Ordering::Equal {
+            return o;
+        }
+    }
+    Ordering::Equal
+}
+
+/// The Claude Code that Claude desktop keeps a copy of, given Claude
+/// desktop's folder (`find_claude_desktop_dir`): the newest version first,
+/// and within one, the newest build.
+///
+/// ```text
+///   macOS:   <Claude>/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude
+///   Windows: <Claude>\claude-code\<version>\<build>\claude.exe, or in a
+///            folder inside the build
+/// ```
+pub fn bundled_claude_code(desktop: &str, platform: &str, look: &mut dyn Look) -> Vec<String> {
+    let root = join_all(&[desktop, "claude-code"]);
+    let Ok(mut versions) = look.readdir(&root) else { return Vec::new() };
+    versions.sort_by(|a, b| version_order(b, a));
+    let mut out = Vec::new();
+    for v in versions {
+        let dir = join_all(&[&root, &v]);
+        let Ok(builds) = look.readdir(&dir) else { continue };
+        let mut found: Vec<(String, f64)> = Vec::new();
+        for b in builds {
+            let build = join_all(&[&dir, &b]);
+            let candidates = match platform {
+                "darwin" => vec![join_all(&[&build, "claude.app", "Contents", "MacOS", "claude"])],
+                "win32" => {
+                    let inside = look.readdir(&build).unwrap_or_default();
+                    std::iter::once(join_all(&[&build, "claude.exe"])).chain(inside.iter().map(|n| join_all(&[&build, n, "claude.exe"]))).collect()
+                }
+                _ => Vec::new(),
+            };
+            for f in candidates {
+                if look.exists(&f) {
+                    let m = look.mtime(&f);
+                    found.push((f, m));
+                }
+            }
+        }
+        found.sort_by(|a, b| b.1.total_cmp(&a.1));
+        out.extend(found.into_iter().map(|(f, _)| f));
+    }
+    out
+}
+
+/// What the environment says of the CLIs XenoNet runs itself.
+#[derive(Clone, Debug, Default)]
+pub struct CliEnv {
+    /// PATH, and PATHEXT, which Windows tries after each name.
+    pub path: String,
+    pub pathext: Option<String>,
+    /// XENONET_CLAUDE_BIN and XENONET_CODEX_BIN.
+    pub claude_bin: Option<String>,
+    pub codex_bin: Option<String>,
+    /// Where the desktop apps keep their folders.
+    pub dirs: Env,
+}
+
+/// The program to run for an app's CLI, or None when it isn't here.
+///
+/// ```text
+///   claude: on PATH (with PATHEXT on Windows, so an npm install's
+///           claude.cmd), then the Claude Code that Claude desktop keeps
+///           (`bundled_claude_code`), then XENONET_CLAUDE_BIN
+///   codex:  XENONET_CODEX_BIN, then the one the ChatGPT desktop app ships
+///           (`bundled_codex_binaries`), then on PATH
+/// ```
+///
+/// `can_run` says whether a file on PATH may be run.
+pub fn find_cli(app: &str, env: &CliEnv, platform: &str, home: &str, look: &mut dyn Look, can_run: &mut dyn FnMut(&str) -> bool) -> Option<String> {
+    let windows = platform == "win32";
+    let set = |v: &Option<String>| v.clone().filter(|v| !v.is_empty());
+    match app {
+        "claude" => crate::paths::on_path("claude", &env.path, env.pathext.as_deref(), windows, can_run)
+            .or_else(|| find_claude_desktop_dir(&env.dirs, platform, home, look).and_then(|d| bundled_claude_code(&d, platform, look).into_iter().next()))
+            .or_else(|| set(&env.claude_bin)),
+        "codex" => set(&env.codex_bin)
+            .or_else(|| bundled_codex_binaries(&env.dirs, platform, home, look).into_iter().next())
+            .or_else(|| crate::paths::on_path("codex", &env.path, env.pathext.as_deref(), windows, can_run)),
+        _ => None,
+    }
+}
+
 // Spelled as on a unix host, where Node's path module is posix; on Windows
 // the JS tests run against the Rust (test:rust) check the same. (Two
 // attributes: clippy takes only a plain cfg(test) for test code.)
@@ -164,5 +259,87 @@ mod tests {
         assert_eq!(app_dir("cache", None, None, "linux", "/home/me", "XenoNet Dev"), "/home/me/.cache/xenonet-dev");
         assert_eq!(app_dir("state", Some("/x"), None, "darwin", "/Users/me", "XenoNet"), "/x/xenonet");
         assert_eq!(app_dir("cache", None, Some("L"), "win32", "/h", "XenoNet"), "L/XenoNet/Cache");
+    }
+
+    /// Made-up folders: the files there, with their mtimes.
+    struct Disk(Vec<(&'static str, f64)>);
+
+    impl Look for Disk {
+        fn exists(&mut self, path: &str) -> bool {
+            self.0.iter().any(|(f, _)| *f == path || f.starts_with(&format!("{path}/")))
+        }
+        fn readdir(&mut self, path: &str) -> Result<Vec<String>, Unreadable> {
+            let mut names: Vec<String> = Vec::new();
+            for (f, _) in &self.0 {
+                if let Some(rest) = f.strip_prefix(&format!("{path}/")) {
+                    let n = rest.split('/').next().unwrap_or("").to_string();
+                    if !names.contains(&n) {
+                        names.push(n);
+                    }
+                }
+            }
+            if names.is_empty() {
+                Err(Unreadable)
+            } else {
+                Ok(names)
+            }
+        }
+        fn mtime(&mut self, path: &str) -> f64 {
+            self.0.iter().find(|(f, _)| *f == path).map_or(f64::NAN, |(_, m)| *m)
+        }
+    }
+
+    #[test]
+    fn claude_code_as_claude_desktop_keeps_it_newest_version_first() {
+        let mac = "/Users/me/Library/Application Support/Claude/claude-code";
+        let mut disk = Disk(vec![
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.99/aa/claude.app/Contents/MacOS/claude", 3.0),
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/claude.app/Contents/MacOS/claude", 1.0),
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/cc/.verified", 2.0),
+        ]);
+        assert_eq!(
+            bundled_claude_code("/Users/me/Library/Application Support/Claude", "darwin", &mut disk),
+            [format!("{mac}/2.1.308/bb/claude.app/Contents/MacOS/claude"), format!("{mac}/2.1.99/aa/claude.app/Contents/MacOS/claude")]
+        );
+        let mut win =
+            Disk(vec![("/L/Claude/claude-code/1.0.0/x/claude.exe", 1.0), ("/L/Claude/claude-code/1.0.0/y/bin/claude.exe", 2.0), ("/L/Claude/claude-code/0.9/z/claude.exe", 9.0)]);
+        assert_eq!(
+            bundled_claude_code("/L/Claude", "win32", &mut win),
+            ["/L/Claude/claude-code/1.0.0/y/bin/claude.exe", "/L/Claude/claude-code/1.0.0/x/claude.exe", "/L/Claude/claude-code/0.9/z/claude.exe"]
+        );
+        assert_eq!(bundled_claude_code("/L/Claude", "linux", &mut win), Vec::<String>::new());
+        assert_eq!(bundled_claude_code("/nowhere", "darwin", &mut win), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_cli_is_found_on_path_then_where_the_desktop_apps_keep_it_then_by_its_variable() {
+        let home = "/Users/me";
+        let bundled = "/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/claude.app/Contents/MacOS/claude";
+        let mut disk = Disk(vec![(bundled, 1.0), ("/Applications/ChatGPT.app/Contents/Resources/codex", 1.0)]);
+        let env = |path: &str, claude: Option<&str>, codex: Option<&str>| CliEnv {
+            path: path.into(),
+            pathext: None,
+            claude_bin: claude.map(str::to_string),
+            codex_bin: codex.map(str::to_string),
+            dirs: Env::default(),
+        };
+        let on = |files: &'static [&'static str]| move |f: &str| files.contains(&f);
+        let e = env("/usr/local/bin:/opt/bin", Some("/x/claude"), None);
+        assert_eq!(find_cli("claude", &e, "darwin", home, &mut disk, &mut on(&["/opt/bin/claude"])).as_deref(), Some("/opt/bin/claude"), "PATH first");
+        assert_eq!(find_cli("claude", &e, "darwin", home, &mut disk, &mut on(&[])).as_deref(), Some(bundled), "then Claude desktop's");
+        let mut empty = Disk(vec![]);
+        assert_eq!(find_cli("claude", &e, "darwin", home, &mut empty, &mut on(&[])).as_deref(), Some("/x/claude"), "then XENONET_CLAUDE_BIN");
+        assert_eq!(find_cli("claude", &env("/usr/bin", Some(""), None), "darwin", home, &mut empty, &mut on(&[])), None);
+        // Windows tries PATHEXT, so an npm install's claude.cmd is found.
+        let w = CliEnv { pathext: Some(".EXE;.CMD".into()), ..env("/n", None, None) };
+        assert_eq!(find_cli("claude", &w, "win32", home, &mut empty, &mut on(&["/n/claude.CMD"])).as_deref(), Some("/n/claude.CMD"));
+        // Codex: its variable, then the ChatGPT app's, then PATH.
+        assert_eq!(find_cli("codex", &env("/usr/bin", None, Some("/c/codex")), "darwin", home, &mut disk, &mut on(&["/usr/bin/codex"])).as_deref(), Some("/c/codex"));
+        assert_eq!(
+            find_cli("codex", &env("/usr/bin", None, None), "darwin", home, &mut disk, &mut on(&["/usr/bin/codex"])).as_deref(),
+            Some("/Applications/ChatGPT.app/Contents/Resources/codex")
+        );
+        assert_eq!(find_cli("codex", &env("/usr/bin", None, None), "linux", home, &mut disk, &mut on(&["/usr/bin/codex"])).as_deref(), Some("/usr/bin/codex"));
+        assert_eq!(find_cli("opencode", &env("/usr/bin", None, None), "linux", home, &mut disk, &mut on(&["/usr/bin/opencode"])), None);
     }
 }

@@ -10,10 +10,11 @@
 // for a session you allowed, since a turn spends its plan, and never while
 // the session's own process runs, so two processes never write one session.
 // The message goes in on stdin, never as an argument, where a leading "-"
-// would read as a flag.
-import { spawn as childSpawn } from "node:child_process";
+// would read as a flag. The run itself is the shared runner's (runs.js):
+// it finds the program, logs the turn and caps how many go at once.
 import fs from "node:fs";
 import { deliveryApps } from "./apps.js";
+import { createRuns } from "./runs.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -40,40 +41,20 @@ export function resumeCommand(agent, { settings = null } = {}) {
   return RESUMED.find((a) => a.id === app)?.resume(id, { settings }) ?? null;
 }
 
-export function createResume({ spawn = childSpawn, env = process.env, settings = null, timeoutMs = 30 * 60e3, exists = fs.existsSync, platform = process.platform } = {}) {
-  const running = new Map(); // agent → its resumed turn's process
-
+// `runs` is the shared runner (runs.js); without one, a runner of its own
+// with the rest of the options (spawn, find, dir, timeoutMs, platform).
+export function createResume({ runs = null, env = process.env, settings = null, exists = fs.existsSync, ...options } = {}) {
+  const runner = runs ?? createRuns(options);
   return {
     name: "resume",
     can: (agent) => !!resumeCommand(agent),
-    running: (agent) => running.has(agent),
+    running: (agent) => runner.running(agent),
     async deliver({ agent, cwd, text }) {
       const cmd = resumeCommand(agent, { settings: typeof settings === "function" ? settings() : settings });
       if (!cmd) return { ok: false, why: "only Claude Code and Codex sessions can be resumed" };
-      if (running.has(agent)) return { ok: false, why: "a resumed turn is under way" };
+      if (runner.running(agent)) return { ok: false, why: "a resumed turn is under way" };
       if (!cwd || !exists(cwd)) return { ok: false, why: "its folder isn't there" };
-      return new Promise((resolve) => {
-        let child;
-        // Windows finds claude.cmd only through a shell, which joins the
-        // arguments as they are: a path with a space is quoted.
-        const args = platform === "win32" ? cmd[1].map((a) => (/\s/.test(a) ? `"${a}"` : a)) : cmd[1];
-        try {
-          child = spawn(cmd[0], args, { cwd, env: resumeEnv(env), stdio: ["pipe", "ignore", "ignore"], windowsHide: true, shell: platform === "win32" });
-        } catch (err) {
-          return resolve({ ok: false, why: err.message });
-        }
-        running.set(agent, child);
-        const timer = setTimeout(() => child.kill(), timeoutMs);
-        timer.unref?.();
-        const done = () => (clearTimeout(timer), running.delete(agent));
-        child.on("exit", done);
-        child.on("error", (err) => (done(), resolve({ ok: false, why: err.code === "ENOENT" ? `${cmd[0]} isn't installed here` : err.message })));
-        child.on("spawn", () => {
-          child.stdin.on("error", () => {});
-          child.stdin.end(text);
-          resolve({ ok: true, where: `pid ${child.pid}` });
-        });
-      });
+      return runner.run({ key: agent, app: cmd[0], args: cmd[1], cwd, env: resumeEnv(env), text });
     },
   };
 }

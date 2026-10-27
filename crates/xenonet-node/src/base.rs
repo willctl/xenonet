@@ -419,6 +419,50 @@ pub fn bundled_codex_binaries(
     dirs::bundled_codex_binaries(&env_of(env), &platform, &home, &mut JsLook { exists, readdir, mtime: Some(mtime) })
 }
 
+#[napi(js_name = "bundledClaudeCode")]
+pub fn bundled_claude_code(
+    desktop: String,
+    platform: String,
+    exists: Function<'_, String, bool>,
+    readdir: Function<'_, String, Vec<String>>,
+    mtime: Function<'_, String, f64>,
+) -> Vec<String> {
+    dirs::bundled_claude_code(&desktop, &platform, &mut JsLook { exists, readdir, mtime: Some(mtime) })
+}
+
+/// What the environment says of the CLIs XenoNet runs (dirs::CliEnv), on
+/// which platform, from which home folder.
+#[napi(object)]
+pub struct JsCliEnv {
+    pub path: String,
+    pub pathext: Option<String>,
+    #[napi(js_name = "claudeBin")]
+    pub claude_bin: Option<String>,
+    #[napi(js_name = "codexBin")]
+    pub codex_bin: Option<String>,
+    pub dirs: DirsEnv,
+    pub platform: String,
+    pub home: String,
+}
+
+#[napi(js_name = "findCli")]
+pub fn find_cli(
+    app: String,
+    env: JsCliEnv,
+    exists: Function<'_, String, bool>,
+    readdir: Function<'_, String, Vec<String>>,
+    mtime: Function<'_, String, f64>,
+    can_run: Option<Function<'_, String, Unknown<'_>>>,
+) -> Option<String> {
+    let mut check = |file: &str| match &can_run {
+        Some(f) => f.call(file.to_string()).is_ok(),
+        None => paths::can_run(file),
+    };
+    let (platform, home) = (env.platform, env.home);
+    let env = dirs::CliEnv { path: env.path, pathext: env.pathext, claude_bin: env.claude_bin, codex_bin: env.codex_bin, dirs: env_of(env.dirs) };
+    dirs::find_cli(&app, &env, &platform, &home, &mut JsLook { exists, readdir, mtime: Some(mtime) }, &mut check)
+}
+
 // ----- the log -----
 
 use xenonet_base::log::{self as xlog, ErrInfo, Log};

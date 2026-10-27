@@ -20,6 +20,7 @@ pub mod observers;
 pub mod procs;
 pub mod registration;
 pub mod reports;
+pub mod runs;
 pub mod spend;
 pub mod store;
 pub mod tokens;
@@ -160,7 +161,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
             Some(state_dir.join("delivery.json").to_string_lossy().into_owned()),
             Some(state_dir.join("delivery-audit.jsonl").to_string_lossy().into_owned()),
         ),
-        router: delivery::RouterSide::new(config.demo, listen_file),
+        router: delivery::RouterSide::new(config.demo, listen_file, state_dir),
         channels: delivery::ChannelSide::default(),
         actors,
         registration,

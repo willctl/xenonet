@@ -288,8 +288,9 @@ const deliveryRouter = new DeliveryRouter({
   channels,
   opencode: createOpenCode(),
   tmux: createTmux(),
-  // Made-up sessions are never resumed.
-  resume: config.demo ? null : createResume({ settings: listenFile }),
+  // Made-up sessions are never resumed. The runs' logs and records go in
+  // the state folder.
+  resume: config.demo ? null : createResume({ settings: listenFile, dir: config.stateDir }),
   // A provider at 90% of its plan takes no wakes: from the live readings.
   usage: (app) => planUsage({ ...state.live?.limits, claude: state.live?.claudeLimits?.() ?? null }, app),
   notify: ({ agent, title, from }) => {
