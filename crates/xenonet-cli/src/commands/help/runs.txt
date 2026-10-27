@@ -1,0 +1,19 @@
+The Claude Code sign-in for the sessions XenoNet runs itself: the ones it
+starts (xenonet start, Start a session…) and the ones it resumes or forks
+to deliver a message at once. They run headless, so they can't sign in by
+themselves. When Claude Code's own sign-in has expired, or this machine
+has only Claude desktop's Claude Code, give XenoNet a long-lived token.
+
+  xenonet runs [status]   whether XenoNet's runs have a token, and where it's kept
+  xenonet runs sign-in    paste the token `claude setup-token` printed. It goes
+                          to your computer's credential store, and to XenoNet's
+                          runs alone, as CLAUDE_CODE_OAUTH_TOKEN; nothing shows
+                          it again
+  xenonet runs forget     takes it out of the credential store
+
+  claude setup-token
+  xenonet runs sign-in
+
+Signing in is yours: XenoNet refuses it from under an agent. A run that
+couldn't sign in ends saying so, and Needs you shows which machine needs
+it.

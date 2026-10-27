@@ -150,4 +150,17 @@ export function answerWords(state, host, a = {}) {
   return `[XenoNet] No session was started${on}: ${reason}.`;
 }
 
+// Where your computer's credential store keeps the long-lived Claude Code
+// token XenoNet's runs sign in with (claude setup-token's), which goes to
+// them alone as CLAUDE_CODE_OAUTH_TOKEN.
+export const SIGN_IN_TARGET = "XenoNet/Claude Code token for XenoNet's runs";
+
+// A token as you pasted it, trimmed: { ok, token } or { ok: false, why }.
+export function signInToken(pasted) {
+  const t = String(pasted ?? "").trim();
+  if (!t) return { ok: false, why: "paste the token claude setup-token printed" };
+  if (!t.startsWith("sk-ant-") || t.length < 20 || t.length > 400 || /[\s\x00-\x1f\x7f]/.test(t)) return { ok: false, why: "that isn't a Claude Code token: run claude setup-token, and paste the line it prints" };
+  return { ok: true, token: t };
+}
+
 export const signInWords = (host) => `Claude Code on ${host} needs a sign-in for XenoNet's runs: run xenonet runs sign-in there`;

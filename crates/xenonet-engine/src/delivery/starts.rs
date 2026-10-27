@@ -260,6 +260,24 @@ pub fn answer_words(state: &str, host: &str, a: &Value) -> String {
     }
 }
 
+/// Where your computer's credential store keeps the long-lived Claude Code
+/// token XenoNet's runs sign in with (`claude setup-token`'s), which goes
+/// to them alone as CLAUDE_CODE_OAUTH_TOKEN.
+pub const SIGN_IN_TARGET: &str = "XenoNet/Claude Code token for XenoNet's runs";
+
+/// A token as you pasted it, trimmed, or why it isn't one: what `claude
+/// setup-token` prints, one line with no spaces.
+pub fn sign_in_token(pasted: &str) -> Result<String, String> {
+    let t = pasted.trim();
+    if t.is_empty() {
+        return Err("paste the token claude setup-token printed".into());
+    }
+    if !t.starts_with("sk-ant-") || t.len() < 20 || t.len() > 400 || t.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("that isn't a Claude Code token: run claude setup-token, and paste the line it prints".into());
+    }
+    Ok(t.to_string())
+}
+
 /// Why a start that ended or was refused needs a sign-in, in words.
 pub fn sign_in_words(host: &str) -> String {
     format!("Claude Code on {host} needs a sign-in for XenoNet's runs: run xenonet runs sign-in there")
@@ -365,5 +383,14 @@ mod tests {
         let ended = json!({ "session": "claude:x", "exit": 0, "minutes": 4 });
         assert_eq!(answer_words("ended", "this machine", &ended), "[XenoNet] claude:x ended (exit 0) after 4 min.");
         assert_eq!(sign_in_words("neo-rex"), "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");
+    }
+
+    #[test]
+    fn a_sign_in_token_is_what_claude_setup_token_prints() {
+        let token = format!("sk-ant-oat01-{}", "a".repeat(80));
+        assert_eq!(sign_in_token(&format!("  {token}\n")), Ok(token.clone()));
+        assert_eq!(sign_in_token(""), Err("paste the token claude setup-token printed".into()));
+        assert!(sign_in_token("hunter2").is_err());
+        assert!(sign_in_token(&format!("{token} extra")).is_err(), "one line, no spaces");
     }
 }

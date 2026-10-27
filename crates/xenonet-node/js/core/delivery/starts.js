@@ -31,3 +31,7 @@ export const sessionOf = (app, log) => native.startsSessionOf(String(app), Strin
 export const answerWords = (state, host, a = {}) => native.startsAnswerWords(String(state), String(host), a ?? {});
 
 export const signInWords = (host) => native.startsSignInWords(String(host));
+
+export const SIGN_IN_TARGET = C.signInTarget;
+
+export const signInToken = (pasted) => native.startsSignInToken(String(pasted ?? ""));

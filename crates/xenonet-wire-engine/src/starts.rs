@@ -164,6 +164,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     if app == "claude" {
         env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
         env.push(("MCP_TOOL_TIMEOUT".into(), MCP_TOOL_TIMEOUT_MS.to_string()));
+        signed_env(w, &mut env);
     }
     let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text } };
     let pid = match run_turn(w, &resumes.runner, turn) {
@@ -187,6 +188,52 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     Ok(json!({ "session": session, "pid": pid, "folder": folder, "app": app }))
 }
 
+// ---------- signing in for unattended runs ----------
+
+fn secrets(w: &World) -> crate::wakes::Secrets {
+    crate::wakes::Secrets::new(w.setup.demo)
+}
+
+/// The long-lived Claude Code token XenoNet's runs sign in with, from your
+/// credential store: for its runs' environment alone, never logged or
+/// shown.
+pub fn run_token(w: &World) -> Option<String> {
+    secrets(w).call("get", &[Arg::text(starts::SIGN_IN_TARGET)]).ok().and_then(|v| v.as_str().map(str::to_string)).filter(|t| !t.is_empty())
+}
+
+/// The environment of a Claude Code run with XenoNet's sign-in, when you
+/// gave it one: CLAUDE_CODE_OAUTH_TOKEN.
+pub fn signed_env(w: &World, env: &mut Vec<(String, String)>) {
+    if let Some(t) = run_token(w) {
+        env.retain(|(k, _)| k != "CLAUDE_CODE_OAUTH_TOKEN");
+        env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t));
+    }
+}
+
+/// `xenonet runs sign-in` and its kin: `status` (whether a token is kept,
+/// and where), `sign-in` with the token you pasted, `forget`. The answer
+/// never carries the token.
+pub fn sign_in(w: &World, action: &str, pasted: &str) -> Result<Value, (u16, String)> {
+    let s = secrets(w);
+    let kind = s.kind();
+    match action {
+        "sign-in" => {
+            let token = starts::sign_in_token(pasted).map_err(|why| (400, why))?;
+            let comment = Arg::Obj(vec![("comment".into(), Arg::text("Claude Code's token for the sessions XenoNet runs, from claude setup-token"))]);
+            s.call("set", &[Arg::text(starts::SIGN_IN_TARGET), Arg::text(token), comment]).map_err(|t| (500, format!("your credential store didn't keep it: {}", t.message)))?;
+            w.log("info", "runs.sign-in", &format!("a Claude Code token for XenoNet's runs is kept in {kind}"));
+        }
+        "forget" => {
+            let _ = s.call("remove", &[Arg::text(starts::SIGN_IN_TARGET)]);
+            w.log("info", "runs.sign-in", "XenoNet forgot its runs' Claude Code token");
+        }
+        "status" => {}
+        other => return Err((400, format!("{other} isn't something xenonet runs does: status, sign-in or forget"))),
+    }
+    let kept = s.call("has", &[Arg::text(starts::SIGN_IN_TARGET)]).is_ok_and(|v| v.truthy());
+    Ok(json!({ "signedIn": kept, "store": kind }))
+}
+
 /// The forks XenoNet made, newest last: each copy and the session it was
 /// forked from, for the console to link them.
 pub fn forks(w: &World) -> Vec<(String, String)> {
@@ -203,9 +250,11 @@ pub fn prompt_file(w: &World, text: &str) -> Result<String, String> {
 
 /// After a resumed or forked turn starts: a fork's copy, once its stream
 /// names it, linked to the session it came from (the fork event); the
-/// prompt file taken away when the turn ends.
-pub fn after_resume(w: &World, runner: &Arc<Runner>, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
-    if fork_of.is_none() && prompt_file.is_none() {
+/// prompt file taken away when the turn ends; and a hint for you when
+/// Claude Code couldn't sign in for it.
+pub fn after_resume(w: &World, runner: &Arc<Runner>, app: &str, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
+    let claude = app == "claude";
+    if fork_of.is_none() && prompt_file.is_none() && !claude {
         return;
     }
     let Some(world) = w.arc() else { return };
@@ -231,6 +280,11 @@ pub fn after_resume(w: &World, runner: &Arc<Runner>, key: &str, pid: u32, fork_o
                 }
             }
             if rec.end.is_some() {
+                // A turn Claude Code couldn't sign in for: a hint for you.
+                let log = std::fs::read_to_string(logs.join(format!("{}.log", rec.id))).unwrap_or_default();
+                if claude && starts::signed_out(&log) {
+                    sign_in_hint(&world, &here_name(&world));
+                }
                 break;
             }
         }

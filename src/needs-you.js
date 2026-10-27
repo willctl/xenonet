@@ -76,7 +76,7 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
 
   function rowHtml(it, n) {
     const key = h(it.key);
-    const mark = it.kind === "question" || it.kind === "permission" ? `<i class="sw ${h(it.app ?? "")}"></i>` : `<span class="ny-mark" title="${it.kind === "actor" ? "An actor" : "A program"}">◇</span>`;
+    const mark = it.kind === "question" || it.kind === "permission" || it.kind === "ask" ? `<i class="sw ${h(it.app ?? (it.kind === "ask" ? "claude" : ""))}"></i>` : `<span class="ny-mark" title="${it.kind === "actor" ? "An actor" : "A program"}">◇</span>`;
     // Its machine: another's, or in network mode this one's, marked here.
     const session = it.kind === "question" || it.kind === "permission";
     const host = it.host ? `<span class="ny-host${it.stale ? " stale" : ""}">${it.stale ? `${h(it.host)} not live` : `on ${h(it.host)}`}</span>` : session && hereId() ? `<span class="ny-host here">on ${h(hereId())} · here</span>` : "";
@@ -97,8 +97,16 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
         lines = `<div class="ny-text">${h(asksFor(r, CAPABILITY_WORDS))}${product ? ` · ${product.slice(1)}` : ""}${r.joins ? ` · it joins ${h(r.actor)}, which XenoNet knows: ${h(JOINS_ALLOW)}` : ""}</div><div class="ny-asker">${asker(who)}</div>`;
       } else lines = `<div class="ny-text">${r.replaces ? "Allow makes a new token, and the old one stops working." : "Allow makes its token."} It shows in the Actors panel, masked. The session that asked never sees it.</div><div class="ny-asker">${asker(who)}</div>`;
       acts = btn(`data-ny-deny="${key}"`, "Deny", it.kind === "request" ? "Its token never works" : "Nothing is made, and the old token, if any, keeps working") + btn(`data-ny-allow="${key}"`, "Allow", it.kind === "request" ? "Its token starts working, and it joins the map" : "Makes the token and shows it masked in the Actors panel", { primary: true, yours: true });
+    } else if (it.kind === "ask") {
+      // A run XenoNet started asks to use a tool: what, and where, as its
+      // machine words it. Deny is safe; Allow waits a moment.
+      lines = `<div class="ny-text" title="${h(it.text ?? "")}"><code>${h(it.tool ?? "a tool")}</code> ${h(gist(it.text ?? ""))}</div><div class="ny-asker">${h([it.host ? `on ${it.host}` : "here", it.session, it.run ? `run ${it.run}` : null].filter(Boolean).join(" · "))}</div>`;
+      acts = btn(`data-ny-deny="${key}"`, "Deny", "It doesn't run, and the session hears why") + btn(`data-ny-allow="${key}"`, "Allow", "It runs this once", { primary: true, yours: true });
+    } else if (it.kind === "sign-in") {
+      lines = `<div class="ny-text">${h(it.text ?? "")}</div>`;
+      acts = btn(`data-ny-dismiss="${key}"`, "✓", "Dismiss");
     } else if (it.kind === "requests") lines = `<div class="ny-text">Allow or deny ${it.count === 1 ? "it" : "them"} in XenoNet's own window, the desktop app.</div>`;
-    return `<li class="ny-row ny-${h(it.kind)}" data-key="${key}"><span class="ny-n">${n}</span><div class="ny-main"><div class="ny-name">${mark}<span class="ny-title">${h(it.title)}</span><span class="ny-what">${h(waitsWords(it))}</span>${host}${when(it)}</div>${lines}</div><div class="ny-acts">${acts}</div></li>`;
+    return `<li class="ny-row ny-${h(it.kind)}" data-key="${key}"><span class="ny-n">${n}</span><div class="ny-main"><div class="ny-name">${mark}<span class="ny-title">${h(it.title)}</span><span class="ny-what">${h(it.kind === "ask" && it.tool ? `wants to run ${it.tool}` : waitsWords(it))}</span>${host}${when(it)}</div>${lines}</div><div class="ny-acts">${acts}</div></li>`;
   }
 
   const tpl = document.createElement("template");
@@ -191,11 +199,11 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
     if (action === "dismiss") {
       sfx("select");
       hide(key);
-      await ack([it.id]);
+      await ack([it.id], it);
       return { ok: true };
     }
     if (action === "message") return (message(it.id), { ok: true });
-    const res = await decide(it.id, action);
+    const res = await decide(it.id, action, it);
     return { ok: !!res?.ok, error: res?.error ?? null };
   }
 

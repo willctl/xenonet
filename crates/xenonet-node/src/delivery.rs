@@ -349,6 +349,7 @@ pub fn starts_constants() -> J {
         "perHour": starts::PER_HOUR,
         "perHostHour": starts::PER_HOST_HOUR,
         "freshMs": starts::FRESH_MS,
+        "signInTarget": starts::SIGN_IN_TARGET,
     }))
 }
 
@@ -416,6 +417,15 @@ pub fn starts_session_of(app: String, log: String) -> Option<String> {
 #[napi(js_name = "startsAnswerWords")]
 pub fn starts_answer_words(state: String, host: String, a: J) -> String {
     starts::answer_words(&state, &host, &a.0)
+}
+
+/// { ok: true, token } or { ok: false, why }.
+#[napi(js_name = "startsSignInToken")]
+pub fn starts_sign_in_token(pasted: String) -> J {
+    J(match starts::sign_in_token(&pasted) {
+        Ok(token) => j!({ "ok": true, "token": token }),
+        Err(why) => j!({ "ok": false, "why": why }),
+    })
 }
 
 #[napi(js_name = "startsSignInWords")]

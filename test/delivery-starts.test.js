@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, senderOf, ACTIONS } from "../core/delivery/reach.js";
-import { request, framed, command, admit, kept, folder, signedOut, sessionOf, answerWords, signInWords, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
+import { request, framed, command, admit, kept, folder, signedOut, sessionOf, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
 
 const ID = "0190d3e0-0000-7000-8000-00000000ab01";
 
@@ -113,4 +113,13 @@ test("the answers in words", () => {
   assert.equal(answerWords("refused", "neo-rex", { reason: "only you start sessions here" }), "[XenoNet] No session was started on neo-rex: only you start sessions here.");
   assert.equal(answerWords("ended", "this machine", { session: "claude:x", exit: 0, minutes: 4 }), "[XenoNet] claude:x ended (exit 0) after 4 min.");
   assert.equal(signInWords("neo-rex"), "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");
+});
+
+test("a sign-in for XenoNet's runs is what claude setup-token prints, kept under XenoNet's own name", () => {
+  const token = `sk-ant-oat01-${"a".repeat(80)}`;
+  assert.deepEqual(signInToken(`  ${token}\n`), { ok: true, token });
+  assert.deepEqual(signInToken(""), { ok: false, why: "paste the token claude setup-token printed" });
+  assert.equal(signInToken("hunter2").ok, false);
+  assert.equal(signInToken(`${token} extra`).ok, false, "one line, no spaces");
+  assert.equal(SIGN_IN_TARGET, "XenoNet/Claude Code token for XenoNet's runs");
 });

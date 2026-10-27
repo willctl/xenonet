@@ -364,7 +364,11 @@ impl RouterCalls<'_> {
             Err(why) => return no(why.into()),
             Ok(c) => c,
         };
-        let env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
+        let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
+        // Claude Code signs in with the token you gave XenoNet's runs.
+        if app == "claude" {
+            crate::starts::signed_env(self.w, &mut env);
+        }
         let parent = text(&agent);
         let key = if fork { format!("fork:{parent}") } else { parent.clone() };
         let cwd = text(&cwd);
@@ -386,7 +390,7 @@ impl RouterCalls<'_> {
         let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: input };
         match crate::starts::run_turn(self.w, &r.runner, turn) {
             Ok(pid) => {
-                crate::starts::after_resume(self.w, &r.runner, &key, pid, fork.then_some(parent.as_str()), prompt_file);
+                crate::starts::after_resume(self.w, &r.runner, &app, &key, pid, fork.then_some(parent.as_str()), prompt_file);
                 obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(if fork { format!("pid {pid}, a copy of the session") } else { format!("pid {pid}") }))])
             }
             Err(why) => {

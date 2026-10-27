@@ -572,6 +572,11 @@ impl Engine for EngineDriver {
         let out = tokio::task::spawn_blocking(move || crate::starts::ask(&w, by, &req, strong)).await.map_err(|e| CoreError::new(e.to_string()))?;
         out.map_err(|(status, why)| CoreError::status(status, why))
     }
+    async fn runs_sign_in(&self, action: &str, token: &str) -> R<Value> {
+        let (w, action, token) = (self.0.clone(), action.to_string(), token.to_string());
+        let out = tokio::task::spawn_blocking(move || crate::starts::sign_in(&w, &action, &token)).await.map_err(|e| CoreError::new(e.to_string()))?;
+        out.map_err(|(status, why)| CoreError::status(status, why))
+    }
     async fn forks(&self) -> R<Value> {
         Ok(serde_json::json!({ "forks": crate::starts::forks(&self.0).into_iter().map(|(child, parent)| serde_json::json!({ "child": child, "parent": parent })).collect::<Vec<_>>() }))
     }

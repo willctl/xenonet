@@ -503,10 +503,13 @@ const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
 // permission, the actors waiting on you and the registrations waiting.
+// Machines whose Claude Code needs a sign-in for XenoNet's runs (the
+// sign-in event), until you dismiss them.
+const signIns = new Map(); // host → { host, fix, since }
 function needsYouNow() {
   const view = actorRequests.view();
   const sessions = (lastLive?.sessions ?? []).filter((s) => s.needsYou && hud.index.has(s.id)).map((s) => ({ id: s.id, app: s.app, title: hud.index.get(s.id)?.title ?? s.id, kind: s.needsYou.kind, text: s.needsYou.text, since: s.needsYou.since, host: s.host ?? null, stale: !!s.stale }));
-  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting });
+  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting, hints: [...signIns.values()] });
 }
 // The Needs you panel (needs-you.js), which answers them: from the
 // palette, N, the strip's button and the tray's menu.
@@ -520,7 +523,8 @@ const needsYou = createNeedsYou({
   },
   select,
   openApp: openInApp,
-  ack,
+  // A sign-in hint goes when you dismiss it; a session's wait as the strip's ✓.
+  ack: (ids, it) => (it?.kind === "sign-in" ? void signIns.delete(it.id) : ack(ids)),
   message: (id) => messageTo(id),
   decide: decideRequest,
   armed: (id) => actorRequests.armed(id),
@@ -1288,6 +1292,16 @@ events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data))
 events.addEventListener("net", () => network.heard());
 // A session you started: started, refused or ended, here or on another
 // machine. A line in the feed, and a toast for what didn't go.
+// Claude Code on a machine needs a sign-in for XenoNet's runs: Needs you
+// says so, and a toast.
+events.addEventListener("sign-in", (e) => {
+  const s = JSON.parse(e.data);
+  if (typeof s.host !== "string") return;
+  const fresh = !signIns.has(s.host);
+  signIns.set(s.host, { host: s.host, fix: s.fix ?? s.words ?? "", since: signIns.get(s.host)?.since ?? (Number.isFinite(s.at) ? s.at : Date.now()) });
+  needsYou.refresh();
+  if (fresh) hud.toast(String(s.words ?? `Claude Code on ${s.host} needs a sign-in for XenoNet's runs`), true);
+});
 events.addEventListener("fork", (e) => {
   const f = JSON.parse(e.data);
   forks.set(f.child, f.parent);

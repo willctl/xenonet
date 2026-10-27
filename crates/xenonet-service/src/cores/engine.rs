@@ -86,6 +86,12 @@ pub trait Engine: Send + Sync {
     async fn start(&self, _by: Value, _req: Value, _strong: bool) -> R<Value> {
         pending(ENGINE)
     }
+    /// XenoNet's runs' Claude Code sign-in (`xenonet runs`): `action` is
+    /// status, sign-in (with the token you pasted) or forget. Never the
+    /// token back.
+    async fn runs_sign_in(&self, _action: &str, _token: &str) -> R<Value> {
+        pending(ENGINE)
+    }
     /// The copies of sessions XenoNet forked to answer messages, each with
     /// the session it came from: { forks: [{ child, parent }] }.
     async fn forks(&self) -> R<Value> {

@@ -52,14 +52,14 @@ impl Secrets {
         Secrets::System(SecretStore::new(crate::js::platform(), tool))
     }
 
-    fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             Secrets::System(s) => s.kind(),
             Secrets::Memory(_) => MemorySecrets::KIND,
         }
     }
 
-    fn call(&self, method: &str, args: &[Arg]) -> Result<Arg> {
+    pub(crate) fn call(&self, method: &str, args: &[Arg]) -> Result<Arg> {
         let t = text(&at(args, 0));
         let r: std::result::Result<Arg, String> = match self {
             Secrets::Memory(m) => {
