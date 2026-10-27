@@ -322,7 +322,8 @@ impl Router {
                 self.settle(c, &k)?;
             }
             let tried = self.attempt(c, &key, m);
-            if tried.is_ok() {
+            // A quiet note isn't one you're told about if no turn takes it.
+            if tried.is_ok() && !m.field("quiet").truthy() {
                 self.arm(c, &key)?;
             }
             self.with(&key, |r| r.attempting = false);
@@ -334,6 +335,13 @@ impl Router {
     }
 
     fn attempt(&self, c: &mut dyn Calls, key: &str, m: &Arg) -> Result<bool> {
+        // XenoNet's own word to whoever asked it something (a start's
+        // answer): it waits for the next turn, and never wakes a session.
+        if m.field("quiet").truthy() {
+            self.assign(c, key, vec![("state", Arg::text("next-turn")), ("how", Arg::text("hooks")), ("why", Arg::text("a note from XenoNet: it waits for the next turn"))])?;
+            Self::emit(c, key)?;
+            return Ok(false);
+        }
         let agent = self.field(key, "agent");
         let view = c.call("router.engine", "view", vec![agent.clone()]).unwrap_or(Arg::Null);
         let app = js_text(&agent).split(':').next().unwrap_or("").to_string();

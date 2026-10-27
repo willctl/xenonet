@@ -204,6 +204,19 @@ test("wake: network delivers at once: a session that ended is resumed without yo
   assert.equal(c.resumed.length, 0);
 });
 
+test("XenoNet's quiet notes (a start's started and ended) wait for the next turn even under wake: network, and nobody is told they did", async () => {
+  const w = world({ wake: "network" });
+  w.store.ended(B, w.t.now);
+  const notes = [];
+  w.router.notify = (n) => notes.push(n);
+  const [rec] = await w.router.route({ id: 77, from: B, to: [B], text: "Your session on desk started.", quiet: true });
+  assert.deepEqual([rec.state, rec.how], ["next-turn", "hooks"]);
+  await sleep(80);
+  assert.equal(w.resumed.length, 0, "not resumed for it");
+  assert.equal(rec.state, "next-turn", "no ack time: not notified");
+  assert.equal(notes.length, 0);
+});
+
 test("a copy forks only from a Claude Code session, with its whole context; Grok Build reads its turn from a file only you can read", async () => {
   assert.deepEqual(forkCommand(`claude:${ID}`, { settings: "/s/l.json" }), ["claude", ["-p", "--resume", ID, "--fork-session", "--output-format", "stream-json", "--verbose", "--settings", "/s/l.json"]]);
   assert.equal(forkCommand(`codex:${ID}`), null);

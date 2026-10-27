@@ -958,6 +958,8 @@ async fn as_agent(h: &Host, me: &str, method: &str, path: &str, body: Value) -> 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_receipts() {
+    // laptop's session, by an id Claude Code could resume or copy.
+    const ASKER: &str = "claude:0190d3e0-0000-7000-8000-00000000b001";
     let root = std::env::temp_dir().join(format!("xenonet-net-starts-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
@@ -966,12 +968,13 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
         std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
     }
     let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
-    let (a, b, c) = three(
-        &root,
-        48121,
-        [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![sess(L1, "Fix the login form", &at("laptop"))], vec![sess(D1, "Ledger fixtures", &at("desk"))]],
-    )
-    .await;
+    // laptop's session is idle in its app, which a wake under wake: network
+    // would answer with a copy.
+    let mut idle = sess(ASKER, "Fix the login form", &at("laptop"));
+    idle.live = json!({ "status": "idle", "lastEventAt": now_ms() - 200e3 });
+    let (a, b, c) = three(&root, 48121, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
+    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
+    assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
     until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
     until("laptop's reach at desk", 10, || async { row_of(&c.state().await, "laptop")["can"] == json!(["start", "answer"]) }).await;
     let mut studio = Stream::of(&a);
@@ -1005,34 +1008,34 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
         let engine = h.ctx.cores.engine.clone();
         async move { texts(&engine.inbox(me, Duration::ZERO).await.unwrap()) }
     };
-    let (s, v) = as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures." })).await;
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures." })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let got =
-        until_value("laptop's session hears desk refused", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) })
+        until_value("laptop's session hears desk refused", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) })
             .await;
     assert_eq!(got, "[XenoNet] No session was started on desk: only you start sessions here: its start setting is you.");
     // …and started once the founder lets the network start sessions there.
     a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
     until("desk's start is network", 10, || async { c.state().await["start"] == "network" }).await;
-    as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
     let got =
-        until_value("laptop's session hears desk started it", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("Started grok:")).map(Value::String) }).await;
+        until_value("laptop's session hears desk started it", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("Started grok:")).map(Value::String) }).await;
     assert!(got.as_str().unwrap().ends_with("on desk, in ~. Message it as you would any session."), "{got}");
     let (args, prompt) = ran(&c, 2).await;
     assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]) && args.contains(&"--prompt-file".to_string()), "{args:?}");
     assert_eq!(
         prompt,
-        format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{L1}). It came from an agent, not from your user.\n\nRun the fixtures.")
+        format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). It came from an agent, not from your user.\n\nRun the fixtures.")
     );
-    until_value("laptop's session hears the run ended", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains(" ended (exit 0)")).map(Value::String) }).await;
+    until_value("laptop's session hears the run ended", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains(" ended (exit 0)")).map(Value::String) }).await;
     // Bypassing permission checks is never taken.
-    let (s, v) = as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "x", "mode": "bypassPermissions" })).await;
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "x", "mode": "bypassPermissions" })).await;
     assert_eq!((s, v["error"].clone()), (400, json!("XenoNet never starts a session that bypasses its permission checks")), "{v}");
 
     // A run Claude Code can't sign in for ends saying so, with a hint.
     let mut hints = Stream::of(&b);
-    as_agent(&b, L1, "POST", "/api/start", json!({ "machine": "desk", "prompt": "signed-out, please" })).await;
-    let got = until_value("the sign-in answer", 15, || async { inbox(&b, L1).await.into_iter().find(|t| t.contains("needs a sign-in")).map(Value::String) }).await;
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "signed-out, please" })).await;
+    let got = until_value("the sign-in answer", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("needs a sign-in")).map(Value::String) }).await;
     assert!(
         got.as_str().unwrap().contains("ended (exit 1)")
             && got.as_str().unwrap().contains("Claude Code on desk needs a sign-in for XenoNet's runs: run xenonet runs sign-in there"),
@@ -1040,6 +1043,9 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     );
     let hint = hints.next("sign-in", 5, |_| true).await;
     assert_eq!(hint["words"], "Claude Code on desk needs a sign-in for XenoNet's runs", "{hint}");
+    // XenoNet's answers to laptop's session waited for its next turn: none
+    // of them woke it, though laptop's wake is network.
+    assert_eq!(fake_runs(&b).len(), 0, "{:?}", fake_runs(&b));
 
     // An older XenoNet refuses the target as an id it doesn't have: that
     // reads as too old.

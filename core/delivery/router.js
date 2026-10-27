@@ -124,13 +124,21 @@ export class DeliveryRouter extends EventEmitter {
       this.records.set(`${m.id}|${agent}`, rec);
       while (this.records.size > KEEP) this.records.delete(this.records.keys().next().value);
       await this.#attempt(rec, m);
-      this.#arm(rec, m);
+      // A quiet note isn't one you're told about if no turn takes it.
+      if (!m.quiet) this.#arm(rec, m);
       out.push(rec);
     }
     return out;
   }
 
   async #attempt(rec, m) {
+    // XenoNet's own word to whoever asked it something (a start's answer):
+    // it waits for the next turn, and never wakes a session.
+    if (m.quiet) {
+      Object.assign(rec, { state: "next-turn", how: "hooks", why: "a note from XenoNet: it waits for the next turn" });
+      this.emit("delivery", { ...rec });
+      return false;
+    }
     const view = await this.engine.view(rec.agent).catch(() => null);
     const app = rec.agent.split(":")[0];
     const idle = !view || view.status === "idle" || view.status === "ended";

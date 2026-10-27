@@ -19,7 +19,7 @@
 //! answer to one is let go.
 
 use crate::js::{now_ms, Locked};
-use crate::network::{clip, ms, net, note, send, sender_kind};
+use crate::network::{clip, ms, net, quiet_note, send, sender_kind};
 use crate::runs::{Runner, Turn};
 use crate::world::World;
 use serde_json::{json, Value};
@@ -385,8 +385,9 @@ pub fn tell(w: &World, by: &Value, host: &str, state: &str, a: &Value) {
         w.emit(From::Engine, "start", ev);
         return;
     }
+    // To the session that asked: for its next turn, never a wake of its own.
     if let Some(id) = s(by, "id") {
-        note(w, &id, &id, &words, None);
+        quiet_note(w, &id, &id, &words);
     }
 }
 

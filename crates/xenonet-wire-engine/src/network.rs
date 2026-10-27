@@ -1297,6 +1297,17 @@ fn body_of(r: &Row, op: &str, by: Option<&str>) -> Value {
 /// A note to a session here from XenoNet's network, as a message from
 /// `sender` (the handoff's maker, or the session that took it).
 pub(crate) fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) {
+    note_with(w, sender, target, words, host, false);
+}
+
+/// A note that waits for the session's next turn, and never wakes it: a
+/// start's started and ended, which a wake under `wake: network` would
+/// otherwise turn into a turn of their own.
+pub(crate) fn quiet_note(w: &World, sender: &str, target: &str, words: &str) {
+    note_with(w, sender, target, words, None, true);
+}
+
+fn note_with(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>, quiet: bool) {
     let mut env = Value::Null;
     if let Some(h) = host {
         if let Ok(mid) = new_id("msg") {
@@ -1320,6 +1331,9 @@ pub(crate) fn note(w: &World, sender: &str, target: &str, words: &str, host: Opt
         obj(vec![("id", Arg::Num(id)), ("from", Arg::text(sender)), ("to", Arg::List(vec![t.clone()])), ("target", t), ("text", Arg::text(words)), ("ts", Arg::Num(now))]);
     if !env.is_null() {
         push(&mut event, "verified", arg(&env["line"]));
+    }
+    if quiet {
+        push(&mut event, "quiet", Arg::Bool(true));
     }
     told(w, "message", &event);
 }
