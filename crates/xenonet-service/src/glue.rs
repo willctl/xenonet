@@ -70,6 +70,15 @@ pub fn event(ctx: &Arc<Ctx>, from: From, name: &str, data: Value) {
         // What another host said of a message sent there: stored, held,
         // delivered, seen or refused.
         (From::Engine, "receipt") => ctx.broadcast("message-receipt", &data),
+        // A start you asked for: started, refused, or ended.
+        (From::Engine, "start") => ctx.broadcast("start", &data),
+        // Claude Code on a machine needs a sign-in for XenoNet's runs.
+        (From::Engine, "sign-in") => {
+            ctx.broadcast("sign-in", &data);
+            if !ctx.config.demo {
+                ctx.notify_desktop(json!({ "type": "notify", "key": format!("sign-in:{}", js(&data["host"])), "title": js(&data["words"]), "body": js(&data["fix"]) }));
+            }
+        }
         (From::Delivery, "delivery") => ctx.broadcast("delivery", &data),
         (From::Delivery, "error") => eprintln!("[xenonet] delivery: {}", xenonet_base::text::js_string(&data["message"])),
         // A message for an actor nothing can wake: a notification for you.

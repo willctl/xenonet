@@ -58,7 +58,7 @@ const SEED_MS = 6 * 3600e3;
 // `actorBeams(id)` the nodes it beams into (see actors.js).
 // `onRename(id, title)` saves a session's new name and answers { ok, title,
 // error }; without it, sessions can't be renamed here.
-export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, onMessageSession = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
+export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPreview, onStats, onReset, onHandoff, onTerminal, onAck, onOpenApp, onOpened = null, onRename = null, onMessageActor = null, onMessageSession = null, onStartSession = null, identities = null, actorOf = () => null, actorBeams = () => [], sfx = () => {}, mcp = null }) {
   const filters = { claude: true, codex: true, grok: true, archived: true, external: true };
   let data = null;
   let index = new Map();
@@ -198,9 +198,22 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     }
   });
 
+  // XenoNet's own word for something you asked for ({ kind: "xenonet",
+  // title, detail, ts }): a session you started, here or on another
+  // machine, and how it ended.
+  function xenonetItem(ev) {
+    const li = document.createElement("li");
+    li.className = "ev xenonet";
+    li.dataset.ts = ev.ts;
+    li.style.setProperty("--c", ev.bad ? colorVar("danger") : "var(--accent)");
+    li.innerHTML = `<span class="ev-glyph">▸</span><span class="ev-body"><span class="ev-title">${h(ev.title ?? "XenoNet")}</span><span class="ev-detail">${h(ev.detail ?? "")}</span></span><span class="feed-time">${timeAgo(ev.ts)}</span>`;
+    return li;
+  }
+
   function feedItem(ev) {
     if (ev.actor) return actorItem(ev);
     if (ev.kind === "identity") return identityItem(ev);
+    if (ev.kind === "xenonet") return xenonetItem(ev);
     const n = index.get(ev.sessionId);
     if (!n) return null;
     const key = ev.kind === "tool" ? ev.category : ev.kind;
@@ -571,7 +584,9 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     // A session of this machine's takes a message from you, from here, and
     // so does one on another machine in your network.
     const canMessage = onMessageSession && isSession && (!node.host || node.network);
-    const actions = [...(node.actions ?? []), ...(canMessage ? [{ id: "message", label: "✉ Message", client: true }] : []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : [])]
+    // Another machine in your network starts a session from its node.
+    const canStart = onStartSession && node.kind === "host" && node.network;
+    const actions = [...(node.actions ?? []), ...(canMessage ? [{ id: "message", label: "✉ Message", client: true }] : []), ...(canTerminal ? [{ id: "terminal", label: "›_ Open terminal here", client: true }] : []), ...(canStart ? [{ id: "start-session", label: "▸ Start a session…", client: true }] : [])]
       .map((a, i) => `<button class="act ${i === 0 && isSession ? `primary ${h(node.app)}` : ""}" data-action="${h(a.id)}">${h(a.label)}</button>`)
       .join("");
 
@@ -624,6 +639,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     if (action === "handoff") return onHandoff?.(node);
     if (action === "terminal") return onTerminal?.(node);
     if (action === "message") return onMessageSession?.(node);
+    if (action === "start-session") return onStartSession?.(node);
     try {
       const res = await fetch("/api/open", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodeId: node.id, action }) });
       const body = await res.json();

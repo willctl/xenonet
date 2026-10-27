@@ -463,6 +463,10 @@
       "rust": "crates/xenonet-engine/src/delivery/setup.rs",
       "differences": []
     },
+    "core/delivery/starts.js": {
+      "rust": "crates/xenonet-engine/src/delivery/starts.rs",
+      "differences": []
+    },
     "core/delivery/tmux.js": {
       "rust": "crates/xenonet-engine/src/delivery/tmux.rs",
       "differences": []
@@ -1343,6 +1347,7 @@
     "test/delivery-routes.test.js",
     "test/delivery-runs.test.js",
     "test/delivery-scopes.test.js",
+    "test/delivery-starts.test.js",
     "test/delivery-wake.test.js",
     "test/demo-root.test.js",
     "test/digest.test.js",

@@ -161,6 +161,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             Ok(Some(Reply::json(200, state)))
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
+        ("POST", "/api/start") => start(ctx, req).await,
         // This machine's own reading, and a made-up one for each other host
         // the simulation has: one that's away has its last, from when it
         // was last heard from.
@@ -752,6 +753,56 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
         }
         _ => fail(404, "not-found", "not found"),
     }
+}
+
+/// A start on a made-up machine, from the window, answered as the real
+/// one would be: refused at once when the machine is away or its XenoNet
+/// too old (rack's), else sent; then, as the start event, started a
+/// moment later and ended a few seconds after. A start here, or anything
+/// that isn't the window's, goes on to the real route, with its body put
+/// back.
+async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError> {
+    let bytes = req.bytes(64 << 10).await?;
+    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let machine = body.get("machine").and_then(Value::as_str).unwrap_or("").to_string();
+    let Some(state) = simulated_net_state(ctx) else { return Ok(None) };
+    let row = state["hosts"].as_array().and_then(|l| l.iter().find(|h| h["id"] == machine.as_str() && h["self"] != true).cloned());
+    let Some(row) = row.filter(|_| !machine.is_empty() && state["self"]["id"] != machine.as_str()) else {
+        req.body = Body::Bytes(bytes);
+        return Ok(None);
+    };
+    if let Some(why) = ctx.from_window(req).await {
+        return Ok(Some(Reply::coded(403, "yours", why)));
+    }
+    let prompt = body.get("prompt").and_then(Value::as_str).map_or("", str::trim);
+    if prompt.is_empty() {
+        return Ok(Some(Reply::coded(400, "bad-request", "say what the new session should do: a prompt")));
+    }
+    if row["online"] != true {
+        return Ok(Some(Reply::coded(409, "refused", format!("{machine} is offline, so nothing was started: a start is never kept for later"))));
+    }
+    if !row["can"].as_array().is_some_and(|c| c.iter().any(|x| x == "start")) {
+        return Ok(Some(Reply::coded(409, "refused", format!("{machine}'s XenoNet is too old to start sessions: update it there"))));
+    }
+    let app = body.get("app").and_then(Value::as_str).filter(|a| ["claude", "codex", "grok"].contains(a)).unwrap_or("claude").to_string();
+    let folder = body.get("folder").and_then(Value::as_str).filter(|f| !f.is_empty()).unwrap_or("~").to_string();
+    let request = format!("msg_{}", random_uuid());
+    let session = (app != "codex").then(|| format!("{app}:{}", random_uuid()));
+    {
+        let c = ctx.clone();
+        let (machine, folder, session) = (machine.clone(), folder.clone(), session.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            let started = json!({ "session": session, "folder": folder });
+            let words = xenonet_engine::delivery::starts::answer_words("started", &machine, &started);
+            c.broadcast("start", &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }));
+            tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
+            let ended = json!({ "session": session, "exit": 0, "minutes": 0 });
+            let words = xenonet_engine::delivery::starts::answer_words("ended", &machine, &ended);
+            c.broadcast("start", &json!({ "state": "ended", "host": machine, "session": session, "exit": 0, "minutes": 0, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }));
+        });
+    }
+    Ok(Some(Reply::json(200, json!({ "request": request, "host": machine, "state": "sent", "way": format!("sent to {machine}: the answer comes as a message, started or refused, and again when the session ends"), "simulated": true }))))
 }
 
 /// Who may start and wake sessions, set in the simulated state: this

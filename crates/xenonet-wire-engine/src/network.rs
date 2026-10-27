@@ -188,11 +188,11 @@ impl Sink for EngineSink {
     }
 }
 
-fn net(w: &World) -> Arc<dyn Net> {
+pub(crate) fn net(w: &World) -> Arc<dyn Net> {
     w.engine.net.get()
 }
 
-fn send(w: &World, to: To, kind: Kind, body: Value) {
+pub(crate) fn send(w: &World, to: To, kind: Kind, body: Value) {
     if let Err(e) = net(w).send(Outgoing { to, kind, body }) {
         w.log("warn", "net.send", &format!("a {} for the network wasn't queued: {e}", kind.as_str()));
     }
@@ -211,7 +211,7 @@ fn n(v: &Value, k: &str) -> Option<f64> {
 }
 
 /// At most `max` characters, as a schema's limit asks.
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
@@ -219,7 +219,7 @@ fn opt(v: Option<String>, max: usize) -> Value {
     v.map_or(Value::Null, |s| Value::String(clip(&s, max)))
 }
 
-fn ms(x: f64) -> Value {
+pub(crate) fn ms(x: f64) -> Value {
     if x.is_finite() && x >= 0.0 {
         json!(x.round() as i64)
     } else {
@@ -273,12 +273,12 @@ pub fn receive(w: &World, incoming: Incoming) {
     if net(w).me().is_none() {
         return;
     }
-    let Incoming { from, kind, body, from_window_host, .. } = incoming;
+    let Incoming { from, kind, body, from_window_host, at } = incoming;
     let _one = w.net.taking.locked();
     let done = match kind {
         Kind::Presence => presence_in(w, &from, &body),
         Kind::Claims => claims_in(w, &from, &body),
-        Kind::Message => message_in(w, &from, &body, from_window_host),
+        Kind::Message => message_in(w, &from, &body, from_window_host, at),
         Kind::Receipt => receipt_in(w, &from, &body),
         Kind::Handoff => handoff_in(w, &from, &body),
         // The person's actions from another console are the network's
@@ -604,7 +604,7 @@ fn stub(id: &str) -> Value {
 
 // ---------- messages out ----------
 
-fn sender_kind(me: &str) -> &'static str {
+pub(crate) fn sender_kind(me: &str) -> &'static str {
     if me == YOU {
         "you"
     } else if parse_actor_id(me).is_some() {
@@ -714,7 +714,7 @@ fn envelope(from: &str, mid: &str, at: f64, sender: &str, kind: &str, name: Opti
     })
 }
 
-fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()> {
+fn message_in(w: &World, from: &str, b: &Value, window_host: bool, at: f64) -> Result<()> {
     let (Some(mid), Some(sender), Some(kind), Some(target), Some(body)) = (s(b, "mid"), s(b, "sender"), s(b, "senderKind"), s(b, "target"), s(b, "body")) else {
         return Err(Thrown::new("a message without its mid, sender, target or body"));
     };
@@ -725,6 +725,13 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
     };
     if !mid.starts_with("msg_") || !sender_ok || body.is_empty() || body.chars().count() > 16000 {
         return Err(Thrown::new("a message that isn't network/message/v1"));
+    }
+    // A start request: the starts' own (starts.rs), answered by receipts
+    // keyed by its mid. An older XenoNet refuses the target below.
+    if target == xenonet_engine::delivery::starts::TARGET {
+        let strong = b.get("auth").and_then(|a| a.get("strength")).and_then(Value::as_str) == Some("strong");
+        crate::starts::start_in(w, from, &mid, &kind, &sender, &body, strong, window_host, at);
+        return Ok(());
     }
     let t = Arg::text(target.clone());
     if !(is_agent_id(&t) || is_actor_agent(&t)) {
@@ -865,6 +872,10 @@ fn receipt_in(w: &World, from: &str, b: &Value) -> Result<()> {
     let (Some(mid), Some(agent), Some(state)) = (s(b, "mid"), s(b, "agent"), s(b, "state")) else {
         return Err(Thrown::new("a receipt without its mid, agent or state"));
     };
+    // An answer to a start request sent from here.
+    if crate::starts::answer_in(w, from, &mid, b) {
+        return Ok(());
+    }
     let Some(m) = store(w, |s| s.message_by_mid(&mid, None))? else { return Ok(()) };
     let id = m.num("id").unwrap_or(f64::NAN);
     let who = format!("@{from}:{agent}");
@@ -1273,7 +1284,7 @@ fn body_of(r: &Row, op: &str, by: Option<&str>) -> Value {
 
 /// A note to a session here from XenoNet's network, as a message from
 /// `sender` (the handoff's maker, or the session that took it).
-fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) {
+pub(crate) fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) {
     let mut env = Value::Null;
     if let Some(h) = host {
         if let Ok(mid) = new_id("msg") {

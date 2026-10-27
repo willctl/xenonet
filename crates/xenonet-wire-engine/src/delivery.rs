@@ -270,7 +270,7 @@ impl Channels for ChannelsDriver {
 /// Claude Code turn listens with.
 pub struct Resumes {
     pub runner: std::sync::Arc<Runner>,
-    settings: Option<String>,
+    pub settings: Option<String>,
 }
 
 /// The router's records as JS objects, which route() and list() give and
@@ -287,7 +287,7 @@ pub struct RouterSide {
     timers: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     opencode: OpenCode,
     tmux: Tmux,
-    resume: Option<Resumes>,
+    pub resume: Option<Resumes>,
 }
 
 impl RouterSide {
@@ -364,7 +364,7 @@ impl RouterCalls<'_> {
         let (key, cwd) = (text(&agent), text(&cwd));
         let args: Vec<String> = args.iter().map(text).collect();
         let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: text(&o.field("text")) };
-        match r.runner.run(turn, &self.w.setup.home) {
+        match crate::starts::run_turn(self.w, &r.runner, turn) {
             Ok(pid) => obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(format!("pid {pid}")))]),
             Err(why) => no(why),
         }

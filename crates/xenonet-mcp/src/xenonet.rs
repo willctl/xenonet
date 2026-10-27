@@ -257,9 +257,15 @@ impl Context {
         (cwd, js::number(pid))
     }
 
-    async fn call(&self, op: &str, meta: &Value, mut body: Map<String, Value>) -> Result<String, String> {
+    async fn call(&self, op: &str, meta: &Value, body: Map<String, Value>) -> Result<String, String> {
+        self.call_route(&format!("/api/engine/{op}"), meta, body).await
+    }
+
+    /// A call to one of XenoNet's routes, as the session or the actor
+    /// calling.
+    async fn call_route(&self, route: &str, meta: &Value, mut body: Map<String, Value>) -> Result<String, String> {
         let me = self.caller(meta).ok_or(NO_SESSION)?;
-        let route = format!("/api/engine/{op}");
+        let route = route.to_string();
         let Caller::Agent(id) = me else {
             return self.as_actor("POST", &route, Some(&Value::Object(body))).await.map(|v| js::stringify(&v, 1));
         };
@@ -377,6 +383,8 @@ fn encode_uri_component(s: &str) -> String {
     out
 }
 
+const START_SESSION: &str = "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once; whether the session started, and later how it ended, come to you as messages. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.";
+
 const HANDOFF: &str = "Leaves work for another session to pick up where you left off, on this machine or another one in your XenoNet network: the goal, what's done, what's next, the files, and the branch and commit. It goes as a message to the sessions at work in clones of this repo now (or to the session you name in to), and the next session that starts in one is offered it. The first session to accept it gets it, and one no one takes lapses after a week. With accept, takes one you were offered. With nothing else, lists the handoffs open to you and the ones you made.";
 
 fn scope_arg() -> Z {
@@ -440,6 +448,13 @@ fn defs(actor: bool) -> Vec<Def> {
             ("files", array(string()).max(200.0).optional()),
             ("branch", string().optional().describe("The branch to pick up on; yours when left out.")),
             ("commit", string().optional().describe("The commit to start from, by its hash.")),
+        ]), &write),
+        def("start_session", "Start a session", START_SESSION, object(vec![
+            ("machine", string().optional().describe("Another machine in your XenoNet network, by its id; this one when left out.")),
+            ("folder", string().optional().describe("A project or folder on that machine's map, by its id (project:…) or path, or ~, the default.")),
+            ("app", enumeration(&["claude", "codex", "grok"]).optional().describe("claude (Claude Code, the default), codex or grok (Grok Build).")),
+            ("prompt", string().describe("What the new session should do: its first prompt.")),
+            ("mode", enumeration(&["manual", "plan", "acceptEdits", "auto", "dontAsk"]).optional().describe("A permission mode; manual, the default, is your user's own settings. Codex takes none.")),
         ]), &write),
         def("doctor", "Check XenoNet's setup", "Whether what XenoNet needs is in place on this machine: XenoNet itself, Claude Code, Codex and Grok Build installed and signed in, the folders XenoNet reads, git, and whether Claude Code, Codex and Grok Build are connected. Lists only what isn't fine, each with a fix for your user. Use it when XenoNet's other tools fail.", object(vec![]), &read),
     ];
@@ -533,6 +548,7 @@ impl ServerHandler for Sessions {
                 ];
                 ctx.call("handoff", &meta, body(&keys)).await
             }
+            "start_session" => ctx.call_route("/api/start", &meta, body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode")])).await,
             "doctor" => ctx.doctor().await,
             "ask_gateway_token" => ctx.ask_gateway_token(&meta, a["actor"].as_str().unwrap_or_default()).await,
             "actor_heartbeat" => {

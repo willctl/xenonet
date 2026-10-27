@@ -388,6 +388,8 @@ const hud = createHud({
   onMessageActor: (id) => messageTo(id),
   // And to a session, from its own panel.
   onMessageSession: (node) => messageTo(node.id),
+  // Another machine's node: Start a session there.
+  onStartSession: (node) => network.startSession({ host: node.host }),
   identities,
   actorOf: (id) => scene.actor(id),
   actorBeams: (id) => scene.actorLayer.targetsOf(id),
@@ -488,13 +490,15 @@ const network = createNetwork({
   // The gateway's tunnel or LAN address is set where the actor gateway's
   // is, in the Actors panel.
   gateway: () => openActors(),
+  // This machine's projects and folders on the map, for Start a session.
+  projects: () => [...fullIndex.values()].filter((n) => !n.host && (n.kind === "project" || n.kind === "zone") && n.path).map((n) => ({ id: n.id, name: n.name, path: n.path })),
 });
 // What waits on you sounds only where you are, in a network: one rule for
 // this machine's waits and the others'.
 alerts.setChime(() => chimeHere(network.state));
 // The load panel's larger view: each machine's load, parts and sessions.
 // Its machine chips are the Filters chips.
-const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph: () => fullGraph, net: () => network.state });
+const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph: () => fullGraph, net: () => network.state, onStart: (host) => network.startSession({ host }) });
 
 // Everything waiting on you, the longest wait first (core/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
@@ -1265,6 +1269,16 @@ events.addEventListener("doctor", (e) => alerts.setDoctor(JSON.parse(e.data)));
 events.addEventListener("hosts", (e) => hostFilters.setHosts(JSON.parse(e.data)));
 // The network across machines changed: read it again (network.js).
 events.addEventListener("net", () => network.heard());
+// A session you started: started, refused or ended, here or on another
+// machine. A line in the feed, and a toast for what didn't go.
+events.addEventListener("start", (e) => {
+  const s = JSON.parse(e.data);
+  const bad = s.state === "refused" || (s.state === "ended" && s.exit !== 0);
+  const words = String(s.words ?? "").replace(/^\[XenoNet\] /, "");
+  hud.activity({ kind: "xenonet", title: s.host && s.host !== "this machine" ? `Start on ${s.host}` : "Start", detail: words, bad, ts: Number.isFinite(s.at) ? s.at : Date.now() });
+  if (s.state !== "ended" || bad) hud.toast(words, bad);
+  network.heardStart?.(s);
+});
 // The theme (core/themes.js): the server's choice wins, and a change to it
 // (from the palette, another window, xenonet theme or an edit to a theme of
 // your own) is drawn in place, without a reload.

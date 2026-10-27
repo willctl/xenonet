@@ -35,6 +35,7 @@ pub mod service;
 pub mod session;
 pub mod setup;
 pub mod spend;
+pub mod start;
 pub mod status;
 pub mod svc;
 pub mod theme;
@@ -97,6 +98,7 @@ pub const COMMANDS: &[Command] = &[
         Some("[create|join|status|hosts|add-machine|remove|leave|set|approve|gateway]"),
     ),
     cmd("svc", "Publish a local HTTP service to the network, for programs on its other machines", Some("[publish|unpublish|list]")),
+    cmd("start", "Start a session here or on another machine, with a first prompt", Some("[--on <machine>] \"<prompt>\"")),
     cmd("hosts", "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", Some("[self|add|remove|test]")),
     cmd("search", "Search every {apps lines} transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),
@@ -165,6 +167,7 @@ fn text(name: &str) -> &'static str {
         "spend" => spend::HELP,
         "status" => status::HELP,
         "svc" => svc::HELP,
+        "start" => start::HELP,
         "theme" => theme::HELP,
         "uninstall" => uninstall::HELP,
         "update" => update::HELP,
@@ -208,6 +211,7 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "spend" => spend::run(args, flags),
         "status" => status::run(args, flags),
         "svc" => svc::run(args, flags),
+        "start" => start::run(args, flags),
         "theme" => theme::run(args, flags),
         "uninstall" => uninstall::run(args, flags),
         "update" => update::run(args, flags),

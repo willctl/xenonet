@@ -567,6 +567,11 @@ impl Engine for EngineDriver {
         let envelope = extra.as_ref().and_then(|e| e.get("envelope")).cloned().unwrap_or(Value::Null);
         self.run(None, move |w, c| crate::network::handoff(w, c, &me, &args, &envelope)).await
     }
+    async fn start(&self, by: Value, req: Value, strong: bool) -> R<Value> {
+        let w = self.0.clone();
+        let out = tokio::task::spawn_blocking(move || crate::starts::ask(&w, by, &req, strong)).await.map_err(|e| CoreError::new(e.to_string()))?;
+        out.map_err(|(status, why)| CoreError::status(status, why))
+    }
     fn mark_unseen(&self, me: &str, ids: &Value) -> R<()> {
         crate::store::call(&self.0.store, "markUnseen", &[Arg::text(me), crate::js::arg(ids)]).map(|_| ()).map_err(|t| CoreError::new(t.message))
     }

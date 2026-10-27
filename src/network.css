@@ -77,6 +77,8 @@ p.net-warn {
 .net .net-seg-k { min-width: 140px; font-size: 13px; color: var(--text); }
 .net .net-seg .act { padding: 3px 9px; font-size: 12px; }
 .net .net-seg .act.on { border-color: var(--accent); color: var(--accent); background: rgb(var(--accent-rgb) / 0.14); }
-.net .net-reach .net-seg { margin: 4px 0 0; }
-.net .net-reach .net-seg-k { min-width: 120px; font-size: 11px; color: var(--muted); }
+.net .net-reach { grid-column: 2 / -1; display: flex; flex-wrap: wrap; column-gap: 18px; }
+.net .net-reach .net-seg { margin: 2px 0 0; }
+.net .net-reach > .ac-via { flex-basis: 100%; }
+.net .net-reach .net-seg-k { min-width: 0; margin-right: 4px; font-size: 11px; color: var(--muted); }
 .net .net-reach .net-seg .act { padding: 1px 7px; font-size: 11px; }

@@ -235,6 +235,18 @@ impl Runner {
         started
     }
 
+    /// One turn of `program`, given rather than found: XENONET_RUNS_BIN's,
+    /// which stands in for every app's CLI in the tests.
+    pub fn run_program(self: &Arc<Self>, t: Turn<'_>, program: &str) -> Result<u32, String> {
+        self.admit(t.key)?;
+        let key = t.key.to_string();
+        let started = self.start(t, program);
+        if started.is_err() {
+            self.release(&key);
+        }
+        started
+    }
+
     /// One turn of `program`, once `admit` let it start.
     fn start(self: &Arc<Self>, t: Turn<'_>, program: &str) -> Result<u32, String> {
         let Turn { key, app, args, cwd, env, text } = t;

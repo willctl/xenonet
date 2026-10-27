@@ -11,5 +11,6 @@ pub mod router;
 pub mod runs;
 pub mod selector;
 pub mod setup;
+pub mod starts;
 pub mod tmux;
 pub mod usage;

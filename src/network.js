@@ -28,10 +28,24 @@
 // own never sees any of this outside this panel and Add a machine.
 import { escapeHtml as h } from "./format.js";
 import { hostOfId } from "./hosts.js";
+import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
+// What a session starts as, in the Start a session box.
+const START_APPS = [
+  ["claude", "Claude Code"],
+  ["codex", "Codex"],
+  ["grok", "Grok Build"],
+];
+const START_MODES = [
+  ["", "Your settings"],
+  ["plan", "Plan"],
+  ["acceptEdits", "Accept edits"],
+  ["auto", "Auto"],
+  ["dontAsk", "Don't ask"],
+];
 const EVERY_OUT = 60e3;
 const SECRET = "net-join";
 
@@ -47,7 +61,7 @@ const addrHtml = (text) => `<span class="addr-real">${h(text)}</span><span class
 // `calls` are the window's own (actor-requests.js); `message(id)` opens the
 // box that writes to a session as you; `gateway()` opens the Actors panel,
 // where the gateway's address is set; `onChange(view)` hears each new read.
-export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {}, onChange = () => {}, message = () => {}, gateway = () => {}, request = (...a) => globalThis.fetch(...a) }) {
+export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {}, onChange = () => {}, message = () => {}, gateway = () => {}, projects = () => [], request = (...a) => globalThis.fetch(...a) }) {
   let state = stateOf(null);
   let agents = [];
   let read = false;
@@ -60,6 +74,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   // The join line on screen: who it's for and when it lapses. The line
   // itself is kept as a secret (secret.js), never here.
   let joinTicket = null;
+  // The last start sent from the box, and the answers to starts you asked
+  // for (the start event), newest first: for the driver.
+  let lastStart = null;
+  const answers = [];
 
   const isOpen = () => !!panel?.isConnected;
   const body = () => panel?.querySelector(".m-body");
@@ -164,7 +182,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   // host, which approves it here.
   function reachHtml(x) {
     const r = reachOf(x);
-    if (!r) return `<div class="ac-via" data-net-reach="${h(x.id)}">Its XenoNet is too old to start sessions or to take these settings from here.</div>`;
+    if (!r) return `<div class="net-reach" data-net-reach="${h(x.id)}"><div class="ac-via">Its XenoNet is too old to start sessions or to take these settings from here.</div></div>`;
     const window = !!state.self?.window;
     const pending = r.pending
       .map((w) => `<div class="ac-via net-warn" data-net-widen="${h(w.id)}">${h(widenWords(w, x.id))}. It needs the founder or a second window host.${window && w.by !== state.self?.id ? ` <button class="act" data-net-widen-approve="${h(`${x.id}|${w.id}`)}" data-yours>Approve</button>` : ""}</div>`)
@@ -187,12 +205,16 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       : confirm === x.id
         ? `<span class="net-ask">Remove ${h(x.id)}?</span><button class="act" data-net-keep>Keep it</button><button class="act primary ac-danger" data-net-remove-yes="${h(x.id)}" data-yours>Remove</button>`
         : `<button class="act" data-net-replace="${h(x.id)}" data-yours title="It was set up again: a new line for it, under the same id">Replace…</button><button class="act" data-net-remove="${h(x.id)}" title="Take it out of the network">Remove</button>`;
+    // A session started there: this machine, or another online whose
+    // XenoNet takes starts.
+    const starts = me || (x.online && hostCan(x, "start")) ? `<button class="act" data-net-start-session="${h(x.id)}" title="A new Claude Code, Codex or Grok Build session there, with a first prompt">Start a session…</button>` : "";
     const theirs = agents.filter((a) => a.host === x.id);
     const mismatch = state.rosterMismatch.includes(x.id) ? `<div class="ac-via net-warn">sees another list of the network's machines</div>` : "";
     return `<li class="ac-row net-host${x.online ? "" : " offline"}" data-key="${h(x.id)}" data-net-host="${h(x.id)}">
         <span class="ac-dot"></span>
-        <div class="ac-main"><div class="ac-name"><span class="ac-title">${h(x.id)}</span>${tags}</div><div class="ac-what" data-net-host-line>${h(hostLine(x))}</div>${mismatch}${me ? "" : reachHtml(x)}</div>
-        <div class="ac-acts">${acts}</div>
+        <div class="ac-main"><div class="ac-name"><span class="ac-title">${h(x.id)}</span>${tags}</div><div class="ac-what" data-net-host-line>${h(hostLine(x))}</div>${mismatch}</div>
+        <div class="ac-acts">${starts}${acts}</div>
+        ${me ? "" : reachHtml(x)}
         ${theirs.length ? `<ol class="net-agents">${theirs.map(agentHtml).join("")}</ol>` : ""}
       </li>`;
   }
@@ -284,7 +306,98 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <div class="m-foot"><span class="grow"></span><button class="act" data-net-done>Done</button></div>`;
   }
 
-  const VIEWS = { main: () => (inNetwork(state) ? memberHtml() : aloneHtml()), start: startHtml, join: joinHtml, add: addHtml, line: lineHtml };
+  // ---------- Start a session ----------
+
+  // The machines a session can start on: this one, and the others online
+  // whose XenoNet takes starts.
+  function startHosts() {
+    const me = state.self?.id ?? null;
+    const others = state.hosts.filter((x) => x.id !== me && x.online && hostCan(x, "start")).map((x) => x.id);
+    return [{ id: me, label: me ? `${me} (here)` : "This machine" }, ...others.map((id) => ({ id, label: id }))];
+  }
+
+  // A machine's folders to pick from: this one's projects and folders on
+  // the map, another's sessions' folders as its presence reports them;
+  // and home.
+  function foldersOf(host) {
+    const me = !host || host === state.self?.id;
+    const list = me ? projects().map((p) => ({ value: p.id, label: p.path ?? p.name ?? p.id })) : [...new Set(agents.filter((a) => a.host === host && a.cwd).map((a) => a.cwd))].map((c) => ({ value: c, label: c }));
+    return [{ value: "~", label: "home" }, ...list.slice(0, 200)];
+  }
+
+  const choice = (attr, value, label, on) => `<button class="act${on ? " on" : ""}" ${attr}="${h(value)}" aria-pressed="${on}">${h(label)}</button>`;
+
+  function sessionHtml() {
+    const hosts = startHosts();
+    const host = hosts.some((x) => x.id === view.host) ? view.host : hosts[0].id;
+    view.host = host;
+    const app = view.app ?? "claude";
+    const mode = app === "codex" ? "" : (view.mode ?? "");
+    const folders = foldersOf(host);
+    return `<p class="ac-lead">Start a session</p>
+      <div class="net-seg" data-net-start-hosts><span class="net-seg-k">Machine</span>${hosts.map((x) => choice("data-net-start-host", x.id ?? "", x.label, x.id === host)).join("")}</div>
+      <div class="net-seg" data-net-start-apps><span class="net-seg-k">App</span>${START_APPS.map(([id, label]) => choice("data-net-start-app", id, label, id === app)).join("")}</div>
+      <div class="net-seg" data-net-start-modes><span class="net-seg-k">Permissions</span>${START_MODES.map(([id, label]) => choice("data-net-start-mode", id, label, id === mode)).join("")}</div>
+      <div class="ac-form">
+        <label class="ac-field"><span class="ac-k">Folder</span><input class="ac-input" data-net-start-folder list="net-start-folders" value="${h(view.folder ?? "~")}" spellcheck="false" autocomplete="off"></label>
+        <datalist id="net-start-folders" data-net-start-folders>${folders.map((f) => `<option value="${h(f.value)}">${h(f.label)}</option>`).join("")}</datalist>
+        <label class="ac-field"><span class="ac-k">Prompt</span><textarea class="ac-input net-start-prompt" data-net-start-prompt rows="5" placeholder="What the new session should do" spellcheck="true">${h(view.prompt ?? "")}</textarea></label>
+      </div>
+      <p class="pj-note">It runs headless through XenoNet, and shows on the map like any other session. Its first prompt says you started it from this console. Permission prompts it can't settle by its settings come to Needs you, here and on every window host. Codex runs with its own config's sandbox and approvals. In a terminal: <code>xenonet start --on &lt;machine&gt; "&lt;prompt&gt;"</code></p>
+      ${errorHtml(view.error)}
+      <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-start-send data-yours disabled title="Starts the session">Start</button></div>`;
+  }
+
+  // Send waits a moment after the box shows, so a click meant for what
+  // was there before can't land on it.
+  let armTimer = null;
+  function arm() {
+    clearTimeout(armTimer);
+    view.armedAt = Date.now() + ARM_MS;
+    armTimer = setTimeout(() => {
+      const b = body()?.querySelector("[data-net-start-send]");
+      if (b && !busy) b.disabled = false;
+    }, ARM_MS);
+  }
+  const armed = () => view.name === "session" && view.armedAt != null && Date.now() >= view.armedAt;
+
+  // A pick in the box, changed in place so what's typed stays.
+  function pick(attr, value) {
+    const key = { "data-net-start-host": "host", "data-net-start-app": "app", "data-net-start-mode": "mode" }[attr];
+    view[key] = value;
+    for (const b of body()?.querySelectorAll(`[${attr}]`) ?? []) {
+      const on = b.getAttribute(attr) === value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+    if (key === "host") body().querySelector("[data-net-start-folders]").innerHTML = foldersOf(value).map((f) => `<option value="${h(f.value)}">${h(f.label)}</option>`).join("");
+    // Codex takes its own config's: no mode.
+    if (key === "app") for (const b of body()?.querySelectorAll("[data-net-start-mode]") ?? []) b.disabled = value === "codex" && b.dataset.netStartMode !== "";
+    sfx("toggle");
+  }
+
+  async function sendStart() {
+    if (!armed()) return { ok: false, error: "not armed yet" };
+    const b = body();
+    const host = view.host || null;
+    const folder = b.querySelector("[data-net-start-folder]").value.trim() || "~";
+    const prompt = b.querySelector("[data-net-start-prompt]").value;
+    const app = view.app ?? "claude";
+    const mode = app === "codex" ? "" : (view.mode ?? "");
+    const remote = host && host !== state.self?.id;
+    Object.assign(view, { folder, prompt });
+    return busyWith(async () => {
+      const r = await calls.call("POST", "/api/start", { ...(remote ? { machine: host } : {}), folder, app, ...(mode ? { mode } : {}), prompt });
+      if (!r.ok) return failed(r, `xenonet start${remote ? ` --on ${host}` : ""} "<prompt>"`);
+      sfx("success");
+      toast(r.data.state === "sent" ? `Sent to ${r.data.host}: whether it started comes to the feed.` : `Started ${r.data.session ?? "a Codex session"} in ${r.data.folder}.`);
+      lastStart = { ...r.data, at: Date.now() };
+      go({ name: "main" });
+      return { ok: true, ...r.data };
+    });
+  }
+
+  const VIEWS = { main: () => (inNetwork(state) ? memberHtml() : aloneHtml()), start: startHtml, join: joinHtml, add: addHtml, line: lineHtml, session: sessionHtml };
 
   // Drawn again only when something it shows changed, so a read every few
   // seconds never swaps a button out from under the pointer. A form keeps
@@ -304,11 +417,12 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       if (wait && wait.dataset.acWait !== (joined() ? "done" : "waiting")) wait.outerHTML = waitHtml();
       return;
     }
-    if ((view.name === "add" || view.name === "start" || view.name === "join") && drawn === view.name) return;
+    if ((view.name === "add" || view.name === "start" || view.name === "join" || view.name === "session") && drawn === view.name) return;
     const html = VIEWS[view.name]?.() ?? VIEWS.main();
     if (view.name === "main" && html === drawn) return;
     b.innerHTML = html;
     drawn = view.name === "main" ? html : view.name;
+    if (view.name === "session") arm();
     b.querySelector("[data-net-add-host], [data-net-self], [data-net-join-address]")?.focus();
   }
 
@@ -528,6 +642,12 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netRemoveYes) return remove(d.netRemoveYes);
     if (d.netReplace) return replace(d.netReplace);
     if (d.netApprove) return approve(d.netApprove);
+    if (d.netStartSession != null) return startSession({ host: d.netStartSession || null });
+    for (const attr of ["data-net-start-host", "data-net-start-app", "data-net-start-mode"]) {
+      const b = t.closest(`[${attr}]`);
+      if (b) return pick(attr, b.getAttribute(attr));
+    }
+    if (t.closest("[data-net-start-send]")) return sendStart();
     if (d.netSet) return setReach(null, d.netSet);
     if (d.netSetOn) return setReach(...d.netSetOn.split("|"));
     if (d.netWidenApprove) return approveWiden(...d.netWidenApprove.split("|"));
@@ -545,6 +665,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         onClose: () => {
           forgetSecrets();
           joinTicket = null;
+          clearTimeout(armTimer);
           unblur();
           view = { name: "main" };
           panel = null;
@@ -574,6 +695,11 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   // Add a machine: its form, with what's given filled in.
   const addMachine = ({ host = "", window = false } = {}) => open("add", { host, window: !!window });
+
+  // Start a session: the box, on a machine (this one when none), with what's
+  // given filled in.
+  const startSession = ({ host = null, folder = null, app = null, mode = null, prompt = null } = {}) =>
+    open("session", { host: host ?? state.self?.id ?? null, ...(folder ? { folder } : {}), ...(app ? { app } : {}), ...(mode ? { mode } : {}), ...(prompt ? { prompt } : {}) });
 
   // ---------- for the driver ----------
 
@@ -636,10 +762,28 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       waits: remoteWaits(state, agents).filter((w) => w.kind === "remote-need").map((w) => ({ agent: w.id, host: w.host, text: w.text, chime: w.chime })),
       stuck: remoteWaits(state, agents).filter((w) => w.kind === "remote-stuck").map((w) => ({ agent: w.id, host: w.host, text: w.text })),
       join: joinState(),
+      // The Start a session box: what it's set to, whether Start is armed,
+      // where each choice is; and the last start sent from it.
+      session:
+        isOpen() && view.name === "session"
+          ? {
+              host: view.host ?? null,
+              hosts: startHosts().map((x) => x.id),
+              app: view.app ?? "claude",
+              mode: view.mode ?? "",
+              folder: body()?.querySelector("[data-net-start-folder]")?.value ?? null,
+              folders: foldersOf(view.host).map((f) => f.value),
+              prompt: body()?.querySelector("[data-net-start-prompt]")?.value ?? null,
+              armed: armed(),
+              at: { send: centre("[data-net-start-send]"), hosts: centres("data-net-start-host"), apps: centres("data-net-start-app"), modes: centres("data-net-start-mode") },
+            }
+          : null,
+      lastStart,
+      answers: answers.slice(0, 10),
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session") } : null,
     };
   }
 
@@ -656,10 +800,16 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   return {
     open,
     addMachine,
+    startSession,
     show,
     refresh,
     // The event stream said the network changed.
     heard: () => void refresh().catch(() => {}),
+    // An answer to a start you asked for (the start event).
+    heardStart: (s) => {
+      answers.unshift({ state: s.state, host: s.host ?? null, session: s.session ?? null, reason: s.reason ?? null, exit: s.exit ?? null, words: s.words ?? null });
+      answers.length = Math.min(answers.length, 10);
+    },
     close: () => isOpen() && modals.close(),
     // One of another machine's agents, by its @<host>: id.
     agent: (id) => agents.find((a) => a.id === id) ?? null,

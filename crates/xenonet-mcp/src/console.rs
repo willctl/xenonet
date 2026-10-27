@@ -363,11 +363,15 @@ fn defs(installed: bool) -> Vec<Def> {
         def(
             "network",
             "The network",
-            "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, and where you're at), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch, and the titles-only and share-load settings. `open` shows the panel, `start` and `join` its forms, and `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the setting and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
+            "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, where you're at, who may start and wake sessions there, and what its XenoNet takes), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch, and this machine's titles-only, share-load, start and wake settings. `open` shows the panel and `join` its form. `start` opens Start a session on a machine (host, this one by default) with its folder, app, mode and prompt filled in; on a machine on its own, with none of those, it opens the form that starts a network. `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the settings (at.set for this machine's, at.setOn for another's), Start (session.at.send, once session.armed) and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. answers lists the answers to the starts you asked for. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
             object(vec![
                 ("action", enumeration(&["read", "open", "start", "join", "add", "message", "close"]).optional().describe("read (the default) says how the network stands without opening anything.")),
-                ("host", string().optional().describe("For add: the new machine's id.")),
+                ("host", string().optional().describe("For add: the new machine's id. For start: the machine to start a session on.")),
                 ("window", boolean().optional().describe("For add: whether you'll use a XenoNet window on it.")),
+                ("folder", string().optional().describe("For start: a project or folder on that machine, by its id or path, or ~.")),
+                ("app", enumeration(&["claude", "codex", "grok"]).optional().describe("For start: the app.")),
+                ("mode", string().optional().describe("For start: a permission mode (plan, acceptEdits, auto, dontAsk); your own settings when left out.")),
+                ("prompt", string().optional().describe("For start: the first prompt.")),
                 ("to", string().optional().describe("For message: a session's id, @<host>:<id> for another machine's, or an actor's.")),
                 ("text", string().optional().describe("For message: what goes in the box.")),
                 ("settle", settle_arg()),
@@ -798,6 +802,10 @@ impl Console {
             "network" => match a.get("action").and_then(Value::as_str).unwrap_or("read") {
                 "message" => one(self.driver(&s, "messageAs", vec![arg(a, "to"), arg(a, "text"), settle(a)]).await?),
                 "add" => one(self.driver(&s, "network", vec![json!("add"), Value::Object(tools::pick(a, &[("host", "host"), ("window", "window")])), settle(a)]).await?),
+                "start" if ["host", "folder", "app", "mode", "prompt"].iter().any(|k| a.get(*k).is_some()) => {
+                    let keys = [("host", "host"), ("folder", "folder"), ("app", "app"), ("mode", "mode"), ("prompt", "prompt")];
+                    one(self.driver(&s, "network", vec![json!("start"), Value::Object(tools::pick(a, &keys)), settle(a)]).await?)
+                }
                 action => one(self.driver(&s, "network", vec![json!(action), Value::Null, settle(a)]).await?),
             },
             "machines" => match a.get("action").and_then(Value::as_str).unwrap_or("read") {

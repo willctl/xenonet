@@ -31,6 +31,9 @@ pub struct Setup {
     pub version: String,
     /// Where XenoNet's files are: schemas/ among them.
     pub root: std::path::PathBuf,
+    /// The program every run starts in place of the app's CLI
+    /// (XENONET_RUNS_BIN): the tests' fake.
+    pub runs_bin: Option<String>,
 }
 
 pub struct World {
@@ -57,6 +60,8 @@ pub struct World {
     /// What this machine last told the network of itself (its presence
     /// and claims), and the timer that tells it again.
     pub net: crate::network::NetState,
+    /// Sessions started here, and the start requests sent from here.
+    pub starts: crate::starts::StartSide,
 }
 
 impl World {

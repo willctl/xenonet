@@ -45,6 +45,9 @@ pub struct Config {
     pub runtime_dir: String,
     /// The demo's made-up world, once it's made (core/demo.js createWorld).
     pub world: Option<Value>,
+    /// XENONET_RUNS_BIN: a program that stands in for Claude Code, Codex
+    /// and Grok Build in every run XenoNet starts, as the tests' fake.
+    pub runs_bin: Option<String>,
 }
 
 /// How far above the service's port the actor gateway's is by default
@@ -174,6 +177,7 @@ impl Config {
             exec: set("XENONET_EXEC"),
             runtime_dir,
             world: None,
+            runs_bin: set("XENONET_RUNS_BIN"),
         }
     }
 

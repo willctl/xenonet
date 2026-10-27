@@ -156,7 +156,7 @@ impl Router {
     /// allowance for the session, here and for actors.
     fn may_wake(c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Decision> {
         let consent = Consent { here: Self::consented(c, agent, false)?, remote: Self::consented(c, agent, true)? };
-        Ok(reach::decide(Action::Wake, &reach::sender_of(from), &js_text(agent), &Settings { consent }))
+        Ok(reach::decide(Action::Wake, &reach::sender_of(from), &js_text(agent), &Settings { consent, ..Settings::default() }))
     }
 
     /// Whether a session can be reached without hooks (an OpenCode run

@@ -27,7 +27,10 @@ function ring(kind, label, v, sub = "") {
 }
 
 // read(url): a GET, as fetch.
-export function createMachinesView({ modals, sfx = () => {}, hosts, graph = () => null, net = () => null, read = (url) => fetch(url), onPick = () => {} }) {
+export function createMachinesView({ modals, sfx = () => {}, hosts, graph = () => null, net = () => null, read = (url) => fetch(url), onPick = () => {}, onStart = null }) {
+  // Whether a machine takes a start from here: this one, or one online in
+  // the network whose XenoNet says it does.
+  const canStart = (x) => !!onStart && (x.here || (x.online && !!net()?.hosts?.find((r) => r.id === x.id)?.can?.includes("start")));
   let panel = null;
   let timer = null;
   let reading = null;
@@ -106,7 +109,7 @@ export function createMachinesView({ modals, sfx = () => {}, hosts, graph = () =
     const c = counts.get(x.key);
     const apps = c ? Object.entries(c.apps).sort((a, b) => b[1] - a[1]).map(([app, n]) => `${n} ${APP_LABEL[app] ?? app}`) : [];
     const words = c ? `${c.total} ${c.total === 1 ? "session" : "sessions"} on the map: ${apps.join(", ")}` : "No sessions on the map";
-    return `<div class="mc-sessions"><span>${h(words)}</span>${model.network ? `<button class="act" data-mc-show="${h(x.key)}" title="Show only this machine's work on the map">Show on the map</button>` : ""}</div>`;
+    return `<div class="mc-sessions"><span>${h(words)}</span>${model.network ? `<button class="act" data-mc-show="${h(x.key)}" title="Show only this machine's work on the map">Show on the map</button>` : ""}${canStart(x) ? `<button class="act" data-mc-start="${h(x.here ? "" : (x.id ?? ""))}" title="A new session there, with a first prompt">Start a session…</button>` : ""}</div>`;
   }
 
   function card(x, counts) {
@@ -183,6 +186,12 @@ export function createMachinesView({ modals, sfx = () => {}, hosts, graph = () =
   }
 
   function onClick(e) {
+    const start = e.target.closest("[data-mc-start]");
+    if (start) {
+      sfx("select");
+      modals.close();
+      return void onStart(start.dataset.mcStart || null);
+    }
     const t = e.target.closest("[data-mc-machine], [data-mc-all], [data-mc-platform], [data-mc-gpu], [data-mc-online], [data-mc-sort], [data-mc-view], [data-mc-show]");
     if (!t) return;
     if (t.dataset.mcMachine != null) hosts?.toggle(t.dataset.mcMachine);

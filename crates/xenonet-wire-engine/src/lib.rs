@@ -22,6 +22,7 @@ pub mod registration;
 pub mod reports;
 pub mod runs;
 pub mod spend;
+pub mod starts;
 pub mod store;
 pub mod tokens;
 pub mod verify;
@@ -120,6 +121,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
         projects_dir: config.projects_dir.clone(),
         version: env.version.clone(),
         root: config.root.clone(),
+        runs_bin: config.runs_bin.clone(),
     };
     let map = map::Map::new(cores.state.clone());
     let sys = procs::System::new();
@@ -169,6 +171,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
         observers: OnceLock::new(),
         me: OnceLock::new(),
         net: network::NetState::default(),
+        starts: starts::StartSide::default(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
     if w.actors.is_some() && !config.demo {

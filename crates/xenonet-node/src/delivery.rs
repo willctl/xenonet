@@ -329,9 +329,98 @@ pub fn reach_decide(action: String, sender: JsArg, target: JsArg, settings: JsAr
     let Some(a) = reach::Action::parse(&action) else {
         return JsArg(reach::Decision::Refuse(format!("nothing decides \"{action}\" here")).to_arg());
     };
-    let consent = settings.0.field("consent");
-    let s = reach::Settings { consent: reach::Consent { here: consent.field("here").truthy(), remote: consent.field("remote").truthy() } };
+    let s = reach::Settings::of(&settings.0);
     JsArg(reach::decide(a, &reach::Sender::of(&sender.0), &xenonet_engine::store::js_text(&target.0), &s).to_arg())
+}
+
+// ----- starts -----
+
+use crate::js::Json as J;
+use serde_json::{json as j, Value as V};
+use xenonet_engine::delivery::starts;
+
+#[napi(js_name = "startsConstants")]
+pub fn starts_constants() -> J {
+    J(j!({
+        "target": starts::TARGET,
+        "apps": starts::APPS,
+        "modes": starts::MODES,
+        "promptMax": starts::PROMPT_MAX,
+        "perHour": starts::PER_HOUR,
+        "perHostHour": starts::PER_HOST_HOUR,
+        "freshMs": starts::FRESH_MS,
+    }))
+}
+
+/// { ok: true, request } or { ok: false, why }.
+#[napi(js_name = "startsRequest")]
+pub fn starts_request(v: J) -> J {
+    J(match starts::request(&v.0) {
+        Ok(r) => j!({ "ok": true, "request": r.to_json() }),
+        Err(why) => j!({ "ok": false, "why": why }),
+    })
+}
+
+#[napi(js_name = "startsFramed")]
+pub fn starts_framed(by: J, from: Option<String>, prompt: String) -> String {
+    starts::framed(&by.0, from.as_deref(), &prompt)
+}
+
+fn request_of(r: &V) -> starts::Request {
+    let s = |k: &str| r.get(k).and_then(V::as_str).map(str::to_string);
+    starts::Request { folder: s("folder").unwrap_or_default(), app: s("app").unwrap_or_default(), mode: s("mode"), prompt: s("prompt").unwrap_or_default() }
+}
+
+/// [app, args].
+#[napi(js_name = "startsCommand")]
+pub fn starts_command(r: J, id: String, cwd: String, settings: Option<String>, server: String, prompt_file: Option<String>) -> J {
+    let (app, args) = starts::command(&request_of(&r.0), &id, &cwd, settings.as_deref(), &server, prompt_file.as_deref());
+    J(j!([app, args]))
+}
+
+fn history_of(h: &V) -> Vec<(f64, String)> {
+    h.as_array().into_iter().flatten().map(|e| (e.get(0).and_then(V::as_f64).unwrap_or(f64::NAN), e.get(1).and_then(V::as_str).unwrap_or("").to_string())).collect()
+}
+
+#[napi(js_name = "startsAdmit")]
+pub fn starts_admit(history: J, from: String, now: f64) -> Option<String> {
+    starts::admit(&history_of(&history.0), &from, now)
+}
+
+#[napi(js_name = "startsKept")]
+pub fn starts_kept(history: J, now: f64) -> J {
+    J(j!(starts::kept(&history_of(&history.0), now).into_iter().map(|(at, h)| j!([xenonet_base::json::number(at), h])).collect::<Vec<_>>()))
+}
+
+/// { ok: true, path } or { ok: false, why }.
+#[napi(js_name = "startsFolder")]
+pub fn starts_folder(asked: String, home: String, known: J, reported: Vec<String>) -> J {
+    let known: Vec<(String, String)> =
+        known.0.as_array().into_iter().flatten().map(|e| (e.get(0).and_then(V::as_str).unwrap_or("").to_string(), e.get(1).and_then(V::as_str).unwrap_or("").to_string())).collect();
+    J(match starts::folder(&asked, &home, &known, &reported) {
+        Ok(path) => j!({ "ok": true, "path": path }),
+        Err(why) => j!({ "ok": false, "why": why }),
+    })
+}
+
+#[napi(js_name = "startsSignedOut")]
+pub fn starts_signed_out(log: String) -> bool {
+    starts::signed_out(&log)
+}
+
+#[napi(js_name = "startsSessionOf")]
+pub fn starts_session_of(app: String, log: String) -> Option<String> {
+    starts::session_of(&app, &log)
+}
+
+#[napi(js_name = "startsAnswerWords")]
+pub fn starts_answer_words(state: String, host: String, a: J) -> String {
+    starts::answer_words(&state, &host, &a.0)
+}
+
+#[napi(js_name = "startsSignInWords")]
+pub fn starts_sign_in_words(host: String) -> String {
+    starts::sign_in_words(&host)
 }
 
 // ----- resume -----

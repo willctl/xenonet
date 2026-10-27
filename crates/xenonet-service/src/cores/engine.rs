@@ -79,6 +79,13 @@ pub trait Engine: Send + Sync {
     async fn handoff(&self, _me: &str, _args: Value, _extra: Option<Value>) -> R<Value> {
         pending(ENGINE)
     }
+    /// A new session, here or on another machine (`POST /api/start`): `by`
+    /// is who asks ({ kind, id, title }), `req` the request ({ machine?,
+    /// folder?, app?, mode?, prompt }), `strong` whether you were checked
+    /// by the window key. The first answer: started here, or sent there.
+    async fn start(&self, _by: Value, _req: Value, _strong: bool) -> R<Value> {
+        pending(ENGINE)
+    }
     /// `engine.store.markUnseen(me, ids)`.
     fn mark_unseen(&self, _me: &str, _ids: &Value) -> R<()> {
         pending(ENGINE)

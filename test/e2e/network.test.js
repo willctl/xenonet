@@ -464,6 +464,57 @@ test("net-approval: a window host another one signed in waits for an approval he
   await s.driver("network", "close");
 }));
 
+test("start and wake: this machine's set here, another machine's sent to it, and a widening that waits for a second window host", { timeout: limit(60000) }, shoot("network-reach", async () => {
+  // laptop is a window host, not the founder.
+  await simulate("net-member", {}, (n) => n.self === "laptop");
+  const { network: n } = await s.driver("network", "open");
+  assert.deepEqual([n.start, n.wake], ["you", "consent"], "you, and your consent, unless widened");
+  assert.deepEqual(n.hosts.find((x) => x.id === "rack").reach, null, "rack's XenoNet says nothing of it");
+  assert.match(n.text, /rack.*Its XenoNet is too old to start sessions/i);
+  await clickAt(n.at.set["start:network"], "this machine's start: the network");
+  assert.ok(await until(async () => (await network()).start === "network"), "set here at once");
+  // studio's wake to the network waits; its start narrows at once.
+  await clickAt((await network()).at.setOn["studio|wake:network"], "studio's wake: the network");
+  const waits = await until(async () => {
+    const got = await network();
+    const studio = got.hosts.find((x) => x.id === "studio");
+    return studio.reach.pending.length ? got : null;
+  });
+  assert.ok(waits, "the widening waits");
+  assert.match(waits.text, /laptop asked to let the network wake sessions on studio\. It needs the founder or a second window host\./i);
+  await clickAt(waits.at.setOn["studio|start:off"], "studio's start: nobody");
+  assert.ok(await until(async () => (await network()).hosts.find((x) => x.id === "studio").reach.start === "off"), "narrowed at once");
+  const raw = await served();
+  assert.equal(raw.start, "network");
+  await s.driver("network", "close");
+}));
+
+test("Start a session on a made-up machine: the box, Start once it's armed, and the answers in the feed", { timeout: limit(60000) }, shoot("network-start", async () => {
+  await simulate("net-founder", {}, (n) => n.hosts.some((x) => x.id === "laptop" && x.online));
+  // laptop's row has Start a session; rack's, offline and too old, hasn't.
+  const { network: opened } = await s.driver("network", "open");
+  assert.ok(opened.at.startSession.laptop && opened.at.startSession.studio, JSON.stringify(opened.at.startSession));
+  assert.equal(opened.at.startSession.rack, undefined);
+  const { network: n } = await s.driver("network", "start", { host: "laptop", prompt: "Tidy the billing tests", app: "grok" });
+  assert.equal(n.view, "session");
+  assert.deepEqual([n.session.host, n.session.app, n.session.prompt, n.session.folder], ["laptop", "grok", "Tidy the billing tests", "~"]);
+  assert.deepEqual(n.session.hosts, ["studio", "laptop"], "this machine, and laptop: rack is offline");
+  assert.ok(n.session.folders.includes("~"));
+  // Start is armed a moment after the box shows.
+  const armed = await until(async () => ((await network()).session?.armed ? await network() : null));
+  assert.ok(armed, "Start is armed");
+  await clickAt(armed.session.at.apps.claude, "Claude Code");
+  await clickAt((await network()).session.at.send, "Start");
+  const sent = await until(async () => (await network()).lastStart);
+  assert.deepEqual([sent?.state, sent?.host], ["sent", "laptop"], JSON.stringify(sent));
+  const started = await until(async () => (await network()).answers.find((a) => a.state === "started" && a.host === "laptop"));
+  assert.match(started.session, /^claude:/);
+  const ended = await until(async () => (await network()).answers.find((a) => a.state === "ended" && a.host === "laptop"), 10000);
+  assert.equal(ended.exit, 0);
+  const feed = await s.driver("feed", { limit: 10 });
+  assert.ok(JSON.stringify(feed).includes("Started claude:"), JSON.stringify(feed));
+}));
+
 test("net-gateway-down says so: since when, why, and what waits in the outbox", { timeout: limit(60000) }, shoot("network-gateway-down", async () => {
   await simulate("net-gateway-down", {}, (n) => n.gateway?.link === "offline");
   await served();
