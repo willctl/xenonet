@@ -12,12 +12,14 @@ export const TURN_MS = C.turnMs;
 export const LOG_MAX = C.logMax;
 export const KEEP_MS = C.keepMs;
 
-export function launch(program, args, { platform = process.platform } = {}) {
-  return native.runsLaunch(String(program), [...args].map(String), platform === "win32");
+export const cmdExe = (comspec, systemRoot) => native.runsCmdExe(comspec ?? null, systemRoot ?? null);
+
+export function launch(program, args, { platform = process.platform, env = process.env } = {}) {
+  return native.runsLaunch(String(program), [...args].map(String), platform === "win32", env.ComSpec ?? env.COMSPEC ?? null, env.SystemRoot ?? env.SYSTEMROOT ?? null);
 }
 
-export function admit(runs, key, { now = Date.now(), cap = CAP, alive = isAlive } = {}) {
-  return native.runsAdmit(runs, String(key), Number(now), Math.min(cap, 2 ** 32 - 1), (pid) => !!alive(pid)) ?? null;
+export function admit(runs, key, { now = Date.now(), cap = CAP, alive = isAlive, also = [] } = {}) {
+  return native.runsAdmit(runs, String(key), Number(now), Math.min(cap, 2 ** 32 - 1), (pid) => !!alive(pid), [...also].map(String)) ?? null;
 }
 
 export const kept = (runs, now = Date.now()) => native.runsKept(runs, Number(now));

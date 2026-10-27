@@ -47,23 +47,42 @@ impl Launch {
     }
 }
 
+/// cmd.exe by its full path, never by its name, which Windows looks for in
+/// the folder a run starts in (the session's project) first: %ComSpec%,
+/// else %SystemRoot%\System32\cmd.exe.
+pub fn cmd_exe(comspec: Option<&str>, system_root: Option<&str>) -> String {
+    match (comspec.filter(|c| !c.is_empty()), system_root.filter(|r| !r.is_empty())) {
+        (Some(c), _) => c.to_string(),
+        (None, Some(root)) => format!("{root}\\System32\\cmd.exe"),
+        (None, None) => "C:\\Windows\\System32\\cmd.exe".into(),
+    }
+}
+
+/// How to start `program` with `args` here, or why it can't be done
+/// safely, with cmd.exe as this process's environment names it.
+pub fn launch(program: &str, args: &[String], windows: bool) -> Result<Launch, String> {
+    let var = |k: &str| std::env::var(k).ok();
+    launch_with(program, args, windows, &cmd_exe(var("ComSpec").as_deref(), var("SystemRoot").as_deref()))
+}
+
 /// How to start `program` with `args` here, or why it can't be done
 /// safely. Elsewhere each argument goes as it is, and the platform quotes
 /// it once. On Windows a batch file (an npm install's claude.cmd) runs only
-/// through cmd.exe, which takes one command line as written: each part is
-/// quoted once, and a part cmd.exe would still read inside quotes (a quote
-/// or a %) is refused.
-pub fn launch(program: &str, args: &[String], windows: bool) -> Result<Launch, String> {
+/// through `cmd` (cmd.exe's full path), which takes one command line as
+/// written: each part is quoted once, and a part cmd.exe would still read
+/// inside quotes is refused: a quote, a % or a ! (which it expands), a line
+/// break, or a \ at its end (which would escape the closing quote).
+pub fn launch_with(program: &str, args: &[String], windows: bool, cmd: &str) -> Result<Launch, String> {
     let batch = program.rsplit_once('.').is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"));
     if !windows || !batch {
         return Ok(Launch { program: program.to_string(), args: args.to_vec(), verbatim: false });
     }
     let parts: Vec<&str> = std::iter::once(program).chain(args.iter().map(String::as_str)).collect();
-    if let Some(bad) = parts.iter().find(|p| p.contains(['"', '%', '\r', '\n'])) {
+    if let Some(bad) = parts.iter().find(|p| p.contains(['"', '%', '!', '\r', '\n']) || p.ends_with('\\')) {
         return Err(format!("XenoNet can't pass {bad} to a batch file safely"));
     }
     let line = parts.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(" ");
-    Ok(Launch { program: "cmd.exe".into(), args: vec!["/d".into(), "/s".into(), "/c".into(), format!("\"{line}\"")], verbatim: true })
+    Ok(Launch { program: cmd.into(), args: vec!["/d".into(), "/s".into(), "/c".into(), format!("\"{line}\"")], verbatim: true })
 }
 
 /// One run, as delivery-runs.json keeps it.
@@ -80,6 +99,8 @@ pub struct Run {
     /// Its exit code: none for one killed by a signal, or still going.
     pub exit: Option<f64>,
     pub ms: Option<f64>,
+    /// Whether the turn's cap stopped it (`TURN_MS`).
+    pub timed_out: bool,
 }
 
 fn opt(v: Option<f64>) -> Value {
@@ -87,8 +108,13 @@ fn opt(v: Option<f64>) -> Value {
 }
 
 impl Run {
+    /// As the file keeps it: `timedOut` only on a run the cap stopped.
     pub fn to_json(&self) -> Value {
-        json!({ "id": self.id, "key": self.key, "app": self.app, "pid": opt(self.pid), "at": xenonet_base::json::number(self.at), "end": opt(self.end), "exit": opt(self.exit), "ms": opt(self.ms) })
+        let mut v = json!({ "id": self.id, "key": self.key, "app": self.app, "pid": opt(self.pid), "at": xenonet_base::json::number(self.at), "end": opt(self.end), "exit": opt(self.exit), "ms": opt(self.ms) });
+        if self.timed_out {
+            v["timedOut"] = Value::Bool(true);
+        }
+        v
     }
 
     /// A record as the file or the JS has it; None for one without its id,
@@ -96,7 +122,17 @@ impl Run {
     pub fn of(v: &Value) -> Option<Run> {
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
         let n = |k: &str| v.get(k).and_then(Value::as_f64);
-        Some(Run { id: s("id")?, key: s("key")?, app: s("app").unwrap_or_default(), pid: n("pid"), at: n("at")?, end: n("end"), exit: n("exit"), ms: n("ms") })
+        Some(Run {
+            id: s("id")?,
+            key: s("key")?,
+            app: s("app").unwrap_or_default(),
+            pid: n("pid"),
+            at: n("at")?,
+            end: n("end"),
+            exit: n("exit"),
+            ms: n("ms"),
+            timed_out: v.get("timedOut").and_then(Value::as_bool).unwrap_or(false),
+        })
     }
 
     /// Whether it counts as under way: not ended, within its turn, and its
@@ -121,11 +157,18 @@ pub fn write(runs: &[Run]) -> String {
 
 /// Whether a run for `key` may start now: None, or why not.
 pub fn admit(runs: &[Run], key: &str, now: f64, cap: usize, alive: &mut dyn FnMut(f64) -> bool) -> Option<String> {
-    let live: Vec<&Run> = runs.iter().filter(|r| r.live(now, alive)).collect();
-    if live.iter().any(|r| r.key == key) {
+    admit_with(runs, &[], key, now, cap, alive)
+}
+
+/// `admit`, counting `also` too: the keys of runs a runner has under way,
+/// whether or not they have a record yet (one just admitted, still
+/// starting), each once.
+pub fn admit_with(runs: &[Run], also: &[String], key: &str, now: f64, cap: usize, alive: &mut dyn FnMut(f64) -> bool) -> Option<String> {
+    let live: Vec<&Run> = runs.iter().filter(|r| !also.contains(&r.key) && r.live(now, alive)).collect();
+    if also.iter().any(|k| k == key) || live.iter().any(|r| r.key == key) {
         return Some("a run is under way for it".into());
     }
-    if live.len() >= cap {
+    if live.len() + also.len() >= cap {
         return Some(format!("XenoNet runs at most {cap} turns at once on this machine"));
     }
     None
@@ -172,24 +215,32 @@ mod tests {
         // Windows, an .exe: as it is too; Rust or Node quotes it once.
         let exe = launch("C:\\Program Files\\Claude\\claude.exe", &args, true).unwrap();
         assert_eq!((exe.program.as_str(), exe.verbatim), ("C:\\Program Files\\Claude\\claude.exe", false));
-        // Windows, a .cmd: through cmd.exe, as one line, each part quoted.
-        let cmd = launch("C:\\Users\\Jo Smith\\AppData\\Roaming\\npm\\claude.CMD", &s(&["-p", "--settings", "C:\\Users\\Jo Smith\\listen.json"]), true).unwrap();
+        // Windows, a .cmd: through cmd.exe by its full path, as one line,
+        // each part quoted.
+        let shell = "C:\\Windows\\System32\\cmd.exe";
+        let cmd = launch_with("C:\\Users\\Jo Smith\\AppData\\Roaming\\npm\\claude.CMD", &s(&["-p", "--settings", "C:\\Users\\Jo Smith\\listen.json"]), true, shell).unwrap();
         assert_eq!(
             cmd,
             Launch {
-                program: "cmd.exe".into(),
+                program: shell.into(),
                 args: s(&["/d", "/s", "/c", "\"\"C:\\Users\\Jo Smith\\AppData\\Roaming\\npm\\claude.CMD\" \"-p\" \"--settings\" \"C:\\Users\\Jo Smith\\listen.json\"\""]),
                 verbatim: true
             }
         );
-        assert_eq!(launch("C:\\npm\\codex.bat", &s(&["exec", "-"]), true).unwrap().args[3], "\"\"C:\\npm\\codex.bat\" \"exec\" \"-\"\"");
-        assert_eq!(launch("C:\\npm\\claude.cmd", &s(&["100%"]), true), Err("XenoNet can't pass 100% to a batch file safely".into()));
-        assert!(launch("C:\\npm\\claude.cmd", &s(&["a\"b"]), true).is_err());
+        assert_eq!(launch_with("C:\\npm\\codex.bat", &s(&["exec", "-"]), true, shell).unwrap().args[3], "\"\"C:\\npm\\codex.bat\" \"exec\" \"-\"\"");
+        assert_eq!(launch_with("C:\\npm\\claude.cmd", &s(&["100%"]), true, shell), Err("XenoNet can't pass 100% to a batch file safely".into()));
+        for bad in ["a\"b", "hi!", "C:\\dir\\", "a\nb"] {
+            assert!(launch_with("C:\\npm\\claude.cmd", &s(&[bad]), true, shell).is_err(), "{bad}");
+        }
         assert!(!launch("/opt/claude.cmd", &args, false).unwrap().verbatim, "only Windows runs batch files");
+        // cmd.exe is %ComSpec%, else in %SystemRoot%, never found by name.
+        assert_eq!(cmd_exe(Some("D:\\W\\system32\\cmd.exe"), Some("C:\\Windows")), "D:\\W\\system32\\cmd.exe");
+        assert_eq!(cmd_exe(Some(""), Some("E:\\Win")), "E:\\Win\\System32\\cmd.exe");
+        assert_eq!(cmd_exe(None, None), "C:\\Windows\\System32\\cmd.exe");
     }
 
     fn run(id: &str, key: &str, at: f64, end: Option<f64>) -> Run {
-        Run { id: id.into(), key: key.into(), app: "claude".into(), pid: Some(10.0), at, end, exit: None, ms: None }
+        Run { id: id.into(), key: key.into(), app: "claude".into(), pid: Some(10.0), at, end, exit: None, ms: None, timed_out: false }
     }
 
     #[test]
@@ -205,7 +256,15 @@ mod tests {
         assert_eq!(admit(&runs, "claude:f", now, CAP, &mut alive).as_deref(), Some("XenoNet runs at most 4 turns at once on this machine"));
         assert_eq!(admit(&runs, "claude:f", now + TURN_MS, CAP, &mut alive), None, "past their turn they don't count");
         assert_eq!(admit(&runs, "claude:f", now, CAP, &mut |pid| pid != 10.0), None, "nor once their processes are gone");
-        // What the file keeps comes back the same.
+        // A runner's own runs under way count once, record or not.
+        let mine = s(&["claude:a", "claude:g"]);
+        assert_eq!(admit_with(&runs[..2], &mine, "claude:g", now, CAP, &mut alive).as_deref(), Some("a run is under way for it"), "admitted, still starting");
+        assert_eq!(admit_with(&runs[..2], &mine, "claude:h", now, CAP, &mut alive), None, "claude:a counted once");
+        assert!(admit_with(&runs[..2], &s(&["claude:a", "claude:g", "claude:h"]), "claude:i", now, 3, &mut alive).is_some());
+        // What the file keeps comes back the same, a timed-out run too.
+        runs[1].timed_out = true;
+        assert_eq!(runs[1].to_json()["timedOut"], true);
+        assert!(runs[0].to_json().get("timedOut").is_none());
         let back = read(&write(&runs));
         assert_eq!(back, runs);
         assert_eq!(read("not json"), []);

@@ -445,7 +445,8 @@
     "core/delivery/runs.js": {
       "rust": "crates/xenonet-engine/src/delivery/runs.rs",
       "differences": [
-        "Starting the process, writing its log and keeping the records' file are the JS runner's, given Rust's decisions (how to launch, whether a run may start, which records and logs are kept)."
+        "Starting the process, writing its log and keeping the records' file are the JS runner's, given Rust's decisions (how to launch, whether a run may start, which records and logs are kept).",
+        "On Windows the JS runner stops a turn's tree with taskkill /T /F and counts the turn until cmd.exe exits; the binary's runner puts each turn in a job object and counts it until the job is empty."
       ]
     },
     "core/delivery/router.js": {

@@ -2,16 +2,18 @@
 //! Codex that this machine starts, for a session it resumes. What runs,
 //! quoted how, and whether it may start now are xenonet-engine's
 //! (`delivery::runs`); the processes, their logs in `runs/` and the
-//! records in delivery-runs.json are here.
+//! records in delivery-runs.json are here. Each run's processes are one
+//! `Tree` (a job object on Windows): a run counts until they've all ended,
+//! and its cap stops them all.
 
 use crate::js::{now_ms, platform, Locked};
-use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use xenonet_base::dirs::{self, CliEnv, Look, Unreadable};
+use xenonet_base::process::Tree;
 use xenonet_engine::delivery::runs::{self, Run};
 
 /// The disk as it is.
@@ -49,6 +51,17 @@ fn cli_env() -> CliEnv {
     }
 }
 
+/// Opens a file only you can read: made with mode 0600 on unix, so it's
+/// never readable by others, not even for a moment.
+fn private(o: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o
+}
+
 /// A file only you can read, written whole: a temporary file, then a
 /// rename, so a reader never sees half of it.
 fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
@@ -56,12 +69,8 @@ fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(d)?;
     }
     let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, text)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
-    }
+    let _ = std::fs::remove_file(&tmp);
+    private(std::fs::OpenOptions::new().write(true).create_new(true)).open(&tmp)?.write_all(text.as_bytes())?;
     std::fs::rename(&tmp, file)
 }
 
@@ -75,14 +84,7 @@ struct Log {
 impl Log {
     fn open(path: &Path) -> Option<Log> {
         std::fs::create_dir_all(path.parent()?).ok()?;
-        let mut o = std::fs::OpenOptions::new();
-        o.create(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            o.mode(0o600);
-        }
-        Some(Log { file: o.open(path).ok()?, written: 0 })
+        Some(Log { file: private(std::fs::OpenOptions::new().create(true).append(true)).open(path).ok()?, written: 0 })
     }
 
     fn write(&mut self, chunk: &[u8]) {
@@ -137,13 +139,23 @@ pub struct Turn<'a> {
     pub text: String,
 }
 
+/// The records, and the sessions whose runs this runner has under way:
+/// one lock, so admitting a run and counting it are one step.
+#[derive(Default)]
+struct State {
+    runs: Vec<Run>,
+    /// Each run this runner admitted, from then until it and everything it
+    /// started have ended.
+    watching: Vec<String>,
+}
+
 pub struct Runner {
     /// XenoNet's state folder: the logs and the records' file are there.
     /// None keeps both in memory.
     dir: Option<PathBuf>,
-    runs: Mutex<Vec<Run>>,
-    /// The sessions whose runs this runner watches.
-    watching: Mutex<HashSet<String>>,
+    state: Mutex<State>,
+    /// Writes of the records' file, one at a time.
+    saving: Mutex<()>,
 }
 
 fn alive(pid: f64) -> bool {
@@ -153,28 +165,35 @@ fn alive(pid: f64) -> bool {
 impl Runner {
     pub fn new(dir: Option<PathBuf>) -> Arc<Runner> {
         let runs = dir.as_ref().and_then(|d| std::fs::read_to_string(d.join("delivery-runs.json")).ok()).map(|t| runs::read(&t)).unwrap_or_default();
-        Arc::new(Runner { dir, runs: Mutex::new(runs), watching: Mutex::new(HashSet::new()) })
+        Arc::new(Runner { dir, state: Mutex::new(State { runs, watching: Vec::new() }), saving: Mutex::new(()) })
     }
 
     /// Whether a run for `key` is under way: one this runner watches, or
     /// one a record says still runs.
     pub fn running(&self, key: &str) -> bool {
-        self.watching.locked().contains(key) || runs::admit(&self.runs.locked(), key, now_ms(), usize::MAX, &mut alive).is_some()
+        let s = self.state.locked();
+        runs::admit_with(&s.runs, &s.watching, key, now_ms(), usize::MAX, &mut alive).is_some()
     }
 
     pub fn list(&self) -> Vec<Run> {
-        self.runs.locked().clone()
+        self.state.locked().runs.clone()
     }
 
     fn save(&self) {
+        let _one = self.saving.locked();
         let text = {
-            let mut r = self.runs.locked();
-            *r = runs::kept(&r, now_ms());
-            runs::write(&r)
+            let mut s = self.state.locked();
+            s.runs = runs::kept(&s.runs, now_ms());
+            runs::write(&s.runs)
         };
         if let Some(d) = &self.dir {
             let _ = write_private(&d.join("delivery-runs.json"), &text);
         }
+    }
+
+    /// Lets go of a run admitted for `key`.
+    fn release(&self, key: &str) {
+        self.state.locked().watching.retain(|k| k != key);
     }
 
     /// Logs a week old or more go when a run starts.
@@ -189,23 +208,34 @@ impl Runner {
         }
     }
 
-    /// Whether a run for `key` may start now, or why not.
+    /// Whether a run for `key` may start now, or why not. One that may is
+    /// counted at once, under the same lock, so two messages to one session
+    /// can't both start a run; `release` lets it go if it doesn't start.
     fn admit(&self, key: &str) -> Result<(), String> {
-        if self.watching.locked().contains(key) {
-            return Err("a run is under way for it".into());
+        let mut s = self.state.locked();
+        if let Some(why) = runs::admit_with(&s.runs, &s.watching, key, now_ms(), runs::CAP, &mut alive) {
+            return Err(why);
         }
-        runs::admit(&self.runs.locked(), key, now_ms(), runs::CAP, &mut alive).map_or(Ok(()), Err)
+        s.watching.push(key.to_string());
+        Ok(())
     }
 
     /// One turn, with the program found for its app (`dirs::find_cli`) from
     /// `home`: its process's id, or why it didn't start.
     pub fn run(self: &Arc<Self>, t: Turn<'_>, home: &str) -> Result<u32, String> {
         self.admit(t.key)?;
-        let program = dirs::find_cli(t.app, &cli_env(), platform(), home, &mut Disk, &mut xenonet_base::paths::can_run).ok_or_else(|| format!("{} isn't installed here", t.app))?;
-        self.start(t, &program)
+        let key = t.key.to_string();
+        let started = match dirs::find_cli(t.app, &cli_env(), platform(), home, &mut Disk, &mut xenonet_base::paths::can_run) {
+            Some(program) => self.start(t, &program),
+            None => Err(format!("{} isn't installed here", t.app)),
+        };
+        if started.is_err() {
+            self.release(&key);
+        }
+        started
     }
 
-    /// One turn of `program`, once it may start.
+    /// One turn of `program`, once `admit` let it start.
     fn start(self: &Arc<Self>, t: Turn<'_>, program: &str) -> Result<u32, String> {
         let Turn { key, app, args, cwd, env, text } = t;
         let how = runs::launch(program, args, cfg!(windows))?;
@@ -214,7 +244,8 @@ impl Runner {
         if let Some(l) = &logs {
             Self::sweep(l);
         }
-        let log = logs.as_ref().and_then(|l| Log::open(&l.join(format!("{id}.log")))).map(|l| Arc::new(Mutex::new(l)));
+        let log_path = logs.as_ref().map(|l| l.join(format!("{id}.log")));
+        let log = log_path.as_ref().and_then(|p| Log::open(p)).map(|l| Arc::new(Mutex::new(l)));
         let out = || if log.is_some() { Stdio::piped() } else { Stdio::null() };
         let mut cmd = Command::new(&how.program);
         xenonet_base::process::Background::no_window(&mut cmd);
@@ -227,12 +258,20 @@ impl Runner {
         let at = now_ms();
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(format!("{app} isn't installed here")),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => {
+                // No run, so no log of one.
+                if let Some(p) = &log_path {
+                    drop(log);
+                    let _ = std::fs::remove_file(p);
+                }
+                return Err(if e.kind() == std::io::ErrorKind::NotFound { format!("{app} isn't installed here") } else { e.to_string() });
+            }
         };
+        // Whatever it starts stops with it (a job object on Windows).
+        let tree = Tree::of(&child);
         let pid = child.id();
-        self.watching.locked().insert(key.to_string());
-        self.runs.locked().push(Run { id, key: key.to_string(), app: app.to_string(), pid: Some(f64::from(pid)), at, end: None, exit: None, ms: None });
+        let run = Run { id, key: key.to_string(), app: app.to_string(), pid: Some(f64::from(pid)), at, end: None, exit: None, ms: None, timed_out: false };
+        self.state.locked().runs.push(run);
         self.save();
         if let Some(log) = &log {
             if let Some(o) = child.stdout.take() {
@@ -247,30 +286,48 @@ impl Runner {
                 let _ = stdin.write_all(text.as_bytes());
             });
         }
-        // One turn, half an hour at most; then it's let go.
+        // One turn, half an hour at most; then it and everything it started
+        // are stopped. It's under way until they've all ended.
         let me = self.clone();
         let key = key.to_string();
         std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs_f64(runs::TURN_MS / 1000.0);
-            let code = loop {
-                match child.try_wait() {
-                    Ok(Some(status)) => break status.code(),
-                    Err(_) => break None,
-                    Ok(None) if Instant::now() >= deadline => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break None;
+            let mut code = None;
+            let mut exited = false;
+            let mut timed_out = false;
+            loop {
+                if !exited {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            code = status.code();
+                            exited = true;
+                        }
+                        Err(_) => exited = true,
+                        Ok(None) => {}
                     }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(250)),
                 }
-            };
-            let end = now_ms();
-            if let Some(r) = me.runs.locked().iter_mut().find(|r| r.pid == Some(f64::from(pid)) && r.key == key && r.end.is_none()) {
-                r.end = Some(end);
-                r.exit = code.map(f64::from);
-                r.ms = Some(end - r.at);
+                if exited && !tree.others() {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    tree.kill(&mut child);
+                    let _ = child.wait();
+                    timed_out = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
             }
-            me.watching.locked().remove(&key);
+            let end = now_ms();
+            {
+                let mut s = me.state.locked();
+                if let Some(r) = s.runs.iter_mut().find(|r| r.pid == Some(f64::from(pid)) && r.key == key && r.end.is_none()) {
+                    r.end = Some(end);
+                    r.exit = code.map(f64::from);
+                    r.ms = Some(end - r.at);
+                    r.timed_out = timed_out;
+                }
+            }
+            me.release(&key);
             me.save();
         });
         Ok(pid)
@@ -288,9 +345,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // A script stands in for Claude Code, in a folder on a PATH of its
-        // own: it reads its prompt, writes to both outputs and fails.
+        // own: it reads its prompt, writes to both outputs, waits until the
+        // test lets it go, and fails.
         let bin = dir.join("claude");
-        std::fs::write(&bin, "#!/bin/sh\nread line\necho \"out: $line\"\necho err >&2\nsleep 0.3\nexit 3\n").unwrap();
+        let go = dir.join("go");
+        std::fs::write(&bin, "#!/bin/sh\nread line\necho \"out: $line\"\necho err >&2\nwhile [ ! -f \"$GO\" ]; do sleep 0.02; done\nexit 3\n").unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -299,13 +358,31 @@ mod tests {
         let found = dirs::find_cli("claude", &CliEnv { path: cwd.clone(), ..CliEnv::default() }, platform(), "/nowhere", &mut Disk, &mut xenonet_base::paths::can_run).unwrap();
         assert_eq!(found, bin.to_string_lossy());
         let r = Runner::new(Some(dir.clone()));
-        let env = [("PATH".to_string(), "/usr/bin:/bin".to_string())];
+        let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("GO".to_string(), go.to_string_lossy().into_owned())];
         let turn = |key| Turn { key, app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into() };
+        // Admitted is counted at once: a second message to the session, or
+        // a fifth run, can't start one beside it before it has started.
         r.admit("claude:a").unwrap();
+        assert_eq!(r.admit("claude:a"), Err("a run is under way for it".into()), "one per session");
+        for k in ["claude:b", "claude:c", "claude:d"] {
+            r.admit(k).unwrap();
+        }
+        assert_eq!(r.admit("claude:e"), Err("XenoNet runs at most 4 turns at once on this machine".into()));
+        for k in ["claude:b", "claude:c", "claude:d"] {
+            r.release(k);
+        }
         let pid = r.start(turn("claude:a"), &found).unwrap();
         assert!(r.running("claude:a"));
-        assert_eq!(r.admit("claude:a"), Err("a run is under way for it".into()), "one per session");
+        assert_eq!(r.admit("claude:a"), Err("a run is under way for it".into()));
         assert!(Runner::new(Some(dir.clone())).running("claude:a"), "a restart counts it while it runs");
+        // A run that doesn't start leaves no log, and its session free.
+        assert_eq!(r.run(Turn { app: "nothing-here", ..turn("claude:x") }, "/nowhere"), Err("nothing-here isn't installed here".into()));
+        assert!(!r.running("claude:x"));
+        r.admit("claude:y").unwrap();
+        assert_eq!(r.start(turn("claude:y"), &dir.join("gone").to_string_lossy()), Err("claude isn't installed here".into()));
+        r.release("claude:y");
+        assert_eq!(std::fs::read_dir(dir.join("runs")).unwrap().count(), 1, "only the run that started has a log");
+        std::fs::write(&go, "").unwrap();
         let end = Instant::now() + Duration::from_secs(10);
         while r.running("claude:a") {
             assert!(Instant::now() < end, "the run ended");

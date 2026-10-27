@@ -384,10 +384,17 @@ pub fn runs_constants() -> RunsConstants {
     RunsConstants { cap: runs::CAP as u32, turn_ms: runs::TURN_MS, log_max: runs::LOG_MAX as u32, keep_ms: runs::KEEP_MS }
 }
 
-/// { program, args, verbatim }, or { why }.
+#[napi(js_name = "runsCmdExe")]
+pub fn runs_cmd_exe(comspec: Option<String>, system_root: Option<String>) -> String {
+    runs::cmd_exe(comspec.as_deref(), system_root.as_deref())
+}
+
+/// { program, args, verbatim }, or { why }, with cmd.exe where the twin's
+/// %ComSpec% and %SystemRoot% say.
 #[napi(js_name = "runsLaunch")]
-pub fn runs_launch(program: String, args: Vec<String>, windows: bool) -> JsArg {
-    JsArg(match runs::launch(&program, &args, windows) {
+pub fn runs_launch(program: String, args: Vec<String>, windows: bool, comspec: Option<String>, system_root: Option<String>) -> JsArg {
+    let cmd = runs::cmd_exe(comspec.as_deref(), system_root.as_deref());
+    JsArg(match runs::launch_with(&program, &args, windows, &cmd) {
         Ok(l) => l.to_arg(),
         Err(why) => Arg::Obj(vec![("why".into(), Arg::text(why))]),
     })
@@ -397,10 +404,11 @@ fn runs_of(records: &JsArg) -> Vec<runs::Run> {
     list(records.0.clone()).iter().filter_map(runs::run_of).collect()
 }
 
-/// null, or why a run for `key` may not start now.
+/// null, or why a run for `key` may not start now, counting `also` (the
+/// keys of runs under way, record or not).
 #[napi(js_name = "runsAdmit")]
-pub fn runs_admit(records: JsArg, key: String, now: f64, cap: u32, alive: Function<'_, f64, bool>) -> Option<String> {
-    runs::admit(&runs_of(&records), &key, now, cap as usize, &mut |pid| alive.call(pid).unwrap_or(false))
+pub fn runs_admit(records: JsArg, key: String, now: f64, cap: u32, alive: Function<'_, f64, bool>, also: Vec<String>) -> Option<String> {
+    runs::admit_with(&runs_of(&records), &also, &key, now, cap as usize, &mut |pid| alive.call(pid).unwrap_or(false))
 }
 
 #[napi(js_name = "runsKept")]
