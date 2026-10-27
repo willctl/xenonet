@@ -1,53 +1,77 @@
 // xenonet net and xenonet svc, against the binary: a service of its own on
-// 127.0.0.1:48111 (its actor gateway on 48112) with a temporary home and
-// state folder, and the command talking to it. Making a network and
-// publishing a service are the person's, so where these tests run under an
-// agent on macOS the refusal is what's checked; where process checks can't
-// tell (Linux, Windows) or the person runs them, the network is made, its
-// LAN door checked, a service published and taken off, and the network
-// left.
+// a loopback port the OS picks (its actor gateway on another) with a
+// temporary home and state folder, and the command talking to it. Making
+// a network and publishing a service are the person's, so where these
+// tests run under an agent on macOS the refusal is what's checked; where
+// process checks can't tell (Linux, Windows) or the person runs them, the
+// network is made, its LAN door checked, a service published and taken
+// off, and the network left.
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
 use serde_json::Value;
 use std::io::{Read, Write as _};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const PORT: &str = "48111";
-const GATEWAY_PORT: &str = "48112";
-const LAN: &str = "127.0.0.1:48114";
+/// XenoNet's own ports, the person's XenoNet's: never handed to a test.
+const XENONET: std::ops::RangeInclusive<u16> = 47840..=47842;
+
+/// `N` free ports on 127.0.0.1, each different. The OS picks each one for
+/// a listener on port 0; every listener is held until all the ports are
+/// read, so no two are the same, then released for the test to listen on.
+/// A fixed port can already be taken, by another test binary or by an
+/// outgoing connection, since the ephemeral range those draw from covers
+/// most high ports.
+fn free_ports<const N: usize>() -> [u16; N] {
+    let mut held = Vec::new();
+    let mut ports = Vec::new();
+    while ports.len() < N {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a free port on loopback");
+        let port = listener.local_addr().expect("a bound listener's address").port();
+        if !XENONET.contains(&port) {
+            ports.push(port);
+        }
+        held.push(listener);
+    }
+    drop(held);
+    std::array::from_fn(|i| ports[i])
+}
 
 struct Service {
     child: Child,
     dir: PathBuf,
+    port: u16,
+    gateway_port: u16,
 }
 
 impl Service {
-    fn start() -> Service {
+    fn start(port: u16, gateway_port: u16) -> Service {
         let dir = std::env::temp_dir().join(format!("xenonet-cli-net-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["home/Projects", "state", "cache", "runtime"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
         }
-        let child = Command::new(env!("CARGO_BIN_EXE_xenonet")).arg("serve").envs(Service::env(&dir)).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
-        let s = Service { child, dir };
+        let child =
+            Command::new(env!("CARGO_BIN_EXE_xenonet")).arg("serve").envs(Service::env(&dir, port, gateway_port)).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        let s = Service { child, dir, port, gateway_port };
         let end = Instant::now() + Duration::from_secs(30);
-        while status(&format!("127.0.0.1:{PORT}"), "GET", "/api/health", &[]) != 200 {
-            assert!(Instant::now() < end, "the service didn't start on {PORT}");
+        while status(&format!("127.0.0.1:{port}"), "GET", "/api/health", &[]) != 200 {
+            assert!(Instant::now() < end, "the service didn't start on {port}");
             std::thread::sleep(Duration::from_millis(100));
         }
         s
     }
 
-    fn env(dir: &std::path::Path) -> Vec<(&'static str, String)> {
+    fn env(dir: &std::path::Path, port: u16, gateway_port: u16) -> Vec<(&'static str, String)> {
         let p = |d: &str| dir.join(d).to_string_lossy().into_owned();
         vec![
             ("HOME", p("home")),
-            ("XENONET_PORT", PORT.into()),
-            ("XENONET_GATEWAY_PORT", GATEWAY_PORT.into()),
+            ("XENONET_PORT", port.to_string()),
+            ("XENONET_GATEWAY_PORT", gateway_port.to_string()),
             ("XENONET_STATE_DIR", p("state")),
             ("XENONET_CACHE_DIR", p("cache")),
             ("XENONET_RUNTIME_DIR", p("runtime")),
@@ -57,7 +81,7 @@ impl Service {
     }
 
     fn run(&self, args: &[&str]) -> (i32, String, String) {
-        let out = Command::new(env!("CARGO_BIN_EXE_xenonet")).args(args).arg("--no-color").envs(Service::env(&self.dir)).output().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_xenonet")).args(args).arg("--no-color").envs(Service::env(&self.dir, self.port, self.gateway_port)).output().unwrap();
         (out.status.code().unwrap_or(-1), String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
     }
 }
@@ -92,7 +116,11 @@ fn status(addr: &str, method: &str, path: &str, headers: &[(&str, &str)]) -> u16
 
 #[test]
 fn net_makes_a_network_or_is_refused_from_under_an_agent() {
-    let s = Service::start();
+    // The service's API, its actor gateway, and the network's LAN door.
+    let [port, gateway_port, lan] = free_ports();
+    let s = Service::start(port, gateway_port);
+    let lan = format!("127.0.0.1:{lan}");
+    let lan = lan.as_str();
     let (code, out, err) = s.run(&["--help"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("net "), "the command is listed: {out}");
@@ -104,10 +132,10 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     assert!(out.contains("xenonet svc publish <name> http://127.0.0.1:<port> --paths"), "{out}");
     let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9"]);
     assert_eq!(code, 2, "no paths: {err}");
-    let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--lan", LAN, "--json"]);
+    let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--lan", lan, "--json"]);
     if code != 0 {
         assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex"), "refused for what it is: {err}");
-        assert_eq!(status(LAN, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
+        assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
         let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/"]);
         assert_eq!(code, 1);
         assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex"), "refused for what it is: {err}");
@@ -118,10 +146,10 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     assert_eq!(st["self"]["id"], "studio");
     assert_eq!(st["gateway"]["kind"], "loopback");
     // The LAN door: the network's routes for its own address alone.
-    assert_eq!(status(LAN, "GET", "/net/v1/roster", &[]), 401, "unsigned");
-    assert_eq!(status(LAN, "GET", "/net/v1/roster", &[("Host", "evil.example")]), 421);
-    assert_eq!(status(LAN, "GET", "/net/v1/roster", &[("Origin", "http://evil.example")]), 403);
-    assert_eq!(status(LAN, "POST", "/mcp", &[]), 404);
+    assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 401, "unsigned");
+    assert_eq!(status(lan, "GET", "/net/v1/roster", &[("Host", "evil.example")]), 421);
+    assert_eq!(status(lan, "GET", "/net/v1/roster", &[("Origin", "http://evil.example")]), 403);
+    assert_eq!(status(lan, "POST", "/mcp", &[]), 404);
     let (code, out, _) = s.run(&["net", "status"]);
     assert_eq!(code, 0);
     assert!(out.contains("home") && out.contains("studio"), "{out}");
@@ -138,7 +166,7 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, out, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/", "--paths", "/files/"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("/api/svc/studio/files/"), "{out}");
-    let (code, _, err) = s.run(&["svc", "publish", "own", &format!("http://127.0.0.1:{PORT}"), "--paths", "/api/"]);
+    let (code, _, err) = s.run(&["svc", "publish", "own", &format!("http://127.0.0.1:{}", s.port), "--paths", "/api/"]);
     assert_eq!(code, 1, "never XenoNet's own API");
     assert!(err.contains("XenoNet's own"), "{err}");
     let (code, _, err) = s.run(&["svc", "publish", "far", "http://192.168.1.5:9", "--paths", "/"]);
@@ -167,5 +195,5 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, out, err) = s.run(&["net", "leave", "--force"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("left home"), "{out}");
-    assert_eq!(status(LAN, "GET", "/net/v1/roster", &[]), 0, "the LAN door closed");
+    assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "the LAN door closed");
 }

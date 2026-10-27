@@ -1,13 +1,13 @@
 // Services through the network (docs/design/network.md, "Services through
 // the network"): three services in this process, each with its own state
-// folder. hub founds the network and is its LAN-only gateway on
-// 127.0.0.1:48131; studio and laptop join. studio publishes a made-up HTTP
-// service, and laptop's programs reach it at /api/svc/studio/<name>/… on
-// laptop's own API: an allowlisted path passes and one outside it is
-// refused; the service is sent laptop's id in Forwarded, never a
-// caller's own, and the caller's bearer untouched; the size caps hold; a
-// host outside --hosts is refused; and with studio offline, laptop answers
-// 503 at once.
+// folder. hub founds the network and is its LAN-only gateway on a
+// loopback port the OS picks; studio and laptop join. studio publishes a
+// made-up HTTP service, and laptop's programs reach it at
+// /api/svc/studio/<name>/… on laptop's own API: an allowlisted path passes
+// and one outside it is refused; the service is sent laptop's id in
+// Forwarded, never a caller's own, and the caller's bearer untouched; the
+// size caps hold; a host outside --hosts is refused; and with studio
+// offline, laptop answers 503 at once.
 //
 // With Xenolith built (xenolith/rust/target/release/xenolith), a real
 // curator on studio and a follower on laptop sync a page through
@@ -16,6 +16,8 @@
 // NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
+mod common;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -40,10 +42,6 @@ use xenonet_service::gateway::tunnel::SystemHost;
 use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
 
-const LAN: u16 = 48131;
-const XENOLITH_LAN: u16 = 48134;
-/// laptop's own API, listening for Xenolith's follower in the second test.
-const XENOLITH_API: u16 = 48135;
 const TOKEN: &str = "Bearer svc-token-0123456789";
 
 /// The person at the window and their terminal, until `agent` says the
@@ -270,8 +268,9 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let root = std::env::temp_dir().join(format!("xenonet-net-svc-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    let [lan] = common::free_ports();
     let gw = Host::open("hub", root.join("hub"), 47995).await;
-    let (s, v) = gw.window("POST", "/api/net/create", json!({ "name": "home", "host": "hub", "lan": format!("127.0.0.1:{LAN}") })).await;
+    let (s, v) = gw.window("POST", "/api/net/create", json!({ "name": "home", "host": "hub", "lan": format!("127.0.0.1:{lan}") })).await;
     assert_eq!(s, 200, "{v}");
     let a = Host::open("studio", root.join("studio"), 47996).await;
     join(&a, &gw).await;
@@ -534,15 +533,17 @@ async fn a_xenolith_follower_syncs_with_its_curator_through_the_network() {
     let port = rx.recv_timeout(Duration::from_secs(30)).expect("Xenolith said where it listens");
 
     // studio founds the network and publishes Xenolith's sync routes;
-    // laptop joins, with its own API listening.
+    // laptop joins, with its own API listening on `api` for Xenolith's
+    // follower.
+    let [lan, api] = common::free_ports();
     let a = Host::open("studio", root.join("studio"), 47998).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{XENOLITH_LAN}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
     assert_eq!(s, 200, "{v}");
-    let b = Host::open("laptop", root.join("laptop"), XENOLITH_API).await;
+    let b = Host::open("laptop", root.join("laptop"), api).await;
     join(&b, &a).await;
     live(&a, 2).await;
     live(&b, 2).await;
-    let door = listen(b.ctx.clone(), XENOLITH_API).await;
+    let door = listen(b.ctx.clone(), api).await;
     let (s, v) = a.window("POST", "/api/net/svc/publish", json!({ "name": "xenolith", "target": format!("http://127.0.0.1:{port}"), "paths": ["/sync/v1/"] })).await;
     assert_eq!(s, 200, "{v}");
 
@@ -551,7 +552,7 @@ async fn a_xenolith_follower_syncs_with_its_curator_through_the_network() {
     let follower = Xenolith::new(&bin, &root.join("laptop"));
     follower.ok(&["serve", "--init"], None);
     follower.ok(&["sync", "name", "laptop"], None);
-    let peer = format!("http://127.0.0.1:{XENOLITH_API}/api/svc/studio/xenolith");
+    let peer = format!("http://127.0.0.1:{api}/api/svc/studio/xenolith");
     follower.ok(&["sync", "peer", "add", "studio", &peer], Some(&token));
     follower.ok(&["sync", "follow", "project:atlas", "studio"], None);
     let follower_bin = follower.bin.clone();
