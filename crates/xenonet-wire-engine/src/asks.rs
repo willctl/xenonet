@@ -120,7 +120,7 @@ pub fn input_words(input: &Value, home: &str) -> String {
 
 /// Whether a tool call may read the run's environment, or names the
 /// token: a command that prints it (env, printenv or set on their own),
-/// PowerShell's env: drive, /proc/<pid>/environ, an environment API, or
+/// PowerShell's `env:` drive, `/proc/<pid>/environ`, an environment API, or
 /// OAUTH_TOKEN anywhere. Only what runs or is read counts (a command, a
 /// path, a pattern, a query, a URL), not a description or a file's new
 /// text. It warns; it doesn't decide.
