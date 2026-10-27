@@ -166,10 +166,11 @@ kept, and `xenonet runs forget` takes it away.
 **The run it signs in can read it.** Claude Code passes its environment to
 the commands it runs, so the session XenoNet runs, and anyone who can
 prompt that session, can print the token with a command such as
-`printenv`. Allow cards say so when a call may read the environment or
-names the token (`env`, `printenv`, `set`, PowerShell's `env:`,
-`/proc/self/environ`, `OAUTH_TOKEN`): deny those unless the session may
-see the token. Under `start: network` or `wake: network` (see [Who may
+`printenv`. When such a call asks you first, its Allow card says so: one
+that may read the environment or names the token (`env`, `printenv`,
+`set`, PowerShell's `env:`, `/proc/self/environ`, `OAUTH_TOKEN`). Deny it
+unless the session may see the token. A call the session's settings or
+permission mode already allow doesn't ask, so it gets no card. Under `start: network` or `wake: network` (see [Who may
 start and wake sessions](network.md#who-may-start-and-wake-sessions)),
 that's anyone the setting lets in, so keep a token only on a machine whose
 settings you'd trust with it.
