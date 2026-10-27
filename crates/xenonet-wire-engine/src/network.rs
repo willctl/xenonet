@@ -759,6 +759,16 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
     }
     let mut c = EngineCalls::new(w, None);
     let view = c.view(&t)?;
+    // An actor XenoNet only observes reads nothing: refused, as a message
+    // sent on this machine is, rather than stored for no one.
+    let unreached = xenonet_engine::engine::Engine::unreached(&mut c, &view).map_err(|e| match e {
+        Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
+        Fail::Thrown(t) => t,
+    })?;
+    if let Some(why) = unreached {
+        receipt(w, from, &mid, &target, "refused", Some(&why));
+        return Ok(());
+    }
     // This host's own limits hold for it too: paused, too fast, a repeat.
     let ask = obj(vec![("sender", Arg::text(sender_id.clone())), ("recipients", Arg::List(vec![view.clone()])), ("text", Arg::text(body.clone())), ("depth", Arg::num(hops))]);
     if let Err(e) = xenonet_engine::peer::Calls::call(&mut c, "engine.policy", "checkSend", vec![ask]) {

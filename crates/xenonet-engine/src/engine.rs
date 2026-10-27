@@ -887,8 +887,23 @@ impl Engine {
 
     /// Why an actor XenoNet only observes isn't sent messages.
     fn deaf(a: &Arg) -> Fail {
+        Fail::Error(Self::deaf_why(a))
+    }
+
+    fn deaf_why(a: &Arg) -> String {
         let how = if a.field("reader").truthy() { "XenoNet reads its records but has no way to message it" } else { "XenoNet only observes it" };
-        Fail::Error(format!("{} (\"{}\") can't read messages: {how}, so nothing would reach it", js_text(&a.field("id")), js_text(&a.field("title"))))
+        format!("{} (\"{}\") can't read messages: {how}, so nothing would reach it", js_text(&a.field("id")), js_text(&a.field("title")))
+    }
+
+    /// Why a message from another machine can't reach an agent here (its
+    /// view): no actor here has its id, or it reads no messages, as a
+    /// message sent on this machine is refused. None when it can.
+    pub fn unreached(c: &mut dyn Calls, a: &Arg) -> Result<Option<String>> {
+        let id = a.field("id");
+        if is_actor_agent(&id) && (kind_nullish(c, "engine.actors")? || !c.call("engine.actors", "has", vec![id.clone()])?.truthy()) {
+            return Ok(Some("no session or actor here has that id".into()));
+        }
+        Ok((!Self::reads(c, &id)?).then(|| Self::deaf_why(a)))
     }
 
     /// What kind of agent another is, as agents read it.

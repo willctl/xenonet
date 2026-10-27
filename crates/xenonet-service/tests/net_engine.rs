@@ -34,6 +34,8 @@ use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
 use xenonet_wire_engine::world::World;
 
 const LAN: u16 = 48114;
+/// The second network's, for actors.
+const ACTORS_LAN: u16 = 48119;
 const S1: &str = "claude:aaaaaaaa-0001";
 const L1: &str = "claude:bbbbbbbb-0001";
 const D1: &str = "codex:cccccccc-0001";
@@ -170,9 +172,16 @@ struct Host {
 
 impl Host {
     async fn open(name: &'static str, dir: PathBuf, sessions: Vec<Sess>, door: Option<u16>) -> Host {
+        let actors = door.is_some();
+        Host::open_with(name, dir, sessions, door, actors).await
+    }
+
+    /// A machine with actors on or off; the gateway's always has them.
+    async fn open_with(name: &'static str, dir: PathBuf, sessions: Vec<Sess>, door: Option<u16>, actors: bool) -> Host {
         let home = dir.join("home").to_string_lossy().into_owned();
         let state = dir.join("state").to_string_lossy().into_owned();
-        let actors = if door.is_some() { "on" } else { "off" };
+        let on = actors || door.is_some();
+        let actors = if on { "on" } else { "off" };
         let vars = [
             ("HOME", home.as_str()),
             ("XENONET_STATE_DIR", state.as_str()),
@@ -183,7 +192,7 @@ impl Host {
         ];
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let mut config = Config::from(&[], &get);
-        let mut cores = Cores::pending(door.is_some(), false, false);
+        let mut cores = Cores::pending(on, false, false);
         cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone() });
         let env = WireEnv { version: "0.0.0-test".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
         let world = xenonet_wire_engine::wire(&mut cores, &mut config, &env).expect("the engine's parts");
@@ -667,6 +676,79 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let st = a.state().await;
     assert_eq!(row(&st, "den")["window"], true, "{st}");
     drop((a, b, c, e));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// An actor registered at a machine and allowed there, which may message
+/// agents.
+fn actor(h: &Host, name: &str) -> String {
+    let reg = h.ctx.cores.registration.clone().unwrap();
+    let asked = reg.register(&json!({ "name": name, "capabilities": ["message-agents"] }), &json!({ "ok": true, "checked": false })).unwrap();
+    let request = reg.requests().unwrap()["requests"][0]["id"].as_str().unwrap().to_string();
+    reg.decide(&request, &json!("allow")).unwrap();
+    asked["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn actors_reach_actors_on_other_machines() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-actors-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    // studio founds the network, laptop joins as a window host; both have
+    // actors.
+    let a = Host::open_with("studio", root.join("studio"), vec![], None, true).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{ACTORS_LAN}") })).await;
+    assert_eq!(s, 200, "{v}");
+    let (address, code) = ticket(&a, "laptop", true).await;
+    let b = Host::open_with("laptop", root.join("laptop"), vec![], None, true).await;
+    join(&b, &address, &code).await;
+    for h in [&a, &b] {
+        live(h, 2).await;
+    }
+    let wren = actor(&a, "Wren");
+    let kite = actor(&b, "Kite");
+    assert_eq!((wren.as_str(), kite.as_str()), ("actor:wren", "actor:kite"));
+    // Grok Bot as XenoNet on laptop sees it: observed, with no way to
+    // message it.
+    let grok = xenonet_engine::sql::Arg::Obj(vec![
+        ("id".into(), xenonet_engine::sql::Arg::text("actor:grok")),
+        ("name".into(), xenonet_engine::sql::Arg::text("Grok")),
+        ("via".into(), xenonet_engine::sql::Arg::List(vec![xenonet_engine::sql::Arg::text("observed")])),
+    ]);
+    b.world.actors.as_ref().unwrap().call(&b.world, "upsert", &[grok]).unwrap();
+    let send = |h: &Host, me: &str, body: Value| {
+        let (engine, me) = (h.ctx.cores.engine.clone(), me.to_string());
+        async move { engine.send(&me, body, None).await }
+    };
+
+    // An actor reaches another machine's actor only with a grant that
+    // names it: by:kite is kite on laptop.
+    let refused = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap_err();
+    assert!(refused.to_string().contains("no session or actor you can reach is @laptop:actor:kite"), "{refused}");
+    a.ctx.cores.policy.grant(&wren, "by:kite by:grok", 3600e3).unwrap();
+    let sent = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap();
+    assert_eq!(sent["to"][0]["host"], "laptop", "{sent}");
+    let got = until_value("wren's message at kite", 10, || async {
+        let got = b.ctx.cores.engine.inbox(&kite, Duration::ZERO).await.unwrap();
+        got.as_array().unwrap().first().cloned()
+    })
+    .await;
+    assert_eq!((got["text"].clone(), got["from"]["id"].clone()), (json!("Is the mix done?"), json!("@studio:actor:wren")), "{got}");
+    until("the stored receipt at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:kite" && r.is_some()) }).await;
+    // kite answers with a grant of its own; a machine: term names the host.
+    b.ctx.cores.policy.grant(&kite, "by:wren machine:desk", 3600e3).unwrap();
+    let refused = send(&b, &kite, json!({ "replyTo": got["id"], "text": "Mixed." })).await.unwrap_err();
+    assert!(refused.to_string().contains("no session or actor you can reach is @studio:actor:wren"), "{refused}");
+    b.ctx.cores.policy.grant(&kite, "by:wren machine:studio", 3600e3).unwrap();
+    send(&b, &kite, json!({ "replyTo": got["id"], "text": "Mixed." })).await.unwrap();
+    until("kite's answer at wren", 10, || async { texts(&a.ctx.cores.engine.inbox(&wren, Duration::ZERO).await.unwrap()) == ["Mixed."] }).await;
+
+    // Grok Bot on laptop reads no messages: laptop refuses one, as it
+    // refuses one sent there, rather than storing it for no one.
+    send(&a, &wren, json!({ "to": "@laptop:actor:grok", "text": "Anything new?" })).await.unwrap();
+    until("grok's refusal at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:grok" && r.as_deref() == Some("refused")) }).await;
+    drop((a, b));
     let _ = std::fs::remove_dir_all(root);
 }
 
