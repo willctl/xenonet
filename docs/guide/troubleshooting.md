@@ -55,6 +55,8 @@ This prints the same summary as Markdown, ready to paste into an issue (`--json`
 
 **Port 47840 is already in use.** Another program holds XenoNet's port. The log names it when it's another XenoNet, such as XenoNet Dev started on the wrong port. Quit that one, or start XenoNet with another `XENONET_PORT`.
 
+**The doctor says Codex or Grok Build is "not installed".** That's a note, not a problem: XenoNet shows the app's sessions once it's installed, and the checks that need it are skipped until then. A Codex that isn't installed doesn't count against "XenoNet can read what it shows" or "XenoNet's parts are working" either.
+
 **The doctor says "connected, but … is gone".** XenoNet's hooks run files that aren't there any more, often from a checkout that was moved or deleted. Run `xenonet connect`. Each XenoNet on the computer (the installed one, XenoNet Dev) keeps its own hooks and MCP server, so connecting one never removes the other's.
 
 **`xenonet update` on 0.3.0 stops with an error about `node`.** The 0.3.0 updater can't install 0.4.0's Service and Tools, which have no `node`. Update Desktop instead. Its first start installs them. See [Upgrading from 0.3.0](components.md#upgrading-from-030).

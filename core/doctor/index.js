@@ -173,10 +173,24 @@ function grokBin(ctx) {
 // sets (allow_managed_hooks_only).
 const grokPolicies = (ctx) => ["/etc/grok/requirements.toml", "/etc/grok/managed_config.toml", inGrok(ctx, "requirements.toml"), inGrok(ctx, "managed_config.toml")];
 
+// Codex's command: the ChatGPT app's codex (ctx.codexBin, when it's
+// there) or a codex on PATH, or null when there's neither. That's Codex not
+// installed, which is no problem: XenoNet shows its threads once it is.
+function codexBin(ctx) {
+  const bins = [ctx.codexBin, ctx.which("codex")].filter(Boolean);
+  const bin = bins.find((b) => path.isAbsolute(b) && ctx.exists(b)) ?? bins[0];
+  if (!bin || (path.isAbsolute(bin) && !ctx.exists(bin)) || (!path.isAbsolute(bin) && !ctx.which(bin))) return null;
+  return bin;
+}
+// The map's sources for apps that aren't installed: what they can't read
+// isn't a failure. Only Codex's runs a program of the app's own.
+const absentSources = (ctx) => (codexBin(ctx) ? [] : ["codex"]);
+
 // The sources of the map that xenonet.sources reports as failed: Xenolith
-// and identities are extras, so theirs go without a word.
+// and identities are extras, so theirs go without a word, and so do those
+// of an app that isn't installed (`absent`).
 const OPTIONAL_SOURCES = new Set(["wiki", "identities"]);
-const failedSources = (health) => (health?.sources ?? []).filter((s) => !s.ok && !OPTIONAL_SOURCES.has(s.name));
+const failedSources = (health, absent = []) => (health?.sources ?? []).filter((s) => !s.ok && !OPTIONAL_SOURCES.has(s.name) && !absent.includes(s.name));
 
 export const CHECKS = [
   // ---------- XenoNet ----------
@@ -196,11 +210,12 @@ export const CHECKS = [
     title: "XenoNet can read what it shows",
     async run(ctx) {
       if (!ctx.health) return skip("needs XenoNet running");
-      const bad = failedSources(ctx.health);
-      const counts = Object.fromEntries(ctx.health.sources.filter((s) => s.ok).map((s) => [s.name, s.count]));
+      const absent = absentSources(ctx);
+      const bad = failedSources(ctx.health, absent);
+      const counts = Object.fromEntries(ctx.health.sources.filter((s) => s.ok && !absent.includes(s.name)).map((s) => [s.name, s.count]));
       if (bad.length) return fail(bad.map((s) => `${s.name}: ${s.error ?? "failed"}`).join("; "), "Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.");
       const parts = [counts.projects != null && plural(counts.projects, "project"), counts.claude != null && plural(counts.claude, "Claude session"), counts.codex != null && plural(counts.codex, "Codex thread"), counts.grok ? plural(counts.grok, "Grok Build session") : null].filter(Boolean);
-      return ok(`reading ${parts.join(", ")}`);
+      return ok(`reading ${parts.join(", ")}${absent.includes("codex") ? "; Codex isn't installed" : ""}`);
     },
   },
   {
@@ -216,12 +231,15 @@ export const CHECKS = [
       // that reads for a source xenonet.sources reports as failed would only
       // say the same again, so it's left to that check.
       // The check can be shown alone (xenonet doctor --only xenonet.blocks), so
-      // it names those sources rather than pointing at another check.
-      const reported = new Set(failedSources(ctx.health).map((s) => s.name));
+      // it names those sources rather than pointing at another check. One
+      // that reads for an app that isn't installed has nothing to read.
+      const absent = absentSources(ctx);
+      const reported = new Set(failedSources(ctx.health, absent).map((s) => s.name));
       const wrong = blocks.filter((b) => b.state === "failed" || b.state === "degraded");
-      const bad = wrong.filter((b) => !reported.has(b.source)).sort((a, b) => (a.state === "failed" ? 0 : 1) - (b.state === "failed" ? 0 : 1));
+      const bad = wrong.filter((b) => !reported.has(b.source) && !absent.includes(b.source)).sort((a, b) => (a.state === "failed" ? 0 : 1) - (b.state === "failed" ? 0 : 1));
       const left = [...new Set(wrong.filter((b) => reported.has(b.source)).map((b) => b.source))];
-      if (!bad.length) return ok(`${plural(blocks.length, "part")}, none with a problem${left.length ? ` besides those reading for ${left.join(" and ")}, which XenoNet can't read` : ""}`);
+      const besides = [left.length ? `those reading for ${left.join(" and ")}, which XenoNet can't read` : null, wrong.some((b) => absent.includes(b.source)) ? "those reading for Codex, which isn't installed" : null].filter(Boolean);
+      if (!bad.length) return ok(`${plural(blocks.length, "part")}, none with a problem${besides.length ? ` besides ${besides.join(", and ")}` : ""}`);
       const say = (list) => list.map((b) => `${b.name} ${b.state === "failed" ? "isn't working" : "is partly working"}${b.lastError ? ` (${tilde(b.lastError.message, ctx.home)})` : ""}`).join("; ");
       // A source that missed one beat (a timeout, a file half written) is
       // fine again a few seconds later: only a part that's stayed that way
@@ -356,9 +374,8 @@ export const CHECKS = [
     group: "Codex",
     title: "Codex is installed",
     async run(ctx) {
-      const bins = [ctx.codexBin, ctx.which("codex")].filter(Boolean);
-      const bin = bins.find((b) => path.isAbsolute(b) && ctx.exists(b)) ?? bins[0];
-      if (!bin || (path.isAbsolute(bin) && !ctx.exists(bin)) || (!path.isAbsolute(bin) && !ctx.which(bin))) return warn("no Codex: neither the ChatGPT app's codex nor a codex command", "Install the ChatGPT desktop app or the Codex CLI.");
+      const bin = codexBin(ctx);
+      if (!bin) return info("not installed; XenoNet shows Codex's threads once it is", "To use Codex, install the ChatGPT desktop app or the Codex CLI.");
       const v = await ctx.run(bin, ["--version"], 4000);
       const version = (v.stdout.match(/\d+\.\d+\.\d+[\w.-]*/) ?? [])[0];
       return ok(`${version ? `version ${version}, ` : ""}${tilde(bin, ctx.home)}`);
@@ -369,7 +386,7 @@ export const CHECKS = [
     group: "Codex",
     title: "Codex is signed in",
     async run(ctx) {
-      const bin = ctx.which("codex") ?? ctx.codexBin;
+      const bin = ctx.which("codex") ?? codexBin(ctx);
       if (!bin) return skip("Codex isn't installed");
       const r = await ctx.run(bin, ["login", "status"], 6000);
       const text = `${r.stdout}${r.stderr}`.trim();

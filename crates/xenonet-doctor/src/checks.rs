@@ -229,11 +229,45 @@ fn list(v: Option<&Value>) -> Vec<Value> {
     v.and_then(Value::as_array).cloned().unwrap_or_default()
 }
 
-fn failed_sources(health: Option<&Value>) -> Vec<Value> {
+fn failed_sources(health: Option<&Value>, absent: &[&str]) -> Vec<Value> {
     list(health.and_then(|h| h.get("sources")))
         .into_iter()
-        .filter(|s| !truthy(s.get("ok")) && !matches!(s.get("name").and_then(Value::as_str), Some("wiki" | "identities")))
+        .filter(|s| {
+            let name = s.get("name").and_then(Value::as_str);
+            !truthy(s.get("ok")) && !matches!(name, Some("wiki" | "identities")) && !name.is_some_and(|n| absent.contains(&n))
+        })
         .collect()
+}
+
+/// Codex's command: the ChatGPT app's codex (`codexBin`, when it's there)
+/// or a codex on PATH, or None when there's neither. That's Codex not
+/// installed, which is no problem: XenoNet shows its threads once it is.
+async fn codex_bin(c: &Ctx<'_>) -> Result<Option<String>, Failure> {
+    let mut bins: Vec<String> = Vec::new();
+    if let Some(b) = c.f.get("codexBin").filter(|v| truthy(Some(v))) {
+        bins.push(js_string(b));
+    }
+    if let Some(b) = c.which("codex").await? {
+        bins.push(b);
+    }
+    let mut bin = None;
+    for b in &bins {
+        if NATIVE.is_absolute(b) && c.exists(b).await? {
+            bin = Some(b.clone());
+            break;
+        }
+    }
+    Ok(match bin.or_else(|| bins.first().cloned()) {
+        Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await?.then_some(b),
+        Some(b) => c.which(&b).await?.is_some().then_some(b),
+        None => None,
+    })
+}
+
+/// The map's sources for apps that aren't installed: what they can't read
+/// isn't a failure. Only Codex's runs a program of the app's own.
+async fn absent_sources(c: &Ctx<'_>) -> Result<Vec<&'static str>, Failure> {
+    Ok(if codex_bin(c).await?.is_some() { Vec::new() } else { vec!["codex"] })
 }
 
 fn n(v: Option<&Value>) -> f64 {
@@ -267,29 +301,35 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
         }
         "xenonet.sources" => {
             let Some(health) = f.get("health").filter(|v| truthy(Some(v))) else { return Ok(skip("needs XenoNet running")) };
-            let bad = failed_sources(Some(health));
+            let absent = absent_sources(&c).await?;
+            let bad = failed_sources(Some(health), &absent);
             if !bad.is_empty() {
                 let said: Vec<String> =
                     bad.iter().map(|x| format!("{}: {}", s(x.get("name")), x.get("error").filter(|v| !v.is_null()).map_or_else(|| "failed".into(), js_string))).collect();
                 return Ok(fail(said.join("; "), Some("Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.")));
             }
             let mut counts: Map<String, Value> = Map::new();
-            for x in list(health.get("sources")).into_iter().filter(|x| truthy(x.get("ok"))) {
+            for x in list(health.get("sources")).into_iter().filter(|x| truthy(x.get("ok")) && !x.get("name").and_then(Value::as_str).is_some_and(|n| absent.contains(&n))) {
                 counts.insert(s(x.get("name")), x.get("count").cloned().unwrap_or(Value::Null));
             }
             let part = |k: &str, word: &str| counts.get(k).filter(|v| !v.is_null()).map(|v| plural(n(Some(v)), word, None));
             let grok = counts.get("grok").filter(|v| truthy(Some(v))).map(|v| plural(n(Some(v)), "Grok Build session", None));
             let parts: Vec<String> = [part("projects", "project"), part("claude", "Claude session"), part("codex", "Codex thread"), grok].into_iter().flatten().collect();
-            Ok(ok(format!("reading {}", parts.join(", "))))
+            let missing = if absent.contains(&"codex") { "; Codex isn't installed" } else { "" };
+            Ok(ok(format!("reading {}{missing}", parts.join(", "))))
         }
         "xenonet.blocks" => {
             let Some(health) = f.get("health").filter(|v| truthy(Some(v))) else { return Ok(skip("needs XenoNet running")) };
             let Some(blocks) = health.get("blocks").filter(|v| truthy(Some(v))) else { return Ok(skip("this XenoNet doesn't report its parts")) };
             let blocks = list(Some(blocks));
-            let reported: Vec<Value> = failed_sources(Some(health)).iter().map(|x| x.get("name").cloned().unwrap_or(Value::Null)).collect();
+            // One that reads for an app that isn't installed has nothing to
+            // read.
+            let absent = absent_sources(&c).await?;
+            let gone = |b: &Value| b.get("source").and_then(Value::as_str).is_some_and(|src| absent.contains(&src));
+            let reported: Vec<Value> = failed_sources(Some(health), &absent).iter().map(|x| x.get("name").cloned().unwrap_or(Value::Null)).collect();
             let has = |b: &Value| b.get("source").is_some_and(|src| reported.iter().any(|r| xenonet_app::jsv::strict_eq(Some(r), Some(src))));
             let wrong: Vec<&Value> = blocks.iter().filter(|b| matches!(b.get("state").and_then(Value::as_str), Some("failed" | "degraded"))).collect();
-            let mut bad: Vec<&Value> = wrong.iter().copied().filter(|b| !has(b)).collect();
+            let mut bad: Vec<&Value> = wrong.iter().copied().filter(|b| !has(b) && !gone(b)).collect();
             bad.sort_by_key(|b| u8::from(b.get("state").and_then(Value::as_str) != Some("failed")));
             let mut left: Vec<String> = Vec::new();
             for b in wrong.iter().filter(|b| has(b)) {
@@ -299,7 +339,14 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 }
             }
             if bad.is_empty() {
-                let besides = if left.is_empty() { String::new() } else { format!(" besides those reading for {}, which XenoNet can't read", left.join(" and ")) };
+                let mut besides: Vec<String> = Vec::new();
+                if !left.is_empty() {
+                    besides.push(format!("those reading for {}, which XenoNet can't read", left.join(" and ")));
+                }
+                if wrong.iter().any(|b| gone(b)) {
+                    besides.push("those reading for Codex, which isn't installed".into());
+                }
+                let besides = if besides.is_empty() { String::new() } else { format!(" besides {}", besides.join(", and ")) };
                 return Ok(ok(format!("{}, none with a problem{besides}", plural(blocks.len() as f64, "part", None))));
             }
             let say = |l: &[&Value]| -> String {
@@ -410,27 +457,8 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
             Ok(warn(if truthy(cl.get("reason")) { format!("{reason}, so there's {since}") } else { format!("there's {since}") }, None))
         }
         "codex.cli" => {
-            let mut bins: Vec<String> = Vec::new();
-            if let Some(b) = f.get("codexBin").filter(|v| truthy(Some(v))) {
-                bins.push(js_string(b));
-            }
-            if let Some(b) = c.which("codex").await? {
-                bins.push(b);
-            }
-            let mut bin = None;
-            for b in &bins {
-                if NATIVE.is_absolute(b) && c.exists(b).await? {
-                    bin = Some(b.clone());
-                    break;
-                }
-            }
-            let bin = match bin.or_else(|| bins.first().cloned()) {
-                Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await?.then_some(b),
-                Some(b) => c.which(&b).await?.is_some().then_some(b),
-                None => None,
-            };
-            let Some(bin) = bin else {
-                return Ok(warn("no Codex: neither the ChatGPT app's codex nor a codex command", Some("Install the ChatGPT desktop app or the Codex CLI.")));
+            let Some(bin) = codex_bin(&c).await? else {
+                return Ok(info("not installed; XenoNet shows Codex's threads once it is", Some("To use Codex, install the ChatGPT desktop app or the Codex CLI.")));
             };
             let v = c.run(&bin, &["--version"], 4000.0).await?;
             static R: OnceLock<Regex> = OnceLock::new();
@@ -440,9 +468,9 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
         "codex.auth" => {
             let bin = match c.which("codex").await? {
                 Some(b) => Some(b),
-                None => f.get("codexBin").map(js_string),
+                None => codex_bin(&c).await?,
             };
-            let Some(bin) = bin.filter(|b| !b.is_empty()) else { return Ok(skip("Codex isn't installed")) };
+            let Some(bin) = bin else { return Ok(skip("Codex isn't installed")) };
             let r = c.run(&bin, &["login", "status"], 6000.0).await?;
             let text = xenonet_base::text::js_trim(&format!("{}{}", s(r.get("stdout")), s(r.get("stderr")))).to_string();
             let lower = text.to_ascii_lowercase();

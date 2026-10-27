@@ -374,6 +374,32 @@ test("XenoNet's parts: a warning names each that hasn't worked for a minute, fai
   assert.equal((await blocks(BLOCKS(), { health: null })).status, "skip", "no XenoNet running");
 });
 
+test("Codex not installed is a note, on every system: its sign-in is skipped, and what its source and parts can't read isn't a failure", async () => {
+  const since = Date.now() - 3 * 60e3;
+  const spawn = "spawn codex program not found";
+  // No codex on PATH and no ChatGPT app's: the bare name the service falls
+  // back to, which it couldn't start.
+  const none = (platform) =>
+    ctxWith({
+      bins: { codex: undefined },
+      ctx: {
+        platform,
+        codexBin: "codex",
+        health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: false, error: spawn }], blocks: [...BLOCKS(), { name: "codex-threads", kind: "gatherer", source: "codex", state: "failed", since, lastOk: null, lastError: { at: 5, message: spawn }, counters: { errors: 9 } }] },
+      },
+    });
+  for (const platform of ["win32", "darwin", "linux"]) {
+    const out = byId(await runDoctor(none(platform), { only: ["codex.cli", "codex.auth", "xenonet.sources", "xenonet.blocks"] }));
+    assert.deepEqual([out["codex.cli"].status, out["codex.cli"].detail, out["codex.cli"].fix], ["info", "not installed; XenoNet shows Codex's threads once it is", "To use Codex, install the ChatGPT desktop app or the Codex CLI."], platform);
+    assert.equal(out["codex.auth"].status, "skip", platform);
+    assert.deepEqual([out["xenonet.sources"].status, out["xenonet.sources"].detail], ["ok", "reading 2 projects, 9 Claude sessions; Codex isn't installed"], platform);
+    assert.deepEqual([out["xenonet.blocks"].status, out["xenonet.blocks"].detail], ["ok", "4 parts, none with a problem besides those reading for Codex, which isn't installed"], platform);
+  }
+  // Installed, its source failing is still a failure.
+  const broken = byId(await runDoctor(ctxWith({ ctx: { health: { sources: [{ name: "codex", ok: false, error: "no app-server" }], blocks: BLOCKS() } } }), { only: ["xenonet.sources"] }));
+  assert.deepEqual([broken["xenonet.sources"].status, broken["xenonet.sources"].detail], ["fail", "codex: no app-server"]);
+});
+
 test("XenoNet's parts: one that reads for a source the sources check reports as failed isn't said twice", async () => {
   const run = async (sources, list) => byId(await runDoctor(ctxWith({ ctx: { health: { sources, blocks: list } } }), { only: ["xenonet.sources", "xenonet.blocks"] }));
   const since = Date.now() - 3 * 60e3;
