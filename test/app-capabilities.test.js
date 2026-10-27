@@ -207,7 +207,7 @@ test("open: each app opens its own sessions, starts its own in a project, and ta
 });
 
 test("delivery: each app's resume, the environment a resumed turn keeps, its plan's usage, as before", () => {
-  assert.deepEqual(deliveryApps().map((a) => [a.id, !!a.resume, !!a.channel, !!a.server]), [["claude", true, true, false], ["codex", true, false, false], ["opencode", false, false, true]]);
+  assert.deepEqual(deliveryApps().map((a) => [a.id, !!a.resume, !!a.channel, !!a.server]), [["claude", true, true, false], ["codex", true, false, false], ["grok", true, false, false], ["opencode", false, false, true]]);
   const id = "0190d3e0-0000-7000-8000-00000000ab01";
   assert.deepEqual(resumeCommand(`claude:${id}`), ["claude", ["-p", "--resume", id]]);
   assert.deepEqual(resumeCommand(`claude:${id}`, { settings: "/s/listen.json" }), ["claude", ["-p", "--resume", id, "--settings", "/s/listen.json"]]);
