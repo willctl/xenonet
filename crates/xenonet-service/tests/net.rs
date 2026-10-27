@@ -973,7 +973,9 @@ async fn a_gateway_that_takes_connections_and_says_nothing_puts_the_link_offline
     fw.set(PASS);
     let st = until_state(&b, "laptop live again", |s| s["gateway"]["link"] == "live").await;
     assert_eq!(st["gateway"]["reason"], Value::Null, "{st}");
-    assert!(b.sink.up());
+    // The state reads live as soon as the stream opens; the engine hears it
+    // a moment later.
+    until("the engine heard the link come back", 5, || b.sink.up()).await;
     until("laptop's second presence at studio and desk", 10, || a.sink.presence_from("laptop").contains(&2) && c.sink.presence_from("laptop").contains(&2)).await;
     until("each side sees the other online again", 10, || online(&b, "studio") && online(&b, "desk") && online(&a, "laptop") && online(&c, "laptop")).await;
 }
