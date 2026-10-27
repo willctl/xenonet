@@ -101,7 +101,9 @@ pub const LAUNCHER_PENDING: &str = "XenoNet replaces it the next time it starts,
 /// renamed: that copy goes aside, as `<to>.<pid>-<ms>.old`, the new one
 /// takes its name, and `sweep_aside` deletes the old one on a later start,
 /// once nothing runs it. If the new one can't take the name, the old one
-/// goes back.
+/// goes back. Between the two renames the launcher's path is briefly
+/// missing, so a hook or MCP server starting in that moment fails once;
+/// the rename of a file that isn't running replaces it in one step.
 pub fn replace_file(tmp: &str, to: &str, rename: &mut dyn FnMut(&str, &str) -> Result<(), FsError>) -> Result<(), FsError> {
     let first = match rename(tmp, to) {
         Ok(()) => return Ok(()),
@@ -127,12 +129,21 @@ pub fn is_aside(entry: &str, name: &str) -> bool {
     entry.strip_prefix(name).is_some_and(|rest| rest.starts_with('.')) && std::path::Path::new(entry).extension().is_some_and(|x| x == "old")
 }
 
-/// Deletes the copies `replace_file` put aside beside `to`. One still
-/// running (on Windows) stays until a later start.
+/// The process whose copy `entry` is, when it's a temporary copy of `name`
+/// that `write_launcher_bin` makes: `<name>.<pid>.tmp`.
+fn tmp_of(entry: &str, name: &str) -> Option<u32> {
+    entry.strip_prefix(name)?.strip_prefix('.')?.strip_suffix(".tmp")?.parse().ok()
+}
+
+/// Deletes the copies `replace_file` put aside beside `to`, and the
+/// temporary copies a launcher update left when it stopped halfway (one
+/// whose process no longer runs). One still running (on Windows) stays
+/// until a later start.
 pub fn sweep_aside(to: &str) {
     let (dir, name) = (NATIVE.dirname(to), NATIVE.basename(to, None));
     for entry in fsx::read_dir_names(&dir).unwrap_or_default() {
-        if is_aside(&entry, &name) {
+        let stale = tmp_of(&entry, &name).is_some_and(|pid| !xenonet_base::process::running(pid, true));
+        if is_aside(&entry, &name) || stale {
             let _ = fsx::unlink(&NATIVE.join(&[&dir, &entry]));
         }
     }
@@ -772,8 +783,18 @@ mod tests {
         // A later start deletes it, and nothing else beside the launcher.
         std::fs::write(NATIVE.join(&[&dir, "xenonet.from"]), "1.0.0").unwrap();
         std::fs::write(NATIVE.join(&[&dir, "other.old"]), "not ours").unwrap();
+        // A temporary copy an update left when it stopped halfway goes too;
+        // one whose process still runs (this test's) stays.
+        std::fs::write(NATIVE.join(&[&dir, "xenonet.4294967294.tmp"]), "left").unwrap();
+        let mine = format!("xenonet.{}.tmp", std::process::id());
+        std::fs::write(NATIVE.join(&[&dir, &mine]), "copying").unwrap();
         sweep_aside(&to);
-        assert_eq!(fsx::read_dir_names(&dir).unwrap(), ["other.old", "xenonet", "xenonet.from"]);
+        let mut left = fsx::read_dir_names(&dir).unwrap();
+        left.sort();
+        let mut want = vec!["other.old".to_string(), "xenonet".into(), "xenonet.from".into(), mine.clone()];
+        want.sort();
+        assert_eq!(left, want);
+        std::fs::remove_file(NATIVE.join(&[&dir, &mine])).unwrap();
 
         // One that can't be renamed either stays as it was, and says why.
         std::fs::write(&tmp, "newer").unwrap();

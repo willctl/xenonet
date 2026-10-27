@@ -255,10 +255,13 @@ test("copies of the launcher put aside while they ran are deleted on a later sta
   selectComponent("tools", await stagePackage(tools.file, tools.item, { env }), env);
   const launcher = path.join(env.XENONET_RUNTIME_DIR, "launcher");
   fs.mkdirSync(launcher, { recursive: true });
-  for (const name of [`${EXE}.4242-1760000000000.old`, `${EXE}.7-1.old`, "notes.old", `${EXE}.from`]) fs.writeFileSync(path.join(launcher, name), "x");
+  // And a temporary copy an update left when it stopped halfway; one whose
+  // process still runs (this test's parent) stays.
+  const mine = `${EXE}.${process.ppid}.tmp`;
+  for (const name of [`${EXE}.4242-1760000000000.old`, `${EXE}.7-1.old`, "notes.old", `${EXE}.from`, `${EXE}.4294967294.tmp`, mine]) fs.writeFileSync(path.join(launcher, name), "x");
   const out = installLauncher(env);
   assert.equal(out.pending, null);
-  assert.deepEqual(fs.readdirSync(launcher).sort(), [EXE, `${EXE}.from`, "notes.old"].sort());
+  assert.deepEqual(fs.readdirSync(launcher).sort(), [EXE, `${EXE}.from`, "notes.old", mine].sort());
 });
 
 // Windows won't replace a program that's running: the launcher runs as long

@@ -50,7 +50,10 @@ export const LAUNCHER_PENDING = "XenoNet replaces it the next time it starts, or
 // command does, but it lets the running file be renamed: that copy goes
 // aside, as <to>.<pid>-<ms>.old, the new one takes its name, and sweepAside
 // deletes the old one on a later start, once nothing runs it. If the new one
-// can't take the name, the old one goes back.
+// can't take the name, the old one goes back. Between the two renames the
+// launcher's path is briefly missing, so a hook or MCP server starting in that
+// moment fails once; the rename of a file that isn't running replaces it in
+// one step.
 export function replaceFile(tmp, to, { rename = fs.renameSync } = {}) {
   try {
     return rename(tmp, to);
@@ -67,13 +70,30 @@ export function replaceFile(tmp, to, { rename = fs.renameSync } = {}) {
   }
 }
 
-// Deletes the copies replaceFile put aside beside `to`. One still running (on
-// Windows) stays until a later start.
+// Whether a process runs (one that's another user's counts).
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+
+// Deletes the copies replaceFile put aside beside `to`, and the temporary
+// copies (<to>.<pid>.tmp) a launcher update left when it stopped halfway, one
+// whose process no longer runs. One still running (on Windows) stays until a
+// later start.
 export function sweepAside(to) {
   const dir = path.dirname(to), prefix = `${path.basename(to)}.`;
   let names = [];
   try { names = fs.readdirSync(dir); } catch {}
-  for (const name of names) if (name.startsWith(prefix) && name.endsWith(".old")) try { fs.unlinkSync(path.join(dir, name)); } catch {}
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const tmp = /^(\d+)\.tmp$/.exec(name.slice(prefix.length));
+    const stale = tmp && Number(tmp[1]) > 0 && !alive(Number(tmp[1]));
+    if (name.endsWith(".old") || stale) try { fs.unlinkSync(path.join(dir, name)); } catch {}
+  }
 }
 
 // Copies the Tools' binary to the launcher's, when it isn't the copy of these
