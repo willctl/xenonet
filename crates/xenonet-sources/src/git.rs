@@ -243,14 +243,43 @@ pub fn git_dirs(dir: &str) -> Option<(String, String)> {
 }
 
 /// What says a repo may have changed, as its files' mtimes: `status`, its
-/// index, HEAD and HEAD's reflog (staging, commits, checkouts, resets) and
-/// its FETCH_HEAD and packed refs (fetches), and its config (an upstream
-/// set, say); `config`, its config files and yours (~/.gitconfig, and the
-/// XDG one).
+/// index, HEAD, HEAD's reflog and ORIG_HEAD (staging, commits, checkouts,
+/// resets, merges), its FETCH_HEAD and packed refs, its remote-tracking
+/// refs and their reflogs, newest of each (fetches, `--no-write-fetch-head`
+/// ones too, and pushes, which move a remote-tracking ref and nothing
+/// else), and its config (an upstream set, say); `config`, its config files
+/// and yours (~/.gitconfig, and the XDG one).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stamps {
     pub status: String,
     pub config: String,
+}
+
+fn mtime_of(p: &std::path::Path) -> Option<f64> {
+    std::fs::symlink_metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok())
+}
+
+/// The newest mtime of a folder and everything in it (a few levels and a
+/// few thousand entries at most), or "" when it isn't there: a ref moved
+/// within it rewrites its file and its folder, and its reflog grows.
+fn tree_mtime(dir: &str) -> String {
+    fn walk(p: &std::path::Path, depth: u8, left: &mut u32, newest: &mut Option<f64>) {
+        let Some(at) = mtime_of(p) else { return };
+        *newest = Some(newest.map_or(at, |n| n.max(at)));
+        if depth == 0 || !p.is_dir() {
+            return;
+        }
+        for e in std::fs::read_dir(p).into_iter().flatten().flatten() {
+            if *left == 0 {
+                return;
+            }
+            *left -= 1;
+            walk(&e.path(), depth - 1, left, newest);
+        }
+    }
+    let mut newest = None;
+    walk(std::path::Path::new(dir), 8, &mut 4096, &mut newest);
+    newest.map_or_else(String::new, xenonet_base::json::number_string)
 }
 
 fn mtimes(files: &[String]) -> String {
@@ -267,11 +296,12 @@ pub fn repo_stamps(dir: &str, home: &str, xdg_config_home: Option<&str>) -> Opti
     use xenonet_base::nodepath::NATIVE;
     let (git, common) = git_dirs(dir)?;
     let at = |base: &str, parts: &[&str]| NATIVE.join(&std::iter::once(base).chain(parts.iter().copied()).collect::<Vec<_>>());
-    let status = [at(&git, &["index"]), at(&git, &["HEAD"]), at(&git, &["logs", "HEAD"]), at(&common, &["FETCH_HEAD"]), at(&common, &["packed-refs"])];
+    let status = [at(&git, &["index"]), at(&git, &["HEAD"]), at(&git, &["logs", "HEAD"]), at(&git, &["ORIG_HEAD"]), at(&common, &["FETCH_HEAD"]), at(&common, &["packed-refs"])];
+    let remotes = format!("{}|{}", tree_mtime(&at(&common, &["refs", "remotes"])), tree_mtime(&at(&common, &["logs", "refs", "remotes"])));
     let xdg = xdg_config_home.filter(|x| !x.is_empty()).map_or_else(|| at(home, &[".config"]), str::to_string);
     let config = [at(&common, &["config"]), at(&git, &["config.worktree"]), at(home, &[".gitconfig"]), at(&xdg, &["git", "config"])];
     let config = mtimes(&config);
-    Some(Stamps { status: format!("{}|{config}", mtimes(&status)), config })
+    Some(Stamps { status: format!("{}|{remotes}|{config}", mtimes(&status)), config })
 }
 
 /// Whether to read a repo's status now, from when it was last read
@@ -333,6 +363,44 @@ mod tests {
         assert!(drivers_fresh(Some(("c", 0.0)), Some("c"), CONFIG_TTL_MS - 1.0));
         assert!(!drivers_fresh(Some(("c", 0.0)), Some("d"), 1.0), "its config changed");
         assert!(!drivers_fresh(Some(("c", 0.0)), Some("c"), CONFIG_TTL_MS));
+    }
+
+    #[test]
+    fn a_push_changes_the_status_stamp() {
+        let root = std::env::temp_dir().join(format!("xenonet-stamps-push-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath="])
+                .args(args)
+                .current_dir(dir)
+                .output()
+        };
+        if !git(&root, &["--version"]).is_ok_and(|o| o.status.success()) {
+            return;
+        }
+        let (remote, repo) = (root.join("remote.git"), root.join("repo"));
+        let ok = |o: std::io::Result<std::process::Output>| assert!(o.unwrap().status.success());
+        ok(git(&root, &["init", "-q", "--bare", &remote.to_string_lossy()]));
+        ok(git(&root, &["init", "-q", "-b", "main", &repo.to_string_lossy()]));
+        std::fs::write(repo.join("a.txt"), "a").unwrap();
+        ok(git(&repo, &["add", "-A"]));
+        ok(git(&repo, &["commit", "-q", "-m", "one"]));
+        ok(git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]));
+        ok(git(&repo, &["push", "-q", "-u", "origin", "main"]));
+        std::fs::write(repo.join("a.txt"), "b").unwrap();
+        ok(git(&repo, &["commit", "-q", "-am", "two"]));
+        let (path, home) = (repo.to_string_lossy().into_owned(), root.join("home").to_string_lossy().into_owned());
+        let ahead = repo_stamps(&path, &home, None).unwrap();
+        assert_eq!(repo_stamps(&path, &home, None).unwrap(), ahead);
+        // A push moves the remote-tracking ref and its reflog, and nothing
+        // else a status reads: "ahead 1" goes.
+        ok(git(&repo, &["push", "-q"]));
+        let pushed = repo_stamps(&path, &home, None).unwrap();
+        assert_ne!(pushed.status, ahead.status);
+        assert_eq!(pushed.config, ahead.config);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -170,6 +170,34 @@ export function gitDirs(dir) {
   return { git, common: common ? path.resolve(git, common) : git };
 }
 
+// The newest mtime of a folder and everything in it (a few levels and a few
+// thousand entries at most), or "" when it isn't there: a ref moved within it
+// rewrites its file and its folder, and its reflog grows.
+function treeMtime(dir) {
+  let newest = null, left = 4096;
+  const walk = (p, depth) => {
+    let st;
+    try {
+      st = fs.lstatSync(p);
+    } catch {
+      return;
+    }
+    newest = Math.max(newest ?? st.mtimeMs, st.mtimeMs);
+    if (!depth || !st.isDirectory()) return;
+    let names = [];
+    try {
+      names = fs.readdirSync(p);
+    } catch {}
+    for (const name of names) {
+      if (!left) return;
+      left--;
+      walk(path.join(p, name), depth - 1);
+    }
+  };
+  walk(dir, 8);
+  return newest == null ? "" : String(newest);
+}
+
 const mtimes = (files) =>
   files
     .map((f) => {
@@ -182,18 +210,21 @@ const mtimes = (files) =>
     .join("|");
 
 // What says a repo may have changed, as its files' mtimes: `status`, its
-// index, HEAD and HEAD's reflog (staging, commits, checkouts, resets), its
-// FETCH_HEAD and packed refs (fetches), and its config (an upstream set,
-// say); `config`, its config files and yours (~/.gitconfig, and the XDG
-// one). Null when its git folder can't be found: then its status and
+// index, HEAD, HEAD's reflog and ORIG_HEAD (staging, commits, checkouts,
+// resets, merges), its FETCH_HEAD and packed refs, its remote-tracking refs
+// and their reflogs, newest of each (fetches, --no-write-fetch-head ones too,
+// and pushes, which move a remote-tracking ref and nothing else), and its
+// config (an upstream set, say); `config`, its config files and yours
+// (~/.gitconfig, and the XDG one). Null when its git folder can't be found: then its status and
 // drivers are read every time.
 export function repoStamps(dir, { home = os.homedir(), xdg = process.env.XDG_CONFIG_HOME } = {}) {
   const dirs = gitDirs(dir);
   if (!dirs) return null;
   const { git, common } = dirs;
   const config = mtimes([path.join(common, "config"), path.join(git, "config.worktree"), path.join(home, ".gitconfig"), path.join(xdg || path.join(home, ".config"), "git", "config")]);
-  const status = mtimes([path.join(git, "index"), path.join(git, "HEAD"), path.join(git, "logs", "HEAD"), path.join(common, "FETCH_HEAD"), path.join(common, "packed-refs")]);
-  return { status: `${status}|${config}`, config };
+  const status = mtimes([path.join(git, "index"), path.join(git, "HEAD"), path.join(git, "logs", "HEAD"), path.join(git, "ORIG_HEAD"), path.join(common, "FETCH_HEAD"), path.join(common, "packed-refs")]);
+  const remotes = `${treeMtime(path.join(common, "refs", "remotes"))}|${treeMtime(path.join(common, "logs", "refs", "remotes"))}`;
+  return { status: `${status}|${remotes}|${config}`, config };
 }
 
 // Whether to read a repo's status now, from when it was last read (`last`:

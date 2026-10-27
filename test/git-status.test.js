@@ -3,6 +3,7 @@
 // the watch's health says when git can't answer for one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -230,6 +231,35 @@ test("git runs only when a repo may have changed: its status when its index, HEA
   fs.writeFileSync(path.join(wt, ".git"), `gitdir: ${shared}\n`);
   assert.deepEqual(gitDirs(wt), { git: shared, common: path.join(repo, ".git") });
   assert.equal(repoStamps(path.join(root, "plain"), { home }), null);
+});
+
+// A push moves the remote-tracking ref and its reflog, and nothing else a
+// status reads: "ahead 1" goes. Real git, with a bare remote of its own.
+test("a push changes a repo's status stamp", async (t) => {
+  const git = (cwd, ...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=", ...args], { cwd, stdio: "pipe", windowsHide: true });
+  try {
+    git(os.tmpdir(), "--version");
+  } catch {
+    return t.skip("no git here");
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-git-push-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const [remote, repo, home] = ["remote.git", "repo", "home"].map((n) => path.join(root, n));
+  git(root, "init", "-q", "--bare", remote);
+  git(root, "init", "-q", "-b", "main", repo);
+  fs.writeFileSync(path.join(repo, "a.txt"), "a");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "one");
+  git(repo, "remote", "add", "origin", remote);
+  git(repo, "push", "-q", "-u", "origin", "main");
+  fs.writeFileSync(path.join(repo, "a.txt"), "b");
+  git(repo, "commit", "-q", "-am", "two");
+  const ahead = repoStamps(repo, { home });
+  assert.deepEqual(repoStamps(repo, { home }), ahead);
+  git(repo, "push", "-q");
+  const pushed = repoStamps(repo, { home });
+  assert.notEqual(pushed.status, ahead.status);
+  assert.equal(pushed.config, ahead.config);
 });
 
 test("without git, nothing is asked and nothing changes", async () => {
