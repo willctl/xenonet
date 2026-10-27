@@ -2,16 +2,19 @@
 // section 7): three services in this process, each with its own state
 // folder, its made-up sessions, and the binary's hub and relay as `xenonet
 // serve` plugs them in. studio founds the network and is its LAN-only
-// gateway on 127.0.0.1:48122; laptop joins as a window host and desk as a
-// server. studio's console sees laptop's map under @laptop:, and opens a
-// transcript of laptop's through the window; an agent on studio can't, a
-// host that shares titles only keeps its transcripts, a gap brings a
-// fresh snapshot, and laptop's relay stops once studio's subscription
-// lapses. Each machine's load comes with its map, unless it stops sharing it.
+// gateway on a loopback port the OS picks; laptop joins as a window host
+// and desk as a server. studio's console sees laptop's map under @laptop:,
+// and opens a transcript of laptop's through the window; an agent on
+// studio can't, a host that shares titles only keeps its transcripts, a
+// gap brings a fresh snapshot, and laptop's relay stops once studio's
+// subscription lapses. Each machine's load comes with its map, unless it
+// stops sharing it.
 //
 // NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
+mod common;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -35,7 +38,6 @@ use xenonet_wire_app::hosts::hub::{HostHub, HubCore, HubParts};
 use xenonet_wire_app::hosts::relay::Timing as RelayTiming;
 use xenonet_wire_app::hosts::schemas::HostSchemas;
 
-const LAN: u16 = 48122;
 const L1: &str = "claude:bbbbbbbb-0001";
 const S1: &str = "claude:aaaaaaaa-0001";
 
@@ -347,8 +349,9 @@ async fn a_window_host_sees_another_hosts_map_and_opens_its_transcripts_from_the
     let root = std::env::temp_dir().join(format!("xenonet-net-map-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    let [lan] = common::free_ports();
     let a = Host::open("studio", root.join("studio"), vec![(S1, "Add partial refunds")]).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{LAN}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
     assert_eq!(s, 200, "{v}");
     let b = Host::open("laptop", root.join("laptop"), vec![(L1, "Fix the login form")]).await;
     join(&b, &a, true).await;

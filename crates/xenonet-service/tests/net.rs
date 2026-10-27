@@ -4,10 +4,12 @@
 // hosts on other machines would. Their /api/net routes are called as the
 // window calls them, and a test Sink stands in for the engine.
 //
-// Each test has its own ports among 48113-48125 (48112 is one nothing
-// answers on), never 47840-47842. NET_TEST_LOG=1 prints what each host logs.
+// Each test takes its ports from the OS (common::free_ports), so no two
+// tests share one. NET_TEST_LOG=1 prints what each host logs.
 
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
+mod common;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -241,7 +243,8 @@ async fn network(test: &str, port: u16, caps: Caps, shifts: [f64; 3]) -> (Host, 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
-    let (a, b, c) = network("restart", 48113, Caps::default(), [0.0; 3]).await;
+    let [port] = common::free_ports();
+    let (a, b, c) = network("restart", port, Caps::default(), [0.0; 3]).await;
     // Every host's roster agrees, and each sees the others online.
     let heads: Vec<Value> = [a.state().await, b.state().await, c.state().await].iter().map(|s| s["rosterHead"].clone()).collect();
     assert!(heads.iter().all(|h| *h == heads[0] && !h.is_null()), "{heads:?}");
@@ -332,7 +335,8 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
     let caps = Caps { frames: 3, ..Caps::default() };
-    let (a, b, c) = network("gap", 48115, caps, [0.0; 3]).await;
+    let [port] = common::free_ports();
+    let (a, b, c) = network("gap", port, caps, [0.0; 3]).await;
     // desk is away; laptop sends it five, and the gateway keeps three.
     let c = {
         c.svc.stop();
@@ -380,7 +384,8 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week() {
-    let (a, b, c) = network("signed-time", 48114, Caps::default(), [0.0; 3]).await;
+    let [port] = common::free_ports();
+    let (a, b, c) = network("signed-time", port, Caps::default(), [0.0; 3]).await;
     let laptop = b.svc.node().shared().clone();
     // A refusal's time, unsigned, or signed by another key, or over another
     // request's nonce, isn't taken.
@@ -449,7 +454,8 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_clock_five_minutes_off_still_links() {
-    let (a, b, c) = network("clock", 48117, Caps::default(), [0.0, 300e3, -300e3]).await;
+    let [port] = common::free_ports();
+    let (a, b, c) = network("clock", port, Caps::default(), [0.0, 300e3, -300e3]).await;
     for h in [&b, &c] {
         let skew = h.state().await["gateway"]["skewMs"].as_f64().unwrap();
         assert!((skew.abs() - 300e3).abs() < 5e3, "{skew}");
@@ -493,18 +499,22 @@ async fn until_state(h: &Host, what: &str, ok: impl Fn(&Value) -> bool) -> Value
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
-    let (a, b, c) = network("move", 48116, Caps::default(), [0.0; 3]).await;
+    // desk's LAN address once it takes the gateway, and one nothing
+    // answers on.
+    let [port, desk_port, unused] = common::free_ports();
+    let (desk_lan, nobody) = (format!("127.0.0.1:{desk_port}"), format!("127.0.0.1:{unused}"));
+    let (a, b, c) = network("move", port, Caps::default(), [0.0; 3]).await;
     // laptop is away while the gateway moves.
     b.svc.stop();
     // desk asks to take it over, at its own LAN address: desk isn't the
     // founder, so it waits for approval, and the founder gives it.
-    let (s, v) = c.call("POST", "/api/net/gateway/take", json!({ "lan": "127.0.0.1:48118" }), true).await;
+    let (s, v) = c.call("POST", "/api/net/gateway/take", json!({ "lan": desk_lan }), true).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["proposed"], true, "{v}");
     let st = until_state(&a, "the proposal at studio", |s| s["proposals"].as_array().is_some_and(|p| !p.is_empty())).await;
     assert_eq!((st["proposals"][0]["op"].clone(), st["proposals"][0]["host"].clone()), (json!("gateway"), json!("desk")));
     assert_eq!(st["proposals"][0]["signers"], json!(["desk"]));
-    assert_eq!(st["proposals"][0]["gateway"], "127.0.0.1:48118");
+    assert_eq!(st["proposals"][0]["gateway"], desk_lan);
     // Approved by its id: an id nothing waits under signs nothing.
     let (s, v) = a.call("POST", "/api/net/approve", json!({ "id": "bm90LXRoaXMtb25l" }), true).await;
     assert_eq!(s, 404, "{v}");
@@ -512,7 +522,7 @@ async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
     assert_eq!(s, 200, "{v}");
     // desk is the gateway now, studio links to it, and frames go through it.
     until_state(&c, "desk as the gateway", |s| s["self"]["gateway"] == true && s["gateway"]["link"] == "live").await;
-    until_state(&a, "studio linked to desk", |s| s["self"]["gateway"] == false && s["gateway"]["address"] == "127.0.0.1:48118" && s["gateway"]["link"] == "live").await;
+    until_state(&a, "studio linked to desk", |s| s["self"]["gateway"] == false && s["gateway"]["address"] == desk_lan && s["gateway"]["link"] == "live").await;
     // The gateway's host can't be removed while it holds the gateway.
     let (s, v) = a.call("POST", "/api/net/remove", json!({ "host": "desk" }), true).await;
     assert_eq!(s, 403, "{v}");
@@ -528,11 +538,11 @@ async fn the_gateway_moves_by_hand_and_a_host_that_missed_it_follows() {
     let b = b.restart().await;
     tokio::time::sleep(Duration::from_millis(1000)).await;
     assert_ne!(b.state().await["gateway"]["link"], "live");
-    let (s, v) = b.call("POST", "/api/net/gateway/set", json!({ "address": "127.0.0.1:48112" }), true).await;
+    let (s, v) = b.call("POST", "/api/net/gateway/set", json!({ "address": nobody }), true).await;
     assert_ne!(s, 200, "a wrong address isn't followed: {v}");
-    let (s, v) = b.call("POST", "/api/net/gateway/set", json!({ "address": "127.0.0.1:48118" }), true).await;
+    let (s, v) = b.call("POST", "/api/net/gateway/set", json!({ "address": desk_lan }), true).await;
     assert_eq!(s, 200, "{v}");
-    let st = until_state(&b, "laptop linked to desk", |s| s["gateway"]["link"] == "live" && s["gateway"]["address"] == "127.0.0.1:48118").await;
+    let st = until_state(&b, "laptop linked to desk", |s| s["gateway"]["link"] == "live" && s["gateway"]["address"] == desk_lan).await;
     assert_eq!(st["gateway"]["keyId"], c.state().await["self"]["keyId"]);
     b.send("studio", Kind::Message, "followed");
     until("laptop's message at studio", 10, || a.sink.texts("message").contains(&"followed".to_string())).await;
@@ -560,7 +570,7 @@ fn raw(port: u16, method: &str, path: &str, headers: &[(&str, &str)], body: &str
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
-    let port = 48119;
+    let [port] = common::free_ports();
     let a = Host::new("lan", "studio", 0.0, Caps::default()).await;
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
     assert_eq!(s, 200, "{v}");
@@ -656,7 +666,7 @@ async fn a_founder_alone_leaves_only_with_force_and_its_lan_door_closes() {
     // As `xenonet net leave` does it from the person's terminal
     // (crates/xenonet-cli/tests/net.rs, which only gets this far where
     // it isn't run from under an agent).
-    let port = 48120;
+    let [port] = common::free_ports();
     let a = Host::new("alone", "studio", 0.0, Caps::default()).await;
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
     assert_eq!(s, 200, "{v}");
@@ -701,7 +711,8 @@ impl xenonet_base::network::RelaySink for Relays {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
-    let (a, b, c) = network("relay", 48121, Caps::default(), [0.0; 3]).await;
+    let [port] = common::free_ports();
+    let (a, b, c) = network("relay", port, Caps::default(), [0.0; 3]).await;
     let heard = Arc::new(Relays::default());
     b.svc.sinks().set_relay("hear", heard.clone());
     // desk sends laptop the map: it reaches laptop's relay sink, never its
@@ -764,7 +775,8 @@ async fn relay_and_svc_frames_never_touch_the_gateways_store() {
     // drops them when the host isn't linked, rather than writing them to
     // its store, where a stream that ended before its ack would leave them
     // for a week.
-    let (a, b, c) = network("held", 48123, Caps::default(), [0.0; 3]).await;
+    let [port] = common::free_ports();
+    let (a, b, c) = network("held", port, Caps::default(), [0.0; 3]).await;
     let heard = Arc::new(Relays::default());
     b.svc.sinks().set_relay("hear", heard.clone());
     let gw = a.svc.node().gateway().unwrap();
@@ -908,10 +920,17 @@ impl Drop for Firewall {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_gateway_that_takes_connections_and_says_nothing_puts_the_link_offline() {
-    // studio is the gateway on 48124. desk links to it; laptop links
-    // through a firewall on 48125, and sends its presence each time its
-    // link comes up, as its engine would.
-    let (lan, path) = (48124, 48125);
+    // studio is the gateway on `lan`. desk links to it; laptop links
+    // through a firewall on `path`, and sends its presence each time its
+    // link comes up, as its engine would. The firewall swaps one address
+    // for the other in place, so the two ports need as many digits; the
+    // OS's nearly always have five.
+    let [lan, path] = loop {
+        let [lan, path] = common::free_ports();
+        if lan.to_string().len() == path.to_string().len() {
+            break [lan, path];
+        }
+    };
     let a = Host::new("silent", "studio", 0.0, Caps::default()).await;
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") }), true).await;
     assert_eq!(s, 200, "{v}");
