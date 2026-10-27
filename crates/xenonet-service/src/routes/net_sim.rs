@@ -372,6 +372,10 @@ fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bo
         "waitsOnYou": 0,
         "you": you,
         "platform": m.platform,
+        // rack runs an older XenoNet, which says neither: starts there are
+        // refused as too old.
+        "reach": if m.id == "rack" { Value::Null } else { json!({ "start": "you", "wake": "consent", "pending": [] }) },
+        "can": if m.id == "rack" { json!([]) } else { json!(xenonet_base::network::CAN) },
     })
 }
 
@@ -446,6 +450,8 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         "rosterMismatch": [],
         "titlesOnly": false,
         "shareLoad": true,
+        "start": "you",
+        "wake": "consent",
         "simulated": true,
     });
     match kind {
@@ -739,10 +745,72 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             if let Some(on) = body.get("shareLoad").and_then(Value::as_bool) {
                 sim.state["shareLoad"] = json!(on);
             }
-            Reply::json(200, sim.state.clone())
+            match set_reach(&mut sim.state, body, now) {
+                Ok(()) => Reply::json(200, sim.state.clone()),
+                Err((status, code, why)) => fail(status, code, why),
+            }
         }
         _ => fail(404, "not-found", "not found"),
     }
+}
+
+/// Who may start and wake sessions, set in the simulated state: this
+/// machine's at once; another's (`host`) as that machine would take it
+/// (xenonet_net::operator): narrowing at once, widening to network at once
+/// from the founder, else waiting for a second window host, which the
+/// made-up laptop is when this machine is studio.
+fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'static str, String)> {
+    let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+    let me = state["self"]["id"].as_str().unwrap_or("").to_string();
+    let bad = |k: &str, v: &str, allowed: &[&str]| (!allowed.contains(&v)).then(|| (400, "bad-request", format!("{k} is one of {}", allowed.join(", "))));
+    for (k, allowed) in [("start", &xenonet_base::network::STARTS[..]), ("wake", &xenonet_base::network::WAKES[..])] {
+        if let Some(e) = text(k).and_then(|v| bad(k, &v, allowed)) {
+            return Err(e);
+        }
+    }
+    let host = text("host").filter(|h| *h != me);
+    let Some(host) = host else {
+        for k in ["start", "wake"] {
+            if let Some(v) = text(k) {
+                state[k] = json!(v);
+                if let Some(row) = state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == me.as_str())) {
+                    row["reach"][k] = json!(v);
+                }
+            }
+        }
+        return Ok(());
+    };
+    if state["self"]["window"] != true {
+        return Err((403, "not-window", "another machine's settings are changed from a window host".into()));
+    }
+    let founder = state["self"]["founder"] == true;
+    let Some(row) = state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == host.as_str())) else {
+        return Err((404, "no-host", format!("{host} isn't in the network")));
+    };
+    if row["reach"].is_null() {
+        // An older XenoNet ignores the frame: nothing changes there.
+        return Ok(());
+    }
+    if let Some(id) = text("approve") {
+        let pending = row["reach"]["pending"].as_array().cloned().unwrap_or_default();
+        if let Some(w) = pending.iter().find(|w| w["id"] == id.as_str()) {
+            let setting = w["setting"].as_str().unwrap_or("start").to_string();
+            row["reach"][setting.as_str()] = json!("network");
+            row["reach"]["pending"] = json!(pending.into_iter().filter(|w| w["id"] != id.as_str()).collect::<Vec<_>>());
+        }
+        return Ok(());
+    }
+    for k in ["start", "wake"] {
+        let Some(v) = text(k) else { continue };
+        let mut pending: Vec<Value> = row["reach"]["pending"].as_array().cloned().unwrap_or_default().into_iter().filter(|w| w["setting"] != k).collect();
+        if v != "network" || founder {
+            row["reach"][k] = json!(v);
+        } else if row["reach"][k] != "network" {
+            pending.push(json!({ "id": format!("wid_{k}_{}", now as i64), "setting": k, "value": "network", "by": me, "at": now as i64 }));
+        }
+        row["reach"]["pending"] = json!(pending);
+    }
+    Ok(())
 }
 
 // You, writing to a simulated host's agent from the window: checked as
@@ -929,6 +997,33 @@ mod tests {
         assert_eq!(apply(&mut s, "/api/net/ticket", &json!({ "host": "a5" }), now).status, 429);
         let mut alone = sim("net-none");
         assert_eq!(apply(&mut alone, "/api/net/ticket", &json!({ "host": "desk" }), now).status, 409);
+    }
+
+    #[test]
+    fn start_and_wake_here_and_on_another_machine_as_it_would_take_them() {
+        let now = 1_000_000.0;
+        let reach = |s: &Sim, host: &str| s.state["hosts"].as_array().unwrap().iter().find(|h| h["id"] == host).unwrap()["reach"].clone();
+        // Here, at once.
+        let mut s = sim("net-founder");
+        let st = apply(&mut s, "/api/net/settings", &json!({ "start": "network", "wake": "network" }), now).body_json();
+        assert_eq!((st["start"].clone(), st["wake"].clone()), (json!("network"), json!("network")));
+        assert_eq!(apply(&mut s, "/api/net/settings", &json!({ "start": "everyone" }), now).status, 400);
+        // studio is the founder: laptop's start widens at once.
+        apply(&mut s, "/api/net/settings", &json!({ "host": "laptop", "start": "network" }), now);
+        assert_eq!(reach(&s, "laptop")["start"], "network");
+        // rack's XenoNet says nothing of its reach: it takes none.
+        assert_eq!(apply(&mut s, "/api/net/settings", &json!({ "host": "rack", "start": "off" }), now).status, 200);
+        assert!(reach(&s, "rack").is_null());
+        // At laptop, a window host but not the founder, a widening of
+        // studio's waits, and a narrowing doesn't.
+        let mut m = sim("net-member");
+        apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "wake": "network" }), now);
+        assert_eq!((reach(&m, "studio")["wake"].clone(), reach(&m, "studio")["pending"][0]["by"].clone()), (json!("consent"), json!("laptop")));
+        apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "start": "off" }), now);
+        assert_eq!(reach(&m, "studio")["start"], "off");
+        let id = reach(&m, "studio")["pending"][0]["id"].as_str().unwrap().to_string();
+        apply(&mut m, "/api/net/settings", &json!({ "host": "studio", "approve": id }), now);
+        assert_eq!((reach(&m, "studio")["wake"].clone(), reach(&m, "studio")["pending"].clone()), (json!("network"), json!([])));
     }
 
     #[test]

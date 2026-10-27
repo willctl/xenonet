@@ -21,6 +21,20 @@ const KeyId = z.string().regex(KEY_ID).describe("What people compare: xnk1_ and 
 const B64 = z.string().regex(B64URL).describe("base64url, no padding");
 const Mid = z.string().regex(/^msg_[0-9a-f-]{36}$/).describe("The message's id across the network (its envelope's mid)");
 const Strength = z.enum(["strong", "weak"]).describe("strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked");
+export const STARTS = ["off", "you", "network"];
+export const WAKES = ["consent", "network"];
+// Who may start and wake sessions on a host (docs/guide/network.md), and
+// the widenings to network another window host asked for, which wait for
+// the founder or a second window host.
+const Reach = obj({
+  start: z.enum(STARTS).describe("Who may start sessions there: nobody, you (from a window host's console), or the network (you, and the sessions and actors on window hosts)"),
+  wake: z.enum(WAKES).describe("Who may wake its sessions for a message: your consent per session, or any sender in the network, within the budgets"),
+  pending: z
+    .array(obj({ id: z.string().min(1).max(64), setting: z.enum(["start", "wake"]), value: z.literal("network"), by: HostId.describe("The window host that asked"), at: ms }))
+    .max(4)
+    .describe("Widenings to network another window host asked for, waiting ten minutes at most for the founder or a second window host to approve"),
+});
+const Can = z.array(z.string().max(32)).max(16).describe("What the host's XenoNet takes beyond messages: start (a start request) and answer (an answer to a run's permission prompt). An older XenoNet says nothing");
 
 export const FRAME_KINDS = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];
 // Frames the gateway keeps for a host that's away; the rest are dropped for
@@ -78,6 +92,8 @@ export const NetworkPresence = define(
     you: z.boolean().describe("The person's last input was in this host's console: they're here"),
     youAt: ms.nullable().optional().describe("When the person last worked at this host's console (input in the last two minutes), to the half minute, by the gateway's clock: the consoles chime only where it's latest, or everywhere once it's five minutes old"),
     roster: B64.describe("The hash of the sender's roster head, so hosts that see different rosters notice"),
+    reach: Reach.optional(),
+    can: Can.optional(),
   }),
   { title: "A host's presence", description: "Which agents are on a host, what each is doing, and whether the person is there." },
 );
@@ -165,8 +181,8 @@ export const NetworkOperator = define(
   1,
   obj({
     schema: z.literal("network/operator/v1"),
-    action: z.enum(["message", "ticket", "remove", "replace"]),
-    args: z.record(z.string(), z.unknown()),
+    action: z.enum(["message", "ticket", "remove", "replace", "settings", "answer"]),
+    args: z.record(z.string(), z.unknown()).describe("For settings: { start?, wake? } or { approve } with a waiting widening's id. For answer: { ask, decision }, decision allow or deny"),
     checked: z.enum(["window", "person"]).describe("window: the window key; person: a terminal, by process checks"),
     strength: Strength,
     nonce: B64,
@@ -299,6 +315,8 @@ export const NetworkState = define(
         youAt: ms.nullable().optional().describe("When the person last worked at its console, by this machine's clock"),
         platform: z.string().max(32).nullable(),
         self: z.boolean().optional().describe("This machine's own row"),
+        reach: Reach.nullable().optional().describe("Who may start and wake sessions there, as its presence said; null when its XenoNet doesn't say"),
+        can: Can.optional(),
       }),
     ),
     tickets: z.array(obj({ host: HostId, window: z.boolean(), expires: ms })).describe("Tickets that wait; the ticket itself is shown once, where it was made"),
@@ -307,6 +325,8 @@ export const NetworkState = define(
     rosterMismatch: z.array(HostId).describe("Hosts whose presence shows another roster head"),
     titlesOnly: z.boolean(),
     shareLoad: z.boolean().optional().describe("Whether this machine sends its load (CPU, GPU, memory and what the parts are) to the window hosts' consoles that watch its map; on unless turned off"),
+    start: z.enum(STARTS).optional().describe("Who may start sessions on this machine; you unless widened"),
+    wake: z.enum(WAKES).optional().describe("Who may wake this machine's sessions for a message; consent unless widened"),
     queues: z.array(obj({ host: HostId, frames: count, bytes: count })).optional().describe("On the gateway's host: what waits at the gateway for each host"),
     epoch: B64.optional().describe("On the gateway's host: its queues' epoch, which hosts resume within"),
     joinClosedUntil: ms.nullable().optional().describe("On the gateway's host: when the join route opens again, after 200 bad tickets in an hour; null while it's open"),

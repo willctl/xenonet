@@ -33,10 +33,20 @@ on and can't read them.
                                    network here; this XenoNet carries on alone
   xenonet net set [--titles-only | --no-titles-only]
                   [--share-load | --no-share-load] [--lan <ip:port>]
+                  [--start off|you|network] [--wake consent|network]
                                    what this machine shares with the network
                                    (its load: CPU, GPU, memory and the parts,
-                                   on by default), and a LAN-only gateway's
-                                   address
+                                   on by default), a LAN-only gateway's
+                                   address, who may start sessions here (you,
+                                   by default; network adds the sessions and
+                                   actors on window hosts) and who may wake
+                                   them for a message (your consent per
+                                   session, by default, or the network)
+  xenonet net set --on <id> [--start …] [--wake …] [--approve <id>]
+                                   another machine's start and wake, from a
+                                   window host. Narrowing is done at once;
+                                   network takes the founder, or waits for
+                                   another window host to --approve it
   xenonet net gateway take [--lan <ip:port>]
                                    makes this machine the network's gateway,
                                    at that LAN address or through the actor

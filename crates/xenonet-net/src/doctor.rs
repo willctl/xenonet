@@ -291,6 +291,8 @@ mod tests {
             lan: None,
             titles_only: false,
             share_load: true,
+            start: "you".into(),
+            wake: "consent".into(),
             joined: 0,
         };
         let address = |host: &str, a: &str| {

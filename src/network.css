@@ -65,3 +65,18 @@ p.net-warn {
 .net .net-flash { animation: net-flash 1.6s ease-out 1; }
 @keyframes net-flash { from { background: rgb(var(--attention-rgb) / 0.18); } to { background: transparent; } }
 .net .ac-message { margin: 6px 0 10px; }
+/* Who may start and wake sessions: one button per value, the one set
+   pressed; on another machine's row, smaller. */
+.net .net-seg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 2px;
+}
+.net .net-seg-k { min-width: 140px; font-size: 13px; color: var(--text); }
+.net .net-seg .act { padding: 3px 9px; font-size: 12px; }
+.net .net-seg .act.on { border-color: var(--accent); color: var(--accent); background: rgb(var(--accent-rgb) / 0.14); }
+.net .net-reach .net-seg { margin: 4px 0 0; }
+.net .net-reach .net-seg-k { min-width: 120px; font-size: 11px; color: var(--muted); }
+.net .net-reach .net-seg .act { padding: 1px 7px; font-size: 11px; }

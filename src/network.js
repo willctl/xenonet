@@ -29,7 +29,7 @@
 import { escapeHtml as h } from "./format.js";
 import { hostOfId } from "./hosts.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
-import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS } from "./network-model.js";
+import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 const EVERY_OUT = 60e3;
@@ -145,6 +145,36 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return `<li class="net-agent${a.waits ? " waits" : ""}${a.stuck && !a.waits ? " stuck" : ""}" data-net-agent="${h(a.id)}"${said}><i class="sw ${h(a.app ?? "")}"></i><span class="net-agent-title">${h(a.title)}</span><span class="net-agent-what">${tag ? `<em>${h(tag)}</em> ` : ""}${h(what)}</span><button class="ac-link" data-net-message="${h(a.id)}" title="Message this session as you">Message</button></li>`;
   }
 
+  // Who may start and wake sessions: one button per value, the one set
+  // pressed. `on` names another machine, whose buttons send it the change
+  // (data-net-set-on); this machine's set it here (data-net-set). Both are
+  // yours.
+  function settingHtml(setting, value, on = null) {
+    const values = setting === "start" ? STARTS : WAKES;
+    const words = setting === "start" ? START_WORDS : WAKE_WORDS;
+    const attr = (v) => (on ? `data-net-set-on="${h(`${on}|${setting}:${v}`)}"` : `data-net-set="${h(`${setting}:${v}`)}"`);
+    const label = setting === "start" ? "Start sessions" : "Wake for a message";
+    return `<div class="net-seg" data-net-setting="${h(setting)}"><span class="net-seg-k">${label}</span>${values
+      .map((v) => `<button class="act${v === value ? " on" : ""}" ${attr(v)} aria-pressed="${v === value}" data-yours>${h(words[v])}</button>`)
+      .join("")}</div>`;
+  }
+
+  // Another machine's start and wake, changed from this window host: a
+  // change to the network waits there for the founder or a second window
+  // host, which approves it here.
+  function reachHtml(x) {
+    const r = reachOf(x);
+    if (!r) return `<div class="ac-via" data-net-reach="${h(x.id)}">Its XenoNet is too old to start sessions or to take these settings from here.</div>`;
+    const window = !!state.self?.window;
+    const pending = r.pending
+      .map((w) => `<div class="ac-via net-warn" data-net-widen="${h(w.id)}">${h(widenWords(w, x.id))}. It needs the founder or a second window host.${window && w.by !== state.self?.id ? ` <button class="act" data-net-widen-approve="${h(`${x.id}|${w.id}`)}" data-yours>Approve</button>` : ""}</div>`)
+      .join("");
+    const controls = window
+      ? `${settingHtml("start", r.start, x.id)}${settingHtml("wake", r.wake, x.id)}`
+      : `<div class="ac-via">Starts: ${h(START_WORDS[r.start])} · wakes: ${h(WAKE_WORDS[r.wake])}</div>`;
+    return `<div class="net-reach" data-net-reach="${h(x.id)}">${controls}${pending}</div>`;
+  }
+
   function hostHtml(x, confirm) {
     const me = x.id === state.self?.id;
     const tags = hostTags(x, state.self)
@@ -161,7 +191,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const mismatch = state.rosterMismatch.includes(x.id) ? `<div class="ac-via net-warn">sees another list of the network's machines</div>` : "";
     return `<li class="ac-row net-host${x.online ? "" : " offline"}" data-key="${h(x.id)}" data-net-host="${h(x.id)}">
         <span class="ac-dot"></span>
-        <div class="ac-main"><div class="ac-name"><span class="ac-title">${h(x.id)}</span>${tags}</div><div class="ac-what" data-net-host-line>${h(hostLine(x))}</div>${mismatch}</div>
+        <div class="ac-main"><div class="ac-name"><span class="ac-title">${h(x.id)}</span>${tags}</div><div class="ac-what" data-net-host-line>${h(hostLine(x))}</div>${mismatch}${me ? "" : reachHtml(x)}</div>
         <div class="ac-acts">${acts}</div>
         ${theirs.length ? `<ol class="net-agents">${theirs.map(agentHtml).join("")}</ol>` : ""}
       </li>`;
@@ -193,6 +223,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <p class="pj-note">On, the other consoles see this machine's sessions by their titles alone: not the text of a question waiting, the last message, or why a session seems stuck.</p>
       <label class="net-check"><input type="checkbox" data-net-load data-yours ${state.shareLoad !== false ? "checked" : ""}> Share load with the network</label>
       <p class="pj-note">On, the window hosts' consoles see this machine's CPU, GPU and memory, and what its parts are, in their Machines panel while they watch it.</p>
+      ${settingHtml("start", state.start)}
+      ${settingHtml("wake", state.wake)}
+      <p class="pj-note">Who may start a session on this machine: nobody, you from a window host's console, or the network, which adds the sessions and actors on window hosts. Who may wake a session here to take a message at once: the sessions you allowed with <code>xenonet live allow</code>, or anyone in the network, within the wake budget. A window host can narrow these from its console; widening to the network from another machine takes the founder or a second window host.</p>
+      ${selfWidens()}
       ${errorHtml(view.error)}
       <div class="m-foot"><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
   }
@@ -413,6 +447,43 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     });
   }
 
+  // Who may start or wake sessions ("start:network"): this machine's, or
+  // another's (`host`), which that machine checks.
+  async function setReach(host, sv) {
+    const [setting, value] = String(sv).split(":");
+    const words = (setting === "start" ? START_WORDS : WAKE_WORDS)[value] ?? value;
+    return busyWith(async () => {
+      const r = await calls.call("PUT", "/api/net/settings", { ...(host ? { host } : {}), [setting]: value });
+      if (!r.ok) return failed(r, `xenonet net set${host ? ` --on ${host}` : ""} --${setting} ${value}`);
+      sfx("toggle");
+      const what = setting === "start" ? "start sessions" : "wake sessions";
+      if (!host) toast(`Who may ${what} here: ${words.toLowerCase()}.`);
+      else if (value === "network" && !state.self?.founder) toast(`Sent to ${host}. Letting the network ${what} there waits for the founder or another window host.`);
+      else toast(`Sent to ${host}: who may ${what} there, ${words.toLowerCase()}.`);
+      await refresh();
+      return { ok: true };
+    });
+  }
+
+  // Another window host asked to widen a machine's settings: a second
+  // window host's approval, sent to that machine.
+  async function approveWiden(host, id) {
+    return busyWith(async () => {
+      const r = await calls.call("PUT", "/api/net/settings", { host, approve: id });
+      if (!r.ok) return failed(r, `xenonet net set --on ${host} --approve ${id}`);
+      sfx("success");
+      toast(`Approved, and sent to ${host}.`);
+      await refresh();
+      return { ok: true };
+    });
+  }
+
+  // Widenings of this machine's settings that wait for another window host.
+  function selfWidens() {
+    const mine = reachOf(state.hosts.find((x) => x.id === state.self?.id));
+    return (mine?.pending ?? []).map((w) => `<p class="net-warn" data-net-widen="${h(w.id)}">${h(widenWords(w, "this machine"))}. Another window host approves it, or set it here.</p>`).join("");
+  }
+
   async function titlesOnly(on) {
     const r = await calls.call("PUT", "/api/net/settings", { titlesOnly: on });
     if (!r.ok) {
@@ -457,6 +528,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netRemoveYes) return remove(d.netRemoveYes);
     if (d.netReplace) return replace(d.netReplace);
     if (d.netApprove) return approve(d.netApprove);
+    if (d.netSet) return setReach(null, d.netSet);
+    if (d.netSetOn) return setReach(...d.netSetOn.split("|"));
+    if (d.netWidenApprove) return approveWiden(...d.netWidenApprove.split("|"));
   }
 
   // Opens the panel (`at`: start, join or add), or reads it again in place.
@@ -508,6 +582,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     return r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null;
   };
 
+  // Where each button with `attr` is, by its value ("start:network",
+  // "desk|wake:consent", "desk|<id>").
+  const centres = (attr) => Object.fromEntries([...(panel?.querySelectorAll(`[${attr}]`) ?? [])].map((b) => [b.getAttribute(attr), centre(`[${attr}="${CSS.escape(b.getAttribute(attr))}"]`)]).filter(([, at]) => at));
+
   // Text from the panel with the ticket masked, shown or not.
   const masked = (text) => (joinTicket ? text.split(joinTicket).join("••••••••••••") : text);
 
@@ -541,6 +619,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         window: !!x.window,
         agents: x.agents ?? 0,
         waitsOnYou: x.waitsOnYou ?? 0,
+        reach: reachOf(x),
+        can: Array.isArray(x.can) ? x.can : [],
         line: hostLine(x),
         row: isOpen() ? (panel.querySelector(`[data-net-host="${CSS.escape(x.id)}"] [data-net-host-line]`)?.textContent ?? null) : null,
         remote: agents.filter((a) => a.host === x.id).map((a) => ({ id: a.id, title: a.title, app: a.app, status: a.status, waits: a.waits, text: a.text, stuck: a.stuck, lastMessage: a.lastMessage, repoKey: a.repoKey })),
@@ -551,13 +631,15 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       mismatch: state.rosterMismatch,
       titlesOnly: !!state.titlesOnly,
       shareLoad: state.shareLoad !== false,
+      start: state.start ?? "you",
+      wake: state.wake ?? "consent",
       waits: remoteWaits(state, agents).filter((w) => w.kind === "remote-need").map((w) => ({ agent: w.id, host: w.host, text: w.text, chime: w.chime })),
       stuck: remoteWaits(state, agents).filter((w) => w.kind === "remote-stuck").map((w) => ({ agent: w.id, host: w.host, text: w.text })),
       join: joinState(),
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve") } : null,
     };
   }
 

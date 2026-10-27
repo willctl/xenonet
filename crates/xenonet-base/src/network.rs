@@ -121,6 +121,44 @@ pub struct Host {
     pub seen: Option<f64>,
 }
 
+/// Who may start sessions on a machine (`start`) and wake its sessions
+/// for a message (`wake`), as its network.json keeps them: what
+/// `delivery::reach` decides by. `pending` lists the changes to `network`
+/// another window host asked for, which wait for the founder or a second
+/// window host (`network/presence/v1`'s reach.pending).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reach {
+    pub start: String,
+    pub wake: String,
+    pub pending: Vec<Value>,
+}
+
+/// `start`: nobody, you (from a window host's console), or the network
+/// (you, and the sessions and actors on window hosts).
+pub const STARTS: [&str; 3] = ["off", "you", "network"];
+/// `wake`: your consent per session (`xenonet live allow`), or any sender
+/// in the network, within the budgets.
+pub const WAKES: [&str; 2] = ["consent", "network"];
+
+impl Default for Reach {
+    fn default() -> Self {
+        Reach { start: "you".into(), wake: "consent".into(), pending: Vec::new() }
+    }
+}
+
+impl Reach {
+    /// As presence carries it.
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({ "start": self.start, "wake": self.wake, "pending": self.pending })
+    }
+}
+
+/// What this build's XenoNet takes from other machines beyond messages,
+/// which presence lists (`can`), so a sender knows before it asks:
+/// `start` (a start request) and `answer` (an answer to a run's
+/// permission prompt).
+pub const CAN: [&str; 2] = ["start", "answer"];
+
 /// The network as the engine sees it. The service puts xenonet-net's link
 /// behind it; with no network, `me` is `None` and `send` refuses.
 pub trait Net: Send + Sync {
@@ -151,6 +189,15 @@ pub trait Net: Send + Sync {
     /// Whether this host is a window host in the roster: only one is shown
     /// other hosts' maps (section 7).
     fn is_window_host(&self) -> bool {
+        false
+    }
+    /// Who may start and wake sessions here (Settings → Network).
+    fn reach(&self) -> Reach {
+        Reach::default()
+    }
+    /// Whether another host's presence said it takes `what` (`CAN`): a
+    /// host that runs an older XenoNet says nothing.
+    fn host_can(&self, _host: &str, _what: &str) -> bool {
         false
     }
 }

@@ -772,6 +772,88 @@ async fn actors_reach_actors_on_other_machines() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// studio founds a network on `lan` (a window host and the gateway),
+/// laptop joins as a window host and desk as a server, each with
+/// `sessions`; all three linked.
+async fn three(root: &Path, lan: u16, sessions: [Vec<Sess>; 3]) -> (Host, Host, Host) {
+    let [sa, sb, sc] = sessions;
+    let a = Host::open("studio", root.join("studio"), sa, None).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
+    assert_eq!(s, 200, "{v}");
+    let (address, code) = ticket(&a, "laptop", true).await;
+    let b = Host::open("laptop", root.join("laptop"), sb, None).await;
+    join(&b, &address, &code).await;
+    live(&b, 2).await;
+    let (address, code) = ticket(&a, "desk", false).await;
+    let c = Host::open("desk", root.join("desk"), sc, None).await;
+    join(&c, &address, &code).await;
+    for h in [&a, &b, &c] {
+        live(h, 3).await;
+    }
+    (a, b, c)
+}
+
+/// A host's row in another's state.
+fn row_of(st: &Value, id: &str) -> Value {
+    st["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap_or(Value::Null)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_two() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-reach-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let (a, b, c) = three(&root, 48120, [vec![], vec![], vec![]]).await;
+    let st = c.state().await;
+    assert_eq!((st["start"].clone(), st["wake"].clone()), (json!("you"), json!("consent")), "you, and your consent, by default");
+    // Each host's presence says what it is set to and what it takes.
+    until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["reach"]["start"] == "you" }).await;
+    assert_eq!(row_of(&a.state().await, "desk")["can"], json!(["start", "answer"]));
+    let desk = || async { c.state().await };
+
+    // laptop, a window host but not the founder, asks to let the network
+    // start sessions on desk: it waits there for a second window host.
+    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
+    assert_eq!((s, v["sent"]["host"].clone()), (200, json!("desk")), "{v}");
+    let widen = until_value("the widening waiting on desk", 10, || async {
+        let st = desk().await;
+        row_of(&st, "desk")["reach"]["pending"].as_array().and_then(|p| p.first().cloned())
+    })
+    .await;
+    assert_eq!((widen["setting"].clone(), widen["by"].clone()), (json!("start"), json!("laptop")), "{widen}");
+    assert_eq!(desk().await["start"], "you", "not yet");
+    // studio sees it on desk's row, and laptop can't approve its own.
+    until("the widening at studio", 10, || async { row_of(&a.state().await, "desk")["reach"]["pending"][0]["id"] == widen["id"] }).await;
+    b.window("PUT", "/api/net/settings", json!({ "host": "desk", "approve": widen["id"] })).await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(desk().await["start"], "you", "laptop asked for it, so laptop can't approve it");
+    let (s, _) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "approve": widen["id"] })).await;
+    assert_eq!(s, 200);
+    until("desk's start widened by studio's approval", 10, || async { desk().await["start"] == "network" }).await;
+    assert_eq!(row_of(&desk().await, "desk")["reach"]["pending"], json!([]));
+    // Narrowing: any window host, at once.
+    b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "off" })).await;
+    until("desk's start narrowed by laptop", 10, || async { desk().await["start"] == "off" }).await;
+    // The founder widens at once.
+    a.window("PUT", "/api/net/settings", json!({ "host": "desk", "wake": "network" })).await;
+    until("desk's wake widened by studio", 10, || async { desk().await["wake"] == "network" }).await;
+    until("desk's new reach at laptop", 10, || async { row_of(&b.state().await, "desk")["reach"] == json!({ "start": "off", "wake": "network", "pending": [] }) }).await;
+    // desk is no window host: it changes no other machine's settings.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "host": "laptop", "start": "off" })).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("not-window")), "{v}");
+    // At its own keyboard, desk sets either, and what's set isn't a value.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "start": "network", "wake": "consent" })).await;
+    assert_eq!((s, v["start"].clone(), v["wake"].clone()), (200, json!("network"), json!("consent")), "{v}");
+    let (s, _) = c.window("PUT", "/api/net/settings", json!({ "start": "everyone" })).await;
+    assert_eq!(s, 400);
+    // network.json keeps them.
+    let kept: Value = serde_json::from_str(&std::fs::read_to_string(c.dir.join("state").join("network").join("network.json")).unwrap()).unwrap();
+    assert_eq!((kept["start"].clone(), kept["wake"].clone()), (json!("network"), json!("consent")));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
 async fn until_value<F: std::future::Future<Output = Option<Value>>>(what: &str, secs: u64, mut get: impl FnMut() -> F) -> Value {
     let end = std::time::Instant::now() + Duration::from_secs(secs);
     loop {

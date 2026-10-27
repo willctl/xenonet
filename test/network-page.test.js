@@ -5,7 +5,7 @@
 // sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, reachOf, hostCan, widenWords, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
 import { NetworkState } from "../core/schema/network.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -160,4 +160,21 @@ test("what waits for approval says what it does and who asked", () => {
   const s = stateOf({ ...founder(), proposals: [add, { op: "add", host: "x1" }, null] });
   assert.deepEqual(s.proposals.map((p) => p.id), ["e1"]);
   assert.deepEqual(stateOf(null).proposals, []);
+});
+
+test("who may start and wake sessions on each machine, and what its XenoNet takes", () => {
+  const s = stateOf({ ...founder(), start: "network", wake: "consent" });
+  NetworkState.parse(s);
+  assert.deepEqual([s.start, s.wake], ["network", "consent"]);
+  assert.deepEqual([stateOf(null).start, stateOf(null).wake], ["you", "consent"], "you, and your consent, unless widened");
+  const widen = { id: "wid_1", setting: "start", value: "network", by: "laptop", at: NOW };
+  const desk = host("desk", { window: false, reach: { start: "you", wake: "network", pending: [widen, { setting: "start" }, null] }, can: ["start", "answer"] });
+  assert.deepEqual(reachOf(desk), { start: "you", wake: "network", pending: [widen] });
+  assert.equal(widenWords(widen, "desk"), "laptop asked to let the network start sessions on desk");
+  assert.ok(hostCan(desk, "start") && hostCan(desk, "answer"));
+  // An older XenoNet says neither: it takes no start.
+  const old = host("rack", { reach: null });
+  assert.equal(reachOf(old), null);
+  assert.equal(hostCan(old, "start"), false);
+  assert.deepEqual(reachOf(host("x", { reach: { start: "everyone", wake: 3 } })), { start: "you", wake: "consent", pending: [] }, "read leniently");
 });

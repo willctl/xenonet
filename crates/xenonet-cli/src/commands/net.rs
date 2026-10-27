@@ -61,8 +61,18 @@ fn show_status(st: &Value) {
     for q in list(st, "queues").iter().filter(|q| num(q, "frames") > 0.0) {
         print(format!("  {}  {} waiting for {}", c::dim("queue   "), num(q, "frames"), t(q, "host")));
     }
+    print(format!("  {}  start: {}, wake: {}", c::dim("sessions"), t(st, "start"), t(st, "wake")));
     for p in list(st, "proposals") {
         print(c::yellow(format!("  ! {} waits for approval: xenonet net approve {}", proposal_words(p), t(p, "host"))));
+    }
+    // Widenings of a machine's start or wake that wait for a second window
+    // host.
+    for h in list(st, "hosts") {
+        for w in h.get("reach").map(|r| list(r, "pending")).unwrap_or_default() {
+            let what = format!("{} asked to let the network {} sessions on {}", t(w, "by"), t(w, "setting"), t(h, "id"));
+            let how = if on(h, "self") { "another window host approves it".to_string() } else { format!("xenonet net set --on {} --approve {}", t(h, "id"), t(w, "id")) };
+            print(c::yellow(format!("  ! {what}: {how}")));
+        }
     }
     let mismatch: Vec<String> = list(st, "rosterMismatch").iter().filter_map(Value::as_str).map(str::to_string).collect();
     if !mismatch.is_empty() {
@@ -240,10 +250,32 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             } else if let Some(lan) = flags.str("lan") {
                 body.insert("lan".into(), json!(lan));
             }
+            for k in ["start", "wake", "approve"] {
+                if let Some(v) = flags.text(k) {
+                    body.insert(k.into(), json!(v));
+                }
+            }
             if body.is_empty() {
-                return Err(Fail::new("say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --lan <ip:port> or --no-lan", 2));
+                return Err(Fail::new(
+                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network>, --wake <consent|network>, --lan <ip:port> or --no-lan",
+                    2,
+                ));
+            }
+            // Another machine's start and wake, from this window host.
+            let on = flags.text("on");
+            if let Some(host) = &on {
+                if body.keys().any(|k| !matches!(k.as_str(), "start" | "wake" | "approve")) {
+                    return Err(Fail::new("--on sets another machine's --start and --wake, or approves a change that waits there (--approve <id>)", 2));
+                }
+                body.insert("host".into(), json!(host));
             }
             let st = call(&s, "PUT", "/api/net/settings", Some(&Value::Object(body)))?;
+            if let Some(host) = on {
+                if !flags.on("json") {
+                    print(format!("{} sent to {host}, which checks it: a change to network waits for the founder or another window host", c::green("✓")));
+                    return Ok(0);
+                }
+            }
             out(&st, &show_status)
         }
         "approve" => {

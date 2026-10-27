@@ -14,7 +14,9 @@
 //!   id the state lists it under.
 //! - `POST gateway/take`, `POST gateway/set`: moving the gateway by hand.
 //! - `PUT settings`: titles only, whether this machine shares its load,
-//!   and a LAN-only gateway's address.
+//!   who may start and wake sessions here (`start`, `wake`), and a
+//!   LAN-only gateway's address. With `host`, another machine's `start`
+//!   and `wake`, sent from this window host as an `operator` frame.
 //! - `GET svc`, `POST svc/publish`, `POST svc/unpublish`: the services this
 //!   host publishes to the network (`xenonet svc`). Other hosts reach them
 //!   at `/api/svc/…` (routes/svc.rs).
@@ -24,6 +26,7 @@ use crate::gateway::network::{parse_lan, NetService};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_net::node::Change;
 use xenonet_net::{NetError, R};
 
 /// The network's state as a development instance's `simulate` set it, or
@@ -112,7 +115,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         }
         "remove" => node.remove(&text("host")).await,
         "replace" => node.replace(&text("host")).await,
-        "settings" => settings(&svc, &body).await,
+        "settings" => settings(ctx, req, &svc, &body).await,
         "approve" => node.approve(&text("id")).await,
         "gateway/take" => take(ctx, &svc, &body).await,
         "svc" => Ok(node.shared().svc_list()),
@@ -198,7 +201,16 @@ fn publish(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
     svc.node().shared().svc_publish(&text("name"), &target, &list("paths")?, &list("hosts")?)
 }
 
-async fn settings(svc: &NetService, body: &Value) -> R<Value> {
+async fn settings(ctx: &Ctx, req: &Req, svc: &NetService, body: &Value) -> R<Value> {
+    // Another machine's: who may start and wake sessions there, sent from
+    // this window host as you, for that machine to check.
+    if let Some(host) = body.get("host").and_then(Value::as_str).filter(|h| svc.node().shared().network().is_some_and(|n| n.host != *h)) {
+        let window = req.header("x-xenonet-window").is_some() && ctx.from_window(req).await.is_none();
+        // Strong from the window, or from a terminal where process checks
+        // tell the person from an agent: macOS.
+        return svc.node().settings_on(host, body, if window { "window" } else { "person" }, window || cfg!(target_os = "macos"));
+    }
+    let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     let titles = body.get("titlesOnly").and_then(Value::as_bool);
     let load = body.get("shareLoad").and_then(Value::as_bool);
     let lan = match body.get("lan") {
@@ -217,5 +229,6 @@ async fn settings(svc: &NetService, body: &Value) -> R<Value> {
             None => svc.unlisten(),
         }
     }
-    svc.node().settings(titles, load, lan.map(|l| l.map(|a| a.to_string())))
+    let change = Change { titles_only: titles, share_load: load, lan: lan.map(|l| l.map(|a| a.to_string())), start: text("start"), wake: text("wake") };
+    svc.node().settings(change)
 }

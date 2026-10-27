@@ -86,6 +86,8 @@ struct Out {
     you_at: Option<f64>,
     /// The roster head the last presence carried.
     roster: String,
+    /// Who may start and wake sessions here, as the last presence said.
+    reach: Value,
     claims: BTreeMap<String, Value>,
     /// The roster head when the claims last went: a new one sends them all.
     claims_roster: String,
@@ -436,6 +438,9 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
     // rosters notice it from each other's presence. A new head may be a
     // host that joined and has heard nothing yet, so the set goes in full.
     let roster = net(w).roster_head().unwrap_or_default();
+    // Who may start and wake sessions here, and what this XenoNet takes:
+    // a change to the settings goes out as one.
+    let reach = net(w).reach().to_json();
     let body = {
         let mut out = w.net.out.locked();
         let full = full || roster != out.roster;
@@ -447,7 +452,7 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
             (changed, gone)
         };
         let you_at = worked.or(out.you_at);
-        if !full && agents.is_empty() && removed.is_empty() && you == out.you && you_at == out.you_at && roster == out.roster {
+        if !full && agents.is_empty() && removed.is_empty() && you == out.you && you_at == out.you_at && roster == out.roster && reach == out.reach {
             return None;
         }
         out.counter = (out.counter + 1.0).max(now_ms().round());
@@ -455,7 +460,8 @@ pub fn presence(w: &World, full: bool) -> Option<Value> {
         out.you = you;
         out.you_at = you_at;
         out.roster.clone_from(&roster);
-        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster })
+        out.reach = reach.clone();
+        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster, "reach": reach, "can": xenonet_base::network::CAN })
     };
     send(w, To::All, Kind::Presence, body.clone());
     Some(body)

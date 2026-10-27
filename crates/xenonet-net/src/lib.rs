@@ -15,6 +15,8 @@
 //!   offset, epochs and the long-poll fallback.
 //! - `node`: this machine in its network, behind
 //!   `xenonet_base::network::Net`, calling a `Sink`.
+//! - `operator`: the person's actions from another host, and the rules
+//!   for changing who may start and wake sessions here.
 //! - `svc`: services a host publishes to the network, and requests to
 //!   other hosts' services, in `svc` frames.
 //! - `doctor`: what the doctor says about the network, from its files.
@@ -29,6 +31,7 @@ pub mod hoststore;
 pub mod keys;
 pub mod link;
 pub mod node;
+pub mod operator;
 pub mod request;
 pub mod roster;
 pub mod sink;
