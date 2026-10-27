@@ -106,13 +106,15 @@ XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's
 | ngrok | `ngrok`, with your authtoken added | Your ngrok domain, if you give it |
 | Your own | Anything that forwards `https://<your name>/mcp` to the gateway's port and passes the Host header on | The name you give |
 
+What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's `/mcp` alone, and the panel says **public: /mcp alone**. The network's routes and A2A stay off the internet. Cloudflare's tunnels and ngrok forward the gateway's whole port, so they also carry the network's routes and, while it's on, A2A. For those, the panel says **public: its whole port**. If Funnel puts any other path on the internet, the panel shows it as a warning, `xenonet doctor` says which, and **Repair** sets Funnel back to `/mcp`. A Funnel that an older XenoNet set up for the whole port is narrowed to `/mcp` the next time XenoNet checks it.
+
 To set it up:
 
 1. In the Actors panel, under **actor gateway**, choose **Set up…** and pick a tunnel. The ones this computer has come first. XenoNet starts the tunnel, then checks that the address reaches the gateway from the internet side, and shows **Online** once it does.
 2. On the actor, choose **Connect…**. XenoNet makes a gateway token, which works only at the gateway. For Muse, which XenoNet only observes until then, this also makes it an actor that reports itself.
    A session can start this step for you, in Claude Code or Codex with the `ask_gateway_token` tool, or from a terminal with `xenonet gateway token <slug>`. That makes no token and returns none. It leaves a card in XenoNet's window, in the attention strip and the Actors panel, saying whose app it's for and who asked. **Allow** makes the token and opens the steps below, with the token masked. **Deny** drops the ask. Until you allow, the actor's old token keeps working, and an ask lapses after ten minutes. The session never sees the token, so don't paste one to it or into a chat.
 3. Follow the numbered steps XenoNet shows, each with its own Copy button. The token stays masked until you choose **Show**, and for ten seconds after, and **Copy token** copies it without showing it. The last step waits for the app's first call and ticks when it comes:
-   - **Grok Bot**: copy the message into a new Grok Bot chat. It adds XenoNet as an MCP server by URL with the token in its header. The token stays in that chat, so delete the chat afterwards.
+   - **Grok Bot**: copy the message into a Grok Bot chat. It asks Grok Bot to add XenoNet as an MCP server by URL, and to ask you for the token with its secure secret card. When the card shows, choose **Copy token**, paste the token into the card, not the chat, and save it. Grok Bot keeps it as a secret its model never sees.
    - **Muse**: copy the message into a Muse chat and approve the connector card. When Muse asks for the key, paste the token into the card's key field, not the chat.
    - **Any other MCP host**: add an MCP server by URL, with the gateway's address and the header `Authorization: Bearer <the token>`.
 
@@ -131,7 +133,7 @@ When a message through the gateway reaches a session or actor here, XenoNet mark
 
 Agents built on frameworks that speak A2A, the Linux Foundation's agent-to-agent protocol, can reach the sessions here through the gateway. CrewAI, LangGraph's agent server, Microsoft Agent Framework, Google's ADK and Bedrock AgentCore speak it. XenoNet speaks version 1.0, over its JSON-RPC binding.
 
-It's off until you turn it on. Set the gateway up first, then in the Actors panel, under **actor gateway**, turn on **Let A2A agents reach XenoNet**. The gateway then also answers at:
+It's off until you turn it on. Set the gateway up first, with a tunnel other than Tailscale Funnel, which publishes `/mcp` alone. Then in the Actors panel, under **actor gateway**, turn on **Let A2A agents reach XenoNet**. The gateway then also answers at:
 
 - `https://<the gateway's address>/.well-known/agent-card.json`, XenoNet's Agent Card, which tells an agent how to call;
 - `https://<the gateway's address>/a2a`, where it calls.

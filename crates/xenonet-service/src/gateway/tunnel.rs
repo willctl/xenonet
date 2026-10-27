@@ -5,7 +5,8 @@
 //!
 //!   tailscale         Tailscale Funnel: `tailscale funnel --bg` with the
 //!                     command that matches the Tailscale running, which
-//!                     keeps it across restarts.
+//!                     keeps it across restarts. It publishes the
+//!                     gateway's /mcp alone.
 //!   cloudflare        a named Cloudflare Tunnel, run as XenoNet's child.
 //!   cloudflare-quick  a Cloudflare quick tunnel: a new address each start.
 //!   ngrok             ngrok, signed in, on the owner's domain if named.
@@ -53,7 +54,7 @@ pub const KINDS: [Kind; 5] = [
         asks_name: None,
         asks_host: None,
         needs: "Needs Tailscale signed in, with Funnel allowed for this computer in your tailnet's policy.",
-        note: Some("Funnel makes this computer's tailnet name public. Rename it in Tailscale first if the name says too much."),
+        note: Some("Funnel puts the gateway's /mcp alone on the internet, and makes this computer's tailnet name public. Rename it in Tailscale first if the name says too much."),
         docs: Some("https://tailscale.com/kb/1223/funnel"),
     },
     Kind {
@@ -212,25 +213,48 @@ pub fn tailscale_self(text: &str) -> Value {
     json!({ "up": true, "version": version, "host": super::actor_gateway::normal_host(me["DNSName"].as_str()), "funnel": funnel })
 }
 
+/// The one path Funnel publishes: the actor gateway's MCP endpoint. The
+/// network's routes and A2A stay off the internet.
+pub const FUNNEL_PATH: &str = "/mcp";
+
+/// The command that has Funnel publish the gateway's `/mcp` alone.
+pub fn funnel_args(port: u16) -> Vec<String> {
+    ["funnel", "--bg", "--yes", "--set-path", FUNNEL_PATH, &format!("http://127.0.0.1:{port}{FUNNEL_PATH}")].iter().map(ToString::to_string).collect()
+}
+
 /// What `tailscale funnel status --json` serves on port 443 of this
-/// computer's name.
+/// computer's name: nothing, the gateway's `/mcp` alone (on the internet,
+/// or the tailnet only), the gateway's whole port as an older XenoNet set
+/// it up ("wide", which XenoNet narrows), something else at one path
+/// (which Repair may replace), or other paths beside the gateway's, which
+/// Funnel would put on the internet with it. `public` lists the paths on
+/// the internet.
 pub fn funnel_of(conf: &Value, host: &str, port: u16) -> Value {
     let hp = format!("{host}:443");
     let handlers = conf.get("Web").and_then(|w| w.get(&hp)).and_then(|w| w.get("Handlers")).and_then(Value::as_object).cloned().unwrap_or_default();
-    if handlers.is_empty() {
-        return json!({ "state": "none" });
-    }
     let mounts: Vec<String> = handlers.keys().cloned().collect();
-    let root = handlers.get("/").and_then(|h| h.get("Proxy")).filter(|p| !p.is_null()).map(xenonet_base::text::js_string);
-    let ours = |p: &str| p.replacen("localhost", "127.0.0.1", 1).trim_end_matches('/') == format!("http://127.0.0.1:{port}");
-    if mounts.len() > 1 {
-        return json!({ "state": "shared", "target": mounts.join(", ") });
+    let funnel = conf.get("AllowFunnel").and_then(|a| a.get(&hp)) == Some(&json!(true));
+    let public = if funnel { mounts.clone() } else { Vec::new() };
+    if handlers.is_empty() {
+        return json!({ "state": "none", "public": public });
     }
-    match root {
-        Some(r) if ours(&r) => json!({ "state": if conf.get("AllowFunnel").and_then(|a| a.get(&hp)) == Some(&json!(true)) { "ours" } else { "tailnet" } }),
-        Some(r) => json!({ "state": "elsewhere", "target": r }),
-        None => json!({ "state": "elsewhere", "target": mounts[0] }),
+    let proxy = |m: &str| handlers.get(m).and_then(|h| h.get("Proxy")).filter(|p| !p.is_null()).map(xenonet_base::text::js_string);
+    let to_us = |m: &str, path: &str| proxy(m).is_some_and(|p| p.replacen("localhost", "127.0.0.1", 1).trim_end_matches('/') == format!("http://127.0.0.1:{port}{path}"));
+    let ours = |m: &str| (m == FUNNEL_PATH && to_us(m, FUNNEL_PATH)) || (m == "/" && to_us(m, ""));
+    if mounts.iter().any(|m| !ours(m)) {
+        if mounts.len() > 1 {
+            return json!({ "state": "shared", "target": mounts.join(", "), "public": public });
+        }
+        return json!({ "state": "elsewhere", "target": proxy("/").unwrap_or_else(|| mounts[0].clone()), "public": public });
     }
+    let state = if handlers.contains_key("/") {
+        "wide"
+    } else if funnel {
+        "ours"
+    } else {
+        "tailnet"
+    };
+    json!({ "state": state, "public": public })
 }
 
 /// What XenoNet learns from a line a tunnel tool wrote.
@@ -463,6 +487,8 @@ struct Inner {
     tailscale_bin: Option<(f64, Tool)>,
     tools: HashMap<String, (f64, Vec<Tool>)>,
     next: u64,
+    /// The paths Funnel put on the internet when last read.
+    public: Option<Value>,
 }
 
 /// What a tunnel tells: the address it got, that it's up, that how it
@@ -512,6 +538,7 @@ impl Tunnel {
                 tailscale_bin: None,
                 tools: HashMap::new(),
                 next: 0,
+                public: None,
             })),
         }
     }
@@ -584,10 +611,22 @@ impl Tunnel {
         (Some(bin), Some(me), None)
     }
 
+    // What Funnel serves now, and the paths it puts on the internet, kept
+    // for the view.
     async fn funnel_now(&self, bin: &Tool, host: &str) -> Value {
         let out = self.host.run(&bin.path, &["funnel".into(), "status".into(), "--json".into()], Duration::from_secs(5)).await;
         let conf = json::parse(if out.stdout.is_empty() { "{}" } else { &out.stdout }).unwrap_or_else(|_| json!({}));
-        funnel_of(&conf, host, self.port)
+        let f = funnel_of(&conf, host, self.port);
+        self.inner.locked().public = Some(f["public"].clone());
+        f
+    }
+
+    async fn funnel_off(&self, bin: &Tool) {
+        let out = self.host.run(&bin.path, &["funnel".into(), "--yes".into(), "--https=443".into(), "off".into()], Duration::from_secs(10)).await;
+        if !out.ok {
+            let why = if out.stderr.trim().is_empty() { out.stdout.trim().to_string() } else { out.stderr.trim().to_string() };
+            (self.hooks.log)("gateway.tunnel", &format!("tailscale funnel off failed: {why}"));
+        }
     }
 
     async fn tailscale_up(&self, take_over: bool) {
@@ -622,7 +661,12 @@ impl Tunnel {
             );
         }
         if f["state"] != "ours" {
-            let out = self.host.run(&bin.path, &["funnel".into(), "--bg".into(), "--yes".into(), self.port.to_string()], Duration::from_secs(20)).await;
+            // The whole port, as an older XenoNet published it, or what
+            // Repair replaces: cleared first, so /mcp is all that's left.
+            if f["state"] == "wide" || f["state"] == "elsewhere" {
+                self.funnel_off(&bin).await;
+            }
+            let out = self.host.run(&bin.path, &funnel_args(self.port), Duration::from_secs(20)).await;
             let said = format!("{}\n{}", out.stdout, out.stderr);
             if let Some(i) = said.find("https://login.tailscale.com/") {
                 let link: String = said[i..].chars().take_while(|c| !c.is_whitespace()).collect();
@@ -633,7 +677,7 @@ impl Tunnel {
                 let last = xenonet_base::text::js_trim(&said).split('\n').next_back().filter(|l| !l.is_empty()).unwrap_or("it said nothing").to_string();
                 return self.set_state("failed", Some(format!("tailscale funnel didn't take: {last}")));
             }
-            (self.hooks.log)("gateway.tunnel", &format!("Tailscale Funnel forwards {host} to port {}", self.port));
+            (self.hooks.log)("gateway.tunnel", &format!("Tailscale Funnel forwards {host}{FUNNEL_PATH} alone to port {}", self.port));
         }
         self.set_state("up", None);
     }
@@ -643,14 +687,10 @@ impl Tunnel {
         let (bin, me, _) = self.tailscale().await;
         let (Some(bin), Some(host)) = (bin, me.as_ref().and_then(|m| m["host"].as_str().map(str::to_string))) else { return };
         let f = self.funnel_now(&bin, &host).await;
-        if f["state"] != "ours" && f["state"] != "tailnet" {
-            return;
+        if f["state"] == "ours" || f["state"] == "tailnet" || f["state"] == "wide" {
+            self.funnel_off(&bin).await;
         }
-        let out = self.host.run(&bin.path, &["funnel".into(), "--yes".into(), "--https=443".into(), "off".into()], Duration::from_secs(10)).await;
-        if !out.ok {
-            let why = if out.stderr.trim().is_empty() { out.stdout.trim().to_string() } else { out.stderr.trim().to_string() };
-            (self.hooks.log)("gateway.tunnel", &format!("tailscale funnel off failed: {why}"));
-        }
+        self.inner.locked().public = None;
     }
 
     // ---------- a child XenoNet runs ----------
@@ -924,6 +964,9 @@ impl Tunnel {
             "since": json::number(i.state.2),
             "pid": i.child.as_ref().and_then(|c| c.pid),
             "log": log,
+            // What's on the internet: Funnel's paths as last read, or null
+            // for a tunnel that forwards the gateway's whole port.
+            "public": if i.want.as_ref().is_some_and(|w| w.kind == "tailscale") { i.public.clone().unwrap_or(Value::Null) } else { Value::Null },
         })
     }
 

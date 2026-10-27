@@ -813,6 +813,13 @@ test("actors: the gateway off, its problem with what to do, reachable, and each 
   assert.match(broken.fix, /Repair sets the tunnel up again/);
   const fine = { on: true, problem: null, host: "xenonet.example.com", url: "https://xenonet.example.com/mcp", tunnel: { label: "ngrok", through: "ngrok" }, reach: { state: "ok" }, actors: [] };
   assert.deepEqual([(await check(fine)).status, (await check(fine)).detail], ["ok", "reachable at https://xenonet.example.com/mcp through ngrok"]);
+  // What's public, by the tunnel's kind: Funnel's /mcp alone, a port tunnel's everything.
+  const funnel = { ...fine, host: "mac.example.ts.net", url: "https://mac.example.ts.net/mcp", tunnel: { kind: "tailscale", through: "Tailscale Funnel", public: ["/mcp"] } };
+  assert.equal((await check(funnel)).detail, "reachable at https://mac.example.ts.net/mcp through Tailscale Funnel, with /mcp alone public");
+  assert.equal((await check({ ...fine, tunnel: { kind: "ngrok", through: "ngrok", public: null } })).detail, "reachable at https://xenonet.example.com/mcp through ngrok, with the gateway's whole port public");
+  const wide = await check({ ...funnel, tunnel: { ...funnel.tunnel, public: ["/", "/mcp"] } });
+  assert.deepEqual([wide.status, wide.detail], ["warn", "Tailscale Funnel puts more than the gateway's /mcp on the internet: /, /mcp"]);
+  assert.match(wide.fix, /Repair sets Funnel back to \/mcp alone/);
   assert.equal((await check({ ...fine, reach: { state: "unknown" } })).status, "info");
   const apps = await check({
     ...fine,

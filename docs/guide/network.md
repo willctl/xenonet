@@ -25,7 +25,7 @@ xenonet net create --name home --host studio
 
 This machine is now the founder and the gateway. The other machines reach the gateway at an address, which is one of:
 
-- **A tunnel**, the one the actor gateway uses: Tailscale Funnel, a Cloudflare tunnel, ngrok, or your own address. Set it up in the Actors panel, under **actor gateway**. A quick Cloudflare tunnel's address changes every time it starts, so the doctor says it doesn't suit a network.
+- **A tunnel**, the one the actor gateway uses: a Cloudflare tunnel, ngrok, or your own address. Set it up in the Actors panel, under **actor gateway**. A quick Cloudflare tunnel's address changes every time it starts, so the doctor says it doesn't suit a network. Tailscale Funnel doesn't carry a network: it publishes the actor gateway's `/mcp` alone. With Funnel, give the network this machine's tailnet address instead, as below.
 - **An address on your LAN or tailnet**, which this machine has:
 
   ```bash

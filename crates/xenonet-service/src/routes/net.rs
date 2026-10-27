@@ -40,8 +40,15 @@ fn refused(e: &NetError) -> Reply {
 
 /// The actor gateway's public host, which a network through its tunnel
 /// is reached at.
+/// The actor gateway's public host, when its tunnel carries the network's
+/// routes too. Tailscale Funnel publishes `/mcp` alone, so a network on
+/// that gateway takes a LAN or tailnet address instead.
 fn public_host(ctx: &Ctx) -> Option<String> {
-    ctx.gateway.get().and_then(|g| g.gateway().public_host())
+    let g = ctx.gateway.get()?;
+    if g.tunnel().view()["kind"] == "tailscale" {
+        return None;
+    }
+    g.gateway().public_host()
 }
 
 /// Whether a request may make a ticket: the window's, or on macOS the

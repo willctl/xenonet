@@ -655,6 +655,10 @@ export const CHECKS = [
       if (!st.on) return ok("it's off, so nothing outside this computer reaches XenoNet through it");
       const fix = "In XenoNet's Actors panel, Repair sets the tunnel up again and Change… picks another; xenonet gateway check checks again from a terminal.";
       if (st.problem) return warn(st.problem, fix);
+      // Funnel publishes /mcp alone: any other path it puts on the
+      // internet is a warning.
+      const more = st.tunnel?.kind === "tailscale" ? (st.tunnel.public ?? []).filter((p) => p !== "/mcp") : [];
+      if (more.length) return warn(`Tailscale Funnel puts more than the gateway's /mcp on the internet: ${st.tunnel.public.join(", ")}`, "In XenoNet's Actors panel, Repair sets Funnel back to /mcp alone. A path another program serves on port 443 has to move first.");
       if (st.reach?.state !== "ok") return info(`it's on, at ${st.host ?? "no address yet"}; XenoNet hasn't checked that address yet`);
       // Each app's connection: an old address, a token about to stop
       // working, or calls with a token that no longer works.
@@ -666,7 +670,10 @@ export const CHECKS = [
         a.token && a.expiring ? `${a.name}'s gateway token stops working on ${day(a.expiresAt)} unless it calls before then` : null,
       ]).filter(Boolean);
       if (said.length) return warn(said.join("; "), "In XenoNet's Actors panel, Connect… on the actor gives its app the address and a token again.");
-      return ok(`reachable at ${st.url}${st.tunnel?.through ? ` through ${st.tunnel.through}` : ""}${st.reach.local ? ", checked on this computer alone" : ""}`);
+      // What's public: Funnel's /mcp alone, or a port tunnel's everything.
+      const kind = st.tunnel?.kind;
+      const pub = kind === "tailscale" ? (Array.isArray(st.tunnel.public) ? ", with /mcp alone public" : "") : ["cloudflare", "cloudflare-quick", "ngrok"].includes(kind) ? ", with the gateway's whole port public" : "";
+      return ok(`reachable at ${st.url}${st.tunnel?.through ? ` through ${st.tunnel.through}` : ""}${pub}${st.reach.local ? ", checked on this computer alone" : ""}`);
     },
   },
   {
