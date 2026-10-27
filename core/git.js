@@ -1,6 +1,7 @@
 // Uncommitted work per project, from `git status --porcelain -b`.
 import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { onPath } from "./paths.js";
 import { Block } from "./blocks/lifecycle.js";
@@ -136,20 +137,129 @@ export function filterOverrides(listing, { scoped = true } = {}) {
   return args;
 }
 
-export function gitStatus(dir, { exec = execFile } = {}) {
+// The watch reads a repo's status only when something says it may have
+// changed, and its filter drivers only when its config may have: with a
+// dozen repos, reading both every pass ran git more than once a second.
+//
+// A repo whose index, HEAD, reflog, fetches and config haven't changed is
+// read again after STATUS_IDLE_MS anyway, for edits to its files, which git
+// status alone sees. What its config said of its drivers stands until its
+// config files or yours change, and CONFIG_TTL_MS at most, for files they
+// include.
+export const STATUS_IDLE_MS = 120000;
+export const CONFIG_TTL_MS = 600000;
+
+// A repo's git folder, and the one it shares with its other worktrees (the
+// same for a plain repo): .git, or where a .git file's gitdir points, and
+// its commondir. Null when there's neither.
+export function gitDirs(dir) {
+  let git = path.join(dir, ".git");
+  try {
+    if (fs.statSync(git).isFile()) {
+      const to = /gitdir:\s*(.+)/.exec(fs.readFileSync(git, "utf8"))?.[1]?.trim();
+      if (!to) return null;
+      git = path.resolve(dir, to);
+    }
+  } catch {
+    return null;
+  }
+  let common = null;
+  try {
+    common = fs.readFileSync(path.join(git, "commondir"), "utf8").trim() || null;
+  } catch {}
+  return { git, common: common ? path.resolve(git, common) : git };
+}
+
+// The newest mtime of a folder and everything in it (a few levels and a few
+// thousand entries at most), or "" when it isn't there: a ref moved within it
+// rewrites its file and its folder, and its reflog grows.
+function treeMtime(dir) {
+  let newest = null, left = 4096;
+  const walk = (p, depth) => {
+    let st;
+    try {
+      st = fs.lstatSync(p);
+    } catch {
+      return;
+    }
+    newest = Math.max(newest ?? st.mtimeMs, st.mtimeMs);
+    if (!depth || !st.isDirectory()) return;
+    let names = [];
+    try {
+      names = fs.readdirSync(p);
+    } catch {}
+    for (const name of names) {
+      if (!left) return;
+      left--;
+      walk(path.join(p, name), depth - 1);
+    }
+  };
+  walk(dir, 8);
+  return newest == null ? "" : String(newest);
+}
+
+const mtimes = (files) =>
+  files
+    .map((f) => {
+      try {
+        return String(fs.statSync(f).mtimeMs);
+      } catch {
+        return "";
+      }
+    })
+    .join("|");
+
+// What says a repo may have changed, as its files' mtimes: `status`, its
+// index, HEAD, HEAD's reflog and ORIG_HEAD (staging, commits, checkouts,
+// resets, merges), its FETCH_HEAD and packed refs, its remote-tracking refs
+// and their reflogs, newest of each (fetches, --no-write-fetch-head ones too,
+// and pushes, which move a remote-tracking ref and nothing else), and its
+// config (an upstream set, say); `config`, its config files and yours
+// (~/.gitconfig, and the XDG one). Null when its git folder can't be found: then its status and
+// drivers are read every time.
+export function repoStamps(dir, { home = os.homedir(), xdg = process.env.XDG_CONFIG_HOME } = {}) {
+  const dirs = gitDirs(dir);
+  if (!dirs) return null;
+  const { git, common } = dirs;
+  const config = mtimes([path.join(common, "config"), path.join(git, "config.worktree"), path.join(home, ".gitconfig"), path.join(xdg || path.join(home, ".config"), "git", "config")]);
+  const status = mtimes([path.join(git, "index"), path.join(git, "HEAD"), path.join(git, "logs", "HEAD"), path.join(git, "ORIG_HEAD"), path.join(common, "FETCH_HEAD"), path.join(common, "packed-refs")]);
+  const remotes = `${treeMtime(path.join(common, "refs", "remotes"))}|${treeMtime(path.join(common, "logs", "refs", "remotes"))}`;
+  return { status: `${status}|${remotes}|${config}`, config };
+}
+
+// Whether to read a repo's status now, from when it was last read (`last`:
+// { stamp, at }) and its stamp now: never read, a stamp that can't be told
+// or has changed, or idle for STATUS_IDLE_MS.
+export const statusDue = (last, stamp, now) => !last || last.stamp == null || stamp == null || last.stamp !== stamp || now - last.at >= STATUS_IDLE_MS;
+
+// Whether the drivers a repo's config listed before (`cached`: { stamp, at })
+// still stand: the same stamp, within CONFIG_TTL_MS.
+export const driversFresh = (cached, stamp, now) => !!cached && cached.stamp != null && stamp != null && cached.stamp === stamp && now - cached.at < CONFIG_TTL_MS;
+
+// A repo's status, or null when git can't give it: the filter drivers its
+// config lists turned off first, so a status runs nothing of the repo's.
+// `cache` ({ stamp, at, args }, the watch's for this repo) keeps what the
+// drivers came to under the config stamp `stamp`, so they're listed again
+// only once it changes. `exec` stands in for execFile in tests.
+export function gitStatus(dir, { exec = execFile, cache = null, stamp = null, now = Date.now() } = {}) {
   const options = { timeout: 8000, windowsHide: true, maxBuffer: 4 << 20, env: { ...process.env, GIT_NO_LAZY_FETCH: "1" } };
   const run = (args) => new Promise((resolve) => exec("git", ["-C", dir, ...args], options, (err, stdout) => resolve({ err, stdout })));
   return (async () => {
-    let drivers = await run(DRIVERS_ARGS);
-    let scoped = true;
-    // git before 2.26 doesn't know --show-scope, and exits 129 on an
-    // option it doesn't know: there every driver counts as the repo's.
-    if (drivers.err?.code === 129) [drivers, scoped] = [await run(DRIVERS_ARGS.filter((a) => a !== "--show-scope")), false];
-    // Exit 1: no key matched, so no drivers.
-    if (drivers.err && drivers.err.code !== 1) return null;
-    const filters = filterOverrides(drivers.err ? "" : drivers.stdout, { scoped });
-    if (!filters) return null;
-    const { err, stdout } = await run([...GUARDS, ...filters, ...STATUS_ARGS]);
+    let args = cache && driversFresh(cache, stamp, now) ? cache.args : null;
+    if (!args) {
+      let drivers = await run(DRIVERS_ARGS);
+      let scoped = true;
+      // git before 2.26 doesn't know --show-scope, and exits 129 on an
+      // option it doesn't know: there every driver counts as the repo's.
+      if (drivers.err?.code === 129) [drivers, scoped] = [await run(DRIVERS_ARGS.filter((a) => a !== "--show-scope")), false];
+      // Exit 1: no key matched, so no drivers.
+      if (drivers.err && drivers.err.code !== 1) return null;
+      const filters = filterOverrides(drivers.err ? "" : drivers.stdout, { scoped });
+      if (!filters) return null;
+      args = [...GUARDS, ...filters, ...STATUS_ARGS];
+      if (cache && stamp != null) Object.assign(cache, { stamp, at: now, args });
+    }
+    const { err, stdout } = await run(args);
     return err ? null : { ...parseStatus(stdout), checkedAt: Date.now() };
   })();
 }
@@ -162,22 +272,25 @@ export function gitStatus(dir, { exec = execFile } = {}) {
 // projects (a folder gone or left out, or another projects folder in use)
 // drop out, so nothing counts them any more.
 export class RepoWatch extends Block {
-  constructor({ status = gitStatus, available = gitAvailable, clock } = {}) {
+  // `stamps` and `now` stand in for a repo's files and the clock in tests.
+  constructor({ status = gitStatus, available = gitAvailable, clock, stamps = (dir) => repoStamps(dir), now = () => Date.now() } = {}) {
     super({ name: "git-status", kind: "gatherer", clock });
     this.readStatus = status;
     this.available = available;
+    this.stamps = stamps;
+    this.now = now;
     this.status = new Map();
-    this.sources = new Map(); // project key → { p, source }
+    this.sources = new Map(); // project key → { p, source, last, cache, stamps, at }
   }
 
-  #source(p) {
+  #repo(p) {
     let r = this.sources.get(p.key);
     if (!r) {
       r = {};
       r.source = new Gatherer({
         name: "git-status:repo",
         gather: async () => {
-          const s = await this.readStatus(r.p.path);
+          const s = await this.readStatus(r.p.path, { cache: r.cache, stamp: r.stamps?.config ?? null, now: r.at });
           if (!s) throw new Error(`git couldn't read the status of ${r.p.path}`);
           return s;
         },
@@ -186,8 +299,12 @@ export class RepoWatch extends Block {
       });
       this.sources.set(p.key, r);
     }
+    // Another folder under the same key: nothing kept of the old one
+    // stands for it.
+    if (r.p && r.p.path !== p.path) [r.last, r.cache] = [null, {}];
     r.p = p;
-    return r.source;
+    r.cache ??= {};
+    return r;
   }
 
   async refresh(projects) {
@@ -197,12 +314,24 @@ export class RepoWatch extends Block {
     for (const key of this.status.keys()) if (!keep.has(key)) this.status.delete(key);
     for (const key of this.sources.keys()) if (!keep.has(key)) this.sources.delete(key);
     const failed = [];
+    // A repo's status is read only when its stamps say it may have changed
+    // or it's been idle a while, and its drivers only when its config may
+    // have; otherwise what was read stands.
     const run = async () => {
       for (let p = queue.shift(); p; p = queue.shift()) {
-        const source = this.#source(p);
-        const s = await source.run();
-        if (source.last.ok) this.status.set(p.key, s);
-        else failed.push(source.last.error);
+        const r = this.#repo(p);
+        r.stamps = this.stamps(p.path);
+        r.at = this.now();
+        if (this.status.has(p.key) && !statusDue(r.last, r.stamps?.status ?? null, r.at)) continue;
+        const s = await r.source.run();
+        if (r.source.last.ok) {
+          this.status.set(p.key, s);
+          r.last = { stamp: r.stamps?.status ?? null, at: r.at };
+        } else {
+          // Read it all again next pass.
+          [r.last, r.cache] = [null, {}];
+          failed.push(r.source.last.error);
+        }
       }
     };
     await Promise.all([run(), run(), run()]);

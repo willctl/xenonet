@@ -267,6 +267,16 @@ impl Verifier {
         Ok(c.get("procs.supported")?.truthy())
     }
 
+    /// Whether XenoNet sees the process on the other end of a connection
+    /// and the ones above it (procs' `chains`): macOS, Linux and Windows.
+    /// A procs that doesn't say goes by `supported`.
+    fn chains(c: &mut dyn Calls) -> Result<bool> {
+        Ok(match c.get("procs.chains")? {
+            Arg::Undef => Self::supported(c)?,
+            v => v.truthy(),
+        })
+    }
+
     fn pass(&self) -> Arg {
         self.inner.locked().counts.unchecked += 1.0;
         obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(false))])
@@ -387,9 +397,10 @@ impl Verifier {
 
     /// Requests only you make: not from any agent, nor from under an actor
     /// product's processes. The nearer of one of those and XenoNet's own
-    /// app decides.
+    /// app decides. Wherever XenoNet sees processes' chains: macOS, Linux
+    /// and Windows.
     pub fn person(&self, c: &mut dyn Calls) -> Result<Arg> {
-        if !Self::supported(c)? {
+        if !Self::chains(c)? {
             return Ok(self.pass());
         }
         let (_, chain) = Self::see(c, false);
@@ -629,6 +640,19 @@ impl Verifier {
             return Ok(obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(false))]));
         }
         if !Self::supported(c)? {
+            // Where XenoNet sees chains but can't vouch for an app's own
+            // executable (Linux, Windows), the Desktop still passes
+            // unchecked, and becomes home for `person` only with no agent
+            // and no actor product anywhere above it.
+            if Self::chains(c)? {
+                let (pid, chain) = Self::see(c, false);
+                if pid.truthy() && !chain.is_empty() && !chain.iter().any(|p| p.field("agent").truthy() || product_of(p).truthy()) {
+                    let mut i = self.inner.locked();
+                    if i.desktops == mine {
+                        i.home = pid;
+                    }
+                }
+            }
             return Ok(self.pass());
         }
         let (pid, chain) = Self::see(c, true);
@@ -772,6 +796,9 @@ mod tests {
     /// signed, and a working folder.
     struct Table {
         supported: bool,
+        // procs' `chains`, when it says (Linux and Windows: true while
+        // `supported` is false).
+        sees: Option<bool>,
         now: f64,
         peer: Arg,
         chains: Vec<Vec<Arg>>,
@@ -782,7 +809,7 @@ mod tests {
 
     impl Table {
         fn new(chains: Vec<Vec<Arg>>) -> Table {
-            Table { supported: true, now: 1_000_000.0, peer: Arg::Null, chains, gone: vec![], signed: vec![], cwd: None }
+            Table { supported: true, sees: None, now: 1_000_000.0, peer: Arg::Null, chains, gone: vec![], signed: vec![], cwd: None }
         }
         /// A request from this process.
         fn from(&mut self, pid: f64) -> &mut Table {
@@ -805,7 +832,11 @@ mod tests {
             })
         }
         fn get(&mut self, path: &str) -> Result<Arg> {
-            Ok(if path == "procs.supported" { Arg::Bool(self.supported) } else { Arg::Undef })
+            Ok(match (path, self.sees) {
+                ("procs.supported", _) => Arg::Bool(self.supported),
+                ("procs.chains", Some(sees)) => Arg::Bool(sees),
+                _ => Arg::Undef,
+            })
         }
         fn kind(&mut self, path: &str) -> Result<String> {
             Ok(if path == "procs.cwd" { "function" } else { "undefined" }.into())
@@ -917,6 +948,44 @@ mod tests {
         assert_eq!(v.asker(t.from(30.0)).unwrap().field("cwd"), Arg::text("/Users/me/projects/atlas"));
         t.supported = false;
         assert_eq!((said(&v.person(&mut t)), said(&v.asker(&mut t))), (passed(), passed()));
+    }
+
+    #[test]
+    fn on_linux_and_windows_whats_yours_is_held_to_the_chain_alone() {
+        // As procs reads them there: a program's path, no app bundles.
+        let claude = |pid: f64| proc(pid, "C:/Users/me/.local/bin/claude.exe", Some("claude"), None);
+        let desktop = proc(100.0, "C:/Users/me/AppData/Local/Programs/XenoNet/XenoNet.exe", None, None);
+        let explorer = proc(5.0, "C:/Windows/explorer.exe", None, None);
+        let launcher = "C:/Users/me/AppData/Local/XenoNet/runtime/launcher/xenonet.exe";
+        let mut t = Table::new(vec![
+            vec![proc(30.0, launcher, None, None), proc(29.0, "C:/Windows/System32/cmd.exe", None, None), claude(20.0), explorer.clone()],
+            vec![proc(31.0, launcher, None, None), proc(28.0, "C:/Program Files/PowerShell/7/pwsh.exe", None, None), explorer.clone()],
+            vec![desktop.clone(), explorer.clone()],
+            vec![proc(33.0, "C:/Windows/System32/cmd.exe", None, None), desktop.clone(), claude(21.0)],
+            vec![proc(101.0, "C:/w/xenonet/node_modules/electron/dist/electron.exe", None, None), claude(22.0)],
+        ]);
+        t.supported = false;
+        t.sees = Some(true);
+        let v = verifier(Arg::Null);
+        let under_claude = "this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet";
+        // xenonet connect --yes from under Claude Code is refused; from your
+        // own terminal it passes, checked.
+        assert_eq!(said(&v.person(t.from(30.0))), refused(under_claude));
+        assert_eq!(v.person(t.from(31.0)).unwrap(), obj(vec![("ok", Arg::Bool(true)), ("checked", Arg::Bool(true))]));
+        assert_eq!(said(&v.person(t.from(99.0))), refused("this is yours to do, and XenoNet couldn't see which program asked; run it in your own terminal or in XenoNet"));
+        // The rest stays as it was there: unchecked.
+        assert_eq!(v.check(t.from(30.0), &Arg::text("codex:a"), false).unwrap().field("checked"), Arg::Bool(false));
+        assert_eq!(v.window(t.from(101.0)).unwrap().field("checked"), Arg::Bool(false));
+        // A Desktop with an agent above it passes unchecked, but isn't home.
+        assert_eq!(v.desktop(t.from(101.0), true).unwrap().field("checked"), Arg::Bool(false));
+        assert_eq!(said(&v.person(t.from(33.0))), refused(under_claude));
+        // XenoNet's own Desktop, with nothing of an agent's above it, is
+        // home: its terminal is nearer than an agent above it.
+        v.desktop(t.from(100.0), true).unwrap();
+        assert_eq!(said(&v.person(t.from(33.0))), passed());
+        // Where XenoNet sees no chains at all, it passes, unchecked.
+        t.sees = Some(false);
+        assert_eq!(v.person(t.from(30.0)).unwrap().field("checked"), Arg::Bool(false));
     }
 
     #[test]

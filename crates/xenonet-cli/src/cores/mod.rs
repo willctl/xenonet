@@ -47,7 +47,9 @@ pub mod supervisor;
 mod tar;
 mod tasks;
 
-pub use components::{activate_package, component_updates, ensure_service, install_launcher, installed_runtime, recover_service_update, service_request, update_component};
+pub use components::{
+    activate_package, component_updates, ensure_service, install_launcher, installed_runtime, recover_service_update, service_request, stop_file, update_component,
+};
 pub use control::{control_driver, control_launch, control_quit, control_record, run_module, run_script, ConsoleControl};
 pub use relay::run_relay;
 

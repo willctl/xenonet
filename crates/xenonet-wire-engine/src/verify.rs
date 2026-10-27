@@ -29,7 +29,7 @@ impl Calls for VerifyCalls<'_> {
             ("procs", m) => procs::call(self.sys, m, &args),
             ("", "now") => Ok(Arg::Num(now_ms())),
             ("", "peerOf") => Ok(match self.peer {
-                Some(p) => crate::js::arg(&procs::peer_of(self.sys, p.local.port(), p.remote.port())),
+                Some(p) => crate::js::arg(&procs::peer_of(self.sys, p.conn, p.local.port(), p.remote.port())),
                 None => Arg::Null,
             }),
             _ => Err(no_method(path, method)),
@@ -175,16 +175,16 @@ mod tests {
     async fn a_request_with_no_process_to_see_passes_unchecked_or_is_refused_as_unseen() {
         let c = checks();
         // A loopback address with no connection behind it: nothing owns it.
-        let peer = Peer { remote: "127.0.0.1:9".parse().unwrap(), local: "127.0.0.1:1".parse().unwrap() };
+        let peer = Peer::new("127.0.0.1:9".parse().unwrap(), "127.0.0.1:1".parse().unwrap());
         let v = c.check(peer, "claude:0190d3e0-0000-7000-8000-000000000001", false).await;
         // No process on the other end: let through unchecked, as the JS did.
         assert_eq!(v["ok"], true, "{v}");
         let you = c.person(peer).await;
-        if c.sys.procs.supported {
+        if c.sys.procs.chains {
             assert_eq!((you["ok"].clone(), you["unseen"].clone()), (json!(false), json!(true)), "{you}");
         }
         assert_eq!(c.peer(peer).await, "?");
-        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
         // A session of an app XenoNet doesn't check is refused, never let
         // through unchecked.
         let other = c.check(peer, "gemini-cli:x", false).await;
@@ -193,7 +193,7 @@ mod tests {
             other["reason"],
             "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session"
         );
-        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
     }
 
     // A made-up Mac, answering the commands procs asks for: the Claude app
@@ -225,7 +225,7 @@ mod tests {
     }
 
     fn from(port: u16) -> Peer {
-        Peer { remote: format!("127.0.0.1:{port}").parse().unwrap(), local: "127.0.0.1:47842".parse().unwrap() }
+        Peer::new(format!("127.0.0.1:{port}").parse().unwrap(), "127.0.0.1:47842".parse().unwrap())
     }
 
     // The tray app in the home folder's Applications, started by launchd at

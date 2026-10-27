@@ -39,7 +39,7 @@
 
 ## Repo status
 
-XenoNet runs `git status` every 20 seconds for each repo's status. So that a repo you cloned or unpacked can't make XenoNet run its programs, XenoNet runs it this way:
+XenoNet looks at each repo every 20 seconds, and runs `git status` only when the repo may have changed: when its index, HEAD, reflog, fetches, pushes or config changed since the last read, or two minutes after it, for edits to files that only `git status` sees. It lists the repo's filter drivers with `git config` only when the repo's config or yours changes, and every ten minutes at most. So that a repo you cloned or unpacked can't make XenoNet run its programs, XenoNet runs `git status` this way:
 
 - It empties the filter drivers that the repo's own config names. The filters of git-lfs stay on. Your own filters, from your global and system config, work as they do anywhere.
 - It points the repo's hooks at nothing.
@@ -71,4 +71,4 @@ On macOS, one session can't pass for another. Any program here can reach the ser
 
 This check can't tell apart threads of one Codex process. It also can't place a session that no running process has been seen to hold yet, so that session goes to whoever names it first.
 
-On Windows and Linux, XenoNet doesn't check which process sent a request yet.
+On Windows and Linux, XenoNet sees the process on the other end of a connection and its parents too: on Linux from `/proc`, on Windows from the system's process list and `netstat -ano`. There it refuses what's yours to do from under a session, as on macOS: connecting your agents, changing your standing settings, starting the service at login, and the rest the guides call yours. The nearest of an agent and XenoNet's own Desktop decides, so a `claude` run in XenoNet's terminal is still an agent. XenoNet tells an actor product's processes apart mostly by its Mac app bundle, so on Windows and Linux it may not see a program as under an actor product. It refuses such a request when it can't see the process that sent it. The check follows each process's parent, so a program an agent starts some other way, such as through Task Scheduler, launchd or systemd, an existing terminal, a detached process (`setsid`, `tmux new-window -d`) or with a parent it made up, isn't seen as under that agent; macOS has the same limit. It doesn't yet check that a request in a session's name comes from that session's process there, since it can't tell who signed a program.

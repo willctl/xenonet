@@ -50,9 +50,10 @@ function machine() {
   return { table, signed };
 }
 
-function fakeProcs({ table, signed }, { supported = true, calls = { chain: 0 } } = {}) {
+function fakeProcs({ table, signed }, { supported = true, chains = undefined, calls = { chain: 0 } } = {}) {
   return {
     supported,
+    ...(chains === undefined ? {} : { chains }),
     peer: async (socket) => socket.pid,
     chain: async (pid) => {
       calls.chain++;
@@ -197,6 +198,27 @@ test("where XenoNet can't look, requests go through unchecked", async () => {
   assert.deepEqual(await verify.check(from(400), "claude:A"), { ok: true, checked: false });
   assert.deepEqual(await verify.person(from(220)), { ok: true, checked: false });
   assert.equal(verify.state.unchecked, 2);
+});
+
+test("on Linux and Windows, where XenoNet sees chains but not signatures, what's yours is held to the chain and the rest passes unchecked", async () => {
+  // As crates/xenonet-engine/src/verify.rs's own test has it: xenonet
+  // connect --yes from under Claude Code is refused, from a terminal it
+  // passes, checked.
+  const { verify, from } = setup({ supported: false, chains: true, home: null });
+  const agent = await verify.person(from(220));
+  assert.deepEqual([agent.ok, agent.checked], [false, true]);
+  assert.match(agent.reason, /came from under a Claude Code process/);
+  assert.deepEqual(await verify.person(from(400)), { ok: true, checked: true });
+  assert.deepEqual(await verify.check(from(220), "claude:A"), { ok: true, checked: false }, "sessions' requests: unchecked, as before");
+  // A Desktop is home only with no agent above it: XenoNet's terminal (620)
+  // runs under XenoNet's app, which no agent started here.
+  assert.deepEqual(await verify.desktop(from(XENONET)), { ok: true, checked: false });
+  assert.deepEqual(await verify.person(from(630)), { ok: false, checked: true, reason: "this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet" }, "a claude run in XenoNet's terminal is still an agent");
+  assert.equal((await verify.person(from(620))).ok, true);
+  assert.deepEqual(await verify.desktop(from(220)), { ok: true, checked: false }, "a Desktop under an agent passes, but isn't home");
+  // A procs that says it sees nothing passes, unchecked.
+  const blind = setup({ supported: false, chains: false });
+  assert.deepEqual(await blind.verify.person(blind.from(220)), { ok: true, checked: false });
 });
 
 test("a request in the name of a session whose app XenoNet doesn't check is refused, never passed unchecked", async () => {

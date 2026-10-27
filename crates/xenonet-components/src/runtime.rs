@@ -77,6 +77,14 @@ pub fn descriptor_file(env: &Env, m: &Machine) -> String {
     NATIVE.join(&[&runtime_dir(env, m), &format!("service-{}.json", port_of(env))])
 }
 
+/// What `xenonet service stop` leaves beside the descriptor: a supervisor
+/// that was waiting for another service to give up the port (one Desktop
+/// started before the service was registered) reads it as "stay stopped"
+/// rather than starting its own the moment the port is free.
+pub fn stop_file(env: &Env, m: &Machine) -> String {
+    NATIVE.join(&[&runtime_dir(env, m), &format!("service-{}.stop", port_of(env))])
+}
+
 /// The service's descriptor: its port and the token its hello wants.
 pub fn read_descriptor(env: &Env, m: &Machine) -> Result<(f64, String), FsError> {
     let file = descriptor_file(env, m);

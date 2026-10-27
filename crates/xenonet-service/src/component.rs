@@ -298,7 +298,7 @@ pub async fn start(file: PathBuf, hooks: Hooks) -> std::io::Result<Arc<Component
             let Ok((socket, remote)) = listener.accept().await else { continue };
             let local = socket.local_addr().unwrap_or(remote);
             let (hello_tx, hello_rx) = tokio::sync::oneshot::channel();
-            let conn = Arc::new(Conn { role: Mutex::new(None), rpc: Mutex::new(None), hello: Mutex::new(Some(hello_tx)), peer: Peer { remote, local } });
+            let conn = Arc::new(Conn { role: Mutex::new(None), rpc: Mutex::new(None), hello: Mutex::new(Some(hello_tx)), peer: Peer::new(remote, local) });
             let (s, c) = (svc.clone(), conn.clone());
             let handler: Handler = Arc::new(move |method, params| {
                 let (s, c) = (s.clone(), c.clone());

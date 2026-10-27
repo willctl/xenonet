@@ -17,8 +17,16 @@ function envFor() {
   return env;
 }
 
-// A command's output, or an error that carries what it wrote anyway.
+// A command's output, or an error that carries what it wrote anyway. procs'
+// own calls on Linux and Windows (the process table, a connection's process,
+// a command line) are read from the system itself, in Rust.
 function run(file, args) {
+  try {
+    const own = native.procsNativeAnswer(String(file), args.map(String));
+    if (own != null) return Promise.resolve(own);
+  } catch (err) {
+    return Promise.reject(err);
+  }
   return new Promise((resolve, reject) => execFile(file, args, { maxBuffer: 16 * 1024 * 1024, timeout: 5000, windowsHide: true, env: envFor() }, (err, stdout) => (err ? reject(Object.assign(err, { stdout })) : resolve(stdout))));
 }
 
@@ -35,12 +43,22 @@ export const parseCwds = (text) => new Map(native.procsParseCwds(String(text ?? 
 export const parseCommands = (text) => new Map(native.procsParseCommands(String(text ?? "")));
 export const parsePs = (text) => new Map(native.procsParsePs(lines(text)));
 export const parseNetstat = (text, { localPort, remotePort }) => native.procsParseNetstat(lines(text), localPort, remotePort) ?? null;
+export const PROCESSES = "xenonet:processes";
+export const TCP_PEER = "xenonet:tcp-peer";
+export const COMMAND_LINE = "xenonet:command-line";
+export const parseTable = (text) => {
+  const [table, exes] = native.procsParseTable(String(text ?? ""));
+  return { table: new Map(table), exes: new Map(exes) };
+};
+export const parseNetstatWindows = (text, { localPort, remotePort }) => native.procsParseNetstatWindows(String(text ?? ""), localPort, remotePort) ?? null;
+export const parseProcNetTcp = (text, { localPort, remotePort }) => native.procsParseProcNetTcp(String(text ?? ""), Number(localPort), Number(remotePort)) ?? null;
 
 export function createProcs({ platform = process.platform, exec = run, now = () => Date.now() } = {}) {
   const core = new native.ProcsCore(String(platform));
   const shared = new Map();
   const go = (machine) => drive(machine, (q) => (q.op === "now" ? now() : exec(q.file, q.args)), shared);
   const supported = core.supported;
+  const chains = core.chains;
 
   async function peer(socket) {
     const { pid, keep } = await go(core.peer(socket?.localPort, socket?.remotePort, socket?.__xenonetPeer));
@@ -56,6 +74,7 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
 
   return {
     supported,
+    chains,
     peer,
     chain: (pid, { again = true, exe = false } = {}) => go(core.chain(pid, !!again, !!exe)),
     alive: async ({ pid, start }) => go(core.alive(pid, start)),

@@ -41,11 +41,68 @@ export function writeLauncher(entry, { source = fs.readFileSync(LAUNCHER_SOURCE,
   }
 }
 
+// Why the launcher's binary is still the old one when it couldn't be
+// replaced, and when it will be.
+export const LAUNCHER_PENDING = "XenoNet replaces it the next time it starts, or the next time you run xenonet update";
+
+// Puts `tmp` in `to`'s place. Windows won't replace a program that's
+// running, and the launcher runs as long as an MCP server or the xenonet
+// command does, but it lets the running file be renamed: that copy goes
+// aside, as <to>.<pid>-<ms>.old, the new one takes its name, and sweepAside
+// deletes the old one on a later start, once nothing runs it. If the new one
+// can't take the name, the old one goes back. Between the two renames the
+// launcher's path is briefly missing, so a hook or MCP server starting in that
+// moment fails once; the rename of a file that isn't running replaces it in
+// one step.
+export function replaceFile(tmp, to, { rename = fs.renameSync } = {}) {
+  try {
+    return rename(tmp, to);
+  } catch (err) {
+    if (!fs.existsSync(to)) throw err;
+  }
+  const aside = `${to}.${process.pid}-${Date.now()}.old`;
+  rename(to, aside);
+  try {
+    rename(tmp, to);
+  } catch (err) {
+    try { rename(aside, to); } catch {}
+    throw err;
+  }
+}
+
+// Whether a process runs (one that's another user's counts).
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+
+// Deletes the copies replaceFile put aside beside `to`, and the temporary
+// copies (<to>.<pid>.tmp) a launcher update left when it stopped halfway, one
+// whose process no longer runs. One still running (on Windows) stays until a
+// later start.
+export function sweepAside(to) {
+  const dir = path.dirname(to), prefix = `${path.basename(to)}.`;
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch {}
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const tmp = /^(\d+)\.tmp$/.exec(name.slice(prefix.length));
+    const stale = tmp && Number(tmp[1]) > 0 && !alive(Number(tmp[1]));
+    if (name.endsWith(".old") || stale) try { fs.unlinkSync(path.join(dir, name)); } catch {}
+  }
+}
+
 // Copies the Tools' binary to the launcher's, when it isn't the copy of these
 // Tools already (its .from file says which it is), through a temporary file
-// and a rename, so a hook starting meanwhile runs the old or the new. One in
-// use that can't be replaced now (on Windows) is replaced next time.
+// and a rename, so a hook starting meanwhile runs the old or the new; a
+// launcher that's running is put aside first (replaceFile). True when it was
+// written, false when there was nothing to do; throws why it couldn't be.
 export function writeLauncherBin(tools, to) {
+  sweepAside(to);
   const from = path.join(tools.root, "bin", binName());
   if (!fs.existsSync(from)) return false;
   const source = `${tools.version}-${tools.sha256}`;
@@ -58,25 +115,32 @@ export function writeLauncherBin(tools, to) {
   try {
     fs.copyFileSync(from, tmp);
     if (process.platform !== "win32") fs.chmodSync(tmp, 0o755);
-    fs.renameSync(tmp, to);
+    replaceFile(tmp, to);
     fs.writeFileSync(`${to}.from`, source);
     return true;
-  } catch {
+  } catch (err) {
     fs.rmSync(tmp, { force: true });
-    return false;
+    throw err;
   }
 }
 
+// `pending` says why the binary is still an earlier Tools' when it couldn't
+// be replaced, and when it will be.
 export function installLauncher(env = process.env) {
   const tools = currentComponent("tools", env);
   if (!tools) return null;
   const dir = path.join(runtimeDir(env), "launcher");
   const bin = launcherBin(env);
   fs.mkdirSync(dir, { recursive: true });
-  writeLauncherBin(tools, bin);
+  let pending = null;
+  try {
+    writeLauncherBin(tools, bin);
+  } catch (err) {
+    pending = `the launcher couldn't be replaced (${err.message}); ${LAUNCHER_PENDING}`;
+  }
   const entry = path.join(dir, "cli", "xenonet.js");
   if (fs.existsSync(path.join(dir, earlierNode())) && fs.existsSync(entry)) writeLauncher(entry);
-  return { bin: fs.existsSync(bin) ? bin : null, root: dir };
+  return { bin: fs.existsSync(bin) ? bin : null, root: dir, pending };
 }
 
 // Whether a selected Service or Tools has its xenonet binary. One from
@@ -359,8 +423,9 @@ export async function activatePackage(file, item, { env = process.env, operation
     io.check(staged);
     if (item.component === "tools") {
       selectComponent("tools", staged, env);
-      installLauncher(env);
-      return { component: "tools", version: staged.version, status: "updated", detail: "New commands use this version. Connected MCP processes keep running." };
+      const pending = installLauncher(env)?.pending;
+      const detail = pending ? `New commands use this version once the launcher is replaced: ${pending}. Connected MCP processes keep running.` : "New commands use this version. Connected MCP processes keep running.";
+      return { component: "tools", version: staged.version, status: "updated", detail };
     }
     return switchService(env, io, old, staged);
   });

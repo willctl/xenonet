@@ -87,11 +87,11 @@ async function eventStream() {
 }
 
 // Your standing settings (the projects folder, your rules, identities, the
-// theme) are yours: on macOS the server refuses them to a process under an
+// theme) are yours: on macOS, Linux and Windows the server refuses them to a process under an
 // agent or an actor product, as these tests often are. Which this one is,
 // read as the server reads it; refused() checks the answer then.
 const procs = createProcs();
-const refusedHere = procs.supported && (await procs.chain(process.pid)).some((p) => p.agent || p.product);
+const refusedHere = procs.chains && (await procs.chain(process.pid)).some((p) => p.agent || p.product);
 async function refused(answer) {
   const res = await answer;
   assert.deepEqual([res.status, res.data.code], [403, "yours"], JSON.stringify(res.data));

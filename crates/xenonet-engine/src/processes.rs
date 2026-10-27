@@ -28,17 +28,26 @@ pub struct Rules {
 
 // Claude Code: the CLI, the native install under
 // ~/.local/share/claude/versions, or the one Claude desktop runs from its
-// claude.app.
+// claude.app; on Windows claude.exe, but for Claude desktop's own main
+// executable, which is called that too: AnthropicClaude\app-<version>\
+// claude.exe. The Claude Code Claude desktop runs, from elsewhere in that
+// folder, is Claude Code.
 fn claude_program(p: &str, base: &str) -> bool {
-    base == "claude" || re!(r"\/claude\/versions\/[^/]+$").is_match(p)
+    base == "claude" || (base == "claude.exe" && !claude_desktop(p)) || re!(r"\/claude\/versions\/[^/]+$").is_match(p)
+}
+/// Whether a path (with / for \) is Claude desktop's own main executable
+/// on Windows.
+fn claude_desktop(p: &str) -> bool {
+    re!(r"\/AnthropicClaude\/app-[^/]+\/claude\.exe$", i).is_match(p)
 }
 fn claude_script(args: &str) -> bool {
     args.contains("@anthropic-ai/claude-code/cli.js")
 }
 
-// Codex: the CLI, or the one the ChatGPT app bundles.
+// Codex: the CLI (codex.exe on Windows), or the one the ChatGPT app
+// bundles.
 fn codex_program(_: &str, base: &str) -> bool {
-    base == "codex" || re!(r"^codex-(aarch64|x86_64)").is_match(base)
+    base == "codex" || base == "codex.exe" || re!(r"^codex-(aarch64|x86_64)").is_match(base)
 }
 fn codex_script(args: &str) -> bool {
     args.contains("@openai/codex/")
@@ -112,8 +121,10 @@ pub fn agent_among<'a>(program: &str, args: &str, agents: &'a [Agent]) -> Option
     if let Some(a) = agents.iter().find(|a| (a.rules.program)(&p, base)) {
         return Some(&a.id);
     }
-    if base == "node" || base == "bun" {
-        return agents.iter().find(|a| a.rules.script.is_some_and(|s| s(args))).map(|a| a.id.as_str());
+    if crate::procs::is_node(base) {
+        // A package's path, with / for \ as on Windows.
+        let args = slashes(args);
+        return agents.iter().find(|a| a.rules.script.is_some_and(|s| s(&args))).map(|a| a.id.as_str());
     }
     None
 }
@@ -134,6 +145,14 @@ mod tests {
             ("C:\\Users\\me\\.grok\\bin\\grok.exe", Some("grok")),
             ("/usr/local/bin/agent", None),
             ("/usr/local/bin/grokker", None),
+            // Windows: Claude desktop's own main executable isn't Claude
+            // Code, in any case of its folders; the Claude Code it runs is.
+            ("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe", None),
+            ("C:/users/me/appdata/local/anthropicclaude/APP-1.2.3/claude.exe", None),
+            ("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\resources\\claude-code\\claude.exe", Some("claude")),
+            ("C:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.0\\claude.exe", Some("claude")),
+            ("C:\\Users\\me\\.local\\bin\\claude.exe", Some("claude")),
+            ("C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe", Some("codex")),
         ] {
             assert_eq!(agent_of(program, ""), agent, "{program}");
         }

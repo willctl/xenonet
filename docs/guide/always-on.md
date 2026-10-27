@@ -56,6 +56,7 @@ Start at sign-in, in the tray menu and the installer, is a separate setting: it 
 
 - When Desktop opens and no service answers, it asks launchd, systemd or Task Scheduler to start the registered one rather than starting a second copy. `xenonet service start` and `xenonet update service` do the same.
 - If you turn it on while Desktop's service is running, the new one waits for that one to stop. When the running service has no terminals open, it stops right away, and the new one takes over within a few seconds. Desktop reconnects and reloads its window. With terminals open, the running service keeps going until it stops, at the latest when you log out.
+- `xenonet service stop` while the new one is waiting stops both: the waiting one sees the stop and doesn't take over. It starts again at your next login, or with `xenonet service start`.
 - On a Mac with the tray app running, the menu bar icon is the tray's, and Desktop hides its own. Without it, and on Linux and Windows, the menu bar icon, the tray and notifications come from Desktop and show while Desktop runs.
 - Uninstalling Desktop also turns this off, whether or not you remove your data.
 - XenoNet Dev, run from a checkout, starts and stops its own service and never registers one. Its Background service panel says so.

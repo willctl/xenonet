@@ -1,1 +1,1 @@
-Check with xenonet update --check. Run xenonet update tools, service or all to install. If terminals are running, close them and run the service update again. Desktop updates are in the app's Updates panel.
+Check with xenonet update --check. xenonet update shows what would change and asks first (--yes to go ahead without asking); xenonet update tools, service or all installs those at once. The Tools update first, then the Service. If terminals are running, close them and run the service update again. Desktop updates are in the app's Updates panel.

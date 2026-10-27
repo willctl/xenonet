@@ -16,6 +16,7 @@
 // Where a check rests on a path (Hermes's hosts, XenoNet's own bundle), the
 // executable's real path decides instead (chain's `exe`).
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { APPS } from "./apps.js";
@@ -49,8 +50,10 @@ function envFor() {
 
 // A command's output, or an error that carries what it wrote anyway: lsof
 // says 1 when one of the processes it's asked about can't be read (another
-// user's), and still lists the rest.
+// user's), and still lists the rest. procs' own calls on Linux and Windows
+// (PROCESSES, TCP_PEER, COMMAND_LINE) are read from the system itself.
 function run(file, args) {
+  if (OWN.has(file)) return ownCall(file, args);
   return new Promise((resolve, reject) => execFile(file, args, { maxBuffer: 16 * 1024 * 1024, timeout: 5000, windowsHide: true, env: envFor() }, (err, stdout) => (err ? reject(Object.assign(err, { stdout })) : resolve(stdout))));
 }
 
@@ -74,7 +77,7 @@ const HERMES_PATH = /\/\.hermes\/|\/Hermes\.app\//;
 export const wantsArgs = (program) => {
   const p = String(program ?? "").replace(/\\/g, "/");
   const base = path.posix.basename(p);
-  return /^(node|bun)$/.test(base) || (PYTHON.test(base) && HERMES_PATH.test(p));
+  return /^(node|bun)(\.exe)?$/.test(base) || (PYTHON.test(base) && HERMES_PATH.test(p));
 };
 
 // The actor product a program belongs to, from its path and, for Node and
@@ -95,7 +98,7 @@ export function productOf(program, args = "") {
   const p = String(program ?? "").replace(/\\/g, "/");
   const base = path.posix.basename(p);
   if (PYTHON.test(base) && HERMES_PATH.test(p) && /\b(hermes_cli|tui_gateway|run_agent)\b/.test(args)) return { product: "hermes-agent", role: "host" };
-  if (/^(node|bun)$/.test(base) && /\/(ui-tui\/dist|hermes_cli\/tui_dist)\/entry\.js\b/.test(args)) return { product: "hermes-agent", role: "tui" };
+  if (/^(node|bun)(\.exe)?$/.test(base) && /\/(ui-tui\/dist|hermes_cli\/tui_dist)\/entry\.js\b/.test(args)) return { product: "hermes-agent", role: "tui" };
   const bundle = /\/([^/]+)\.app\//.exec(p)?.[1];
   return bundle && Object.hasOwn(ACTOR_APPS, bundle) ? { product: ACTOR_APPS[bundle], role: "app" } : null;
 }
@@ -202,8 +205,158 @@ export function parseNetstat(text, { localPort, remotePort }) {
   return closing;
 }
 
+// ---------- Linux and Windows ----------
+//
+// There XenoNet reads the processes itself rather than through ps and lsof:
+// on Linux from /proc, on Windows from the system's process list (the
+// binary takes a ToolHelp32 snapshot; here PowerShell asks CIM). They're
+// asked for as these calls, which run() answers and a test answers with a
+// made-up table.
+//
+// PROCESSES: every process, one line each, "pid ppid start program exe",
+// tab separated, with its start time in ms (UTC), the program it says it is
+// (Linux: argv[0]; Windows: its image) and its executable's real path (empty
+// where it can't be read). TCP_PEER [local port, remote port]: the process
+// holding the client's end of a connection to 127.0.0.1, on Linux (Windows
+// asks netstat -ano). COMMAND_LINE [pid]: a process's command line.
+export const PROCESSES = "xenonet:processes";
+export const TCP_PEER = "xenonet:tcp-peer";
+export const COMMAND_LINE = "xenonet:command-line";
+const OWN = new Set([PROCESSES, TCP_PEER, COMMAND_LINE]);
+
+// What PROCESSES answers: the table, and each process's executable.
+export function parseTable(text) {
+  const table = new Map(), exes = new Map();
+  for (const line of String(text ?? "").split("\n")) {
+    const f = line.replace(/\r$/, "").split("\t");
+    if (f.length < 4) continue;
+    const [pid, ppid, start] = [Number(f[0]), Number(f[1]), Number(f[2])];
+    if (!Number.isInteger(pid) || !f[3]) continue;
+    table.set(pid, { pid, ppid: Number.isFinite(ppid) ? ppid : 0, start: Number.isFinite(start) ? start : 0, program: f[3] });
+    if (f[4]) exes.set(pid, f[4]);
+  }
+  return { table, exes };
+}
+
+// The process holding the client's end of a connection to 127.0.0.1, as
+// netstat -ano -p TCP lists it on Windows: "TCP <local> <foreign> <state>
+// <pid>", the state in the system's language, so it isn't read; a pair whose
+// pid is 0 has been closed.
+export function parseNetstatWindows(text, { localPort, remotePort }) {
+  const client = `127.0.0.1:${remotePort}`, server = `127.0.0.1:${localPort}`;
+  for (const line of String(text ?? "").split("\n")) {
+    const f = line.trim().split(/\s+/);
+    const pid = Number(f[f.length - 1]);
+    if (f.length >= 4 && f[0].toUpperCase() === "TCP" && f[1] === client && f[2] === server && pid > 0) return pid;
+  }
+  return null;
+}
+
+// The socket inode of the client's end of a connection to 127.0.0.1, as
+// /proc/net/tcp lists it on Linux: "sl local rem st … uid timeout inode",
+// addresses as hex ADDR:PORT (127.0.0.1 is 0100007F), and an inode of 0 for
+// a socket that's closing.
+export function parseProcNetTcp(text, { localPort, remotePort }) {
+  const hex = (port) => `0100007F:${Number(port).toString(16).toUpperCase().padStart(4, "0")}`;
+  const [client, server] = [hex(remotePort), hex(localPort)];
+  for (const line of String(text ?? "").split("\n").slice(1)) {
+    const f = line.trim().split(/\s+/);
+    if (f.length > 9 && f[1].toUpperCase() === client && f[2].toUpperCase() === server && f[9] !== "0") return f[9];
+  }
+  return null;
+}
+
+// A field of a table line: no tabs or line breaks of its own.
+const field = (s) => String(s ?? "").replace(/[\t\n\r]/g, " ");
+
+// procs' own calls, from this system.
+async function ownCall(file, args) {
+  if (process.platform === "linux") {
+    const pids = () => fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n));
+    const argv = (pid) => {
+      try {
+        return fs.readFileSync(`/proc/${pid}/cmdline`).toString("utf8").split("\0").filter(Boolean);
+      } catch {
+        return [];
+      }
+    };
+    if (file === PROCESSES) {
+      const boot = Number(/^btime (\d+)/m.exec(fs.readFileSync("/proc/stat", "utf8"))?.[1] ?? 0) * 1000;
+      const lines = [];
+      for (const pid of pids()) {
+        let stat;
+        try {
+          stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+        } catch {
+          continue;
+        }
+        // The fields come after the name's last ")": linux shows userspace
+        // 100 clock ticks a second.
+        const name = stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")"));
+        const rest = stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/);
+        let exe = "";
+        try {
+          exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, "");
+        } catch {}
+        lines.push(`${pid}\t${rest[1]}\t${boot + Number(rest[19]) * 10}\t${field(argv(pid)[0] ?? name)}\t${field(exe)}`);
+      }
+      return lines.join("\n");
+    }
+    if (file === TCP_PEER) {
+      const inode = parseProcNetTcp(fs.readFileSync("/proc/net/tcp", "utf8"), { localPort: args[0], remotePort: args[1] });
+      if (!inode) return "";
+      const target = `socket:[${inode}]`;
+      for (const pid of pids()) {
+        let fds = [];
+        try {
+          fds = fs.readdirSync(`/proc/${pid}/fd`);
+        } catch {
+          continue;
+        }
+        for (const fd of fds) {
+          try {
+            if (fs.readlinkSync(`/proc/${pid}/fd/${fd}`) === target) return pid;
+          } catch {}
+        }
+      }
+      return "";
+    }
+    if (file === COMMAND_LINE) return argv(args[0]).join(" ");
+  }
+  if (process.platform === "win32" && file !== TCP_PEER) {
+    // CIM's Win32_Process: what the binary reads through ToolHelp32 and the
+    // process itself, here through PowerShell.
+    const filter = file === COMMAND_LINE ? ` -Filter "ProcessId=${Number(args[0])}"` : "";
+    const script = `Get-CimInstance Win32_Process${filter} | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; ppid = $_.ParentProcessId; start = if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { 0 }; name = $_.Name; exe = $_.ExecutablePath; line = $_.CommandLine } } | ConvertTo-Json -Compress`;
+    const out = await new Promise((resolve, reject) => execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { maxBuffer: 64 * 1024 * 1024, timeout: 20000, windowsHide: true }, (err, stdout) => (err ? reject(err) : resolve(stdout))));
+    const rows = [JSON.parse(out || "[]")].flat();
+    if (file === COMMAND_LINE) return String(rows[0]?.line ?? "");
+    return rows.map((r) => `${r.pid}\t${r.ppid}\t${r.start}\t${field(r.exe || r.name)}\t${field(r.exe ?? "")}`).join("\n");
+  }
+  throw new Error(`${file} couldn't be read on this system`);
+}
+
 export function createProcs({ platform = process.platform, exec = run, now = () => Date.now() } = {}) {
+  // supported: everything procs does (macOS, where codesign says who signed
+  // a running program). chains: the process on the other end of a
+  // connection and the ones above it, on macOS, Linux and Windows, which
+  // what's yours to do rests on alone. native: the table is read as
+  // PROCESSES.
   const supported = platform === "darwin";
+  const native = platform === "linux" || platform === "win32";
+  const chains = supported || native;
+  // Where the table is read natively, each process's executable as the last
+  // read said, by pid, start time and program.
+  const nativeExes = new Map();
+  const readNative = async () => {
+    const { table: t, exes } = parseTable(await exec(PROCESSES, []));
+    if (nativeExes.size > 4096) nativeExes.clear();
+    for (const [pid, exe] of exes) {
+      const p = t.get(pid);
+      if (p) nativeExes.set(`${p.pid}:${p.start}:${p.program}`, exe);
+    }
+    return t;
+  };
   let table = null, tableAt = 0, pending = null;
   const signatures = new Map();
   // What each process of Node, Bun or Hermes's Pythons is, by pid, start
@@ -219,8 +372,8 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
 
   async function snapshot() {
     if (table && now() - tableAt < TABLE_MS) return table;
-    pending ??= exec("ps", ["-axo", "pid=,ppid=,lstart=,comm="])
-      .then((text) => ((table = parsePs(text)), (tableAt = now()), table))
+    pending ??= (native ? readNative() : exec("ps", ["-axo", "pid=,ppid=,lstart=,comm="]).then(parsePs))
+      .then((t) => ((table = t), (tableAt = now()), table))
       .finally(() => (pending = null));
     return pending;
   }
@@ -229,9 +382,15 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
   // told. Only a process found is kept on the socket, so a lookup that
   // failed is tried again on its next request.
   async function peer(socket) {
-    if (!supported || !socket?.remotePort) return null;
+    if (!chains || !socket?.remotePort) return null;
     if (socket.__xenonetPeer != null) return socket.__xenonetPeer;
-    const pid = parseNetstat(await exec("netstat", ["-anv", "-p", "tcp"]).catch(() => ""), { localPort: socket.localPort, remotePort: socket.remotePort });
+    const ports = { localPort: socket.localPort, remotePort: socket.remotePort };
+    let pid;
+    if (platform === "win32") pid = parseNetstatWindows(await exec("netstat", ["-ano", "-p", "TCP"]).catch(() => ""), ports);
+    else if (platform === "linux") {
+      const n = Number(String(await exec(TCP_PEER, [String(ports.localPort), String(ports.remotePort)]).catch(() => "")).trim());
+      pid = Number.isFinite(n) && n > 0 ? n : null;
+    } else pid = parseNetstat(await exec("netstat", ["-anv", "-p", "tcp"]).catch(() => ""), ports);
     if (pid != null) socket.__xenonetPeer = pid;
     return pid;
   }
@@ -259,7 +418,14 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
     const fresh = again && !t.has(pid) ? await newcomers(pid, t) : null;
     const get = (p) => fresh?.get(p) ?? t.get(p);
     const rows = [];
-    for (let p = get(pid); p && rows.length < 64; p = p.ppid > 1 ? get(p.ppid) : null) rows.push(p);
+    // Windows keeps a parent's pid after the parent is gone, and may give it
+    // to a newer process: a "parent" that started after its child isn't the
+    // one that started it.
+    const parentOf = (p) => {
+      const q = p.ppid > 1 ? get(p.ppid) : null;
+      return q && native && q.start > 0 && p.start > 0 && q.start > p.start ? null : q;
+    };
+    for (let p = get(pid); p && rows.length < 64; p = parentOf(p)) rows.push(p);
     const real = exe ? await executablesOf(rows) : null;
     const out = [];
     for (const p of rows) {
@@ -268,7 +434,7 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
       let agent = of("");
       let args = "";
       if (!agent && (wantsArgs(p.program) || (file && wantsArgs(file)))) {
-        args = await exec("ps", ["-o", "command=", "-p", String(p.pid)]).catch(() => "");
+        args = await (native ? exec(COMMAND_LINE, [String(p.pid)]) : exec("ps", ["-o", "command=", "-p", String(p.pid)])).catch(() => "");
         agent = of(args);
       }
       let product = agent ? null : productOf(file ?? p.program, args);
@@ -285,6 +451,7 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
   // read again.
   async function executablesOf(rows) {
     const key = (p) => `${p.pid}:${p.start}:${p.program}`;
+    if (native) return new Map(rows.map((p) => [p.pid, nativeExes.get(key(p)) ?? null]));
     const missing = rows.filter((p) => !executables.has(key(p)));
     if (missing.length) {
       const read = parseTexts(await exec("lsof", ["-a", "-p", missing.map((p) => p.pid).join(","), "-d", "txt", "-Fn"]).catch((err) => err?.stdout ?? ""));
@@ -339,8 +506,10 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
   // whole table costs a tenth of a second. Empty for a process that's gone.
   async function newcomers(pid, t) {
     const out = new Map();
+    // Natively, the whole table is read again: it's quick.
+    const fresh = native ? await readNative().catch(() => new Map()) : null;
     for (let p = pid; p > 1 && out.size < 64; ) {
-      const row = (await describe([p])).get(p);
+      const row = fresh ? fresh.get(p) : (await describe([p])).get(p);
       const known = t.get(p);
       if (!row || (known && known.start === row.start && known.program === row.program)) break;
       out.set(p, row);
@@ -451,7 +620,7 @@ export function createProcs({ platform = process.platform, exec = run, now = () 
     return signatures.get(key);
   }
 
-  return { supported, peer, chain, alive, signed, snapshot, cwd, census, children, describe, cwds };
+  return { supported, chains, peer, chain, alive, signed, snapshot, cwd, census, children, describe, cwds };
 }
 
 // Whether the lookups work on this machine, for the doctor: a connection

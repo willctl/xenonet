@@ -13,6 +13,11 @@ import { parse } from "../cli/lib/args.js";
 import { table, wrapText, plural, clip } from "../cli/lib/out.js";
 import { commandScript, commandState, installCommand, uninstallCommand } from "../core/command.js";
 import { HEALTH_MS } from "../core/client.js";
+import net from "node:net";
+import { stopFile } from "../core/components/runtime.js";
+import { rpc } from "../core/components/rpc.js";
+import { SERVICE_API } from "../core/components/protocol.js";
+import { inOrder, changes } from "../cli/commands/update.js";
 import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -563,6 +568,76 @@ test("shell completion offers each command's own words, xenonet drift's flags am
   const bash = await xenonet(["completion", "bash"]);
   assert.match(bash.stdout, /\n {4}drift\) COMPREPLY=\(\$\(compgen -W "--all --exit-code" -- "\$cur"\)\) ;;\n/);
   assert.equal((await xenonet(["completion", "fish"])).code, 2);
+});
+
+test("xenonet update: the Tools before the Service, and only what would change is asked about", () => {
+  // As crates/xenonet-cli/src/commands/update.rs's own test has it.
+  const service = { component: "service", version: "0.5.3", current: "0.5.2", available: true };
+  const tools = { component: "tools", version: "0.5.3", current: "0.5.0", available: true };
+  const all = inOrder([service, tools], "all");
+  assert.deepEqual(all, [tools, service]);
+  assert.deepEqual(inOrder([service, tools], "service"), [service]);
+  assert.deepEqual(changes(all), ["Tools 0.5.0 → 0.5.3", "Service 0.5.2 → 0.5.3"]);
+  const current = { component: "tools", version: "0.5.3", current: "0.5.3", available: false };
+  const missing = { component: "service", version: "0.5.3", current: null, available: true };
+  assert.deepEqual(changes([current, missing]), ["Service (not installed) → 0.5.3"]);
+});
+
+// A stand-in for the service's own socket (core/components/runtime.js):
+// it writes the connection file and answers hello, status and stop,
+// refusing a stop while terminals run unless it's forced.
+async function componentService(env, { terminals = false } = {}) {
+  const token = "ab".repeat(32);
+  const s = { stops: 0, sockets: new Set() };
+  const server = net.createServer((socket) => {
+    s.sockets.add(socket);
+    socket.on("close", () => s.sockets.delete(socket));
+    rpc(socket, async (method, params) => {
+      if (method === "hello") {
+        if (params.token !== token) throw new Error("XenoNet refused this connection.");
+        return { version: "9.9.9", pid: 1, api: SERVICE_API };
+      }
+      if (method === "stop") {
+        if (terminals && !params?.force) throw new Error("XenoNet has running terminals. Close them first, or use --force.");
+        s.stops++;
+        return { stopping: true };
+      }
+      return { version: "9.9.9", pid: 1, terminals: [] };
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  fs.mkdirSync(env.XENONET_RUNTIME_DIR, { recursive: true });
+  fs.writeFileSync(path.join(env.XENONET_RUNTIME_DIR, `service-${env.XENONET_PORT}.json`), JSON.stringify({ port: server.address().port, token, pid: 1, version: "9.9.9" }));
+  s.close = () => new Promise((r) => {
+    for (const socket of s.sockets) socket.destroy();
+    server.close(r);
+  });
+  return s;
+}
+
+test("xenonet service stop leaves the stop file a supervisor waiting for the port reads, and takes it away when the stop is refused", async () => {
+  const env = { XENONET_RUNTIME_DIR: path.join(tmp(), "runtime"), XENONET_PORT: "47998" };
+  const file = path.join(env.XENONET_RUNTIME_DIR, "service-47998.stop");
+  assert.equal(stopFile(env), file);
+  const s = await componentService(env, { terminals: true });
+  try {
+    const refused = await xenonet(["service", "stop"], { env });
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.stderr, /running terminals/);
+    assert.equal(fs.existsSync(file), false, "a refused stop leaves no stop file");
+    const stopped = await xenonet(["service", "stop", "--force"], { env });
+    assert.equal(stopped.code, 0, stopped.stderr);
+    assert.deepEqual(JSON.parse(stopped.stdout), { stopping: true });
+    assert.equal(s.stops, 1);
+    assert.equal(fs.existsSync(file), true, "a supervisor waiting for the port stays stopped");
+  } finally {
+    await s.close();
+  }
+  // With no service to stop, there's nothing for a supervisor to wait on.
+  fs.rmSync(file);
+  fs.rmSync(path.join(env.XENONET_RUNTIME_DIR, "service-47998.json"));
+  assert.notEqual((await xenonet(["service", "stop"], { env })).code, 0);
+  assert.equal(fs.existsSync(file), false);
 });
 
 test("xenonet without a XenoNet: status says so, doctor runs here, and mistakes exit 2", async () => {

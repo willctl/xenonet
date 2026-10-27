@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import net from "node:net";
-import { parsePs, parseNetstat, parseCwd, parseCwds, parseCommands, parseTexts, agentOf, productOf, wantsArgs, createProcs, selfTest } from "../core/procs.js";
+import { parsePs, parseNetstat, parseCwd, parseCwds, parseCommands, parseTexts, agentOf, productOf, wantsArgs, createProcs, selfTest, parseTable, parseNetstatWindows, parseProcNetTcp, PROCESSES, TCP_PEER, COMMAND_LINE } from "../core/procs.js";
 import { fakeProcesses } from "./harness/procs.js";
 
 test("agentOf: the agent apps by their program path, and Node by its arguments", () => {
@@ -15,6 +15,13 @@ test("agentOf: the agent apps by their program path, and Node by its arguments",
   assert.equal(agentOf("/Applications/Claude.app/Contents/MacOS/claude"), "claude");
   assert.equal(agentOf("/opt/homebrew/bin/codex"), "codex");
   assert.equal(agentOf("/path/codex-aarch64-apple-darwin"), "codex");
+  // Windows: Claude desktop's own main executable isn't Claude Code, in any
+  // case of its folders; the Claude Code it runs is.
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe"), null);
+  assert.equal(agentOf("C:/users/me/appdata/local/anthropicclaude/APP-1.2.3/claude.exe"), null);
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\resources\\claude-code\\claude.exe"), "claude");
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.0\\claude.exe"), "claude");
+  assert.equal(agentOf("C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe"), "codex");
   // Node and Bun are told apart only by what they run.
   assert.equal(agentOf("/usr/local/bin/node"), null);
   assert.equal(agentOf("/usr/local/bin/node", "node /x/@anthropic-ai/claude-code/cli.js"), "claude");
@@ -407,17 +414,95 @@ test("peer(): only a process found is kept on the socket, so a lookup that faile
 });
 
 test("createProcs on another platform supports nothing and looks nowhere", async () => {
-  const procs = createProcs({ platform: "linux", exec: async () => assert.fail("should not run commands") });
-  assert.equal(procs.supported, false);
+  const procs = createProcs({ platform: "freebsd", exec: async () => assert.fail("should not run commands") });
+  assert.deepEqual([procs.supported, procs.chains], [false, false]);
   assert.equal(await procs.peer({ remotePort: 51000, localPort: 47842 }), null);
   assert.equal(await procs.signed({ agent: "claude", pid: 1, start: 0, program: "/x/claude" }), false);
 });
 
-// The live lookups only work on macOS. One check end to end: a child process
+// A made-up Linux or Windows machine: what each call answers, by its file and
+// arguments; `asked` keeps every call.
+function nativeMachine(answers) {
+  const asked = [];
+  const exec = async (file, args) => {
+    const key = [file, ...args].join(" ");
+    asked.push(key);
+    if (!(key in answers)) throw new Error(`no ${key} here`);
+    return answers[key];
+  };
+  return { asked, exec, answers };
+}
+
+test("on Windows the processes are read natively, the connection's process from netstat -ano, and a reused parent pid isn't a parent", async () => {
+  // Claude Code's claude.exe runs cmd, which runs the xenonet command; Node
+  // runs the npm Claude Code, known by its command line. 30's parent pid 9
+  // was a process that's gone, and 9 now belongs to one that started later.
+  // Claude desktop's own claude.exe isn't Claude Code.
+  const table = [
+    "4\t0\t0\tSystem\t",
+    "5\t4\t1000\tC:\\Windows\\explorer.exe\tC:\\Windows\\explorer.exe",
+    "20\t5\t2000\tC:\\Users\\me\\.local\\bin\\claude.exe\tC:\\Users\\me\\.local\\bin\\claude.exe",
+    "21\t20\t3000\tC:\\Windows\\System32\\cmd.exe\tC:\\Windows\\System32\\cmd.exe",
+    "22\t21\t4000\tC:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe\tC:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe",
+    "23\t5\t2500\tC:\\Program Files\\nodejs\\node.exe\tC:\\Program Files\\nodejs\\node.exe",
+    "9\t5\t9000\tC:\\Windows\\notepad.exe\tC:\\Windows\\notepad.exe",
+    "30\t9\t5000\tC:\\Windows\\System32\\cmd.exe\t",
+    "31\t1\t5000\tC:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe\tC:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe",
+  ].join("\r\n");
+  // German Windows: the state words are the system's language.
+  const netstat = "\r\nAktive Verbindungen\r\n\r\n  Proto  Lokale Adresse         Remoteadresse          Status           PID\r\n  TCP    127.0.0.1:47840        0.0.0.0:0              ABHÖREN          700\r\n  TCP    127.0.0.1:47840        127.0.0.1:51000        HERGESTELLT      700\r\n  TCP    127.0.0.1:51000        127.0.0.1:47840        HERGESTELLT      22\r\n  TCP    127.0.0.1:51001        127.0.0.1:47840        TIME_WAIT        0\r\n";
+  const m = nativeMachine({ [PROCESSES]: table, "netstat -ano -p TCP": netstat, [`${COMMAND_LINE} 23`]: '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js' });
+  const procs = createProcs({ platform: "win32", exec: m.exec, now: () => 1e12 });
+  assert.deepEqual([procs.supported, procs.chains], [false, true]);
+  const socket = { localPort: 47840, remotePort: 51000 };
+  assert.equal(await procs.peer(socket), 22, "the client's end, whatever the state is called in this language");
+  assert.equal(await procs.peer({ localPort: 47840, remotePort: 51001 }), null, "a closed pair's pid is 0");
+  const chain = await procs.chain(22, { exe: true });
+  assert.deepEqual(chain.map((p) => [p.pid, p.agent]), [[22, null], [21, null], [20, "claude"], [5, null], [4, null]]);
+  assert.equal(chain[0].exe, "C:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe");
+  assert.equal((await procs.chain(23))[0].agent, "claude", "node.exe running Claude Code's cli.js");
+  assert.deepEqual((await procs.chain(30, { exe: true })).map((p) => [p.pid, p.exe]), [[30, null]], "9 started after 30, so it isn't 30's parent");
+  assert.equal((await procs.chain(31))[0].agent, null, "Claude desktop's own claude.exe isn't Claude Code");
+  assert.ok(!m.asked.some((a) => a.startsWith("ps ") || a.startsWith("lsof ")), m.asked.join("\n"));
+  assert.equal(parseNetstatWindows(netstat, socket), 22);
+});
+
+test("on Linux the processes and a connection's process are read from /proc, and a newcomer by reading the table again", async () => {
+  const first = "1\t0\t100\t/sbin/init\t/usr/lib/systemd/systemd\n50\t1\t200\t/bin/bash\t/usr/bin/bash\n";
+  const m = nativeMachine({ [PROCESSES]: first, [`${TCP_PEER} 47840 51000`]: "60\n" });
+  let clock = 1e12;
+  const procs = createProcs({ platform: "linux", exec: m.exec, now: () => clock });
+  assert.deepEqual([procs.supported, procs.chains], [false, true]);
+  assert.equal(await procs.peer({ localPort: 47840, remotePort: 51000 }), 60);
+  assert.equal((await procs.chain(50)).length, 1, "up to init, as up to launchd");
+  m.answers[PROCESSES] = `${first}60\t50\t300\tclaude\t/home/me/.local/share/claude/versions/2.1.0\n`;
+  const chain = await procs.chain(60, { exe: true });
+  assert.deepEqual(chain.map((p) => [p.pid, p.agent]), [[60, "claude"], [50, null]]);
+  assert.equal(chain[0].exe, "/home/me/.local/share/claude/versions/2.1.0");
+  // What /proc/net/tcp and a table line say.
+  const tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:BAB0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0000000000000000 100 0 0 10 0\n   1: 0100007F:C738 0100007F:BAB0 01 00000000:00000000 00:00000000 00000000  1000        0 22222 1 0000000000000000 20 4 30 10 -1\n   2: 0100007F:C739 0100007F:BAB0 06 00000000:00000000 03:00000000 00000000     0        0 0 3 0000000000000000\n";
+  assert.equal(parseProcNetTcp(tcp, { localPort: 47792, remotePort: 51000 }), "22222");
+  assert.equal(parseProcNetTcp(tcp, { localPort: 47792, remotePort: 51001 }), null, "a socket that's closing has no inode");
+  const { table, exes } = parseTable("7\t1\t1.5e12\tpython3 -c x\t\n8\tx\tnope\tsh\t/bin/sh\nnot a line\n");
+  assert.deepEqual([table.get(7), table.get(8), exes.get(7), exes.get(8)], [{ pid: 7, ppid: 1, start: 1.5e12, program: "python3 -c x" }, { pid: 8, ppid: 0, start: 0, program: "sh" }, undefined, "/bin/sh"]);
+});
+
+// This machine's own processes, read as XenoNet reads them on Linux and
+// Windows: this process, its executable, its parent and its command line.
+test("on Linux and Windows this process is read from the system itself", { skip: !["linux", "win32"].includes(process.platform) && "read natively on Linux and Windows" }, async () => {
+  const procs = createProcs();
+  assert.equal(procs.chains, true);
+  const chain = await procs.chain(process.pid, { exe: true });
+  assert.equal(chain[0].pid, process.pid);
+  assert.ok(chain.length > 1, "and its parent");
+  assert.ok(typeof chain[0].exe === "string" && chain[0].exe.length > 0, JSON.stringify(chain[0]));
+});
+
+// The live lookups work on macOS, Linux and Windows. One check end to end: a child process
 // opens a connection to a local server, and procs resolves the server's
 // socket back to that child's pid, with this test process among its
 // ancestors.
-test("peer() and chain() resolve a real connection to the process that made it", { skip: process.platform !== "darwin" }, async () => {
+test("peer() and chain() resolve a real connection to the process that made it", { skip: !["darwin", "linux", "win32"].includes(process.platform) }, async () => {
   const server = net.createServer();
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;

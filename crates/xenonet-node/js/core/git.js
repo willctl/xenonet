@@ -6,6 +6,7 @@
 // here, through `exec` (execFile, or what a test stands in for it), and so
 // do the watch's turns (three repos at a time) and its gatherers.
 import { execFile, execFileSync } from "node:child_process";
+import os from "node:os";
 import { onPath } from "./paths.js";
 import { Block } from "./blocks/lifecycle.js";
 import { Gatherer } from "./blocks/gatherer.js";
@@ -38,24 +39,39 @@ export const filterOverrides = (listing, { scoped = true } = {}) => native.gitFi
 // An exit code, as git's error carries it (a spawn error's is a string).
 const codeOf = (err) => (typeof err?.code === "number" ? err.code : null);
 
-// A repo's status, or null when git can't give it. `exec` stands in for
-// execFile in tests.
-export function gitStatus(dir, { exec = execFile } = {}) {
+// When a repo's status and its drivers are read again: Rust's.
+export const STATUS_IDLE_MS = native.gitStatusIdleMs();
+export const CONFIG_TTL_MS = native.gitConfigTtlMs();
+export const gitDirs = (dir) => native.gitDirs(String(dir)) ?? null;
+export const repoStamps = (dir, { home = os.homedir(), xdg = process.env.XDG_CONFIG_HOME } = {}) => native.gitRepoStamps(String(dir), String(home), xdg ? String(xdg) : null) ?? null;
+export const statusDue = (last, stamp, now) => native.gitStatusDue(last ?? null, stamp ?? null, Number(now));
+export const driversFresh = (cached, stamp, now) => native.gitDriversFresh(cached ?? null, stamp ?? null, Number(now));
+
+// A repo's status, or null when git can't give it. `cache` ({ stamp, at,
+// args }, the watch's for this repo) keeps what the drivers came to under
+// the config stamp `stamp`. `exec` stands in for execFile in tests.
+export function gitStatus(dir, { exec = execFile, cache = null, stamp = null, now = Date.now() } = {}) {
   const options = { timeout: 8000, windowsHide: true, maxBuffer: 4 << 20, env: { ...process.env, GIT_NO_LAZY_FETCH: "1" } };
   const run = (args) => new Promise((resolve) => exec("git", ["-C", dir, ...args], options, (err, stdout) => resolve({ err, stdout })));
   return (async () => {
-    let scoped = true;
-    let drivers = await run(native.gitDriversArgs(true));
-    for (;;) {
-      const next = native.gitAfterDrivers(codeOf(drivers.err), !!drivers.err, String(drivers.stdout ?? ""), scoped);
-      if (next.unscoped) {
-        [drivers, scoped] = [await run(native.gitDriversArgs(false)), false];
-        continue;
+    let args = cache && driversFresh(cache, stamp, now) ? cache.args : null;
+    if (!args) {
+      let scoped = true;
+      let drivers = await run(native.gitDriversArgs(true));
+      for (;;) {
+        const next = native.gitAfterDrivers(codeOf(drivers.err), !!drivers.err, String(drivers.stdout ?? ""), scoped);
+        if (next.unscoped) {
+          [drivers, scoped] = [await run(native.gitDriversArgs(false)), false];
+          continue;
+        }
+        if (!next.args) return null;
+        args = next.args;
+        break;
       }
-      if (!next.args) return null;
-      const { err, stdout } = await run(next.args);
-      return err ? null : { ...parseStatus(stdout), checkedAt: Date.now() };
+      if (cache && stamp != null) Object.assign(cache, { stamp, at: now, args });
     }
+    const { err, stdout } = await run(args);
+    return err ? null : { ...parseStatus(stdout), checkedAt: Date.now() };
   })();
 }
 
@@ -64,22 +80,25 @@ export function gitStatus(dir, { exec = execFile } = {}) {
 // answer. The watch is a block itself, "git-status", degraded while some
 // repo's status couldn't be read.
 export class RepoWatch extends Block {
-  constructor({ status = gitStatus, available = gitAvailable, clock } = {}) {
+  // `stamps` and `now` stand in for a repo's files and the clock in tests.
+  constructor({ status = gitStatus, available = gitAvailable, clock, stamps = (dir) => repoStamps(dir), now = () => Date.now() } = {}) {
     super({ name: "git-status", kind: "gatherer", clock });
     this.readStatus = status;
     this.available = available;
+    this.stamps = stamps;
+    this.now = now;
     this.status = new Map();
-    this.sources = new Map(); // project key → { p, source }
+    this.sources = new Map(); // project key → { p, source, last, cache, stamps, at }
   }
 
-  #source(p) {
+  #repo(p) {
     let r = this.sources.get(p.key);
     if (!r) {
       r = {};
       r.source = new Gatherer({
         name: "git-status:repo",
         gather: async () => {
-          const s = await this.readStatus(r.p.path);
+          const s = await this.readStatus(r.p.path, { cache: r.cache, stamp: r.stamps?.config ?? null, now: r.at });
           if (!s) throw new Error(native.gitUnreadable(String(r.p.path)));
           return s;
         },
@@ -88,8 +107,12 @@ export class RepoWatch extends Block {
       });
       this.sources.set(p.key, r);
     }
+    // Another folder under the same key: nothing kept of the old one
+    // stands for it.
+    if (r.p && r.p.path !== p.path) [r.last, r.cache] = [null, {}];
     r.p = p;
-    return r.source;
+    r.cache ??= {};
+    return r;
   }
 
   async refresh(projects) {
@@ -99,12 +122,24 @@ export class RepoWatch extends Block {
     for (const key of this.status.keys()) if (!keep.has(key)) this.status.delete(key);
     for (const key of this.sources.keys()) if (!keep.has(key)) this.sources.delete(key);
     const failed = [];
+    // A repo's status is read only when its stamps say it may have changed
+    // or it's been idle a while, and its drivers only when its config may
+    // have; otherwise what was read stands.
     const run = async () => {
       for (let p = queue.shift(); p; p = queue.shift()) {
-        const source = this.#source(p);
-        const s = await source.run();
-        if (source.last.ok) this.status.set(p.key, s);
-        else failed.push(source.last.error);
+        const r = this.#repo(p);
+        r.stamps = this.stamps(p.path);
+        r.at = this.now();
+        if (this.status.has(p.key) && !native.gitStatusDue(r.last, r.stamps?.status ?? null, r.at)) continue;
+        const s = await r.source.run();
+        if (r.source.last.ok) {
+          this.status.set(p.key, s);
+          r.last = { stamp: r.stamps?.status ?? null, at: r.at };
+        } else {
+          // Read it all again next pass.
+          [r.last, r.cache] = [null, {}];
+          failed.push(r.source.last.error);
+        }
       }
     };
     await Promise.all([run(), run(), run()]);

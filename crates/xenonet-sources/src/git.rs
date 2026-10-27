@@ -213,6 +213,117 @@ pub fn after_drivers(code: Option<f64>, err: bool, stdout: &str, scoped: bool) -
     }
 }
 
+// The watch reads a repo's status only when something says it may have
+// changed, and its filter drivers only when its config may have: with a
+// dozen repos, reading both every pass ran git more than once a second.
+
+/// A repo whose index, HEAD, reflog and fetches haven't changed is read
+/// again after this long anyway, for edits to its files, which git status
+/// alone sees.
+pub const STATUS_IDLE_MS: f64 = 120_000.0;
+/// What a repo's config said of its filter drivers stands until its config
+/// files or yours change, and this long at most, for files they include.
+pub const CONFIG_TTL_MS: f64 = 600_000.0;
+
+/// A repo's git folder, and the one it shares with its other worktrees
+/// (the same for a plain repo): `.git`, or where a `.git` file's gitdir
+/// points, and its commondir. None when there's neither.
+pub fn git_dirs(dir: &str) -> Option<(String, String)> {
+    use xenonet_base::nodepath::NATIVE;
+    let mut git_dir = NATIVE.join(&[dir, ".git"]);
+    let meta = std::fs::metadata(&git_dir).ok()?;
+    if meta.is_file() {
+        let text = String::from_utf8_lossy(&std::fs::read(&git_dir).ok()?).into_owned();
+        let to = text.split_once("gitdir:")?.1.lines().next()?.trim().to_string();
+        git_dir = xenonet_base::nodepath::resolve(&[dir, &to]);
+    }
+    let common = std::fs::read(NATIVE.join(&[&git_dir, "commondir"])).ok().map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|c| !c.is_empty());
+    let common = common.map_or_else(|| git_dir.clone(), |c| xenonet_base::nodepath::resolve(&[&git_dir, &c]));
+    Some((git_dir, common))
+}
+
+/// What says a repo may have changed, as its files' mtimes: `status`, its
+/// index, HEAD, HEAD's reflog and ORIG_HEAD (staging, commits, checkouts,
+/// resets, merges), its FETCH_HEAD and packed refs, its remote-tracking
+/// refs and their reflogs, newest of each (fetches, `--no-write-fetch-head`
+/// ones too, and pushes, which move a remote-tracking ref and nothing
+/// else), and its config (an upstream set, say); `config`, its config files
+/// and yours (~/.gitconfig, and the XDG one).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stamps {
+    pub status: String,
+    pub config: String,
+}
+
+fn mtime_of(p: &std::path::Path) -> Option<f64> {
+    std::fs::symlink_metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok())
+}
+
+/// The newest mtime of a folder and everything in it (a few levels and a
+/// few thousand entries at most), or "" when it isn't there: a ref moved
+/// within it rewrites its file and its folder, and its reflog grows.
+fn tree_mtime(dir: &str) -> String {
+    fn walk(p: &std::path::Path, depth: u8, left: &mut u32, newest: &mut Option<f64>) {
+        let Some(at) = mtime_of(p) else { return };
+        *newest = Some(newest.map_or(at, |n| n.max(at)));
+        if depth == 0 || !p.is_dir() {
+            return;
+        }
+        for e in std::fs::read_dir(p).into_iter().flatten().flatten() {
+            if *left == 0 {
+                return;
+            }
+            *left -= 1;
+            walk(&e.path(), depth - 1, left, newest);
+        }
+    }
+    let mut newest = None;
+    walk(std::path::Path::new(dir), 8, &mut 4096, &mut newest);
+    newest.map_or_else(String::new, xenonet_base::json::number_string)
+}
+
+fn mtimes(files: &[String]) -> String {
+    files
+        .iter()
+        .map(|f| std::fs::metadata(f).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).map_or_else(String::new, xenonet_base::json::number_string))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// A repo's stamps, or None when its git folder can't be found: then its
+/// status and drivers are read every time.
+pub fn repo_stamps(dir: &str, home: &str, xdg_config_home: Option<&str>) -> Option<Stamps> {
+    use xenonet_base::nodepath::NATIVE;
+    let (git, common) = git_dirs(dir)?;
+    let at = |base: &str, parts: &[&str]| NATIVE.join(&std::iter::once(base).chain(parts.iter().copied()).collect::<Vec<_>>());
+    let status = [at(&git, &["index"]), at(&git, &["HEAD"]), at(&git, &["logs", "HEAD"]), at(&git, &["ORIG_HEAD"]), at(&common, &["FETCH_HEAD"]), at(&common, &["packed-refs"])];
+    let remotes = format!("{}|{}", tree_mtime(&at(&common, &["refs", "remotes"])), tree_mtime(&at(&common, &["logs", "refs", "remotes"])));
+    let xdg = xdg_config_home.filter(|x| !x.is_empty()).map_or_else(|| at(home, &[".config"]), str::to_string);
+    let config = [at(&common, &["config"]), at(&git, &["config.worktree"]), at(home, &[".gitconfig"]), at(&xdg, &["git", "config"])];
+    let config = mtimes(&config);
+    Some(Stamps { status: format!("{}|{remotes}|{config}", mtimes(&status)), config })
+}
+
+/// Whether to read a repo's status now, from when it was last read
+/// (`last`: its status stamp then, and when) and its stamp now: never
+/// read, a stamp that can't be told or has changed, or idle for
+/// STATUS_IDLE_MS.
+pub fn status_due(last: Option<(&str, f64)>, stamp: Option<&str>, now: f64) -> bool {
+    match (last, stamp) {
+        (Some((was, at)), Some(is)) => was != is || now - at >= STATUS_IDLE_MS,
+        _ => true,
+    }
+}
+
+/// Whether the drivers a repo's config listed before (`cached`: its config
+/// stamp then, and when) still stand: the same stamp, within CONFIG_TTL_MS.
+pub fn drivers_fresh(cached: Option<(&str, f64)>, stamp: Option<&str>, now: f64) -> bool {
+    match (cached, stamp) {
+        (Some((was, at)), Some(is)) => was == is && now - at < CONFIG_TTL_MS,
+        _ => false,
+    }
+}
+
 /// Whether git on the path needs the Command Line Tools checked: on a Mac,
 /// /usr/bin/git is a stub until they're installed.
 pub fn needs_dev_tools(platform: &str, git: Option<&str>) -> bool {
@@ -239,6 +350,94 @@ pub fn problem_of(failed: &[String]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_repos_status_is_read_when_it_may_have_changed_and_its_drivers_when_its_config_may_have() {
+        assert!(status_due(None, Some("1|2"), 0.0), "never read");
+        assert!(status_due(Some(("1|2", 0.0)), None, 1.0), "a stamp that can't be told");
+        assert!(!status_due(Some(("1|2", 0.0)), Some("1|2"), STATUS_IDLE_MS - 1.0));
+        assert!(status_due(Some(("1|2", 0.0)), Some("1|3"), 1.0), "its index or HEAD changed");
+        assert!(status_due(Some(("1|2", 0.0)), Some("1|2"), STATUS_IDLE_MS), "idle long enough");
+        assert!(!drivers_fresh(None, Some("c"), 0.0));
+        assert!(!drivers_fresh(Some(("c", 0.0)), None, 0.0));
+        assert!(drivers_fresh(Some(("c", 0.0)), Some("c"), CONFIG_TTL_MS - 1.0));
+        assert!(!drivers_fresh(Some(("c", 0.0)), Some("d"), 1.0), "its config changed");
+        assert!(!drivers_fresh(Some(("c", 0.0)), Some("c"), CONFIG_TTL_MS));
+    }
+
+    #[test]
+    fn a_push_changes_the_status_stamp() {
+        let root = std::env::temp_dir().join(format!("xenonet-stamps-push-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath="])
+                .args(args)
+                .current_dir(dir)
+                .output()
+        };
+        if !git(&root, &["--version"]).is_ok_and(|o| o.status.success()) {
+            return;
+        }
+        let (remote, repo) = (root.join("remote.git"), root.join("repo"));
+        let ok = |o: std::io::Result<std::process::Output>| assert!(o.unwrap().status.success());
+        ok(git(&root, &["init", "-q", "--bare", &remote.to_string_lossy()]));
+        ok(git(&root, &["init", "-q", "-b", "main", &repo.to_string_lossy()]));
+        std::fs::write(repo.join("a.txt"), "a").unwrap();
+        ok(git(&repo, &["add", "-A"]));
+        ok(git(&repo, &["commit", "-q", "-m", "one"]));
+        ok(git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]));
+        ok(git(&repo, &["push", "-q", "-u", "origin", "main"]));
+        std::fs::write(repo.join("a.txt"), "b").unwrap();
+        ok(git(&repo, &["commit", "-q", "-am", "two"]));
+        let (path, home) = (repo.to_string_lossy().into_owned(), root.join("home").to_string_lossy().into_owned());
+        let ahead = repo_stamps(&path, &home, None).unwrap();
+        assert_eq!(repo_stamps(&path, &home, None).unwrap(), ahead);
+        // A push moves the remote-tracking ref and its reflog, and nothing
+        // else a status reads: "ahead 1" goes.
+        ok(git(&repo, &["push", "-q"]));
+        let pushed = repo_stamps(&path, &home, None).unwrap();
+        assert_ne!(pushed.status, ahead.status);
+        assert_eq!(pushed.config, ahead.config);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_stamps_follow_a_repos_own_files_and_a_worktrees_shared_ones() {
+        let root = std::env::temp_dir().join(format!("xenonet-stamps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        let git = repo.join(".git");
+        std::fs::create_dir_all(git.join("logs")).unwrap();
+        std::fs::create_dir_all(git.join("worktrees").join("wt")).unwrap();
+        for f in ["index", "HEAD", "config", "logs/HEAD"] {
+            std::fs::write(git.join(f), "x").unwrap();
+        }
+        let home = root.join("home").to_string_lossy().into_owned();
+        let path = repo.to_string_lossy().into_owned();
+        assert_eq!(git_dirs(&path), Some((git.to_string_lossy().into_owned(), git.to_string_lossy().into_owned())));
+        let first = repo_stamps(&path, &home, None).unwrap();
+        assert_eq!(repo_stamps(&path, &home, None).unwrap(), first, "nothing changed");
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(git.join("index")).unwrap().set_modified(later).unwrap();
+        let staged = repo_stamps(&path, &home, None).unwrap();
+        assert!(staged.status != first.status && staged.config == first.config);
+        // Its config changing changes both: an upstream set changes ahead
+        // and behind.
+        std::fs::File::options().write(true).open(git.join("config")).unwrap().set_modified(later).unwrap();
+        assert_ne!(repo_stamps(&path, &home, None).unwrap().config, staged.config);
+        // A worktree: a .git file that points at its folder, which shares
+        // the repo's config.
+        let wt = root.join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", git.join("worktrees").join("wt").display())).unwrap();
+        std::fs::write(git.join("worktrees").join("wt").join("commondir"), "../..\n").unwrap();
+        let (own, shared) = git_dirs(&wt.to_string_lossy()).unwrap();
+        assert!(own.ends_with("wt") && std::path::Path::new(&shared) == git.as_path(), "{own} {shared}");
+        assert_eq!(repo_stamps(&root.join("plain").to_string_lossy(), &home, None), None, "not a repo: read every time");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn reads_a_status() {

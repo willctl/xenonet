@@ -78,18 +78,19 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             model.as_ref().map_or(String::new(), |m| format!(" with {m}"))
         ))
     ));
-    // A .cmd (an npm install) runs only through the shell.
+    // A .cmd (an npm install) runs only through the shell. The session is
+    // yours to talk to, in this terminal: it inherits the console, so it
+    // doesn't take Background::no_window, which on Windows would give it a
+    // console of its own with no window, cut off from this one.
     let args: Vec<String> = list(&cmd, "args").iter().map(|a| crate::js::text(Some(a))).collect();
     let lower = bin.to_ascii_lowercase();
     let mut child = if lower.ends_with(".cmd") || lower.ends_with(".bat") {
         let line = std::iter::once(format!("\"{bin}\"")).chain(args.iter().map(|a| format!("\"{a}\""))).collect::<Vec<_>>().join(" ");
         let mut c = std::process::Command::new("cmd.exe");
-        xenonet_base::process::Background::no_window(&mut c);
         c.args(["/d", "/s", "/c", &format!("\"{line}\"")]);
         c
     } else {
         let mut c = std::process::Command::new(&bin);
-        xenonet_base::process::Background::no_window(&mut c);
         c.args(&args);
         c
     };
