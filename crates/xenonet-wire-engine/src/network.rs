@@ -15,7 +15,9 @@
 //!   frame waits in the outbox until a stored receipt comes back. One from
 //!   another host is stored with its sender qualified (`@laptop:claude:…`)
 //!   and an envelope that says how it came, then delivered as local mail.
-//!   Receipts go back: stored at once, then delivered, seen or held.
+//!   Receipts go back: stored at once, then delivered, seen or held. One
+//!   stored there that no one read by the end of the outbox's week is
+//!   unread here.
 //! - **Claims across clones.** Claims and observed edits go out as a repo
 //!   key and a path inside the repo; others' come back for the edit
 //!   warning.
@@ -253,7 +255,7 @@ pub fn removed(w: &World, host: &str) {
 }
 
 /// What this host tells the others now, if it changed: presence and
-/// claims; and handoffs made here that lapsed.
+/// claims; and handoffs made here that lapsed, and messages no one read.
 pub fn tick(w: &World) {
     if net(w).me().is_none() {
         return;
@@ -261,6 +263,7 @@ pub fn tick(w: &World) {
     presence(w, false);
     claims(w, false);
     lapse(w);
+    unread(w);
 }
 
 /// A body from another host.
@@ -1479,6 +1482,17 @@ fn lapse(w: &World) {
                 send(w, To::All, Kind::Handoff, body_of(&r, "lapsed", None));
             }
         }
+    }
+}
+
+/// A message another host stored but no one there read by the end of the
+/// outbox's week is unread: its sender sees that, not "stored" for good.
+fn unread(w: &World) {
+    let now = now_ms();
+    let Ok(rows) = store(w, |s| s.unread_since(now - OUTBOX_MS, now)) else { return };
+    for r in rows {
+        let (Some(id), Some(agent)) = (r.num("message_id"), r.text("agent")) else { continue };
+        w.emit(From::Engine, "receipt", json!({ "id": id, "agent": agent, "host": r.text("host"), "state": "unread", "reason": "no one there read it in a week" }));
     }
 }
 
