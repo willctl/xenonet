@@ -18,7 +18,7 @@
 //! The requests sent from here are kept in memory: after a restart, a late
 //! answer to one is let go.
 
-use crate::js::{now_ms, Locked};
+use crate::js::{now_ms, obj, Locked};
 use crate::network::{clip, ms, net, quiet_note, send, sender_kind};
 use crate::runs::{Runner, Turn};
 use crate::world::World;
@@ -132,11 +132,17 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
         return Err("XenoNet's demo starts no sessions".into());
     }
     let Some(resumes) = w.router.resume.as_ref() else { return Err("this XenoNet runs no sessions".into()) };
+    // Paused, XenoNet starts nothing, whoever asks.
+    if w.policy.call("paused", &[]).is_ok_and(|p| p.truthy()) {
+        return Err("XenoNet is paused here, so it starts nothing until it's resumed".into());
+    }
     let now = now_ms();
+    // Ten an hour from each machine, and from each asker here.
+    let bucket = from.map_or_else(|| starts::asker(&sender.id), str::to_string);
     {
         let mut h = w.starts.history.locked();
         *h = starts::kept(&h, now);
-        if let Some(why) = starts::admit(&h, from.unwrap_or(""), now) {
+        if let Some(why) = starts::admit(&h, &bucket, now) {
             return Err(why);
         }
     }
@@ -144,6 +150,14 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     let cwd = starts::folder(&r.folder, &w.setup.home, &known, &reported)?;
     if !std::path::Path::new(&cwd).is_dir() {
         return Err(format!("{} isn't there", r.folder));
+    }
+    // This machine's limits on messages hold for a start too: too fast
+    // from one sender, a repeat of the same prompt.
+    let ask = obj(vec![("sender", Arg::text(sender.id.clone())), ("recipients", Arg::List(vec![Arg::text(TARGET)])), ("text", Arg::text(r.prompt.clone())), ("depth", Arg::num(0.0))]);
+    match w.policy.call("checkSend", &[ask]) {
+        Ok(_) => {}
+        Err(xenonet_engine::delivery::policy::Fail::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
+        Err(f) => return Err(format!("this machine's limits hold it: {}", crate::delivery::policy_thrown(f).0.message)),
     }
     let id = uuid()?;
     let session = (r.app != "codex").then(|| format!("{}:{id}", r.app));
@@ -178,7 +192,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
             return Err(why);
         }
     };
-    w.starts.history.locked().push((now, from.unwrap_or("").to_string()));
+    w.starts.history.locked().push((now, bucket));
     let folder = xenonet_base::paths::tilde(&cwd, &w.setup.home);
     w.log(
         "info",

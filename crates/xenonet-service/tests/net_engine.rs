@@ -995,6 +995,15 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let ended = studio.next("start", 15, |d| d["state"] == "ended").await;
     assert_eq!((ended["session"].as_str(), ended["exit"].clone()), (Some(session.as_str()), json!(0)), "{ended}");
 
+    // Paused, desk starts nothing, even for you.
+    let (s, v) = c.window("POST", "/api/delivery/pause", json!({ "paused": true })).await;
+    assert_eq!((s, v["paused"].clone()), (200, json!(true)), "{v}");
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "Paused?" })).await;
+    let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
+    assert_eq!(refused["reason"], "XenoNet is paused here, so it starts nothing until it's resumed", "{refused}");
+    c.window("POST", "/api/delivery/pause", json!({ "paused": false })).await;
+    assert_eq!(fake_runs(&c).len(), 1);
+
     // desk is no window host: whatever it says of who asks, nothing starts.
     let mut desk = Stream::of(&c);
     let (s, v) = c.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hi" })).await;
@@ -1028,6 +1037,15 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
         format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). It came from an agent, not from your user.\n\nRun the fixtures.")
     );
     until_value("laptop's session hears the run ended", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains(" ended (exit 0)")).map(Value::String) }).await;
+    // The same start again within the minute: a repeat, held by desk's
+    // limits on messages.
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
+    let got = until_value("laptop's session hears the repeat was held", 15, || async {
+        inbox(&b, ASKER).await.into_iter().find(|t| t.contains("asked for under a minute ago")).map(Value::String)
+    })
+    .await;
+    assert_eq!(got, "[XenoNet] No session was started on desk: the same start was asked for under a minute ago.");
+    assert_eq!(fake_runs(&c).len(), 2);
     // Bypassing permission checks is never taken.
     let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "x", "mode": "bypassPermissions" })).await;
     assert_eq!((s, v["error"].clone()), (400, json!("XenoNet never starts a session that bypasses its permission checks")), "{v}");

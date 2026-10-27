@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, senderOf, ACTIONS } from "../core/delivery/reach.js";
-import { request, framed, command, admit, kept, folder, signedOut, sessionOf, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
+import { request, framed, command, admit, asker, kept, folder, signedOut, sessionOf, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
 
 const ID = "0190d3e0-0000-7000-8000-00000000ab01";
 
@@ -83,6 +83,12 @@ test("twenty starts an hour on a machine, and ten from one machine", () => {
   assert.equal(admit(h, "studio", now), "this machine starts at most 20 sessions an hour");
   assert.equal(admit(h, "studio", now + 3600e3), null);
   assert.equal(kept(h, now + 3600e3 - 6000).length, 16);
+  // Each asker here has its own ten.
+  const mine = Array.from({ length: 10 }, () => [now, asker("claude:a")]);
+  assert.equal(admit(mine, asker("claude:a"), now), "claude:a asks for at most 10 sessions an hour here");
+  assert.equal(admit(mine, asker("claude:b"), now), null);
+  assert.equal(admit(mine, asker("you"), now), null);
+  assert.equal(admit(Array.from({ length: 10 }, () => [now, asker("you")]), asker("you"), now), "you ask for at most 10 sessions an hour here");
 });
 
 test("a folder is home, a map id or a path the machine reports", () => {

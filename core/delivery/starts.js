@@ -79,13 +79,20 @@ export function command(r, id, cwd, { settings = null, server = "xenonet", promp
   return ["claude", ["-p", "--session-id", id, ...(settings ? ["--settings", settings] : []), ...(r.mode ? ["--permission-mode", r.mode] : []), "--permission-prompt-tool", `mcp__${server}__permission`]];
 }
 
-// Whether a start may go now, by the starts in the last hour ([at, from],
-// from "" for this machine): null, or why not.
+// Who asked a start here, in the starts' history: one asker on this
+// machine (a session, an actor, you) by its id, apart from the others.
+export const asker = (id) => `here:${id}`;
+
+// Whether a start may go now, by the starts in the last hour ([at, from]:
+// another machine by its name, or one asker here, asker(id), each with its
+// own ten): null, or why not.
 export function admit(history, from, now = Date.now()) {
   const recent = history.filter(([at]) => now - at < HOUR_MS);
   if (recent.length >= PER_HOUR) return `this machine starts at most ${PER_HOUR} sessions an hour`;
-  if (recent.filter(([, h]) => h === from).length >= PER_HOST_HOUR) return `${from || "this machine"} asks for at most ${PER_HOST_HOUR} sessions an hour here`;
-  return null;
+  if (recent.filter(([, h]) => h === from).length < PER_HOST_HOUR) return null;
+  const here = String(from).startsWith("here:") ? String(from).slice("here:".length) : null;
+  const who = here === "you" ? "you ask" : here !== null ? `${here} asks` : `${from || "this machine"} asks`;
+  return `${who} for at most ${PER_HOST_HOUR} sessions an hour here`;
 }
 
 export const kept = (history, now = Date.now()) => history.filter(([at]) => now - at < HOUR_MS);

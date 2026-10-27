@@ -383,6 +383,11 @@ fn history_of(h: &V) -> Vec<(f64, String)> {
     h.as_array().into_iter().flatten().map(|e| (e.get(0).and_then(V::as_f64).unwrap_or(f64::NAN), e.get(1).and_then(V::as_str).unwrap_or("").to_string())).collect()
 }
 
+#[napi(js_name = "startsAsker")]
+pub fn starts_asker(id: String) -> String {
+    starts::asker(&id)
+}
+
 #[napi(js_name = "startsAdmit")]
 pub fn starts_admit(history: J, from: String, now: f64) -> Option<String> {
     starts::admit(&history_of(&history.0), &from, now)

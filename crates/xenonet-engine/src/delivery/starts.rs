@@ -157,18 +157,30 @@ pub fn command(r: &Request, id: &str, cwd: &str, settings: Option<&str>, server:
     (r.app.clone(), args)
 }
 
+/// Who asked a start here, in the starts' history: one asker on this
+/// machine (a session, an actor, you) by its id, apart from the others.
+pub fn asker(id: &str) -> String {
+    format!("here:{id}")
+}
+
 /// Whether a start may go now, by the starts in the last hour (when, and
-/// from which machine: "" for this one): None, or why not.
+/// who asked: another machine by its name, or one asker here, `asker`,
+/// each with its own ten): None, or why not.
 pub fn admit(history: &[(f64, String)], from: &str, now: f64) -> Option<String> {
     let recent: Vec<&(f64, String)> = history.iter().filter(|(at, _)| now - at < HOUR_MS).collect();
     if recent.len() >= PER_HOUR {
         return Some(format!("this machine starts at most {PER_HOUR} sessions an hour"));
     }
-    if recent.iter().filter(|(_, h)| h == from).count() >= PER_HOST_HOUR {
-        let who = if from.is_empty() { "this machine".to_string() } else { from.to_string() };
-        return Some(format!("{who} asks for at most {PER_HOST_HOUR} sessions an hour here"));
+    if recent.iter().filter(|(_, h)| h == from).count() < PER_HOST_HOUR {
+        return None;
     }
-    None
+    let who = match from.strip_prefix("here:") {
+        Some("you") => "you ask".to_string(),
+        Some(id) => format!("{id} asks"),
+        None if from.is_empty() => "this machine asks".to_string(),
+        None => format!("{from} asks"),
+    };
+    Some(format!("{who} for at most {PER_HOST_HOUR} sessions an hour here"))
 }
 
 /// The history worth keeping: the last hour's.
@@ -345,6 +357,15 @@ mod tests {
         assert_eq!(admit(&h, "studio", now).as_deref(), Some("this machine starts at most 20 sessions an hour"));
         assert_eq!(admit(&h, "studio", now + HOUR_MS), None, "an hour on");
         assert_eq!(kept(&h, now + HOUR_MS - 6000.0).len(), 16, "six of inix's and this machine's ten");
+        // Each asker here has its own ten: one session's don't hold
+        // another's, or yours.
+        let a = asker("claude:a");
+        let mine: Vec<(f64, String)> = (0..10).map(|_| (now, a.clone())).collect();
+        assert_eq!(admit(&mine, &a, now).as_deref(), Some("claude:a asks for at most 10 sessions an hour here"));
+        assert_eq!(admit(&mine, &asker("claude:b"), now), None);
+        assert_eq!(admit(&mine, &asker("you"), now), None);
+        let yours: Vec<(f64, String)> = (0..10).map(|_| (now, asker("you"))).collect();
+        assert_eq!(admit(&yours, &asker("you"), now).as_deref(), Some("you ask for at most 10 sessions an hour here"));
     }
 
     #[test]

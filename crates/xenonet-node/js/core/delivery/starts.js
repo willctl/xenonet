@@ -18,6 +18,8 @@ export const framed = (by, from, prompt) => native.startsFramed(by ?? {}, from ?
 
 export const command = (r, id, cwd, { settings = null, server = "xenonet", promptFile = null } = {}) => native.startsCommand(r, String(id), String(cwd), settings, String(server), promptFile);
 
+export const asker = (id) => native.startsAsker(String(id));
+
 export const admit = (history, from, now = Date.now()) => native.startsAdmit(history, String(from ?? ""), Number(now)) ?? null;
 
 export const kept = (history, now = Date.now()) => native.startsKept(history, Number(now));
