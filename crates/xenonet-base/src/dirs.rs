@@ -168,7 +168,9 @@ fn version_order(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// The Claude Code that Claude desktop keeps a copy of, given Claude
 /// desktop's folder (`find_claude_desktop_dir`): the newest version first,
-/// and within one, the newest build.
+/// and within one, the newest build. Only a build Claude desktop marked
+/// `.verified` counts, so a download still under way, or one that failed
+/// its check, is never run.
 ///
 /// ```text
 ///   macOS:   <Claude>/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude
@@ -186,6 +188,9 @@ pub fn bundled_claude_code(desktop: &str, platform: &str, look: &mut dyn Look) -
         let mut found: Vec<(String, f64)> = Vec::new();
         for b in builds {
             let build = join_all(&[&dir, &b]);
+            if !look.exists(&join_all(&[&build, ".verified"])) {
+                continue;
+            }
             let candidates = match platform {
                 "darwin" => vec![join_all(&[&build, "claude.app", "Contents", "MacOS", "claude"])],
                 "win32" => {
@@ -294,15 +299,33 @@ mod tests {
         let mac = "/Users/me/Library/Application Support/Claude/claude-code";
         let mut disk = Disk(vec![
             ("/Users/me/Library/Application Support/Claude/claude-code/2.1.99/aa/claude.app/Contents/MacOS/claude", 3.0),
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.99/aa/.verified", 3.0),
             ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/claude.app/Contents/MacOS/claude", 1.0),
-            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/cc/.verified", 2.0),
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/.verified", 1.0),
+            // Newer, but not verified: a download under way.
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/cc/claude.app/Contents/MacOS/claude", 2.0),
         ]);
         assert_eq!(
             bundled_claude_code("/Users/me/Library/Application Support/Claude", "darwin", &mut disk),
             [format!("{mac}/2.1.308/bb/claude.app/Contents/MacOS/claude"), format!("{mac}/2.1.99/aa/claude.app/Contents/MacOS/claude")]
         );
-        let mut win =
-            Disk(vec![("/L/Claude/claude-code/1.0.0/x/claude.exe", 1.0), ("/L/Claude/claude-code/1.0.0/y/bin/claude.exe", 2.0), ("/L/Claude/claude-code/0.9/z/claude.exe", 9.0)]);
+        // With none of the newest version's builds verified, the version
+        // before it.
+        let mut fresh = Disk(vec![
+            ("/C/claude-code/2.0.0/new/claude.app/Contents/MacOS/claude", 2.0),
+            ("/C/claude-code/1.9.0/old/claude.app/Contents/MacOS/claude", 1.0),
+            ("/C/claude-code/1.9.0/old/.verified", 1.0),
+        ]);
+        assert_eq!(bundled_claude_code("/C", "darwin", &mut fresh), ["/C/claude-code/1.9.0/old/claude.app/Contents/MacOS/claude"]);
+        let mut win = Disk(vec![
+            ("/L/Claude/claude-code/1.0.0/x/claude.exe", 1.0),
+            ("/L/Claude/claude-code/1.0.0/x/.verified", 1.0),
+            ("/L/Claude/claude-code/1.0.0/y/bin/claude.exe", 2.0),
+            ("/L/Claude/claude-code/1.0.0/y/.verified", 2.0),
+            ("/L/Claude/claude-code/1.0.0/w/claude.exe", 5.0),
+            ("/L/Claude/claude-code/0.9/z/claude.exe", 9.0),
+            ("/L/Claude/claude-code/0.9/z/.verified", 9.0),
+        ]);
         assert_eq!(
             bundled_claude_code("/L/Claude", "win32", &mut win),
             ["/L/Claude/claude-code/1.0.0/y/bin/claude.exe", "/L/Claude/claude-code/1.0.0/x/claude.exe", "/L/Claude/claude-code/0.9/z/claude.exe"]
@@ -315,7 +338,11 @@ mod tests {
     fn a_cli_is_found_on_path_then_where_the_desktop_apps_keep_it_then_by_its_variable() {
         let home = "/Users/me";
         let bundled = "/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/claude.app/Contents/MacOS/claude";
-        let mut disk = Disk(vec![(bundled, 1.0), ("/Applications/ChatGPT.app/Contents/Resources/codex", 1.0)]);
+        let mut disk = Disk(vec![
+            (bundled, 1.0),
+            ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/.verified", 1.0),
+            ("/Applications/ChatGPT.app/Contents/Resources/codex", 1.0),
+        ]);
         let env = |path: &str, claude: Option<&str>, codex: Option<&str>| CliEnv {
             path: path.into(),
             pathext: None,

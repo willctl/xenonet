@@ -88,7 +88,9 @@ function versionOrder(a, b) {
 
 // The Claude Code that Claude desktop keeps a copy of, given Claude
 // desktop's folder (findClaudeDesktopDir): the newest version first, and
-// within one, the newest build.
+// within one, the newest build. Only a build Claude desktop marked
+// .verified counts, so a download still under way, or one that failed its
+// check, is never run.
 //   macOS:   <Claude>/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude
 //   Windows: <Claude>\claude-code\<version>\<build>\claude.exe, or in a
 //            folder inside the build
@@ -109,6 +111,7 @@ export function bundledClaudeCode(desktopDir, { platform = process.platform, exi
     const found = [];
     for (const b of builds) {
       const build = path.join(dir, b);
+      if (!exists(path.join(build, ".verified"))) continue;
       const candidates =
         platform === "darwin" ? [path.join(build, "claude.app", "Contents", "MacOS", "claude")] : platform === "win32" ? [path.join(build, "claude.exe"), ...(list(build) ?? []).map((n) => path.join(build, n, "claude.exe"))] : [];
       for (const f of candidates) if (exists(f)) found.push([f, mtime(f)]);
