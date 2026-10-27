@@ -19,7 +19,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "description": "The recipient, unqualified"
+      "description": "The recipient, unqualified: xenonet:start for a start request"
     },
     "state": {
       "type": "string",
@@ -28,9 +28,11 @@
         "delivered",
         "seen",
         "held",
-        "refused"
+        "refused",
+        "started",
+        "ended"
       ],
-      "description": "stored: the receiving engine has it (the sender may drop it from its outbox); held: it waits because the session bypasses permission checks"
+      "description": "stored: the receiving engine has it (the sender may drop it from its outbox); held: it waits because the session bypasses permission checks. For a start request: started, refused, then ended"
     },
     "reason": {
       "anyOf": [
@@ -46,6 +48,60 @@
     "at": {
       "type": "number",
       "description": "Epoch milliseconds"
+    },
+    "session": {
+      "description": "For started and ended: the new session's id (null for Codex until it names its thread)",
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pid": {
+      "description": "For started: its process",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "folder": {
+      "description": "For started: its folder, with the home folder as ~",
+      "type": "string",
+      "maxLength": 1000
+    },
+    "app": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "grok"
+      ]
+    },
+    "exit": {
+      "description": "For ended: its exit code, null when it was stopped",
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "minutes": {
+      "description": "For ended: how long it ran",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "signIn": {
+      "description": "For ended: Claude Code there needs a sign-in for XenoNet's runs",
+      "type": "boolean"
     }
   },
   "required": [

@@ -124,10 +124,19 @@ export const NetworkReceipt = define(
   obj({
     schema: z.literal("network/receipt/v1"),
     mid: Mid,
-    agent: z.string().min(1).max(200).describe("The recipient, unqualified"),
-    state: z.enum(["stored", "delivered", "seen", "held", "refused"]).describe("stored: the receiving engine has it (the sender may drop it from its outbox); held: it waits because the session bypasses permission checks"),
+    agent: z.string().min(1).max(200).describe("The recipient, unqualified: xenonet:start for a start request"),
+    state: z
+      .enum(["stored", "delivered", "seen", "held", "refused", "started", "ended"])
+      .describe("stored: the receiving engine has it (the sender may drop it from its outbox); held: it waits because the session bypasses permission checks. For a start request: started, refused, then ended"),
     reason: z.string().max(280).nullable(),
     at: ms,
+    session: z.string().max(200).nullable().optional().describe("For started and ended: the new session's id (null for Codex until it names its thread)"),
+    pid: count.optional().describe("For started: its process"),
+    folder: z.string().max(1000).optional().describe("For started: its folder, with the home folder as ~"),
+    app: z.enum(["claude", "codex", "grok"]).optional(),
+    exit: z.int().nullable().optional().describe("For ended: its exit code, null when it was stopped"),
+    minutes: count.optional().describe("For ended: how long it ran"),
+    signIn: z.boolean().optional().describe("For ended: Claude Code there needs a sign-in for XenoNet's runs"),
   }),
   { title: "A receipt", description: "What happened to a message on the host it went to." },
 );
