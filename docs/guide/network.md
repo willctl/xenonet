@@ -123,13 +123,15 @@ Two settings on each machine decide what the network may do to its sessions:
 
 Set this machine's in the Network panel's **This machine** box, or with `xenonet net set --start network --wake network`. At its own keyboard you can always set either.
 
+A session XenoNet starts, resumes or forks runs with the Claude Code sign-in you gave its runs on that machine (`xenonet runs sign-in`), and can read it from its environment. Under **the network**, the sessions and actors on window hosts can start such a session, or prompt one through a wake, and so can have it read the token. Widen these only on a machine whose token you'd let them see; the Allow card warns when a call may read the environment (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)).
+
 From a window host, change another machine's on its row in the Network panel, or with `xenonet net set --on neo-rex --start off` in a terminal on a Mac. On Linux and Windows, `--on` refuses at once, since XenoNet can't tell you from an agent there: use the Network panel. Narrowing (to nobody, you or consent) is done at once. Widening to the network takes the founder's console, or a second window host: from any other window host it waits ten minutes on that machine, shows on its row in every window host's Network panel, and another window host approves it there, or with `xenonet net set --on neo-rex --approve <id>`.
 
 ## Permission prompts
 
-A Claude Code session XenoNet starts asks XenoNet, through the xenonet MCP server's `permission` tool, whenever its settings don't settle a tool call. XenoNet answers only for the runs it started; any other session asks in its own app.
+A Claude Code session XenoNet starts, and a turn it resumes or forks, asks XenoNet, through the xenonet MCP server's `permission` tool, whenever its settings don't settle a tool call. XenoNet answers only for its own runs; any other session asks in its own app.
 
-The prompt shows in Needs you on that machine and on every window host: "neo-rex · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. Allow is yours, and works a moment after the row shows. Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
+The prompt shows in Needs you on that machine and on every window host: "neo-rex · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
 
 ## Everything crosses through the gateway
 

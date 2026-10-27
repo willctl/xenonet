@@ -100,7 +100,7 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
     } else if (it.kind === "ask") {
       // A run XenoNet started asks to use a tool: what, and where, as its
       // machine words it. Deny is safe; Allow waits a moment.
-      lines = `<div class="ny-text" title="${h(it.text ?? "")}"><code>${h(it.tool ?? "a tool")}</code> ${h(gist(it.text ?? ""))}</div><div class="ny-asker">${h([it.host ? `on ${it.host}` : "here", it.session, it.run ? `run ${it.run}` : null].filter(Boolean).join(" · "))}</div>`;
+      lines = `<div class="ny-text" title="${h(it.text ?? "")}"><code>${h(it.tool ?? "a tool")}</code> ${h(gist(it.text ?? ""))}</div>${it.warning ? `<div class="ny-warn" data-ny-warn>${h(it.warning)}</div>` : ""}<div class="ny-asker">${h([it.host ? `on ${it.host}` : "here", it.session, it.run ? `run ${it.run}` : null].filter(Boolean).join(" · "))}</div>`;
       acts = btn(`data-ny-deny="${key}"`, "Deny", "It doesn't run, and the session hears why") + btn(`data-ny-allow="${key}"`, "Allow", "It runs this once", { primary: true, yours: true });
     } else if (it.kind === "sign-in") {
       lines = `<div class="ny-text">${h(it.text ?? "")}</div>`;

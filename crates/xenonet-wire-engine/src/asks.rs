@@ -33,6 +33,11 @@ pub const TARGET: &str = "xenonet:ask";
 pub const HOLD_MS: f64 = 10.0 * 60e3;
 /// Asks from other machines kept at most.
 const THERE_MAX: usize = 50;
+/// What the Allow card says of a call that may read the run's environment:
+/// Claude Code passes its own environment to its tools, so a token given
+/// to XenoNet's runs (`xenonet runs sign-in`) is readable there.
+pub const ENV_WARNING: &str =
+    "This may read the run's environment, which holds the Claude Code sign-in token you gave XenoNet's runs, if you gave one. Deny it unless the session may see that token.";
 
 /// One ask, as Needs you shows it.
 #[derive(Clone, Debug)]
@@ -45,6 +50,8 @@ pub struct Ask {
     pub title: String,
     pub tool: String,
     pub input: String,
+    /// Whether it may read the run's environment (`reads_env`).
+    pub warn: bool,
     pub at: f64,
     pub until: f64,
 }
@@ -60,6 +67,7 @@ impl Ask {
             "title": self.title,
             "tool": self.tool,
             "input": self.input,
+            "warning": if self.warn { json!(ENV_WARNING) } else { Value::Null },
             "at": ms(self.at),
             "until": ms(self.until),
         })
@@ -67,6 +75,10 @@ impl Ask {
 
     fn of(v: &Value, host: &str) -> Option<Ask> {
         let s = |k: &str, max: usize| v.get(k).and_then(Value::as_str).map(|t| clip(&xenonet_engine::delivery::policy::sanitize(t, true, max as f64), max));
+        let input = s("input", 300).unwrap_or_default();
+        // The other machine's word that it may read the environment, or
+        // this one's from the call as it shows: the card's words are ours.
+        let warn = v.get("warning").is_some_and(|w| w.as_str().is_some_and(|t| !t.is_empty())) || reads_env(&json!({ "command": input }));
         Some(Ask {
             id: s("id", 64).filter(|i| i.starts_with("ask_"))?,
             host: Some(host.to_string()),
@@ -74,7 +86,8 @@ impl Ask {
             run: s("run", 64).unwrap_or_default(),
             title: s("title", 200).unwrap_or_default(),
             tool: s("tool", 80).unwrap_or_default(),
-            input: s("input", 300).unwrap_or_default(),
+            input,
+            warn,
             at: v.get("at").and_then(Value::as_f64).unwrap_or_else(now_ms),
             until: v.get("until").and_then(Value::as_f64).unwrap_or_else(|| now_ms() + HOLD_MS),
         })
@@ -103,6 +116,35 @@ pub fn input_words(input: &Value, home: &str) -> String {
     let text = pick.unwrap_or_else(|| input.to_string());
     let text = xenonet_base::paths::tilde(&text, home);
     clip(&xenonet_engine::delivery::policy::sanitize(&text, true, 300.0), 300)
+}
+
+/// Whether a tool call may read the run's environment, or names the
+/// token: a command that prints it (env, printenv or set on their own),
+/// PowerShell's env: drive, /proc/<pid>/environ, an environment API, or
+/// OAUTH_TOKEN anywhere. Only what runs or is read counts (a command, a
+/// path, a pattern, a query, a URL), not a description or a file's new
+/// text. It warns; it doesn't decide.
+pub fn reads_env(input: &Value) -> bool {
+    const FIELDS: [&str; 7] = ["command", "file_path", "path", "pattern", "query", "url", "script"];
+    let text: Vec<String> = FIELDS.iter().filter_map(|k| input.get(*k).and_then(Value::as_str)).map(str::to_lowercase).collect();
+    if text.iter().any(|t| ["oauth_token", "environ", "env:", "process.env", "getenv"].iter().any(|n| t.contains(n))) {
+        return true;
+    }
+    let Some(cmd) = input.get("command").and_then(Value::as_str) else { return false };
+    let cmd = cmd.to_lowercase();
+    // Each simple command: its first word that isn't an assignment, by its
+    // name without a path; env with no command after it, set alone.
+    cmd.split(['|', ';', '&', '(', ')', '`', '\n']).any(|seg| {
+        let mut words = seg.split_whitespace().skip_while(|w| w.contains('='));
+        let Some(first) = words.next() else { return false };
+        let rest: Vec<&str> = words.collect();
+        match first.rsplit(['/', '\\']).next().unwrap_or(first).trim_end_matches(".exe") {
+            "printenv" => true,
+            "env" => rest.iter().all(|w| w.starts_with('-')),
+            "set" => rest.is_empty(),
+            _ => false,
+        }
+    })
 }
 
 /// The answer Claude Code takes.
@@ -189,6 +231,7 @@ pub fn ask(w: &World, me: &str, title: Option<&str>, body: &Value) -> Result<Val
         title: clip(&format!("{label} · {session_title}"), 200),
         tool: clip(&xenonet_engine::delivery::policy::sanitize(&tool, true, 80.0), 80),
         input: input_words(&input, &w.setup.home),
+        warn: reads_env(&input),
         at: now,
         until: now + hold,
     };
@@ -336,5 +379,40 @@ mod tests {
         let a = Ask::of(&json!({ "id": "ask_1", "title": "desk · Notes\u{1b}[31m", "tool": "Bash", "input": "ls", "at": 1.0, "until": 2.0 }), "desk").unwrap();
         assert_eq!((a.host.as_deref(), a.title.as_str()), (Some("desk"), "desk · Notes"));
         assert!(Ask::of(&json!({ "id": "x" }), "desk").is_none(), "only an ask's id");
+    }
+
+    #[test]
+    fn a_call_that_may_read_the_runs_environment_is_flagged() {
+        let cmd = |c: &str| reads_env(&json!({ "command": c, "description": "print the environment" }));
+        for c in [
+            "env",
+            "env | grep -i token",
+            "/usr/bin/env -0",
+            "printenv CLAUDE_CODE_OAUTH_TOKEN",
+            "echo $CLAUDE_CODE_OAUTH_TOKEN",
+            "set",
+            "cd /tmp && set | sort",
+            "cat /proc/self/environ",
+            "tr '\\0' '\\n' < /proc/$$/environ",
+            "Get-ChildItem Env:",
+            "echo $env:CLAUDE_CODE_OAUTH_TOKEN",
+            "python3 -c 'import os; print(os.environ)'",
+            "node -e 'console.log(process.env)'",
+            "X=1 printenv",
+        ] {
+            assert!(cmd(c), "{c}");
+        }
+        for c in ["npm test", "set -euo pipefail; make", "env FOO=1 node build.js", "npm config set registry https://r", "git log --oneline", "cat .env.example"] {
+            assert!(!cmd(c), "{c}");
+        }
+        assert!(reads_env(&json!({ "file_path": "/proc/self/environ" })));
+        assert!(reads_env(&json!({ "pattern": "OAUTH_TOKEN", "path": "." })));
+        assert!(!reads_env(&json!({ "file_path": "/w/notes.md", "content": "os.environ and printenv" })), "a file's new text runs nothing");
+        // Its card says so, here and on a window host, in this machine's
+        // words whatever the other machine sends.
+        let a = Ask::of(&json!({ "id": "ask_1", "input": "printenv", "warning": "anything" }), "desk").unwrap();
+        assert_eq!(a.to_json(None)["warning"], json!(ENV_WARNING));
+        assert_eq!(Ask::of(&json!({ "id": "ask_2", "input": "npm test" }), "desk").unwrap().to_json(None)["warning"], Value::Null);
+        assert!(Ask::of(&json!({ "id": "ask_3", "input": "env | sort", "warning": null }), "desk").unwrap().warn, "worked out here too");
     }
 }

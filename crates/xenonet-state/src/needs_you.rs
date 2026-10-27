@@ -157,6 +157,7 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
             m.insert("run".into(), str_of(a.get("run")));
             m.insert("tool".into(), str_of(a.get("tool")));
             m.insert("text".into(), str_of(a.get("input")));
+            m.insert("warning".into(), str_of(a.get("warning")));
             m.insert("since".into(), num(a.get("at")));
             m.insert("expiresAt".into(), num(a.get("until")));
             m.insert("actions".into(), strings(&["allow", "deny"]));

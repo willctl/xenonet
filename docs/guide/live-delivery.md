@@ -139,7 +139,10 @@ delivered at once, without a per-session allowance, within the wake budget:
 
 A session at work still gets the message from its hooks during its turn.
 Set the wake setting in the Network panel's This machine box, or with
-`xenonet net set --wake network`.
+`xenonet net set --wake network`. A turn XenoNet resumes or forks runs with
+the sign-in you gave its runs, which the turn can read: under `network`,
+any sender can prompt one (see [Signing in for XenoNet's
+runs](#signing-in-for-xenonets-runs)).
 
 ### Signing in for XenoNet's runs
 
@@ -156,9 +159,20 @@ xenonet runs sign-in
 Paste the token `claude setup-token` printed; it doesn't show as you paste
 it. XenoNet keeps it in your computer's credential store, as it keeps the
 OpenRouter key, and passes it to its own Claude Code runs alone, as
-`CLAUDE_CODE_OAUTH_TOKEN`. Nothing shows it again, and no agent sees it:
-signing in is yours, refused from under an agent. `xenonet runs` says
-whether a token is kept, and `xenonet runs forget` takes it away.
+`CLAUDE_CODE_OAUTH_TOKEN`. XenoNet never shows it again, and signing in is
+yours, refused from under an agent. `xenonet runs` says whether a token is
+kept, and `xenonet runs forget` takes it away.
+
+**The run it signs in can read it.** Claude Code passes its environment to
+the commands it runs, so the session XenoNet runs, and anyone who can
+prompt that session, can print the token with a command such as
+`printenv`. Allow cards say so when a call may read the environment or
+names the token (`env`, `printenv`, `set`, PowerShell's `env:`,
+`/proc/self/environ`, `OAUTH_TOKEN`): deny those unless the session may
+see the token. Under `start: network` or `wake: network` (see [Who may
+start and wake sessions](network.md#who-may-start-and-wake-sessions)),
+that's anyone the setting lets in, so keep a token only on a machine whose
+settings you'd trust with it.
 
 A run whose output says Claude Code isn't signed in ends saying so, and
 Needs you shows "Claude Code on neo-rex needs a sign-in for XenoNet's

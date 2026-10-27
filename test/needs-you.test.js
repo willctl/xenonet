@@ -89,7 +89,10 @@ test("a run's permission prompt, from this machine or another, with Allow and De
       ["ask:ask_1", "ask", ["allow", "deny"]],
     ],
   );
-  assert.deepEqual([q[1].host, q[1].tool, q[1].text, q[1].run, q[1].expiresAt], ["neo-rex", "Bash", "npm test", "run_1", T + 570e3]);
+  assert.deepEqual([q[1].host, q[1].tool, q[1].text, q[1].run, q[1].expiresAt, q[1].warning], ["neo-rex", "Bash", "npm test", "run_1", T + 570e3, null]);
+  // One that may read the run's environment carries its machine's warning.
+  const env = needsYouQueue({ asks: [{ ...ask, input: "printenv", warning: "This may read the run's environment" }], canDecide: true });
+  assert.equal(env[0].warning, "This may read the run's environment");
   assert.deepEqual([q[0].title, q[0].text], ["Claude Code on neo-rex", hint.fix]);
   assert.equal(waitsWords(q[1]), "wants to run a tool");
   assert.equal(waitsWords(q[0]), "needs a sign-in for XenoNet's runs");

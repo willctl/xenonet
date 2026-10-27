@@ -93,7 +93,7 @@ export function needsYouQueue({ sessions = [], actors = [], requests = [], gatew
   if (canDecide) {
     for (const a of asks ?? []) {
       if (!a?.id) continue;
-      items.push({ key: `ask:${a.id}`, kind: "ask", id: a.id, title: str(a.title) ?? a.id, host: str(a.host), session: str(a.session), run: str(a.run), tool: str(a.tool), text: str(a.input), since: num(a.at), expiresAt: num(a.until), actions: ["allow", "deny"] });
+      items.push({ key: `ask:${a.id}`, kind: "ask", id: a.id, title: str(a.title) ?? a.id, host: str(a.host), session: str(a.session), run: str(a.run), tool: str(a.tool), text: str(a.input), warning: str(a.warning), since: num(a.at), expiresAt: num(a.until), actions: ["allow", "deny"] });
     }
   }
   if (canDecide) {
