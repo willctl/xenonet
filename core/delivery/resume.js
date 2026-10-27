@@ -57,25 +57,47 @@ export function forkCommand(agent, { settings = null } = {}) {
   return ["claude", ["-p", "--resume", id, "--fork-session", "--output-format", "stream-json", "--verbose", ...(settings ? ["--settings", settings] : [])]];
 }
 
+// A Claude Code turn XenoNet runs asks its permission prompts of you,
+// through the xenonet MCP server (`server`, its name in the session's
+// settings) and its permission tool, as a started session does.
+export const withPermissionTool = (app, args, server = "xenonet") => (app === "claude" ? [...args, "--permission-prompt-tool", `mcp__${server}__permission`] : [...args]);
+
 // A command that ends with --prompt-file (Grok Build's) reads the prompt
-// from a file only you can read, written here and taken away when the turn
+// from a file only you can read, in `dir` (XenoNet's state folder's runs/,
+// as the Rust runner's <state>/runs/<id>.prompt), taken away when the turn
 // has had its time: [args, text for standard input].
 export function withPromptFile(args, text, dir = os.tmpdir()) {
   if (args.at(-1) !== "--prompt-file") return [args, text];
-  const file = path.join(dir, `xenonet-prompt-${crypto.randomUUID()}.txt`);
+  const file = path.join(dir, `${crypto.randomUUID()}.prompt`);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, text, { mode: 0o600 });
   setTimeout(() => fs.rmSync(file, { force: true }), TURN_MS).unref?.();
   return [[...args, file], ""];
 }
 
+// The hold a permission prompt waits for you (asks.rs's), and so how long
+// a Claude Code turn waits on the permission tool: a minute more.
+export const HOLD_MS = 10 * 60e3;
+
+// The environment of a turn of `app`: XenoNet's own without other
+// sessions' marks; for Claude Code, MCP_TOOL_TIMEOUT a minute past the hold.
+export function turnEnv(app, env, holdMs = HOLD_MS) {
+  const out = resumeEnv(env);
+  if (app === "claude") out.MCP_TOOL_TIMEOUT = String(Math.round(holdMs + 60e3));
+  return out;
+}
+
 // `runs` is the shared runner (runs.js); without one, a runner of its own
 // with the rest of the options (spawn, find, dir, timeoutMs, platform).
+// `server` is the xenonet MCP server's name in the sessions' settings, whose
+// permission tool a Claude Code turn asks; `stateDir` XenoNet's state folder,
+// whose runs/ holds Grok Build's prompt files, as the Rust runner's does.
 // deliver({ fork }) runs a copy of a Claude Code session (forkCommand),
 // while the session itself runs too: that's what it's for.
-export function createResume({ runs = null, env = process.env, settings = null, exists = fs.existsSync, ...options } = {}) {
+export function createResume({ runs = null, env = process.env, settings = null, exists = fs.existsSync, server = "xenonet", holdMs = HOLD_MS, stateDir = null, ...options } = {}) {
   const runner = runs ?? createRuns(options);
   const listen = () => (typeof settings === "function" ? settings() : settings);
+  const promptDir = stateDir ?? options.dir ?? null;
   return {
     name: "resume",
     fork: true,
@@ -86,14 +108,14 @@ export function createResume({ runs = null, env = process.env, settings = null, 
         const cmd = forkCommand(agent, { settings: listen() });
         if (!cmd) return { ok: false, why: "only Claude Code sessions can be forked" };
         if (!cwd || !exists(cwd)) return { ok: false, why: "its folder isn't there" };
-        return runner.run({ key: `fork:${agent}`, app: cmd[0], args: cmd[1], cwd, env: resumeEnv(env), text });
+        return runner.run({ key: `fork:${agent}`, app: cmd[0], args: withPermissionTool(cmd[0], cmd[1], server), cwd, env: turnEnv(cmd[0], env, holdMs), text });
       }
       const cmd = resumeCommand(agent, { settings: listen() });
       if (!cmd) return { ok: false, why: "only Claude Code, Codex and Grok Build sessions can be resumed" };
       if (runner.running(agent)) return { ok: false, why: "a resumed turn is under way" };
       if (!cwd || !exists(cwd)) return { ok: false, why: "its folder isn't there" };
-      const [args, input] = withPromptFile(cmd[1], text, options.dir ? path.join(options.dir, "runs") : undefined);
-      return runner.run({ key: agent, app: cmd[0], args, cwd, env: resumeEnv(env), text: input });
+      const [args, input] = withPromptFile(cmd[1], text, promptDir ? path.join(promptDir, "runs") : undefined);
+      return runner.run({ key: agent, app: cmd[0], args: withPermissionTool(cmd[0], args, server), cwd, env: turnEnv(cmd[0], env, holdMs), text: input });
     },
   };
 }

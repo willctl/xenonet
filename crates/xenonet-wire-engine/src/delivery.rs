@@ -365,10 +365,16 @@ impl RouterCalls<'_> {
             Ok(c) => c,
         };
         let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
-        // Claude Code signs in with the token you gave XenoNet's runs.
+        // Claude Code signs in with the token you gave XenoNet's runs, and
+        // asks its permission prompts of you through this XenoNet's server,
+        // waiting a minute past the hold for your answer, as a start does.
         if app == "claude" {
             crate::starts::signed_env(self.w, &mut env);
+            env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
+            env.push(("MCP_TOOL_TIMEOUT".into(), crate::starts::mcp_tool_timeout_ms(self.w).to_string()));
         }
+        let server = xenonet_engine::delivery::setup::server_name(&Arg::Num(f64::from(self.w.setup.port)));
+        let args = resume::with_permission_tool(&app, args, &server);
         let parent = text(&agent);
         let key = if fork { format!("fork:{parent}") } else { parent.clone() };
         let cwd = text(&cwd);

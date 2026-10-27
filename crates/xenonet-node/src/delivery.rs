@@ -474,6 +474,13 @@ pub fn resume_fork(agent: JsArg, settings: JsArg) -> JsArg {
     JsArg(resume::fork_command(&agent.0, &settings.0).map_or(Arg::Null, |(c, a)| Arg::List(vec![Arg::text(c), Arg::List(a)])))
 }
 
+/// A Claude Code turn's arguments with the permission tool of `server`;
+/// other apps' as they are.
+#[napi(js_name = "resumeWithPermissionTool")]
+pub fn resume_with_permission_tool(app: String, args: JsArg, server: String) -> JsArg {
+    JsArg(Arg::List(resume::with_permission_tool(&app, list(args.0), &server)))
+}
+
 /// { why } it can't, or { cmd: [app, args] }, for a fork.
 #[napi(js_name = "resumePlanFork")]
 pub fn resume_plan_fork(env: Env, deps: Object<'_>, agent: JsArg, settings: JsArg, cwd: JsArg) -> Result<JsArg> {

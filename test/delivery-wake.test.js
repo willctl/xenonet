@@ -12,7 +12,7 @@ import { Engine } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
 import { DeliveryPolicy } from "../core/delivery/policy.js";
 import { DeliveryRouter } from "../core/delivery/router.js";
-import { createResume, resumeCommand, resumeEnv, forkCommand, withPromptFile } from "../core/delivery/resume.js";
+import { createResume, resumeCommand, resumeEnv, forkCommand, withPromptFile, withPermissionTool, turnEnv, HOLD_MS } from "../core/delivery/resume.js";
 import { planUsage } from "../core/delivery/usage.js";
 import { listenSettings, writeListenSettings, liveSetup } from "../core/delivery/setup.js";
 
@@ -73,7 +73,15 @@ test("resume runs the session's own CLI on the same session, the message on stdi
   const r = createResume({ spawn, find, env: { PATH: "/bin", CLAUDE_PID: "1" }, settings: () => "/s/listen.json", exists: () => true });
   const out = await r.deliver({ agent: `claude:${ID}`, cwd: "/w/atlas", text: "-rf [XenoNet from Muse] hi" });
   assert.deepEqual(out, { ok: true, where: "pid 99" });
-  assert.deepEqual(runs[0], { cmd: "claude", args: ["-p", "--resume", ID, "--settings", "/s/listen.json"], cwd: "/w/atlas", env: { PATH: "/bin" }, text: "-rf [XenoNet from Muse] hi" });
+  // It asks its permission prompts of you, and waits for your answer a
+  // minute past the hold.
+  assert.deepEqual(runs[0], {
+    cmd: "claude",
+    args: ["-p", "--resume", ID, "--settings", "/s/listen.json", "--permission-prompt-tool", "mcp__xenonet__permission"],
+    cwd: "/w/atlas",
+    env: { PATH: "/bin", MCP_TOOL_TIMEOUT: String(HOLD_MS + 60e3) },
+    text: "-rf [XenoNet from Muse] hi",
+  });
   assert.ok(r.running(`claude:${ID}`));
   assert.match((await r.deliver({ agent: `claude:${ID}`, cwd: "/w/atlas", text: "again" })).why, /under way/, "one resumed turn at a time");
   assert.match((await createResume({ spawn, find, exists: () => false }).deliver({ agent: `codex:${ID}`, cwd: "/gone", text: "x" })).why, /folder/);
@@ -205,6 +213,7 @@ test("a copy forks only from a Claude Code session, with its whole context; Grok
   const [args, input] = withPromptFile(["-r", ID, "--prompt-file"], "[XenoNet from Muse] hi", dir);
   assert.equal(input, "", "nothing on standard input");
   assert.equal(fs.readFileSync(args.at(-1), "utf8"), "[XenoNet from Muse] hi");
+  assert.match(path.basename(args.at(-1)), /^[0-9a-f-]{36}\.prompt$/, "named as the Rust runner names it");
   if (process.platform !== "win32") assert.equal(fs.statSync(args.at(-1)).mode & 0o777, 0o600);
   assert.deepEqual(withPromptFile(["exec", "resume", ID, "-"], "hi", dir), [["exec", "resume", ID, "-"], "hi"], "others take standard input");
   // A fork runs while the session does, under a key of its own.
@@ -223,7 +232,13 @@ test("a copy forks only from a Claude Code session, with its whole context; Grok
   assert.ok(r.running(`claude:${ID}`));
   const out = await r.deliver({ agent: `claude:${ID}`, cwd: "/w", text: "a copy", fork: true });
   assert.deepEqual(out, { ok: true, where: "pid 98" });
-  assert.deepEqual(runs[1], { cmd: "claude", args: ["-p", "--resume", ID, "--fork-session", "--output-format", "stream-json", "--verbose"], text: "a copy", cwd: "/w" });
+  assert.deepEqual(runs[1], { cmd: "claude", args: ["-p", "--resume", ID, "--fork-session", "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "mcp__xenonet__permission"], text: "a copy", cwd: "/w" });
+  // Under another server name (XenoNet Dev's), its permission tool; Codex
+  // has none, and no MCP_TOOL_TIMEOUT.
+  assert.deepEqual(withPermissionTool("claude", ["-p"], "xenonet-dev"), ["-p", "--permission-prompt-tool", "mcp__xenonet-dev__permission"]);
+  assert.deepEqual(withPermissionTool("codex", ["exec", "-"]), ["exec", "-"]);
+  assert.equal(turnEnv("codex", { PATH: "/bin" }).MCP_TOOL_TIMEOUT, undefined);
+  assert.equal(turnEnv("claude", { PATH: "/bin" }, 1000).MCP_TOOL_TIMEOUT, "61000");
   assert.equal((await r.deliver({ agent: `codex:${ID}`, cwd: "/w", text: "x", fork: true })).why, "only Claude Code sessions can be forked");
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -35,7 +35,7 @@ use xenonet_service::glue::From;
 
 /// How long Claude Code waits on an MCP tool: a minute past the permission
 /// tool's hold, so a prompt waiting for you isn't cut short.
-fn mcp_tool_timeout_ms(w: &World) -> u64 {
+pub(crate) fn mcp_tool_timeout_ms(w: &World) -> u64 {
     (w.setup.permission_hold_ms.unwrap_or(crate::asks::HOLD_MS) + 60e3).round() as u64
 }
 

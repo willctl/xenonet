@@ -76,6 +76,18 @@ pub fn fork_command(agent: &Arg, settings: &Arg) -> Option<(String, Vec<Arg>)> {
     Some(("claude".into(), args))
 }
 
+/// A Claude Code turn XenoNet runs asks its permission prompts of you,
+/// through the xenonet MCP server (`server`, its name in the session's
+/// settings) and its `permission` tool, as a started session does. Other
+/// apps' arguments are as they are.
+pub fn with_permission_tool(app: &str, mut args: Vec<Arg>, server: &str) -> Vec<Arg> {
+    if app == "claude" {
+        args.push(Arg::text("--permission-prompt-tool"));
+        args.push(Arg::text(format!("mcp__{server}__permission")));
+    }
+    args
+}
+
 /// A fork's deliver before anything starts, as `plan`, but while the
 /// session runs too: that's what it's for.
 pub fn plan_fork(c: &mut dyn Calls, agent: &Arg, settings: &Arg, cwd: &Arg) -> Result<std::result::Result<(String, Vec<Arg>), &'static str>> {
@@ -143,5 +155,15 @@ mod tests {
         );
         assert!(fork_command(&Arg::text(format!("codex:{id}")), &Arg::Null).is_none());
         assert!(fork_command(&Arg::text("claude:abc"), &Arg::Null).is_none());
+    }
+
+    #[test]
+    fn a_resumed_or_forked_claude_code_turn_asks_its_prompts_of_you() {
+        let args = |v: Vec<Arg>| v.iter().map(js_text).collect::<Vec<_>>();
+        let (_, fork) = fork_command(&Arg::text("claude:0190d3e0-0000-7000-8000-00000000ab01"), &Arg::Null).unwrap();
+        let asked = args(with_permission_tool("claude", fork, "xenonet-dev"));
+        assert_eq!(asked[asked.len() - 2..], ["--permission-prompt-tool".to_string(), "mcp__xenonet-dev__permission".to_string()]);
+        let codex = vec![Arg::text("exec"), Arg::text("-")];
+        assert_eq!(args(with_permission_tool("codex", codex.clone(), "xenonet")), args(codex), "only Claude Code has a permission prompt tool");
     }
 }

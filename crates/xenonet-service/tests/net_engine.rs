@@ -137,6 +137,7 @@ done
 n=$(ls "$here" | grep -c '^args-')
 printf '%s\n' "$@" > "$here/args-$n"
 printf '%s' "$prompt" > "$here/prompt-$n"
+printf '%s' "$MCP_TOOL_TIMEOUT" > "$here/timeout-$n"
 case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
 case "$prompt" in *hold-on*) sleep 25 ;; esac
@@ -1096,6 +1097,11 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     assert_eq!(&args[..3], ["-p", "--resume", ENDED.trim_start_matches("claude:")], "{args:?}");
     assert!(!args.contains(&"--fork-session".to_string()), "{args:?}");
     assert!(prompt.contains("The fixtures moved."), "{prompt}");
+    // It asks its permission prompts of you, as a start does, and Claude
+    // Code waits on the tool a minute past the hold.
+    let asks = |args: &[String]| args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1] == "mcp__xenonet-47997__permission");
+    assert!(asks(&args), "{args:?}");
+    assert_eq!(std::fs::read_to_string(c.dir.join("bin").join("timeout-0")).unwrap(), "66000");
     until("the delivered receipt at laptop", 15, || async { b.receipts().iter().any(|(who, r)| *who == format!("@desk:{ENDED}") && r.as_deref() == Some("delivered")) }).await;
     // The one its app holds gets a copy, with its whole context, which the
     // console links to it.
@@ -1103,6 +1109,7 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     let (args, prompt) = ran(&c, 2).await;
     assert_eq!(&args[..4], ["-p", "--resume", OPEN.trim_start_matches("claude:"), "--fork-session"], "{args:?}");
     assert!(prompt.contains("Notes for 0.6?"), "{prompt}");
+    assert!(asks(&args), "a copy asks too: {args:?}");
     let fork = desk.next("fork", 10, |_| true).await;
     assert_eq!((fork["parent"].as_str(), fork["child"].as_str()), (Some(OPEN), Some("claude:0190d3e0-0000-7000-8000-0000000f0f01")), "{fork}");
     let (_, forks) = c.call("GET", "/api/runs/forks", Value::Null, &[]).await;
