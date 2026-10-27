@@ -25,7 +25,12 @@ fn status(state: &str, version: &str, funnel: bool) -> String {
 }
 
 fn served(proxy: &str, allow: bool, more: bool) -> String {
-    let mut handlers = json!({ "/": { "Proxy": proxy } });
+    served_at("/", proxy, allow, more)
+}
+
+fn served_at(at: &str, proxy: &str, allow: bool, more: bool) -> String {
+    let mut handlers = json!({});
+    handlers[at] = json!({ "Proxy": proxy });
     if more {
         handlers["/grafana"] = json!({ "Proxy": "http://127.0.0.1:3000" });
     }
@@ -34,6 +39,17 @@ fn served(proxy: &str, allow: bool, more: bool) -> String {
         conf["AllowFunnel"] = json!({ format!("{HOST}:443"): true });
     }
     conf.to_string()
+}
+
+// Funnel as XenoNet sets it up: the gateway's /mcp alone.
+fn mcp_alone() -> String {
+    served_at("/mcp", &format!("http://127.0.0.1:{PORT}/mcp"), true, false)
+}
+
+// Funnel's answer to a command: off clears what it serves, and anything
+// else sets /mcp alone.
+fn funnel_answers() -> OnFunnel {
+    Box::new(|args: &[String]| (RunOut { ok: true, ..Default::default() }, Some(if args.iter().any(|a| a == "off") { "{}".to_string() } else { mcp_alone() })))
 }
 
 struct Child {
@@ -148,11 +164,21 @@ fn tailscales_status_and_funnels_settings_as_the_gateway_needs_them() {
     assert_eq!(tailscale_self(&status("Stopped", "1.104.1", true))["why"], json!("Tailscale is turned off on this computer"));
     assert_eq!(tailscale_self("not json")["up"], json!(false));
     let p = |t: String| serde_json::from_str::<Value>(&t).unwrap();
-    assert_eq!(funnel_of(&json!({}), HOST, PORT), json!({ "state": "none" }));
-    assert_eq!(funnel_of(&p(served(&format!("http://127.0.0.1:{PORT}"), true, false)), HOST, PORT), json!({ "state": "ours" }));
-    assert_eq!(funnel_of(&p(served(&format!("http://localhost:{PORT}"), false, false)), HOST, PORT), json!({ "state": "tailnet" }));
-    assert_eq!(funnel_of(&p(served("http://127.0.0.1:48852", true, false)), HOST, PORT), json!({ "state": "elsewhere", "target": "http://127.0.0.1:48852" }));
-    assert_eq!(funnel_of(&p(served(&format!("http://127.0.0.1:{PORT}"), true, true)), HOST, PORT), json!({ "state": "shared", "target": "/, /grafana" }));
+    assert_eq!(funnel_of(&json!({}), HOST, PORT), json!({ "state": "none", "public": [] }));
+    assert_eq!(funnel_of(&p(mcp_alone()), HOST, PORT), json!({ "state": "ours", "public": ["/mcp"] }));
+    assert_eq!(funnel_of(&p(served_at("/mcp", &format!("http://localhost:{PORT}/mcp/"), false, false)), HOST, PORT), json!({ "state": "tailnet", "public": [] }));
+    // The whole port, as XenoNet published it before /mcp alone.
+    assert_eq!(funnel_of(&p(served(&format!("http://127.0.0.1:{PORT}"), true, false)), HOST, PORT), json!({ "state": "wide", "public": ["/"] }));
+    let mut both = p(mcp_alone());
+    both["Web"][format!("{HOST}:443")]["Handlers"]["/"] = json!({ "Proxy": format!("http://localhost:{PORT}") });
+    assert_eq!(funnel_of(&both, HOST, PORT), json!({ "state": "wide", "public": ["/mcp", "/"] }));
+    assert_eq!(funnel_of(&p(served("http://127.0.0.1:48852", true, false)), HOST, PORT), json!({ "state": "elsewhere", "target": "http://127.0.0.1:48852", "public": ["/"] }));
+    assert_eq!(funnel_of(&p(served_at("/mcp", "http://127.0.0.1:48852/mcp", true, false)), HOST, PORT), json!({ "state": "elsewhere", "target": "/mcp", "public": ["/mcp"] }));
+    assert_eq!(
+        funnel_of(&p(served(&format!("http://127.0.0.1:{PORT}"), true, true)), HOST, PORT),
+        json!({ "state": "shared", "target": "/, /grafana", "public": ["/", "/grafana"] })
+    );
+    assert_eq!(funnel_args(PORT), vec!["funnel", "--bg", "--yes", "--set-path", "/mcp", "http://127.0.0.1:48850/mcp"]);
 }
 
 #[test]
@@ -192,9 +218,8 @@ fn a_tunnel_tools_lines_the_address_it_got_that_its_up_and_what_went_wrong() {
 }
 
 #[tokio::test]
-async fn tailscale_funnel_set_up_with_the_command_that_matches_and_nothing_done_when_its_there() {
-    let conf = served(&format!("http://127.0.0.1:{PORT}"), true, false);
-    let host = Fake::tailscale(Some(Box::new(move |_| (RunOut { ok: true, ..Default::default() }, Some(conf.clone())))), "{}", status("Running", "1.104.1-t7f4", true));
+async fn tailscale_funnel_set_up_with_the_command_that_matches_publishing_mcp_alone_and_nothing_done_when_its_there() {
+    let host = Fake::tailscale(Some(funnel_answers()), "{}", status("Running", "1.104.1-t7f4", true));
     let hosts = Arc::new(Mutex::new(Vec::new()));
     let h = hosts.clone();
     let t = tunnel(host.clone(), TunnelHooks { on_host: Arc::new(move |x| h.lock().unwrap().push(x.to_string())), ..Default::default() });
@@ -202,7 +227,11 @@ async fn tailscale_funnel_set_up_with_the_command_that_matches_and_nothing_done_
     assert_eq!((v["kind"].clone(), v["state"].clone(), v["why"].clone()), (json!("tailscale"), json!("up"), Value::Null));
     assert_eq!(*hosts.lock().unwrap(), vec![HOST.to_string()]);
     // Homebrew's older command is passed over for the app's, which matches.
-    assert_eq!(host.ran().into_iter().find(|r| r[1] == "funnel" && r[2] == "--bg").unwrap(), vec![APP, "funnel", "--bg", "--yes", "48850"]);
+    assert_eq!(
+        host.ran().into_iter().find(|r| r[1] == "funnel" && r[2] == "--bg").unwrap(),
+        vec![APP, "funnel", "--bg", "--yes", "--set-path", "/mcp", "http://127.0.0.1:48850/mcp"]
+    );
+    assert_eq!(t.view()["public"], json!(["/mcp"]), "the view says what's on the internet");
     let before = host.ran().len();
     t.ensure().await;
     assert_eq!(host.ran()[before..].iter().filter(|r| r[1] == "funnel" && r[2] != "status").count(), 0, "already set up");
@@ -213,13 +242,18 @@ async fn tailscale_funnel_set_up_with_the_command_that_matches_and_nothing_done_
 }
 
 #[tokio::test]
+async fn tailscale_funnel_narrows_the_whole_port_an_older_xenonet_published_without_a_repair() {
+    let host = Fake::tailscale(Some(funnel_answers()), &served(&format!("http://127.0.0.1:{PORT}"), true, false), status("Running", "1.104.1", true));
+    let t = tunnel(host.clone(), TunnelHooks::default());
+    let v = t.up("tailscale", None, None, false).await.unwrap();
+    assert_eq!((v["state"].clone(), v["why"].clone(), v["public"].clone()), (json!("up"), Value::Null, json!(["/mcp"])));
+    let changes: Vec<Vec<String>> = host.ran().into_iter().filter(|r| r[1] == "funnel" && r[2] != "status").map(|r| r[1..].to_vec()).collect();
+    assert_eq!(changes, vec![vec!["funnel".to_string(), "--yes".into(), "--https=443".into(), "off".into()], funnel_args(PORT)], "the whole port off first, then /mcp alone");
+}
+
+#[tokio::test]
 async fn tailscale_funnel_leaves_what_it_forwards_elsewhere_until_repair_and_passes_on_what_tailscale_asks() {
-    let ours = served(&format!("http://127.0.0.1:{PORT}"), true, false);
-    let elsewhere = Fake::tailscale(
-        Some(Box::new(move |_| (RunOut { ok: true, ..Default::default() }, Some(ours.clone())))),
-        &served("http://127.0.0.1:48852", true, false),
-        status("Running", "1.104.1", true),
-    );
+    let elsewhere = Fake::tailscale(Some(funnel_answers()), &served("http://127.0.0.1:48852", true, false), status("Running", "1.104.1", true));
     let t1 = tunnel(elsewhere.clone(), TunnelHooks::default());
     let why = t1.up("tailscale", None, None, false).await.unwrap()["why"].as_str().unwrap().to_string();
     assert!(why.contains("already forwards to http://127.0.0.1:48852, not to this XenoNet's gateway: Repair points it here"), "{why}");

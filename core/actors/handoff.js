@@ -23,12 +23,18 @@ export function handoff(product, { url, token = null }) {
     return token
       ? { app: "A2A agent", steps: [step("Give the agent XenoNet's Agent Card URL.", "url"), step("Have it send the token in the header Authorization: Bearer <token>.", "token")], message: null }
       : { app: "A2A agent", steps: [step("Give the agent XenoNet's new Agent Card URL. Its token still works.", "url")], message: null };
+  // The token goes into Grok Bot's secure secret card, which its model never
+  // sees, never into its chat.
   if (product === "grok-bot")
     return token
       ? {
           app: "Grok Bot",
-          steps: [step("Paste this into a new Grok Bot chat.", "message"), step("Once it's added, delete that chat: the token stays in it."), step("For answers within seconds, give XenoNet a way to wake it.", "wake")],
-          message: `Add an MCP server named "xenonet" by URL: ${url} with the header Authorization: Bearer ${token}. Then call its whoami tool and tell me what it says.`,
+          steps: [
+            step("Paste this into a Grok Bot chat.", "message"),
+            step("When Grok Bot asks for the token, paste it into its secret card, not the chat, and save it.", "token"),
+            step("For answers within seconds, give XenoNet a way to wake it.", "wake"),
+          ],
+          message: `Add an MCP server named "xenonet" by URL: ${url}. Ask me for its token with your secure secret card, named XENONET_GATEWAY_TOKEN, never in chat, and send it in the header Authorization: Bearer <the token>. Then call its whoami tool and tell me what it says.`,
         }
       : {
           app: "Grok Bot",
