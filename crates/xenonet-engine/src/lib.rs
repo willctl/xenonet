@@ -17,6 +17,7 @@ pub mod network;
 pub mod peer;
 pub mod processes;
 pub mod procs;
+pub mod procs_native;
 pub mod products;
 pub mod sql;
 pub mod store;

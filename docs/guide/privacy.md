@@ -71,4 +71,4 @@ On macOS, one session can't pass for another. Any program here can reach the ser
 
 This check can't tell apart threads of one Codex process. It also can't place a session that no running process has been seen to hold yet, so that session goes to whoever names it first.
 
-On Windows and Linux, XenoNet doesn't check which process sent a request yet.
+On Windows and Linux, XenoNet sees the process on the other end of a connection and its parents too: on Linux from `/proc`, on Windows from the system's process list and `netstat -ano`. There it refuses what's yours to do from under a session or an actor product, as on macOS: connecting your agents, changing your standing settings, starting the service at login, and the rest the guides call yours. The nearest of an agent, an actor product and XenoNet's own Desktop decides, so a `claude` run in XenoNet's terminal is still an agent. It refuses such a request when it can't see the process that sent it. It doesn't yet check that a request in a session's name comes from that session's process there, since it can't tell who signed a program.

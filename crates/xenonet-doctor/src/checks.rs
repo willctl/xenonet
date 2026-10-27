@@ -690,7 +690,7 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
         }
         "agents.checked" => {
             if f.platform() != "darwin" {
-                return Ok(info("XenoNet can't see yet which process sends a request on this system, so it takes each session at its word", None));
+                return Ok(info("XenoNet doesn't check on this system yet that a request in a session's name comes from that session's process, so it takes each session at its word; what's yours to do is still refused from under an agent", None));
             }
             let t = c.must("procs", json!([])).await?;
             if !truthy(t.get("peer")) {
@@ -757,7 +757,7 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 return Ok(skip("actors are off here (XENONET_ACTORS=off)"));
             }
             if f.platform() != "darwin" {
-                return Ok(info("XenoNet can't see yet which process sends a request on this system, so an actor's token alone decides", None));
+                return Ok(info("XenoNet doesn't hold actors' tokens to their processes on this system yet, so an actor's token alone decides", None));
             }
             let t = c.must("procs", json!([])).await?;
             let blind = if !truthy(t.get("peer")) {

@@ -92,11 +92,18 @@ fn not_yours(why: &str) -> Fail {
 }
 
 /// XenoNet's own Desktop, by its executable: an installed XenoNet, XenoNet
-/// Dev.app, or the Electron a checkout runs.
+/// Dev.app, or the Electron a checkout runs; on Windows XenoNet.exe (the
+/// xenonet.exe of the command and the service is lower case) or a
+/// checkout's electron.exe, and on Linux a checkout's electron.
 fn is_desktop(exe: &str) -> bool {
-    let Some((app, _)) = exe.rsplit_once(".app/Contents/MacOS/") else { return false };
-    let name = app.rsplit('/').next().unwrap_or("");
-    name.starts_with("XenoNet") || name == "Electron"
+    let exe = exe.replace('\\', "/");
+    if let Some((app, _)) = exe.rsplit_once(".app/Contents/MacOS/") {
+        let name = app.rsplit('/').next().unwrap_or("");
+        return name.starts_with("XenoNet") || name == "Electron";
+    }
+    let name = exe.rsplit('/').next().unwrap_or("");
+    let electron = exe.contains("/node_modules/electron/dist/") && (name == "electron" || name.eq_ignore_ascii_case("electron.exe"));
+    electron || (name.starts_with("XenoNet") && name.to_ascii_lowercase().ends_with(".exe"))
 }
 
 /// Registering the service is yours to do (docs/design/always-on.md),
@@ -104,8 +111,8 @@ fn is_desktop(exe: &str) -> bool {
 /// the routes that are yours, so XenoNet's own window passes and an agent
 /// doesn't. With none running, this process's parents are looked at the
 /// same way: the nearer of an agent, an actor's app and XenoNet's Desktop
-/// decides. Where XenoNet can't see processes (Linux, Windows), it passes,
-/// as the service's own check does.
+/// decides, on macOS, Linux and Windows alike; elsewhere it passes, as the
+/// service's own check does.
 pub fn yours(env: &Value) -> Result<(), Fail> {
     if let Ok(verdict) = service_request(env, "yours", &json!({})) {
         if verdict.get("ok").and_then(Value::as_bool) == Some(true) {
@@ -115,7 +122,7 @@ pub fn yours(env: &Value) -> Result<(), Fail> {
         return Err(Fail::new(reason, 1));
     }
     let sys = xenonet_wire_engine::procs::System::new();
-    if !sys.procs.supported {
+    if !sys.procs.chains {
         return Ok(());
     }
     let chain = sys.procs.chain(&mut sys.io(), Some(f64::from(std::process::id())), true, true).map_err(|_| not_yours("XenoNet couldn't see which program asked"))?;
@@ -446,6 +453,13 @@ mod tests {
         assert!(!is_desktop("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"));
         assert!(!is_desktop("/Applications/Claude.app/Contents/MacOS/Claude"));
         assert!(!is_desktop("/usr/local/bin/xenonet"));
+        // Windows and Linux.
+        assert!(is_desktop("C:\\Users\\w\\AppData\\Local\\Programs\\XenoNet\\XenoNet.exe"));
+        assert!(is_desktop("C:\\w\\xenonet\\node_modules\\electron\\dist\\electron.exe"));
+        assert!(is_desktop("/home/w/xenonet/node_modules/electron/dist/electron"));
+        assert!(!is_desktop("C:\\Users\\w\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe"), "the command and the service");
+        assert!(!is_desktop("C:\\Users\\w\\AppData\\Roaming\\Claude\\claude-code\\2.1.0\\claude.exe"));
+        assert!(!is_desktop("/home/w/.local/bin/electron"));
     }
 
     #[test]

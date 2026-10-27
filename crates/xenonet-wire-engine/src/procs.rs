@@ -47,7 +47,9 @@ fn answer(r: std::result::Result<String, exec::Failed>) -> Answer {
 
 impl System {
     pub fn new() -> Arc<System> {
-        System::with(crate::js::platform(), Box::new(|c| answer(exec::run(&spec_of(c)))))
+        // procs' own calls on Linux and Windows are read from the system
+        // itself; the rest are commands.
+        System::with(crate::js::platform(), Box::new(|c| xenonet_engine::procs_native::answer(c).unwrap_or_else(|| answer(exec::run(&spec_of(c))))))
     }
 
     /// The lookups with commands run by `runner`, as if on `platform`.
@@ -216,11 +218,12 @@ pub fn call(sys: &System, method: &str, args: &[Arg]) -> Result<Arg> {
     Ok(crate::js::arg(&out))
 }
 
-/// `procs.<path>` read: its `supported`, and its calls.
+/// `procs.<path>` read: its `supported` and `chains`, and its calls.
 pub fn get(sys: &System, field: &str) -> Arg {
     match field {
         "supported" => Arg::Bool(sys.procs.supported),
-        "" => obj(vec![("supported", Arg::Bool(sys.procs.supported))]),
+        "chains" => Arg::Bool(sys.procs.chains),
+        "" => obj(vec![("supported", Arg::Bool(sys.procs.supported)), ("chains", Arg::Bool(sys.procs.chains))]),
         _ => Arg::Undef,
     }
 }
@@ -228,7 +231,7 @@ pub fn get(sys: &System, field: &str) -> Arg {
 pub fn kind(field: &str) -> &'static str {
     match field {
         "" => "object",
-        "supported" => "boolean",
+        "supported" | "chains" => "boolean",
         "snapshot" | "chain" | "alive" | "signed" | "cwd" | "census" | "children" | "describe" | "cwds" | "of" | "peer" => "function",
         _ => "undefined",
     }

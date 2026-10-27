@@ -180,11 +180,11 @@ mod tests {
         // No process on the other end: let through unchecked, as the JS did.
         assert_eq!(v["ok"], true, "{v}");
         let you = c.person(peer).await;
-        if c.sys.procs.supported {
+        if c.sys.procs.chains {
             assert_eq!((you["ok"].clone(), you["unseen"].clone()), (json!(false), json!(true)), "{you}");
         }
         assert_eq!(c.peer(peer).await, "?");
-        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
         // A session of an app XenoNet doesn't check is refused, never let
         // through unchecked.
         let other = c.check(peer, "gemini-cli:x", false).await;
@@ -193,7 +193,7 @@ mod tests {
             other["reason"],
             "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session"
         );
-        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.supported { 1 } else { 2 }));
+        assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
     }
 
     // A made-up Mac, answering the commands procs asks for: the Claude app

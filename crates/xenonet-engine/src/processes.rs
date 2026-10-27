@@ -28,17 +28,19 @@ pub struct Rules {
 
 // Claude Code: the CLI, the native install under
 // ~/.local/share/claude/versions, or the one Claude desktop runs from its
-// claude.app.
+// claude.app; on Windows claude.exe, but for Claude desktop's own, which is
+// called that too and lives in its AnthropicClaude folder.
 fn claude_program(p: &str, base: &str) -> bool {
-    base == "claude" || re!(r"\/claude\/versions\/[^/]+$").is_match(p)
+    base == "claude" || (base == "claude.exe" && !p.contains("/AnthropicClaude/")) || re!(r"\/claude\/versions\/[^/]+$").is_match(p)
 }
 fn claude_script(args: &str) -> bool {
     args.contains("@anthropic-ai/claude-code/cli.js")
 }
 
-// Codex: the CLI, or the one the ChatGPT app bundles.
+// Codex: the CLI (codex.exe on Windows), or the one the ChatGPT app
+// bundles.
 fn codex_program(_: &str, base: &str) -> bool {
-    base == "codex" || re!(r"^codex-(aarch64|x86_64)").is_match(base)
+    base == "codex" || base == "codex.exe" || re!(r"^codex-(aarch64|x86_64)").is_match(base)
 }
 fn codex_script(args: &str) -> bool {
     args.contains("@openai/codex/")
@@ -112,8 +114,10 @@ pub fn agent_among<'a>(program: &str, args: &str, agents: &'a [Agent]) -> Option
     if let Some(a) = agents.iter().find(|a| (a.rules.program)(&p, base)) {
         return Some(&a.id);
     }
-    if base == "node" || base == "bun" {
-        return agents.iter().find(|a| a.rules.script.is_some_and(|s| s(args))).map(|a| a.id.as_str());
+    if crate::procs::is_node(base) {
+        // A package's path, with / for \ as on Windows.
+        let args = slashes(args);
+        return agents.iter().find(|a| a.rules.script.is_some_and(|s| s(&args))).map(|a| a.id.as_str());
     }
     None
 }

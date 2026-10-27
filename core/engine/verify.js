@@ -220,9 +220,10 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
   // Requests only you make (connecting your agents, removing actors): not
   // from any agent, nor from under an actor product's processes. The nearer
   // of one of those and XenoNet's own app decides, so a claude run in XenoNet's
-  // terminal is still an agent.
+  // terminal is still an agent. Wherever XenoNet sees processes' chains
+  // (procs.chains): macOS, Linux and Windows.
   async function person(socket) {
-    if (!procs.supported) return pass();
+    if (!chains()) return pass();
     const { chain } = await see(socket);
     if (!chain.length) return unseen(null, "this is yours to do, and XenoNet couldn't see which program asked; run it in your own terminal or in XenoNet");
     state.checked++;
@@ -352,7 +353,17 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     home = null;
     verdicts.clear();
     if (socket == null) return { ok: true, checked: false };
-    if (!procs.supported) return pass();
+    if (!procs.supported) {
+      // Where XenoNet sees chains but can't vouch for an app's own
+      // executable (Linux, Windows), the Desktop still passes unchecked, and
+      // becomes home for person only with no agent and no actor product
+      // anywhere above it.
+      if (chains()) {
+        const { pid, chain } = await see(socket);
+        if (pid && chain.length && !chain.some((p) => p.agent || p.product) && mine === desktops) home = pid;
+      }
+      return pass();
+    }
     const { pid, chain } = await see(socket, { exe: true });
     if (!pid || !chain.length) return unseen(null, "XenoNet couldn't see which program connected as its Desktop");
     state.checked++;
@@ -390,6 +401,10 @@ export function createVerifier({ procs, store, home = null, now = () => Date.now
     if (!own) return refuse(null, `only ${TRAY_APP}'s own executable, in /Applications or your own Applications folder, can be XenoNet's tray`);
     return { ok: true, checked: true };
   }
+
+  // Whether XenoNet sees the process on the other end of a connection and
+  // the ones above it: a procs that doesn't say goes by `supported`.
+  const chains = () => !!(procs.chains ?? procs.supported);
 
   function pass() {
     state.unchecked++;

@@ -45,7 +45,7 @@ A repo goes as just its path. Codex gets no other file names, nothing from insid
 
 Codex's picks can make a folder a project or a group, but they never hide anything, and your rules win over them. XenoNet keeps the picks with a fingerprint of the folders they were based on. It tells you when those folders have changed since, and it never asks Codex again by itself.
 
-Asking Codex spends your Codex usage. Like your rules and the folder itself, asking Codex and `Forget Codex's picks` are yours to do. On macOS, XenoNet refuses them from under a session or an [actor product](actors.md). [Telling sessions apart on macOS](privacy.md#telling-sessions-apart-on-macos) says how XenoNet knows.
+Asking Codex spends your Codex usage. Like your rules and the folder itself, asking Codex and `Forget Codex's picks` are yours to do. On macOS, Linux and Windows, XenoNet refuses them from under a session or an [actor product](actors.md). [Telling sessions apart on macOS](privacy.md#telling-sessions-apart-on-macos) says how XenoNet knows.
 
 ## Changing the projects folder
 
@@ -61,7 +61,7 @@ With XenoNet running, the `xenonet` command does the same:
 - `xenonet root --check ~/code` only checks it.
 - `xenonet root --reset` goes back to `~/Projects`.
 
-Changing the folder is yours to do, from XenoNet's window or your own terminal. On macOS, XenoNet refuses a change from under a session or an actor product.
+Changing the folder is yours to do, from XenoNet's window or your own terminal. On macOS, Linux and Windows, XenoNet refuses a change from under a session or an actor product.
 
 When `XENONET_PROJECTS_DIR` is set, it decides the folder instead, and the panel says so.
 

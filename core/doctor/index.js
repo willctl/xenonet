@@ -579,7 +579,7 @@ export const CHECKS = [
     group: "Sessions",
     title: "Sessions can't pass for each other",
     async run(ctx) {
-      if (ctx.platform !== "darwin") return info("XenoNet can't see yet which process sends a request on this system, so it takes each session at its word");
+      if (ctx.platform !== "darwin") return info("XenoNet doesn't check on this system yet that a request in a session's name comes from that session's process, so it takes each session at its word; what's yours to do is still refused from under an agent");
       const t = await ctx.procs();
       // On macOS an agent's request goes through unchecked only when
       // netstat has no line for it at all, so agents' tools keep working;
@@ -713,7 +713,7 @@ export const CHECKS = [
     title: "Actors' tokens are held to their processes",
     async run(ctx) {
       if (ctx.actors === null) return skip("actors are off here (XENONET_ACTORS=off)");
-      if (ctx.platform !== "darwin") return info("XenoNet can't see yet which process sends a request on this system, so an actor's token alone decides");
+      if (ctx.platform !== "darwin") return info("XenoNet doesn't hold actors' tokens to their processes on this system yet, so an actor's token alone decides");
       const t = await ctx.procs();
       // On macOS a request whose process XenoNet can't see is refused, an
       // actor's and yours alike (core/engine/verify.js).
