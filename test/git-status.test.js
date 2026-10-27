@@ -3,7 +3,10 @@
 // the watch's health says when git can't answer for one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RepoWatch, gitStatus, parseStatus, filterOverrides } from "../core/git.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { RepoWatch, gitStatus, parseStatus, filterOverrides, repoStamps, gitDirs, statusDue, driversFresh, STATUS_IDLE_MS, CONFIG_TTL_MS } from "../core/git.js";
 import { fakeProcesses } from "./harness/procs.js";
 
 // git status answers for the repos in `answers`, by folder; any other is
@@ -173,6 +176,60 @@ test("a repo whose drivers git can't list, or whose driver -c can't name, gets n
   assert.equal(filterOverrides(listing([["local", "filter.x=y.clean", "cat"]])), null);
   // Yours can keep such a name: it isn't emptied, so it needn't be named.
   assert.deepEqual(filterOverrides(listing([["global", "filter.x=y.clean", "cat"]])), []);
+});
+
+test("git runs only when a repo may have changed: its status when its index, HEAD, fetches or config change or it's been idle, its drivers when its config changes", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-git-seen-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // A repo's own files, as git keeps them; nothing here runs git itself.
+  const repo = path.join(root, "atlas");
+  fs.mkdirSync(path.join(repo, ".git", "logs"), { recursive: true });
+  for (const f of ["index", "HEAD", "config", "logs/HEAD"]) fs.writeFileSync(path.join(repo, ".git", f), "x");
+  const home = path.join(root, "home");
+  const machine = fakeProcesses();
+  const runs = [];
+  machine.program("git", ({ args }) => {
+    runs.push(args.includes("config") ? "config" : "status");
+    return args.includes("config") ? { code: 1 } : { stdout: "## main\n" };
+  });
+  let clock = 0;
+  const watch = new RepoWatch({ status: (dir, opts) => gitStatus(dir, { exec: machine.execFile, ...opts }), available: () => true, stamps: (dir) => repoStamps(dir, { home }), now: () => clock });
+  const projects = [{ key: "/p/atlas", path: repo, git: { branch: "main" } }];
+  const pass = async (at) => {
+    clock = at;
+    runs.length = 0;
+    await watch.refresh(projects);
+    return [...runs];
+  };
+  const touch = (f, by) => fs.utimesSync(path.join(repo, ".git", f), new Date(Date.now() + by), new Date(Date.now() + by));
+  assert.deepEqual(await pass(0), ["config", "status"]);
+  assert.deepEqual(await pass(20e3), [], "nothing changed");
+  touch("index", 5e3);
+  assert.deepEqual(await pass(40e3), ["status"], "staged: its status again, its drivers as they were");
+  touch("config", 10e3);
+  assert.deepEqual(await pass(60e3), ["config", "status"], "its config changed: both, since an upstream set changes ahead and behind");
+  assert.deepEqual(await pass(60e3 + STATUS_IDLE_MS), ["status"], "idle long enough: its status, for edits only git status sees");
+  assert.deepEqual(await pass(60e3 + CONFIG_TTL_MS), ["config", "status"], "and its drivers again after a while, for files its config includes");
+  assert.equal(watch.status.get("/p/atlas").branch, "main");
+
+  // The decisions, as the Rust service makes them too.
+  assert.equal(statusDue(null, "a", 0), true);
+  assert.equal(statusDue({ stamp: "a", at: 0 }, null, 1), true, "a stamp that can't be told");
+  assert.equal(statusDue({ stamp: "a", at: 0 }, "a", STATUS_IDLE_MS - 1), false);
+  assert.equal(statusDue({ stamp: "a", at: 0 }, "b", 1), true);
+  assert.equal(driversFresh({ stamp: "c", at: 0 }, "c", CONFIG_TTL_MS - 1), true);
+  assert.equal(driversFresh({}, "c", 0), false);
+  assert.equal(driversFresh({ stamp: "c", at: 0 }, "d", 0), false);
+  // A worktree's own folder, and the one it shares; a folder that's no repo
+  // has no stamps, and is read every time.
+  const shared = path.join(repo, ".git", "worktrees", "wt");
+  fs.mkdirSync(shared, { recursive: true });
+  fs.writeFileSync(path.join(shared, "commondir"), "../..\n");
+  const wt = path.join(root, "wt");
+  fs.mkdirSync(wt);
+  fs.writeFileSync(path.join(wt, ".git"), `gitdir: ${shared}\n`);
+  assert.deepEqual(gitDirs(wt), { git: shared, common: path.join(repo, ".git") });
+  assert.equal(repoStamps(path.join(root, "plain"), { home }), null);
 });
 
 test("without git, nothing is asked and nothing changes", async () => {

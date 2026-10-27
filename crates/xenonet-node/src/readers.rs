@@ -77,6 +77,44 @@ pub fn git_problem(failed: Vec<String>) -> Option<String> {
     git::problem_of(&failed)
 }
 
+#[napi(js_name = "gitStatusIdleMs")]
+pub fn git_status_idle_ms() -> f64 {
+    git::STATUS_IDLE_MS
+}
+
+#[napi(js_name = "gitConfigTtlMs")]
+pub fn git_config_ttl_ms() -> f64 {
+    git::CONFIG_TTL_MS
+}
+
+/// { git, common }, or null.
+#[napi(js_name = "gitDirs")]
+pub fn git_dirs(dir: String) -> Json {
+    Json(git::git_dirs(&dir).map_or(Value::Null, |(g, c)| json!({ "git": g, "common": c })))
+}
+
+/// { status, config }, or null.
+#[napi(js_name = "gitRepoStamps")]
+pub fn git_repo_stamps(dir: String, home: String, xdg: Option<String>) -> Json {
+    Json(git::repo_stamps(&dir, &home, xdg.as_deref()).map_or(Value::Null, |s| json!({ "status": s.status, "config": s.config })))
+}
+
+// { stamp, at } as the watch keeps it: a stamp that isn't text is one
+// that couldn't be told.
+fn kept(v: &Value) -> Option<(&str, f64)> {
+    Some((v.get("stamp")?.as_str()?, v.get("at")?.as_f64()?))
+}
+
+#[napi(js_name = "gitStatusDue")]
+pub fn git_status_due(last: Json, stamp: Option<String>, now: f64) -> bool {
+    git::status_due(kept(&last.0), stamp.as_deref(), now)
+}
+
+#[napi(js_name = "gitDriversFresh")]
+pub fn git_drivers_fresh(cached: Json, stamp: Option<String>, now: f64) -> bool {
+    git::drivers_fresh(kept(&cached.0), stamp.as_deref(), now)
+}
+
 // ---------- projects.js ----------
 
 // What the bottom-up pass has seen, for a while (forgetScans clears it).
