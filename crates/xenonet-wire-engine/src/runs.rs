@@ -339,8 +339,10 @@ impl Runner {
                     r.timed_out = timed_out;
                 }
             }
-            me.release(&key);
+            // Saved before the session is let go, so whoever sees it free
+            // (a restart, the next run) reads how this one ended.
             me.save();
+            me.release(&key);
         });
         Ok(pid)
     }
