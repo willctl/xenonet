@@ -9,8 +9,9 @@
 //!
 //! The router uses this only for a session you allowed, since a turn
 //! spends its plan, and never while the session's own process runs. The
-//! message goes in on stdin, never as an argument. Starting the process and
-//! watching it are the twin's.
+//! message goes in on stdin, never as an argument. The run itself is the
+//! shared runner's (`runs`): it finds the program, logs the turn and caps
+//! how many go at once.
 
 use super::apps::{self, Ways};
 use crate::peer::{Calls, Result};
@@ -54,10 +55,11 @@ pub fn resume_command(agent: &Arg, settings: &Arg) -> Option<(String, Vec<Arg>)>
 }
 
 /// What a deliver comes to before anything starts: Err(why) it can't, or
-/// the command and its arguments (quoted for Windows, whose claude.cmd
-/// runs only through a shell). The twin's "running" and "exists" say
-/// whether a resumed turn is under way and whether its folder is there.
-pub fn plan(c: &mut dyn Calls, agent: &Arg, settings: &Arg, cwd: &Arg, windows: bool) -> Result<std::result::Result<(String, Vec<Arg>), &'static str>> {
+/// the app whose CLI the runner starts and its arguments, as they are: the
+/// runner quotes them once for the platform. The twin's "running" and
+/// "exists" say whether a resumed turn is under way and whether its folder
+/// is there.
+pub fn plan(c: &mut dyn Calls, agent: &Arg, settings: &Arg, cwd: &Arg) -> Result<std::result::Result<(String, Vec<Arg>), &'static str>> {
     let Some((cmd, args)) = resume_command(agent, settings) else {
         return Ok(Err("only Claude Code and Codex sessions can be resumed"));
     };
@@ -67,20 +69,6 @@ pub fn plan(c: &mut dyn Calls, agent: &Arg, settings: &Arg, cwd: &Arg, windows: 
     if !cwd.truthy() || !c.call("", "exists", vec![cwd.clone()])?.truthy() {
         return Ok(Err("its folder isn't there"));
     }
-    let args = if windows {
-        args.into_iter()
-            .map(|a| {
-                let t = js_text(&a);
-                if crate::re!(r"\s").is_match(&t) {
-                    Arg::text(format!("\"{t}\""))
-                } else {
-                    a
-                }
-            })
-            .collect()
-    } else {
-        args
-    };
     Ok(Ok((cmd, args)))
 }
 

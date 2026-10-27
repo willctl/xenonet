@@ -50,6 +50,9 @@ getrandom = "0.3"
 # each system defines it, for reading a review's files without following
 # a link.
 libc = "0.2"
+# Windows's job objects, so a headless turn and every process it starts
+# (cmd.exe, then the node it runs) stop together. tokio already brings it.
+windows-sys = "0.61"
 # Zstandard, read only: Codex's archived rollouts (.jsonl.zst), which
 # stats, search and a thread's transcript read as the JS does with
 # zlib.zstdDecompressSync. A decoder in Rust alone, so the Windows and

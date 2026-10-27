@@ -13,7 +13,8 @@
 //! What's kept is Rust's. The policy's own clock, limits and files are
 //! called as the JS called them, through `Calls`: "policy" is the twin (its
 //! now(), limits, file and auditFile, which a program may change), "fs"
-//! node:fs.
+//! node:fs. The wake budget's counts go in delivery-wakes.json beside the
+//! policy's file, so a restart doesn't hand every sender a fresh budget.
 
 use super::selector::{format_selector, matches, parse_selector, Selector};
 use crate::peer::{list, Calls, Thrown};
@@ -50,8 +51,28 @@ pub fn is_you(id: &Arg) -> bool {
     matches!(id.as_str(), Some("you" | YOU))
 }
 
+/// An actor's id as its host and slug: `actor:<slug>` is one on this
+/// machine (no host), `@<host>:actor:<slug>` one on another machine in the
+/// network. None for anything else, and for you, who is never an actor
+/// here.
+pub fn actor_of(id: &Arg) -> Option<(Option<String>, String)> {
+    if is_you(id) {
+        return None;
+    }
+    let s = js_text(id);
+    if let Some(slug) = s.strip_prefix("actor:") {
+        return Some((None, slug.to_string()));
+    }
+    if !s.starts_with('@') {
+        return None;
+    }
+    let (host, slug) = xenonet_base::ids::parse_actor_id(&s)?;
+    let host = host?;
+    (slug != "you").then(|| (Some(host.to_string()), slug.to_string()))
+}
+
 fn is_actor(id: &Arg) -> bool {
-    js_text(id).starts_with("actor:") && !is_you(id)
+    actor_of(id).is_some()
 }
 
 /// Strings that look like keys or tokens: provider keys, GitHub and Slack
@@ -262,6 +283,7 @@ impl Policy {
         data.insert("consent".into(), json!({}));
         let mut p = Policy { data, ..Policy::default() };
         if let Some(file) = nonnull(c.get("policy.file")?).filter(Arg::truthy) {
+            let wakes = Self::wakes_file(&js_text(&file));
             if let Ok(text) = c.call("fs", "readFileSync", vec![file, Arg::text("utf8")]) {
                 if let Ok(v) = xenonet_base::json::parse(&js_text(&text)) {
                     for (k, v) in spread(&v) {
@@ -269,8 +291,58 @@ impl Policy {
                     }
                 }
             }
+            // The wake budget's counts, so a restart doesn't hand every
+            // sender and session a fresh budget.
+            if let Ok(text) = c.call("fs", "readFileSync", vec![Arg::text(wakes), Arg::text("utf8")]) {
+                if let Ok(Value::Object(m)) = xenonet_base::json::parse(&js_text(&text)) {
+                    for (k, times) in m {
+                        if let (true, Value::Array(times)) = (k.starts_with("w:") || k.starts_with("wt:"), times) {
+                            p.hits.insert(k, times.iter().filter_map(Value::as_f64).collect());
+                        }
+                    }
+                }
+            }
         }
         Ok(p)
+    }
+
+    /// delivery-wakes.json, beside the policy's file.
+    fn wakes_file(file: &str) -> String {
+        NATIVE.join(&[&NATIVE.dirname(file), "delivery-wakes.json"])
+    }
+
+    /// The wakes of the last hour, the only ones the budget counts.
+    fn save_wakes(&self, c: &mut dyn Calls) -> Result<()> {
+        let file = c.get("policy.file")?;
+        if !file.truthy() {
+            return Ok(());
+        }
+        let t = Self::now(c)?;
+        let mut keep = Map::new();
+        for (k, times) in &self.hits {
+            if !(k.starts_with("w:") || k.starts_with("wt:")) {
+                continue;
+            }
+            let live: Vec<Value> = times.iter().filter(|x| t - **x < 3600e3).map(|x| xenonet_base::json::number(*x)).collect();
+            if !live.is_empty() {
+                keep.insert(k.clone(), Value::Array(live));
+            }
+        }
+        let wakes = Self::wakes_file(&js_text(&file));
+        let tmp = format!("{wakes}.tmp");
+        let wrote = c
+            .call("fs", "mkdirSync", vec![Arg::text(NATIVE.dirname(&wakes)), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])])
+            .and_then(|_| {
+                c.call(
+                    "fs",
+                    "writeFileSync",
+                    vec![Arg::text(tmp.clone()), Arg::text(stringify(&Value::Object(keep), 0)), Arg::Obj(vec![("mode".into(), Arg::num(f64::from(0o600)))])],
+                )
+            })
+            .and_then(|_| c.call("fs", "renameSync", vec![Arg::text(tmp), Arg::text(wakes)]));
+        // As the JS: a budget that can't be written is still kept in memory.
+        drop(wrote);
+        Ok(())
     }
 
     fn now(c: &mut dyn Calls) -> Result<f64> {
@@ -328,7 +400,7 @@ impl Policy {
     // ---------- scopes ----------
 
     pub fn grant(&mut self, c: &mut dyn Calls, actor: &Arg, selector: &Arg, ttl_ms: Option<&Arg>, by: &Arg) -> Result<Arg> {
-        if !is_actor(actor) {
+        if actor_of(actor).is_none_or(|(host, _)| host.is_some()) {
             return Err(Fail::Error("scopes are granted to actors (actor:<slug>)".into()));
         }
         let Some(sel) = parse_selector(selector) else {
@@ -391,9 +463,12 @@ impl Policy {
     }
 
     /// The scope a caller works within: Ok(None) for no limit (you,
-    /// sessions on this machine); for an actor its live grant, or Deny.
+    /// sessions on this machine); for an actor its live grant, or Deny. An
+    /// actor on another machine works within the scope its own machine
+    /// granted it, which that machine checked before the message left: here
+    /// it's open, and what this machine lets it do is `reach`'s to decide.
     pub fn scope_of(&self, c: &mut dyn Calls, id: &Arg) -> Result<Scope> {
-        if !is_actor(id) {
+        if actor_of(id).is_none_or(|(host, _)| host.is_some()) {
             return Ok(Scope::Free);
         }
         let g = self.data.get("grants").and_then(|g| g.get(js_text(id)));
@@ -410,8 +485,9 @@ impl Policy {
     }
 
     /// Whether `caller` may see or reach an agent with these facts.
-    /// Another actor is visible to an actor only if a grant names it
-    /// (`by:<slug>`).
+    /// Another actor, on this machine or another, is visible to an actor
+    /// only if a grant names its slug (`by:<slug>`), and only on the
+    /// machines the grant's `machine:` terms name, when it has any.
     pub fn visible(&self, c: &mut dyn Calls, caller: &Arg, facts: &Arg) -> Result<bool> {
         let scope = match self.scope_of(c, caller)? {
             Scope::Free => return Ok(true),
@@ -419,12 +495,13 @@ impl Policy {
             Scope::Within(s) => s,
         };
         if facts.field("app").as_str() == Some("actor") {
-            let id = facts.field("id");
-            return Ok(scope.terms.iter().any(|t| t.key == "by" && id.as_str() == Some(format!("actor:{}", t.value).as_str())));
+            let Some((_, slug)) = actor_of(&facts.field("id")) else { return Ok(false) };
+            let on = Selector { terms: scope.terms.iter().filter(|t| t.key == "machine").cloned().collect() };
+            return Ok(scope.terms.iter().any(|t| t.key == "by" && t.value == slug) && matches(Some(&on), facts));
         }
         // An actor's own reports of what it works on can't widen its own
         // scope.
-        let me: String = js_text(caller).chars().skip("actor:".len()).collect();
+        let me = actor_of(caller).map(|(_, slug)| slug).unwrap_or_default();
         if scope.terms.iter().any(|t| t.key == "by" && t.value == me) {
             return Ok(false);
         }
@@ -613,7 +690,7 @@ impl Policy {
     pub fn spend_wake(&mut self, c: &mut dyn Calls, sender: &Arg, target: &Arg) -> Result<()> {
         self.take(c, &format!("w:{}", js_text(sender)), f64::INFINITY, 3600e3)?;
         self.take(c, &format!("wt:{}", js_text(target)), f64::INFINITY, 3600e3)?;
-        Ok(())
+        self.save_wakes(c)
     }
 
     // ---------- audit ----------
@@ -861,6 +938,37 @@ mod tests {
         assert!(matches!(p.scope_of(&mut c, &wren).unwrap(), Scope::Deny));
         let kinds: Vec<String> = p.memory_audit.iter().map(|e| js_text(&e.field("kind"))).collect();
         assert_eq!(kinds, ["grant", "grant", "grant", "grant", "revoke", "revoke"]);
+    }
+
+    #[test]
+    fn an_actor_on_another_machine_is_its_host_and_slug() {
+        let of = |id: &str| actor_of(&Arg::text(id));
+        assert_eq!(of("@studio:actor:muse"), Some((Some("studio".into()), "muse".into())));
+        assert_eq!(of("actor:muse"), Some((None, "muse".into())));
+        for not in ["you", "actor:you", "@studio:actor:you", "@studio:claude:aaaaaaaa-0001", "claude:aaaaaaaa-0001", "@Studio:actor:muse", "@studio:actor:"] {
+            assert_eq!(of(not), None, "{not}");
+        }
+        assert_eq!(actor_of(&Arg::Null), None);
+        let mut c = Clock(1_000_000.0);
+        let mut p = Policy::load(&mut c).unwrap();
+        let (wren, you) = (Arg::text("actor:wren"), Arg::text("you"));
+        let muse =
+            |machine: &str| Arg::Obj(vec![("id".into(), Arg::text(format!("@{machine}:actor:muse"))), ("app".into(), Arg::text("actor")), ("machine".into(), Arg::text(machine))]);
+        assert!(!p.visible(&mut c, &wren, &muse("studio")).unwrap(), "default deny");
+        p.grant(&mut c, &wren, &Arg::text("by:muse"), None, &you).unwrap();
+        assert!(p.visible(&mut c, &wren, &muse("studio")).unwrap(), "muse on studio is muse");
+        assert!(p.visible(&mut c, &wren, &muse("laptop")).unwrap(), "on any machine, with no machine: term");
+        let kite = Arg::Obj(vec![("id".into(), Arg::text("@studio:actor:kite")), ("app".into(), Arg::text("actor")), ("machine".into(), Arg::text("studio"))]);
+        assert!(!p.visible(&mut c, &wren, &kite).unwrap());
+        p.grant(&mut c, &wren, &Arg::text("by:muse machine:studio"), None, &you).unwrap();
+        assert!(p.visible(&mut c, &wren, &muse("studio")).unwrap());
+        assert!(!p.visible(&mut c, &wren, &muse("laptop")).unwrap(), "only on studio");
+        // Another machine's actor isn't scoped by this machine's grants,
+        // and can't be granted one; its secrets are redacted as an actor's.
+        let far = Arg::text("@studio:actor:wren");
+        assert!(matches!(p.scope_of(&mut c, &far).unwrap(), Scope::Free));
+        assert_eq!(error(p.grant(&mut c, &far, &Arg::text("all"), None, &you)), "scopes are granted to actors (actor:<slug>)");
+        assert_eq!(text_for(&Arg::text("DEPLOY_TOKEN=abc"), &far, &Arg::Obj(vec![]), &Arg::Obj(vec![])).1, 1);
     }
 
     fn refusal(r: Result<()>) -> (&'static str, String) {

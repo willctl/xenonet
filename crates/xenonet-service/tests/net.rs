@@ -269,6 +269,19 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
     let laptop = s["hosts"].as_array().unwrap().iter().find(|h| h["id"] == "laptop").unwrap().clone();
     assert_eq!((laptop["agents"].clone(), laptop["waitsOnYou"].clone()), (json!(1), json!(1)));
     assert_eq!(s["rosterMismatch"], json!(["laptop"]), "its presence named another head");
+    // laptop's own row counts the agents its own presence lists.
+    let me = b.state().await["hosts"].as_array().unwrap().iter().find(|h| h["self"] == true).unwrap().clone();
+    assert_eq!((me["id"].clone(), me["agents"].clone(), me["waitsOnYou"].clone()), (json!("laptop"), json!(1), json!(1)), "{me}");
+    b.svc
+        .net()
+        .send(Outgoing {
+            to: To::All,
+            kind: Kind::Presence,
+            body: json!({ "schema": "network/presence/v1", "counter": 2, "full": false, "agents": [{ "id": "claude:2" }], "removed": ["claude:1"], "you": false, "roster": "x" }),
+        })
+        .unwrap();
+    let me = b.state().await["hosts"].as_array().unwrap().iter().find(|h| h["self"] == true).unwrap().clone();
+    assert_eq!((me["agents"].clone(), me["waitsOnYou"].clone()), (json!(1), json!(0)), "a change, and one gone: {me}");
     let epoch = s["epoch"].clone();
 
     // The gateway goes, mid-stream: the hosts go offline, and what they

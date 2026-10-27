@@ -15,7 +15,9 @@
 //!   frame waits in the outbox until a stored receipt comes back. One from
 //!   another host is stored with its sender qualified (`@laptop:claude:…`)
 //!   and an envelope that says how it came, then delivered as local mail.
-//!   Receipts go back: stored at once, then delivered, seen or held.
+//!   Receipts go back: stored at once, then delivered, seen or held. One
+//!   stored there that no one read by the end of the outbox's week is
+//!   unread here.
 //! - **Claims across clones.** Claims and observed edits go out as a repo
 //!   key and a path inside the repo; others' come back for the edit
 //!   warning.
@@ -33,6 +35,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_base::ids::{is_session_id, parse_actor_id, qualify, YOU};
 use xenonet_base::network::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
+use xenonet_engine::delivery::reach::{self, Action, Decision, Settings};
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Fail, ACTIVE_MS};
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
 use xenonet_engine::peer::{Result, Thrown};
@@ -252,7 +255,7 @@ pub fn removed(w: &World, host: &str) {
 }
 
 /// What this host tells the others now, if it changed: presence and
-/// claims; and handoffs made here that lapsed.
+/// claims; and handoffs made here that lapsed, and messages no one read.
 pub fn tick(w: &World) {
     if net(w).me().is_none() {
         return;
@@ -260,6 +263,7 @@ pub fn tick(w: &World) {
     presence(w, false);
     claims(w, false);
     lapse(w);
+    unread(w);
 }
 
 /// A body from another host.
@@ -751,8 +755,23 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
         receipt(w, from, &mid, &target, "refused", Some("this thread has gone back and forth too many times; XenoNet stops agent-to-agent threads at 6 messages"));
         return Ok(());
     }
+    // What this machine lets the sender do here.
+    if let Decision::Refuse(why) = reach::decide(Action::Message, &reach::sender_of(&Arg::text(sender_id.clone())), &target, &Settings::default()) {
+        receipt(w, from, &mid, &target, "refused", Some(&why));
+        return Ok(());
+    }
     let mut c = EngineCalls::new(w, None);
     let view = c.view(&t)?;
+    // An actor XenoNet only observes reads nothing: refused, as a message
+    // sent on this machine is, rather than stored for no one.
+    let unreached = xenonet_engine::engine::Engine::unreached(&mut c, &view).map_err(|e| match e {
+        Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
+        Fail::Thrown(t) => t,
+    })?;
+    if let Some(why) = unreached {
+        receipt(w, from, &mid, &target, "refused", Some(&why));
+        return Ok(());
+    }
     // This host's own limits hold for it too: paused, too fast, a repeat.
     let ask = obj(vec![("sender", Arg::text(sender_id.clone())), ("recipients", Arg::List(vec![view.clone()])), ("text", Arg::text(body.clone())), ("depth", Arg::num(hops))]);
     if let Err(e) = xenonet_engine::peer::Calls::call(&mut c, "engine.policy", "checkSend", vec![ask]) {
@@ -1463,6 +1482,21 @@ fn lapse(w: &World) {
                 send(w, To::All, Kind::Handoff, body_of(&r, "lapsed", None));
             }
         }
+    }
+}
+
+/// A message another host stored but no one there read by the end of the
+/// outbox's week is unread: its sender sees that, not "stored" for good.
+fn unread(w: &World) {
+    unread_at(w, now_ms());
+}
+
+/// `unread` as of `now`, which a test can move a week on.
+pub fn unread_at(w: &World, now: f64) {
+    let Ok(rows) = store(w, |s| s.unread_since(now - OUTBOX_MS, now)) else { return };
+    for r in rows {
+        let (Some(id), Some(agent)) = (r.num("message_id"), r.text("agent")) else { continue };
+        w.emit(From::Engine, "receipt", json!({ "id": id, "agent": agent, "host": r.text("host"), "state": "unread", "reason": "no one there read it in a week" }));
     }
 }
 

@@ -5,11 +5,14 @@
 // that don't cross identities. Made-up sessions and repos.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Engine } from "../core/engine/engine.js";
 import { EngineStore } from "../core/engine/store.js";
 import { Actors, mapOf } from "../core/actors/index.js";
 import { takeHeartbeat } from "../core/actors/reports.js";
-import { DeliveryPolicy, redactSecrets, sanitize, framed } from "../core/delivery/policy.js";
+import { DeliveryPolicy, redactSecrets, sanitize, framed, actorOf } from "../core/delivery/policy.js";
 import { parseSelector, matches, isSelector, within } from "../core/delivery/selector.js";
 
 const A = "claude:aaaaaaaa-0001", B = "codex:bbbbbbbb-0002", C = "opencode:ses-cccccccc0003", D = "claude:dddddddd-0004";
@@ -185,6 +188,26 @@ test("consent and the wake budget: per session, expiring; a provider near its li
   assert.ok(p.wakeAllowed(A, B).ok);
 });
 
+test("the wake budget is kept beside the policy's file: a restart doesn't hand out a fresh one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-wakes-"));
+  const file = path.join(dir, "delivery.json");
+  const t = { now: 1e12 };
+  const limits = { wakesPerSenderPerHour: 2 };
+  const p = new DeliveryPolicy({ file, now: () => t.now, limits });
+  p.spendWake(A, C);
+  p.spendWake(A, D);
+  assert.equal(p.wakeAllowed(A, B).why, "sender-wake-budget");
+  const wakes = path.join(dir, "delivery-wakes.json");
+  if (process.platform !== "win32") assert.equal(fs.statSync(wakes).mode & 0o777, 0o600);
+  const again = new DeliveryPolicy({ file, now: () => t.now, limits });
+  assert.equal(again.wakeAllowed(A, B).why, "sender-wake-budget", "after a restart too");
+  t.now += 3601e3;
+  assert.ok(again.wakeAllowed(A, B).ok, "an hour on");
+  again.spendWake(B, C);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(wakes, "utf8"))).sort(), [`w:${B}`, `wt:${C}`], "only the last hour's are kept");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("without a policy the engine works as it did", async () => {
   const { engine } = world({ policy: false });
   assert.equal((await engine.peers(WREN, { scope: "machine" })).length, 4);
@@ -197,4 +220,27 @@ test("an actor's own reports never widen its scope: a grant can't rest on by:<it
   p.grant(WREN, "by:kite");
   assert.equal(p.visible(WREN, { id: A, app: "claude", actors: ["kite"] }), true);
   assert.equal(p.visible(WREN, { id: "actor:kite", app: "actor" }), true);
+});
+
+test("an actor on another machine is @host:actor:slug: a by: grant reaches it there, a machine: term narrows it to one host", () => {
+  assert.deepEqual(actorOf("@studio:actor:muse"), { host: "studio", slug: "muse" });
+  assert.deepEqual(actorOf("actor:muse"), { host: null, slug: "muse" });
+  for (const not of ["you", "actor:you", "@studio:actor:you", `@studio:${A}`, A, "@Studio:actor:muse", "@studio:actor:", null]) assert.equal(actorOf(not), null, String(not));
+  const p = new DeliveryPolicy();
+  const muse = (machine) => ({ id: `@${machine}:actor:muse`, app: "actor", machine });
+  assert.equal(p.visible(WREN, muse("studio")), false, "default deny");
+  p.grant(WREN, "by:muse");
+  assert.equal(p.visible(WREN, muse("studio")), true, "muse on studio is muse");
+  assert.equal(p.visible(WREN, muse("laptop")), true, "and on any machine, with no machine: term");
+  assert.equal(p.visible(WREN, { id: "@studio:actor:kite", app: "actor", machine: "studio" }), false, "another actor isn't named");
+  p.grant(WREN, "by:muse machine:studio");
+  assert.equal(p.visible(WREN, muse("studio")), true);
+  assert.equal(p.visible(WREN, muse("laptop")), false, "only on studio");
+  // An actor on another machine is an actor here too: it isn't scoped by
+  // this machine's grants, which are for this machine's actors, and it
+  // can't be granted one.
+  assert.equal(p.scopeOf("@studio:actor:wren"), null);
+  assert.equal(p.visible("@studio:actor:wren", { id: A, app: "claude" }), true);
+  assert.throws(() => p.grant("@studio:actor:wren", "all"), /scopes are granted to actors/);
+  assert.equal(p.textFor({ text: "DEPLOY_TOKEN=abc", sender: "@studio:actor:wren", senderFacts: {}, recipientFacts: {} }).redacted, 1, "its secrets are redacted as an actor's");
 });

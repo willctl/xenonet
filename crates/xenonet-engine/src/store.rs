@@ -487,12 +487,15 @@ impl EngineStore {
     /// What the other host said of a delivery. A receipt never goes back
     /// to an earlier state, and seen marks it seen.
     pub fn set_receipt(&self, id: f64, agent: &str, state: &str, at: f64) -> Result<bool> {
+        // unread is this host's own word for one stored there that no one
+        // read in the outbox's week; a later delivered or seen still counts.
         let rank = |s: &str| match s {
             "stored" => 1,
             "held" => 2,
-            "delivered" => 3,
-            "seen" => 4,
-            "refused" => 5,
+            "unread" => 3,
+            "delivered" => 4,
+            "seen" => 5,
+            "refused" => 6,
             _ => 0,
         };
         let Some(had) = self.delivery(id, agent)? else { return Ok(false) };
@@ -512,6 +515,20 @@ impl EngineStore {
             "SELECT d.message_id, d.agent, d.host, d.frame FROM deliveries d JOIN messages m ON m.id = d.message_id WHERE d.host IS NOT NULL AND d.receipt IS NULL AND d.frame IS NOT NULL AND m.created_at >= ? ORDER BY d.message_id",
             &[n(since)],
         )
+    }
+    /// Deliveries to other hosts that were stored there (or held) for a
+    /// message made before `before`, and not read since: now unread, at
+    /// `at`. The ones that changed, with their message's id, agent and host.
+    pub fn unread_since(&self, before: f64, at: f64) -> Result<Vec<Row>> {
+        let rows = self.all(
+            "SELECT d.message_id, d.agent, d.host FROM deliveries d JOIN messages m ON m.id = d.message_id WHERE d.host IS NOT NULL AND d.receipt IN ('stored', 'held') AND m.created_at < ? ORDER BY d.message_id",
+            &[n(before)],
+        )?;
+        for r in &rows {
+            let (Some(id), Some(agent)) = (r.num("message_id"), r.text("agent")) else { continue };
+            self.run("UPDATE deliveries SET receipt = 'unread', receipt_at = ? WHERE message_id = ? AND agent = ?", &[n(at), n(id), Arg::text(agent)])?;
+        }
+        Ok(rows)
     }
     /// Each delivery of a message with its host and receipt, for the
     /// console.
@@ -1167,6 +1184,22 @@ mod tests {
         assert!(s.set_receipt(id, "@laptop:claude:x", "seen", 1002.0).unwrap());
         assert!(!s.set_receipt(id, "@laptop:claude:x", "stored", 1003.0).unwrap(), "never back to an earlier state");
         assert_eq!(s.outbox(0.0).unwrap().len(), 0);
+        // Stored there and not read in the outbox's week: unread here, until
+        // it's read after all.
+        let later = s
+            .send(
+                &obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:y".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:y".into()]))]),
+                n(1000.0),
+            )
+            .unwrap();
+        s.set_delivery_net(later, "@laptop:claude:y", "laptop", "{}").unwrap();
+        assert!(s.set_receipt(later, "@laptop:claude:y", "stored", 1001.0).unwrap());
+        assert_eq!(s.unread_since(1000.0, 5000.0).unwrap().len(), 0, "not a week yet");
+        let gone = s.unread_since(1001.0, 5000.0).unwrap();
+        assert_eq!(gone.iter().map(|r| r.text("agent").unwrap().to_string()).collect::<Vec<_>>(), ["@laptop:claude:y"], "the seen one stays seen");
+        assert_eq!(s.delivery(later, "@laptop:claude:y").unwrap().unwrap().text("receipt"), Some("unread"));
+        assert_eq!(s.unread_since(1001.0, 5001.0).unwrap().len(), 0, "once");
+        assert!(s.set_receipt(later, "@laptop:claude:y", "seen", 5002.0).unwrap(), "read after all");
         assert_eq!(s.message_by_mid("msg_1", None).unwrap().unwrap().num("id"), Some(id));
         assert!(s.message_by_mid("msg_1", Some("laptop")).unwrap().is_none());
         s.put_net_claim("laptop", "github.com/x/y", "src/a.rs", "claude:x", Some("main"), "edit", None, 1000.0).unwrap();

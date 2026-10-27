@@ -11,6 +11,8 @@ export const LIMITS = native.policyLimits();
 
 export const isYou = (id) => native.policyIsYou(id);
 
+export const actorOf = (id) => native.policyActorOf(id);
+
 export const redactSecrets = (text) => native.policyRedact(String(text));
 
 export const sanitize = (text, { oneLine = false, max = 4000 } = {}) => native.policySanitize(String(text ?? ""), !!oneLine, Number(max));
