@@ -91,28 +91,26 @@ fn not_yours(why: &str) -> Fail {
     Fail::new(format!("this is yours to do, and {why}; run it in your own terminal or in XenoNet"), 1)
 }
 
-/// XenoNet's own Desktop, by its executable: an installed XenoNet, XenoNet
-/// Dev.app, or the Electron a checkout runs; on Windows XenoNet.exe (the
-/// xenonet.exe of the command and the service is lower case) or a
-/// checkout's electron.exe, and on Linux a checkout's electron.
-fn is_desktop(exe: &str) -> bool {
-    let exe = exe.replace('\\', "/");
-    if let Some((app, _)) = exe.rsplit_once(".app/Contents/MacOS/") {
-        let name = app.rsplit('/').next().unwrap_or("");
-        return name.starts_with("XenoNet") || name == "Electron";
-    }
-    let name = exe.rsplit('/').next().unwrap_or("");
-    let electron = exe.contains("/node_modules/electron/dist/") && (name == "electron" || name.eq_ignore_ascii_case("electron.exe"));
-    electron || (name.starts_with("XenoNet") && name.to_ascii_lowercase().ends_with(".exe"))
+/// Why this process, the first of `chain`, came from under an agent or an
+/// actor's app anywhere above it, or None. No program above it counts as
+/// XenoNet's Desktop here: a program's name or path is anyone's to copy,
+/// so `copy cmd.exe %TEMP%\XenoNet.exe` would pass. Desktop's own calls
+/// reach a running service, which knows its Desktop by the connection.
+pub fn refusal(chain: &[xenonet_engine::procs::Link]) -> Option<Fail> {
+    chain.iter().skip(1).find_map(|link| match (link.agent, link.product) {
+        (Some(agent), _) => Some(not_yours(&format!("it came from under {}", an_agent(agent)))),
+        (None, Some(_)) => Some(not_yours("it came from under an actor's app")),
+        (None, None) => None,
+    })
 }
 
 /// Registering the service is yours to do (docs/design/always-on.md),
 /// never an agent's. A running service checks this process as it checks
 /// the routes that are yours, so XenoNet's own window passes and an agent
-/// doesn't. With none running, this process's parents are looked at the
-/// same way: the nearer of an agent, an actor's app and XenoNet's Desktop
-/// decides, on macOS, Linux and Windows alike; elsewhere it passes, as the
-/// service's own check does.
+/// doesn't. With none running, this process's parents are looked at on
+/// macOS, Linux and Windows alike, and an agent or an actor's app anywhere
+/// above it refuses (`refusal`); elsewhere it passes, as the service's own
+/// check does.
 pub fn yours(env: &Value) -> Result<(), Fail> {
     if let Ok(verdict) = service_request(env, "yours", &json!({})) {
         if verdict.get("ok").and_then(Value::as_bool) == Some(true) {
@@ -126,18 +124,7 @@ pub fn yours(env: &Value) -> Result<(), Fail> {
         return Ok(());
     }
     let chain = sys.procs.chain(&mut sys.io(), Some(f64::from(std::process::id())), true, true).map_err(|_| not_yours("XenoNet couldn't see which program asked"))?;
-    for link in chain.iter().skip(1) {
-        if let Some(agent) = link.agent {
-            return Err(not_yours(&format!("it came from under {}", an_agent(agent))));
-        }
-        if link.product.is_some() {
-            return Err(not_yours("it came from under an actor's app"));
-        }
-        if link.exe.clone().flatten().is_some_and(|f| is_desktop(&f)) {
-            return Ok(());
-        }
-    }
-    Ok(())
+    refusal(&chain).map_or(Ok(()), Err)
 }
 
 /// How the running service stands: its status, or None when none answers.
@@ -445,21 +432,25 @@ fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, stop_file: &s
 mod tests {
     use super::*;
 
+    // A process of a chain as procs gives it.
+    fn link(pid: f64, exe: &str, agent: Option<&'static str>) -> xenonet_engine::procs::Link {
+        let row = xenonet_engine::procs::Row { pid, ppid: pid - 1.0, start: pid, program: exe.into() };
+        xenonet_engine::procs::Link { row, exe: Some(Some(exe.into())), agent, product: None }
+    }
+
     #[test]
-    fn desktops_are_xenonets_own_apps() {
-        assert!(is_desktop("/Applications/XenoNet.app/Contents/MacOS/XenoNet"));
-        assert!(is_desktop("/Users/w/Applications/XenoNet Dev.app/Contents/MacOS/XenoNet Dev"));
-        assert!(is_desktop("/w/xenonet/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
-        assert!(!is_desktop("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"));
-        assert!(!is_desktop("/Applications/Claude.app/Contents/MacOS/Claude"));
-        assert!(!is_desktop("/usr/local/bin/xenonet"));
-        // Windows and Linux.
-        assert!(is_desktop("C:\\Users\\w\\AppData\\Local\\Programs\\XenoNet\\XenoNet.exe"));
-        assert!(is_desktop("C:\\w\\xenonet\\node_modules\\electron\\dist\\electron.exe"));
-        assert!(is_desktop("/home/w/xenonet/node_modules/electron/dist/electron"));
-        assert!(!is_desktop("C:\\Users\\w\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe"), "the command and the service");
-        assert!(!is_desktop("C:\\Users\\w\\AppData\\Roaming\\Claude\\claude-code\\2.1.0\\claude.exe"));
-        assert!(!is_desktop("/home/w/.local/bin/electron"));
+    fn an_agent_anywhere_above_refuses_whatever_runs_between() {
+        let me = link(40.0, "C:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe", None);
+        let claude = link(10.0, "C:\\Users\\me\\.local\\bin\\claude.exe", Some("claude"));
+        // cmd.exe copied to %TEMP%\XenoNet.exe, which an agent ran.
+        let renamed = link(30.0, "C:\\Users\\me\\AppData\\Local\\Temp\\XenoNet.exe", None);
+        let desktop = link(20.0, "C:\\Users\\me\\AppData\\Local\\Programs\\XenoNet\\XenoNet.exe", None);
+        let refused = refusal(&[me.clone(), renamed, claude.clone()]).map(|f| f.message);
+        assert_eq!(refused.as_deref(), Some("this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet"));
+        assert!(refusal(&[me.clone(), desktop.clone(), claude]).is_some(), "nor does the installed Desktop's path vouch for what's above it");
+        assert!(refusal(&[me.clone(), desktop, link(5.0, "C:\\Windows\\explorer.exe", None)]).is_none());
+        // This process itself isn't looked at: it's the xenonet command.
+        assert!(refusal(&[link(1.0, "/Users/me/.local/bin/claude", Some("claude"))]).is_none());
     }
 
     #[test]
