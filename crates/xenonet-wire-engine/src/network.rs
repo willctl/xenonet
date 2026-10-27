@@ -1488,7 +1488,11 @@ fn lapse(w: &World) {
 /// A message another host stored but no one there read by the end of the
 /// outbox's week is unread: its sender sees that, not "stored" for good.
 fn unread(w: &World) {
-    let now = now_ms();
+    unread_at(w, now_ms());
+}
+
+/// `unread` as of `now`, which a test can move a week on.
+pub fn unread_at(w: &World, now: f64) {
     let Ok(rows) = store(w, |s| s.unread_since(now - OUTBOX_MS, now)) else { return };
     for r in rows {
         let (Some(id), Some(agent)) = (r.num("message_id"), r.text("agent")) else { continue };

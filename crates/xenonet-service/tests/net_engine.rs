@@ -752,6 +752,17 @@ async fn actors_reach_actors_on_other_machines() {
     send(&a, &wren, json!({ "to": "@laptop:actor:grok", "text": "Anything new?" })).await.unwrap();
     until("grok's refusal at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:grok" && r.as_deref() == Some("refused")) }).await;
 
+    // A message laptop stored that nobody there reads by the end of the
+    // outbox's week shows as unread at studio, until it's read after all.
+    let unread = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Are you there?" })).await.unwrap();
+    let id = unread["id"].as_f64().unwrap();
+    let receipt = || a.world.store.with(|s| s.net_deliveries(id).unwrap().first().and_then(|d| d.text("receipt").map(str::to_string)));
+    until("the stored receipt", 10, || async { receipt().as_deref() == Some("stored") }).await;
+    xenonet_wire_engine::network::unread_at(&a.world, now_ms() + 8.0 * 24.0 * 3600e3);
+    assert_eq!(receipt().as_deref(), Some("unread"));
+    assert_eq!(texts(&b.ctx.cores.engine.inbox(&kite, Duration::ZERO).await.unwrap()), ["Are you there?"]);
+    until("the seen receipt after unread", 10, || async { receipt().as_deref() == Some("seen") }).await;
+
     // While laptop is away, the answer says the message waits for it.
     b.svc.stop();
     until("laptop offline at studio", 15, || async { a.state().await["hosts"].as_array().unwrap().iter().any(|h| h["id"] == "laptop" && h["online"] == false) }).await;
