@@ -35,6 +35,8 @@ enum Kind {
     Lit(Value),
     Arr { item: Box<Z>, min: Option<usize>, max: Option<usize> },
     Obj { shape: Vec<(&'static str, Z)>, strict: bool },
+    /// z.record(z.string(), z.unknown()): any object, read as it is.
+    Record,
     Opt(Box<Z>),
     Null(Box<Z>),
     Union(Vec<Z>),
@@ -113,6 +115,10 @@ pub fn array(item: Z) -> Z {
 /// z.object(): keys it doesn't name are left out of what it reads.
 pub fn object(shape: Vec<(&'static str, Z)>) -> Z {
     of(Kind::Obj { shape, strict: false })
+}
+/// z.record(z.string(), z.unknown()): any object, passed on whole.
+pub fn record() -> Z {
+    of(Kind::Record)
 }
 /// z.strictObject(): keys it doesn't name are refused.
 pub fn strict(shape: Vec<(&'static str, Z)>) -> Z {
@@ -231,6 +237,11 @@ impl Z {
                 }
                 m.insert("type".into(), json!("array"));
                 m.insert("items".into(), Value::Object(item.json()));
+            }
+            Kind::Record => {
+                m.insert("type".into(), json!("object"));
+                m.insert("propertyNames".into(), json!({ "type": "string" }));
+                m.insert("additionalProperties".into(), json!({}));
             }
             Kind::Obj { shape, strict } => {
                 m.insert("type".into(), json!("object"));
@@ -392,6 +403,12 @@ impl Z {
                     say(issues, path, format!("Too big: expected array to have <={n} items"));
                 }
                 Some(Value::Array(out))
+            }
+            Kind::Record => {
+                if !matches!(v, Some(Value::Object(_))) {
+                    say(issues, path, wrong("record"));
+                }
+                v.cloned()
             }
             Kind::Obj { shape, strict } => {
                 let Some(Value::Object(given)) = v else {

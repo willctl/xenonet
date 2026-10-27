@@ -180,6 +180,8 @@ fn sessions_case(case: &str, env: &[(&str, String)], extra: Vec<Value>) {
     messages.extend([call(30, "whoami", json!({})), call(31, "peers", json!({ "scope": "machine" })), call(32, "ask_gateway_token", json!({ "actor": "actor:muse" }))]);
     messages.push(request(33, "tools/call", json!({ "name": "whoami", "arguments": {}, "_meta": { "threadId": THREAD } })));
     messages.extend([call(34, "handoff", json!({ "goal": "Finish the refunds", "files": ["src/refunds.ts"] })), call(35, "handoff", json!({ "accept": "hof_x" }))]);
+    // A start, and a permission prompt, with no XenoNet to answer them.
+    messages.extend([call(36, "start_session", json!({ "machine": "desk", "prompt": "Run the fixtures" })), call(37, "permission", json!({ "tool_name": "Bash", "input": { "command": "ls", "n": [1] } })), call(38, "permission", json!({ "tool_name": "Bash", "input": "ls" }))]);
     messages.extend(extra);
     let mut env = env.to_vec();
     env.push(("XENONET_PORT", "1".into()));

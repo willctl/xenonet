@@ -515,6 +515,33 @@ test("Start a session on a made-up machine: the box, Start once it's armed, and 
   assert.ok(JSON.stringify(feed).includes("Started claude:"), JSON.stringify(feed));
 }));
 
+test("a run's permission prompt from another machine: in Needs you with Deny, and Allow once it's armed", { timeout: limit(60000) }, shoot("network-ask", async () => {
+  const centerOf = (selector) =>
+    s.eval(`return (() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      el?.scrollIntoView({ block: "center" });
+      const r = el?.getBoundingClientRect();
+      return r?.width ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
+    })()`);
+  const clickOn = async (selector) => clickAt(await until(() => centerOf(selector), 4000), selector);
+  const ask = () => s.driver("needsYou").then((q) => q.needsYou?.items?.find((it) => it.kind === "ask") ?? q.items?.find((it) => it.kind === "ask") ?? null);
+  for (const decision of ["deny", "allow"]) {
+    await simulate("net-founder", { b: "ask" }, (n) => n.hosts.some((x) => x.id === "laptop"));
+    const it = await until(ask);
+    assert.ok(it, "the ask waits in Needs you");
+    assert.deepEqual([it.title, it.tool, it.text, it.host, it.actions], ["laptop · Tidy the billing tests", "Bash", "cargo test --package billing", "laptop", ["allow", "deny"]]);
+    await s.driver("needsYou", "open");
+    const row = await s.eval(`return (() => { const li = document.querySelector('[data-key="${it.key}"]'); return li && { text: li.textContent.replace(/\\s+/g, " ").trim(), buttons: [...li.querySelectorAll("button")].map((b) => b.textContent.trim()), yours: [...li.querySelectorAll("[data-yours]")].map((b) => b.textContent.trim()) }; })()`);
+    assert.match(row.text, /laptop · Tidy the billing tests\s*wants to run Bash/);
+    assert.match(row.text, /cargo test --package billing/);
+    assert.deepEqual([row.buttons, row.yours], [["Deny", "Allow"], ["Allow"]], "Allow is yours alone");
+    if (decision === "allow") assert.ok(await until(async () => (await ask())?.armed), "Allow arms");
+    await clickOn(`[data-ny-${decision}="${it.key}"]`);
+    assert.ok(await until(async () => !(await ask())), `${decision} answers it, and it goes`);
+    await s.driver("needsYou", "close");
+  }
+}));
+
 test("net-gateway-down says so: since when, why, and what waits in the outbox", { timeout: limit(60000) }, shoot("network-gateway-down", async () => {
   await simulate("net-gateway-down", {}, (n) => n.gateway?.link === "offline");
   await served();

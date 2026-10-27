@@ -577,6 +577,18 @@ impl Engine for EngineDriver {
         let out = tokio::task::spawn_blocking(move || crate::starts::sign_in(&w, &action, &token)).await.map_err(|e| CoreError::new(e.to_string()))?;
         out.map_err(|(status, why)| CoreError::status(status, why))
     }
+    async fn permission(&self, me: &str, title: Option<String>, body: Value) -> R<Value> {
+        let (w, me) = (self.0.clone(), me.to_string());
+        let out = tokio::task::spawn_blocking(move || crate::asks::ask(&w, &me, title.as_deref(), &body)).await.map_err(|e| CoreError::new(e.to_string()))?;
+        out.map_err(|(status, why)| CoreError::status(status, why))
+    }
+    async fn asks(&self) -> R<Value> {
+        Ok(crate::asks::list(&self.0))
+    }
+    async fn answer(&self, id: &str, decision: &str) -> R<Value> {
+        let host = crate::asks::answer(&self.0, id, decision).map_err(|why| CoreError::status(409, why))?;
+        Ok(serde_json::json!({ "host": host }))
+    }
     async fn forks(&self) -> R<Value> {
         Ok(serde_json::json!({ "forks": crate::starts::forks(&self.0).into_iter().map(|(child, parent)| serde_json::json!({ "child": child, "parent": parent })).collect::<Vec<_>>() }))
     }

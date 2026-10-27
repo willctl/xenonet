@@ -282,8 +282,14 @@ pub fn receive(w: &World, incoming: Incoming) {
         Kind::Receipt => receipt_in(w, &from, &body),
         Kind::Handoff => handoff_in(w, &from, &body),
         // The person's actions from another console are the network's
-        // own (section 8); a message from them comes as a message.
-        Kind::Operator => Ok(()),
+        // own (section 8), but for your answer to a run's permission
+        // prompt; a message from them comes as a message.
+        Kind::Operator => {
+            if body.get("action").and_then(Value::as_str) == Some("answer") {
+                crate::asks::answer_in(w, &from, body.get("args").unwrap_or(&Value::Null));
+            }
+            Ok(())
+        }
         // The map's frames go to the relay and the hub, and services'
         // requests and answers to the network's services: never the engine.
         Kind::Relay | Kind::Svc => Ok(()),
@@ -731,6 +737,12 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool, at: f64) -> R
     if target == xenonet_engine::delivery::starts::TARGET {
         let strong = b.get("auth").and_then(|a| a.get("strength")).and_then(Value::as_str) == Some("strong");
         crate::starts::start_in(w, from, &mid, &kind, &sender, &body, strong, window_host, at);
+        return Ok(());
+    }
+    // A permission prompt of a run on another machine, for this console,
+    // or its end (asks.rs).
+    if target == crate::asks::TARGET {
+        crate::asks::ask_in(w, from, &body);
         return Ok(());
     }
     let t = Arg::text(target.clone());

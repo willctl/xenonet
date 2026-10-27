@@ -92,6 +92,22 @@ pub trait Engine: Send + Sync {
     async fn runs_sign_in(&self, _action: &str, _token: &str) -> R<Value> {
         pending(ENGINE)
     }
+    /// A run's permission prompt (the xenonet MCP server's `permission`
+    /// tool), from `me`, titled `title`: held until you answer. The answer
+    /// Claude Code takes; refused (403) for a caller that isn't a run
+    /// XenoNet started.
+    async fn permission(&self, _me: &str, _title: Option<String>, _body: Value) -> R<Value> {
+        pending(ENGINE)
+    }
+    /// The permission prompts waiting: this machine's and the others'.
+    async fn asks(&self) -> R<Value> {
+        pending(ENGINE)
+    }
+    /// Your Allow or Deny for one: { host }, the machine it's on when it's
+    /// another's (where the answer goes), else null.
+    async fn answer(&self, _id: &str, _decision: &str) -> R<Value> {
+        pending(ENGINE)
+    }
     /// The copies of sessions XenoNet forked to answer messages, each with
     /// the session it came from: { forks: [{ child, parent }] }.
     async fn forks(&self) -> R<Value> {

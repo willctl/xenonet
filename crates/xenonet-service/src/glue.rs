@@ -74,6 +74,15 @@ pub fn event(ctx: &Arc<Ctx>, from: From, name: &str, data: Value) {
         (From::Engine, "start") => ctx.broadcast("start", &data),
         // A copy of a session XenoNet forked to answer a message.
         (From::Engine, "fork") => ctx.broadcast("fork", &data),
+        // A run's permission prompt waits for you, here or on another
+        // machine; and its end.
+        (From::Engine, "ask") => {
+            ctx.broadcast("ask", &data);
+            if !ctx.config.demo {
+                ctx.notify_desktop(json!({ "type": "notify", "key": format!("ask:{}", js(&data["id"])), "title": format!("{} wants to run {}", js(&data["title"]), js(&data["tool"])), "body": "Allow or Deny it in Needs you." }));
+            }
+        }
+        (From::Engine, "ask-done") => ctx.broadcast("ask-done", &data),
         // Claude Code on a machine needs a sign-in for XenoNet's runs.
         (From::Engine, "sign-in") => {
             ctx.broadcast("sign-in", &data);

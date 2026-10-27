@@ -33,9 +33,11 @@ use xenonet_engine::delivery::starts::{self, Request, TARGET};
 use xenonet_engine::sql::Arg;
 use xenonet_service::glue::From;
 
-/// How long Claude Code waits on an MCP tool: above the permission tool's
-/// hold, so a prompt waiting for you isn't cut short.
-pub const MCP_TOOL_TIMEOUT_MS: u64 = 11 * 60 * 1000;
+/// How long Claude Code waits on an MCP tool: a minute past the permission
+/// tool's hold, so a prompt waiting for you isn't cut short.
+fn mcp_tool_timeout_ms(w: &World) -> u64 {
+    (w.setup.permission_hold_ms.unwrap_or(crate::asks::HOLD_MS) + 60e3).round() as u64
+}
 
 /// A request sent from here, waiting for its answers.
 struct Asked {
@@ -163,7 +165,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
         xenonet_engine::delivery::resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, crate::js::text(&v))).collect();
     if app == "claude" {
         env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
-        env.push(("MCP_TOOL_TIMEOUT".into(), MCP_TOOL_TIMEOUT_MS.to_string()));
+        env.push(("MCP_TOOL_TIMEOUT".into(), mcp_tool_timeout_ms(w).to_string()));
         signed_env(w, &mut env);
     }
     let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text } };

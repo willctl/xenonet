@@ -118,7 +118,8 @@ impl State for Map {
 /// The program every run on a test machine starts, in place of the app's
 /// CLI: it keeps its arguments and its prompt (standard input, or Grok
 /// Build's prompt file) beside itself, says it isn't signed in when the
-/// prompt asks it to, and otherwise takes a second and ends well. With
+/// prompt asks it to, waits 25 seconds when it says hold-on, and
+/// otherwise takes a second and ends well. With
 /// --fork-session it names its copy as Claude Code's stream does.
 fn fake_cli(dir: &Path) -> String {
     let bin = dir.join("bin").join("fake-cli");
@@ -138,6 +139,7 @@ printf '%s\n' "$@" > "$here/args-$n"
 printf '%s' "$prompt" > "$here/prompt-$n"
 case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
+case "$prompt" in *hold-on*) sleep 25 ;; esac
 sleep 1
 exit 0
 "#;
@@ -250,6 +252,8 @@ impl Host {
             ("XENONET_PORT", "47997"),
             ("HERMES_HOME", home.as_str()),
             ("XENONET_RUNS_BIN", fake.as_str()),
+            // A permission prompt waits six seconds for an answer here.
+            ("XENONET_PERMISSION_HOLD_MS", "6000"),
         ];
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let mut config = Config::from(&[], &get);
@@ -1088,6 +1092,59 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     assert_eq!((fork["parent"].as_str(), fork["child"].as_str()), (Some(OPEN), Some("claude:0190d3e0-0000-7000-8000-0000000f0f01")), "{fork}");
     let (_, forks) = c.call("GET", "/api/runs/forks", Value::Null, &[]).await;
     assert_eq!(forks["forks"], json!([{ "child": "claude:0190d3e0-0000-7000-8000-0000000f0f01", "parent": OPEN }]));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from_another() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-asks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("desk").join("home")).unwrap();
+    let (a, b, c) = three(&root, 48124, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &root.to_string_lossy())]]).await;
+    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
+    // You start a session on desk, a server, from studio's console.
+    let mut studio = Stream::of(&a);
+    a.window("POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: tidy the ledger" })).await;
+    let started = studio.next("start", 15, |d| d["state"] == "started").await;
+    let run = started["session"].as_str().unwrap().to_string();
+    // Its Claude Code asks to run a tool, through the permission tool: held
+    // on desk, and shown on both window hosts, never on desk itself.
+    let ask = |me: String, input: Value| {
+        let ctx = c.ctx.clone();
+        tokio::spawn(async move {
+            let req = Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", me.as_str())], Some(&json!({ "tool_name": "Bash", "input": input, "tool_use_id": "toolu_1" }).to_string()));
+            let r = api(&ctx, req).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let held = ask(run.clone(), json!({ "command": "npm test", "description": "Run the tests" }));
+    let shown = |h: &Host| {
+        let h = h.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", h.window_key.reveal())], None);
+            api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    let at_laptop = until_value("the ask at laptop", 10, || async { shown(&b).await.into_iter().find(|x| x["host"] == "desk") }).await;
+    assert_eq!((at_laptop["tool"].clone(), at_laptop["input"].clone(), at_laptop["session"].clone()), (json!("Bash"), json!("npm test"), json!(run)), "{at_laptop}");
+    assert!(at_laptop["title"].as_str().unwrap().starts_with("desk · "), "{at_laptop}");
+    until("the ask at studio", 10, || async { shown(&a).await.iter().any(|x| x["id"] == at_laptop["id"]) }).await;
+    // laptop answers Allow: the answer goes to desk as an operator frame,
+    // and the tool answers as Claude Code takes it.
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": at_laptop["id"], "decision": "allow" })).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer), (200, json!({ "behavior": "allow", "updatedInput": { "command": "npm test", "description": "Run the tests" } })));
+    until("the ask gone at studio", 10, || async { shown(&a).await.is_empty() }).await;
+    // Nobody answers: a deny that says so, when the hold runs out.
+    let (s, answer) = ask(run.clone(), json!({ "command": "rm -rf build" })).await.unwrap();
+    assert_eq!((s, answer), (200, json!({ "behavior": "deny", "message": "nobody answered in a minute" })));
+    // A session XenoNet didn't start is refused.
+    let (s, v) = ask(D1.to_string(), json!({ "command": "ls" })).await.unwrap();
+    assert_eq!((s, v["code"].clone()), (403, json!("not-a-run")), "{v}");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }

@@ -506,10 +506,27 @@ const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph
 // Machines whose Claude Code needs a sign-in for XenoNet's runs (the
 // sign-in event), until you dismiss them.
 const signIns = new Map(); // host → { host, fix, since }
+// The permission prompts of the runs XenoNet started, here and on other
+// machines (GET /api/runs/asks, with the window's key), for Allow and Deny.
+let runAsks = [];
+async function readAsks() {
+  const r = await windowCalls.call("GET", "/api/runs/asks").catch(() => null);
+  if (r?.ok) runAsks = Array.isArray(r.data.asks) ? r.data.asks : [];
+  needsYou.refresh();
+  return runAsks;
+}
+async function answerAsk(id, decision) {
+  const r = await windowCalls.call("POST", "/api/runs/answer", { ask: id, decision });
+  sfx(r.ok ? "success" : "error");
+  if (r.ok) runAsks = runAsks.filter((a) => a.id !== id);
+  else hud.toast(r.error ?? "That didn't go through", true);
+  needsYou.refresh();
+  return { ok: r.ok, error: r.error };
+}
 function needsYouNow() {
   const view = actorRequests.view();
   const sessions = (lastLive?.sessions ?? []).filter((s) => s.needsYou && hud.index.has(s.id)).map((s) => ({ id: s.id, app: s.app, title: hud.index.get(s.id)?.title ?? s.id, kind: s.needsYou.kind, text: s.needsYou.text, since: s.needsYou.since, host: s.host ?? null, stale: !!s.stale }));
-  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting, hints: [...signIns.values()] });
+  return needsYouQueue({ sessions, actors: lastActors?.actors ?? [], requests: view.requests, gatewayAsks: view.gatewayAsks, canDecide: view.canDecide, waiting: view.off ? 0 : view.waiting, hints: [...signIns.values()], asks: runAsks });
 }
 // The Needs you panel (needs-you.js), which answers them: from the
 // palette, N, the strip's button and the tray's menu.
@@ -526,8 +543,9 @@ const needsYou = createNeedsYou({
   // A sign-in hint goes when you dismiss it; a session's wait as the strip's ✓.
   ack: (ids, it) => (it?.kind === "sign-in" ? void signIns.delete(it.id) : ack(ids)),
   message: (id) => messageTo(id),
-  decide: decideRequest,
-  armed: (id) => actorRequests.armed(id),
+  decide: (id, decision, it) => (it?.kind === "ask" ? answerAsk(id, decision) : decideRequest(id, decision)),
+  // A run's ask is armed by its row's own wait; a registration's as its card's.
+  armed: (id) => String(id).startsWith("ask_") || actorRequests.armed(id),
 });
 
 const updatesPanel = createUpdatesPanel({ modals, desktop, toast: (message) => hud.toast(message) });
@@ -1294,6 +1312,16 @@ events.addEventListener("net", () => network.heard());
 // machine. A line in the feed, and a toast for what didn't go.
 // Claude Code on a machine needs a sign-in for XenoNet's runs: Needs you
 // says so, and a toast.
+// A run's permission prompt waits, here or on another machine: Needs you
+// lists it, and it chimes where you are; done, it goes.
+events.addEventListener("ask", (e) => {
+  const a = JSON.parse(e.data);
+  void readAsks();
+  if (chimeHere(network.state)) sfx("alert");
+  hud.toast(`${a.title ?? "A run"} wants to run ${a.tool ?? "a tool"}: Needs you has Allow and Deny`);
+});
+events.addEventListener("ask-done", () => void readAsks());
+void readAsks();
 events.addEventListener("sign-in", (e) => {
   const s = JSON.parse(e.data);
   if (typeof s.host !== "string") return;

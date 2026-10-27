@@ -47,7 +47,7 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
     rows.clear();
     shownAt.clear();
     const queue = visible();
-    panel = modals.open(`${head(queue)}<div class="m-body ny"><ol class="ny-list" data-ny-list></ol><p class="ny-empty" data-ny-empty hidden>Nothing waits on you. Questions, permissions, actors waiting and programs asking to join show here as they come.</p><p class="pj-note">A session's question or permission is answered in its own app: Open goes there. Allow is yours alone, from this window.</p></div>`, {
+    panel = modals.open(`${head(queue)}<div class="m-body ny"><ol class="ny-list" data-ny-list></ol><p class="ny-empty" data-ny-empty hidden>Nothing waits on you. Questions, permissions, actors waiting and programs asking to join show here as they come.</p><p class="pj-note">A session's question or permission is answered in its own app: Open goes there. A session XenoNet runs itself asks here instead, with Allow and Deny. Allow is yours alone, from this window.</p></div>`, {
       accent: "var(--attention)",
       cls: "ny-panel",
       onClose: () => {

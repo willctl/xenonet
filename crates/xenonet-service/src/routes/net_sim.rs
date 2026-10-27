@@ -46,6 +46,8 @@ const MINUTE: f64 = 60e3;
 struct Sim {
     state: Value,
     agents: Vec<Value>,
+    /// Made-up permission prompts of runs on the other machines.
+    asks: Vec<Value>,
 }
 
 fn sims() -> &'static Mutex<HashMap<usize, Sim>> {
@@ -97,7 +99,9 @@ pub fn simulated_remote_agents(ctx: &Ctx) -> Option<Vec<Value>> {
 /// Puts the network into one of KINDS: what it made, or None for a kind
 /// that isn't one. `you_at` is the host the person is at (this one by
 /// default), for net-founder and net-remote-waiting; `variant`
-/// "titles-only" has the other machines share titles only, so their
+/// "ask", for net-founder, has a run on laptop wait for your Allow or Deny
+/// on a permission prompt; "titles-only" has the other machines share
+/// titles only, so their
 /// agents carry no question's text, last message or stuck reason, and
 /// "relay", for net-founder, has laptop drawn from a relay snapshot: this
 /// machine's own map, served as laptop's by a relay over a network inside
@@ -113,7 +117,13 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         "hosts": state["hosts"].as_array().map_or(0, Vec::len),
         "agents": agents.len(),
     });
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents });
+    // "ask": a run XenoNet started on laptop asks to use a tool, for Needs
+    // you's Allow and Deny.
+    let asks = if variant == Some("ask") { vec![made_up_ask(ctx.now())] } else { Vec::new() };
+    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone() });
+    for a in &asks {
+        ctx.broadcast("ask", a);
+    }
     let relay = kind == "net-founder" && variant == Some("relay");
     if let Some(h) = &ctx.cores.hub {
         if let Ok(Some(r)) = h.simulate("net-relay", &json!({ "id": "laptop", "off": !relay })) {
@@ -162,6 +172,8 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
         }
         ("POST", "/api/actors/you/message") => message(ctx, req).await,
         ("POST", "/api/start") => start(ctx, req).await,
+        ("GET", "/api/runs/asks") => asks(ctx, req, false).await,
+        ("POST", "/api/runs/answer") => asks(ctx, req, true).await,
         // This machine's own reading, and a made-up one for each other host
         // the simulation has: one that's away has its last, from when it
         // was last heard from.
@@ -755,6 +767,61 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
     }
 }
 
+/// A permission prompt of a made-up run on laptop, as its machine would
+/// send it (asks.rs).
+fn made_up_ask(now: f64) -> Value {
+    json!({
+        "id": format!("ask_{}", random_uuid()),
+        "host": "laptop",
+        "here": false,
+        "session": "claude:0190d3e0-0000-7000-8000-00000000a5c1",
+        "run": format!("run_{}", random_uuid()),
+        "title": "laptop · Tidy the billing tests",
+        "tool": "Bash",
+        "input": "cargo test --package billing",
+        "at": (now - 20e3) as i64,
+        "until": (now + 580e3) as i64,
+        "simulated": true,
+    })
+}
+
+/// The permission prompts waiting, with the made-up ones; and your answer
+/// to a made-up one, which goes nowhere but takes it off. Anything else is
+/// the real route's, with its body put back.
+async fn asks(ctx: &Arc<Ctx>, req: &mut Req, answer: bool) -> Result<Option<Reply>, CoreError> {
+    if !answer {
+        if let Some(why) = ctx.from_window(req).await {
+            return Ok(Some(Reply::coded(403, "yours", why)));
+        }
+        let mut real = ctx.cores.engine.asks().await.unwrap_or_else(|_| json!({ "asks": [] }));
+        let made: Vec<Value> = sims().locked().get(&key(ctx)).map(|s| s.asks.clone()).unwrap_or_default();
+        if let Some(list) = real["asks"].as_array_mut() {
+            list.extend(made);
+        }
+        return Ok(Some(Reply::json(200, real)));
+    }
+    let bytes = req.bytes(4 << 10).await?;
+    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let id = body.get("ask").and_then(Value::as_str).unwrap_or("").to_string();
+    let decision = body.get("decision").and_then(Value::as_str).unwrap_or("").to_string();
+    let made = sims().locked().get(&key(ctx)).is_some_and(|s| s.asks.iter().any(|a| a["id"] == id.as_str()));
+    if !made {
+        req.body = Body::Bytes(bytes);
+        return Ok(None);
+    }
+    if let Some(why) = ctx.from_window(req).await {
+        return Ok(Some(Reply::coded(403, "yours", why)));
+    }
+    if !matches!(decision.as_str(), "allow" | "deny") {
+        return Ok(Some(Reply::coded(400, "bad-request", "the answer is allow or deny")));
+    }
+    if let Some(s) = sims().locked().get_mut(&key(ctx)) {
+        s.asks.retain(|a| a["id"] != id.as_str());
+    }
+    ctx.broadcast("ask-done", &json!({ "op": "done", "id": id, "decision": decision, "simulated": true }));
+    Ok(Some(Reply::json(200, json!({ "ok": true, "ask": id, "decision": decision, "host": "laptop", "simulated": true }))))
+}
+
 /// A start on a made-up machine, from the window, answered as the real
 /// one would be: refused at once when the machine is away or its XenoNet
 /// too old (rack's), else sent; then, as the start event, started a
@@ -1025,7 +1092,7 @@ mod tests {
 
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents }
+        Sim { state, agents, asks: Vec::new() }
     }
 
     #[test]

@@ -455,7 +455,7 @@ test("mcp: says which Claude session or Codex thread is calling", async () => {
   };
   try {
     const claude = await run({ CLAUDE_CODE_SESSION_ID: "11111111-2222-3333-4444-555555555555", CLAUDE_PROJECT_DIR: "/w/atlas", CLAUDE_PID: "4242" });
-    assert.deepEqual(claude.tools, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "doctor", "ask_gateway_token"]);
+    assert.deepEqual(claude.tools, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "doctor", "ask_gateway_token", "permission"]);
     // The agent's process, so XenoNet can tell when it's gone.
     assert.deepEqual(xenonet.seen.at(-1), { url: "/api/engine/peers", agent: "claude:11111111-2222-3333-4444-555555555555", body: { scope: "machine", cwd: "/w/atlas", pid: 4242 } });
     assert.match(claude.call.result.content[0].text, /codex:other/);

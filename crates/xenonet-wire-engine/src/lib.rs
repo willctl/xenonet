@@ -8,6 +8,7 @@
 #![expect(clippy::result_large_err, reason = "the cores' Calls return xenonet-engine's Thrown, passed on whole")]
 
 pub mod actors;
+pub mod asks;
 pub mod connect;
 pub mod delivery;
 pub mod engine;
@@ -122,6 +123,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
         version: env.version.clone(),
         root: config.root.clone(),
         runs_bin: config.runs_bin.clone(),
+        permission_hold_ms: config.permission_hold_ms,
     };
     let map = map::Map::new(cores.state.clone());
     let sys = procs::System::new();
@@ -172,6 +174,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
         me: OnceLock::new(),
         net: network::NetState::default(),
         starts: starts::StartSide::default(),
+        asks: asks::AskSide::default(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
     if w.actors.is_some() && !config.demo {

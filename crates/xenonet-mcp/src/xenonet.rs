@@ -31,7 +31,7 @@
 use crate::engine;
 use crate::process;
 use crate::tools::{self, Def};
-use crate::zod::{array, boolean, enumeration, int, number, object, string, Z};
+use crate::zod::{array, boolean, enumeration, int, number, object, record, string, Z};
 use regex::Regex;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CustomNotification, DiscoverResult, ErrorCode, Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
@@ -316,6 +316,22 @@ impl Context {
         Ok(doctor_text(&r))
     }
 
+    // A run's permission prompt: Claude Code calls the tool itself, and
+    // takes allow or deny as JSON text. XenoNet answers only for the runs
+    // it started; anything that goes wrong is a deny that says why.
+    async fn permission(&self, meta: &Value, a: &Value) -> String {
+        let deny = |why: String| js::stringify(&json!({ "behavior": "deny", "message": why }), 0);
+        let Some(Caller::Agent(id)) = self.caller(meta) else {
+            return deny("XenoNet can't tell which session is calling".into());
+        };
+        let body = Value::Object(tools::pick(a, &[("tool_name", "tool_name"), ("input", "input"), ("tool_use_id", "tool_use_id")]));
+        match self.request("POST", "/api/runs/permission", Some(&body), &[("x-xenonet-agent".into(), id)]).await {
+            Ok(v) => js::stringify(&v, 0),
+            Err(e) if e.status.is_some() => deny(e.message),
+            Err(_) => deny("XenoNet isn't running, so nobody can answer this prompt".into()),
+        }
+    }
+
     // A gateway token is never in an agent's context: the ask makes none
     // and answers with none, and a token that ever came back anyway is
     // withheld here, so a change on the server's side can't put one in a
@@ -382,6 +398,8 @@ fn encode_uri_component(s: &str) -> String {
     }
     out
 }
+
+const PERMISSION: &str = "Only for the sessions XenoNet runs itself: Claude Code calls it, as its permission prompt tool, when its settings don't settle a tool call. XenoNet asks your user in its console, on every machine with a window, and answers allow or deny; with no answer in ten minutes, deny. Never call it yourself: any other session is refused.";
 
 const START_SESSION: &str = "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once; whether the session started, and later how it ended, come to you as messages. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.";
 
@@ -460,6 +478,11 @@ fn defs(actor: bool) -> Vec<Def> {
     ];
     if !actor {
         d.push(def("ask_gateway_token", "Ask for an actor's gateway token", "Asks your user to let an actor's app (Muse, say) reach XenoNet from outside this machine. It makes no token and returns none: it leaves a card in XenoNet's window, and the token is made, and shown masked, only when your user clicks Allow there. Nothing changes until then, and the actor's old token, if any, keeps working. Never ask your user to paste the token to you or into a chat: tell them to Allow the card and copy the token from the window straight into the app that needs it. The actor must be one XenoNet knows (peers lists them), and an ask lapses after ten minutes.", object(vec![("actor", string().describe("The actor's slug, such as muse (or its id, actor:muse)."))]), &write));
+        d.push(def("permission", "Answer a permission prompt", PERMISSION, object(vec![
+            ("tool_name", string().describe("The tool Claude Code asks to run.")),
+            ("input", record().describe("What it calls the tool with.")),
+            ("tool_use_id", string().optional()),
+        ]), &write));
     } else {
         d.push(def("actor_heartbeat", "Say you're here", "Tells XenoNet you're here and what you're doing. Set presence to working or idle (offline says goodbye), and status to one line that sessions and your user see, such as \"Triaging issues in atlas-api\". Send one at least as often as the heartbeat you registered with, or XenoNet shows you away. The answer says whether messages wait for you (unread).", object(vec![
             ("presence", enumeration(&["working", "idle", "offline"]).optional()),
@@ -551,6 +574,7 @@ impl ServerHandler for Sessions {
             "start_session" => ctx.call_route("/api/start", &meta, body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode")])).await,
             "doctor" => ctx.doctor().await,
             "ask_gateway_token" => ctx.ask_gateway_token(&meta, a["actor"].as_str().unwrap_or_default()).await,
+            "permission" => Ok(ctx.permission(&meta, &a).await),
             "actor_heartbeat" => {
                 // Its own process is this server's parent, which XenoNet
                 // watches.

@@ -160,7 +160,7 @@ fn a_channel_session_gets_the_2025_handshake_and_its_messages() {
 
     let tools = s.ask(2, "tools/list", json!({}));
     let names: Vec<_> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(names, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "doctor", "ask_gateway_token"]);
+    assert_eq!(names, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "doctor", "ask_gateway_token", "permission"]);
 
     let call = s.ask(3, "tools/call", json!({ "name": "send", "arguments": { "to": "repo", "text": "hello", "reply_to": 7 } }));
     assert!(call["result"].get("isError").is_none(), "an answer, as the JS server gives it: {call}");
@@ -195,7 +195,7 @@ fn the_tools_are_the_js_servers() {
     let tools = s.ask(2, "tools/list", json!({}));
     let tools = tools["result"]["tools"].as_array().unwrap();
     let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "doctor", "ask_gateway_token"]);
+    assert_eq!(names, ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "doctor", "ask_gateway_token", "permission"]);
     for t in tools {
         assert_eq!(t["inputSchema"]["type"], json!("object"));
         assert_eq!(t["inputSchema"]["$schema"], json!("https://json-schema.org/draft/2020-12/schema"));

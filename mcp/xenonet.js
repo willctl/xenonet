@@ -152,6 +152,20 @@ async function doctor() {
   return text({ by: r.by ?? "this MCP server (XenoNet isn't running)", summary: r.summary, notes });
 }
 
+// A run's permission prompt: Claude Code calls the tool itself, and takes
+// allow or deny as JSON text. XenoNet answers only for the runs it started;
+// anything that goes wrong is a deny that says why.
+async function permission(ctx, body) {
+  const deny = (message) => ({ content: [{ type: "text", text: JSON.stringify({ behavior: "deny", message }) }] });
+  const me = caller(ctx);
+  if (!me || me.actor) return deny("XenoNet can't tell which session is calling");
+  try {
+    return { content: [{ type: "text", text: JSON.stringify(await post(XENONET, "/api/runs/permission", body, { "x-xenonet-agent": me.id })) }] };
+  } catch (err) {
+    return deny(err.status ? err.message : "XenoNet isn't running, so nobody can answer this prompt");
+  }
+}
+
 // A gateway token is never in an agent's context: the ask makes none and
 // answers with none, and a token that ever came back anyway is withheld
 // here, so a change on the server's side can't put one in a transcript.
@@ -168,6 +182,8 @@ async function askGatewayToken(ctx, actor) {
     throw new Error("XenoNet isn't running, so it can't show your user the ask. Your user can open it, and the doctor tool says what else is wrong.");
   }
 }
+
+const PERMISSION = "Only for the sessions XenoNet runs itself: Claude Code calls it, as its permission prompt tool, when its settings don't settle a tool call. XenoNet asks your user in its console, on every machine with a window, and answers allow or deny; with no answer in ten minutes, deny. Never call it yourself: any other session is refused.";
 
 const START_SESSION = "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once; whether the session started, and later how it ended, come to you as messages. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.";
 
@@ -418,6 +434,20 @@ function buildServer(actor = null) {
         annotations: write,
       },
       ({ actor }, ctx) => askGatewayToken(ctx, actor),
+    );
+    server.registerTool(
+      "permission",
+      {
+        title: "Answer a permission prompt",
+        description: PERMISSION,
+        inputSchema: z.object({
+          tool_name: z.string().describe("The tool Claude Code asks to run."),
+          input: z.record(z.string(), z.unknown()).describe("What it calls the tool with."),
+          tool_use_id: z.string().optional(),
+        }),
+        annotations: write,
+      },
+      ({ tool_name, input, tool_use_id }, ctx) => permission(ctx, { tool_name, input, tool_use_id }),
     );
   }
   if (servesActor()) registerActorTools(server, { write });
