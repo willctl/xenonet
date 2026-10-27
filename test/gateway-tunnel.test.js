@@ -204,11 +204,12 @@ test("the check, in words: no name in public DNS, nothing answering, the wrong c
   assert.equal((await checkReach({ host: null })).stage, "address");
 });
 
-test("what to tell each app: numbered steps with what each copies, the token only in Grok Bot's message, and the address alone when it changed", () => {
+test("what to tell each app: numbered steps with what each copies, the token never in a chat, and the address alone when it changed", () => {
   const url = "https://xenonet.example.com/mcp";
   const grok = handoff("grok-bot", { url, token: "xenonet_gateway_x" });
-  assert.deepEqual(grok.steps.map((s) => s.copy), ["message", null, "wake"]);
-  assert.match(grok.message, /Add an MCP server named "xenonet" by URL: https:\/\/xenonet\.example\.com\/mcp with the header Authorization: Bearer xenonet_gateway_x\./);
+  assert.deepEqual(grok.steps.map((s) => s.copy), ["message", "token", "wake"]);
+  assert.equal(grok.message.includes("xenonet_gateway_x"), false, "Grok Bot's token goes in its secret card, never its chat");
+  assert.match(grok.message, /Add an MCP server named "xenonet" by URL: https:\/\/xenonet\.example\.com\/mcp\. Ask me for its token with your secure secret card, named XENONET_GATEWAY_TOKEN/);
   const muse = handoff("muse", { url, token: "xenonet_gateway_x" });
   assert.deepEqual(muse.steps.map((s) => s.copy), ["message", "token"]);
   assert.equal(muse.message.includes("xenonet_gateway_x"), false, "Muse's key goes in its card, never its chat");

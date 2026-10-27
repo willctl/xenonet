@@ -105,9 +105,10 @@ the internet.
    - calls with a token that was replaced, taken away or expired, with
      the actor named from the revocation record.
 9. **What to tell each app, written out** (`core/actors/handoff.js`).
-   - **Grok Bot** is set up from its chat, and its MCP header can't use a
-     saved secret, so its message carries the token. The guide says to
-     delete that chat afterwards.
+   - **Grok Bot** is set up from its chat, and its message never carries
+     the token: it asks Grok Bot to request the token with its secure
+     secret card, whose value Grok Bot's model never sees, and to send it
+     as the MCP header.
    - **Muse's** message never carries the token: Muse asks for the key in
      its connector card's own field.
    - **Any other MCP host** gets the URL and the header.

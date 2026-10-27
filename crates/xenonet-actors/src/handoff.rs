@@ -26,10 +26,16 @@ pub fn handoff(product: Option<&str>, url: &str, host: &str, token: Option<&str>
             message: None,
         },
         (Some("a2a"), None) => Handoff { app: Some("A2A agent"), steps: vec![("Give the agent XenoNet's new Agent Card URL. Its token still works.", Some("url"))], message: None },
-        (Some("grok-bot"), Some(token)) => Handoff {
+        // The token goes into Grok Bot's secure secret card, which its
+        // model never sees, never into its chat.
+        (Some("grok-bot"), Some(_)) => Handoff {
             app: Some("Grok Bot"),
-            steps: vec![("Paste this into a new Grok Bot chat.", Some("message")), ("Once it's added, delete that chat: the token stays in it.", None), ("For answers within seconds, give XenoNet a way to wake it.", Some("wake"))],
-            message: Some(format!("Add an MCP server named \"xenonet\" by URL: {url} with the header Authorization: Bearer {token}. Then call its whoami tool and tell me what it says.")),
+            steps: vec![
+                ("Paste this into a Grok Bot chat.", Some("message")),
+                ("When Grok Bot asks for the token, paste it into its secret card, not the chat, and save it.", Some("token")),
+                ("For answers within seconds, give XenoNet a way to wake it.", Some("wake")),
+            ],
+            message: Some(format!("Add an MCP server named \"xenonet\" by URL: {url}. Ask me for its token with your secure secret card, named XENONET_GATEWAY_TOKEN, never in chat, and send it in the header Authorization: Bearer <the token>. Then call its whoami tool and tell me what it says.")),
         },
         (Some("grok-bot"), None) => Handoff {
             app: Some("Grok Bot"),
@@ -72,5 +78,14 @@ mod tests {
         assert_eq!(h.app, Some("A2A agent"));
         assert_eq!(h.steps.iter().map(|(_, copy)| *copy).collect::<Vec<_>>(), [Some("url"), Some("token")]);
         assert_eq!(h.message, None, "the token never goes in a message to paste");
+    }
+
+    #[test]
+    fn grok_bot_gets_its_token_in_its_secret_card_never_its_chat() {
+        let h = handoff(Some("grok-bot"), "https://x.example/mcp", "x.example", Some("xenonet_gateway_x"));
+        assert_eq!(h.steps.iter().map(|(_, copy)| *copy).collect::<Vec<_>>(), [Some("message"), Some("token"), Some("wake")]);
+        let message = h.message.unwrap();
+        assert!(!message.contains("xenonet_gateway_x"), "the token never goes in Grok Bot's chat");
+        assert!(message.starts_with("Add an MCP server named \"xenonet\" by URL: https://x.example/mcp. Ask me for its token with your secure secret card"));
     }
 }

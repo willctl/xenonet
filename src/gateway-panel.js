@@ -116,14 +116,19 @@ export function gatewayAskHtml(v, { gateway, a, name: who, again, a2a = null }) 
       <div class="m-foot"><button class="act" data-ac-back>Cancel</button><span class="grow"></span>${viaA2a}<button class="act primary" data-ac-gateway-make="${h(v.id)}" data-yours>${again ? "Make a new token" : "Connect"}</button></div>`;
 }
 
+// Whether the message to paste carries the token, so it's kept and shown
+// masked; one that only asks for it in the app's own field shows as is.
+const carriesToken = (how, v) => !!v?.token && !!how.message?.includes(v.token);
+
 // The steps, each with its Copy and what it copies: the message (masked
 // when it carries the token), the token, or the address.
 function stepsHtml(how, { url, v = null, name = "", done = false }) {
   const host = hostIn(url);
-  const copy = { message: v?.token ? `data-secret-copy="message"` : `data-ac-gateway-copy="${h(how.message ?? "")}" data-ac-copied="Message copied"`, token: `data-secret-copy="token"`, url: `data-ac-gateway-copy="${h(url)}" data-ac-copied="Address copied"` };
+  const secret = carriesToken(how, v);
+  const copy = { message: secret ? `data-secret-copy="message"` : `data-ac-gateway-copy="${h(how.message ?? "")}" data-ac-copied="Message copied"`, token: `data-secret-copy="token"`, url: `data-ac-gateway-copy="${h(url)}" data-ac-copied="Address copied"` };
   const label = { message: "Copy message", token: "Copy token", url: "Copy URL" };
   const body = {
-    message: () => (v?.token ? secretHtml("message", { attrs: "data-ac-handoff", block: true }) : `<pre class="ac-message" data-ac-handoff>${addrHtml(how.message, host)}</pre>`),
+    message: () => (secret ? secretHtml("message", { attrs: "data-ac-handoff", block: true }) : `<pre class="ac-message" data-ac-handoff>${addrHtml(how.message, host)}</pre>`),
     token: () => secretHtml("token", { attrs: "data-ac-token-text" }),
     url: () => `<code class="ac-url">${addrHtml(url, host)}</code>`,
   };
@@ -142,7 +147,7 @@ function stepsHtml(how, { url, v = null, name = "", done = false }) {
 export function gatewayTokenHtml(v, { url, product, name, done }) {
   const how = handoff(product, { url, token: v.token });
   keepSecret("token", v.token);
-  if (how.message) keepSecret("message", v.token, how.message);
+  if (carriesToken(how, v)) keepSecret("message", v.token, how.message);
   return `${stepsHtml(how, { url, v, name: how.app ?? name, done })}
       <div class="m-foot"><span class="pj-foot">XenoNet keeps only its hash, so it can't show it again.</span><span class="grow"></span><button class="act${done ? " primary" : ""}" data-ac-done>Done</button></div>`;
 }
