@@ -91,21 +91,26 @@ fn not_yours(why: &str) -> Fail {
     Fail::new(format!("this is yours to do, and {why}; run it in your own terminal or in XenoNet"), 1)
 }
 
-/// XenoNet's own Desktop, by its executable: an installed XenoNet, XenoNet
-/// Dev.app, or the Electron a checkout runs.
-fn is_desktop(exe: &str) -> bool {
-    let Some((app, _)) = exe.rsplit_once(".app/Contents/MacOS/") else { return false };
-    let name = app.rsplit('/').next().unwrap_or("");
-    name.starts_with("XenoNet") || name == "Electron"
+/// Why this process, the first of `chain`, came from under an agent or an
+/// actor's app anywhere above it, or None. No program above it counts as
+/// XenoNet's Desktop here: a program's name or path is anyone's to copy,
+/// so `copy cmd.exe %TEMP%\XenoNet.exe` would pass. Desktop's own calls
+/// reach a running service, which knows its Desktop by the connection.
+pub fn refusal(chain: &[xenonet_engine::procs::Link]) -> Option<Fail> {
+    chain.iter().skip(1).find_map(|link| match (link.agent, link.product) {
+        (Some(agent), _) => Some(not_yours(&format!("it came from under {}", an_agent(agent)))),
+        (None, Some(_)) => Some(not_yours("it came from under an actor's app")),
+        (None, None) => None,
+    })
 }
 
 /// Registering the service is yours to do (docs/design/always-on.md),
 /// never an agent's. A running service checks this process as it checks
 /// the routes that are yours, so XenoNet's own window passes and an agent
-/// doesn't. With none running, this process's parents are looked at the
-/// same way: the nearer of an agent, an actor's app and XenoNet's Desktop
-/// decides. Where XenoNet can't see processes (Linux, Windows), it passes,
-/// as the service's own check does.
+/// doesn't. With none running, this process's parents are looked at on
+/// macOS, Linux and Windows alike, and an agent or an actor's app anywhere
+/// above it refuses (`refusal`); elsewhere it passes, as the service's own
+/// check does.
 pub fn yours(env: &Value) -> Result<(), Fail> {
     if let Ok(verdict) = service_request(env, "yours", &json!({})) {
         if verdict.get("ok").and_then(Value::as_bool) == Some(true) {
@@ -115,22 +120,11 @@ pub fn yours(env: &Value) -> Result<(), Fail> {
         return Err(Fail::new(reason, 1));
     }
     let sys = xenonet_wire_engine::procs::System::new();
-    if !sys.procs.supported {
+    if !sys.procs.chains {
         return Ok(());
     }
     let chain = sys.procs.chain(&mut sys.io(), Some(f64::from(std::process::id())), true, true).map_err(|_| not_yours("XenoNet couldn't see which program asked"))?;
-    for link in chain.iter().skip(1) {
-        if let Some(agent) = link.agent {
-            return Err(not_yours(&format!("it came from under {}", an_agent(agent))));
-        }
-        if link.product.is_some() {
-            return Err(not_yours("it came from under an actor's app"));
-        }
-        if link.exe.clone().flatten().is_some_and(|f| is_desktop(&f)) {
-            return Ok(());
-        }
-    }
-    Ok(())
+    refusal(&chain).map_or(Ok(()), Err)
 }
 
 /// How the running service stands: its status, or None when none answers.
@@ -244,17 +238,57 @@ fn port_taken(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_err_and(|e| e.kind() == std::io::ErrorKind::AddrInUse)
 }
 
-// While another XenoNet service has the port, such as one Desktop started
-// before this was registered: waits for it to stop, saying so once.
-fn wait_for_port(port: u16, say: impl Fn(&str)) {
-    let mut said = false;
-    while port_taken(port) {
-        if !said {
-            say(&format!("another XenoNet service has port {port}; this one starts when it stops"));
-            said = true;
+/// How a wait for the port ended: it's free, or the service that had it
+/// was stopped with `xenonet service stop`, and this one stays stopped too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Waited {
+    Free,
+    Stopped,
+}
+
+/// While `taken`, waits (`pause`), saying so once (`waiting`). Once the
+/// port is free after a wait, a stop asked for meanwhile (`stopped`) means
+/// stay stopped. A port that was never taken is just free.
+pub fn wait_until_free(mut taken: impl FnMut() -> bool, mut stopped: impl FnMut() -> bool, mut pause: impl FnMut(), mut waiting: impl FnMut()) -> Waited {
+    let mut waited = false;
+    while taken() {
+        if !waited {
+            waiting();
+            waited = true;
         }
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        pause();
     }
+    if waited && stopped() {
+        Waited::Stopped
+    } else {
+        Waited::Free
+    }
+}
+
+/// Whether `xenonet service stop` left its stop file since `since`. One
+/// from before (a stop while nothing waited) says nothing about this wait.
+pub fn stopped_since(file: &str, since: std::time::SystemTime) -> bool {
+    std::fs::metadata(file).and_then(|m| m.modified()).is_ok_and(|at| at >= since)
+}
+
+// While another XenoNet service has the port, such as one Desktop started
+// before this was registered: waits for it to stop. If it was stopped with
+// `xenonet service stop`, this one stays stopped too (its stop file is
+// taken away), until the next login or `xenonet service start`; otherwise
+// it starts now.
+fn wait_for_port(port: u16, stop_file: &str, say: impl Fn(&str)) -> Waited {
+    let since = std::time::SystemTime::now();
+    let waited = wait_until_free(
+        || port_taken(port),
+        || stopped_since(stop_file, since),
+        || std::thread::sleep(std::time::Duration::from_secs(1)),
+        || say(&format!("another XenoNet service has port {port}; this one starts when it stops")),
+    );
+    if waited == Waited::Stopped {
+        let _ = std::fs::remove_file(stop_file);
+        say("that service was stopped with xenonet service stop, so this one stays stopped until you next log in or run xenonet service start");
+    }
+    waited
 }
 
 /// The settings a scheduled task gives `service run` as its arguments
@@ -303,6 +337,7 @@ pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
     env.shift_remove("XENONET_EXEC");
     shell_env(&mut env);
     let port: u16 = runtime::port_of(&env).parse().unwrap_or(47840);
+    let stop_file = runtime::stop_file(&env, &machine());
     let mut cmd = std::process::Command::new(&bin);
     xenonet_base::process::Background::no_window(&mut cmd);
     cmd.arg("serve").env_clear();
@@ -312,13 +347,17 @@ pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        wait_for_port(port, |t| eprintln!("[xenonet] {t}"));
+        // A clean exit: launchd and systemd start it again only after a
+        // failure.
+        if wait_for_port(port, &stop_file, |t| eprintln!("[xenonet] {t}")) == Waited::Stopped {
+            return Ok(0);
+        }
         let err = cmd.exec();
         Err(Fail::error(format!("couldn't run {bin}: {err}")))
     }
     #[cfg(not(unix))]
     {
-        supervise(cmd, &bin, port, &env)
+        supervise(cmd, &bin, port, &stop_file, &env)
     }
 }
 
@@ -328,9 +367,10 @@ pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
 /// and systemd do, starts it again RESTART_S seconds after it fails unless
 /// it keeps failing (supervisor::Restarts, systemd's limits), and keeps its
 /// own process and the service's in the pids file for `service status`. A
-/// clean stop ends it too, until the next sign-in.
+/// clean stop ends it too, until the next sign-in, and so does `xenonet
+/// service stop` of the service it was waiting on.
 #[cfg(not(unix))]
-fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, env: &Env) -> Result<i32, Fail> {
+fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, stop_file: &str, env: &Env) -> Result<i32, Fail> {
     use std::io::Write;
     use xenonet_components::supervisor::{BURST, BURST_S, RESTART_S};
     let pids = place().filter(|p| p.kind == supervisor::Kind::TaskScheduler).map(|p| p.pids());
@@ -352,7 +392,10 @@ fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, env: &Env) ->
     };
     let open = || std::fs::OpenOptions::new().create(true).append(true).open(&log_file).map_err(|e| Fail::error(format!("couldn't open {log_file}: {e}")));
     keep(None, None);
-    wait_for_port(port, note);
+    if wait_for_port(port, stop_file, note) == Waited::Stopped {
+        done();
+        return Ok(0);
+    }
     let mut restarts = supervisor::Restarts::default();
     let mut last = None;
     loop {
@@ -378,7 +421,10 @@ fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, env: &Env) ->
         keep(None, last);
         note(&format!("the service stopped unexpectedly (exit code {code}); starting it again in {RESTART_S} seconds"));
         std::thread::sleep(std::time::Duration::from_secs(RESTART_S.into()));
-        wait_for_port(port, note);
+        if wait_for_port(port, stop_file, note) == Waited::Stopped {
+            done();
+            return Ok(0);
+        }
     }
 }
 
@@ -386,14 +432,25 @@ fn supervise(mut cmd: std::process::Command, bin: &str, port: u16, env: &Env) ->
 mod tests {
     use super::*;
 
+    // A process of a chain as procs gives it.
+    fn link(pid: f64, exe: &str, agent: Option<&'static str>) -> xenonet_engine::procs::Link {
+        let row = xenonet_engine::procs::Row { pid, ppid: pid - 1.0, start: pid, program: exe.into() };
+        xenonet_engine::procs::Link { row, exe: Some(Some(exe.into())), agent, product: None }
+    }
+
     #[test]
-    fn desktops_are_xenonets_own_apps() {
-        assert!(is_desktop("/Applications/XenoNet.app/Contents/MacOS/XenoNet"));
-        assert!(is_desktop("/Users/w/Applications/XenoNet Dev.app/Contents/MacOS/XenoNet Dev"));
-        assert!(is_desktop("/w/xenonet/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"));
-        assert!(!is_desktop("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"));
-        assert!(!is_desktop("/Applications/Claude.app/Contents/MacOS/Claude"));
-        assert!(!is_desktop("/usr/local/bin/xenonet"));
+    fn an_agent_anywhere_above_refuses_whatever_runs_between() {
+        let me = link(40.0, "C:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe", None);
+        let claude = link(10.0, "C:\\Users\\me\\.local\\bin\\claude.exe", Some("claude"));
+        // cmd.exe copied to %TEMP%\XenoNet.exe, which an agent ran.
+        let renamed = link(30.0, "C:\\Users\\me\\AppData\\Local\\Temp\\XenoNet.exe", None);
+        let desktop = link(20.0, "C:\\Users\\me\\AppData\\Local\\Programs\\XenoNet\\XenoNet.exe", None);
+        let refused = refusal(&[me.clone(), renamed, claude.clone()]).map(|f| f.message);
+        assert_eq!(refused.as_deref(), Some("this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet"));
+        assert!(refusal(&[me.clone(), desktop.clone(), claude]).is_some(), "nor does the installed Desktop's path vouch for what's above it");
+        assert!(refusal(&[me.clone(), desktop, link(5.0, "C:\\Windows\\explorer.exe", None)]).is_none());
+        // This process itself isn't looked at: it's the xenonet command.
+        assert!(refusal(&[link(1.0, "/Users/me/.local/bin/claude", Some("claude"))]).is_none());
     }
 
     #[test]
@@ -416,6 +473,76 @@ mod tests {
         let settings: Vec<String> = ["XENONET_STATE_DIR=D:\\Xeno Net\\state", "PATH=C:\\elsewhere", "XENONET_HOSTS=1", "plain"].map(String::from).to_vec();
         assert_eq!(with_settings(&given, &settings), json!({ "XENONET_PORT": "47850", "XENONET_STATE_DIR": "D:\\Xeno Net\\state", "XENONET_HOSTS": "1" }));
         assert_eq!(with_settings(&given, &[]), given);
+    }
+
+    #[test]
+    fn a_wait_for_the_port_ends_free_or_stopped() {
+        // Taken twice, then free; a stop meanwhile or not.
+        let run = |stop: bool| {
+            let (mut left, mut said, mut pauses) = (2, 0, 0);
+            let waited = wait_until_free(
+                || {
+                    left -= 1;
+                    left >= 0
+                },
+                || stop,
+                || pauses += 1,
+                || said += 1,
+            );
+            (waited, said, pauses)
+        };
+        assert_eq!(run(false), (Waited::Free, 1, 2), "said once, waited twice");
+        assert_eq!(run(true), (Waited::Stopped, 1, 2));
+        // A port that was free from the start: a stop file says nothing.
+        assert_eq!(wait_until_free(|| false, || true, || {}, || {}), Waited::Free);
+    }
+
+    #[test]
+    fn only_a_stop_since_the_wait_began_counts() {
+        let dir = std::env::temp_dir().join(format!("xenonet-stop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("service-47999.stop").to_string_lossy().into_owned();
+        let before = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        assert!(!stopped_since(&file, before), "no file");
+        std::fs::write(&file, "{}").unwrap();
+        assert!(stopped_since(&file, before));
+        assert!(!stopped_since(&file, std::time::SystemTime::now() + std::time::Duration::from_secs(60)), "an earlier stop's");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_supervisor_waiting_on_a_service_that_is_stopped_stays_stopped() {
+        let dir = std::env::temp_dir().join(format!("xenonet-held-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("service.stop").to_string_lossy().into_owned();
+        // The service Desktop started, holding the port, and `xenonet
+        // service stop` a moment into the wait: the stop file first, then
+        // the port freed.
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        let f = file.clone();
+        let stopper = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::fs::write(&f, "{}").unwrap();
+            drop(held);
+        });
+        let said = std::sync::Mutex::new(Vec::new());
+        let waited = wait_for_port(port, &file, |t| said.lock().unwrap().push(t.to_string()));
+        stopper.join().unwrap();
+        assert_eq!(waited, Waited::Stopped);
+        assert!(!std::path::Path::new(&file).exists(), "the stop file is taken away once it's done its work");
+        let said = said.into_inner().unwrap();
+        assert!(said[0].contains(&format!("port {port}")) && said[1].contains("stays stopped"), "{said:?}");
+        // With no stop, the port freed means start.
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        let freer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(held);
+        });
+        assert_eq!(wait_for_port(port, &file, |_| {}), Waited::Free);
+        freer.join().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

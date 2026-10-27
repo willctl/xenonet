@@ -17,17 +17,23 @@
 import path from "node:path";
 import { APPS } from "./apps.js";
 
+// Claude desktop's own main executable on Windows (a path with / for \).
+const CLAUDE_DESKTOP = /\/AnthropicClaude\/app-[^/]+\/claude\.exe$/i;
+
 export const PROCESSES = {
   // The CLI, the native install under ~/.local/share/claude/versions, or
-  // the one Claude desktop runs from its claude.app.
+  // the one Claude desktop runs from its claude.app; on Windows claude.exe,
+  // but for Claude desktop's own main executable, which is called that too:
+  // AnthropicClaude\app-<version>\claude.exe. The Claude Code Claude desktop
+  // runs, from elsewhere in that folder, is Claude Code.
   claude: {
-    program: (p, base) => base === "claude" || /\/claude\/versions\/[^/]+$/.test(p),
+    program: (p, base) => base === "claude" || (base === "claude.exe" && !CLAUDE_DESKTOP.test(p)) || /\/claude\/versions\/[^/]+$/.test(p),
     script: (args) => /@anthropic-ai\/claude-code\/cli\.js/.test(args),
     pinsByHook: true,
   },
-  // The CLI, or the one the ChatGPT app bundles.
+  // The CLI (codex.exe on Windows), or the one the ChatGPT app bundles.
   codex: {
-    program: (_p, base) => base === "codex" || /^codex-(aarch64|x86_64)/.test(base),
+    program: (_p, base) => base === "codex" || base === "codex.exe" || /^codex-(aarch64|x86_64)/.test(base),
     script: (args) => /@openai\/codex\//.test(args),
   },
   // The grok binary its installer puts in ~/.grok/downloads and links
@@ -58,6 +64,7 @@ export function agentOf(program, args = "", agents = AGENTS) {
   const p = String(program ?? "").replace(/\\/g, "/");
   const base = path.posix.basename(p);
   for (const a of agents) if (a.program(p, base)) return a.id;
-  if (/^(node|bun)$/.test(base)) for (const a of agents) if (a.script?.(args)) return a.id;
+  // A package's path, with / for \ as on Windows.
+  if (/^(node|bun)(\.exe)?$/.test(base)) for (const a of agents) if (a.script?.(String(args).replace(/\\/g, "/"))) return a.id;
   return null;
 }

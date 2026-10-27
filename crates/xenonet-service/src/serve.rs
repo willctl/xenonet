@@ -555,7 +555,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             loop {
                 let Ok((stream, remote)) = listener.accept().await else { continue };
                 let local = stream.local_addr().unwrap_or(SocketAddr::from(([127, 0, 0, 1], port)));
-                let peer = Peer { remote, local };
+                let peer = Peer::new(remote, local);
                 let ctx = ctx.clone();
                 tokio::spawn(async move {
                     let service = service_fn(move |req| {

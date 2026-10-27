@@ -2,7 +2,7 @@ Manage the background service.
 
   xenonet service start      start it, unless it's running
   xenonet service status     how it is, and whether it starts at login (JSON)
-  xenonet service stop       stop it; refused while terminals run, unless --force
+  xenonet service stop       stop it, until start or your next login; refused while terminals run, unless --force
   xenonet service install    start it at login, and again if it stops unexpectedly
   xenonet service uninstall  stop starting it at login, and stop the copy that started
   xenonet service run        run it in the foreground, as launchd, systemd and Task Scheduler do

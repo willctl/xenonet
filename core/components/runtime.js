@@ -9,6 +9,12 @@ import { SERVICE_API, negotiate } from "./protocol.js";
 
 export const runtimeDir = (env = process.env) => env.XENONET_RUNTIME_DIR || path.join(appDir("state", { env }), "runtime");
 export const descriptorFile = (env = process.env) => path.join(runtimeDir(env), `service-${env.XENONET_PORT || 47840}.json`);
+// What `xenonet service stop` leaves beside the descriptor: a supervisor
+// that was waiting for another service to give up the port (one Desktop
+// started before the service was registered) reads it as "stay stopped"
+// rather than starting its own the moment the port is free
+// (crates/xenonet-cli/src/cores/supervisor.rs).
+export const stopFile = (env = process.env) => path.join(runtimeDir(env), `service-${env.XENONET_PORT || 47840}.stop`);
 
 // The xenonet binary's name, and the launcher's own copy of it, which
 // never moves (docs/design/contracts.md, section 12).

@@ -126,6 +126,36 @@ pub fn parse_netstat(text: String, local_port: MaybeJson, remote_port: MaybeJson
     procs::parse_netstat(&text, &xenonet_engine::js::template(local_port.0.as_ref()), &xenonet_engine::js::template(remote_port.0.as_ref()))
 }
 
+/// What PROCESSES answers, as [[pid, row]] pairs and [[pid, exe]] pairs.
+#[napi(js_name = "procsParseTable")]
+pub fn parse_table(text: String) -> Json {
+    let (table, exes) = procs::parse_table(&text);
+    Json(json!([table_json(&table), strings_json(&exes)]))
+}
+
+#[napi(js_name = "procsParseNetstatWindows")]
+pub fn parse_netstat_windows(text: String, local_port: MaybeJson, remote_port: MaybeJson) -> Option<f64> {
+    procs::parse_netstat_windows(&text, &xenonet_engine::js::template(local_port.0.as_ref()), &xenonet_engine::js::template(remote_port.0.as_ref()))
+}
+
+#[napi(js_name = "procsParseProcNetTcp")]
+pub fn parse_proc_net_tcp(text: String, local_port: u32, remote_port: u32) -> Option<String> {
+    procs::parse_proc_net_tcp(&text, u16::try_from(local_port).ok()?, u16::try_from(remote_port).ok()?)
+}
+
+/// procs' own calls (PROCESSES, TCP_PEER, COMMAND_LINE) answered from this
+/// system, for the twin's default exec: the text, or null for any other
+/// call. One that can't be read throws.
+#[napi(js_name = "procsNativeAnswer")]
+pub fn native_answer(file: String, args: Vec<String>) -> napi::Result<Option<String>> {
+    let call = Call { file, args, share: None };
+    match xenonet_engine::procs_native::answer(&call) {
+        None => Ok(None),
+        Some(Ok(text)) => Ok(Some(text)),
+        Some(Err(f)) => Err(napi::Error::from_reason(f.message)),
+    }
+}
+
 #[napi(js_name = "procsSelfTest")]
 pub fn self_test(me: f64, peer: Option<f64>, first: MaybeJson) -> Json {
     let first = first.0.filter(Value::is_object);
@@ -158,6 +188,11 @@ impl ProcsCore {
     #[napi(getter)]
     pub fn supported(&self) -> bool {
         self.inner.supported
+    }
+
+    #[napi(getter)]
+    pub fn chains(&self) -> bool {
+        self.inner.chains
     }
 
     /// The table, as [pid, row] pairs.

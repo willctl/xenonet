@@ -487,10 +487,11 @@ async fn listen(ctx: Arc<Ctx>, port: u16) -> tokio::task::JoinHandle<()> {
             let Ok((stream, remote)) = listener.accept().await else { return };
             let local = stream.local_addr().unwrap();
             let ctx = ctx.clone();
+            let peer = Peer::new(remote, local);
             tokio::spawn(async move {
                 let answer = hyper::service::service_fn(move |req| {
                     let ctx = ctx.clone();
-                    async move { Ok::<_, Infallible>(xenonet_service::serve::to_response(xenonet_service::serve::handle(&ctx, req, Peer { remote, local }).await)) }
+                    async move { Ok::<_, Infallible>(xenonet_service::serve::to_response(xenonet_service::serve::handle(&ctx, req, peer).await)) }
                 });
                 let _ = hyper::server::conn::http1::Builder::new().serve_connection(hyper_util::rt::TokioIo::new(stream), answer).await;
             });

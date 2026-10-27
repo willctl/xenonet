@@ -6,7 +6,7 @@ XenoNet reads Claude Code's, Codex's and Grok Build's files. It acts only when y
 
 | Data | Source | Stability |
 | --- | --- | --- |
-| Projects and repo status | A scan of `~/Projects`, described in [Finding projects](projects.md), and `git status --porcelain -b` every 20 seconds | Yours |
+| Projects and repo status | A scan of `~/Projects`, described in [Finding projects](projects.md), and `git status --porcelain -b` when a repo may have changed, looked for every 20 seconds (see [Repo status](privacy.md#repo-status)) | Yours |
 | Codex sessions and transcripts | `codex app-server` JSON-RPC, started from the ChatGPT desktop app's bundled binary or the Codex CLI | Official API, labelled experimental |
 | Claude Code sessions and transcripts | Its transcript files in `~/.claude/projects`, or under `CLAUDE_CONFIG_DIR`, read as the Agent SDK's `listSessions` and `getSessionMessages` read them | Internal format, best effort |
 | Grok Build sessions and transcripts | Each session's folder under `~/.grok/sessions`, or `GROK_HOME`'s: its `summary.json`, its `updates.jsonl` of ACP session updates, and its `usage.json` of tokens and cost. See [Grok Build in XenoNet](../design/grok-build.md). | `summary.json` is in Grok's guide; the rest is undocumented, best effort |

@@ -26,11 +26,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     match action {
         "start" => start(&env),
         "status" => Ok(status(&env)),
-        "stop" => {
-            let answer = cores::service_request(&env, action, &json!({ "force": flags.on("force") }))?;
-            print(stringify(&answer, 0));
-            Ok(0)
-        }
+        "stop" => stop(&env, flags),
         "install" => install(&env, flags),
         "uninstall" => uninstall(&env, flags),
         "run" => login::run(&env, args.get(1..).unwrap_or_default()),
@@ -43,10 +39,34 @@ fn port_of(env: &Value) -> String {
     env.get("XENONET_PORT").and_then(Value::as_str).map(str::to_string).or_else(|| sys::var("XENONET_PORT")).unwrap_or_else(|| "47840".into())
 }
 
+/// Stops the service that answers. The stop file goes down first: a
+/// supervisor waiting for the port, because a service Desktop started had
+/// it before the supervisor's own could start, sees it and stays stopped
+/// too, rather than starting its copy the moment this one frees the port.
+/// A stop that's refused (terminals open) takes it away again.
+fn stop(env: &Value, flags: &Flags) -> Done {
+    let file = cores::stop_file(env);
+    if let Some(dir) = std::path::Path::new(&file).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&file, stringify(&json!({ "at": crate::out::now(), "pid": std::process::id() }), 0));
+    match cores::service_request(env, "stop", &json!({ "force": flags.on("force") })) {
+        Ok(answer) => {
+            print(stringify(&answer, 0));
+            Ok(0)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&file);
+            Err(e)
+        }
+    }
+}
+
 /// Starts the service unless one answers. One registered to start at login
 /// is started by its supervisor, so there's never a second copy beside
-/// the one it keeps.
+/// the one it keeps. A stop file an earlier stop left is cleared first.
 fn start(env: &Value) -> Done {
+    let _ = std::fs::remove_file(cores::stop_file(env));
     cores::recover_service_update(env)?;
     if login::running(env).is_some() {
         print(stringify(&json!({ "status": "reused" }), 0));

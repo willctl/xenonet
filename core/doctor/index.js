@@ -173,10 +173,24 @@ function grokBin(ctx) {
 // sets (allow_managed_hooks_only).
 const grokPolicies = (ctx) => ["/etc/grok/requirements.toml", "/etc/grok/managed_config.toml", inGrok(ctx, "requirements.toml"), inGrok(ctx, "managed_config.toml")];
 
+// Codex's command: the ChatGPT app's codex (ctx.codexBin, when it's
+// there) or a codex on PATH, or null when there's neither. That's Codex not
+// installed, which is no problem: XenoNet shows its threads once it is.
+function codexBin(ctx) {
+  const bins = [ctx.codexBin, ctx.which("codex")].filter(Boolean);
+  const bin = bins.find((b) => path.isAbsolute(b) && ctx.exists(b)) ?? bins[0];
+  if (!bin || (path.isAbsolute(bin) && !ctx.exists(bin)) || (!path.isAbsolute(bin) && !ctx.which(bin))) return null;
+  return bin;
+}
+// The map's sources for apps that aren't installed: what they can't read
+// isn't a failure. Only Codex's runs a program of the app's own.
+const absentSources = (ctx) => (codexBin(ctx) ? [] : ["codex"]);
+
 // The sources of the map that xenonet.sources reports as failed: Xenolith
-// and identities are extras, so theirs go without a word.
+// and identities are extras, so theirs go without a word, and so do those
+// of an app that isn't installed (`absent`).
 const OPTIONAL_SOURCES = new Set(["wiki", "identities"]);
-const failedSources = (health) => (health?.sources ?? []).filter((s) => !s.ok && !OPTIONAL_SOURCES.has(s.name));
+const failedSources = (health, absent = []) => (health?.sources ?? []).filter((s) => !s.ok && !OPTIONAL_SOURCES.has(s.name) && !absent.includes(s.name));
 
 export const CHECKS = [
   // ---------- XenoNet ----------
@@ -196,11 +210,12 @@ export const CHECKS = [
     title: "XenoNet can read what it shows",
     async run(ctx) {
       if (!ctx.health) return skip("needs XenoNet running");
-      const bad = failedSources(ctx.health);
-      const counts = Object.fromEntries(ctx.health.sources.filter((s) => s.ok).map((s) => [s.name, s.count]));
+      const absent = absentSources(ctx);
+      const bad = failedSources(ctx.health, absent);
+      const counts = Object.fromEntries(ctx.health.sources.filter((s) => s.ok && !absent.includes(s.name)).map((s) => [s.name, s.count]));
       if (bad.length) return fail(bad.map((s) => `${s.name}: ${s.error ?? "failed"}`).join("; "), "Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.");
       const parts = [counts.projects != null && plural(counts.projects, "project"), counts.claude != null && plural(counts.claude, "Claude session"), counts.codex != null && plural(counts.codex, "Codex thread"), counts.grok ? plural(counts.grok, "Grok Build session") : null].filter(Boolean);
-      return ok(`reading ${parts.join(", ")}`);
+      return ok(`reading ${parts.join(", ")}${absent.includes("codex") ? "; Codex isn't installed" : ""}`);
     },
   },
   {
@@ -216,12 +231,15 @@ export const CHECKS = [
       // that reads for a source xenonet.sources reports as failed would only
       // say the same again, so it's left to that check.
       // The check can be shown alone (xenonet doctor --only xenonet.blocks), so
-      // it names those sources rather than pointing at another check.
-      const reported = new Set(failedSources(ctx.health).map((s) => s.name));
+      // it names those sources rather than pointing at another check. One
+      // that reads for an app that isn't installed has nothing to read.
+      const absent = absentSources(ctx);
+      const reported = new Set(failedSources(ctx.health, absent).map((s) => s.name));
       const wrong = blocks.filter((b) => b.state === "failed" || b.state === "degraded");
-      const bad = wrong.filter((b) => !reported.has(b.source)).sort((a, b) => (a.state === "failed" ? 0 : 1) - (b.state === "failed" ? 0 : 1));
+      const bad = wrong.filter((b) => !reported.has(b.source) && !absent.includes(b.source)).sort((a, b) => (a.state === "failed" ? 0 : 1) - (b.state === "failed" ? 0 : 1));
       const left = [...new Set(wrong.filter((b) => reported.has(b.source)).map((b) => b.source))];
-      if (!bad.length) return ok(`${plural(blocks.length, "part")}, none with a problem${left.length ? ` besides those reading for ${left.join(" and ")}, which XenoNet can't read` : ""}`);
+      const besides = [left.length ? `those reading for ${left.join(" and ")}, which XenoNet can't read` : null, wrong.some((b) => absent.includes(b.source)) ? "those reading for Codex, which isn't installed" : null].filter(Boolean);
+      if (!bad.length) return ok(`${plural(blocks.length, "part")}, none with a problem${besides.length ? ` besides ${besides.join(", and ")}` : ""}`);
       const say = (list) => list.map((b) => `${b.name} ${b.state === "failed" ? "isn't working" : "is partly working"}${b.lastError ? ` (${tilde(b.lastError.message, ctx.home)})` : ""}`).join("; ");
       // A source that missed one beat (a timeout, a file half written) is
       // fine again a few seconds later: only a part that's stayed that way
@@ -356,9 +374,8 @@ export const CHECKS = [
     group: "Codex",
     title: "Codex is installed",
     async run(ctx) {
-      const bins = [ctx.codexBin, ctx.which("codex")].filter(Boolean);
-      const bin = bins.find((b) => path.isAbsolute(b) && ctx.exists(b)) ?? bins[0];
-      if (!bin || (path.isAbsolute(bin) && !ctx.exists(bin)) || (!path.isAbsolute(bin) && !ctx.which(bin))) return warn("no Codex: neither the ChatGPT app's codex nor a codex command", "Install the ChatGPT desktop app or the Codex CLI.");
+      const bin = codexBin(ctx);
+      if (!bin) return info("not installed; XenoNet shows Codex's threads once it is", "To use Codex, install the ChatGPT desktop app or the Codex CLI.");
       const v = await ctx.run(bin, ["--version"], 4000);
       const version = (v.stdout.match(/\d+\.\d+\.\d+[\w.-]*/) ?? [])[0];
       return ok(`${version ? `version ${version}, ` : ""}${tilde(bin, ctx.home)}`);
@@ -369,7 +386,7 @@ export const CHECKS = [
     group: "Codex",
     title: "Codex is signed in",
     async run(ctx) {
-      const bin = ctx.which("codex") ?? ctx.codexBin;
+      const bin = ctx.which("codex") ?? codexBin(ctx);
       if (!bin) return skip("Codex isn't installed");
       const r = await ctx.run(bin, ["login", "status"], 6000);
       const text = `${r.stdout}${r.stderr}`.trim();
@@ -562,7 +579,7 @@ export const CHECKS = [
     group: "Sessions",
     title: "Sessions can't pass for each other",
     async run(ctx) {
-      if (ctx.platform !== "darwin") return info("XenoNet can't see yet which process sends a request on this system, so it takes each session at its word");
+      if (ctx.platform !== "darwin") return info("XenoNet doesn't check on this system yet that a request in a session's name comes from that session's process, so it takes each session at its word; what's yours to do is still refused from under an agent");
       const t = await ctx.procs();
       // On macOS an agent's request goes through unchecked only when
       // netstat has no line for it at all, so agents' tools keep working;
@@ -696,7 +713,7 @@ export const CHECKS = [
     title: "Actors' tokens are held to their processes",
     async run(ctx) {
       if (ctx.actors === null) return skip("actors are off here (XENONET_ACTORS=off)");
-      if (ctx.platform !== "darwin") return info("XenoNet can't see yet which process sends a request on this system, so an actor's token alone decides");
+      if (ctx.platform !== "darwin") return info("XenoNet doesn't hold actors' tokens to their processes on this system yet, so an actor's token alone decides");
       const t = await ctx.procs();
       // On macOS a request whose process XenoNet can't see is refused, an
       // actor's and yours alike (core/engine/verify.js).
@@ -792,10 +809,12 @@ export const CHECKS = [
 // accept them by its path. On a Mac, socketfilterfw says whether the
 // firewall is on, blocks everything, or lets the service's program in;
 // --getappblocked says "permitted" of any path, even one that isn't there,
-// so the list of programs decides. It reads ctx.network() (this machine's
-// part in its network), the service's own program (self.exe) and the one a
-// restart runs (ctx.restartExe()), which only the service's machine
-// answers, and ctx.realpath().
+// so the list of programs decides. On Windows, PowerShell says which of
+// Windows Defender Firewall's profiles are on, which this computer's
+// networks use, and the inbound rules for the service's program. It reads
+// ctx.network() (this machine's part in its network), the service's own
+// program (self.exe) and the one a restart runs (ctx.restartExe()), which
+// only the service's machine answers, and ctx.realpath().
 const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
 
 // --getglobalstate's State: 0 off, 1 on, 2 on and blocking every incoming
@@ -859,6 +878,73 @@ async function listing(ctx, apps, file) {
   return null;
 }
 
+// Windows Defender Firewall, read through PowerShell's NetSecurity cmdlets,
+// whose answers don't change with the system's language: each profile's
+// state, the profiles of the networks this computer is on, and the inbound
+// rules for each of the service's programs. Only read: XenoNet never changes
+// a rule.
+const POWERSHELL = "powershell.exe";
+const PROFILES = { Public: "Public", Private: "Private", DomainAuthenticated: "Domain" };
+const psQuote = (s) => `'${String(s).replaceAll("'", "''")}'`;
+function windowsFirewallScript(paths) {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$paths = @(${paths.map(psQuote).join(", ")})`,
+    "$profiles = @(Get-NetFirewallProfile | ForEach-Object { [pscustomobject]@{ name = [string]$_.Name; enabled = [string]$_.Enabled; inbound = [string]$_.DefaultInboundAction; rules = [string]$_.AllowInboundRules } })",
+    "$networks = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.NetworkCategory })",
+    "$rules = @(Get-NetFirewallApplicationFilter | ForEach-Object { $p = if ($_.Program) { [Environment]::ExpandEnvironmentVariables($_.Program) } else { '' }; foreach ($want in $paths) { if ($p -ieq $want) { $f = $_; Get-NetFirewallRule -AssociatedNetFirewallApplicationFilter $f | Where-Object { [string]$_.Direction -eq 'Inbound' } | ForEach-Object { [pscustomobject]@{ program = $want; name = [string]$_.DisplayName; enabled = [string]$_.Enabled; action = [string]$_.Action; profile = [string]$_.Profile } } } } })",
+    "[pscustomobject]@{ profiles = $profiles; networks = $networks; rules = $rules } | ConvertTo-Json -Depth 4 -Compress",
+  ].join("\n");
+}
+
+// The netsh line that lets a program in, run as administrator.
+const netshAllow = (exe, profiles) => `netsh advfirewall firewall add rule name="XenoNet Service" dir=in action=allow program="${exe}" enable=yes profile=${profiles.map((p) => p.toLowerCase()).join(",")}`;
+// "Private network", "Domain and Private networks".
+const networksOf = (names) => `${names.join(" and ")} network${names.length > 1 ? "s" : ""}`;
+
+// What the firewall does to the service's programs (`exe`, and `next`, the
+// one a restart runs) on the networks this computer is on: off, letting
+// them in, blocking every incoming connection, blocking them, or not having
+// let them in yet, with the netsh line that lets them in. A public network
+// is no place to accept connections, so that fix makes it private first.
+async function windowsFirewall(ctx, exe, next) {
+  const paths = next ? [exe, next] : [exe];
+  const fix = (profiles) => {
+    const want = [...new Set(profiles.map((n) => (n === "Public" ? "Private" : n)))];
+    const lines = paths.map((p) => netshAllow(p, want)).join(", then ");
+    return profiles.includes("Public") ? `This network is Public: make it Private in Settings › Network & internet, in its properties. Then in a terminal run as administrator: ${lines}` : `In a terminal run as administrator: ${lines}`;
+  };
+  const r = await ctx.run(POWERSHELL, ["-NoProfile", "-NonInteractive", "-Command", windowsFirewallScript(paths)], 30000);
+  let seen = null;
+  try {
+    seen = r?.code === 0 && !r.timedOut ? JSON.parse(String(r.stdout ?? "")) : null;
+  } catch {}
+  const shown = tilde(exe, ctx.home);
+  const list = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
+  if (!seen || typeof seen !== "object" || !list(seen.profiles).length) return info("XenoNet couldn't read Windows Defender Firewall's settings", `If other machines can't reach this gateway, let ${shown} in. ${fix(["Private"])}`);
+  const profile = (name) => list(seen.profiles).find((p) => p?.name === name) ?? {};
+  // The profiles of the networks this computer is on (all three when it
+  // can't tell), and those the firewall is on for.
+  const known = [...new Set(list(seen.networks).map((n) => PROFILES[n]).filter(Boolean))];
+  const used = known.length ? known : ["Domain", "Private", "Public"];
+  const on = used.filter((name) => profile(name).enabled === "True");
+  if (!on.length) return ok(`Windows Defender Firewall is off for ${networksOf(used)}`);
+  const all = on.filter((name) => profile(name).rules === "False");
+  if (all.length) return warn(`Windows Defender Firewall blocks every incoming connection on ${networksOf(all)}, so no other machine can reach this gateway`, "Turn off Blocks all incoming connections: Windows Security › Firewall & network protection, then that network's profile.");
+  const covers = (rule, name) => rule?.enabled === "True" && (rule.profile === "Any" || String(rule.profile).split(/,\s*/).includes(name));
+  const rulesOf = (path) => list(seen.rules).filter((rule) => String(rule?.program).toLowerCase() === path.toLowerCase());
+  const blocking = paths.flatMap(rulesOf).filter((rule) => rule.action === "Block" && on.some((name) => covers(rule, name)));
+  const blocked = on.filter((name) => blocking.some((rule) => covers(rule, name)));
+  if (blocked.length) {
+    const names = [...new Set(blocking.map((rule) => `"${rule.name}"`))].join(", ");
+    return warn(`Windows Defender Firewall blocks ${shown} on ${networksOf(blocked)}, so other machines can't reach this gateway`, `Turn off the rule that blocks it (${names}) in Windows Defender Firewall with Advanced Security › Inbound Rules. ${fix(blocked)}`);
+  }
+  const open = (path, name) => profile(name).inbound === "Allow" || rulesOf(path).some((rule) => rule.action === "Allow" && covers(rule, name));
+  const missing = on.filter((name) => paths.some((path) => !open(path, name)));
+  if (!missing.length) return ok(`Windows Defender Firewall lets ${shown} in on ${networksOf(on)}${next ? `, and ${tilde(next, ctx.home)}, which the service runs from after a restart` : ""}`);
+  return warn(`Windows Defender Firewall hasn't let ${shown} in on ${networksOf(missing)}, so other machines can't reach this gateway`, fix(missing));
+}
+
 // What socketfilterfw said, when it said it: its output, or null.
 async function said(ctx, args) {
   const r = await ctx.run(SOCKETFILTERFW, args, 5000);
@@ -880,11 +966,7 @@ async function firewall(ctx) {
   if (!exe) return info("XenoNet couldn't tell which program its service runs as");
   const restart = await ctx.restartExe?.();
   const next = restart && String(restart) !== exe ? String(restart) : null;
-  if (ctx.platform === "win32")
-    return info(
-      `XenoNet doesn't read Windows Defender Firewall's rules, which let a program in by its path; the service runs as ${tilde(exe, ctx.home)}`,
-      "If other machines can't reach this gateway, let that program in: Windows Security › Firewall & network protection › Allow an app through firewall › Allow another app. Updates keep its path.",
-    );
+  if (ctx.platform === "win32") return windowsFirewall(ctx, exe, next);
   const home = ctx.home ?? "";
   const stateText = await said(ctx, ["--getglobalstate"]);
   const state = stateText === null ? null : globalState(stateText);

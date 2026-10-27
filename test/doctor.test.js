@@ -243,12 +243,68 @@ test("the firewall's check is for the network's gateway on a LAN or tailnet addr
   assert.deepEqual(await check({ network: () => ({ gateway: true, address: null, kind: null }) }), ["skip", "the gateway has no address yet"]);
   assert.deepEqual(await check({ platform: "linux" }), ["skip", "for macOS and Windows, whose firewalls let programs in by their path"]);
   assert.deepEqual(await check({ self: { port: 47840, name: "XenoNet" } }), ["info", "XenoNet couldn't tell which program its service runs as"]);
-  const windows = byId(await runDoctor(ctxWith({ ctx: { platform: "win32" } }), { only: ["network.firewall"] }))["network.firewall"];
-  assert.deepEqual(
-    [windows.status, windows.detail],
-    ["info", "XenoNet doesn't read Windows Defender Firewall's rules, which let a program in by its path; the service runs as ~/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet"],
-  );
-  assert.match(windows.fix, /Allow an app through firewall › Allow another app\. Updates keep its path\.$/);
+});
+
+test("the gateway's firewall on Windows: off, letting the service in, blocking it, or the netsh line that lets it in", async () => {
+  const WIN_HOME = "C:\\Users\\ada";
+  const exe = `${WIN_HOME}\\AppData\\Local\\XenoNet\\runtime\\components\\service\\active\\bin\\xenonet.exe`;
+  const shown = "~\\AppData\\Local\\XenoNet\\runtime\\components\\service\\active\\bin\\xenonet.exe";
+  const profiles = (on = { Domain: true, Private: true, Public: true }, over = {}) =>
+    ["Domain", "Private", "Public"].map((name) => ({ name, enabled: on[name] ? "True" : "False", inbound: "NotConfigured", rules: "NotConfigured", ...over[name] }));
+  const rule = (action, profile, program = exe, enabled = "True") => ({ program, name: `xenonet (${action})`, enabled, action, profile });
+  // PowerShell's answer, as the check's script prints it; `asked` keeps
+  // what it was asked to run.
+  const check = async (answer, { networks = ["Private"], ctx = {} } = {}) => {
+    const asked = [];
+    const run = async (file, args) => {
+      asked.push([file, ...args]);
+      if (file !== "powershell.exe") return { code: 1, stdout: "", stderr: "unknown" };
+      return answer === null ? { code: 1, stdout: "", stderr: "Get-NetFirewallProfile : access denied" } : { code: 0, stdout: JSON.stringify({ networks, ...answer }), stderr: "" };
+    };
+    const r = byId(await runDoctor(ctxWith({ ctx: { platform: "win32", home: WIN_HOME, self: { port: 47840, name: "XenoNet", exe }, run, ...ctx } }), { only: ["network.firewall"] }))["network.firewall"];
+    return { ...r, asked };
+  };
+  const netsh = (profile, program = exe) => `netsh advfirewall firewall add rule name="XenoNet Service" dir=in action=allow program="${program}" enable=yes profile=${profile}`;
+
+  const allowed = await check({ profiles: profiles(), rules: [rule("Allow", "Private, Public")] });
+  assert.deepEqual([allowed.status, allowed.detail], ["ok", `Windows Defender Firewall lets ${shown} in on Private network`]);
+  // Read-only: one PowerShell, which reads the rules for the service's program.
+  assert.equal(allowed.asked.length, 1);
+  assert.deepEqual(allowed.asked[0].slice(0, 4), ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]);
+  assert.ok(allowed.asked[0][4].includes(`'${exe}'`) && !/Set-|New-|Remove-|netsh/.test(allowed.asked[0][4]), allowed.asked[0][4]);
+
+  const off = await check({ profiles: profiles({ Domain: true, Private: false, Public: true }), rules: [] });
+  assert.deepEqual([off.status, off.detail], ["ok", "Windows Defender Firewall is off for Private network"]);
+  const any = await check({ profiles: profiles(), rules: [rule("Allow", "Any")] });
+  assert.equal(any.status, "ok");
+
+  // No rule for it: the exact line, for the private profile, run as administrator.
+  const missing = await check({ profiles: profiles(), rules: [rule("Allow", "Domain"), rule("Allow", "Private", "C:\\Other\\app.exe")] });
+  assert.deepEqual([missing.status, missing.detail], ["warn", `Windows Defender Firewall hasn't let ${shown} in on Private network, so other machines can't reach this gateway`]);
+  assert.equal(missing.fix, `In a terminal run as administrator: ${netsh("private")}`);
+  // A rule that's turned off doesn't count.
+  assert.equal((await check({ profiles: profiles(), rules: [rule("Allow", "Private", exe, "False")] })).status, "warn");
+  // On a public network, the fix makes it private first.
+  const pub = await check({ profiles: profiles(), rules: [] }, { networks: ["Public"] });
+  assert.equal(pub.fix, `This network is Public: make it Private in Settings › Network & internet, in its properties. Then in a terminal run as administrator: ${netsh("private")}`);
+
+  // Blocked: a block rule wins over an allow.
+  const blocked = await check({ profiles: profiles(), rules: [rule("Allow", "Private"), rule("Block", "Private, Public")] });
+  assert.deepEqual([blocked.status, blocked.detail], ["warn", `Windows Defender Firewall blocks ${shown} on Private network, so other machines can't reach this gateway`]);
+  assert.equal(blocked.fix, `Turn off the rule that blocks it ("xenonet (Block)") in Windows Defender Firewall with Advanced Security › Inbound Rules. In a terminal run as administrator: ${netsh("private")}`);
+  const all = await check({ profiles: profiles(undefined, { Private: { rules: "False" } }), rules: [rule("Allow", "Private")] });
+  assert.deepEqual([all.status, all.detail], ["warn", "Windows Defender Firewall blocks every incoming connection on Private network, so no other machine can reach this gateway"]);
+
+  // After a restart the service runs from another program: both are checked.
+  const versioned = `${WIN_HOME}\\AppData\\Local\\XenoNet\\runtime\\components\\service\\0.5.3-4f36d8c169f9c50b\\bin\\xenonet.exe`;
+  const moving = await check({ profiles: profiles(), rules: [rule("Allow", "Private", versioned)] }, { ctx: { self: { port: 47840, name: "XenoNet", exe: versioned }, restartExe: () => exe } });
+  assert.equal(moving.status, "warn");
+  assert.equal(moving.fix, `In a terminal run as administrator: ${netsh("private", versioned)}, then ${netsh("private")}`);
+
+  // An answer it can't read is a note, with the line anyway.
+  const unread = await check(null);
+  assert.deepEqual([unread.status, unread.detail], ["info", "XenoNet couldn't read Windows Defender Firewall's settings"]);
+  assert.equal(unread.fix, `If other machines can't reach this gateway, let ${shown} in. In a terminal run as administrator: ${netsh("private")}`);
 });
 
 test("sign-ins: signed out is a failure with the fix; no Claude Code skips what needs it", async () => {
@@ -372,6 +428,32 @@ test("XenoNet's parts: a warning names each that hasn't worked for a minute, fai
   assert.deepEqual([blip.status, blip.detail], ["info", "codex-app-server isn't working (spawn codex ENOENT); transcripts is partly working (EMFILE: too many open files, watch '~/.claude/projects'), a moment ago; XenoNet tries again by itself"]);
   assert.equal((await blocks(undefined)).status, "skip", "a XenoNet that doesn't list its parts");
   assert.equal((await blocks(BLOCKS(), { health: null })).status, "skip", "no XenoNet running");
+});
+
+test("Codex not installed is a note, on every system: its sign-in is skipped, and what its source and parts can't read isn't a failure", async () => {
+  const since = Date.now() - 3 * 60e3;
+  const spawn = "spawn codex program not found";
+  // No codex on PATH and no ChatGPT app's: the bare name the service falls
+  // back to, which it couldn't start.
+  const none = (platform) =>
+    ctxWith({
+      bins: { codex: undefined },
+      ctx: {
+        platform,
+        codexBin: "codex",
+        health: { sources: [{ name: "projects", ok: true, count: 2 }, { name: "claude", ok: true, count: 9 }, { name: "codex", ok: false, error: spawn }], blocks: [...BLOCKS(), { name: "codex-threads", kind: "gatherer", source: "codex", state: "failed", since, lastOk: null, lastError: { at: 5, message: spawn }, counters: { errors: 9 } }] },
+      },
+    });
+  for (const platform of ["win32", "darwin", "linux"]) {
+    const out = byId(await runDoctor(none(platform), { only: ["codex.cli", "codex.auth", "xenonet.sources", "xenonet.blocks"] }));
+    assert.deepEqual([out["codex.cli"].status, out["codex.cli"].detail, out["codex.cli"].fix], ["info", "not installed; XenoNet shows Codex's threads once it is", "To use Codex, install the ChatGPT desktop app or the Codex CLI."], platform);
+    assert.equal(out["codex.auth"].status, "skip", platform);
+    assert.deepEqual([out["xenonet.sources"].status, out["xenonet.sources"].detail], ["ok", "reading 2 projects, 9 Claude sessions; Codex isn't installed"], platform);
+    assert.deepEqual([out["xenonet.blocks"].status, out["xenonet.blocks"].detail], ["ok", "4 parts, none with a problem besides those reading for Codex, which isn't installed"], platform);
+  }
+  // Installed, its source failing is still a failure.
+  const broken = byId(await runDoctor(ctxWith({ ctx: { health: { sources: [{ name: "codex", ok: false, error: "no app-server" }], blocks: BLOCKS() } } }), { only: ["xenonet.sources"] }));
+  assert.deepEqual([broken["xenonet.sources"].status, broken["xenonet.sources"].detail], ["fail", "codex: no app-server"]);
 });
 
 test("XenoNet's parts: one that reads for a source the sources check reports as failed isn't said twice", async () => {

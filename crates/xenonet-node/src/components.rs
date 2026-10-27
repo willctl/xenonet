@@ -113,6 +113,11 @@ pub fn comp_descriptor_file(env: Json, machine: Json) -> String {
     runtime::descriptor_file(&env_of(env), &machine_of(&machine))
 }
 
+#[napi(js_name = "compStopFile")]
+pub fn comp_stop_file(env: Json, machine: Json) -> String {
+    runtime::stop_file(&env_of(env), &machine_of(&machine))
+}
+
 #[napi(js_name = "compReadDescriptor")]
 pub fn comp_read_descriptor(env: Json, machine: Json) -> Jv {
     fs_answer(runtime::read_descriptor(&env_of(env), &machine_of(&machine)).map(|(port, token)| Jv::Obj(vec![("port", Jv::Num(port)), ("token", s(token))])))

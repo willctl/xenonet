@@ -144,6 +144,15 @@ fn bits(pid: f64) -> u64 {
     }
 }
 
+impl PidMap<Row> {
+    /// A table of one row.
+    pub fn from_row(row: Row) -> Self {
+        let mut t = PidMap::default();
+        t.set(row.pid, row);
+        t
+    }
+}
+
 impl<V> PidMap<V> {
     pub fn set(&mut self, pid: f64, v: V) {
         match self.at.get(&bits(pid)) {
@@ -198,6 +207,12 @@ fn actor_app(bundle: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether a program's file name is Node's or Bun's (node.exe and bun.exe
+/// on Windows).
+pub fn is_node(base: &str) -> bool {
+    matches!(base, "node" | "bun" | "node.exe" | "bun.exe")
+}
+
 fn is_python(base: &str) -> bool {
     re!(r"^python(\d+(\.\d+)*)?$", i).is_match(base)
 }
@@ -213,7 +228,7 @@ fn hermes_path(p: &str) -> bool {
 pub fn wants_args(program: &str) -> bool {
     let p = slashes(program);
     let base = &Style::Posix.basename(&p, None);
-    base == "node" || base == "bun" || (is_python(base) && hermes_path(&p))
+    is_node(base) || (is_python(base) && hermes_path(&p))
 }
 
 /// The actor product a program belongs to, from its path and, for Node and
@@ -236,7 +251,7 @@ pub fn product_of(program: &str, args: &str) -> Option<Product> {
     if is_python(base) && hermes_path(&p) && re!(r"\b(hermes_cli|tui_gateway|run_agent)\b").is_match(args) {
         return Some(Product { product: "hermes-agent", role: "host" });
     }
-    if (base == "node" || base == "bun") && re!(r"\/(ui-tui\/dist|hermes_cli\/tui_dist)\/entry\.js\b").is_match(args) {
+    if is_node(base) && re!(r"\/(ui-tui\/dist|hermes_cli\/tui_dist)\/entry\.js\b").is_match(args) {
         return Some(Product { product: "hermes-agent", role: "tui" });
     }
     let bundle = re!(r"\/([^/]+)\.app\/").captures(&p).and_then(|c| c.get(1)).map(|m| m.as_str());
@@ -430,6 +445,72 @@ pub fn parse_netstat(text: &str, local_port: &str, remote_port: &str) -> Option<
     closing
 }
 
+// ---------- Linux and Windows ----------
+//
+// There XenoNet reads the processes itself rather than through ps and
+// lsof: on Linux from /proc, on Windows from a ToolHelp32 snapshot (see
+// procs_native). They're asked for as these calls, which the system's
+// `Io` answers natively and a test answers with a made-up table.
+
+/// Every process: one line each, `pid ppid start program exe`, tab
+/// separated, with its start time in ms (UTC), the program it says it is
+/// (Linux: `argv[0]`; Windows: its image) and its executable's real path
+/// (empty where it can't be read: another user's process).
+pub const PROCESSES: &str = "xenonet:processes";
+/// The process holding the client's end of a connection to 127.0.0.1, by
+/// `[local port, remote port]` as the server sees them: its pid, or nothing.
+/// Linux only; Windows asks netstat -ano.
+pub const TCP_PEER: &str = "xenonet:tcp-peer";
+/// A process's command line, by `[pid]`.
+pub const COMMAND_LINE: &str = "xenonet:command-line";
+
+/// What `PROCESSES` answers: the table, and each process's executable.
+pub fn parse_table(text: &str) -> (Table, PidMap<String>) {
+    let (mut table, mut exes) = (PidMap::default(), PidMap::default());
+    for line in text.split('\n') {
+        let f: Vec<&str> = line.trim_end_matches('\r').split('\t').collect();
+        if f.len() < 4 {
+            continue;
+        }
+        let (pid, ppid, start) = (js_num(f[0]), js_num(f[1]), js_num(f[2]));
+        if !pid.is_finite() || pid.trunc() != pid || f[3].is_empty() {
+            continue;
+        }
+        table.set(pid, Row { pid, ppid: if ppid.is_finite() { ppid } else { 0.0 }, start: if start.is_finite() { start } else { 0.0 }, program: f[3].to_string() });
+        if let Some(exe) = f.get(4).filter(|e| !e.is_empty()) {
+            exes.set(pid, (*exe).to_string());
+        }
+    }
+    (table, exes)
+}
+
+/// The process holding the client's end of a connection to 127.0.0.1, as
+/// `netstat -ano -p TCP` lists it on Windows: `TCP <local> <foreign>
+/// <state> <pid>`, the state in the system's language, so it isn't read;
+/// a pair whose pid is 0 has been closed.
+pub fn parse_netstat_windows(text: &str, local_port: &str, remote_port: &str) -> Option<f64> {
+    let client = format!("127.0.0.1:{remote_port}");
+    let server = format!("127.0.0.1:{local_port}");
+    text.split('\n').find_map(|line| {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        let pid = js_num(f.last()?);
+        (f.len() >= 4 && f[0].eq_ignore_ascii_case("TCP") && f[1] == client && f[2] == server && pid > 0.0).then_some(pid)
+    })
+}
+
+/// The socket inode of the client's end of a connection to 127.0.0.1, as
+/// /proc/net/tcp lists it on Linux: `sl local rem st … uid timeout inode`,
+/// addresses as hex `ADDR:PORT` (127.0.0.1 is 0100007F), and an inode of 0
+/// for a socket that's closing.
+pub fn parse_proc_net_tcp(text: &str, local_port: u16, remote_port: u16) -> Option<String> {
+    let client = format!("0100007F:{remote_port:04X}");
+    let server = format!("0100007F:{local_port:04X}");
+    text.split('\n').skip(1).find_map(|line| {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        (f.len() > 9 && f[1].eq_ignore_ascii_case(&client) && f[2].eq_ignore_ascii_case(&server) && f[9] != "0").then(|| f[9].to_string())
+    })
+}
+
 fn key(p: &Row) -> String {
     format!("{}:{}:{}", number_string(p.pid), number_string(p.start), p.program)
 }
@@ -476,19 +557,51 @@ struct State {
     // folder: asked, and settled.
     bundle_reads: HashMap<String, BundleRead>,
     bundle_ids: HashMap<String, Option<String>>,
+    // Where the table is read natively (Linux, Windows), each process's
+    // executable as the last read said, by pid, start time and program.
+    native_exes: HashMap<String, String>,
 }
 
 /// What the census says of a process: `of` in core/procs.js.
 pub type Verdict = (Option<&'static str>, Option<Product>);
 
 pub struct Procs {
+    /// Everything procs does: macOS, where codesign can say who signed a
+    /// running program, so requests in a session's name, actors' tokens and
+    /// the window's routes are checked too.
     pub supported: bool,
+    /// The process on the other end of a connection and the ones above it,
+    /// each with the agent or actor product it is: macOS, Linux and
+    /// Windows. What's yours to do (verify's `person`) rests on this alone.
+    pub chains: bool,
+    // Linux and Windows, where the table is read natively (PROCESSES).
+    native: bool,
+    platform: String,
     state: Mutex<State>,
 }
 
 impl Procs {
     pub fn new(platform: &str) -> Self {
-        Procs { supported: platform == "darwin", state: Mutex::new(State::default()) }
+        let native = platform == "linux" || platform == "win32";
+        Procs { supported: platform == "darwin", chains: platform == "darwin" || native, native, platform: platform.to_string(), state: Mutex::new(State::default()) }
+    }
+
+    // The whole table as PROCESSES gives it, with each process's
+    // executable kept for chain's `exe`.
+    fn read_native(&self, io: &mut dyn Io, shared: bool) -> Result<Table, String> {
+        let call = Call::new(PROCESSES, &[]);
+        let text = io.exec(if shared { call.shared(PROCESSES.into()) } else { call }).map_err(|f| f.message)?;
+        let (table, exes) = parse_table(&text);
+        let mut s = self.s();
+        if s.native_exes.len() > 4096 {
+            s.native_exes.clear();
+        }
+        for (pid, exe) in exes.iter() {
+            if let Some(row) = table.get(*pid) {
+                s.native_exes.insert(key(row), exe.clone());
+            }
+        }
+        Ok(table)
     }
 
     fn s(&self) -> MutexGuard<'_, State> {
@@ -506,8 +619,12 @@ impl Procs {
                 }
             }
         }
-        let text = io.exec(Call::new("ps", &["-axo", "pid=,ppid=,lstart=,comm="]).shared("ps -axo".into())).map_err(|f| f.message)?;
-        let table = Arc::new(parse_ps(&text));
+        let table = if self.native {
+            Arc::new(self.read_native(io, true)?)
+        } else {
+            let text = io.exec(Call::new("ps", &["-axo", "pid=,ppid=,lstart=,comm="]).shared("ps -axo".into())).map_err(|f| f.message)?;
+            Arc::new(parse_ps(&text))
+        };
         let now = io.now();
         let mut s = self.s();
         s.table = Some(table.clone());
@@ -520,14 +637,19 @@ impl Procs {
     /// whether to keep it on the socket. Only a process found is kept, so
     /// a lookup that failed is tried again on its next request.
     pub fn peer(&self, io: &mut dyn Io, local_port: Option<&Value>, remote_port: Option<&Value>, kept: Option<&Value>) -> (Value, bool) {
-        if !self.supported || !truthy(remote_port) {
+        if !self.chains || !truthy(remote_port) {
             return (Value::Null, false);
         }
         if let Some(k) = kept.filter(|k| !k.is_null()) {
             return (k.clone(), false);
         }
-        let text = io.exec(Call::new("netstat", &["-anv", "-p", "tcp"])).unwrap_or_default();
-        match parse_netstat(&text, &template(local_port), &template(remote_port)) {
+        let (local, remote) = (template(local_port), template(remote_port));
+        let found = match self.platform.as_str() {
+            "win32" => parse_netstat_windows(&io.exec(Call::new("netstat", &["-ano", "-p", "TCP"])).unwrap_or_default(), &local, &remote),
+            "linux" => io.exec(Call::new(TCP_PEER, &[&local, &remote])).ok().map(|t| js_num(js_trim(&t))).filter(|p| p.is_finite() && *p > 0.0),
+            _ => parse_netstat(&io.exec(Call::new("netstat", &["-anv", "-p", "tcp"])).unwrap_or_default(), &local, &remote),
+        };
+        match found {
             Some(pid) => (xenonet_base::json::number(pid), true),
             None => (Value::Null, false),
         }
@@ -559,7 +681,10 @@ impl Procs {
             if rows.len() >= 64 {
                 break;
             }
-            next = if p.ppid > 1.0 { get(p.ppid) } else { None };
+            // Windows keeps a parent's pid after the parent is gone, and may
+            // give it to a newer process: a "parent" that started after its
+            // child isn't the one that started it.
+            next = if p.ppid > 1.0 { get(p.ppid).filter(|q| !(self.native && q.start > 0.0 && p.start > 0.0 && q.start > p.start)) } else { None };
             rows.push(p);
         }
         let real = if exe { Some(self.executables_of(io, &rows)) } else { None };
@@ -574,7 +699,8 @@ impl Procs {
             let mut agent = of("");
             let mut args = String::new();
             if agent.is_none() && (wants_args(&p.program) || named.is_some_and(wants_args)) {
-                args = io.exec(Call::new("ps", &["-o", "command=", "-p", &number_string(p.pid)])).unwrap_or_default();
+                let pid = number_string(p.pid);
+                args = io.exec(if self.native { Call::new(COMMAND_LINE, &[&pid]) } else { Call::new("ps", &["-o", "command=", "-p", &pid]) }).unwrap_or_default();
                 agent = of(&args);
             }
             let program = file.as_deref().unwrap_or(&p.program).to_string();
@@ -593,6 +719,14 @@ impl Procs {
     // the rest in one lsof. Kept by pid, start time and program, so a
     // process that runs another program under a new name is read again.
     fn executables_of(&self, io: &mut dyn Io, rows: &[Row]) -> PidMap<Option<String>> {
+        if self.native {
+            let s = self.s();
+            let mut out = PidMap::default();
+            for p in rows {
+                out.set(p.pid, s.native_exes.get(&key(p)).cloned());
+            }
+            return out;
+        }
         let missing: Vec<&Row> = {
             let s = self.s();
             rows.iter().filter(|p| !s.executables.contains_key(&key(p))).collect()
@@ -690,9 +824,14 @@ impl Procs {
     // that's gone.
     fn newcomers(&self, io: &mut dyn Io, pid: f64, t: &Table) -> Table {
         let mut out = PidMap::default();
+        // Natively, the whole table is read again: it's quick.
+        let fresh = if self.native { self.read_native(io, false).ok() } else { None };
         let mut p = pid;
         while p > 1.0 && out.len() < 64 {
-            let described = self.describe(io, &[Value::from(p)]);
+            let described = match &fresh {
+                Some(f) => f.get(p).map(|r| PidMap::from_row(r.clone())).unwrap_or_default(),
+                None => self.describe(io, &[Value::from(p)]),
+            };
             let Some(row) = described.get(p) else { break };
             if t.get(p).is_some_and(|k| k.start == row.start && k.program == row.program) {
                 break;
@@ -892,6 +1031,97 @@ pub fn self_test(me: f64, peer: Option<f64>, first: Option<(f64, Option<&Value>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A made-up Linux or Windows machine: what each call answers, by its
+    /// file and arguments, and every call asked.
+    struct Machine {
+        answers: HashMap<String, String>,
+        asked: Vec<String>,
+    }
+
+    impl Io for Machine {
+        fn exec(&mut self, call: Call) -> Result<String, Failure> {
+            let asked = std::iter::once(call.file.clone()).chain(call.args).collect::<Vec<_>>().join(" ");
+            self.asked.push(asked.clone());
+            self.answers.get(&asked).cloned().ok_or(Failure { message: format!("no {asked} here"), stdout: None })
+        }
+        fn now(&mut self) -> f64 {
+            1e12
+        }
+    }
+
+    fn machine(answers: &[(&str, &str)]) -> Machine {
+        Machine { answers: answers.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(), asked: Vec::new() }
+    }
+
+    #[test]
+    fn on_windows_and_linux_the_processes_are_read_natively_and_a_reused_parent_pid_isnt_a_parent() {
+        // Windows: Claude Code's claude.exe runs cmd, which runs the xenonet
+        // command; Node runs the npm Claude Code, known by its command line.
+        // 30's parent pid 9 was a process that's gone, and 9 now belongs to
+        // one that started later.
+        let table = [
+            "4\t0\t0\tSystem\t",
+            "5\t4\t1000\tC:\\Windows\\explorer.exe\tC:\\Windows\\explorer.exe",
+            "20\t5\t2000\tC:\\Users\\me\\.local\\bin\\claude.exe\tC:\\Users\\me\\.local\\bin\\claude.exe",
+            "21\t20\t3000\tC:\\Windows\\System32\\cmd.exe\tC:\\Windows\\System32\\cmd.exe",
+            "22\t21\t4000\tC:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe\tC:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe",
+            "23\t5\t2500\tC:\\Program Files\\nodejs\\node.exe\tC:\\Program Files\\nodejs\\node.exe",
+            "9\t5\t9000\tC:\\Windows\\notepad.exe\tC:\\Windows\\notepad.exe",
+            "30\t9\t5000\tC:\\Windows\\System32\\cmd.exe\t",
+            "31\t1\t5000\tC:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe\tC:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.0.0\\claude.exe",
+        ]
+        .join("\r\n");
+        let netstat = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:47840        0.0.0.0:0              LISTENING       700\r\n  TCP    127.0.0.1:47840        127.0.0.1:51000        HERGESTELLT     700\r\n  TCP    127.0.0.1:51000        127.0.0.1:47840        HERGESTELLT     22\r\n  TCP    127.0.0.1:51001        127.0.0.1:47840        TIME_WAIT       0\r\n";
+        let mut m = machine(&[
+            (PROCESSES, &table),
+            ("netstat -ano -p TCP", netstat),
+            (&format!("{COMMAND_LINE} 23"), "\"C:\\Program Files\\nodejs\\node.exe\" C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js"),
+        ]);
+        let p = Procs::new("win32");
+        assert!(p.chains && !p.supported);
+        let (pid, keep) = p.peer(&mut m, Some(&Value::from(47840)), Some(&Value::from(51000)), None);
+        assert_eq!((pid, keep), (Value::from(22), true), "the client's end, whatever the state is called in this language");
+        assert_eq!(p.peer(&mut m, Some(&Value::from(47840)), Some(&Value::from(51001)), None).0, Value::Null, "a closed pair's pid is 0");
+        let chain = p.chain(&mut m, Some(22.0), true, true).unwrap();
+        assert_eq!(chain.iter().map(|l| l.row.pid).collect::<Vec<_>>(), [22.0, 21.0, 20.0, 5.0, 4.0]);
+        assert_eq!(chain.iter().map(|l| l.agent).collect::<Vec<_>>(), [None, None, Some("claude"), None, None]);
+        assert_eq!(chain[0].exe.clone().flatten().as_deref(), Some("C:\\Users\\me\\AppData\\Local\\XenoNet\\runtime\\launcher\\xenonet.exe"));
+        assert_eq!(p.chain(&mut m, Some(23.0), true, false).unwrap()[0].agent, Some("claude"), "node.exe running Claude Code's cli.js");
+        assert_eq!(p.chain(&mut m, Some(30.0), true, true).unwrap().len(), 1, "9 started after 30, so it isn't 30's parent");
+        assert_eq!(p.chain(&mut m, Some(30.0), true, true).unwrap()[0].exe, Some(None), "an executable that couldn't be read");
+        assert_eq!(p.chain(&mut m, Some(31.0), true, false).unwrap()[0].agent, None, "Claude desktop's own claude.exe isn't Claude Code");
+        assert!(!m.asked.iter().any(|a| a.starts_with("ps ") || a.starts_with("lsof ")), "{:?}", m.asked);
+
+        // Linux: the connection's process from /proc, and a process the
+        // table didn't have yet, read again.
+        let first = "1\t0\t100\t/sbin/init\t/usr/lib/systemd/systemd\n50\t1\t200\t/bin/bash\t/usr/bin/bash\n";
+        let mut m = machine(&[(PROCESSES, first), (&format!("{TCP_PEER} 47840 51000"), "60\n")]);
+        let p = Procs::new("linux");
+        assert_eq!(p.peer(&mut m, Some(&Value::from(47840)), Some(&Value::from(51000)), None).0, Value::from(60));
+        assert_eq!(p.chain(&mut m, Some(50.0), true, false).unwrap().len(), 1, "up to init, as up to launchd");
+        m.answers.insert(PROCESSES.into(), format!("{first}60\t50\t300\tclaude\t/home/me/.local/share/claude/versions/2.1.0\n"));
+        let chain = p.chain(&mut m, Some(60.0), true, true).unwrap();
+        assert_eq!(chain.iter().map(|l| (l.row.pid, l.agent)).collect::<Vec<_>>(), [(60.0, Some("claude")), (50.0, None)]);
+        assert_eq!(chain[0].exe.clone().flatten().as_deref(), Some("/home/me/.local/share/claude/versions/2.1.0"));
+        // Anywhere else, nothing is looked at.
+        let mut m = machine(&[]);
+        let p = Procs::new("freebsd");
+        assert!(!p.chains && !p.supported);
+        assert_eq!(p.peer(&mut m, Some(&Value::from(47840)), Some(&Value::from(51000)), None).0, Value::Null);
+        assert_eq!(m.asked, Vec::<String>::new());
+    }
+
+    #[test]
+    fn what_proc_net_tcp_and_a_table_line_say() {
+        let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:BAB0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0000000000000000 100 0 0 10 0\n   1: 0100007F:C738 0100007F:BAB0 01 00000000:00000000 00:00000000 00000000  1000        0 22222 1 0000000000000000 20 4 30 10 -1\n   2: 0100007F:C739 0100007F:BAB0 06 00000000:00000000 03:00000000 00000000     0        0 0 3 0000000000000000\n";
+        assert_eq!(parse_proc_net_tcp(tcp, 47792, 51000).as_deref(), Some("22222"));
+        assert_eq!(parse_proc_net_tcp(tcp, 47792, 51001), None, "a socket that's closing has no inode");
+        let (t, exes) = parse_table("7\t1\t1.5e12\tpython3 -c x\t\n8\tx\tnope\tsh\t/bin/sh\nnot a line\n");
+        assert_eq!(t.get(7.0).map(|r| (r.ppid, r.start, r.program.as_str())), Some((1.0, 1.5e12, "python3 -c x")));
+        assert_eq!(t.get(8.0).map(|r| (r.ppid, r.start)), Some((0.0, 0.0)));
+        assert_eq!((exes.get(7.0), exes.get(8.0).map(String::as_str)), (None, Some("/bin/sh")));
+    }
 
     #[test]
     fn agents_by_program() {
