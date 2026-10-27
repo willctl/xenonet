@@ -268,6 +268,51 @@ pub fn prompt_file(w: &World, text: &str) -> Result<String, String> {
     Ok(f.to_string_lossy().into_owned())
 }
 
+/// A run's log, read as it grows: each read gives the whole lines written
+/// since the last one, so a watcher never reads the log from its start
+/// again.
+struct Tail {
+    file: std::path::PathBuf,
+    at: u64,
+    part: Vec<u8>,
+}
+
+impl Tail {
+    fn new(file: std::path::PathBuf) -> Tail {
+        Tail { file, at: 0, part: Vec::new() }
+    }
+
+    /// The bytes written since the last read.
+    fn more(&mut self) {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut f) = std::fs::File::open(&self.file) else { return };
+        if f.seek(SeekFrom::Start(self.at)).is_err() {
+            return;
+        }
+        let mut buf = Vec::new();
+        if f.read_to_end(&mut buf).is_ok() {
+            self.at += buf.len() as u64;
+            self.part.extend_from_slice(&buf);
+        }
+    }
+
+    /// The whole lines written since the last read; a line still being
+    /// written waits for the next.
+    fn lines(&mut self) -> String {
+        self.more();
+        let Some(end) = self.part.iter().rposition(|b| *b == b'\n') else { return String::new() };
+        let done: Vec<u8> = self.part.drain(..=end).collect();
+        String::from_utf8_lossy(&done).into_owned()
+    }
+
+    /// Everything not read yet, a last unfinished line included: once the
+    /// run has ended.
+    fn rest(&mut self) -> String {
+        self.more();
+        String::from_utf8_lossy(&std::mem::take(&mut self.part)).into_owned()
+    }
+}
+
 /// After a resumed or forked turn starts: a fork's copy, once its stream
 /// names it, linked to the session it came from (the fork event); the
 /// prompt file taken away when the turn ends; and a hint for you when
@@ -282,12 +327,16 @@ pub fn after_resume(w: &World, runner: &Arc<Runner>, app: &str, key: &str, pid: 
     let logs = std::path::Path::new(&w.setup.state_dir).join("runs");
     std::thread::spawn(move || {
         let mut named = parent.is_none();
+        let mut tail: Option<Tail> = None;
+        let mut out = false;
         loop {
             std::thread::sleep(Duration::from_millis(400));
             let Some(rec) = runner.list().into_iter().rev().find(|r| r.key == key && r.pid == Some(f64::from(pid))) else { break };
+            let log = tail.get_or_insert_with(|| Tail::new(logs.join(format!("{}.log", rec.id))));
+            let new = if rec.end.is_some() { log.rest() } else { log.lines() };
+            out = out || (claude && starts::signed_out(&new));
             if !named {
-                let log = std::fs::read_to_string(logs.join(format!("{}.log", rec.id))).unwrap_or_default();
-                if let (Some(child), Some(parent)) = (starts::session_of("claude", &log), parent.as_deref()) {
+                if let (Some(child), Some(parent)) = (starts::session_of("claude", &new), parent.as_deref()) {
                     named = true;
                     {
                         let mut f = world.starts.forks.locked();
@@ -301,8 +350,7 @@ pub fn after_resume(w: &World, runner: &Arc<Runner>, app: &str, key: &str, pid: 
             }
             if rec.end.is_some() {
                 // A turn Claude Code couldn't sign in for: a hint for you.
-                let log = std::fs::read_to_string(logs.join(format!("{}.log", rec.id))).unwrap_or_default();
-                if claude && starts::signed_out(&log) {
+                if out {
                     sign_in_hint(&world, &here_name(&world));
                 }
                 break;
@@ -345,12 +393,16 @@ fn watch(
     answer: &Answer,
 ) {
     let mine = |r: &xenonet_engine::delivery::runs::Run| r.key == key && r.pid == Some(f64::from(pid));
-    let log_of = |id: &str| std::fs::read_to_string(logs.join(format!("{id}.log"))).unwrap_or_default();
+    let mut tail: Option<Tail> = None;
+    let mut out = false;
     let ended = loop {
         std::thread::sleep(Duration::from_millis(400));
         let Some(rec) = runner.list().into_iter().rev().find(|r| mine(r)) else { break None };
+        let log = tail.get_or_insert_with(|| Tail::new(logs.join(format!("{}.log", rec.id))));
+        let new = if rec.end.is_some() { log.rest() } else { log.lines() };
+        out = out || starts::signed_out(&new);
         if session.is_none() {
-            if let Some(found) = starts::session_of(app, &log_of(&rec.id)) {
+            if let Some(found) = starts::session_of(app, &new) {
                 session = Some(found.clone());
                 answer(w, "started", json!({ "session": found, "pid": pid, "folder": folder, "app": app }));
             }
@@ -363,10 +415,9 @@ fn watch(
         let _ = std::fs::remove_file(f);
     }
     let Some(rec) = ended else { return };
-    let log = log_of(&rec.id);
     let minutes = (rec.ms.unwrap_or(0.0) / 60e3).round();
     let mut body = json!({ "session": session, "exit": rec.exit, "minutes": minutes, "app": app });
-    if app == "claude" && starts::signed_out(&log) {
+    if app == "claude" && out {
         let here = here_name(w);
         body["reason"] = json!(starts::sign_in_words(&here));
         body["signIn"] = json!(true);
@@ -557,4 +608,27 @@ pub fn answer_in(w: &World, from: &str, mid: &str, b: &Value) -> bool {
 /// hint in the console.
 pub fn sign_in_hint(w: &World, host: &str) {
     w.emit(From::Engine, "sign-in", json!({ "host": host, "app": "claude", "words": format!("Claude Code on {host} needs a sign-in for XenoNet's runs"), "fix": starts::sign_in_words(host), "at": ms(now_ms()) }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tail;
+
+    #[test]
+    fn a_log_is_read_as_it_grows_by_whole_lines() {
+        let dir = std::env::temp_dir().join(format!("xenonet-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("run.log");
+        let mut t = Tail::new(file.clone());
+        assert_eq!(t.lines(), "", "no log yet");
+        std::fs::write(&file, "{\"a\":1}\n{\"session_").unwrap();
+        assert_eq!(t.lines(), "{\"a\":1}\n");
+        assert_eq!(t.lines(), "", "the half line waits");
+        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        std::io::Write::write_all(&mut f, b"id\":\"x\"}\nNot logged in").unwrap();
+        assert_eq!(t.lines(), "{\"session_id\":\"x\"}\n", "only what's new, the line made whole");
+        assert_eq!(t.rest(), "Not logged in", "at the end, the last unfinished line too");
+        assert_eq!(t.rest(), "");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
