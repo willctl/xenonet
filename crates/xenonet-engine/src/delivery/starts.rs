@@ -200,8 +200,10 @@ fn trim_end(p: &str) -> &str {
 /// The folder a request names, as a path on this machine: ~ (home), a
 /// project or folder by its id on the map (`known`: [id, path]), or a path
 /// the machine reports (a project's or folder's path, or a session's
-/// folder, in `reported`), with ~ for home. Or why it's none of those.
-pub fn folder(asked: &str, home: &str, known: &[(String, String)], reported: &[String]) -> Result<String, String> {
+/// folder, in `reported`), with ~ for home. On Windows (`windows`) a path
+/// takes its separator, and paths compare as its file system does, either
+/// slash and any case alike. Or why it's none of those.
+pub fn folder(asked: &str, home: &str, known: &[(String, String)], reported: &[String], windows: bool) -> Result<String, String> {
     let asked = asked.trim();
     if asked.is_empty() || asked == "~" {
         return Ok(home.to_string());
@@ -210,11 +212,20 @@ pub fn folder(asked: &str, home: &str, known: &[(String, String)], reported: &[S
         return Ok(path.clone());
     }
     let expand = |p: &str| match p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+        Some(rest) if windows => format!("{}\\{}", trim_end(home), rest.replace('/', "\\")),
         Some(rest) => format!("{}/{rest}", trim_end(home)),
         None => p.to_string(),
     };
-    let want = expand(asked);
-    let same = |p: &str| trim_end(&expand(p)) == trim_end(&want);
+    let key = |p: &str| {
+        let t = trim_end(&expand(p)).to_string();
+        if windows {
+            t.replace('/', "\\").to_lowercase()
+        } else {
+            t
+        }
+    };
+    let want = key(asked);
+    let same = |p: &str| key(p) == want;
     if let Some((_, path)) = known.iter().find(|(_, p)| same(p)) {
         return Ok(path.clone());
     }
@@ -372,7 +383,7 @@ mod tests {
     fn a_folder_is_home_a_map_id_or_a_path_the_machine_reports() {
         let known = vec![("project:atlas".to_string(), "/home/jo/src/atlas".to_string()), ("zone:notes".to_string(), "/home/jo/notes".to_string())];
         let reported = vec!["~/work/ledger".to_string()];
-        let f = |a: &str| folder(a, "/home/jo", &known, &reported);
+        let f = |a: &str| folder(a, "/home/jo", &known, &reported, false);
         assert_eq!(f("~"), Ok("/home/jo".into()));
         assert_eq!(f(""), Ok("/home/jo".into()));
         assert_eq!(f("project:atlas"), Ok("/home/jo/src/atlas".into()));
@@ -382,6 +393,15 @@ mod tests {
         assert_eq!(f("/home/jo/work/ledger"), Ok("/home/jo/work/ledger".into()));
         assert_eq!(f("/etc"), Err("/etc isn't a project or folder on this machine's map: name one by its id or path, or ~".into()));
         assert!(f("~/src").is_err(), "a folder above a project isn't one");
+        assert!(f("/HOME/jo/notes").is_err(), "case counts, off Windows");
+        // On Windows: its separator, and either slash and any case alike.
+        let known = vec![("project:atlas".to_string(), "C:\\Users\\jo\\src\\Atlas".to_string())];
+        let reported = vec!["~\\work\\Ledger".to_string()];
+        let w = |a: &str| folder(a, "C:\\Users\\jo", &known, &reported, true);
+        assert_eq!(w("~/work/ledger"), Ok("C:\\Users\\jo\\work\\Ledger".into()));
+        assert_eq!(w("c:/users/jo/src/atlas/"), Ok("C:\\Users\\jo\\src\\Atlas".into()));
+        assert_eq!(w("~\\SRC\\atlas"), Ok("C:\\Users\\jo\\src\\Atlas".into()));
+        assert!(w("~/src").is_err());
     }
 
     #[test]

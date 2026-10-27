@@ -93,7 +93,7 @@ test("twenty starts an hour on a machine, and ten from one machine", () => {
 
 test("a folder is home, a map id or a path the machine reports", () => {
   const known = [["project:atlas", "/home/jo/src/atlas"], ["zone:notes", "/home/jo/notes"]];
-  const f = (a) => folder(a, "/home/jo", known, ["~/work/ledger"]);
+  const f = (a) => folder(a, "/home/jo", known, ["~/work/ledger"], { windows: false });
   assert.deepEqual(f("~"), { ok: true, path: "/home/jo" });
   assert.deepEqual(f(""), { ok: true, path: "/home/jo" });
   assert.deepEqual(f("project:atlas"), { ok: true, path: "/home/jo/src/atlas" });
@@ -103,6 +103,13 @@ test("a folder is home, a map id or a path the machine reports", () => {
   assert.deepEqual(f("/home/jo/work/ledger"), { ok: true, path: "/home/jo/work/ledger" });
   assert.deepEqual(f("/etc"), { ok: false, why: "/etc isn't a project or folder on this machine's map: name one by its id or path, or ~" });
   assert.equal(f("~/src").ok, false);
+  assert.equal(f("/HOME/jo/notes").ok, false, "case counts, off Windows");
+  // On Windows: its separator, and either slash and any case alike.
+  const w = (a) => folder(a, "C:\\Users\\jo", [["project:atlas", "C:\\Users\\jo\\src\\Atlas"]], ["~\\work\\Ledger"], { windows: true });
+  assert.deepEqual(w("~/work/ledger"), { ok: true, path: "C:\\Users\\jo\\work\\Ledger" });
+  assert.deepEqual(w("c:/users/jo/src/atlas/"), { ok: true, path: "C:\\Users\\jo\\src\\Atlas" });
+  assert.deepEqual(w("~\\SRC\\atlas"), { ok: true, path: "C:\\Users\\jo\\src\\Atlas" });
+  assert.equal(w("~/src").ok, false);
 });
 
 test("a run says its session, and whether Claude Code is signed out", () => {

@@ -101,16 +101,24 @@ const trimEnd = (p) => p.replace(/[/\\]+$/, "") || p;
 
 // The folder a request names, as a path on this machine: ~ (home), a
 // project or folder by its id on the map (`known`: [id, path]), or a path
-// the machine reports (`reported`), with ~ for home. { ok, path } or
-// { ok: false, why }.
-export function folder(asked, home, known = [], reported = []) {
+// the machine reports (`reported`), with ~ for home. On Windows a path
+// takes its separator, and paths compare as its file system does, either
+// slash and any case alike. { ok, path } or { ok: false, why }.
+export function folder(asked, home, known = [], reported = [], { windows = process.platform === "win32" } = {}) {
   const a = String(asked ?? "").trim();
   if (!a || a === "~") return { ok: true, path: home };
   const byId = known.find(([id]) => id === a);
   if (byId) return { ok: true, path: byId[1] };
-  const expand = (p) => (p.startsWith("~/") || p.startsWith("~\\") ? `${trimEnd(home)}/${p.slice(2)}` : p);
-  const want = trimEnd(expand(a));
-  const same = (p) => trimEnd(expand(p)) === want;
+  const expand = (p) => {
+    if (!(p.startsWith("~/") || p.startsWith("~\\"))) return p;
+    return windows ? `${trimEnd(home)}\\${p.slice(2).replaceAll("/", "\\")}` : `${trimEnd(home)}/${p.slice(2)}`;
+  };
+  const key = (p) => {
+    const t = trimEnd(expand(p));
+    return windows ? t.replaceAll("/", "\\").toLowerCase() : t;
+  };
+  const want = key(a);
+  const same = (p) => key(p) === want;
   const k = known.find(([, p]) => same(p));
   if (k) return { ok: true, path: k[1] };
   const r = reported.find(same);

@@ -147,7 +147,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
         }
     }
     let (known, reported) = folders(w);
-    let cwd = starts::folder(&r.folder, &w.setup.home, &known, &reported)?;
+    let cwd = starts::folder(&r.folder, &w.setup.home, &known, &reported, cfg!(windows))?;
     if !std::path::Path::new(&cwd).is_dir() {
         return Err(format!("{} isn't there", r.folder));
     }

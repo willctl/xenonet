@@ -24,7 +24,8 @@ export const admit = (history, from, now = Date.now()) => native.startsAdmit(his
 
 export const kept = (history, now = Date.now()) => native.startsKept(history, Number(now));
 
-export const folder = (asked, home, known = [], reported = []) => native.startsFolder(String(asked ?? ""), String(home), known, reported.map(String));
+export const folder = (asked, home, known = [], reported = [], { windows = process.platform === "win32" } = {}) =>
+  native.startsFolder(String(asked ?? ""), String(home), known, reported.map(String), !!windows);
 
 export const signedOut = (log) => native.startsSignedOut(String(log ?? ""));
 
