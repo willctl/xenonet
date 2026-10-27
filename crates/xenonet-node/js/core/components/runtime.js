@@ -15,6 +15,7 @@ import { SERVICE_API, negotiate } from "./protocol.js";
 
 export const runtimeDir = (env = process.env) => native.compRuntimeDir(envOf(env), machine());
 export const descriptorFile = (env = process.env) => native.compDescriptorFile(envOf(env), machine());
+export const stopFile = (env = process.env) => native.compStopFile(envOf(env), machine());
 
 export const binName = (platform = process.platform) => native.compBinName(String(platform));
 export const launcherBin = (env = process.env, platform = process.platform) => native.compLauncherBin(envOf(env), { ...machine(), platform: String(platform) });

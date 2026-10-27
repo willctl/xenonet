@@ -340,6 +340,12 @@ pub fn ensure_service(runtime: &Value) -> Result<Value, Fail> {
     block_on(ensure(runtime)).map_err(Fail::error)?.map_err(failed)
 }
 
+/// stopFile(env): what `xenonet service stop` leaves for a supervisor
+/// waiting for the port.
+pub fn stop_file(env: &Value) -> String {
+    runtime::stop_file(&env_with(env), &machine())
+}
+
 /// connectService({ env }), then client.request(action, body), then close.
 pub fn service_request(env: &Value, action: &str, body: &Value) -> Result<Value, Fail> {
     let env = env_with(env);
