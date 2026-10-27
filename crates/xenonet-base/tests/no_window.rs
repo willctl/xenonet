@@ -152,8 +152,13 @@ fn a_console_program_started_with_no_window_shows_none() {
         .creation_flags(DETACHED_PROCESS);
     let out = c.output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().find_map(|l| l.strip_prefix("RESULT ")).unwrap_or_else(|| panic!("the detached copy said nothing:\n{text}\n{}", String::from_utf8_lossy(&out.stderr)));
-    let counts: Vec<usize> = line.split(' ').map(|n| n.parse().unwrap()).collect();
+    // The test harness prints "test <name> ... " before the test's own
+    // output, on the same line, so the result can start mid-line.
+    let line = text
+        .lines()
+        .find_map(|l| l.split_once("RESULT ").map(|(_, rest)| rest))
+        .unwrap_or_else(|| panic!("the detached copy said nothing:\n{text}\n{}", String::from_utf8_lossy(&out.stderr)));
+    let counts: Vec<usize> = line.split_whitespace().take(2).map(|n| n.parse().unwrap()).collect();
     // Without no_window, the same program from the same detached process
     // gets a console window of its own, where the session has a desktop to
     // show one on: that's what no_window is for.
