@@ -445,13 +445,19 @@ export function createDriver(app) {
     // it's about (a session's id, or an actor's), its title and its words.
     feed({ limit = 20 } = {}) {
       const lines = [...document.querySelectorAll("#feed > li")].slice(0, Math.max(1, Number(limit) || 20));
-      // The title's words, without the mark an actor's line carries.
-      const title = (el) => [...(el?.childNodes ?? [])].filter((n) => !n.classList?.contains("ev-actor")).map((n) => n.textContent).join("").trim();
+      // The title's words, without the mark an actor's line carries or the
+      // machine's label (its own field, so it never runs into the title).
+      const title = (el) => [...(el?.childNodes ?? [])].filter((n) => !n.classList?.contains("ev-actor") && !n.classList?.contains("host-tag")).map((n) => n.textContent).join("").trim();
+      const machine = (el) => {
+        const tag = el?.querySelector(".host-tag");
+        return tag ? { host: tag.firstChild?.textContent.trim() ?? "", ...(tag.classList.contains("here") ? { here: true } : {}) } : {};
+      };
       return {
         ...app.hud?.feedState(),
         lines: lines.map((li) => ({
           kind: li.dataset.kind ?? [...li.classList].find((c) => c !== "ev" && c !== "fresh") ?? null,
           ...(li.dataset.actor ? { actor: li.dataset.actor } : li.dataset.id ? { session: li.dataset.id } : {}),
+          ...machine(li.querySelector(".ev-title")),
           title: title(li.querySelector(".ev-title")),
           detail: li.querySelector(".ev-detail")?.textContent.trim() ?? "",
           at: Number(li.dataset.ts) || null,
