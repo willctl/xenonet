@@ -17,6 +17,7 @@ import net from "node:net";
 import { stopFile } from "../core/components/runtime.js";
 import { rpc } from "../core/components/rpc.js";
 import { SERVICE_API } from "../core/components/protocol.js";
+import { inOrder, changes } from "../cli/commands/update.js";
 import { command } from "./harness/xenonet-bin.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -567,6 +568,19 @@ test("shell completion offers each command's own words, xenonet drift's flags am
   const bash = await xenonet(["completion", "bash"]);
   assert.match(bash.stdout, /\n {4}drift\) COMPREPLY=\(\$\(compgen -W "--all --exit-code" -- "\$cur"\)\) ;;\n/);
   assert.equal((await xenonet(["completion", "fish"])).code, 2);
+});
+
+test("xenonet update: the Tools before the Service, and only what would change is asked about", () => {
+  // As crates/xenonet-cli/src/commands/update.rs's own test has it.
+  const service = { component: "service", version: "0.5.3", current: "0.5.2", available: true };
+  const tools = { component: "tools", version: "0.5.3", current: "0.5.0", available: true };
+  const all = inOrder([service, tools], "all");
+  assert.deepEqual(all, [tools, service]);
+  assert.deepEqual(inOrder([service, tools], "service"), [service]);
+  assert.deepEqual(changes(all), ["Tools 0.5.0 → 0.5.3", "Service 0.5.2 → 0.5.3"]);
+  const current = { component: "tools", version: "0.5.3", current: "0.5.3", available: false };
+  const missing = { component: "service", version: "0.5.3", current: null, available: true };
+  assert.deepEqual(changes([current, missing]), ["Service (not installed) → 0.5.3"]);
 });
 
 // A stand-in for the service's own socket (core/components/runtime.js):

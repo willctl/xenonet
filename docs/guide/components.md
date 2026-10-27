@@ -56,6 +56,8 @@ xenonet update tools
 xenonet update service
 ```
 
+`xenonet update` on its own lists what would change and asks before it installs anything; `--yes` answers for you. Either way, and with `xenonet update all`, the Tools update first, then the Service.
+
 The tray isn't in the Updates panel or `xenonet update` yet. A newer disk image replaces it, and `xenonet service install` copies the new one to `~/Applications`.
 
 Downloads are checked against the release manifest's size and SHA-256 hash. Each component is installed into a new version directory. The selected version changes only after validation. Old versions are retained so running MCP processes can finish and a failed service startup can return to the previous version.
