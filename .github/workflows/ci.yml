@@ -107,9 +107,17 @@ jobs:
   # runner has no GPU (docs/guide/development.md). Drawn in software, the
   # map makes a frame every second or two, so the suite takes the best part
   # of an hour, and its tests' time limits stretch (test/harness/software.js).
+  # So it runs as four shards side by side, split by each file's time on
+  # this runner (scripts/e2e-shard.mjs, test/e2e/timings.json), about ten
+  # minutes each.
   e2e-linux:
+    name: e2e-linux (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
@@ -166,13 +174,14 @@ jobs:
         env:
           XENONET_E2E_SHOW: inactive
           XENONET_SOFTWARE_RENDERING: "1"
+          XENONET_E2E_SHARD: ${{ matrix.shard }}/4
       # A failing test saves what the window showed (the test instance's
       # made-up data only), and Desktop's log is beside it. Both are in
       # .xenonet, which the upload would otherwise pass over as hidden.
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-linux
+          name: e2e-linux-${{ matrix.shard }}
           path: |
             .xenonet/e2e-*.png
             .xenonet/logs/

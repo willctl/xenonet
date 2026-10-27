@@ -2,10 +2,11 @@
 // (docs/design/network.md): three services in this process, each with its
 // own state folder, its own git clones and the binary's engine driver
 // plugged into its link as `xenonet serve` plugs it. studio founds the
-// network and is its LAN-only gateway on 127.0.0.1:48114; laptop and desk
-// join with tickets as the window makes them. Agents call the engine's
-// API with their own header, as hooks and the MCP server do, and the
-// person calls /api/net and /api/actors/you/message as the window does.
+// network and is its LAN-only gateway on a loopback port the OS picks;
+// laptop and desk join with tickets as the window makes them. Agents call
+// the engine's API with their own header, as hooks and the MCP server do,
+// and the person calls /api/net and /api/actors/you/message as the window
+// does.
 //
 // NET_TEST_LOG=1 prints what each host logs.
 
@@ -13,6 +14,8 @@
 // own network tests.
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
+
+mod common;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -33,9 +36,6 @@ use xenonet_service::routes::api;
 use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
 use xenonet_wire_engine::world::World;
 
-const LAN: u16 = 48114;
-/// The second network's, for actors.
-const ACTORS_LAN: u16 = 48119;
 const S1: &str = "claude:aaaaaaaa-0001";
 const L1: &str = "claude:bbbbbbbb-0001";
 const D1: &str = "codex:cccccccc-0001";
@@ -469,17 +469,17 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     let laptop_home = root.join("laptop/home").to_string_lossy().into_owned();
     let mut asking = sess(L2, "Pick the redirect", &laptop_notes.to_string_lossy());
     asking.live = json!({ "needsYou": "question", "question": format!("Keep the old query string in {laptop_home}/notes/redirect.md?"), "lastMessage": "The redirect works; one choice is left." });
-    let door_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let [lan, door_port] = common::free_ports();
 
     // studio founds the network: a LAN-only gateway on loopback.
     let a = Host::open("studio", root.join("studio"), vec![sess(S1, "Add partial refunds", &studio_atlas)], Some(door_port)).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{LAN}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
     assert_eq!(s, 200, "{v}");
     assert_eq!((v["self"]["founder"].clone(), v["self"]["window"].clone()), (json!(true), json!(true)));
     // laptop joins with a ticket from the gateway's own window, as a window
     // host; desk with one from laptop's window, as a server.
     let (address, code) = ticket(&a, "laptop", true).await;
-    assert_eq!(address, format!("127.0.0.1:{LAN}"));
+    assert_eq!(address, format!("127.0.0.1:{lan}"));
     let b = Host::open("laptop", root.join("laptop"), vec![sess(L1, "Fix the login form", &laptop_atlas), asking], None).await;
     join(&b, &address, &code).await;
     live(&b, 2).await;
@@ -773,8 +773,9 @@ async fn actors_reach_actors_on_other_machines() {
     let root = root.canonicalize().unwrap();
     // studio founds the network, laptop joins as a window host; both have
     // actors.
+    let [lan] = common::free_ports();
     let a = Host::open_with("studio", root.join("studio"), vec![], None, true).await;
-    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{ACTORS_LAN}") })).await;
+    let (s, v) = a.window("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{lan}") })).await;
     assert_eq!(s, 200, "{v}");
     let (address, code) = ticket(&a, "laptop", true).await;
     let b = Host::open_with("laptop", root.join("laptop"), vec![], None, true).await;
