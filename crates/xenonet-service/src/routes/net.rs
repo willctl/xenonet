@@ -207,8 +207,12 @@ async fn settings(ctx: &Ctx, req: &Req, svc: &NetService, body: &Value) -> R<Val
     if let Some(host) = body.get("host").and_then(Value::as_str).filter(|h| svc.node().shared().network().is_some_and(|n| n.host != *h)) {
         let window = req.header("x-xenonet-window").is_some() && ctx.from_window(req).await.is_none();
         // Strong from the window, or from a terminal where process checks
-        // tell the person from an agent: macOS.
-        return svc.node().settings_on(host, body, if window { "window" } else { "person" }, window || cfg!(target_os = "macos"));
+        // tell the person from an agent: macOS. The machine it's for would
+        // refuse anything weaker, so it isn't sent.
+        if !window && !cfg!(target_os = "macos") {
+            return Err(NetError::new(403, "weak", super::runs::AS_YOU));
+        }
+        return svc.node().settings_on(host, body, if window { "window" } else { "person" }, true);
     }
     let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     let titles = body.get("titlesOnly").and_then(Value::as_bool);

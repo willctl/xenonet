@@ -46,7 +46,9 @@ on and can't read them.
                                    another machine's start and wake, from a
                                    window host. Narrowing is done at once;
                                    network takes the founder, or waits for
-                                   another window host to --approve it
+                                   another window host to --approve it. As
+                                   you, only in a terminal on a Mac; on
+                                   Linux and Windows, use XenoNet's window
   xenonet net gateway take [--lan <ip:port>]
                                    makes this machine the network's gateway,
                                    at that LAN address or through the actor

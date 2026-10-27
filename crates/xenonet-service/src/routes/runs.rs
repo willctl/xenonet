@@ -30,6 +30,11 @@ use std::sync::Arc;
 use xenonet_engine::engine::is_agent_id;
 use xenonet_engine::sql::Arg;
 
+/// Why a call as you is refused where you can't be told from an agent: a
+/// start, or another machine's settings, from a terminal on Linux or
+/// Windows. Every machine that takes them would refuse them.
+pub const AS_YOU: &str = "as you, this runs only from XenoNet's window, or a terminal on a Mac";
+
 const BODY: usize = 64 << 10;
 
 /// `/api/start` and `/api/runs/…`, or None for any other path.
@@ -93,8 +98,12 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
         return Err(Reply::coded(403, "yours", why));
     }
     // Strong from the window's key, or from a terminal where process checks
-    // tell you from an agent: macOS.
+    // tell you from an agent: macOS. Anything weaker would be refused by
+    // whichever machine starts it, so it's refused here, saying why.
     let strong = req.header("x-xenonet-window").is_some() || cfg!(target_os = "macos");
+    if !strong {
+        return Err(Reply::coded(403, "weak", AS_YOU));
+    }
     Ok((json!({ "kind": "you", "id": xenonet_base::ids::YOU, "title": "you" }), strong))
 }
 
