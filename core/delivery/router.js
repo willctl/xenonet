@@ -15,11 +15,13 @@
 // push with no ack goes back to waiting for the hooks. Actors aren't routed
 // here: they read their inbox.
 //
-// Waking a session spends its plan, so every wake is checked against the
-// policy (pause switch, consent, wake budget) first; a message that may not
-// wake anything still waits for the next turn.
+// Waking a session spends its plan, so every wake is checked first: against
+// the policy (pause switch, wake budget), and with reach.js, which decides
+// what this machine lets the sender do (your consent); a message that may
+// not wake anything still waits for the next turn.
 import { EventEmitter } from "node:events";
 import { framed, hashText, isYou } from "./policy.js";
+import { decide, senderOf } from "./reach.js";
 import { waysOf, served } from "./apps.js";
 
 export const ACK_MS = 60e3;
@@ -73,6 +75,13 @@ export class DeliveryRouter extends EventEmitter {
     return w;
   }
 
+  // Whether this machine lets `from` wake `agent` (reach.js): your
+  // allowance for the session, here and for actors.
+  #mayWake(from, agent) {
+    const consent = { here: !!this.policy.consented(agent), remote: !!this.policy.consented(agent, { remote: true }) };
+    return decide("wake", senderOf(from), agent, { consent });
+  }
+
   // How a message from `from` would reach `a`, an agent as the engine lists
   // it, if sent now: for the sender's answer. null when it waits for the hooks.
   way(from, a) {
@@ -80,8 +89,8 @@ export class DeliveryRouter extends EventEmitter {
     if (idle && !this.policy.wakeAllowed(from, a.id, { usage: this.usage(a.app) }).ok) return null;
     if (this.engine.listening?.has(a.id)) return "right away: it's listening for messages";
     if (waysOf(a.app)?.channel && a.status === "idle" && this.channels?.live(a.id)) return "right away, through its channel";
-    if (a.status === "ended" && this.resumable(a) && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, in a turn XenoNet resumes it for";
-    if (waysOf(a.app)?.server && this.opencode && this.policy.consented(a.id, { remote: String(from).startsWith("actor:") })) return "right away, through its OpenCode server";
+    if (a.status === "ended" && this.resumable(a) && this.#mayWake(from, a.id).ok) return "right away, in a turn XenoNet resumes it for";
+    if (waysOf(a.app)?.server && this.opencode && this.#mayWake(from, a.id).ok) return "right away, through its OpenCode server";
     return null;
   }
 
@@ -139,7 +148,8 @@ export class DeliveryRouter extends EventEmitter {
       }
       // 2. OpenCode's own server, with your consent for that session.
       if (waysOf(app)?.server && this.opencode) {
-        if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("opencode: no consent");
+        const may = this.#mayWake(m.from, rec.agent);
+        if (!may.ok) tried.push(`opencode: ${may.why}`);
         else {
           const r = await this.opencode.deliver(rec.agent, text).catch((err) => ({ ok: false, why: err.message }));
           if (r.ok) return success("opencode", { ackedAt: this.now(), where: r.where });
@@ -149,9 +159,12 @@ export class DeliveryRouter extends EventEmitter {
       // 3. Typing into its tmux pane: consent, a sender XenoNet verified with
       // a token or you, and an idle session that isn't waiting on its user.
       if (this.tmux && idle && !view?.ended && !view?.needsYou) {
-        const sender = isYou(m.from) || m.from.startsWith("actor:");
+        // Only you, or an actor this machine checked by its token.
+        const who = senderOf(m.from);
+        const sender = who.kind === "you" || (who.kind === "actor" && !who.host);
         const pid = this.engine.store.contact?.(rec.agent)?.pid ?? null;
-        if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("tmux: no consent");
+        const may = this.#mayWake(m.from, rec.agent);
+        if (!may.ok) tried.push(`tmux: ${may.why}`);
         else if (!sender) tried.push("tmux: only you or an actor with a token may type");
         else if (!pid) tried.push("tmux: no process known");
         else {
@@ -164,7 +177,8 @@ export class DeliveryRouter extends EventEmitter {
       // 4. A headless resume, for a Claude Code or Codex session whose
       // process has gone, with your consent: never while it runs.
       if (this.resume && view?.ended && this.resume.can(rec.agent)) {
-        if (!this.policy.consented(rec.agent, { remote: m.from.startsWith("actor:") })) tried.push("resume: no consent");
+        const may = this.#mayWake(m.from, rec.agent);
+        if (!may.ok) tried.push(`resume: ${may.why}`);
         else {
           const r = await this.resume.deliver({ agent: rec.agent, cwd: view.cwd, text }).catch((err) => ({ ok: false, why: err.message }));
           this.policy.audit({ kind: "resumed", message: m.id, from: m.from, to: rec.agent, ok: r.ok, why: r.why ?? null, text: hashText(m.text) });

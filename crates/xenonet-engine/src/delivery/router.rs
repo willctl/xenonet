@@ -9,9 +9,10 @@
 //!   next turn  waits for the session's hooks
 //!   notified   nothing picked it up within ackMs, so XenoNet told you
 //!
-//! Waking a session spends its plan, so every wake is checked against the
-//! policy (pause switch, consent, wake budget) first; a message that may not
-//! wake anything still waits for the next turn.
+//! Waking a session spends its plan, so every wake is checked first:
+//! against the policy (pause switch, wake budget), and with `reach`, which
+//! decides what this machine lets the sender do (your consent); a message
+//! that may not wake anything still waits for the next turn.
 //!
 //! The records are Rust's; the twin keeps a JS object for each, which it's
 //! told of ("listed", "unlisted", "sync", "release"), and the events and
@@ -20,6 +21,7 @@
 //! are called as the JS called them.
 
 use super::policy::{framed, hash_text, is_you};
+use super::reach::{self, Action, Consent, Decision, Kind, Settings};
 use crate::peer::{list, opt_call, Calls, Result};
 use crate::sql::Arg;
 use crate::store::js_text;
@@ -150,6 +152,13 @@ impl Router {
         Ok(c.call("router.policy", "consented", vec![id.clone(), obj(vec![("remote", Arg::Bool(remote))])])?.truthy())
     }
 
+    /// Whether this machine lets `from` wake `agent` (`reach`): your
+    /// allowance for the session, here and for actors.
+    fn may_wake(c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Decision> {
+        let consent = Consent { here: Self::consented(c, agent, false)?, remote: Self::consented(c, agent, true)? };
+        Ok(reach::decide(Action::Wake, &reach::sender_of(from), &js_text(agent), &Settings { consent }))
+    }
+
     /// Whether a session can be reached without hooks (an OpenCode run
     /// XenoNet has a way into).
     pub fn reaches(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
@@ -222,11 +231,10 @@ impl Router {
         if ways.is_some_and(|w| w.channel) && status.as_str() == Some("idle") && opt_call(c, "router.channels", "live", vec![id.clone()])?.truthy() {
             return Ok(Some("right away, through its channel"));
         }
-        let remote = starts(from, "actor:");
-        if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && Self::consented(c, &id, remote)? {
+        if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && Self::may_wake(c, from, &id)?.allowed() {
             return Ok(Some("right away, in a turn XenoNet resumes it for"));
         }
-        if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? && Self::consented(c, &id, remote)? {
+        if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? && Self::may_wake(c, from, &id)?.allowed() {
             return Ok(Some("right away, through its OpenCode server"));
         }
         Ok(None)
@@ -344,7 +352,6 @@ impl Router {
             Self::emit(c, key)?;
             Ok(true)
         };
-        let remote = starts(&from, "actor:");
         // 0. Its Stop hook, listening after a turn: the hook hands the
         // message over itself, and checks the wake then.
         if opt_call(c, "router.engine.listening", "has", vec![agent.clone()])?.truthy() {
@@ -366,8 +373,8 @@ impl Router {
             }
             // 2. OpenCode's own server, with your consent for that session.
             if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? {
-                if !Self::consented(c, &agent, remote)? {
-                    tried.push("opencode: no consent".into());
+                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                    tried.push(format!("opencode: {why}"));
                 } else {
                     let r = caught(c.call("router.opencode", "deliver", vec![agent.clone(), text.clone()]));
                     if r.field("ok").truthy() {
@@ -381,10 +388,12 @@ impl Router {
             // verified with a token or you, and an idle session that isn't
             // waiting on its user.
             if truthy_at(c, "router.tmux")? && idle && !view.field("ended").truthy() && !view.field("needsYou").truthy() {
-                let sender = is_you(&from) || remote;
+                // Only you, or an actor this machine checked by its token.
+                let who = reach::sender_of(&from);
+                let sender = who.kind == Kind::You || (who.kind == Kind::Actor && who.host.is_none());
                 let pid = opt_call(c, "router.engine.store", "contact", vec![agent.clone()])?.field("pid").or(Arg::Null);
-                if !Self::consented(c, &agent, remote)? {
-                    tried.push("tmux: no consent".into());
+                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                    tried.push(format!("tmux: {why}"));
                 } else if !sender {
                     tried.push("tmux: only you or an actor with a token may type".into());
                 } else if !pid.truthy() {
@@ -414,8 +423,8 @@ impl Router {
             // 4. A headless resume, for a Claude Code or Codex session whose
             // process has gone, with your consent: never while it runs.
             if truthy_at(c, "router.resume")? && view.field("ended").truthy() && c.call("router.resume", "can", vec![agent.clone()])?.truthy() {
-                if !Self::consented(c, &agent, remote)? {
-                    tried.push("resume: no consent".into());
+                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                    tried.push(format!("resume: {why}"));
                 } else {
                     let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone())])]));
                     c.call(

@@ -5,6 +5,7 @@ pub mod apps;
 pub mod channel;
 pub mod opencode;
 pub mod policy;
+pub mod reach;
 pub mod resume;
 pub mod router;
 pub mod selector;

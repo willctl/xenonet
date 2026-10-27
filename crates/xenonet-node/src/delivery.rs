@@ -314,6 +314,26 @@ impl TmuxCore {
     }
 }
 
+// ----- reach -----
+
+use xenonet_engine::delivery::reach;
+
+#[napi(js_name = "reachSender")]
+pub fn reach_sender(id: JsArg) -> JsArg {
+    JsArg(reach::sender_of(&id.0).to_arg())
+}
+
+/// { ok: true }, or { ok: false, why }.
+#[napi(js_name = "reachDecide")]
+pub fn reach_decide(action: String, sender: JsArg, target: JsArg, settings: JsArg) -> JsArg {
+    let Some(a) = reach::Action::parse(&action) else {
+        return JsArg(reach::Decision::Refuse(format!("nothing decides \"{action}\" here")).to_arg());
+    };
+    let consent = settings.0.field("consent");
+    let s = reach::Settings { consent: reach::Consent { here: consent.field("here").truthy(), remote: consent.field("remote").truthy() } };
+    JsArg(reach::decide(a, &reach::Sender::of(&sender.0), &xenonet_engine::store::js_text(&target.0), &s).to_arg())
+}
+
 // ----- resume -----
 
 use xenonet_engine::delivery::resume;

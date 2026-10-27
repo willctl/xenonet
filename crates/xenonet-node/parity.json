@@ -432,6 +432,10 @@
         "Text cut by sanitize mid-surrogate-pair ends in U+FFFD where JS kept the lone half."
       ]
     },
+    "core/delivery/reach.js": {
+      "rust": "crates/xenonet-engine/src/delivery/reach.rs",
+      "differences": []
+    },
     "core/delivery/resume.js": {
       "rust": "crates/xenonet-engine/src/delivery/resume.rs",
       "differences": [

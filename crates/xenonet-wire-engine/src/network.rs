@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_base::ids::{is_session_id, parse_actor_id, qualify, YOU};
 use xenonet_base::network::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
+use xenonet_engine::delivery::reach::{self, Action, Decision, Settings};
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Fail, ACTIVE_MS};
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
 use xenonet_engine::peer::{Result, Thrown};
@@ -749,6 +750,11 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool) -> Result<()>
     let hops = n(b, "hops").unwrap_or(0.0).max(local_depth(w, reply_to));
     if hops >= MAX_HOPS {
         receipt(w, from, &mid, &target, "refused", Some("this thread has gone back and forth too many times; XenoNet stops agent-to-agent threads at 6 messages"));
+        return Ok(());
+    }
+    // What this machine lets the sender do here.
+    if let Decision::Refuse(why) = reach::decide(Action::Message, &reach::sender_of(&Arg::text(sender_id.clone())), &target, &Settings::default()) {
+        receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
     }
     let mut c = EngineCalls::new(w, None);
