@@ -90,10 +90,50 @@ The chime and the notification for anything that waits on you, on this machine o
 From a window host's console you can:
 
 - **Message any session, as you.** Choose **Message** beside it in the Network panel, or in a session's own panel. It arrives as "From you, at studio's console." A machine takes a message as you only from a window host's console, checked by that console's window key, and refuses one from any other machine.
+- **Start a session on any machine**, as [Starting sessions](#starting-sessions) says.
+- **Change who may start and wake sessions on another machine**, as [Who may start and wake sessions](#who-may-start-and-wake-sessions) says.
+- **Answer a permission prompt** from a session XenoNet runs on any machine, as [Permission prompts](#permission-prompts) says.
 - **Add a machine**, as above.
 - **Remove a machine** that isn't a window host. Removing a window host, or moving the gateway, needs the founder or two window hosts.
 
 What changes one machine's own setup stays on it: connecting its sessions, installing its background service, its gateway's tunnel, and actors' tokens and scopes. So do creating, joining and leaving a network, which XenoNet refuses from under an agent.
+
+## Starting sessions
+
+You, a session or an actor can start a Claude Code, Codex or Grok Build session on any machine in the network, in a folder there, with a first prompt. It runs headless, through XenoNet's runner, and shows on the map like any other session, so you can message it and follow it.
+
+- **In the console:** **Start a session…** on a machine's row in the Network panel, on its card in the Machines view, or in its node's panel on the map. Pick the machine, the app, the permissions (your own settings, or plan, accept edits, auto or don't ask), a folder from that machine's projects or its home, and write the prompt. **Start** is yours, and works a moment after the box opens.
+- **In a terminal:** `xenonet start --on neo-rex --in project:atlas "Run the ledger fixtures"`. Leave `--on` out for this machine. `--app` picks codex or grok, and `--mode` a permission mode.
+- **From a session or an actor:** the xenonet MCP server's `start_session` tool. An actor needs the spawn-sessions capability, and calls from its own machine (see [Actors](actors.md)).
+
+The machine that runs it decides. A start comes only from a window host: a machine without a window can be started on, but never starts anything. A start as you needs your window host's window key. A start from a session or an actor needs that machine's start setting to be **the network** (see below). The folder is a project or folder from its map, by id or path, a folder one of its sessions works in, or `~`. A session never starts bypassing its permission checks, and Codex runs with its own `config.toml`'s sandbox and approvals. A machine starts 20 sessions an hour at most, and 10 for any one machine that asks.
+
+The first prompt says who asked: "[XenoNet] Started by you, at inix's console.", or "[XenoNet] inix says this was asked by the session «Fix the login form» (claude:…). It came from an agent, not from your user."
+
+The answers come back as receipts: started, with the new session's id, or refused with why, and later ended, with its exit and how long it ran. For you they're a line in the activity feed; for a session or an actor, a message. A start goes only to a machine that's online, and its XenoNet must be new enough to take starts: the answer says so at once otherwise, and nothing waits to start later. A machine whose run couldn't sign in to Claude Code says so, and Needs you shows which machine needs `xenonet runs sign-in` (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)).
+
+## Who may start and wake sessions
+
+Two settings on each machine decide what the network may do to its sessions:
+
+| Setting | Values | Default |
+|---|---|---|
+| `start`: who may start sessions here | nobody (`off`), `you` from a window host's console, or `network`: you, and the sessions and actors on window hosts | `you` |
+| `wake`: who may wake a session here to take a message at once | your `consent` per session (`xenonet live allow`), or `network`: any sender, within the wake budget | `consent` |
+
+Set this machine's in the Network panel's **This machine** box, or with `xenonet net set --start network --wake network`. At its own keyboard you can always set either.
+
+From a window host, change another machine's on its row in the Network panel, or with `xenonet net set --on neo-rex --start off`. Narrowing (to nobody, you or consent) is done at once. Widening to the network takes the founder's console, or a second window host: from any other window host it waits ten minutes on that machine, shows on its row in every window host's Network panel, and another window host approves it there, or with `xenonet net set --on neo-rex --approve <id>`.
+
+## Permission prompts
+
+A Claude Code session XenoNet starts asks XenoNet, through the xenonet MCP server's `permission` tool, whenever its settings don't settle a tool call. XenoNet answers only for the runs it started; any other session asks in its own app.
+
+The prompt shows in Needs you on that machine and on every window host: "neo-rex · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. Allow is yours, and works a moment after the row shows. Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
+
+## Everything crosses through the gateway
+
+Messages, starts, their answers, permission prompts and your answers all cross between machines as signed, sealed frames through the network's gateway, as the map and messages always have. No machine opens a port to another, and no new kind of frame was added, so a machine running an older XenoNet refuses what it doesn't take rather than misreading it.
 
 ## A2A agents
 
@@ -198,6 +238,9 @@ Crosses, signed and sealed:
 - when you last worked at each machine's console, so the chime plays where you are;
 - claims and the files sessions are changing, as the repo's remote and the path inside the repo;
 - messages, their receipts and handoffs;
+- each machine's start and wake settings, what waits to widen them, and what its XenoNet takes;
+- start requests, with their prompt, and their answers, to and from the machine they're for;
+- a run's permission prompt, to each window host: its machine, session, run, tool and what it would run (a command or a path, up to 300 characters, with the home folder as `~`), and your answer back;
 - while a console is open on a window host, each other machine's map for it: its places and its sessions of the last 7 days (at most 5,000), with the home folder as `~`, and their live state, as the [SSH hosts prototype](other-machines.md) sends them with detail on. Only a window host is sent maps, and only while its console asks again every 20 seconds;
 - a session's transcript or stats, only when you open one in a window host's XenoNet window. Nothing keeps them;
 - each machine's load, every 5 seconds, with its map, while a window host's console watches it: CPU, GPU and memory in use, and what the parts are (the CPU's model, threads and speed, total memory, each GPU's name and memory, platform and architecture). No machine names, serials or OS version. A machine keeps its load to itself with **Share load with the network** off in its Network panel (on by default), or `xenonet net set --no-share-load`. A console that isn't a window host's gets no other machine's load, as it gets no other machine's map;

@@ -173,7 +173,7 @@ A wake says only that messages are waiting, and how many. It never includes what
 Any session can write to an actor, and each wake may start a run you pay for, so XenoNet limits wakes:
 - Messages that arrive close together make one wake.
 - An actor is woken at most every 30 seconds, and 20 times an hour.
-- An actor isn't woken again while the messages from its last wake are still unread, for up to ten minutes.
+- An actor isn't woken again while the messages from its last wake are still unread, for two minutes. If they're still unread then, it's woken once more, and not again for those messages.
 - A webhook that fails is retried after a longer wait each time, up to half an hour. The actor's row and `xenonet doctor` say why it failed.
 
 A webhook's URL and key go to your computer's credential store: Keychain on a Mac, Credential Manager on Windows, the Secret Service on Linux. The window never shows them again. The store keeps them out of XenoNet's files, but programs running as you can still read them there. So before each call, XenoNet checks the URL again and calls it only if its host is still the one you set. XenoNet calls `https://` addresses only, or `http://` on this computer. It refuses link-local addresses and doesn't follow redirects. The key is sent as `Authorization: Bearer`, which is what a Grok Bot routine expects. A key that starts with `whsec_` signs the call instead, following [Standard Webhooks](https://www.standardwebhooks.com). Only XenoNet's window can set a webhook. `xenonet actor wake <slug>` shows how an actor is woken, `test` calls its webhook, and `off` stops waking it.
@@ -228,7 +228,9 @@ An actor is held to the capabilities you allowed, and to limits on how much and 
 
 With `message-agents`, an actor can write to sessions and to other actors of yours (`xenonet actor send actor:moth "…"`). Each reads it in its inbox, with how XenoNet knows who sent it. To write to an actor yourself, choose **Message…** in its inspector. The actor reads your message in its inbox as from you, at XenoNet's own window. Only you can write and send there. XenoNet's control channel never presses those buttons outside the demo, so no agent driving the window can send as you.
 
-A program that speaks MCP gets the same calls as tools from the `xenonet` MCP server, with `XENONET_ACTOR_TOKEN_FILE` in its environment. The tools are `actor_heartbeat`, `actor_events` and `actor_targets`. The [actor interface](../design/actors/interface.md) has the whole API.
+With `spawn-sessions`, an actor on this machine can start a Claude Code, Codex or Grok Build session, here or on another machine of your network, with the `start_session` tool or `POST /api/start` under its token. The machine it starts on must let the network start sessions there, and the new session's first prompt says an actor asked (see [Starting sessions](network.md#starting-sessions)). It's never offered through the actor gateway, so an actor outside this machine can't start one.
+
+A program that speaks MCP gets the same calls as tools from the `xenonet` MCP server, with `XENONET_ACTOR_TOKEN_FILE` in its environment. Its own tools are `actor_heartbeat`, `actor_events` and `actor_targets`. The [actor interface](../design/actors/interface.md) has the whole API.
 
 ## Tokens
 
