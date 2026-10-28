@@ -55,7 +55,7 @@ test("a program is quoted once for its platform: as it is elsewhere, a batch fil
   assert.equal(cmdExe(undefined, undefined), "C:\\Windows\\System32\\cmd.exe");
 });
 
-test("Claude Code is found on PATH, then where Claude desktop keeps it (the newest verified build), then at XENONET_CLAUDE_BIN", () => {
+test("Claude Code is found on PATH, then where its installer puts it, then where Claude desktop keeps it (the newest verified build), then at XENONET_CLAUDE_BIN", () => {
   const home = p("Users", "jo");
   const support = path.join(home, "Library", "Application Support", "Claude", "claude-code");
   const binary = (version, build) => path.join(support, version, build, "claude.app", "Contents", "MacOS", "claude");
@@ -74,12 +74,16 @@ test("Claude Code is found on PATH, then where Claude desktop keeps it (the newe
   assert.deepEqual(bundledClaudeCode(path.join(home, "Library", "Application Support", "Claude"), { platform: "darwin", ...unverified }), [binary("2.1.0", "old")], "the newest verified build");
   const at = (env, look = d, platform = "darwin") => findCli("claude", { env, platform, homeDir: home, ...look });
   assert.equal(at({ PATH: PATHS(p("usr", "bin"), p("opt", "bin")) }), p("opt", "bin", "claude"), "PATH first");
+  const installed = disk({ [path.join(home, ".local", "bin", "claude")]: 1, [binary("2.1.308", "a93ded4b1b47")]: 2, [verified("2.1.308", "a93ded4b1b47")]: 2 });
+  assert.equal(at({ PATH: p("usr", "bin") }, installed), path.join(home, ".local", "bin", "claude"), "then where its installer puts it");
   assert.equal(at({ PATH: p("usr", "bin"), XENONET_CLAUDE_BIN: p("x", "claude") }), binary("2.1.308", "a93ded4b1b47"), "then Claude desktop's own");
   assert.equal(at({ PATH: p("usr", "bin"), XENONET_CLAUDE_BIN: p("x", "claude") }, disk({})), p("x", "claude"), "then its variable");
   assert.equal(at({ PATH: p("usr", "bin"), XENONET_CLAUDE_BIN: "" }, disk({})), null, "or nowhere");
   // Windows: PATHEXT finds an npm install's claude.cmd; Claude desktop's
   // MSIX folder holds its claude.exe.
   assert.equal(at({ PATH: p("npm"), PATHEXT: ".EXE;.CMD" }, disk({ [p("npm", "claude.CMD")]: 1 }), "win32"), p("npm", "claude.CMD"));
+  // Its installer's claude.exe, which it leaves off PATH.
+  assert.equal(at({ PATH: p("npm"), PATHEXT: ".EXE;.CMD" }, disk({ [path.join(home, ".local", "bin", "claude.exe")]: 1 }), "win32"), path.join(home, ".local", "bin", "claude.exe"));
   const msix = path.join("L", "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "claude-code");
   const win = disk({
     [path.join(msix, "1.0.0", "x", "claude.exe")]: 1,

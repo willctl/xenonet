@@ -122,10 +122,19 @@ export function bundledClaudeCode(desktopDir, { platform = process.platform, exi
   return out;
 }
 
+// Where Claude Code's own installer puts it: ~/.local/bin/claude, or
+// claude.exe there on Windows. On Windows the installer leaves that folder
+// off PATH, and elsewhere a service started before the install keeps the
+// PATH it had.
+function installedClaudeCode(platform = process.platform, homeDir = home) {
+  return path.join(homeDir, ".local", "bin", platform === "win32" ? "claude.exe" : "claude");
+}
+
 // The program to run for an app's CLI, or null when it isn't here.
 //   claude: on PATH (with PATHEXT on Windows, so an npm install's
-//           claude.cmd), then the Claude Code that Claude desktop keeps
-//           (bundledClaudeCode), then XENONET_CLAUDE_BIN
+//           claude.cmd), then where its installer puts it
+//           (installedClaudeCode), then the Claude Code that Claude desktop
+//           keeps (bundledClaudeCode), then XENONET_CLAUDE_BIN
 //   codex:  XENONET_CODEX_BIN, then the one the ChatGPT desktop app ships
 //           (bundledCodexBinaries), then on PATH
 // `canRun` throws for a file on PATH that may not be run.
@@ -135,7 +144,11 @@ export function findCli(app, { env = process.env, platform = process.platform, h
     const dir = findClaudeDesktopDir(look);
     return dir ? bundledClaudeCode(dir, look)[0] : undefined;
   };
-  if (app === "claude") return onPath("claude", { env, platform, canRun }) ?? desktop() ?? (env.XENONET_CLAUDE_BIN || null);
+  const installed = () => {
+    const f = installedClaudeCode(platform, homeDir);
+    return exists(f) ? f : undefined;
+  };
+  if (app === "claude") return onPath("claude", { env, platform, canRun }) ?? installed() ?? desktop() ?? (env.XENONET_CLAUDE_BIN || null);
   if (app === "codex") return env.XENONET_CODEX_BIN || bundledCodexBinaries(look)[0] || onPath("codex", { env, platform, canRun });
   return null;
 }
