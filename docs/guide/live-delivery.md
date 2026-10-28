@@ -93,10 +93,12 @@ stay among the ones you can message by name.
 
 XenoNet looks for the program in this order:
 
-- Claude Code: `claude` on your `PATH`, then the copy of Claude Code that
-  Claude desktop keeps in its own folder (`claude-code/<version>/…`, the
-  newest version whose build Claude desktop marked `.verified`), then the
-  path in `XENONET_CLAUDE_BIN`.
+- Claude Code: `claude` on your `PATH`, then where Claude Code's installer
+  puts it (`~/.local/bin/claude`, or `claude.exe` there on Windows, where
+  the installer leaves that folder off `PATH`), then the copy of Claude
+  Code that Claude desktop keeps in its own folder
+  (`claude-code/<version>/…`, the newest version whose build Claude
+  desktop marked `.verified`), then the path in `XENONET_CLAUDE_BIN`.
 - Codex: the path in `XENONET_CODEX_BIN`, then the `codex` the ChatGPT
   desktop app ships, then `codex` on your `PATH`.
 
