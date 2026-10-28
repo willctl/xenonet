@@ -603,6 +603,8 @@ async function componentService(env, { terminals = false } = {}) {
       if (method === "stop") {
         if (terminals && !params?.force) throw new Error("XenoNet has running terminals. Close them first, or use --force.");
         s.stops++;
+        // A service ends a moment after it answers.
+        setTimeout(() => s.close(), 400);
         return { stopping: true };
       }
       return { version: "9.9.9", pid: 1, terminals: [] };
@@ -612,8 +614,10 @@ async function componentService(env, { terminals = false } = {}) {
   fs.mkdirSync(env.XENONET_RUNTIME_DIR, { recursive: true });
   fs.writeFileSync(path.join(env.XENONET_RUNTIME_DIR, `service-${env.XENONET_PORT}.json`), JSON.stringify({ port: server.address().port, token, pid: 1, version: "9.9.9" }));
   s.close = () => new Promise((r) => {
+    s.closed = true;
     for (const socket of s.sockets) socket.destroy();
-    server.close(r);
+    if (server.listening) server.close(() => r());
+    else r();
   });
   return s;
 }
@@ -632,6 +636,7 @@ test("xenonet service stop leaves the stop file a supervisor waiting for the por
     assert.equal(stopped.code, 0, stopped.stderr);
     assert.deepEqual(JSON.parse(stopped.stdout), { stopping: true });
     assert.equal(s.stops, 1);
+    assert.equal(s.closed, true, "the stop waits until the service has ended, so a start right after starts one");
     assert.equal(fs.existsSync(file), true, "a supervisor waiting for the port stays stopped");
   } finally {
     await s.close();
@@ -639,7 +644,9 @@ test("xenonet service stop leaves the stop file a supervisor waiting for the por
   // With no service to stop, there's nothing for a supervisor to wait on.
   fs.rmSync(file);
   fs.rmSync(path.join(env.XENONET_RUNTIME_DIR, "service-47998.json"));
-  assert.notEqual((await xenonet(["service", "stop"], { env })).code, 0);
+  const none = await xenonet(["service", "stop"], { env });
+  assert.notEqual(none.code, 0);
+  assert.match(none.stderr, /XenoNet's service isn't running/);
   assert.equal(fs.existsSync(file), false);
 });
 

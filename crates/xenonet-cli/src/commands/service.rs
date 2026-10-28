@@ -44,6 +44,10 @@ fn port_of(env: &Value) -> String {
 /// it before the supervisor's own could start, sees it and stays stopped
 /// too, rather than starting its copy the moment this one frees the port.
 /// A stop that's refused (terminals open) takes it away again.
+///
+/// The service answers as it begins to stop, and this waits until it has:
+/// a `service start` right after would otherwise find it still answering,
+/// say it reused it, and leave nothing running once it ended.
 fn stop(env: &Value, flags: &Flags) -> Done {
     let file = cores::stop_file(env);
     if let Some(dir) = std::path::Path::new(&file).parent() {
@@ -52,15 +56,29 @@ fn stop(env: &Value, flags: &Flags) -> Done {
     let _ = std::fs::write(&file, stringify(&json!({ "at": crate::out::now(), "pid": std::process::id() }), 0));
     match cores::service_request(env, "stop", &json!({ "force": flags.on("force") })) {
         Ok(answer) => {
+            if answer.get("stopping") == Some(&json!(true)) {
+                let until = std::time::Instant::now() + STOP_WAIT;
+                while login::running(env).is_some() && std::time::Instant::now() < until {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
             print(stringify(&answer, 0));
             Ok(0)
         }
         Err(e) => {
             let _ = std::fs::remove_file(&file);
+            // The service writes service-<port>.json beside the stop file
+            // while it runs; without it, there's none to stop.
+            if !std::path::Path::new(&file).with_extension("json").exists() {
+                return Err(Fail::new("XenoNet's service isn't running", 1));
+            }
             Err(e)
         }
     }
 }
+
+/// How long `service stop` waits for the service to end.
+const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Starts the service unless one answers. One registered to start at login
 /// is started by its supervisor, so there's never a second copy beside

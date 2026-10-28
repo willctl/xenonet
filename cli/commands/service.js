@@ -27,12 +27,40 @@ export async function run(args, flags) {
       fs.writeFileSync(file, JSON.stringify({ at: Date.now(), pid: process.pid }));
     } catch {}
   }
+  let answer;
   try {
     const client = await connectService({ env });
-    try { print(JSON.stringify(await client.request(action === "stop" ? "stop" : "status", { force: !!flags.force }))); }
+    try { answer = await client.request(action === "stop" ? "stop" : "status", { force: !!flags.force }); }
     finally { client.close(); }
   } catch (err) {
-    if (file) fs.rmSync(file, { force: true });
+    if (file) {
+      fs.rmSync(file, { force: true });
+      // The service writes service-<port>.json beside the stop file while
+      // it runs; without it, there's none to stop.
+      if (!fs.existsSync(file.replace(/\.stop$/, ".json"))) throw new Error("XenoNet's service isn't running");
+    }
     throw err;
+  }
+  // The service answers as it begins to stop, and this waits until it has:
+  // a `service start` right after would otherwise find it still answering,
+  // say it reused it, and leave nothing running once it ended.
+  if (file && answer?.stopping === true) {
+    const until = Date.now() + STOP_WAIT_MS;
+    while (Date.now() < until && (await answers(env))) await new Promise((r) => setTimeout(r, 200));
+  }
+  print(JSON.stringify(answer));
+}
+
+// How long `service stop` waits for the service to end.
+const STOP_WAIT_MS = 15000;
+
+// Whether a service answers on env's port.
+async function answers(env) {
+  try {
+    const client = await connectService({ env });
+    try { await client.request("status", {}); return true; }
+    finally { client.close(); }
+  } catch {
+    return false;
   }
 }
