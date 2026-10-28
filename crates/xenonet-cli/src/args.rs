@@ -24,6 +24,15 @@ const TAKES_VALUE: &[&str] = &[
     "out",
     "last",
     "since",
+    // xenonet logs
+    "component",
+    "code",
+    // xenonet diagnose
+    "model",
+    // xenonet refusals
+    "provider",
+    // xenonet live
+    "hours",
     // xenonet hosts
     "sshPort",
     "xenonetPort",
@@ -64,9 +73,19 @@ const TAKES_VALUE: &[&str] = &[
     // xenonet net
     "lan",
     "op",
+    "on",
+    "wake",
+    "approve",
+    // xenonet start
+    "in",
+    "mode",
     // xenonet svc
     "hosts",
 ];
+// Flags that take a value in one command only, because another command
+// reads the same name as a switch: xenonet net set --start network, but
+// xenonet hosts add … --start and xenonet relay --start.
+const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 
 /// The flags given, by name: what JS's `flags` object holds.
@@ -162,6 +181,11 @@ fn camel(name: &str) -> String {
     out
 }
 
+// Whether --key takes the word after it, in the command named so far.
+fn takes_value(key: &str, command: Option<&String>) -> bool {
+    TAKES_VALUE.contains(&key) || TAKES_VALUE_IN.iter().any(|(c, keys)| command.is_some_and(|w| w == c) && keys.contains(&key))
+}
+
 pub fn parse(argv: &[String]) -> Parsed {
     let mut flags = Flags::default();
     let mut rest = Vec::new();
@@ -197,7 +221,7 @@ pub fn parse(argv: &[String]) -> Parsed {
             let key = camel(k);
             if let Some(v) = v {
                 set(&mut flags, &key, v.to_string());
-            } else if TAKES_VALUE.contains(&key.as_str()) && i + 1 < argv.len() {
+            } else if takes_value(&key, rest.first()) && i + 1 < argv.len() {
                 i += 1;
                 set(&mut flags, &key, argv[i].clone());
             } else if let Some(name) = k.strip_prefix("no-") {
@@ -256,6 +280,63 @@ mod tests {
         assert_eq!(parse(&args(&["--a=b=c", "--no-exit-code", "-v"])).flags, flags(json!({ "a": "b=c", "exitCode": false, "version": true })));
         assert_eq!(camel("host-key-alias"), "hostKeyAlias");
         assert_eq!(camel("a-B-c-"), "a-BC-");
+    }
+
+    // Every flag a command's help shows with a value takes the word after
+    // it, so "--on neo-rex" is neo-rex and not "--on" and a stray word.
+    #[test]
+    fn the_flags_help_shows_with_a_value_take_one() {
+        let net = parse(&args(&["net", "set", "--on", "neo-rex", "--start", "network", "--wake", "network"]));
+        assert_eq!((net.rest, net.flags), (args(&["net", "set"]), flags(json!({ "on": "neo-rex", "start": "network", "wake": "network" }))));
+        assert_eq!(parse(&args(&["net", "set", "--on", "desk", "--approve", "p1"])).flags, flags(json!({ "on": "desk", "approve": "p1" })));
+        let start = parse(&args(&["start", "--on", "desk", "--in", "~/app", "--app", "codex", "--mode", "plan", "fix", "it"]));
+        assert_eq!((start.rest, start.flags), (args(&["start", "fix", "it"]), flags(json!({ "on": "desk", "in": "~/app", "app": "codex", "mode": "plan" }))));
+        assert_eq!(parse(&args(&["logs", "--component", "service", "--code", "doctor."])).flags, flags(json!({ "component": "service", "code": "doctor." })));
+        assert_eq!(parse(&args(&["diagnose", "--model", "m"])).flags, flags(json!({ "model": "m" })));
+        assert_eq!(parse(&args(&["refusals", "--provider", "claude"])).flags, flags(json!({ "provider": "claude" })));
+        assert_eq!(parse(&args(&["live", "pause", "--hours", "2"])).flags, flags(json!({ "hours": "2" })));
+        // --start is a switch everywhere but net.
+        assert_eq!(parse(&args(&["relay", "--start", "--demo"])).flags, flags(json!({ "start": true, "demo": true })));
+        let hosts = parse(&args(&["hosts", "add", "box", "--start", "user@box"]));
+        assert_eq!((hosts.rest, hosts.flags), (args(&["hosts", "add", "box", "user@box"]), flags(json!({ "start": true }))));
+    }
+
+    // The --flags a command's help file shows with a value after them
+    // (--on <id>, --start off|you|network), by command.
+    fn flags_with_values_in_help() -> Vec<(String, String)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/help");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let command = path.file_stem().unwrap().to_string_lossy().to_string();
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (at, _) in text.match_indices("--") {
+                let after = &text[at + 2..];
+                let name: String = after.chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-').collect();
+                // The word right after it (one space or =, not a column's
+                // padding), without the brackets around an optional flag.
+                let Some(rest) = after[name.len()..].strip_prefix([' ', '=']) else { continue };
+                let word = rest.split(char::is_whitespace).next().unwrap_or("").trim_end_matches([']', ')', ',', '.']);
+                let choices = word.contains('|') && word.split('|').all(|w| w.starts_with(|c: char| c.is_ascii_lowercase()) && w.chars().all(char::is_alphanumeric));
+                let placeholder = word.starts_with('<') || word == "…" || (word.len() == 1 && word.chars().all(|c| c.is_ascii_alphabetic()));
+                if !name.is_empty() && !name.starts_with("no-") && (placeholder || choices) {
+                    found.push((command.clone(), name));
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_flag_help_shows_with_a_value_takes_it() {
+        let found = flags_with_values_in_help();
+        assert!(found.len() > 20, "the help files show flags with values: {found:?}");
+        let missed: Vec<String> = found
+            .into_iter()
+            .filter(|(command, name)| parse(&args(&[command, &format!("--{name}"), "x"])).flags.list(&camel(name)) != ["x"])
+            .map(|(command, name)| format!("xenonet {command} --{name}"))
+            .collect();
+        assert!(missed.is_empty(), "these read the word after them as a value in their help, and the parser doesn't: {missed:?}");
     }
 
     #[test]

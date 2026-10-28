@@ -35,6 +35,9 @@ test("arguments: flags anywhere, values, negations and everything after --", () 
   assert.deepEqual(parse(["who", "--json", "src/a.js"]), { flags: { json: true }, rest: ["who", "src/a.js"] });
   assert.deepEqual(parse(["console", "--instance", "dev", "--", "type:--x"]), { flags: { instance: "dev" }, rest: ["console", "type:--x"] });
   assert.deepEqual(parse(["--dry-run"]).flags, { dryRun: true });
+  assert.deepEqual(parse(["logs", "--component", "service", "--code", "doctor."]), { flags: { component: "service", code: "doctor." }, rest: ["logs"] });
+  assert.deepEqual(parse(["live", "allow", "s1", "--hours", "2"]).flags, { hours: "2" });
+  assert.deepEqual([parse(["diagnose", "--model", "m"]).flags, parse(["refusals", "--provider", "claude"]).flags], [{ model: "m" }, { provider: "claude" }]);
 });
 
 test("output: columns line up, the last one wraps under itself, and painted text stays painted", () => {

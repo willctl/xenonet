@@ -4,6 +4,8 @@
 // than once (xenonet actor targets --add … --add …) collects its values.
 const TAKES_VALUE = new Set([
   "port", "only", "limit", "dir", "instance", "seconds", "theme", "size", "out", "last", "since",
+  // xenonet logs, diagnose, refusals, live
+  "component", "code", "model", "provider", "hours",
   // xenonet hosts
   "sshPort", "xenonetPort", "identity", "knownHosts", "hostKeyAlias", "command",
   // xenonet actor
