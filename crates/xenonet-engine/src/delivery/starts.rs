@@ -283,16 +283,17 @@ pub fn answer_words(state: &str, host: &str, a: &Value) -> String {
     }
 }
 
-/// Where your computer's credential store keeps the long-lived Claude Code
-/// token XenoNet's runs sign in with (`claude setup-token`'s), which goes
-/// to them alone as CLAUDE_CODE_OAUTH_TOKEN.
 /// What the Allow card says of a call that may read the run's environment:
 /// Claude Code passes its own environment to its tools, so a token given
 /// to XenoNet's runs (`xenonet runs sign-in`) is readable there.
 pub const ENV_WARNING: &str =
     "This may read the run's environment, which holds the Claude Code sign-in token you gave XenoNet's runs, if you gave one. Deny it unless the session may see that token.";
 
-pub const SIGN_IN_TARGET: &str = "XenoNet/Claude Code token for XenoNet's runs";
+/// Where your computer's credential store keeps the long-lived Claude Code
+/// token XenoNet's runs sign in with (`claude setup-token`'s), which goes
+/// to them alone as CLAUDE_CODE_OAUTH_TOKEN. The store takes names without
+/// quotes or backslashes (`secret_store::TARGET`).
+pub const SIGN_IN_TARGET: &str = "XenoNet/Claude Code runs";
 
 /// A token as you pasted it, trimmed, or why it isn't one: what `claude
 /// setup-token` prints, one line with no spaces.
