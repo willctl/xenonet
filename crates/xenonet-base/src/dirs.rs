@@ -212,6 +212,14 @@ pub fn bundled_claude_code(desktop: &str, platform: &str, look: &mut dyn Look) -
     out
 }
 
+/// Where Claude Code's own installer puts it: ~/.local/bin/claude, or
+/// claude.exe there on Windows. On Windows the installer leaves that
+/// folder off PATH, and elsewhere a service started before the install
+/// keeps the PATH it had.
+pub fn installed_claude_code(platform: &str, home: &str) -> String {
+    join_all(&[home, ".local", "bin", if platform == "win32" { "claude.exe" } else { "claude" }])
+}
+
 /// What the environment says of the CLIs XenoNet runs itself.
 #[derive(Clone, Debug, Default)]
 pub struct CliEnv {
@@ -229,8 +237,9 @@ pub struct CliEnv {
 ///
 /// ```text
 ///   claude: on PATH (with PATHEXT on Windows, so an npm install's
-///           claude.cmd), then the Claude Code that Claude desktop keeps
-///           (`bundled_claude_code`), then XENONET_CLAUDE_BIN
+///           claude.cmd), then where its installer puts it
+///           (`installed_claude_code`), then the Claude Code that Claude
+///           desktop keeps (`bundled_claude_code`), then XENONET_CLAUDE_BIN
 ///   codex:  XENONET_CODEX_BIN, then the one the ChatGPT desktop app ships
 ///           (`bundled_codex_binaries`), then on PATH
 /// ```
@@ -241,6 +250,7 @@ pub fn find_cli(app: &str, env: &CliEnv, platform: &str, home: &str, look: &mut 
     let set = |v: &Option<String>| v.clone().filter(|v| !v.is_empty());
     match app {
         "claude" => crate::paths::on_path("claude", &env.path, env.pathext.as_deref(), windows, can_run)
+            .or_else(|| Some(installed_claude_code(platform, home)).filter(|f| look.exists(f)))
             .or_else(|| find_claude_desktop_dir(&env.dirs, platform, home, look).and_then(|d| bundled_claude_code(&d, platform, look).into_iter().next()))
             .or_else(|| set(&env.claude_bin)),
         "codex" => set(&env.codex_bin)
@@ -353,6 +363,9 @@ mod tests {
         let on = |files: &'static [&'static str]| move |f: &str| files.contains(&f);
         let e = env("/usr/local/bin:/opt/bin", Some("/x/claude"), None);
         assert_eq!(find_cli("claude", &e, "darwin", home, &mut disk, &mut on(&["/opt/bin/claude"])).as_deref(), Some("/opt/bin/claude"), "PATH first");
+        let mut installed =
+            Disk(vec![("/Users/me/.local/bin/claude", 1.0), (bundled, 1.0), ("/Users/me/Library/Application Support/Claude/claude-code/2.1.308/bb/.verified", 1.0)]);
+        assert_eq!(find_cli("claude", &e, "darwin", home, &mut installed, &mut on(&[])).as_deref(), Some("/Users/me/.local/bin/claude"), "then where its installer puts it");
         assert_eq!(find_cli("claude", &e, "darwin", home, &mut disk, &mut on(&[])).as_deref(), Some(bundled), "then Claude desktop's");
         let mut empty = Disk(vec![]);
         assert_eq!(find_cli("claude", &e, "darwin", home, &mut empty, &mut on(&[])).as_deref(), Some("/x/claude"), "then XENONET_CLAUDE_BIN");
@@ -360,6 +373,9 @@ mod tests {
         // Windows tries PATHEXT, so an npm install's claude.cmd is found.
         let w = CliEnv { pathext: Some(".EXE;.CMD".into()), ..env("/n", None, None) };
         assert_eq!(find_cli("claude", &w, "win32", home, &mut empty, &mut on(&["/n/claude.CMD"])).as_deref(), Some("/n/claude.CMD"));
+        // Its installer's claude.exe, which it leaves off PATH.
+        let mut native = Disk(vec![("/Users/me/.local/bin/claude.exe", 1.0)]);
+        assert_eq!(find_cli("claude", &w, "win32", home, &mut native, &mut on(&[])).as_deref(), Some("/Users/me/.local/bin/claude.exe"));
         // Codex: its variable, then the ChatGPT app's, then PATH.
         assert_eq!(find_cli("codex", &env("/usr/bin", None, Some("/c/codex")), "darwin", home, &mut disk, &mut on(&["/usr/bin/codex"])).as_deref(), Some("/c/codex"));
         assert_eq!(

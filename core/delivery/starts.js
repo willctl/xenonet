@@ -168,7 +168,9 @@ export function answerWords(state, host, a = {}) {
 // Where your computer's credential store keeps the long-lived Claude Code
 // token XenoNet's runs sign in with (claude setup-token's), which goes to
 // them alone as CLAUDE_CODE_OAUTH_TOKEN.
-export const SIGN_IN_TARGET = "XenoNet/Claude Code token for XenoNet's runs";
+// The credential store takes names without quotes or backslashes
+// (secret-store.js, TARGET).
+export const SIGN_IN_TARGET = "XenoNet/Claude Code runs";
 
 // A token as you pasted it, trimmed: { ok, token } or { ok: false, why }.
 export function signInToken(pasted) {

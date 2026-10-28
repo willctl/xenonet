@@ -614,6 +614,19 @@ pub fn sign_in_hint(w: &World, host: &str) {
 #[cfg(test)]
 mod tests {
     use super::Tail;
+    use xenonet_engine::delivery::starts;
+    use xenonet_engine::sql::Arg;
+
+    // The token is kept under a name the credential store takes, and read
+    // back from it: each store checks the name the same way.
+    #[test]
+    fn a_runs_token_is_kept_and_read_back() {
+        assert!(xenonet_actors::secret_store::is_target(starts::SIGN_IN_TARGET), "{}", starts::SIGN_IN_TARGET);
+        let s = crate::wakes::Secrets::new(true);
+        let token = format!("sk-ant-oat01-{}", "a".repeat(80));
+        assert_eq!(s.call("set", &[Arg::text(starts::SIGN_IN_TARGET), Arg::text(token.clone())]).ok(), Some(Arg::Bool(true)));
+        assert_eq!(s.call("get", &[Arg::text(starts::SIGN_IN_TARGET)]).ok(), Some(Arg::Text(token)));
+    }
 
     #[test]
     fn a_log_is_read_as_it_grows_by_whole_lines() {

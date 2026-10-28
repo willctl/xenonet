@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, senderOf, ACTIONS } from "../core/delivery/reach.js";
+import { TARGET as STORE_NAME } from "../core/secret-store.js";
 import { request, framed, command, admit, asker, kept, folder, signedOut, sessionOf, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
 
 const ID = "0190d3e0-0000-7000-8000-00000000ab01";
@@ -134,5 +135,6 @@ test("a sign-in for XenoNet's runs is what claude setup-token prints, kept under
   assert.deepEqual(signInToken(""), { ok: false, why: "paste the token claude setup-token printed" });
   assert.equal(signInToken("hunter2").ok, false);
   assert.equal(signInToken(`${token} extra`).ok, false, "one line, no spaces");
-  assert.equal(SIGN_IN_TARGET, "XenoNet/Claude Code token for XenoNet's runs");
+  assert.equal(SIGN_IN_TARGET, "XenoNet/Claude Code runs");
+  assert.match(SIGN_IN_TARGET, STORE_NAME, "a name the credential store takes");
 });
