@@ -20,6 +20,7 @@ import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
 import { claude, codex, mapperOf, brokenAt, fail, usageOf, userText } from "./events.js";
 import { costParts, plainModel, priorityTier, PRICES_CHECKED } from "./pricing.js";
 import { isContextCall, spaceOf } from "./xenolith.js";
+import { ServerNames, withDeclared } from "./mcp-names.js";
 import { APP, TAILED, tailedApp } from "./apps.js";
 import { patchPaths } from "./patch.js";
 import { grokSubagent, grokUsageStamp, grokUsageTurns, readGrokUsage } from "./grok-usage.js";
@@ -483,7 +484,7 @@ class LiveSession {
 // the tailer block's (core/blocks/tailer.js); this turns each line into
 // state and events.
 export class LiveTelemetry extends EventEmitter {
-  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null }) {
+  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null, connectors = null }) {
     super();
     this.home = home;
     // The MCP server the config names for the shared context (wikiServer,
@@ -510,6 +511,10 @@ export class LiveTelemetry extends EventEmitter {
     this.claudeReason = null;
     this.claudeSamples = { anthropic: [], desktop: [] };
     this.sessions = new Map();
+    // What each uuid-named MCP server says it is (mcp-names.js), and what
+    // Claude desktop calls its connectors (desktop-connectors.js).
+    this.serverNames = new ServerNames();
+    this.connectors = connectors;
     this.limits = { codex: null, claude: null };
     this.limitSamples = { codex: [], claude: [] };
     this.history = [];
@@ -618,6 +623,7 @@ export class LiveTelemetry extends EventEmitter {
       // it; an app's events other than Codex's have Claude Code's shapes.
       const app = tailedApp(f.app, "claude");
       const codexApp = app === "codex";
+      if (!codexApp) this.serverNames.observe(rec.raw, mcpServerOf);
       const file = codexApp ? this.#codexFile(this.sessions.get(f.sessionId)) : app === "claude" ? claude.file({ agentId: f.agentId }) : this.#lineFile(f, app);
       const events = mapperOf(app).events(rec, file);
       // A provider's refusal, as its line marks it (core/refusals), read
@@ -1448,7 +1454,13 @@ export class LiveTelemetry extends EventEmitter {
       costs: this.costs(now, sessions),
       collab: this.collab(sessions),
       collisions: this.collisions(now),
-      resources: [...resources.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([server, ts]) => ({ server, ts })),
+      resources: withDeclared(
+        [...resources.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([server, ts]) => {
+          const found = this.serverNames.name(server);
+          return { server, ts, ...(found ? { name: found.name, nameSource: found.source } : {}) };
+        }),
+        this.connectors?.() ?? new Map(),
+      ),
       status: this.status,
     };
   }

@@ -25,6 +25,8 @@ use xenonet_blocks::scanner::{FnRules, Limits, Scanner};
 use xenonet_blocks::tailer::{Listed, Swept, Tailer};
 use xenonet_schema::vendor::Sampling;
 use xenonet_sources::claude_usage;
+use xenonet_sources::desktop_connectors::Connectors;
+use xenonet_sources::live::names::with_declared;
 use xenonet_sources::live::telemetry::{Emit, Telemetry, Where};
 
 const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
@@ -88,6 +90,8 @@ pub struct Live {
     vendor: Arc<Vendor>,
     pub anthropic: Option<Arc<Gather>>,
     pub desktop: Option<(Arc<Gather>, String)>,
+    /// What Claude desktop calls its connectors (desktop_connectors.rs).
+    connectors: Mutex<Connectors>,
     listener: OnceLock<Listener>,
     // The sweeps' and the limits' tasks, stopped with it.
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -134,6 +138,7 @@ impl Live {
         let desktop =
             claude_desktop_dir.map(|d| (Arc::new(Gather::new("claude-desktop-usage", Options { keep: true, fallback: Value::Null, ..Default::default() })), d.to_string()));
         Arc::new(Live {
+            connectors: Mutex::new(Connectors::new(claude_desktop_dir)),
             roots,
             tail: Mutex::new(Tail { tailer: Tailer::new("transcripts", PRIME_WINDOW_MS, now), scanners, entries: HashMap::new(), started: false }),
             telemetry: Mutex::new(telemetry),
@@ -503,6 +508,9 @@ impl Live {
         let mut snap = lock(&self.telemetry).snapshot(now_ms());
         let st = lock(&self.status).clone();
         snap["status"] = json!({ "watching": st.watching, "files": st.files, "lines": st.lines, "errors": st.errors });
+        // What Claude desktop calls its connectors beats what the lines suggest.
+        let declared = lock(&self.connectors).get(now_ms()).to_vec();
+        with_declared(&mut snap["resources"], &declared);
         snap
     }
 

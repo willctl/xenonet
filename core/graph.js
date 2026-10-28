@@ -7,6 +7,7 @@
 import { pathKey, isUnder, baseName, scratchZone, tilde } from "./paths.js";
 import { projectRelations, normalizeRemote } from "./projects.js";
 import { contextName } from "./xenolith.js";
+import { isOpaque, shortName } from "./mcp-names.js";
 
 export function activityOf(updatedAt, now, { activeWindowMs, recentWindowMs }) {
   if (!updatedAt) return "idle";
@@ -161,7 +162,10 @@ export function buildGraph({ projectsDir, homeDir = null, projects, sessions, na
   for (const r of resources) {
     const id = `resource:${r.server}`;
     if (nodes.has(id)) continue;
-    nodes.set(id, { id, kind: "resource", name: r.server, lastActivity: r.ts });
+    // A uuid for an id shows as the name the server says it is, or the start
+    // of the uuid; the id stays the node's, so beams and the inspector find it.
+    const name = r.name ?? (isOpaque(r.server) ? shortName(r.server) : r.server);
+    nodes.set(id, { id, kind: "resource", name, ...(name !== r.server ? { server: r.server } : {}), ...(r.nameSource ? { nameSource: r.nameSource } : {}), lastActivity: r.ts });
     link("core", id, "resource");
   }
 

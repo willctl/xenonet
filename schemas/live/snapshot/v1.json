@@ -715,6 +715,19 @@
           "ts": {
             "type": "number",
             "description": "Epoch milliseconds"
+          },
+          "name": {
+            "description": "What an MCP server with a uuid for an id is called: its name in Claude desktop, or what its instructions or results say",
+            "type": "string"
+          },
+          "nameSource": {
+            "description": "Where the name came from: Claude desktop's list of connectors, or the server's own instructions or results",
+            "type": "string",
+            "enum": [
+              "declared",
+              "instructions",
+              "results"
+            ]
           }
         },
         "required": [
