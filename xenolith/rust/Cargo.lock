@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "xenolith-cli"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "chrono",
  "embed-resource",
@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "xenolith-core"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "chrono",
  "fancy-regex",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "xenolith-tray"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "embed-resource",
  "libc",
