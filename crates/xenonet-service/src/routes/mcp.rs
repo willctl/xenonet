@@ -34,9 +34,10 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
     }
     let state = &ctx.cores.state;
     let nodes = state.nodes()?;
-    let known = nodes
-        .iter()
-        .any(|n| (n["kind"] == "resource" && n["name"] == json!(server)) || (n["kind"] == "wiki" && server == n.get("server").and_then(Value::as_str).unwrap_or("agent-wiki")));
+    let known = nodes.iter().any(|n| {
+        (n["kind"] == "resource" && n.get("server").unwrap_or(&n["name"]) == &json!(server))
+            || (n["kind"] == "wiki" && server == n.get("server").and_then(Value::as_str).unwrap_or("agent-wiki"))
+    });
     if !known {
         return Ok(Reply::error(404, "that MCP server isn't on this map"));
     }

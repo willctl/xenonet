@@ -14,6 +14,7 @@
 //! threw. Arithmetic on a record's counts is a number's (Number() of what
 //! the record says), where JS's `+` would have joined strings.
 
+use super::names::ServerNames;
 use super::{
     categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
     slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
@@ -922,6 +923,8 @@ pub struct Telemetry {
     desktop_samples: Vec<Value>,
     history: Vec<Event>,
     pending_label: Option<(String, Value, f64)>,
+    // What each uuid-named MCP server says it is (names.rs).
+    server_names: ServerNames,
 }
 
 impl Telemetry {
@@ -942,6 +945,7 @@ impl Telemetry {
             desktop_samples: Vec::new(),
             history: Vec::new(),
             pending_label: None,
+            server_names: ServerNames::new(),
         }
     }
 
@@ -1029,6 +1033,7 @@ impl Telemetry {
                 // What the mapper keeps of the session's file, as the lines
                 // come (its runs of chunks).
                 let i = self.session(&f.session_id, "grok");
+                self.server_names.observe(&raw, mcp_server_of);
                 let o = GrokLine::new(raw);
                 let file = LineFile { run: std::cell::RefCell::new(self.sessions[i].line_run.take()), ..LineFile::new(Some(f.agent_id.clone())) };
                 let events = line_events::grok(&o, &file);
@@ -1037,6 +1042,7 @@ impl Telemetry {
                 self.claude_line(f, "grok", o.ts(), &events, live, now, out)
             }
             _ => {
+                self.server_names.observe(&raw, mcp_server_of);
                 let o = ClaudeLine { raw };
                 let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
                 self.refusal(app, f, &o.raw, &events, live, out);
@@ -2507,7 +2513,20 @@ impl Telemetry {
         let costs = self.costs(now, &sessions);
         let collab = Self::collab(&sessions);
         let collisions = self.collisions(now);
-        let resources = Value::Array(resources.into_iter().map(|(server, ts)| obj(vec![("server", server), ("ts", number(ts))])).collect());
+        let resources = Value::Array(
+            resources
+                .into_iter()
+                .map(|(server, ts)| {
+                    let found = server.as_str().and_then(|id| self.server_names.name(id));
+                    let mut fields = vec![("server", server), ("ts", number(ts))];
+                    if let Some(found) = found {
+                        fields.push(("name", Value::String(found.name)));
+                        fields.push(("nameSource", Value::String(found.source.into())));
+                    }
+                    obj(fields)
+                })
+                .collect(),
+        );
         obj(vec![
             ("at", number(now)),
             ("sessions", Value::Array(sessions)),

@@ -7,6 +7,7 @@
 pub mod claude;
 pub mod claude_usage;
 pub mod codex;
+pub mod desktop_connectors;
 pub mod git;
 pub mod grok;
 pub mod line_events;

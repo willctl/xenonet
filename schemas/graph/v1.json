@@ -1272,7 +1272,20 @@
               },
               "name": {
                 "type": "string",
-                "description": "The MCP server"
+                "description": "What the shared system is called: the MCP server, or for a server whose id is a uuid the name it says it is, or \"Connector\" and the start of the id"
+              },
+              "server": {
+                "description": "The MCP server's id, when name is something else",
+                "type": "string"
+              },
+              "nameSource": {
+                "description": "Where a name that isn't the server's id came from",
+                "type": "string",
+                "enum": [
+                  "declared",
+                  "instructions",
+                  "results"
+                ]
               },
               "fx": {
                 "type": [

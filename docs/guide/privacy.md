@@ -29,6 +29,8 @@
 
 - If you [connect Spotify](spotify.md), XenoNet talks to Spotify to sign in, to read what's playing every few seconds while a window is open, and to send the commands you give or turn on. Nothing of your sessions goes to Spotify, and what's playing goes nowhere else.
 
+- Naming an MCP server whose id is a uuid sends nothing anywhere. XenoNet reads each connector's name and uuid from Claude desktop's session records, and nothing else in them (not their urls). From a server's instructions and results it keeps only the name the instructions open with, and how often each domain is linked and spelled out in the results. These stay in memory and are rebuilt from your recent transcripts when XenoNet starts.
+
 ## What shows on screen
 
 - Paths under your home folder show as `~` on the map, in the panels and in the activity feed. So a screenshot of them doesn't show your user name.

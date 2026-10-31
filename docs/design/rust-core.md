@@ -598,6 +598,7 @@ place. This table follows it.
 | `core/drift.js`, `core/vendor.js` | `xenonet-schema/src/drift.rs`, `vendor.rs` | `drift`, `vendor-reader`, `server` pass |
 | `core/blocks/clock.js`, `core/blocks/index.js` | `xenonet-blocks/src/clock.rs`, `lib.rs` (the twin keeps `Date.now()` and the timers, which tests mock) | `xenolith`, and every test that loads a block |
 | `core/xenolith.js` | `xenonet-sources/src/xenolith.rs` | `xenolith` passes |
+| `core/mcp-names.js`, `core/desktop-connectors.js` | `xenonet-sources/src/live/names.rs` (each line fed by `telemetry.rs`), `desktop_connectors.rs` (read for the service by `xenonet-wire-map/src/live.rs`) | No twin: Rust tests of the same cases. `live` and `graph` pass with the twins, which feed the lines to names.rs |
 | `core/frames.js`, `core/rename.js`, `core/export-labels.js`, `core/needs-you.js` | `xenonet-state/src/frames.rs`, `rename.rs`, `export_labels.rs`, `needs_you.rs` (the page keeps their JS) | `frames`, `rename`, `export-labels`, `needs-you`, `poster`, `page-markup` pass |
 | `core/refusals/demo.js`, `query.js`, `store.js` | `xenonet-sources/src/refusals/` (in xenonet-sources, not xenonet-actors: the live tailer reads refusals) | `refusals`, `refusal-browser` pass |
 | `core/redact.js`, `core/digest.js`, `core/classify.js` | `xenonet-state/src/redact.rs`, `digest.rs`, `classify.rs` (running Codex and asking the decider stay in the twins) | `redact`, `digest`, `decide`, `poster` pass |

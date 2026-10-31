@@ -20,6 +20,7 @@ import { claudeUsageGatherer, desktopUsageGatherer } from "./claude-usage.js";
 import { ClaudeLine, CodexLine, linesOf } from "./lines.js";
 import { tailedApp } from "../../../../core/apps.js";
 import { grokUsageStamp, readGrokUsage } from "../../../../core/grok-usage.js";
+import { withDeclared } from "../../../../core/mcp-names.js";
 
 const PRIME_WINDOW_MS = 24 * 3600e3;
 const SWEEP_MS = 2000;
@@ -343,9 +344,10 @@ export class LiveTelemetry extends EventEmitter {
   #core;
   #faces = new Map();
 
-  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null }) {
+  constructor({ claudeRoot, codexRoot, grokRoot = null, claudeDesktopDir, claudeUsage = null, home = null, contextServer = null, connectors = null }) {
     super();
     this.contextServer = contextServer;
+    this.connectors = connectors;
     // Watch canonical long paths: on Windows, libuv aborts the process when a
     // recursive watch root is an 8.3 short name (C:\Users\ABCDEF~1\...).
     this.roots = [
@@ -656,6 +658,7 @@ export class LiveTelemetry extends EventEmitter {
       Object.assign(s, { tokens: m.tokens, context: m.context, toolCounts: m.toolCounts });
     }
     snap.status = this.status;
+    if (this.connectors) snap.resources = withDeclared(snap.resources, this.connectors());
     return snap;
   }
 }

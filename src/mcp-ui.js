@@ -15,7 +15,11 @@ export function createMcpUi({ modals, toast, read = (url) => fetch(url) }) {
   const cache = new Map();
   const pending = new Map();
   let view = null;
-  const serverOf = (node) => node.kind === "wiki" ? node.server ?? "agent-wiki" : node.name;
+  // A shared system's id, which its name replaces on the map when the id is a uuid.
+  const serverOf = (node) => node.kind === "wiki" ? node.server ?? "agent-wiki" : node.server ?? node.name;
+  // Where a name that isn't the server's id came from; a guess says so.
+  const NAMED_FROM = { declared: "named in Claude desktop", instructions: "named by its instructions", results: "name guessed from its results" };
+  const titleOf = (node) => node.kind === "wiki" ? serverOf(node) : node.name;
   const keyOf = (node) => `${node.host ?? ""}/${serverOf(node)}`;
   async function load(node, refresh = false) {
     const key = keyOf(node);
@@ -46,7 +50,7 @@ export function createMcpUi({ modals, toast, read = (url) => fetch(url) }) {
     }
   }
   async function open(node) {
-    const panel = modals.open(`<header class="m-head"><div><div class="m-chip">Shared system · MCP</div><h2>${h(serverOf(node))}</h2><div class="m-sub">Reading the server catalog…</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"></div>`, { wide: true, cls: "mcp-panel", accent: colorVar("resource"), onClose: () => { if (view?.panel === panel) view = null; } });
+    const panel = modals.open(`<header class="m-head"><div><div class="m-chip">Shared system · MCP</div><h2>${h(titleOf(node))}</h2><div class="m-sub">Reading the server catalog…</div></div><button class="act" data-mclose>Close ✕</button></header><div class="m-body"></div>`, { wide: true, cls: "mcp-panel", accent: colorVar("resource"), onClose: () => { if (view?.panel === panel) view = null; } });
     view = { node, panel, tab: "overview", query: "", info: null };
     try {
       const info = await load(node);
@@ -70,7 +74,7 @@ export function createMcpUi({ modals, toast, read = (url) => fetch(url) }) {
   function render() {
     if (!view?.info) return;
     const { panel, info, tab, query } = view;
-    panel.innerHTML = `<header class="m-head"><div><div class="m-chip">Shared system · MCP</div><h2>${h(info.title ?? info.server)}</h2><div class="m-sub">${h(info.server)} · ${badge(info)}</div></div><div class="mcp-head-actions"><button class="act" data-mcp-refresh>Refresh</button><button class="act" data-mclose>Close ✕</button></div></header><div class="mcp-tabs" role="tablist" aria-label="MCP server details">${["overview", "tools", "context", "activity"].map((t) => `<button role="tab" aria-selected="${t === tab}" aria-controls="mcp-tab-content" id="mcp-tab-${t}" tabindex="${t === tab ? 0 : -1}" data-mcp-tab="${t}">${t}${t === "tools" ? ` <span>${count(info, "tools")}</span>` : ""}</button>`).join("")}</div><div class="m-body" id="mcp-tab-content" role="tabpanel" aria-labelledby="mcp-tab-${tab}">${content(info, tab, query)}</div>`;
+    panel.innerHTML = `<header class="m-head"><div><div class="m-chip">Shared system · MCP</div><h2>${h(info.title && info.title !== info.server ? info.title : titleOf(view.node))}</h2><div class="m-sub">${h(info.server)} · ${badge(info)}${NAMED_FROM[view.node.nameSource] ? ` · ${h(NAMED_FROM[view.node.nameSource])}` : ""}</div></div><div class="mcp-head-actions"><button class="act" data-mcp-refresh>Refresh</button><button class="act" data-mclose>Close ✕</button></div></header><div class="mcp-tabs" role="tablist" aria-label="MCP server details">${["overview", "tools", "context", "activity"].map((t) => `<button role="tab" aria-selected="${t === tab}" aria-controls="mcp-tab-content" id="mcp-tab-${t}" tabindex="${t === tab ? 0 : -1}" data-mcp-tab="${t}">${t}${t === "tools" ? ` <span>${count(info, "tools")}</span>` : ""}</button>`).join("")}</div><div class="m-body" id="mcp-tab-content" role="tabpanel" aria-labelledby="mcp-tab-${tab}">${content(info, tab, query)}</div>`;
     panel.querySelectorAll("[data-mcp-tab]").forEach((b) => {
       b.onclick = () => { view.tab = b.dataset.mcpTab; render(); panel.querySelector(`[data-mcp-tab="${view.tab}"]`).focus(); };
       b.onkeydown = (e) => {
