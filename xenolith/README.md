@@ -345,7 +345,7 @@ your own agents from each other.
 | Endpoint | Who |
 | --- | --- |
 | `/mcp` | a local request without a token, or a token |
-| `/sync/v1` | a token, always, even from this machine |
+| `/sync/v1` | a token, always, even from this machine (`/sync/v1/pair` takes a pairing code's proof instead) |
 | `/status`, `/ui`, `/api` | local requests only, never a token |
 | `/health` | anyone: name, version, build, pid and uptime, nothing private |
 
@@ -546,6 +546,53 @@ after the curator's when its log is pulled. A machine that only follows a
 space sends anyone who asks it for that space on to the curator (421, with the
 curator's URL when it is an `https://` one). Both machines record each sync in
 their audit chains.
+
+#### One home, many satellites (pairing)
+
+Following spaces one by one is for splitting them between machines on purpose.
+For the usual setup, one **home** machine runs the curator and Ask, and every
+other machine is a **satellite** that joins with one code. A satellite keeps a
+full local copy, so `context_start`, search and reads work offline, and its
+sessions leave notes as usual; its own curator and Ask are off. It follows
+every space home lists that it has no follow of its own for, spaces made later
+included, and `xenolith sync follow` still works for one you want to pin.
+`xenolith sync status` names home.
+
+On home (needs the running service and the [owner key](#the-owner-key), like
+deciding a held change):
+
+```bash
+xenolith pair offer          # prints <home-id>.<secret>; --json for programs
+```
+
+The code is valid for 10 minutes and one join. On the satellite, give the
+address of home's Xenolith service (the same kind of base URL as a peer's) and
+type or paste the code at the prompt, or send it on stdin; it is never an
+argument:
+
+```bash
+xenolith pair join --url https://home.example/xenolith
+```
+
+`--name` sets this machine's name at home (default: the host name) and `--peer`
+what the satellite calls home (default `home`). The join makes a keypair here
+and posts its public key and an HMAC of it under the code's secret to
+`/sync/v1/pair`; home answers with a machine token sealed to that key, kept as
+`peers/<name>.token` like any peer's. A code seen by someone else is useless
+without its secret, a second join on the same code is refused, and `/sync/v1/pair`
+shares the bad-token limit (20 bad tries a minute from one source, then 429).
+The token holds `ctx:read` and `ctx:append` for every space and never reaches
+`machine:local`; home also grants `machine:<name>` `ctx:append:all` for ten
+years, because a token reaches a space only through a grant too. Pages are not
+written from a satellite; `xenolith revoke machine:<name>` and
+`xenolith token revoke machine:<name>` end the pairing. Both machines record the
+pairing in their audit chains with the token's id, never the code or the token.
+
+Restart the satellite's curator (quit the tray and open it again) after
+joining: it then only syncs, once a minute. Notes left in the satellite's own
+`machine:local` space stay there unfiled while it is a satellite. Moving home
+means pairing again on the new machine; the satellite refuses the new curator
+until you do (the curator id is pinned).
 
 ## The curator
 
@@ -932,7 +979,7 @@ folder in your home. On Windows:
 | Path | What |
 | --- | --- |
 | `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs`, `publicUrl` |
-| `%APPDATA%\Xenolith\access.json`, `sync.json`, `peers\` | who may use which space, tokens' hashes, sync peers and their tokens (yours alone) |
+| `%APPDATA%\Xenolith\access.json`, `sync.json`, `pair.json`, `peers\` | who may use which space, tokens' hashes, sync peers and their tokens, the pairing code waiting (yours alone) |
 | `%LOCALAPPDATA%\Xenolith\runtime\` | `xenolith.exe` and `ui/` (the Xenolith window) |
 | `%LOCALAPPDATA%\Xenolith\service\` | the service's ini |
 | `%LOCALAPPDATA%\Xenolith\tray\` | `xenolith-tray.exe`, its ini, its logon-task definition, icons and the window's data folder (`webview\`) |

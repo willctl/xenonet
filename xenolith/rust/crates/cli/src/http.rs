@@ -485,6 +485,9 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
     use xenolith_core::access::Level;
     use xenolith_core::spaces::{self, SpaceId};
     use xenolith_core::sync;
+    if path == format!("{}/spaces", sync::API) {
+        return spaces_list(app, method, who, resource, entry);
+    }
     let rest = path.strip_prefix(&format!("{}/spaces/", sync::API)).unwrap_or("");
     let parts: Vec<&str> = rest.split('/').collect();
     let not_found = || Reply::json(404, &json!({ "error": "not_found", "error_description": "No such space or page here." }));
@@ -574,6 +577,66 @@ fn sync_route(app: &App, req: &Request, method: &str, path: &str, who: Principal
     }
 }
 
+/// GET /sync/v1/spaces: the spaces this machine curates that the caller may read (never
+/// machine:local), which a satellite follows.
+fn spaces_list(app: &App, method: &str, who: Principal, resource: &Resource, entry: &mut Entry) -> Reply {
+    use xenolith_core::access::Level;
+    if method != "GET" {
+        return Reply::json(405, &json!({ "error": "Use GET" })).with("Allow", "GET");
+    }
+    let st = app.state();
+    let Some(root) = st.wiki_dir.clone().filter(|_| st.setup_error.is_none()) else {
+        return Reply::json(503, &json!({ "error": st.setup_error.clone().unwrap_or_default() }));
+    };
+    let policy = access::load(&AppPaths::current());
+    let now = now_ms();
+    let Some(who) = policy.current(&who, now) else {
+        return challenge(resource, Some("invalid_token"), None, "The token has been revoked or has expired.");
+    };
+    entry.client = Some(who.name());
+    // A space this machine only follows is not its to list: its curator lists it.
+    let cfg = xenolith_core::sync::Config::load(&AppPaths::current());
+    Reply::json(200, &xenolith_core::sync::space_list(&root, &|s| policy.allows(&who, s, Level::Read, now) && cfg.curator_of(s).is_none()))
+}
+
+/// POST /sync/v1/pair: a satellite joining with a pairing code (xenolith_core::pair). No token: the
+/// proof of the code is in the body. A bad join counts like a bad token against its source.
+fn pair_route(app: &App, req: &Request, method: &str, entry: &mut Entry) -> Reply {
+    if method != "POST" {
+        return Reply::json(405, &json!({ "error": "Use POST" })).with("Allow", "POST");
+    }
+    let source = source_of(req);
+    let now = Instant::now();
+    if let Some(wait) = app.bad_tokens.blocked(&source, now) {
+        entry.result = Some("rate-limited".into());
+        return too_many(wait);
+    }
+    let body: Value = read_body(req).ok().and_then(|b| serde_json::from_str(&b).ok()).unwrap_or(Value::Null);
+    match xenolith_core::pair::accept(&AppPaths::current(), &body, &clip_str(&source, 120), now_ms()) {
+        Ok(answer) => {
+            entry.result = Some("paired".into());
+            Reply::json(200, &answer)
+        }
+        Err(r) => {
+            entry.result = Some("pair-refused".into());
+            if r.bad && app.bad_tokens.failed(&source, now) {
+                audit::best_effort(
+                    &AppPaths::current(),
+                    "refused",
+                    "an unknown machine",
+                    vec![("why", json!("too many bad pairing codes")), ("source", json!(clip_str(&source, 120))), ("transport", json!("sync"))],
+                );
+            }
+            Reply::json(r.status, &json!({ "error": "pair_refused", "error_description": r.why }))
+        }
+    }
+}
+
+fn too_many(wait: Duration) -> Reply {
+    let secs = wait.as_secs().max(1);
+    Reply::json(429, &json!({ "error": "too_many_requests", "error_description": format!("Too many bad tokens from here. Try again in {secs} s.") })).with("Retry-After", &secs.to_string())
+}
+
 // ---------------------------------------------------------------- tokens (OAuth 2.1 resource server, as MCP's authorization spec has it)
 
 /// RFC 9728's metadata for the MCP endpoint: what it is and which scopes it knows.
@@ -659,10 +722,7 @@ fn authenticate(app: &App, req: &Request, resource: &Resource, also: &str, beare
     let now = Instant::now();
     if let Some(wait) = app.bad_tokens.blocked(&source, now) {
         entry.result = Some("rate-limited".into());
-        let secs = wait.as_secs().max(1);
-        return Err(
-            Reply::json(429, &json!({ "error": "too_many_requests", "error_description": format!("Too many bad tokens from here. Try again in {secs} s.") })).with("Retry-After", &secs.to_string())
-        );
+        return Err(too_many(wait));
     }
     let r = principal_of(resource, also, bearer, local, entry);
     if r.is_err() && app.bad_tokens.failed(&source, now) {
@@ -724,6 +784,9 @@ fn handle(app: &App, req: &Request, entry: &mut Entry) -> Reply {
     if is_sync {
         if app.closing.load(Ordering::SeqCst) {
             return Reply::json(503, &json!({ "error": "xenolith is restarting; retry shortly." }));
+        }
+        if path == xenolith_core::pair::ROUTE {
+            return pair_route(app, req, method, entry);
         }
         // Sync is remote by nature: a token always, even from this machine.
         if bearer.is_none() {

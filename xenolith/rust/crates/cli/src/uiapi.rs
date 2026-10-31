@@ -293,6 +293,7 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             "/api/held" | "/api/revert" => Some(("Deciding a change", ", or run `xenolith held` in a terminal")),
             "/api/forget" => Some(("Forgetting", ", or run `xenolith forget` in a terminal")),
             "/api/note" => Some(("A note from you", "")),
+            "/api/pair/offer" => Some(("Offering a pairing code", ", or run `xenolith pair offer` in a terminal")),
             "/api/settings" if settings_body.as_ref().is_some_and(|b| b.get("approvals").is_some()) => Some(("Changing approvals", "")),
             _ => None,
         };
@@ -471,6 +472,15 @@ pub fn handle(app: &App, st: &State, req: &Request, method: &str, path: &str, qu
             Err(held::Error::Conflict(m)) => json_reply(409, &json!({ "error": m, "conflict": true })),
             Err(held::Error::Wiki(wiki::Error::Wiki(m))) => json_reply(409, &json!({ "error": m })),
             Err(held::Error::Wiki(e)) => json_reply(500, &json!({ "error": e.to_string() })),
+        };
+    }
+    if path == "/api/pair/offer" && method == "POST" {
+        return match xenolith_core::pair::offer(&AppPaths::current(), xenolith_core::text::now_ms()) {
+            Ok((code, expires)) => {
+                entry.result = Some("pair code offered".into());
+                json_reply(200, &json!({ "code": code, "expiresAt": expires, "expiresInSeconds": xenolith_core::pair::CODE_TTL_MS / 1000 }))
+            }
+            Err(e) => json_reply(409, &json!({ "error": e.to_string() })),
         };
     }
     if path == "/api/note" && method == "POST" {

@@ -84,6 +84,7 @@ A release is a tag `xenolith-v<version>` and four archives, built by
 | A note's source is stamped from who sent it (`by`); only the owner's notes may be `user` | `inbox::By`, `inbox::trusted_source`, `inbox::tests` |
 | Reads return content only: `pages/`, `log/`, `inbox/` and the protocol's top-level files | `wiki::readable_rel`, `wiki::tests::reads_return_content_only` |
 | A token reaches `machine:local` only through a grant and scopes that name it exactly | `access::Scope::covers`, `access::tests` |
+| A pairing code works once, within ten minutes, only with its secret; the token it yields reads and appends only; neither the code nor the token enters the audit chain | `pair::accept`, `test/pair.mjs` |
 | Files only the owner may read (access.json, sync.json, peer tokens, the owner key) are written with `private::write` | `private::tests`, the mode checks in `test/tokens.mjs` and `test/sync.mjs` |
 | Files in the shared context folder are untrusted input (held changes, journals, settings, sync state) | `held::parse_file`, `curator::journal_problem`, `settings::approvals_and_problem`, sync's `load_manifest` and `FollowState::load`, and their tests |
 | The approval mode is read once per batch, under the commit's lock | `Journal.auto`, `held::apply_auto_locked`; the auto-mode tests in `test/curator.mjs` |

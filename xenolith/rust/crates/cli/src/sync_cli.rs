@@ -95,13 +95,22 @@ pub fn run(args: &[String]) -> ! {
             let c = Config::load(&paths);
             let peers: Vec<Value> = c.peers.iter().map(|(n, u)| json!({ "name": n, "url": u, "token": sync::token_file(&paths, n).exists() })).collect();
             let state = sync::status(&paths, &crate::access_cli::root());
-            let v = json!({ "machine": c.machine, "peers": peers, "follow": c.follow, "timeoutSeconds": c.timeout().as_secs(), "spaces": state["spaces"], "dead": state["dead"] });
+            let mut v = json!({ "machine": c.machine, "peers": peers, "follow": c.follow, "timeoutSeconds": c.timeout().as_secs(), "spaces": state["spaces"], "dead": state["dead"] });
+            if let Some(h) = &c.home {
+                v["home"] = json!(h);
+            }
             let mut lines = vec![format!("This machine: {}.", c.machine.as_deref().unwrap_or("(no name yet: xenolith sync name <machine>)"))];
+            if let Some(h) = &c.home {
+                lines.push(format!("Satellite of {h}: it follows every space {h} lists, and its curator and Ask are off."));
+            }
             for p in &peers {
                 lines.push(format!("peer {} at {}{}", p["name"].as_str().unwrap_or(""), p["url"].as_str().unwrap_or(""), if p["token"] == true { "" } else { " (no token)" }));
             }
             for s in state["spaces"].as_array().into_iter().flatten() {
                 let mut line = format!("follows {}, curated by {}", s["space"].as_str().unwrap_or("?"), s["peer"].as_str().unwrap_or("?"));
+                if c.auto.contains(s["space"].as_str().unwrap_or("")) {
+                    line.push_str(" (home's list)");
+                }
                 if let Some(id) = s["curator"].as_str() {
                     line.push_str(&format!(" (curator {})", &id[..8.min(id.len())]));
                 }
