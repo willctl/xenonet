@@ -18,7 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const SRC = path.join(root, 'assets', 'icon');
 const OUT = path.join(root, 'dist', 'icons');
 
-/** tile: the stone and its feet (class "tile"); accent: the diamond cut in it (class "accent"); badge: the status dot. */
+/** tile: the layers of stone (class "tile"); accent: unused by the current mark (class "accent"); badge: the status dot. */
 export const STATES = {
   healthy: { tile: '#39FF9F', accent: '#05070A', badge: null },
   degraded: { tile: '#39FF9F', accent: '#05070A', badge: '#FFB547' },

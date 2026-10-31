@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Xenolith at 16 px (the tray at 100% scaling): the standing stone, its diamond and a
-       block at each foot, fitted to the pixel grid. The badge sits in the top-right corner with
-       a 1 px knocked-out ring. Same classes as xenolith.svg; scripts/build-icons.mjs renders
-       the states. -->
+  <!-- Xenolith at 16 px (the tray at 100% scaling): three layers of stone fitted to the pixel
+       grid. The badge sits in the top-right corner with a 1 px knocked-out ring. Same classes as
+       xenolith.svg; scripts/build-icons.mjs renders the states. -->
   <defs>
     <mask id="knockout">
       <rect width="16" height="16" fill="#FFFFFF"/>
@@ -10,10 +9,9 @@
     </mask>
   </defs>
   <g class="glyph">
-    <rect class="tile" fill="#39FF9F" x="5" y="1" width="6" height="14"/>
-    <rect class="tile" fill="#39FF9F" x="1" y="12" width="3" height="3"/>
-    <rect class="tile" fill="#39FF9F" x="12" y="12" width="3" height="3"/>
-    <path class="accent" fill="#05070A" d="M8 4 L10 6 L8 8 L6 6 Z"/>
+    <rect class="tile" fill="#39FF9F" x="5" y="2" width="6" height="3"/>
+    <rect class="tile" fill="#39FF9F" x="3" y="6" width="10" height="3"/>
+    <rect class="tile" fill="#39FF9F" x="1" y="10" width="14" height="3"/>
   </g>
   <g class="badge" display="none">
     <circle class="badge-dot" cx="12.5" cy="3.5" r="3.5" fill="#FFB547"/>

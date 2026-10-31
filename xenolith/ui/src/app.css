@@ -160,9 +160,6 @@ a:hover {
   fill: var(--accent);
   transition: fill 0.3s;
 }
-.logo .logo-fold {
-  fill: var(--bg);
-}
 .logo.down .logo-page {
   fill: var(--muted);
 }

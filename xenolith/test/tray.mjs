@@ -57,10 +57,10 @@ describe('icons', () => {
     }
     const [healthy, degraded, down] = files.map((f) => readIco(f)[0]);
     const MINT = [0x39, 0xff, 0x9f, 255];
-    assert.deepEqual(dibPixel(healthy, 7, 10), MINT, 'the stone is solid mint');
-    assert.deepEqual(dibPixel(healthy, 2, 13), MINT, 'a block at each foot');
-    assert.deepEqual(dibPixel(healthy, 7, 5), [0x05, 0x07, 0x0a, 255], 'the diamond cut in the stone');
-    assert.equal(dibPixel(healthy, 12, 3)[3], 0, 'transparent beside the stone: no tile');
+    assert.deepEqual(dibPixel(healthy, 7, 10), MINT, 'the base layer is solid mint');
+    assert.deepEqual(dibPixel(healthy, 7, 8), MINT, 'the middle layer');
+    assert.equal(dibPixel(healthy, 7, 5)[3], 0, 'a gap between layers');
+    assert.equal(dibPixel(healthy, 14, 7)[3], 0, 'transparent beside a narrower layer: no tile');
     assert.equal(dibPixel(healthy, 0, 0)[3], 0, 'transparent corner');
     assert.deepEqual(dibPixel(healthy, 8, 3), MINT, 'no knockout ring when healthy');
     assert.deepEqual(dibPixel(degraded, 12, 3), [0xff, 0xb5, 0x47, 255], 'amber badge');

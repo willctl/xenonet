@@ -1,23 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- Xenolith: a standing stone with a diamond cut in it and a block at each foot, in the
-       square-and-diamond language of XenoNet's mark. Drawn straight on the taskbar with no
-       tile, for 20 px and up (xenolith-16.svg is the pixel-fitted tray version).
-       scripts/build-icons.mjs colors class="tile" (the stone and its feet) and class="accent"
-       (the diamond) per state, and shows class="badge" when the state has one;
-       class="knockout" erases a ring around the badge. -->
+  <!-- Xenolith: three layers of stone, widest at the base, in the square style of XenoNet's
+       mark. Drawn straight on the taskbar with no tile, for 20 px and up (xenolith-16.svg is the
+       pixel-fitted tray version). scripts/build-icons.mjs colors class="tile" per state, and
+       shows class="badge" when the state has one; class="knockout" erases a ring around the
+       badge. -->
   <defs>
     <mask id="knockout">
       <rect width="256" height="256" fill="#FFFFFF"/>
-      <circle class="knockout" cx="204" cy="52" r="60" fill="#000000"/>
+      <circle class="knockout" cx="208" cy="48" r="56" fill="#000000"/>
     </mask>
   </defs>
   <g class="glyph">
-    <rect class="tile" fill="#39FF9F" x="84" y="16" width="88" height="224"/>
-    <rect class="tile" fill="#39FF9F" x="24" y="196" width="40" height="40"/>
-    <rect class="tile" fill="#39FF9F" x="192" y="196" width="40" height="40"/>
-    <path class="accent" fill="#05070A" d="M128 56 L160 96 L128 136 L96 96 Z"/>
+    <rect class="tile" fill="#39FF9F" x="88" y="40" width="80" height="48"/>
+    <rect class="tile" fill="#39FF9F" x="56" y="104" width="144" height="48"/>
+    <rect class="tile" fill="#39FF9F" x="24" y="168" width="208" height="48"/>
   </g>
   <g class="badge" display="none">
-    <circle class="badge-dot" cx="204" cy="52" r="44" fill="#FFB547"/>
+    <circle class="badge-dot" cx="208" cy="48" r="40" fill="#FFB547"/>
   </g>
 </svg>

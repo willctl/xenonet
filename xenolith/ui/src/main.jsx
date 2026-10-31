@@ -121,13 +121,12 @@ const Icon = ({ name, size = 16 }) => (
   </svg>
 );
 
-/** The window's mark: a standing stone with a diamond cut in it and a block at each foot. */
+/** The window's mark: three layers of stone, widest at the base. */
 const Logo = ({ health }) => (
   <svg className={`logo ${health}`} width="30" height="30" viewBox="0 0 256 256" aria-hidden="true">
-    <rect className="logo-page" x="84" y="16" width="88" height="224" />
-    <rect className="logo-page" x="24" y="196" width="40" height="40" />
-    <rect className="logo-page" x="192" y="196" width="40" height="40" />
-    <path className="logo-fold" d="M128 56 L160 96 L128 136 L96 96 Z" />
+    <rect className="logo-page" x="88" y="40" width="80" height="48" />
+    <rect className="logo-page" x="56" y="104" width="144" height="48" />
+    <rect className="logo-page" x="24" y="168" width="208" height="48" />
   </svg>
 );
 
