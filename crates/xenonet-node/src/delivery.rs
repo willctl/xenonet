@@ -350,6 +350,7 @@ pub fn starts_constants() -> J {
         "perHostHour": starts::PER_HOST_HOUR,
         "freshMs": starts::FRESH_MS,
         "signInTarget": starts::SIGN_IN_TARGET,
+        "lastMax": starts::LAST_MAX,
     }))
 }
 
@@ -412,6 +413,36 @@ pub fn starts_folder(asked: String, home: String, known: J, reported: Vec<String
         Ok(path) => j!({ "ok": true, "path": path }),
         Err(why) => j!({ "ok": false, "why": why }),
     })
+}
+
+fn finish_json(f: Option<starts::Finish>) -> J {
+    J(f.map_or(V::Null, |f| j!({ "text": f.text, "error": f.error, "denied": f.denied })))
+}
+
+/// { text, error, denied } for the last turn that ended in these lines, or null.
+#[napi(js_name = "startsFinish")]
+pub fn starts_finish(app: String, log: String) -> J {
+    finish_json(starts::finish(&app, &log))
+}
+
+#[napi(js_name = "startsReported")]
+pub fn starts_reported(app: String, log: String) -> bool {
+    starts::reported(&app, &log)
+}
+
+#[napi(js_name = "startsOutcome")]
+pub fn starts_outcome(finish: J, reported: bool) -> String {
+    let f = finish.0.as_object().map(|o| starts::Finish {
+        text: o.get("text").and_then(V::as_str).unwrap_or("").to_string(),
+        error: o.get("error").and_then(V::as_bool).unwrap_or(false),
+        denied: o.get("denied").and_then(V::as_array).map(|a| a.iter().filter_map(V::as_str).map(str::to_string).collect()).unwrap_or_default(),
+    });
+    starts::outcome(f.as_ref(), reported).to_string()
+}
+
+#[napi(js_name = "startsClipped")]
+pub fn starts_clipped(text: String) -> String {
+    starts::clipped(&text)
 }
 
 #[napi(js_name = "startsSignedOut")]

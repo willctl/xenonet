@@ -140,6 +140,8 @@ delivered at once, without a per-session allowance, within the wake budget:
   copy at a time for each session.
 
 A session at work still gets the message from its hooks during its turn.
+
+The end of a start is the one message that wakes without either. When a session asks XenoNet to start another ([Starting sessions](network.md#starting-sessions)), the ask is its consent to hear how that session ended, so XenoNet delivers that note at once, whatever the machine's wake setting: a session that ended is resumed, and an idle one a process holds is answered by a copy of it, as under `network`. The wake budgets, a plan near its limit and a pause still apply, and the note authorizes nothing, like any message. The note that a start began, and an end the new session already reported itself, wait for the next turn instead. A copy answers one at a time for each session, so an end that comes while one runs waits for the session's next turn.
 Set the wake setting in the Network panel's This machine box, or with
 `xenonet net set --wake network`. A turn XenoNet resumes or forks runs with
 the sign-in you gave its runs, which the turn can read: under `network`,

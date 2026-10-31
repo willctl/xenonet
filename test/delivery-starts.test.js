@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, senderOf, ACTIONS } from "../core/delivery/reach.js";
 import { TARGET as STORE_NAME } from "../core/secret-store.js";
-import { request, framed, command, admit, asker, kept, folder, signedOut, sessionOf, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
+import { request, framed, command, admit, asker, kept, folder, signedOut, sessionOf, finish, reported, outcome, clipped, LAST_MAX, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
 
 const ID = "0190d3e0-0000-7000-8000-00000000ab01";
 
@@ -67,9 +67,9 @@ test("each app starts its own way, and the prompt is never an argument", () => {
   const r = (app, mode = null) => ({ folder: "~", app, mode, prompt: "-rm -rf" });
   assert.deepEqual(command(r("claude", "plan"), ID, "/w/atlas", { settings: "/s/listen.json", server: "xenonet" }), [
     "claude",
-    ["-p", "--session-id", ID, "--settings", "/s/listen.json", "--permission-mode", "plan", "--permission-prompt-tool", "mcp__xenonet__permission"],
+    ["-p", "--session-id", ID, "--output-format", "stream-json", "--verbose", "--settings", "/s/listen.json", "--permission-mode", "plan", "--permission-prompt-tool", "mcp__xenonet__permission"],
   ]);
-  assert.deepEqual(command(r("claude"), ID, "/w", { server: "xenonet-dev" })[1], ["-p", "--session-id", ID, "--permission-prompt-tool", "mcp__xenonet-dev__permission"]);
+  assert.deepEqual(command(r("claude"), ID, "/w", { server: "xenonet-dev" })[1], ["-p", "--session-id", ID, "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "mcp__xenonet-dev__permission"]);
   assert.deepEqual(command(r("codex"), ID, "/w/atlas"), ["codex", ["exec", "--json", "-C", "/w/atlas", "-"]]);
   assert.deepEqual(command(r("grok", "manual"), ID, "/w", { promptFile: "/s/runs/p.txt" })[1], ["--prompt-file", "/s/runs/p.txt", "-s", ID, "--output-format", "json", "--permission-mode", "default"]);
   for (const app of APPS) assert.ok(!command(r(app), ID, "/w", { promptFile: "/p" })[1].some((a) => a.includes("rm -rf")), app);
@@ -125,8 +125,58 @@ test("a run says its session, and whether Claude Code is signed out", () => {
 test("the answers in words", () => {
   assert.equal(answerWords("started", "neo-rex", { session: `claude:${ID}`, folder: "~/src/atlas" }), `[XenoNet] Started claude:${ID} on neo-rex, in ~/src/atlas. Message it as you would any session.`);
   assert.equal(answerWords("refused", "neo-rex", { reason: "only you start sessions here" }), "[XenoNet] No session was started on neo-rex: only you start sessions here.");
-  assert.equal(answerWords("ended", "this machine", { session: "claude:x", exit: 0, minutes: 4 }), "[XenoNet] claude:x ended (exit 0) after 4 min.");
+  assert.equal(
+    answerWords("ended", "this machine", { session: "claude:x", exit: 0, minutes: 4 }),
+    "[XenoNet] claude:x ended after 4 min (exit 0). That machine's XenoNet is older and can't say whether it finished or stopped to ask something.",
+  );
+  const ended = (o, extra = {}) => answerWords("ended", "neo-rex", { session: "claude:x", exit: 0, minutes: 5, outcome: o, last: "All set.", ...extra });
+  assert.equal(ended("asked", { last: "Want me to go ahead?" }), "[XenoNet] claude:x on neo-rex stopped to ask something, and has done nothing more after 5 min. Answer it by messaging it: it takes up from there.\nIts last words: «Want me to go ahead?»");
+  assert.equal(ended("finished"), "[XenoNet] claude:x on neo-rex finished after 5 min, but sent no report of its own.\nIts last words: «All set.»");
+  assert.equal(ended("reported"), "[XenoNet] claude:x on neo-rex finished after 5 min and reported back itself.\nIts last words: «All set.»");
+  assert.equal(ended("denied", { denied: ["Bash", "Edit"] }), "[XenoNet] claude:x on neo-rex stopped after 5 min for want of permission to use Bash, Edit, which it was denied.\nIts last words: «All set.»");
+  assert.equal(ended("failed", { exit: 1, reason: "Claude Code needs a sign-in" }), "[XenoNet] claude:x on neo-rex failed after 5 min (exit 1): Claude Code needs a sign-in.\nIts last words: «All set.»");
+  assert.equal(ended("silent", { last: "" }), "[XenoNet] claude:x on neo-rex ended after 5 min without a word: it sent no report and left no last message (exit 0).");
   assert.equal(signInWords("neo-rex"), "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");
+});
+
+test("a turn's end is read from the run's output, and says what the session did", () => {
+  const claude = [
+    '{"type":"system","subtype":"init","session_id":"s"}',
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}',
+    '{"type":"result","subtype":"success","is_error":false,"result":"Want me to go ahead? I\'ll stop here.","permission_denials":[]}',
+  ].join("\n");
+  const f = finish("claude", claude);
+  assert.deepEqual(f, { text: "Want me to go ahead? I'll stop here.", error: false, denied: [] });
+  assert.equal(outcome(f, false), "asked");
+  assert.equal(finish("claude", '{"type":"assistant"}\n'), null, "no end yet");
+  const d = finish("claude", '{"type":"result","subtype":"success","is_error":false,"result":"I could not run it.","permission_denials":[{"tool_name":"Bash"},{"tool_name":"Edit"}]}');
+  assert.deepEqual([d.denied, outcome(d, true)], [["Bash", "Edit"], "denied"]);
+  const failed = finish("claude", '{"type":"result","subtype":"error_during_execution","is_error":true,"result":""}');
+  assert.equal(outcome(failed, false), "failed");
+  const done = { text: "Updated to 0.6.1.", error: false, denied: [] };
+  assert.deepEqual([outcome(done, false), outcome(done, true)], ["finished", "reported"]);
+  assert.equal(outcome({ text: "", error: false, denied: [] }, false), "silent");
+  assert.equal(outcome(null, true), "silent");
+  for (const q of ["Let me know which one.", "Shall I continue", "ok, say so and I'll do it"]) assert.equal(outcome({ text: q, error: false, denied: [] }, false), "asked", q);
+  assert.equal(outcome({ text: "Done. The service restarted.", error: false, denied: [] }, false), "finished");
+  const codex = ['{"type":"thread.started","thread_id":"t"}', '{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"Which folder?"}}', '{"type":"turn.completed"}'].join("\n");
+  assert.deepEqual(finish("codex", codex), { text: "Which folder?", error: false, denied: [] });
+  const cf = finish("codex", '{"type":"turn.failed","error":{"message":"rate limited"}}');
+  assert.deepEqual([cf.text, cf.error], ["rate limited", true]);
+});
+
+test("a session reports back by calling XenoNet's send tool", () => {
+  const sent = '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__xenonet__send","input":{"to":"claude:a","text":"done"}}]}}';
+  assert.ok(reported("claude", sent));
+  assert.ok(reported("claude", sent.replace("mcp__xenonet__send", "mcp__xenonet-dev__send")));
+  assert.ok(!reported("claude", sent.replace("__send", "__inbox")));
+  assert.ok(!reported("claude", '{"type":"assistant","message":{"content":[{"type":"text","text":"mcp__xenonet__send"}]}}'));
+  assert.ok(reported("codex", '{"type":"item.completed","item":{"type":"mcp_tool_call","server":"xenonet","tool":"send"}}'));
+});
+
+test("last words are clipped to whole characters", () => {
+  assert.equal(clipped("  hi  "), "hi");
+  assert.equal(Array.from(clipped("é".repeat(LAST_MAX + 5))).length, LAST_MAX + 1);
 });
 
 test("a sign-in for XenoNet's runs is what claude setup-token prints, kept under XenoNet's own name", () => {

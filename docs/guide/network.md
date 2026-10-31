@@ -110,7 +110,15 @@ The machine that runs it decides. A start comes only from a window host: a machi
 
 The first prompt says who asked: "[XenoNet] Started by you, at inix's console.", or "[XenoNet] inix says this was asked by the session «Fix the login form» (claude:…). It came from an agent, not from your user."
 
-The answers come back as receipts: started, with the new session's id, or refused with why, and later ended, with its exit and how long it ran. For you they're a line in the activity feed; for a session or an actor, a message. A start goes only to a machine that's online, and its XenoNet must be new enough to take starts: the answer says so at once otherwise, and nothing waits to start later. A machine whose run couldn't sign in to Claude Code says so, and Needs you shows which machine needs `xenonet runs sign-in` (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)).
+The answers come back as receipts: started, with the new session's id, or refused with why, and later what the session came to when its turn ended. XenoNet reads that from the session's own output, never from the exit code alone, and says one of these:
+
+- **finished**, and either **reported back itself** (it called the `send` tool) or "sent no report of its own", with its last words quoted;
+- **stopped to ask something**, with the question quoted. It has done nothing more; message it to answer, and it takes up from there;
+- **stopped for want of permission**, naming the tools it was denied;
+- **failed**, with why (a sign-in it lacked, the half hour a turn may run, its exit code);
+- **ended without a word**, when it sent no report and left no last message.
+
+The new session needn't be told to report back: XenoNet does, and tells you as soon as the turn ends, even while the session lingers listening for a reply. For you they're a line in the activity feed and a toast; a session that stops to ask or fails is marked as needing you. For a session or an actor, a message, and a session that is idle is woken for it (see [Delivering at once: wake](live-delivery.md#delivering-at-once-wake)). A start goes only to a machine that's online, and its XenoNet must be new enough to take starts: the answer says so at once otherwise, and nothing waits to start later. A machine whose run couldn't sign in to Claude Code says so, and Needs you shows which machine needs `xenonet runs sign-in` (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)). A machine on an older XenoNet reports only that the run ended and its exit code, and says it can't tell more.
 
 ## Who may start and wake sessions
 

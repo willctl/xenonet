@@ -160,6 +160,15 @@ impl Router {
 
     /// Whether this machine lets `from` wake `agent` (`reach`): its wake
     /// setting, else your allowance for the session, here and for actors.
+    /// `granted`: the message is a start's end, told to the session that
+    /// asked for the start, whose ask is its consent to this wake.
+    fn may_wake_for(c: &mut dyn Calls, from: &Arg, agent: &Arg, granted: bool) -> Result<Decision> {
+        if granted {
+            return Ok(Decision::Allow);
+        }
+        Self::may_wake(c, from, agent)
+    }
+
     fn may_wake(c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Decision> {
         let consent = Consent { here: Self::consented(c, agent, false)?, remote: Self::consented(c, agent, true)? };
         let wake = if Self::wake_network(c)? { Wake::Network } else { Wake::Consent };
@@ -171,6 +180,12 @@ impl Router {
     /// goes to a copy of it, forked with its whole context: under wake
     /// network only, since the session itself can't take it now.
     pub fn forkable(&self, c: &mut dyn Calls, view: &Arg) -> Result<bool> {
+        Self::forkable_for(c, view, false)
+    }
+
+    /// `forkable`, and also without wake network when `granted` (a start's
+    /// end for the session that asked for the start).
+    fn forkable_for(c: &mut dyn Calls, view: &Arg, granted: bool) -> Result<bool> {
         if !view.truthy() || view.field("ended").truthy() || view.field("status").as_str() == Some("working") {
             return Ok(false);
         }
@@ -178,7 +193,7 @@ impl Router {
         if !js_text(&id).starts_with("claude:") || !truthy_at(c, "router.resume.fork")? || !c.call("router.resume", "can", vec![id])?.truthy() {
             return Ok(false);
         }
-        Self::wake_network(c)
+        Ok(granted || Self::wake_network(c)?)
     }
 
     /// Whether a session can be reached without hooks (an OpenCode run
@@ -348,6 +363,8 @@ impl Router {
         let status = view.field("status");
         let idle = !view.truthy() || matches!(status.as_str(), Some("idle" | "ended"));
         let from = m.field("from");
+        // A start's end, told to the session that asked for the start.
+        let granted = m.field("startEnd").truthy();
         let from_name = match m.field("fromName") {
             n if !n.is_nullish() => n,
             _ => {
@@ -410,7 +427,7 @@ impl Router {
             }
             // 2. OpenCode's own server, with your consent for that session.
             if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? {
-                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
                     tried.push(format!("opencode: {why}"));
                 } else {
                     let r = caught(c.call("router.opencode", "deliver", vec![agent.clone(), text.clone()]));
@@ -429,7 +446,7 @@ impl Router {
                 let who = reach::sender_of(&from);
                 let sender = who.kind == Kind::You || (who.kind == Kind::Actor && who.host.is_none());
                 let pid = opt_call(c, "router.engine.store", "contact", vec![agent.clone()])?.field("pid").or(Arg::Null);
-                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
                     tried.push(format!("tmux: {why}"));
                 } else if !sender {
                     tried.push("tmux: only you or an actor with a token may type".into());
@@ -460,7 +477,7 @@ impl Router {
             // 4. A headless resume, for a Claude Code or Codex session whose
             // process has gone, with your consent: never while it runs.
             if truthy_at(c, "router.resume")? && view.field("ended").truthy() && c.call("router.resume", "can", vec![agent.clone()])?.truthy() {
-                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
                     tried.push(format!("resume: {why}"));
                 } else {
                     let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone())])]));
@@ -482,10 +499,10 @@ impl Router {
                     }
                     tried.push(format!("resume: {}", js_text(&r.field("why"))));
                 }
-            } else if self.forkable(c, &view)? {
+            } else if Self::forkable_for(c, &view, granted)? {
                 // 5. A copy of a Claude Code session a process holds, under
                 // wake network: it answers with the whole context, now.
-                if let Decision::Refuse(why) = Self::may_wake(c, &from, &agent)? {
+                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
                     tried.push(format!("fork: {why}"));
                 } else {
                     let r = caught(c.call(

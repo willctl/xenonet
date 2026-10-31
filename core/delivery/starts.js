@@ -7,8 +7,8 @@
 // machine the network's: a message frame to TARGET, answered by receipts
 // keyed by its id.
 //
-//   claude -p --session-id <id> [--settings <listen file>] [--permission-mode <m>]
-//          --permission-prompt-tool mcp__<server>__permission
+//   claude -p --session-id <id> --output-format stream-json --verbose [--settings <listen file>]
+//          [--permission-mode <m>] --permission-prompt-tool mcp__<server>__permission
 //   codex exec --json -C <folder> -
 //   grok --prompt-file <file> -s <id> --output-format json [--permission-mode <m>]
 //
@@ -76,7 +76,7 @@ const grokMode = (m) => (m === "manual" ? "default" : m);
 export function command(r, id, cwd, { settings = null, server = "xenonet", promptFile = null } = {}) {
   if (r.app === "codex") return ["codex", ["exec", "--json", "-C", cwd, "-"]];
   if (r.app === "grok") return ["grok", ["--prompt-file", promptFile ?? "", "-s", id, "--output-format", "json", ...(r.mode ? ["--permission-mode", grokMode(r.mode)] : [])]];
-  return ["claude", ["-p", "--session-id", id, ...(settings ? ["--settings", settings] : []), ...(r.mode ? ["--permission-mode", r.mode] : []), "--permission-prompt-tool", `mcp__${server}__permission`]];
+  return ["claude", ["-p", "--session-id", id, "--output-format", "stream-json", "--verbose", ...(settings ? ["--settings", settings] : []), ...(r.mode ? ["--permission-mode", r.mode] : []), "--permission-prompt-tool", `mcp__${server}__permission`]];
 }
 
 // Who asked a start here, in the starts' history: one asker on this
@@ -148,8 +148,83 @@ export function sessionOf(app, log) {
   return null;
 }
 
+const lines = (log) => String(log ?? "").split("\n").flatMap((l) => {
+  try {
+    const v = JSON.parse(l.trim());
+    return v && typeof v === "object" ? [v] : [];
+  } catch {
+    return [];
+  }
+});
+const clean = (v) => (typeof v === "string" ? v.trim() : "");
+
+// The last turn that ended in these lines of a run's output (a Claude Code
+// stream's result, Codex's last message at a turn.completed, or the result
+// Grok Build prints): { text, error, denied }, or null while none ended.
+export function finish(app, log) {
+  let lastMessage = "";
+  let out = null;
+  for (const v of lines(log)) {
+    if (app === "codex") {
+      if (v.type === "item.completed" && v.item?.type === "agent_message") lastMessage = clean(v.item.text);
+      else if (v.type === "turn.completed") {
+        out = { text: lastMessage, error: false, denied: [] };
+        lastMessage = "";
+      } else if (v.type === "turn.failed" || v.type === "error") {
+        const why = clean(v.error?.message ?? v.message);
+        out = { text: why || lastMessage, error: true, denied: [] };
+        lastMessage = "";
+      }
+    } else if (v.type === "result" || (app === "grok" && typeof v.result === "string")) {
+      const denied = Array.isArray(v.permission_denials) ? v.permission_denials.map((d) => d?.tool_name).filter((n) => typeof n === "string") : [];
+      const error = v.is_error === true || (typeof v.subtype === "string" && v.subtype.startsWith("error"));
+      out = { text: clean(v.result), error, denied };
+    }
+  }
+  return out;
+}
+
+// Whether the session called XenoNet's send tool in these lines of its
+// output: it told someone what it found itself.
+export function reported(app, log) {
+  return lines(log).some((v) => {
+    if (app === "codex") return v.item?.type === "mcp_tool_call" && v.item.tool === "send" && String(v.item.server ?? "").startsWith("xenonet");
+    return Array.isArray(v.message?.content) && v.message.content.some((b) => b?.type === "tool_use" && typeof b.name === "string" && b.name.startsWith("mcp__xenonet") && b.name.endsWith("__send"));
+  });
+}
+
+// Whether a final message asks something and waits: a question in its last
+// lines, or an offer to go on when told to.
+function asks(text) {
+  const tail = Array.from(text).slice(-300).join("");
+  return tail.includes("?") || /\b(want me to|shall i|should i|let me know|say so and i|tell me (if|whether|which))\b/i.test(tail);
+}
+
+// What a turn came to, from its end: failed, denied a tool, asked
+// something, finished (and reported back itself, or only said so in its
+// last message), or silent when it left nothing.
+export function outcome(f, wasReported) {
+  if (!f) return "silent";
+  if (f.error) return "failed";
+  if (f.denied.length) return "denied";
+  if (!f.text) return "silent";
+  if (asks(f.text)) return "asked";
+  return wasReported ? "reported" : "finished";
+}
+
+// The most of a session's last words a notice carries.
+export const LAST_MAX = 1200;
+
+export function clipped(text) {
+  const t = String(text ?? "").trim();
+  const chars = Array.from(t);
+  return chars.length <= LAST_MAX ? t : `${chars.slice(0, LAST_MAX).join("").trimEnd()}…`;
+}
+
 // What the requester is told of an answer, on `host` ("this machine" for
-// this one). `a` is the receipt's body.
+// this one). `a` is the receipt's body. An end says what the session did
+// (outcome: finished, reported, asked, denied, failed or silent) and quotes
+// its last words (last), never only that a process exited.
 export function answerWords(state, host, a = {}) {
   const session = str(a.session);
   const reason = str(a.reason) ?? "";
@@ -159,8 +234,22 @@ export function answerWords(state, host, a = {}) {
     return session ? `[XenoNet] Started ${session}${on}${where}. Message it as you would any session.` : `[XenoNet] Started a session${on}${where}.`;
   }
   if (state === "ended") {
+    const who = `${session ?? "The session"}${on}`;
+    const after = ` after ${Number.isFinite(a.minutes) ? a.minutes : 0} min`;
+    const last = str(a.last)?.trim() ?? "";
+    const quote = last ? `\nIts last words: «${last}»` : "";
+    const tools = Array.isArray(a.denied) ? a.denied.filter((t) => typeof t === "string").join(", ") : "";
+    const because = reason ? `: ${reason}` : "";
     const exit = Number.isFinite(a.exit) ? `exit ${a.exit}` : "stopped";
-    return `[XenoNet] ${session ?? "The session"}${on} ended (${exit}) after ${Number.isFinite(a.minutes) ? a.minutes : 0} min${reason ? `: ${reason}` : ""}.`;
+    const head = {
+      asked: `${who} stopped to ask something, and has done nothing more${after}. Answer it by messaging it: it takes up from there.${quote}`,
+      denied: `${who} stopped${after} for want of permission to use ${tools}, which it was denied.${quote}`,
+      failed: `${who} failed${after} (${exit})${because}.${quote}`,
+      reported: `${who} finished${after} and reported back itself.${quote}`,
+      finished: `${who} finished${after}, but sent no report of its own.${quote}`,
+      silent: `${who} ended${after} without a word: it sent no report and left no last message (${exit})${because}.`,
+    }[a.outcome] ?? `${who} ended${after} (${exit})${because}. That machine's XenoNet is older and can't say whether it finished or stopped to ask something.`;
+    return `[XenoNet] ${head}`;
   }
   return `[XenoNet] No session was started${on}: ${reason}.`;
 }

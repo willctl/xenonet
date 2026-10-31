@@ -1297,17 +1297,32 @@ fn body_of(r: &Row, op: &str, by: Option<&str>) -> Value {
 /// A note to a session here from XenoNet's network, as a message from
 /// `sender` (the handoff's maker, or the session that took it).
 pub(crate) fn note(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>) {
-    note_with(w, sender, target, words, host, false);
+    note_with(w, sender, target, words, host, Way::Plain);
 }
 
 /// A note that waits for the session's next turn, and never wakes it: a
 /// start's started and ended, which a wake under `wake: network` would
 /// otherwise turn into a turn of their own.
 pub(crate) fn quiet_note(w: &World, sender: &str, target: &str, words: &str) {
-    note_with(w, sender, target, words, None, true);
+    note_with(w, sender, target, words, None, Way::Quiet);
 }
 
-fn note_with(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>, quiet: bool) {
+/// A start's end, told to the session that asked for it: delivered at
+/// once, waking the session if it's idle. The ask is its consent to this
+/// one wake, so the machine's wake setting doesn't stand in the way; the
+/// wake budgets, a paused XenoNet and a plan near its limit still do.
+pub(crate) fn start_end_note(w: &World, sender: &str, target: &str, words: &str) {
+    note_with(w, sender, target, words, None, Way::StartEnd);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Way {
+    Plain,
+    Quiet,
+    StartEnd,
+}
+
+fn note_with(w: &World, sender: &str, target: &str, words: &str, host: Option<&str>, way: Way) {
     let mut env = Value::Null;
     if let Some(h) = host {
         if let Ok(mid) = new_id("msg") {
@@ -1332,8 +1347,10 @@ fn note_with(w: &World, sender: &str, target: &str, words: &str, host: Option<&s
     if !env.is_null() {
         push(&mut event, "verified", arg(&env["line"]));
     }
-    if quiet {
-        push(&mut event, "quiet", Arg::Bool(true));
+    match way {
+        Way::Quiet => push(&mut event, "quiet", Arg::Bool(true)),
+        Way::StartEnd => push(&mut event, "startEnd", Arg::Bool(true)),
+        Way::Plain => {}
     }
     told(w, "message", &event);
 }

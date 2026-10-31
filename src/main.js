@@ -1339,10 +1339,14 @@ events.addEventListener("fork", (e) => {
 });
 events.addEventListener("start", (e) => {
   const s = JSON.parse(e.data);
-  const bad = s.state === "refused" || (s.state === "ended" && s.exit !== 0);
+  // A session that stopped to ask, was denied a tool, failed or said nothing
+  // is a start that needs you; one that finished is good news, with its last
+  // words. An older XenoNet's end names no outcome, only an exit code.
+  const needs = ["asked", "denied", "failed", "silent"].includes(s.outcome) || (s.state === "ended" && !s.outcome && s.exit !== 0);
+  const bad = s.state === "refused" || needs;
   const words = String(s.words ?? "").replace(/^\[XenoNet\] /, "");
   hud.activity({ kind: "xenonet", title: s.host && s.host !== "this machine" ? `Start on ${s.host}` : "Start", detail: words, bad, ts: Number.isFinite(s.at) ? s.at : Date.now() });
-  if (s.state !== "ended" || bad) hud.toast(words, bad);
+  if (s.state !== "ended" || bad || s.outcome) hud.toast(words, bad);
   network.heardStart?.(s);
 });
 // The theme (core/themes.js): the server's choice wins, and a change to it
