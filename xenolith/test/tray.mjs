@@ -44,7 +44,7 @@ function dibPixel(frame, x, y) {
 
 describe('icons', () => {
   const out = path.join(tmp, 'icons');
-  test('three states, each a multi-size .ico (16-256 px); the 16 px page-bubble is pixel-sharp', () => {
+  test('three states, each a multi-size .ico (16-256 px); the 16 px stone is pixel-sharp', () => {
     const files = buildIcons({ outDir: out });
     assert.deepEqual(files.map((f) => path.basename(f)), ['xenolith-healthy.ico', 'xenolith-degraded.ico', 'xenolith-down.ico']);
     for (const f of files) {
@@ -56,19 +56,17 @@ describe('icons', () => {
       }
     }
     const [healthy, degraded, down] = files.map((f) => readIco(f)[0]);
-    const INDIGO = [0x4f, 0x46, 0xe5, 255];
-    assert.deepEqual(dibPixel(healthy, 4, 4), [255, 255, 255, 255], 'text line is solid white');
-    assert.deepEqual(dibPixel(healthy, 5, 10), INDIGO, 'the page is solid indigo');
-    assert.deepEqual(dibPixel(healthy, 4, 13), INDIGO, 'the speech-bubble tail');
-    assert.deepEqual(dibPixel(healthy, 11, 4), [0xa5, 0xb4, 0xfc, 255], 'the folded corner');
-    assert.equal(dibPixel(healthy, 13, 2)[3], 0, 'transparent past the fold: no tile');
+    const MINT = [0x39, 0xff, 0x9f, 255];
+    assert.deepEqual(dibPixel(healthy, 7, 10), MINT, 'the base layer is solid mint');
+    assert.deepEqual(dibPixel(healthy, 7, 8), MINT, 'the middle layer');
+    assert.equal(dibPixel(healthy, 7, 5)[3], 0, 'a gap between layers');
+    assert.equal(dibPixel(healthy, 14, 7)[3], 0, 'transparent beside a narrower layer: no tile');
     assert.equal(dibPixel(healthy, 0, 0)[3], 0, 'transparent corner');
-    assert.equal(dibPixel(healthy, 12, 12)[3], 0, 'no badge when healthy (the corner below the page is empty)');
-    assert.deepEqual(dibPixel(healthy, 9, 9), [255, 255, 255, 255], 'no knockout ring when healthy');
-    assert.deepEqual(dibPixel(degraded, 12, 12), [0xf5, 0x9e, 0x0b, 255], 'amber badge');
-    assert.ok(dibPixel(degraded, 9, 9)[3] < 128, 'a ring is knocked out around the badge');
-    assert.deepEqual(dibPixel(down, 12, 12), [0xdc, 0x26, 0x26, 255], 'red badge');
-    assert.deepEqual(dibPixel(down, 5, 10), [0x6b, 0x72, 0x80, 255], 'grey page when down');
+    assert.deepEqual(dibPixel(healthy, 8, 3), MINT, 'no knockout ring when healthy');
+    assert.deepEqual(dibPixel(degraded, 12, 3), [0xff, 0xb5, 0x47, 255], 'amber badge');
+    assert.ok(dibPixel(degraded, 8, 3)[3] < 128, 'a ring is knocked out around the badge');
+    assert.deepEqual(dibPixel(down, 12, 3), [0xff, 0x5d, 0x73, 255], 'red badge');
+    assert.deepEqual(dibPixel(down, 7, 10), [0x7d, 0x8c, 0x99, 255], 'grey stone when down');
     assert.ok(fs.statSync(path.join(out, 'preview.png')).size > 1000);
   });
 });

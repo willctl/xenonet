@@ -822,10 +822,9 @@ Xenolith window (below). **Right click** shows the menu:
 - restart service;
 - quit.
 
-Starting the tray again while it runs opens the window. The icon is a dog-eared
-page with a speech-bubble tail, because what the apps say becomes pages. It
-is indigo when healthy, has an amber dot when it needs attention, and is grey
-with a red dot when the service is down. `assets/icon/xenolith-16.svg` is
+Starting the tray again while it runs opens the window. The icon is three layers of stone, widest at the base, in the square style of
+XenoNet's mark. It is mint when healthy, has an amber dot when it needs
+attention, and is grey with a red dot when the service is down. `assets/icon/xenolith-16.svg` is
 fitted to the 16 px grid that the tray uses at 100% scaling, and
 `xenolith.svg` draws 20 px and up. `npm run icons` builds `dist/icons/*.ico`
 (16 to 256 px) and `dist/icons/preview.png`, which shows every state and size on

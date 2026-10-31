@@ -18,11 +18,11 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const SRC = path.join(root, 'assets', 'icon');
 const OUT = path.join(root, 'dist', 'icons');
 
-/** tile: the page (class "tile"); accent: its folded corner (class "accent"); badge: the status dot. */
+/** tile: the layers of stone (class "tile"); accent: unused by the current mark (class "accent"); badge: the status dot. */
 export const STATES = {
-  healthy: { tile: '#4F46E5', accent: '#A5B4FC', badge: null },
-  degraded: { tile: '#4F46E5', accent: '#A5B4FC', badge: '#F59E0B' },
-  down: { tile: '#6B7280', accent: '#D1D5DB', badge: '#DC2626' },
+  healthy: { tile: '#39FF9F', accent: '#05070A', badge: null },
+  degraded: { tile: '#39FF9F', accent: '#05070A', badge: '#FFB547' },
+  down: { tile: '#7D8C99', accent: '#05070A', badge: '#FF5D73' },
 };
 export const SIZES = [16, 20, 24, 32, 48, 64, 256];
 /** Which source draws each size: the pixel-fitted design at 16 px; the full one above (class "detail" only from 32 px). */
@@ -83,11 +83,11 @@ export function parseSvg(text, state, { detail = true } = {}) {
 
 /** The source as a standalone SVG in a state's colors; with a badge, the glyph takes the knockout mask. */
 export function stateSvg(text, colors) {
-  let s = text.replace(/#4F46E5/g, colors.tile).replace(/#A5B4FC/g, colors.accent);
+  let s = text.replace(/#39FF9F/g, colors.tile).replace(/#05070A/g, colors.accent);
   if (colors.badge) {
     s = s
       .replace('<g class="badge" display="none">', '<g class="badge">')
-      .replace('fill="#F59E0B"', `fill="${colors.badge}"`)
+      .replace('fill="#FFB547"', `fill="${colors.badge}"`)
       .replace('<g class="glyph">', '<g class="glyph" mask="url(#knockout)">');
   }
   return s;
