@@ -74,6 +74,11 @@ pub struct Config {
     pub curators: BTreeMap<String, String>,
     /// sync.json's timeoutSeconds: how long one request to a peer may take.
     pub timeout_seconds: Option<u64>,
+    /// The peer this machine is a satellite of (pairing): it follows every space that peer lists
+    /// unless an explicit follow says otherwise, and its curator and Ask are off.
+    pub home: Option<String>,
+    /// Followed spaces that were followed because home lists them, not by `sync follow`.
+    pub auto: BTreeSet<String>,
 }
 
 pub fn config_file(paths: &AppPaths) -> PathBuf {
@@ -106,7 +111,7 @@ impl Config {
         let v: Value = fs::read_to_string(config_file(paths)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
         let peers: BTreeMap<String, String> =
             v["peers"].as_object().into_iter().flatten().filter_map(|(n, u)| u.as_str().filter(|u| valid_name(n) && valid_url(u)).map(|u| (n.clone(), u.to_string()))).collect();
-        let (mut follow, mut curators) = (BTreeMap::new(), BTreeMap::new());
+        let (mut follow, mut curators, mut auto) = (BTreeMap::new(), BTreeMap::new(), BTreeSet::new());
         for (space, f) in v["follow"].as_object().into_iter().flatten() {
             if !SpaceId::parse(space).is_ok_and(|s| !s.is_local()) {
                 continue;
@@ -115,11 +120,15 @@ impl Config {
             let peer = f.as_str().or(f["peer"].as_str()).filter(|p| valid_name(p));
             let Some(peer) = peer else { continue };
             follow.insert(space.clone(), peer.to_string());
+            if f["auto"] == true {
+                auto.insert(space.clone());
+            }
             if let Some(id) = f["curator"].as_str().filter(|c| is_curator_id(c)) {
                 curators.insert(space.clone(), id.to_string());
             }
         }
-        Config { machine: v["machine"].as_str().filter(|m| valid_name(m)).map(String::from), peers, follow, curators, timeout_seconds: v["timeoutSeconds"].as_u64().filter(|s| *s > 0) }
+        let home = v["home"].as_str().filter(|h| peers.contains_key(*h)).map(String::from);
+        Config { machine: v["machine"].as_str().filter(|m| valid_name(m)).map(String::from), peers, follow, curators, timeout_seconds: v["timeoutSeconds"].as_u64().filter(|s| *s > 0), home, auto }
     }
 
     /// Writes sync.json for you alone (and, on Windows, the service, which reads who curates what).
@@ -132,12 +141,18 @@ impl Config {
                 if let Some(id) = self.curators.get(space) {
                     f["curator"] = json!(id);
                 }
+                if self.auto.contains(space) {
+                    f["auto"] = json!(true);
+                }
                 (space.clone(), f)
             })
             .collect();
         let mut v = json!({ "machine": self.machine, "peers": self.peers, "follow": follow });
         if let Some(t) = self.timeout_seconds {
             v["timeoutSeconds"] = json!(t);
+        }
+        if let Some(h) = &self.home {
+            v["home"] = json!(h);
         }
         crate::private::write(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::private::service_readers())?;
         Ok(())
@@ -157,11 +172,13 @@ impl Config {
     pub fn follow(&mut self, space: &SpaceId, peer: &str) {
         self.follow.insert(space.to_string(), peer.to_string());
         self.curators.remove(&space.to_string());
+        self.auto.remove(&space.to_string());
     }
 
     pub fn unfollow(&mut self, space: &SpaceId) {
         self.follow.remove(&space.to_string());
         self.curators.remove(&space.to_string());
+        self.auto.remove(&space.to_string());
     }
 
     /// Forgets a peer, with what this machine followed from it.
@@ -171,6 +188,10 @@ impl Config {
         for s in gone {
             self.follow.remove(&s);
             self.curators.remove(&s);
+            self.auto.remove(&s);
+        }
+        if self.home.as_deref() == Some(peer) {
+            self.home = None;
         }
     }
 }
@@ -600,7 +621,7 @@ pub fn accept(dir: &Path, who: &Principal, entries: &[Value], can: &dyn Fn(Level
 fn request(method: &str, url: &str, token: &str, body: Option<&Value>, timeout: Duration) -> std::result::Result<(u16, Value), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let mut config = format!("header = \"Authorization: Bearer {token}\"\n");
+    let mut config = if token.is_empty() { String::new() } else { format!("header = \"Authorization: Bearer {token}\"\n") };
     if let Some(b) = body {
         config.push_str(&format!("data-binary = \"{}\"\n", b.to_string().replace('\\', "\\\\").replace('"', "\\\"")));
     }
@@ -633,6 +654,49 @@ fn request(method: &str, url: &str, token: &str, body: Option<&Value>, timeout: 
         return Err(one_line(&String::from_utf8_lossy(&out.stderr)));
     }
     Ok((status, serde_json::from_str(json_text).unwrap_or(Value::Null)))
+}
+
+/// POST without a token (the pairing route, where the proof is in the body).
+pub fn post_open(url: &str, body: &Value, timeout: Duration) -> std::result::Result<(u16, Value), String> {
+    request("POST", url, "", Some(body), timeout)
+}
+
+/// The spaces this machine lists for a machine paired with it: every one the caller may read, but
+/// never machine:local.
+pub fn space_list(root: &Path, can_read: &dyn Fn(&SpaceId) -> bool) -> Value {
+    let names: Vec<String> = spaces::list(root).into_iter().filter(|s| !s.is_local() && can_read(s)).map(|s| s.to_string()).collect();
+    json!({ "spaces": names })
+}
+
+/// On a satellite: follows every space home lists that has no follow record of its own, so a space
+/// made at home later is followed at the next pass. Returns how many it started following.
+pub fn adopt_home_spaces(paths: &AppPaths, _root: &Path) -> std::result::Result<usize, String> {
+    let cfg = Config::load(paths);
+    let Some(home) = cfg.home.clone() else { return Ok(0) };
+    let base = cfg.peers.get(&home).ok_or_else(|| format!("no peer named {home}"))?;
+    let token = read_token(paths, &home).ok_or_else(|| format!("no token for {home}"))?;
+    let url = format!("{}{API}/spaces", base.trim_end_matches('/'));
+    let listed = match request("GET", &url, &token, None, cfg.timeout()) {
+        Ok((200, v)) => v,
+        Ok((status, v)) => return Err(format!("{home} answered {status}: {}", why(&v))),
+        Err(e) => return Err(format!("{home} could not be reached: {e}")),
+    };
+    let wanted: Vec<SpaceId> = listed["spaces"].as_array().into_iter().flatten().filter_map(Value::as_str).filter_map(|s| SpaceId::parse(s).ok()).filter(|s| !s.is_local()).collect();
+    update(paths, |c| {
+        let mut added = 0;
+        if c.home.as_deref() != Some(&home) {
+            return Ok(0);
+        }
+        for id in &wanted {
+            if !c.follow.contains_key(&id.to_string()) {
+                c.follow(id, &home);
+                c.auto.insert(id.to_string());
+                added += 1;
+            }
+        }
+        Ok(added)
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Why a pass stopped short.
@@ -1214,8 +1278,14 @@ fn run_pass(pass: &mut Pass, who: &str) -> std::result::Result<(), Stop> {
 
 /// Syncs every followed space; one report each.
 pub fn sync_all(paths: &AppPaths, root: &Path) -> Vec<Value> {
+    // A satellite first learns which spaces home has.
+    let mut reports = vec![];
+    if let Err(e) = adopt_home_spaces(paths, root) {
+        reports.push(json!({ "space": "home's spaces", "peer": Config::load(paths).home, "error": e }));
+    }
     let cfg = Config::load(paths);
-    cfg.follow.keys().filter_map(|s| SpaceId::parse(s).ok()).map(|s| sync_space(paths, root, &cfg, &s)).collect()
+    reports.extend(cfg.follow.keys().filter_map(|s| SpaceId::parse(s).ok()).map(|s| sync_space(paths, root, &cfg, &s)));
+    reports
 }
 
 /// Every followed space as /status and `xenolith sync status` show it: its curator, the notes

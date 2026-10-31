@@ -14,7 +14,8 @@
 //! Each space has its own curator (xenolith_core::spaces): this process runs one for this machine's
 //! space and one for every other space, and starts one for a space created while it runs. A space
 //! this machine only follows has its curator on another machine (xenolith_core::sync): this process
-//! syncs it once a minute instead.
+//! syncs it once a minute instead. On a satellite (paired with a home, xenolith_core::pair) it files
+//! nothing and answers nothing: the curator and Ask are on home, and this process only syncs.
 
 use serde_json::{Value, json};
 use std::io::Read;
@@ -131,7 +132,8 @@ pub fn run(args: &[String]) -> ! {
     }
     let once = has("--once");
     let asks_only = has("--asks-only");
-    if once && !asks_only {
+    let satellite = xenolith_core::sync::Config::load(&paths).home.is_some();
+    if once && !asks_only && !satellite {
         // File what is due in the other spaces first; this machine's space follows below.
         let followed = xenolith_core::sync::Config::load(&paths);
         for id in spaces::list(&root).into_iter().filter(|s| !s.is_local() && followed.curator_of(s).is_none()) {
@@ -142,9 +144,9 @@ pub fn run(args: &[String]) -> ! {
         }
     }
     let others: Others = Arc::new(Mutex::new(vec![]));
-    let curator = (!asks_only).then(|| Arc::new(Curator::new(&wiki_dir, cfg.clone(), reqlog.clone(), once, Waker::new())));
+    let curator = (!asks_only && !satellite).then(|| Arc::new(Curator::new(&wiki_dir, cfg.clone(), reqlog.clone(), once, Waker::new())));
     // The same process answers the window's questions (Ask): it is the one that runs as the user.
-    let asker = (!once).then(|| {
+    let asker = (!once && !satellite).then(|| {
         let server = std::env::current_exe().unwrap_or_else(|_| "xenolith".into());
         Arc::new(AskWorker::new(&wiki_dir, AskCfg::from_config(&config, &cfg), reqlog.clone(), server, paths.clone(), Waker::new()))
     });
@@ -181,7 +183,13 @@ pub fn run(args: &[String]) -> ! {
         chosen.reasoning_effort,
         cfg.codex_path,
         wiki::disp(&cfg.codex_home),
-        if curator.is_some() { "" } else { ", answering questions only" }
+        if curator.is_some() {
+            ""
+        } else if satellite {
+            ", a satellite"
+        } else {
+            ", answering questions only"
+        }
     ));
     reqlog.write(vec![
         ("kind", json!("curator")),
@@ -192,12 +200,14 @@ pub fn run(args: &[String]) -> ! {
     ]);
     let ask_thread = asker.clone().map(|a| std::thread::spawn(move || a.run()));
     // The other spaces' curators, and a look for new spaces every few seconds.
-    let watcher = (curator.is_some() && !once).then(|| {
+    let watcher = ((curator.is_some() || satellite) && !once).then(|| {
         let (root, cfg, reqlog, others, stopping) = (root.clone(), cfg.clone(), reqlog.clone(), others.clone(), stopping.clone());
         std::thread::spawn(move || {
             let mut synced_at: Option<std::time::Instant> = None;
             while !stopping.load(Ordering::SeqCst) {
-                start_space_curators(&root, &cfg, &reqlog, &others);
+                if !satellite {
+                    start_space_curators(&root, &cfg, &reqlog, &others);
+                }
                 // The spaces this machine follows: push their notes and pull their pages each minute.
                 if synced_at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(60)) {
                     synced_at = Some(std::time::Instant::now());
@@ -217,6 +227,12 @@ pub fn run(args: &[String]) -> ! {
         })
     });
     let mut failed = None;
+    if satellite && !once {
+        log("satellite: files nothing and answers nothing; syncing with home");
+        while !stopping.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
     if let Some(Err(e)) = curator.as_ref().map(|c| c.run()) {
         failed = Some(format!("{e:?}"));
         if let Some(a) = &asker {

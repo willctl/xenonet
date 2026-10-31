@@ -23,6 +23,7 @@ sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.4"
 unicode-normalization = "0.1"
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
 
 # Small and fast: optimized for size, one codegen unit, LTO, stripped symbols. Size matters for
 # speed here: on Windows each launch of a large program costs a scan (measured 2026-10-03: the

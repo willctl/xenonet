@@ -1,6 +1,6 @@
 # Xenolith across machines: one home, many satellites
 
-Status: design, reviewed, not built. Xenolith stays standalone: nothing here imports or calls another program.
+Status: the first version (pairing, satellites, follow-all) is built; Ask forwarding, page writes from satellites and `home move` / `home take` are not. Xenolith stays standalone: nothing here imports or calls another program.
 
 ## Problem
 
@@ -34,7 +34,7 @@ xenolith pair join --url https://home.example/xenolith   # asks for the code
 
 - The code is `<home-id>.<secret>` and nothing else. The address is a separate `--url`, so a code pasted in a chat reveals no address. The code is read from a prompt or stdin, never an argument.
 - `join` makes a keypair, sends its public key and an HMAC of it under the secret to `/sync/v1/pair`, and home answers with a machine token encrypted to that key. A code seen by someone else is useless without the secret and the race: home refuses a second join on the same code outright and says who joined and from where. `/sync/v1/pair` shares the bad-token rate limit.
-- The token is `ctx:read:all` plus `ctx:append:all`. Writes to pages are not part of pairing: replacing pages from a satellite is a later `xenolith grant` the owner runs by hand. `machine:local` on home stays out of `all`, as it is now.
+- The token is `ctx:read:all` plus `ctx:append:all`, with a ten-year grant for the machine behind it (a token reaches a space only through a grant too). Writes to pages are not part of pairing: replacing pages from a satellite is a later `xenolith grant` the owner runs by hand. `machine:local` on home stays out of `all`, as it is now.
 - The token is stored as today in `peers/<name>.token` (0600, or a protected ACL on Windows). The satellite then turns its curator and Ask off and sets home as the peer. `xenolith sync status` names home.
 - `pair offer` needs the owner key, as deciding held changes does. Pairings and mode changes go in the audit chain on both machines with the token's id, never the code or the token.
 

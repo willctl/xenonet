@@ -21,6 +21,7 @@ pub mod lint;
 pub mod lock;
 pub mod models;
 pub mod owner;
+pub mod pair;
 pub mod paths;
 pub mod private;
 pub mod readcache;
