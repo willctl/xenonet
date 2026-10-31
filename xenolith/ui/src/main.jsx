@@ -121,13 +121,13 @@ const Icon = ({ name, size = 16 }) => (
   </svg>
 );
 
-/** The tray mark: a dog-eared page with a speech-bubble tail. */
+/** The window's mark: a standing stone with a diamond cut in it and a block at each foot. */
 const Logo = ({ health }) => (
   <svg className={`logo ${health}`} width="30" height="30" viewBox="0 0 256 256" aria-hidden="true">
-    <path className="logo-page" d="M52 16 H164 L232 84 V168 C232 184 220 196 204 196 H116 L64 244 V196 H52 C36 196 24 184 24 168 V44 C24 28 36 16 52 16 Z" />
-    <path className="logo-fold" d="M164 16 V64 C164 75 173 84 184 84 H232 Z" />
-    <rect fill="#fff" x="60" y="68" width="76" height="22" rx="11" />
-    <rect fill="#fff" x="60" y="118" width="136" height="22" rx="11" />
+    <rect className="logo-page" x="84" y="16" width="88" height="224" />
+    <rect className="logo-page" x="24" y="196" width="40" height="40" />
+    <rect className="logo-page" x="192" y="196" width="40" height="40" />
+    <path className="logo-fold" d="M128 56 L160 96 L128 136 L96 96 Z" />
   </svg>
 );
 

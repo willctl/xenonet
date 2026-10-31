@@ -28,6 +28,8 @@ await build({
   format: 'iife',
   target: ['chrome120', 'edge120'],
   jsx: 'automatic',
+  // The fonts are copied beside app.css below; their urls stay as written.
+  external: ['fonts/*'],
   minify: true,
   charset: 'utf8',
   legalComments: 'none',
@@ -36,6 +38,7 @@ await build({
 });
 await fs.copyFile(path.join(root, 'ui', 'index.html'), path.join(uiOut, 'index.html'));
 await fs.copyFile(path.join(root, 'assets', 'icon', 'xenolith.svg'), path.join(uiOut, 'icon.svg'));
+await fs.cp(path.join(root, 'ui', 'fonts'), path.join(uiOut, 'fonts'), { recursive: true });
 
 for (const f of await fs.readdir(uiOut, { withFileTypes: true })) {
   if (f.isDirectory()) continue;
