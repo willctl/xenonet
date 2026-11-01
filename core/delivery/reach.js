@@ -31,7 +31,8 @@ export function senderOf(id) {
 
 // { ok: true }, or { ok: false, why }. `settings` is what this machine is
 // set to: `consent` (whether you allowed the target, here and for actors),
-// `start` (off, you or network) and `wake` (consent or network).
+// `start` (off, you, network or delegate: the network, on the person's
+// standing delegation) and `wake` (consent or network).
 export function decide(action, sender, target, settings = {}) {
   if (action === "message") return { ok: true };
   if (action === "wake") {
@@ -40,14 +41,14 @@ export function decide(action, sender, target, settings = {}) {
     return (sender?.kind === "actor" ? consent.remote : consent.here) ? { ok: true } : { ok: false, why: "no consent" };
   }
   if (action === "start") {
-    const start = ["off", "network"].includes(settings?.start) ? settings.start : "you";
+    const start = ["off", "network", "delegate"].includes(settings?.start) ? settings.start : "you";
     if (start === "off") return { ok: false, why: "this machine starts no sessions: its start setting is off" };
     // The receiver can tell only which machine signed the request and
     // whether it's a window host; what it says of its sender is that
     // machine's word.
     if (sender?.window === false) return { ok: false, why: `${sender.host ?? "that machine"} isn't a window host, and only window hosts start sessions` };
     if (sender?.kind === "you") return sender.strong ? { ok: true } : { ok: false, why: "a start as you comes only from a window host's console, checked by its window key" };
-    return start === "network" ? { ok: true } : { ok: false, why: "only you start sessions here: its start setting is you" };
+    return start === "network" || start === "delegate" ? { ok: true } : { ok: false, why: "only you start sessions here: its start setting is you" };
   }
   return { ok: false, why: `nothing decides "${action}" here` };
 }

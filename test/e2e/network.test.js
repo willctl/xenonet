@@ -484,6 +484,14 @@ test("start and wake: this machine's set here, another machine's sent to it, and
   assert.match(waits.text, /laptop asked to let the network wake sessions on studio\. It needs the founder or a second window host\./i);
   await clickAt(waits.at.setOn["studio|start:off"], "studio's start: nobody");
   assert.ok(await until(async () => (await network()).hosts.find((x) => x.id === "studio").reach.start === "off"), "narrowed at once");
+  // Putting studio on delegation widens past the network: it waits too, and says what it asks.
+  await clickAt((await network()).at.setOn["studio|start:delegate"], "studio's start: delegated");
+  const delegating = await until(async () => {
+    const got = await network();
+    return got.hosts.find((x) => x.id === "studio").reach.pending.some((w) => w.value === "delegate") ? got : null;
+  });
+  assert.ok(delegating, "delegating waits for a second window host");
+  assert.match(delegating.text, /laptop asked to put studio on your standing delegation\. It needs the founder or a second window host\./i);
   const raw = await served();
   assert.equal(raw.start, "network");
   await s.driver("network", "close");

@@ -351,6 +351,7 @@ pub fn starts_constants() -> J {
         "freshMs": starts::FRESH_MS,
         "signInTarget": starts::SIGN_IN_TARGET,
         "lastMax": starts::LAST_MAX,
+        "delegatedRules": starts::DELEGATED_RULES,
     }))
 }
 
@@ -364,13 +365,20 @@ pub fn starts_request(v: J) -> J {
 }
 
 #[napi(js_name = "startsFramed")]
-pub fn starts_framed(by: J, from: Option<String>, prompt: String) -> String {
-    starts::framed(&by.0, from.as_deref(), &prompt)
+pub fn starts_framed(by: J, from: Option<String>, prompt: String, delegated_by: Option<String>, delegated_on: Option<String>) -> String {
+    let delegation = delegated_by.as_deref().zip(delegated_on.as_deref());
+    starts::framed(&by.0, from.as_deref(), &prompt, delegation)
 }
 
 fn request_of(r: &V) -> starts::Request {
     let s = |k: &str| r.get(k).and_then(V::as_str).map(str::to_string);
-    starts::Request { folder: s("folder").unwrap_or_default(), app: s("app").unwrap_or_default(), mode: s("mode"), prompt: s("prompt").unwrap_or_default() }
+    starts::Request {
+        folder: s("folder").unwrap_or_default(),
+        app: s("app").unwrap_or_default(),
+        mode: s("mode"),
+        prompt: s("prompt").unwrap_or_default(),
+        delegate: r.get("delegate").and_then(V::as_bool).unwrap_or(false),
+    }
 }
 
 /// [app, args].

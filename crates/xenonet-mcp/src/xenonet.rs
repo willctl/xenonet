@@ -403,6 +403,7 @@ const PERMISSION: &str = "Only for the sessions XenoNet runs itself: Claude Code
 
 const START_SESSION: &str = "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once. Whether the session started, and what it came to when it stopped (finished, stopped to ask something, was denied a tool, failed or left nothing), come to you as messages that quote its last words, and the end wakes you if you are idle. XenoNet reports it; the new session needn't be told to. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.";
 
+const DELEGATE: &str = "Hands a task to another machine in your XenoNet network, to be worked on there without your user having to come to that machine. It works only on a machine your user set to take delegated work (in XenoNet's Machines, Start sessions: Delegated, set once from their own console); anywhere else it is refused, with how your user sets that. The new session's first prompt says it runs on your user's standing delegation, set where and when, which that machine checked: you can't claim it. XenoNet answers its permission prompts for reading, for editing files under its folder and for routine commands (listing, searching, read-only git, XenoNet's own update and doctor); anything else, and always what deletes, handles secrets, reaches the network or spends money, comes to your user's console as a question that only they answer. It answers at once. When the session stops you are told what it came to (finished, stopped to ask something, was denied a tool, failed or left nothing), with its last words, and the end wakes you if you are idle. XenoNet reports that; the new session needn't be told to.";
 const HANDOFF: &str = "Leaves work for another session to pick up where you left off, on this machine or another one in your XenoNet network: the goal, what's done, what's next, the files, and the branch and commit. It goes as a message to the sessions at work in clones of this repo now (or to the session you name in to), and the next session that starts in one is offered it. The first session to accept it gets it, and one no one takes lapses after a week. With accept, takes one you were offered. With nothing else, lists the handoffs open to you and the ones you made.";
 
 fn scope_arg() -> Z {
@@ -473,6 +474,12 @@ fn defs(actor: bool) -> Vec<Def> {
             ("app", enumeration(&["claude", "codex", "grok"]).optional().describe("claude (Claude Code, the default), codex or grok (Grok Build).")),
             ("prompt", string().describe("What the new session should do: its first prompt.")),
             ("mode", enumeration(&["manual", "plan", "acceptEdits", "auto", "dontAsk"]).optional().describe("A permission mode; manual, the default, is your user's own settings. Codex takes none.")),
+        ]), &write),
+        def("delegate", "Delegate a task to another machine", DELEGATE, object(vec![
+            ("machine", string().describe("The machine in your XenoNet network to do it, by its id.")),
+            ("task", string().describe("What to do there: the new session's first prompt. Say what done looks like, and what to report back.")),
+            ("folder", string().optional().describe("A project or folder on that machine's map, by its id (project:…) or path, or ~, the default. What it may edit without a question is under this folder.")),
+            ("app", enumeration(&["claude", "codex", "grok"]).optional().describe("claude (Claude Code, the default), codex or grok (Grok Build).")),
         ]), &write),
         def("doctor", "Check XenoNet's setup", "Whether what XenoNet needs is in place on this machine: XenoNet itself, Claude Code, Codex and Grok Build installed and signed in, the folders XenoNet reads, git, and whether Claude Code, Codex and Grok Build are connected. Lists only what isn't fine, each with a fix for your user. Use it when XenoNet's other tools fail.", object(vec![]), &read),
     ];
@@ -579,6 +586,12 @@ impl ServerHandler for Sessions {
             }
             "start_session" => {
                 ctx.call_route("/api/start", &meta, body(&[("machine", "machine"), ("folder", "folder"), ("app", "app"), ("prompt", "prompt"), ("mode", "mode")])).await
+            }
+            "delegate" => {
+                let mut m = body(&[("machine", "machine"), ("folder", "folder"), ("app", "app")]);
+                m.insert("prompt".into(), a.get("task").cloned().unwrap_or(Value::Null));
+                m.insert("delegate".into(), json!(true));
+                ctx.call_route("/api/start", &meta, m).await
             }
             "doctor" => ctx.doctor().await,
             "ask_gateway_token" => ctx.ask_gateway_token(&meta, a["actor"].as_str().unwrap_or_default()).await,

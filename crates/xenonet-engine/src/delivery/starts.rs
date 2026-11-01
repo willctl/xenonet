@@ -45,11 +45,18 @@ pub struct Request {
     /// None: the person's own settings.
     pub mode: Option<String>,
     pub prompt: String,
+    /// Asked as delegated work: the machine starts it only when it's set to
+    /// delegate (a session or actor asking; you asking is never refused).
+    pub delegate: bool,
 }
 
 impl Request {
     pub fn to_json(&self) -> Value {
-        json!({ "folder": self.folder, "app": self.app, "mode": self.mode, "prompt": self.prompt })
+        let mut v = json!({ "folder": self.folder, "app": self.app, "mode": self.mode, "prompt": self.prompt });
+        if self.delegate {
+            v["delegate"] = json!(true);
+        }
+        v
     }
 }
 
@@ -57,7 +64,7 @@ fn text(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
-/// A request as it came (`{ folder?, app?, mode?, prompt }`), or why it
+/// A request as it came (`{ folder?, app?, mode?, prompt, delegate? }`), or why it
 /// can't be started anywhere.
 pub fn request(v: &Value) -> Result<Request, String> {
     let app = text(v, "app").filter(|a| !a.is_empty()).unwrap_or_else(|| "claude".into());
@@ -87,7 +94,8 @@ pub fn request(v: &Value) -> Result<Request, String> {
     if folder.chars().count() > 1000 {
         return Err("that folder is too long to be one".into());
     }
-    Ok(Request { folder, app, mode, prompt })
+    let delegate = v.get("delegate").and_then(Value::as_bool).unwrap_or(false);
+    Ok(Request { folder, app, mode, prompt, delegate })
 }
 
 /// One-line text for a title, without what could break the framing.
@@ -96,10 +104,18 @@ fn title_of(t: &str) -> String {
     one.replace(['«', '»'], "\"")
 }
 
+/// What a delegated session is told after who asked: what XenoNet does
+/// for it, and what stays off limits whatever the delegation.
+pub const DELEGATED_RULES: &str = "Within that delegation XenoNet answers your permission prompts for reading, for editing files under this folder and for routine commands, and sends anything else to your user's console as a question, so you needn't ask first. Never delete data, print or move secrets, or spend money.";
+
 /// The first prompt: who asked, then the prompt. `by` is `{ kind, id,
 /// title }`; `from` is the machine it came from, None for this one.
-pub fn framed(by: &Value, from: Option<&str>, prompt: &str) -> String {
+/// `delegation` is the machine that put this one on standing delegation
+/// and the day (a session or actor starts under it): the prompt then says
+/// the asker's authority is your user's, checked here, not claimed.
+pub fn framed(by: &Value, from: Option<&str>, prompt: &str, delegation: Option<(&str, &str)>) -> String {
     let kind = by.get("kind").and_then(Value::as_str).unwrap_or("session");
+    let mut rules = String::new();
     let line = if kind == "you" {
         match from {
             Some(h) => format!("[XenoNet] Started by you, at {h}'s console."),
@@ -109,12 +125,21 @@ pub fn framed(by: &Value, from: Option<&str>, prompt: &str) -> String {
         let id = super::policy::sanitize(by.get("id").and_then(Value::as_str).unwrap_or(""), true, 200.0);
         let title = title_of(by.get("title").and_then(Value::as_str).unwrap_or(&id));
         let what = if kind == "actor" { "the actor" } else { "the session" };
+        let tail = match delegation {
+            Some((host, date)) => {
+                rules = format!("{DELEGATED_RULES}\n\n");
+                format!(
+                    " Your user delegated it: they put this machine on standing delegation at {host}'s console on {date}, which XenoNet here checked; the asker can't claim it."
+                )
+            }
+            None => " It came from an agent, not from your user.".to_string(),
+        };
         match from {
-            Some(h) => format!("[XenoNet] {h} says this was asked by {what} «{title}» ({id}). It came from an agent, not from your user."),
-            None => format!("[XenoNet] This was asked by {what} «{title}» ({id}) on this machine. It came from an agent, not from your user."),
+            Some(h) => format!("[XenoNet] {h} says this was asked by {what} «{title}» ({id}).{tail}"),
+            None => format!("[XenoNet] This was asked by {what} «{title}» ({id}) on this machine.{tail}"),
         }
     };
-    format!("{line}\n\n{prompt}")
+    format!("{line}\n\n{rules}{prompt}")
 }
 
 /// Grok Build's word for a mode.
@@ -390,7 +415,7 @@ pub fn answer_words(state: &str, host: &str, a: &Value) -> String {
                 Some("reported") => format!("{who} finished{after} and reported back itself.{quote}"),
                 Some("finished") => format!("{who} finished{after}, but sent no report of its own.{quote}"),
                 Some("silent") => format!("{who} ended{after} without a word: it sent no report and left no last message ({exit}){because}."),
-                _ => format!("{who} ended{after} ({exit}){because}. That machine's XenoNet is older and can't say whether it finished or stopped to ask something."),
+                _ => format!("{who} ended{after} ({exit}){because}. That machine's XenoNet is older and can't say whether it finished or stopped to ask something, so don't take it for done: update XenoNet there (xenonet update tools, then xenonet update service)."),
             };
             format!("[XenoNet] {head}")
         }
@@ -435,7 +460,7 @@ mod tests {
     #[test]
     fn a_request_says_its_app_mode_folder_and_prompt() {
         let r = request(&json!({ "prompt": "  Fix the login form  " })).unwrap();
-        assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into() });
+        assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into(), delegate: false });
         assert_eq!(request(&json!({ "app": "grok", "mode": "plan", "folder": "project:atlas", "prompt": "x" })).unwrap().mode.as_deref(), Some("plan"));
         assert_eq!(request(&json!({ "mode": "manual", "prompt": "x" })).unwrap().mode, None, "manual is the person's own settings");
         assert_eq!(request(&json!({ "mode": "bypassPermissions", "prompt": "x" })), Err("XenoNet never starts a session that bypasses its permission checks".into()));
@@ -446,26 +471,43 @@ mod tests {
         assert!(request(&json!({ "prompt": "x".repeat(PROMPT_MAX + 1) })).is_err());
         let back = request(&r.to_json()).unwrap();
         assert_eq!(back, r);
+        // Delegated work says so, and a plain request doesn't carry the word.
+        let d = request(&json!({ "prompt": "x", "delegate": true })).unwrap();
+        assert!(d.delegate && d.to_json()["delegate"] == json!(true));
+        assert!(!r.delegate && r.to_json().get("delegate").is_none());
+        assert_eq!(request(&d.to_json()).unwrap(), d);
     }
 
     #[test]
     fn the_first_prompt_says_who_asked() {
         let you = json!({ "kind": "you", "id": "actor:you" });
-        assert_eq!(framed(&you, Some("inix"), "Go."), "[XenoNet] Started by you, at inix's console.\n\nGo.");
-        assert_eq!(framed(&you, None, "Go."), "[XenoNet] Started by you, at this machine's console.\n\nGo.");
+        assert_eq!(framed(&you, Some("inix"), "Go.", None), "[XenoNet] Started by you, at inix's console.\n\nGo.");
+        assert_eq!(framed(&you, None, "Go.", None), "[XenoNet] Started by you, at this machine's console.\n\nGo.");
         let s = json!({ "kind": "session", "id": "claude:aaaaaaaa-0001", "title": "Fix «it»\n\u{1b}[31mnow" });
         assert_eq!(
-            framed(&s, Some("inix"), "Go."),
+            framed(&s, Some("inix"), "Go.", None),
             "[XenoNet] inix says this was asked by the session «Fix \"it\" now» (claude:aaaaaaaa-0001). It came from an agent, not from your user.\n\nGo."
         );
         let a = json!({ "kind": "actor", "id": "actor:muse" });
-        assert!(framed(&a, None, "Go.").starts_with("[XenoNet] This was asked by the actor «actor:muse» (actor:muse) on this machine."));
+        assert!(framed(&a, None, "Go.", None).starts_with("[XenoNet] This was asked by the actor «actor:muse» (actor:muse) on this machine."));
+    }
+
+    #[test]
+    fn a_delegated_start_says_your_user_delegated_it_and_what_stays_off_limits() {
+        let s = json!({ "kind": "session", "id": "claude:aaaaaaaa-0001", "title": "Update" });
+        let text = framed(&s, Some("inix"), "Go.", Some(("inix", "2026-11-01")));
+        assert!(text.starts_with("[XenoNet] inix says this was asked by the session «Update» (claude:aaaaaaaa-0001). Your user delegated it: they put this machine on standing delegation at inix's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.\n\n"));
+        assert!(text.ends_with(&format!("{DELEGATED_RULES}\n\nGo.")));
+        assert!(!text.contains("not from your user"), "the agent line is gone: the delegation is your user's");
+        // A start by you says what it said, delegation or not.
+        let you = json!({ "kind": "you", "id": "actor:you" });
+        assert_eq!(framed(&you, Some("inix"), "Go.", Some(("inix", "2026-11-01"))), "[XenoNet] Started by you, at inix's console.\n\nGo.");
     }
 
     #[test]
     fn each_app_starts_its_own_way_and_the_prompt_never_goes_as_an_argument() {
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
-        let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into() };
+        let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into(), delegate: false };
         let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None);
         assert_eq!(app, "claude");
         assert_eq!(
@@ -571,7 +613,7 @@ mod tests {
         let ended = json!({ "session": "claude:x", "exit": 0, "minutes": 4 });
         assert_eq!(
             answer_words("ended", "this machine", &ended),
-            "[XenoNet] claude:x ended after 4 min (exit 0). That machine's XenoNet is older and can't say whether it finished or stopped to ask something."
+            "[XenoNet] claude:x ended after 4 min (exit 0). That machine's XenoNet is older and can't say whether it finished or stopped to ask something, so don't take it for done: update XenoNet there (xenonet update tools, then xenonet update service)."
         );
         let ended = |outcome: &str, extra: Value| {
             let mut a = json!({ "session": "claude:x", "exit": 0, "minutes": 5, "outcome": outcome, "last": "All set." });

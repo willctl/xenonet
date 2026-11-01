@@ -14,6 +14,8 @@
 //!   start    start: off refuses all; a start comes only from a window
 //!            host (this machine counts as one); you need a strong check
 //!            (the window key); sessions and actors need start: network
+//!            or delegate (delegate is network, and what they start runs
+//!            on the person's standing delegation: delegation.rs)
 //! ```
 
 use super::policy::{actor_of, is_you};
@@ -124,14 +126,17 @@ pub enum Start {
     #[default]
     You,
     Network,
+    /// The network, on the person's standing delegation.
+    Delegate,
 }
 
 impl Start {
-    /// off, you or network; anything else is you.
+    /// off, you, network or delegate; anything else is you.
     pub fn parse(s: &str) -> Start {
         match s {
             "off" => Start::Off,
             "network" => Start::Network,
+            "delegate" => Start::Delegate,
             _ => Start::You,
         }
     }
@@ -228,7 +233,7 @@ pub fn decide(action: Action, sender: &Sender, _target: &str, settings: &Setting
             match sender.kind {
                 Kind::You if sender.strong => Decision::Allow,
                 Kind::You => refuse("a start as you comes only from a window host's console, checked by its window key".into()),
-                _ if settings.start == Start::Network => Decision::Allow,
+                _ if matches!(settings.start, Start::Network | Start::Delegate) => Decision::Allow,
                 _ => refuse("only you start sessions here: its start setting is you".into()),
             }
         }
@@ -287,18 +292,23 @@ mod tests {
         // You, strongly, from a window host: under you and network.
         assert_eq!(d(&you, Start::You), Decision::Allow);
         assert_eq!(d(&you, Start::Network), Decision::Allow);
+        assert_eq!(d(&you, Start::Delegate), Decision::Allow);
         assert_eq!(d(&weak, Start::Network), Decision::Refuse("a start as you comes only from a window host's console, checked by its window key".into()));
         // Sessions and actors on window hosts: only under network.
         for s in [&session, &actor] {
             assert_eq!(d(s, Start::You), Decision::Refuse("only you start sessions here: its start setting is you".into()));
             assert_eq!(d(s, Start::Network), Decision::Allow);
+            assert_eq!(d(s, Start::Delegate), Decision::Allow, "delegate is the network, on your standing delegation");
         }
         // A machine that isn't a window host starts nothing, whoever it
         // names as the sender.
         assert_eq!(d(&server, Start::Network), Decision::Refuse("desk isn't a window host, and only window hosts start sessions".into()));
         // off: nobody.
         assert_eq!(d(&you, Start::Off), Decision::Refuse("this machine starts no sessions: its start setting is off".into()));
-        assert_eq!((Start::parse("network"), Start::parse("x"), Wake::parse("network"), Wake::parse("")), (Start::Network, Start::You, Wake::Network, Wake::Consent));
+        assert_eq!(
+            (Start::parse("network"), Start::parse("delegate"), Start::parse("x"), Wake::parse("network"), Wake::parse("")),
+            (Start::Network, Start::Delegate, Start::You, Wake::Network, Wake::Consent)
+        );
         let js = Arg::Obj(vec![("start".into(), Arg::text("network")), ("wake".into(), Arg::text("network"))]);
         assert_eq!(Settings::of(&js), Settings { consent: Consent::default(), start: Start::Network, wake: Wake::Network });
     }

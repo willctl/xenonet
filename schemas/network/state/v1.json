@@ -248,9 +248,10 @@
                     "enum": [
                       "off",
                       "you",
-                      "network"
+                      "network",
+                      "delegate"
                     ],
-                    "description": "Who may start sessions there: nobody, you (from a window host's console), or the network (you, and the sessions and actors on window hosts)"
+                    "description": "Who may start sessions there: nobody, you (from a window host's console), the network (you, and the sessions and actors on window hosts), or delegate (the network, and what a session or actor starts there runs on your standing delegation, within its limits)"
                   },
                   "wake": {
                     "type": "string",
@@ -280,7 +281,10 @@
                         },
                         "value": {
                           "type": "string",
-                          "const": "network"
+                          "enum": [
+                            "network",
+                            "delegate"
+                          ]
                         },
                         "by": {
                           "type": "string",
@@ -301,7 +305,27 @@
                       ],
                       "additionalProperties": {}
                     },
-                    "description": "Widenings to network another window host asked for, waiting ten minutes at most for the founder or a second window host to approve"
+                    "description": "Widenings to network (or, for a start, to delegate) another window host asked for, waiting ten minutes at most for the founder or a second window host to approve"
+                  },
+                  "delegated": {
+                    "description": "While start is delegate: who put the machine on it, and when",
+                    "type": "object",
+                    "properties": {
+                      "by": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{1,31}$",
+                        "description": "The window host whose action put it on delegation: itself, for the person at its own keyboard"
+                      },
+                      "at": {
+                        "type": "number",
+                        "description": "Epoch milliseconds"
+                      }
+                    },
+                    "required": [
+                      "by",
+                      "at"
+                    ],
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -435,7 +459,35 @@
       "enum": [
         "off",
         "you",
-        "network"
+        "network",
+        "delegate"
+      ]
+    },
+    "delegated": {
+      "description": "While start is delegate: the window host whose action put this machine on it, and when",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "by": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,31}$",
+              "description": "The host's id in the network, picked by the person: never the machine's own name"
+            },
+            "at": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            }
+          },
+          "required": [
+            "by",
+            "at"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "wake": {

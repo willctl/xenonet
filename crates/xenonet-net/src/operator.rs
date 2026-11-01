@@ -6,10 +6,11 @@
 //! Every action comes from a window host's console, as you, checked
 //! strongly there, under a minute old and never seen before. Then:
 //!
-//! - `settings` narrows (`off`, `you`, `consent`) from any window host.
-//!   Widening to `network` takes the founder, or a second window host:
-//!   one from another window host waits (`pending`) until a different
-//!   window host approves it, for ten minutes at most.
+//! - `settings` narrows (`off`, `you`, `consent`, and `delegate` back to
+//!   `network`) from any window host. Widening to `network`, or to
+//!   `delegate`, takes the founder, or a second window host: one from
+//!   another window host waits (`pending`) until a different window host
+//!   approves it, for ten minutes at most.
 //! - `answer` is your Allow or Deny for a run's permission prompt, which
 //!   the engine takes.
 
@@ -59,13 +60,26 @@ pub struct Widen {
     pub id: String,
     /// `start` or `wake`.
     pub setting: String,
+    /// What it would become: `network`, or `delegate` for a start.
+    pub value: String,
     pub by: String,
     pub at: f64,
 }
 
 impl Widen {
     pub fn to_json(&self) -> Value {
-        json!({ "id": self.id, "setting": self.setting, "value": "network", "by": self.by, "at": self.at.round() as i64 })
+        json!({ "id": self.id, "setting": self.setting, "value": self.value, "by": self.by, "at": self.at.round() as i64 })
+    }
+}
+
+/// How much a value of a setting lets others do: from 2 up it's a
+/// widening to the network, which only the founder or two window hosts do.
+fn rank(setting: &str, value: &str) -> u8 {
+    match (setting, value) {
+        (_, "network") => 2,
+        ("start", "delegate") => 3,
+        ("start", "you") => 1,
+        _ => 0,
     }
 }
 
@@ -94,9 +108,9 @@ pub fn settings(cur: (&str, &str), args: &Value, from: &str, founder: bool, pend
         }
         let w = pending.remove(i);
         if w.setting == "start" {
-            start = "network".into();
+            start = w.value;
         } else {
-            wake = "network".into();
+            wake = w.value;
         }
         return Ok(Outcome::Set { start, wake });
     }
@@ -115,13 +129,14 @@ pub fn settings(cur: (&str, &str), args: &Value, from: &str, founder: bool, pend
     for (k, v) in asked {
         let Some(v) = v else { continue };
         let had = if k == "start" { &mut start } else { &mut wake };
-        if v != "network" || founder {
+        let widening = rank(k, &v) >= 2 && rank(k, &v) > rank(k, had);
+        if !widening || founder {
             // Narrowing, or the founder's: done. It takes back any widening
             // of the same setting that waits.
             *had = v;
             pending.retain(|w| w.setting != k);
-        } else if *had != "network" {
-            let w = Widen { id: new_id(), setting: k.into(), by: from.into(), at: now };
+        } else if *had != v {
+            let w = Widen { id: new_id(), setting: k.into(), value: v, by: from.into(), at: now };
             pending.retain(|x| x.setting != k);
             pending.push(w.clone());
             widen = Some(w);
@@ -212,5 +227,26 @@ mod tests {
         assert_eq!(settings(("you", "consent"), &json!({}), "laptop", false, &mut p, NOW, &mut id), Err("say what to set: start or wake".into()));
         // Already the network's: nothing waits.
         assert_eq!(settings(("network", "consent"), &json!({ "start": "network" }), "laptop", false, &mut p, NOW, &mut id), Ok(set("network", "consent")));
+    }
+
+    #[test]
+    fn delegating_is_a_widening_past_the_network_and_stepping_back_is_not() {
+        let mut p = Vec::new();
+        let mut id = ids();
+        // The founder puts a machine on delegate at once, from the network or from you.
+        assert_eq!(settings(("network", "consent"), &json!({ "start": "delegate" }), "studio", true, &mut p, NOW, &mut id), Ok(set("delegate", "consent")));
+        assert_eq!(settings(("you", "consent"), &json!({ "start": "delegate" }), "studio", true, &mut p, NOW, &mut id), Ok(set("delegate", "consent")));
+        // Another window host's request waits, even from the network, and says what it asks for.
+        let w = settings(("network", "consent"), &json!({ "start": "delegate" }), "laptop", false, &mut p, NOW, &mut id).unwrap();
+        let Outcome::Waits { start, widen, .. } = w else { panic!("{w:?}") };
+        assert_eq!((start.as_str(), widen.setting.as_str(), widen.to_json()["value"].as_str()), ("network", "start", Some("delegate")));
+        // The second window host's approval makes it delegate, not network.
+        assert_eq!(settings(("network", "consent"), &json!({ "approve": widen.id }), "desk", false, &mut p, NOW + 1000.0, &mut id), Ok(set("delegate", "consent")));
+        // Stepping back to the network, or narrower, is any window host's.
+        assert_eq!(settings(("delegate", "consent"), &json!({ "start": "network" }), "laptop", false, &mut p, NOW, &mut id), Ok(set("network", "consent")));
+        assert_eq!(settings(("delegate", "consent"), &json!({ "start": "off" }), "laptop", false, &mut p, NOW, &mut id), Ok(set("off", "consent")));
+        // Already delegate: nothing waits.
+        assert_eq!(settings(("delegate", "consent"), &json!({ "start": "delegate" }), "laptop", false, &mut p, NOW, &mut id), Ok(set("delegate", "consent")));
+        assert!(settings(("you", "consent"), &json!({ "wake": "delegate" }), "laptop", false, &mut p, NOW, &mut id).is_err(), "wake has no delegate");
     }
 }

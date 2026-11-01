@@ -293,6 +293,7 @@ mod tests {
             share_load: true,
             start: "you".into(),
             wake: "consent".into(),
+            delegated: None,
             joined: 0,
         };
         let address = |host: &str, a: &str| {

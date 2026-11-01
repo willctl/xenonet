@@ -9,7 +9,7 @@
 //! returns, and the link sends them when it can.
 
 use crate::codec::{frame_id, is_b64};
-use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY, SERVICES};
+use crate::files::{address_kind, Delegated, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY, SERVICES};
 use crate::frame::{host_frame, open_frame, Draft, Frame};
 use crate::gateway::{join_body, Gateway, NetRequest};
 use crate::gwstore::{Caps, GwStore, TicketRow};
@@ -303,6 +303,17 @@ impl Recent {
         }
         self.ids.insert(id.to_string(), at);
         true
+    }
+}
+
+/// Records who put this machine on delegate and when, as `start` becomes
+/// delegate; takes it away as it leaves. `before` is the start setting
+/// before the change.
+fn note_delegation(net: &mut NetFile, before: &str, by: &str, now: f64) {
+    if net.start != "delegate" {
+        net.delegated = None;
+    } else if before != "delegate" || net.delegated.is_none() {
+        net.delegated = Some(Delegated { by: by.to_string(), at: now.round() as i64 });
     }
 }
 
@@ -968,8 +979,10 @@ impl Shared {
             let mut id = || crate::codec::nonce().map_or_else(|_| format!("wid_{}", now as i64), |n| format!("wid_{n}"));
             let outcome = crate::operator::settings((&net.start, &net.wake), args, from, founder, &mut widens, now, &mut id);
             if let Ok(crate::operator::Outcome::Set { start, wake } | crate::operator::Outcome::Waits { start, wake, .. }) = &outcome {
+                let before = net.start.clone();
                 net.start.clone_from(start);
                 net.wake.clone_from(wake);
+                note_delegation(net, &before, from, now);
                 if let Err(e) = self.dir.write_network(net) {
                     self.log("net.operator", &format!("{from}'s change to this machine's settings wasn't kept: {}", e.message));
                 }
@@ -1317,7 +1330,7 @@ impl Net for Shared {
         let Some(n) = self.network() else { return xenonet_base::network::Reach::default() };
         let now = self.now();
         let pending = self.widens.locked().iter().filter(|w| now - w.at < crate::operator::WIDEN_MS).map(crate::operator::Widen::to_json).collect();
-        xenonet_base::network::Reach { start: n.start, wake: n.wake, pending }
+        xenonet_base::network::Reach { start: n.start, wake: n.wake, pending, delegated: n.delegated.map(|d| (d.by, d.at)) }
     }
 
     fn host_can(&self, host: &str, what: &str) -> bool {
@@ -1565,6 +1578,7 @@ impl Node {
             share_load: true,
             start: "you".into(),
             wake: "consent".into(),
+            delegated: None,
             joined: at,
         };
         self.adopt(net, key, roster)?;
@@ -1633,6 +1647,7 @@ impl Node {
             share_load: true,
             start: "you".into(),
             wake: "consent".into(),
+            delegated: None,
             joined: n.now() as i64,
         };
         let name = net.name.clone();
@@ -1787,7 +1802,7 @@ impl Node {
         let Change { titles_only, share_load, lan, start, wake } = change;
         let n = &self.shared;
         if start.as_deref().is_some_and(|s| !xenonet_base::network::STARTS.contains(&s)) {
-            return Err(NetError::bad("start is off, you or network"));
+            return Err(NetError::bad("start is off, you, network or delegate"));
         }
         if wake.as_deref().is_some_and(|w| !xenonet_base::network::WAKES.contains(&w)) {
             return Err(NetError::bad("wake is consent or network"));
@@ -1802,6 +1817,7 @@ impl Node {
                 net.share_load = s;
             }
             // Set here, a setting takes back what waits to widen it.
+            let before = net.start.clone();
             for (k, v) in [("start", start), ("wake", wake)] {
                 let Some(v) = v else { continue };
                 n.widens.locked().retain(|w| w.setting != k);
@@ -1811,6 +1827,8 @@ impl Node {
                     net.wake = v;
                 }
             }
+            let (me, now) = (net.host.clone(), n.now());
+            note_delegation(net, &before, &me, now);
             if let Some(lan) = lan {
                 if net.gateway.host != net.host {
                     return Err(NetError::new(409, "not-gateway", "the LAN address is the gateway's: set it on its host"));
@@ -1867,7 +1885,7 @@ impl Node {
             return Err(NetError::bad("say what to set: start or wake, or approve a change that waits"));
         }
         if a.get("start").and_then(Value::as_str).is_some_and(|s| !xenonet_base::network::STARTS.contains(&s)) {
-            return Err(NetError::bad("start is off, you or network"));
+            return Err(NetError::bad("start is off, you, network or delegate"));
         }
         if a.get("wake").and_then(Value::as_str).is_some_and(|w| !xenonet_base::network::WAKES.contains(&w)) {
             return Err(NetError::bad("wake is consent or network"));
@@ -1986,6 +2004,7 @@ impl Node {
             "shareLoad": net.share_load,
             "start": net.start,
             "wake": net.wake,
+            "delegated": net.delegated.as_ref().map(|d| json!({ "by": d.by, "at": d.at })),
         });
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());

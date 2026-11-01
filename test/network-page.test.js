@@ -5,7 +5,7 @@
 // sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, reachOf, hostCan, widenWords, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
 import { NetworkState } from "../core/schema/network.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -169,12 +169,20 @@ test("who may start and wake sessions on each machine, and what its XenoNet take
   assert.deepEqual([stateOf(null).start, stateOf(null).wake], ["you", "consent"], "you, and your consent, unless widened");
   const widen = { id: "wid_1", setting: "start", value: "network", by: "laptop", at: NOW };
   const desk = host("desk", { window: false, reach: { start: "you", wake: "network", pending: [widen, { setting: "start" }, null] }, can: ["start", "answer"] });
-  assert.deepEqual(reachOf(desk), { start: "you", wake: "network", pending: [widen] });
+  assert.deepEqual(reachOf(desk), { start: "you", wake: "network", pending: [widen], delegated: null });
   assert.equal(widenWords(widen, "desk"), "laptop asked to let the network start sessions on desk");
+  // A machine on delegate says who put it there and when; the widening to it says so too.
+  const delegated = host("desk", { window: false, reach: { start: "delegate", wake: "consent", pending: [{ ...widen, value: "delegate" }], delegated: { by: "studio", at: NOW } } });
+  NetworkState.parse(stateOf({ ...founder(), hosts: [delegated], start: "delegate", delegated: { by: "studio", at: NOW } }));
+  assert.deepEqual(reachOf(delegated), { start: "delegate", wake: "consent", pending: [{ ...widen, value: "delegate" }], delegated: { by: "studio", at: NOW } });
+  assert.equal(widenWords({ ...widen, value: "delegate" }, "desk"), "laptop asked to put desk on your standing delegation");
+  assert.match(delegationWords({ by: "studio", at: NOW }, NOW), /^Delegated by studio, [^.]+\. Sessions and actors that ask this machine for work run without asking about reading, editing files under the folder they start in, routine commands/);
+  assert.match(delegationWords(null), /^Delegated\. Sessions and actors/);
+  assert.ok(START_WORDS.delegate && STARTS.includes("delegate"));
   assert.ok(hostCan(desk, "start") && hostCan(desk, "answer"));
   // An older XenoNet says neither: it takes no start.
   const old = host("rack", { reach: null });
   assert.equal(reachOf(old), null);
   assert.equal(hostCan(old, "start"), false);
-  assert.deepEqual(reachOf(host("x", { reach: { start: "everyone", wake: 3 } })), { start: "you", wake: "consent", pending: [] }, "read leniently");
+  assert.deepEqual(reachOf(host("x", { reach: { start: "everyone", wake: 3 } })), { start: "you", wake: "consent", pending: [], delegated: null }, "read leniently");
 });

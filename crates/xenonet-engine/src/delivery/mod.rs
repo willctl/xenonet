@@ -3,6 +3,7 @@
 
 pub mod apps;
 pub mod channel;
+pub mod delegation;
 pub mod opencode;
 pub mod policy;
 pub mod reach;

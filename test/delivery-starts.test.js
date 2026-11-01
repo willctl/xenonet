@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, senderOf, ACTIONS } from "../core/delivery/reach.js";
 import { TARGET as STORE_NAME } from "../core/secret-store.js";
-import { request, framed, command, admit, asker, kept, folder, signedOut, sessionOf, finish, reported, outcome, clipped, LAST_MAX, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
+import { request, framed, DELEGATED_RULES, command, admit, asker, kept, folder, signedOut, sessionOf, finish, reported, outcome, clipped, LAST_MAX, answerWords, signInWords, signInToken, SIGN_IN_TARGET, APPS, PROMPT_MAX, TARGET } from "../core/delivery/starts.js";
 
 const ID = "0190d3e0-0000-7000-8000-00000000ab01";
 
@@ -20,10 +20,12 @@ test("a start comes from a window host: you strongly, sessions and actors under 
   const you = from("you", true, true);
   assert.deepEqual(d(you, "you"), { ok: true });
   assert.deepEqual(d(you, "network"), { ok: true });
+  assert.deepEqual(d(you, "delegate"), { ok: true });
   assert.deepEqual(d(from("you", true, false), "network"), { ok: false, why: "a start as you comes only from a window host's console, checked by its window key" });
   for (const s of [from("@laptop:claude:aaaaaaaa-0001", true, false), from("actor:muse", true, true)]) {
     assert.deepEqual(d(s, "you"), { ok: false, why: "only you start sessions here: its start setting is you" });
     assert.deepEqual(d(s, "network"), { ok: true });
+    assert.deepEqual(d(s, "delegate"), { ok: true }, "delegate is the network, on your standing delegation");
   }
   assert.deepEqual(d({ ...you, window: false, host: "desk" }, "network"), { ok: false, why: "desk isn't a window host, and only window hosts start sessions" });
   assert.deepEqual(d(you, "off"), { ok: false, why: "this machine starts no sessions: its start setting is off" });
@@ -61,6 +63,19 @@ test("the first prompt says who asked, with the title made safe", () => {
     "[XenoNet] inix says this was asked by the session «Fix \"it\" now» (claude:aaaaaaaa-0001). It came from an agent, not from your user.\n\nGo.",
   );
   assert.match(framed({ kind: "actor", id: "actor:muse" }, null, "Go."), /^\[XenoNet\] This was asked by the actor «actor:muse» \(actor:muse\) on this machine\./);
+});
+
+test("a delegated start says your user delegated it, and what stays off limits", () => {
+  const text = framed({ kind: "session", id: "claude:aaaaaaaa-0001", title: "Update" }, "inix", "Go.", { by: "inix", on: "2026-11-01" });
+  assert.ok(
+    text.startsWith(
+      "[XenoNet] inix says this was asked by the session «Update» (claude:aaaaaaaa-0001). Your user delegated it: they put this machine on standing delegation at inix's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.\n\n",
+    ),
+  );
+  assert.ok(text.endsWith(`${DELEGATED_RULES}\n\nGo.`));
+  assert.ok(!text.includes("not from your user"));
+  // A start by you says what it said, delegation or not.
+  assert.equal(framed({ kind: "you", id: "actor:you" }, "inix", "Go.", { by: "inix", on: "2026-11-01" }), "[XenoNet] Started by you, at inix's console.\n\nGo.");
 });
 
 test("each app starts its own way, and the prompt is never an argument", () => {
@@ -127,7 +142,7 @@ test("the answers in words", () => {
   assert.equal(answerWords("refused", "neo-rex", { reason: "only you start sessions here" }), "[XenoNet] No session was started on neo-rex: only you start sessions here.");
   assert.equal(
     answerWords("ended", "this machine", { session: "claude:x", exit: 0, minutes: 4 }),
-    "[XenoNet] claude:x ended after 4 min (exit 0). That machine's XenoNet is older and can't say whether it finished or stopped to ask something.",
+    "[XenoNet] claude:x ended after 4 min (exit 0). That machine's XenoNet is older and can't say whether it finished or stopped to ask something, so don't take it for done: update XenoNet there (xenonet update tools, then xenonet update service).",
   );
   const ended = (o, extra = {}) => answerWords("ended", "neo-rex", { session: "claude:x", exit: 0, minutes: 5, outcome: o, last: "All set.", ...extra });
   assert.equal(ended("asked", { last: "Want me to go ahead?" }), "[XenoNet] claude:x on neo-rex stopped to ask something, and has done nothing more after 5 min. Answer it by messaging it: it takes up from there.\nIts last words: «Want me to go ahead?»");
