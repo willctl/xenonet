@@ -1052,9 +1052,20 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     assert_eq!(fake_runs(&b).len(), 0);
 
     // A session on laptop asks desk: refused while desk's start is you…
+    // What the session has been told so far: its inbox, which hands each
+    // message over once, kept, and the copies woken to take an end at
+    // once, since a message delivered that way isn't left in the inbox.
+    let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let inbox = |h: &Host, me: &'static str| {
         let engine = h.ctx.cores.engine.clone();
-        async move { texts(&engine.inbox(me, Duration::ZERO).await.unwrap()) }
+        let told = told.clone();
+        let woken: Vec<String> = fake_runs(h).into_iter().map(|(_, prompt)| prompt).collect();
+        async move {
+            let fresh = texts(&engine.inbox(me, Duration::ZERO).await.unwrap());
+            let mut told = told.lock().unwrap();
+            told.extend(fresh);
+            told.iter().cloned().chain(woken).collect::<Vec<String>>()
+        }
     };
     let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures." })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
