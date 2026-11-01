@@ -131,25 +131,34 @@ pub struct Reach {
     pub start: String,
     pub wake: String,
     pub pending: Vec<Value>,
+    /// While `start` is delegate: the window host whose action set it, and
+    /// when (epoch ms).
+    pub delegated: Option<(String, i64)>,
 }
 
-/// `start`: nobody, you (from a window host's console), or the network
-/// (you, and the sessions and actors on window hosts).
-pub const STARTS: [&str; 3] = ["off", "you", "network"];
+/// `start`: nobody, you (from a window host's console), the network (you,
+/// and the sessions and actors on window hosts), or delegate: the network,
+/// and what a session or actor starts here runs on your standing
+/// delegation, within its limits (`delivery::delegation`).
+pub const STARTS: [&str; 4] = ["off", "you", "network", "delegate"];
 /// `wake`: your consent per session (`xenonet live allow`), or any sender
 /// in the network, within the budgets.
 pub const WAKES: [&str; 2] = ["consent", "network"];
 
 impl Default for Reach {
     fn default() -> Self {
-        Reach { start: "you".into(), wake: "consent".into(), pending: Vec::new() }
+        Reach { start: "you".into(), wake: "consent".into(), pending: Vec::new(), delegated: None }
     }
 }
 
 impl Reach {
     /// As presence carries it.
     pub fn to_json(&self) -> Value {
-        serde_json::json!({ "start": self.start, "wake": self.wake, "pending": self.pending })
+        let mut out = serde_json::json!({ "start": self.start, "wake": self.wake, "pending": self.pending });
+        if let Some((by, at)) = &self.delegated {
+            out["delegated"] = serde_json::json!({ "by": by, "at": at });
+        }
+        out
     }
 }
 

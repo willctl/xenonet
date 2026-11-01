@@ -58,6 +58,11 @@ pub struct StartSide {
     /// Copies of sessions XenoNet forked to answer a message, each with the
     /// session it came from: the last 200.
     forks: Mutex<Vec<(String, String)>>,
+    /// Sessions started under a standing delegation, each with the folder
+    /// it started in: what its permission prompts are judged against
+    /// (`xenonet_engine::delivery::delegation`). Kept in memory: after a
+    /// restart its prompts go to your console, as any run's do.
+    delegations: Mutex<HashMap<String, String>>,
 }
 
 /// One turn: of XENONET_RUNS_BIN's program when it names one (the tests'
@@ -128,6 +133,14 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     if let Decision::Refuse(why) = reach::decide(Action::Start, sender, "", &settings) {
         return Err(why);
     }
+    // Delegated work is for a machine set to take it: a session or actor
+    // asking for it elsewhere is told so, not started as a plain start.
+    if r.delegate && sender.kind != Kind::You && settings.start != Start::Delegate {
+        let me = net(w).me().map_or_else(|| "this machine".to_string(), |m| m.host);
+        return Err(format!(
+            "{me} isn't set to take delegated work: your user sets that once, in Machines under Start sessions, as Delegated (xenonet net set --on {me} --start delegate)"
+        ));
+    }
     if w.setup.demo {
         return Err("XenoNet's demo starts no sessions".into());
     }
@@ -166,7 +179,11 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     let runs = std::path::Path::new(&w.setup.state_dir).join("runs");
     // Grok Build reads its prompt from a file only its owner can read,
     // taken away when the run ends.
-    let text = starts::framed(by, from, &r.prompt);
+    // Under a standing delegation, a session or actor asking is told it was
+    // your user's delegation, set where and when, as this machine keeps it.
+    let delegation = (settings.start == Start::Delegate && sender.kind != Kind::You).then(|| reach.delegated.clone()).flatten();
+    let on = delegation.as_ref().map(|(_, at)| xenonet_base::time::iso(*at as f64).chars().take(10).collect::<String>());
+    let text = starts::framed(by, from, &r.prompt, delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()));
     let prompt_file = if r.app == "grok" {
         let f = runs.join(format!("{id}.prompt"));
         write_private(&f, &text).map_err(|e| format!("the prompt couldn't be written for Grok Build: {e}"))?;
@@ -194,6 +211,9 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
         }
     };
     w.starts.history.locked().push((now, bucket));
+    if let (Some(session), Some(_)) = (&session, &delegation) {
+        w.starts.delegations.locked().insert(session.clone(), cwd.clone());
+    }
     let folder = xenonet_base::paths::tilde(&cwd, &w.setup.home);
     w.log(
         "info",
@@ -253,6 +273,12 @@ pub fn sign_in(w: &World, action: &str, pasted: &str) -> Result<Value, (u16, Str
     }
     let kept = s.call("has", &[Arg::text(starts::SIGN_IN_TARGET)]).is_ok_and(|v| v.truthy());
     Ok(json!({ "signedIn": kept, "store": kind }))
+}
+
+/// The folder a session was started in under a standing delegation, if it
+/// was: what a delegation covers is judged against it.
+pub fn delegated_folder(w: &World, session: &str) -> Option<String> {
+    w.starts.delegations.locked().get(session).cloned()
 }
 
 /// The forks XenoNet made, newest last: each copy and the session it was

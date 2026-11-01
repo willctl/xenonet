@@ -51,13 +51,14 @@ export const inNetwork = (s) => !!s?.network;
 
 // Who may start sessions on a machine and wake them, in the console's
 // words (network/state/v1's start and wake, and each host's reach).
-export const STARTS = ["off", "you", "network"];
+export const STARTS = ["off", "you", "network", "delegate"];
 export const WAKES = ["consent", "network"];
-export const START_WORDS = { off: "Nobody", you: "You", network: "The network" };
+export const START_WORDS = { off: "Nobody", you: "You", network: "The network", delegate: "Delegated" };
 export const WAKE_WORDS = { consent: "Sessions you allowed", network: "The network" };
 
 // A host's reach as its row says, read leniently: null for a machine whose
-// XenoNet doesn't say (an older one), else { start, wake, pending }.
+// XenoNet doesn't say (an older one), else { start, wake, pending,
+// delegated }, delegated being who put it on delegation and when.
 export function reachOf(host) {
   const r = host?.reach;
   if (!r || typeof r !== "object") return null;
@@ -65,6 +66,7 @@ export function reachOf(host) {
     start: STARTS.includes(r.start) ? r.start : "you",
     wake: WAKES.includes(r.wake) ? r.wake : "consent",
     pending: list(r.pending).filter((w) => w && typeof w.id === "string" && (w.setting === "start" || w.setting === "wake")),
+    delegated: r.delegated && typeof r.delegated.by === "string" ? { by: r.delegated.by, at: Number.isFinite(r.delegated.at) ? r.delegated.at : null } : null,
   };
 }
 
@@ -73,7 +75,8 @@ export function reachOf(host) {
 export const hostCan = (host, what) => list(host?.can).includes(what);
 
 // A widening that waits on a machine, as a line.
-export const widenWords = (w, host) => `${w.by} asked to let the network ${w.setting} sessions on ${host}`;
+export const widenWords = (w, host) =>
+  w.value === "delegate" ? `${w.by} asked to put ${host} on your standing delegation` : `${w.by} asked to let the network ${w.setting} sessions on ${host}`;
 
 // A time as the console shows it: the clock today, the date before that.
 export function clock(ms, now = Date.now()) {
@@ -265,4 +268,12 @@ export function joinOf(data, now = Date.now()) {
 export function joinFields(address, ticket) {
   const m = /^\s*xenonet\s+net\s+join\s+(\S+)\s+(\S+)\s*$/.exec(address ?? "");
   return m ? { address: m[1], ticket: m[2] } : { address: String(address ?? "").trim(), ticket: String(ticket ?? "").trim() };
+}
+
+// What a standing delegation is, as the console says it where it's set:
+// who put the machine on it and when, what runs without a question, and
+// what is always one (delegation.rs; docs/guide/delegation.md).
+export function delegationWords(d, now = Date.now()) {
+  const who = d?.by ? `Delegated by ${d.by}${Number.isFinite(d.at) ? `, ${clock(d.at, now)}` : ""}.` : "Delegated.";
+  return `${who} Sessions and actors that ask this machine for work run without asking about reading, editing files under the folder they start in, routine commands and XenoNet's own update and doctor. Anything else, and always what deletes, handles secrets, reaches the network or spends money, comes to your console as a question.`;
 }

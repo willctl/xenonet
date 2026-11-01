@@ -185,6 +185,8 @@ async function askGatewayToken(ctx, actor) {
 
 const PERMISSION = "Only for the sessions XenoNet runs itself: Claude Code calls it, as its permission prompt tool, when its settings don't settle a tool call. XenoNet asks your user in its console, on every machine with a window, and answers allow or deny; with no answer in ten minutes, deny. Never call it yourself: any other session is refused.";
 
+const DELEGATE =
+  "Hands a task to another machine in your XenoNet network, to be worked on there without your user having to come to that machine. It works only on a machine your user set to take delegated work (in XenoNet's Machines, Start sessions: Delegated, set once from their own console); anywhere else it is refused, with how your user sets that. The new session's first prompt says it runs on your user's standing delegation, set where and when, which that machine checked: you can't claim it. XenoNet answers its permission prompts for reading, for editing files under its folder and for routine commands (listing, searching, read-only git, XenoNet's own update and doctor); anything else, and always what deletes, handles secrets, reaches the network or spends money, comes to your user's console as a question that only they answer. It answers at once. When the session stops you are told what it came to (finished, stopped to ask something, was denied a tool, failed or left nothing), with its last words, and the end wakes you if you are idle. XenoNet reports that; the new session needn't be told to.";
 const START_SESSION = "Starts a new Claude Code, Codex or Grok Build session, on this machine or on another one in your XenoNet network, in a folder there, with a first prompt. The machine decides by its start setting: by default only your user starts sessions, so a start you ask for is refused unless your user let the network start them there. It answers at once. Whether the session started, and what it came to when it stopped (finished, stopped to ask something, was denied a tool, failed or left nothing), come to you as messages that quote its last words, and the end wakes you if you are idle. XenoNet reports it; the new session needn't be told to. The new session's first prompt says you asked, and that the ask came from an agent, not from its user. Left without a mode, it runs under your user's own settings, and its permission prompts go to your user. A session never starts bypassing its permission checks.";
 
 const scopeArg = z.string().optional().describe("repo, the default, is this repo and its worktrees. machine is every session and actor at work. Or a selector of key:value terms, all of which must hold: project:<name>, identity:<account>, app:<claude|codex|opencode|…>, machine:<name>, status:<idle|working|live>, by:<actor slug>, such as \"project:xenonet status:idle\".");
@@ -413,6 +415,21 @@ function buildServer(actor = null) {
       annotations: write,
     },
     ({ machine, folder, app, prompt, mode }, ctx) => callRoute("/api/start", ctx, { machine, folder, app, prompt, mode }),
+  );
+  server.registerTool(
+    "delegate",
+    {
+      title: "Delegate a task to another machine",
+      description: DELEGATE,
+      inputSchema: z.object({
+        machine: z.string().describe("The machine in your XenoNet network to do it, by its id."),
+        task: z.string().describe("What to do there: the new session's first prompt. Say what done looks like, and what to report back."),
+        folder: z.string().optional().describe("A project or folder on that machine's map, by its id (project:…) or path, or ~, the default. What it may edit without a question is under this folder."),
+        app: z.enum(["claude", "codex", "grok"]).optional().describe("claude (Claude Code, the default), codex or grok (Grok Build)."),
+      }),
+      annotations: write,
+    },
+    ({ machine, task, folder, app }, ctx) => callRoute("/api/start", ctx, { machine, folder, app, prompt: task, delegate: true }),
   );
   server.registerTool(
     "doctor",

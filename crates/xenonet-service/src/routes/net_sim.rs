@@ -888,9 +888,10 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
 
 /// Who may start and wake sessions, set in the simulated state: this
 /// machine's at once; another's (`host`) as that machine would take it
-/// (xenonet_net::operator): narrowing at once, widening to network at once
-/// from the founder, else waiting for a second window host, which the
-/// made-up laptop is when this machine is studio.
+/// (xenonet_net::operator): narrowing at once, widening to network (or, for
+/// a start, to delegate) at once from the founder, else waiting for a
+/// second window host, which the made-up laptop is when this machine is
+/// studio.
 fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'static str, String)> {
     let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     let me = state["self"]["id"].as_str().unwrap_or("").to_string();
@@ -905,8 +906,15 @@ fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'st
         for k in ["start", "wake"] {
             if let Some(v) = text(k) {
                 state[k] = json!(v);
+                if k == "start" {
+                    let at = now as i64;
+                    state["delegated"] = if v == "delegate" { json!({ "by": me, "at": at }) } else { Value::Null };
+                }
                 if let Some(row) = state["hosts"].as_array_mut().and_then(|l| l.iter_mut().find(|h| h["id"] == me.as_str())) {
                     row["reach"][k] = json!(v);
+                    if k == "start" {
+                        note_delegated(&mut row["reach"], &v, &me, now);
+                    }
                 }
             }
         }
@@ -927,7 +935,11 @@ fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'st
         let pending = row["reach"]["pending"].as_array().cloned().unwrap_or_default();
         if let Some(w) = pending.iter().find(|w| w["id"] == id.as_str()) {
             let setting = w["setting"].as_str().unwrap_or("start").to_string();
-            row["reach"][setting.as_str()] = json!("network");
+            let value = w["value"].as_str().unwrap_or("network").to_string();
+            row["reach"][setting.as_str()] = json!(value);
+            if setting == "start" {
+                note_delegated(&mut row["reach"], &value, &me, now);
+            }
             row["reach"]["pending"] = json!(pending.into_iter().filter(|w| w["id"] != id.as_str()).collect::<Vec<_>>());
         }
         return Ok(());
@@ -935,14 +947,34 @@ fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'st
     for k in ["start", "wake"] {
         let Some(v) = text(k) else { continue };
         let mut pending: Vec<Value> = row["reach"]["pending"].as_array().cloned().unwrap_or_default().into_iter().filter(|w| w["setting"] != k).collect();
-        if v != "network" || founder {
+        let rank = |v: &str| match (k, v) {
+            (_, "network") => 2,
+            ("start", "delegate") => 3,
+            ("start", "you") => 1,
+            _ => 0,
+        };
+        let had = row["reach"][k].as_str().unwrap_or("").to_string();
+        if rank(&v) < 2 || rank(&v) <= rank(&had) || founder {
             row["reach"][k] = json!(v);
-        } else if row["reach"][k] != "network" {
-            pending.push(json!({ "id": format!("wid_{k}_{}", now as i64), "setting": k, "value": "network", "by": me, "at": now as i64 }));
+            if k == "start" {
+                note_delegated(&mut row["reach"], &v, &me, now);
+            }
+        } else {
+            pending.push(json!({ "id": format!("wid_{k}_{}", now as i64), "setting": k, "value": v, "by": me, "at": now as i64 }));
         }
         row["reach"]["pending"] = json!(pending);
     }
     Ok(())
+}
+
+/// A simulated machine's reach once its start is `start`: who put it on
+/// delegate and when, while it is; nothing once it isn't.
+fn note_delegated(reach: &mut Value, start: &str, by: &str, now: f64) {
+    if start == "delegate" {
+        reach["delegated"] = json!({ "by": by, "at": now as i64 });
+    } else if let Some(o) = reach.as_object_mut() {
+        o.remove("delegated");
+    }
 }
 
 // You, writing to a simulated host's agent from the window: checked as

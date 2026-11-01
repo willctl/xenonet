@@ -11,10 +11,11 @@ export const PROMPT_MAX = C.promptMax;
 export const PER_HOUR = C.perHour;
 export const PER_HOST_HOUR = C.perHostHour;
 export const FRESH_MS = C.freshMs;
+export const DELEGATED_RULES = C.delegatedRules;
 
 export const request = (v = {}) => native.startsRequest(v ?? {});
 
-export const framed = (by, from, prompt) => native.startsFramed(by ?? {}, from ?? null, String(prompt ?? ""));
+export const framed = (by, from, prompt, delegation = null) => native.startsFramed(by ?? {}, from ?? null, String(prompt ?? ""), delegation?.by ?? null, delegation?.on ?? null);
 
 export const command = (r, id, cwd, { settings = null, server = "xenonet", promptFile = null } = {}) => native.startsCommand(r, String(id), String(cwd), settings, String(server), promptFile);
 

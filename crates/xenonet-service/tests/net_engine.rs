@@ -1330,3 +1330,117 @@ fn http_post(port: u16, host: &str, bearer: &str, body: &str) -> (u16, Value) {
     let body = out.split_once("\r\n\r\n").map_or("", |(_, b)| b);
     (status, serde_json::from_str(body).unwrap_or(Value::Null))
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
+    const ASKER: &str = "claude:0190d3e0-0000-7000-8000-00000000b001";
+    let root = std::env::temp_dir().join(format!("xenonet-net-delegate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    for h in ["studio", "laptop", "desk"] {
+        std::fs::create_dir_all(root.join(h).join("home").join("work")).unwrap();
+    }
+    let at = |h: &str| root.join(h).join("home").join("work").to_string_lossy().into_owned();
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![sess(ASKER, "Fix the login form", &at("laptop"))], vec![]]).await;
+    until("desk takes starts, as studio sees it", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
+
+    // The founder puts desk on delegate, from studio's console; desk keeps
+    // who and when, and says so in its presence.
+    let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "delegate" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("desk is on delegate", 10, || async { c.state().await["start"] == "delegate" }).await;
+    let kept = |h: &Host| -> Value { serde_json::from_str(&std::fs::read_to_string(h.dir.join("state").join("network").join("network.json")).unwrap()).unwrap() };
+    assert_eq!((kept(&c)["start"].clone(), kept(&c)["delegated"]["by"].clone()), (json!("delegate"), json!("studio")), "{}", kept(&c));
+    until("studio sees who delegated desk", 10, || async { row_of(&a.state().await, "desk")["reach"]["delegated"]["by"] == "studio" }).await;
+
+    // A session on laptop asks desk to do something: its first prompt says
+    // whose delegation it runs on, which desk checked.
+    let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: update XenoNet", "delegate": true })).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
+    let (args, prompt) = ran(&c, 1).await;
+    let day = xenonet_base::time::iso(now_ms()).chars().take(10).collect::<String>();
+    assert_eq!(
+        prompt,
+        format!(
+            "[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). Your user delegated it: they put this machine on standing delegation at studio's console on {day}, which XenoNet here checked; the asker can't claim it.\n\n{}\n\nhold-on: update XenoNet",
+            xenonet_engine::delivery::starts::DELEGATED_RULES
+        )
+    );
+    let run = format!("claude:{}", args[2]);
+
+    // Its permission prompts: what the delegation covers is allowed at once
+    // and never shows on a console; the rest is held for you, saying why.
+    let ask = |input: Value, tool: &'static str| {
+        let ctx = c.ctx.clone();
+        let run = run.clone();
+        tokio::spawn(async move {
+            let req = Req::fake(
+                "POST",
+                "/api/runs/permission",
+                &[("x-xenonet-agent", run.as_str())],
+                Some(&json!({ "tool_name": tool, "input": input, "tool_use_id": "toolu_1" }).to_string()),
+            );
+            let r = api(&ctx, req).await.unwrap();
+            (r.status, r.body_json())
+        })
+    };
+    let covered = |input: Value| json!({ "behavior": "allow", "updatedInput": input });
+    let home = root.join("desk").join("home").to_string_lossy().into_owned();
+    for (tool, input) in [
+        ("Bash", json!({ "command": "xenonet --version" })),
+        ("Bash", json!({ "command": "xenonet update tools; xenonet update service" })),
+        ("Write", json!({ "file_path": format!("{home}/notes.md"), "content": "x" })),
+        ("Read", json!({ "file_path": format!("{home}/work/a.txt") })),
+        ("mcp__xenonet__send", json!({ "to": "x", "text": "done" })),
+    ] {
+        let (s, answer) = tokio::time::timeout(Duration::from_secs(3), ask(input.clone(), tool)).await.unwrap_or_else(|_| panic!("{tool} {input} was held, not allowed")).unwrap();
+        assert_eq!((s, answer), (200, covered(input.clone())), "{tool} {input}");
+    }
+    let shown = |h: &Host| {
+        let h = h.ctx.clone();
+        async move {
+            let req = Req::fake("GET", "/api/runs/asks", &[("x-xenonet-window", h.window_key.reveal())], None);
+            api(&h, req).await.unwrap().body_json()["asks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+    assert!(shown(&a).await.is_empty() && shown(&b).await.is_empty(), "what the delegation covers asks nobody");
+    let held = ask(json!({ "command": "rm -rf build" }), "Bash");
+    let waiting = until_value("the ask at laptop", 10, || async { shown(&b).await.into_iter().find(|x| x["host"] == "desk") }).await;
+    assert_eq!(waiting["input"], "[outside what you delegated: it has rm in it] rm -rf build", "{waiting}");
+    let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "deny" })).await;
+    assert_eq!((s, v["host"].clone()), (200, json!("desk")), "{v}");
+    let (s, answer) = tokio::time::timeout(Duration::from_secs(10), held).await.unwrap().unwrap();
+    assert_eq!((s, answer["behavior"].clone()), (200, json!("deny")), "{answer}");
+    // A file outside the folder it started in is a question too.
+    let outside = ask(json!({ "file_path": format!("{}/other.md", root.join("desk").to_string_lossy()), "content": "x" }), "Write");
+    let waiting = until_value("the outside write at laptop", 10, || async { shown(&b).await.into_iter().find(|x| x["tool"] == "Write") }).await;
+    assert!(waiting["input"].as_str().unwrap().starts_with("[outside what you delegated: it changes a file outside "), "{waiting}");
+    b.window("POST", "/api/runs/answer", json!({ "ask": waiting["id"], "decision": "deny" })).await;
+    let _ = tokio::time::timeout(Duration::from_secs(10), outside).await.unwrap();
+
+    // Stepping back to the network takes the delegation away: the next
+    // start is told it came from an agent.
+    b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
+    until("desk is back on network", 10, || async { c.state().await["start"] == "network" }).await;
+    assert_eq!(kept(&c)["delegated"], Value::Null, "{}", kept(&c));
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: once more" })).await;
+    let (_, prompt) = ran(&c, 2).await;
+    assert!(prompt.contains("It came from an agent, not from your user.") && !prompt.contains("Your user delegated it"), "{prompt}");
+    // Delegated work asked of a machine that isn't on delegate isn't started
+    // as a plain start: the asker is told how it's set.
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: delegated, but not set", "delegate": true })).await;
+    let engine = b.ctx.cores.engine.clone();
+    let told = until_value("laptop's session hears desk won't take delegated work", 15, || async {
+        texts(&engine.inbox(ASKER, Duration::ZERO).await.unwrap()).into_iter().find(|t| t.contains("isn't set to take delegated work")).map(Value::String)
+    })
+    .await;
+    assert_eq!(
+        told,
+        "[XenoNet] No session was started on desk: desk isn't set to take delegated work: your user sets that once, in Machines under Start sessions, as Delegated (xenonet net set --on desk --start delegate)."
+    );
+    assert_eq!(fake_runs(&c).len(), 2, "nothing started");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}

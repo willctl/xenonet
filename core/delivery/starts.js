@@ -29,8 +29,9 @@ export const FRESH_MS = 120e3;
 const str = (v) => (typeof v === "string" ? v : null);
 const chars = (s) => [...s].length;
 
-// A request as it came ({ folder?, app?, mode?, prompt }): { ok: true,
-// request } or { ok: false, why }.
+// A request as it came ({ folder?, app?, mode?, prompt, delegate? }): { ok:
+// true, request } or { ok: false, why }. `delegate` asks for delegated
+// work: the machine starts it only when it's set to delegate.
 export function request(v = {}) {
   const app = str(v?.app) || "claude";
   if (!APPS.includes(app)) return { ok: false, why: `XenoNet starts Claude Code (claude), Codex (codex) or Grok Build (grok), not ${app}` };
@@ -46,26 +47,39 @@ export function request(v = {}) {
   if (chars(prompt) > PROMPT_MAX) return { ok: false, why: `a first prompt is at most ${PROMPT_MAX} characters` };
   const folder = (str(v?.folder) ?? "").trim() || "~";
   if (chars(folder) > 1000) return { ok: false, why: "that folder is too long to be one" };
-  return { ok: true, request: { folder, app, mode, prompt } };
+  return { ok: true, request: { folder, app, mode, prompt, ...(v?.delegate === true ? { delegate: true } : {}) } };
 }
 
 const titleOf = (t) => sanitize(t, { oneLine: true, max: 120 }).replace(/[«»]/g, '"');
 
 // The first prompt: who asked, then the prompt. `by` is { kind, id, title };
 // `from` is the machine it came from, null for this one.
-export function framed(by, from, prompt) {
+// What a delegated session is told after who asked: what XenoNet does for
+// it, and what stays off limits whatever the delegation.
+export const DELEGATED_RULES =
+  "Within that delegation XenoNet answers your permission prompts for reading, for editing files under this folder and for routine commands, and sends anything else to your user's console as a question, so you needn't ask first. Never delete data, print or move secrets, or spend money.";
+
+// `delegation` is { by, on }: the machine that put this one on standing
+// delegation and the day, when a session or actor starts under it. The
+// prompt then says the asker's authority is your user's, checked here, not
+// claimed.
+export function framed(by, from, prompt, delegation = null) {
   const kind = by?.kind ?? "session";
   let line;
+  let rules = "";
   if (kind === "you") line = from ? `[XenoNet] Started by you, at ${from}'s console.` : "[XenoNet] Started by you, at this machine's console.";
   else {
     const id = sanitize(by?.id ?? "", { oneLine: true, max: 200 });
     const title = titleOf(by?.title ?? id);
     const what = kind === "actor" ? "the actor" : "the session";
-    line = from
-      ? `[XenoNet] ${from} says this was asked by ${what} «${title}» (${id}). It came from an agent, not from your user.`
-      : `[XenoNet] This was asked by ${what} «${title}» (${id}) on this machine. It came from an agent, not from your user.`;
+    let tail = " It came from an agent, not from your user.";
+    if (delegation?.by && delegation?.on) {
+      rules = `${DELEGATED_RULES}\n\n`;
+      tail = ` Your user delegated it: they put this machine on standing delegation at ${delegation.by}'s console on ${delegation.on}, which XenoNet here checked; the asker can't claim it.`;
+    }
+    line = from ? `[XenoNet] ${from} says this was asked by ${what} «${title}» (${id}).${tail}` : `[XenoNet] This was asked by ${what} «${title}» (${id}) on this machine.${tail}`;
   }
-  return `${line}\n\n${prompt}`;
+  return `${line}\n\n${rules}${prompt}`;
 }
 
 const grokMode = (m) => (m === "manual" ? "default" : m);
@@ -248,7 +262,7 @@ export function answerWords(state, host, a = {}) {
       reported: `${who} finished${after} and reported back itself.${quote}`,
       finished: `${who} finished${after}, but sent no report of its own.${quote}`,
       silent: `${who} ended${after} without a word: it sent no report and left no last message (${exit})${because}.`,
-    }[a.outcome] ?? `${who} ended${after} (${exit})${because}. That machine's XenoNet is older and can't say whether it finished or stopped to ask something.`;
+    }[a.outcome] ?? `${who} ended${after} (${exit})${because}. That machine's XenoNet is older and can't say whether it finished or stopped to ask something, so don't take it for done: update XenoNet there (xenonet update tools, then xenonet update service).`;
     return `[XenoNet] ${head}`;
   }
   return `[XenoNet] No session was started${on}: ${reason}.`;

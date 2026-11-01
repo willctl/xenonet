@@ -33,6 +33,7 @@ pub const TARGET: &str = "xenonet:ask";
 pub const HOLD_MS: f64 = 10.0 * 60e3;
 /// Asks from other machines kept at most.
 const THERE_MAX: usize = 50;
+use xenonet_engine::delivery::delegation::{self, Verdict};
 pub use xenonet_engine::delivery::starts::ENV_WARNING;
 
 /// One ask, as Needs you shows it.
@@ -232,6 +233,20 @@ pub fn ask(w: &World, me: &str, title: Option<&str>, body: &Value) -> Result<Val
     };
     let input = body.get("input").cloned().unwrap_or_else(|| json!({}));
     let tool = body.get("tool_name").and_then(Value::as_str).unwrap_or("a tool").to_string();
+    // A session started under this machine's standing delegation: what the
+    // delegation covers is allowed here and now; the rest comes to you,
+    // with why it wasn't covered.
+    let mut outside = None;
+    if let Some(folder) = crate::starts::delegated_folder(w, me) {
+        match delegation::judge(&tool, &input, &folder, &w.setup.home, cfg!(windows)) {
+            Verdict::Allow if !reads_env(&input) => {
+                w.log("info", "ask", &format!("{me}'s {tool} ({}) is allowed by this machine's standing delegation", input_words(&input, &w.setup.home)));
+                return Ok(answer_json("allow", &input, ""));
+            }
+            Verdict::Allow => outside = Some("it may read the run's environment".to_string()),
+            Verdict::Ask(why) => outside = Some(why),
+        }
+    }
     let here = net(w).me().map(|m| m.host);
     let label = here.clone().unwrap_or_else(|| "This machine".into());
     let session_title = title.map_or_else(|| me.to_string(), |t| xenonet_engine::delivery::policy::sanitize(t, true, 120.0));
@@ -244,7 +259,10 @@ pub fn ask(w: &World, me: &str, title: Option<&str>, body: &Value) -> Result<Val
         run,
         title: clip(&format!("{label} · {session_title}"), 200),
         tool: clip(&xenonet_engine::delivery::policy::sanitize(&tool, true, 80.0), 80),
-        input: input_words(&input, &w.setup.home),
+        input: match &outside {
+            Some(why) => clip(&format!("[outside what you delegated: {why}] {}", input_words(&input, &w.setup.home)), 300),
+            None => input_words(&input, &w.setup.home),
+        },
         warn: reads_env(&input),
         at: now,
         until: now + hold,

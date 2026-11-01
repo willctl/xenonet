@@ -21,18 +21,25 @@ const KeyId = z.string().regex(KEY_ID).describe("What people compare: xnk1_ and 
 const B64 = z.string().regex(B64URL).describe("base64url, no padding");
 const Mid = z.string().regex(/^msg_[0-9a-f-]{36}$/).describe("The message's id across the network (its envelope's mid)");
 const Strength = z.enum(["strong", "weak"]).describe("strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked");
-export const STARTS = ["off", "you", "network"];
+export const STARTS = ["off", "you", "network", "delegate"];
 export const WAKES = ["consent", "network"];
 // Who may start and wake sessions on a host (docs/guide/network.md), and
 // the widenings to network another window host asked for, which wait for
 // the founder or a second window host.
 const Reach = obj({
-  start: z.enum(STARTS).describe("Who may start sessions there: nobody, you (from a window host's console), or the network (you, and the sessions and actors on window hosts)"),
+  start: z
+    .enum(STARTS)
+    .describe(
+      "Who may start sessions there: nobody, you (from a window host's console), the network (you, and the sessions and actors on window hosts), or delegate (the network, and what a session or actor starts there runs on your standing delegation, within its limits)",
+    ),
   wake: z.enum(WAKES).describe("Who may wake its sessions for a message: your consent per session, or any sender in the network, within the budgets"),
   pending: z
-    .array(obj({ id: z.string().min(1).max(64), setting: z.enum(["start", "wake"]), value: z.literal("network"), by: HostId.describe("The window host that asked"), at: ms }))
+    .array(obj({ id: z.string().min(1).max(64), setting: z.enum(["start", "wake"]), value: z.enum(["network", "delegate"]), by: HostId.describe("The window host that asked"), at: ms }))
     .max(4)
-    .describe("Widenings to network another window host asked for, waiting ten minutes at most for the founder or a second window host to approve"),
+    .describe("Widenings to network (or, for a start, to delegate) another window host asked for, waiting ten minutes at most for the founder or a second window host to approve"),
+  delegated: obj({ by: HostId.describe("The window host whose action put it on delegation: itself, for the person at its own keyboard"), at: ms })
+    .optional()
+    .describe("While start is delegate: who put the machine on it, and when"),
 });
 const Can = z.array(z.string().max(32)).max(16).describe("What the host's XenoNet takes beyond messages: start (a start request) and answer (an answer to a run's permission prompt). An older XenoNet says nothing");
 
@@ -335,6 +342,7 @@ export const NetworkState = define(
     titlesOnly: z.boolean(),
     shareLoad: z.boolean().optional().describe("Whether this machine sends its load (CPU, GPU, memory and what the parts are) to the window hosts' consoles that watch its map; on unless turned off"),
     start: z.enum(STARTS).optional().describe("Who may start sessions on this machine; you unless widened"),
+    delegated: obj({ by: HostId, at: ms }).nullable().optional().describe("While start is delegate: the window host whose action put this machine on it, and when"),
     wake: z.enum(WAKES).optional().describe("Who may wake this machine's sessions for a message; consent unless widened"),
     queues: z.array(obj({ host: HostId, frames: count, bytes: count })).optional().describe("On the gateway's host: what waits at the gateway for each host"),
     epoch: B64.optional().describe("On the gateway's host: its queues' epoch, which hosts resume within"),

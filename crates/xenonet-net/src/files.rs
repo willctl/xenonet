@@ -51,7 +51,18 @@ pub struct NetFile {
     /// unless the person widens them.
     pub start: String,
     pub wake: String,
+    /// While `start` is delegate: the window host whose action set it
+    /// (this machine, for the person at its own keyboard) and when, which
+    /// a delegated session is told. None otherwise.
+    pub delegated: Option<Delegated>,
     pub joined: i64,
+}
+
+/// Who put this machine on delegate, and when (ms).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Delegated {
+    pub by: String,
+    pub at: i64,
 }
 
 impl NetFile {
@@ -73,6 +84,7 @@ impl NetFile {
             "shareLoad": self.share_load,
             "start": self.start,
             "wake": self.wake,
+            "delegated": self.delegated.as_ref().map(|d| json!({ "by": d.by, "at": d.at })),
             "joined": self.joined,
         })
     }
@@ -98,6 +110,7 @@ impl NetFile {
             share_load: v.get("shareLoad").and_then(Value::as_bool).unwrap_or(true),
             start: v.get("start").and_then(Value::as_str).filter(|s| xenonet_base::network::STARTS.contains(s)).unwrap_or("you").to_string(),
             wake: v.get("wake").and_then(Value::as_str).filter(|s| xenonet_base::network::WAKES.contains(s)).unwrap_or("consent").to_string(),
+            delegated: v.get("delegated").and_then(|d| Some(Delegated { by: d.get("by")?.as_str()?.to_string(), at: d.get("at")?.as_i64()? })),
             joined: v.get("joined").and_then(Value::as_i64).unwrap_or(0),
         })
     }

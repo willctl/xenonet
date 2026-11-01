@@ -90,6 +90,7 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
             share_load: true,
             start: "you".into(),
             wake: "consent".into(),
+            delegated: None,
             joined: T0,
         })
         .unwrap();

@@ -229,6 +229,15 @@ also publish a local service to the network, such as Xenolith's sync, and
 programs on the other machines reach it through their own XenoNet.
 [A network across your machines](docs/guide/network.md) shows how.
 
+You can tell an assistant "do this on the other machine" and have it done
+there. Set a machine to take delegated work once, from your own console, and
+an assistant's `delegate` hands it a task. The task runs under your standing
+delegation: reading, editing files under its folder and routine commands run
+without a question, and anything that deletes, handles secrets, reaches the
+network or spends money comes to you in Needs you, on any of your consoles.
+The assistant is told how it ended and woken for it.
+[Delegating work to another machine](docs/guide/delegation.md) has the details.
+
 ### Shows other machines over SSH, as a prototype
 
 Start XenoNet with `XENONET_HOSTS=1` and it can show other machines' XenoNets

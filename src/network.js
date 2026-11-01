@@ -30,7 +30,7 @@ import { escapeHtml as h } from "./format.js";
 import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
-import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords } from "./network-model.js";
+import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 // What a session starts as, in the Start a session box.
@@ -190,7 +190,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const controls = window
       ? `${settingHtml("start", r.start, x.id)}${settingHtml("wake", r.wake, x.id)}`
       : `<div class="ac-via">Starts: ${h(START_WORDS[r.start])} · wakes: ${h(WAKE_WORDS[r.wake])}</div>`;
-    return `<div class="net-reach" data-net-reach="${h(x.id)}">${controls}${pending}</div>`;
+    const delegation = r.start === "delegate" ? `<div class="ac-via" data-net-delegation="${h(x.id)}">${h(delegationWords(r.delegated))}</div>` : "";
+    return `<div class="net-reach" data-net-reach="${h(x.id)}">${controls}${delegation}${pending}</div>`;
   }
 
   function hostHtml(x, confirm) {
@@ -247,7 +248,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       <p class="pj-note">On, the window hosts' consoles see this machine's CPU, GPU and memory, and what its parts are, in their Machines panel while they watch it.</p>
       ${settingHtml("start", state.start)}
       ${settingHtml("wake", state.wake)}
-      <p class="pj-note">Who may start a session on this machine: nobody, you from a window host's console, or the network, which adds the sessions and actors on window hosts. Who may wake a session here to take a message at once: the sessions you allowed with <code>xenonet live allow</code>, or anyone in the network, within the wake budget. A window host can narrow these from its console; widening to the network from another machine takes the founder or a second window host.</p>
+      ${state.start === "delegate" ? `<p class="pj-note" data-net-delegation="${h(state.self?.id ?? "")}">${h(delegationWords(state.delegated ? { by: state.delegated.by, at: state.delegated.at } : null))}</p>` : ""}
+      <p class="pj-note">Who may start a session on this machine: nobody, you from a window host's console, the network, which adds the sessions and actors on window hosts, or delegated: the network, and what its sessions and actors start here runs on your standing delegation, within the limits above. Who may wake a session here to take a message at once: the sessions you allowed with <code>xenonet live allow</code>, or anyone in the network, within the wake budget. A window host can narrow these from its console; widening to the network from another machine takes the founder or a second window host.</p>
       ${selfWidens()}
       ${errorHtml(view.error)}
       <div class="m-foot"><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
@@ -572,7 +574,9 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       sfx("toggle");
       const what = setting === "start" ? "start sessions" : "wake sessions";
       if (!host) toast(`Who may ${what} here: ${words.toLowerCase()}.`);
-      else if (value === "network" && !state.self?.founder) toast(`Sent to ${host}. Letting the network ${what} there waits for the founder or another window host.`);
+      else if ((value === "network" || value === "delegate") && !state.self?.founder) {
+        toast(value === "delegate" ? `Sent to ${host}. Putting it on your standing delegation waits for the founder or another window host.` : `Sent to ${host}. Letting the network ${what} there waits for the founder or another window host.`);
+      }
       else toast(`Sent to ${host}: who may ${what} there, ${words.toLowerCase()}.`);
       await refresh();
       return { ok: true };

@@ -302,7 +302,7 @@ mod tests {
     }
 
     // The --flags a command's help file shows with a value after them
-    // (--on <id>, --start off|you|network), by command.
+    // (--on <id>, --start off|you|network|delegate), by command.
     fn flags_with_values_in_help() -> Vec<(String, String)> {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/help");
         let mut found = Vec::new();

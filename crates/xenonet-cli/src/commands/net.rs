@@ -62,6 +62,14 @@ fn show_status(st: &Value) {
         print(format!("  {}  {} waiting for {}", c::dim("queue   "), num(q, "frames"), t(q, "host")));
     }
     print(format!("  {}  start: {}, wake: {}", c::dim("sessions"), t(st, "start"), t(st, "wake")));
+    if let Some(d) = st.get("delegated").filter(|d| d.is_object()) {
+        print(format!(
+            "  {}  delegated by {} on {}: what its sessions and actors start here runs on your standing delegation",
+            c::dim("        "),
+            t(d, "by"),
+            xenonet_base::time::iso(num(d, "at")).chars().take(10).collect::<String>()
+        ));
+    }
     for p in list(st, "proposals") {
         print(c::yellow(format!("  ! {} waits for approval: xenonet net approve {}", proposal_words(p), t(p, "host"))));
     }
@@ -257,7 +265,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             if body.is_empty() {
                 return Err(Fail::new(
-                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network>, --wake <consent|network>, --lan <ip:port> or --no-lan",
+                    "say what to set: --titles-only, --no-titles-only, --share-load, --no-share-load, --start <off|you|network|delegate>, --wake <consent|network>, --lan <ip:port> or --no-lan",
                     2,
                 ));
             }
@@ -272,7 +280,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let st = call(&s, "PUT", "/api/net/settings", Some(&Value::Object(body)))?;
             if let Some(host) = on {
                 if !flags.on("json") {
-                    print(format!("{} sent to {host}, which checks it: a change to network waits for the founder or another window host", c::green("✓")));
+                    print(format!("{} sent to {host}, which checks it: a change to network or delegate waits for the founder or another window host", c::green("✓")));
                     return Ok(0);
                 }
             }
