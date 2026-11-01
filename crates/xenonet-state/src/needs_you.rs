@@ -104,7 +104,14 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         if truthy(s.get("stale")) {
             m.insert("stale".into(), Value::Bool(true));
         }
-        m.insert("actions".into(), strings(if local { &["show", "open", "dismiss"] } else { &["show"] }));
+        // A question can be answered from here, by you alone: the window with
+        // the key gets Reply, which sends the answer as yours, at this
+        // console, to the session on any machine.
+        let mut actions: Vec<&str> = if local { vec!["show", "open", "dismiss"] } else { vec!["show"] };
+        if can_decide && kind == "question" {
+            actions.push("reply");
+        }
+        m.insert("actions".into(), strings(&actions));
         out.push(Value::Object(m));
     }
     for a in items(get("actors")) {

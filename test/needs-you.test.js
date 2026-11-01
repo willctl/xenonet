@@ -24,7 +24,8 @@ test("the queue: everything that waits on you, the longest wait first, with what
     [["gateway", "Muse"], ["permission", "Session 2"], ["actor", "Wren"], ["question", "Session 1"], ["request", "Heron"]],
     "oldest first; a session ready for review, an actor that doesn't wait and you stay out",
   );
-  assert.deepEqual(q.find((it) => it.kind === "question").actions, ["show", "open", "dismiss"]);
+  assert.deepEqual(q.find((it) => it.kind === "question").actions, ["show", "open", "dismiss", "reply"], "the window with the key can answer a question as you");
+  assert.deepEqual(q.find((it) => it.kind === "permission").actions, ["show", "open", "dismiss"], "a permission is answered in its own app");
   assert.deepEqual(q.find((it) => it.kind === "actor").actions, ["show", "message"]);
   assert.deepEqual(q.find((it) => it.kind === "request").actions, ["allow", "deny"]);
   assert.equal(q.find((it) => it.kind === "request").expiresAt, T + 604000, "a request says when it lapses");
@@ -51,6 +52,9 @@ test("another machine's waits: shown, never opened or dismissed from here, and a
   assert.deepEqual(q.map((it) => [it.title, it.host ?? null]), [["Session 3", "studio"], ["Session 1", null], ["Session 2", "studio"]]);
   assert.deepEqual(q[0].actions, ["show"]);
   assert.equal(countOf(q), 2);
+  // With the key, another machine's question can be answered from here.
+  const keyed = needsYouQueue({ sessions: [session(1, "question", T, { host: "studio" })], canDecide: true });
+  assert.deepEqual(keyed[0].actions, ["show", "reply"]);
 });
 
 test("ties keep their places, and odd input is left out rather than thrown on", () => {

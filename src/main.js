@@ -543,6 +543,23 @@ const needsYou = createNeedsYou({
   // A sign-in hint goes when you dismiss it; a session's wait as the strip's ✓.
   ack: (ids, it) => (it?.kind === "sign-in" ? void signIns.delete(it.id) : ack(ids)),
   message: (id) => messageTo(id),
+  // Go ahead and No: XenoNet sends them as you, at this console, to the
+  // session (here or on another machine), which is told it was the owner.
+  reply: async (it, which) => {
+    if (which === "text") return (messageTo(it.id), { ok: true });
+    const words = which === "go" ? "Go ahead." : "No, don't go ahead.";
+    const r = await windowCalls.call("POST", "/api/actors/you/message", { to: it.id, text: words });
+    lastMessage = { to: it.id, ok: r.ok, status: r.status, error: r.ok ? null : (r.error ?? "It didn't go"), state: r.data?.state ?? null, at: Date.now() };
+    if (!r.ok) {
+      sfx("error");
+      hud.toast(r.error ?? "It didn't go", true);
+      return { ok: false, error: r.error };
+    }
+    sfx("success");
+    // The wait goes when the session takes it up and moves on.
+    hud.toast(`Told the session: ${words}`);
+    return { ok: true };
+  },
   decide: (id, decision, it) => (it?.kind === "ask" ? answerAsk(id, decision) : decideRequest(id, decision)),
   // A run's ask is armed by its row's own wait; a registration's as its card's.
   armed: (id) => String(id).startsWith("ask_") || actorRequests.armed(id),
