@@ -1055,7 +1055,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     // What the session has been told so far: its inbox, which hands each
     // message over once, kept, and the copies woken to take an end at
     // once, since a message delivered that way isn't left in the inbox.
-    let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let told = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let inbox = |h: &Host, me: &'static str| {
         let engine = h.ctx.cores.engine.clone();
         let told = told.clone();
