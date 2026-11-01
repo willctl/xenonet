@@ -70,7 +70,10 @@ export function needsYouQueue({ sessions = [], actors = [], requests = [], gatew
       since: num(s.since),
       ...(s.host ? { host: s.host } : {}),
       ...(s.stale ? { stale: true } : {}),
-      actions: local ? ["show", "open", "dismiss"] : ["show"],
+      // A question can be answered from here, by you alone: the window with
+      // the key (canDecide) gets Reply, which sends the answer as yours, at
+      // this console, to the session on any machine.
+      actions: [...(local ? ["show", "open", "dismiss"] : ["show"]), ...(canDecide && s.kind === "question" ? ["reply"] : [])],
     });
   }
   for (const a of actors ?? []) {

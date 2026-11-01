@@ -105,7 +105,7 @@ test("a question, an actor and programs asking to join wait in one queue, the lo
   assert.deepEqual([wren.kind, wren.title, wren.waitsWords, wren.actions], ["actor", "Wren", "asks", ["show", "message"]]);
   assert.match(wren.text, /refunds fix/);
   const question = q.items.find((it) => it.key === `session:${asked.a}`);
-  assert.deepEqual([question.kind, question.actions], ["question", ["show", "open", "dismiss"]]);
+  assert.deepEqual([question.kind, question.actions], ["question", ["show", "open", "dismiss", "reply"]]);
   assert.deepEqual(q.items.find((it) => it.key === `request:${heron.request}`).actions, ["allow", "deny"]);
   assert.equal(q.open, false);
   assert.equal((await s.driver("state")).counts.needsYou, q.count);
@@ -124,7 +124,8 @@ test("a question, an actor and programs asking to join wait in one queue, the lo
   assert.deepEqual([heronRow.buttons, heronRow.yours], [["Deny", "Allow"], ["Allow"]], "Allow is yours alone");
   assert.ok(heronRow.text.includes("Heron") && heronRow.text.includes("asks to join XenoNet") && heronRow.text.includes("run commands"), heronRow.text);
   assert.deepEqual(shown.find((r) => r.key === "actor:actor:wren").buttons, ["Show", "Message"]);
-  assert.deepEqual(shown.find((r) => r.key === `session:${asked.a}`).buttons, ["Show", "Open", "✓"]);
+  const questionRow = shown.find((r) => r.key === `session:${asked.a}`);
+  assert.deepEqual([questionRow.buttons, questionRow.yours], [["Show", "Go ahead", "No", "Answer…", "Open", "✓"], ["Go ahead", "No", "Answer…"]], "a question is answered here by you alone");
   // Allow is ready a moment after its row shows.
   assert.ok(await until(async () => (await queue()).items.find((it) => it.key === `request:${heron.request}`)?.armed), "Allow arms");
   await s.screenshot({ name: "e2e-needs-you-panel", inline: false });
@@ -138,6 +139,20 @@ test("a question, an actor and programs asking to join wait in one queue, the lo
   assert.ok((await s.driver("commands")).some((c) => c.id === "needs-you" && c.key === "N"));
   const st = await s.driver("command", "needs-you");
   assert.equal(st.overlays.needsYou, true, "the palette's command opens it");
+}));
+
+test("a real click on Go ahead sends the answer as you to the session that asked", { timeout: limit(60000) }, shoot("needs-you-reply", async () => {
+  const question = (await queue()).items.find((it) => it.kind === "question" && it.actions.includes("reply"));
+  assert.ok(question, "a question to answer");
+  await assert.rejects(s.driver("needsYou", "reply", question.key), /Use read, open, close/, "the control channel has no action for it");
+  await s.driver("needsYou", "open");
+  await clickOn(`[data-ny-list] > li[data-key="${question.key}"] [data-ny-reply="go"]`);
+  const sent = await until(async () => {
+    const last = (await s.driver("message"))?.last;
+    return last?.to === question.id ? last : null;
+  });
+  assert.ok(sent?.ok, `the answer went: ${JSON.stringify(sent)}`);
+  await s.driver("needsYou", "close");
 }));
 
 test("Show selects an actor, ✓ dismisses a session's wait, and a demo session can't open in an app", { timeout: limit(60000) }, shoot("needs-you-answer", async () => {

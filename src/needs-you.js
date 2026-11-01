@@ -6,7 +6,8 @@
 // program asking to be an actor, or a session's ask for a gateway token,
 // has its Allow and Deny here, as in the strip and the Actors panel: Allow
 // waits a moment after its row shows, and is marked data-yours, which
-// XenoNet's control channel never presses outside the demo.
+// XenoNet's control channel never presses outside the demo. So are Go ahead,
+// No and Answer… on a session's question: yours alone.
 //
 // It opens from the palette, with N, from the strip's Needs you button and
 // from the tray's menu. While it's open, rows are reconciled rather than
@@ -26,8 +27,9 @@ const DISMISS_MS = 8000;
 // `items()` is the queue as it is now (needsYouQueue), `request(id)` the
 // window's view of a registration or a gateway ask by its id, for the
 // details its row shows. The rest answer: select(id), openApp(id),
-// ack(ids), message(id), decide(id, "allow" | "deny"), armed(id).
-export function createNeedsYou({ modals, sfx, items, request = () => null, select, openApp, ack, message, decide, armed = () => false }) {
+// ack(ids), message(id), reply(item, "go" | "no" | "text"), decide(id,
+// "allow" | "deny"), armed(id).
+export function createNeedsYou({ modals, sfx, items, request = () => null, select, openApp, ack, message, reply = async () => ({ ok: false }), decide, armed = () => false }) {
   let panel = null;
   let list = null;
   let armTimer = null;
@@ -47,7 +49,7 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
     rows.clear();
     shownAt.clear();
     const queue = visible();
-    panel = modals.open(`${head(queue)}<div class="m-body ny"><ol class="ny-list" data-ny-list></ol><p class="ny-empty" data-ny-empty hidden>Nothing waits on you. Questions, permissions, actors waiting and programs asking to join show here as they come.</p><p class="pj-note">A session's question or permission is answered in its own app: Open goes there. A session XenoNet runs itself asks here instead, with Allow and Deny. Allow is yours alone, from this window.</p></div>`, {
+    panel = modals.open(`${head(queue)}<div class="m-body ny"><ol class="ny-list" data-ny-list></ol><p class="ny-empty" data-ny-empty hidden>Nothing waits on you. Questions, permissions, actors waiting and programs asking to join show here as they come.</p><p class="pj-note">A session's permission is answered in its own app: Open goes there. A question can be answered here: Go ahead, No or your own words are sent to the session, here or on another machine, as you at this console. A session XenoNet runs itself asks here for a tool, with Allow and Deny. These buttons are yours alone, from this window.</p></div>`, {
       accent: "var(--attention)",
       cls: "ny-panel",
       onClose: () => {
@@ -85,7 +87,15 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
     if (it.kind === "question" || it.kind === "permission") {
       const text = it.host && !it.text ? `The question is on ${it.host}: preview the transcript to read it.` : (it.text ?? "");
       lines = `<div class="ny-text" title="${h(text)}">${h(gist(text))}</div>`;
-      acts = btn(`data-ny-show="${key}"`, "Show", "Select it on the map") + (it.actions.includes("open") ? btn(`data-ny-open="${key}"`, "Open", "Open it in its app, to answer it", { primary: true }) + btn(`data-ny-dismiss="${key}"`, "✓", "Dismiss") : "");
+      // Reply is yours alone (data-yours): XenoNet itself sends the answer
+      // as from you, at this console, to the session here or on another
+      // machine, so the session knows it was the owner who said it.
+      const answers = it.actions.includes("reply")
+        ? btn(`data-ny-reply="go"`, "Go ahead", "Tell it yes, as you at this console", { primary: true }).replace("<button", "<button data-yours") +
+          btn(`data-ny-reply="no"`, "No", "Tell it no, as you at this console").replace("<button", "<button data-yours") +
+          btn(`data-ny-reply="text"`, "Answer…", "Write your own answer, sent as you at this console").replace("<button", "<button data-yours")
+        : "";
+      acts = btn(`data-ny-show="${key}"`, "Show", "Select it on the map") + answers + (it.actions.includes("open") ? btn(`data-ny-open="${key}"`, "Open", "Open it in its app, to answer it", { primary: !answers }) + btn(`data-ny-dismiss="${key}"`, "✓", "Dismiss") : "");
     } else if (it.kind === "actor") {
       lines = `<div class="ny-text">${h(it.text)}</div>`;
       acts = btn(`data-ny-show="${key}"`, "Show", "Select it on the map, where its inspector says the rest") + (it.actions.includes("message") ? btn(`data-ny-message="${key}"`, "Message", "Write to it, marked as from you", { primary: true }) : "");
@@ -208,6 +218,16 @@ export function createNeedsYou({ modals, sfx, items, request = () => null, selec
   }
 
   async function onClick(e) {
+    const rb = e.target.closest("button[data-ny-reply]");
+    if (rb && !rb.disabled) {
+      e.stopPropagation();
+      const it = itemOf(rb.closest("[data-key]")?.dataset.key);
+      if (!it?.actions.includes("reply")) return;
+      rb.disabled = true;
+      const res = await reply(it, rb.dataset.nyReply);
+      if (!res?.ok && rb.isConnected) rb.disabled = false;
+      return;
+    }
     const b = e.target.closest("button[data-ny-show], button[data-ny-open], button[data-ny-dismiss], button[data-ny-message], button[data-ny-allow], button[data-ny-deny]");
     if (!b || b.disabled) return;
     e.stopPropagation();

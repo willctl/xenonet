@@ -120,6 +120,10 @@ The answers come back as receipts: started, with the new session's id, or refuse
 
 The new session needn't be told to report back: XenoNet does, and tells you as soon as the turn ends, even while the session lingers listening for a reply. For you they're a line in the activity feed and a toast; a session that stops to ask or fails is marked as needing you. For a session or an actor, a message, and a session that is idle is woken for it (see [Delivering at once: wake](live-delivery.md#delivering-at-once-wake)). A start goes only to a machine that's online, and its XenoNet must be new enough to take starts: the answer says so at once otherwise, and nothing waits to start later. A machine whose run couldn't sign in to Claude Code says so, and Needs you shows which machine needs `xenonet runs sign-in` (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)). A machine on an older XenoNet reports only that the run ended and its exit code, and says it can't tell more.
 
+### Answering a question that stopped a session
+
+A session that ends its turn asking something shows in **Needs you**, on its own machine and on every window host, as a question. On a window host, the row has **Go ahead**, **No** and **Answer…**. XenoNet itself sends the answer to the session, here or on another machine, as you at that console: the session reads "verified: you, at inix's console" and not an agent's relay, and a session that ended is resumed to take it. An agent can't press these buttons or fill in the answer: they are yours alone, like Allow, and XenoNet's control channel refuses to press them outside the demo. An agent that wants your answer can only say what it is waiting for.
+
 ## Who may start and wake sessions
 
 Two settings on each machine decide what the network may do to its sessions:
