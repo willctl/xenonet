@@ -19,7 +19,7 @@
 //! answer to one is let go.
 
 use crate::js::{now_ms, obj, Locked};
-use crate::network::{clip, ms, net, quiet_note, send, sender_kind};
+use crate::network::{clip, ms, net, quiet_note, send, sender_kind, start_end_note};
 use crate::runs::{Runner, Turn};
 use crate::world::World;
 use serde_json::{json, Value};
@@ -378,8 +378,36 @@ fn write_private(file: &std::path::Path, text: &str) -> std::io::Result<()> {
     std::io::Write::write_all(&mut o.open(file)?, text.as_bytes())
 }
 
+/// The receipt for one end of a started run: what the session did
+/// (`outcome`), its last words, and the tools it was denied. `live` says
+/// its process is still running, listening for a reply.
+#[expect(clippy::too_many_arguments, reason = "the end's parts")]
+fn end_body(w: &World, app: &str, session: Option<&String>, finish: Option<&starts::Finish>, plain: &str, said: bool, signed_out: bool, minutes: f64, live: bool) -> Value {
+    let mut body = json!({ "session": session, "minutes": minutes, "app": app, "live": live });
+    let mut kind = starts::outcome(finish, said);
+    if signed_out {
+        kind = "failed";
+        let here = here_name(w);
+        body["reason"] = json!(starts::sign_in_words(&here));
+        body["signIn"] = json!(true);
+        sign_in_hint(w, &here);
+    }
+    body["outcome"] = json!(kind);
+    let text = finish.map(|f| f.text.as_str()).filter(|t| !t.is_empty()).unwrap_or(plain);
+    if !text.is_empty() {
+        body["last"] = json!(starts::clipped(text));
+    }
+    if let Some(f) = finish.filter(|f| !f.denied.is_empty()) {
+        body["denied"] = json!(f.denied);
+    }
+    body
+}
+
 /// Watches a started run until it ends: Codex's thread id once it says
-/// one, then how the run ended and whether Claude Code needs a sign-in.
+/// one; each turn's end, told as it happens (a session that waits for a
+/// reply after its turn is still running, but has said its piece), with
+/// what it did and its last words; and how the run ended, and whether
+/// Claude Code needs a sign-in.
 #[expect(clippy::too_many_arguments, reason = "the run's parts")]
 fn watch(
     w: &World,
@@ -396,17 +424,35 @@ fn watch(
     let mine = |r: &xenonet_engine::delivery::runs::Run| r.key == key && r.pid == Some(f64::from(pid));
     let mut tail: Option<Tail> = None;
     let mut out = false;
+    let mut said = false;
+    let mut turns = 0;
+    // Whether the last turn told was told while the process still ran.
+    let mut open = false;
+    // What the run printed that wasn't an event: an error before the
+    // session could say anything.
+    let mut plain = String::new();
     let ended = loop {
         std::thread::sleep(Duration::from_millis(400));
         let Some(rec) = runner.list().into_iter().rev().find(|r| mine(r)) else { break None };
         let log = tail.get_or_insert_with(|| Tail::new(logs.join(format!("{}.log", rec.id))));
         let new = if rec.end.is_some() { log.rest() } else { log.lines() };
         out = out || starts::signed_out(&new);
+        said = said || starts::reported(app, &new);
+        if let Some(line) = new.lines().map(str::trim).rfind(|l| !l.is_empty() && serde_json::from_str::<Value>(l).is_err()) {
+            plain = line.chars().take(400).collect();
+        }
         if session.is_none() {
             if let Some(found) = starts::session_of(app, &new) {
                 session = Some(found.clone());
                 answer(w, "started", json!({ "session": found, "pid": pid, "folder": folder, "app": app }));
             }
+        }
+        if let Some(f) = starts::finish(app, &new) {
+            turns += 1;
+            open = rec.end.is_none();
+            let minutes = (rec.ms.unwrap_or_else(|| now_ms() - rec.at) / 60e3).round();
+            answer(w, "ended", end_body(w, app, session.as_ref(), Some(&f), "", said, app == "claude" && out, minutes, open));
+            said = false;
         }
         if rec.end.is_some() {
             break Some(rec);
@@ -417,14 +463,21 @@ fn watch(
     }
     let Some(rec) = ended else { return };
     let minutes = (rec.ms.unwrap_or(0.0) / 60e3).round();
-    let mut body = json!({ "session": session, "exit": rec.exit, "minutes": minutes, "app": app });
-    if app == "claude" && out {
-        let here = here_name(w);
-        body["reason"] = json!(starts::sign_in_words(&here));
-        body["signIn"] = json!(true);
-        sign_in_hint(w, &here);
-    } else if rec.timed_out {
+    if turns > 0 {
+        // Every turn was told as it ended. If the last was told while the
+        // process listened on, this lets the answer go.
+        if open {
+            answer(w, "ended", json!({ "session": session, "minutes": minutes, "app": app, "live": false, "closed": true }));
+        }
+        return;
+    }
+    let mut body = end_body(w, app, session.as_ref(), None, &plain, said, app == "claude" && out, minutes, false);
+    body["exit"] = json!(rec.exit);
+    if rec.timed_out {
+        body["outcome"] = json!("failed");
         body["reason"] = json!("it ran half an hour, the most a turn runs");
+    } else if rec.exit.is_some_and(|e| e != 0.0) && body["outcome"] == "silent" {
+        body["outcome"] = json!("failed");
     }
     answer(w, "ended", body);
 }
@@ -432,6 +485,10 @@ fn watch(
 /// What the requester hears of an answer from `host`: a message to a
 /// session or an actor, or a line in your console.
 pub fn tell(w: &World, by: &Value, host: &str, state: &str, a: &Value) {
+    // The last word of a run whose turns were all told: nothing to add.
+    if a.get("closed").and_then(Value::as_bool) == Some(true) {
+        return;
+    }
     let words = starts::answer_words(state, host, a);
     // Claude Code there needs a sign-in for XenoNet's runs: a hint in your
     // console, whoever asked.
@@ -451,9 +508,15 @@ pub fn tell(w: &World, by: &Value, host: &str, state: &str, a: &Value) {
         w.emit(From::Engine, "start", ev);
         return;
     }
-    // To the session that asked: for its next turn, never a wake of its own.
+    // To the session that asked. A start's beginning waits for its next
+    // turn. Its end is delivered at once, waking the session if it's idle,
+    // unless the started session told it itself: the message did that.
     if let Some(id) = s(by, "id") {
-        quiet_note(w, &id, &id, &words);
+        if state == "ended" && a.get("outcome").and_then(Value::as_str) != Some("reported") {
+            start_end_note(w, &id, &id, &words);
+        } else {
+            quiet_note(w, &id, &id, &words);
+        }
     }
 }
 
@@ -589,7 +652,8 @@ pub fn answer_in(w: &World, from: &str, mid: &str, b: &Value) -> bool {
             return true;
         }
         let out = (a.by.clone(), a.host.clone());
-        if matches!(state, "refused" | "ended") {
+        // An end whose process still listens for a reply is not the last.
+        if state == "refused" || (state == "ended" && b.get("live").and_then(Value::as_bool) != Some(true)) {
             asked.remove(mid);
         }
         // A week on, an answer that never came is let go.

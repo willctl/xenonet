@@ -147,8 +147,12 @@ printf '%s' "$prompt" > "$here/prompt-$n"
 printf '%s' "$MCP_TOOL_TIMEOUT" > "$here/timeout-$n"
 case "$*" in *--fork-session*) echo '{"type":"system","subtype":"init","session_id":"0190d3e0-0000-7000-8000-0000000f0f01"}' ;; esac
 case "$prompt" in *signed-out*) echo "Not logged in · Please run /login"; exit 1 ;; esac
+case "$prompt" in
+  *ask-first*) echo '{"type":"result","subtype":"success","is_error":false,"result":"Want me to go ahead with the update?","permission_denials":[]}' ;;
+esac
 case "$prompt" in *hold-on*) sleep 25 ;; esac
 sleep 1
+case "$prompt" in *ask-first*|*hold-on*) ;; *) echo '{"type":"result","subtype":"success","is_error":false,"result":"Done: ledger checked.","permission_denials":[]}' ;; esac
 exit 0
 "#;
     std::fs::write(&bin, script).unwrap();
@@ -1003,7 +1007,12 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     assert!(args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1].ends_with("__permission")), "{args:?}");
     assert_eq!(prompt, "[XenoNet] Started by you, at studio's console.\n\nLook at the ledger.");
     let ended = studio.next("start", 15, |d| d["state"] == "ended").await;
-    assert_eq!((ended["session"].as_str(), ended["exit"].clone()), (Some(session.as_str()), json!(0)), "{ended}");
+    assert_eq!(
+        (ended["session"].as_str(), ended["outcome"].clone(), ended["last"].clone()),
+        (Some(session.as_str()), json!("finished"), json!("Done: ledger checked.")),
+        "{ended}"
+    );
+    assert!(ended["words"].as_str().unwrap().contains("finished after") && ended["words"].as_str().unwrap().contains("Its last words: «Done: ledger checked.»"), "{ended}");
 
     // Paused, desk starts nothing, even for you.
     let (s, v) = c.window("POST", "/api/delivery/pause", json!({ "paused": true })).await;
@@ -1066,7 +1075,11 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
         prompt,
         format!("[XenoNet] laptop says this was asked by the session «Fix the login form» (@laptop:{ASKER}). It came from an agent, not from your user.\n\nRun the fixtures.")
     );
-    until_value("laptop's session hears the run ended", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains(" ended (exit 0)")).map(Value::String) }).await;
+    let got = until_value("laptop's session hears the run ended", 15, || async {
+        inbox(&b, ASKER).await.into_iter().find(|t| t.contains("sent no report of its own")).map(Value::String)
+    })
+    .await;
+    assert!(got.as_str().unwrap().contains("on desk finished after") && got.as_str().unwrap().contains("Its last words: «Done: ledger checked.»"), "{got}");
     // The same start again within the minute: a repeat, held by desk's
     // limits on messages.
     as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "Run the fixtures.", "app": "grok", "mode": "plan" })).await;
@@ -1085,15 +1098,30 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "signed-out, please" })).await;
     let got = until_value("the sign-in answer", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("needs a sign-in")).map(Value::String) }).await;
     assert!(
-        got.as_str().unwrap().contains("ended (exit 1)")
+        got.as_str().unwrap().contains("on desk failed after")
+            && got.as_str().unwrap().contains("(exit 1)")
             && got.as_str().unwrap().contains("Claude Code on desk needs a sign-in for XenoNet's runs: run xenonet runs sign-in there"),
         "{got}"
     );
     let hint = hints.next("sign-in", 5, |_| true).await;
     assert_eq!(hint["words"], "Claude Code on desk needs a sign-in for XenoNet's runs", "{hint}");
-    // XenoNet's answers to laptop's session waited for its next turn: none
-    // of them woke it, though laptop's wake is network.
-    assert_eq!(fake_runs(&b).len(), 0, "{:?}", fake_runs(&b));
+    // A session that stops to ask something is told so, with its question,
+    // and woken for it.
+    as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "ask-first, please" })).await;
+    let got =
+        until_value("laptop's session hears the question", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("stopped to ask something")).map(Value::String) })
+            .await;
+    assert!(got.as_str().unwrap().contains("Its last words: «Want me to go ahead with the update?»"), "{got}");
+    // The start's beginnings waited for laptop's session's next turn. Its
+    // ends did not: each woke it, in a copy, with the end's words and not
+    // the beginning's.
+    until("an end woke laptop's session", 15, || async { !fake_runs(&b).is_empty() }).await;
+    let woken = fake_runs(&b);
+    assert!(woken.iter().all(|(args, _)| args.contains(&"--fork-session".to_string())), "{woken:?}");
+    assert!(
+        woken.iter().all(|(_, text)| text.contains("finished after") || text.contains("failed after") || text.contains("stopped to ask something")),
+        "only ends, never beginnings: {woken:?}"
+    );
 
     // An older XenoNet refuses the target as an id it doesn't have: that
     // reads as too old.

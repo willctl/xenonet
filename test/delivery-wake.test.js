@@ -217,6 +217,28 @@ test("XenoNet's quiet notes (a start's started and ended) wait for the next turn
   assert.equal(notes.length, 0);
 });
 
+test("a start's end wakes the session that asked for it, even under wake: consent, within the budgets; the same words as an ordinary message do not", async () => {
+  const w = world();
+  const [rec] = await w.router.route({ id: 80, from: A, to: [A], text: "[XenoNet] claude:x on neo-rex stopped to ask something.", startEnd: true });
+  assert.deepEqual([rec.state, rec.how], ["live", "fork"], "an idle session a process holds is answered by a copy");
+  assert.deepEqual([w.resumed[0].agent, w.resumed[0].fork], [A, true]);
+  assert.match(w.resumed[0].text, /stopped to ask something/);
+  assert.ok(w.router.list().length, "and the delivery is on the record");
+  // An ended asker is resumed, still without an allowance.
+  w.store.ended(B, w.t.now);
+  const [gone] = await w.router.route({ id: 81, from: B, to: [B], text: "[XenoNet] claude:y finished.", startEnd: true });
+  assert.deepEqual([gone.state, gone.how], ["live", "resume"]);
+  // The grant is the flag's alone: an ordinary message waits, as before.
+  const [plain] = await w.router.route({ id: 82, from: B, to: [A], text: "hello" });
+  assert.equal(plain.state, "next-turn");
+  assert.equal(w.resumed.length, 2);
+  // A paused XenoNet, or a spent budget, still holds it back.
+  w.policy.setPaused(true);
+  const [held] = await w.router.route({ id: 83, from: A, to: [A], text: "again", startEnd: true });
+  assert.equal(held.state, "next-turn");
+  assert.match(held.why, /paused/);
+});
+
 test("a copy forks only from a Claude Code session, with its whole context; Grok Build reads its turn from a file only you can read", async () => {
   assert.deepEqual(forkCommand(`claude:${ID}`, { settings: "/s/l.json" }), ["claude", ["-p", "--resume", ID, "--fork-session", "--output-format", "stream-json", "--verbose", "--settings", "/s/l.json"]]);
   assert.equal(forkCommand(`codex:${ID}`), null);

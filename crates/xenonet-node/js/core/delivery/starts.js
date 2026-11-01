@@ -31,6 +31,16 @@ export const signedOut = (log) => native.startsSignedOut(String(log ?? ""));
 
 export const sessionOf = (app, log) => native.startsSessionOf(String(app), String(log ?? "")) ?? null;
 
+export const finish = (app, log) => native.startsFinish(String(app), String(log ?? ""));
+
+export const reported = (app, log) => native.startsReported(String(app), String(log ?? ""));
+
+export const outcome = (f, wasReported) => native.startsOutcome(f ?? null, !!wasReported);
+
+export const LAST_MAX = C.lastMax;
+
+export const clipped = (text) => native.startsClipped(String(text ?? ""));
+
 export const answerWords = (state, host, a = {}) => native.startsAnswerWords(String(state), String(host), a ?? {});
 
 export const signInWords = (host) => native.startsSignInWords(String(host));

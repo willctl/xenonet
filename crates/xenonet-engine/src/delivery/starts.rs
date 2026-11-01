@@ -8,8 +8,8 @@
 //! frame to `TARGET`, answered by receipts keyed by its id.
 //!
 //! ```text
-//! claude -p --session-id <id> [--settings <listen file>] [--permission-mode <m>]
-//!        --permission-prompt-tool mcp__<server>__permission
+//! claude -p --session-id <id> --output-format stream-json --verbose [--settings <listen file>]
+//!        [--permission-mode <m>] --permission-prompt-tool mcp__<server>__permission
 //! codex exec --json -C <folder> -
 //! grok --prompt-file <file> -s <id> --output-format json [--permission-mode <m>]
 //! ```
@@ -144,7 +144,7 @@ pub fn command(r: &Request, id: &str, cwd: &str, settings: Option<&str>, server:
             }
         }
         _ => {
-            args.extend([s("-p"), s("--session-id"), s(id)]);
+            args.extend([s("-p"), s("--session-id"), s(id), s("--output-format"), s("stream-json"), s("--verbose")]);
             if let Some(f) = settings {
                 args.extend([s("--settings"), s(f)]);
             }
@@ -258,8 +258,110 @@ pub fn session_of(app: &str, log: &str) -> Option<String> {
     None
 }
 
+/// How the end of one turn of a started run reads in its output: what the
+/// session said last, whether it failed, and the tools it was denied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Finish {
+    pub text: String,
+    pub error: bool,
+    pub denied: Vec<String>,
+}
+
+fn clean(v: &Value) -> String {
+    v.as_str().unwrap_or("").trim().to_string()
+}
+
+/// The last turn that ended in these lines of a run's output (a Claude Code
+/// stream's result, Codex's last message at a turn.completed, or the
+/// result Grok Build prints), if any ended.
+pub fn finish(app: &str, log: &str) -> Option<Finish> {
+    let mut last_message = String::new();
+    let mut out = None;
+    for line in log.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        let kind = v.get("type").and_then(Value::as_str).unwrap_or("");
+        if app == "codex" {
+            match kind {
+                "item.completed" if v["item"]["type"] == "agent_message" => last_message = clean(&v["item"]["text"]),
+                "turn.completed" => out = Some(Finish { text: std::mem::take(&mut last_message), error: false, denied: Vec::new() }),
+                "turn.failed" | "error" => {
+                    let why = v.pointer("/error/message").or_else(|| v.get("message")).map(clean).unwrap_or_default();
+                    out = Some(Finish { text: if why.is_empty() { std::mem::take(&mut last_message) } else { why }, error: true, denied: Vec::new() });
+                }
+                _ => {}
+            }
+        } else if kind == "result" || (app == "grok" && v.get("result").is_some_and(Value::is_string)) {
+            let denied = v
+                .get("permission_denials")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|d| d.get("tool_name").and_then(Value::as_str)).map(str::to_string).collect())
+                .unwrap_or_default();
+            let error = v.get("is_error").and_then(Value::as_bool).unwrap_or(false) || v.get("subtype").and_then(Value::as_str).is_some_and(|t| t.starts_with("error"));
+            out = Some(Finish { text: clean(&v["result"]), error, denied });
+        }
+    }
+    out
+}
+
+/// Whether the session called XenoNet's send tool in these lines of its
+/// output: it told someone what it found itself.
+pub fn reported(app: &str, log: &str) -> bool {
+    log.lines().any(|line| {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return false };
+        if app == "codex" {
+            return v["item"]["type"] == "mcp_tool_call" && v["item"]["tool"] == "send" && v["item"]["server"].as_str().is_some_and(|s| s.starts_with("xenonet"));
+        }
+        v["message"]["content"]
+            .as_array()
+            .is_some_and(|c| c.iter().any(|b| b["type"] == "tool_use" && b["name"].as_str().is_some_and(|n| n.starts_with("mcp__xenonet") && n.ends_with("__send"))))
+    })
+}
+
+/// Whether a final message asks something and waits: a question in its last
+/// lines, or an offer to go on when told to.
+fn asks(text: &str) -> bool {
+    let tail: String = text.chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
+    tail.contains('?') || crate::re!(r"(?i)\b(want me to|shall i|should i|let me know|say so and i|tell me (if|whether|which))\b").is_match(&tail)
+}
+
+/// What a turn came to, from its end: failed, denied a tool, asked
+/// something, finished (and reported back itself, or only said so in its
+/// last message), or silent when it left nothing.
+pub fn outcome(f: Option<&Finish>, reported: bool) -> &'static str {
+    let Some(f) = f else { return "silent" };
+    if f.error {
+        "failed"
+    } else if !f.denied.is_empty() {
+        "denied"
+    } else if f.text.is_empty() {
+        "silent"
+    } else if asks(&f.text) {
+        "asked"
+    } else if reported {
+        "reported"
+    } else {
+        "finished"
+    }
+}
+
+/// The most of a session's last words a notice carries.
+pub const LAST_MAX: usize = 1200;
+
+/// The words clipped for a notice, to whole characters.
+pub fn clipped(text: &str) -> String {
+    let t = text.trim();
+    if t.chars().count() <= LAST_MAX {
+        return t.to_string();
+    }
+    let head: String = t.chars().take(LAST_MAX).collect();
+    format!("{}…", head.trim_end())
+}
+
 /// What the requester is told of an answer: started, refused or ended, on
-/// `host` ("this machine" for this one). `a` is the receipt's body.
+/// `host` ("this machine" for this one). `a` is the receipt's body. An end
+/// says what the session did (`outcome`: finished, reported, asked,
+/// denied, failed or silent) and quotes its last words (`last`), never
+/// only that a process exited.
 pub fn answer_words(state: &str, host: &str, a: &Value) -> String {
     let session = a.get("session").and_then(Value::as_str);
     let reason = a.get("reason").and_then(Value::as_str).unwrap_or("");
@@ -273,11 +375,24 @@ pub fn answer_words(state: &str, host: &str, a: &Value) -> String {
             }
         }
         "ended" => {
-            let who = session.unwrap_or("The session");
-            let exit = a.get("exit").and_then(Value::as_f64).map_or_else(|| "stopped".to_string(), |e| format!("exit {e}"));
+            let who = format!("{}{on}", session.unwrap_or("The session"));
             let minutes = a.get("minutes").and_then(Value::as_f64).unwrap_or(0.0);
-            let tail = if reason.is_empty() { String::new() } else { format!(": {reason}") };
-            format!("[XenoNet] {who}{on} ended ({exit}) after {minutes} min{tail}.")
+            let after = format!(" after {minutes} min");
+            let last = a.get("last").and_then(Value::as_str).unwrap_or("").trim();
+            let quote = if last.is_empty() { String::new() } else { format!("\nIts last words: «{last}»") };
+            let tools = a.get("denied").and_then(Value::as_array).map(|d| d.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+            let because = if reason.is_empty() { String::new() } else { format!(": {reason}") };
+            let exit = a.get("exit").and_then(Value::as_f64).map_or_else(|| "stopped".to_string(), |e| format!("exit {e}"));
+            let head = match a.get("outcome").and_then(Value::as_str) {
+                Some("asked") => format!("{who} stopped to ask something, and has done nothing more{after}. Answer it by messaging it: it takes up from there.{quote}"),
+                Some("denied") => format!("{who} stopped{after} for want of permission to use {tools}, which it was denied.{quote}"),
+                Some("failed") => format!("{who} failed{after} ({exit}){because}.{quote}"),
+                Some("reported") => format!("{who} finished{after} and reported back itself.{quote}"),
+                Some("finished") => format!("{who} finished{after}, but sent no report of its own.{quote}"),
+                Some("silent") => format!("{who} ended{after} without a word: it sent no report and left no last message ({exit}){because}."),
+                _ => format!("{who} ended{after} ({exit}){because}. That machine's XenoNet is older and can't say whether it finished or stopped to ask something."),
+            };
+            format!("[XenoNet] {head}")
         }
         _ => format!("[XenoNet] No session was started{on}: {reason}."),
     }
@@ -353,8 +468,27 @@ mod tests {
         let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into() };
         let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None);
         assert_eq!(app, "claude");
-        assert_eq!(args, ["-p", "--session-id", id, "--settings", "/s/listen.json", "--permission-mode", "plan", "--permission-prompt-tool", "mcp__xenonet__permission"]);
-        assert_eq!(command(&r("claude", None), id, "/w", None, "xenonet-dev", None).1, ["-p", "--session-id", id, "--permission-prompt-tool", "mcp__xenonet-dev__permission"]);
+        assert_eq!(
+            args,
+            [
+                "-p",
+                "--session-id",
+                id,
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--settings",
+                "/s/listen.json",
+                "--permission-mode",
+                "plan",
+                "--permission-prompt-tool",
+                "mcp__xenonet__permission"
+            ]
+        );
+        assert_eq!(
+            command(&r("claude", None), id, "/w", None, "xenonet-dev", None).1,
+            ["-p", "--session-id", id, "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "mcp__xenonet-dev__permission"]
+        );
         assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None).1, ["exec", "--json", "-C", "/w/atlas", "-"]);
         assert_eq!(
             command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).1,
@@ -435,7 +569,27 @@ mod tests {
             "[XenoNet] No session was started on neo-rex: only you start sessions here."
         );
         let ended = json!({ "session": "claude:x", "exit": 0, "minutes": 4 });
-        assert_eq!(answer_words("ended", "this machine", &ended), "[XenoNet] claude:x ended (exit 0) after 4 min.");
+        assert_eq!(
+            answer_words("ended", "this machine", &ended),
+            "[XenoNet] claude:x ended after 4 min (exit 0). That machine's XenoNet is older and can't say whether it finished or stopped to ask something."
+        );
+        let ended = |outcome: &str, extra: Value| {
+            let mut a = json!({ "session": "claude:x", "exit": 0, "minutes": 5, "outcome": outcome, "last": "All set." });
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            answer_words("ended", "neo-rex", &a)
+        };
+        assert_eq!(ended("asked", json!({ "last": "Want me to go ahead?" })), "[XenoNet] claude:x on neo-rex stopped to ask something, and has done nothing more after 5 min. Answer it by messaging it: it takes up from there.\nIts last words: «Want me to go ahead?»");
+        assert_eq!(ended("finished", json!({})), "[XenoNet] claude:x on neo-rex finished after 5 min, but sent no report of its own.\nIts last words: «All set.»");
+        assert_eq!(ended("reported", json!({})), "[XenoNet] claude:x on neo-rex finished after 5 min and reported back itself.\nIts last words: «All set.»");
+        assert_eq!(
+            ended("denied", json!({ "denied": ["Bash", "Edit"] })),
+            "[XenoNet] claude:x on neo-rex stopped after 5 min for want of permission to use Bash, Edit, which it was denied.\nIts last words: «All set.»"
+        );
+        assert_eq!(
+            ended("failed", json!({ "exit": 1, "reason": "Claude Code needs a sign-in" })),
+            "[XenoNet] claude:x on neo-rex failed after 5 min (exit 1): Claude Code needs a sign-in.\nIts last words: «All set.»"
+        );
+        assert_eq!(ended("silent", json!({ "last": "" })), "[XenoNet] claude:x on neo-rex ended after 5 min without a word: it sent no report and left no last message (exit 0).");
         assert_eq!(sign_in_words("neo-rex"), "Claude Code on neo-rex needs a sign-in for XenoNet's runs: run xenonet runs sign-in there");
     }
 
@@ -446,5 +600,57 @@ mod tests {
         assert_eq!(sign_in_token(""), Err("paste the token claude setup-token printed".into()));
         assert!(sign_in_token("hunter2").is_err());
         assert!(sign_in_token(&format!("{token} extra")).is_err(), "one line, no spaces");
+    }
+
+    #[test]
+    fn a_turns_end_is_read_from_the_runs_output() {
+        let claude = r#"{"type":"system","subtype":"init","session_id":"s"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Want me to go ahead? I'll stop here.","permission_denials":[]}
+"#;
+        let f = finish("claude", claude).unwrap();
+        assert_eq!(f, Finish { text: "Want me to go ahead? I'll stop here.".into(), error: false, denied: vec![] });
+        assert_eq!(outcome(Some(&f), false), "asked");
+        assert!(finish("claude", "{\"type\":\"assistant\"}\n").is_none(), "no end yet");
+        let denied = r#"{"type":"result","subtype":"success","is_error":false,"result":"I could not run it.","permission_denials":[{"tool_name":"Bash"},{"tool_name":"Edit"}]}"#;
+        let d = finish("claude", denied).unwrap();
+        assert_eq!((d.denied.clone(), outcome(Some(&d), true)), (vec!["Bash".to_string(), "Edit".to_string()], "denied"));
+        let failed = finish("claude", r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":""}"#).unwrap();
+        assert_eq!(outcome(Some(&failed), false), "failed");
+        let done = Finish { text: "Updated to 0.6.1.".into(), error: false, denied: vec![] };
+        assert_eq!((outcome(Some(&done), false), outcome(Some(&done), true)), ("finished", "reported"));
+        assert_eq!(outcome(Some(&Finish { text: String::new(), error: false, denied: vec![] }), false), "silent");
+        assert_eq!(outcome(None, true), "silent");
+        for q in ["Let me know which one.", "Shall I continue", "ok, say so and I'll do it"] {
+            assert!(asks(q), "{q}");
+        }
+        assert!(!asks("Done. The service restarted."));
+    }
+
+    #[test]
+    fn codex_ends_a_turn_with_its_last_message() {
+        let log = r#"{"type":"thread.started","thread_id":"t"}
+{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"Which folder?"}}
+{"type":"turn.completed"}
+"#;
+        assert_eq!(finish("codex", log), Some(Finish { text: "Which folder?".into(), error: false, denied: vec![] }));
+        assert_eq!(finish("codex", r#"{"type":"turn.failed","error":{"message":"rate limited"}}"#).map(|f| (f.text, f.error)), Some(("rate limited".into(), true)));
+    }
+
+    #[test]
+    fn reporting_back_means_calling_the_send_tool() {
+        let sent = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__xenonet__send","input":{"to":"claude:a","text":"done"}}]}}"#;
+        assert!(reported("claude", sent));
+        assert!(reported("claude", &sent.replace("mcp__xenonet__send", "mcp__xenonet-dev__send")));
+        assert!(!reported("claude", &sent.replace("__send", "__inbox")));
+        assert!(!reported("claude", r#"{"type":"assistant","message":{"content":[{"type":"text","text":"mcp__xenonet__send"}]}}"#));
+        assert!(reported("codex", r#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"xenonet","tool":"send"}}"#));
+    }
+
+    #[test]
+    fn last_words_are_clipped_to_whole_characters() {
+        assert_eq!(clipped("  hi  "), "hi");
+        let long = "é".repeat(LAST_MAX + 5);
+        assert_eq!(clipped(&long).chars().count(), LAST_MAX + 1);
     }
 }

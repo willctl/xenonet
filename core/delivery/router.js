@@ -78,10 +78,12 @@ export class DeliveryRouter extends EventEmitter {
   // app, its terminal, or a run XenoNet resumed) and that isn't at work goes
   // to a copy of it, forked with its whole context: under wake network
   // only, since the session itself can't take it now.
-  forkable(view) {
+  // Also without wake network when `granted`: a start's end, told to the
+  // session that asked for the start.
+  forkable(view, granted = false) {
     if (!view || view.ended || view.status === "working" || !String(view.id).startsWith("claude:")) return false;
     if (!this.resume?.fork || !this.resume.can(view.id)) return false;
-    return this.#wakeNetwork();
+    return granted || this.#wakeNetwork();
   }
 
   // A wake for a session's listening Stop hook to hand a message over (the
@@ -94,7 +96,10 @@ export class DeliveryRouter extends EventEmitter {
 
   // Whether this machine lets `from` wake `agent` (reach.js): your
   // allowance for the session, here and for actors.
-  #mayWake(from, agent) {
+  // `granted`: the message is a start's end, told to the session that asked
+  // for the start, whose ask is its consent to this wake.
+  #mayWake(from, agent, granted = false) {
+    if (granted) return { ok: true };
     const consent = { here: !!this.policy.consented(agent), remote: !!this.policy.consented(agent, { remote: true }) };
     return decide("wake", senderOf(from), agent, { consent, wake: this.reach?.()?.wake });
   }
@@ -139,6 +144,7 @@ export class DeliveryRouter extends EventEmitter {
       this.emit("delivery", { ...rec });
       return false;
     }
+    const granted = !!m.startEnd;
     const view = await this.engine.view(rec.agent).catch(() => null);
     const app = rec.agent.split(":")[0];
     const idle = !view || view.status === "idle" || view.status === "ended";
@@ -174,7 +180,7 @@ export class DeliveryRouter extends EventEmitter {
       }
       // 2. OpenCode's own server, with your consent for that session.
       if (waysOf(app)?.server && this.opencode) {
-        const may = this.#mayWake(m.from, rec.agent);
+        const may = this.#mayWake(m.from, rec.agent, granted);
         if (!may.ok) tried.push(`opencode: ${may.why}`);
         else {
           const r = await this.opencode.deliver(rec.agent, text).catch((err) => ({ ok: false, why: err.message }));
@@ -189,7 +195,7 @@ export class DeliveryRouter extends EventEmitter {
         const who = senderOf(m.from);
         const sender = who.kind === "you" || (who.kind === "actor" && !who.host);
         const pid = this.engine.store.contact?.(rec.agent)?.pid ?? null;
-        const may = this.#mayWake(m.from, rec.agent);
+        const may = this.#mayWake(m.from, rec.agent, granted);
         if (!may.ok) tried.push(`tmux: ${may.why}`);
         else if (!sender) tried.push("tmux: only you or an actor with a token may type");
         else if (!pid) tried.push("tmux: no process known");
@@ -203,7 +209,7 @@ export class DeliveryRouter extends EventEmitter {
       // 4. A headless resume, for a Claude Code or Codex session whose
       // process has gone, with your consent: never while it runs.
       if (this.resume && view?.ended && this.resume.can(rec.agent)) {
-        const may = this.#mayWake(m.from, rec.agent);
+        const may = this.#mayWake(m.from, rec.agent, granted);
         if (!may.ok) tried.push(`resume: ${may.why}`);
         else {
           const r = await this.resume.deliver({ agent: rec.agent, cwd: view.cwd, text }).catch((err) => ({ ok: false, why: err.message }));
@@ -211,10 +217,10 @@ export class DeliveryRouter extends EventEmitter {
           if (r.ok) return success("resume", { where: r.where });
           tried.push(`resume: ${r.why}`);
         }
-      } else if (this.forkable(view)) {
+      } else if (this.forkable(view, granted)) {
         // 5. A copy of a Claude Code session a process holds, under wake
         // network: it answers with the whole context, now.
-        const may = this.#mayWake(m.from, rec.agent);
+        const may = this.#mayWake(m.from, rec.agent, granted);
         if (!may.ok) tried.push(`fork: ${may.why}`);
         else {
           const r = await this.resume.deliver({ agent: rec.agent, cwd: view.cwd, text, fork: true }).catch((err) => ({ ok: false, why: err.message }));
