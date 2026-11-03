@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { schemaFromDts, tsToSchema, declarationsOf } from "../scripts/provider-drift/types.mjs";
 import { typeFindings } from "../scripts/provider-drift/common.mjs";
-import { drizzleTables, opencodeFindings } from "../scripts/provider-drift/inspect-native.mjs";
+import { drizzleTables, opencodeFindings, hermesSchemaVersion, hermesFindings } from "../scripts/provider-drift/inspect-native.mjs";
 import { PROVIDERS, providerById } from "../scripts/provider-drift/registry.mjs";
 
 // From @google/gemini-cli-core's chatRecordingTypes.d.ts.
@@ -117,4 +117,12 @@ test("OpenCode: its tables from its source, with the columns XenoNet reads", () 
   const changed = drizzleTables(TABLES.replace("    version: text().notNull(),\n", "").replace("directory: DatabasePath.directoryColumn().notNull()", "directory: DatabasePath.directoryColumn()"), SHARED);
   assert.deepEqual(opencodeFindings(changed).map((f) => [f.kind, f.path]).sort(), [["now-optional", "session.directory"], ["removed", "session.version"]]);
   assert.deepEqual(opencodeFindings(new Map()).map((f) => f.path), ["session", "part"]);
+});
+
+test("Hermes's state schema version is read from its source and held to the schema's range", () => {
+  assert.equal(hermesSchemaVersion("# x\nSCHEMA_VERSION = 32\n_FTS = 1\n"), 32);
+  assert.equal(hermesSchemaVersion("SCHEMA_VERSION = 'x'"), null);
+  assert.deepEqual(hermesFindings(32), []);
+  assert.deepEqual(hermesFindings(null), []);
+  assert.deepEqual(hermesFindings(33).map((f) => [f.kind, f.severity]), [["version-out-of-range", "change"]]);
 });

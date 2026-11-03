@@ -20,6 +20,7 @@ import path from "node:path";
 import { npmInstall, npmDistTags, installedPackage } from "./releases.mjs";
 import { schemaFromDts, splitTop, stripComments } from "./types.mjs";
 import { typeFindings, steps, xenonetSchema } from "./common.mjs";
+import { satisfies } from "../../core/vendor.js";
 
 // The types a package declares, from a .d.ts in it, with `extra`
 // declarations of XenoNet's naming the provider's own types together (a
@@ -165,4 +166,46 @@ export async function inspectOpenCode({ version }) {
   const ref = `v${version}`;
   const tables = await s.run(`read its tables from ${OPENCODE_REPO} at ${ref}`, async () => drizzleTables(await githubFile(OPENCODE_REPO, OPENCODE_FILES.tables, ref), await githubFile(OPENCODE_REPO, OPENCODE_FILES.shared, ref)), (t) => `tables ${[...t.keys()].join(", ")}`);
   return { steps: s.list, findings: tables ? opencodeFindings(tables) : [], read: {}, info: tables ? { typesFrom: `${OPENCODE_REPO} ${ref}` } : {} };
+}
+
+// ---------- Hermes Agent ----------
+
+const HERMES_REPO = "NousResearch/hermes-agent";
+const HERMES_DB = "nous/hermes-agent/state-db";
+// Where its schema version is declared; the older file is the fallback for
+// releases from before the split.
+export const HERMES_FILES = ["hermes_state_common.py", "hermes_state.py"];
+
+// The number in `SCHEMA_VERSION = 32`.
+export function hermesSchemaVersion(source) {
+  const n = /^SCHEMA_VERSION\s*=\s*(\d+)\s*$/m.exec(String(source))?.[1];
+  return n ? Number(n) : null;
+}
+
+// Its state database carries its own schema_version, apart from Hermes's
+// version, so a release adds to it without any range here noticing. The
+// version at the head of its source must be one the schema's range takes.
+export function hermesFindings(version, schema = xenonetSchema(HERMES_DB)) {
+  const range = schema?.["x-xenonet"]?.vendorVersions;
+  if (version == null) return [];
+  if (range && satisfies(`${version}.0.0`, range)) return [];
+  return [{ source: HERMES_DB, kind: "version-out-of-range", severity: "change", path: "schema_version", variant: null, detail: `Hermes's source is at state schema ${version}, and XenoNet's schema reads ${range ?? "no versions"}`, origin: "types" }];
+}
+
+export async function inspectHermes() {
+  const s = steps();
+  const version = await s.run(
+    `read SCHEMA_VERSION from ${HERMES_REPO}`,
+    async () => {
+      for (const file of HERMES_FILES) {
+        try {
+          const v = hermesSchemaVersion(await githubFile(HERMES_REPO, file, "main"));
+          if (v != null) return v;
+        } catch {}
+      }
+      throw new Error(`none of ${HERMES_FILES.join(", ")} in ${HERMES_REPO} declares SCHEMA_VERSION`);
+    },
+    (v) => `state schema ${v}`,
+  );
+  return { steps: s.list, findings: hermesFindings(version), read: {}, info: version != null ? { typesFrom: `${HERMES_REPO} main, state schema ${version}` } : {} };
 }

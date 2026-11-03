@@ -504,6 +504,19 @@
       "properties": {
         "type": {
           "type": "string",
+          "const": "tools-used"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
           "const": "file-history-delta"
         }
       },

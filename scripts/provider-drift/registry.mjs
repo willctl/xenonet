@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { inspectAgentSdk, inspectClaudeCode } from "./inspect-claude.mjs";
 import { inspectCodex } from "./inspect-codex.mjs";
-import { inspectGeminiCli, inspectCopilotCli, inspectOpenCode } from "./inspect-native.mjs";
+import { inspectGeminiCli, inspectCopilotCli, inspectOpenCode, inspectHermes } from "./inspect-native.mjs";
 import { REPO } from "./common.mjs";
 
 const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(REPO, rel), "utf8"));
@@ -146,7 +146,9 @@ export const PROVIDERS = [
     // Every source but state-db and the stamp is read against Hermes's
     // version; those two carry versions of their own format.
     rangeSources: ["nous/hermes-agent/spawn-ledger", "nous/hermes-agent/gateway-state", "nous/hermes-agent/processes", "nous/hermes-agent/cron-jobs", "nous/hermes-agent/cron-ticker"],
-    notInspected: "Its files are written by a running Hermes with a model behind it. The check records the latest version, and whether the schemas' ranges take it.",
+    // Its state database's schema version, from its source.
+    inspect: inspectHermes,
+    notInspected: "Its files are written by a running Hermes with a model behind it, so none is run. The check records the latest version and whether the schemas' ranges take it, and reads the state database's schema version from its source (the other files carry no version of their own).",
   },
   // The providers XenoNet's experimental readers read (core/native/*.js).
   // `experimental` marks them in the report. None of them is run: each is
@@ -209,9 +211,15 @@ export const PROVIDERS = [
     id: "spacexai/grok-build",
     name: "Grok Build",
     sources: ["spacexai/grok-build/session-summary", "spacexai/grok-build/update-line", "spacexai/grok-build/usage", "spacexai/grok-build/subagent-meta"],
-    // Its releases on GitHub (tags like v1.0.50), which its installer
-    // downloads.
-    release: { github: "xai-org/grok-build" },
+    // The version files its installer and `grok update` read. The GitHub
+    // repository is a source mirror with no releases or tags.
+    release: {
+      feeds: {
+        stable: "https://storage.googleapis.com/grok-build-public-artifacts/cli/stable",
+        alpha: "https://storage.googleapis.com/grok-build-public-artifacts/cli/alpha",
+      },
+      tags: ["stable", "alpha"],
+    },
     notInspected:
       "Its session files are written by a signed-in grok with a model behind it, and none of them says Grok's version, so there's no range to check. Their formats are read from its source (docs/design/grok-build.md); the check records the latest version only.",
   },
