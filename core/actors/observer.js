@@ -9,7 +9,8 @@
 //                     are what you allowed, so the observer only adds how it
 //                     knows the actor; and whether its product is installed,
 //                     which keeps it listed however long it hasn't run
-//   say(id, …)        what it sees of it (presence and status), said when it
+//   say(id, …)        what it sees of it (presence, status, and the usage its
+//                     own records report), said when it
 //                     changes, and every 30 s besides while it's there, so
 //                     it stays heard from (lastSeen is when it last was); a
 //                     registered actor says its own status
@@ -100,14 +101,15 @@ export class Observer extends Block {
   // which lists it for a week (the placeholder of a product whose observer
   // you turned on before it was installed, or a product long gone). Once
   // its product is seen, it's listed.
-  say(id, { presence, status = null, at = this.clock.now() }) {
+  say(id, { presence, status = null, usage, at = this.clock.now() }) {
     if (!this.actors.has(id)) return false;
     if (!THERE.has(presence) && !THERE.has(this.actors.presence(id)) && this.actors.installed(id) === false) return false;
     const line = this.actors.isRegistered(id) ? undefined : status;
     const last = this.said.get(id);
-    if (last && last.presence === presence && last.status === line && (!THERE.has(presence) || at - last.at < KEEPALIVE_MS)) return false;
-    this.actors.report(id, { instance: "observed", presence, ...(line !== undefined ? { status: line } : {}), via: "observed", at });
-    this.said.set(id, { presence, status: line, at });
+    const usageKey = usage === undefined ? undefined : JSON.stringify(usage);
+    if (last && last.presence === presence && last.status === line && last.usage === usageKey && (!THERE.has(presence) || at - last.at < KEEPALIVE_MS)) return false;
+    this.actors.report(id, { instance: "observed", presence, ...(line !== undefined ? { status: line } : {}), ...(usage !== undefined ? { usage } : {}), via: "observed", at });
+    this.said.set(id, { presence, status: line, usage: usageKey, at });
     return true;
   }
 

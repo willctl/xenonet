@@ -223,3 +223,37 @@ test("each profile's files are its own", () => {
   assert.equal(readGateway(root).state, "missing");
   assert.equal(readGateway(work).gateway.state, "degraded");
 });
+
+test("the session database: a session says what it used and cost, by model too, and never its base URL or a task's name", () => {
+  const file = path.join(tmp(), "usage.db");
+  const db = stateDb(file, { usage: true });
+  db.session({ id: "s1", source: "tui", cwd: "/Users/ada/atlas", startedAt: T - 5 * MIN, activityAt: T - 10e3, activity: "executing tool: terminal" });
+  db.usage("s1", { model: "claude-sonnet-5-5", provider: "anthropic", mode: "api", tokens: [1000, 200, 4000, 50, 30], estimated: 0.31, actual: 0.4, status: "actual", source: "provider_response" });
+  db.modelUsage("s1", { model: "claude-sonnet-5-5", provider: "anthropic", mode: "api", tokens: [900, 150, 4000, 50, 30], actual: 0.36, status: "actual" });
+  db.modelUsage("s1", { model: "claude-haiku-5-5", provider: "anthropic", mode: "api", task: "title", tokens: [100, 50, 0, 0, 0], actual: 0.04, status: "actual" });
+  db.modelUsage("s1", { model: "claude-sonnet-5-5", provider: "anthropic", mode: "api", task: "compression", tokens: [100, 0, 0, 0, 0], actual: 0.01, status: "actual" });
+  db.session({ id: "s2", source: "cli", startedAt: T - 4 * MIN, activityAt: T - 20e3 });
+  db.usage("s2", { model: "gpt-5", provider: "openai-codex", mode: "subscription", status: "included", source: "none" });
+  db.close();
+  const r = readStateDb(file, { sinceMs: T - 10 * MIN });
+  assert.equal(r.state, "ok");
+  const by = Object.fromEntries(r.sessions.map((s) => [s.id, s]));
+  assert.deepEqual([by.s1.model, by.s1.billing_provider, by.s1.billing_mode, by.s1.input_tokens, by.s1.output_tokens, by.s1.cache_read_tokens, by.s1.cache_write_tokens, by.s1.reasoning_tokens, by.s1.estimated_cost_usd, by.s1.actual_cost_usd, by.s1.cost_status, by.s1.cost_source], ["claude-sonnet-5-5", "anthropic", "api", 1000, 200, 4000, 50, 30, 0.31, 0.4, "actual", "provider_response"]);
+  assert.deepEqual([by.s2.billing_mode, by.s2.cost_status, by.s2.actual_cost_usd], ["subscription", "included", null]);
+  // The tasks are summed away: two rows for the one model, a third for the other.
+  assert.deepEqual(r.modelUsage.map((m) => [m.session_id, m.model, m.billing_provider, m.input_tokens, m.actual_cost_usd]), [["s1", "claude-haiku-5-5", "anthropic", 100, 0.04], ["s1", "claude-sonnet-5-5", "anthropic", 1000, 0.37]]);
+  assert.ok(!JSON.stringify(r).includes(SECRET), "no title, base URL or task name");
+  assert.deepEqual(kinds("state-db"), []);
+});
+
+test("the session database: a layout without the usage columns or the per-model table reads as before, with no drift", () => {
+  const file = path.join(tmp(), "nousage.db");
+  const db = stateDb(file);
+  db.session({ id: "s1", source: "tui", startedAt: T - MIN, activityAt: T - 5e3 });
+  db.close();
+  const r = readStateDb(file, { sinceMs: T - 10 * MIN });
+  assert.equal(r.state, "ok");
+  assert.deepEqual(r.modelUsage, []);
+  assert.equal(r.sessions[0].billing_provider ?? null, null);
+  assert.deepEqual(kinds("state-db"), []);
+});

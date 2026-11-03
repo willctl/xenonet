@@ -325,6 +325,7 @@ impl NativeReader for Numbat {
                     model: r.model.as_deref(),
                     branch: r.branch.as_deref(),
                     subagent_of: r.parent_id.as_deref(),
+                    usage: None,
                     via: Via::Numbat,
                 }
                 .record()

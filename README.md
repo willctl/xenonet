@@ -431,8 +431,9 @@ gateway. Here is what's planned:
 - Cost. XenoNet will show usage and spend across Claude, OpenAI and other
   model APIs, by project, session and provider.
 - More sources. Besides Claude Code, Codex and Grok Build, XenoNet reads
-  OpenCode, Gemini CLI, Copilot CLI and Cursor sessions as an experiment,
-  and will read more agent apps.
+  OpenCode, Gemini CLI, Copilot CLI and Cursor sessions as an experiment
+  (an OpenCode session carries the cost, tokens and model OpenCode records
+  for it), and will read more agent apps.
 
 ## Related work
 

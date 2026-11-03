@@ -314,8 +314,74 @@ pub fn read_jobs(c: &mut dyn Calls, home: &str, version: Option<String>) -> Resu
 
 // ---------- a profile's state.db ----------
 
-const SESSION_COLUMNS: [&str; 12] =
-    ["id", "source", "parent_session_id", "started_at", "ended_at", "end_reason", "cwd", "git_repo_root", "last_activity_at", "last_activity_description", "archived", "hidden"];
+// The session columns, then what a session says it used and what that cost,
+// as Hermes totals it (never its title, system prompt, billing_base_url,
+// which names a host, or a task's name). The usage ones are missing in older
+// layouts, and none of them is drift.
+const SESSION_COLUMNS: [&str; 24] = [
+    "id",
+    "source",
+    "parent_session_id",
+    "started_at",
+    "ended_at",
+    "end_reason",
+    "cwd",
+    "git_repo_root",
+    "last_activity_at",
+    "last_activity_description",
+    "archived",
+    "hidden",
+    "model",
+    "billing_provider",
+    "billing_mode",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "estimated_cost_usd",
+    "actual_cost_usd",
+    "cost_status",
+    "cost_source",
+];
+// The same by model and provider within a session, summed over the tasks it
+// did, so a task's name is never read. Only in layouts from schema 20.
+const MODEL_USAGE_COLUMNS: [&str; 11] = [
+    "model",
+    "billing_provider",
+    "billing_mode",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "estimated_cost_usd",
+    "actual_cost_usd",
+    "cost_status",
+];
+
+// session_model_usage's rows for some sessions (a JSON array of ids), one per
+// session, model, provider and billing mode.
+fn model_usage_sql(cols: &[String]) -> String {
+    let has = |c: &str| cols.iter().any(|x| x == c);
+    let mut group = vec!["session_id", "model"];
+    group.extend(["billing_provider", "billing_mode"].into_iter().filter(|c| has(c)));
+    let mut select: Vec<String> = group.iter().map(ToString::to_string).collect();
+    for c in MODEL_USAGE_COLUMNS.iter().filter(|c| !group.contains(c)) {
+        if *c == "cost_status" {
+            if has(c) {
+                select.push("MAX(cost_status) AS cost_status".into());
+            }
+        } else if has(c) {
+            select.push(format!("SUM({c}) AS {c}"));
+        }
+    }
+    format!(
+        "SELECT {} FROM session_model_usage WHERE session_id IN (SELECT value FROM json_each(?)) GROUP BY {} ORDER BY session_id, model LIMIT 2000",
+        select.join(", "),
+        group.join(", ")
+    )
+}
 const MESSAGE_COLUMNS: [&str; 6] = ["id", "session_id", "role", "tool_name", "timestamp", "active"];
 const HEARTBEAT_COLUMNS: [&str; 4] = ["pid", "started_at", "last_heartbeat", "profile"];
 // The columns XenoNet can't do without: one that's gone is drift.
@@ -360,7 +426,7 @@ fn row(c: &mut dyn Calls, sql: &str, args: Vec<Arg>) -> Result<Value> {
 }
 
 fn empty(after_id: &Value) -> Value {
-    json!({ "version": null, "sessions": [], "messages": [], "toolPaths": [], "heartbeats": [], "lastId": after_id })
+    json!({ "version": null, "sessions": [], "messages": [], "toolPaths": [], "heartbeats": [], "modelUsage": [], "lastId": after_id })
 }
 
 fn with_state(state: &str, code: Option<Value>, rest: Value) -> Value {
@@ -391,7 +457,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
     let out = (|| -> Result<Value> {
         let src = source("stateDb");
         let mut has: Vec<(&str, Vec<String>)> = Vec::new();
-        for table in ["sessions", "messages", "gateway_heartbeats", "schema_version"] {
+        for table in ["sessions", "messages", "gateway_heartbeats", "schema_version", "session_model_usage"] {
             let cols = rows(c, &format!("PRAGMA table_info({table})"), vec![])?.iter().filter_map(|r| r.get("name").and_then(Value::as_str).map(str::to_string)).collect();
             has.push((table, cols));
         }
@@ -482,6 +548,13 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         }
         let sessions =
             rows(c, &format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
+        // Each of those sessions' use by model and provider, summed over its tasks.
+        let model_usage = if !sessions.is_empty() && has_col("session_model_usage", "session_id") && has_col("session_model_usage", "model") {
+            let ids: Vec<Value> = sessions.iter().map(|s| s.get("id").cloned().unwrap_or(Value::Null)).collect();
+            rows(c, &model_usage_sql(&cols("session_model_usage")), vec![Arg::text(xenonet_base::json::stringify(&Value::Array(ids), 0))])?
+        } else {
+            Vec::new()
+        };
         let heartbeats = if has_col("gateway_heartbeats", "pid") {
             rows(c, &format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])?
         } else {
@@ -491,14 +564,14 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
             Some(v) => json!([{ "version": xenonet_base::text::js_number(Some(&Value::String(v.clone()))) }]),
             None => json!([]),
         };
-        let record = json!({ "schema_version": schema_version, "sessions": sessions, "messages": messages, "tool_paths": tool_paths, "gateway_heartbeats": heartbeats });
+        let record = json!({ "schema_version": schema_version, "sessions": sessions, "messages": messages, "tool_paths": tool_paths, "gateway_heartbeats": heartbeats, "session_model_usage": model_usage });
         let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&record), version_arg(version.as_deref())])?.to_json();
         let checked = if checked.is_null() { json!({}) } else { checked };
         let arr = |k: &str| checked.get(k).filter(|v| !v.is_null()).cloned().unwrap_or(json!([]));
         // Archived compaction generations are history, not new work.
         let messages: Vec<Value> = arr("messages").as_array().cloned().unwrap_or_default().into_iter().filter(|m| m.get("active").and_then(Value::as_f64) != Some(0.0)).collect();
         Ok(
-            json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "lastId": last_id }),
+            json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "modelUsage": arr("session_model_usage"), "lastId": last_id }),
         )
     })();
     let _ = c.call("db", "close", vec![]);

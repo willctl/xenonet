@@ -103,11 +103,18 @@ const OLD = `
 // A session database at `file`, in the current layout or the old one, in
 // WAL mode as Hermes keeps it. Its helpers take times in epoch
 // milliseconds and write them as Hermes does, in seconds.
-export function stateDb(file, { layout = "current", version = layout === "current" ? 32 : 12 } = {}) {
+// `usage` adds the columns Hermes keeps a session's billing in, and the
+// per-model table (schema 20 on).
+export function stateDb(file, { layout = "current", version = layout === "current" ? 32 : 12, usage = false } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec(layout === "current" ? CURRENT : OLD);
+  if (usage && layout === "current") {
+    const cost = "input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0, cache_write_tokens INTEGER DEFAULT 0, reasoning_tokens INTEGER DEFAULT 0, estimated_cost_usd REAL, actual_cost_usd REAL, cost_status TEXT, cost_source TEXT";
+    for (const c of ["billing_provider TEXT", "billing_base_url TEXT", "billing_mode TEXT", ...cost.split(", ")]) db.exec(`ALTER TABLE sessions ADD COLUMN ${c}`);
+    db.exec(`CREATE TABLE session_model_usage (session_id TEXT NOT NULL, model TEXT NOT NULL, billing_provider TEXT, billing_base_url TEXT, billing_mode TEXT, task TEXT, api_call_count INTEGER DEFAULT 0, ${cost}, first_seen REAL, last_seen REAL)`);
+  }
   db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(version);
   if (layout === "current") db.prepare("INSERT INTO state_meta (key, value) VALUES (?, ?)").run("heartbeat:x", SECRET);
   const s = (ms) => (ms == null ? null : ms / 1000);
@@ -124,6 +131,15 @@ export function stateDb(file, { layout = "current", version = layout === "curren
     update(id, { endedAt, endReason, activityAt, activity } = {}) {
       if (endedAt !== undefined) db.prepare("UPDATE sessions SET ended_at = ?, end_reason = ? WHERE id = ?").run(s(endedAt), endReason ?? null, id);
       if (current && activityAt !== undefined) db.prepare("UPDATE sessions SET last_activity_at = ?, last_activity_description = ? WHERE id = ?").run(s(activityAt), activity ?? null, id);
+    },
+    // What Hermes totalled for a session (a usage layout): the made-up base
+    // URL is a host that must not leave the file.
+    usage(id, { model = null, provider = null, mode = null, tokens = [0, 0, 0, 0, 0], estimated = null, actual = null, status = null, source = null } = {}) {
+      db.prepare("UPDATE sessions SET model = ?, billing_provider = ?, billing_base_url = ?, billing_mode = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?, estimated_cost_usd = ?, actual_cost_usd = ?, cost_status = ?, cost_source = ? WHERE id = ?").run(model, provider, SECRET, mode, ...tokens, estimated, actual, status, source, id);
+    },
+    // One row of session_model_usage; a task's name is free text.
+    modelUsage(id, { model, provider = null, mode = null, task = "main", tokens = [0, 0, 0, 0, 0], estimated = null, actual = null, status = null }) {
+      db.prepare("INSERT INTO session_model_usage (session_id, model, billing_provider, billing_base_url, billing_mode, task, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost_usd, actual_cost_usd, cost_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, model, provider, SECRET, mode, task === "main" ? task : SECRET, ...tokens, estimated, actual, status);
     },
     // A message: an assistant's with tool calls ([{ name, args }]), a tool's
     // result (tool), or plain text, all with made-up content.

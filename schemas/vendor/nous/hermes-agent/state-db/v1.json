@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/state-db/v1.json",
   "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
   "title": "Hermes Agent's session database",
-  "description": "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: through 32, read by the columns PRAGMA table_info lists. Version 32 records additive structures introduced under 31; the metadata columns read here are unchanged.",
+  "description": "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: through 32, read by the columns PRAGMA table_info lists. Version 32 records additive structures introduced under 31; the metadata and usage columns read here are unchanged.",
   "type": "object",
   "properties": {
     "schema_version": {
@@ -96,6 +96,82 @@
               "number",
               "null"
             ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "billing_provider": {
+            "description": "Who billed it: anthropic, openrouter, nous… an open set; never billing_base_url, which names a host",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "billing_mode": {
+            "description": "api, subscription… an open set",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "output_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cache_read_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cache_write_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reasoning_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "actual_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cost_status": {
+            "description": "actual, estimated, included (covered by a subscription) or unknown; zero cost is not free unless this says actual",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cost_source": {
+            "description": "Where the price came from: provider_response, official_docs_snapshot, custom_contract, none…",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -104,7 +180,7 @@
         ],
         "additionalProperties": {}
       },
-      "description": "select id, source, parent_session_id, started_at, ended_at, end_reason, cwd, git_repo_root, last_activity_at, last_activity_description, archived, hidden from sessions, the columns that are there; never title, system_prompt, user_id, chat_id, display_name or origin_json"
+      "description": "select id, source, parent_session_id, started_at, ended_at, end_reason, cwd, git_repo_root, last_activity_at, last_activity_description, archived, hidden, model, billing_provider, billing_mode, the five token counts, estimated_cost_usd, actual_cost_usd, cost_status, cost_source from sessions, the columns that are there; never title, system_prompt, user_id, chat_id, display_name, origin_json or billing_base_url"
     },
     "messages": {
       "type": "array",
@@ -186,6 +262,88 @@
         "additionalProperties": {}
       },
       "description": "The path argument of write_file and patch calls in messages.tool_calls, taken out by SQLite (json_extract), so nothing else in a call leaves the database"
+    },
+    "session_model_usage": {
+      "description": "select session_id, model, billing_provider, billing_mode, sums of the token and cost columns, max(cost_status) from session_model_usage for those sessions, grouped by session, model, provider and mode: never task, which is free text, or billing_base_url",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "billing_provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "billing_mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "output_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cache_read_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cache_write_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reasoning_tokens": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "actual_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cost_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": {}
+      }
     },
     "gateway_heartbeats": {
       "type": "array",

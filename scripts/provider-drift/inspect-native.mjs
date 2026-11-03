@@ -137,6 +137,9 @@ export function drizzleTables(source, shared = "") {
 // XenoNet's columns against the tables: those it reads must be there, and
 // those it needs must be NOT NULL. The edits' tool and path are in
 // part.data's JSON, which the tables don't type, so only data is checked.
+// Properties of the session schema that SQLite takes out of one column.
+const FROM_COLUMN = { model_provider: "model", model_id: "model" };
+
 export function opencodeFindings(tables, schema = xenonetSchema(OPENCODE_DB)) {
   const findings = [];
   const add = (kind, severity, at, detail) => findings.push({ source: OPENCODE_DB, kind, severity, path: at, variant: null, detail, origin: "types" });
@@ -152,8 +155,8 @@ export function opencodeFindings(tables, schema = xenonetSchema(OPENCODE_DB)) {
     }
     const required = new Set(node?.required ?? []);
     for (const name of only ?? Object.keys(node?.properties ?? {})) {
-      const col = columns.get(name);
-      if (!col) add("removed", "change", `${table}.${name}`, "XenoNet reads this column, and OpenCode's source doesn't declare it any more");
+      const col = columns.get(table === "session" ? (FROM_COLUMN[name] ?? name) : name);
+      if (!col) add("removed", "change", `${table}.${FROM_COLUMN[name] ?? name}`, "XenoNet reads this column, and OpenCode's source doesn't declare it any more");
       else if (required.has(name) && !col.notNull) add("now-optional", "change", `${table}.${name}`, "XenoNet needs it; OpenCode's source says it may be NULL");
     }
     if (table === "part" && !columns.has("data")) add("removed", "change", "part.data", "XenoNet reads the edit tools' file paths from it, and OpenCode's source doesn't declare it any more");

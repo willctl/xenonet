@@ -28,7 +28,7 @@ const ID = "actor:hermes";
 // A machine with Hermes installed under a made-up home: Hermes.app and its
 // desktop backend running (unless `running` is false), the backend in the
 // spawn ledger and ticking, and the map's two projects.
-function machine({ running = true, nodes = NODES() } = {}) {
+function machine({ running = true, nodes = NODES(), usage = false } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-hermes-home-"));
   dirs.push(home);
   const root = hermesRoot(path.join(home, ".hermes"));
@@ -48,7 +48,7 @@ function machine({ running = true, nodes = NODES() } = {}) {
     setTicker(root, { at: T - 10e3, pid: host });
   }
   const observer = new HermesObserver({ actors, procs, home, env: {}, clock });
-  const db = stateDb(path.join(root, "state.db"));
+  const db = stateDb(path.join(root, "state.db"), { usage });
   databases.push(db);
   const look = async (at = clock.t) => {
     clock.t = at;
@@ -356,4 +356,31 @@ test("what it reads of Hermes's files: the sources hermes.md allows, and never i
   const observer = new HermesObserver({ actors: w.actors, procs: w.procs, home: w.home, env: {}, files, clock: w.clock });
   await observer.tick(T);
   assert.deepEqual([...new Set(read)].sort(), ["cron/jobs.json", "cron/ticker_heartbeat", "cron/ticker_last_success", "gateway_state.json", "hermes-agent/install-stamp.json", "processes.json", "spawn-ledger.json"]);
+});
+
+test("its sessions' own totals: tokens, cost and models added up on the actor, with subscriptions and unknown prices left unpriced, never as zero", async () => {
+  const w = machine({ usage: true });
+  w.db.session({ id: "s1", source: "desktop", cwd: ATLAS_DIR, repo: ATLAS_DIR, startedAt: T - 5 * MIN, activityAt: T - 5000, activity: "executing tool: terminal" });
+  w.db.usage("s1", { model: "claude-sonnet-5-5", provider: "anthropic", mode: "api", tokens: [1000, 200, 4000, 50, 30], estimated: 0.31, actual: 0.4, status: "actual" });
+  w.db.modelUsage("s1", { model: "claude-sonnet-5-5", provider: "anthropic", mode: "api", tokens: [900, 150, 4000, 50, 30], actual: 0.36, status: "actual" });
+  w.db.modelUsage("s1", { model: "claude-haiku-5-5", provider: "anthropic", mode: "api", task: "title", tokens: [100, 50, 0, 0, 0], actual: 0.04, status: "actual" });
+  w.db.session({ id: "s2", source: "cli", cwd: ATLAS_DIR, repo: ATLAS_DIR, startedAt: T - 4 * MIN, activityAt: T - 6000 });
+  w.db.usage("s2", { model: "gpt-5", provider: "openai-codex", mode: "subscription", tokens: [500, 100, 0, 0, 0], actual: 0, status: "included" });
+  w.db.session({ id: "s3", source: "cli", cwd: ATLAS_DIR, repo: ATLAS_DIR, startedAt: T - 3 * MIN, activityAt: T - 7000 });
+  w.db.usage("s3", { model: "local", provider: "ollama", mode: "api", tokens: [10, 5, 0, 0, 0], estimated: 0.02, status: "estimated" });
+  await w.look();
+  const u = w.snap().usage;
+  assert.equal(u.sessions, 3);
+  assert.equal(u.since, T);
+  assert.equal(u.costUsd, 0.4 + 0.02, "the actual price where Hermes has one, its estimate where that is all it has; the subscription's is none");
+  assert.equal(u.estimated, true);
+  assert.equal(u.unpriced, 1);
+  assert.deepEqual(u.tokens, { input: 1000 + 500 + 10, output: 200 + 100 + 5, reasoning: 30, cacheRead: 4000, cacheWrite: 50 });
+  assert.deepEqual(u.models.map((m) => [m.provider, m.model, m.mode, m.tokens, m.costUsd]), [["anthropic", "claude-sonnet-5-5", "api", 1050, 0.36], ["openai-codex", "gpt-5", "subscription", 600, null], ["anthropic", "claude-haiku-5-5", "api", 150, 0.04], ["ollama", "local", "api", 15, 0.02]].sort((a, b) => b[3] - a[3]));
+  assert.ok(!JSON.stringify([w.actors.list(), w.actors.events({ since: 0 })]).includes(SECRET), "no title, base URL or task name");
+  // A layout with no usage columns says nothing of usage.
+  const old = machine();
+  old.db.session({ id: "s1", source: "desktop", cwd: ATLAS_DIR, repo: ATLAS_DIR, startedAt: T - MIN, activityAt: T - 5000 });
+  await old.look();
+  assert.equal("usage" in old.snap(), false);
 });

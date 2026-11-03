@@ -18,13 +18,21 @@ const session = open({
   time_created: num.describe("Epoch milliseconds"),
   time_updated: num.describe("Epoch milliseconds"),
   time_archived: maybe(num),
+  cost: maybe(num).describe("What OpenCode totalled for the session, in USD; the 1.19 layout"),
+  tokens_input: maybe(num),
+  tokens_output: maybe(num),
+  tokens_reasoning: maybe(num),
+  tokens_cache_read: maybe(num),
+  tokens_cache_write: maybe(num),
+  model_provider: maybe(str).describe("model.providerID, taken out of the session's model JSON"),
+  model_id: maybe(str).describe("model.id, taken out of the session's model JSON"),
 });
 
 export const Db = vendor(
   "anomaly/opencode/db",
   1,
   open({
-    session: z.array(session).describe("select id, parent_id, directory, title, version, time_created, time_updated, time_archived from session"),
+    session: z.array(session).describe("select id, parent_id, directory, title, version, time_created, time_updated, time_archived, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, and the providerID and id of model from session"),
     edits: z
       .array(open({ session_id: str, time_created: num, tool: str, path: maybe(str) }))
       .describe("The file each edit, write and multiedit tool part names (data.state.input.filePath), and each apply_patch part's file headers, taken from part.data; nothing else in a part is kept"),

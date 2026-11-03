@@ -20,6 +20,14 @@ export const SOURCE = "anomaly/opencode/db";
 export const EDIT_TOOLS = [...APP.opencode.editTools];
 export const PATCH_TOOLS = ["apply_patch", "patch"];
 const SESSION_COLUMNS = ["id", "parent_id", "directory", "title", "version", "time_created", "time_updated", "time_archived"];
+// What a session says it used, apart from its identity: the cost OpenCode
+// totalled (USD) and the five token counts. All of them are NOT NULL in
+// the 1.19 layout, and missing in an older one.
+const USAGE_COLUMNS = ["cost", "tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write"];
+// session.model is JSON ({ id, providerID, variant }); only the two names
+// are taken out, by SQLite, so the rest of it never leaves the database.
+const modelSql = `CASE WHEN json_valid(model) AND json_type(model, '$.providerID') = 'text' THEN json_extract(model, '$.providerID') END AS model_provider,
+    CASE WHEN json_valid(model) AND json_type(model, '$.id') = 'text' THEN json_extract(model, '$.id') END AS model_id`;
 const NEEDED = { session: ["id", "directory", "time_created", "time_updated"], part: ["session_id", "time_created", "data"] };
 const EDITS_MAX = 5000;
 
@@ -96,7 +104,8 @@ export function readDb(file, { sinceMs = 0, editsSinceMs = sinceMs, open = (f) =
       else for (const c of needed) if (!has[t].has(c)) r.missing(`${t}[].${c}`, version);
     }
     if (!NEEDED.session.every((c) => has.session.has(c))) return { state: "unreadable", ...empty, version };
-    const cols = SESSION_COLUMNS.filter((c) => has.session.has(c));
+    const cols = [...SESSION_COLUMNS, ...USAGE_COLUMNS].filter((c) => has.session.has(c));
+    if (has.session.has("model")) cols.push(modelSql);
     const session = db.prepare(`SELECT ${cols.join(", ")} FROM session WHERE time_updated > ? ORDER BY time_updated DESC LIMIT ${SESSIONS_MAX}`).all(sinceMs).map((x) => ({ ...x }));
     const raw = NEEDED.part.every((c) => has.part.has(c)) ? db.prepare(editsSql).all(editsSinceMs).reverse() : [];
     const edits = [];
@@ -113,6 +122,20 @@ export function readDb(file, { sinceMs = 0, editsSinceMs = sinceMs, open = (f) =
       db.close();
     } catch {}
   }
+}
+
+// A session row's usage, as the session carries it: null when the row has
+// none of it (an older layout), else the cost in USD and the tokens, each
+// null where the row has no number. The cost is what OpenCode totalled for
+// the whole session, not today's.
+export function usageOf(s) {
+  const n = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+  const tokens = { input: n(s.tokens_input), output: n(s.tokens_output), reasoning: n(s.tokens_reasoning), cacheRead: n(s.tokens_cache_read), cacheWrite: n(s.tokens_cache_write) };
+  const provider = typeof s.model_provider === "string" && s.model_provider ? s.model_provider : null;
+  const model = typeof s.model_id === "string" && s.model_id ? s.model_id : null;
+  const costUsd = n(s.cost);
+  if (costUsd == null && provider == null && model == null && Object.values(tokens).every((v) => v == null)) return null;
+  return { costUsd, tokens, provider, model };
 }
 
 export class OpenCodeSessions extends NativeReader {
@@ -151,6 +174,7 @@ export class OpenCodeSessions extends NativeReader {
           createdAt: s.time_created,
           updatedAt: s.time_updated,
           archived: s.time_archived != null,
+          usage: usageOf(s),
           edits: new Map(),
         });
       }
@@ -174,7 +198,7 @@ export class OpenCodeSessions extends NativeReader {
   // a subagent's. Its edits are read from OpenCode's own records, so the
   // engine doesn't take them as observed.
   session(r) {
-    return runSession(r, { app: "opencode", title: r.title ?? titled("OpenCode", r.cwd), archived: r.archived, parentId: r.parentId });
+    return runSession(r, { app: "opencode", title: r.title ?? titled("OpenCode", r.cwd), archived: r.archived, parentId: r.parentId, model: r.usage?.model ?? null, usage: r.usage });
   }
 
   status() {

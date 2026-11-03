@@ -182,6 +182,45 @@ fn placeholder() -> Value {
     })
 }
 
+// The usage an observer reports (crates/xenonet-actors/src/hermes.rs), cut to
+// the snapshot's shape: numbers where numbers go, names clipped to 80
+// characters, five models. Null or a non-object is none.
+pub fn clean_usage(u: &Arg) -> Option<Value> {
+    if !matches!(u, Arg::Obj(_)) {
+        return None;
+    }
+    let num = |a: &Arg| match a {
+        Arg::Num(n) if n.is_finite() && *n >= 0.0 => *n,
+        _ => 0.0,
+    };
+    let cost = |a: &Arg| match a {
+        Arg::Num(n) if n.is_finite() && *n >= 0.0 => number(*n),
+        _ => Value::Null,
+    };
+    let name = |a: &Arg| match a {
+        Arg::Text(t) if !t.is_empty() => Value::String(String::from_utf16_lossy(&t.encode_utf16().take(80).collect::<Vec<u16>>())),
+        _ => Value::Null,
+    };
+    let t = u.field("tokens");
+    let models: Vec<Value> = match u.field("models") {
+        Arg::List(list) => list
+            .iter()
+            .take(5)
+            .map(|m| json!({ "provider": name(&m.field("provider")), "model": name(&m.field("model")), "mode": name(&m.field("mode")), "tokens": number(num(&m.field("tokens"))), "costUsd": cost(&m.field("costUsd")) }))
+            .collect(),
+        _ => Vec::new(),
+    };
+    Some(json!({
+        "since": number(num(&u.field("since"))),
+        "sessions": number(num(&u.field("sessions")).floor()),
+        "costUsd": cost(&u.field("costUsd")),
+        "estimated": u.field("estimated").truthy(),
+        "unpriced": number(num(&u.field("unpriced")).floor()),
+        "tokens": { "input": number(num(&t.field("input"))), "output": number(num(&t.field("output"))), "reasoning": number(num(&t.field("reasoning"))), "cacheRead": number(num(&t.field("cacheRead"))), "cacheWrite": number(num(&t.field("cacheWrite"))) },
+        "models": models,
+    }))
+}
+
 fn opt(n: Option<f64>) -> Value {
     n.map_or(Value::Null, number)
 }
@@ -224,6 +263,9 @@ pub struct Actor {
     pub status: Option<String>,
     pub status_at: Option<f64>,
     pub needs_you: Option<Value>,
+    /// What the app's own records say its sessions used (`clean_usage`);
+    /// an observer's to say again, so never stored.
+    pub usage: Option<Value>,
     pub seq: f64,
     pub instances: Vec<(String, Instance)>,
     pub acted_at: Option<f64>,
@@ -474,6 +516,7 @@ impl Actors {
                 status: r.text("status").map(str::to_string),
                 status_at: r.num("status_at"),
                 needs_you: None,
+                usage: None,
                 seq: r.num("seq").unwrap_or(0.0),
                 instances: Vec::new(),
                 acted_at: None,
@@ -597,6 +640,7 @@ impl Actors {
                 status: None,
                 status_at: None,
                 needs_you: None,
+                usage: None,
                 seq: 0.0,
                 instances: Vec::new(),
                 acted_at: None,
@@ -735,6 +779,7 @@ impl Actors {
             a.status = None;
             a.status_at = None;
             a.needs_you = None;
+            a.usage = None;
             a.acted_at = None;
             a.cwd = Value::Null;
             a.recent.clear();
@@ -936,6 +981,10 @@ impl Actors {
                 a.needs_you = Some(json!({ "kind": xenonet_engine::store::js_text(&n.field("kind")), "text": text, "since": since }));
             }
             _ => a.needs_you = None,
+        }
+        match o.field("usage") {
+            Arg::Undef => {}
+            u => a.usage = clean_usage(&u),
         }
         let via = o.field("via");
         let status = o.field("status");
@@ -1295,6 +1344,9 @@ impl Actors {
         o.insert("status".into(), a.status.clone().map_or(Value::Null, Value::String));
         if let Some(n) = &a.needs_you {
             o.insert("needsYou".into(), n.clone());
+        }
+        if let Some(u) = &a.usage {
+            o.insert("usage".into(), u.clone());
         }
         o.insert("capabilities".into(), Value::Array(a.capabilities.clone()));
         o.insert("targets".into(), Value::Array(targets));

@@ -659,12 +659,25 @@ not in a XenoNet schema.
     `desktop-installation.json`;
   - Electron's cookies and storage;
   - the nonce in `backend-ownership.json`.
+- **What the observer reads for usage.** From `sessions`: `model`,
+  `billing_provider`, `billing_mode`, the five token counts,
+  `estimated_cost_usd`, `actual_cost_usd`, `cost_status` and `cost_source`.
+  From `session_model_usage` (schema 20 on), summed over each session's tasks
+  by model, provider and mode: the same token, cost and status columns. A
+  price counts only when `cost_status` is `actual` or `estimated`;
+  `included` (a subscription's) and `unknown` leave the session unpriced.
+  The observer adds up the sessions it has seen at work since it started and
+  reports them as the actor's `usage` (`actor/snapshot/v1`): tokens, the cost
+  Hermes totalled, whether any of it is Hermes's own estimate, the sessions
+  left unpriced, and the five models that used the most tokens. Older
+  layouts without these columns report none, and that is not drift.
 - **Content in `state.db`:**
   - in `messages`: `content`, `reasoning`, `reasoning_content`,
     `reasoning_details`, `codex_reasoning_items`, `codex_message_items`,
     `api_content` and `display_metadata`;
   - `tool_calls`, apart from the `path` extraction if the owner allows it;
-  - in `sessions`: `system_prompt` and `title`;
+  - in `sessions`: `system_prompt`, `title` and `billing_base_url`, which names a host;
+  - in `session_model_usage`: `task`, which is free text, and `billing_base_url`;
   - the `system_prompts` table;
   - the values in `state_meta`;
   - `gateway_routing.entry_json` and `delivery_obligations`.

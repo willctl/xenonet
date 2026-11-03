@@ -340,6 +340,7 @@ impl NativeReader for CopilotCli {
                     model: None,
                     branch: r.branch.as_deref(),
                     subagent_of: None,
+                    usage: None,
                     via: Via::Reader,
                 }
                 .record()

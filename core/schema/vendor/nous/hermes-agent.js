@@ -34,6 +34,35 @@ const session = open({
   last_activity_description: maybe(str).describe("A machine phrase from fixed templates (executing tool: terminal), matched and put into XenoNet's own words, never shown"),
   archived: maybe(num),
   hidden: maybe(num),
+  model: maybe(str),
+  billing_provider: maybe(str).describe("Who billed it: anthropic, openrouter, nous… an open set; never billing_base_url, which names a host"),
+  billing_mode: maybe(str).describe("api, subscription… an open set"),
+  input_tokens: maybe(num),
+  output_tokens: maybe(num),
+  cache_read_tokens: maybe(num),
+  cache_write_tokens: maybe(num),
+  reasoning_tokens: maybe(num),
+  estimated_cost_usd: maybe(num),
+  actual_cost_usd: maybe(num),
+  cost_status: maybe(str).describe("actual, estimated, included (covered by a subscription) or unknown; zero cost is not free unless this says actual"),
+  cost_source: maybe(str).describe("Where the price came from: provider_response, official_docs_snapshot, custom_contract, none…"),
+});
+
+// A session's use of one model through one provider, summed over its tasks
+// (session_model_usage; schema 20 on).
+const modelUsage = open({
+  session_id: str,
+  model: maybe(str),
+  billing_provider: maybe(str),
+  billing_mode: maybe(str),
+  input_tokens: maybe(num),
+  output_tokens: maybe(num),
+  cache_read_tokens: maybe(num),
+  cache_write_tokens: maybe(num),
+  reasoning_tokens: maybe(num),
+  estimated_cost_usd: maybe(num),
+  actual_cost_usd: maybe(num),
+  cost_status: maybe(str),
 });
 
 export const StateDb = vendor(
@@ -41,19 +70,20 @@ export const StateDb = vendor(
   1,
   open({
     schema_version: z.array(open({ version: num })).describe("select version from schema_version"),
-    sessions: z.array(session).describe("select id, source, parent_session_id, started_at, ended_at, end_reason, cwd, git_repo_root, last_activity_at, last_activity_description, archived, hidden from sessions, the columns that are there; never title, system_prompt, user_id, chat_id, display_name or origin_json"),
+    sessions: z.array(session).describe("select id, source, parent_session_id, started_at, ended_at, end_reason, cwd, git_repo_root, last_activity_at, last_activity_description, archived, hidden, model, billing_provider, billing_mode, the five token counts, estimated_cost_usd, actual_cost_usd, cost_status, cost_source from sessions, the columns that are there; never title, system_prompt, user_id, chat_id, display_name, origin_json or billing_base_url"),
     messages: z
       .array(open({ id: num, session_id: str, role: str, tool_name: maybe(str), timestamp: num, active: maybe(num), calls: maybe(num).describe("1 when the row holds tool calls (so isn't a reply), from tool_calls IS NOT NULL") }))
       .describe("select id, session_id, role, tool_name, timestamp, active, (tool_calls IS NOT NULL) AS calls from messages: what happened and when, never content"),
     tool_paths: z
       .array(open({ id: num, session_id: str, timestamp: num, tool: str, path: maybe(str) }))
       .describe("The path argument of write_file and patch calls in messages.tool_calls, taken out by SQLite (json_extract), so nothing else in a call leaves the database"),
+    session_model_usage: z.array(modelUsage).optional().describe("select session_id, model, billing_provider, billing_mode, sums of the token and cost columns, max(cost_status) from session_model_usage for those sessions, grouped by session, model, provider and mode: never task, which is free text, or billing_base_url"),
     gateway_heartbeats: z.array(open({ pid: num, started_at: maybe(num), last_heartbeat: num, profile: maybe(str) })).describe("select pid, started_at, last_heartbeat, profile from gateway_heartbeats; never host, which is the machine's name"),
   }),
   {
     title: "Hermes Agent's session database",
     description:
-      "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: through 32, read by the columns PRAGMA table_info lists. Version 32 records additive structures introduced under 31; the metadata columns read here are unchanged.",
+      "The metadata XenoNet reads from ~/.hermes/state.db (and each profile's), opened read only for a moment, with named columns. The version is the database's own schema_version: through 32, read by the columns PRAGMA table_info lists. Version 32 records additive structures introduced under 31; the metadata and usage columns read here are unchanged.",
     versions: "<=32",
   },
 );

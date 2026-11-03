@@ -59,6 +59,16 @@ export const Session = define(
     observed: z.enum(["numbat", "gateway"]).optional().describe("How XenoNet knows of it: numbat's event records, or an actor's report through the gateway"),
     reportedBy: nstr.optional().describe("The actor that reported it through the gateway"),
     reader: z.enum(["experimental"]).optional().describe("Read from the harness's own records by an experimental reader (core/native)"),
+
+    // What the app's own records say the session used.
+    usage: obj({
+      costUsd: z.number().nullable().describe("What the app totalled for the whole session, in USD; null where it doesn't say. Not XenoNet's estimate at API prices"),
+      tokens: obj({ input: z.number().nullable(), output: z.number().nullable(), reasoning: z.number().nullable(), cacheRead: z.number().nullable(), cacheWrite: z.number().nullable() }),
+      provider: nstr,
+      model: nstr,
+    })
+      .optional()
+      .describe("Reported by the app's own records (OpenCode's session row), whole session"),
   }),
   {
     title: "Session",

@@ -158,6 +158,7 @@ impl ReportedRuns {
                     model: None,
                     branch: None,
                     subagent_of: None,
+                    usage: None,
                     via: Via::Gateway { actor: &r.actor },
                 }
                 .record()

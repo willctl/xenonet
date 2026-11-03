@@ -42,6 +42,8 @@ Hermes Agent, from Nous Research, is `actor:hermes`, and `actor:hermes-<profile>
 
 XenoNet reads Hermes's spawn ledger, gateway state, scheduler ticker, scheduled jobs and background processes. From Hermes's session database, XenoNet reads which sessions are active and where, which tools ran when, and the path of each file Hermes writes. SQLite takes that path out of the call, so nothing else in the call leaves the database.
 
+The same database says what each session used and cost. XenoNet adds that up on Hermes's actor: the tokens, the cost Hermes totalled, and the models and providers that used the most. It shows the price Hermes states, not an estimate at API prices. A session covered by a subscription or with no price counts as unpriced, never as free. The totals are those of the sessions XenoNet has seen at work since it started watching. It reads only the model, the provider, the billing mode and the counts: never a title, a task's name or the address of a custom endpoint.
+
 Those edits count in the warnings a session gets before an edit. XenoNet marks them as observed, since it inferred them.
 
 Hermes's status is in XenoNet's words, such as "Running a command in atlas-api". The sessions it starts with `claude -p` or `codex exec` get a beam from it.

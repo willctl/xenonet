@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { OpenCodeSessions, readDb, patchFiles, sessionIdOf, localId, openCodeId, opencodeDbPath } from "../core/native/opencode.js";
+import { OpenCodeSessions, readDb, usageOf, patchFiles, sessionIdOf, localId, openCodeId, opencodeDbPath } from "../core/native/opencode.js";
 import { sessionIdOf as numbatSessionIdOf } from "../core/numbat.js";
 import { observedSessions } from "../core/reported-runs.js";
 import { Engine } from "../core/engine/engine.js";
@@ -205,5 +205,43 @@ test("a session about to edit a file an OpenCode session edited is warned, and c
     await assert.rejects(engine.send(C, { to: O, text: "hi" }), /can't read messages: XenoNet reads its records but has no way to message it/);
   } finally {
     w.done();
+  }
+});
+
+test("a session says what it cost and used, from OpenCode's own row, and its model's two names are all that's taken from the model JSON", () => {
+  const t = setup({
+    usage: true,
+    sessions: [
+      { id: A, directory: "/w/atlas", created: NOW - 600e3, updated: NOW - 60e3, usage: { cost: 0.42, tokens: [1000, 200, 30, 4000, 50], model: JSON.stringify({ id: "claude-sonnet-5-5", providerID: "anthropic", variant: "high", secret: "SECRET MODEL FIELD" }) } },
+      { id: B, directory: "/w/borealis", created: NOW - 500e3, updated: NOW - 50e3, usage: { cost: 0, tokens: [0, 0, 0, 0, 0], model: "not json" } },
+    ],
+  });
+  try {
+    const got = readDb(t.file, { sinceMs: NOW - 86400e3 });
+    assert.equal(got.state, "ok");
+    assert.ok(!JSON.stringify(got).includes("SECRET MODEL FIELD"));
+    const reader = new OpenCodeSessions({ file: t.file, clock: { now: () => NOW } }).read(NOW);
+    const sessions = Object.fromEntries(reader.sessions().map((s) => [s.rawId, s]));
+    assert.deepEqual(sessions[A].usage, { costUsd: 0.42, tokens: { input: 1000, output: 200, reasoning: 30, cacheRead: 4000, cacheWrite: 50 }, provider: "anthropic", model: "claude-sonnet-5-5" });
+    assert.equal(sessions[A].model, "claude-sonnet-5-5");
+    // A session that used nothing says so, with no model: zero is a number, not a gap.
+    assert.deepEqual(sessions[B].usage, { costUsd: 0, tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, provider: null, model: null });
+    for (const s of Object.values(sessions)) assert.ok(Session.safeParse(s).success, JSON.stringify(Session.safeParse(s).error?.issues));
+  } finally {
+    t.done();
+  }
+});
+
+test("a database from before the usage columns gives sessions with no usage, and no drift", () => {
+  const t = setup({ sessions: [{ id: A, directory: "/w/atlas", created: NOW - 600e3, updated: NOW - 60e3 }] });
+  try {
+    const reader = new OpenCodeSessions({ file: t.file, clock: { now: () => NOW } }).read(NOW);
+    const [s] = reader.sessions();
+    assert.equal("usage" in s, false);
+    assert.equal(s.model, null);
+    assert.equal(usageOf({}), null);
+    assert.equal(usageOf({ cost: -1, tokens_input: "x" }), null);
+  } finally {
+    t.done();
   }
 });

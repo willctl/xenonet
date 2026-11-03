@@ -73,6 +73,17 @@ export const ActorSnapshot = define(
       .nullable()
       .optional()
       .describe("When it waits on you, for the alert strip; null or left out otherwise"),
+    usage: obj({
+      since: ms.describe("When XenoNet began adding up the sessions below"),
+      sessions: z.int().nonnegative().describe("The sessions its own records show at work since then, counted by their whole totals"),
+      costUsd: z.number().nullable().describe("What the app totalled for them, in USD: the sessions it priced; null when it priced none. Not XenoNet's estimate at API prices"),
+      estimated: z.boolean().describe("Some of costUsd is the app's own estimate, not what the provider billed"),
+      unpriced: z.int().nonnegative().describe("Sessions with no price: covered by a subscription, or the app doesn't say"),
+      tokens: obj({ input: z.number(), output: z.number(), reasoning: z.number(), cacheRead: z.number(), cacheWrite: z.number() }),
+      models: z.array(obj({ provider: nstr, model: nstr, mode: nstr, tokens: z.number(), costUsd: z.number().nullable() })).max(5).describe("The five that used the most tokens"),
+    })
+      .optional()
+      .describe("What the app's own records say its sessions used and cost (Hermes's session database); left out when it keeps none"),
     capabilities: z.array(Capability),
     targets: z
       .array(

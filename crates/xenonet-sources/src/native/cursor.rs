@@ -246,6 +246,7 @@ impl NativeReader for Cursor {
                     model: None,
                     branch: None,
                     subagent_of: None,
+                    usage: None,
                     via: Via::Reader,
                 }
                 .record()

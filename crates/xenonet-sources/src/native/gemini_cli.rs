@@ -322,6 +322,7 @@ impl NativeReader for GeminiCli {
                     model: None,
                     branch: None,
                     subagent_of: r.parent_id.as_deref(),
+                    usage: None,
                     via: Via::Reader,
                 }
                 .record()
