@@ -79,7 +79,7 @@ const OPENCODE_DB = "anomaly/opencode/db";
 // they spread in from elsewhere.
 export const OPENCODE_FILES = { tables: "packages/core/src/session/sql.ts", shared: "packages/core/src/database/schema.sql.ts" };
 
-async function githubFile(repo, file, ref, { fetchImpl = fetch, token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN } = {}) {
+export async function githubFile(repo, file, ref, { fetchImpl = fetch, token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN } = {}) {
   const url = `https://api.github.com/repos/${repo}/contents/${file}?ref=${encodeURIComponent(ref)}`;
   const res = await fetchImpl(url, {
     headers: { "user-agent": "xenonet-provider-drift (+https://github.com/willctl/xenonet)", accept: "application/vnd.github.raw", ...(token ? { authorization: `Bearer ${token}` } : {}) },

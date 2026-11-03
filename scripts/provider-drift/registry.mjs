@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { inspectAgentSdk, inspectClaudeCode } from "./inspect-claude.mjs";
 import { inspectCodex } from "./inspect-codex.mjs";
+import { inspectGrok } from "./inspect-grok.mjs";
 import { inspectGeminiCli, inspectCopilotCli, inspectOpenCode, inspectHermes } from "./inspect-native.mjs";
 import { REPO } from "./common.mjs";
 
@@ -220,8 +221,10 @@ export const PROVIDERS = [
       },
       tags: ["stable", "alpha"],
     },
+    // The Rust structs its files are written from, in its source.
+    inspect: inspectGrok,
     notInspected:
-      "Its session files are written by a signed-in grok with a model behind it, and none of them says Grok's version, so there's no range to check. Their formats are read from its source (docs/design/grok-build.md); the check records the latest version only.",
+      "No run is made: its session files are written by a signed-in grok with a model behind it, and none of them says Grok's version, so there's no range to check. The structs it writes them from are read from its source (docs/design/grok-build.md) instead.",
   },
 ];
 

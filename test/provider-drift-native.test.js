@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { schemaFromDts, tsToSchema, declarationsOf } from "../scripts/provider-drift/types.mjs";
 import { typeFindings } from "../scripts/provider-drift/common.mjs";
+import { rustStruct, grokFindings } from "../scripts/provider-drift/inspect-grok.mjs";
 import { drizzleTables, opencodeFindings, hermesSchemaVersion, hermesFindings } from "../scripts/provider-drift/inspect-native.mjs";
 import { PROVIDERS, providerById } from "../scripts/provider-drift/registry.mjs";
 
@@ -125,4 +126,76 @@ test("Hermes's state schema version is read from its source and held to the sche
   assert.deepEqual(hermesFindings(32), []);
   assert.deepEqual(hermesFindings(null), []);
   assert.deepEqual(hermesFindings(33).map((f) => [f.kind, f.severity]), [["version-out-of-range", "change"]]);
+});
+
+// Trimmed copies of Grok Build's Rust structs (xai-org/grok-build).
+const GROK = {
+  persistence: `
+/// doc
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct Summary {
+    pub info: Info,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    pub session_summary: String,
+    #[serde(default)]
+    pub num_chat_messages: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub git_remotes: Vec<String>,
+    #[serde(flatten)]
+    pub(crate) agent: PersistedAgentSelection,
+}`,
+  info: "pub struct Info {\n    pub id: acp::SessionId,\n    pub cwd: String,\n}",
+  usage: `
+#[serde(rename_all = "camelCase")]
+pub struct SessionUsageFile {
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub session: UsageSummary,
+    #[serde(default)]
+    pub turns: Vec<TurnUsage>,
+    #[serde(skip)]
+    last_incoming_turn: Option<u32>,
+}
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummary {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub model_usage: IndexMap<String, UsageSummary>,
+}
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsage {
+    pub turn_number: u32,
+    #[serde(flatten)]
+    pub usage: UsageSummary,
+}`,
+  subagent: "pub(crate) struct SubagentMeta {\n    pub subagent_id: String,\n    pub parent_session_id: String,\n    pub child_session_id: String,\n    pub subagent_type: String,\n}",
+};
+
+test("Grok Build's structs are read as serde writes them, and compared with the schemas", () => {
+  const summary = rustStruct(GROK.persistence, "Summary");
+  assert.deepEqual([...summary.fields.keys()], ["info", "agent_id", "session_summary", "num_chat_messages", "parent_session_id", "session_kind", "git_remotes"]);
+  assert.equal(summary.fields.get("info").optional, false);
+  assert.equal(summary.fields.get("agent_id").optional, true);
+  assert.deepEqual(summary.flatten, ["PersistedAgentSelection"]);
+  const usage = rustStruct(GROK.usage, "SessionUsageFile");
+  assert.deepEqual([...usage.fields.keys()], ["sessionId", "session", "turns"]);
+  assert.deepEqual([...rustStruct(GROK.usage, "UsageSummary").fields.keys()], ["inputTokens", "modelUsage"]);
+  assert.equal(rustStruct(GROK.usage, "Missing"), null);
+
+  // Against the schemas on disk, with the fields these copies don't have
+  // reported: optional ones as info, never as a change.
+  const found = grokFindings(GROK);
+  assert.ok(found.length > 0);
+  assert.deepEqual(found.filter((f) => f.severity === "change"), []);
+  assert.ok(found.some((f) => f.path === "turns[].turnId"));
+  // A field gone from a struct is reported, and so is a struct gone.
+  const gone = grokFindings({ ...GROK, subagent: "pub struct Other { pub x: u8 }" });
+  assert.deepEqual(gone.filter((f) => f.severity === "change").map((f) => f.path), ["SubagentMeta"]);
 });
