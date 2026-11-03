@@ -214,6 +214,13 @@ input schemas, context resources and templates, and recent session usage.
 XenoNet labels missing metadata and never shows the credentials in a
 server's configuration.
 
+Claude desktop reaches its connectors, such as Spotify or PostHog, by a uuid.
+XenoNet shows each one under the name Claude desktop gives it, read from the
+connector list in desktop's session records. A uuid server desktop doesn't
+list gets the name its own instructions open with, or the service its results
+link to and name in their text. With nothing to go on it shows "Connector" and
+the start of the uuid. The inspector keeps the full id.
+
 ### Joins your machines into one network
 
 A XenoNet network joins the machines you use. The sessions on each see the

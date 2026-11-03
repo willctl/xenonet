@@ -569,7 +569,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         row("tags", node.tags?.length ? node.tags.map((t) => `<span class="tag">${h(t)}</span>`).join(" ") : null) +
         row("also called", node.aliases?.length ? node.aliases.map((a) => h(a)).join(", ") : null, "wrap");
     } else if (node.kind === "resource") {
-      const users = live ? live.sessions.filter((s) => (s.host ?? null) === (node.host ?? null) && s.mcp.some((m) => m.server === node.name)) : [];
+      const users = live ? live.sessions.filter((s) => (s.host ?? null) === (node.host ?? null) && s.mcp.some((m) => m.server === (node.server ?? node.name))) : [];
       grid =
         row("last call", node.lastActivity ? timeAgo(node.lastActivity) : "—") +
         row("used by", users.length ? users.map((s) => (index.get(s.id) ? `<a href="#" data-goto="${h(s.id)}">${h(index.get(s.id).title)}</a>` : "")).filter(Boolean).join("<br>") : "—");

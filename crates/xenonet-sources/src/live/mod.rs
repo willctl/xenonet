@@ -7,6 +7,7 @@
 //! gives the `TypeError` lines.rs gives, which the tailer counts as an
 //! error, as live.js's catch did.
 
+pub mod names;
 pub mod telemetry;
 
 use crate::lines::{opt_prop, TypeError};

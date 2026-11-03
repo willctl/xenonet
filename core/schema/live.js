@@ -149,7 +149,16 @@ export const LiveSnapshot = define(
         }),
       )
       .describe("Sessions on the map that both edited a file in the last ten minutes"),
-    resources: z.array(obj({ server: z.string(), ts: ms })).max(8),
+    resources: z
+      .array(
+        obj({
+          server: z.string(),
+          ts: ms,
+          name: z.string().optional().describe("What an MCP server with a uuid for an id is called: its name in Claude desktop, or what its instructions or results say"),
+          nameSource: z.enum(["declared", "instructions", "results"]).optional().describe("Where the name came from: Claude desktop's list of connectors, or the server's own instructions or results"),
+        }),
+      )
+      .max(8),
     status: obj({ watching: z.boolean(), files: count, lines: count, errors: count }),
   }),
   {

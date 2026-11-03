@@ -168,7 +168,9 @@ const PageNode = obj({
 const ResourceNode = obj({
   id: z.string().regex(hosted("resource:")),
   kind: z.literal("resource"),
-  name: z.string().describe("The MCP server"),
+  name: z.string().describe("What the shared system is called: the MCP server, or for a server whose id is a uuid the name it says it is, or \"Connector\" and the start of the id"),
+  server: z.string().optional().describe("The MCP server's id, when name is something else"),
+  nameSource: z.enum(["declared", "instructions", "results"]).optional().describe("Where a name that isn't the server's id came from"),
   ...placed,
   ...rolled,
   ...remote,

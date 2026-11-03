@@ -397,3 +397,37 @@ test("a provider's refusal ends the turn, is in the feed as one, and is told onc
   assert.equal(live.sessions.get(`codex:${CODEX_ID}`).turn.active, false);
   fs.rmSync(f.root, { recursive: true, force: true });
 });
+
+test("a server with a uuid for an id is named from what its results say", async () => {
+  const f = setup();
+  const ts = new Date().toISOString();
+  const id = "5c1e4a90-27b3-4d6f-9a08-3b7e61d2f4c8";
+  const rows = Array.from({ length: 4 }, (_, i) => `Tunebox track ${i}: https://open.tunebox.com/track/${i} cover https://i.tbcdn.co/image/${i}`).join("\n");
+  fs.writeFileSync(
+    f.claudeFile,
+    line({ type: "user", timestamp: ts, message: { role: "user", content: "play something" } }) +
+      line({ type: "assistant", timestamp: ts, message: { id: "msg_1", model: "claude-x", content: [{ type: "tool_use", id: "tu1", name: `mcp__${id}__search`, input: {} }] } }) +
+      line({ type: "user", timestamp: ts, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu1", content: rows }] } }),
+  );
+  const live = new LiveTelemetry({ claudeRoot: f.claudeRoot, codexRoot: f.codexRoot, claudeDesktopDir: null });
+  await live.start();
+  live.stop();
+  assert.deepEqual(live.snapshot().resources.map(({ server, name, nameSource }) => ({ server, name, nameSource })), [{ server: id, name: "Tunebox", nameSource: "results" }]);
+  fs.rmSync(f.root, { recursive: true, force: true });
+});
+
+test("a connector Claude desktop names keeps that name over what its results say", async () => {
+  const f = setup();
+  const ts = new Date().toISOString();
+  const id = "5c1e4a90-27b3-4d6f-9a08-3b7e61d2f4c8";
+  fs.writeFileSync(
+    f.claudeFile,
+    line({ type: "user", timestamp: ts, message: { role: "user", content: "play something" } }) +
+      line({ type: "assistant", timestamp: ts, message: { id: "msg_1", model: "claude-x", content: [{ type: "tool_use", id: "tu1", name: `mcp__${id}__search`, input: {} }] } }),
+  );
+  const live = new LiveTelemetry({ claudeRoot: f.claudeRoot, codexRoot: f.codexRoot, claudeDesktopDir: null, connectors: () => new Map([[id, "Tunebox"]]) });
+  await live.start();
+  live.stop();
+  assert.deepEqual(live.snapshot().resources.map(({ server, name, nameSource }) => ({ server, name, nameSource })), [{ server: id, name: "Tunebox", nameSource: "declared" }]);
+  fs.rmSync(f.root, { recursive: true, force: true });
+});

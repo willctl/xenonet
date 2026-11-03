@@ -162,3 +162,30 @@ test("a session's project is the deepest one holding its folder, never one that 
   assert.equal(parent("native:codex:np"), `project:${pathKey(`${root}/labs/geofence/tools`)}`);
   assert.equal(parent("claude:loose"), "zone:/home/me/projects/anywhere");
 });
+
+test("a shared system shows as its name; a uuid shows as the name it says it is, or its first characters", () => {
+  const uuid = "5c1e4a90-27b3-4d6f-9a08-3b7e61d2f4c8";
+  const other = "a9d3f0b2-6e41-4c57-8b12-77c0e5a49d36";
+  const g = buildGraph({
+    projectsDir: "/home/me/Projects",
+    projects: [],
+    sessions: [],
+    resources: [
+      { server: "firefox", ts: 1 },
+      { server: uuid, ts: 2, name: "Tunebox", nameSource: "results" },
+      { server: other, ts: 3 },
+    ],
+    now,
+    windows,
+  });
+  const node = (server) => g.nodes.find((n) => n.id === `resource:${server}`);
+  assert.deepEqual(node("firefox"), { ...node("firefox"), name: "firefox", lastActivity: 1 });
+  assert.equal("server" in node("firefox"), false, "a name someone gave needs no second field");
+  assert.equal(node(uuid).name, "Tunebox");
+  assert.equal(node(uuid).server, uuid, "the id stays findable");
+  assert.equal(node(uuid).nameSource, "results");
+  assert.equal(node(other).name, "Connector a9d3f0b2");
+  assert.equal(node(other).server, other);
+  assert.equal("nameSource" in node(other), false);
+  assert.ok(g.links.some((l) => l.target === `resource:${uuid}` && l.kind === "resource"), "beams still land on the id");
+});

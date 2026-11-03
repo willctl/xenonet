@@ -14,6 +14,7 @@ import { cleanTitle, renamable } from "./rename.js";
 import { buildGraph } from "./graph.js";
 import { actionsFor } from "./open.js";
 import { LiveTelemetry } from "./live.js";
+import { createConnectors } from "./desktop-connectors.js";
 import { fetchClaudeUsage } from "./claude-usage.js";
 import { RepoWatch } from "./git.js";
 import { IdentityWatch } from "./identities.js";
@@ -132,6 +133,7 @@ export class XenoNetState extends EventEmitter {
       claudeUsage: config.claudeUsage ? () => fetchClaudeUsage() : null,
       home: config.homeDir,
       contextServer: config.wikiServer,
+      connectors: createConnectors({ dir: config.claudeDesktopDir }),
     });
     this.blocks.add(this.live.tailer, { source: "live" });
     this.blocks.add(claudeLines);

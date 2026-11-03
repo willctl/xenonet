@@ -14,6 +14,7 @@ use xenonet_base::ids::normalize_remote;
 use xenonet_base::json::number;
 use xenonet_base::paths::{base_name, is_under, path_key, scratch_zone, tilde};
 use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_sources::live::names::{is_opaque, short_name};
 
 fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.as_object().and_then(|m| m.get(k))
@@ -336,10 +337,26 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         if g.has(&id) {
             continue;
         }
-        g.set(
-            &id,
-            obj(json!({ "id": id, "kind": "resource", "name": get(r, "server").cloned().unwrap_or(Value::Null), "lastActivity": get(r, "ts").cloned().unwrap_or(Value::Null) })),
-        );
+        // A uuid for an id shows as the name the server says it is, or the
+        // start of the uuid; the id stays the node's, so beams and the
+        // inspector find it.
+        let server = get(r, "server").cloned().unwrap_or(Value::Null);
+        let name = match get(r, "name").filter(|n| !n.is_null()) {
+            Some(name) => name.clone(),
+            None => server.as_str().filter(|s| is_opaque(s)).map_or_else(|| server.clone(), |s| Value::String(short_name(s))),
+        };
+        let mut node = Map::new();
+        node.insert("id".into(), Value::String(id.clone()));
+        node.insert("kind".into(), Value::String("resource".into()));
+        node.insert("name".into(), name.clone());
+        if name != server {
+            node.insert("server".into(), server);
+        }
+        if let Some(source) = get(r, "nameSource").filter(|s| truthy(Some(s))) {
+            node.insert("nameSource".into(), source.clone());
+        }
+        node.insert("lastActivity".into(), get(r, "ts").cloned().unwrap_or(Value::Null));
+        g.set(&id, obj(Value::Object(node)));
         g.link("core", &id, "resource");
     }
 
