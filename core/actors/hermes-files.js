@@ -200,6 +200,14 @@ export function readJobs(home, { version = null, files = fs } = {}) {
 // ---------- a profile's state.db ----------
 
 const SESSION_COLUMNS = ["id", "source", "parent_session_id", "started_at", "ended_at", "end_reason", "cwd", "git_repo_root", "last_activity_at", "last_activity_description", "archived", "hidden"];
+// What a session says it used and what that cost, as Hermes totals it
+// (never its title, system prompt, billing_base_url, which names a host,
+// or a task's name). Missing in older layouts; none is drift.
+const USAGE_COLUMNS = ["model", "billing_provider", "billing_mode", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "estimated_cost_usd", "actual_cost_usd", "cost_status", "cost_source"];
+// The same by model and provider within a session (a session can switch
+// models or fall back), summed over the tasks it did, so a task's name is
+// never read. Only in layouts from schema 20.
+const MODEL_USAGE_COLUMNS = ["model", "billing_provider", "billing_mode", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "estimated_cost_usd", "actual_cost_usd", "cost_status"];
 const MESSAGE_COLUMNS = ["id", "session_id", "role", "tool_name", "timestamp", "active"];
 const HEARTBEAT_COLUMNS = ["pid", "started_at", "last_heartbeat", "profile"];
 // The columns XenoNet can't do without: one that's gone is drift.
@@ -235,6 +243,15 @@ const toolPathsSql = (withTime) => `
     CASE WHEN json_valid(args) THEN CASE WHEN json_type(args, '$.path') = 'text' THEN json_extract(args, '$.path') END END AS path
   FROM named WHERE tool IN (${EDIT_TOOLS.map((t) => `'${t}'`).join(", ")}) ORDER BY id`;
 
+// session_model_usage's rows for some sessions (a JSON array of ids), one
+// per session, model, provider and billing mode.
+const modelUsageSql = (cols) => {
+  const sum = (c) => (cols.has(c) ? `SUM(${c}) AS ${c}` : null);
+  const group = ["session_id", "model", ...["billing_provider", "billing_mode"].filter((c) => cols.has(c))];
+  const select = [...group, ...MODEL_USAGE_COLUMNS.filter((c) => !group.includes(c)).map((c) => (c === "cost_status" ? (cols.has(c) ? "MAX(cost_status) AS cost_status" : null) : sum(c))).filter(Boolean)];
+  return `SELECT ${select.join(", ")} FROM session_model_usage WHERE session_id IN (SELECT value FROM json_each(?)) GROUP BY ${group.join(", ")} ORDER BY session_id, model LIMIT 2000`;
+};
+
 const plain = (rows) => rows.map((r) => ({ ...r }));
 
 // What's new in a profile's session database since the last read: the
@@ -245,7 +262,7 @@ const plain = (rows) => rows.map((r) => ({ ...r }));
 // heartbeats, lastId }. `open` opens the file read only (tests give their
 // own).
 export function readStateDb(file, { afterId = null, sinceMs, sessionIds = [], open = (f) => new DatabaseSync(f, { readOnly: true }), files = fs } = {}) {
-  const empty = { version: null, sessions: [], messages: [], toolPaths: [], heartbeats: [], lastId: afterId };
+  const empty = { version: null, sessions: [], messages: [], toolPaths: [], heartbeats: [], modelUsage: [], lastId: afterId };
   if (!files.existsSync(file)) return { state: "missing", ...empty };
   let db;
   try {
@@ -256,7 +273,7 @@ export function readStateDb(file, { afterId = null, sinceMs, sessionIds = [], op
   const stateDb = reader(SOURCE.stateDb);
   try {
     const columns = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
-    const has = { sessions: columns("sessions"), messages: columns("messages"), gateway_heartbeats: columns("gateway_heartbeats"), schema_version: columns("schema_version") };
+    const has = { sessions: columns("sessions"), messages: columns("messages"), gateway_heartbeats: columns("gateway_heartbeats"), schema_version: columns("schema_version"), session_model_usage: columns("session_model_usage") };
     const version = has.schema_version.has("version") ? cleanVersion(String(db.prepare("SELECT max(version) AS v FROM schema_version").get()?.v ?? "")) : null;
     for (const [table, needed] of Object.entries(NEEDED)) {
       if (!has[table].size) stateDb.missing(table, version);
@@ -285,10 +302,12 @@ export function readStateDb(file, { afterId = null, sinceMs, sessionIds = [], op
     const active = has.sessions.has("last_activity_at") ? "COALESCE(last_activity_at, started_at)" : "started_at";
     const ended = has.sessions.has("ended_at");
     const where = [`id IN (SELECT value FROM json_each(?))`, ...(ended ? [`(ended_at IS NULL AND ${active} > ?)`, `ended_at > ?`] : [`${active} > ?`])];
-    const sessions = plain(db.prepare(`SELECT ${pick(SESSION_COLUMNS, "sessions").join(", ")} FROM sessions WHERE ${where.join(" OR ")} ORDER BY started_at DESC LIMIT 500`).all(JSON.stringify(ids), since, ...(ended ? [since] : [])));
+    const sessions = plain(db.prepare(`SELECT ${pick([...SESSION_COLUMNS, ...USAGE_COLUMNS], "sessions").join(", ")} FROM sessions WHERE ${where.join(" OR ")} ORDER BY started_at DESC LIMIT 500`).all(JSON.stringify(ids), since, ...(ended ? [since] : [])));
+    // Each of those sessions' use by model and provider, summed over its tasks.
+    const modelUsage = sessions.length && has.session_model_usage.has("session_id") && has.session_model_usage.has("model") ? plain(db.prepare(modelUsageSql(has.session_model_usage)).all(JSON.stringify(sessions.map((x) => x.id)))) : [];
     const heartbeats = has.gateway_heartbeats.has("pid") ? plain(db.prepare(`SELECT ${pick(HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")} FROM gateway_heartbeats`).all()) : [];
 
-    const checked = stateDb.check({ schema_version: version != null ? [{ version: Number(version) }] : [], sessions, messages, tool_paths: toolPaths, gateway_heartbeats: heartbeats }, { version }) ?? {};
+    const checked = stateDb.check({ schema_version: version != null ? [{ version: Number(version) }] : [], sessions, messages, tool_paths: toolPaths, gateway_heartbeats: heartbeats, session_model_usage: modelUsage }, { version }) ?? {};
     return {
       state: "ok",
       version,
@@ -297,6 +316,7 @@ export function readStateDb(file, { afterId = null, sinceMs, sessionIds = [], op
       messages: (checked.messages ?? []).filter((m) => m.active !== 0),
       toolPaths: checked.tool_paths ?? [],
       heartbeats: checked.gateway_heartbeats ?? [],
+      modelUsage: checked.session_model_usage ?? [],
       lastId,
     };
   } catch (err) {

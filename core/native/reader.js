@@ -102,7 +102,7 @@ export const titled = (name, cwd) => `${name}${cwd ? ` in ${pathStyle(cwd).basen
 // A run as session/v1, in the order every reader writes one (as the Rust's
 // RunSession does), then how XenoNet knows of it: by default from an
 // experimental reader of the app's own records.
-export const runSession = (r, { app, title, archived = false, model = null, branch = null, parentId = null, via = { reader: "experimental" } }) => ({
+export const runSession = (r, { app, title, archived = false, model = null, branch = null, parentId = null, usage = null, via = { reader: "experimental" } }) => ({
   id: r.id,
   app,
   rawId: r.rawId,
@@ -117,6 +117,7 @@ export const runSession = (r, { app, title, archived = false, model = null, bran
   parentId,
   parentKind: parentId ? "subagent" : null,
   ...via,
+  ...(usage ? { usage } : {}),
 });
 
 // What the engine reads of a run, in the shape of a live session's: when

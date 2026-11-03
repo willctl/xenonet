@@ -94,6 +94,25 @@ const running = (pid) => {
   }
 };
 
+// The usage an observer reports (core/actors/hermes.js), cut to the
+// snapshot's shape: numbers where numbers go, names clipped, five models.
+const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+const cost = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+const name = (v) => (typeof v === "string" && v ? v.slice(0, 80) : null);
+export function cleanUsage(u) {
+  if (!u || typeof u !== "object") return null;
+  const t = u.tokens ?? {};
+  return {
+    since: num(u.since),
+    sessions: Math.floor(num(u.sessions)),
+    costUsd: cost(u.costUsd),
+    estimated: !!u.estimated,
+    unpriced: Math.floor(num(u.unpriced)),
+    tokens: { input: num(t.input), output: num(t.output), reasoning: num(t.reasoning), cacheRead: num(t.cacheRead), cacheWrite: num(t.cacheWrite) },
+    models: (Array.isArray(u.models) ? u.models : []).slice(0, 5).map((m) => ({ provider: name(m?.provider), model: name(m?.model), mode: name(m?.mode), tokens: num(m?.tokens), costUsd: cost(m?.costUsd) })),
+  };
+}
+
 const json = (v) => (v == null ? null : JSON.stringify(v));
 const parse = (s, fallback) => {
   try {
@@ -380,7 +399,7 @@ export class Actors extends EventEmitter {
       this.store.forgetActor(a.slug);
       a.instances.clear();
       a.targets.clear();
-      Object.assign(a, { presence: "unknown", presenceSince: null, lastSeen: null, status: null, statusAt: null, needsYou: null, actedAt: null, cwd: null, recent: [] });
+      Object.assign(a, { presence: "unknown", presenceSince: null, lastSeen: null, status: null, statusAt: null, needsYou: null, usage: null, actedAt: null, cwd: null, recent: [] });
       this.#save(a);
     });
     this.#changed();
@@ -471,7 +490,7 @@ export class Actors extends EventEmitter {
   // for it. `leaseMs`: for an instance with no heartbeat that says it's
   // there only now and then (a remote actor's reads), how long its word
   // holds before it's out of sight.
-  report(id, { instance = "main", presence, status, needsYou, heartbeatMs, leaseMs, pid, cwd, via, at = this.now() } = {}) {
+  report(id, { instance = "main", presence, status, needsYou, usage, heartbeatMs, leaseMs, pid, cwd, via, at = this.now() } = {}) {
     const a = this.#need(id);
     // A presence kept across a restart gives way to the first source that
     // speaks: the same instance carries on from it, and any other replaces it.
@@ -495,6 +514,7 @@ export class Actors extends EventEmitter {
     a.lastSeen = Math.max(a.lastSeen ?? 0, at);
     a.dirty = true;
     if (needsYou !== undefined) a.needsYou = needsYou ? { kind: String(needsYou.kind), text: statusLine(needsYou.text).status || "Waiting for you", since: needsYou.since ?? at } : null;
+    if (usage !== undefined) a.usage = cleanUsage(usage);
     this.store.transaction(() => {
       this.#settle(a, at, via);
       if (status !== undefined) this.#status(a, status, { via, at });
@@ -703,6 +723,7 @@ export class Actors extends EventEmitter {
       heartbeatMs: a.heartbeatMs,
       status: a.status,
       ...(a.needsYou ? { needsYou: { ...a.needsYou } } : {}),
+      ...(a.usage ? { usage: a.usage } : {}),
       capabilities: a.capabilities,
       targets,
       recent: a.recent.map((e) => ({ ...e })),

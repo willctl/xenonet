@@ -55,6 +55,8 @@ fn text(a: &Arg) -> String {
 struct Said {
     presence: Arg,
     status: Arg,
+    /// The usage it last said, as JSON, to tell a change.
+    usage: Option<String>,
     at: f64,
 }
 
@@ -203,14 +205,16 @@ impl Observer {
         Ok(())
     }
 
-    /// Presence and a status in XenoNet's words (`o`: presence, status,
-    /// at). Whether it said it.
+    /// Presence, a status in XenoNet's words and the usage its own records
+    /// report (`o`: presence, status, usage, at). Whether it said it.
     pub fn say(&self, c: &mut dyn Calls, id: &str, o: &Arg) -> Result<bool> {
         let presence = o.field("presence");
         let status = match o.field("status") {
             Arg::Undef => Arg::Null,
             v => v,
         };
+        let usage = o.field("usage");
+        let usage_key = (usage != Arg::Undef).then(|| xenonet_base::json::stringify(&usage.to_json(), 0));
         let at = now(c, &o.field("at"))?;
         if !c.call("actors", "has", vec![Arg::text(id)])?.truthy() {
             return Ok(false);
@@ -220,7 +224,7 @@ impl Observer {
         }
         let line = if c.call("actors", "isRegistered", vec![Arg::text(id)])?.truthy() { Arg::Undef } else { status };
         if let Some((_, last)) = self.s().said.iter().find(|(k, _)| k == id) {
-            if eq(&last.presence, &presence) && eq(&last.status, &line) && (!there(&presence) || at - last.at < KEEPALIVE_MS) {
+            if eq(&last.presence, &presence) && eq(&last.status, &line) && last.usage == usage_key && (!there(&presence) || at - last.at < KEEPALIVE_MS) {
                 return Ok(false);
             }
         }
@@ -228,10 +232,13 @@ impl Observer {
         if line != Arg::Undef {
             r.push(("status".into(), line.clone()));
         }
+        if usage != Arg::Undef {
+            r.push(("usage".into(), usage));
+        }
         r.push(("via".into(), Arg::text("observed")));
         r.push(("at".into(), Arg::Num(at)));
         c.call("actors", "report", vec![Arg::text(id), Arg::Obj(r)])?;
-        let said = Said { presence, status: line, at };
+        let said = Said { presence, status: line, usage: usage_key, at };
         let mut s = self.s();
         match s.said.iter_mut().find(|(k, _)| k == id) {
             Some(slot) => slot.1 = said,

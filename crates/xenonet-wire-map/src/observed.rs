@@ -316,6 +316,7 @@ mod tests {
                 model: None,
                 branch: None,
                 subagent_of: None,
+                usage: None,
                 via: Via::Reader,
             }
             .record()]

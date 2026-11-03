@@ -25,6 +25,9 @@ export const openCodeId = (id) => native.openCodeId(id);
 // The files an apply_patch text names, from its headers only.
 export const patchFiles = (text) => native.opencodePatchFiles(text);
 
+// A session row's usage, null when the row has none.
+export const usageOf = (row) => native.opencodeUsageOf(row ?? null);
+
 // vendor.js's reader for the database, got when Rust says (after the
 // database opened), as readDb got it.
 function vendorOf() {

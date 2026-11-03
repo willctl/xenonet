@@ -49,6 +49,57 @@
               "number",
               "null"
             ]
+          },
+          "cost": {
+            "description": "What OpenCode totalled for the session, in USD; the 1.19 layout",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens_input": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens_output": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens_reasoning": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens_cache_read": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens_cache_write": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "model_provider": {
+            "description": "model.providerID, taken out of the session's model JSON",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_id": {
+            "description": "model.id, taken out of the session's model JSON",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -60,7 +111,7 @@
         ],
         "additionalProperties": {}
       },
-      "description": "select id, parent_id, directory, title, version, time_created, time_updated, time_archived from session"
+      "description": "select id, parent_id, directory, title, version, time_created, time_updated, time_archived, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, and the providerID and id of model from session"
     },
     "edits": {
       "type": "array",

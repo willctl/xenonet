@@ -333,6 +333,16 @@ pub fn opencode_patch_files(text: MaybeJson) -> Vec<String> {
     opencode::patch_files(text.0.as_ref())
 }
 
+/// A session row's usage (the shim's usageOf): null when the row has none.
+#[napi(js_name = "opencodeUsageOf")]
+pub fn opencode_usage_of(row: MaybeJson) -> Jv {
+    let row = row.0.unwrap_or(Value::Null);
+    match opencode::usage_of(&row).1 {
+        Some(u) => jv(u),
+        None => Jv::Json(Value::Null),
+    }
+}
+
 #[napi(js_name = "opencodeDbPath")]
 pub fn opencode_db_path(home: String, xdg_data_home: Option<String>, named: Option<String>) -> String {
     opencode::opencode_db_path(&home, xdg_data_home.as_deref(), named.as_deref())

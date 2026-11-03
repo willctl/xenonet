@@ -267,6 +267,81 @@
       "enum": [
         "experimental"
       ]
+    },
+    "usage": {
+      "description": "Reported by the app's own records (OpenCode's session row), whole session",
+      "type": "object",
+      "properties": {
+        "costUsd": {
+          "description": "What the app totalled for the whole session, in USD; null where it doesn't say. Not XenoNet's estimate at API prices",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "output": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "reasoning": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "cacheRead": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "cacheWrite": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "input",
+            "output",
+            "reasoning",
+            "cacheRead",
+            "cacheWrite"
+          ],
+          "additionalProperties": {}
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "costUsd",
+        "tokens",
+        "provider",
+        "model"
+      ],
+      "additionalProperties": {}
     }
   },
   "required": [

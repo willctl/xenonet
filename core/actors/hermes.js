@@ -54,6 +54,9 @@ const REPLAY_MS = 10 * 60e3;
 const HISTORY_MS = 3600e3;
 const DAY_MS = 24 * 3600e3;
 const PROFILES_MS = 60e3;
+// Hermes's cost_status words for a price it stands behind. "included" is a
+// subscription's, "unknown" is none: neither is a price of zero.
+const PRICED = new Set(["actual", "estimated"]);
 const RUNNING_GATEWAY = new Set(["starting", "running", "degraded", "draining"]);
 // The purposes in the ledger whose process hosts the agent, so the process
 // check must know it as Hermes's (the doctor's self-test).
@@ -120,6 +123,36 @@ function stampOf(files, ...paths) {
     .join("|");
 }
 
+// A row's tokens and price, as Hermes totals them: the price only where
+// cost_status says Hermes stands behind it (actual, or its own estimate);
+// "included" (a subscription) and "unknown" give none, never zero.
+const n = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+function usageRow(r) {
+  const priced = PRICED.has(r.cost_status);
+  const actual = typeof r.actual_cost_usd === "number" && r.actual_cost_usd >= 0 ? r.actual_cost_usd : null;
+  const estimate = typeof r.estimated_cost_usd === "number" && r.estimated_cost_usd >= 0 ? r.estimated_cost_usd : null;
+  const costUsd = !priced ? null : r.cost_status === "actual" ? actual ?? estimate : estimate ?? actual;
+  return {
+    provider: typeof r.billing_provider === "string" && r.billing_provider ? r.billing_provider : null,
+    model: typeof r.model === "string" && r.model ? r.model : null,
+    mode: typeof r.billing_mode === "string" && r.billing_mode ? r.billing_mode : null,
+    input: n(r.input_tokens),
+    output: n(r.output_tokens),
+    reasoning: n(r.reasoning_tokens),
+    cacheRead: n(r.cache_read_tokens),
+    cacheWrite: n(r.cache_write_tokens),
+    costUsd,
+    estimated: costUsd != null && (r.cost_status === "estimated" || actual == null),
+  };
+}
+// Whether a session row carries any usage at all (the older layouts don't).
+const usageOfRow = (s) => (["input_tokens", "output_tokens", "cost_status", "billing_provider", "model"].some((c) => s[c] != null) ? usageRow(s) : null);
+// A session's rows of session_model_usage, or null when it has none.
+const modelsOf = (rows, id) => {
+  const mine = (rows ?? []).filter((r) => r.session_id === id).map(usageRow);
+  return mine.length ? mine : null;
+};
+
 export class HermesObserver extends Observer {
   // `home`: the folder Hermes's root is in (~). `procs`: the process
   // table (core/procs.js). `env`: for HERMES_HOME.
@@ -166,7 +199,7 @@ export class HermesObserver extends Observer {
         // The actor's name: "Hermes", and a named profile's in brackets when
         // it's plain enough to show.
         title: name === "default" ? "Hermes" : /^[A-Za-z0-9][\w .-]{0,31}$/.test(name) ? `Hermes (${name})` : "Hermes (a profile)",
-        db: { stamp: null, lastId: null, read: false },
+        db: { stamp: null, lastId: null, read: false, since: null },
         sessions: new Map(),
         lastTool: new Map(),
       };
@@ -386,7 +419,7 @@ export class HermesObserver extends Observer {
       presence = "offline";
       status = gateway?.state === "startup_failed" ? "Its gateway failed to start" : null;
     }
-    this.say(p.id, { presence, status, at });
+    this.say(p.id, { presence, status, usage: this.#usage(p, at), at });
 
     // Where it works: its sessions' places, and its jobs' folders.
     for (const s of active) this.touch(p.id, this.#placeOfSession(s), "works-on", at);
@@ -397,6 +430,44 @@ export class HermesObserver extends Observer {
       const kind = j.status === "ok" ? "finished" : ["error", "delivery_failed", "blocked_config"].includes(j.status) ? "failed" : null;
       if (kind) this.happened(p.id, { ref: `job:${j.id}:${j.lastRunAt}`, kind, target: j.workdir && path.isAbsolute(j.workdir) ? this.actors.placeOf(j.workdir) : null, subject: "job", at: Math.min(j.lastRunAt, at) });
     }
+  }
+
+  // What its sessions' own rows say they used and cost, added up: the
+  // sessions seen at work since the observer began (their whole totals, as
+  // Hermes keeps them), or undefined while the database hasn't been read.
+  #usage(p, at) {
+    if (!p.db.read) return undefined;
+    p.db.since ??= at;
+    const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+    const byModel = new Map();
+    let costUsd = null;
+    let estimated = false;
+    let unpriced = 0;
+    let sessions = 0;
+    for (const s of p.sessions.values()) {
+      if (!s.usage || s.hidden) continue;
+      sessions++;
+      const rows = s.models?.length ? s.models : [s.usage];
+      for (const r of rows) {
+        tokens.input += r.input;
+        tokens.output += r.output;
+        tokens.reasoning += r.reasoning;
+        tokens.cacheRead += r.cacheRead;
+        tokens.cacheWrite += r.cacheWrite;
+        const key = `${r.provider}\u0000${r.model}\u0000${r.mode}`;
+        const m = byModel.get(key) ?? byModel.set(key, { provider: r.provider, model: r.model, mode: r.mode, tokens: 0, costUsd: null }).get(key);
+        m.tokens += r.input + r.output;
+        if (r.costUsd != null) m.costUsd = (m.costUsd ?? 0) + r.costUsd;
+      }
+      if (s.usage.costUsd == null) unpriced++;
+      else {
+        costUsd = (costUsd ?? 0) + s.usage.costUsd;
+        if (s.usage.estimated) estimated = true;
+      }
+    }
+    if (!sessions) return null;
+    const models = [...byModel.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 5);
+    return { since: p.db.since, sessions, costUsd, estimated, unpriced, tokens, models };
   }
 
   // New rows of a profile's database: sessions kept current, its tools
@@ -419,6 +490,8 @@ export class HermesObserver extends Observer {
         archived: !!s.archived,
         hidden: !!s.hidden,
         lastMessageAt: was?.lastMessageAt ?? null,
+        usage: usageOfRow(s),
+        models: modelsOf(fresh.modelUsage, s.id) ?? was?.models ?? null,
       });
     }
     const sessionOf = (id) => p.sessions.get(id) ?? null;

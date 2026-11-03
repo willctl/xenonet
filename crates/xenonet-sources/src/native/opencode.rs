@@ -24,6 +24,13 @@ pub fn edit_tools() -> &'static [String] {
 }
 pub const PATCH_TOOLS: [&str; 2] = ["apply_patch", "patch"];
 const SESSION_COLUMNS: [&str; 8] = ["id", "parent_id", "directory", "title", "version", "time_created", "time_updated", "time_archived"];
+/// What a session says it used: the cost OpenCode totalled (USD) and the
+/// five token counts. NOT NULL in the 1.19 layout, missing in an older one.
+const USAGE_COLUMNS: [&str; 6] = ["cost", "tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write"];
+/// session.model is JSON ({ id, providerID, variant }); only the two names
+/// are taken out, by SQLite, so the rest of it never leaves the database.
+const MODEL_SQL: &str = "CASE WHEN json_valid(model) AND json_type(model, '$.providerID') = 'text' THEN json_extract(model, '$.providerID') END AS model_provider,
+    CASE WHEN json_valid(model) AND json_type(model, '$.id') = 'text' THEN json_extract(model, '$.id') END AS model_id";
 const NEEDED_SESSION: [&str; 4] = ["id", "directory", "time_created", "time_updated"];
 const NEEDED_PART: [&str; 3] = ["session_id", "time_created", "data"];
 const EDITS_MAX: usize = 5000;
@@ -240,7 +247,10 @@ fn read_open(db: &mut dyn Db, vendor: &mut dyn Vendor, since_ms: f64, edits_sinc
     if !NEEDED_SESSION.iter().all(|c| session.has(c)) {
         return Ok(Read { version, ..Read::empty("unreadable") });
     }
-    let cols: Vec<&str> = SESSION_COLUMNS.iter().copied().filter(|c| session.has(c)).collect();
+    let mut cols: Vec<&str> = SESSION_COLUMNS.iter().chain(USAGE_COLUMNS.iter()).copied().filter(|c| session.has(c)).collect();
+    if session.has("model") {
+        cols.push(MODEL_SQL);
+    }
     let sql = format!("SELECT {} FROM session WHERE time_updated > ? ORDER BY time_updated DESC LIMIT {SESSIONS_MAX}", cols.join(", "));
     let sessions = db.all(&sql, Some(since_ms)).map_err(drop)?;
     let mut raw = if NEEDED_PART.iter().all(|c| part.has(c)) { db.all(&edits_sql(), Some(edits_since_ms)).map_err(drop)? } else { Vec::new() };
@@ -315,7 +325,41 @@ pub struct Run {
     pub created_at: Stamp,
     pub updated_at: Stamp,
     pub archived: bool,
+    /// The model's name and the usage, as the session carries them.
+    pub model: Option<String>,
+    pub usage: Option<Out>,
     pub edits: Edits,
+}
+
+/// A session row's usage: None when the row has none of it, else the cost
+/// in USD and the tokens, each null where the row has no number. The cost
+/// is what OpenCode totalled for the whole session, not today's. Also the
+/// model's name.
+pub fn usage_of(s: &Value) -> (Option<String>, Option<Out>) {
+    let n = |k: &str| field(s, k).and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.0);
+    let name = |k: &str| str_of(field(s, k)).filter(|v| !v.is_empty()).map(str::to_string);
+    let (provider, model) = (name("model_provider"), name("model_id"));
+    let tokens = [n("tokens_input"), n("tokens_output"), n("tokens_reasoning"), n("tokens_cache_read"), n("tokens_cache_write")];
+    let cost = n("cost");
+    if cost.is_none() && provider.is_none() && model.is_none() && tokens.iter().all(Option::is_none) {
+        return (None, None);
+    }
+    let usage = Out::Obj(vec![
+        ("costUsd", Out::opt_num(cost)),
+        (
+            "tokens",
+            Out::Obj(vec![
+                ("input", Out::opt_num(tokens[0])),
+                ("output", Out::opt_num(tokens[1])),
+                ("reasoning", Out::opt_num(tokens[2])),
+                ("cacheRead", Out::opt_num(tokens[3])),
+                ("cacheWrite", Out::opt_num(tokens[4])),
+            ]),
+        ),
+        ("provider", Out::opt_str(provider.as_deref())),
+        ("model", Out::opt_str(model.as_deref())),
+    ]);
+    (model, Some(usage))
 }
 
 // for…of over what the check gave back: an array's items, a string's
@@ -364,6 +408,7 @@ impl OpenCode {
         for s in items(&got.sessions, "sessions")? {
             let Some(raw) = str_of(field(&s, "id")) else { continue };
             let id = session_id_of(raw);
+            let (model, usage) = usage_of(&s);
             let run = Run {
                 id: id.clone(),
                 raw_id: raw.to_string(),
@@ -373,6 +418,8 @@ impl OpenCode {
                 created_at: Stamp::Raw(field(&s, "time_created").cloned()),
                 updated_at: Stamp::Raw(field(&s, "time_updated").cloned()),
                 archived: field(&s, "time_archived").is_some_and(|v| !v.is_null()),
+                model,
+                usage,
                 edits: Edits::new(),
             };
             runs.insert(&id, run);
@@ -432,9 +479,10 @@ impl NativeReader for OpenCode {
                     created_at: r.created_at.out(),
                     updated_at: r.updated_at.out(),
                     archived: r.archived,
-                    model: None,
+                    model: r.model.as_deref(),
                     branch: None,
                     subagent_of: r.parent_id.as_deref(),
+                    usage: r.usage.clone(),
                     via: Via::Reader,
                 }
                 .record()
@@ -455,6 +503,7 @@ impl NativeReader for OpenCode {
                     ("createdAt", r.created_at.out()),
                     ("updatedAt", r.updated_at.out()),
                     ("archived", Out::bool(r.archived)),
+                    ("usage", r.usage.clone().unwrap_or_else(Out::null)),
                     ("edits", edits_out(&r.edits)),
                 ])
             })
@@ -465,6 +514,19 @@ impl NativeReader for OpenCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_row_says_what_it_used_and_a_bare_row_says_nothing() {
+        let row = json!({ "cost": 0.42, "tokens_input": 1000, "tokens_output": 200, "tokens_reasoning": 30, "tokens_cache_read": 4000, "tokens_cache_write": 50, "model_provider": "anthropic", "model_id": "claude-sonnet-5-5" });
+        let (model, usage) = usage_of(&row);
+        assert_eq!(model.as_deref(), Some("claude-sonnet-5-5"));
+        let Some(Out::Obj(fields)) = usage else { panic!("no usage") };
+        assert_eq!(fields.iter().map(|(k, _)| *k).collect::<Vec<_>>(), ["costUsd", "tokens", "provider", "model"]);
+        assert_eq!(usage_of(&json!({})), (None, None));
+        assert_eq!(usage_of(&json!({ "cost": -1, "tokens_input": "x" })), (None, None));
+        // Zero is a number, not a gap.
+        assert!(usage_of(&json!({ "cost": 0, "tokens_input": 0 })).1.is_some());
+    }
 
     struct Plain(Vec<String>);
     impl Vendor for Plain {

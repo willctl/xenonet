@@ -204,6 +204,122 @@
         }
       ]
     },
+    "usage": {
+      "description": "What the app's own records say its sessions used and cost (Hermes's session database); left out when it keeps none",
+      "type": "object",
+      "properties": {
+        "since": {
+          "type": "number",
+          "description": "When XenoNet began adding up the sessions below"
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "The sessions its own records show at work since then, counted by their whole totals"
+        },
+        "costUsd": {
+          "description": "What the app totalled for them, in USD: the sessions it priced; null when it priced none. Not XenoNet's estimate at API prices",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "estimated": {
+          "type": "boolean",
+          "description": "Some of costUsd is the app's own estimate, not what the provider billed"
+        },
+        "unpriced": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Sessions with no price: covered by a subscription, or the app doesn't say"
+        },
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "number"
+            },
+            "output": {
+              "type": "number"
+            },
+            "reasoning": {
+              "type": "number"
+            },
+            "cacheRead": {
+              "type": "number"
+            },
+            "cacheWrite": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "input",
+            "output",
+            "reasoning",
+            "cacheRead",
+            "cacheWrite"
+          ],
+          "additionalProperties": {}
+        },
+        "models": {
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "mode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tokens": {
+                "type": "number"
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "provider",
+              "model",
+              "mode",
+              "tokens",
+              "costUsd"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "The five that used the most tokens"
+        }
+      },
+      "required": [
+        "since",
+        "sessions",
+        "costUsd",
+        "estimated",
+        "unpriced",
+        "tokens",
+        "models"
+      ],
+      "additionalProperties": {}
+    },
     "capabilities": {
       "type": "array",
       "items": {

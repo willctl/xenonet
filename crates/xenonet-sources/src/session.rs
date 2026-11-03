@@ -200,13 +200,16 @@ pub struct RunSession<'a> {
     pub branch: Option<&'a str>,
     /// The session this run is a subagent of.
     pub subagent_of: Option<&'a str>,
+    /// What the app's own records say the session used (`usage`), after the
+    /// rest.
+    pub usage: Option<Out>,
     pub via: Via<'a>,
 }
 
 impl RunSession<'_> {
     /// The session in the runs' order: id, app, rawId, title, preview
     /// (null), cwd, createdAt, updatedAt, archived, model, branch,
-    /// parentId, parentKind, then how XenoNet knows of it.
+    /// parentId, parentKind, then how XenoNet knows of it, then the usage when it has one.
     pub fn record(self) -> Out {
         let mut o = vec![
             ("id", Out::str(self.id)),
@@ -230,6 +233,9 @@ impl RunSession<'_> {
                 o.push(("reportedBy", Out::str(actor)));
             }
             Via::Reader => o.push(("reader", Out::str("experimental"))),
+        }
+        if let Some(usage) = self.usage {
+            o.push(("usage", usage));
         }
         Out::Obj(o)
     }
@@ -299,6 +305,34 @@ mod tests {
     }
 
     #[test]
+    fn a_run_with_usage_carries_it_last() {
+        let run = |usage| {
+            RunSession {
+                id: "opencode:s1",
+                app: "opencode",
+                raw_id: "s1",
+                title: "OpenCode".into(),
+                cwd: None,
+                created_at: Out::Num(1.0),
+                updated_at: Out::Num(2.0),
+                archived: false,
+                model: None,
+                branch: None,
+                subagent_of: None,
+                usage,
+                via: Via::Reader,
+            }
+            .record()
+        };
+        let keys = |o: Out| match o {
+            Out::Obj(fs) => fs.into_iter().map(|(k, _)| k).collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        assert_eq!(keys(run(None)).last(), Some(&"reader"));
+        assert_eq!(keys(run(Some(Out::Obj(vec![])))).last(), Some(&"usage"));
+    }
+
+    #[test]
     fn runs_say_how_xenonet_knows_of_them() {
         let run = |via| {
             RunSession {
@@ -313,6 +347,7 @@ mod tests {
                 model: None,
                 branch: None,
                 subagent_of: Some("gemini-cli:r0"),
+                usage: None,
                 via,
             }
             .record()

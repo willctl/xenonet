@@ -92,6 +92,12 @@ const TABLES = `export const SessionTable = sqliteTable(
     directory: DatabasePath.directoryColumn().notNull(),
     title: text().notNull(),
     version: text().notNull(),
+    cost: real().notNull().default(0),
+    tokens_input: integer().notNull().default(0),
+    tokens_output: integer().notNull().default(0),
+    tokens_reasoning: integer().notNull().default(0),
+    tokens_cache_read: integer().notNull().default(0),
+    tokens_cache_write: integer().notNull().default(0),
     model: text({ mode: "json" }).$type<{ id: string, providerID: string }>(),
     ...Timestamps,
     time_archived: integer(),
@@ -111,12 +117,15 @@ export const PartTable = sqliteTable(
 test("OpenCode: its tables from its source, with the columns XenoNet reads", () => {
   const tables = drizzleTables(TABLES, SHARED);
   assert.deepEqual([...tables.keys()], ["session", "part"]);
-  assert.deepEqual([...tables.get("session").keys()], ["id", "parent_id", "directory", "title", "version", "model", "time_created", "time_updated", "time_archived"]);
+  assert.deepEqual([...tables.get("session").keys()], ["id", "parent_id", "directory", "title", "version", "cost", "tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write", "model", "time_created", "time_updated", "time_archived"]);
   assert.equal(tables.get("session").get("time_created").notNull, true);
   assert.equal(tables.get("session").get("parent_id").notNull, false);
   assert.deepEqual(opencodeFindings(tables), []);
   const changed = drizzleTables(TABLES.replace("    version: text().notNull(),\n", "").replace("directory: DatabasePath.directoryColumn().notNull()", "directory: DatabasePath.directoryColumn()"), SHARED);
   assert.deepEqual(opencodeFindings(changed).map((f) => [f.kind, f.path]).sort(), [["now-optional", "session.directory"], ["removed", "session.version"]]);
+  // The model's two names come out of one column: losing it is one finding, named for the column.
+  const noModel = drizzleTables(TABLES.replace(/    model: text[^\n]*\n/, ""), SHARED);
+  assert.deepEqual(opencodeFindings(noModel).map((f) => f.path), ["session.model", "session.model"]);
   assert.deepEqual(opencodeFindings(new Map()).map((f) => f.path), ["session", "part"]);
 });
 

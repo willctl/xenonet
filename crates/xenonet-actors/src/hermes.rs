@@ -171,6 +171,9 @@ struct Db {
     stamp: Option<String>,
     last_id: Value,
     read: bool,
+    /// When the usage began to be added up (the first look after the
+    /// database was read).
+    since: Option<f64>,
     heartbeats: Option<Value>,
     state: Option<String>,
 }
@@ -190,6 +193,68 @@ struct Session {
     archived: bool,
     hidden: bool,
     last_message_at: Option<f64>,
+    /// What its row says it used, and its use by model when the database
+    /// keeps that.
+    usage: Option<UsageRow>,
+    models: Option<Vec<UsageRow>>,
+}
+
+/// Hermes's cost_status words for a price it stands behind. "included" (a
+/// subscription's) and "unknown" give none, never zero.
+const PRICED: [&str; 2] = ["actual", "estimated"];
+
+/// A row's tokens and price, as Hermes totals them.
+#[derive(Clone, Debug, Default)]
+struct UsageRow {
+    provider: Option<String>,
+    model: Option<String>,
+    mode: Option<String>,
+    input: f64,
+    output: f64,
+    reasoning: f64,
+    cache_read: f64,
+    cache_write: f64,
+    cost_usd: Option<f64>,
+    estimated: bool,
+}
+
+fn usage_row(r: &Value) -> UsageRow {
+    let n = |k: &str| r.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.0);
+    let name = |k: &str| r.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
+    let status = r.get("cost_status").and_then(Value::as_str);
+    let (actual, estimate) = (n("actual_cost_usd"), n("estimated_cost_usd"));
+    let cost_usd = if status.is_some_and(|s| PRICED.contains(&s)) {
+        if status == Some("actual") {
+            actual.or(estimate)
+        } else {
+            estimate.or(actual)
+        }
+    } else {
+        None
+    };
+    UsageRow {
+        provider: name("billing_provider"),
+        model: name("model"),
+        mode: name("billing_mode"),
+        input: n("input_tokens").unwrap_or(0.0),
+        output: n("output_tokens").unwrap_or(0.0),
+        reasoning: n("reasoning_tokens").unwrap_or(0.0),
+        cache_read: n("cache_read_tokens").unwrap_or(0.0),
+        cache_write: n("cache_write_tokens").unwrap_or(0.0),
+        cost_usd,
+        estimated: cost_usd.is_some() && (status == Some("estimated") || actual.is_none()),
+    }
+}
+
+/// Whether a session row carries any usage at all (the older layouts don't).
+fn usage_of_row(s: &Value) -> Option<UsageRow> {
+    ["input_tokens", "output_tokens", "cost_status", "billing_provider", "model"].iter().any(|c| s.get(*c).is_some_and(|v| !v.is_null())).then(|| usage_row(s))
+}
+
+/// A session's rows of session_model_usage, or None when it has none.
+fn models_of(rows: &Value, id: &str) -> Option<Vec<UsageRow>> {
+    let mine: Vec<UsageRow> = rows.as_array().map(|l| l.iter().filter(|r| r.get("session_id").and_then(Value::as_str) == Some(id)).map(usage_row).collect()).unwrap_or_default();
+    (!mine.is_empty()).then_some(mine)
 }
 
 #[derive(Clone, Debug)]
@@ -574,6 +639,95 @@ impl Hermes {
 
     // What a profile's database says, its presence and status, and the
     // events and targets they make.
+    /// What its sessions' own rows say they used and cost, added up: the
+    /// sessions seen at work since the observer began (their whole totals, as
+    /// Hermes keeps them). None while the database hasn't been read (the
+    /// usage is left unsaid), null when no session carries any.
+    fn usage(p: &mut Profile, at: f64) -> Option<Arg> {
+        if !p.db.read {
+            return None;
+        }
+        let since = *p.db.since.get_or_insert(at);
+        let (mut input, mut output, mut reasoning, mut cache_read, mut cache_write) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        let mut by_model: Vec<(String, UsageRow, f64, Option<f64>)> = Vec::new();
+        let (mut cost_usd, mut estimated, mut unpriced, mut sessions): (Option<f64>, bool, f64, f64) = (None, false, 0.0, 0.0);
+        for (_, s) in &p.sessions {
+            let Some(u) = &s.usage else { continue };
+            if s.hidden {
+                continue;
+            }
+            sessions += 1.0;
+            let rows: Vec<&UsageRow> = match &s.models {
+                Some(m) if !m.is_empty() => m.iter().collect(),
+                _ => vec![u],
+            };
+            for r in rows {
+                input += r.input;
+                output += r.output;
+                reasoning += r.reasoning;
+                cache_read += r.cache_read;
+                cache_write += r.cache_write;
+                let key = format!("{:?}\u{0}{:?}\u{0}{:?}", r.provider, r.model, r.mode);
+                let slot = match by_model.iter().position(|(k, ..)| *k == key) {
+                    Some(i) => i,
+                    None => {
+                        by_model.push((key, r.clone(), 0.0, None));
+                        by_model.len() - 1
+                    }
+                };
+                by_model[slot].2 += r.input + r.output;
+                if let Some(cost) = r.cost_usd {
+                    by_model[slot].3 = Some(by_model[slot].3.unwrap_or(0.0) + cost);
+                }
+            }
+            match u.cost_usd {
+                None => unpriced += 1.0,
+                Some(cost) => {
+                    cost_usd = Some(cost_usd.unwrap_or(0.0) + cost);
+                    if u.estimated {
+                        estimated = true;
+                    }
+                }
+            }
+        }
+        if sessions == 0.0 {
+            return Some(Arg::Null);
+        }
+        by_model.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        let text = |v: &Option<String>| v.as_deref().map_or(Arg::Null, Arg::text);
+        let models = by_model
+            .iter()
+            .take(5)
+            .map(|(_, r, tokens, cost)| {
+                Arg::Obj(vec![
+                    ("provider".into(), text(&r.provider)),
+                    ("model".into(), text(&r.model)),
+                    ("mode".into(), text(&r.mode)),
+                    ("tokens".into(), Arg::Num(*tokens)),
+                    ("costUsd".into(), cost.map_or(Arg::Null, Arg::Num)),
+                ])
+            })
+            .collect();
+        Some(Arg::Obj(vec![
+            ("since".into(), Arg::Num(since)),
+            ("sessions".into(), Arg::Num(sessions)),
+            ("costUsd".into(), cost_usd.map_or(Arg::Null, Arg::Num)),
+            ("estimated".into(), Arg::Bool(estimated)),
+            ("unpriced".into(), Arg::Num(unpriced)),
+            (
+                "tokens".into(),
+                Arg::Obj(vec![
+                    ("input".into(), Arg::Num(input)),
+                    ("output".into(), Arg::Num(output)),
+                    ("reasoning".into(), Arg::Num(reasoning)),
+                    ("cacheRead".into(), Arg::Num(cache_read)),
+                    ("cacheWrite".into(), Arg::Num(cache_write)),
+                ]),
+            ),
+            ("models".into(), Arg::List(models)),
+        ]))
+    }
+
     #[expect(clippy::too_many_arguments, reason = "the JS's observe and what one look found, one argument each")]
     fn observe(&self, c: &mut dyn Calls, p: &mut Profile, r: &Read, processes: usize, apps: usize, version: Option<&str>, at: f64, is_installed: bool) -> Result<()> {
         let there = processes > 0 || r.gateway_alive || r.ticker_alive;
@@ -664,7 +818,12 @@ impl Hermes {
         } else {
             ("offline", if r.gateway["state"].as_str() == Some("startup_failed") { json!("Its gateway failed to start") } else { Value::Null })
         };
-        c.call("", "say", vec![Arg::text(&p.id), Arg::Obj(vec![("presence".into(), Arg::text(presence)), ("status".into(), value_arg(&status)), ("at".into(), Arg::Num(at))])])?;
+        let mut said = vec![("presence".to_string(), Arg::text(presence)), ("status".into(), value_arg(&status))];
+        if let Some(usage) = Self::usage(p, at) {
+            said.push(("usage".into(), usage));
+        }
+        said.push(("at".into(), Arg::Num(at)));
+        c.call("", "say", vec![Arg::text(&p.id), Arg::Obj(said)])?;
         // Where it works: its sessions' places, and its jobs' folders.
         for s in &active {
             let place = Self::place_of_session(c, Some(s))?;
@@ -718,6 +877,7 @@ impl Hermes {
         for s in &sessions {
             let id = text_of(s.get("id"));
             let was = p.sessions.iter().find(|(k, _)| *k == id).and_then(|(_, x)| x.last_message_at);
+            let was_models = p.sessions.iter().find(|(k, _)| *k == id).and_then(|(_, x)| x.models.clone());
             let opt = |k: &str| s.get(k).cloned().unwrap_or(Value::Null);
             let session = Session {
                 id: id.clone(),
@@ -733,6 +893,8 @@ impl Hermes {
                 archived: truthy(s.get("archived")),
                 hidden: truthy(s.get("hidden")),
                 last_message_at: was,
+                usage: usage_of_row(s),
+                models: models_of(&fresh["modelUsage"], &id).or(was_models),
             };
             match p.sessions.iter_mut().find(|(k, _)| *k == id) {
                 Some(slot) => slot.1 = session,
