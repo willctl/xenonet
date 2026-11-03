@@ -235,7 +235,10 @@
                       },
                       "additionalProperties": {},
                       "x-xenonet": {
-                        "closed": true
+                        "closed": true,
+                        "known": [
+                          "last_usage_includes_reasoning"
+                        ]
                       }
                     },
                     {

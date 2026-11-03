@@ -13,7 +13,7 @@ import { PROVIDERS, targetsOf } from "../scripts/provider-drift/registry.mjs";
 import { REPO, xenonetSchema } from "../scripts/provider-drift/common.mjs";
 import { compare, compareAll, nodeAt, schemaFromDts, tsToSchema, declarationsOf, functionsOf, methodsOf, codexMethodsIn, importsFrom } from "../scripts/provider-drift/types.mjs";
 import { widenRange, setVersionsInSource, setVersionsInDocs } from "../scripts/provider-drift/ranges.mjs";
-import { newestInPackages, newestInAppcast, versionInJson, releaseVersion, npmDistTags } from "../scripts/provider-drift/releases.mjs";
+import { newestInPackages, newestInAppcast, versionInJson, releaseVersion, npmDistTags, textFeedLatest } from "../scripts/provider-drift/releases.mjs";
 import { rangeFindings, dedupe, buildReport, fixPlan, renderMarkdown, fingerprint, issueAction, issueBody, hasDrift } from "../scripts/provider-drift/report.mjs";
 import { readers, checkLines, CLAUDE_LINES, CODEX_LINES } from "../scripts/provider-drift/checks.mjs";
 import { transcriptExpectations } from "../scripts/provider-drift/inspect-claude.mjs";
@@ -271,6 +271,14 @@ test("versions from npm's dist-tags, a GitHub release, an APT index, a Sparkle f
   assert.equal(versionInJson({ version: "not a version" }), null);
   assert.equal(versionInJson({ version: 7 }), null);
   assert.equal(versionInJson(null), null);
+});
+
+test("a text feed gives a version per channel, and fails when none reads as a version", async () => {
+  const answers = { "https://x.test/stable": "1.0.70\n", "https://x.test/alpha": "1.0.74", "https://x.test/junk": "<html>" };
+  const fetchImpl = async (url) => ({ ok: url in answers, status: url in answers ? 200 : 404, text: async () => answers[url] });
+  const got = await textFeedLatest({ stable: "https://x.test/stable", alpha: "https://x.test/alpha", junk: "https://x.test/junk" }, { fetchImpl });
+  assert.deepEqual(got.versions, { stable: "1.0.70", alpha: "1.0.74" });
+  await assert.rejects(textFeedLatest({ junk: "https://x.test/junk" }, { fetchImpl }), /don't say a version/);
 });
 
 // ---------- reading output ----------

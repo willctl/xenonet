@@ -95,6 +95,18 @@ export async function jsonLatest({ url, field }, opts) {
   return { url, versions: { latest: version } };
 }
 
+// A plain-text feed per channel, each a file holding one version (Grok
+// Build's installer reads these): { <tag>: <url> }.
+export async function textFeedLatest(feeds, opts) {
+  const versions = {};
+  for (const [tag, url] of Object.entries(feeds)) {
+    const v = (await (await get(url, opts)).text()).trim();
+    if (cleanVersion(v) && parseVersion(v)) versions[tag] = v;
+  }
+  if (!Object.keys(versions).length) throw new Error(`${Object.values(feeds).join(", ")} don't say a version`);
+  return { url: Object.values(feeds)[0], versions };
+}
+
 // The versions a provider's release descriptor (registry.mjs) points at.
 export async function latestVersions(release, opts = {}) {
   if (!release) return null;
@@ -102,6 +114,7 @@ export async function latestVersions(release, opts = {}) {
   if (release.github) return githubLatest(release.github, { pattern: release.pattern, ...opts });
   if (release.apt) return aptLatest(release.apt, opts);
   if (release.sparkle) return sparkleLatest(release.sparkle, opts);
+  if (release.feeds) return textFeedLatest(release.feeds, opts);
   if (release.json) return jsonLatest(release.json, opts);
   return null;
 }

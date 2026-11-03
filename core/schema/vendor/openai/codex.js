@@ -88,7 +88,7 @@ const event = variants("type", [
   open({ type: z.literal("task_complete"), last_agent_message: maybe(str), duration_ms: maybe(num) }),
   open({
     type: z.literal("token_count"),
-    info: closed({ total_token_usage: tokens.optional(), last_token_usage: tokens.optional(), model_context_window: maybe(num) }).nullable(),
+    info: closed({ total_token_usage: tokens.optional(), last_token_usage: tokens.optional(), model_context_window: maybe(num) }, { known: ["last_usage_includes_reasoning"] }).nullable(),
     rate_limits: open({ primary: maybe(window), secondary: maybe(window) }).nullable().optional(),
   }),
   open({ type: z.literal("item_completed"), item, started_at_ms: maybe(num), completed_at_ms: maybe(num) }),

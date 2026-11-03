@@ -86,6 +86,7 @@ export const TranscriptLine = vendor(
       "last-prompt",
       "attachment",
       "file-history-snapshot",
+      "tools-used",
       "file-history-delta",
       "agent-name",
       "custom-title",
