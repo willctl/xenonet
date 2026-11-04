@@ -200,7 +200,7 @@ export const CHECKS = [
     title: "XenoNet is running",
     async run(ctx) {
       if (ctx.self) return ok(`${ctx.self.name ?? "XenoNet"} on port ${ctx.self.port}`);
-      if (!ctx.base) return warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", "Open XenoNet (or XenoNet Dev).");
+      if (!ctx.base) return warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", "Open XenoNet, or run xenonet service start.");
       return ok(`${ctx.baseName ?? "XenoNet"} on ${ctx.base.replace(/^http:\/\//, "")}`);
     },
   },

@@ -87,7 +87,7 @@ Use the endpoint audit to identify an actual denied helper or file access.
    the configuration files the connection step will change.
 2. Have the administrator approve the candidate's exact runtime files.
    Start with no automatic startup. The bundle accepts
-   `/currentuser /NOAUTOSTART /NODESKTOP`; interactive setup lets the owner
+   `/S /currentuser /NOAUTOSTART /NODESKTOP` for a silent install; interactive setup lets the owner
    choose the installation and launch steps. See the packet for exact files.
 3. Launch Desktop from the owner's session. Inspect Updates and turn off
    automatic checks for the fixed-hash pilot. Confirm the reported Desktop,

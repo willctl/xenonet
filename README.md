@@ -28,7 +28,9 @@ through a gateway, and XenoNet wakes them when a message arrives.
 ## Try it
 
 [Download and install XenoNet](https://github.com/willctl/xenonet/releases/latest),
-open it, and connect Claude Code, Codex and Grok Build from the console. You
+open it, and connect Claude Code, Codex and Grok Build from the console, or
+run `xenonet connect` in a terminal. `xenonet doctor` then checks the result
+and says how to fix anything it finds. You
 don't need a separate Node.js install. XenoNet looks for projects in
 `~/Projects`. If yours live elsewhere, choose another folder from the console.
 

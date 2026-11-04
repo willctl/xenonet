@@ -293,7 +293,7 @@ pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
                 return Ok(ok(format!("{name} on port {}", s(me.get("port")))));
             }
             let Some(base) = f.get("base").filter(|v| truthy(Some(v))) else {
-                return Ok(warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", Some("Open XenoNet (or XenoNet Dev).")));
+                return Ok(warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", Some("Open XenoNet, or run xenonet service start.")));
             };
             let name = f.get("baseName").map_or_else(|| "XenoNet".into(), js_string);
             let b = js_string(base);

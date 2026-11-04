@@ -104,7 +104,7 @@ pub fn find(ports: &[f64], answer: Duration) -> Option<Server> {
 /// What `need` says when no XenoNet answers.
 pub fn not_running(ports: &[f64]) -> String {
     let at: Vec<String> = ports.iter().map(|p| format!("127.0.0.1:{}", number_string(*p))).collect();
-    format!("XenoNet isn't running (nothing answers on {}). Open XenoNet, or start XenoNet Dev from its checkout with npm run app.", at.join(" or "))
+    format!("XenoNet isn't running (nothing answers on {}). Open XenoNet, or run xenonet service start. From a checkout, npm run app starts XenoNet Dev.", at.join(" or "))
 }
 
 /// The XenoNet picked, or why there's none.
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!((health_ms(&Pick::default()), health_ms(&Pick { dev: true, ..Default::default() })), (HEALTH_MS, NAMED_HEALTH_MS));
         assert_eq!(
             not_running(&[47840.0, 47842.0]),
-            "XenoNet isn't running (nothing answers on 127.0.0.1:47840 or 127.0.0.1:47842). Open XenoNet, or start XenoNet Dev from its checkout with npm run app."
+            "XenoNet isn't running (nothing answers on 127.0.0.1:47840 or 127.0.0.1:47842). Open XenoNet, or run xenonet service start. From a checkout, npm run app starts XenoNet Dev."
         );
     }
 

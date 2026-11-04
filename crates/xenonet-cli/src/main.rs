@@ -71,6 +71,18 @@ fn run(name: &str, args: &[String], flags: &Flags) -> Done {
     commands::run(name, args, flags)
 }
 
+/// The tools a connected session calls aren't commands, so a person who
+/// types one is told where they are.
+const SESSION_TOOLS: [&str; 11] = ["send", "inbox", "peers", "claim", "release", "who_has", "whoami", "focus", "handoff", "delegate", "permission"];
+
+fn unknown_command(name: &str) -> String {
+    if SESSION_TOOLS.contains(&name) {
+        format!("no command \"{name}\". Sessions use that as a tool, once xenonet connect has added XenoNet to their app. xenonet agents lists them, and xenonet messages shows what they said.")
+    } else {
+        format!("no command \"{name}\". xenonet --help lists them.")
+    }
+}
+
 fn main_of(argv: &[String]) -> Done {
     let Parsed { mut flags, rest } = parse(argv);
     out::set_color(!(flags.is_false("color") || flags.on("json")));
@@ -105,7 +117,7 @@ fn main_of(argv: &[String]) -> Done {
         return run(alias(first), &[], &flags);
     }
     if find(&name).is_none() {
-        return Err(Fail::new(format!("no command \"{name}\". xenonet --help lists them."), 2));
+        return Err(Fail::new(unknown_command(&name), 2));
     }
     run(&name, &args, &flags)
 }
@@ -165,4 +177,15 @@ fn main() {
         }
     };
     std::process::exit(if code == 0 && out::wrote_badly() { 1 } else { code });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unknown_command;
+
+    #[test]
+    fn a_session_tool_typed_as_a_command_says_where_it_lives() {
+        assert!(unknown_command("send").contains("xenonet connect"));
+        assert_eq!(unknown_command("frobnicate"), "no command \"frobnicate\". xenonet --help lists them.");
+    }
 }
