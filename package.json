@@ -32,6 +32,7 @@
     "schemas": "node scripts/schemas.mjs",
     "bench": "node scripts/bench.mjs",
     "bench:gpu": "node scripts/gpu-bench.mjs",
+    "bench:service": "node scripts/bench-service.mjs",
     "lab": "node scripts/lab/lab.mjs",
     "hook:snippet": "node scripts/hook-snippet.mjs",
     "app": "node scripts/rust-bin.mjs && electron .",

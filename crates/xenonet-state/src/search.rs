@@ -402,6 +402,13 @@ pub struct Plan {
     open: Option<Value>,
 }
 
+impl Plan {
+    /// `bytes` more of the file are indexed (see `Search::begin_pieces`).
+    pub fn indexed(&mut self, bytes: usize) {
+        self.next_offset += bytes as f64;
+    }
+}
+
 /// What `begin` says: read the file whole first, or index these lines.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Begun<'a> {
@@ -648,6 +655,28 @@ impl Search {
         }
         plan.next_offset = if plan.zst { plan.size } else { offset + indexed.len() as f64 };
         Ok(Begun::Lines(lines_of(indexed)))
+    }
+
+    /// Starts indexing a file that is read in pieces, as `begin` starts
+    /// one read whole: nothing is read yet, and each piece's complete lines
+    /// (`lines_of`) are indexed, with `Plan::indexed` saying how far they
+    /// went. Not for a Codex rollout, which `begin` looks through whole to
+    /// find out how its prompts are said, nor a compressed archive.
+    pub fn begin_pieces(&self, plan: &mut Plan) -> Result<(), Error> {
+        let offset = if plan.whole { 0.0 } else { plan.offset };
+        if plan.whole {
+            plan.open = None;
+        }
+        let db = self.ready("exec")?;
+        db.execute_batch("begin")?;
+        if plan.whole && plan.known {
+            if let Err(e) = db.prepare_cached("delete from docs where file = ?").and_then(|mut s| s.execute([&plan.file])) {
+                self.rollback()?;
+                return Err(e.into());
+            }
+        }
+        plan.next_offset = offset;
+        Ok(())
     }
 
     /// The documents of a text of a session's file: `user_events` as in
