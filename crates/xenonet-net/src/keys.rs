@@ -148,6 +148,8 @@ pub fn write_private(file: &Path, data: &[u8]) -> R<()> {
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         }
     }
+    let tmp = file.with_file_name(format!(".{}.{}.tmp", file.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()), std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
     #[cfg(unix)]
@@ -155,20 +157,24 @@ pub fn write_private(file: &Path, data: &[u8]) -> R<()> {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);
     }
-    let mut f = o.open(file)?;
+    let mut f = o.open(&tmp)?;
     #[cfg(not(unix))]
     {
-        let name = file.to_string_lossy().into_owned();
+        let name = tmp.to_string_lossy().into_owned();
         let protected = xenonet_base::private_file::protect_file(&name, true, &mut |cmd: &str, args: &[&str]| xenonet_base::private_file::run_private(cmd, args));
         if let Err(e) = protected {
             drop(f);
-            let _ = std::fs::remove_file(file);
+            let _ = std::fs::remove_file(&tmp);
             return Err(NetError::internal(format!("XenoNet couldn't make {name} yours alone: {}", e.message())));
         }
     }
-    f.write_all(data)?;
-    f.sync_all()?;
-    Ok(())
+    let written = f.write_all(data).and_then(|()| f.sync_all());
+    drop(f);
+    // Linked into place, which fails if the file is there, so a crash can't
+    // leave a key that is half written, and a key is never replaced.
+    let linked = written.and_then(|()| std::fs::hard_link(&tmp, file));
+    let _ = std::fs::remove_file(&tmp);
+    Ok(linked?)
 }
 
 #[cfg(test)]
@@ -203,6 +209,7 @@ mod tests {
         let again = HostKey::load_or_create(&file).unwrap();
         assert_eq!(made.public(), again.public());
         assert!(write_private(&file, b"x").is_err(), "never replaced");
+        assert_eq!(std::fs::read_dir(file.parent().unwrap()).unwrap().count(), 1, "no temp file left, even after a refusal");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

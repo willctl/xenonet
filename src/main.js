@@ -1,3 +1,4 @@
+import { linkWatcher } from "./link-resync.js";
 import { createUpdatesPanel } from "./updates.js";
 import { createBackground } from "./background.js";
 import { createNetwork } from "./network.js";
@@ -1275,8 +1276,18 @@ document.getElementById("boot").classList.add("done");
 if (params.has("wallpaper")) setWallpaper(true);
 
 const events = new EventSource("/api/events");
-events.addEventListener("open", () => hud.setLink("live"));
-events.addEventListener("error", () => hud.setLink("down"));
+const link = linkWatcher({
+  state: (s) => hud.setLink(s),
+  resync() {
+    boot().then(([g, l]) => (applyGraph(g), applyLive(l)));
+    fetch("/api/actors").then(async (r) => (r.status === 503 ? actorsAreOff() : applyActors(await r.json())), () => {});
+    actorRequests.refresh();
+    network.refresh().catch(() => {});
+    void readAsks();
+  },
+});
+events.addEventListener("open", () => link.open());
+events.addEventListener("error", () => link.error());
 events.addEventListener("graph", (e) => applyGraph(JSON.parse(e.data)));
 events.addEventListener("live", (e) => applyLive(JSON.parse(e.data)));
 events.addEventListener("activity", (e) => {

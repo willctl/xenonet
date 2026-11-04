@@ -228,9 +228,7 @@ pub fn write_json(file: &Path, v: &Value) -> R<()> {
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = file.with_extension(format!("tmp-{}", std::process::id()));
-    std::fs::write(&tmp, format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())))?;
-    std::fs::rename(&tmp, file)?;
+    xenonet_base::fs::write_atomic(file, format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())).as_bytes())?;
     Ok(())
 }
 
@@ -250,5 +248,46 @@ mod tests {
         assert_eq!(base_url("192.168.1.5:48200"), "http://192.168.1.5:48200");
         assert_eq!(base_url("http://gw.example.net:8080/"), "http://gw.example.net:8080");
         assert_eq!(host_of("https://GW.example.net/x"), "gw.example.net");
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("xenonet-files-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn writers_at_once_never_fail_or_tear_a_file() {
+        let dir = scratch("race");
+        let file = dir.join("network.json");
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let file = file.clone();
+                std::thread::spawn(move || {
+                    for i in 0..60 {
+                        write_json(&file, &json!({ "t": t, "i": i, "pad": "x".repeat(4000) })).expect("every write lands");
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert!(read_json(&file).unwrap().is_some(), "whole JSON");
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, vec!["network.json".to_string()], "no temp files left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_temp_file() {
+        let dir = scratch("fail");
+        let file = dir.join("network.json");
+        std::fs::create_dir(&file).unwrap(); // a rename onto a folder fails
+        assert!(write_json(&file, &json!({})).is_err());
+        let left = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(left, 1, "only the folder");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -262,13 +262,21 @@ pub async fn lock(io: &Io, env: &Env, m: &Machine) -> Result<String, Failure> {
                 Err(e) if e.get("code").and_then(Value::as_str) == Some("ESRCH") => {}
                 Err(_) => return Err(Failure::Rethrow),
             }
-        } else {
+        } else if !abandoned(&file) {
             return Err(Failure::msg("Another XenoNet update is starting."));
         }
         fsx::unlink(&file)?;
         create_lock(&file)?;
     }
     Ok(file)
+}
+
+/// How long a lock may sit without a pid in it before it is one a crash
+/// left, between making the file and writing to it.
+const LOCK_PID_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn abandoned(file: &str) -> bool {
+    std::fs::metadata(file).and_then(|m| m.modified()).ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age > LOCK_PID_WAIT)
 }
 
 fn create_lock(file: &str) -> Result<(), FsError> {
@@ -479,6 +487,10 @@ mod tests {
         // A lock with no pid in it yet is one starting.
         std::fs::write(file, "").unwrap();
         assert_eq!(take(Ok(json!(null))).unwrap_err().message(), "Another XenoNet update is starting.");
+        // One that has stayed that way was left by a crash: taken.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+        std::fs::File::options().write(true).open(file).unwrap().set_modified(old).unwrap();
+        assert!(take(Ok(json!(null))).is_ok(), "a lock a crash left empty is taken over");
         unlock(file).unwrap();
         assert!(take(Ok(json!(null))).is_ok());
         std::fs::remove_dir_all(&p.dir).unwrap();

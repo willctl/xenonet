@@ -99,7 +99,7 @@ export async function withInstallLock(env, action) {
     if (err.code !== "EEXIST") throw err;
     const pid = Number(fs.readFileSync(file, "utf8"));
     if (pid > 0) { try { process.kill(pid, 0); throw new Error("Another XenoNet update is in progress."); } catch (e) { if (e.code !== "ESRCH") throw e; } }
-    else throw new Error("Another XenoNet update is starting.");
+    else if (Date.now() - fs.statSync(file).mtimeMs <= 30000) throw new Error("Another XenoNet update is starting.");
     fs.unlinkSync(file);
     fd = fs.openSync(file, "wx", 0o600);
   }
