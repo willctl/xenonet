@@ -32,9 +32,20 @@ take messages live with xenonet doctor --live.`;
 
 const actorId = (a) => (String(a).startsWith("actor:") ? a : `actor:${a}`);
 
+const SUBS = ["status", "pause", "resume", "allow", "disallow", "grant", "revoke", "audit"];
+
+// What a command used wrong says, before it looks for a XenoNet to ask.
+function usage(sub, rest) {
+  if (sub && !SUBS.includes(sub)) throw new Fail(`xenonet live doesn't know "${sub}"; xenonet live --help lists what it does`, 2);
+  if ((sub === "allow" || sub === "disallow") && !rest[0]) throw new Fail(`say which session: xenonet live ${sub} <session id>`, 2);
+  if (sub === "grant" && rest.length < 2) throw new Fail("say which actor and what scope: xenonet live grant hermes project:xenonet", 2);
+  if (sub === "revoke" && !rest[0]) throw new Fail("say which actor: xenonet live revoke hermes", 2);
+}
+
 export async function run(args, flags) {
-  const s = await need(flags);
   const [sub, ...rest] = args;
+  usage(sub, rest);
+  const s = await need(flags);
   const hours = flags.hours ? Number(flags.hours) : undefined;
   const say = (out) => (flags.json ? json(out) : print(typeof out === "string" ? out : JSON.stringify(out)));
   if (!sub || sub === "status") {
@@ -58,15 +69,12 @@ export async function run(args, flags) {
   }
   if (sub === "pause" || sub === "resume") return say(await post(s, "/api/delivery/pause", { paused: sub === "pause" })), 0;
   if (sub === "allow" || sub === "disallow") {
-    if (!rest[0]) throw new Fail(`say which session: xenonet live ${sub} <session id>`);
     return say(await post(s, `/api/delivery/${sub}`, { session: rest[0], hours, remote: !!flags.remote })), 0;
   }
   if (sub === "grant") {
-    if (rest.length < 2) throw new Fail("say which actor and what scope: xenonet live grant hermes project:xenonet");
     return say(await post(s, "/api/delivery/grant", { actor: actorId(rest[0]), scope: rest.slice(1).join(" "), hours })), 0;
   }
   if (sub === "revoke") {
-    if (!rest[0]) throw new Fail("say which actor: xenonet live revoke hermes");
     return say(await post(s, "/api/delivery/revoke", { actor: actorId(rest[0]) })), 0;
   }
   if (sub === "audit") {
@@ -75,5 +83,5 @@ export async function run(args, flags) {
     for (const a of d.audit) print(`${c.dim(new Date(a.at).toLocaleString())} ${a.kind} ${Object.entries(a).filter(([k]) => !["at", "kind"].includes(k)).map(([k, v]) => `${k}=${v}`).join(" ")}`);
     return 0;
   }
-  throw new Fail(`xenonet live doesn't know "${sub}"; xenonet live --help lists what it does`);
+  return 0;
 }

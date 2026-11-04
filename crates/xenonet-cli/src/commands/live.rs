@@ -107,10 +107,25 @@ fn status(d: &Value) {
     });
 }
 
+const SUBS: [&str; 8] = ["status", "pause", "resume", "allow", "disallow", "grant", "revoke", "audit"];
+
+/// What a command used wrong says, before it looks for a XenoNet to ask.
+fn usage(sub: Option<&str>, rest: &[String]) -> Result<(), Fail> {
+    let first = rest.first().is_some_and(|x| !x.is_empty());
+    match sub {
+        Some(sub) if !SUBS.contains(&sub) => Err(Fail::new(format!("xenonet live doesn't know \"{sub}\"; xenonet live --help lists what it does"), 2)),
+        Some(sub @ ("allow" | "disallow")) if !first => Err(Fail::new(format!("say which session: xenonet live {sub} <session id>"), 2)),
+        Some("grant") if rest.len() < 2 => Err(Fail::new("say which actor and what scope: xenonet live grant hermes project:xenonet", 2)),
+        Some("revoke") if !first => Err(Fail::new("say which actor: xenonet live revoke hermes", 2)),
+        _ => Ok(()),
+    }
+}
+
 pub fn run(args: &[String], flags: &Flags) -> Done {
-    let s = need(flags)?;
     let sub = args.first().map(String::as_str).filter(|x| !x.is_empty());
     let rest = args.get(1..).unwrap_or(&[]);
+    usage(sub, rest)?;
+    let s = need(flags)?;
     let hours = flags.on("hours").then(|| number(flags.number("hours")));
     match sub {
         None | Some("status") => {
@@ -124,7 +139,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         Some(sub @ ("pause" | "resume")) => say(&s.post("/api/delivery/pause", &body(vec![("paused", Some(Value::Bool(sub == "pause")))]), &[])?, flags),
         Some(sub @ ("allow" | "disallow")) => {
-            let Some(session) = rest.first().filter(|x| !x.is_empty()) else { return Err(Fail::new(format!("say which session: xenonet live {sub} <session id>"), 1)) };
+            let session = &rest[0];
             say(
                 &s.post(
                     &format!("/api/delivery/{sub}"),
@@ -134,21 +149,16 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 flags,
             )
         }
-        Some("grant") => {
-            if rest.len() < 2 {
-                return Err(Fail::new("say which actor and what scope: xenonet live grant hermes project:xenonet", 1));
-            }
-            say(
-                &s.post(
-                    "/api/delivery/grant",
-                    &body(vec![("actor", Some(Value::String(actor_id(&rest[0])))), ("scope", Some(Value::String(rest[1..].join(" ")))), ("hours", hours)]),
-                    &[],
-                )?,
-                flags,
-            )
-        }
+        Some("grant") => say(
+            &s.post(
+                "/api/delivery/grant",
+                &body(vec![("actor", Some(Value::String(actor_id(&rest[0])))), ("scope", Some(Value::String(rest[1..].join(" ")))), ("hours", hours)]),
+                &[],
+            )?,
+            flags,
+        ),
         Some("revoke") => {
-            let Some(actor) = rest.first().filter(|x| !x.is_empty()) else { return Err(Fail::new("say which actor: xenonet live revoke hermes", 1)) };
+            let actor = &rest[0];
             say(&s.post("/api/delivery/revoke", &body(vec![("actor", Some(Value::String(actor_id(actor))))]), &[])?, flags)
         }
         Some("audit") => {
@@ -164,6 +174,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             Ok(0)
         }
-        Some(sub) => Err(Fail::new(format!("xenonet live doesn't know \"{sub}\"; xenonet live --help lists what it does"), 1)),
+        Some(_) => Ok(0),
     }
 }

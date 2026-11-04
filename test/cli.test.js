@@ -40,6 +40,21 @@ test("arguments: flags anywhere, values, negations and everything after --", () 
   assert.deepEqual([parse(["diagnose", "--model", "m"]).flags, parse(["refusals", "--provider", "claude"]).flags], [{ model: "m" }, { provider: "claude" }]);
 });
 
+test("a command used wrong exits 2 and says how, with no XenoNet to ask", async () => {
+  // Every run here names a port nothing listens on and has a home folder
+  // of its own, so a usage error that waits on a XenoNet would exit 1
+  // saying none is running.
+  const port = String(await closedPort());
+  for (const args of [["decide", "nope"], ["refusals", "nope"], ["refusals", "capture"], ["live", "nope"], ["live", "grant", "hermes"], ["live", "revoke"], ["live", "allow"], ["live", "disallow"], ["who"], ["search"]]) {
+    const out = await xenonet([...args, "--port", port]);
+    assert.equal(out.code, 2, `xenonet ${args.join(" ")}: ${out.stderr}`);
+    assert.match(out.stderr, /^xenonet: (say |no such|xenonet live doesn't know)/);
+    assert.doesNotMatch(out.stderr, /isn't running/);
+  }
+  const none = await xenonet(["live", "pause", "--port", port]);
+  assert.equal(none.code, 1, "the same command used right does need one");
+});
+
 test("output: columns line up, the last one wraps under itself, and painted text stays painted", () => {
   const out = table([["✓", "short", "one"], ["!", "a longer title", "two words"]], { indent: 2 });
   assert.equal(out, "  ✓  short           one\n  !  a longer title  two words");
