@@ -149,16 +149,14 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 flags,
             )
         }
-        Some("grant") => {
-            say(
-                &s.post(
-                    "/api/delivery/grant",
-                    &body(vec![("actor", Some(Value::String(actor_id(&rest[0])))), ("scope", Some(Value::String(rest[1..].join(" ")))), ("hours", hours)]),
-                    &[],
-                )?,
-                flags,
-            )
-        }
+        Some("grant") => say(
+            &s.post(
+                "/api/delivery/grant",
+                &body(vec![("actor", Some(Value::String(actor_id(&rest[0])))), ("scope", Some(Value::String(rest[1..].join(" ")))), ("hours", hours)]),
+                &[],
+            )?,
+            flags,
+        ),
         Some("revoke") => {
             let actor = &rest[0];
             say(&s.post("/api/delivery/revoke", &body(vec![("actor", Some(Value::String(actor_id(actor))))]), &[])?, flags)
