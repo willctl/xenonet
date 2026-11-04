@@ -34,6 +34,13 @@ const MODEL_SQL: &str = "CASE WHEN json_valid(model) AND json_type(model, '$.pro
 const NEEDED_SESSION: [&str; 4] = ["id", "directory", "time_created", "time_updated"];
 const NEEDED_PART: [&str; 3] = ["session_id", "time_created", "data"];
 const EDITS_MAX: usize = 5000;
+/// OpenCode 2 keeps its sessions in session_v2 and its parts in
+/// session_part; 1.x kept them in session and part. A database upgraded from
+/// 1.x can hold both, so each that's there is read, the newer table's rows
+/// first.
+const SESSION_TABLES: [&str; 2] = ["session_v2", "session"];
+const PART_TABLES: [&str; 2] = ["session_part", "part"];
+const TOOL_NAME: &str = "COALESCE(json_extract(data, '$.tool'), json_extract(data, '$.name'))";
 
 /// OpenCode's ids (ses_…) as XenoNet's session ids take them: a dash for
 /// each underscore, or for an id OpenCode doesn't make, its bytes in hex
@@ -61,17 +68,20 @@ fn quoted(names: &[&str]) -> String {
 
 /// The edit tools' files since a time, newest first, so a busy day can't
 /// crowd out the edits that matter: the last ones.
-pub fn edits_sql() -> String {
+/// A 1.x part names its tool in data.tool and its file in input.filePath; a
+/// 2.x part has data.name and input.path.
+pub fn edits_sql(table: &str) -> String {
     let all: Vec<&str> = edit_tools().iter().map(String::as_str).chain(PATCH_TOOLS.iter().copied()).collect();
     format!(
         "
   SELECT session_id, time_created,
-    json_extract(data, '$.tool') AS tool,
-    CASE WHEN json_type(data, '$.state.input.filePath') = 'text' THEN json_extract(data, '$.state.input.filePath') END AS path,
-    CASE WHEN json_extract(data, '$.tool') IN ({}) AND json_type(data, '$.state.input.patchText') = 'text' THEN json_extract(data, '$.state.input.patchText') END AS patch
-  FROM part
+    {TOOL_NAME} AS tool,
+    CASE WHEN json_type(data, '$.state.input.filePath') = 'text' THEN json_extract(data, '$.state.input.filePath')
+         WHEN json_type(data, '$.state.input.path') = 'text' THEN json_extract(data, '$.state.input.path') END AS path,
+    CASE WHEN {TOOL_NAME} IN ({}) AND json_type(data, '$.state.input.patchText') = 'text' THEN json_extract(data, '$.state.input.patchText') END AS patch
+  FROM {table}
   WHERE time_created > ? AND json_valid(data) AND json_extract(data, '$.type') = 'tool'
-    AND json_extract(data, '$.tool') IN ({})
+    AND {TOOL_NAME} IN ({})
     AND COALESCE(json_extract(data, '$.state.status'), '') <> 'error'
   ORDER BY time_created DESC LIMIT {EDITS_MAX}",
         quoted(&PATCH_TOOLS),
@@ -224,36 +234,77 @@ pub fn read_db<'d>(exists: bool, open: &mut dyn FnMut() -> Result<Box<dyn Db + '
 }
 
 fn read_open(db: &mut dyn Db, vendor: &mut dyn Vendor, since_ms: f64, edits_since_ms: f64) -> Result<Read, ()> {
-    let session = Columns::of(db, "session").map_err(drop)?;
-    let part = Columns::of(db, "part").map_err(drop)?;
+    // The tables that are there, or the 1.x name with no columns when none is.
+    let mut tables_of = |names: &[&'static str], fallback: &'static str| -> Result<Vec<(&'static str, Columns)>, ()> {
+        let mut found = Vec::new();
+        for t in names {
+            let c = Columns::of(db, t).map_err(drop)?;
+            if !c.0.is_empty() {
+                found.push((*t, c));
+            }
+        }
+        if found.is_empty() {
+            found.push((fallback, Columns(Vec::new())));
+        }
+        Ok(found)
+    };
+    let session_tables = tables_of(&SESSION_TABLES, "session")?;
+    let part_tables = tables_of(&PART_TABLES, "part")?;
     // The newest session's version, by rowid when time_updated is gone, so
     // the drift below is still recorded with a version.
-    let version = if session.has("version") {
-        let sql = format!("SELECT version AS v FROM session ORDER BY {} DESC LIMIT 1", if session.has("time_updated") { "time_updated" } else { "rowid" });
+    let mut version = None;
+    for (t, c) in &session_tables {
+        if !c.has("version") {
+            continue;
+        }
+        let sql = format!("SELECT version AS v FROM {t} ORDER BY {} DESC LIMIT 1", if c.has("time_updated") { "time_updated" } else { "rowid" });
         let row = db.get(&sql).map_err(drop)?;
-        row.as_ref().and_then(|r| str_of(field(r, "v"))).and_then(clean_version).map(str::to_string)
-    } else {
-        None
-    };
-    for (t, cols, needed) in [("session", &session, &NEEDED_SESSION[..]), ("part", &part, &NEEDED_PART[..])] {
-        if cols.0.is_empty() {
-            vendor.missing(t, version.as_deref()).map_err(drop)?;
-        } else {
-            for c in needed.iter().filter(|c| !cols.has(c)) {
-                vendor.missing(&format!("{t}[].{c}"), version.as_deref()).map_err(drop)?;
+        version = row.as_ref().and_then(|r| str_of(field(r, "v"))).and_then(clean_version).map(str::to_string);
+        if version.is_some() {
+            break;
+        }
+    }
+    for (group, needed) in [(&session_tables, &NEEDED_SESSION[..]), (&part_tables, &NEEDED_PART[..])] {
+        for (t, cols) in group {
+            if cols.0.is_empty() {
+                vendor.missing(t, version.as_deref()).map_err(drop)?;
+            } else {
+                for c in needed.iter().filter(|c| !cols.has(c)) {
+                    vendor.missing(&format!("{t}[].{c}"), version.as_deref()).map_err(drop)?;
+                }
             }
         }
     }
-    if !NEEDED_SESSION.iter().all(|c| session.has(c)) {
+    let readable: Vec<&(&str, Columns)> = session_tables.iter().filter(|(_, c)| NEEDED_SESSION.iter().all(|n| c.has(n))).collect();
+    if readable.is_empty() {
         return Ok(Read { version, ..Read::empty("unreadable") });
     }
-    let mut cols: Vec<&str> = SESSION_COLUMNS.iter().chain(USAGE_COLUMNS.iter()).copied().filter(|c| session.has(c)).collect();
-    if session.has("model") {
-        cols.push(MODEL_SQL);
+    let mut sessions: Vec<Value> = Vec::new();
+    for (t, c) in readable {
+        let mut cols: Vec<&str> = SESSION_COLUMNS.iter().chain(USAGE_COLUMNS.iter()).copied().filter(|n| c.has(n)).collect();
+        if c.has("model") {
+            cols.push(MODEL_SQL);
+        }
+        let sql = format!("SELECT {} FROM {t} WHERE time_updated > ? ORDER BY time_updated DESC LIMIT {SESSIONS_MAX}", cols.join(", "));
+        for row in db.all(&sql, Some(since_ms)).map_err(drop)? {
+            if !sessions.iter().any(|x| field(x, "id") == field(&row, "id")) {
+                sessions.push(row);
+            }
+        }
     }
-    let sql = format!("SELECT {} FROM session WHERE time_updated > ? ORDER BY time_updated DESC LIMIT {SESSIONS_MAX}", cols.join(", "));
-    let sessions = db.all(&sql, Some(since_ms)).map_err(drop)?;
-    let mut raw = if NEEDED_PART.iter().all(|c| part.has(c)) { db.all(&edits_sql(), Some(edits_since_ms)).map_err(drop)? } else { Vec::new() };
+    let updated = |v: &Value| field(v, "time_updated").and_then(Value::as_f64).unwrap_or(0.0);
+    sessions.sort_by(|x, y| updated(y).total_cmp(&updated(x)));
+    sessions.truncate(SESSIONS_MAX);
+    let sessions = Value::Array(sessions);
+    let mut raw: Vec<Value> = Vec::new();
+    for (t, c) in &part_tables {
+        if NEEDED_PART.iter().all(|n| c.has(n)) {
+            raw.extend(db.all(&edits_sql(t), Some(edits_since_ms)).map_err(drop)?);
+        }
+    }
+    let created = |v: &Value| field(v, "time_created").and_then(Value::as_f64).unwrap_or(0.0);
+    raw.sort_by(|x, y| created(y).total_cmp(&created(x)));
+    raw.truncate(EDITS_MAX);
     raw.reverse();
     let mut edits = Vec::new();
     for e in &raw {
@@ -588,6 +639,41 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(read_db(false, &mut || Err("never".into()), &mut v, 0.0, 0.0).unwrap().state, "missing");
         assert_eq!(read_db(true, &mut || Err("EACCES: permission denied".into()), &mut v, 0.0, 0.0).unwrap().state, "denied");
+    }
+
+    #[test]
+    fn opencode_2_tables_are_read_beside_1x_ones() {
+        let now = 1_800_000_000_000.0_f64;
+        let tool = |name: &str, key: &str, input: &str| format!(r#"{{"type":"tool","{key}":"{name}","state":{{"status":"completed","input":{input},"output":"SECRET"}}}}"#);
+        let sql = format!(
+            "CREATE TABLE session_v2 (id text, parent_id text, directory text, title text, version text, time_created integer, time_updated integer, time_archived integer);
+             CREATE TABLE session_part (message_id text, session_id text, time_created integer, data text);
+             CREATE TABLE session (id text, parent_id text, directory text, title text, version text, time_created integer, time_updated integer, time_archived integer);
+             CREATE TABLE part (id text, session_id text, time_created integer, data text);
+             INSERT INTO session_v2 VALUES ('ses_a', NULL, '/w/atlas', 'New', '2.2.5', {c}, {u}, NULL);
+             INSERT INTO session VALUES ('ses_b', NULL, '/w/other', 'Old', '1.19.3', {c}, {o}, NULL), ('ses_a', NULL, '/w/atlas', 'Stale copy', '1.19.3', {c}, {c}, NULL);
+             INSERT INTO session_part VALUES ('m1', 'ses_a', {t1}, '{w}');
+             INSERT INTO part VALUES ('p1', 'ses_b', {t2}, '{f}');",
+            c = now - 600e3,
+            u = now - 60e3,
+            o = now - 50e3,
+            t1 = now - 120e3,
+            t2 = now - 100e3,
+            w = tool("write", "name", r#"{"path":"src/app.ts","content":"SECRET"}"#),
+            f = tool("edit", "tool", r#"{"filePath":"/w/other/old.txt"}"#),
+        );
+        let (dir, file) = db(&sql);
+        let mut v = Plain(Vec::new());
+        let got = read_db(true, &mut || Sqlite::open(&file).map(|d| Box::new(d) as Box<dyn Db>), &mut v, now - 86400e3, now - EDIT_KEEP_MS).unwrap();
+        assert_eq!((got.state, got.version.as_deref()), ("ok", Some("2.2.5")));
+        let ids: Vec<_> = got.sessions.as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["ses_b", "ses_a"], "newest first, the newer table's copy of a session kept");
+        assert_eq!(got.sessions[1]["title"], "New");
+        let edits: Vec<_> = got.edits.as_array().unwrap().iter().map(|e| (e["session_id"].as_str().unwrap().to_string(), e["path"].as_str().unwrap().to_string())).collect();
+        assert_eq!(edits, [("ses_a".to_string(), "src/app.ts".to_string()), ("ses_b".to_string(), "/w/other/old.txt".to_string())]);
+        assert!(!got.edits.to_string().contains("SECRET"));
+        assert_eq!(v.0, Vec::<String>::new());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -9,8 +9,9 @@ see and message the other sessions once you connect Grok Build.
 This note says what Grok Build keeps, how XenoNet reads it, what XenoNet
 writes into Grok Build's settings, and what's still to do. It was written
 against Grok Build 1.0.50, its source and the user guide that ships with it
-in `~/.grok/docs/user-guide/`. The tests' Grok Build files are made up in
-the shapes the source writes.
+in `~/.grok/docs/user-guide/`, and the session files Grok Build 1.0.70 wrote
+read through the schemas and the reader. The tests' Grok Build files are made
+up in the shapes the source writes.
 
 ## Where it sits
 
