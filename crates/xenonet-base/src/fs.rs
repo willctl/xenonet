@@ -6,6 +6,23 @@ use std::io;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+/// Writes a file whole or not at all: to a temporary file of its own beside
+/// it (named by process and count, so writers at once never share one),
+/// flushed to disk, then renamed over it. A failure takes the temporary
+/// file away; the old file stays as it was.
+pub fn write_atomic(file: &Path, data: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let name = file.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let tmp = file.with_file_name(format!(".{name}.{}-{}.tmp", std::process::id(), COUNT.fetch_add(1, Ordering::Relaxed)));
+    let result = std::fs::File::create(&tmp).and_then(|mut f| f.write_all(data).and_then(|()| f.sync_all())).and_then(|()| std::fs::rename(&tmp, file));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 /// An error as Node reports one: its code when the system gave one, and
 /// its message.
 #[derive(Clone, Debug, PartialEq, Eq)]

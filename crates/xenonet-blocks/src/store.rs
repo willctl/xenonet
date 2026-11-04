@@ -194,9 +194,7 @@ pub fn write_atomic(file: &str, text: &str) -> Result<(), FsError> {
     if let Some(dir) = Path::new(file).parent() {
         fs::create_dir_all(dir).map_err(|e| FsError::of(e, "mkdir", &dir.to_string_lossy()))?;
     }
-    let tmp = format!("{file}.tmp");
-    fs::write(&tmp, text).map_err(|e| FsError::of(e, "open", &tmp))?;
-    fs::rename(&tmp, file).map_err(|e| FsError::of(e, "rename", &tmp))?;
+    xenonet_base::fs::write_atomic(Path::new(file), text.as_bytes()).map_err(|e| FsError::of(e, "rename", file))?;
     Ok(())
 }
 
@@ -229,6 +227,29 @@ mod tests {
         fn prepare_fresh(&mut self, _: &mut Value) -> Result<(), Halt> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn atomic_writes_at_once_never_fail_and_leave_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("xenonet-atomic-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let file = dir.join("state.json").to_string_lossy().into_owned();
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let file = file.clone();
+                std::thread::spawn(move || {
+                    for i in 0..60 {
+                        write_atomic(&file, &format!("{{\"t\":{t},\"i\":{i},\"pad\":\"{}\"}}", "x".repeat(4000))).expect("every write lands");
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert!(json::parse(&fs::read_to_string(&file).unwrap()).is_ok(), "whole JSON");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no temp files left");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
