@@ -1,5 +1,6 @@
 // The xenonet command's commands, for its help and its shell completion. Each
-// one's code is in ../commands/<name>.js.
+// one's code is in ../commands/<name>.js, or, for the ones marked native, in
+// the xenonet binary (crates/xenonet-cli), which this command hands them to.
 export const COMMANDS = {
   setup: { about: "Install a downloaded Service or Tools package for your account" },
   service: { about: "Manage the background service", args: "[start|status|stop]" },
@@ -21,6 +22,10 @@ export const COMMANDS = {
   spend: { about: "About what today's work would cost at API prices, by app and by actor" },
   messages: { about: "What sessions and actors said to each other today" },
   root: { about: "The projects folder XenoNet reads, or read another", args: "[folder]" },
+  net: { about: "One network across your machines: create or join one, add a machine, see the hosts", args: "[create|join|status|hosts|add-machine|remove|leave|set|approve|gateway]", native: true },
+  svc: { about: "Publish a local HTTP service to the network, for programs on its other machines", args: "[publish|unpublish|list]", native: true },
+  start: { about: "Start a session here or on another machine, with a first prompt", args: "[--on <machine>] \"<prompt>\"", native: true },
+  runs: { about: "The Claude Code sign-in for the sessions XenoNet runs itself", args: "[status|sign-in|forget]", native: true },
   hosts: { about: "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", args: "[self|add|remove|test]" },
   search: { about: "Search every Claude Code, Codex and Grok Build transcript", args: "<words>" },
   theme: { about: "The console's look and sound: list, switch, or make your own", args: "[id]" },

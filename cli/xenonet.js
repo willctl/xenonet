@@ -62,6 +62,8 @@ async function main() {
 }
 
 async function run(name, args, flags) {
+  // These commands exist only in the xenonet binary.
+  if (COMMANDS[name]?.native) return (await import("./lib/native.js")).delegate(process.argv.slice(2));
   const mod = await import(`./commands/${name}.js`);
   if (flags.help) {
     const cmd = COMMANDS[name];

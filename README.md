@@ -256,6 +256,25 @@ and counts, and a transcript crosses only when you open it in XenoNet's
 window.
 [Other machines over SSH](docs/guide/other-machines.md) shows how to set one up.
 
+## Apps XenoNet reads
+
+XenoNet reads these apps' own session records. Apps marked "observed" show
+on the map and count in edit warnings, but XenoNet can't message them.
+
+| App | How you turn it on | Messages |
+|---|---|---|
+| Claude Code | `xenonet connect` | Yes |
+| Codex | `xenonet connect` | Yes |
+| Grok Build | `xenonet connect grok` | Yes |
+| OpenCode (experimental) | `XENONET_READERS=opencode` | Yes, for sessions you allow, through its own server |
+| Gemini CLI (experimental) | `XENONET_READERS=gemini-cli` | Observed |
+| Copilot CLI (experimental) | `XENONET_READERS=copilot` | Observed |
+| Cursor (experimental) | `XENONET_READERS=cursor`, plus a hook in its `hooks.json` | Observed |
+
+Hermes Agent and Grok Bot are actors, not sessions. The
+[full list](docs/guide/related-work.md#what-xenonet-detects-today) also has
+numbat's runs, SPACE sandboxes and Pi.
+
 ## Privacy
 
 XenoNet runs on your machine and reads the files Claude Code, Codex and Grok
