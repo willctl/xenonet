@@ -380,7 +380,7 @@ const assistantAudit = connections ? createAudit({ store: engineStore }) : null;
 // is kept, and the feed hears nothing of it.
 const remoteRead = ({ actor, connection, reach, at }) => broadcast("remote-read", { actor, transport: engineStore.connection(connection)?.transport_kind ?? null, reach, at });
 const assistantService = connections ? createAssistantService({ connections, source: assistantSource, remote: createRemotePresence({ actors, onRead: remoteRead }), audit: assistantAudit, version: VERSION }) : null;
-const assistant = connections ? assistantEndpoint({ connections, service: assistantService, audit: assistantAudit, env: { ...process.env, XENONET_PORT: String(config.port) }, log: (line) => console.log(`[xenonet] ${line}`) }) : null;
+const assistant = connections ? assistantEndpoint({ connections, service: assistantService, audit: assistantAudit, env: { ...process.env, XENONET_PORT: String(config.port) }, log: (line) => log.info("assistant.note", line) }) : null;
 if (connections) actors.drive(60e3, () => connections.tick());
 // Tunnels XenoNet runs for those connections (core/assistant/tunnels.js):
 // tunnel-client as a child of this service, with the tunnel's key from
@@ -396,7 +396,7 @@ const tunnels = connections
       ...(config.demo ? { find: () => process.env.XENONET_TUNNEL_CLIENT || null, profiles: () => [] } : {}),
       home: config.homeDir,
       launch: { bin: xenonetBin({ env: process.env, root }), port: config.port },
-      log: (line) => console.log(`[xenonet] ${line}`),
+      log: (line) => log.info("assistant.note", line),
     })
   : null;
 // The window reads how they stand with its key; this says only that it

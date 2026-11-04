@@ -4,6 +4,8 @@ Several Claude Code, Codex and Grok Build sessions often work in the same repo a
 
 XenoNet's engine starts from what XenoNet already reads in every transcript: who is working where, on which branch, and editing which files. It adds messages between sessions, claims on files, and a line from each session about what it's doing. On the map, each message travels as a light from one session to the other.
 
+XenoNet also reads OpenCode, Gemini CLI, Copilot CLI and Cursor sessions, which are experimental and off until you turn them on. [What XenoNet detects today](related-work.md#what-xenonet-detects-today) says which of them XenoNet can message and which it only observes.
+
 ## Connecting your agents
 
 `Connect your agents to XenoNet` in the palette shows what it will add to Claude Code's, Codex's and Grok Build's settings. Grok Build shows there once it's installed. When you confirm, it adds the `xenonet` MCP server for every project, and hooks. You do this once.

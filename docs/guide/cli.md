@@ -59,6 +59,10 @@ $ xenonet
 
 Every command takes `--json`, for scripts. A command talks to XenoNet, or to XenoNet Dev when XenoNet isn't running. `--dev`, `--demo` or `--port` picks one.
 
+## Exit codes
+
+A command exits 0 when it did what you asked, 1 when it failed or found a problem, and 2 when you used it wrong, with a line saying how. Failing means the doctor has a failed check, `xenonet status` finds no XenoNet running, a `hosts test` gets no answer, or an error. `xenonet drift` normally exits 0; with `--exit-code` it exits 1 when there is drift you haven't looked at, and leaves it unmarked. No other command has that flag.
+
 ## The doctor
 
 `xenonet doctor` checks these:
