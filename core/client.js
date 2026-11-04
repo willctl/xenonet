@@ -41,7 +41,7 @@ export async function find(opts = {}, { answerMs = healthMs(opts) } = {}) {
 
 export async function need(opts = {}) {
   const s = await find(opts);
-  if (!s) throw new Error(`XenoNet isn't running (nothing answers on ${candidates(opts).map((p) => `127.0.0.1:${p}`).join(" or ")}). Open XenoNet, or start XenoNet Dev from its checkout with npm run app.`);
+  if (!s) throw new Error(`XenoNet isn't running (nothing answers on ${candidates(opts).map((p) => `127.0.0.1:${p}`).join(" or ")}). Open XenoNet, or run xenonet service start. From a checkout, npm run app starts XenoNet Dev.`);
   return s;
 }
 

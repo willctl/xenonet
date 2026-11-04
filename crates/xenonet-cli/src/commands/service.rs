@@ -115,9 +115,20 @@ fn status(env: &Value) -> i32 {
             0
         }
         Err(e) => {
-            print(stringify(&json!({ "running": false, "error": e.message, "login": login }), 0));
+            print(stringify(&json!({ "running": false, "error": not_running_words(&e.message), "login": login }), 0));
             1
         }
+    }
+}
+
+/// What a failed status request says: a service that was never started
+/// answers with a missing file or a refused connection, which means
+/// nothing to a person.
+fn not_running_words(message: &str) -> String {
+    if message.starts_with("ENOENT") || message.starts_with("ECONNREFUSED") {
+        "XenoNet's service isn't running. Start it with xenonet service start.".into()
+    } else {
+        message.to_string()
     }
 }
 

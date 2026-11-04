@@ -39,7 +39,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             json(&json!({ "running": false }));
         } else {
             print(format!(
-                "{} XenoNet isn't running {}\n  Open XenoNet, or start XenoNet Dev from its checkout with npm run app.",
+                "{} XenoNet isn't running {}\n  Open XenoNet, or run xenonet service start. From a checkout, npm run app starts XenoNet Dev.",
                 c::dim("○"),
                 c::dim(format!("(nothing answers on {})", where_(flags)))
             ));
