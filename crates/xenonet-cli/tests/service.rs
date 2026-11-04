@@ -93,6 +93,8 @@ fn status_says_how_it_starts_with_no_service_running() {
     assert_eq!(code, 1, "no service: {out}");
     let v: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["running"], Value::Bool(false));
+    let error = v["error"].as_str().unwrap();
+    assert!(error.contains("xenonet service start") && !error.contains("ENOENT"), "a person can act on it: {error}");
     let login = &v["login"];
     assert_eq!(login["supported"], Value::Bool(true));
     assert_eq!(login["supervisor"], if cfg!(target_os = "macos") { "launchd" } else { "systemd" });

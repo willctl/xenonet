@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 use xenonet_schema::vendor::Sampling;
 use xenonet_state::search::{Begun, Plan, Search};
 
+// How much of a transcript is read for the index at once.
+const INDEX_PIECE: usize = 8 << 20;
+
 #[derive(Clone, Debug, Default)]
 pub struct Status {
     pub files: f64,
@@ -30,6 +33,7 @@ pub struct TranscriptSearch {
     pub status: Mutex<Status>,
     vendor: Arc<Vendor>,
     one: tokio::sync::Mutex<()>,
+    piece: std::sync::atomic::AtomicUsize,
 }
 
 // The bytes as text, bad UTF-8 replaced, without a copy when there's none:
@@ -66,6 +70,7 @@ impl TranscriptSearch {
             status: Mutex::new(Status::default()),
             vendor,
             one: tokio::sync::Mutex::new(()),
+            piece: std::sync::atomic::AtomicUsize::new(INDEX_PIECE),
         })
     }
 
@@ -83,6 +88,13 @@ impl TranscriptSearch {
         let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Ok(0.0) };
         let core = lock(&self.core);
         let Some(mut plan): Option<Plan> = core.plan(file, app).map_err(message)? else { return Ok(0.0) };
+        // What isn't compressed and isn't a Codex rollout is read a piece at
+        // a time: a transcript can be hundreds of megabytes, and held whole
+        // it was the service's largest allocation, kept by the allocator
+        // long after.
+        if app != "codex" && !plan.zst {
+            return Self::index_pieces(&core, tailed, plan, &self.vendor, self.piece.load(std::sync::atomic::Ordering::Relaxed));
+        }
         let text = if plan.whole { read_whole(file) } else { read_from(file, plan.offset, plan.size) }.map_err(|e| e.to_string())?;
         // A Codex rollout found to have a completed user message is read
         // whole.
@@ -108,6 +120,54 @@ impl TranscriptSearch {
                 let _ = core.rollback();
                 return Err(message(e));
             }
+        }
+        core.commit(&plan, Some(&run)).map_err(message)?;
+        Ok(run.n)
+    }
+
+    // The same, a piece of the file at a time (Search::begin_pieces): each
+    // piece's complete lines, the rest carried to the next read.
+    fn index_pieces(core: &Search, tailed: Tailed, mut plan: Plan, vendor: &Vendor, piece: usize) -> Result<f64, String> {
+        let from = if plan.whole { 0.0 } else { plan.offset };
+        let mut f = std::fs::File::open(&plan.file).map_err(|e| e.to_string())?;
+        f.seek(SeekFrom::Start(from as u64)).map_err(|e| e.to_string())?;
+        core.begin_pieces(&mut plan).map_err(message)?;
+        let fail = |e: String| {
+            let _ = core.rollback();
+            e
+        };
+        let mut run = Search::run_for(&plan);
+        let mut sampling = Sampling::default();
+        let mut left = (plan.size - from).max(0.0) as u64;
+        // One buffer for every piece: pieces of a size of their own each
+        // time were kept by the allocator, none fit for the next.
+        let mut buf = vec![0u8; piece];
+        let mut filled = 0;
+        while left > 0 {
+            let got = (&mut f).take(left.min((buf.len() - filled) as u64)).read(&mut buf[filled..]).map_err(|e| fail(e.to_string()))?;
+            if got == 0 {
+                break;
+            }
+            left -= got as u64;
+            filled += got;
+            let Some(cut) = buf[..filled].iter().rposition(|&b| b == b'\n').map(|i| i + 1) else {
+                // A line longer than the buffer: more room.
+                if filled == buf.len() {
+                    buf.resize(buf.len() * 2, 0);
+                }
+                continue;
+            };
+            let piece = String::from_utf8_lossy(&buf[..cut]);
+            plan.indexed(cut);
+            for l in xenonet_state::search::lines_of(&piece) {
+                let Some(raw) = vendor.line(tailed, l, &mut sampling) else { continue };
+                if let Err(e) = core.add(&mut run, raw) {
+                    return Err(fail(message(e)));
+                }
+            }
+            drop(piece);
+            buf.copy_within(cut..filled, 0);
+            filled -= cut;
         }
         core.commit(&plan, Some(&run)).map_err(message)?;
         Ok(run.n)
@@ -215,6 +275,38 @@ mod tests {
         assert_eq!(hits[0]["sessionId"], format!("claude:{id}"));
         let hits = s.search("nightly reports", 30.0).await.expect("a search");
         assert_eq!(hits[0]["sessionId"], format!("codex:{thread}"), "the archive is indexed");
+        s.close();
+        std::fs::remove_dir_all(&dir).expect("cleaned up");
+    }
+
+    #[tokio::test]
+    async fn pieces_cut_at_lines_and_miss_none() {
+        let dir = std::env::temp_dir().join(format!("xenonet-wire-search-pieces-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let claude = dir.join("claude").join("p");
+        std::fs::create_dir_all(&claude).expect("a folder");
+        let id = "0190d3e0-0000-7000-8000-000000000002";
+        // Prompts of different lengths, one longer than a piece, and a last
+        // line nobody has finished.
+        let mut text = String::new();
+        for i in 0..40 {
+            let words = format!("marker{i}x {}", "word ".repeat(1 + i * 3));
+            let line = json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": words } });
+            text.push_str(&xenonet_base::json::stringify(&line, 0));
+            text.push('\n');
+        }
+        text.push_str("{\"type\":\"user\",\"timestamp\"");
+        std::fs::write(claude.join(format!("{id}.jsonl")), &text).expect("a transcript");
+        let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
+        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &[], "", vendor);
+        s.piece.store(97, std::sync::atomic::Ordering::Relaxed);
+        s.index().await;
+        assert_eq!(s.status_json().get("errors"), None, "{}", s.status_json());
+        assert_eq!(s.status_json()["docs"].as_f64(), Some(40.0), "{}", s.status_json());
+        for i in [0, 17, 39] {
+            let hits = s.search(&format!("marker{i}x"), 30.0).await.expect("a search");
+            assert_eq!(hits.len(), 1, "marker{i}x");
+        }
         s.close();
         std::fs::remove_dir_all(&dir).expect("cleaned up");
     }

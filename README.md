@@ -28,7 +28,9 @@ through a gateway, and XenoNet wakes them when a message arrives.
 ## Try it
 
 [Download and install XenoNet](https://github.com/willctl/xenonet/releases/latest),
-open it, and connect Claude Code, Codex and Grok Build from the console. You
+open it, and connect Claude Code, Codex and Grok Build from the console, or
+run `xenonet connect` in a terminal. `xenonet doctor` then checks the result
+and says how to fix anything it finds. You
 don't need a separate Node.js install. XenoNet looks for projects in
 `~/Projects`. If yours live elsewhere, choose another folder from the console.
 
@@ -253,6 +255,25 @@ XenoNet, and your console reads it over SSH. A machine sends titles, states
 and counts, and a transcript crosses only when you open it in XenoNet's
 window.
 [Other machines over SSH](docs/guide/other-machines.md) shows how to set one up.
+
+## Apps XenoNet reads
+
+XenoNet reads these apps' own session records. Apps marked "observed" show
+on the map and count in edit warnings, but XenoNet can't message them.
+
+| App | How you turn it on | Messages |
+|---|---|---|
+| Claude Code | `xenonet connect` | Yes |
+| Codex | `xenonet connect` | Yes |
+| Grok Build | `xenonet connect grok` | Yes |
+| OpenCode (experimental) | `XENONET_READERS=opencode` | Yes, for sessions you allow, through its own server |
+| Gemini CLI (experimental) | `XENONET_READERS=gemini-cli` | Observed |
+| Copilot CLI (experimental) | `XENONET_READERS=copilot` | Observed |
+| Cursor (experimental) | `XENONET_READERS=cursor`, plus a hook in its `hooks.json` | Observed |
+
+Hermes Agent and Grok Bot are actors, not sessions. The
+[full list](docs/guide/related-work.md#what-xenonet-detects-today) also has
+numbat's runs, SPACE sandboxes and Pi.
 
 ## Privacy
 

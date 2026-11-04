@@ -690,6 +690,10 @@ test("xenonet without a XenoNet: status says so, doctor runs here, and mistakes 
 
   const wrong = await xenonet(["frobnicate"]);
   assert.deepEqual([wrong.code, wrong.stderr], [2, 'xenonet: no command "frobnicate". xenonet --help lists them.\n']);
+  const tool = await xenonet(["send", ...port]);
+  assert.equal(tool.code, 2);
+  assert.match(tool.stderr, /Sessions use that as a tool, once xenonet connect/);
+  assert.match(status.stdout, /xenonet service start/);
   assert.equal((await xenonet(["who"])).code, 2);
   const version = await xenonet(["-v"]);
   assert.equal(version.stdout, `xenonet ${JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version}\n`);

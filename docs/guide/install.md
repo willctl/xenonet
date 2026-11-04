@@ -2,6 +2,13 @@
 
 [Download XenoNet](https://github.com/willctl/xenonet/releases/latest) for Windows or macOS. Choose the bundle for an offline install. Desktop-only downloads fetch missing components on first launch. Neither needs a separate Node.js installation.
 
+## First run
+
+1. Open XenoNet. Allow the background service if it asks.
+2. Run `Connect your agents to XenoNet` from the palette, or `xenonet connect` in a terminal. Either shows each change before it makes it. Restart sessions that were open, so they pick up the XenoNet tools.
+3. Run `xenonet doctor`. Each problem it finds comes with a fix. If it says XenoNet isn't running, open XenoNet or run `xenonet service start`.
+4. Ask a session to run `peers`. It lists the other sessions in its repo, and `send` messages one. These are tools sessions call, not terminal commands. `xenonet messages` shows what they said.
+
 ## Updates
 
 Open **Check for XenoNet updates** in the command palette or **Updates...** in the tray or Mac app menu. XenoNet checks after startup and every six hours. Windows downloads Desktop updates in the background and waits for you to choose **Restart and update**. Restarting Desktop keeps the service, terminals and MCP processes running. You can turn off background checks and check manually instead.

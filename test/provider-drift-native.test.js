@@ -129,6 +129,16 @@ test("OpenCode: its tables from its source, with the columns XenoNet reads", () 
   assert.deepEqual(opencodeFindings(new Map()).map((f) => f.path), ["session", "part"]);
 });
 
+test("OpenCode 2's session_v2 and session_part are the tables checked where the source declares them", () => {
+  const v2 = drizzleTables(TABLES.replace('"session",', '"session_v2",').replace('"part",', '"session_part",'), SHARED);
+  assert.deepEqual([...v2.keys()], ["session_v2", "session_part"]);
+  assert.deepEqual(opencodeFindings(v2), []);
+  const noVersion = drizzleTables(TABLES.replace('"session",', '"session_v2",').replace('"part",', '"session_part",').replace("    version: text().notNull(),\n", ""), SHARED);
+  assert.deepEqual(opencodeFindings(noVersion).map((f) => f.path), ["session_v2.version"]);
+  const noData = drizzleTables(TABLES.replace('"session",', '"session_v2",').replace('"part",', '"session_part",').replace(/    data: text[^\n]*\n/, ""), SHARED);
+  assert.deepEqual(opencodeFindings(noData).map((f) => f.path), ["session_part.data"]);
+});
+
 test("Hermes's state schema version is read from its source and held to the schema's range", () => {
   assert.equal(hermesSchemaVersion("# x\nSCHEMA_VERSION = 32\n_FTS = 1\n"), 32);
   assert.equal(hermesSchemaVersion("SCHEMA_VERSION = 'x'"), null);

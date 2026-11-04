@@ -15,7 +15,7 @@ import { EngineStore } from "../core/engine/store.js";
 import { actionsFor } from "../core/open.js";
 import { Session } from "../core/schema/session.js";
 import { drift } from "../core/drift.js";
-import { opencodeDb, tool } from "./fixtures/opencode.js";
+import { opencodeDb, opencodeDb2, tool, tool2 } from "./fixtures/opencode.js";
 import { DatabaseSync } from "node:sqlite";
 
 const NOW = Date.parse("2026-10-16T12:00:00Z");
@@ -78,6 +78,47 @@ test("its edits are the edit tools' files, relative ones joined to where it ran;
     assert.deepEqual([...o.live(sessionIdOf(SUB)).edits.keys()], []);
     const raw = readDb(w.file, { sinceMs: NOW - 86400e3 });
     assert.doesNotMatch(JSON.stringify(raw), /SECRET/);
+  } finally {
+    w.done();
+  }
+});
+
+test("OpenCode 2's session_v2 and session_part are read like 1.x's tables, and a database holding both gives both", () => {
+  const w = setup();
+  try {
+    opencodeDb2(w.file, {
+      legacy: true,
+      sessions: [
+        { id: A, directory: "/w/atlas", title: "Overwrite notes", created: NOW - 600e3, updated: NOW - 60e3, model: { id: "gpt-x", providerID: "openai" }, cost: 0.25, tokens: 900 },
+        { id: B, directory: "/w/other", legacy: true, version: "1.19.3", created: NOW - 500e3, updated: NOW - 50e3 },
+        { id: SUB, parent: A, directory: "/w/atlas", created: NOW - 300e3 },
+      ],
+      parts: [
+        { session: A, at: NOW - 120e3, data: tool2("write", { path: "/w/atlas/notes.txt", content: "SECRET CONTENT" }) },
+        { session: A, at: NOW - 110e3, data: tool2("edit", { path: "src/app.ts", oldString: "a", newString: "b" }) },
+        { session: A, at: NOW - 100e3, data: tool2("patch", { patchText: "*** Begin Patch\n*** Update File: src/lib.ts\n@@\n-SECRET\n+SECRET\n*** End Patch" }) },
+        { session: A, at: NOW - 90e3, data: tool2("write", { path: "/w/atlas/failed.txt" }, "error") },
+        { session: A, at: NOW - 80e3, data: tool2("read", { path: "/w/atlas/read-only.txt" }) },
+        { session: B, at: NOW - 70e3, legacy: true, data: tool("write", { filePath: "/w/other/old.txt" }) },
+      ],
+    });
+    const seen = () => drift.list().filter((r) => r.source === "anomaly/opencode/db").length;
+    const before = seen();
+    const raw = readDb(w.file, { sinceMs: NOW - 86400e3 });
+    assert.equal(raw.state, "ok");
+    assert.equal(raw.version, "2.2.5");
+    assert.equal(seen(), before, "2.x is not drift");
+    assert.deepEqual(raw.sessions.map((s) => s.id), [B, A, SUB], "newest update first, whichever table it came from");
+    assert.deepEqual([raw.sessions[1].model_provider, raw.sessions[1].model_id, raw.sessions[1].cost, raw.sessions[1].tokens_input], ["openai", "gpt-x", 0.25, 900]);
+    assert.deepEqual(raw.edits.map((e) => [e.session_id, e.tool, e.path]), [
+      [A, "write", "/w/atlas/notes.txt"],
+      [A, "edit", "src/app.ts"],
+      [A, "patch", "src/lib.ts"],
+      [B, "write", "/w/other/old.txt"],
+    ]);
+    assert.doesNotMatch(JSON.stringify(raw), /SECRET/);
+    const o = new OpenCodeSessions({ file: w.file }).read(NOW);
+    assert.deepEqual([...o.live(sessionIdOf(A)).edits.keys()].sort(), ["/w/atlas/notes.txt", "/w/atlas/src/app.ts", "/w/atlas/src/lib.ts"]);
   } finally {
     w.done();
   }

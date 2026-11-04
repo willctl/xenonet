@@ -53,11 +53,15 @@ $ xenonet
 | `xenonet console <steps>` | Drives XenoNet Dev, to check a change to XenoNet. See [Driving XenoNet](development.md#driving-xenonet-from-agents-scripts-and-tests). |
 | `xenonet service` | The background service. `start`, `status` and `stop` start it, say how it is and stop it; `stop` refuses while terminals run, unless `--force`, and holds until `start` or your next login, even when the copy that starts at login was waiting to take over. `install` starts it at login, and again if it stops unexpectedly, under launchd on macOS, systemd on Linux or Task Scheduler on Windows; `uninstall` turns that off. `run` is what they run. See [Keeping the service running](always-on.md). |
 | `xenonet setup` | Installs a downloaded Service or Tools package for your account. Run it from the package's extracted folder, as `bin/xenonet setup`. See [Install without Desktop](components.md#install-without-desktop). |
-| `xenonet update` | `--check` looks for Service and Tools updates. `xenonet update` shows what would change and asks first (`--yes` skips the question); `update tools`, `update service` or `update all` installs them without asking. The Tools update first, then the Service. Desktop updates in its Updates panel. See [Updates](components.md#updates). |
+| `xenonet update` | `--check` lists the Service and Tools updates that are available (`--json` gives each as a line of JSON). `xenonet update` shows what would change and asks first (`--yes` skips the question); `update tools`, `update service` or `update all` installs them without asking. The Tools update first, then the Service. Desktop updates in its Updates panel. See [Updates](components.md#updates). |
 | `xenonet install`, `xenonet uninstall` | Puts the command on your PATH, or takes it off. |
 | `xenonet completion zsh` | Prints tab completion for zsh. Add `eval "$(xenonet completion zsh)"` to `~/.zshrc`, or the `bash` one to `~/.bashrc`. |
 
 Every command takes `--json`, for scripts. A command talks to XenoNet, or to XenoNet Dev when XenoNet isn't running. `--dev`, `--demo` or `--port` picks one.
+
+## Exit codes
+
+A command exits 0 when it did what you asked, 1 when it failed or found a problem, and 2 when you used it wrong, with a line saying how. Failing means the doctor has a failed check, `xenonet status` finds no XenoNet running, a `hosts test` gets no answer, or an error. `xenonet drift` normally exits 0; with `--exit-code` it exits 1 when there is drift you haven't looked at, and leaves it unmarked. No other command has that flag.
 
 ## The doctor
 

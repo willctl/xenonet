@@ -207,33 +207,44 @@ fn nv(v: f64) -> Option<Value> {
 
 /// A stable sort by a comparator that gives a number, as JS's sort takes
 /// one: negative puts `a` first, and NaN counts as 0. (Rust's own sort may
-/// panic on an order that isn't total.)
-fn sort_by_num<T: Clone>(v: &mut Vec<T>, cmp: impl Fn(&T, &T) -> f64) {
-    merge_sort(v, &cmp);
-}
-
-fn merge_sort<T: Clone>(v: &mut Vec<T>, cmp: &dyn Fn(&T, &T) -> f64) {
-    if v.len() < 2 {
+/// panic on an order that isn't total.) The items move once, at the end:
+/// the merges work on their places, as the history holds a hundred
+/// thousand events with maps in them at start.
+fn sort_by_num<T>(v: &mut Vec<T>, cmp: impl Fn(&T, &T) -> f64) {
+    let n = v.len();
+    if n < 2 {
         return;
     }
-    let mid = v.len() / 2;
-    let mut right = v.split_off(mid);
-    merge_sort(v, cmp);
-    merge_sort(&mut right, cmp);
-    let left = std::mem::take(v);
-    let (mut i, mut j) = (0, 0);
-    while i < left.len() && j < right.len() {
-        // The right one goes first only when it's strictly before.
-        if cmp(&left[i], &right[j]) > 0.0 {
-            v.push(right[j].clone());
-            j += 1;
-        } else {
-            v.push(left[i].clone());
-            i += 1;
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut spare = vec![0usize; n];
+    let mut width = 1;
+    while width < n {
+        let mut start = 0;
+        while start < n {
+            let mid = (start + width).min(n);
+            let end = (start + 2 * width).min(n);
+            let (mut i, mut j, mut k) = (start, mid, start);
+            while i < mid && j < end {
+                // The right one goes first only when it's strictly before.
+                if cmp(&v[order[i]], &v[order[j]]) > 0.0 {
+                    spare[k] = order[j];
+                    j += 1;
+                } else {
+                    spare[k] = order[i];
+                    i += 1;
+                }
+                k += 1;
+            }
+            spare[k..k + (mid - i)].copy_from_slice(&order[i..mid]);
+            k += mid - i;
+            spare[k..k + (end - j)].copy_from_slice(&order[j..end]);
+            start = end;
         }
+        std::mem::swap(&mut order, &mut spare);
+        width *= 2;
     }
-    v.extend_from_slice(&left[i..]);
-    v.extend_from_slice(&right[j..]);
+    let mut taken: Vec<Option<T>> = std::mem::take(v).into_iter().map(Some).collect();
+    v.extend(order.into_iter().map(|i| taken[i].take().expect("each place once")));
 }
 
 fn num_of(v: Option<&Value>, key: &str) -> f64 {
@@ -1151,14 +1162,20 @@ impl Telemetry {
             if live {
                 let at = self.index_of(ts, true);
                 self.history.insert(at, Event { ts, fields: full.clone() });
+                if self.history.len() > HISTORY_MAX + 500 {
+                    self.trim_history(now);
+                }
+                out.push(Emit::Activity(full));
             } else {
-                self.history.push(Event { ts, fields: full.clone() });
+                self.history.push(Event { ts, fields: full });
+                // Reading a pile of busy transcripts would keep every event
+                // of the day until the sort at the end; the sort and trim
+                // leave the same ones as doing it once.
+                if self.history.len() > 4 * HISTORY_MAX {
+                    self.primed(now);
+                }
             }
-            if live && self.history.len() > HISTORY_MAX + 500 {
-                self.trim_history(now);
-            }
-        }
-        if live {
+        } else if live {
             out.push(Emit::Activity(full));
         }
     }

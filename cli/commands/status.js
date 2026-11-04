@@ -17,7 +17,7 @@ export async function run(_args, flags) {
   const s = await find(flags);
   if (!s) {
     if (flags.json) json({ running: false });
-    else print(`${c.dim("○")} XenoNet isn't running ${c.dim(`(nothing answers on ${candidates(flags).map((p) => `127.0.0.1:${p}`).join(" or ")})`)}\n  Open XenoNet, or start XenoNet Dev from its checkout with npm run app.`);
+    else print(`${c.dim("○")} XenoNet isn't running ${c.dim(`(nothing answers on ${candidates(flags).map((p) => `127.0.0.1:${p}`).join(" or ")})`)}\n  Open XenoNet, or run xenonet service start. From a checkout, npm run app starts XenoNet Dev.`);
     return 1;
   }
   const [summary, all, list, doctor] = await Promise.all([get(s, "/api/summary"), get(s, "/api/engine/agents").catch(() => []), get(s, "/api/actors").catch(() => null), get(s, "/api/doctor").catch(() => null)]);

@@ -143,9 +143,12 @@ const FROM_COLUMN = { model_provider: "model", model_id: "model" };
 export function opencodeFindings(tables, schema = xenonetSchema(OPENCODE_DB)) {
   const findings = [];
   const add = (kind, severity, at, detail) => findings.push({ source: OPENCODE_DB, kind, severity, path: at, variant: null, detail, origin: "types" });
+  // OpenCode 2 declares session_v2 and session_part, 1.x session and part:
+  // the 2.x name is the one checked where the source has it.
+  const named = (v2, v1) => (tables.has(v2) ? v2 : v1);
   const want = [
-    ["session", schema?.properties?.session?.items, null],
-    ["part", schema?.properties?.edits?.items, ["session_id", "time_created"]],
+    [named("session_v2", "session"), schema?.properties?.session?.items, null],
+    [named("session_part", "part"), schema?.properties?.edits?.items, ["session_id", "time_created"]],
   ];
   for (const [table, node, only] of want) {
     const columns = tables.get(table);
@@ -155,11 +158,11 @@ export function opencodeFindings(tables, schema = xenonetSchema(OPENCODE_DB)) {
     }
     const required = new Set(node?.required ?? []);
     for (const name of only ?? Object.keys(node?.properties ?? {})) {
-      const col = columns.get(table === "session" ? (FROM_COLUMN[name] ?? name) : name);
+      const col = columns.get(table.startsWith("session") && !table.endsWith("part") ? (FROM_COLUMN[name] ?? name) : name);
       if (!col) add("removed", "change", `${table}.${FROM_COLUMN[name] ?? name}`, "XenoNet reads this column, and OpenCode's source doesn't declare it any more");
       else if (required.has(name) && !col.notNull) add("now-optional", "change", `${table}.${name}`, "XenoNet needs it; OpenCode's source says it may be NULL");
     }
-    if (table === "part" && !columns.has("data")) add("removed", "change", "part.data", "XenoNet reads the edit tools' file paths from it, and OpenCode's source doesn't declare it any more");
+    if (table.endsWith("part") && !columns.has("data")) add("removed", "change", `${table}.data`, "XenoNet reads the edit tools' file paths from it, and OpenCode's source doesn't declare it any more");
   }
   return findings;
 }

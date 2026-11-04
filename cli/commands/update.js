@@ -33,5 +33,13 @@ export async function run(args, flags) {
       if (!(await confirm("Update them?", flags))) return print(c.dim("Nothing changed."));
     }
   }
+  // --check says it in words; --json keeps what a script reads.
+  if (flags.check && !flags.json) {
+    const lines = changes(items);
+    if (!lines.length) return print("The Service and Tools are up to date. Desktop updates itself, in its Updates panel.");
+    print("XenoNet can update:");
+    for (const l of lines) print(`  ${l}`);
+    return print(c.dim("Run xenonet update to install them."));
+  }
   for (const item of items) print(JSON.stringify(flags.check ? item : await updateComponent(item)));
 }

@@ -71,6 +71,20 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
         }
     }
+    // --check says it in words; --json keeps what a script reads.
+    if flags.on("check") && !flags.on("json") {
+        let lines = changes(&items);
+        if lines.is_empty() {
+            print("The Service and Tools are up to date. Desktop updates itself, in its Updates panel.");
+            return Ok(0);
+        }
+        print("XenoNet can update:");
+        for l in &lines {
+            print(format!("  {l}"));
+        }
+        print(c::dim("Run xenonet update to install them."));
+        return Ok(0);
+    }
     for item in &items {
         let out = if flags.on("check") { item.clone() } else { cores::update_component(item)? };
         print(stringify(&out, 0));

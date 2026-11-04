@@ -37,6 +37,14 @@ ${c.bold("Examples")}
 // ends the command quietly.
 process.stdout.on("error", (err) => (err.code === "EPIPE" ? process.exit(0) : (process.exitCode = 1)));
 
+// The tools a connected session calls aren't commands, so a person who
+// types one is told where they are.
+const SESSION_TOOLS = ["send", "inbox", "peers", "claim", "release", "who_has", "whoami", "focus", "handoff", "delegate", "permission"];
+const unknownCommand = (name) =>
+  SESSION_TOOLS.includes(name)
+    ? `no command "${name}". Sessions use that as a tool, once xenonet connect has added XenoNet to their app. xenonet agents lists them, and xenonet messages shows what they said.`
+    : `no command "${name}". xenonet --help lists them.`;
+
 async function main() {
   const { flags, rest } = parse(process.argv.slice(2));
   if (flags.color === false || flags.json) setColor(false);
@@ -49,11 +57,13 @@ async function main() {
   }
   if (!name) return flags.help ? help() : run("status", [], flags);
   if (name === "help") return args[0] ? run(ALIASES[args[0]] ?? args[0], [], { ...flags, help: true }) : help();
-  if (!COMMANDS[name]) throw new Fail(`no command "${name}". xenonet --help lists them.`, 2);
+  if (!COMMANDS[name]) throw new Fail(unknownCommand(name), 2);
   return run(name, args, flags);
 }
 
 async function run(name, args, flags) {
+  // These commands exist only in the xenonet binary.
+  if (COMMANDS[name]?.native) return (await import("./lib/native.js")).delegate(process.argv.slice(2));
   const mod = await import(`./commands/${name}.js`);
   if (flags.help) {
     const cmd = COMMANDS[name];

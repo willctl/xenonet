@@ -29,6 +29,11 @@ const USAGE_COLUMNS = ["cost", "tokens_input", "tokens_output", "tokens_reasonin
 const modelSql = `CASE WHEN json_valid(model) AND json_type(model, '$.providerID') = 'text' THEN json_extract(model, '$.providerID') END AS model_provider,
     CASE WHEN json_valid(model) AND json_type(model, '$.id') = 'text' THEN json_extract(model, '$.id') END AS model_id`;
 const NEEDED = { session: ["id", "directory", "time_created", "time_updated"], part: ["session_id", "time_created", "data"] };
+// OpenCode 2 keeps its sessions in session_v2 and its parts in session_part;
+// 1.x kept them in session and part. A database upgraded from 1.x can hold
+// both, so each that's there is read, the newer table's rows first.
+const SESSION_TABLES = ["session_v2", "session"];
+const PART_TABLES = ["session_part", "part"];
 const EDITS_MAX = 5000;
 
 // OpenCode's ids as XenoNet's session ids take them, and back. A session's
@@ -70,14 +75,17 @@ export function patchFiles(text) {
 // other fields never leave the database, apart from apply_patch's text,
 // whose file headers are kept and the rest dropped here. Newest first, so
 // a busy day can't crowd out the edits that matter: the last ones.
-const editsSql = `
+// A 1.x part names its tool in data.tool and its file in input.filePath; a
+// 2.x part has data.name and input.path.
+const editsSql = (table) => `
   SELECT session_id, time_created,
-    json_extract(data, '$.tool') AS tool,
-    CASE WHEN json_type(data, '$.state.input.filePath') = 'text' THEN json_extract(data, '$.state.input.filePath') END AS path,
-    CASE WHEN json_extract(data, '$.tool') IN (${PATCH_TOOLS.map((t) => `'${t}'`).join(", ")}) AND json_type(data, '$.state.input.patchText') = 'text' THEN json_extract(data, '$.state.input.patchText') END AS patch
-  FROM part
+    COALESCE(json_extract(data, '$.tool'), json_extract(data, '$.name')) AS tool,
+    CASE WHEN json_type(data, '$.state.input.filePath') = 'text' THEN json_extract(data, '$.state.input.filePath')
+         WHEN json_type(data, '$.state.input.path') = 'text' THEN json_extract(data, '$.state.input.path') END AS path,
+    CASE WHEN COALESCE(json_extract(data, '$.tool'), json_extract(data, '$.name')) IN (${PATCH_TOOLS.map((t) => `'${t}'`).join(", ")}) AND json_type(data, '$.state.input.patchText') = 'text' THEN json_extract(data, '$.state.input.patchText') END AS patch
+  FROM ${table}
   WHERE time_created > ? AND json_valid(data) AND json_extract(data, '$.type') = 'tool'
-    AND json_extract(data, '$.tool') IN (${[...EDIT_TOOLS, ...PATCH_TOOLS].map((t) => `'${t}'`).join(", ")})
+    AND COALESCE(json_extract(data, '$.tool'), json_extract(data, '$.name')) IN (${[...EDIT_TOOLS, ...PATCH_TOOLS].map((t) => `'${t}'`).join(", ")})
     AND COALESCE(json_extract(data, '$.state.status'), '') <> 'error'
   ORDER BY time_created DESC LIMIT ${EDITS_MAX}`;
 
@@ -95,19 +103,44 @@ export function readDb(file, { sinceMs = 0, editsSinceMs = sinceMs, open = (f) =
   const r = reader(SOURCE);
   try {
     const columns = (t) => new Set(db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name));
-    const has = { session: columns("session"), part: columns("part") };
+    const tablesOf = (names, fallback) => {
+      const found = names.map((t) => [t, columns(t)]).filter(([, c]) => c.size);
+      return found.length ? found : [[fallback, new Set()]];
+    };
+    const sessionTables = tablesOf(SESSION_TABLES, "session");
+    const partTables = tablesOf(PART_TABLES, "part");
     // The newest session's version, by rowid when time_updated is gone, so
     // the drift below is still recorded with a version.
-    const version = has.session.has("version") ? cleanVersion(db.prepare(`SELECT version AS v FROM session ORDER BY ${has.session.has("time_updated") ? "time_updated" : "rowid"} DESC LIMIT 1`).get()?.v ?? null) : null;
-    for (const [t, needed] of Object.entries(NEEDED)) {
-      if (!has[t].size) r.missing(t, version);
-      else for (const c of needed) if (!has[t].has(c)) r.missing(`${t}[].${c}`, version);
+    let version = null;
+    for (const [t, c] of sessionTables) {
+      if (!c.has("version")) continue;
+      version = cleanVersion(db.prepare(`SELECT version AS v FROM ${t} ORDER BY ${c.has("time_updated") ? "time_updated" : "rowid"} DESC LIMIT 1`).get()?.v ?? null);
+      if (version) break;
     }
-    if (!NEEDED.session.every((c) => has.session.has(c))) return { state: "unreadable", ...empty, version };
-    const cols = [...SESSION_COLUMNS, ...USAGE_COLUMNS].filter((c) => has.session.has(c));
-    if (has.session.has("model")) cols.push(modelSql);
-    const session = db.prepare(`SELECT ${cols.join(", ")} FROM session WHERE time_updated > ? ORDER BY time_updated DESC LIMIT ${SESSIONS_MAX}`).all(sinceMs).map((x) => ({ ...x }));
-    const raw = NEEDED.part.every((c) => has.part.has(c)) ? db.prepare(editsSql).all(editsSinceMs).reverse() : [];
+    for (const [group, needed] of [[sessionTables, NEEDED.session], [partTables, NEEDED.part]]) {
+      for (const [t, c] of group) {
+        if (!c.size) r.missing(t, version);
+        else for (const n of needed) if (!c.has(n)) r.missing(`${t}[].${n}`, version);
+      }
+    }
+    const readable = sessionTables.filter(([, c]) => NEEDED.session.every((n) => c.has(n)));
+    if (!readable.length) return { state: "unreadable", ...empty, version };
+    const seen = new Set();
+    const session = [];
+    for (const [t, c] of readable) {
+      const cols = [...SESSION_COLUMNS, ...USAGE_COLUMNS].filter((n) => c.has(n));
+      if (c.has("model")) cols.push(modelSql);
+      const rows = db.prepare(`SELECT ${cols.join(", ")} FROM ${t} WHERE time_updated > ? ORDER BY time_updated DESC LIMIT ${SESSIONS_MAX}`).all(sinceMs);
+      for (const x of rows) if (!seen.has(x.id)) (seen.add(x.id), session.push({ ...x }));
+    }
+    session.sort((x, y) => y.time_updated - x.time_updated);
+    session.length = Math.min(session.length, SESSIONS_MAX);
+    const raw = partTables
+      .filter(([, c]) => NEEDED.part.every((n) => c.has(n)))
+      .flatMap(([t]) => db.prepare(editsSql(t)).all(editsSinceMs))
+      .sort((x, y) => y.time_created - x.time_created)
+      .slice(0, EDITS_MAX)
+      .reverse();
     const edits = [];
     for (const e of raw) {
       if (e.path) edits.push({ session_id: e.session_id, time_created: e.time_created, tool: e.tool, path: e.path });
