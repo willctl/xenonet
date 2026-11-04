@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import { c, print } from "../lib/out.js";
+import { c, print, Fail } from "../lib/out.js";
 import { appDir } from "../../core/dirs.js";
 import { config } from "../../core/config.js";
 import { listFiles } from "../../core/paths.js";
@@ -80,7 +80,7 @@ export async function run([sub = "list", id], flags) {
   }
   if (sub === "capture") {
     const ids = flags.all ? store.list().filter((r) => !r.context).map((r) => r.id) : id ? [id] : [];
-    if (!ids.length) throw new Error("say which: xenonet refusals capture <id>, or --all");
+    if (!ids.length) throw new Fail("say which: xenonet refusals capture <id>, or --all", 2);
     let added = 0;
     for (const x of ids) {
       const r = store.capture(x);
@@ -126,5 +126,5 @@ export async function run([sub = "list", id], flags) {
     }
     return print(`${c.green("✓")} Looked through ${files} transcript${files === 1 ? "" : "s"}; kept ${found} refusal${found === 1 ? "" : "s"} XenoNet didn't have${found && !contextOn(dir) ? c.dim(" (without context: xenonet refusals context on, then capture --all)") : ""}.`);
   }
-  throw new Error(`no such: xenonet refusals ${sub}. xenonet refusals --help lists them.`);
+  throw new Fail(`no such: xenonet refusals ${sub}. xenonet refusals --help lists them.`, 2);
 }

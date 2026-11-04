@@ -189,7 +189,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 id.map(|x| vec![x.clone()]).unwrap_or_default()
             };
             if ids.is_empty() {
-                return Err(Fail::error("say which: xenonet refusals capture <id>, or --all"));
+                return Err(Fail::new("say which: xenonet refusals capture <id>, or --all", 2));
             }
             let mut added = 0;
             for x in &ids {
@@ -204,7 +204,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             Ok(0)
         }
         "scan" => scan(&dir, flags),
-        _ => Err(Fail::error(format!("no such: xenonet refusals {sub}. xenonet refusals --help lists them."))),
+        _ => Err(Fail::new(format!("no such: xenonet refusals {sub}. xenonet refusals --help lists them."), 2)),
     }
 }
 

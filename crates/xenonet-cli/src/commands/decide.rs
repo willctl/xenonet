@@ -48,6 +48,6 @@ pub fn run(args: &[String], _flags: &Flags) -> Done {
             print(format!("{} XenoNet forgot the key.", c::green("✓")));
             Ok(0)
         }
-        sub => Err(Fail::error(format!("no such: xenonet decide {sub}. xenonet decide --help says more."))),
+        sub => Err(Fail::new(format!("no such: xenonet decide {sub}. xenonet decide --help says more."), 2)),
     }
 }

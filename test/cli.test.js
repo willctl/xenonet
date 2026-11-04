@@ -40,6 +40,14 @@ test("arguments: flags anywhere, values, negations and everything after --", () 
   assert.deepEqual([parse(["diagnose", "--model", "m"]).flags, parse(["refusals", "--provider", "claude"]).flags], [{ model: "m" }, { provider: "claude" }]);
 });
 
+test("a command used wrong exits 2 and says how: a missing name, an unknown subcommand", async () => {
+  for (const args of [["decide", "nope"], ["refusals", "nope"], ["refusals", "capture"], ["live", "grant", "hermes"], ["live", "revoke"], ["live", "allow"], ["who"], ["search"]]) {
+    const out = await xenonet(args);
+    assert.equal(out.code, 2, `xenonet ${args.join(" ")}: ${out.stderr}`);
+    assert.match(out.stderr, /^xenonet: (say |no such)/);
+  }
+});
+
 test("output: columns line up, the last one wraps under itself, and painted text stays painted", () => {
   const out = table([["✓", "short", "one"], ["!", "a longer title", "two words"]], { indent: 2 });
   assert.equal(out, "  ✓  short           one\n  !  a longer title  two words");

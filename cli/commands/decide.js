@@ -2,7 +2,7 @@
 // (core/decide.js), and its OpenRouter key, which goes straight into your
 // computer's credential store. The key is read from standard input, so it
 // never shows in your shell's history or a process list.
-import { c, print } from "../lib/out.js";
+import { c, print, Fail } from "../lib/out.js";
 import { createSecretStore } from "../../core/secret-store.js";
 import { createDecider } from "../../core/decide.js";
 
@@ -43,5 +43,5 @@ export async function run([sub = "status"]) {
     await decider.forgetKey();
     return print(`${c.green("✓")} XenoNet forgot the key.`);
   }
-  throw new Error(`no such: xenonet decide ${sub}. xenonet decide --help says more.`);
+  throw new Fail(`no such: xenonet decide ${sub}. xenonet decide --help says more.`, 2);
 }

@@ -58,15 +58,15 @@ export async function run(args, flags) {
   }
   if (sub === "pause" || sub === "resume") return say(await post(s, "/api/delivery/pause", { paused: sub === "pause" })), 0;
   if (sub === "allow" || sub === "disallow") {
-    if (!rest[0]) throw new Fail(`say which session: xenonet live ${sub} <session id>`);
+    if (!rest[0]) throw new Fail(`say which session: xenonet live ${sub} <session id>`, 2);
     return say(await post(s, `/api/delivery/${sub}`, { session: rest[0], hours, remote: !!flags.remote })), 0;
   }
   if (sub === "grant") {
-    if (rest.length < 2) throw new Fail("say which actor and what scope: xenonet live grant hermes project:xenonet");
+    if (rest.length < 2) throw new Fail("say which actor and what scope: xenonet live grant hermes project:xenonet", 2);
     return say(await post(s, "/api/delivery/grant", { actor: actorId(rest[0]), scope: rest.slice(1).join(" "), hours })), 0;
   }
   if (sub === "revoke") {
-    if (!rest[0]) throw new Fail("say which actor: xenonet live revoke hermes");
+    if (!rest[0]) throw new Fail("say which actor: xenonet live revoke hermes", 2);
     return say(await post(s, "/api/delivery/revoke", { actor: actorId(rest[0]) })), 0;
   }
   if (sub === "audit") {

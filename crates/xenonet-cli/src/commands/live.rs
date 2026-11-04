@@ -124,7 +124,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         Some(sub @ ("pause" | "resume")) => say(&s.post("/api/delivery/pause", &body(vec![("paused", Some(Value::Bool(sub == "pause")))]), &[])?, flags),
         Some(sub @ ("allow" | "disallow")) => {
-            let Some(session) = rest.first().filter(|x| !x.is_empty()) else { return Err(Fail::new(format!("say which session: xenonet live {sub} <session id>"), 1)) };
+            let Some(session) = rest.first().filter(|x| !x.is_empty()) else { return Err(Fail::new(format!("say which session: xenonet live {sub} <session id>"), 2)) };
             say(
                 &s.post(
                     &format!("/api/delivery/{sub}"),
@@ -136,7 +136,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         Some("grant") => {
             if rest.len() < 2 {
-                return Err(Fail::new("say which actor and what scope: xenonet live grant hermes project:xenonet", 1));
+                return Err(Fail::new("say which actor and what scope: xenonet live grant hermes project:xenonet", 2));
             }
             say(
                 &s.post(
@@ -148,7 +148,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             )
         }
         Some("revoke") => {
-            let Some(actor) = rest.first().filter(|x| !x.is_empty()) else { return Err(Fail::new("say which actor: xenonet live revoke hermes", 1)) };
+            let Some(actor) = rest.first().filter(|x| !x.is_empty()) else { return Err(Fail::new("say which actor: xenonet live revoke hermes", 2)) };
             say(&s.post("/api/delivery/revoke", &body(vec![("actor", Some(Value::String(actor_id(actor))))]), &[])?, flags)
         }
         Some("audit") => {
