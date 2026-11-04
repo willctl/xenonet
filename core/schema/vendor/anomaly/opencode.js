@@ -5,8 +5,9 @@
 // file's content, a share URL or a credential.
 //
 // From OpenCode's own source (github.com/anomalyco/opencode, its SQLite
-// tables session and part) and checked against a database OpenCode 1.19.3
-// wrote. Each session row says the OpenCode version that made it.
+// tables session and part in 1.x, session_v2 and session_part in 2.x) and
+// checked against a database OpenCode 1.19.3 wrote. Each session row says
+// the OpenCode version that made it.
 import { vendor, open, maybe, num, str, z } from "../common.js";
 
 const session = open({
@@ -32,15 +33,15 @@ export const Db = vendor(
   "anomaly/opencode/db",
   1,
   open({
-    session: z.array(session).describe("select id, parent_id, directory, title, version, time_created, time_updated, time_archived, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, and the providerID and id of model from session"),
+    session: z.array(session).describe("select id, parent_id, directory, title, version, time_created, time_updated, time_archived, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, and the providerID and id of model from session_v2 (OpenCode 2) and session (1.x), each that is there"),
     edits: z
       .array(open({ session_id: str, time_created: num, tool: str, path: maybe(str) }))
-      .describe("The file each edit, write and multiedit tool part names (data.state.input.filePath), and each apply_patch part's file headers, taken from part.data; nothing else in a part is kept"),
+      .describe("The file each edit, write and multiedit tool part names (data.state.input.filePath, or input.path in 2.x), and each apply_patch part's file headers, taken from session_part.data (2.x) and part.data (1.x); nothing else in a part is kept"),
   }),
   {
     title: "OpenCode's database",
     description:
-      "The rows XenoNet reads from OpenCode's opencode.db ($XDG_DATA_HOME/opencode, ~/.local/share/opencode by default, or OPENCODE_DB), opened read only: its sessions and which files their edit tools changed. The version is the newest session's own (session.version).",
-    versions: "<2.0.0",
+      "The rows XenoNet reads from OpenCode's opencode.db ($XDG_DATA_HOME/opencode, ~/.local/share/opencode by default, or OPENCODE_DB), opened read only: its sessions and which files their edit tools changed. OpenCode 2 writes session_v2 and session_part, 1.x session and part; a database upgraded from 1.x can hold both. The version is the newest session's own (session.version).",
+    versions: "*",
   },
 );
