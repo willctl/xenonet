@@ -44,6 +44,8 @@ export function engineRoutes({ engine, connect, verify, readJson, send, actorCal
     claim: (me, b) => engine.claim(me, { paths: b.paths, note: b.note, minutes: b.minutes }),
     release: (me, b) => engine.release(me, { paths: Array.isArray(b.paths) && b.paths.length ? b.paths : null }),
     focus: (me, b) => engine.setFocus(me, b.text),
+    // An OpenCode session's plugin, as it happens (core/native/opencode-events.js).
+    "opencode-event": (me, b) => engine.opencodeEvent(me, { events: b.events, cwd: b.cwd }),
     // A Claude Code session's channel waiting for messages (core/delivery/channel.js).
     channel: async (me, b) => {
       if (!channels || !me.startsWith("claude:")) return { items: [], off: true };

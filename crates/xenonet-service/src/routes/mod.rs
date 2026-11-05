@@ -116,6 +116,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route.starts_with("/api/engine/") || route == "/api/hook/codex" {
         let r = engine::EngineRoutes {
             engine: cores.engine.clone(),
+            state: cores.state.clone(),
             connect: cores.connect.clone(),
             verify: cores.verify.clone(),
             caller: ctx.caller.as_ref(),

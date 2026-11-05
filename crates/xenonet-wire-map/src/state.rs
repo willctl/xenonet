@@ -105,6 +105,8 @@ pub struct MapState {
     codex_projects: Arc<Gather>,
     grok_sessions: Arc<Gather>,
     pub runs: Mutex<ReportedRuns>,
+    /// What OpenCode's XenoNet plugin says as it happens (state.opencodeEvents).
+    pub opencode: Mutex<xenonet_sources::native::opencode_events::OpenCodeEvents>,
     /// The native readers and numbat's, when they're on.
     observed: Vec<Arc<crate::observed::Observed>>,
     inner: Mutex<Inner>,
@@ -204,6 +206,7 @@ impl MapState {
             codex_projects,
             grok_sessions,
             runs: Mutex::new(ReportedRuns::new()),
+            opencode: Mutex::new(xenonet_sources::native::opencode_events::OpenCodeEvents::new()),
             observed: crate::observed::Observed::all(&cfg, &vendor),
             inner: Mutex::new(Inner { map: Map_ { sources: json!([]), ..Default::default() }, memory: Memory::new(), projects_dir, demo_titles: Vec::new(), repo_pass_for: None }),
             refreshing: Mutex::new(None),
@@ -565,7 +568,28 @@ impl MapState {
         // One session per id: the first source to list it wins.
         let ids: Vec<Option<Value>> = all.iter().map(|x| x.get("id").cloned()).collect();
         let first = xenonet_sources::reported_runs::firsts(&ids);
-        all.into_iter().zip(first).filter(|(_, f)| *f).map(|(x, _)| x).collect()
+        let now = now_ms();
+        let mut events = lock(&self.opencode);
+        all.into_iter()
+            .zip(first)
+            .filter(|(_, f)| *f)
+            .map(|(mut x, _)| {
+                // The plugin's model is the newest; its usage stands in for a
+                // row's that has none.
+                if x.get("app").and_then(Value::as_str) == Some("opencode") {
+                    let st = x.get("id").and_then(Value::as_str).and_then(|id| events.state(id, now));
+                    if let (Some(st), Some(o)) = (st, x.as_object_mut()) {
+                        if let Some(m) = st.model {
+                            o.insert("model".into(), json!(m));
+                        }
+                        if let Some(u) = st.usage.filter(|_| o.get("usage").is_none_or(Value::is_null)) {
+                            o.insert("usage".into(), u);
+                        }
+                    }
+                }
+                x
+            })
+            .collect()
     }
 
     // A sign-in that changed since the last refresh goes to the activity
@@ -616,13 +640,19 @@ impl MapState {
 
     /// The tailer's snapshot as the page gets it.
     pub fn snapshot(&self) -> Value {
-        let snap = self.live.snapshot();
+        let mut snap = self.live.snapshot();
         let acks = self.store.acks();
         let signed_in = lock(&self.inner).memory.signed_in();
         let hidden = self.cfg.hidden();
         let g = lock(&self.inner);
         let nodes = g.map.graph.as_ref().map_or(&[][..], |gr| items(gr.get("nodes")));
         let mut node = |id: &str| g.map.index.get(id).and_then(|&i| nodes.get(i)).cloned();
+        // OpenCode sessions whose plugin speaks for them (working, waiting
+        // on a permission) are live sessions like the tailer's.
+        let extra = lock(&self.opencode).snapshot(now_ms(), &|id| g.map.index.contains_key(id));
+        if let Some(Value::Array(list)) = snap.get_mut("sessions") {
+            list.extend(extra);
+        }
         decide::live_snapshot(snap, &hidden, &acks, signed_in.as_ref(), &mut node)
     }
 
@@ -1339,6 +1369,9 @@ impl State for MapState {
     fn note_hook(&self, id: &str, body: &Value) -> R<()> {
         self.live.note_hook(id, body).map_err(err)
     }
+    fn opencode_event(&self, id: &str, events: &Value, cwd: Option<&str>) -> R<usize> {
+        Ok(lock(&self.opencode).ingest(id, events, cwd, now_ms()))
+    }
     fn root_info(&self) -> R<Value> {
         let mut r = workspace::root(self.cfg.env_projects_dir.as_deref(), Some(&self.store.workspace_root()), &self.cfg.home_dir);
         r["scan"] = lock(&self.inner).map.scan.clone().unwrap_or(Value::Null);
@@ -1421,7 +1454,11 @@ impl State for MapState {
         if let Some(i) = self.live.info(id, now) {
             return Ok(Some(i));
         }
-        Ok(self.observed(id, now))
+        let read = self.observed(id, now);
+        // An OpenCode session whose plugin is talking: what it says goes
+        // before what its database says, which stays the fallback.
+        let Some(ev) = lock(&self.opencode).live(id, now) else { return Ok(read) };
+        Ok(Some(merge_opencode(read, ev)))
     }
     fn observed_live(&self, id: &str) -> R<bool> {
         Ok(self.observed(id, now_ms()).is_some())
@@ -1518,6 +1555,28 @@ impl MapState {
     }
 }
 
+/// The reader's live view of an OpenCode run with the plugin's over it: its
+/// status and wait, the later last event, and the edits of both, a file's
+/// newest.
+fn merge_opencode(read: Option<Value>, ev: Value) -> Value {
+    let mut out = read.unwrap_or_else(|| json!({ "endedAt": null }));
+    let at = |v: &Value| v.get("lastEventAt").and_then(Value::as_f64).unwrap_or(0.0);
+    let last = at(&out).max(at(&ev));
+    let mut edits: Vec<Value> = items(out.get("edits")).to_vec();
+    for e in items(ev.get("edits")) {
+        edits.retain(|x| x.get("path") != e.get("path"));
+        edits.push(e.clone());
+    }
+    if let Some(o) = out.as_object_mut() {
+        o.insert("observed".into(), json!(false));
+        o.insert("lastEventAt".into(), json!(last));
+        o.insert("status".into(), ev["status"].clone());
+        o.insert("needsYou".into(), ev["needsYou"].clone());
+        o.insert("edits".into(), Value::Array(edits));
+    }
+    out
+}
+
 /// Runs an actor reports from elsewhere (state.reportedRuns).
 pub struct RunsCore(pub Arc<MapState>);
 
@@ -1541,3 +1600,20 @@ impl Runs for RunsCore {
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod opencode_events_tests {
+    use super::*;
+
+    #[test]
+    fn the_plugins_word_goes_before_the_databases_and_the_edits_of_both_stay() {
+        let read =
+            json!({ "observed": false, "lastEventAt": 5000.0, "endedAt": null, "status": "idle", "edits": [{ "path": "/w/a.js", "ts": 1.0 }, { "path": "/w/b.js", "ts": 2.0 }] });
+        let ev = json!({ "observed": false, "lastEventAt": 9000.0, "status": "working", "needsYou": "permission", "edits": [{ "path": "/w/a.js", "ts": 8.0 }] });
+        let m = merge_opencode(Some(read), ev.clone());
+        assert_eq!((m["status"].as_str(), m["needsYou"].as_str(), m["lastEventAt"].as_f64()), (Some("working"), Some("permission"), Some(9000.0)));
+        assert_eq!(m["edits"], json!([{ "path": "/w/b.js", "ts": 2.0 }, { "path": "/w/a.js", "ts": 8.0 }]));
+        let alone = merge_opencode(None, ev);
+        assert_eq!((alone["status"].as_str(), alone["endedAt"].is_null()), (Some("working"), true), "a session the database hasn't read yet");
+    }
+}
