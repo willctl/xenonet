@@ -73,6 +73,32 @@ A second run, with two sessions, two rounds and `opencode/deepseek-v4.1-flash-fr
 
 Then a session can message another by words from its title, by its id, or by a selector such as `app:opencode` or `project:atlas app:opencode`.
 
+## The plugin
+
+`scripts/demo/opencode-plugin.js` is a second file for the same project. Copy it to `.opencode/plugins/xenonet.js`, or to `~/.config/opencode/plugins/xenonet.js` for every project. It tells the XenoNet on this machine, as the session, what happens in it:
+
+| OpenCode event | What XenoNet gets | What it does |
+|---|---|---|
+| `session.status`, `session.idle` | busy or idle | The session shows as working or idle. |
+| `permission.asked`, `permission.replied` | the permission's id and the tool it is for | A wait shows as a needs-you card until it is answered, or for 30 minutes. |
+| an edit tool's `tool.execute.after` | the file's path | The file counts as being edited for 30 minutes, for edit claims and collision warnings. |
+| `message.updated`, once the message has finished | its cost, tokens, provider and model | The session shows the model, and its usage when the database has none. |
+
+Nothing else leaves OpenCode: no prompt, reply, tool output, command or file content. The plugin never waits for XenoNet. A call that gets no answer in 800 ms is dropped, and the plugin leaves XenoNet alone for 30 seconds after one fails. A XenoNet that doesn't know the route, or a kind of event, ignores it.
+
+XenoNet goes by the plugin while it is speaking, and by OpenCode's database when it isn't: a working mark lapses after 5 minutes without an event. The database stays the reader for history and for sessions that don't have the plugin (`XENONET_READERS=opencode`, see the experimental readers). Events for a session the map doesn't have yet show on the map once the database lists it.
+
+The calls are `POST /api/engine/opencode-event`, with `x-xenonet-agent` set to the session, like the tools' calls. XenoNet checks that they come from under an OpenCode process, and only an OpenCode session can send them.
+
+## Starting OpenCode sessions remotely
+
+Not built. XenoNet can wake a session you allowed, but it can't start one. What it would take:
+
+1. Find a server, as delivery does. OpenCode's server makes a session with `POST /session` (a title, and the folder it works in, as the server's own `/path`), and starts its first turn with `POST /session/:id/prompt_async`.
+2. Pick the server. A TUI's server runs turns in its own process, so a session made through `opencode serve` has no TUI to show it. XenoNet would start one in a folder you choose, or use one you started with `--port`.
+3. Ask you first. Starting a session spends money and runs a model, so it needs your allowance, as starting a Claude Code or Codex session does, and a folder the allowance covers.
+4. Report what happened. Starting a session reports back what it did (asked, finished or failed), which needs the plugin above to say when the first turn ends.
+
 ## Good to know
 
 - XenoNet lists the OpenCode sessions you allowed, and those that used its tools, with the titles OpenCode gives them. It doesn't list every OpenCode session it can see.

@@ -28,6 +28,7 @@ import { Blocks } from "./blocks/lifecycle.js";
 import { claudeLines, codexLines, grokLines } from "./lines.js";
 import { NumbatSessions } from "./numbat.js";
 import { nativeReaders } from "./native/index.js";
+import { OpenCodeEvents } from "./native/opencode-events.js";
 import { ReportedRuns, observedSessions } from "./reported-runs.js";
 import { tailedOr, untailed } from "./apps.js";
 import { demoSessions, demoNativeProjects, demoTranscript, demoNarration, demoPicks, startDriver, clientsReady } from "./demo.js";
@@ -121,6 +122,9 @@ export class XenoNetState extends EventEmitter {
     // app's own records, for each app the registry gives one that
     // XENONET_READERS names. Each is { app, source, what, reader }.
     this.nativeReaders = nativeReaders(config, native);
+    // What OpenCode's XenoNet plugin says as it happens (core/native/
+    // opencode-events.js); the map prefers it to the database's rows.
+    this.opencodeEvents = new OpenCodeEvents();
     for (const n of this.nativeReaders) this.blocks.add(n.reader, { source: n.source });
     // Sessions from outside XenoNet's Claude Code and Codex readers. The
     // native readers come first, so a run they read wins over numbat's.
@@ -191,6 +195,15 @@ export class XenoNetState extends EventEmitter {
     for (const n of this.nativeReaders) n.reader.read();
     const read = new Set(sessions.map((x) => x.id));
     for (const o of this.observed.sessions()) if (!read.has(o.id)) sessions.push(o);
+    for (const x of sessions) {
+      if (x.app !== "opencode") continue;
+      const ev = this.opencodeEvents.state(x.id);
+      if (!ev) continue;
+      // The plugin's model is the newest; its usage stands in for a row's
+      // that has none.
+      if (ev.model) x.model = ev.model;
+      if (ev.usage && !x.usage) x.usage = ev.usage;
+    }
     for (const s of sessions) if (this.demoTitles.has(s.id)) s.title = this.demoTitles.get(s.id);
     // Where sessions ran is evidence of where the projects are (see
     // scanProjects), so the scan comes after the session lists.
@@ -551,6 +564,9 @@ export class XenoNetState extends EventEmitter {
     const snap = this.live.snapshot();
     const acks = store.getAcks();
     snap.resources = snap.resources.filter((r) => visibleResource(r.server));
+    // OpenCode sessions whose plugin speaks for them (working, waiting on a
+    // permission) are live sessions like the tailer's.
+    snap.sessions.push(...this.opencodeEvents.snapshot(Date.now(), (id) => this.index.has(id)));
     for (const s of snap.sessions) {
       s.mcp = s.mcp.filter((m) => visibleResource(m.server));
       const node = this.index.get(s.id);
