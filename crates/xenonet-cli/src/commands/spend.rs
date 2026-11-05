@@ -8,9 +8,20 @@ use crate::out::{c, json, plural, print, table, Done, Layout};
 use crate::reach::need;
 use serde_json::{json, Value};
 use xenonet_base::text::js_string;
-use xenonet_base::units::money;
+use xenonet_base::units::{money, tokens};
 
 pub const HELP: &str = include_str!("help/spend.txt");
+
+// What Hermes or OpenCode reported today, in words (cli/commands/spend.js).
+fn reported_in(r: &Value) -> Option<String> {
+    let rep = r.get("reported").filter(|v| v.is_object())?;
+    let toks = tokens(rep.get("tokens").and_then(Value::as_f64));
+    let source = t(rep, "source");
+    Some(match rep.get("usd").and_then(Value::as_f64) {
+        Some(usd) => format!("{source} reports {} ({toks} tokens)", money(Some(usd))),
+        None => format!("{source} reports {toks} tokens, no price"),
+    })
+}
 
 pub fn run(_args: &[String], flags: &Flags) -> Done {
     let s = need(flags)?;
@@ -68,6 +79,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
                 if on(r, "elsewhere") {
                     said.push(format!("{} elsewhere, not priced", plural(num(r, "elsewhere"), "run")));
                 }
+                said.extend(reported_in(r));
                 vec![t(r, "name"), if on(r, "sessions") { money(amount(r, "cost")) } else { c::dim("—") }, c::dim(said.join(", "))]
             })
             .collect();
@@ -75,7 +87,13 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         rows.push(vec![
             c::dim("Unattributed"),
             money(amount(&u, "cost")),
-            c::dim(format!("{} not tied to an actor, such as the ones you start", plural(num(&u, "sessions"), "session"))),
+            c::dim(
+                [Some(format!("{} not tied to an actor, such as the ones you start", plural(num(&u, "sessions"), "session"))), reported_in(&u)]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         ]);
         print(table(&rows, Layout::wrapped(2)));
         if list(b, "actors").is_empty() {
