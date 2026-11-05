@@ -32,7 +32,8 @@ export class DeliveryRouter extends EventEmitter {
       sync: (key, rec) => Object.assign(this.#objs.get(key), rec),
       emit: (key) => this.emit("delivery", { ...this.#objs.get(key) }),
       arm: (key, ms) => {
-        const timer = setTimeout(() => void this.#go(this.#core.expire(key)), ms);
+        // A notifier that throws mustn't take the process down from a timer.
+        const timer = setTimeout(() => void this.#go(this.#core.expire(key)).catch(() => {}), ms);
         timer.unref?.();
         this.timers.set(key, timer);
       },
