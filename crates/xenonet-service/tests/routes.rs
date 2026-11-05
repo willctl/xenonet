@@ -201,6 +201,10 @@ impl cores::State for Fake {
         self.note("noteHook", json!([id, body["hook_event_name"]]));
         Ok(())
     }
+    fn opencode_event(&self, id: &str, events: &Value, cwd: Option<&str>) -> R<usize> {
+        self.note("opencodeEvent", json!([id, events, cwd]));
+        Ok(events.as_array().map_or(0, Vec::len))
+    }
     fn root_info(&self) -> R<Value> {
         Ok(self.root_info.clone())
     }
@@ -433,6 +437,20 @@ async fn an_agents_calls_say_who_it_is_are_checked_and_note_that_its_in_touch() 
     let r = go(&ctx, "POST", "/api/engine/send", &[AGENT], Some(json!({ "to": "all", "text": "hi" }))).await;
     assert_eq!(status_error(&r), (403, json!("not you")));
     assert_eq!(f.was("send"), Vec::<Value>::new());
+}
+
+#[tokio::test]
+async fn an_opencode_sessions_plugin_reports_as_that_session_and_no_other() {
+    let (ctx, f) = service(false);
+    let oc = ("x-xenonet-agent", "opencode:ses-abc123");
+    let events = json!([{ "type": "status", "state": "busy" }, { "type": "from-the-future" }]);
+    let r = go(&ctx, "POST", "/api/engine/opencode-event", &[oc], Some(json!({ "events": events, "cwd": "/w/atlas", "pid": 9 }))).await;
+    assert_eq!((r.status, r.body_json()), (200, json!({ "used": 2 })));
+    assert_eq!(f.was("opencodeEvent")[0], json!(["opencode:ses-abc123", events, "/w/atlas"]));
+    assert_eq!(f.was("touch")[0][0], json!("opencode:ses-abc123"), "it counts as in touch, as its tools do");
+    let r = go(&ctx, "POST", "/api/engine/opencode-event", &[AGENT], Some(json!({ "events": events }))).await;
+    assert_eq!(status_error(&r), (400, json!("only an OpenCode session reports these")));
+    assert_eq!(f.was("opencodeEvent").len(), 1, "a Claude Code session's isn't taken");
 }
 
 #[tokio::test]

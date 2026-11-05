@@ -197,6 +197,15 @@ them by title words or by a selector such as `app:opencode`.
 [OpenCode sessions messaging each other](opencode-messaging.md) has a demo
 of it, and the tools that let an OpenCode session send.
 
+XenoNet's OpenCode plugin also tells XenoNet what a session is doing, as it
+happens: working or idle, a permission it waits on, the files it edits, and
+what each finished message cost. The map and the needs-you strip go by it
+while it speaks, so a waiting OpenCode shows as a needs-you card and its
+edits count toward collision warnings at once. It sends no prompt, reply,
+tool output or file content. When the plugin goes quiet or isn't installed,
+XenoNet goes back to reading OpenCode's database. See
+[OpenCode sessions messaging each other](opencode-messaging.md#the-plugin).
+
 ### tmux
 
 For a harness with no way in, XenoNet can type the message into the tmux

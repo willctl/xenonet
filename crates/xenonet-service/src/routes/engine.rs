@@ -17,7 +17,7 @@
 
 use crate::actor_caller::{rates, retry_after, ActorCaller};
 use crate::borrowed::{attest, platform, Sender};
-use crate::cores::{ok, reason, Actors, Channels, Connect, CoreError, Engine, Verify};
+use crate::cores::{ok, reason, Actors, Channels, Connect, CoreError, Engine, State, Verify};
 use crate::ctx::{fail, pending_reply};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
@@ -35,6 +35,7 @@ const ACTOR_BODY: usize = 16 << 10;
 /// What the engine's routes are given (engineRoutes's arguments).
 pub struct EngineRoutes<'a> {
     pub engine: Arc<dyn Engine>,
+    pub state: Arc<dyn State>,
     pub connect: Arc<dyn Connect>,
     pub verify: Arc<dyn Verify>,
     pub caller: Option<&'a ActorCaller>,
@@ -53,7 +54,7 @@ fn scope_of(s: &Value) -> String {
     }
 }
 
-const OPS: [&str; 10] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel", "handoff"];
+const OPS: [&str; 11] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel", "handoff", "opencode-event"];
 
 /// The capability each operation needs from an actor.
 fn needs(op: &str) -> Option<&'static str> {
@@ -101,6 +102,15 @@ impl EngineRoutes<'_> {
                 e.release(me, paths).await
             }
             "focus" => e.set_focus(me, get(b, "text")).await,
+            // An OpenCode session's plugin, as it happens: only that session
+            // reports it, as itself.
+            "opencode-event" => {
+                if !me.starts_with("opencode:") {
+                    return Err(CoreError::new("only an OpenCode session reports these"));
+                }
+                let used = self.state.opencode_event(me, b.get("events").unwrap_or(&Value::Null), b.get("cwd").and_then(Value::as_str))?;
+                Ok(json!({ "used": used }))
+            }
             "handoff" => {
                 let keys = [
                     ("accept", "accept"),

@@ -133,6 +133,11 @@ pub trait State: Send + Sync {
     fn note_hook(&self, _id: &str, _body: &Value) -> R<()> {
         pending(M)
     }
+    /// `state.opencodeEvents.ingest(id, events, { cwd })`: what an OpenCode
+    /// session's plugin reports. How many events it used.
+    fn opencode_event(&self, _id: &str, _events: &Value, _cwd: Option<&str>) -> R<usize> {
+        pending(M)
+    }
     fn root_info(&self) -> R<Value> {
         pending(M)
     }

@@ -12,6 +12,7 @@ pub mod cursor;
 pub mod files;
 pub mod gemini_cli;
 pub mod opencode;
+pub mod opencode_events;
 
 use files::Files;
 use serde_json::Value;
