@@ -723,7 +723,8 @@ function wireIpc() {
   // The page's theme changed (src/themes-ui.js): the window takes its
   // colors, and keeps them for next time, unless it's a theme the page is
   // only looking at (keep: false). Only plain #rrggbb colors.
-  ipcMain.on("app:theme", (e, { background, symbols, keep = true } = {}) => {
+  ipcMain.on("app:theme", (e, said) => {
+    const { background, symbols, keep = true } = said ?? {};
     if (!ownPage(e) || !HEX.test(background ?? "") || !HEX.test(symbols ?? "") || !win || win.isDestroyed()) return;
     win.setBackgroundColor(background);
     if (!isMac) win.setTitleBarOverlay({ color: background, symbolColor: symbols, height: 32 });
