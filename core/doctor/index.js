@@ -28,6 +28,8 @@ import { inspectState } from "../statefile.js";
 import { plural, duration } from "../units.js";
 import { readDriftFile, describe, sourceName, ADDITIONS, DRIFT_FILE } from "../drift.js";
 import { findTokenFiles } from "../actors/token-file.js";
+import { inspect as hermesPlugin, ownerSteps as hermesSteps, STALE_MS as HERMES_STALE_MS } from "../actors/hermes-plugin.js";
+import { hermesRoot } from "../actors/hermes-files.js";
 import { keyChecks } from "../hosts/doctor.js";
 import { appDir } from "../dirs.js";
 import { LAUNCHER_SOURCE, launcherVersion } from "../components/install.js";
@@ -712,6 +714,25 @@ export const CHECKS = [
       const bad = on.flatMap((o) => o.sources.filter((s) => words[s.state]).map((s) => `${o.name}'s ${s.name}${s.file ? ` (${s.file})` : ""} ${words[s.state]}`));
       if (bad.length) return warn(bad.join("; "), ctx.platform === "darwin" ? "A file that can't be read is usually macOS privacy or its permissions: check them, then restart XenoNet. One in another shape means the product changed it: update XenoNet, and npm run contracts in a checkout lists what changed." : "XenoNet observes these products on macOS for now.");
       return ok(on.map((o) => `${o.name}: ${plural(o.sources.filter((s) => s.state === "ok").length, "source")} read`).join("; "));
+    },
+  },
+  {
+    id: "actors.hermes-plugin",
+    group: "Actors",
+    title: "XenoNet's plugin for Hermes reports",
+    async run(ctx) {
+      const env = ctx.env ?? process.env;
+      if (!ctx.exists(hermesRoot(ctx.home, env))) return ok("Hermes Agent isn't on this computer, so its plugin has nothing to do");
+      const st = hermesPlugin({ home: ctx.home, env, now: ctx.now?.() });
+      if (!st.installed) return info("XenoNet's plugin for Hermes isn't installed, so Hermes is only observed", "xenonet connect hermes adds it. It's optional.");
+      if (!st.current) return warn("the plugin in Hermes's plugins folder isn't the one this XenoNet ships", "xenonet connect hermes updates it.");
+      if (st.token === "loose") return warn("the plugin's token file can be read by other users, so the plugin ignores it", `chmod 600 ${tilde(path.join(st.dir, "token"), ctx.home)}`);
+      const todo = hermesSteps(st, (p) => tilde(p, ctx.home));
+      if (todo.length) return info(`the plugin is installed but ${[st.token !== "ok" && "has no token", !st.enabled && "isn't turned on"].filter(Boolean).join(" and ")}`, todo.join(" "));
+      if (!st.reported) return info("the plugin is installed, turned on and has its token, but hasn't reported yet", "It starts with Hermes's next session.");
+      if (!st.reported.ok) return warn("the plugin can't reach XenoNet or isn't accepted: its last heartbeat failed", "Check the token in XenoNet's Actors panel (New token), and that XenoNet is running.");
+      if (st.reported.ageMs > HERMES_STALE_MS) return info(`the plugin last reported ${duration(st.reported.ageMs)} ago, so no Hermes process is running it now`);
+      return ok(`the plugin is installed, turned on and reporting (last heartbeat ${duration(st.reported.ageMs)} ago)`);
     },
   },
   {

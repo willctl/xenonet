@@ -114,6 +114,7 @@ function factsOf(ctx) {
     stateLoad: ctx.stateLoad ?? null,
     projectsDirSet: !!ctx.env?.XENONET_PROJECTS_DIR,
     grokKeySet: !!ctx.env?.XAI_API_KEY,
+    hermesHome: ctx.env?.HERMES_HOME ?? null,
     actors: ctx.actors === null ? "off" : ctx.actors ? "on" : "none",
   };
 }

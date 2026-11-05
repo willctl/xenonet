@@ -2,6 +2,7 @@ Takes XenoNet's MCP server and hooks out of {apps connect's}
 settings, and leaves your own entries alone. It asks first. With no XenoNet
 running on that port, it takes them out itself.
 
+  hermes       takes XenoNet's plugin out of Hermes Agent's plugins folder instead
   --yes        don't ask
   --port <n>   which XenoNet's entries (47840, the installed XenoNet's, unless
                XENONET_PORT or --dev says otherwise)

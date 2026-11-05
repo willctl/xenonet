@@ -9,18 +9,32 @@ import { c, print } from "../lib/out.js";
 import { find, get, del, nameOf, candidates } from "../../core/client.js";
 import { createConnect } from "../../core/engine/connect.js";
 import { render, confirm } from "./connect.js";
+import { inspect, uninstall } from "../../core/actors/hermes-plugin.js";
+import { tilde } from "../../core/paths.js";
+import os from "node:os";
 
 export const help = `Takes XenoNet's MCP server and hooks out of Claude Code's and Codex's
 settings, and leaves your own entries alone. It asks first. With no XenoNet
 running on that port, it takes them out itself.
 
+  hermes       takes XenoNet's plugin out of Hermes Agent's plugins folder instead
   --yes        don't ask
   --port <n>   which XenoNet's entries (47840, the installed XenoNet's, unless
                XENONET_PORT or --dev says otherwise)`;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-export async function run(_args, flags) {
+async function hermes(flags) {
+  const home = os.homedir();
+  const st = inspect({ home });
+  if (!st.installed && st.token === "none") return print(c.dim("XenoNet's plugin isn't in Hermes's plugins folder; nothing to take out."));
+  if (!(await confirm(`Take XenoNet's plugin, with its token file, out of ${tilde(st.dir, home)}?`, flags))) return print(c.dim("Nothing changed."));
+  uninstall({ home });
+  print(`${c.green("✓")} Took the plugin out. Hermes's config.yaml is as it was. ${st.enabled ? "xenonet stays in plugins.enabled, which does nothing without the folder (hermes plugins disable xenonet removes it). " : ""}Revoke the actor's token in XenoNet's Actors panel.`);
+}
+
+export async function run(args, flags) {
+  if (args.includes("hermes")) return hermes(flags);
   const s = await find(flags);
   // Nothing answers: this XenoNet's entries, by its port, taken out here.
   const local = s ? null : createConnect({ port: candidates(flags)[0], root: ROOT });

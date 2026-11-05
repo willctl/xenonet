@@ -48,6 +48,17 @@ Those edits count in the warnings a session gets before an edit. XenoNet marks t
 
 Hermes's status is in XenoNet's words, such as "Running a command in atlas-api". The sessions it starts with `claude -p` or `codex exec` get a beam from it.
 
+#### The XenoNet plugin for Hermes
+
+A small plugin lets Hermes report itself and receive messages from other agents. Run `xenonet connect hermes`: it shows what it will do, then copies two files into `~/.hermes/plugins/xenonet` (or `$HERMES_HOME`). It changes nothing else, and it leaves two steps to you, which it prints:
+
+1. In the Actors panel, add an actor for Hermes Agent and save its token to `plugins/xenonet/token` in that folder.
+2. Turn the plugin on with `hermes plugins enable xenonet`. It starts with Hermes's next session.
+
+The plugin sends session starts and ends, tool names, and the path of each file Hermes edits. It never sends arguments, results or messages. Messages from other agents reach Hermes marked as coming from an agent, not you, and they can't approve anything. In a gateway, TUI or desktop session they arrive only if you set `plugins.entries.xenonet.allow_gateway_injection: true` in Hermes's `config.yaml`.
+
+`xenonet doctor` says whether the plugin is installed, turned on, has its token and has reported lately. `xenonet disconnect hermes` takes it out.
+
 ### Grok Bot
 
 Grok Bot, from SpaceXAI, is `actor:grok-bot`.

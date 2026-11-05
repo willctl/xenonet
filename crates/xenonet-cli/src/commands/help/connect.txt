@@ -9,6 +9,9 @@ entries there.
 
   xenonet connect {ids connect}
                                    each that's here unless you name them
+  xenonet connect hermes           puts XenoNet's plugin in Hermes Agent's plugins
+                                   folder. It stays off until you turn it on and
+                                   give it a token; connect says how
   --yes                            don't ask
   --json                           the connection's state as JSON, changing nothing
   --here --port <n>                for a XenoNet whose service runs on another machine

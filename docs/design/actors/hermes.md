@@ -8,8 +8,10 @@ point to that commit. The actors interface doc builds on this one. XenoNet's
 observer of Hermes was built from both in Wave 2, observed and attributed
 only (`core/actors/hermes.js`, `hermes-files.js`, and the vendor schemas
 under `nous/hermes-agent/`), and its edited paths count in agents' edit
-warnings, marked as observed; the registered mode, through a XenoNet plugin
-for Hermes, isn't built. `interface.md` says what the observer does now.
+warnings, marked as observed. The registered mode is a small XenoNet plugin
+for Hermes (`plugins/hermes/xenonet`), which `xenonet connect hermes`
+installs and the owner turns on (section 6). `interface.md` says what the
+observer does now.
 
 ## Summary
 
@@ -42,8 +44,8 @@ for Hermes, isn't built. `interface.md` says what the observer does now.
 - **Recommendation.**
   - In Wave 2, build Hermes as observed and attributed only: no installs and
     no changes to its settings.
-  - Add registered mode later, through a small XenoNet plugin for Hermes
-    (observer hooks, metadata only), with the owner's OK.
+  - Registered mode runs through a small XenoNet plugin for Hermes
+    (observer hooks, metadata only), which the owner installs and turns on.
   - Don't use Hermes's API server, its outbound webhooks or
     `hermes mcp serve`.
 
@@ -713,53 +715,71 @@ Could Hermes report to XenoNet itself? Yes, in several ways:
 
 ### The XenoNet plugin for Hermes
 
-**Files.** `plugin.yaml` (its name, version and description), and an
+**Files.** `plugins/hermes/xenonet/` holds `plugin.yaml` and an
 `__init__.py` whose `register(ctx)` registers these hooks
-([hooks][docs-hooks]):
+([hooks][docs-hooks]): `on_session_start`, `on_session_end`,
+`pre_tool_call`, `post_tool_call`, `subagent_start` and `subagent_stop`.
+The hooks return nothing, so they never block or rewrite a call. The plugin
+uses only Python's standard library: a bounded queue that drops facts when
+it's full, and one background thread that talks to XenoNet. Its unit tests
+(`plugins/hermes/test_plugin.py`, run by `npm test`) use a fake `ctx` and a
+fake XenoNet.
 
-- `on_session_start`, `on_session_end` and `on_session_finalize`;
-- `post_tool_call`, and `pre_tool_call` for `terminal`, to catch a launch;
-- `subagent_start` and `subagent_stop`;
-- `on_human_input_request` and `on_human_input_resolved`, so XenoNet can
-  show that Hermes waits for the person.
+**What it sends** to the actor API (`interface.md`, section 2):
 
-It uses only Python's standard library, with a bounded queue that drops
-events when it's full, a background sender, and a heartbeat every 60 s.
-
-**What it sends:**
-
-- Hermes's session id and the tool's name;
-- for file tools, the path;
-- for `terminal`, the `workdir`, and whether the command starts `claude`
-  or `codex`. That's decided in Hermes's process, and the command never
-  leaves it;
-- the duration and status;
-- for a wait, its kind only.
+- a heartbeat every 15 s with the instance (`p<pid>`), `working` for 30 s
+  after a tool call and `idle` after, and the folder Hermes runs in;
+- for an edit tool (`write_file`, `patch`, `edit_file`, `apply_patch`), an
+  `edited` event with the absolute path;
+- for `terminal`, a `ran` event with a count of 1;
+- `finished` events when a session or a subagent ends.
 
 **What it never sends:** arguments, results, prompts, user messages, the
-text of approvals, chat ids or user names.
+command, or anything else Hermes holds. The path is the one thing taken
+from a tool's arguments.
 
-**It never steers.** Its hooks return nothing, because return values from
-`pre_tool_call` can block or rewrite a call.
+**Installing it.** `xenonet connect hermes` shows what it will do, asks, and
+copies the two files into `$HERMES_HOME/plugins/xenonet` (default
+`~/.hermes`). It touches nothing else and never enables the plugin.
+`xenonet disconnect hermes` takes the folder out again. Two steps stay the
+owner's, and connect prints them:
 
-**Finding and talking to XenoNet:**
+1. **A token.** In XenoNet's Actors panel, add an actor for Hermes Agent
+   (`actor:hermes`, which joins the observed actor) and save its token, with
+   **Save to a file…**, to `plugins/xenonet/token`. The plugin uses the file
+   only if others can't read it, keeps the token in memory, sends it only to
+   127.0.0.1 as a bearer, and never prints or logs it. On macOS XenoNet also
+   holds the token to Hermes's own processes.
+2. **Turning it on.** Hermes loads a plugin only when its name is in
+   `plugins.enabled`: `hermes plugins enable xenonet`. It takes effect with
+   the next session. `HERMES_SAFE_MODE=1` skips plugins.
 
-- It finds XenoNet through `XENONET_PORT`, or else tries 47840 and 47842, as
-  XenoNet's own client does.
-- It registers, sends heartbeats and posts events through the actor API in
-  `contracts.md` section 3.
-- Where the token lives is for the interface doc to settle: a 0600 file in
-  the plugin's folder, or a registration per process. Several Hermes
-  processes run at once (the CLI, the desktop backend, the gateway), and
-  they should all show as one actor per profile.
+Without a token the plugin registers nothing. While XenoNet is down, a call
+gives up after 0.6 s and the plugin waits 30 s before it tries again.
 
-**XenoNet's side.** `core/procs.js` has to learn what a Hermes process looks
-like (section 3). Without a code signature, the process check is weaker
-than it is for Claude Code: a request must come "from under a Hermes agent
-host".
+**Messages to Hermes.** A heartbeat's answer says how many messages wait.
+The plugin then reads the actor's inbox and hands each message to Hermes
+with `ctx.inject_message`, framed as from another agent or actor, quoted,
+with a line saying it comes from an agent, not the user, and can't approve
+or authorize anything. The classic CLI takes it into the live REPL. A
+gateway, TUI or desktop session needs a known `session_key` and
+`plugins.entries.xenonet.allow_gateway_injection: true` in `config.yaml`,
+which the owner sets; Hermes refuses the injection otherwise, and the message
+is already read by then.
 
-**Hermes's own safeguards.** `HERMES_SAFE_MODE=1` skips plugins. A plugin
-gets 10 s to load, and each hook callback 30 s.
+**What the doctor says.** The plugin leaves `state.json` beside itself with
+the time of its last answered heartbeat. `xenonet doctor` ("XenoNet's plugin
+for Hermes reports") reads the folder, `config.yaml` and that file, and says
+whether the plugin is installed and current, has a token, is turned on, and
+has reported lately.
+
+**XenoNet's side.** Once the actor is registered, the observer defers to the
+plugin: it still supplies presence from Hermes's files and the attribution of
+sessions Hermes starts, but leaves events to the plugin's own reports.
+
+**Not covered here.** A run against a live Hermes (the plugin is tested with
+fakes), several profiles (the plugin is per `HERMES_HOME`), and the
+approval-wait hooks.
 
 ### XenoNet's MCP server as a Hermes tool
 
@@ -804,7 +824,7 @@ builds. The rest is optional, and each step is the owner's to approve.
 | 2 | A model sign-in, if the one from July has lapsed: `hermes setup --portal`, or `hermes auth add …` | Hermes doing anything | [Nous Portal][docs-portal] | `auth.json` or `.env`, and `config.yaml` | None | A Nous Portal plan ($0 to $200 a month, secondary source) or per-use provider prices | Owner only |
 | 3 | Always on: `hermes gateway install` | An always-on actor; cron without the app open; messaging | [CLI reference][docs-cli], [`gateway_launchd.py`][src-launchd] | Adds `~/Library/LaunchAgents/ai.hermes.gateway.plist` (runs at login, restarts after crashes, waits 30 s between restarts) and starts `gateway run` now. It writes `gateway.pid`, `gateway.lock` and `gateway_state.json`, and logs to `gateway.log` and `gateway.error.log`. `hermes gateway uninstall` reverses it | No download: the code is here, and source installs carry the `all` extra ([package management][docs-pm]). One Python process | Free; models cost what it uses | Owner's OK |
 | 4 | A messaging platform, for example a Telegram bot: `hermes gateway setup` | `message-people` | [Messaging][docs-messaging] | Tokens in `.env`, and `config.yaml` | None | The platforms are free; models cost what it uses | Owner only (bot tokens, pairing) |
-| 5 | The XenoNet plugin for Hermes (later than Wave 2's core) | Registered mode | XenoNet, still to be written | `~/.hermes/plugins/xenonet/`, and `plugins.enabled` in `config.yaml` | A few KB | None | Owner's OK, in XenoNet |
+| 5 | The XenoNet plugin for Hermes: `xenonet connect hermes`, a token, `hermes plugins enable xenonet` | Registered mode | XenoNet (`plugins/hermes/xenonet`) | `~/.hermes/plugins/xenonet/`, and `plugins.enabled` in `config.yaml` | A few KB | None | Owner's OK, in XenoNet |
 | 6 | XenoNet's MCP server in Hermes (optional) | Hermes using XenoNet's claims and messages | XenoNet | `mcp_servers.xenonet` in `config.yaml` | None | A few tool schemas on every turn | Owner's OK |
 
 **Not recommended:**

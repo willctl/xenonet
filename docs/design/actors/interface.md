@@ -77,8 +77,12 @@ Built, as of Wave 3 (2026-10-06):
   routine's), or the owner is notified (Muse). A wake says how many
   messages wait, nothing more (`wake.md`).
 
-Not built: Connect for a product (the XenoNet plugin for Hermes, and so
-Hermes's registered mode), dots, and what section 5 leaves open.
+- **Hermes's registered mode** (`plugins/hermes/xenonet`): a plugin that
+  `xenonet connect hermes` installs and the owner turns on and gives a
+  token (`hermes.md`, section 6).
+
+Not built: Connect registering a product's actor and writing its token
+itself, dots, and what section 5 leaves open.
 
 ## In short
 
@@ -736,7 +740,7 @@ calls carry `Authorization: Bearer`, never `x-xenonet-agent`.
 |---|---|
 | **Add an actor** in the window | Copied by you, or saved by the desktop app to a file you pick (0600) |
 | `xenonet actor register --token-file <file>` | That file, 0600, once you allow it |
-| Connect for a product (the XenoNet plugin for Hermes, later) | The product's plugin folder (`~/.hermes/plugins/xenonet/token`, 0600, and the same under each named profile), where only that product's processes may use it |
+| Adding Hermes Agent's actor in the window, for the XenoNet plugin for Hermes | `$HERMES_HOME/plugins/xenonet/token` (default `~/.hermes`), saved with **Save to a file…** (0600), where only Hermes's processes may use it. `xenonet connect hermes` installs the plugin and says so |
 
 - **A program passes it on** in one of three ways:
   - `Authorization: Bearer <token>` over HTTP;

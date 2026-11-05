@@ -18,7 +18,30 @@ use xenonet_base::client::name_of;
 
 pub const HELP: &str = include_str!("help/disconnect.txt");
 
-pub fn run(_args: &[String], flags: &Flags) -> Done {
+fn hermes(flags: &Flags) -> Done {
+    use xenonet_base::hermes_plugin as hp;
+    let home = crate::sys::home();
+    let hh = std::env::var("HERMES_HOME").ok();
+    let st = hp::inspect(&home, hh.as_deref(), crate::out::now());
+    let dir = xenonet_base::paths::tilde(&st.dir.display().to_string(), &home);
+    if !st.installed && st.token == "none" {
+        print(c::dim("XenoNet's plugin isn't in Hermes's plugins folder; nothing to take out."));
+        return Ok(0);
+    }
+    if !confirm(&format!("Take XenoNet's plugin, with its token file, out of {dir}?"), flags)? {
+        print(c::dim("Nothing changed."));
+        return Ok(0);
+    }
+    hp::uninstall(&home, hh.as_deref()).map_err(|e| crate::out::Fail::new(format!("couldn't remove {dir}: {e}"), 1))?;
+    let stays = if st.enabled { "xenonet stays in plugins.enabled, which does nothing without the folder (hermes plugins disable xenonet removes it). " } else { "" };
+    print(format!("{} Took the plugin out. Hermes's config.yaml is as it was. {stays}Revoke the actor's token in XenoNet's Actors panel.", c::green("✓")));
+    Ok(0)
+}
+
+pub fn run(args: &[String], flags: &Flags) -> Done {
+    if args.iter().any(|a| a == "hermes") {
+        return hermes(flags);
+    }
     let s = find(flags);
     // Nothing answers: this XenoNet's entries, by its port, taken out here.
     let opts = local_options(candidates(flags)[0]);

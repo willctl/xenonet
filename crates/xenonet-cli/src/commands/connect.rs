@@ -138,7 +138,60 @@ pub fn connected() -> Vec<&'static str> {
     xenonet_base::apps::with("connect").map(|a| a.id.as_str()).collect()
 }
 
+/// XenoNet's plugin for Hermes Agent: copied into Hermes's plugins folder,
+/// and off until the owner turns it on and gives it a token
+/// (xenonet_base::hermes_plugin).
+fn hermes(flags: &Flags) -> Done {
+    use xenonet_base::hermes_plugin as hp;
+    let home = crate::sys::home();
+    let hh = std::env::var("HERMES_HOME").ok();
+    let before = hp::inspect(&home, hh.as_deref(), crate::out::now());
+    let shown = |p: &std::path::Path| xenonet_base::paths::tilde(&p.display().to_string(), &home);
+    if flags.on("json") {
+        json(&json!({ "dir": shown(&before.dir), "installed": before.installed, "current": before.current, "enabled": before.enabled, "token": before.token }));
+        return Ok(0);
+    }
+    print(c::bold("Hermes Agent"));
+    let (mark, say) = if before.current {
+        (c::green("✓"), "already in place")
+    } else if before.installed {
+        (c::yellow("+"), "to update")
+    } else {
+        (c::yellow("+"), "to add")
+    };
+    print(format!("  {mark} the XenoNet plugin {}", c::dim(format!("({say})"))));
+    print(c::dim(format!("      {}", shown(&before.dir))));
+    print(c::dim("      Two files. It sends Hermes's session starts and ends, tool names and edited file paths to XenoNet, never arguments or text, and hands Hermes the messages other agents send it. It changes nothing else of Hermes's."));
+    print("");
+    if before.current {
+        print(c::green("The plugin is in place."));
+    } else {
+        if !confirm("Put the plugin in Hermes's plugins folder?", flags)? {
+            print(c::dim("Nothing changed."));
+            return Ok(0);
+        }
+        hp::install(&home, hh.as_deref()).map_err(|e| Fail::new(format!("couldn't write {}: {e}", shown(&before.dir)), 1))?;
+        print(format!("{} The plugin is in {}. It does nothing yet.", c::green("✓"), shown(&before.dir)));
+    }
+    let steps = hp::owner_steps(&hp::inspect(&home, hh.as_deref(), crate::out::now()), &shown);
+    for (i, step) in steps.iter().enumerate() {
+        print(format!("  {}. {step}", i + 1));
+    }
+    if steps.is_empty() {
+        print(c::dim("It's on and has its token; xenonet doctor says whether it reports."));
+    }
+    Ok(0)
+}
+
 pub fn run(words: &[String], flags: &Flags) -> Done {
+    if words.iter().any(|w| w == "hermes") {
+        hermes(flags)?;
+        let rest: Vec<String> = words.iter().filter(|w| *w != "hermes").cloned().collect();
+        if rest.is_empty() {
+            return Ok(0);
+        }
+        return run(&rest, flags);
+    }
     let all = connected();
     let named: Vec<&str> = words.iter().map(|n| if n == "claude-code" { "claude" } else { n.as_str() }).collect();
     let bad: Vec<&str> = named.iter().copied().filter(|a| !all.contains(a)).collect();

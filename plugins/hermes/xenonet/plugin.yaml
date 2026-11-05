@@ -1,0 +1,4 @@
+name: xenonet
+version: 0.1.0
+description: Tells the XenoNet on this machine that Hermes is at work (session starts and ends, tool names, edited file paths) and delivers messages other agents send to it. Metadata only.
+author: XenoNet

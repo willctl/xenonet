@@ -66,6 +66,7 @@
       "server/**",
       "mcp/**",
       "cli/**",
+      "plugins/hermes/**",
       "dist/**",
       "schemas/**",
       "package.json",
