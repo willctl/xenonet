@@ -283,7 +283,7 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     el.querySelector("ol").innerHTML = actorView.rows
       .map((r) => {
         const color = r.unattributed ? "var(--dim)" : colorOf({ id: r.id, kind: r.id === "actor:you" ? "human" : "agent" }, THEME);
-        return `<li class="${r.unattributed ? "none" : ""}" data-spend-actor="${h(r.id)}" title="${h(r.title)}" style="--c:${h(color)}"><i class="sa-dot"></i><span class="sa-name">${h(r.name)}</span><span class="sa-bar"><b style="width:${(r.share * 100).toFixed(1)}%"></b></span><span class="sa-v">${h(r.value)}</span></li>`;
+        return `<li class="${r.unattributed ? "none" : ""}" data-spend-actor="${h(r.id)}" title="${h(r.title)}" style="--c:${h(color)}"><i class="sa-dot"></i><span class="sa-name">${h(r.name)}${r.reported ? `<em class="sa-rep"> ${h(r.reported)} reported</em>` : ""}</span><span class="sa-bar"><b style="width:${(r.share * 100).toFixed(1)}%"></b></span><span class="sa-v">${h(r.value)}</span></li>`;
       })
       .join("");
   }
@@ -367,7 +367,7 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
     // rest is open, how many are folded away, and each row.
     get actorSpend() {
       const el = $("#spend-actors");
-      return { shown: !el.hidden, expanded: actorsOpen, more: actorView?.more ?? 0, rows: (actorView?.rows ?? []).map(({ id, name, value, share, unattributed }) => ({ id, name, value, share, unattributed })), text: el.hidden ? "" : el.innerText.replace(/\s+/g, " ").trim() };
+      return { shown: !el.hidden, expanded: actorsOpen, more: actorView?.more ?? 0, rows: (actorView?.rows ?? []).map(({ id, name, value, share, reported, unattributed }) => ({ id, name, value, share, reported, unattributed })), text: el.hidden ? "" : el.innerText.replace(/\s+/g, " ").trim() };
     },
     // Opens or folds the actors past the first few, as "more" does.
     expandActorSpend(open = !actorsOpen) {

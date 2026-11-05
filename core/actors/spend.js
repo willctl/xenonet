@@ -23,6 +23,9 @@
 //
 // A run reported from elsewhere has no transcript here, so XenoNet can't
 // price it: it's counted apart, as one of the actor's runs elsewhere.
+//
+// What Hermes and OpenCode say they spent is a separate figure, `reported`,
+// never added to the estimate: see reportedToday.
 import { PRICES_CHECKED } from "../pricing.js";
 
 export const UNATTRIBUTED = "unattributed";
@@ -83,14 +86,22 @@ export function attribute({ sessions = [], starts = [], known = null, ids = null
 // the most spent first; tokens are the priced calls' and unpriced names
 // the models without a price, as Token use has them. `elsewhere` counts
 // its runs reported from elsewhere today, which aren't in its cost.
-export function spendByActor({ spend = [], sessions = [], starts = [], names = new Map(), since = null } = {}) {
+// `reported`: today's increases in what Hermes and OpenCode report
+// (reportedToday's items). Each goes to its actor, or to the actor of its
+// session, and adds to that row's `reported: { usd, tokens, source }`
+// (usd null when none of it was priced), present only when there is some,
+// and never to its cost. An item of an actor that isn't listed is dropped;
+// a session no actor started goes to the unattributed.
+export function spendByActor({ spend = [], sessions = [], starts = [], names = new Map(), since = null, reported = [] } = {}) {
   const known = names instanceof Map ? names : new Map(Object.entries(names ?? {}));
   const list = [...spend].filter((s) => typeof s?.id === "string" && Number.isFinite(s.cost));
   // Only the sessions that count today: those with calls, and the runs
   // reported from elsewhere. The map can hold thousands of older ones.
   const runs = sessions.filter((s) => s?.observed === "gateway" && typeof s.id === "string");
-  const who = attribute({ sessions, starts, known: new Set(known.keys()), ids: [...list.map((s) => s.id), ...runs.map((s) => s.id)] });
-  const part = () => ({ cost: 0, tokens: 0, sessions: 0, unpriced: new Set() });
+  const rep = (reported ?? []).filter((r) => r && typeof r === "object");
+  const repSessions = rep.map((r) => r.session).filter((x) => typeof x === "string");
+  const who = attribute({ sessions, starts, known: new Set(known.keys()), ids: [...list.map((s) => s.id), ...runs.map((s) => s.id), ...repSessions] });
+  const part = () => ({ cost: 0, tokens: 0, sessions: 0, unpriced: new Set(), reported: null });
   const rows = new Map();
   const row = (id) => rows.get(id) ?? rows.set(id, { id, name: known.get(id) ?? id, ...part(), elsewhere: 0 }).get(id);
   const none = part();
@@ -112,12 +123,71 @@ export function spendByActor({ spend = [], sessions = [], starts = [], names = n
     const w = who.get(s.id);
     if (w) row(w.actor).elsewhere++;
   }
-  const plain = ({ unpriced, ...r }) => ({ ...r, unpriced: [...unpriced].sort() });
+  for (const r of rep) {
+    let part;
+    if (typeof r.actor === "string") {
+      if (!known.has(r.actor)) continue;
+      part = row(r.actor);
+    } else part = (typeof r.session === "string" && who.get(r.session) ? row(who.get(r.session).actor) : none);
+    part.reported ??= { usd: 0, tokens: 0, sources: new Set() };
+    part.reported.usd += Number.isFinite(r.usd) ? r.usd : 0;
+    part.reported.tokens += Number.isFinite(r.tokens) ? r.tokens : 0;
+    if (typeof r.source === "string") part.reported.sources.add(r.source);
+  }
+  const plain = ({ unpriced, reported, ...r }) => ({
+    ...r,
+    unpriced: [...unpriced].sort(),
+    ...(reported ? { reported: { usd: reported.usd > 0 ? reported.usd : null, tokens: reported.tokens, source: [...reported.sources].sort().join(", ") } } : {}),
+  });
   return {
     total,
     actors: [...rows.values()].map(plain).sort((a, b) => b.cost - a.cost || b.sessions - a.sessions || b.elsewhere - a.elsewhere || String(a.name).localeCompare(String(b.name)) || a.id.localeCompare(b.id)),
     unattributed: plain(none),
   };
+}
+
+const TOKEN_FIELDS = ["input", "output", "reasoning", "cacheRead", "cacheWrite"];
+const label = (raw) => (/hermes/i.test(raw) ? "Hermes" : /opencode/i.test(raw) ? "OpenCode" : raw);
+const nonNeg = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
+const reading = (u) => (u && typeof u === "object" ? { usd: nonNeg(u.costUsd), tokens: TOKEN_FIELDS.reduce((n, f) => n + (nonNeg(u.tokens?.[f]) ?? 0), 0) } : null);
+
+// What Hermes and OpenCode report as spent, for today only. Both keep
+// totals for the life of a session (Hermes's on the actor, over the
+// sessions it has seen), so a reading is a baseline at first sight and only
+// increases after it count, per day. `state` is the last answer's state
+// (null at first), `since` when today began. `usages`: the actors' usage
+// ({ id, product, usage }); `sessions`: the map's, a session with `usage`
+// being OpenCode's. A priced increase adds dollars and tokens; an unpriced
+// one (a subscription, an unknown price) adds tokens and no dollars, never
+// a zero price. A XenoNet that restarts takes new baselines. Answers
+// { state, items }, each item { key, source, actor | session, usd (null
+// when no dollars), tokens } for what grew today, by key.
+export function reportedToday({ state = null, since, usages = [], sessions = [] } = {}) {
+  const readings = [];
+  for (const u of usages) {
+    const r = typeof u?.id === "string" ? reading(u.usage) : null;
+    if (r) readings.push({ key: u.id, source: label(u.product || u.id), actor: u.id, ...r });
+  }
+  for (const s of sessions) {
+    const r = typeof s?.id === "string" ? reading(s.usage) : null;
+    if (r) readings.push({ key: s.id, source: label(s.app ?? ""), session: s.id, ...r });
+  }
+  const seen = { ...(state?.seen ?? {}) };
+  const today = state?.since === since ? { ...(state.today ?? {}) } : {};
+  for (const r of readings) {
+    const usd = r.usd ?? 0;
+    const before = seen[r.key];
+    seen[r.key] = { usd, tokens: r.tokens };
+    // First sight is the baseline: what came before today isn't today's.
+    if (!before) continue;
+    const dUsd = Math.max(0, usd - before.usd);
+    const dTokens = Math.max(0, r.tokens - before.tokens);
+    if (!(dUsd > 0) && !(dTokens > 0)) continue;
+    const was = today[r.key];
+    today[r.key] = { key: r.key, source: r.source, ...(r.actor ? { actor: r.actor } : { session: r.session }), usd: (was?.usd ?? 0) + dUsd, tokens: (was?.tokens ?? 0) + dTokens };
+  }
+  const items = Object.values(today).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { state: { since, seen, today }, items: items.map((i) => ({ ...i, usd: i.usd > 0 ? i.usd : null })) };
 }
 
 // The start of the local day a time falls on, as core/live.js keeps days.
@@ -129,12 +199,20 @@ export const dayStart = (now) => {
 // Today's spend by actor on this XenoNet, as GET /api/spend answers it:
 // the live tailer's costs (`live`), the map's nodes (`nodes`) and the
 // actors (`actors`, the registry). { at, since, checked, total, actors,
-// unattributed }, or null without actors.
-export function actorSpend({ live, nodes, actors, now = Date.now() }) {
+// unattributed }, or null without actors. `meter`: where the reported
+// figure keeps its baselines between calls, an object that starts as {}.
+export function actorSpend({ live, nodes, actors, now = Date.now(), meter = {} }) {
   if (!live || !actors) return null;
   const { names, starts } = actors.sessionsStarted({ now });
   const sessions = [];
   for (const n of nodes ?? []) if (n.kind === "session") sessions.push(n);
   const since = dayStart(now);
-  return { at: now, since, checked: PRICES_CHECKED, ...spendByActor({ spend: live.sessionCosts(now), sessions, starts, names, since }) };
+  const usages = [];
+  for (const id of names.keys()) {
+    const snap = actors.snapshot(id, { now });
+    if (snap?.usage) usages.push({ id, product: snap.product, usage: snap.usage });
+  }
+  const { state, items } = reportedToday({ state: meter.state, since, usages, sessions });
+  meter.state = state;
+  return { at: now, since, checked: PRICES_CHECKED, ...spendByActor({ spend: live.sessionCosts(now), sessions, starts, names, since, reported: items }) };
 }

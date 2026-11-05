@@ -22,7 +22,7 @@ process.env.XENONET_PORT = String(port);
 const { XenoNetState } = await import("../core/state.js");
 const { world, demoSessionList } = await import("../core/demo.js");
 const { Actors, createActors, mapOf } = await import("../core/actors/index.js");
-const { attribute, spendByActor, actorSpend, dayStart } = await import("../core/actors/spend.js");
+const { attribute, spendByActor, actorSpend, dayStart, reportedToday } = await import("../core/actors/spend.js");
 const { LiveTelemetry } = await import("../core/live.js");
 const { ReportedRuns } = await import("../core/reported-runs.js");
 const { PRICES_CHECKED } = await import("../core/pricing.js");
@@ -215,6 +215,70 @@ test("the server's answer: the tailer's costs today, by actor, adding up to Toke
   close(out.actors[0].cost + out.unattributed.cost, out.total, "the parts add up");
   assert.equal(actorSpend({ live, nodes, actors: null }), null, "with actors off, none");
   actors.stop();
+});
+
+// ---------- what Hermes and OpenCode report ----------
+
+const HERMES = "actor:hermes";
+const tok = (input) => ({ input, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 });
+const hermes = (costUsd, input) => ({ id: HERMES, product: "hermes-agent", usage: { costUsd, tokens: tok(input) } });
+const opencode = (id, costUsd, input) => ({ id, app: "opencode", usage: { costUsd, tokens: tok(input) } });
+
+test("a reported total counts from its first sight, only what grows, a day at a time", () => {
+  const day = 1000;
+  let r = reportedToday({ since: day, usages: [hermes(5, 100)], sessions: [opencode("oc1", 2, 10)] });
+  assert.deepEqual(r.items, [], "first sight is the baseline");
+  r = reportedToday({ state: r.state, since: day, usages: [hermes(5.5, 150)], sessions: [opencode("oc1", 2, 10), opencode("oc2", 0.25, 7)] });
+  assert.deepEqual(r.items, [{ key: HERMES, source: "Hermes", actor: HERMES, usd: 0.5, tokens: 50 }], "oc2 was first seen now");
+  r = reportedToday({ state: r.state, since: day, usages: [hermes(5.5, 150)], sessions: [opencode("oc1", 3, 30)] });
+  assert.deepEqual(r.items.map((i) => [i.key, i.source, i.usd, i.tokens]), [[HERMES, "Hermes", 0.5, 50], ["oc1", "OpenCode", 1, 20]]);
+  assert.equal(r.items[1].session, "oc1");
+  // A lower total (a session hidden) adds nothing and lowers the baseline.
+  r = reportedToday({ state: r.state, since: day, usages: [hermes(1, 5)], sessions: [] });
+  assert.equal(r.items[0].usd, 0.5);
+  r = reportedToday({ state: r.state, since: day + 1, usages: [hermes(1.5, 15)], sessions: [] });
+  assert.deepEqual(r.items.map((i) => [i.usd, i.tokens]), [[0.5, 10]], "a new day starts from nothing, with the baselines kept");
+});
+
+test("an unpriced total adds tokens and no dollars, never a zero price", () => {
+  let r = reportedToday({ since: 1, usages: [hermes(null, 10)] });
+  r = reportedToday({ state: r.state, since: 1, usages: [hermes(null, 40)] });
+  assert.deepEqual(r.items.map((i) => [i.usd, i.tokens]), [[null, 30]]);
+});
+
+test("reported is its own figure, by actor or the actor of its session, and never in the cost", () => {
+  const ss = [{ id: "oc1" }, { id: "oc2" }];
+  const nm = new Map([[HERMES, "Hermes"], [WREN, "Wren"]]);
+  const starts = [{ actor: WREN, session: "oc1", at: 1, via: "observed" }];
+  const reported = [
+    { key: HERMES, source: "Hermes", actor: HERMES, usd: 0.5, tokens: 50 },
+    { key: "oc1", source: "OpenCode", session: "oc1", usd: 1, tokens: 20 },
+    { key: "oc2", source: "OpenCode", session: "oc2", usd: null, tokens: 5 },
+    { key: "actor:ghost", source: "Hermes", actor: "actor:ghost", usd: 9, tokens: 9 },
+  ];
+  const out = spendByActor({ spend: [], sessions: ss, starts, names: nm, reported });
+  assert.equal(out.total, 0);
+  const by = (id) => out.actors.find((r) => r.id === id);
+  assert.deepEqual(out.actors.map((r) => r.id).sort(), [HERMES, WREN], "an actor that isn't listed gets nothing");
+  assert.equal(by(HERMES).cost, 0);
+  assert.deepEqual(by(HERMES).reported, { usd: 0.5, tokens: 50, source: "Hermes" });
+  assert.deepEqual(by(WREN).reported, { usd: 1, tokens: 20, source: "OpenCode" });
+  assert.deepEqual(out.unattributed.reported, { usd: null, tokens: 5, source: "OpenCode" });
+  assert.ok(!("reported" in spendByActor({ spend: [], names: nm }).unattributed), "none says nothing");
+});
+
+test("the server's answer keeps baselines between calls and adds the reported figure", () => {
+  const now = Date.now();
+  const live = { sessionCosts: () => [] };
+  let usage = hermes(5, 100).usage;
+  const actors = { sessionsStarted: () => ({ names: new Map([[HERMES, "Hermes"]]), starts: [] }), snapshot: () => ({ product: "hermes-agent", usage }) };
+  const meter = {};
+  const first = actorSpend({ live, nodes: [], actors, now, meter });
+  assert.deepEqual(first.actors, [], "nothing yet: the baseline");
+  usage = hermes(5.5, 150).usage;
+  const out = actorSpend({ live, nodes: [{ id: "oc1", kind: "session", app: "opencode", ...opencode("oc1", 1, 1) }], actors, now, meter });
+  assert.deepEqual(out.actors.map((r) => [r.id, r.cost, r.reported]), [[HERMES, 0, { usd: 0.5, tokens: 50, source: "Hermes" }]]);
+  assert.equal(out.total, 0);
 });
 
 // ---------- the demo ----------

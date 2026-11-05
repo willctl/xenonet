@@ -245,6 +245,14 @@ test("xenonet spend: today's estimate by app and by actor, with the rest unattri
     assert.match(out.stdout, /By actor\n  Wren {10}\$2\.10 {3}3 sessions\n  Kestrel {7}— {7}2 runs elsewhere, not priced\n  Unattributed {2}\$10\.30 {2}9 sessions not tied to an actor, such as the ones you start\n/);
     assert.match(out.stdout, /Not counted, with no price: claude-made-up-9\. Prices checked 2026-10-03\./);
     assert.deepEqual(JSON.parse((await xenonet(["spend", "--json", ...port])).stdout), { costs, byActor });
+    // What Hermes and OpenCode report is said on the row, apart from the estimate.
+    byActor.actors[0].reported = { usd: 0.5, tokens: 12000, source: "Hermes" };
+    byActor.unattributed.reported = { usd: null, tokens: 2500, source: "OpenCode" };
+    const said = (await via(s, "GET /api/spend/actors", ["spend", ...port])).stdout;
+    assert.match(said, /Wren {10}\$2\.10 {3}3 sessions, Hermes reports \$0\.50 \(12k tokens\)\n/);
+    assert.match(said, /Unattributed {2}\$10\.30 {2}9 sessions not tied to an actor, such as the ones you start, OpenCode\s+reports 2\.5k tokens, no price\n/);
+    delete byActor.actors[0].reported;
+    delete byActor.unattributed.reported;
     byActor = null;
     const old = await via(s, "GET /api/spend/actors", ["spend", ...port]);
     assert.equal(old.code, 0, old.stderr);

@@ -81,7 +81,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc
     cores.policy = Arc::new(delivery::PolicyDriver(w.clone()));
     cores.router = Arc::new(delivery::RouterDriver(w.clone()));
     cores.reports = Arc::new(reports::ReportsDriver(w.clone()));
-    cores.spend = Arc::new(spend::SpendDriver(w.clone()));
+    cores.spend = Arc::new(spend::SpendDriver::new(w.clone()));
     if w.actors.is_some() {
         cores.actors = Some(Arc::new(actors::ActorsDriver(w.clone())));
         cores.registration = Some(Arc::new(registration::RegistrationDriver(w.clone())));
