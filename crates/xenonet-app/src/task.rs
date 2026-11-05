@@ -190,9 +190,7 @@ pub fn run_with(mut task: Task, mut answer: impl FnMut(&Value) -> Reply) -> Done
 }
 
 /// The time now in ms, as Date.now() gives it.
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
-}
+pub use xenonet_base::time::now_ms;
 
 #[cfg(test)]
 mod tests {

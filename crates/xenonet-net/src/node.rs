@@ -94,9 +94,7 @@ impl Options {
     }
 }
 
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
-}
+pub use xenonet_base::time::now_ms;
 
 /// How the link stands.
 #[derive(Debug, Clone)]
@@ -1641,7 +1639,7 @@ impl Node {
             name: s(&v.get("network").cloned().unwrap_or(Value::Null), "name"),
             host: host.clone(),
             founder: view.founder.clone(),
-            gateway: Pin { host: view.gateway.clone(), key_id: gw_keys.key_id(), sign: gw_keys.sign_b64(), seal: gw_keys.seal_b64(), address: Some(address.to_string()) },
+            gateway: Pin { host: view.gateway, key_id: gw_keys.key_id(), sign: gw_keys.sign_b64(), seal: gw_keys.seal_b64(), address: Some(address.to_string()) },
             lan: None,
             titles_only: false,
             share_load: true,

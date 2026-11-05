@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(call(&s, "release", &[Arg::text("codex:b")]).unwrap(), Arg::Num(0.0));
         assert!(call(&s, "nope", &[]).unwrap_err().message.contains("is not a function"));
         assert_eq!((kind("unseen"), kind("nope")), ("function", "undefined"));
-        let t = Store(s.clone());
+        let t = Store(s);
         t.set_meta("gateway", "{}").unwrap();
         assert_eq!(t.meta("gateway").unwrap().as_deref(), Some("{}"));
         assert_eq!(t.meta("none").unwrap(), None);

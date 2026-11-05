@@ -419,7 +419,7 @@ impl Router {
             // 1. A Claude Code channel, only to wake an idle session.
             let ways = super::apps::of(&app);
             if ways.is_some_and(|w| w.channel) && idle && opt_call(c, "router.channels", "live", vec![agent.clone()])?.truthy() {
-                let item = obj(vec![("id", m.field("id")), ("from", from_name.clone()), ("text", text.clone())]);
+                let item = obj(vec![("id", m.field("id")), ("from", from_name), ("text", text.clone())]);
                 if c.call("router.channels", "push", vec![agent.clone(), item])?.truthy() {
                     return success(self, c, "channel", vec![]);
                 }
@@ -480,7 +480,7 @@ impl Router {
                 if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
                     tried.push(format!("resume: {why}"));
                 } else {
-                    let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone())])]));
+                    let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text)])]));
                     c.call(
                         "router.policy",
                         "audit",
@@ -508,7 +508,7 @@ impl Router {
                     let r = caught(c.call(
                         "router.resume",
                         "deliver",
-                        vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text.clone()), ("fork", Arg::Bool(true))])],
+                        vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text), ("fork", Arg::Bool(true))])],
                     ));
                     c.call(
                         "router.policy",

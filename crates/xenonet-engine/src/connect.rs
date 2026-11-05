@@ -1531,7 +1531,7 @@ mod tests {
         assert!(!at(47842.0).hook_connected(&mut f, "Stop").unwrap(), "another XenoNet's");
         m.insert("/x/xenonet".to_string(), String::new());
         assert!(c.hook_connected(&mut Files(m.clone()), "SessionStart").unwrap());
-        m.insert(cf.settings_file.clone(), "{ not json".into());
+        m.insert(cf.settings_file, "{ not json".into());
         assert!(!c.hook_connected(&mut Files(m), "Stop").unwrap(), "settings that can't be read");
     }
 
@@ -1751,7 +1751,7 @@ mod tests {
         assert_eq!(c.apply(&mut m, &[Arg::text("claude")]).unwrap(), after, "an app it doesn't name stays as it is");
 
         // Your own hook stays when XenoNet's go.
-        let mut mixed = written.clone();
+        let mut mixed = written;
         mixed["hooks"]["Start"][0]["hooks"].as_array_mut().unwrap().push(json!({ "type": "command", "command": "my-own" }));
         m.files.insert("/h/.wren/hooks.json".into(), mixed.to_string());
         m.asked.clear();

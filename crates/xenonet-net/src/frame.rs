@@ -312,7 +312,7 @@ mod tests {
             assert!(!g.verify(NET, studio.public()), "change {change}: the signature");
             assert!(open_frame(NET, &laptop, &g).is_err(), "change {change}: the sealing");
         }
-        let mut h = f.clone();
+        let mut h = f;
         h.sig[0] ^= 1;
         assert!(!h.verify(NET, studio.public()));
     }

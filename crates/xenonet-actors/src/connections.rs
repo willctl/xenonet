@@ -795,7 +795,7 @@ impl Connections {
             self.store.with(|s| s.add_grant(&grant))?;
             if asserted {
                 let known = list(c.get("identities")?);
-                account_links::assert_link(&self.store, &Arg::text(slug.clone()), &account_link.field("identity"), &adapter.provider, Some(&known), &Arg::num(t))?;
+                account_links::assert_link(&self.store, &Arg::text(slug), &account_link.field("identity"), &adapter.provider, Some(&known), &Arg::num(t))?;
             }
             let audit = obj(vec![
                 ("at", Arg::num(t)),
@@ -812,10 +812,10 @@ impl Connections {
             Ok(())
         });
         if let Err(e) = made_all {
-            self.disk(c, "deleteCredential", vec![Arg::text(grant_id.clone())])?;
+            self.disk(c, "deleteCredential", vec![Arg::text(grant_id)])?;
             return Err(e);
         }
-        let grant = Arg::text(grant_id.clone());
+        let grant = Arg::text(grant_id);
         self.note_revision(c, &grant)?;
         self.sync(c, t)?;
         Self::emit(c, "changed", obj(vec![("grant", grant.clone())]))?;

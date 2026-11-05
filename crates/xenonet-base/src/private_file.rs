@@ -280,7 +280,7 @@ mod tests {
     fn an_acl_saved_in_any_of_icacls_encodings_and_the_file_taken_away() {
         let line = format!("x.token\r\nD:P(A;;FA;;;{SID})\r\n");
         let utf16: Vec<u8> = line.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        for body in [utf16, line.clone().into_bytes()] {
+        for body in [utf16, line.into_bytes()] {
             let asked = std::cell::RefCell::new(Vec::new());
             assert_eq!(acl_of("x.token", &mut windows(&asked, Some(body))).unwrap(), format!("D:P(A;;FA;;;{SID})"));
             // icacls x.token /save <the file> /q, with the file's path as it is, spaces and all.

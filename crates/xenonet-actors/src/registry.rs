@@ -623,7 +623,7 @@ impl Actors {
         if self.get(&id).is_none() {
             self.all.push(Actor {
                 id: id.clone(),
-                slug: slug.clone(),
+                slug,
                 kind: kind.clone(),
                 name: Value::Null,
                 product: Value::Null,
@@ -1788,11 +1788,7 @@ impl Actors {
                 let mut b = b;
                 if b.is_null() {
                     let d = if truthy(Some(&session)) { host.describe(&xenonet_engine::js::template(Some(&session))) } else { Value::Null };
-                    b = if d.get("kind").and_then(Value::as_str) == Some("session") {
-                        d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(session.clone())
-                    } else {
-                        session.clone()
-                    };
+                    b = if d.get("kind").and_then(Value::as_str) == Some("session") { d.get("placeId").filter(|p| !p.is_null()).cloned().unwrap_or(session) } else { session };
                 }
                 self.record(&a, &rec("edited", &b, true), host)?;
                 Ok(json!({ "ok": true, "kind": kind, "a": a, "b": b }))

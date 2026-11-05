@@ -139,7 +139,7 @@ impl Conn {
         // The line to write each answer to a request the service makes.
         let replies = lines;
         let disconnect = {
-            let (pending, closed) = (pending.clone(), closed.clone());
+            let (pending, closed) = (pending.clone(), closed);
             move || {
                 if closed.swap(true, Ordering::SeqCst) {
                     return;

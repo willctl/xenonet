@@ -320,7 +320,7 @@ fn projects(c: &Ctx<'_>) -> Result<Out, Failure> {
     }
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
     let observed = Ctx::observed(&f)?;
-    let mut sorted = projects.clone();
+    let mut sorted = projects;
     sorted.sort_by(|a, b| js_string(a).encode_utf16().cmp(js_string(b).encode_utf16()));
     let labels = truthy(policy.get("labels"));
     let places = p::pairs(c.view.get("places"));

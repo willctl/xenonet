@@ -33,7 +33,7 @@ pub struct StoreError {
 impl StoreError {
     fn io(e: std::io::Error, syscall: &str, path: &Path) -> Self {
         let f = xenonet_base::fs::FsError::of(e, syscall, &path.to_string_lossy());
-        StoreError { message: f.message.clone(), code: f.code.clone() }
+        StoreError { message: f.message.clone(), code: f.code }
     }
 }
 

@@ -100,7 +100,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     };
     cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
     if ssh {
-        let block = host_store.clone();
+        let block = host_store;
         let _ = cores.state.add_block(Arc::new(move || block.health()), None);
     }
 
@@ -138,7 +138,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         dir: (!demo).then(|| Path::new(&state_dir).join("integrations").to_string_lossy().into_owned()),
         home: config.home.clone(),
         demo,
-        decider: decisions.clone(),
+        decider: decisions,
         state: cores.state.clone(),
         root: config.root.to_string_lossy().into_owned(),
     };

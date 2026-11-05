@@ -84,7 +84,7 @@ async fn the_demos_actors_their_simulations_and_its_made_up_request() {
     assert_eq!(actors.simulate("actor-needs-you", Some("actor:wren".into()), None).unwrap().unwrap()["kind"], "actor-needs-you");
     actors.simulate("clear", None, None).unwrap();
     // The demo's made-up request, and its token, which waits for you.
-    let reg = xenonet_wire_engine::registration::RegistrationDriver(w.clone());
+    let reg = xenonet_wire_engine::registration::RegistrationDriver(w);
     let sim = reg.simulate("actor-request", None).unwrap().unwrap();
     assert_eq!((sim["ok"].clone(), sim["a"].clone()), (json!(true), json!("actor:heron")));
     let token = sim["token"].as_str().unwrap();

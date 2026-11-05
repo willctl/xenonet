@@ -795,7 +795,7 @@ impl Link {
         let host_name = if host_id.is_null() { Value::Null } else { host_id.clone() };
         if Some(&key) != self.entry.get("key") || host_name != name_now {
             self.entry["key"] = key.clone();
-            self.entry["name"] = if truthy(Some(&host_id)) && host_id != json!(id) { host_id.clone() } else { Value::Null };
+            self.entry["name"] = if truthy(Some(&host_id)) && host_id != json!(id) { host_id } else { Value::Null };
             self.emit("learn", json!({ "key": key, "name": host_name }));
         }
         self.time(run, now);

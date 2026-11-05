@@ -265,7 +265,7 @@ impl GrokBot {
         let (fresh, candidates) = {
             let mut s = self.s();
             s.app_pids = apps.iter().map(|&i| census.table[i].pid).collect();
-            let mut queue: Vec<usize> = apps.clone();
+            let mut queue: Vec<usize> = apps;
             let mut seen: Vec<f64> = s.app_pids.clone();
             let mut fresh = Vec::new();
             let mut candidates = Vec::new();

@@ -448,7 +448,7 @@ mod tests {
         let refused = refusal(&[me.clone(), renamed, claude.clone()]).map(|f| f.message);
         assert_eq!(refused.as_deref(), Some("this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet"));
         assert!(refusal(&[me.clone(), desktop.clone(), claude]).is_some(), "nor does the installed Desktop's path vouch for what's above it");
-        assert!(refusal(&[me.clone(), desktop, link(5.0, "C:\\Windows\\explorer.exe", None)]).is_none());
+        assert!(refusal(&[me, desktop, link(5.0, "C:\\Windows\\explorer.exe", None)]).is_none());
         // This process itself isn't looked at: it's the xenonet command.
         assert!(refusal(&[link(1.0, "/Users/me/.local/bin/claude", Some("claude"))]).is_none());
     }

@@ -866,7 +866,7 @@ mod tests {
         let shell = proc(40.0, "/bin/zsh", None, None);
         let claude = |pid: f64| proc(pid, "/Users/me/.local/bin/claude", Some("claude"), None);
         let mut t = Table::new(vec![
-            vec![proc(30.0, "/usr/bin/curl", None, None), shell.clone(), proc(5.0, TERMINAL, None, None)],
+            vec![proc(30.0, "/usr/bin/curl", None, None), shell, proc(5.0, TERMINAL, None, None)],
             vec![proc(31.0, "/usr/bin/node", None, None), claude(20.0)],
             vec![proc(32.0, "/usr/bin/node", None, None), claude(21.0)],
             vec![claude(22.0)],
@@ -960,8 +960,8 @@ mod tests {
         let mut t = Table::new(vec![
             vec![proc(30.0, launcher, None, None), proc(29.0, "C:/Windows/System32/cmd.exe", None, None), claude(20.0), explorer.clone()],
             vec![proc(31.0, launcher, None, None), proc(28.0, "C:/Program Files/PowerShell/7/pwsh.exe", None, None), explorer.clone()],
-            vec![desktop.clone(), explorer.clone()],
-            vec![proc(33.0, "C:/Windows/System32/cmd.exe", None, None), desktop.clone(), claude(21.0)],
+            vec![desktop.clone(), explorer],
+            vec![proc(33.0, "C:/Windows/System32/cmd.exe", None, None), desktop, claude(21.0)],
             vec![proc(101.0, "C:/w/xenonet/node_modules/electron/dist/electron.exe", None, None), claude(22.0)],
         ]);
         t.supported = false;
@@ -1008,7 +1008,7 @@ mod tests {
             vec![proc(110.0, "/Users/me/.local/bin/claude", Some("claude"), None)],
             vec![proc(111.0, GROK, None, Some(("grok-bot", "app")))],
             vec![proc(112.0, "/usr/local/bin/node", None, None)],
-            vec![home.clone()],
+            vec![home],
         ]);
         assert_eq!(said(&v.desktop(&mut d, true)), refused("XenoNet couldn't see which program connected as its Desktop"));
         assert_eq!(said(&v.desktop(d.from(110.0), true)), refused("a Claude Code process can't be XenoNet's Desktop"));
@@ -1051,7 +1051,7 @@ mod tests {
             vec![proc(124.0, "/Applications/XenoNet Tray.app/Contents/MacOS/tools/helper", None, None), launchd.clone()],
             vec![proc(125.0, XENONET, None, None), launchd.clone()],
             // The tray itself, started from under an agent or an actor's app.
-            vec![proc(126.0, TRAY, None, None), proc(20.0, "/Users/me/.local/bin/claude", Some("claude"), None), launchd.clone()],
+            vec![proc(126.0, TRAY, None, None), proc(20.0, "/Users/me/.local/bin/claude", Some("claude"), None), launchd],
             vec![proc(127.0, TRAY, None, None), proc(7.0, GROK, None, Some(("grok-bot", "app")))],
             vec![proc(128.0, "/usr/bin/nc", None, None), proc(40.0, "/bin/zsh", None, None), proc(5.0, TERMINAL, None, None)],
         ]);
@@ -1085,16 +1085,16 @@ mod tests {
         let terminal = proc(5.0, TERMINAL, None, None);
         let grok_app = proc(7.0, GROK, None, Some(("grok-bot", "app")));
         let mut t = Table::new(vec![
-            vec![script.clone(), shell.clone(), terminal.clone()],
+            vec![script, shell, terminal.clone()],
             vec![proc(51.0, "/usr/bin/node", None, None), proc(20.0, "/Users/me/.local/bin/claude", Some("claude"), None)],
             vec![proc(52.0, "/Applications/Grok Bot.app/Contents/Resources/relay", None, None), grok_app.clone()],
-            vec![grok_app.clone()],
+            vec![grok_app],
             vec![
                 proc(53.0, "/Applications/Muse.app/Contents/Resources/helper", None, Some(("muse", "host"))),
                 proc(8.0, "/Applications/Muse.app/Contents/MacOS/Muse", None, Some(("muse", "app"))),
             ],
             vec![proc(54.0, "/opt/hermes/bin/agent", None, Some(("hermes-agent", "host"))), terminal.clone()],
-            vec![proc(55.0, "/usr/bin/python3", None, None), terminal.clone()],
+            vec![proc(55.0, "/usr/bin/python3", None, None), terminal],
         ]);
         let v = verifier(Arg::Null);
         let own = obj(vec![("slug", Arg::text("wren")), ("product", Arg::Null)]);

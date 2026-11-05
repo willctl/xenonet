@@ -126,9 +126,7 @@ pub fn platform() -> &'static str {
 }
 
 /// Date.now().
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() * 1000.0).floor()
-}
+pub use xenonet_base::time::now_ms;
 
 /// The JSON of a value that might be a number written as an integer.
 pub fn number(n: f64) -> Value {

@@ -122,7 +122,7 @@ mod tests {
         fs::write(dir.join("gone/deep/v1.json"), "{}").unwrap();
         fs::write(dir.join("notes.txt"), "x").unwrap();
         let s = state(&d, &want);
-        assert_eq!((s.changed.clone(), s.extra.clone()), (vec!["a/v1.json".to_string()], vec!["gone/deep/v1.json".to_string()]));
+        assert_eq!((s.changed.clone(), s.extra), (vec!["a/v1.json".to_string()], vec!["gone/deep/v1.json".to_string()]));
         assert_eq!(write(&d, &want).unwrap(), (vec!["a/v1.json".into()], vec!["gone/deep/v1.json".into()]));
         assert!(!dir.join("gone").exists() && dir.join("notes.txt").exists());
         fs::remove_dir_all(&dir).unwrap();

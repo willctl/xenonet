@@ -35,6 +35,10 @@ fn is_session_file(name: &str) -> bool {
     }
 }
 
+// The most of a session's record that is read; the record is small, and a
+// longer file is treated as one that can't be read.
+const SESSION_FILE_MAX: u64 = 16 * 1024 * 1024;
+
 /// Claude desktop's session files under `root` (its claude-code-sessions
 /// folder), in the order a walk finds them: sessions sit in
 /// `<account>/<organization>/`, so the folders say which Claude account
@@ -50,7 +54,7 @@ pub fn desktop_files(root: &str) -> Vec<DesktopFile> {
                 deeper.push(name);
                 walk(&full, &deeper, out)?;
             } else if t.is_file() && is_session_file(&name) {
-                let data = std::fs::read(&full).ok().and_then(|b| json::parse(&String::from_utf8_lossy(&b)).ok());
+                let data = xenonet_base::fs::read_capped(Path::new(&full), SESSION_FILE_MAX).ok().and_then(|b| json::parse(&String::from_utf8_lossy(&b)).ok());
                 out.push(DesktopFile { file: full, parts: parts.to_vec(), data });
             }
         }

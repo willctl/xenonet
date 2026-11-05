@@ -522,9 +522,14 @@ fn names(dir: &str) -> Vec<String> {
     paths::read_dir_sorted(std::path::Path::new(dir)).map(|es| es.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default()
 }
 
+// The most of a page, a day's log or a note that is read; a longer file is
+// treated as unreadable, since other apps write them and the map reads them
+// all on each refresh.
+const TEXT_MAX: u64 = 8 * 1024 * 1024;
+
 // A file's text, as fs.readFile(f, "utf8") reads it; None when it can't be.
 fn read_text(file: &str) -> Option<String> {
-    std::fs::read(file).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    xenonet_base::fs::read_capped(std::path::Path::new(file), TEXT_MAX).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 // `v || fallback`.

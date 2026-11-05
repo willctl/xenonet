@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(download_plan(&item(&url, json!(sha), json!(4)), &env, &m).unwrap(), (file.clone(), false));
         assert!(!std::path::Path::new(&file).exists(), "a bad copy is taken away");
         std::fs::write(&file, "abcd").unwrap();
-        assert_eq!(download_plan(&item(&url, json!(sha), json!(4)), &env, &m).unwrap(), (file.clone(), true));
+        assert_eq!(download_plan(&item(&url, json!(sha), json!(4)), &env, &m).unwrap(), (file, true));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

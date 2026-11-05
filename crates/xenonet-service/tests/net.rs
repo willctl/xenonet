@@ -430,7 +430,7 @@ async fn a_time_comes_only_signed_by_the_gateway_and_frames_only_within_the_week
         let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind, from: "laptop", to: "desk", at: laptop.gateway_now() as i64 };
         let f = xenonet_net::frame::host_frame(&d, &key, &desk_keys, &json!({ "schema": format!("network/{kind}/v1") }), None).unwrap();
         let batch = format!("{{\"frames\":[{}],\"ack\":null}}", f.line().trim_end());
-        (f.id.clone(), laptop.signed_request("POST", "/net/v1/frames", batch.into_bytes()).unwrap().0)
+        (f.id, laptop.signed_request("POST", "/net/v1/frames", batch.into_bytes()).unwrap().0)
     };
     let (presence, req) = send("presence");
     gw.handle(req).await;

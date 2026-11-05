@@ -676,7 +676,7 @@ mod tests {
         // A gateway entry moves the gateway, with a higher version each time.
         let mut r = r;
         let e = h.entry(&r, Op::Gateway, h.r("desk", true), &["studio"]);
-        r.offer(e.clone()).unwrap();
+        r.offer(e).unwrap();
         assert_eq!((r.view().gateway.as_str(), r.view().gateway_version), ("desk", 1));
         let mut stale = r.draft(Op::Gateway, h.r("nook", true), Some(GatewayAt { address: "x.example".into(), version: 1 }), 5);
         stale.sign_by("studio", &h.keys["studio"]);

@@ -837,7 +837,7 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool, at: f64) -> R
     let framing = if kind == "you" { xenonet_engine::network::from_you_line(from) } else { xenonet_engine::network::from_host_line(from) };
     let mut event = obj(vec![
         ("id", Arg::Num(id)),
-        ("from", Arg::text(sender_id.clone())),
+        ("from", Arg::text(sender_id)),
         ("to", Arg::List(vec![t.clone()])),
         ("target", t),
         ("text", Arg::text(format!("{framing}\n{body}"))),
@@ -1217,7 +1217,7 @@ fn offer(w: &World, c: &mut EngineCalls<'_>, me: &Arg, a: &Value, envelope: &Val
     } else {
         // Named as send names it; a message tells it now.
         let sent = w.engine.send(c, me, &obj(vec![("to", Arg::text(to.clone())), ("text", Arg::text(words.clone())), ("replyTo", Arg::Null)]), &arg(envelope))?;
-        let first = list(sent.field("to")).first().map(|t| text(&t.field("id"))).unwrap_or(to.clone());
+        let first = list(sent.field("to")).first().map(|t| text(&t.field("id"))).unwrap_or(to);
         (Some(first.clone()), host_of(&first).map(str::to_string), Some(sent))
     };
     if to_agent.is_none() && key.is_none() && !scope.truthy() {
@@ -1226,7 +1226,7 @@ fn offer(w: &World, c: &mut EngineCalls<'_>, me: &Arg, a: &Value, envelope: &Val
     let row = obj(vec![
         ("id", Arg::text(id.clone())),
         ("host", Arg::Null),
-        ("maker", Arg::text(me_id.clone())),
+        ("maker", Arg::text(me_id)),
         ("to_agent", Arg::opt_text(to_agent.as_deref())),
         ("to_repo", Arg::opt_text(key.as_deref())),
         ("to_scope", scope.clone()),
@@ -1251,7 +1251,7 @@ fn offer(w: &World, c: &mut EngineCalls<'_>, me: &Arg, a: &Value, envelope: &Val
             None => Some("repo".into()),
         };
         if let Some(to) = to {
-            if let Ok(sent) = w.engine.send(c, me, &obj(vec![("to", Arg::text(to)), ("text", Arg::text(words.clone())), ("replyTo", Arg::Null)]), &arg(envelope)) {
+            if let Ok(sent) = w.engine.send(c, me, &obj(vec![("to", Arg::text(to)), ("text", Arg::text(words)), ("replyTo", Arg::Null)]), &arg(envelope)) {
                 told_now = list(sent.field("to")).iter().map(|x| json(&x.field("id"))).collect();
             }
         }
@@ -1456,7 +1456,7 @@ fn handoff_in(w: &World, from: &str, b: &Value) -> Result<()> {
             let to = b.get("to").cloned().unwrap_or(Value::Null);
             let to_agent = s(&to, "agent").filter(|a| a.chars().count() <= 200).map(|a| here(&a));
             let row = obj(vec![
-                ("id", Arg::text(id.clone())),
+                ("id", Arg::text(id)),
                 ("host", Arg::text(from)),
                 ("maker", Arg::text(maker)),
                 ("to_agent", Arg::opt_text(to_agent.as_deref())),

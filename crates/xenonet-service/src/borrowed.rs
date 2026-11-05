@@ -6,9 +6,7 @@ use serde_json::Value;
 use xenonet_engine::sql::Arg;
 
 /// Milliseconds since the epoch, as Date.now() gives them.
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
-}
+pub use xenonet_base::time::now_ms;
 
 /// crypto.randomUUID(): a version 4 UUID.
 pub fn random_uuid() -> String {

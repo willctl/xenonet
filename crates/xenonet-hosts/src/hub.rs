@@ -61,7 +61,7 @@ pub fn view(info: &Value, entry: &Value, snapshot: &Value, cached: bool, simulat
             m.insert(k.into(), v.clone());
         }
     };
-    m.insert("id".into(), id.clone());
+    m.insert("id".into(), id);
     for k in ["state", "since", "lastHeard", "offsetMs", "rttMs"] {
         put(&mut m, k, info.get(k));
     }

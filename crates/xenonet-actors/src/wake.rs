@@ -636,7 +636,7 @@ impl Wakes {
             None => return Err(Thrown::new("Invalid URL").into()),
         };
         if !re!(r"^[\d.]+$").is_match(&bare) && !bare.contains(':') {
-            let addrs = c.call("", "resolve", vec![Arg::text(bare.clone())]).unwrap_or(Arg::List(vec![]));
+            let addrs = c.call("", "resolve", vec![Arg::text(bare)]).unwrap_or(Arg::List(vec![]));
             if list(addrs).iter().any(|a| link_local(&js_text(&a.field("address")))) {
                 return Ok(out(false, None, Some(format!("{host} is a link-local address, which a wake never goes to")), Some("a link-local address".into())));
             }
@@ -789,7 +789,7 @@ impl Wakes {
         let id = js_text(id);
         let slug = slug_of(&id);
         let config = self.config_of(&slug)?;
-        let c = config.clone().filter(|c| !c.is_null()).unwrap_or(json!({}));
+        let c = config.filter(|c| !c.is_null()).unwrap_or(json!({}));
         let s = self.with(&id, |s| s.clone());
         let kind = self.kind_of(&slug)?;
         let set = self.config_of(&slug)?.is_some_and(|c| json_arg(&c).truthy());
@@ -799,7 +799,7 @@ impl Wakes {
         let listening = self.set_of(&id).len();
         let last = s.as_ref().and_then(|s| s.last.clone());
         Ok(Arg::Obj(vec![
-            ("actor".into(), Arg::text(id.clone())),
+            ("actor".into(), Arg::text(id)),
             ("kind".into(), Arg::text(kind)),
             ("set".into(), Arg::Bool(set)),
             ("host".into(), host),
@@ -900,7 +900,7 @@ impl Wakes {
             json!({ "kind": kind, "at": xenonet_base::json::number(t) })
         };
         if let Value::Object(m) = &mut configs {
-            m.insert(slug.clone(), config);
+            m.insert(slug, config);
         }
         self.save_configs(&configs)?;
         self.forget_state(c, &id)?;

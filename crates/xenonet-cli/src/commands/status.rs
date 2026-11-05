@@ -73,7 +73,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         if let Some(sources) = health.get("sources") {
             out.insert("sources".into(), sources.clone());
         }
-        out.insert("summary".into(), summary.clone());
+        out.insert("summary".into(), summary);
         out.insert("queue".into(), Value::Array(queue));
         out.insert("agents".into(), Value::Array(agents));
         out.insert("actors".into(), actors.map_or(Value::Null, Value::Array));
