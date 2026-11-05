@@ -53,7 +53,8 @@ test("the doctor walks from not installed to reporting", async () => {
   const token = path.join(dir, "token");
   fs.writeFileSync(token, "xenonet_actor_x\n", { mode: 0o644 });
   fs.chmodSync(token, 0o644);
-  assert.equal((await check(w, now)).status, "warn");
+  // Windows has no mode bits to read, so a token file is never "loose" there.
+  if (process.platform !== "win32") assert.equal((await check(w, now)).status, "warn");
   fs.chmodSync(token, 0o600);
   fs.writeFileSync(path.join(w.env.HERMES_HOME, "config.yaml"), "plugins:\n  enabled:\n    - xenonet\n");
   assert.match((await check(w, now)).detail, /hasn't reported yet/);

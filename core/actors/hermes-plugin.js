@@ -62,7 +62,7 @@ export function inspect({ home, env = process.env, now = Date.now() } = {}) {
   let token = "none";
   try {
     const st = fs.statSync(path.join(dir, "token"));
-    token = !st.isFile() ? "none" : st.mode & 0o077 ? "loose" : "ok";
+    token = !st.isFile() ? "none" : process.platform !== "win32" && st.mode & 0o077 ? "loose" : "ok";
   } catch {}
   let reported = null;
   try {

@@ -59,12 +59,13 @@ class Register(unittest.TestCase):
     def test_hooks_registered_with_a_good_token(self):
         with tempfile.TemporaryDirectory() as d:
             tok = os.path.join(d, "token")
-            with open(tok, "w") as f:
+            with open(tok, "w", encoding="utf-8") as f:
                 f.write(TOKEN + "\n")
             os.chmod(tok, 0o600)
             self.assertEqual(plug.read_token(tok), TOKEN)
-            os.chmod(tok, 0o644)
-            self.assertIsNone(plug.read_token(tok))
+            if os.name != "nt":
+                os.chmod(tok, 0o644)
+                self.assertIsNone(plug.read_token(tok))
 
     def test_no_token_no_hooks_no_thread(self):
         ctx = FakeCtx()
@@ -78,7 +79,7 @@ class Register(unittest.TestCase):
     def test_register_wires_the_hooks(self):
         with tempfile.TemporaryDirectory() as d:
             tok = os.path.join(d, "token")
-            with open(tok, "w") as f:
+            with open(tok, "w", encoding="utf-8") as f:
                 f.write(TOKEN)
             os.chmod(tok, 0o600)
             ctx, was = FakeCtx(), plug.HERE
@@ -161,9 +162,11 @@ class Inbound(unittest.TestCase):
             r, _, _ = reporter()
             r.state_file = os.path.join(d, "state.json")
             r.heartbeat()
-            data = json.load(open(r.state_file))
+            with open(r.state_file, encoding="utf-8") as f:
+                data = json.load(f)
             self.assertEqual(data, {"ok": True, "at": 1000000})
-            self.assertEqual(stat.S_IMODE(os.stat(r.state_file).st_mode), 0o600)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(os.stat(r.state_file).st_mode), 0o600)
 
     def test_no_unread_no_inbox_call(self):
         r, _, net = reporter()

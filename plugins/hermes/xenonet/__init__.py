@@ -46,9 +46,9 @@ def read_token(path):
     """The owner's token, or None when there is none or others can read it."""
     try:
         st = os.stat(path)
-        if not stat.S_ISREG(st.st_mode) or st.st_mode & 0o077:
+        if not stat.S_ISREG(st.st_mode) or (os.name != "nt" and st.st_mode & 0o077):
             return None
-        with open(path, "r", encoding="utf8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             token = f.read().strip()
     except OSError:
         return None
@@ -185,7 +185,7 @@ class Reporter:
         try:
             tmp = self.state_file + ".tmp"
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w", encoding="utf8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"ok": ok, "at": int(self.clock() * 1000)}, f)
             os.replace(tmp, self.state_file)
         except OSError:
