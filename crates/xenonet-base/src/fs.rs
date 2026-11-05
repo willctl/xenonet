@@ -23,6 +23,20 @@ pub fn write_atomic(file: &Path, data: &[u8]) -> io::Result<()> {
     result
 }
 
+/// A file's bytes, unless it is longer than `max`: a file another app
+/// writes (a page, a config, a session's record) can grow without bound, and
+/// the service reads it again and again, so it reads at most `max + 1` bytes
+/// and fails with `InvalidData` rather than hold the rest.
+pub fn read_capped(file: &Path, max: u64) -> io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)?.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("longer than {max} bytes")));
+    }
+    Ok(bytes)
+}
+
 /// An error as Node reports one: its code when the system gave one, and
 /// its message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -334,13 +348,24 @@ pub fn file_index(path: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{plain, realpath, realpath_native};
+    use super::{plain, read_capped, realpath, realpath_native};
     use std::path::{Path, PathBuf};
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("xenonet-realpath-{name}-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("a")).expect("a folder");
         dir
+    }
+
+    #[test]
+    fn read_capped_reads_up_to_the_cap_and_no_more() {
+        let dir = temp("capped");
+        let file = dir.join("a").join("f.txt");
+        std::fs::write(&file, b"12345").expect("a file");
+        assert_eq!(read_capped(&file, 5).expect("at the cap"), b"12345");
+        assert_eq!(read_capped(&file, 4).expect_err("over the cap").kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(read_capped(&dir.join("none"), 5).expect_err("missing").kind(), std::io::ErrorKind::NotFound);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn text(p: &Path) -> String {

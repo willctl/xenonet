@@ -157,7 +157,7 @@ fn config_file(p: &Product, env: &Env, home: &str, platform: &str) -> String {
 
 // The wikiDir a config file names, there or not.
 fn named_in(file: &str) -> Option<String> {
-    let text = String::from_utf8_lossy(&std::fs::read(file).ok()?).into_owned();
+    let text = String::from_utf8_lossy(&xenonet_base::fs::read_capped(std::path::Path::new(file), MARKER_MAX).ok()?).into_owned();
     let v = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
     let dir = v.get("wikiDir")?.as_str()?;
     (!xenonet_base::text::js_trim(dir).is_empty()).then(|| dir.to_string())
