@@ -30,19 +30,19 @@ const FAILING_EVERY_MS = 2 * 60e3;
 const SEEN_SAVE_MS = 3600e3;
 // A gateway token that goes unused this much longer stops working: the
 // window says so first.
-export const EXPIRING_MS = 7 * 24 * 3600e3;
+const EXPIRING_MS = 7 * 24 * 3600e3;
 
 // The gateway's port when nothing names one: 1010 above the service's, so
 // 48850 for an installed XenoNet on 47840. That's clear of every instance's
 // port (47840 to 47845), their pages' (1000 above theirs) and Xenolith's
 // (47850 for its HTTP server, 47859 for its preview), and below the ports
 // macOS and Windows hand out for outgoing connections.
-export const GATEWAY_OFFSET = 1010;
+const GATEWAY_OFFSET = 1010;
 export const gatewayPortOf = (port) => (port + GATEWAY_OFFSET <= 65535 ? port + GATEWAY_OFFSET : port - GATEWAY_OFFSET);
 
 // The default before that: 10 above the service's (47850, Xenolith's port,
 // for an installed XenoNet). A gateway set up then keeps it.
-export const OLD_GATEWAY_OFFSET = 10;
+const OLD_GATEWAY_OFFSET = 10;
 export const oldGatewayPortOf = (port) => (port + OLD_GATEWAY_OFFSET <= 65535 ? port + OLD_GATEWAY_OFFSET : gatewayPortOf(port));
 
 const validPort = (p) => (Number.isInteger(p) && p >= 1 && p <= 65535 ? p : null);

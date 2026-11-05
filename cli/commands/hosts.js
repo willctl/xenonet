@@ -82,116 +82,118 @@ async function hostsOf(s) {
 }
 const off = (s) => `Hosts are off in ${nameOf(s)}: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype).`;
 
+async function hostSelf(s, rest, flags) {
+  const [name] = rest;
+  const change = name !== undefined || flags.clear === true;
+  const self = change ? await post(s, "/api/hosts/self", { id: flags.clear ? null : name }) : await get(s, "/api/hosts/self");
+  if (flags.json) return json(self);
+  const key = `key ${self.key.slice(0, 8)}…`;
+  if (change) return print(self.id ? `${c.green("✓")} ${nameOf(s)} calls itself ${c.bold(self.id)} as a host now ${c.dim(`(${key})`)}` : `${c.green("✓")} ${nameOf(s)} has no host name now ${c.dim(`(${key})`)}`);
+  return print(self.id ? `${nameOf(s)} calls itself ${c.bold(self.id)} as a host ${c.dim(`(${key})`)}` : `${nameOf(s)} hasn't named itself as a host ${c.dim(`(${key})`)}. xenonet hosts self <name> names it: a name you choose, such as studio or vm1.`);
+}
+
+async function hostList(s, rest, flags) {
+  const list = await hostsOf(s);
+  if (!list) {
+    if (flags.json) return json({ on: false, self: await get(s, "/api/hosts/self") });
+    print(off(s));
+    const self = await get(s, "/api/hosts/self");
+    return print(c.dim(self.id ? `As a host, it calls itself ${self.id}.` : "As a host, it hasn't named itself: xenonet hosts self <name>."));
+  }
+  if (flags.json) return json({ on: true, ...list });
+  print(`${c.green("●")} ${c.bold(list.self.id ?? "this XenoNet")} ${c.dim(`· ${nameOf(s)}, here · key ${list.self.key.slice(0, 8)}…`)}`);
+  if (!list.hosts.length) return print(c.dim(`  No hosts yet. xenonet hosts add <id> [user@host] adds one.`));
+  const rows = [];
+  for (const h of list.hosts) {
+    const { line, fix } = describe(h);
+    rows.push([h.id, c.dim(h.target ?? ""), `${DOT[h.state] ?? "?"} ${h.state}`, line]);
+    if (fix) rows.push(["", "", "", c.dim(`↳ ${fix}`)]);
+  }
+  print(table(rows, { indent: 2, wrap: true }));
+  return print(c.dim(`\nXenoNet reaches them with its own ssh config, ${shown(list.sshConfig ?? "ssh_config")}.`));
+}
+
+async function hostAdd(s, rest, flags) {
+  const [id, target] = rest;
+  if (!id) throw new Fail("say which host: xenonet hosts add <id> [user@host]", 2);
+  const body = { id, replace: flags.replace === true };
+  if (flags.local) Object.assign(body, { transport: "local" });
+  else Object.assign(body, { target: target ?? id, sshPort: flags.sshPort, identity: flags.identity, knownHosts: flags.knownHosts, hostKeyAlias: flags.hostKeyAlias, command: flags.command });
+  if (flags.xenonetPort !== undefined) body.port = flags.xenonetPort;
+  if (flags.since !== undefined) body.since = flags.since;
+  if (flags.detail) body.detail = true;
+  if (flags.start) body.start = true;
+  for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
+  let h;
+  try {
+    h = await post(s, "/api/hosts", body);
+  } catch (err) {
+    if (err.status === 404) throw new Fail(off(s));
+    throw err;
+  }
+  // A moment for the first connection, so what it found can be said.
+  for (let i = 0; i < 25 && h.state === "connecting"; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    h = (await hostsOf(s))?.hosts.find((x) => x.id === id) ?? h;
+  }
+  if (flags.json) return json(h);
+  const list = await hostsOf(s);
+  print(`${c.green("✓")} Added ${c.bold(id)} ${c.dim(`(${h.target})`)}`);
+  const { line, fix } = describe(h);
+  print(`  ${DOT[h.state] ?? "?"} ${h.state} · ${line}`);
+  if (fix) print(c.dim(`  ↳ ${fix}`));
+  if (h.transport === "ssh" && list?.sshConfig) print(c.dim(`  XenoNet connects with its own ssh config. The first time, check ${id}'s host key in a terminal: ${trustCommand(id, list.sshConfig, shown)}`));
+  return;
+}
+
+async function hostRemove(s, rest, flags) {
+  const [id] = rest;
+  if (!id) throw new Fail("say which host: xenonet hosts remove <id>", 2);
+  const forget = flags.forget === true || (flags.forget !== false && !flags.json && (await confirm(`Also forget where you placed ${id}'s nodes on the map?`, flags)));
+  let r;
+  try {
+    r = await del(s, `/api/hosts/${encodeURIComponent(id)}${forget ? "?forget=1" : ""}`);
+  } catch (err) {
+    if (err.status === 404 && /XENONET_HOSTS/.test(err.message)) throw new Fail(off(s));
+    throw err;
+  }
+  if (flags.json) return json(r);
+  return print(`${c.green("✓")} Removed ${c.bold(id)}${r.forgot ? `, and where you placed ${r.forgot} of its nodes` : ""}. Its last snapshot is gone from the cache.`);
+}
+
+async function hostTest(s, rest, flags) {
+  const [id] = rest;
+  if (!id) throw new Fail("say which host: xenonet hosts test <id>", 2);
+  const t = await post(s, `/api/hosts/${encodeURIComponent(id)}/test`);
+  if (flags.json) {
+    json(t);
+    return t.ok ? 0 : 1;
+  }
+  if (!t.ok) {
+    print(`${c.red("✗")} ${id}: ${t.error?.message ?? `no answer in ${Math.round(t.ms / 1000)} s`}`);
+    if (t.error?.fix) print(c.dim(`  ↳ ${t.error.fix}`));
+    return 1;
+  }
+  const h = t.hello ?? {};
+  print(`${c.green("✓")} ${id} answered in ${(t.ms / 1000).toFixed(1)} s: XenoNet ${h.version} on ${h.platform}${h.demo ? ", made-up data" : ""}${h.id && h.id !== id ? `, calling itself ${h.id}` : ""}`);
+  print(`${c.green("✓")} its relay speaks protocol ${h.protocol}, and sends ${h.detail ? "live detail too" : "titles, states and counts"}${h.sinceMs ? ` for sessions of the last ${Math.round(h.sinceMs / 86400e3) || 1} d` : ""}`);
+  print(`${c.green("✓")} a map of ${t.snapshot.nodes} places and sessions, ${t.snapshot.sessions} of them sessions, ${t.snapshot.live} live`);
+  const skew = t.offsetMs;
+  print(skew == null ? `${c.dim("·")} its clock: no answer yet` : Math.abs(skew) > 120e3 ? `${c.yellow("!")} its clock is ${offset(skew).replace(/^clock /, "")}: have it set its clock by itself` : `${c.green("✓")} its clock: ${offset(skew).replace(/^clock /, "") || "within 2 s of this one's"}`);
+  return 0;
+}
+
+async function hostReconnect(s, rest, flags) {
+  const [id] = rest;
+  if (!id) throw new Fail("say which host: xenonet hosts reconnect <id>", 2);
+  const h = await post(s, `/api/hosts/${encodeURIComponent(id)}/reconnect`);
+  return flags.json ? json(h) : print(`${c.green("✓")} Connecting to ${id} now.`);
+}
+
+const SUBCOMMANDS = { self: hostSelf, list: hostList, add: hostAdd, remove: hostRemove, test: hostTest, reconnect: hostReconnect };
+
 export async function run([sub = "list", ...rest], flags) {
   const s = await need(flags);
-
-  if (sub === "self") {
-    const [name] = rest;
-    const change = name !== undefined || flags.clear === true;
-    const self = change ? await post(s, "/api/hosts/self", { id: flags.clear ? null : name }) : await get(s, "/api/hosts/self");
-    if (flags.json) return json(self);
-    const key = `key ${self.key.slice(0, 8)}…`;
-    if (change) return print(self.id ? `${c.green("✓")} ${nameOf(s)} calls itself ${c.bold(self.id)} as a host now ${c.dim(`(${key})`)}` : `${c.green("✓")} ${nameOf(s)} has no host name now ${c.dim(`(${key})`)}`);
-    return print(self.id ? `${nameOf(s)} calls itself ${c.bold(self.id)} as a host ${c.dim(`(${key})`)}` : `${nameOf(s)} hasn't named itself as a host ${c.dim(`(${key})`)}. xenonet hosts self <name> names it: a name you choose, such as studio or vm1.`);
-  }
-
-  if (sub === "list") {
-    const list = await hostsOf(s);
-    if (!list) {
-      if (flags.json) return json({ on: false, self: await get(s, "/api/hosts/self") });
-      print(off(s));
-      const self = await get(s, "/api/hosts/self");
-      return print(c.dim(self.id ? `As a host, it calls itself ${self.id}.` : "As a host, it hasn't named itself: xenonet hosts self <name>."));
-    }
-    if (flags.json) return json({ on: true, ...list });
-    print(`${c.green("●")} ${c.bold(list.self.id ?? "this XenoNet")} ${c.dim(`· ${nameOf(s)}, here · key ${list.self.key.slice(0, 8)}…`)}`);
-    if (!list.hosts.length) return print(c.dim(`  No hosts yet. xenonet hosts add <id> [user@host] adds one.`));
-    const rows = [];
-    for (const h of list.hosts) {
-      const { line, fix } = describe(h);
-      rows.push([h.id, c.dim(h.target ?? ""), `${DOT[h.state] ?? "?"} ${h.state}`, line]);
-      if (fix) rows.push(["", "", "", c.dim(`↳ ${fix}`)]);
-    }
-    print(table(rows, { indent: 2, wrap: true }));
-    return print(c.dim(`\nXenoNet reaches them with its own ssh config, ${shown(list.sshConfig ?? "ssh_config")}.`));
-  }
-
-  if (sub === "add") {
-    const [id, target] = rest;
-    if (!id) throw new Fail("say which host: xenonet hosts add <id> [user@host]", 2);
-    const body = { id, replace: flags.replace === true };
-    if (flags.local) Object.assign(body, { transport: "local" });
-    else Object.assign(body, { target: target ?? id, sshPort: flags.sshPort, identity: flags.identity, knownHosts: flags.knownHosts, hostKeyAlias: flags.hostKeyAlias, command: flags.command });
-    if (flags.xenonetPort !== undefined) body.port = flags.xenonetPort;
-    if (flags.since !== undefined) body.since = flags.since;
-    if (flags.detail) body.detail = true;
-    if (flags.start) body.start = true;
-    for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
-    let h;
-    try {
-      h = await post(s, "/api/hosts", body);
-    } catch (err) {
-      if (err.status === 404) throw new Fail(off(s));
-      throw err;
-    }
-    // A moment for the first connection, so what it found can be said.
-    for (let i = 0; i < 25 && h.state === "connecting"; i++) {
-      await new Promise((r) => setTimeout(r, 200));
-      h = (await hostsOf(s))?.hosts.find((x) => x.id === id) ?? h;
-    }
-    if (flags.json) return json(h);
-    const list = await hostsOf(s);
-    print(`${c.green("✓")} Added ${c.bold(id)} ${c.dim(`(${h.target})`)}`);
-    const { line, fix } = describe(h);
-    print(`  ${DOT[h.state] ?? "?"} ${h.state} · ${line}`);
-    if (fix) print(c.dim(`  ↳ ${fix}`));
-    if (h.transport === "ssh" && list?.sshConfig) print(c.dim(`  XenoNet connects with its own ssh config. The first time, check ${id}'s host key in a terminal: ${trustCommand(id, list.sshConfig, shown)}`));
-    return;
-  }
-
-  if (sub === "remove") {
-    const [id] = rest;
-    if (!id) throw new Fail("say which host: xenonet hosts remove <id>", 2);
-    const forget = flags.forget === true || (flags.forget !== false && !flags.json && (await confirm(`Also forget where you placed ${id}'s nodes on the map?`, flags)));
-    let r;
-    try {
-      r = await del(s, `/api/hosts/${encodeURIComponent(id)}${forget ? "?forget=1" : ""}`);
-    } catch (err) {
-      if (err.status === 404 && /XENONET_HOSTS/.test(err.message)) throw new Fail(off(s));
-      throw err;
-    }
-    if (flags.json) return json(r);
-    return print(`${c.green("✓")} Removed ${c.bold(id)}${r.forgot ? `, and where you placed ${r.forgot} of its nodes` : ""}. Its last snapshot is gone from the cache.`);
-  }
-
-  if (sub === "test") {
-    const [id] = rest;
-    if (!id) throw new Fail("say which host: xenonet hosts test <id>", 2);
-    const t = await post(s, `/api/hosts/${encodeURIComponent(id)}/test`);
-    if (flags.json) {
-      json(t);
-      return t.ok ? 0 : 1;
-    }
-    if (!t.ok) {
-      print(`${c.red("✗")} ${id}: ${t.error?.message ?? `no answer in ${Math.round(t.ms / 1000)} s`}`);
-      if (t.error?.fix) print(c.dim(`  ↳ ${t.error.fix}`));
-      return 1;
-    }
-    const h = t.hello ?? {};
-    print(`${c.green("✓")} ${id} answered in ${(t.ms / 1000).toFixed(1)} s: XenoNet ${h.version} on ${h.platform}${h.demo ? ", made-up data" : ""}${h.id && h.id !== id ? `, calling itself ${h.id}` : ""}`);
-    print(`${c.green("✓")} its relay speaks protocol ${h.protocol}, and sends ${h.detail ? "live detail too" : "titles, states and counts"}${h.sinceMs ? ` for sessions of the last ${Math.round(h.sinceMs / 86400e3) || 1} d` : ""}`);
-    print(`${c.green("✓")} a map of ${t.snapshot.nodes} places and sessions, ${t.snapshot.sessions} of them sessions, ${t.snapshot.live} live`);
-    const skew = t.offsetMs;
-    print(skew == null ? `${c.dim("·")} its clock: no answer yet` : Math.abs(skew) > 120e3 ? `${c.yellow("!")} its clock is ${offset(skew).replace(/^clock /, "")}: have it set its clock by itself` : `${c.green("✓")} its clock: ${offset(skew).replace(/^clock /, "") || "within 2 s of this one's"}`);
-    return 0;
-  }
-
-  if (sub === "reconnect") {
-    const [id] = rest;
-    if (!id) throw new Fail("say which host: xenonet hosts reconnect <id>", 2);
-    const h = await post(s, `/api/hosts/${encodeURIComponent(id)}/reconnect`);
-    return flags.json ? json(h) : print(`${c.green("✓")} Connecting to ${id} now.`);
-  }
-
-  throw new Fail(`hosts takes self, add, remove, test or reconnect, not "${sub}". xenonet hosts --help says more.`, 2);
+  if (!Object.hasOwn(SUBCOMMANDS, sub)) throw new Fail(`hosts takes self, add, remove, test or reconnect, not "${sub}". xenonet hosts --help says more.`, 2);
+  return SUBCOMMANDS[sub](s, rest, flags);
 }

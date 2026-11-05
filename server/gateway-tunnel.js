@@ -120,7 +120,7 @@ export function findTools(tool, { env = process.env, platform = process.platform
   return [...new Set([onpath, ...(PLACES[tool]?.[platform] ?? [])].filter(ok))];
 }
 
-export const versionIn = (text) => /(\d+\.\d+\.\d+)/.exec(String(text ?? ""))?.[1] ?? null;
+const versionIn = (text) => /(\d+\.\d+\.\d+)/.exec(String(text ?? ""))?.[1] ?? null;
 
 // `tailscale status --json`, as what the gateway needs from it: whether
 // it's up, this computer's name, whether the tailnet lets it use Funnel,
@@ -141,7 +141,7 @@ export function tailscaleSelf(json) {
 
 // The one path Funnel publishes: the actor gateway's MCP endpoint. The
 // network's routes and A2A stay off the internet.
-export const FUNNEL_PATH = "/mcp";
+const FUNNEL_PATH = "/mcp";
 
 // The command that has Funnel publish the gateway's /mcp alone.
 export const funnelArgs = (port) => ["funnel", "--bg", "--yes", "--set-path", FUNNEL_PATH, `http://127.0.0.1:${port}${FUNNEL_PATH}`];

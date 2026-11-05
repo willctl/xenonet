@@ -15,7 +15,7 @@ const RESOLVERS = ["1.1.1.1", "8.8.8.8", "9.9.9.9"];
 
 // The first address the internet's DNS has for `host`: { address, family },
 // or { error } when there's none ("missing") or DNS didn't answer.
-export async function publicAddress(host, { servers = RESOLVERS, timeoutMs = 3000 } = {}) {
+async function publicAddress(host, { servers = RESOLVERS, timeoutMs = 3000 } = {}) {
   const r = new dns.promises.Resolver({ timeout: timeoutMs, tries: 2 });
   r.setServers(servers);
   let failed = null;
@@ -36,7 +36,7 @@ export async function publicAddress(host, { servers = RESOLVERS, timeoutMs = 300
 // One GET of /mcp with the word, at `address` for `host` (TLS checked for
 // that name), or at the gateway's own port when `local`: { status, echoed }
 // or { error } (a code such as ECONNREFUSED, or a TLS one).
-export function probeRequest({ host, address = null, family = 4, nonce, local = null, timeoutMs = 8000 }) {
+function probeRequest({ host, address = null, family = 4, nonce, local = null, timeoutMs = 8000 }) {
   return new Promise((resolve) => {
     const headers = { host, [PROBE_HEADER]: nonce, "user-agent": "xenonet-gateway-check", accept: "application/json" };
     const lookup = (_name, opts, cb) => (opts?.all ? cb(null, [{ address, family }]) : cb(null, address, family));

@@ -99,7 +99,7 @@ const running = (pid) => {
 const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
 const cost = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
 const name = (v) => (typeof v === "string" && v ? v.slice(0, 80) : null);
-export function cleanUsage(u) {
+function cleanUsage(u) {
   if (!u || typeof u !== "object") return null;
   const t = u.tokens ?? {};
   return {

@@ -65,6 +65,22 @@ test("a push nothing acked goes back to the hooks, so a channel Claude Code drop
   assert.equal(r.notes.length, 1);
 });
 
+test("a notifier that throws when the ack timer fires doesn't take the process down", async () => {
+  const r = rig();
+  r.router.notify = () => {
+    throw new Error("notifier broke");
+  };
+  r.channels.poll(A, 1000);
+  const [rec] = await r.router.route(msg());
+  const uncaught = [];
+  const onRejection = (err) => uncaught.push(err);
+  process.on("unhandledRejection", onRejection);
+  await sleep(120);
+  process.off("unhandledRejection", onRejection);
+  assert.equal(rec.state, "notified");
+  assert.deepEqual(uncaught, []);
+});
+
 test("the sender hears how each message will get there: right away through a channel or OpenCode, else from the hooks", async () => {
   const r = rig({ opencode: { deliver: async () => ({ ok: true }) } });
   const idle = { id: A, app: "claude", status: "idle" };

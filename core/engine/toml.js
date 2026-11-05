@@ -105,7 +105,7 @@ export function withoutServer(text, name) {
 
 // Server `name` as XenoNet writes it: its command and arguments, then its
 // environment.
-export function serverToml(name, { command, args = [], env = {} }) {
+function serverToml(name, { command, args = [], env = {} }) {
   const head = `mcp_servers.${tomlKey(name)}`;
   return [
     `[${head}]`,
