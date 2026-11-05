@@ -92,7 +92,8 @@ fn retry_of(code: &str) -> Option<f64> {
 /// service makes it.
 pub fn error_envelope(request_id: &str, code: &str, retry_after_ms: Option<f64>) -> Value {
     let retry = retry_after_ms.or_else(|| retry_of(code));
-    let id = regex::Regex::new(&schema::request_id()).expect("a pattern").is_match(request_id);
+    static REQUEST_ID: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(&schema::request_id()).expect("a pattern"));
+    let id = REQUEST_ID.is_match(request_id);
     let mut m = Map::new();
     m.insert("schema".into(), json!(schema::ERROR_SCHEMA));
     m.insert("request_id".into(), if id { json!(request_id) } else { Value::Null });

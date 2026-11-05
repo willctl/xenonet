@@ -114,6 +114,12 @@ pub fn channel_enabled(env: &dyn Fn(&str) -> Option<String>, cmdline: &dyn Fn(f6
     Regex::new(&format!(r"--(dangerously-load-development-channels|channels)(=|\s)(?s:.)*server:{}(\s|$)", regex::escape(name))).expect("a pattern").is_match(&args)
 }
 
+/// The pattern an actor's or gateway's token matches, compiled once.
+fn token_regex() -> &'static Regex {
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(TOKEN_GREP).expect("a pattern"));
+    &RE
+}
+
 /// A variable of this server's environment, by name.
 pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 
@@ -343,7 +349,7 @@ impl Context {
         let slug = actor.strip_prefix("actor:").unwrap_or(actor);
         let route = format!("/api/actors/{}/gateway/ask", encode_uri_component(slug));
         match self.request("POST", &route, Some(&json!({})), &[("x-xenonet-agent".into(), id)]).await {
-            Ok(v) => Ok(Regex::new(TOKEN_GREP).expect("a pattern").replace_all(&js::stringify(&v, 1), "[token withheld]").into_owned()),
+            Ok(v) => Ok(token_regex().replace_all(&js::stringify(&v, 1), "[token withheld]").into_owned()),
             Err(e) if e.status.is_some() => Err(e.message),
             Err(_) => Err("XenoNet isn't running, so it can't show your user the ask. Your user can open it, and the doctor tool says what else is wrong.".into()),
         }
