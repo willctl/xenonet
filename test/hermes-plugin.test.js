@@ -10,6 +10,6 @@ const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugi
 const probe = spawnSync("python3", ["--version"]);
 
 test("the Hermes plugin's unit tests pass", { skip: probe.error ? "python3 isn't here" : false }, () => {
-  const r = spawnSync("python3", ["-I", "-B", "-m", "unittest", "discover", "-s", dir, "-p", "test_*.py"], { encoding: "utf8", cwd: dir });
+  const r = spawnSync("python3", ["-I", "-B", "-W", "error::ResourceWarning", "-m", "unittest", "discover", "-s", dir, "-p", "test_*.py"], { encoding: "utf8", cwd: dir });
   assert.equal(r.status, 0, r.stderr);
 });
