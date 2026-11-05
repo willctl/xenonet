@@ -65,7 +65,7 @@ export const TranscriptLine = vendor(
           usage,
           stop_reason: z.string().nullable(),
         },
-        { known: ["type", "role", "stop_sequence", "container", "context_management", "stop_details", "diagnostics", "input_transformations"] },
+        { known: ["type", "role", "stop_sequence", "container", "context_management", "stop_details", "diagnostics", "input_transformations", "safeguard_results"] },
       ),
     }).describe("A reply, or a part of one"),
     // A Remote Control session's link, which says no time or version.
@@ -77,7 +77,7 @@ export const TranscriptLine = vendor(
     // Kinds XenoNet passes over: Claude Code's notes and summaries, and what
     // newer versions write about a session around them (its titles and
     // mode, queued prompts, file history, links, costs, API requests, its
-    // worktree and the artifacts it watches).
+    // worktree, the artifacts it watches and who owns it).
     ...skipped(
       "type",
       "system",
@@ -104,6 +104,7 @@ export const TranscriptLine = vendor(
       "worktree-state",
       "artifact-comment-monitor",
       "artifact-autoreact-ledger",
+      "session-owner",
     ),
   ]),
   {

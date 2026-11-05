@@ -384,7 +384,8 @@
               "context_management",
               "stop_details",
               "diagnostics",
-              "input_transformations"
+              "input_transformations",
+              "safeguard_results"
             ]
           }
         }
@@ -726,6 +727,19 @@
         "type": {
           "type": "string",
           "const": "artifact-autoreact-ledger"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "session-owner"
         }
       },
       "required": [
