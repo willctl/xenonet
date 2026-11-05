@@ -13,6 +13,7 @@ pub mod apps;
 pub mod client;
 pub mod dirs;
 pub mod fs;
+pub mod hermes_plugin;
 pub mod http;
 pub mod ids;
 pub mod json;

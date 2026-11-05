@@ -9,6 +9,9 @@ import { c, print, json, Fail } from "../lib/out.js";
 import { need, get, post, nameOf, candidates } from "../../core/client.js";
 import { createConnect } from "../../core/engine/connect.js";
 import { appsWith } from "../../core/apps.js";
+import { inspect, install, ownerSteps } from "../../core/actors/hermes-plugin.js";
+import { tilde } from "../../core/paths.js";
+import os from "node:os";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -23,6 +26,9 @@ entries there.
 
   xenonet connect [claude] [codex] [grok]
                                    each that's here unless you name them
+  xenonet connect hermes           puts XenoNet's plugin in Hermes Agent's plugins
+                                   folder. It stays off until you turn it on and
+                                   give it a token; connect says how
   --yes                            don't ask
   --json                           the connection's state as JSON, changing nothing
   --here --port <n>                for a XenoNet whose service runs on another machine
@@ -91,7 +97,33 @@ async function here(names, flags) {
   print(`${c.green("✓")} Connected ${andList(todo.map((a) => a.name))} to ${who}. While nothing answers there, its hooks stay out of the way.`);
 }
 
+// XenoNet's plugin for Hermes Agent: copied into Hermes's plugins folder, and
+// off until the owner turns it on and gives it a token (core/actors/hermes-plugin.js).
+async function hermes(flags) {
+  const home = os.homedir();
+  const before = inspect({ home });
+  if (flags.json) return json(before);
+  print(c.bold("Hermes Agent"));
+  print(`  ${before.current ? c.green("✓") : c.yellow("+")} the XenoNet plugin ${c.dim(`(${before.current ? "already in place" : before.installed ? "to update" : "to add"})`)}`);
+  print(c.dim(`      ${tilde(before.dir, home)}`));
+  print(c.dim("      Two files. It sends Hermes's session starts and ends, tool names and edited file paths to XenoNet, never arguments or text, and hands Hermes the messages other agents send it. It changes nothing else of Hermes's."));
+  print();
+  if (!before.current) {
+    if (!(await confirm("Put the plugin in Hermes's plugins folder?", flags))) return print(c.dim("Nothing changed."));
+    install({ home });
+    print(`${c.green("✓")} The plugin is in ${tilde(before.dir, home)}. It does nothing yet.`);
+  } else print(c.green("The plugin is in place."));
+  const steps = ownerSteps(inspect({ home }), (p) => tilde(p, home));
+  steps.forEach((t, i) => print(`  ${i + 1}. ${t}`));
+  if (!steps.length) print(c.dim("It's on and has its token; xenonet doctor says whether it reports."));
+}
+
 export async function run(names, flags) {
+  if (names.includes("hermes")) {
+    await hermes(flags);
+    names = names.filter((n) => n !== "hermes");
+    if (!names.length) return;
+  }
   const bad = names.map((n) => (n === "claude-code" ? "claude" : n)).filter((a) => !CONNECTED.includes(a));
   if (bad.length) throw new Fail(`connect works with ${andList(CONNECTED)}, not ${bad.join(", ")}`, 2);
   if (flags.here) return here(names, flags);

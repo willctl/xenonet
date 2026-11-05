@@ -894,9 +894,12 @@ test("actors: their tokens held to processes on macOS, a note elsewhere, and a p
 
 test("actors: with actors off, their checks say so rather than asking for XenoNet", async () => {
   const off = byId(await runDoctor(ctxWith({ ctx: { actors: null } }), { only: ["actors"] }));
+  // The plugin for Hermes reads files, not XenoNet, so it answers with actors off too.
+  assert.equal(off["actors.hermes-plugin"].status, "ok");
+  delete off["actors.hermes-plugin"];
   assert.deepEqual(Object.values(off).map((r) => [r.id, r.status, r.detail]), ["actors.repos", "actors.expired", "actors.gateway", "actors.wakes", "actors.observers", "actors.checked"].map((id) => [id, "skip", "actors are off here (XENONET_ACTORS=off)"]));
   const alone = byId(await runDoctor(ctxWith({ ctx: { actors: undefined } }), { only: ["actors"] }));
-  assert.deepEqual(Object.values(alone).map((r) => r.status), ["skip", "skip", "skip", "skip", "skip", "ok"], "the xenonet command alone can still check the process lookups");
+  assert.deepEqual(Object.values(alone).map((r) => r.status), ["skip", "skip", "skip", "skip", "skip", "ok", "ok"], "the xenonet command alone can still check the process lookups");
 });
 
 test("the launcher check: what hooks and MCP servers run, current and finding XenoNet's Tools", async () => {
