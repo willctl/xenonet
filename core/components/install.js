@@ -43,7 +43,7 @@ export function writeLauncher(entry, { source = fs.readFileSync(LAUNCHER_SOURCE,
 
 // Why the launcher's binary is still the old one when it couldn't be
 // replaced, and when it will be.
-export const LAUNCHER_PENDING = "XenoNet replaces it the next time it starts, or the next time you run xenonet update";
+const LAUNCHER_PENDING = "XenoNet replaces it the next time it starts, or the next time you run xenonet update";
 
 // Puts `tmp` in `to`'s place. Windows won't replace a program that's
 // running, and the launcher runs as long as an MCP server or the xenonet
@@ -54,7 +54,7 @@ export const LAUNCHER_PENDING = "XenoNet replaces it the next time it starts, or
 // launcher's path is briefly missing, so a hook or MCP server starting in that
 // moment fails once; the rename of a file that isn't running replaces it in
 // one step.
-export function replaceFile(tmp, to, { rename = fs.renameSync } = {}) {
+function replaceFile(tmp, to, { rename = fs.renameSync } = {}) {
   try {
     return rename(tmp, to);
   } catch (err) {
@@ -84,7 +84,7 @@ function alive(pid) {
 // copies (<to>.<pid>.tmp) a launcher update left when it stopped halfway, one
 // whose process no longer runs. One still running (on Windows) stays until a
 // later start.
-export function sweepAside(to) {
+function sweepAside(to) {
   const dir = path.dirname(to), prefix = `${path.basename(to)}.`;
   let names = [];
   try { names = fs.readdirSync(dir); } catch {}
@@ -101,7 +101,7 @@ export function sweepAside(to) {
 // and a rename, so a hook starting meanwhile runs the old or the new; a
 // launcher that's running is put aside first (replaceFile). True when it was
 // written, false when there was nothing to do; throws why it couldn't be.
-export function writeLauncherBin(tools, to) {
+function writeLauncherBin(tools, to) {
   sweepAside(to);
   const from = path.join(tools.root, "bin", binName());
   if (!fs.existsSync(from)) return false;

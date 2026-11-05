@@ -332,7 +332,7 @@ async function leave(_args, flags) {
 }
 
 // The events of a text/event-stream body, as { event, data }.
-export async function* sseEvents(body) {
+async function* sseEvents(body) {
   const decoder = new TextDecoder();
   let buf = "";
   let ev = { event: "message", data: [] };

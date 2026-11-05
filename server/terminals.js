@@ -31,7 +31,7 @@ const POSIX_SHELLS = {
 };
 const POSIX_DIRS = ["/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
-export function posixProfiles({ loginShell, exists = fs.existsSync } = {}) {
+function posixProfiles({ loginShell, exists = fs.existsSync } = {}) {
   const out = [];
   const add = (file) => {
     const name = path.basename(file);
@@ -44,7 +44,7 @@ export function posixProfiles({ loginShell, exists = fs.existsSync } = {}) {
   return out.length ? out : [{ id: "sh", label: "sh", file: "/bin/sh", args: ["-l"] }];
 }
 
-export function detectProfiles() {
+function detectProfiles() {
   if (process.platform !== "win32") return posixProfiles({ loginShell: process.env.SHELL || os.userInfo().shell });
   const sys = process.env.SystemRoot ?? "C:\\Windows";
   const out = [];
