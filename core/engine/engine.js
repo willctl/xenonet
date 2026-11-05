@@ -199,7 +199,15 @@ export class Engine extends EventEmitter {
     // A run XenoNet has no transcript of (numbat's records, or one an actor
     // reported through the gateway) reads the same way, its edits marked
     // observed, since XenoNet inferred them.
-    const live = this.state.live?.sessions?.get(id) ?? this.state.observed?.live?.(id) ?? null;
+    let live = this.state.live?.sessions?.get(id) ?? this.state.observed?.live?.(id) ?? null;
+    // An OpenCode session whose plugin is talking: what it says goes before
+    // what its database says, which stays the fallback.
+    const ev = id.startsWith("opencode:") ? this.state.opencodeEvents?.state(id, now) : null;
+    if (ev) {
+      const edits = new Map(live?.edits ?? []);
+      for (const [f, list] of ev.edits) edits.set(f, [...(edits.get(f) ?? []), ...list].sort((a, b) => a.ts - b.ts).slice(-8));
+      live = { observed: false, endedAt: live?.endedAt ?? null, ...live, lastEventAt: Math.max(live?.lastEventAt ?? 0, ev.lastEventAt), edits, status: () => ev.status, needsYou: () => ev.needsYou };
+    }
     const observed = !!live?.observed;
     const contact = this.store.contact(id);
     // A session XenoNet has no record of, but whose own app answers for it
@@ -627,6 +635,18 @@ export class Engine extends EventEmitter {
     }
     this.store.setFocus(me, clip(String(text ?? "").trim(), 200), this.now());
     return { focus: this.store.focus(me)?.text ?? null };
+  }
+
+  // What an OpenCode session's plugin reports as it happens (status, a
+  // permission asked or answered, files edited, a message's cost): kept
+  // for the map and the engine's view (core/native/opencode-events.js).
+  // Only an OpenCode session reports it, as itself. Returns how many of
+  // the events XenoNet used; the rest, such as kinds it doesn't know, are
+  // ignored.
+  opencodeEvent(me, { events, cwd = null } = {}) {
+    if (!me.startsWith("opencode:")) throw Object.assign(new Error("only an OpenCode session reports these"), { status: 400 });
+    const used = this.state.opencodeEvents?.ingest(me, events, { cwd: typeof cwd === "string" ? cwd : null, now: this.now() }) ?? 0;
+    return { used };
   }
 
   // Note that an agent was in touch directly, which means messages reach it.
