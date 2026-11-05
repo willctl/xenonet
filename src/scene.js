@@ -1390,8 +1390,8 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
 
   addEventListener("resize", () => {
     wake();
+    // Sizes the composer, and through it the bloom, in device pixels.
     graph.width(innerWidth).height(innerHeight);
-    bloom.setSize(innerWidth, innerHeight);
     setLineResolution(innerWidth, innerHeight);
   });
 
