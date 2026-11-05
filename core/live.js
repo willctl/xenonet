@@ -582,7 +582,7 @@ export class LiveTelemetry extends EventEmitter {
   // Reads the transcripts written lately as history, then follows them.
   async start() {
     await this.tailer.start();
-    this.limitTimer = setInterval(() => this.readClaudeLimits(), 30000);
+    this.limitTimer = setInterval(() => this.readClaudeLimits().catch(() => {}), 30000);
     await this.readClaudeLimits();
   }
 

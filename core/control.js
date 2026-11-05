@@ -273,6 +273,9 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
     fs.closeSync(out);
     let exited = null;
     child.on("exit", (code, signal) => (exited = code ?? signal));
+    // A command that can't start never exits; without this handler the error
+    // would be thrown from the process instead of reported here.
+    child.on("error", (err) => (exited ??= err.message));
     const until = Date.now() + timeout;
     while (Date.now() < until) {
       const p = await ping();

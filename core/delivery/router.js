@@ -249,7 +249,10 @@ export class DeliveryRouter extends EventEmitter {
       this.policy.audit({ kind: "notified", message: m.id, to: rec.agent });
       this.emit("delivery", { ...rec });
       const view = await this.engine.view(rec.agent).catch(() => null);
-      this.notify({ message: m.id, agent: rec.agent, title: view?.title ?? rec.agent, from: rec.fromName ?? m.from });
+      // A notifier that throws mustn't take the process down from a timer.
+      try {
+        this.notify({ message: m.id, agent: rec.agent, title: view?.title ?? rec.agent, from: rec.fromName ?? m.from });
+      } catch {}
     }, this.ackMs);
     timer.unref?.();
     this.timers.set(rec, timer);
