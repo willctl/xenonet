@@ -17,6 +17,9 @@
 //!
 //! A run reported from elsewhere has no transcript here, so XenoNet can't
 //! price it: it's counted apart, as one of the actor's runs elsewhere.
+//!
+//! What Hermes and OpenCode say they spent is a separate figure, `reported`,
+//! never added to the estimate: see `reported_today`.
 
 use serde_json::{json, Map, Value};
 use std::cmp::Ordering;
@@ -120,6 +123,11 @@ struct Part {
     sessions: f64,
     unpriced: BTreeSet<Utf16>,
     elsewhere: f64,
+    // What Hermes and OpenCode reported for today, apart from the estimate.
+    reported: bool,
+    rep_usd: f64,
+    rep_tokens: f64,
+    rep_sources: BTreeSet<Utf16>,
 }
 
 // A text ordered as JS's sort() orders text.
@@ -151,6 +159,11 @@ fn plain(id: Option<(&str, &Value)>, p: &Part) -> Value {
         o.insert("elsewhere".into(), xenonet_base::json::number(p.elsewhere));
     }
     o.insert("unpriced".into(), Value::Array(p.unpriced.iter().map(|u| json!(u.0)).collect()));
+    if p.reported {
+        let usd = if p.rep_usd > 0.0 { xenonet_base::json::number(p.rep_usd) } else { Value::Null };
+        let source = p.rep_sources.iter().map(|u| u.0.as_str()).collect::<Vec<_>>().join(", ");
+        o.insert("reported".into(), json!({ "usd": usd, "tokens": xenonet_base::json::number(p.rep_tokens), "source": source }));
+    }
     Value::Object(o)
 }
 
@@ -159,7 +172,11 @@ fn plain(id: Option<(&str, &Value)>, p: &Part) -> Value {
 /// actors that count, each one's name by its id; `since`: when today began,
 /// for the runs reported from elsewhere today. Each actor: { id, name,
 /// cost, tokens, sessions, unpriced, elsewhere }, the most spent first.
-pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], names: &[(String, Value)], since: Option<f64>) -> Value {
+/// `reported`: today's increases in what Hermes and OpenCode report
+/// (`reported_today`'s items), each added to its actor's or session's
+/// actor as a separate `reported: { usd, tokens, source }`, never to the
+/// cost.
+pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], names: &[(String, Value)], since: Option<f64>, reported: &[Value]) -> Value {
     let known: HashSet<String> = names.iter().map(|(k, _)| k.clone()).collect();
     let name_of = |id: &str| names.iter().rev().find(|(k, _)| k == id).map(|(_, v)| v.clone()).filter(|v| !v.is_null()).unwrap_or_else(|| json!(id));
     // Each session's calls with its id and cost, and each run reported
@@ -167,7 +184,8 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
     let list: Vec<(&str, f64, &Value)> = spend.iter().filter_map(|s| Some((s.get("id")?.as_str()?, finite(s.get("cost"))?, s))).collect();
     let runs: Vec<(&str, &Value)> =
         sessions.iter().filter(|s| s.get("observed").and_then(Value::as_str) == Some("gateway")).filter_map(|s| Some((s.get("id")?.as_str()?, s))).collect();
-    let ids: Vec<Value> = list.iter().map(|(id, _, _)| json!(id)).chain(runs.iter().map(|(id, _)| json!(id))).collect();
+    let rep_sessions = reported.iter().filter_map(|r| r.get("session").filter(|s| s.is_string()).cloned());
+    let ids: Vec<Value> = list.iter().map(|(id, _, _)| json!(id)).chain(runs.iter().map(|(id, _)| json!(id))).chain(rep_sessions).collect();
     let who: HashMap<String, Who> = attribute(sessions, starts, Some(&known), Some(&ids)).into_iter().map(|(k, w)| (template(Some(&k)), w)).collect();
     let mut rows: Vec<(String, Part)> = Vec::new();
     let row_index = |rows: &mut Vec<(String, Part)>, id: &str| -> usize {
@@ -216,6 +234,30 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
             rows[i].1.elsewhere += 1.0;
         }
     }
+    for r in reported {
+        let part = match (r.get("actor").and_then(Value::as_str), r.get("session").and_then(Value::as_str)) {
+            // An actor missing from the list gets nothing, not the unattributed.
+            (Some(a), _) if !known.contains(a) => continue,
+            (Some(a), _) => {
+                let i = row_index(&mut rows, a);
+                &mut rows[i].1
+            }
+            (None, Some(s)) => match who.get(s) {
+                Some(w) => {
+                    let i = row_index(&mut rows, &w.actor);
+                    &mut rows[i].1
+                }
+                None => &mut none,
+            },
+            (None, None) => &mut none,
+        };
+        part.reported = true;
+        part.rep_usd += finite(r.get("usd")).unwrap_or(0.0);
+        part.rep_tokens += finite(r.get("tokens")).unwrap_or(0.0);
+        if let Some(src) = r.get("source").and_then(Value::as_str) {
+            part.rep_sources.insert(Utf16(src.to_string()));
+        }
+    }
     let mut actors: Vec<(String, Value, &Part)> = rows.iter().map(|(id, p)| (id.clone(), name_of(id), p)).collect();
     xenonet_base::sort::sort_by(&mut actors, |(ai, an, a), (bi, bn, b)| {
         let by = |x: f64, y: f64| y.partial_cmp(&x).unwrap_or(Ordering::Equal);
@@ -232,6 +274,112 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
     })
 }
 
+const TOKEN_FIELDS: [&str; 5] = ["input", "output", "reasoning", "cacheRead", "cacheWrite"];
+
+// The name the figure carries for an app or an actor's product.
+fn source_label(raw: &str) -> String {
+    let lower = raw.to_lowercase();
+    if lower.contains("hermes") {
+        "Hermes".into()
+    } else if lower.contains("opencode") {
+        "OpenCode".into()
+    } else {
+        raw.to_string()
+    }
+}
+
+// One cumulative reading: its key, where it came from, whose it is, and
+// the dollars (None when unpriced) and tokens it totals.
+struct Reading {
+    key: String,
+    source: String,
+    actor: Option<String>,
+    session: Option<String>,
+    usd: Option<f64>,
+    tokens: f64,
+}
+
+fn reading_of(usage: &Value) -> Option<(Option<f64>, f64)> {
+    if !usage.is_object() {
+        return None;
+    }
+    let tokens = TOKEN_FIELDS.iter().map(|f| finite(usage.get("tokens").and_then(|t| t.get(*f))).filter(|v| *v >= 0.0).unwrap_or(0.0)).sum();
+    Some((finite(usage.get("costUsd")).filter(|v| *v >= 0.0), tokens))
+}
+
+/// What Hermes and OpenCode report as spent, for today only. Both keep
+/// totals for the life of a session (Hermes's on the actor, over the
+/// sessions it has seen), so each reading is a baseline at first sight and
+/// only increases after it count, per day: `state` is the answer's own
+/// state from the last call (null at first), `since` when today began.
+/// `usages`: the actors' usage ({ id, product, usage }); `sessions`: the
+/// map's, a session with `usage` being OpenCode's. A priced increase adds
+/// dollars and tokens; an unpriced one (a subscription, an unknown price)
+/// adds tokens and no dollars, never a zero price. Answers (state, items),
+/// each item { key, source, actor | session, usd (null when no dollars),
+/// tokens } for what grew today, by key.
+pub fn reported_today(state: &Value, since: f64, usages: &[Value], sessions: &[Value]) -> (Value, Vec<Value>) {
+    let mut readings: Vec<Reading> = Vec::new();
+    for u in usages {
+        let (Some(id), Some((usd, tokens))) = (u.get("id").and_then(Value::as_str), u.get("usage").and_then(reading_of)) else { continue };
+        let product = u.get("product").and_then(Value::as_str).unwrap_or("");
+        readings.push(Reading {
+            key: id.to_string(),
+            source: source_label(if product.is_empty() { id } else { product }),
+            actor: Some(id.to_string()),
+            session: None,
+            usd,
+            tokens,
+        });
+    }
+    for s in sessions {
+        let (Some(id), Some((usd, tokens))) = (s.get("id").and_then(Value::as_str), s.get("usage").and_then(reading_of)) else { continue };
+        let app = s.get("app").and_then(Value::as_str).unwrap_or("");
+        readings.push(Reading { key: id.to_string(), source: source_label(app), actor: None, session: Some(id.to_string()), usd, tokens });
+    }
+    let mut seen: Map<String, Value> = state.get("seen").and_then(Value::as_object).cloned().unwrap_or_default();
+    let same_day = state.get("since").and_then(Value::as_f64) == Some(since);
+    let mut today: Map<String, Value> = if same_day { state.get("today").and_then(Value::as_object).cloned().unwrap_or_default() } else { Map::new() };
+    for r in readings {
+        let usd = r.usd.unwrap_or(0.0);
+        let before = seen.insert(r.key.clone(), json!({ "usd": xenonet_base::json::number(usd), "tokens": xenonet_base::json::number(r.tokens) }));
+        // First sight is the baseline: what came before today isn't today's.
+        let Some(before) = before else { continue };
+        let d_usd = (usd - finite(before.get("usd")).unwrap_or(0.0)).max(0.0);
+        let d_tokens = (r.tokens - finite(before.get("tokens")).unwrap_or(0.0)).max(0.0);
+        if d_usd <= 0.0 && d_tokens <= 0.0 {
+            continue;
+        }
+        let was = today.get(&r.key);
+        let sum = |f: &str, d: f64| xenonet_base::json::number(was.and_then(|w| finite(w.get(f))).unwrap_or(0.0) + d);
+        let mut item = Map::new();
+        item.insert("key".into(), json!(r.key));
+        item.insert("source".into(), json!(r.source));
+        if let Some(a) = &r.actor {
+            item.insert("actor".into(), json!(a));
+        }
+        if let Some(s) = &r.session {
+            item.insert("session".into(), json!(s));
+        }
+        item.insert("usd".into(), sum("usd", d_usd));
+        item.insert("tokens".into(), sum("tokens", d_tokens));
+        today.insert(r.key, Value::Object(item));
+    }
+    let mut items: Vec<Value> = today.values().cloned().collect();
+    xenonet_base::sort::sort_by(&mut items, |a, b| utf16_cmp(a["key"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or("")));
+    let out = items
+        .iter()
+        .map(|i| {
+            let mut i = i.clone();
+            if finite(i.get("usd")).unwrap_or(0.0) <= 0.0 {
+                i["usd"] = Value::Null;
+            }
+            i
+        })
+        .collect();
+    (json!({ "since": xenonet_base::json::number(since), "seen": seen, "today": today }), out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +393,72 @@ mod tests {
         assert_eq!(w.len(), 2);
         assert_eq!(w[0].1, Who { actor: "actor:hermes".into(), how: "started" });
         assert_eq!(w[1].1, Who { actor: "actor:hermes".into(), how: "parent" });
+    }
+
+    fn hermes(cost: Value, input: f64) -> Value {
+        json!({ "id": "actor:hermes", "product": "hermes-agent", "usage": { "costUsd": cost, "tokens": { "input": input, "output": 0, "reasoning": 0, "cacheRead": 0, "cacheWrite": 0 } } })
+    }
+
+    fn opencode(id: &str, cost: Value, input: f64) -> Value {
+        json!({ "id": id, "app": "opencode", "usage": { "costUsd": cost, "tokens": { "input": input, "output": 0, "reasoning": 0, "cacheRead": 0, "cacheWrite": 0 } } })
+    }
+
+    #[test]
+    fn reported_counts_only_what_grows_after_first_sight() {
+        let day = 1000.0;
+        let (st, items) = reported_today(&Value::Null, day, &[hermes(json!(5.0), 100.0)], &[opencode("oc1", json!(2.0), 10.0)]);
+        assert!(items.is_empty(), "first sight is the baseline");
+        let (st, items) = reported_today(&st, day, &[hermes(json!(5.5), 150.0)], &[opencode("oc1", json!(2.0), 10.0), opencode("oc2", json!(0.25), 7.0)]);
+        // oc2 first seen now: baseline too.
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["key"], "actor:hermes");
+        assert_eq!(items[0]["usd"], 0.5);
+        assert_eq!(items[0]["tokens"], 50);
+        assert_eq!(items[0]["source"], "Hermes");
+        // Increases add up through the day, and a lower total adds nothing.
+        let (st, items) = reported_today(&st, day, &[hermes(json!(5.75), 160.0)], &[opencode("oc1", json!(3.0), 30.0)]);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["usd"], 0.75);
+        assert_eq!(items[1]["key"], "oc1");
+        assert_eq!(items[1]["usd"], 1);
+        assert_eq!(items[1]["tokens"], 20);
+        let (st, items) = reported_today(&st, day, &[hermes(json!(1.0), 5.0)], &[]);
+        assert_eq!(items[0]["usd"], 0.75);
+        // A new day starts from nothing, and keeps the baselines.
+        let (_, items) = reported_today(&st, day + 1.0, &[hermes(json!(1.5), 15.0)], &[]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["usd"], 0.5);
+        assert_eq!(items[0]["tokens"], 10);
+    }
+
+    #[test]
+    fn unpriced_reports_add_tokens_and_no_dollars() {
+        let (st, _) = reported_today(&Value::Null, 1.0, &[hermes(Value::Null, 10.0)], &[]);
+        let (_, items) = reported_today(&st, 1.0, &[hermes(Value::Null, 40.0)], &[]);
+        assert_eq!(items[0]["usd"], Value::Null);
+        assert_eq!(items[0]["tokens"], 30);
+    }
+
+    #[test]
+    fn reported_is_apart_from_the_estimate() {
+        let names = vec![("actor:hermes".to_string(), json!("Hermes")), ("actor:wren".to_string(), json!("Wren"))];
+        let sessions = vec![json!({ "id": "oc1", "app": "opencode" }), json!({ "id": "oc2", "app": "opencode" })];
+        let starts = vec![json!({ "actor": "actor:wren", "session": "oc1", "at": 1, "via": "observed" })];
+        let reported = vec![
+            json!({ "key": "actor:hermes", "source": "Hermes", "actor": "actor:hermes", "usd": 0.5, "tokens": 50 }),
+            json!({ "key": "oc1", "source": "OpenCode", "session": "oc1", "usd": 1, "tokens": 20 }),
+            json!({ "key": "oc2", "source": "OpenCode", "session": "oc2", "usd": null, "tokens": 5 }),
+            json!({ "key": "actor:ghost", "source": "Hermes", "actor": "actor:ghost", "usd": 9.0, "tokens": 9 }),
+        ];
+        let out = spend_by_actor(&[], &sessions, &starts, &names, None, &reported);
+        assert_eq!(out["total"], 0.0);
+        let rows = out["actors"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap();
+        assert_eq!(row("actor:hermes")["cost"], 0.0);
+        assert_eq!(row("actor:hermes")["reported"], json!({ "usd": 0.5, "tokens": 50, "source": "Hermes" }));
+        assert_eq!(row("actor:wren")["reported"], json!({ "usd": 1, "tokens": 20, "source": "OpenCode" }));
+        assert_eq!(out["unattributed"]["reported"], json!({ "usd": null, "tokens": 5, "source": "OpenCode" }));
+        assert!(row("actor:wren").get("reported").is_some() && out["unattributed"]["cost"] == 0.0);
     }
 }

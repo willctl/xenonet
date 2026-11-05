@@ -209,6 +209,14 @@ The sessions you start yourself are unattributed too. The window tells XenoNet y
 
 A run reported from elsewhere has no transcript on this computer, so XenoNet can't price it. Its actor's row says how many such runs it had today, and they aren't in its cost.
 
+### What Hermes and OpenCode say they spent
+
+Hermes and OpenCode record their own cost, and XenoNet shows it as a separate figure, **reported**, beside the estimate. A row reads, for example, `Hermes $0.50 reported`, and hovering over it gives the tokens too. It is never added to the estimate, the share bar or the total, since it isn't priced the same way: Hermes and OpenCode price their own calls.
+
+Both keep totals for the whole life of a session, so XenoNet counts only the part that grew today, from the first time it saw them. A XenoNet that has just started counts from now, and a session it first sees today counts from that moment. A session's total that goes down adds nothing. A subscription, or a price the app doesn't stand behind, adds tokens and no dollars: the row says `tokens`, never `$0.00`.
+
+The Hermes figure goes to the Hermes actor. An OpenCode session isn't an actor, so its figure goes to the actor that started it by the rules above, and otherwise to the unattributed row. `xenonet spend` prints the same on each row, and `GET /api/spend` carries it as `reported: { usd, tokens, source }` (`usd` is `null` when nothing was priced), present only when there is some.
+
 ## Your own programs
 
 Your own programs register with the `xenonet` command, and wait for your Allow in XenoNet's window. Every new actor waits for it, even one you register from your own terminal.

@@ -37,3 +37,15 @@ test("a run reported from elsewhere is said, never priced, and models without a 
   const money = (x) => `${x} dollars`;
   assert.equal(actorSpendView(answer([actor(1, 3)]), { money }).rows[0].value, "3 dollars");
 });
+
+test("what Hermes and OpenCode report is said beside the row, never in its value or share", () => {
+  const rep = { usd: 0.5, tokens: 12000, source: "Hermes" };
+  const a = answer([actor(1, 3, { reported: rep }), actor(2, 0, { sessions: 0, reported: { usd: null, tokens: 2500, source: "OpenCode" } })]);
+  a.unattributed.reported = { usd: 1.25, tokens: 900, source: "OpenCode" };
+  const v = actorSpendView(a);
+  assert.deepEqual(v.rows.map((r) => [r.value, r.reported]), [["$3.00", "$0.50"], ["—", "2.5k tokens"], ["$4.00", "$1.25"]]);
+  assert.equal(v.rows[0].share, 3 / 7, "the share is the estimate's alone");
+  assert.match(v.rows[0].title, /Hermes reports \$0\.50 and 12k tokens today, its own figure, not in the estimate\.$/);
+  assert.match(v.rows[1].title, /OpenCode reports 2\.5k tokens today, its own figure, not in the estimate \(no price reported\)\.$/);
+  assert.equal(actorSpendView(answer([actor(1, 3)])).rows[0].reported, null);
+});

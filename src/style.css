@@ -1811,6 +1811,7 @@ details[open] summary::before {
 .sa-list li.none .sa-dot { width: 4px; height: 4px; border: 1px solid var(--dim); background: none; box-shadow: none; }
 .sa-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sa-list li.none .sa-name { color: var(--dim); }
+.sa-rep { color: var(--dim); font-style: normal; }
 .sa-bar { height: 3px; background: rgb(var(--gold-rgb) / 0.1); }
 .sa-bar b { display: block; height: 100%; background: var(--gold); box-shadow: 0 0 5px rgb(var(--gold-rgb) / 0.6); }
 .sa-list li.none .sa-bar b { background: var(--dim); box-shadow: none; }

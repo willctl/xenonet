@@ -3,11 +3,13 @@
 // core/actors/spend.js).
 import { c, print, json, table, plural } from "../lib/out.js";
 import { need, get } from "../../core/client.js";
-import { money } from "../../core/units.js";
+import { money, tokens } from "../../core/units.js";
 
 export const help = `About what today's work would cost: Claude Code's and Codex's at API
 prices, Grok Build's at what Grok recorded, at this pace, and by actor.
-Grok records a cost only with an API key, so with a SuperGrok or X Premium
+Hermes and OpenCode say what they spent themselves; that is shown apart,
+as "reported", from the day XenoNet first saw it, and never added to the
+estimate. Grok records a cost only with an API key, so with a SuperGrok or X Premium
 sign-in its cost shows as unknown, never as nothing. Each session counts
 for one actor at most: the one that reported it as a run, or started it,
 or started the session it came from. The rest is unattributed, including
@@ -17,6 +19,10 @@ those are.
 On a plan, the work costs the plan; this is what it would cost on the API.
 
   --json   the day's costs and the breakdown by actor, as JSON`;
+
+// What Hermes or OpenCode reported today, in words: "Hermes reports $0.50
+// (12k tokens)", or just the tokens when it gave no price.
+const reportedIn = (rep) => (rep ? `${rep.source} reports ${rep.usd != null ? `${money(rep.usd)} (${tokens(rep.tokens)} tokens)` : `${tokens(rep.tokens)} tokens, no price`}` : null);
 
 export async function run(_args, flags) {
   const s = await need(flags);
@@ -46,10 +52,10 @@ export async function run(_args, flags) {
     const rows = byActor.actors.map((r) => [
       r.name,
       r.sessions ? money(r.cost) : c.dim("—"),
-      c.dim([r.sessions && plural(r.sessions, "session"), r.elsewhere && `${plural(r.elsewhere, "run")} elsewhere, not priced`].filter(Boolean).join(", ")),
+      c.dim([r.sessions && plural(r.sessions, "session"), r.elsewhere && `${plural(r.elsewhere, "run")} elsewhere, not priced`, reportedIn(r.reported)].filter(Boolean).join(", ")),
     ]);
     const u = byActor.unattributed;
-    rows.push([c.dim("Unattributed"), money(u.cost), c.dim(`${plural(u.sessions, "session")} not tied to an actor, such as the ones you start`)]);
+    rows.push([c.dim("Unattributed"), money(u.cost), c.dim([`${plural(u.sessions, "session")} not tied to an actor, such as the ones you start`, reportedIn(u.reported)].filter(Boolean).join(", "))]);
     print(table(rows, { indent: 2, wrap: true }));
     if (!byActor.actors.length) print(c.dim("  No actor started a session that ran today."));
   } else print(c.dim("\nThis XenoNet doesn't break the day down by actor."));

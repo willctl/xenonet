@@ -14,9 +14,9 @@ export function attribute({ sessions = [], starts = [], known = null, ids = null
 // Sets of models, as lists.
 const listed = (s) => (s && typeof s === "object" && s.unpriced != null && !Array.isArray(s.unpriced) ? { ...s, unpriced: [...s.unpriced] } : s);
 
-export function spendByActor({ spend = [], sessions = [], starts = [], names = new Map(), since = null } = {}) {
+export function spendByActor({ spend = [], sessions = [], starts = [], names = new Map(), since = null, reported = [] } = {}) {
   const pairs = names instanceof Map ? [...names] : Object.entries(names ?? {});
-  return native.spendByActor([...spend].map(listed), sessions, starts, pairs, since);
+  return native.spendByActor([...spend].map(listed), sessions, starts, pairs, since, [...(reported ?? [])]);
 }
 
 export const dayStart = (now) => {
@@ -24,11 +24,24 @@ export const dayStart = (now) => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 };
 
-export function actorSpend({ live, nodes, actors, now = Date.now() }) {
+// What Hermes and OpenCode report as spent today, as the core has it.
+export function reportedToday({ state = null, since, usages = [], sessions = [] } = {}) {
+  const [next, items] = native.spendReportedToday(state, since, usages, sessions);
+  return { state: next, items };
+}
+
+export function actorSpend({ live, nodes, actors, now = Date.now(), meter = {} }) {
   if (!live || !actors) return null;
   const { names, starts } = actors.sessionsStarted({ now });
   const sessions = [];
   for (const n of nodes ?? []) if (n.kind === "session") sessions.push(n);
   const since = dayStart(now);
-  return { at: now, since, checked: PRICES_CHECKED, ...spendByActor({ spend: live.sessionCosts(now), sessions, starts, names, since }) };
+  const usages = [];
+  for (const id of names.keys()) {
+    const snap = actors.snapshot(id, { now });
+    if (snap?.usage) usages.push({ id, product: snap.product, usage: snap.usage });
+  }
+  const { state, items } = reportedToday({ state: meter.state, since, usages, sessions });
+  meter.state = state;
+  return { at: now, since, checked: PRICES_CHECKED, ...spendByActor({ spend: live.sessionCosts(now), sessions, starts, names, since, reported: items }) };
 }

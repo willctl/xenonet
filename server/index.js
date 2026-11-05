@@ -205,7 +205,8 @@ const openrouter = config.demo ? createDemoOpenRouterUsage() : createOpenRouterU
 // What each actor's work cost today, for Token use and xenonet spend
 // (core/actors/spend.js): worked out when asked, from the tailer's costs,
 // the map's sessions and who started them. Null with actors off.
-const spendOfActors = () => actorSpend({ live: state.live, nodes: state.index.values(), actors });
+const spendMeter = {};
+const spendOfActors = () => actorSpend({ live: state.live, nodes: state.index.values(), actors, meter: spendMeter });
 
 // Spotify, as a remote for the app you use (core/spotify.js): what's
 // playing goes to the page (spotify), a few seconds apart while a window
