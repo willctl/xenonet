@@ -222,8 +222,8 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     );
     if let Some(world) = w.arc() {
         let runner = resumes.runner.clone();
-        let (key, app, logs) = (key.clone(), app.clone(), runs.clone());
-        let (session, folder, prompt_file) = (session.clone(), folder.clone(), prompt_file.clone());
+        let (key, app, logs) = (key.clone(), app.clone(), runs);
+        let (session, folder, prompt_file) = (session.clone(), folder.clone(), prompt_file);
         std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, &answer));
     }
     Ok(json!({ "session": session, "pid": pid, "folder": folder, "app": app }))
@@ -578,7 +578,7 @@ pub fn ask(w: &World, by: Value, req: &Value, strong: bool) -> Result<Value, (u1
     let mid = xenonet_engine::network::new_id("msg").map_err(|t| (500, t.message))?;
     let id = s(&by, "id").unwrap_or_else(|| YOU.into());
     let kind = by.get("kind").and_then(Value::as_str).unwrap_or("session");
-    let sender = if kind == "you" { YOU.to_string() } else { id.clone() };
+    let sender = if kind == "you" { YOU.to_string() } else { id };
     let mut request = r.to_json();
     request["request"] = json!(mid);
     request["by"] = json!({ "kind": kind, "id": sender, "title": by.get("title").and_then(Value::as_str).map(|t| clip(t, 200)) });
@@ -656,7 +656,7 @@ pub fn start_in(w: &World, from: &str, mid: &str, kind: &str, sender: &str, body
     };
     let qualified = if k == Kind::You { YOU.to_string() } else { format!("@{from}:{sender}") };
     let by = json!({ "kind": k.as_str(), "id": qualified, "title": v.get("by").and_then(|b| b.get("title")).and_then(Value::as_str) });
-    let who = Sender { kind: k, id: qualified.clone(), host: Some(from.to_string()), window, strong };
+    let who = Sender { kind: k, id: qualified, host: Some(from.to_string()), window, strong };
     let (to, m) = (from.to_string(), mid.to_string());
     let answer: Answer = Arc::new(move |w: &World, state: &str, a: Value| start_receipt(w, &to, &m, state, &a));
     match run_here(w, &by, Some(from), &who, &r, answer) {

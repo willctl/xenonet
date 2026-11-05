@@ -377,7 +377,7 @@ pub(crate) mod tests {
             assert_eq!(unpack(&bad, &dir), Err(Unpack::Refused));
         }
         assert!(!dir.parent().unwrap().join("escape").exists());
-        let mut broken = ok.clone();
+        let mut broken = ok;
         broken[10] ^= 1;
         assert!(matches!(unpack(&broken, &dir), Err(Unpack::Bad(_))));
         std::fs::remove_dir_all(&dir).unwrap();

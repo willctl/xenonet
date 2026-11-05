@@ -257,7 +257,7 @@ mod tests {
         fs_call("mkdirSync", &[Arg::text(format!("{d}/a")), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).unwrap();
         fs_call("writeFileSync", &[Arg::text(f.clone()), Arg::text("{}")]).unwrap();
         assert_eq!(fs_call("readFileSync", &[Arg::text(f.clone()), Arg::text("utf8")]).unwrap(), Arg::text("{}"));
-        assert_eq!(fs_call("existsSync", &[Arg::text(f.clone())]).unwrap(), Arg::Bool(true));
+        assert_eq!(fs_call("existsSync", &[Arg::text(f)]).unwrap(), Arg::Bool(true));
         let gone = fs_call("readFileSync", &[Arg::text(format!("{d}/none")), Arg::text("utf8")]).unwrap_err();
         assert_eq!(gone.code.as_deref(), Some(&Value::String("ENOENT".into())));
         assert!(gone.message.starts_with("ENOENT: no such file or directory, open"));

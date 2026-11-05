@@ -1639,7 +1639,7 @@ impl Node {
             name: s(&v.get("network").cloned().unwrap_or(Value::Null), "name"),
             host: host.clone(),
             founder: view.founder.clone(),
-            gateway: Pin { host: view.gateway.clone(), key_id: gw_keys.key_id(), sign: gw_keys.sign_b64(), seal: gw_keys.seal_b64(), address: Some(address.to_string()) },
+            gateway: Pin { host: view.gateway, key_id: gw_keys.key_id(), sign: gw_keys.sign_b64(), seal: gw_keys.seal_b64(), address: Some(address.to_string()) },
             lan: None,
             titles_only: false,
             share_load: true,

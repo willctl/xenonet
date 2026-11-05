@@ -119,7 +119,7 @@ pub fn answered(ctx: &Ctx, method: &str, path: &str, answer: Result<Reply, CoreE
         Err(e) => {
             eprintln!("{}", e.message);
             let short = shorten(path);
-            ctx.log("error", "service.route", &format!("{method} {short}: {}", e.message), Some(&ErrInfo { message: Some(e.message.clone()), stack: None, code: None }), None);
+            ctx.log("error", "service.route", &format!("{method} {short}: {}", e.message), Some(&ErrInfo { message: Some(e.message), stack: None, code: None }), None);
             Reply::error(500, "internal error")
         }
     }

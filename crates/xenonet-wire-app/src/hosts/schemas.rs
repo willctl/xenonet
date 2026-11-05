@@ -364,7 +364,7 @@ mod tests {
         let entry =
             json!({ "id": "lab", "transport": "local", "ssh": null, "port": 47840, "command": null, "since": "7d", "detail": false, "key": null, "name": null, "addedAt": 1 });
         assert_eq!(s.check_entry(&entry), None);
-        let mut bad = entry.clone();
+        let mut bad = entry;
         bad["port"] = json!(0);
         assert!(s.check_entry(&bad).unwrap().starts_with("port: "));
         assert!(s.check_hello(&json!({ "t": "hello" })).is_some());

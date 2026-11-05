@@ -865,7 +865,7 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
     let session = (app != "codex").then(|| format!("{app}:{}", random_uuid()));
     {
         let c = ctx.clone();
-        let (machine, folder, session) = (machine.clone(), folder.clone(), session.clone());
+        let (machine, folder, session) = (machine.clone(), folder, session);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
             let started = json!({ "session": session, "folder": folder });

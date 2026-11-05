@@ -1022,7 +1022,7 @@ mod tests {
     fn a_local_review_is_found_only_by_its_own_id_and_holds_to_its_manifest() {
         let (dir, root) = store("ids");
         assert_eq!(why(Reviews::new(Some(root.clone()), false).seed(&json!({}), 1.0)), "Synthetic reviews belong to the demo instance.");
-        let mut r = Reviews::new(Some(root.clone()), true);
+        let mut r = Reviews::new(Some(root), true);
         let id = r.seed(&json!({ "before": { "a.txt": "one\n" }, "after": { "a.txt": "two\n" } }), 1.0).unwrap();
         assert_eq!(r.view(&id).unwrap()["baseline"]["files"][0]["path"], json!("a.txt"));
         for other in [json!("../../outside"), json!("../reviews/x"), json!(id.as_str().unwrap().to_uppercase()), json!(7), json!(null)] {
@@ -1033,11 +1033,9 @@ mod tests {
         let frozen = vec![file("a.txt", b"one\n")];
         assert_eq!(r.verify_uploaded(&id, &handed_back(frozen.clone(), json!([]))), Ok(()));
         let mismatch = "The uploaded files do not match the frozen manifest. The agent was not released.";
-        for upload in [
-            handed_back(vec![file("a.txt", b"one!\n")], json!([])),
-            handed_back(vec![], json!([])),
-            handed_back(frozen.clone(), json!([{ "path": "a.txt", "reason": "unreadable" }])),
-        ] {
+        for upload in
+            [handed_back(vec![file("a.txt", b"one!\n")], json!([])), handed_back(vec![], json!([])), handed_back(frozen, json!([{ "path": "a.txt", "reason": "unreadable" }]))]
+        {
             assert_eq!(why(r.verify_uploaded(&id, &upload).map(|()| json!(null))), mismatch, "{upload}");
         }
         // An export is of the result that was reviewed, complete, with changes.

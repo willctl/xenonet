@@ -308,7 +308,7 @@ mod tests {
         let ok = json!({ "format": 1, "component": "tools", "version": "1.2.3", "platform": "darwin", "arch": "arm64", "dataSchema": 1, "api": { "min": 1, "max": 1 } });
         assert!(package_info(Some(&ok), "darwin", "arm64").is_ok());
         assert!(package_info(Some(&ok), "linux", "arm64").unwrap_err().contains("not compatible"));
-        let mut newer_api = ok.clone();
+        let mut newer_api = ok;
         newer_api["api"] = json!({ "min": 2, "max": 2 });
         assert!(package_info(Some(&newer_api), "darwin", "arm64").unwrap_err().contains("incompatible"));
         assert_eq!(digest(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");

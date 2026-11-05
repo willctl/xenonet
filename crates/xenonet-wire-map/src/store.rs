@@ -218,7 +218,7 @@ impl StateStore {
                 g.life.ok(now_ms());
             }
             Err(e) => {
-                let message = e.message.clone();
+                let message = e.message;
                 crate::util::log("error", "store.save", &format!("couldn't save its state to {}: {message}", self.file));
                 g.life.problem(&message, now_ms());
             }

@@ -485,7 +485,7 @@ pub fn start(w: &World) {
         }
     }
     let weak = w.me.get().cloned().unwrap_or_default();
-    let looks = weak.clone();
+    let looks = weak;
     timers.push(w.rt.spawn(async move {
         loop {
             let Some(w) = looks.upgrade() else { return };

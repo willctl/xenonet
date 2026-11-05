@@ -88,7 +88,7 @@ fn limits() -> Limits {
 }
 
 fn a2a_with(fake: Arc<Fake>, clock: Arc<Mutex<f64>>) -> Arc<A2a> {
-    let c = clock.clone();
+    let c = clock;
     let a = A2a::new(A2aParts {
         cores: A2aCores { engine: fake.clone(), actors: fake },
         file: None,

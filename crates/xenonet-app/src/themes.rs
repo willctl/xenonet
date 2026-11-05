@@ -466,7 +466,7 @@ pub fn ring_colors(theme: &Value) -> Vec<String> {
     let meaning: Vec<String> = MEANINGFUL.iter().filter_map(|k| colors.and_then(|c| c.get(*k))).filter_map(hex_str).map(six_digits).collect();
     let own: Vec<String> = match theme.get("identities") {
         Some(Value::Array(a)) if a.len() == rings.len() && a.iter().all(is_hex) => a.iter().filter_map(hex_str).map(six_digits).collect(),
-        _ => rings.clone(),
+        _ => rings,
     };
     let mut out: Vec<String> = Vec::new();
     for ring in own {

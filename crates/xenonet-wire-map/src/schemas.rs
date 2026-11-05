@@ -182,7 +182,7 @@ mod tests {
         let source = vendor_sources(&checkout()).into_iter().next().expect("a source");
         let (done, finished) = std::sync::mpsc::channel();
         let reading = {
-            let (vendor, source, done) = (vendor.clone(), source.clone(), done.clone());
+            let (vendor, source, done) = (vendor.clone(), source, done.clone());
             std::thread::spawn(move || {
                 for i in 0..2000 {
                     vendor.check(&source, json!({ "odd": i }), None, None);

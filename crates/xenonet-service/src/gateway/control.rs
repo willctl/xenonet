@@ -171,7 +171,7 @@ impl GatewayControl {
         let host = me.saved().host;
         let _ = me.gateway.set(ActorGateway::with_clock(parts.cores, hooks, port, host.as_deref(), &parts.version, parts.now.clone()));
         let tlog = parts.log.clone();
-        let w4 = weak.clone();
+        let w4 = weak;
         let thooks = TunnelHooks {
             on_host: Arc::new(move |h| {
                 if let Some(c) = w3.upgrade() {

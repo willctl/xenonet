@@ -983,7 +983,7 @@ mod tests {
         let mut c = Clock(1_000_000.0);
         let mut p = Policy::load(&mut c).unwrap();
         let (a, b, you) = (Arg::text("claude:a"), Arg::text("codex:b"), Arg::text("actor:you"));
-        let to_b = [b.clone()];
+        let to_b = [b];
         let text = |i: usize| Arg::text(format!("message {i}"));
         p.set_paused(&mut c, true, &you).unwrap();
         assert_eq!(refusal(p.check_send(&mut c, &a, &to_b, &text(0), 0.0)).0, "paused");

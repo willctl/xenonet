@@ -235,11 +235,11 @@ fn net3(name: &str) -> Net3 {
             "studio",
             vec![
                 Sess { id: A, title: "Add partial refunds", cwd: studio_atlas.clone(), edits: vec![] },
-                Sess { id: A2, title: "Tidy the refunds tests", cwd: studio_atlas.clone(), edits: vec![] },
+                Sess { id: A2, title: "Tidy the refunds tests", cwd: studio_atlas, edits: vec![] },
             ],
         ),
         ("laptop", vec![Sess { id: B, title: "Fix the login form", cwd: laptop_atlas.clone(), edits: vec![format!("{laptop_atlas}/src/ledger.ts")] }]),
-        ("vm1", vec![Sess { id: C, title: "Ledger fixtures", cwd: vm1_ledger.clone(), edits: vec![] }]),
+        ("vm1", vec![Sess { id: C, title: "Ledger fixtures", cwd: vm1_ledger, edits: vec![] }]),
     ] {
         let home = dir.join(host).to_string_lossy().into_owned();
         let state = dir.join(host).join("state").to_string_lossy().into_owned();

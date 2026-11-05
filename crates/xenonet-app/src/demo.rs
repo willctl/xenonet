@@ -517,9 +517,9 @@ impl Writer {
             "run" => {
                 self.codex_tokens(ts, around);
                 let ok = crate::jsv::truthy(b.as_ref());
-                self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "CommandExecution", "command": ["pwsh", "-Command", a.clone().unwrap_or(Value::Null)], "exit_code": i32::from(!ok), "status": if ok { "completed" } else { "failed" }, "aggregatedOutput": if ok { "ok" } else { "1 failed, 23 passed" } } } })]);
+                self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "CommandExecution", "command": ["pwsh", "-Command", a.unwrap_or(Value::Null)], "exit_code": i32::from(!ok), "status": if ok { "completed" } else { "failed" }, "aggregatedOutput": if ok { "ok" } else { "1 failed, 23 passed" } } } })]);
             }
-            "mcp" => self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "McpToolCall", "server": a.clone().unwrap_or(Value::Null), "tool": b.clone().unwrap_or(Value::Null), "arguments": c.clone().unwrap_or(Value::Null), "status": "completed" } } })]),
+            "mcp" => self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "item_completed", "item": { "type": "McpToolCall", "server": a.unwrap_or(Value::Null), "tool": b.clone().unwrap_or(Value::Null), "arguments": c.clone().unwrap_or(Value::Null), "status": "completed" } } })]),
             _ => {}
         }
     }

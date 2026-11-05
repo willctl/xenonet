@@ -992,7 +992,7 @@ impl Gateway {
         let window = body.get("window").and_then(Value::as_bool).ok_or_else(|| NetError::bad("a ticket says whether it's for a window host"))?;
         let now = Self::now(n) as i64;
         let expires = now + ticket::TICKET_MS as i64;
-        self.add_ticket(&TicketRow { hash: hash.into(), host: host.into(), window, maker: signed.host.clone(), made: now, expires }, now)?;
+        self.add_ticket(&TicketRow { hash: hash.into(), host: host.into(), window, maker: signed.host, made: now, expires }, now)?;
         Ok(NetReply::json(200, &json!({ "ok": true, "expires": expires })))
     }
 

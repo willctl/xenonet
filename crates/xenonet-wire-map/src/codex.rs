@@ -130,7 +130,7 @@ impl CodexClient {
             (g.serial, g.stderr.clone())
         };
         // What it says: answers, and requests of its own, declined.
-        let (p, w) = (pending.clone(), stdin.clone());
+        let (p, w) = (pending.clone(), stdin);
         tokio::spawn(async move {
             let (mut out, mut buf) = (BufReader::new(stdout), Vec::new());
             let mut io = Stdout::default();

@@ -1496,7 +1496,7 @@ mod tests {
         assert_eq!(
             j,
             Job {
-                program: launcher.clone(),
+                program: launcher,
                 args: vec!["service".into(), "run".into()],
                 env: vec![("XENONET_HOSTS".into(), "1".into())],
                 dir: "/home/will".into(),

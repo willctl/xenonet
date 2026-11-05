@@ -1060,7 +1060,7 @@ impl Registration {
             let name = check_name(Some(raw), None).or_else(bad)?;
             let base = slug_from(&name);
             let slug = if slug_refusal(Some(&base), None).is_none() && !self.taken_by(c, &base, None, None, Some(t))? {
-                Some(base.clone())
+                Some(base)
             } else {
                 let mut failed = None;
                 let s = suggest_slug(&base, None, &mut |s| match self.taken_by(c, s, None, None, Some(t)) {
@@ -1075,9 +1075,9 @@ impl Registration {
                 }
                 s?
             };
-            let slug_text = slug.clone().unwrap_or_else(|| "null".into());
+            let slug_text = slug.unwrap_or_else(|| "null".into());
             let ask = Ask {
-                name: name.clone(),
+                name,
                 slug: slug_text.clone(),
                 product: Value::Null,
                 capabilities: vec!["run-commands".into(), "edit-repos".into(), "message-agents".into()],

@@ -1287,7 +1287,7 @@ impl Engine {
             ways.push(if w.is_nullish() { Arg::text(delivery_of(r)) } else { w });
         }
         let mut event =
-            obj(vec![("id", id.clone()), ("from", me.clone()), ("to", Arg::List(ids)), ("target", Arg::text(target.clone())), ("text", Arg::text(text)), ("ts", Arg::num(now))]);
+            obj(vec![("id", id.clone()), ("from", me.clone()), ("to", Arg::List(ids)), ("target", Arg::text(target)), ("text", Arg::text(text)), ("ts", Arg::num(now))]);
         if envelope.truthy() {
             push(&mut event, "verified", envelope.field("line"));
             push(&mut event, "strength", envelope.field("auth").field("strength"));
