@@ -6,9 +6,7 @@ use serde_json::{Map, Value};
 use xenonet_base::json::number;
 
 /// Date.now().
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
-}
+pub use xenonet_base::time::now_ms;
 
 pub fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.as_object().and_then(|m| m.get(k))

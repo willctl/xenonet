@@ -9,7 +9,7 @@
 //! OpenAI doesn't price (codex-auto-review, gpt-5.3-codex-spark).
 
 use crate::sync::Locked;
-use crate::time::parse_iso;
+use crate::time::{now_ms, parse_iso};
 use crate::usage::TokenUsage;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -317,10 +317,6 @@ pub fn price_of(model: &str, at: Option<f64>) -> Option<&'static Price> {
     let at = at.unwrap_or_else(now_ms);
     let i = idx.iter().rev().find(|&&i| all[i].from <= at).unwrap_or(&idx[0]);
     Some(&all[*i])
-}
-
-fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
 }
 
 /// What one call cost, in dollars, by kind of token.

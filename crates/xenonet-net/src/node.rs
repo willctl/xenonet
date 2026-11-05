@@ -94,9 +94,7 @@ impl Options {
     }
 }
 
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
-}
+pub use xenonet_base::time::now_ms;
 
 /// How the link stands.
 #[derive(Debug, Clone)]

@@ -13,6 +13,11 @@
 
 /// Days since 1970-01-01 of a day in the proleptic Gregorian calendar. A
 /// day past the end of its month counts on into the next one.
+/// Date.now(): milliseconds since the epoch, whole.
+pub fn now_ms() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
+}
+
 pub fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -181,6 +186,13 @@ pub fn iso(ms: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn now_ms_is_a_whole_number_of_milliseconds_since_the_epoch() {
+        let now = now_ms();
+        assert_eq!(now, now.floor());
+        assert!(now > 1.7e12, "{now}");
+    }
 
     // Each as V8 (Node 22) reads it.
     #[test]
