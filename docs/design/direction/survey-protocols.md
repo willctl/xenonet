@@ -1,0 +1,37 @@
+# Reusable protocols survey (research subagent, 2026-11-08). Verdicts with state as of today.
+
+## A. Agent interop
+- MCP: 2025-11-25 (Tasks experimental, URL elicitation, OIDC discovery, CIMD); 2026-07-28 breaking stateless revision (no initialize/session id; version+caps in _meta; server/discover; Multi Round-Trip Requests; Tasks as extension io.modelcontextprotocol/tasks; Roots/Sampling/Logging deprecated; reverse-DNS extensions; 12-month deprecation). Governance: Linux Foundation AAIF (2025-12-09). Rust rmcp 3.6.0 (2026-10-20, MSRV 1.88). ADOPT: stateless handles, version in every message, publish XenoNet engine as MCP extension namespace, Tasks state machine.
+- A2A 1.0 (Mar 2026; LF AAIF Growth Stage Aug 2026; 150+ orgs). Agent Card (signable), JSON-RPC/gRPC/HTTP+JSON, task states SUBMITTED/WORKING/INPUT_REQUIRED/AUTH_REQUIRED/COMPLETED/FAILED/CANCELED/REJECTED, webhooks, A2A-Version header. Official a2aproject/a2a-rs (a2a-lf, a2a-client-lf, a2a-server-lf axum, a2a-pb, a2a-grpc; Apache-2.0; active). BeeAI ACP folded in 2025-08-29. ADOPT AT THE EDGE (bridge, not internal bus).
+- ACP (Zed Agent Client Protocol): editor/host↔coding agent; sessions, prompts, permission requests, diffs, tool-call reporting; JSON-RPC stdio; remote mode WIP. Clients Zed/JetBrains/Neovim/Emacs; agents Gemini CLI, Goose, Copilot CLI, Claude Code adapter (Agent SDK), Grok Build full ACP (`grok agent stdio`), Hermes. Rust agent-client-protocol 5.0.0 (2026-11-02; 5 majors in 16 months). ADOPT as session-control adapter (start/drive/permission relay) behind a trait.
+- AG-UI: borrow typed event stream idea; skip. AGNTCY (Cisco→LF): SLIM Rust data plane w/ MLS groups, IETF draft; borrow MLS/DID hierarchical names; skip. OpenAI Agents API (public beta 2026-09-10, codex exec-server over WebSocket): borrow harness/host split; skip.
+- Agent identity: no settled standard (LF ANS intent 2026-06-23; W3C Agent Identity Registry CG 2026-04-24; IETF OAuth+SPIFFE draft). Keep Ed25519 roots, render as did:key.
+
+## B. Identity & authz
+- did:key: adopt format, not library (did-method-key stale).
+- UCAN 1.0: borrow delegation-chain model; crates not 1.0 (rs-ucan WIP, ucan 0.4 2023).
+- Biscuit: public-key tokens, offline attenuation, Datalog policy, revocation ids; biscuit-auth 6.0.0 (2025-07, Eclipse, 1.49M dl). ADOPT for tickets, delegation, scoped claims, tool access; facts shaped like Zanzibar tuples.
+- Macaroons: skip. OpenFGA (CNCF incubating 2025-10-28)/SpiceDB: borrow tuple data model, skip servers (need always-on authority). SPIFFE (spiffe 0.19.0): skip. WebAuthn: only if browser login. Tailscale-rs preview (2026-04, unstable): skip as dep, keep optional path. Cap'n Proto RPC (capnp-rpc 0.19.1), OCapN pre-spec: borrow ocap discipline via Biscuit.
+
+## C. Transport
+- iroh 1.0.0 (2026-06-15), crate 1.4.1 (2026-10-21, MIT/Apache, 4M dl): dial-by-Ed25519-key QUIC, hole punching, QUIC NAT traversal draft, multipath, relay fallback, DNS/Pkarr discovery; self-hostable iroh-relay; public relays rate-limited w/ EOL. iroh-gossip 0.102 last on old wire; 1.0 canary adds authorized topics. iroh-docs (namespace key = write cap, author keys, range-based set reconciliation) no stability promise. ADOPT iroh 1.x; gossip once 1.0; borrow iroh-docs key model.
+- rust-libp2p 0.57.1: mature but 0.x, heavier; skip for iroh. Willow-rs archived; borrow Meadowcap scoping. NATS: Go daemon; skip. Matrix: skip (room/state-event model as mental model). ATProto: borrow lexicons (NSID-named versioned record schemas); skip network. Nostr (rust-nostr alpha): borrow signed-event envelope + NIP-59 sealing; skip. WebTransport: later for browser console. Zenoh 1.10.2: borrow key-expression routing; skip.
+
+## D. Sync & wire
+- Automerge: Rust automerge 0.11 (Hexane), autosurgeon 0.13, samod 0.16.0 (2026-10-23, Rust automerge-repo, wire-compatible w/ JS sync server). Keyhive/Beelay (Ink&Switch) pre-alpha, active. ADOPT for Xenolith pages (Markdown as CRDT text) synced over iroh.
+- Loro 1.17.1: alternative if movable tree needed. yrs: skip. Diamond types: skip.
+- Append-only logs w/ per-entity ownership: nothing off the shelf; cleanest designs iroh-docs (signing key per replica = write cap; author keys; set reconciliation) and Nostr signed events. BUILD a small signed-log engine (owner key signs each entry, hash-chained per entity, set-reconciliation sync) on iroh; unifies roster chain, messages, claims, delegation.
+- Wire: ADOPT CBOR + COSE_Sign1 (coset, Google, Apache-2.0, API "may change"; ciborium) for frames/log entries, version-tagged per message; JSON-RPC at MCP/ACP/A2A edges; protobuf only inside gRPC.
+
+## E. Comparable systems — lessons
+- Claude Code cross-session messaging: per-session Unix socket restricted to OS user; cross-machine via Anthropic servers/Remote Control; inbound policy accept/hold/refuse derived from both sessions' permission classes; messages never count as consent, can't change config; loop throttling, size caps; notify_when_idle subscription. Agent teams (experimental): shared task list w/ file locks, JSON mailboxes ~/.claude/teams, TeammateIdle/TaskCreated/TaskCompleted hooks. LEARN: "peer message is information, never authorization" in protocol; per-recipient inbound policy; idle/exit notices first-class; task dependencies.
+- Hermes Agent (MIT, Feb 2026): one AIAgent core behind CLI/gateway/ACP/batch/API; profiles as identity unit; SQLite+FTS5. LEARN: one core, many entry points.
+- OpenAI Agents API: harness/host split (exec-server). agentgateway (LF, Rust, Apache-2.0, v1.7.0 2026-10-27): MCP multiplexing, tool scoping, RBAC, JWT/OIDC, A2A routing, OTel; CONSIDER as optional front door instead of growing own gateway into auth proxy. Docker MCP Gateway: per-server isolation, signed catalog. MS Agent Framework 1.0: MCP-first, A2A-second. NANDA: tiny signed AgentAddr records (≤120 B, TTL) + rich metadata elsewhere. OpenHands: workspace abstraction per machine. Letta: shared memory blocks with one designated editor.
+
+## Recommended stack
+Adopt: iroh 1.x transport (EndpointId = Ed25519 identity; gateway = optional relay role); CBOR+COSE_Sign1 envelopes version-tagged; Biscuit v6 for all tokens with Zanzibar-shaped facts; MCP 2026-07-28 via rmcp 3.x + XenoNet extension namespace; ACP 5.x session control behind a trait; A2A 1.0 via a2a-rs at the edge; Automerge+samod for Xenolith.
+Build small: signed per-entity append-only log (unifies roster, messages, claims, delegation); did:key rendering; inbound-policy accept/hold/refuse.
+Borrow: iroh-docs key model; Meadowcap scoping; UCAN chains; NANDA records; Keyhive later; SLIM MLS; ATProto lexicons; agentgateway optional; Docker MCP isolation; Letta blocks.
+Skip: libp2p, NATS, Matrix, Nostr, Zenoh, Willow-rs, OpenFGA/SpiceDB servers, SPIFFE, Tailscale-rs, Cap'n Proto RPC, AG-UI, BeeAI, OpenAI/MS frameworks.
+Risks: (1) iroh ecosystem half stable (gossip wire break, docs/blobs no promise, public relays EOL → ship own relay); (2) protocol churn at every edge (MCP breaking, ACP 5 majors, A2A 0.3→1.0) → isolate adapters, version per message; (3) authz unsolved for shared CRDT state (Keyhive pre-alpha), agent identity standards are drafts, rs-ucan not 1.0 → own small authz semantics.
+Sources: see subagent report S1–S105 (modelcontextprotocol.io, aaif.io, a2a-protocol.org, agentclientprotocol.com, crates.io, iroh.computer, biscuitsec.org, automerge.org, code.claude.com docs, agentgateway.dev, etc.).
