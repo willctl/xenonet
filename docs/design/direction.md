@@ -370,6 +370,19 @@ copies of the private-file, X25519 and token code go.
 Each phase ships with the service working, and deletes before it adds.
 Nothing starts until Will answers the open questions that gate it.
 
+The rewrite is worked for speed, not ceremony (Will, 2026-11-08). Only
+Will uses XenoNet, so there is no one to protect with a review queue.
+Work lands on `main` directly, in small Conventional Commits, not as a
+stream of pull requests; a pull request is for a change Will wants to
+read before it lands, and nothing else. Checks run locally and before
+the commit: `cargo test --workspace`, `npm test`, the console tools, and
+the VM lab (`scripts/lab/`) for anything that spans machines, with each
+VM running the build under test. CI runs after the push as a backstop;
+no one waits for it, and what it finds is fixed in the next commit.
+Releases are cut at the end of a phase, or when Will wants the installed
+XenoNet on a new build, not per change; between releases the installed
+service runs a local build.
+
 1. **The JS world goes.** Record the HTTP API, MCP tools and network
    frames as golden files from the Rust service first; they replace the
    twins as the contract. Point Electron at the Rust installer and updater

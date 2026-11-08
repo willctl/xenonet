@@ -42,8 +42,9 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   with three services in one process (`crates/xenonet-service/tests/net*.rs`).
 - Some paths are refused from under an agent (creating a network,
   `xenonet service install`). Their tests take the refused branch here and
-  run in full only in CI, as does everything Windows-only, so wait for the
-  Linux and Windows jobs before merging.
+  run in full only in CI, as does everything Windows-only, so look at the
+  Linux and Windows jobs after you push and fix what they find in the
+  next commit.
 - After a change to the UI, check `logs` for page errors, and run
   `npm run test:e2e` before you finish.
 - XenoNet Dev reloads as you save: `src/` reloads the page and
@@ -55,6 +56,17 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   to reach, add it to the driver (`src/driver.js`), and a new kind of action
   to the console's MCP tools (`mcp/console.js`) and the end-to-end
   tests (`test/e2e/`), so this stays the one way to drive XenoNet.
+
+## Iterate fast
+
+Only Will uses XenoNet, and he wants fast iterations with little friction
+(2026-11-08). Land work on `main` in small Conventional Commits; don't open
+a pull request per change, and don't wait for CI or a release to see your
+work. Check it locally first: the tests, the console tools, and the VM lab
+(`scripts/lab/`, Linux VMs that each run XenoNet) when a change spans
+machines. Open a pull request only for a change Will wants to read before
+it lands, and cut a release only at the end of a phase or when he asks.
+`docs/design/direction.md` says how this applies to the rewrite.
 
 ## Working alongside other agents
 
