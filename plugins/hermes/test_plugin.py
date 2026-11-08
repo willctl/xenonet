@@ -96,7 +96,7 @@ class Register(unittest.TestCase):
                 plug.register(ctx)
             finally:
                 plug.HERE, plug.Reporter.start = was, orig
-            self.assertEqual(sorted(ctx.hooks), ["on_session_end", "on_session_start", "post_tool_call", "pre_tool_call", "subagent_start", "subagent_stop"])
+            self.assertEqual(sorted(ctx.hooks), ["on_session_end", "on_session_start", "post_gateway_admission", "post_llm_call", "post_tool_call", "pre_llm_call", "pre_tool_call", "subagent_start", "subagent_stop"])
             self.assertEqual(started, [1])
             for fn in ctx.hooks.values():
                 self.assertIsNone(fn(tool_name="x", args={}, session_id="s"))
@@ -218,6 +218,26 @@ class Inbound(unittest.TestCase):
         r.heartbeat()
         self.assertEqual([k for _, _, k in ctx.injected], ["key-2"])
 
+    def test_a_turn_with_no_tool_still_gives_the_session(self):
+        r, _, _ = reporter()
+        r.session_key = None
+        r.on_llm(session_key="key-3")
+        self.assertEqual(r.session_key, "key-3")
+
+    def test_admission_gives_the_session_key_and_nothing_of_the_message(self):
+        r, _, _ = reporter()
+        self.assertIsNone(r.on_admission(session_key="agent:main:local:dm:x", text="SECRET", source={"a": 1}))
+        self.assertEqual(r.session_key, "agent:main:local:dm:x")
+        self.assertNotIn("SECRET", repr(vars(r)))
+
+    def test_a_local_session_without_a_key_gets_one_from_its_id(self):
+        r, _, _ = reporter()
+        r.session_key = None
+        r.on_session_start(session_id="local-abc", platform="local")
+        self.assertEqual(r.session_key, "agent:main:local:dm:local-abc")
+        r.on_session_start(session_id="other-1")
+        self.assertEqual(r.session_key, "agent:main:local:dm:local-abc", "a session id of another shape is left alone")
+
     def test_state_file_says_when_it_last_reported(self):
         with tempfile.TemporaryDirectory() as d:
             r, _, _ = reporter()
@@ -228,6 +248,13 @@ class Inbound(unittest.TestCase):
             self.assertEqual(data, {"ok": True, "at": 1000000})
             if os.name != "nt":
                 self.assertEqual(stat.S_IMODE(os.stat(r.state_file).st_mode), 0o600)
+
+    def test_without_a_session_it_leaves_the_message_unread(self):
+        r, ctx, net = reporter({"/api/actors/heartbeat": {"unread": 1}, "/api/engine/inbox": [], "/api/actors/events": {}})
+        r.session_key = None
+        r.heartbeat()
+        self.assertEqual(ctx.injected, [])
+        self.assertFalse(any(u.endswith("/api/engine/inbox") for _, u, _, _ in net.seen))
 
     def test_no_unread_no_inbox_call(self):
         r, _, net = reporter()

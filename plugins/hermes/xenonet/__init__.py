@@ -112,9 +112,17 @@ def session_key_of(kw):
         return key
     try:
         from hermes_cli.plugin_session import session_key
-        return session_key() or None
+        key = session_key()
+        if key:
+            return key
     except Exception:
-        return None
+        pass
+    # A local (CLI, TUI or desktop) session's key is its id under the default
+    # profile's prefix; a wrong guess is refused by Hermes and harms nothing.
+    sid = kw.get("session_id")
+    if isinstance(sid, str) and sid.startswith("local-"):
+        return "agent:main:local:dm:" + sid
+    return None
 
 
 def ports():
@@ -191,6 +199,20 @@ class Reporter:
     def on_session_end(self, **kw):
         self.note({"event": {"kind": "finished", "subject": "session"}})
 
+    def on_admission(self, **kw):
+        """Hermes runs this for every message a session takes in, and passes
+        its key. Only the key is kept: the message's text and source are
+        left unread."""
+        key = kw.get("session_key")
+        if isinstance(key, str) and key:
+            self.session_key = key
+        return None
+
+    def on_llm(self, **kw):
+        """Every model call runs inside its session's turn, so this learns
+        the session even when a turn uses no tool."""
+        self.session_key = session_key_of(kw) or self.session_key
+
     def pre_tool(self, **kw):
         self.last_work = self.clock()
         self.session_key = session_key_of(kw) or self.session_key
@@ -255,7 +277,9 @@ class Reporter:
             "presence": "working" if working else "idle", "cwd": os.getcwd(), "pid": os.getpid(),
         })
         self.remember(answer is not None)
-        if answer and answer.get("unread"):
+        # Another Hermes process (a TUI host, a gateway) may hold the session:
+        # one that has none leaves the message unread for it.
+        if answer and answer.get("unread") and self.session_key:
             self.deliver()
 
     def remember(self, ok):
@@ -342,6 +366,7 @@ def register(ctx):
     r = Reporter(token, lambda text, key: ctx.inject_message(text, "user", session_key=key), state_file=os.path.join(HERE, "state.json"))
     for name, fn in (
         ("on_session_start", r.on_session_start), ("on_session_end", r.on_session_end),
+        ("pre_llm_call", r.on_llm), ("post_llm_call", r.on_llm), ("post_gateway_admission", r.on_admission),
         ("pre_tool_call", r.pre_tool), ("post_tool_call", r.post_tool),
         ("subagent_start", r.subagent_start), ("subagent_stop", r.subagent_stop),
     ):
