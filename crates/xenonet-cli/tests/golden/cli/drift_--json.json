@@ -1,0 +1,451 @@
+{
+  "args": [
+    "drift",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "at": "<time>",
+    "file": "~/.xenonet-cache/drift.json",
+    "since": "<time>",
+    "all": false,
+    "sources": [
+      {
+        "source": "anomaly/opencode/db",
+        "name": "OpenCode's database",
+        "schemas": [
+          {
+            "id": "vendor/anomaly/opencode/db/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/agent-sdk/session-listing",
+        "name": "the Agent SDK's session list",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/agent-sdk/session-listing/v1",
+            "major": 1,
+            "range": ">=0.3.0 <0.4.0"
+          }
+        ],
+        "read": {
+          "records": 3,
+          "checked": 1,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": [
+            "0.3.287"
+          ]
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/agent-sdk/session-message",
+        "name": "the Agent SDK's session messages",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/agent-sdk/session-message/v1",
+            "major": 1,
+            "range": ">=0.3.0 <0.4.0"
+          }
+        ],
+        "read": {
+          "records": 18,
+          "checked": 2,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": [
+            "0.3.287"
+          ]
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/claude-code/config",
+        "name": "Claude Code's ~/.claude.json",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/claude-code/config/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": {
+          "records": 1,
+          "checked": 1,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": []
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/claude-code/transcript-line",
+        "name": "Claude Code's transcripts",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/claude-code/transcript-line/v1",
+            "major": 1,
+            "range": ">=1.0.0 <3.0.0"
+          }
+        ],
+        "read": {
+          "records": 54,
+          "checked": 42,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": [
+            "2.1.0"
+          ]
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/claude-desktop/plan-usage",
+        "name": "Claude desktop's plan usage",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/claude-desktop/plan-usage/v1",
+            "major": 1,
+            "range": "2"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/claude-desktop/session",
+        "name": "Claude desktop's session files",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/claude-desktop/session/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anthropic/oauth/usage",
+        "name": "Anthropic's plan usage answer",
+        "schemas": [
+          {
+            "id": "vendor/anthropic/oauth/usage/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "anysphere/cursor/hook-input",
+        "name": "Cursor's hook input",
+        "schemas": [
+          {
+            "id": "vendor/anysphere/cursor/hook-input/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "github/copilot-cli/session-event",
+        "name": "Copilot CLI's session events",
+        "schemas": [
+          {
+            "id": "vendor/github/copilot-cli/session-event/v1",
+            "major": 1,
+            "range": "1"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "github/gh/hosts",
+        "name": "gh's hosts.yml",
+        "schemas": [
+          {
+            "id": "vendor/github/gh/hosts/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": {
+          "records": 1,
+          "checked": 1,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": []
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "google/gemini-cli/chat-record",
+        "name": "Gemini CLI's chat records",
+        "schemas": [
+          {
+            "id": "vendor/google/gemini-cli/chat-record/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/cron-jobs",
+        "name": "Hermes Agent's scheduled jobs",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/cron-jobs/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/cron-ticker",
+        "name": "Hermes Agent's scheduler ticker",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/cron-ticker/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/gateway-state",
+        "name": "Hermes Agent's gateway state",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/gateway-state/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/install-stamp",
+        "name": "Hermes Agent's build stamp",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/install-stamp/v1",
+            "major": 1,
+            "range": "<=2"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/processes",
+        "name": "Hermes Agent's background processes",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/processes/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/spawn-ledger",
+        "name": "Hermes Agent's spawn ledger",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/spawn-ledger/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "nous/hermes-agent/state-db",
+        "name": "Hermes Agent's session database",
+        "schemas": [
+          {
+            "id": "vendor/nous/hermes-agent/state-db/v1",
+            "major": 1,
+            "range": "<=32"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "openai/codex/app-server",
+        "name": "Codex's app-server",
+        "schemas": [
+          {
+            "id": "vendor/openai/codex/app-server/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "openai/codex/auth-claims",
+        "name": "Codex's sign-in",
+        "schemas": [
+          {
+            "id": "vendor/openai/codex/auth-claims/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "openai/codex/rollout-line",
+        "name": "Codex's rollouts",
+        "schemas": [
+          {
+            "id": "vendor/openai/codex/rollout-line/v1",
+            "major": 1,
+            "range": "<1.0.0"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "openai/codex/state-db",
+        "name": "Codex's state database",
+        "schemas": [
+          {
+            "id": "vendor/openai/codex/state-db/v1",
+            "major": 1,
+            "range": "5"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "spacexai/grok-build/session-summary",
+        "name": "Grok Build's session summaries",
+        "schemas": [
+          {
+            "id": "vendor/spacexai/grok-build/session-summary/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": {
+          "records": 1,
+          "checked": 1,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": []
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "spacexai/grok-build/subagent-meta",
+        "name": "Grok Build's subagents' metadata",
+        "schemas": [
+          {
+            "id": "vendor/spacexai/grok-build/subagent-meta/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": null,
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "spacexai/grok-build/update-line",
+        "name": "Grok Build's session updates",
+        "schemas": [
+          {
+            "id": "vendor/spacexai/grok-build/update-line/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": {
+          "records": 28,
+          "checked": 28,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": []
+        },
+        "drift": [],
+        "known": 0
+      },
+      {
+        "source": "spacexai/grok-build/usage",
+        "name": "Grok Build's usage ledgers",
+        "schemas": [
+          {
+            "id": "vendor/spacexai/grok-build/usage/v1",
+            "major": 1,
+            "range": "*"
+          }
+        ],
+        "read": {
+          "records": 2,
+          "checked": 1,
+          "dropped": 0,
+          "stripped": 0,
+          "versions": []
+        },
+        "drift": [],
+        "known": 0
+      }
+    ],
+    "new": 0,
+    "changes": 0,
+    "known": 0,
+    "by": "XenoNet"
+  }
+}

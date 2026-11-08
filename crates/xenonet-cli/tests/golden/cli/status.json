@@ -1,0 +1,7 @@
+{
+  "args": [
+    "status"
+  ],
+  "code": 0,
+  "stdout": "● XenoNet <version> on 127.0.0.1:<port>\n  Reads      3 projects, 3 Claude sessions\n  Sessions   0 working, 2 idle\n  Needs you  ● The solver takes 40 seconds for 500 stops. Get it under 5. (claude) has a question\n  Doctor     1 warning, which xenonet doctor explains (checked just now)\n"
+}

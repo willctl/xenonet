@@ -1,0 +1,37 @@
+{
+  "route": "/api/session/grok%3A0190d3e0-0000-7000-8000-000000000004/transcript",
+  "status": 200,
+  "body": {
+    "entries": [
+      {
+        "id": "update-0",
+        "ts": "<time>",
+        "role": "user",
+        "text": "Write down the depot's loading rules as constraints the solver can use."
+      },
+      {
+        "id": "call_fixture1",
+        "ts": "<time>",
+        "role": "tool",
+        "kind": "tool_use",
+        "title": "Read src/solver.rs",
+        "text": "",
+        "status": "completed"
+      },
+      {
+        "id": "update-3",
+        "ts": "<time>",
+        "role": "reasoning",
+        "text": "Checking the change against what was asked before I answer."
+      },
+      {
+        "id": "update-4",
+        "ts": "<time>",
+        "role": "assistant",
+        "text": "The loading rules are seven constraints. Two need data the depot doesn't send yet."
+      }
+    ],
+    "cursor": null,
+    "total": 4
+  }
+}

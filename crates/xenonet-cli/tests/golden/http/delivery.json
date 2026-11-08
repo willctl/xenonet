@@ -1,0 +1,16 @@
+{
+  "route": "/api/delivery",
+  "status": 200,
+  "body": {
+    "paused": false,
+    "grants": [],
+    "consent": {},
+    "usage": {
+      "claude": null,
+      "codex": null
+    },
+    "listening": [],
+    "recent": [],
+    "audit": []
+  }
+}

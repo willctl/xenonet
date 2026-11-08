@@ -1,0 +1,8 @@
+{
+  "route": "/api/assistant/places",
+  "status": 503,
+  "body": {
+    "error": "Actors are off here (XENONET_ACTORS=off), and remote actors with them",
+    "code": "off"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "args": [
+    "completion",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet completion <zsh|bash>\n\nPrints tab completion for your shell. Add a line to your shell's profile:\n\n  zsh   eval \"$(xenonet completion zsh)\"     (in ~/.zshrc, after compinit)\n  bash  eval \"$(xenonet completion bash)\"    (in ~/.bashrc)\n"
+}

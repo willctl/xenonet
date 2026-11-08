@@ -1,0 +1,8 @@
+{
+  "args": [
+    "diagnose",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet diagnose [--ask]\n\nA summary of XenoNet's state that's safe to share: its versions, the doctor's\nfindings that aren't ok, its errors from the last day by code, where its\nhooks point and which XENONET_ settings are set. No transcripts, titles,\nproject names, identities or keys, and home folders show as ~.\n\n  --json            as JSON\n  --out <file>      write it to a file\n  --ask             have a session on this computer look at it with you.\n                    It's a Codex session (or Claude Code, with --app claude)\n                    in a folder of its own, read-only, that can read XenoNet's\n                    code and never files anything. If it finds a bug in\n                    XenoNet, it writes issue-draft.md there, for you to send\n                    if you choose\n  --app <app>       codex (default) or claude; XENONET_DIAGNOSE_APP sets it\n  --model <model>   the model it uses; XENONET_DIAGNOSE_MODEL sets it\n  --dev             about XenoNet Dev, not the installed XenoNet\n"
+}

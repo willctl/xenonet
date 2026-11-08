@@ -1,0 +1,7 @@
+{
+  "route": "/api/hosts",
+  "status": 404,
+  "body": {
+    "error": "hosts are off in this XenoNet: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype)"
+  }
+}

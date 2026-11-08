@@ -1,0 +1,9 @@
+{
+  "args": [
+    "assistant",
+    "list",
+    "--json"
+  ],
+  "code": 1,
+  "stdout": ""
+}

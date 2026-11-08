@@ -1,0 +1,7 @@
+{
+  "route": "/api/projects/rules",
+  "status": 404,
+  "body": {
+    "error": "not found"
+  }
+}

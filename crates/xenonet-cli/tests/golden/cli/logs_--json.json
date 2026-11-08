@@ -1,0 +1,18 @@
+{
+  "args": [
+    "logs",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "schema": "log/entry/v1",
+    "at": "<time>",
+    "component": "service",
+    "version": "<version>",
+    "pid": "<pid>",
+    "level": "warn",
+    "code": "doctor.claude.cli",
+    "message": "Claude Code is installed: the claude command isn't on your PATH, and handing off to Claude and connecting Claude Code need it",
+    "fix": "Install Claude Code: https://claude.com/claude-code"
+  }
+}

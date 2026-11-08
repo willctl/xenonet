@@ -1,0 +1,9 @@
+{
+  "args": [
+    "refusals",
+    "list",
+    "--json"
+  ],
+  "code": 0,
+  "stdout": "\n"
+}

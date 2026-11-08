@@ -1,0 +1,24 @@
+{
+  "route": "/api/summary",
+  "status": 200,
+  "body": {
+    "working": 0,
+    "needsYou": [
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "kind": "question",
+        "text": "Cache distance lookups in memory, or keep them on disk between runs?",
+        "since": "<time>"
+      }
+    ],
+    "review": 1,
+    "stuck": [],
+    "collisions": 0,
+    "tpm": 0,
+    "url": "http://127.0.0.1:<port>/",
+    "actorsNeedYou": [],
+    "requests": 0
+  }
+}

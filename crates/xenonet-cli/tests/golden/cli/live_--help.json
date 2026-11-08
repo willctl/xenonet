@@ -1,0 +1,8 @@
+{
+  "args": [
+    "live",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet live [pause|resume|allow|disallow|grant|revoke|audit]\n\nLive delivery puts a message into a session as it's sent, instead of when\nthe session next starts a turn: to a session listening after its turn,\nthrough a Claude Code channel or an OpenCode session's own server, or, with\nyour consent, typed into its tmux pane, or in a turn XenoNet resumes a\nClaude Code or Codex session that has ended for.\n\n  xenonet live                         what's paused, granted and allowed, plans used, who's\n                                       listening, and the last deliveries\n  xenonet live pause | resume          stop every message (and wake) at once, or start again\n  xenonet live allow <session> [--hours n] [--remote]\n                                       let XenoNet wake, type into or resume one session (8 hours\n                                       by default); --remote lets actors outside this machine do it\n  xenonet live disallow <session>\n  xenonet live grant <actor> <scope…> [--hours n]\n                                       what an actor's token may see and message, such as\n                                       grant hermes project:xenonet identity:adal (30 days)\n  xenonet live revoke <actor>          take an actor's scope away, at once\n  xenonet live audit                   the audit log's last entries\n  --json                               as JSON\n\nAn actor sees and reaches no session until you grant it a scope. A wake\nspends the session's plan: each sender and session has an hourly budget,\nand a provider at 90% of its plan takes none. Set up Claude Code sessions to\ntake messages live with xenonet doctor --live.\n"
+}

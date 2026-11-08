@@ -1,0 +1,7 @@
+{
+  "route": "/api/spend/actors",
+  "status": 404,
+  "body": {
+    "error": "this XenoNet has no actors"
+  }
+}

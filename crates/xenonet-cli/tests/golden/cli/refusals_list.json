@@ -1,0 +1,8 @@
+{
+  "args": [
+    "refusals",
+    "list"
+  ],
+  "code": 0,
+  "stdout": "No refusals kept. Keeping context is off.\n"
+}

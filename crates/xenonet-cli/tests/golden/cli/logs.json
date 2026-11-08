@@ -1,0 +1,7 @@
+{
+  "args": [
+    "logs"
+  ],
+  "code": 0,
+  "stdout": "<date>, <clock> warn  service doctor.claude.cli\n  Claude Code is installed: the claude command isn't on your PATH, and handing off to Claude and connecting Claude Code need it\n  fix: Install Claude Code: https://claude.com/claude-code\n"
+}

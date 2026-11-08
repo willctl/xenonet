@@ -1,0 +1,19 @@
+{
+  "args": [
+    "live",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "paused": false,
+    "grants": [],
+    "consent": {},
+    "usage": {
+      "claude": null,
+      "codex": null
+    },
+    "listening": [],
+    "recent": [],
+    "audit": []
+  }
+}

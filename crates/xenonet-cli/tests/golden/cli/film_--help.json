@@ -1,0 +1,8 @@
+{
+  "args": [
+    "film",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet film\n\nMakes a film of the last 24 hours: a title card, the day played back in\na slowly turning map with running counts, and an end card with the day's\nnumbers. It renders in a hidden window, so you can keep working, and\nsaves an MP4 to your videos folder. Projects show as star names, and no\nclock appears, unless you reveal more. Nothing is uploaded, and the file\ncarries no metadata.\n\n  --seconds <n>     how long the film is, cards included (15 to 30; default 20)\n  --names           the projects' names, in place of the star names\n  --tokens          the tokens processed, with the day's numbers\n  --theme <name>    the look (default: the one XenoNet Dev uses)\n  --size <WxH>      the frame (default 1080x1920, a story; wide is 1920x1080)\n  --out <file>      where to save it\n  --instance demo   the demo's made-up day instead of yours\n\nIt needs ffmpeg (brew install ffmpeg), and runs from a checkout of XenoNet.\n"
+}

@@ -1,0 +1,8 @@
+{
+  "args": [
+    "spend",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet spend\n\nAbout what today's work would cost: Claude Code's and Codex's at API\nprices, Grok Build's at what Grok recorded, at this pace, and by actor.\nHermes and OpenCode say what they spent themselves; that is shown apart,\nas \"reported\", from the day XenoNet first saw it, and never added to the\nestimate. Grok records a cost only with an API key, so with a SuperGrok or X Premium\nsign-in its cost shows as unknown, never as nothing. Each session counts\nfor one actor at most: the one that reported it as a run, or started it,\nor started the session it came from. The rest is unattributed, including\nthe sessions you start yourself, since XenoNet doesn't know which ones\nthose are.\n\nOn a plan, the work costs the plan; this is what it would cost on the API.\n\n  --json   the day's costs and the breakdown by actor, as JSON\n"
+}

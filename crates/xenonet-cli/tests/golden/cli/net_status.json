@@ -1,0 +1,8 @@
+{
+  "args": [
+    "net",
+    "status"
+  ],
+  "code": 1,
+  "stdout": ""
+}

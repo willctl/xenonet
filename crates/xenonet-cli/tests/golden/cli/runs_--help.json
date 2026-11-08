@@ -1,0 +1,8 @@
+{
+  "args": [
+    "runs",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet runs [status|sign-in|forget]\n\nThe Claude Code sign-in for the sessions XenoNet runs itself: the ones it\nstarts (xenonet start, Start a session…) and the ones it resumes or forks\nto deliver a message at once. They run headless, so they can't sign in by\nthemselves. When Claude Code's own sign-in has expired, or this machine\nhas only Claude desktop's Claude Code, give XenoNet a long-lived token.\n\n  xenonet runs [status]   whether XenoNet's runs have a token, and where it's kept\n  xenonet runs sign-in    paste the token `claude setup-token` printed. It goes\n                          to your computer's credential store, and to XenoNet's\n                          runs alone, as CLAUDE_CODE_OAUTH_TOKEN; nothing shows\n                          it again\n  xenonet runs forget     takes it out of the credential store\n\n  claude setup-token\n  xenonet runs sign-in\n\nSigning in is yours: XenoNet refuses it from under an agent. A run that\ncouldn't sign in ends saying so, and Needs you shows which machine needs\nit.\n\n"
+}

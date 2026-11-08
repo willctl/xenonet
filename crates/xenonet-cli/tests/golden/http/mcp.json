@@ -1,0 +1,7 @@
+{
+  "route": "/api/mcp",
+  "status": 400,
+  "body": {
+    "error": "say which MCP server to inspect"
+  }
+}

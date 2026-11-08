@@ -1,0 +1,23 @@
+{
+  "args": [
+    "spend",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "costs": {
+      "today": 0.12828,
+      "byApp": {
+        "claude": 0.12828,
+        "codex": 0,
+        "grok": null
+      },
+      "perHour": 0,
+      "unpriced": [
+        "grok-build"
+      ],
+      "checked": "2026-10-03"
+    },
+    "byActor": null
+  }
+}

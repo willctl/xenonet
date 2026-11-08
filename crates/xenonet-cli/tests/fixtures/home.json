@@ -1,0 +1,12 @@
+{
+  "about": "The golden test's made-up home: copied for each run, its placeholders filled in ({{home}}: the copy's folder; {{iso:N}} and {{unix:N}}: N seconds from the start of the run, as an ISO time or Unix seconds), then each file's modified time set to the seconds from the start given here, or `default` for every other file and folder.",
+  "default": -259200,
+  "mtimes": {
+    ".claude/projects/-fixture-atlas-api/0190d3e0-0000-7000-8000-000000000001.jsonl": -120,
+    ".claude/projects/-fixture-ledger/0190d3e0-0000-7000-8000-000000000002.jsonl": -18000,
+    ".claude/projects/-fixture-pathfinder/0190d3e0-0000-7000-8000-000000000003.jsonl": -1500,
+    ".grok/sessions/fixture-pathfinder/0190d3e0-0000-7000-8000-000000000004/summary.json": -7200,
+    ".grok/sessions/fixture-pathfinder/0190d3e0-0000-7000-8000-000000000004/updates.jsonl": -7200,
+    ".grok/sessions/fixture-pathfinder/0190d3e0-0000-7000-8000-000000000004/usage.json": -7200
+  }
+}

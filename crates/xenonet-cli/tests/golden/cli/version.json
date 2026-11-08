@@ -1,0 +1,7 @@
+{
+  "args": [
+    "--version"
+  ],
+  "code": 0,
+  "stdout": "xenonet <version>\n"
+}

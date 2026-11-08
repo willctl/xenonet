@@ -1,0 +1,8 @@
+{
+  "route": "/api/actors/observers",
+  "status": 503,
+  "body": {
+    "error": "Actors are off here (XENONET_ACTORS=off)",
+    "code": "off"
+  }
+}

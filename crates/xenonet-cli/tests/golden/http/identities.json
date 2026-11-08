@@ -1,0 +1,59 @@
+{
+  "route": "/api/identities",
+  "status": 200,
+  "body": {
+    "enabled": true,
+    "at": "<time>",
+    "identities": [
+      {
+        "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+        "kind": "claude",
+        "handle": "nova@example.com",
+        "detail": {
+          "plan": "Max",
+          "org": null
+        },
+        "signedIn": true,
+        "active": false,
+        "sources": [
+          "~/.claude.json"
+        ],
+        "firstSeen": "<time>",
+        "seenAt": "<time>",
+        "name": null,
+        "hidden": false,
+        "sessions": 3,
+        "projects": 0
+      },
+      {
+        "id": "github:github.com/nova-dev",
+        "kind": "github",
+        "handle": "nova-dev",
+        "detail": {
+          "host": "github.com"
+        },
+        "signedIn": true,
+        "active": true,
+        "sources": [
+          "gh"
+        ],
+        "firstSeen": "<time>",
+        "seenAt": "<time>",
+        "name": null,
+        "hidden": false,
+        "sessions": 0,
+        "projects": 0
+      }
+    ],
+    "pins": [],
+    "signins": {
+      "claude": [
+        {
+          "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+          "from": "<time>",
+          "to": "<time>"
+        }
+      ]
+    }
+  }
+}

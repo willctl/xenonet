@@ -1,0 +1,8 @@
+{
+  "args": [
+    "agents",
+    "--repo"
+  ],
+  "code": 0,
+  "stdout": "No session or actor has worked in this repo in the last two hours.\n"
+}

@@ -1,0 +1,7 @@
+{
+  "args": [
+    "messages"
+  ],
+  "code": 0,
+  "stdout": "No messages between sessions or actors in the last 24 hours.\n"
+}

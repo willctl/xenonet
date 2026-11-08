@@ -1,0 +1,8 @@
+{
+  "args": [
+    "setup",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet setup\n\nInstall this downloaded component for your account. From its extracted folder, run bin/xenonet setup (bin\\xenonet.exe setup on Windows). Service and Tools can be installed in either order.\n"
+}

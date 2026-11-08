@@ -1,0 +1,12 @@
+{
+  "route": "/api/command",
+  "status": 200,
+  "body": {
+    "file": "<home>/.local/bin/xenonet",
+    "installed": false,
+    "ours": false,
+    "runs": null,
+    "broken": false,
+    "onPath": false
+  }
+}

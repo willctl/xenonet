@@ -1,0 +1,8 @@
+{
+  "args": [
+    "status",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet status\n\nWhich XenoNet is running, what it reads, the sessions at work and the actors\napart from them, what needs you (sessions and actors waiting on you, the\nlongest wait first, and programs asking to be actors), and the doctor's\nlast word. Exits 1 when no XenoNet answers.\n"
+}

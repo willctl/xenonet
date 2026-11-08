@@ -1,0 +1,45 @@
+{
+  "route": "/api/search?q=solver",
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "score": -0.8587159370303934,
+        "hits": 1,
+        "snippets": [
+          {
+            "role": "user",
+            "ts": "<time>",
+            "text": "The ⟦solver⟧ takes 40 seconds for 500 stops. Get it under 5."
+          }
+        ],
+        "inGraph": true,
+        "title": "The solver takes 40 seconds for 500 stops. Get it under 5."
+      },
+      {
+        "sessionId": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "app": "grok",
+        "score": -0.8339452850006704,
+        "hits": 1,
+        "snippets": [
+          {
+            "role": "user",
+            "ts": "<time>",
+            "text": "Write down the depot's loading rules as constraints the ⟦solver⟧ can use."
+          }
+        ],
+        "inGraph": true,
+        "title": "Map the depot loading rules"
+      }
+    ],
+    "status": {
+      "files": 4,
+      "docs": 7,
+      "indexing": false,
+      "lastIndexAt": "<time>",
+      "ms": "<ms>"
+    }
+  }
+}

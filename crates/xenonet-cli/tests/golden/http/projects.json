@@ -1,0 +1,20 @@
+{
+  "route": "/api/projects",
+  "status": 200,
+  "body": {
+    "root": "<home>/Projects",
+    "scan": {
+      "ok": true,
+      "at": "<time>",
+      "ms": "<ms>",
+      "dirsRead": 7,
+      "truncated": false,
+      "depth": 3,
+      "maxDirs": 2000,
+      "groups": 0,
+      "projects": 3
+    },
+    "rules": [],
+    "codex": null
+  }
+}

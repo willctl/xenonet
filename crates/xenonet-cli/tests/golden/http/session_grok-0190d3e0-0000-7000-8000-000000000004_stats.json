@@ -1,0 +1,98 @@
+{
+  "route": "/api/session/grok%3A0190d3e0-0000-7000-8000-000000000004/stats",
+  "status": 200,
+  "body": {
+    "id": "grok:0190d3e0-0000-7000-8000-000000000004",
+    "app": "grok",
+    "from": "<time>",
+    "to": "<time>",
+    "activeMs": 2100000,
+    "totals": {
+      "calls": 2,
+      "input": 2400,
+      "cacheRead": 39600,
+      "cacheWrite": 0,
+      "output": 700,
+      "tokens": 42700,
+      "cost": null,
+      "unpricedCalls": 2
+    },
+    "kinds": {
+      "input": {
+        "tokens": 2400,
+        "cost": null
+      },
+      "cacheRead": {
+        "tokens": 39600,
+        "cost": null
+      },
+      "cacheWrite": {
+        "tokens": 0,
+        "cost": null
+      },
+      "output": {
+        "tokens": 700,
+        "cost": null
+      }
+    },
+    "models": [
+      {
+        "model": "grok-build",
+        "calls": 2,
+        "tokens": 42700,
+        "cost": null,
+        "priced": false,
+        "from": "<time>",
+        "to": "<time>",
+        "efforts": []
+      }
+    ],
+    "turns": [
+      {
+        "n": 1,
+        "start": "<time>",
+        "end": "<time>",
+        "prompt": "Write down the depot's loading rules as constraints the solver can use.",
+        "tokens": 42700,
+        "cost": null,
+        "byModel": {
+          "grok-build": {
+            "tokens": 42700,
+            "cost": 0
+          }
+        },
+        "tools": 1,
+        "errors": 0
+      }
+    ],
+    "tools": [
+      {
+        "name": "read_file",
+        "category": "other",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": "<ms>"
+      }
+    ],
+    "subagents": [],
+    "context": [
+      {
+        "t": "<time>",
+        "used": 21000,
+        "window": 256000
+      }
+    ],
+    "compactions": [],
+    "pricing": {
+      "checked": "2026-10-03",
+      "unpriced": [
+        "grok-build"
+      ]
+    },
+    "title": "Map the depot loading rules",
+    "cwd": "<home>/Projects/pathfinder",
+    "branch": "main",
+    "model": "grok-build"
+  }
+}

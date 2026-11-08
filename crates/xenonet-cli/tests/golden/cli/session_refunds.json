@@ -1,0 +1,8 @@
+{
+  "args": [
+    "session",
+    "refunds"
+  ],
+  "code": 0,
+  "stdout": "Add partial refunds to the orders API. Keep the existing full-refund path working.\nclaude · ~/Projects/atlas-api · feat/partial-refunds · 13 min, 13 min at work · 1 turn\n\n  Estimated cost  $0.07 at API prices on the day, standard tier\n  Tokens          95.3k in 4 calls; 93% read from cache\n\nModels\n  claude-sonnet-4-5  4 calls  $0.07  100%  <clock> to <clock>\n\nTokens\n  read from cache   89k   $0.03   41%\n  written to cache  4.8k  $0.02   28%\n  input             160   <$0.01  1%\n  output            1.4k  $0.02   31%\n\nTurns\n  1  <clock>  13 min  $0.07  Add partial refunds to the orders API. Keep the existing fu…\n\nTools\n  Read  1 call    4 s\n  Edit  1 call    4 s\n  Bash  1 call    20 s\n"
+}

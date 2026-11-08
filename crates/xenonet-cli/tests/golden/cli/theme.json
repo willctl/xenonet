@@ -1,0 +1,7 @@
+{
+  "args": [
+    "theme"
+  ],
+  "code": 0,
+  "stdout": "●    xenonet   Xeno green on void black\n     phosphor  Amber phosphor on black glass, like an old monochrome terminal\n     ochre     Dunes under a bruised sky: ochre, rust and the blue of a desert night\n     gridline  Light trails on an endless grid, in electric cyan and orange on black\n     helios    The sun's surface up close: white-gold light, plasma orange and magnetic magenta\n               loops\n     rime      Frost on black glass: glacier blue and white under a faint aurora\n     trench    The deep sea at night: black water, and the cold light of things that glow on their\n               own\n     eclipse   Totality: black and white with one ring of light, and color only where something\n               needs you, in hues color-blind eyes tell apart\n\nYours go in ~/.xenonet-state/themes; xenonet theme copy starts one.\n"
+}

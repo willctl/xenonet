@@ -1,0 +1,248 @@
+{
+  "route": "/api/theme",
+  "status": 200,
+  "body": {
+    "name": "XenoNet",
+    "about": "Xeno green on void black",
+    "colors": {
+      "bg": "#05070a",
+      "surface": "#0a1015",
+      "surfaceLow": "#06090d",
+      "text": "#dce6ee",
+      "muted": "#7d8c99",
+      "dim": "#566677",
+      "bright": "#e9fff4",
+      "accent": "#39ff9f",
+      "core": "#e9fff4",
+      "project": "#39ff9f",
+      "satellite": "#22c983",
+      "native": "#b18cff",
+      "zone": "#7d8aa3",
+      "resource": "#ff7ad9",
+      "claude": "#ff9d5c",
+      "codex": "#5fe1ff",
+      "grok": "#c6ff3a",
+      "lineage": "#ffd76a",
+      "collab": "#ff5fd2",
+      "collision": "#ff3b6b",
+      "sync": "#7fd8ff",
+      "message": "#c8ffe4",
+      "wiki": "#c9b8ff",
+      "attention": "#ffb547",
+      "review": "#7fe7ff",
+      "stuck": "#ff7a3d",
+      "pressure": "#ffc857",
+      "danger": "#ff5d73",
+      "gold": "#ffd76a",
+      "archived": "#4a5868",
+      "label": "#a8d8c0",
+      "actor": "#c9a0ff",
+      "human": "#e9fff4"
+    },
+    "identities": [
+      "#8fa8ff",
+      "#ff8fb3",
+      "#f2ead3",
+      "#7ef0dd",
+      "#b69bff"
+    ],
+    "categories": {
+      "shell": "#7cf7ff",
+      "edit": "#ffd76a",
+      "read": "#8ab4ff",
+      "web": "#c792ff",
+      "mcp": "#ff7ad9",
+      "agent": "#ffffff",
+      "code": "#5dffc1",
+      "other": "#9fb3c8"
+    },
+    "pages": {
+      "project": "#7fe7ff",
+      "preference": "#ffd76a",
+      "reference": "#c9b8ff",
+      "howto": "#7dffb2",
+      "decision": "#ffa36b",
+      "person": "#ff9be4",
+      "topic": "#e8f4ff"
+    },
+    "fonts": {
+      "display": "\"Chakra Petch\", \"Segoe UI\", sans-serif",
+      "mono": "\"JetBrains Mono\", ui-monospace, \"Cascadia Mono\", monospace"
+    },
+    "sky": {
+      "night": [
+        "#05080c",
+        "#0b2a20",
+        "#101c2c",
+        "#0c2622"
+      ],
+      "dawn": [
+        "#0a0b0c",
+        "#2a2a14",
+        "#14262a",
+        "#30301a"
+      ],
+      "day": [
+        "#06100e",
+        "#06372c",
+        "#102a36",
+        "#16362e"
+      ],
+      "dusk": [
+        "#080a10",
+        "#1e1a3a",
+        "#0c2a2a",
+        "#2a1a2a"
+      ]
+    },
+    "stars": {
+      "count": 3200,
+      "tints": [
+        "#b8ffe0",
+        "#ffffff",
+        "#9fe6ff",
+        "#d9e6ee"
+      ],
+      "shape": "point",
+      "drift": [
+        0,
+        0,
+        0
+      ],
+      "twinkle": 0.5
+    },
+    "grid": {
+      "style": "polar",
+      "center": "#1d7a55",
+      "lines": "#0c3326",
+      "opacity": 0.35
+    },
+    "lattice": {
+      "opacity": 0.035
+    },
+    "sweep": {
+      "shape": "beam",
+      "opacity": 0.03,
+      "speed": 0.35
+    },
+    "dust": {
+      "color": "#39ff9f",
+      "opacity": 0.3,
+      "size": 1.6
+    },
+    "glow": {
+      "bloom": 0.95,
+      "radius": 0.55,
+      "threshold": 0.55,
+      "exposure": 1.05,
+      "fog": 0.0007
+    },
+    "sonar": {
+      "style": "ring",
+      "every": 16
+    },
+    "lines": {
+      "style": "solid",
+      "curvature": 0,
+      "width": 1
+    },
+    "motion": {
+      "pace": 1,
+      "ease": "smooth",
+      "breathe": 0.1
+    },
+    "charts": {
+      "m1": "#0da1bd",
+      "m2": "#d37431",
+      "m3": "#9c77e8",
+      "m4": "#b18b0a",
+      "m5": "#d957b6",
+      "other": "#4d6272",
+      "cacheRead": "#066f83",
+      "input": "#0b96af",
+      "cacheWrite": "#31bddb",
+      "output": "#74e3fe",
+      "one": "#7b95a8",
+      "bad": "#ec835a"
+    },
+    "sound": {
+      "chords": [
+        [
+          50,
+          57,
+          61,
+          64,
+          66
+        ],
+        [
+          47,
+          54,
+          57,
+          62,
+          64
+        ],
+        [
+          43,
+          50,
+          54,
+          59,
+          61
+        ],
+        [
+          45,
+          52,
+          59,
+          61,
+          64
+        ]
+      ],
+      "scale": [
+        62,
+        64,
+        66,
+        68,
+        69,
+        71,
+        73
+      ],
+      "bpm": 84,
+      "pad": "sawtooth",
+      "lead": "triangle",
+      "drone": 38
+    },
+    "actors": {
+      "form": "orb",
+      "params": {},
+      "palette": [
+        "#39ff9f",
+        "#5fe1ff",
+        "#ffd76a",
+        "#ff7ad9",
+        "#b18cff",
+        "#ff9d5c"
+      ],
+      "human": {
+        "form": "orb"
+      },
+      "glow": {
+        "opacity": 0.5,
+        "scale": 2.4
+      },
+      "breathe": {
+        "period": 4.5,
+        "depth": 0.12
+      },
+      "beam": {
+        "style": "pulse",
+        "width": 1.4,
+        "speed": 1
+      },
+      "react": {
+        "flash": 1.6,
+        "ripple": true
+      }
+    },
+    "id": "xenonet",
+    "builtIn": true
+  }
+}

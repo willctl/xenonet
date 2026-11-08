@@ -1,0 +1,841 @@
+{
+ "about": "Every read the recording made, in its order: the test makes each in turn, since some leave a trace later ones show (a log entry, a count of records read), and compares those with a golden.",
+ "steps": [
+  {
+   "get": "/api/health",
+   "golden": null
+  },
+  {
+   "get": "/api/graph",
+   "golden": "http/graph.json"
+  },
+  {
+   "get": "/api/live",
+   "golden": "http/live.json"
+  },
+  {
+   "get": "/api/summary",
+   "golden": "http/summary.json"
+  },
+  {
+   "get": "/api/history?since=0",
+   "golden": "http/history_since_0.json"
+  },
+  {
+   "get": "/api/digest?since=0",
+   "golden": "http/digest_since_0.json"
+  },
+  {
+   "get": "/api/daylog",
+   "golden": null
+  },
+  {
+   "get": "/api/constellation",
+   "golden": null
+  },
+  {
+   "get": "/api/constellation/labels",
+   "golden": null
+  },
+  {
+   "get": "/api/sessions?limit=200",
+   "golden": "http/sessions_limit_200.json"
+  },
+  {
+   "get": "/api/sessions?q=refunds",
+   "golden": "http/sessions_q_refunds.json"
+  },
+  {
+   "get": "/api/engine/state",
+   "golden": "http/engine_state.json"
+  },
+  {
+   "get": "/api/engine/agents",
+   "golden": "http/engine_agents.json"
+  },
+  {
+   "get": "/api/engine/who?path={{home}}/Projects/atlas-api/src/orders/refunds.ts",
+   "golden": "http/engine_who_path_home_Projects_atlas-api_src_orders_refunds.ts.json"
+  },
+  {
+   "get": "/api/actors",
+   "golden": "http/actors.json"
+  },
+  {
+   "get": "/api/actors/events?since=0",
+   "golden": "http/actors_events_since_0.json"
+  },
+  {
+   "get": "/api/actors/observers",
+   "golden": "http/actors_observers.json"
+  },
+  {
+   "get": "/api/actors/requests",
+   "golden": "http/actors_requests.json"
+  },
+  {
+   "get": "/api/actors/targets",
+   "golden": "http/actors_targets.json"
+  },
+  {
+   "get": "/api/spend/actors",
+   "golden": "http/spend_actors.json"
+  },
+  {
+   "get": "/api/themes",
+   "golden": "http/themes.json"
+  },
+  {
+   "get": "/api/theme",
+   "golden": "http/theme.json"
+  },
+  {
+   "get": "/api/environment",
+   "golden": "http/environment.json"
+  },
+  {
+   "get": "/api/layout",
+   "golden": "http/layout.json"
+  },
+  {
+   "get": "/api/workspace/root",
+   "golden": "http/workspace_root.json"
+  },
+  {
+   "get": "/api/projects",
+   "golden": "http/projects.json"
+  },
+  {
+   "get": "/api/projects/rules",
+   "golden": "http/projects_rules.json"
+  },
+  {
+   "get": "/api/identities",
+   "golden": "http/identities.json"
+  },
+  {
+   "get": "/api/drift",
+   "golden": "http/drift.json"
+  },
+  {
+   "get": "/api/hosts",
+   "golden": "http/hosts.json"
+  },
+  {
+   "get": "/api/hosts/self",
+   "golden": null
+  },
+  {
+   "get": "/api/doctor",
+   "golden": null
+  },
+  {
+   "get": "/api/delivery",
+   "golden": "http/delivery.json"
+  },
+  {
+   "get": "/api/logs?since=0",
+   "golden": "http/logs_since_0.json"
+  },
+  {
+   "get": "/api/command",
+   "golden": "http/command.json"
+  },
+  {
+   "get": "/api/mcp",
+   "golden": "http/mcp.json"
+  },
+  {
+   "get": "/api/assistant",
+   "golden": "http/assistant.json"
+  },
+  {
+   "get": "/api/assistant/places",
+   "golden": "http/assistant_places.json"
+  },
+  {
+   "get": "/api/search?q=refunds",
+   "golden": "http/search_q_refunds.json"
+  },
+  {
+   "get": "/api/search?q=solver",
+   "golden": "http/search_q_solver.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000001/stats",
+   "golden": "http/session_claude-0190d3e0-0000-7000-8000-000000000001_stats.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000001/transcript",
+   "golden": "http/session_claude-0190d3e0-0000-7000-8000-000000000001_transcript.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000002/stats",
+   "golden": "http/session_claude-0190d3e0-0000-7000-8000-000000000002_stats.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000002/transcript",
+   "golden": "http/session_claude-0190d3e0-0000-7000-8000-000000000002_transcript.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000003/stats",
+   "golden": "http/session_claude-0190d3e0-0000-7000-8000-000000000003_stats.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000003/transcript",
+   "golden": "http/session_claude-0190d3e0-0000-7000-8000-000000000003_transcript.json"
+  },
+  {
+   "get": "/api/session/grok%3A0190d3e0-0000-7000-8000-000000000004/stats",
+   "golden": "http/session_grok-0190d3e0-0000-7000-8000-000000000004_stats.json"
+  },
+  {
+   "get": "/api/session/grok%3A0190d3e0-0000-7000-8000-000000000004/transcript",
+   "golden": "http/session_grok-0190d3e0-0000-7000-8000-000000000004_transcript.json"
+  },
+  {
+   "run": [
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "-h"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "--version",
+    "--json"
+   ],
+   "golden": "cli/version_--json.json"
+  },
+  {
+   "run": [
+    "--version"
+   ],
+   "golden": "cli/version.json"
+  },
+  {
+   "run": [
+    "help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "setup",
+    "--help"
+   ],
+   "golden": "cli/setup_--help.json"
+  },
+  {
+   "run": [
+    "service",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "update",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "status",
+    "--help"
+   ],
+   "golden": "cli/status_--help.json"
+  },
+  {
+   "run": [
+    "doctor",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "drift",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "logs",
+    "--help"
+   ],
+   "golden": "cli/logs_--help.json"
+  },
+  {
+   "run": [
+    "decide",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "refusals",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "diagnose",
+    "--help"
+   ],
+   "golden": "cli/diagnose_--help.json"
+  },
+  {
+   "run": [
+    "agents",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "actor",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "assistant",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "gateway",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "who",
+    "--help"
+   ],
+   "golden": "cli/who_--help.json"
+  },
+  {
+   "run": [
+    "session",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "live",
+    "--help"
+   ],
+   "golden": "cli/live_--help.json"
+  },
+  {
+   "run": [
+    "spend",
+    "--help"
+   ],
+   "golden": "cli/spend_--help.json"
+  },
+  {
+   "run": [
+    "messages",
+    "--help"
+   ],
+   "golden": "cli/messages_--help.json"
+  },
+  {
+   "run": [
+    "root",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "net",
+    "--help"
+   ],
+   "golden": "cli/net_--help.json"
+  },
+  {
+   "run": [
+    "svc",
+    "--help"
+   ],
+   "golden": "cli/svc_--help.json"
+  },
+  {
+   "run": [
+    "start",
+    "--help"
+   ],
+   "golden": "cli/start_--help.json"
+  },
+  {
+   "run": [
+    "runs",
+    "--help"
+   ],
+   "golden": "cli/runs_--help.json"
+  },
+  {
+   "run": [
+    "hosts",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "search",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "theme",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "film",
+    "--help"
+   ],
+   "golden": "cli/film_--help.json"
+  },
+  {
+   "run": [
+    "script",
+    "--help"
+   ],
+   "golden": "cli/script_--help.json"
+  },
+  {
+   "run": [
+    "connect",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "disconnect",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "console",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "install",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "uninstall",
+    "--help"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "completion",
+    "--help"
+   ],
+   "golden": "cli/completion_--help.json"
+  },
+  {
+   "run": [
+    "status"
+   ],
+   "golden": "cli/status.json"
+  },
+  {
+   "run": [
+    "status",
+    "--json"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "agents"
+   ],
+   "golden": "cli/agents.json"
+  },
+  {
+   "run": [
+    "agents",
+    "--json"
+   ],
+   "golden": "cli/agents_--json.json"
+  },
+  {
+   "run": [
+    "agents",
+    "--repo"
+   ],
+   "golden": "cli/agents_--repo.json"
+  },
+  {
+   "run": [
+    "agents",
+    "--repo",
+    "--json"
+   ],
+   "golden": "cli/agents_--repo_--json.json"
+  },
+  {
+   "run": [
+    "who",
+    "{{home}}/Projects/atlas-api/src/orders/refunds.ts"
+   ],
+   "golden": "cli/who_home_Projects_atlas-api_src_orders_refunds.ts.json"
+  },
+  {
+   "run": [
+    "who",
+    "{{home}}/Projects/atlas-api/src/orders/refunds.ts",
+    "--json"
+   ],
+   "golden": "cli/who_home_Projects_atlas-api_src_orders_refunds.ts_--json.json"
+  },
+  {
+   "run": [
+    "search",
+    "refunds"
+   ],
+   "golden": "cli/search_refunds.json"
+  },
+  {
+   "run": [
+    "search",
+    "refunds",
+    "--json"
+   ],
+   "golden": "cli/search_refunds_--json.json"
+  },
+  {
+   "run": [
+    "search",
+    "solver"
+   ],
+   "golden": "cli/search_solver.json"
+  },
+  {
+   "run": [
+    "search",
+    "solver",
+    "--json"
+   ],
+   "golden": "cli/search_solver_--json.json"
+  },
+  {
+   "run": [
+    "live"
+   ],
+   "golden": "cli/live.json"
+  },
+  {
+   "run": [
+    "live",
+    "--json"
+   ],
+   "golden": "cli/live_--json.json"
+  },
+  {
+   "run": [
+    "spend"
+   ],
+   "golden": "cli/spend.json"
+  },
+  {
+   "run": [
+    "spend",
+    "--json"
+   ],
+   "golden": "cli/spend_--json.json"
+  },
+  {
+   "run": [
+    "messages"
+   ],
+   "golden": "cli/messages.json"
+  },
+  {
+   "run": [
+    "messages",
+    "--json"
+   ],
+   "golden": "cli/messages_--json.json"
+  },
+  {
+   "run": [
+    "drift"
+   ],
+   "golden": "cli/drift.json"
+  },
+  {
+   "run": [
+    "drift",
+    "--json"
+   ],
+   "golden": "cli/drift_--json.json"
+  },
+  {
+   "run": [
+    "logs"
+   ],
+   "golden": "cli/logs.json"
+  },
+  {
+   "run": [
+    "logs",
+    "--json"
+   ],
+   "golden": "cli/logs_--json.json"
+  },
+  {
+   "run": [
+    "root"
+   ],
+   "golden": "cli/root.json"
+  },
+  {
+   "run": [
+    "root",
+    "--json"
+   ],
+   "golden": "cli/root_--json.json"
+  },
+  {
+   "run": [
+    "theme"
+   ],
+   "golden": "cli/theme.json"
+  },
+  {
+   "run": [
+    "theme",
+    "--json"
+   ],
+   "golden": "cli/theme_--json.json"
+  },
+  {
+   "run": [
+    "session",
+    "refunds"
+   ],
+   "golden": "cli/session_refunds.json"
+  },
+  {
+   "run": [
+    "session",
+    "refunds",
+    "--json"
+   ],
+   "golden": "cli/session_refunds_--json.json"
+  },
+  {
+   "run": [
+    "session",
+    "0190d3e0-0000-7000-8000-000000000002"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "session",
+    "0190d3e0-0000-7000-8000-000000000002",
+    "--json"
+   ],
+   "golden": "cli/session_0190d3e0-0000-7000-8000-000000000002_--json.json"
+  },
+  {
+   "run": [
+    "session",
+    "0190d3e0-0000-7000-8000-000000000004"
+   ],
+   "golden": "cli/session_0190d3e0-0000-7000-8000-000000000004.json"
+  },
+  {
+   "run": [
+    "session",
+    "0190d3e0-0000-7000-8000-000000000004",
+    "--json"
+   ],
+   "golden": "cli/session_0190d3e0-0000-7000-8000-000000000004_--json.json"
+  },
+  {
+   "run": [
+    "refusals",
+    "list"
+   ],
+   "golden": "cli/refusals_list.json"
+  },
+  {
+   "run": [
+    "refusals",
+    "list",
+    "--json"
+   ],
+   "golden": "cli/refusals_list_--json.json"
+  },
+  {
+   "run": [
+    "actor",
+    "list"
+   ],
+   "golden": "cli/actor_list.json"
+  },
+  {
+   "run": [
+    "actor",
+    "list",
+    "--json"
+   ],
+   "golden": "cli/actor_list_--json.json"
+  },
+  {
+   "run": [
+    "assistant",
+    "list"
+   ],
+   "golden": "cli/assistant_list.json"
+  },
+  {
+   "run": [
+    "assistant",
+    "list",
+    "--json"
+   ],
+   "golden": "cli/assistant_list_--json.json"
+  },
+  {
+   "run": [
+    "net",
+    "status"
+   ],
+   "golden": "cli/net_status.json"
+  },
+  {
+   "run": [
+    "net",
+    "status",
+    "--json"
+   ],
+   "golden": "cli/net_status_--json.json"
+  },
+  {
+   "run": [
+    "net",
+    "hosts"
+   ],
+   "golden": "cli/net_hosts.json"
+  },
+  {
+   "run": [
+    "net",
+    "hosts",
+    "--json"
+   ],
+   "golden": "cli/net_hosts_--json.json"
+  },
+  {
+   "run": [
+    "svc",
+    "list"
+   ],
+   "golden": "cli/svc_list.json"
+  },
+  {
+   "run": [
+    "svc",
+    "list",
+    "--json"
+   ],
+   "golden": "cli/svc_list_--json.json"
+  },
+  {
+   "run": [
+    "hosts"
+   ],
+   "golden": "cli/hosts.json"
+  },
+  {
+   "run": [
+    "hosts",
+    "--json"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "completion",
+    "zsh"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "completion",
+    "zsh",
+    "--json"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "completion",
+    "bash"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "completion",
+    "bash",
+    "--json"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "diagnose"
+   ],
+   "golden": null
+  },
+  {
+   "run": [
+    "diagnose",
+    "--json"
+   ],
+   "golden": null
+  }
+ ]
+}

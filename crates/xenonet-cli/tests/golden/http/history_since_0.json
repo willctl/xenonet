@@ -1,0 +1,192 @@
+{
+  "route": "/api/history?since=0",
+  "status": 200,
+  "body": {
+    "events": [
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "Bash",
+        "category": "shell",
+        "detail": "pytest tests/test_reconcile.py",
+        "files": [],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "kind": "tool-error",
+        "ts": "<time>",
+        "agentId": null
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "kind": "prompt",
+        "detail": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "Edit",
+        "category": "edit",
+        "detail": "~/Projects/ledger/ledger/reconcile.py",
+        "files": [
+          "<home>/Projects/ledger/ledger/reconcile.py"
+        ],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "kind": "message",
+        "detail": "Rounding now goes half-even through Decimal, and all 24 reconciliation …",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "kind": "turn-end",
+        "duration": 1500000,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "app": "grok",
+        "kind": "prompt",
+        "detail": "Write down the depot's loading rules as constraints the solver can use.",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "app": "grok",
+        "kind": "tool",
+        "tool": "read_file",
+        "category": "other",
+        "detail": "~/Projects/pathfinder/src/solver.rs",
+        "files": [
+          "<home>/Projects/pathfinder/src/solver.rs"
+        ],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "app": "grok",
+        "kind": "message",
+        "detail": "The loading rules are seven constraints.",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "kind": "prompt",
+        "detail": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "Read",
+        "category": "read",
+        "detail": "~/Projects/pathfinder/src/solver.rs",
+        "files": [
+          "<home>/Projects/pathfinder/src/solver.rs"
+        ],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "AskUserQuestion",
+        "category": "other",
+        "detail": "",
+        "files": [],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "kind": "needs-you",
+        "detail": "Cache distance lookups in memory, or keep them on disk between runs?",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "kind": "prompt",
+        "detail": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "Read",
+        "category": "read",
+        "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+        "files": [
+          "<home>/Projects/atlas-api/src/orders/refunds.ts"
+        ],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "Edit",
+        "category": "edit",
+        "detail": "~/Projects/atlas-api/src/orders/refunds.ts",
+        "files": [
+          "<home>/Projects/atlas-api/src/orders/refunds.ts"
+        ],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "kind": "tool",
+        "tool": "Bash",
+        "category": "shell",
+        "detail": "npm test -- orders",
+        "files": [],
+        "server": null,
+        "agentId": null,
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "kind": "message",
+        "detail": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amou…",
+        "ts": "<time>"
+      },
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "kind": "turn-end",
+        "duration": 780000,
+        "ts": "<time>"
+      }
+    ],
+    "now": "<time>"
+  }
+}

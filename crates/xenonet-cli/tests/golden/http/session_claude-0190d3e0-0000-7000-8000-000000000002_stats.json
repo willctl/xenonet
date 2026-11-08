@@ -1,0 +1,130 @@
+{
+  "route": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000002/stats",
+  "status": 200,
+  "body": {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000002",
+    "app": "claude",
+    "from": "<time>",
+    "to": "<time>",
+    "activeMs": 1510000,
+    "totals": {
+      "calls": 3,
+      "input": 120,
+      "cacheRead": 51000,
+      "cacheWrite": 3600,
+      "output": 610,
+      "tokens": 55330,
+      "cost": 0.03831,
+      "unpricedCalls": 0
+    },
+    "kinds": {
+      "input": {
+        "tokens": 120,
+        "cost": 0.00036
+      },
+      "cacheRead": {
+        "tokens": 51000,
+        "cost": 0.015300000000000001
+      },
+      "cacheWrite": {
+        "tokens": 3600,
+        "cost": 0.013499999999999998
+      },
+      "output": {
+        "tokens": 610,
+        "cost": 0.009149999999999998
+      }
+    },
+    "models": [
+      {
+        "model": "claude-sonnet-4-5",
+        "calls": 3,
+        "tokens": 55330,
+        "cost": 0.03831,
+        "priced": true,
+        "from": "<time>",
+        "to": "<time>",
+        "efforts": []
+      }
+    ],
+    "turns": [
+      {
+        "n": 1,
+        "start": "<time>",
+        "end": "<time>",
+        "prompt": null,
+        "tokens": 16330,
+        "cost": 0.01047,
+        "byModel": {
+          "claude-sonnet-4-5": {
+            "tokens": 16330,
+            "cost": 0.01047
+          }
+        },
+        "tools": 1,
+        "errors": 1
+      },
+      {
+        "n": 2,
+        "start": "<time>",
+        "end": "<time>",
+        "prompt": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+        "tokens": 39000,
+        "cost": 0.02784,
+        "byModel": {
+          "claude-sonnet-4-5": {
+            "tokens": 39000,
+            "cost": 0.02784
+          }
+        },
+        "tools": 1,
+        "errors": 0
+      }
+    ],
+    "tools": [
+      {
+        "name": "Bash",
+        "category": "shell",
+        "server": null,
+        "calls": 1,
+        "errors": 1,
+        "ms": "<ms>"
+      },
+      {
+        "name": "Edit",
+        "category": "edit",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": "<ms>"
+      }
+    ],
+    "subagents": [],
+    "context": [
+      {
+        "t": "<time>",
+        "used": 16330,
+        "window": 200000
+      },
+      {
+        "t": "<time>",
+        "used": 18540,
+        "window": 200000
+      },
+      {
+        "t": "<time>",
+        "used": 20460,
+        "window": 200000
+      }
+    ],
+    "compactions": [],
+    "pricing": {
+      "checked": "2026-10-03",
+      "unpriced": []
+    },
+    "title": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+    "cwd": "<home>/Projects/ledger",
+    "branch": "fix/rounding",
+    "model": null
+  }
+}

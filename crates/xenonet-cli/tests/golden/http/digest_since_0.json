@@ -1,0 +1,106 @@
+{
+  "route": "/api/digest?since=0",
+  "status": 200,
+  "body": {
+    "since": 0,
+    "until": "<time>",
+    "totals": {
+      "sessions": 4,
+      "turns": 2,
+      "toolCalls": 8,
+      "files": 2,
+      "errors": 1,
+      "subagents": 0
+    },
+    "sessions": [
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+        "turns": 1,
+        "prompts": 1,
+        "tools": {
+          "read": 1,
+          "edit": 1,
+          "shell": 1
+        },
+        "toolCalls": 3,
+        "files": [
+          "refunds.ts"
+        ],
+        "errors": 0,
+        "subagents": 0,
+        "first": "<time>",
+        "last": "<time>",
+        "lastMessage": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amou…",
+        "needsYou": {
+          "kind": "review",
+          "text": "Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and the full-refund path is unchanged. All 48 order tests pass.",
+          "since": "<time>"
+        }
+      },
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "title": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+        "turns": 1,
+        "prompts": 1,
+        "tools": {
+          "shell": 1,
+          "edit": 1
+        },
+        "toolCalls": 2,
+        "files": [
+          "reconcile.py"
+        ],
+        "errors": 1,
+        "subagents": 0,
+        "first": "<time>",
+        "last": "<time>",
+        "lastMessage": "Rounding now goes half-even through Decimal, and all 24 reconciliation …",
+        "needsYou": null
+      },
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "turns": 0,
+        "prompts": 1,
+        "tools": {
+          "read": 1,
+          "other": 1
+        },
+        "toolCalls": 2,
+        "files": [],
+        "errors": 0,
+        "subagents": 0,
+        "first": "<time>",
+        "last": "<time>",
+        "lastMessage": null,
+        "needsYou": {
+          "kind": "question",
+          "text": "Cache distance lookups in memory, or keep them on disk between runs?",
+          "since": "<time>"
+        }
+      },
+      {
+        "id": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "app": "grok",
+        "title": "Map the depot loading rules",
+        "turns": 0,
+        "prompts": 1,
+        "tools": {
+          "other": 1
+        },
+        "toolCalls": 1,
+        "files": [],
+        "errors": 0,
+        "subagents": 0,
+        "first": "<time>",
+        "last": "<time>",
+        "lastMessage": "The loading rules are seven constraints.",
+        "needsYou": null
+      }
+    ]
+  }
+}

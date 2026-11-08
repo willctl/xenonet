@@ -1,0 +1,15 @@
+{
+  "route": "/api/sessions?q=refunds",
+  "status": 200,
+  "body": [
+    {
+      "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+      "app": "claude",
+      "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+      "cwd": "<home>/Projects/atlas-api",
+      "branch": "feat/partial-refunds",
+      "updatedAt": "<time>",
+      "activity": "active"
+    }
+  ]
+}

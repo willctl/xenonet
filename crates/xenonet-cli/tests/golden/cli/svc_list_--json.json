@@ -1,0 +1,9 @@
+{
+  "args": [
+    "svc",
+    "list",
+    "--json"
+  ],
+  "code": 1,
+  "stdout": ""
+}

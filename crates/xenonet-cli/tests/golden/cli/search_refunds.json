@@ -1,0 +1,8 @@
+{
+  "args": [
+    "search",
+    "refunds"
+  ],
+  "code": 0,
+  "stdout": "Add partial refunds to the orders API. Keep the existing full-refund path working. claude · 2 hits · <n> min ago\n  assistant: Partial refunds work. `POST /orders/:id/refunds` takes an optional amount, and t…\n  user: Add partial refunds to the orders API. Keep the existing full-refund path working.\n"
+}

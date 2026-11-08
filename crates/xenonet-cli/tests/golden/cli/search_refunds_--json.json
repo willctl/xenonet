@@ -1,0 +1,39 @@
+{
+  "args": [
+    "search",
+    "refunds",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "results": [
+      {
+        "sessionId": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "score": -1.1119270466675608,
+        "hits": 2,
+        "snippets": [
+          {
+            "role": "assistant",
+            "ts": "<time>",
+            "text": "Partial ⟦refunds⟧ work. `POST /orders/:id/⟦refunds⟧` takes an optional amount, and the full-⟦refund⟧ path … "
+          },
+          {
+            "role": "user",
+            "ts": "<time>",
+            "text": "Add partial ⟦refunds⟧ to the orders API. Keep the existing full-⟦refund⟧ path working."
+          }
+        ],
+        "inGraph": true,
+        "title": "Add partial refunds to the orders API. Keep the existing full-refund path working."
+      }
+    ],
+    "status": {
+      "files": 4,
+      "docs": 7,
+      "indexing": false,
+      "lastIndexAt": "<time>",
+      "ms": "<ms>"
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "args": [
+    "theme",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "current": "xenonet",
+    "folder": "<home>/.xenonet-state/themes",
+    "problems": [],
+    "themes": [
+      {
+        "id": "xenonet",
+        "name": "XenoNet",
+        "about": "Xeno green on void black",
+        "builtIn": true,
+        "swatch": [
+          "#05070a",
+          "#39ff9f",
+          "#ff9d5c",
+          "#5fe1ff",
+          "#ffb547"
+        ]
+      },
+      {
+        "id": "phosphor",
+        "name": "Phosphor",
+        "about": "Amber phosphor on black glass, like an old monochrome terminal",
+        "builtIn": true,
+        "swatch": [
+          "#020200",
+          "#ffb000",
+          "#ffd27a",
+          "#6dff8a",
+          "#fff1c2"
+        ]
+      },
+      {
+        "id": "ochre",
+        "name": "Ochre",
+        "about": "Dunes under a bruised sky: ochre, rust and the blue of a desert night",
+        "builtIn": true,
+        "swatch": [
+          "#070402",
+          "#e8a85a",
+          "#ff7a3a",
+          "#5aa8ff",
+          "#ffd24a"
+        ]
+      },
+      {
+        "id": "gridline",
+        "name": "Gridline",
+        "about": "Light trails on an endless grid, in electric cyan and orange on black",
+        "builtIn": true,
+        "swatch": [
+          "#000004",
+          "#00e5ff",
+          "#ff9a2a",
+          "#9cff4a",
+          "#ffb000"
+        ]
+      },
+      {
+        "id": "helios",
+        "name": "Helios",
+        "about": "The sun's surface up close: white-gold light, plasma orange and magnetic magenta loops",
+        "builtIn": true,
+        "swatch": [
+          "#0a0300",
+          "#ffb02e",
+          "#ff6a2a",
+          "#7fd4ff",
+          "#fff36a"
+        ]
+      },
+      {
+        "id": "rime",
+        "name": "Rime",
+        "about": "Frost on black glass: glacier blue and white under a faint aurora",
+        "builtIn": true,
+        "swatch": [
+          "#01050a",
+          "#a6ecff",
+          "#ffb59a",
+          "#8affd6",
+          "#fff2a6"
+        ]
+      },
+      {
+        "id": "trench",
+        "name": "Trench",
+        "about": "The deep sea at night: black water, and the cold light of things that glow on their own",
+        "builtIn": true,
+        "swatch": [
+          "#000507",
+          "#2ef2e0",
+          "#ff7ab6",
+          "#9cff6a",
+          "#ffd84a"
+        ]
+      },
+      {
+        "id": "eclipse",
+        "name": "Eclipse",
+        "about": "Totality: black and white with one ring of light, and color only where something needs you, in hues color-blind eyes tell apart",
+        "builtIn": true,
+        "swatch": [
+          "#000000",
+          "#ffffff",
+          "#e69f00",
+          "#56b4e9",
+          "#f0e442"
+        ]
+      }
+    ]
+  }
+}

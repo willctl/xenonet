@@ -1,0 +1,9 @@
+{
+  "args": [
+    "agents",
+    "--repo",
+    "--json"
+  ],
+  "code": 0,
+  "json": []
+}

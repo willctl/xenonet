@@ -1,0 +1,8 @@
+{
+  "args": [
+    "script",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet script <record|run> [file]\n\nScripts drive XenoNet Dev one step after another, as xenonet console does,\nand the console keeps a log of what you do there as the same steps.\n\n  xenonet script record --instance dev > tour.json   what you did, as a script\n  xenonet script run tour.json                       play it in the demo\n  xenonet script run tour.json --instance dev --hidden\n  xenonet script run film.mjs                        a JS module, for anything else\n\nA script is a JSON list of steps: strings as xenonet console takes them\n(\"select:atlas-api\", \"shot:atlas\", \"film:30\") or { \"op\": \"select\",\n\"args\": [\"project:atlas-api\"] }. A module's default export gets the\ninstance (core/control.js) and a step function:\n\n  export default async function ({ xenonet, step }) {\n    await step(\"theme:helios\");\n    await step({ op: \"stats\", args: [\"claude:…\"] });\n    await xenonet.screenshot({ name: \"stats\" });\n  }\n\n  --instance <id>   demo (the default), dev, test or film\n  --hidden          start it hidden if it isn't running\n  --last <n>        record only the last n steps\n  --clear           record, then empty the log\n"
+}

@@ -1,0 +1,7 @@
+{
+  "args": [
+    "agents"
+  ],
+  "code": 0,
+  "stdout": "○ Add partial refunds to the orders API. Kee…  claude · atlas-api · feat/partial-refunds · <n> min ago\n  editing refunds.ts\n○ The solver takes 40 seconds for 500 stops. Get it…  claude · pathfinder · perf/solver · <n> min ago\n  has a question for you\n\nNone of these sessions is connected to XenoNet, so they can't see or message each other. xenonet connect sets that up.\n"
+}

@@ -1,0 +1,9 @@
+{
+  "args": [
+    "net",
+    "hosts",
+    "--json"
+  ],
+  "code": 1,
+  "stdout": ""
+}

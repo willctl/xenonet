@@ -1,0 +1,41 @@
+{
+  "route": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000003/transcript",
+  "status": 200,
+  "body": {
+    "entries": [
+      {
+        "id": "0190d3e0-0000-7000-c000-000000000015",
+        "ts": "<time>",
+        "role": "user",
+        "text": "The solver takes 40 seconds for 500 stops. Get it under 5."
+      },
+      {
+        "id": "0190d3e0-0000-7000-c000-000000000016:0",
+        "ts": "<time>",
+        "role": "tool",
+        "kind": "tool_use",
+        "title": "Read",
+        "text": "{\n  \"file_path\": \"<home>/Projects/pathfinder/src/solver.rs\"\n}"
+      },
+      {
+        "id": "0190d3e0-0000-7000-c000-000000000017:0",
+        "ts": "<time>",
+        "role": "tool",
+        "kind": "tool_result",
+        "title": "result",
+        "status": "completed",
+        "text": "pub fn solve() {}"
+      },
+      {
+        "id": "0190d3e0-0000-7000-c000-000000000018:0",
+        "ts": "<time>",
+        "role": "tool",
+        "kind": "tool_use",
+        "title": "AskUserQuestion",
+        "text": "{\n  \"questions\": [\n    {\n      \"question\": \"Cache distance lookups in memory, or keep them on disk between runs?\",\n      \"header\": \"Cache\",\n      \"options\": [\n        {\n          \"label\": \"Memory\",\n          \"description\": \"Faster, rebuilt each run\"\n        },\n        {\n          \"label\": \"Disk\",\n          \"description\": \"Kept between runs\"\n        }\n      ],\n      \"multiSelect\": false\n    }\n  ]\n}"
+      }
+    ],
+    "cursor": null,
+    "total": 4
+  }
+}

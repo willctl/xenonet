@@ -1,0 +1,131 @@
+{
+  "args": [
+    "session",
+    "refunds",
+    "--json"
+  ],
+  "code": 0,
+  "json": {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+    "app": "claude",
+    "from": "<time>",
+    "to": "<time>",
+    "activeMs": 780000,
+    "totals": {
+      "calls": 4,
+      "input": 160,
+      "cacheRead": 89000,
+      "cacheWrite": 4800,
+      "output": 1350,
+      "tokens": 95310,
+      "cost": 0.06543,
+      "unpricedCalls": 0
+    },
+    "kinds": {
+      "input": {
+        "tokens": 160,
+        "cost": 0.00048
+      },
+      "cacheRead": {
+        "tokens": 89000,
+        "cost": 0.0267
+      },
+      "cacheWrite": {
+        "tokens": 4800,
+        "cost": 0.018
+      },
+      "output": {
+        "tokens": 1350,
+        "cost": 0.020249999999999997
+      }
+    },
+    "models": [
+      {
+        "model": "claude-sonnet-4-5",
+        "calls": 4,
+        "tokens": 95310,
+        "cost": 0.06543,
+        "priced": true,
+        "from": "<time>",
+        "to": "<time>",
+        "efforts": []
+      }
+    ],
+    "turns": [
+      {
+        "n": 1,
+        "start": "<time>",
+        "end": "<time>",
+        "prompt": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+        "tokens": 95310,
+        "cost": 0.06543,
+        "byModel": {
+          "claude-sonnet-4-5": {
+            "tokens": 95310,
+            "cost": 0.06543
+          }
+        },
+        "tools": 3,
+        "errors": 0
+      }
+    ],
+    "tools": [
+      {
+        "name": "Read",
+        "category": "read",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": "<ms>"
+      },
+      {
+        "name": "Edit",
+        "category": "edit",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": "<ms>"
+      },
+      {
+        "name": "Bash",
+        "category": "shell",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": "<ms>"
+      }
+    ],
+    "subagents": [],
+    "context": [
+      {
+        "t": "<time>",
+        "used": 19360,
+        "window": 200000
+      },
+      {
+        "t": "<time>",
+        "used": 22620,
+        "window": 200000
+      },
+      {
+        "t": "<time>",
+        "used": 25450,
+        "window": 200000
+      },
+      {
+        "t": "<time>",
+        "used": 27880,
+        "window": 200000
+      }
+    ],
+    "compactions": [],
+    "pricing": {
+      "checked": "2026-10-03",
+      "unpriced": []
+    },
+    "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+    "cwd": "<home>/Projects/atlas-api",
+    "branch": "feat/partial-refunds",
+    "model": null
+  }
+}

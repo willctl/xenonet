@@ -1,0 +1,9 @@
+{
+  "args": [
+    "net",
+    "status",
+    "--json"
+  ],
+  "code": 1,
+  "stdout": ""
+}

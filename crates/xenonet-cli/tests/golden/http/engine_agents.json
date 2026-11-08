@@ -1,0 +1,53 @@
+{
+  "route": "/api/engine/agents",
+  "status": 200,
+  "body": [
+    {
+      "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+      "app": "claude",
+      "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+      "reader": null,
+      "project": "atlas-api",
+      "projectId": "project:<home>/projects/atlas-api",
+      "projectKind": "project",
+      "cwd": "<home>/Projects/atlas-api",
+      "top": null,
+      "repo": null,
+      "branch": "feat/partial-refunds",
+      "status": "idle",
+      "ended": false,
+      "needsYou": null,
+      "lastActive": "<time>",
+      "focus": null,
+      "editing": [
+        {
+          "path": "<home>/Projects/atlas-api/src/orders/refunds.ts",
+          "at": "<time>"
+        }
+      ],
+      "claims": [],
+      "reachable": false
+    },
+    {
+      "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+      "app": "claude",
+      "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+      "reader": null,
+      "project": "pathfinder",
+      "projectId": "project:<home>/projects/pathfinder",
+      "projectKind": "project",
+      "cwd": "<home>/Projects/pathfinder",
+      "top": null,
+      "repo": null,
+      "branch": "perf/solver",
+      "status": "idle",
+      "ended": false,
+      "needsYou": "question",
+      "lastActive": "<time>",
+      "focus": null,
+      "editing": [],
+      "claims": [],
+      "reachable": false
+    }
+  ]
+}

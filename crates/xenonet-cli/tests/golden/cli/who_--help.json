@@ -1,0 +1,8 @@
+{
+  "args": [
+    "who",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet who <path>\n\nWho has a hand in a file or folder: editing it (in this working\ntree, or the same file in another worktree of the repo, a merge conflict to\ncome) or holding a claim on it. An actor's edit that XenoNet inferred from\nwhat it observes, rather than heard of from the actor, is marked (observed).\n\n  --json   the answer as JSON\n"
+}

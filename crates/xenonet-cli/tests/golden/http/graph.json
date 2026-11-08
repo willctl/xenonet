@@ -1,0 +1,540 @@
+{
+  "route": "/api/graph",
+  "status": 200,
+  "body": {
+    "generatedAt": "<time>",
+    "nodes": [
+      {
+        "id": "core",
+        "kind": "core",
+        "name": "~/Projects",
+        "path": "<home>/Projects",
+        "home": "<home>",
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "sessionCount": 4,
+        "activeCount": 1,
+        "lastActivity": "<time>",
+        "lastSessionAt": "<time>",
+        "actions": []
+      },
+      {
+        "id": "project:<home>/projects/atlas-api",
+        "kind": "project",
+        "name": "atlas-api",
+        "path": "<home>/Projects/atlas-api",
+        "key": "<home>/projects/atlas-api",
+        "rel": "atlas-api",
+        "role": "project",
+        "detected": "folder",
+        "marker": null,
+        "parent": null,
+        "git": null,
+        "stack": [
+          "node"
+        ],
+        "description": "Orders, inventory and payments API for the Atlas store.",
+        "modifiedAt": "<time>",
+        "rule": null,
+        "group": false,
+        "satelliteOf": null,
+        "repo": null,
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "sessionCount": 1,
+        "activeCount": 1,
+        "lastActivity": "<time>",
+        "lastSessionAt": "<time>",
+        "active": true,
+        "actions": [
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          },
+          {
+            "id": "open-vscode",
+            "label": "Open in VS Code"
+          },
+          {
+            "id": "new-claude",
+            "label": "New Claude Code session here"
+          }
+        ],
+        "identities": []
+      },
+      {
+        "id": "project:<home>/projects/ledger",
+        "kind": "project",
+        "name": "ledger",
+        "path": "<home>/Projects/ledger",
+        "key": "<home>/projects/ledger",
+        "rel": "ledger",
+        "role": "project",
+        "detected": "folder",
+        "marker": null,
+        "parent": null,
+        "git": null,
+        "stack": [
+          "python"
+        ],
+        "description": "Double-entry bookkeeping service with monthly reconciliation.",
+        "modifiedAt": "<time>",
+        "rule": null,
+        "group": false,
+        "satelliteOf": null,
+        "repo": null,
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "sessionCount": 1,
+        "activeCount": 0,
+        "lastActivity": "<time>",
+        "lastSessionAt": "<time>",
+        "active": false,
+        "actions": [
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          },
+          {
+            "id": "open-vscode",
+            "label": "Open in VS Code"
+          },
+          {
+            "id": "new-claude",
+            "label": "New Claude Code session here"
+          }
+        ],
+        "identities": []
+      },
+      {
+        "id": "project:<home>/projects/pathfinder",
+        "kind": "project",
+        "name": "pathfinder",
+        "path": "<home>/Projects/pathfinder",
+        "key": "<home>/projects/pathfinder",
+        "rel": "pathfinder",
+        "role": "project",
+        "detected": "folder",
+        "marker": null,
+        "parent": null,
+        "git": null,
+        "stack": [
+          "rust"
+        ],
+        "description": "Route planner for delivery vans.",
+        "modifiedAt": "<time>",
+        "rule": null,
+        "group": false,
+        "satelliteOf": null,
+        "repo": null,
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "sessionCount": 2,
+        "activeCount": 0,
+        "lastActivity": "<time>",
+        "lastSessionAt": "<time>",
+        "active": true,
+        "actions": [
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          },
+          {
+            "id": "open-vscode",
+            "label": "Open in VS Code"
+          },
+          {
+            "id": "new-claude",
+            "label": "New Claude Code session here"
+          }
+        ],
+        "identities": []
+      },
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "app": "claude",
+        "rawId": "0190d3e0-0000-7000-8000-000000000001",
+        "desktopId": null,
+        "inDesktop": false,
+        "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+        "preview": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+        "cwd": "<home>/Projects/atlas-api",
+        "worktree": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "archived": false,
+        "starred": false,
+        "model": null,
+        "effort": null,
+        "permissionMode": null,
+        "branch": "feat/partial-refunds",
+        "tag": null,
+        "sizeBytes": 6686,
+        "parentId": null,
+        "parentKind": null,
+        "claudeAccount": null,
+        "kind": "session",
+        "activity": "active",
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "actions": [
+          {
+            "id": "open-app",
+            "label": "Import into Claude desktop"
+          },
+          {
+            "id": "preview",
+            "label": "Preview transcript",
+            "client": true
+          },
+          {
+            "id": "stats",
+            "label": "Stats",
+            "client": true
+          },
+          {
+            "id": "handoff",
+            "label": "Hand off…",
+            "client": true
+          },
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          }
+        ],
+        "ranAs": {
+          "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+          "confidence": "assumed",
+          "via": "the only account XenoNet has seen"
+        }
+      },
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "app": "claude",
+        "rawId": "0190d3e0-0000-7000-8000-000000000003",
+        "desktopId": null,
+        "inDesktop": false,
+        "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "preview": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "cwd": "<home>/Projects/pathfinder",
+        "worktree": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "archived": false,
+        "starred": false,
+        "model": null,
+        "effort": null,
+        "permissionMode": null,
+        "branch": "perf/solver",
+        "tag": null,
+        "sizeBytes": 3402,
+        "parentId": null,
+        "parentKind": null,
+        "claudeAccount": null,
+        "kind": "session",
+        "activity": "recent",
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "actions": [
+          {
+            "id": "open-app",
+            "label": "Import into Claude desktop"
+          },
+          {
+            "id": "preview",
+            "label": "Preview transcript",
+            "client": true
+          },
+          {
+            "id": "stats",
+            "label": "Stats",
+            "client": true
+          },
+          {
+            "id": "handoff",
+            "label": "Hand off…",
+            "client": true
+          },
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          }
+        ],
+        "ranAs": {
+          "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+          "confidence": "assumed",
+          "via": "the only account XenoNet has seen"
+        }
+      },
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "app": "claude",
+        "rawId": "0190d3e0-0000-7000-8000-000000000002",
+        "desktopId": null,
+        "inDesktop": false,
+        "title": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+        "preview": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+        "cwd": "<home>/Projects/ledger",
+        "worktree": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "archived": false,
+        "starred": false,
+        "model": null,
+        "effort": null,
+        "permissionMode": null,
+        "branch": "fix/rounding",
+        "tag": null,
+        "sizeBytes": 4810,
+        "parentId": null,
+        "parentKind": null,
+        "claudeAccount": null,
+        "kind": "session",
+        "activity": "recent",
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "actions": [
+          {
+            "id": "open-app",
+            "label": "Import into Claude desktop"
+          },
+          {
+            "id": "preview",
+            "label": "Preview transcript",
+            "client": true
+          },
+          {
+            "id": "stats",
+            "label": "Stats",
+            "client": true
+          },
+          {
+            "id": "handoff",
+            "label": "Hand off…",
+            "client": true
+          },
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          }
+        ],
+        "ranAs": {
+          "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+          "confidence": "assumed",
+          "via": "the only account XenoNet has seen"
+        }
+      },
+      {
+        "id": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "app": "grok",
+        "rawId": "0190d3e0-0000-7000-8000-000000000004",
+        "title": "Map the depot loading rules",
+        "preview": null,
+        "cwd": "<home>/Projects/pathfinder",
+        "worktree": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "archived": false,
+        "model": "grok-build",
+        "branch": "main",
+        "status": null,
+        "source": null,
+        "parentId": null,
+        "parentKind": null,
+        "background": false,
+        "sizeBytes": 2219,
+        "kind": "session",
+        "activity": "recent",
+        "fx": null,
+        "fy": null,
+        "fz": null,
+        "pinned": false,
+        "actions": [
+          {
+            "id": "preview",
+            "label": "Preview transcript",
+            "client": true
+          },
+          {
+            "id": "stats",
+            "label": "Stats",
+            "client": true
+          },
+          {
+            "id": "handoff",
+            "label": "Hand off…",
+            "client": true
+          },
+          {
+            "id": "open-folder",
+            "label": "Open folder"
+          }
+        ],
+        "ranAs": null
+      }
+    ],
+    "links": [
+      {
+        "source": "core",
+        "target": "project:<home>/projects/atlas-api",
+        "kind": "contains"
+      },
+      {
+        "source": "core",
+        "target": "project:<home>/projects/ledger",
+        "kind": "contains"
+      },
+      {
+        "source": "core",
+        "target": "project:<home>/projects/pathfinder",
+        "kind": "contains"
+      },
+      {
+        "source": "project:<home>/projects/atlas-api",
+        "target": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "kind": "session"
+      },
+      {
+        "source": "project:<home>/projects/pathfinder",
+        "target": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "kind": "session"
+      },
+      {
+        "source": "project:<home>/projects/ledger",
+        "target": "claude:0190d3e0-0000-7000-8000-000000000002",
+        "kind": "session"
+      },
+      {
+        "source": "project:<home>/projects/pathfinder",
+        "target": "grok:0190d3e0-0000-7000-8000-000000000004",
+        "kind": "session"
+      }
+    ],
+    "relations": [],
+    "stats": {
+      "wikiPages": 0,
+      "dirtyRepos": 0,
+      "projects": 3,
+      "groups": 0,
+      "sessions": 4,
+      "claude": 3,
+      "codex": 0,
+      "active": 1,
+      "archived": 0
+    },
+    "identities": [
+      {
+        "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
+        "kind": "claude",
+        "handle": "nova@example.com",
+        "detail": {
+          "plan": "Max",
+          "org": null
+        },
+        "signedIn": true,
+        "active": false,
+        "sources": [
+          "~/.claude.json"
+        ],
+        "firstSeen": "<time>",
+        "seenAt": "<time>",
+        "name": null,
+        "hidden": false,
+        "sessions": 3,
+        "projects": 0
+      },
+      {
+        "id": "github:github.com/nova-dev",
+        "kind": "github",
+        "handle": "nova-dev",
+        "detail": {
+          "host": "github.com"
+        },
+        "signedIn": true,
+        "active": true,
+        "sources": [
+          "gh"
+        ],
+        "firstSeen": "<time>",
+        "seenAt": "<time>",
+        "name": null,
+        "hidden": false,
+        "sessions": 0,
+        "projects": 0
+      }
+    ],
+    "hideIdentities": false,
+    "demo": false,
+    "sources": [
+      {
+        "name": "projects",
+        "ok": true,
+        "ms": "<ms>",
+        "count": 3,
+        "note": "3 projects in 0 groups, 7 folders read"
+      },
+      {
+        "name": "codex",
+        "ok": false,
+        "ms": "<ms>",
+        "error": "spawn <home>/no-codex ENOENT"
+      },
+      {
+        "name": "codex-projects",
+        "ok": true,
+        "ms": "<ms>",
+        "count": 0
+      },
+      {
+        "name": "claude",
+        "ok": true,
+        "ms": "<ms>",
+        "count": 3
+      },
+      {
+        "name": "grok",
+        "ok": true,
+        "ms": "<ms>",
+        "count": 1
+      },
+      {
+        "name": "live",
+        "ok": true,
+        "count": 4
+      },
+      {
+        "name": "wiki",
+        "ok": false,
+        "count": 0,
+        "error": "Xenolith folder not found"
+      },
+      {
+        "name": "search",
+        "ok": true,
+        "count": 0,
+        "ms": "<ms>"
+      },
+      {
+        "name": "identities",
+        "ok": true,
+        "ms": "<ms>",
+        "count": 2,
+        "note": "1 claude, 1 github"
+      }
+    ]
+  }
+}

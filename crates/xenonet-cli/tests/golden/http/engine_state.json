@@ -1,0 +1,33 @@
+{
+  "route": "/api/engine/state",
+  "status": 200,
+  "body": {
+    "agents": [
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+        "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+        "app": "claude",
+        "project": "atlas-api",
+        "branch": "feat/partial-refunds",
+        "status": "idle",
+        "focus": null,
+        "editing": 1,
+        "claims": [],
+        "reachable": false
+      },
+      {
+        "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+        "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "app": "claude",
+        "project": "pathfinder",
+        "branch": "perf/solver",
+        "status": "idle",
+        "focus": null,
+        "editing": 0,
+        "claims": [],
+        "reachable": false
+      }
+    ],
+    "messages": []
+  }
+}

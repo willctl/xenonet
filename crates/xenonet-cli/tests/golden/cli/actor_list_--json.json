@@ -1,0 +1,9 @@
+{
+  "args": [
+    "actor",
+    "list",
+    "--json"
+  ],
+  "code": 1,
+  "stdout": ""
+}

@@ -1,0 +1,23 @@
+{
+  "route": "/api/workspace/root",
+  "status": 200,
+  "body": {
+    "path": "<home>/Projects",
+    "source": "default",
+    "env": null,
+    "chosen": null,
+    "default": "<home>/Projects",
+    "home": "<home>",
+    "scan": {
+      "ok": true,
+      "at": "<time>",
+      "ms": "<ms>",
+      "dirsRead": 7,
+      "truncated": false,
+      "depth": 3,
+      "maxDirs": 2000,
+      "groups": 0,
+      "projects": 3
+    }
+  }
+}

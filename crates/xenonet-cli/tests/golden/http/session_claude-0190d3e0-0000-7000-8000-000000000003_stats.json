@@ -1,0 +1,109 @@
+{
+  "route": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000003/stats",
+  "status": 200,
+  "body": {
+    "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+    "app": "claude",
+    "from": "<time>",
+    "to": "<time>",
+    "activeMs": 900000,
+    "totals": {
+      "calls": 2,
+      "input": 80,
+      "cacheRead": 34000,
+      "cacheWrite": 2400,
+      "output": 340,
+      "tokens": 36820,
+      "cost": 0.02454,
+      "unpricedCalls": 0
+    },
+    "kinds": {
+      "input": {
+        "tokens": 80,
+        "cost": 0.00024
+      },
+      "cacheRead": {
+        "tokens": 34000,
+        "cost": 0.0102
+      },
+      "cacheWrite": {
+        "tokens": 2400,
+        "cost": 0.009
+      },
+      "output": {
+        "tokens": 340,
+        "cost": 0.0050999999999999995
+      }
+    },
+    "models": [
+      {
+        "model": "claude-sonnet-4-5",
+        "calls": 2,
+        "tokens": 36820,
+        "cost": 0.02454,
+        "priced": true,
+        "from": "<time>",
+        "to": "<time>",
+        "efforts": []
+      }
+    ],
+    "turns": [
+      {
+        "n": 1,
+        "start": "<time>",
+        "end": "<time>",
+        "prompt": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+        "tokens": 36820,
+        "cost": 0.02454,
+        "byModel": {
+          "claude-sonnet-4-5": {
+            "tokens": 36820,
+            "cost": 0.02454
+          }
+        },
+        "tools": 2,
+        "errors": 0
+      }
+    ],
+    "tools": [
+      {
+        "name": "Read",
+        "category": "read",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": "<ms>"
+      },
+      {
+        "name": "AskUserQuestion",
+        "category": "other",
+        "server": null,
+        "calls": 1,
+        "errors": 0,
+        "ms": null
+      }
+    ],
+    "subagents": [],
+    "context": [
+      {
+        "t": "<time>",
+        "used": 17320,
+        "window": 200000
+      },
+      {
+        "t": "<time>",
+        "used": 19500,
+        "window": 200000
+      }
+    ],
+    "compactions": [],
+    "pricing": {
+      "checked": "2026-10-03",
+      "unpriced": []
+    },
+    "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+    "cwd": "<home>/Projects/pathfinder",
+    "branch": "perf/solver",
+    "model": null
+  }
+}

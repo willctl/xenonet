@@ -1,0 +1,7 @@
+{
+  "args": [
+    "spend"
+  ],
+  "code": 0,
+  "stdout": "About $0.13 today at API prices\n  Claude Code  $0.13\n  Codex        $0.00\n  Grok Build   unknown (Grok recorded no cost)\n\nThis XenoNet doesn't break the day down by actor.\n\nNot counted, with no price: grok-build. Prices checked 2026-10-03. On a plan, the work costs the plan.\n"
+}

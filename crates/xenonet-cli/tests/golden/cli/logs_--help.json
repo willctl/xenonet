@@ -1,0 +1,8 @@
+{
+  "args": [
+    "logs",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet logs\n\nWhat went wrong in XenoNet lately: the background service, the desktop app\nand the xenonet command, each line with a code that says what it is and the\nfix when there's one. Home folders show as ~ and anything like a key is\ntaken out, so it's safe to paste into an issue.\n\n  --errors          errors only (default: errors and warnings)\n  --all             info lines too\n  --since <time>    how far back: 30m, 6h, 2d (default 24h)\n  --component <c>   service, desktop or cli\n  --code <code>     codes starting with this, such as doctor. or service.port\n  --summary         each code once, with how often and when last\n  --dev             XenoNet Dev's log, not the installed XenoNet's\n  --json            as JSON lines\n"
+}

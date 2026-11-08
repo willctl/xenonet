@@ -1,0 +1,42 @@
+{
+  "route": "/api/sessions?limit=200",
+  "status": 200,
+  "body": [
+    {
+      "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+      "app": "claude",
+      "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
+      "cwd": "<home>/Projects/atlas-api",
+      "branch": "feat/partial-refunds",
+      "updatedAt": "<time>",
+      "activity": "active"
+    },
+    {
+      "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+      "app": "claude",
+      "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
+      "cwd": "<home>/Projects/pathfinder",
+      "branch": "perf/solver",
+      "updatedAt": "<time>",
+      "activity": "recent"
+    },
+    {
+      "id": "grok:0190d3e0-0000-7000-8000-000000000004",
+      "app": "grok",
+      "title": "Map the depot loading rules",
+      "cwd": "<home>/Projects/pathfinder",
+      "branch": "main",
+      "updatedAt": "<time>",
+      "activity": "recent"
+    },
+    {
+      "id": "claude:0190d3e0-0000-7000-8000-000000000002",
+      "app": "claude",
+      "title": "Reconciliation is off by a cent on some months. Find out why and fix it.",
+      "cwd": "<home>/Projects/ledger",
+      "branch": "fix/rounding",
+      "updatedAt": "<time>",
+      "activity": "recent"
+    }
+  ]
+}

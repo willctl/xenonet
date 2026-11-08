@@ -1,0 +1,8 @@
+{
+  "args": [
+    "messages",
+    "--help"
+  ],
+  "code": 0,
+  "stdout": "xenonet messages\n\nThe messages sessions and actors sent each other in the last 24 hours,\noldest first, with who has read each one.\n\n  --json   the messages as JSON\n"
+}
