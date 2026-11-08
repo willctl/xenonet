@@ -718,8 +718,12 @@ Could Hermes report to XenoNet itself? Yes, in several ways:
 **Files.** `plugins/hermes/xenonet/` holds `plugin.yaml` and an
 `__init__.py` whose `register(ctx)` registers these hooks
 ([hooks][docs-hooks]): `on_session_start`, `on_session_end`,
-`pre_tool_call`, `post_tool_call`, `subagent_start` and `subagent_stop`.
-The hooks return nothing, so they never block or rewrite a call. The plugin
+`pre_tool_call`, `post_tool_call`, `pre_llm_call`, `post_llm_call`,
+`post_gateway_admission`, `subagent_start` and `subagent_stop`. The hooks
+return nothing, so they never block or rewrite a call. The last three
+besides the tool hooks only learn which session is running: of
+`post_gateway_admission` (which also receives the message's text and
+source) the plugin keeps the session key and nothing else. The plugin
 uses only Python's standard library: a bounded queue that drops facts when
 it's full, and one background thread that talks to XenoNet. Its unit tests
 (`plugins/hermes/test_plugin.py`, run by `npm test`) use a fake `ctx` and a
@@ -761,14 +765,29 @@ Without a token the plugin registers nothing. While XenoNet is down, a call
 gives up after 0.6 s and the plugin waits 30 s before it tries again.
 
 **Messages to Hermes.** A heartbeat's answer says how many messages wait.
-The plugin then reads the actor's inbox and hands each message to Hermes
-with `ctx.inject_message`, framed as from another agent or actor, quoted,
-with a line saying it comes from an agent, not the user, and can't approve
-or authorize anything. The classic CLI takes it into the live REPL. A
-gateway, TUI or desktop session needs a known `session_key` and
-`plugins.entries.xenonet.allow_gateway_injection: true` in `config.yaml`,
-which the owner sets; Hermes refuses the injection otherwise, and the message
-is already read by then.
+If this process has a session, the plugin reads the actor's inbox (a list of
+messages) and hands each one to Hermes with `ctx.inject_message`, framed as
+from another agent or actor, quoted, with a line saying it comes from an
+agent, not the user, and can't approve or authorize anything. A process with
+no session leaves the messages unread, since Hermes may run the plugin in
+more than one process (a gateway and a TUI host) and only one holds the
+session.
+
+The session key comes from the key a hook passes, else from Hermes's own
+`plugin_session.session_key()` helper (which answers only inside a tool
+call), else from the session id of a local session
+(`agent:main:local:dm:<id>`); Hermes refuses a wrong key. The classic CLI
+takes the message into the live REPL. A gateway, TUI or desktop session also
+needs `plugins.entries.xenonet.allow_gateway_injection: true` in
+`config.yaml`, which the owner sets.
+
+**Answering.** The plugin registers one tool, `xenonet_reply(text, reply_to,
+to)`, in the `xenonet` toolset. It posts to `/api/engine/send` with the
+plugin's token, waits up to 8 s, and returns XenoNet's own reason when it
+refuses. The model passes the message's number, and the reply goes to its
+sender. The engine lets an agent answer the sender of a message delivered to
+it without a grant for that sender; a message to anyone else follows the
+actor's scopes.
 
 **What the doctor says.** The plugin leaves `state.json` beside itself with
 the time of its last answered heartbeat. `xenonet doctor` ("XenoNet's plugin

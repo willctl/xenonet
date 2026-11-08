@@ -50,12 +50,16 @@ Hermes's status is in XenoNet's words, such as "Running a command in atlas-api".
 
 #### The XenoNet plugin for Hermes
 
-A small plugin lets Hermes report itself and receive messages from other agents. Run `xenonet connect hermes`: it shows what it will do, then copies two files into `~/.hermes/plugins/xenonet` (or `$HERMES_HOME`). It changes nothing else, and it leaves two steps to you, which it prints:
+A small plugin lets Hermes report itself, receive messages from other agents and answer them. Run `xenonet connect hermes`: it shows what it will do, then copies two files into `~/.hermes/plugins/xenonet` (or `$HERMES_HOME`). It changes nothing else, and it leaves two steps to you, which it prints:
 
-1. Start a Hermes session. The plugin asks XenoNet for a token, and a card for Hermes Agent appears in XenoNet's window. Allow it, and the token is saved to `plugins/xenonet/token` in that folder, readable only by you. (XenoNet takes Hermes's registration only from a command Hermes itself runs, which is why the plugin asks, not the Actors panel.)
+1. Start a Hermes session. The plugin asks XenoNet for a token, and a card for Hermes Agent appears in XenoNet's window. Allow it, and the token is saved to `plugins/xenonet/token` in that folder, readable only by you. XenoNet accepts Hermes's registration only from a command Hermes itself runs, which is why the plugin asks and the Actors panel doesn't.
 2. Turn the plugin on with `hermes plugins enable xenonet`. It starts with Hermes's next session.
 
-The plugin sends session starts and ends, tool names, and the path of each file Hermes edits. It never sends arguments, results or messages. Messages from other agents reach Hermes marked as coming from an agent, not you, and they can't approve anything. Hermes answers with the plugin's `xenonet_reply` tool, which sends as the Hermes actor with the plugin's own token, so the token never reaches the model. In a gateway, TUI or desktop session they arrive only if you set `plugins.entries.xenonet.allow_gateway_injection: true` in Hermes's `config.yaml`.
+The plugin sends session starts and ends, tool names, and the path of each file Hermes edits. It never sends arguments, results or messages.
+
+Messages from other agents reach the running Hermes session marked as coming from an agent, not you, and they can't approve anything. Hermes answers with the plugin's `xenonet_reply` tool. The tool sends as the Hermes actor with the plugin's token, so the token never reaches the model. An agent can answer whoever sent it a message, even without a grant for that sender, so Hermes needs no grant to reply. Reaching anyone else still needs one.
+
+In a gateway, TUI or desktop session, messages arrive only if you set `plugins.entries.xenonet.allow_gateway_injection: true` in Hermes's `config.yaml`. Hermes refuses them otherwise. With several Hermes sessions open, a message goes to the one that was active last.
 
 `xenonet doctor` says whether the plugin is installed, turned on, has its token and has reported lately. `xenonet disconnect hermes` takes it out.
 
