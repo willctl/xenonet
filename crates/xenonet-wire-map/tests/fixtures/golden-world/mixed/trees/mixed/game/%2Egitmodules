@@ -1,0 +1,8 @@
+[submodule "engine"]
+	path = libs/engine
+[submodule "art"]
+	path = art
+[submodule "gone"]
+	path = gone
+[submodule "plain"]
+	path = plain

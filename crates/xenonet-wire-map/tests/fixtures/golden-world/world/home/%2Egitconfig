@@ -1,0 +1,7 @@
+[user]
+	name = Nova
+	email = nova@example.com
+[credential "https://github.com"]
+	helper = !gh auth git-credential
+[includeIf "gitdir:<world>/home/Projects/labs/"]
+	path = ~/.gitconfig-orbit

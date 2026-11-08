@@ -1,0 +1,5 @@
+[project]
+name='misc'
+
+[tool.uv.workspace]
+members = ['tool-a', 'tool-b']

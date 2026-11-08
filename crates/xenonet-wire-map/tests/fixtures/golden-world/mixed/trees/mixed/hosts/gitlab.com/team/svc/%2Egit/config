@@ -1,0 +1,4 @@
+[core]
+	bare = false
+[remote "origin"]
+	url = git@example.com:me/svc.git

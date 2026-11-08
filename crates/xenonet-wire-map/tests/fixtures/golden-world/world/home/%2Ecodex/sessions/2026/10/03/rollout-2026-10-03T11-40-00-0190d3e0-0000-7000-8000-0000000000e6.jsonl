@@ -1,0 +1,4 @@
+{"type":"event_msg","timestamp":"2026-10-03T11:40:00.000Z","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"Before the odd lines"}]}}}
+123
+null
+{"type":"event_msg","timestamp":"2026-10-03T11:41:00.000Z","payload":{"type":"user_message","message":"After them"}}

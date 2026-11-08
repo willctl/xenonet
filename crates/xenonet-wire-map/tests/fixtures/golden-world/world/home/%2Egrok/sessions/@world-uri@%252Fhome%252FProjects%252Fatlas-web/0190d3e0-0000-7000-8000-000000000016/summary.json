@@ -1,0 +1,15 @@
+{
+  "info": {
+    "id": "0190d3e0-0000-7000-8000-000000000016",
+    "cwd": "<world>/home/Projects/atlas-web"
+  },
+  "session_summary": "",
+  "generated_title": "Check contrast on every page",
+  "title_is_manual": false,
+  "created_at": "2026-10-03T11:54:30.000Z",
+  "updated_at": "2026-10-03T11:56:10.000Z",
+  "current_model_id": "grok-build",
+  "head_branch": null,
+  "parent_session_id": "0190d3e0-0000-7000-8000-000000000015",
+  "session_kind": "subagent"
+}

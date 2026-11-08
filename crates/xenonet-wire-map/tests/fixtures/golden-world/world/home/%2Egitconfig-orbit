@@ -1,0 +1,5 @@
+[user]
+	name = Orbit
+	email = hello@orbitworks.example
+[credential "https://github.com"]
+	username = orbitworks

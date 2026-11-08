@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-10-03T11:54:50.000Z","isSidechain":true,"message":{"role":"user","content":"Profile the solver on the 500-stop fixture"}}
+{"type":"assistant","timestamp":"2026-10-03T11:54:52.000Z","isSidechain":true,"message":{"id":"msg_e09c7681-5ec2-4d7f-85f2-bbc3f92b71fd","model":"claude-sonnet-4-5","stop_reason":"tool_use","usage":{"input_tokens":30,"cache_read_input_tokens":9000,"cache_creation_input_tokens":0,"output_tokens":400},"content":[{"type":"tool_use","id":"toolu_sub1","name":"Bash","input":{"command":"cargo flamegraph --bench solver"}}]}}

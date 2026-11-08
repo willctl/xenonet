@@ -1,0 +1,5303 @@
+{
+ "demo": {
+  "projects": [
+   {
+    "name": "atlas-api",
+    "path": "<world>/home/Projects/atlas-api",
+    "key": "<world>/home/projects/atlas-api",
+    "rel": "atlas-api",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/atlas-api.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "Orders, inventory and payments API for the Atlas store.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "atlas-api-local-db",
+    "path": "<world>/home/Projects/atlas-api-local-db",
+    "key": "<world>/home/projects/atlas-api-local-db",
+    "rel": "atlas-api-local-db",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [
+     "docker",
+     "supabase"
+    ],
+    "description": "Local Postgres and Supabase for atlas-api.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "atlas-web",
+    "path": "<world>/home/Projects/atlas-web",
+    "key": "<world>/home/projects/atlas-web",
+    "rel": "atlas-web",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/atlas-web.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "The Atlas storefront, built with Next.js.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "docs",
+    "path": "<world>/home/Projects/docs",
+    "key": "<world>/home/projects/docs",
+    "rel": "docs",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/docs.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "Docs site for Atlas and Ledger.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "infra",
+    "path": "<world>/home/Projects/infra",
+    "key": "<world>/home/projects/infra",
+    "rel": "infra",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@github.com:atlas-co/infra.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "docker"
+    ],
+    "description": "Terraform modules and deploy scripts for every environment.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "labs",
+    "path": "<world>/home/Projects/labs",
+    "key": "<world>/home/projects/labs",
+    "rel": "labs",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Experiments that aren't projects yet.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "geofence",
+    "path": "<world>/home/Projects/labs/geofence",
+    "key": "<world>/home/projects/labs/geofence",
+    "rel": "labs/geofence",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/home/projects/labs",
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/orbitworks/geofence.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "Delivery zones drawn from postcodes.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "route-sim",
+    "path": "<world>/home/Projects/labs/route-sim",
+    "key": "<world>/home/projects/labs/route-sim",
+    "rel": "labs/route-sim",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/home/projects/labs",
+    "git": {
+     "branch": "main",
+     "origin": "git@gh-orbit:orbitworks/route-sim.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": "Simulates a day of van routes against pathfinder.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger",
+    "path": "<world>/home/Projects/ledger",
+    "key": "<world>/home/projects/ledger",
+    "rel": "ledger",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/nova-dev/ledger.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": "Double-entry bookkeeping service with monthly reconciliation.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "pathfinder",
+    "path": "<world>/home/Projects/pathfinder",
+    "key": "<world>/home/projects/pathfinder",
+    "rel": "pathfinder",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/orbitworks/pathfinder.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "rust"
+    ],
+    "description": "Route planner for delivery vans.",
+    "modifiedAt": 1791021600000
+   }
+  ],
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 12,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 1,
+   "projects": 9
+  },
+  "folders": [
+   {
+    "rel": "atlas-api",
+    "key": "<world>/home/projects/atlas-api",
+    "path": "<world>/home/Projects/atlas-api",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json",
+     "tsconfig.json"
+    ],
+    "files": 3,
+    "folders": 1,
+    "kinds": {
+     "json": 2,
+     "md": 1
+    },
+    "sessions": 3
+   },
+   {
+    "rel": "atlas-api-local-db",
+    "key": "<world>/home/projects/atlas-api-local-db",
+    "path": "<world>/home/Projects/atlas-api-local-db",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "README.md",
+     "docker-compose.yml",
+     "supabase"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "yml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "atlas-api-local-db/supabase",
+    "key": "<world>/home/projects/atlas-api-local-db/supabase",
+    "path": "<world>/home/Projects/atlas-api-local-db/supabase",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "atlas-web",
+    "key": "<world>/home/projects/atlas-web",
+    "path": "<world>/home/Projects/atlas-web",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json",
+     "tsconfig.json"
+    ],
+    "files": 3,
+    "folders": 1,
+    "kinds": {
+     "json": 2,
+     "md": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "docs",
+    "key": "<world>/home/projects/docs",
+    "path": "<world>/home/Projects/docs",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "json": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "infra",
+    "key": "<world>/home/projects/infra",
+    "path": "<world>/home/Projects/infra",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "Dockerfile",
+     "README.md",
+     "compose.yaml"
+    ],
+    "files": 3,
+    "folders": 0,
+    "kinds": {
+     "md": 1,
+     "yaml": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "labs",
+    "key": "<world>/home/projects/labs",
+    "path": "<world>/home/Projects/labs",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 3,
+    "kinds": {
+     "md": 2
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "labs/geofence",
+    "key": "<world>/home/projects/labs/geofence",
+    "path": "<world>/home/Projects/labs/geofence",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "json": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "labs/route-sim",
+    "key": "<world>/home/projects/labs/route-sim",
+    "path": "<world>/home/Projects/labs/route-sim",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "labs/snippets",
+    "key": "<world>/home/projects/labs/snippets",
+    "path": "<world>/home/Projects/labs/snippets",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "README.md",
+     "pyproject.toml"
+    ],
+    "files": 3,
+    "folders": 0,
+    "kinds": {
+     "md": 1,
+     "py": 1,
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger",
+    "key": "<world>/home/projects/ledger",
+    "path": "<world>/home/Projects/ledger",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "toml": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "pathfinder",
+    "key": "<world>/home/projects/pathfinder",
+    "path": "<world>/home/Projects/pathfinder",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "Cargo.toml",
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "toml": 1,
+     "md": 1
+    },
+    "sessions": 2
+   }
+  ]
+ },
+ "demoRules": {
+  "projects": [
+   {
+    "name": "atlas-api",
+    "path": "<world>/home/Projects/atlas-api",
+    "key": "<world>/home/projects/atlas-api",
+    "rel": "atlas-api",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/atlas-api.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "Orders, inventory and payments API for the Atlas store.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "atlas-api-local-db",
+    "path": "<world>/home/Projects/atlas-api-local-db",
+    "key": "<world>/home/projects/atlas-api-local-db",
+    "rel": "atlas-api-local-db",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [
+     "docker",
+     "supabase"
+    ],
+    "description": "Local Postgres and Supabase for atlas-api.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "atlas-web",
+    "path": "<world>/home/Projects/atlas-web",
+    "key": "<world>/home/projects/atlas-web",
+    "rel": "atlas-web",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/atlas-web.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "The Atlas storefront, built with Next.js.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "docs",
+    "path": "<world>/home/Projects/docs",
+    "key": "<world>/home/projects/docs",
+    "rel": "docs",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/atlas-co/docs.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "Docs site for Atlas and Ledger.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "labs",
+    "path": "<world>/home/Projects/labs",
+    "key": "<world>/home/projects/labs",
+    "rel": "labs",
+    "role": "project",
+    "detected": "rule",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Experiments that aren't projects yet.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger",
+    "path": "<world>/home/Projects/ledger",
+    "key": "<world>/home/projects/ledger",
+    "rel": "ledger",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/nova-dev/ledger.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": "Double-entry bookkeeping service with monthly reconciliation.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "pathfinder",
+    "path": "<world>/home/Projects/pathfinder",
+    "key": "<world>/home/projects/pathfinder",
+    "rel": "pathfinder",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "https://github.com/orbitworks/pathfinder.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "rust"
+    ],
+    "description": "Route planner for delivery vans.",
+    "modifiedAt": 1791021600000
+   }
+  ],
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 9,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 0,
+   "projects": 7
+  },
+  "folders": [
+   {
+    "rel": "atlas-api",
+    "key": "<world>/home/projects/atlas-api",
+    "path": "<world>/home/Projects/atlas-api",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json",
+     "tsconfig.json"
+    ],
+    "files": 3,
+    "folders": 1,
+    "kinds": {
+     "json": 2,
+     "md": 1
+    },
+    "sessions": 3
+   },
+   {
+    "rel": "atlas-api-local-db",
+    "key": "<world>/home/projects/atlas-api-local-db",
+    "path": "<world>/home/Projects/atlas-api-local-db",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "README.md",
+     "docker-compose.yml",
+     "supabase"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "yml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "atlas-api-local-db/supabase",
+    "key": "<world>/home/projects/atlas-api-local-db/supabase",
+    "path": "<world>/home/Projects/atlas-api-local-db/supabase",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "atlas-web",
+    "key": "<world>/home/projects/atlas-web",
+    "path": "<world>/home/Projects/atlas-web",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json",
+     "tsconfig.json"
+    ],
+    "files": 3,
+    "folders": 1,
+    "kinds": {
+     "json": 2,
+     "md": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "docs",
+    "key": "<world>/home/projects/docs",
+    "path": "<world>/home/Projects/docs",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "json": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "labs",
+    "key": "<world>/home/projects/labs",
+    "path": "<world>/home/Projects/labs",
+    "repo": false,
+    "call": "project",
+    "why": "rule",
+    "markers": [
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 3,
+    "kinds": {
+     "md": 2
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "ledger",
+    "key": "<world>/home/projects/ledger",
+    "path": "<world>/home/Projects/ledger",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "toml": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "pathfinder",
+    "key": "<world>/home/projects/pathfinder",
+    "path": "<world>/home/Projects/pathfinder",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "Cargo.toml",
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "toml": 1,
+     "md": 1
+    },
+    "sessions": 2
+   }
+  ]
+ },
+ "clients": {
+  "projects": [
+   {
+    "name": "harbor-api",
+    "path": "<world>/home/Clients/harbor-api",
+    "key": "<world>/home/clients/harbor-api",
+    "rel": "harbor-api",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": null,
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "go"
+    ],
+    "description": "Berths, bookings and invoices for the Harbor marina.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "harbor-app",
+    "path": "<world>/home/Clients/harbor-app",
+    "key": "<world>/home/clients/harbor-app",
+    "rel": "harbor-app",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": null,
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node",
+     "typescript"
+    ],
+    "description": "Berth bookings for the Harbor marina, on the web and in the app.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "kiln",
+    "path": "<world>/home/Clients/kiln",
+    "key": "<world>/home/clients/kiln",
+    "rel": "kiln",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": null,
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "rust"
+    ],
+    "description": "Firing schedules for a pottery studio's kilns.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "labs",
+    "path": "<world>/home/Clients/labs",
+    "key": "<world>/home/clients/labs",
+    "rel": "labs",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Experiments for clients.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "glaze",
+    "path": "<world>/home/Clients/labs/glaze",
+    "key": "<world>/home/clients/labs/glaze",
+    "rel": "labs/glaze",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/home/clients/labs",
+    "git": {
+     "branch": "main",
+     "origin": null,
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": "Glaze recipes, scaled to the batch.",
+    "modifiedAt": 1791021600000
+   }
+  ],
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 6,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 1,
+   "projects": 4
+  },
+  "folders": [
+   {
+    "rel": "harbor-api",
+    "key": "<world>/home/clients/harbor-api",
+    "path": "<world>/home/Clients/harbor-api",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "go.mod"
+    ],
+    "files": 3,
+    "folders": 0,
+    "kinds": {
+     "md": 1,
+     "go": 1,
+     "mod": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "harbor-app",
+    "key": "<world>/home/clients/harbor-app",
+    "path": "<world>/home/Clients/harbor-app",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "package.json",
+     "tsconfig.json"
+    ],
+    "files": 3,
+    "folders": 1,
+    "kinds": {
+     "json": 2,
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "kiln",
+    "key": "<world>/home/clients/kiln",
+    "path": "<world>/home/Clients/kiln",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "Cargo.toml",
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "toml": 1,
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "labs",
+    "key": "<world>/home/clients/labs",
+    "path": "<world>/home/Clients/labs",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     "README.md"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "labs/glaze",
+    "key": "<world>/home/clients/labs/glaze",
+    "path": "<world>/home/Clients/labs/glaze",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 1,
+    "kinds": {
+     "md": 1,
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "labs/snippets",
+    "key": "<world>/home/clients/labs/snippets",
+    "path": "<world>/home/Clients/labs/snippets",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "README.md",
+     "pyproject.toml"
+    ],
+    "files": 3,
+    "folders": 0,
+    "kinds": {
+     "md": 1,
+     "toml": 1,
+     "py": 1
+    },
+    "sessions": 0
+   }
+  ]
+ },
+ "mixed": {
+  "projects": [
+   {
+    "name": "app",
+    "path": "<world>/trees/mixed/app",
+    "key": "<world>/trees/mixed/app",
+    "rel": "app",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "app-fix",
+    "path": "<world>/trees/mixed/app-fix",
+    "key": "<world>/trees/mixed/app-fix",
+    "rel": "app-fix",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "app-fix",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": "<world>/trees/mixed/app",
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": "fix",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "clients",
+    "path": "<world>/trees/mixed/clients",
+    "key": "<world>/trees/mixed/clients",
+    "rel": "clients",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "shop",
+    "path": "<world>/trees/mixed/clients/shop",
+    "key": "<world>/trees/mixed/clients/shop",
+    "rel": "clients/shop",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "pnpm-workspace.yaml",
+    "parent": "<world>/trees/mixed/clients",
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "site",
+    "path": "<world>/trees/mixed/clients/site",
+    "key": "<world>/trees/mixed/clients/site",
+    "rel": "clients/site",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/clients",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/site.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "d",
+    "path": "<world>/trees/mixed/d",
+    "key": "<world>/trees/mixed/d",
+    "rel": "d",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "deep",
+    "path": "<world>/trees/mixed/deep",
+    "key": "<world>/trees/mixed/deep",
+    "rel": "deep",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "empty",
+    "path": "<world>/trees/mixed/empty",
+    "key": "<world>/trees/mixed/empty",
+    "rel": "empty",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "game",
+    "path": "<world>/trees/mixed/game",
+    "key": "<world>/trees/mixed/game",
+    "rel": "game",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/game.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "art",
+    "path": "<world>/trees/mixed/game/art",
+    "key": "<world>/trees/mixed/game/art",
+    "rel": "game/art",
+    "role": "project",
+    "detected": "submodule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/game",
+    "git": {
+     "branch": "main",
+     "origin": "https://example.com/art.git",
+     "worktreeOf": null,
+     "submoduleOf": "<world>/trees/mixed/game"
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "engine",
+    "path": "<world>/trees/mixed/game/libs/engine",
+    "key": "<world>/trees/mixed/game/libs/engine",
+    "rel": "game/libs/engine",
+    "role": "project",
+    "detected": "submodule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/game",
+    "git": {
+     "branch": "main",
+     "origin": "https://example.com/engine.git",
+     "worktreeOf": null,
+     "submoduleOf": "<world>/trees/mixed/game"
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "hg-tool",
+    "path": "<world>/trees/mixed/hg-tool",
+    "key": "<world>/trees/mixed/hg-tool",
+    "rel": "hg-tool",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".hg",
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "hosts",
+    "path": "<world>/trees/mixed/hosts",
+    "key": "<world>/trees/mixed/hosts",
+    "rel": "hosts",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "jj-tool",
+    "path": "<world>/trees/mixed/jj-tool",
+    "key": "<world>/trees/mixed/jj-tool",
+    "rel": "jj-tool",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".jj",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "rust"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger",
+    "path": "<world>/trees/mixed/ledger",
+    "key": "<world>/trees/mixed/ledger",
+    "rel": "ledger",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "0123456789ab",
+     "origin": "git@example.com:me/ledger.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger-db",
+    "path": "<world>/trees/mixed/ledger-db",
+    "key": "<world>/trees/mixed/ledger-db",
+    "rel": "ledger-db",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [
+     "docker",
+     "supabase"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "make-only",
+    "path": "<world>/trees/mixed/make-only",
+    "key": "<world>/trees/mixed/make-only",
+    "rel": "make-only",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Builds the thing.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "misc",
+    "path": "<world>/trees/mixed/misc",
+    "key": "<world>/trees/mixed/misc",
+    "rel": "misc",
+    "role": "group",
+    "detected": "contains",
+    "marker": "pyproject.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tool-a",
+    "path": "<world>/trees/mixed/misc/tool-a",
+    "key": "<world>/trees/mixed/misc/tool-a",
+    "rel": "misc/tool-a",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/misc",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/tool-a.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tool-b",
+    "path": "<world>/trees/mixed/misc/tool-b",
+    "key": "<world>/trees/mixed/misc/tool-b",
+    "rel": "misc/tool-b",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/misc",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/tool-b.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "mono",
+    "path": "<world>/trees/mixed/mono",
+    "key": "<world>/trees/mixed/mono",
+    "rel": "mono",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/mono.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "notes",
+    "path": "<world>/trees/mixed/notes",
+    "key": "<world>/trees/mixed/notes",
+    "rel": "notes",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "A plain folder of notes and drafts.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "rusty",
+    "path": "<world>/trees/mixed/rusty",
+    "key": "<world>/trees/mixed/rusty",
+    "rel": "rusty",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "Cargo.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "rust"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "studio",
+    "path": "<world>/trees/mixed/studio",
+    "key": "<world>/trees/mixed/studio",
+    "rel": "studio",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "app",
+    "path": "<world>/trees/mixed/studio/app",
+    "key": "<world>/trees/mixed/studio/app",
+    "rel": "studio/app",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/studio",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "The studio booking app",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "web",
+    "path": "<world>/trees/mixed/studio/web",
+    "key": "<world>/trees/mixed/studio/web",
+    "rel": "studio/web",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/studio",
+    "git": {
+     "branch": "feat/zoom",
+     "origin": null,
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "typescript"
+    ],
+    "description": "The web front end, with next.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tooling",
+    "path": "<world>/trees/mixed/tooling",
+    "key": "<world>/trees/mixed/tooling",
+    "rel": "tooling",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "pyproject.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "turbo",
+    "path": "<world>/trees/mixed/turbo",
+    "key": "<world>/trees/mixed/turbo",
+    "rel": "turbo",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "turbo.json",
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   }
+  ],
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 49,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 3,
+   "projects": 25
+  },
+  "folders": [
+   {
+    "rel": "app",
+    "key": "<world>/trees/mixed/app",
+    "path": "<world>/trees/mixed/app",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "app-fix",
+    "key": "<world>/trees/mixed/app-fix",
+    "path": "<world>/trees/mixed/app-fix",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients",
+    "key": "<world>/trees/mixed/clients",
+    "path": "<world>/trees/mixed/clients",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 3,
+    "kinds": {
+     "txt": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop",
+    "key": "<world>/trees/mixed/clients/shop",
+    "path": "<world>/trees/mixed/clients/shop",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "pnpm-workspace.yaml"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "yaml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop/api",
+    "key": "<world>/trees/mixed/clients/shop/api",
+    "path": "<world>/trees/mixed/clients/shop/api",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "go.work"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "work": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop/web",
+    "key": "<world>/trees/mixed/clients/shop/web",
+    "path": "<world>/trees/mixed/clients/shop/web",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/site",
+    "key": "<world>/trees/mixed/clients/site",
+    "path": "<world>/trees/mixed/clients/site",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "clients/tools",
+    "key": "<world>/trees/mixed/clients/tools",
+    "path": "<world>/trees/mixed/clients/tools",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "d",
+    "key": "<world>/trees/mixed/d",
+    "path": "<world>/trees/mixed/d",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 4,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "d/src",
+    "key": "<world>/trees/mixed/d/src",
+    "path": "<world>/trees/mixed/d/src",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "go": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "deep",
+    "key": "<world>/trees/mixed/deep",
+    "path": "<world>/trees/mixed/deep",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "deep/a",
+    "key": "<world>/trees/mixed/deep/a",
+    "path": "<world>/trees/mixed/deep/a",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "deep/a/b",
+    "key": "<world>/trees/mixed/deep/a/b",
+    "path": "<world>/trees/mixed/deep/a/b",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "empty",
+    "key": "<world>/trees/mixed/empty",
+    "path": "<world>/trees/mixed/empty",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game",
+    "key": "<world>/trees/mixed/game",
+    "path": "<world>/trees/mixed/game",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     ".gitmodules"
+    ],
+    "files": 1,
+    "folders": 3,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game/art",
+    "key": "<world>/trees/mixed/game/art",
+    "path": "<world>/trees/mixed/game/art",
+    "repo": true,
+    "call": "project",
+    "why": "submodule",
+    "markers": [
+     ".git"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game/libs/engine",
+    "key": "<world>/trees/mixed/game/libs/engine",
+    "path": "<world>/trees/mixed/game/libs/engine",
+    "repo": true,
+    "call": "project",
+    "why": "submodule",
+    "markers": [
+     ".git"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hg-tool",
+    "key": "<world>/trees/mixed/hg-tool",
+    "path": "<world>/trees/mixed/hg-tool",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".hg"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts",
+    "key": "<world>/trees/mixed/hosts",
+    "path": "<world>/trees/mixed/hosts",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 2,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/github.com",
+    "key": "<world>/trees/mixed/hosts/github.com",
+    "path": "<world>/trees/mixed/hosts/github.com",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/github.com/me",
+    "key": "<world>/trees/mixed/hosts/github.com/me",
+    "path": "<world>/trees/mixed/hosts/github.com/me",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 2,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/gitlab.com",
+    "key": "<world>/trees/mixed/hosts/gitlab.com",
+    "path": "<world>/trees/mixed/hosts/gitlab.com",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/gitlab.com/team",
+    "key": "<world>/trees/mixed/hosts/gitlab.com/team",
+    "path": "<world>/trees/mixed/hosts/gitlab.com/team",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "jj-tool",
+    "key": "<world>/trees/mixed/jj-tool",
+    "path": "<world>/trees/mixed/jj-tool",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".jj",
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger",
+    "key": "<world>/trees/mixed/ledger",
+    "path": "<world>/trees/mixed/ledger",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "pyproject.toml",
+     "requirements.txt"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "toml": 1,
+     "txt": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger-db",
+    "key": "<world>/trees/mixed/ledger-db",
+    "path": "<world>/trees/mixed/ledger-db",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "docker-compose.yml",
+     "supabase"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "yml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger-db/supabase",
+    "key": "<world>/trees/mixed/ledger-db/supabase",
+    "path": "<world>/trees/mixed/ledger-db/supabase",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "make-only",
+    "key": "<world>/trees/mixed/make-only",
+    "path": "<world>/trees/mixed/make-only",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "Makefile",
+     "readme"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc",
+    "key": "<world>/trees/mixed/misc",
+    "path": "<world>/trees/mixed/misc",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 6,
+    "kinds": {
+     "ipynb": 1,
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/examples",
+    "key": "<world>/trees/mixed/misc/examples",
+    "path": "<world>/trees/mixed/misc/examples",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/examples/swift",
+    "key": "<world>/trees/mixed/misc/examples/swift",
+    "path": "<world>/trees/mixed/misc/examples/swift",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Package.swift"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "swift": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/fastapi_demo",
+    "key": "<world>/trees/mixed/misc/fastapi_demo",
+    "path": "<world>/trees/mixed/misc/fastapi_demo",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/payloads",
+    "key": "<world>/trees/mixed/misc/payloads",
+    "path": "<world>/trees/mixed/misc/payloads",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/scratch",
+    "key": "<world>/trees/mixed/misc/scratch",
+    "path": "<world>/trees/mixed/misc/scratch",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/scratch/sub",
+    "key": "<world>/trees/mixed/misc/scratch/sub",
+    "path": "<world>/trees/mixed/misc/scratch/sub",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "py": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/tool-a",
+    "key": "<world>/trees/mixed/misc/tool-a",
+    "path": "<world>/trees/mixed/misc/tool-a",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/tool-b",
+    "key": "<world>/trees/mixed/misc/tool-b",
+    "path": "<world>/trees/mixed/misc/tool-b",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "mono",
+    "key": "<world>/trees/mixed/mono",
+    "path": "<world>/trees/mixed/mono",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "notes",
+    "key": "<world>/trees/mixed/notes",
+    "path": "<world>/trees/mixed/notes",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "README.md"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "notes/drafts",
+    "key": "<world>/trees/mixed/notes/drafts",
+    "path": "<world>/trees/mixed/notes/drafts",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "notes/site",
+    "key": "<world>/trees/mixed/notes/site",
+    "path": "<world>/trees/mixed/notes/site",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "rusty",
+    "key": "<world>/trees/mixed/rusty",
+    "path": "<world>/trees/mixed/rusty",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "rusty/core",
+    "key": "<world>/trees/mixed/rusty/core",
+    "path": "<world>/trees/mixed/rusty/core",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "studio",
+    "key": "<world>/trees/mixed/studio",
+    "path": "<world>/trees/mixed/studio",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "studio/app",
+    "key": "<world>/trees/mixed/studio/app",
+    "path": "<world>/trees/mixed/studio/app",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "studio/web",
+    "key": "<world>/trees/mixed/studio/web",
+    "path": "<world>/trees/mixed/studio/web",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "tsconfig.json"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "md": 1,
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "tooling",
+    "key": "<world>/trees/mixed/tooling",
+    "path": "<world>/trees/mixed/tooling",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "tooling/a",
+    "key": "<world>/trees/mixed/tooling/a",
+    "path": "<world>/trees/mixed/tooling/a",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "turbo",
+    "key": "<world>/trees/mixed/turbo",
+    "path": "<world>/trees/mixed/turbo",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "turbo.json"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "turbo/apps",
+    "key": "<world>/trees/mixed/turbo/apps",
+    "path": "<world>/trees/mixed/turbo/apps",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "turbo/apps/web",
+    "key": "<world>/trees/mixed/turbo/apps/web",
+    "path": "<world>/trees/mixed/turbo/apps/web",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   }
+  ]
+ },
+ "mixedSessions": {
+  "projects": [
+   {
+    "name": "app",
+    "path": "<world>/trees/mixed/app",
+    "key": "<world>/trees/mixed/app",
+    "rel": "app",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "app-fix",
+    "path": "<world>/trees/mixed/app-fix",
+    "key": "<world>/trees/mixed/app-fix",
+    "rel": "app-fix",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "app-fix",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": "<world>/trees/mixed/app",
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": "fix",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "clients",
+    "path": "<world>/trees/mixed/clients",
+    "key": "<world>/trees/mixed/clients",
+    "rel": "clients",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "shop",
+    "path": "<world>/trees/mixed/clients/shop",
+    "key": "<world>/trees/mixed/clients/shop",
+    "rel": "clients/shop",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "pnpm-workspace.yaml",
+    "parent": "<world>/trees/mixed/clients",
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "site",
+    "path": "<world>/trees/mixed/clients/site",
+    "key": "<world>/trees/mixed/clients/site",
+    "rel": "clients/site",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/clients",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/site.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "d",
+    "path": "<world>/trees/mixed/d",
+    "key": "<world>/trees/mixed/d",
+    "rel": "d",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "pkg",
+    "path": "<world>/trees/mixed/d/node_modules/pkg",
+    "key": "<world>/trees/mixed/d/node_modules/pkg",
+    "rel": "d/node_modules/pkg",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/d",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/pkg.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "deep",
+    "path": "<world>/trees/mixed/deep",
+    "key": "<world>/trees/mixed/deep",
+    "rel": "deep",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "repo",
+    "path": "<world>/trees/mixed/deep/a/b/c/repo",
+    "key": "<world>/trees/mixed/deep/a/b/c/repo",
+    "rel": "deep/a/b/c/repo",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/deep",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/repo.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "empty",
+    "path": "<world>/trees/mixed/empty",
+    "key": "<world>/trees/mixed/empty",
+    "rel": "empty",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "game",
+    "path": "<world>/trees/mixed/game",
+    "key": "<world>/trees/mixed/game",
+    "rel": "game",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/game.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "art",
+    "path": "<world>/trees/mixed/game/art",
+    "key": "<world>/trees/mixed/game/art",
+    "rel": "game/art",
+    "role": "project",
+    "detected": "submodule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/game",
+    "git": {
+     "branch": "main",
+     "origin": "https://example.com/art.git",
+     "worktreeOf": null,
+     "submoduleOf": "<world>/trees/mixed/game"
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "engine",
+    "path": "<world>/trees/mixed/game/libs/engine",
+    "key": "<world>/trees/mixed/game/libs/engine",
+    "rel": "game/libs/engine",
+    "role": "project",
+    "detected": "submodule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/game",
+    "git": {
+     "branch": "main",
+     "origin": "https://example.com/engine.git",
+     "worktreeOf": null,
+     "submoduleOf": "<world>/trees/mixed/game"
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "hg-tool",
+    "path": "<world>/trees/mixed/hg-tool",
+    "key": "<world>/trees/mixed/hg-tool",
+    "rel": "hg-tool",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".hg",
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "hosts",
+    "path": "<world>/trees/mixed/hosts",
+    "key": "<world>/trees/mixed/hosts",
+    "rel": "hosts",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "jj-tool",
+    "path": "<world>/trees/mixed/jj-tool",
+    "key": "<world>/trees/mixed/jj-tool",
+    "rel": "jj-tool",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".jj",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "rust"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger",
+    "path": "<world>/trees/mixed/ledger",
+    "key": "<world>/trees/mixed/ledger",
+    "rel": "ledger",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "0123456789ab",
+     "origin": "git@example.com:me/ledger.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger-db",
+    "path": "<world>/trees/mixed/ledger-db",
+    "key": "<world>/trees/mixed/ledger-db",
+    "rel": "ledger-db",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [
+     "docker",
+     "supabase"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "make-only",
+    "path": "<world>/trees/mixed/make-only",
+    "key": "<world>/trees/mixed/make-only",
+    "rel": "make-only",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Builds the thing.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "misc",
+    "path": "<world>/trees/mixed/misc",
+    "key": "<world>/trees/mixed/misc",
+    "rel": "misc",
+    "role": "group",
+    "detected": "contains",
+    "marker": "pyproject.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "fastapi_demo",
+    "path": "<world>/trees/mixed/misc/fastapi_demo",
+    "key": "<world>/trees/mixed/misc/fastapi_demo",
+    "rel": "misc/fastapi_demo",
+    "role": "project",
+    "detected": "sessions",
+    "marker": null,
+    "parent": "<world>/trees/mixed/misc",
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "scratch",
+    "path": "<world>/trees/mixed/misc/scratch",
+    "key": "<world>/trees/mixed/misc/scratch",
+    "rel": "misc/scratch",
+    "role": "project",
+    "detected": "sessions",
+    "marker": null,
+    "parent": "<world>/trees/mixed/misc",
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tool-a",
+    "path": "<world>/trees/mixed/misc/tool-a",
+    "key": "<world>/trees/mixed/misc/tool-a",
+    "rel": "misc/tool-a",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/misc",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/tool-a.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tool-b",
+    "path": "<world>/trees/mixed/misc/tool-b",
+    "key": "<world>/trees/mixed/misc/tool-b",
+    "rel": "misc/tool-b",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/misc",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/tool-b.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "mono",
+    "path": "<world>/trees/mixed/mono",
+    "key": "<world>/trees/mixed/mono",
+    "rel": "mono",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/mono.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "notes",
+    "path": "<world>/trees/mixed/notes",
+    "key": "<world>/trees/mixed/notes",
+    "rel": "notes",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "A plain folder of notes and drafts.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "rusty",
+    "path": "<world>/trees/mixed/rusty",
+    "key": "<world>/trees/mixed/rusty",
+    "rel": "rusty",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "Cargo.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "rust"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "studio",
+    "path": "<world>/trees/mixed/studio",
+    "key": "<world>/trees/mixed/studio",
+    "rel": "studio",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "app",
+    "path": "<world>/trees/mixed/studio/app",
+    "key": "<world>/trees/mixed/studio/app",
+    "rel": "studio/app",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/studio",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "The studio booking app",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "web",
+    "path": "<world>/trees/mixed/studio/web",
+    "key": "<world>/trees/mixed/studio/web",
+    "rel": "studio/web",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/studio",
+    "git": {
+     "branch": "feat/zoom",
+     "origin": null,
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "typescript"
+    ],
+    "description": "The web front end, with next.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tooling",
+    "path": "<world>/trees/mixed/tooling",
+    "key": "<world>/trees/mixed/tooling",
+    "rel": "tooling",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "pyproject.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "turbo",
+    "path": "<world>/trees/mixed/turbo",
+    "key": "<world>/trees/mixed/turbo",
+    "rel": "turbo",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "turbo.json",
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   }
+  ],
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 49,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 5,
+   "projects": 27
+  },
+  "folders": [
+   {
+    "rel": "app",
+    "key": "<world>/trees/mixed/app",
+    "path": "<world>/trees/mixed/app",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "app-fix",
+    "key": "<world>/trees/mixed/app-fix",
+    "path": "<world>/trees/mixed/app-fix",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients",
+    "key": "<world>/trees/mixed/clients",
+    "path": "<world>/trees/mixed/clients",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 3,
+    "kinds": {
+     "txt": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "clients/shop",
+    "key": "<world>/trees/mixed/clients/shop",
+    "path": "<world>/trees/mixed/clients/shop",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "pnpm-workspace.yaml"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "yaml": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "clients/shop/api",
+    "key": "<world>/trees/mixed/clients/shop/api",
+    "path": "<world>/trees/mixed/clients/shop/api",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "go.work"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "work": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop/web",
+    "key": "<world>/trees/mixed/clients/shop/web",
+    "path": "<world>/trees/mixed/clients/shop/web",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "clients/site",
+    "key": "<world>/trees/mixed/clients/site",
+    "path": "<world>/trees/mixed/clients/site",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "clients/tools",
+    "key": "<world>/trees/mixed/clients/tools",
+    "path": "<world>/trees/mixed/clients/tools",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "d",
+    "key": "<world>/trees/mixed/d",
+    "path": "<world>/trees/mixed/d",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 0,
+    "folders": 4,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "d/node_modules/pkg",
+    "key": "<world>/trees/mixed/d/node_modules/pkg",
+    "path": "<world>/trees/mixed/d/node_modules/pkg",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "d/src",
+    "key": "<world>/trees/mixed/d/src",
+    "path": "<world>/trees/mixed/d/src",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "go": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "deep",
+    "key": "<world>/trees/mixed/deep",
+    "path": "<world>/trees/mixed/deep",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "deep/a",
+    "key": "<world>/trees/mixed/deep/a",
+    "path": "<world>/trees/mixed/deep/a",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "deep/a/b",
+    "key": "<world>/trees/mixed/deep/a/b",
+    "path": "<world>/trees/mixed/deep/a/b",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "deep/a/b/c/repo",
+    "key": "<world>/trees/mixed/deep/a/b/c/repo",
+    "path": "<world>/trees/mixed/deep/a/b/c/repo",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "empty",
+    "key": "<world>/trees/mixed/empty",
+    "path": "<world>/trees/mixed/empty",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game",
+    "key": "<world>/trees/mixed/game",
+    "path": "<world>/trees/mixed/game",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     ".gitmodules"
+    ],
+    "files": 1,
+    "folders": 3,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game/art",
+    "key": "<world>/trees/mixed/game/art",
+    "path": "<world>/trees/mixed/game/art",
+    "repo": true,
+    "call": "project",
+    "why": "submodule",
+    "markers": [
+     ".git"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game/libs/engine",
+    "key": "<world>/trees/mixed/game/libs/engine",
+    "path": "<world>/trees/mixed/game/libs/engine",
+    "repo": true,
+    "call": "project",
+    "why": "submodule",
+    "markers": [
+     ".git"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hg-tool",
+    "key": "<world>/trees/mixed/hg-tool",
+    "path": "<world>/trees/mixed/hg-tool",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".hg"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts",
+    "key": "<world>/trees/mixed/hosts",
+    "path": "<world>/trees/mixed/hosts",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 2,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "hosts/github.com",
+    "key": "<world>/trees/mixed/hosts/github.com",
+    "path": "<world>/trees/mixed/hosts/github.com",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "hosts/github.com/me",
+    "key": "<world>/trees/mixed/hosts/github.com/me",
+    "path": "<world>/trees/mixed/hosts/github.com/me",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 2,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "hosts/gitlab.com",
+    "key": "<world>/trees/mixed/hosts/gitlab.com",
+    "path": "<world>/trees/mixed/hosts/gitlab.com",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/gitlab.com/team",
+    "key": "<world>/trees/mixed/hosts/gitlab.com/team",
+    "path": "<world>/trees/mixed/hosts/gitlab.com/team",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "jj-tool",
+    "key": "<world>/trees/mixed/jj-tool",
+    "path": "<world>/trees/mixed/jj-tool",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".jj",
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger",
+    "key": "<world>/trees/mixed/ledger",
+    "path": "<world>/trees/mixed/ledger",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "pyproject.toml",
+     "requirements.txt"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "toml": 1,
+     "txt": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger-db",
+    "key": "<world>/trees/mixed/ledger-db",
+    "path": "<world>/trees/mixed/ledger-db",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "docker-compose.yml",
+     "supabase"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "yml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger-db/supabase",
+    "key": "<world>/trees/mixed/ledger-db/supabase",
+    "path": "<world>/trees/mixed/ledger-db/supabase",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "make-only",
+    "key": "<world>/trees/mixed/make-only",
+    "path": "<world>/trees/mixed/make-only",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "Makefile",
+     "readme"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc",
+    "key": "<world>/trees/mixed/misc",
+    "path": "<world>/trees/mixed/misc",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 6,
+    "kinds": {
+     "ipynb": 1,
+     "toml": 1
+    },
+    "sessions": 4
+   },
+   {
+    "rel": "misc/examples",
+    "key": "<world>/trees/mixed/misc/examples",
+    "path": "<world>/trees/mixed/misc/examples",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/examples/swift",
+    "key": "<world>/trees/mixed/misc/examples/swift",
+    "path": "<world>/trees/mixed/misc/examples/swift",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Package.swift"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "swift": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/fastapi_demo",
+    "key": "<world>/trees/mixed/misc/fastapi_demo",
+    "path": "<world>/trees/mixed/misc/fastapi_demo",
+    "repo": false,
+    "call": "project",
+    "why": "sessions",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "misc/payloads",
+    "key": "<world>/trees/mixed/misc/payloads",
+    "path": "<world>/trees/mixed/misc/payloads",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/scratch",
+    "key": "<world>/trees/mixed/misc/scratch",
+    "path": "<world>/trees/mixed/misc/scratch",
+    "repo": false,
+    "call": "project",
+    "why": "sessions",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 2
+   },
+   {
+    "rel": "misc/scratch/sub",
+    "key": "<world>/trees/mixed/misc/scratch/sub",
+    "path": "<world>/trees/mixed/misc/scratch/sub",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "py": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "misc/tool-a",
+    "key": "<world>/trees/mixed/misc/tool-a",
+    "path": "<world>/trees/mixed/misc/tool-a",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/tool-b",
+    "key": "<world>/trees/mixed/misc/tool-b",
+    "path": "<world>/trees/mixed/misc/tool-b",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "mono",
+    "key": "<world>/trees/mixed/mono",
+    "path": "<world>/trees/mixed/mono",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "notes",
+    "key": "<world>/trees/mixed/notes",
+    "path": "<world>/trees/mixed/notes",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "README.md"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "notes/drafts",
+    "key": "<world>/trees/mixed/notes/drafts",
+    "path": "<world>/trees/mixed/notes/drafts",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "notes/site",
+    "key": "<world>/trees/mixed/notes/site",
+    "path": "<world>/trees/mixed/notes/site",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "rusty",
+    "key": "<world>/trees/mixed/rusty",
+    "path": "<world>/trees/mixed/rusty",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "rusty/core",
+    "key": "<world>/trees/mixed/rusty/core",
+    "path": "<world>/trees/mixed/rusty/core",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "studio",
+    "key": "<world>/trees/mixed/studio",
+    "path": "<world>/trees/mixed/studio",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 2
+   },
+   {
+    "rel": "studio/app",
+    "key": "<world>/trees/mixed/studio/app",
+    "path": "<world>/trees/mixed/studio/app",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "studio/web",
+    "key": "<world>/trees/mixed/studio/web",
+    "path": "<world>/trees/mixed/studio/web",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md",
+     "tsconfig.json"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "md": 1,
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "tooling",
+    "key": "<world>/trees/mixed/tooling",
+    "path": "<world>/trees/mixed/tooling",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "tooling/a",
+    "key": "<world>/trees/mixed/tooling/a",
+    "path": "<world>/trees/mixed/tooling/a",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "turbo",
+    "key": "<world>/trees/mixed/turbo",
+    "path": "<world>/trees/mixed/turbo",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "turbo.json"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "turbo/apps",
+    "key": "<world>/trees/mixed/turbo/apps",
+    "path": "<world>/trees/mixed/turbo/apps",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "turbo/apps/web",
+    "key": "<world>/trees/mixed/turbo/apps/web",
+    "path": "<world>/trees/mixed/turbo/apps/web",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   }
+  ]
+ },
+ "mixedRules": {
+  "projects": [
+   {
+    "name": "app",
+    "path": "<world>/trees/mixed/app",
+    "key": "<world>/trees/mixed/app",
+    "rel": "app",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "app-fix",
+    "path": "<world>/trees/mixed/app-fix",
+    "key": "<world>/trees/mixed/app-fix",
+    "rel": "app-fix",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "app-fix",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": "<world>/trees/mixed/app",
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": "fix",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "clients",
+    "path": "<world>/trees/mixed/clients",
+    "key": "<world>/trees/mixed/clients",
+    "rel": "clients",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "shop",
+    "path": "<world>/trees/mixed/clients/shop",
+    "key": "<world>/trees/mixed/clients/shop",
+    "rel": "clients/shop",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "pnpm-workspace.yaml",
+    "parent": "<world>/trees/mixed/clients",
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "site",
+    "path": "<world>/trees/mixed/clients/site",
+    "key": "<world>/trees/mixed/clients/site",
+    "rel": "clients/site",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/clients",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/site.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "deep",
+    "path": "<world>/trees/mixed/deep",
+    "key": "<world>/trees/mixed/deep",
+    "rel": "deep",
+    "role": "group",
+    "detected": "contains",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "c",
+    "path": "<world>/trees/mixed/deep/a/b/c",
+    "key": "<world>/trees/mixed/deep/a/b/c",
+    "rel": "deep/a/b/c",
+    "role": "project",
+    "detected": "rule",
+    "marker": null,
+    "parent": "<world>/trees/mixed/deep",
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "empty",
+    "path": "<world>/trees/mixed/empty",
+    "key": "<world>/trees/mixed/empty",
+    "rel": "empty",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "game",
+    "path": "<world>/trees/mixed/game",
+    "key": "<world>/trees/mixed/game",
+    "rel": "game",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/game.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "art",
+    "path": "<world>/trees/mixed/game/art",
+    "key": "<world>/trees/mixed/game/art",
+    "rel": "game/art",
+    "role": "project",
+    "detected": "submodule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/game",
+    "git": {
+     "branch": "main",
+     "origin": "https://example.com/art.git",
+     "worktreeOf": null,
+     "submoduleOf": "<world>/trees/mixed/game"
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "engine",
+    "path": "<world>/trees/mixed/game/libs/engine",
+    "key": "<world>/trees/mixed/game/libs/engine",
+    "rel": "game/libs/engine",
+    "role": "project",
+    "detected": "submodule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/game",
+    "git": {
+     "branch": "main",
+     "origin": "https://example.com/engine.git",
+     "worktreeOf": null,
+     "submoduleOf": "<world>/trees/mixed/game"
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "hg-tool",
+    "path": "<world>/trees/mixed/hg-tool",
+    "key": "<world>/trees/mixed/hg-tool",
+    "rel": "hg-tool",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".hg",
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "hosts",
+    "path": "<world>/trees/mixed/hosts",
+    "key": "<world>/trees/mixed/hosts",
+    "rel": "hosts",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "jj-tool",
+    "path": "<world>/trees/mixed/jj-tool",
+    "key": "<world>/trees/mixed/jj-tool",
+    "rel": "jj-tool",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".jj",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "rust"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger",
+    "path": "<world>/trees/mixed/ledger",
+    "key": "<world>/trees/mixed/ledger",
+    "rel": "ledger",
+    "role": "group",
+    "detected": "rule",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "0123456789ab",
+     "origin": "git@example.com:me/ledger.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "ledger-db",
+    "path": "<world>/trees/mixed/ledger-db",
+    "key": "<world>/trees/mixed/ledger-db",
+    "rel": "ledger-db",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [
+     "docker",
+     "supabase"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "make-only",
+    "path": "<world>/trees/mixed/make-only",
+    "key": "<world>/trees/mixed/make-only",
+    "rel": "make-only",
+    "role": "project",
+    "detected": "folder",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "Builds the thing.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "misc",
+    "path": "<world>/trees/mixed/misc",
+    "key": "<world>/trees/mixed/misc",
+    "rel": "misc",
+    "role": "group",
+    "detected": "contains",
+    "marker": "pyproject.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "payloads",
+    "path": "<world>/trees/mixed/misc/payloads",
+    "key": "<world>/trees/mixed/misc/payloads",
+    "rel": "misc/payloads",
+    "role": "project",
+    "detected": "rule",
+    "marker": null,
+    "parent": "<world>/trees/mixed/misc",
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tool-b",
+    "path": "<world>/trees/mixed/misc/tool-b",
+    "key": "<world>/trees/mixed/misc/tool-b",
+    "rel": "misc/tool-b",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/misc",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/tool-b.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "mono",
+    "path": "<world>/trees/mixed/mono",
+    "key": "<world>/trees/mixed/mono",
+    "rel": "mono",
+    "role": "project",
+    "detected": "repo",
+    "marker": ".git",
+    "parent": null,
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/mono.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "notes",
+    "path": "<world>/trees/mixed/notes",
+    "key": "<world>/trees/mixed/notes",
+    "rel": "notes",
+    "role": "group",
+    "detected": "rule",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": "A plain folder of notes and drafts.",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "rusty",
+    "path": "<world>/trees/mixed/rusty",
+    "key": "<world>/trees/mixed/rusty",
+    "rel": "rusty",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "Cargo.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "rust"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "studio",
+    "path": "<world>/trees/mixed/studio",
+    "key": "<world>/trees/mixed/studio",
+    "rel": "studio",
+    "role": "project",
+    "detected": "rule",
+    "marker": null,
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "app",
+    "path": "<world>/trees/mixed/studio/app",
+    "key": "<world>/trees/mixed/studio/app",
+    "rel": "studio/app",
+    "role": "project",
+    "detected": "rule",
+    "marker": ".git",
+    "parent": "<world>/trees/mixed/studio",
+    "git": {
+     "branch": "main",
+     "origin": "git@example.com:me/app.git",
+     "worktreeOf": null,
+     "submoduleOf": null
+    },
+    "stack": [
+     "node"
+    ],
+    "description": "The studio booking app",
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "tooling",
+    "path": "<world>/trees/mixed/tooling",
+    "key": "<world>/trees/mixed/tooling",
+    "rel": "tooling",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "pyproject.toml",
+    "parent": null,
+    "git": null,
+    "stack": [
+     "python"
+    ],
+    "description": null,
+    "modifiedAt": 1791021600000
+   },
+   {
+    "name": "turbo",
+    "path": "<world>/trees/mixed/turbo",
+    "key": "<world>/trees/mixed/turbo",
+    "rel": "turbo",
+    "role": "project",
+    "detected": "workspace",
+    "marker": "turbo.json",
+    "parent": null,
+    "git": null,
+    "stack": [],
+    "description": null,
+    "modifiedAt": 1791021600000
+   }
+  ],
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 46,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 5,
+   "projects": 22
+  },
+  "folders": [
+   {
+    "rel": "app",
+    "key": "<world>/trees/mixed/app",
+    "path": "<world>/trees/mixed/app",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "app-fix",
+    "key": "<world>/trees/mixed/app-fix",
+    "path": "<world>/trees/mixed/app-fix",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "README.md"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients",
+    "key": "<world>/trees/mixed/clients",
+    "path": "<world>/trees/mixed/clients",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 3,
+    "kinds": {
+     "txt": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop",
+    "key": "<world>/trees/mixed/clients/shop",
+    "path": "<world>/trees/mixed/clients/shop",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "pnpm-workspace.yaml"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "yaml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop/api",
+    "key": "<world>/trees/mixed/clients/shop/api",
+    "path": "<world>/trees/mixed/clients/shop/api",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "go.work"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "work": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/shop/web",
+    "key": "<world>/trees/mixed/clients/shop/web",
+    "path": "<world>/trees/mixed/clients/shop/web",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "clients/site",
+    "key": "<world>/trees/mixed/clients/site",
+    "path": "<world>/trees/mixed/clients/site",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "clients/tools",
+    "key": "<world>/trees/mixed/clients/tools",
+    "path": "<world>/trees/mixed/clients/tools",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "deep",
+    "key": "<world>/trees/mixed/deep",
+    "path": "<world>/trees/mixed/deep",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "deep/a",
+    "key": "<world>/trees/mixed/deep/a",
+    "path": "<world>/trees/mixed/deep/a",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "deep/a/b",
+    "key": "<world>/trees/mixed/deep/a/b",
+    "path": "<world>/trees/mixed/deep/a/b",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "deep/a/b/c",
+    "key": "<world>/trees/mixed/deep/a/b/c",
+    "path": "<world>/trees/mixed/deep/a/b/c",
+    "repo": false,
+    "call": "project",
+    "why": "rule",
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "empty",
+    "key": "<world>/trees/mixed/empty",
+    "path": "<world>/trees/mixed/empty",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game",
+    "key": "<world>/trees/mixed/game",
+    "path": "<world>/trees/mixed/game",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     ".gitmodules"
+    ],
+    "files": 1,
+    "folders": 3,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game/art",
+    "key": "<world>/trees/mixed/game/art",
+    "path": "<world>/trees/mixed/game/art",
+    "repo": true,
+    "call": "project",
+    "why": "submodule",
+    "markers": [
+     ".git"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "game/libs/engine",
+    "key": "<world>/trees/mixed/game/libs/engine",
+    "path": "<world>/trees/mixed/game/libs/engine",
+    "repo": true,
+    "call": "project",
+    "why": "submodule",
+    "markers": [
+     ".git"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hg-tool",
+    "key": "<world>/trees/mixed/hg-tool",
+    "path": "<world>/trees/mixed/hg-tool",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".hg"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts",
+    "key": "<world>/trees/mixed/hosts",
+    "path": "<world>/trees/mixed/hosts",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [],
+    "files": 0,
+    "folders": 2,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/github.com",
+    "key": "<world>/trees/mixed/hosts/github.com",
+    "path": "<world>/trees/mixed/hosts/github.com",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/github.com/me",
+    "key": "<world>/trees/mixed/hosts/github.com/me",
+    "path": "<world>/trees/mixed/hosts/github.com/me",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 2,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/gitlab.com",
+    "key": "<world>/trees/mixed/hosts/gitlab.com",
+    "path": "<world>/trees/mixed/hosts/gitlab.com",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "hosts/gitlab.com/team",
+    "key": "<world>/trees/mixed/hosts/gitlab.com/team",
+    "path": "<world>/trees/mixed/hosts/gitlab.com/team",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "jj-tool",
+    "key": "<world>/trees/mixed/jj-tool",
+    "path": "<world>/trees/mixed/jj-tool",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".jj",
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger",
+    "key": "<world>/trees/mixed/ledger",
+    "path": "<world>/trees/mixed/ledger",
+    "repo": true,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     ".git",
+     "pyproject.toml",
+     "requirements.txt"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {
+     "toml": 1,
+     "txt": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "ledger-db",
+    "key": "<world>/trees/mixed/ledger-db",
+    "path": "<world>/trees/mixed/ledger-db",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "docker-compose.yml",
+     "supabase"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "yml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "ledger-db/supabase",
+    "key": "<world>/trees/mixed/ledger-db/supabase",
+    "path": "<world>/trees/mixed/ledger-db/supabase",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "make-only",
+    "key": "<world>/trees/mixed/make-only",
+    "path": "<world>/trees/mixed/make-only",
+    "repo": false,
+    "call": "project",
+    "why": "folder",
+    "markers": [
+     "Makefile",
+     "readme"
+    ],
+    "files": 2,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc",
+    "key": "<world>/trees/mixed/misc",
+    "path": "<world>/trees/mixed/misc",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 2,
+    "folders": 6,
+    "kinds": {
+     "ipynb": 1,
+     "toml": 1
+    },
+    "sessions": 1
+   },
+   {
+    "rel": "misc/examples",
+    "key": "<world>/trees/mixed/misc/examples",
+    "path": "<world>/trees/mixed/misc/examples",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/examples/swift",
+    "key": "<world>/trees/mixed/misc/examples/swift",
+    "path": "<world>/trees/mixed/misc/examples/swift",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Package.swift"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "swift": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/fastapi_demo",
+    "key": "<world>/trees/mixed/misc/fastapi_demo",
+    "path": "<world>/trees/mixed/misc/fastapi_demo",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/payloads",
+    "key": "<world>/trees/mixed/misc/payloads",
+    "path": "<world>/trees/mixed/misc/payloads",
+    "repo": false,
+    "call": "project",
+    "why": "rule",
+    "markers": [],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 1
+   },
+   {
+    "rel": "misc/scratch",
+    "key": "<world>/trees/mixed/misc/scratch",
+    "path": "<world>/trees/mixed/misc/scratch",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "misc/scratch/sub",
+    "key": "<world>/trees/mixed/misc/scratch/sub",
+    "path": "<world>/trees/mixed/misc/scratch/sub",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "py": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "misc/tool-b",
+    "key": "<world>/trees/mixed/misc/tool-b",
+    "path": "<world>/trees/mixed/misc/tool-b",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git"
+    ],
+    "files": 0,
+    "folders": 0,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "mono",
+    "key": "<world>/trees/mixed/mono",
+    "path": "<world>/trees/mixed/mono",
+    "repo": true,
+    "call": "project",
+    "why": "repo",
+    "markers": [
+     ".git",
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "notes",
+    "key": "<world>/trees/mixed/notes",
+    "path": "<world>/trees/mixed/notes",
+    "repo": false,
+    "call": "group",
+    "why": "contains",
+    "markers": [
+     "README.md"
+    ],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "notes/drafts",
+    "key": "<world>/trees/mixed/notes/drafts",
+    "path": "<world>/trees/mixed/notes/drafts",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "notes/site",
+    "key": "<world>/trees/mixed/notes/site",
+    "path": "<world>/trees/mixed/notes/site",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "rusty",
+    "key": "<world>/trees/mixed/rusty",
+    "path": "<world>/trees/mixed/rusty",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "rusty/core",
+    "key": "<world>/trees/mixed/rusty/core",
+    "path": "<world>/trees/mixed/rusty/core",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "Cargo.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "studio",
+    "key": "<world>/trees/mixed/studio",
+    "path": "<world>/trees/mixed/studio",
+    "repo": false,
+    "call": "project",
+    "why": "rule",
+    "markers": [],
+    "files": 1,
+    "folders": 2,
+    "kinds": {
+     "md": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "studio/app",
+    "key": "<world>/trees/mixed/studio/app",
+    "path": "<world>/trees/mixed/studio/app",
+    "repo": true,
+    "call": "project",
+    "why": "rule",
+    "markers": [
+     ".git",
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "tooling",
+    "key": "<world>/trees/mixed/tooling",
+    "path": "<world>/trees/mixed/tooling",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "tooling/a",
+    "key": "<world>/trees/mixed/tooling/a",
+    "path": "<world>/trees/mixed/tooling/a",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "pyproject.toml"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "toml": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "turbo",
+    "key": "<world>/trees/mixed/turbo",
+    "path": "<world>/trees/mixed/turbo",
+    "repo": false,
+    "call": "project",
+    "why": "workspace",
+    "markers": [
+     "turbo.json"
+    ],
+    "files": 1,
+    "folders": 1,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   },
+   {
+    "rel": "turbo/apps",
+    "key": "<world>/trees/mixed/turbo/apps",
+    "path": "<world>/trees/mixed/turbo/apps",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [],
+    "files": 0,
+    "folders": 1,
+    "kinds": {},
+    "sessions": 0
+   },
+   {
+    "rel": "turbo/apps/web",
+    "key": "<world>/trees/mixed/turbo/apps/web",
+    "path": "<world>/trees/mixed/turbo/apps/web",
+    "repo": false,
+    "call": "folder",
+    "why": null,
+    "markers": [
+     "package.json"
+    ],
+    "files": 1,
+    "folders": 0,
+    "kinds": {
+     "json": 1
+    },
+    "sessions": 0
+   }
+  ]
+ },
+ "mixedDepth1": {
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 20,
+   "truncated": false,
+   "depth": 1,
+   "maxDirs": 2000,
+   "groups": 1,
+   "projects": 22
+  },
+  "projects": [
+   "app project:repo [.git]",
+   "app-fix project:repo [.git]",
+   "clients project:folder",
+   "d project:folder",
+   "deep group:contains",
+   "deep/a/b/c/repo project:repo [.git] in deep",
+   "empty project:folder",
+   "game project:repo [.git]",
+   "game/art project:submodule [.git] in game",
+   "game/libs/engine project:submodule [.git] in game",
+   "hg-tool project:repo [.hg]",
+   "hosts project:folder",
+   "jj-tool project:repo [.jj]",
+   "ledger project:repo [.git]",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc project:workspace [pyproject.toml]",
+   "mono project:repo [.git]",
+   "notes project:folder",
+   "rusty project:workspace [Cargo.toml]",
+   "studio project:folder",
+   "tooling project:workspace [pyproject.toml]",
+   "turbo project:workspace [turbo.json]"
+  ],
+  "folders": [
+   "app project:repo repo",
+   "app-fix project:repo repo",
+   "clients project:folder",
+   "d project:folder",
+   "deep group:contains 1 sessions",
+   "deep/a/b/c/repo project:repo repo 1 sessions",
+   "empty project:folder",
+   "game project:repo repo",
+   "game/art project:submodule repo",
+   "game/libs/engine project:submodule repo",
+   "hg-tool project:repo repo",
+   "hosts project:folder",
+   "jj-tool project:repo repo",
+   "ledger project:repo repo",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc project:workspace",
+   "mono project:repo repo",
+   "notes project:folder",
+   "rusty project:workspace",
+   "studio project:folder",
+   "tooling project:workspace",
+   "turbo project:workspace"
+  ]
+ },
+ "mixedDepth2": {
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 41,
+   "truncated": false,
+   "depth": 2,
+   "maxDirs": 2000,
+   "groups": 4,
+   "projects": 25
+  },
+  "projects": [
+   "app project:repo [.git]",
+   "app-fix project:repo [.git]",
+   "clients group:contains",
+   "clients/shop project:workspace [pnpm-workspace.yaml] in clients",
+   "clients/site project:repo [.git] in clients",
+   "d project:folder",
+   "deep group:contains",
+   "deep/a/b/c/repo project:repo [.git] in deep",
+   "empty project:folder",
+   "game project:repo [.git]",
+   "game/art project:submodule [.git] in game",
+   "game/libs/engine project:submodule [.git] in game",
+   "hg-tool project:repo [.hg]",
+   "hosts project:folder",
+   "jj-tool project:repo [.jj]",
+   "ledger project:repo [.git]",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc group:contains [pyproject.toml]",
+   "misc/tool-a project:repo [.git] in misc",
+   "misc/tool-b project:repo [.git] in misc",
+   "mono project:repo [.git]",
+   "notes project:folder",
+   "rusty project:workspace [Cargo.toml]",
+   "studio group:contains",
+   "studio/app project:repo [.git] in studio",
+   "studio/web project:repo [.git] in studio",
+   "tooling project:workspace [pyproject.toml]",
+   "turbo project:workspace [turbo.json]"
+  ],
+  "folders": [
+   "app project:repo repo",
+   "app-fix project:repo repo",
+   "clients group:contains",
+   "clients/shop project:workspace",
+   "clients/site project:repo repo",
+   "clients/tools folder",
+   "d project:folder",
+   "d/src folder",
+   "deep group:contains 1 sessions",
+   "deep/a group:contains 1 sessions",
+   "deep/a/b/c/repo project:repo repo 1 sessions",
+   "empty project:folder",
+   "game project:repo repo",
+   "game/art project:submodule repo",
+   "game/libs/engine project:submodule repo",
+   "hg-tool project:repo repo",
+   "hosts project:folder",
+   "hosts/github.com folder",
+   "hosts/gitlab.com folder",
+   "jj-tool project:repo repo",
+   "ledger project:repo repo",
+   "ledger-db project:folder",
+   "ledger-db/supabase folder",
+   "make-only project:folder",
+   "misc group:contains",
+   "misc/examples folder",
+   "misc/fastapi_demo folder",
+   "misc/payloads folder",
+   "misc/scratch folder",
+   "misc/tool-a project:repo repo",
+   "misc/tool-b project:repo repo",
+   "mono project:repo repo",
+   "notes project:folder",
+   "notes/drafts folder",
+   "notes/site folder",
+   "rusty project:workspace",
+   "rusty/core folder",
+   "studio group:contains",
+   "studio/app project:repo repo",
+   "studio/web project:repo repo",
+   "tooling project:workspace",
+   "tooling/a folder",
+   "turbo project:workspace",
+   "turbo/apps folder"
+  ]
+ },
+ "mixedDepth4": {
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 54,
+   "truncated": false,
+   "depth": 4,
+   "maxDirs": 2000,
+   "groups": 6,
+   "projects": 27
+  },
+  "projects": [
+   "app project:repo [.git]",
+   "app-fix project:repo [.git]",
+   "clients group:contains",
+   "clients/shop project:workspace [pnpm-workspace.yaml] in clients",
+   "clients/site project:repo [.git] in clients",
+   "d project:folder",
+   "deep group:contains",
+   "deep/a/b/c/repo project:repo [.git] in deep",
+   "empty project:folder",
+   "game project:repo [.git]",
+   "game/art project:submodule [.git] in game",
+   "game/libs/engine project:submodule [.git] in game",
+   "hg-tool project:repo [.hg]",
+   "hosts group:contains",
+   "hosts/github.com/me group:contains in hosts",
+   "hosts/github.com/me/other project:repo [.git] in hosts/github.com/me",
+   "hosts/github.com/me/tool project:repo [.git] in hosts/github.com/me",
+   "hosts/gitlab.com/team/svc project:repo [.git] in hosts",
+   "jj-tool project:repo [.jj]",
+   "ledger project:repo [.git]",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc group:contains [pyproject.toml]",
+   "misc/tool-a project:repo [.git] in misc",
+   "misc/tool-b project:repo [.git] in misc",
+   "mono project:repo [.git]",
+   "notes project:folder",
+   "rusty project:workspace [Cargo.toml]",
+   "studio group:contains",
+   "studio/app project:repo [.git] in studio",
+   "studio/web project:repo [.git] in studio",
+   "tooling project:workspace [pyproject.toml]",
+   "turbo project:workspace [turbo.json]"
+  ],
+  "folders": [
+   "app project:repo repo",
+   "app-fix project:repo repo",
+   "clients group:contains",
+   "clients/shop project:workspace",
+   "clients/shop/api folder",
+   "clients/shop/api/main folder",
+   "clients/shop/web folder",
+   "clients/site project:repo repo",
+   "clients/tools folder",
+   "d project:folder",
+   "d/src folder",
+   "deep group:contains 1 sessions",
+   "deep/a group:contains 1 sessions",
+   "deep/a/b group:contains 1 sessions",
+   "deep/a/b/c group:contains 1 sessions",
+   "deep/a/b/c/repo project:repo repo 1 sessions",
+   "empty project:folder",
+   "game project:repo repo",
+   "game/art project:submodule repo",
+   "game/libs/engine project:submodule repo",
+   "hg-tool project:repo repo",
+   "hosts group:contains",
+   "hosts/github.com group:contains",
+   "hosts/github.com/me group:contains",
+   "hosts/github.com/me/other project:repo repo",
+   "hosts/github.com/me/tool project:repo repo",
+   "hosts/gitlab.com group:contains",
+   "hosts/gitlab.com/team group:contains",
+   "hosts/gitlab.com/team/svc project:repo repo",
+   "jj-tool project:repo repo",
+   "ledger project:repo repo",
+   "ledger-db project:folder",
+   "ledger-db/supabase folder",
+   "make-only project:folder",
+   "misc group:contains",
+   "misc/examples folder",
+   "misc/examples/swift folder",
+   "misc/fastapi_demo folder",
+   "misc/payloads folder",
+   "misc/scratch folder",
+   "misc/scratch/sub folder",
+   "misc/tool-a project:repo repo",
+   "misc/tool-b project:repo repo",
+   "mono project:repo repo",
+   "notes project:folder",
+   "notes/drafts folder",
+   "notes/site folder",
+   "rusty project:workspace",
+   "rusty/core folder",
+   "studio group:contains",
+   "studio/app project:repo repo",
+   "studio/web project:repo repo",
+   "tooling project:workspace",
+   "tooling/a folder",
+   "turbo project:workspace",
+   "turbo/apps folder",
+   "turbo/apps/web folder"
+  ]
+ },
+ "mixedBudget": {
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 20,
+   "truncated": true,
+   "depth": 3,
+   "maxDirs": 20,
+   "groups": 0,
+   "projects": 22
+  },
+  "projects": [
+   "app project:repo [.git]",
+   "app-fix project:repo [.git]",
+   "clients project:folder",
+   "d project:folder",
+   "deep project:folder",
+   "empty project:folder",
+   "game project:repo [.git]",
+   "game/art project:submodule [.git] in game",
+   "game/libs/engine project:submodule [.git] in game",
+   "hg-tool project:repo [.hg]",
+   "hosts project:folder",
+   "jj-tool project:repo [.jj]",
+   "ledger project:repo [.git]",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc project:workspace [pyproject.toml]",
+   "mono project:repo [.git]",
+   "notes project:folder",
+   "rusty project:workspace [Cargo.toml]",
+   "studio project:folder",
+   "tooling project:workspace [pyproject.toml]",
+   "turbo project:workspace [turbo.json]"
+  ],
+  "folders": [
+   "app project:repo repo",
+   "app-fix project:repo repo",
+   "clients project:folder",
+   "d project:folder",
+   "deep project:folder",
+   "empty project:folder",
+   "game project:repo repo",
+   "game/art project:submodule repo",
+   "game/libs/engine project:submodule repo",
+   "hg-tool project:repo repo",
+   "hosts project:folder",
+   "jj-tool project:repo repo",
+   "ledger project:repo repo",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc project:workspace",
+   "mono project:repo repo",
+   "notes project:folder",
+   "rusty project:workspace",
+   "studio project:folder",
+   "tooling project:workspace",
+   "turbo project:workspace"
+  ]
+ },
+ "mixedSubmodules": {
+  "scan": {
+   "ok": true,
+   "at": 1791028830000,
+   "ms": 0,
+   "dirsRead": 49,
+   "truncated": false,
+   "depth": 3,
+   "maxDirs": 2000,
+   "groups": 3,
+   "projects": 24
+  },
+  "projects": [
+   "app project:repo [.git]",
+   "app-fix project:repo [.git]",
+   "clients group:contains",
+   "clients/shop project:workspace [pnpm-workspace.yaml] in clients",
+   "clients/site project:repo [.git] in clients",
+   "d project:folder",
+   "deep project:folder",
+   "empty project:folder",
+   "game project:repo [.git]",
+   "game/libs/engine project:submodule [.git] in game",
+   "hg-tool project:repo [.hg]",
+   "hosts project:folder",
+   "jj-tool project:repo [.jj]",
+   "ledger project:repo [.git]",
+   "ledger-db project:folder",
+   "make-only project:folder",
+   "misc group:contains [pyproject.toml]",
+   "misc/tool-a project:repo [.git] in misc",
+   "misc/tool-b project:repo [.git] in misc",
+   "mono project:repo [.git]",
+   "notes project:folder",
+   "rusty project:workspace [Cargo.toml]",
+   "studio group:contains",
+   "studio/app project:repo [.git] in studio",
+   "studio/web project:repo [.git] in studio",
+   "tooling project:workspace [pyproject.toml]",
+   "turbo project:workspace [turbo.json]"
+  ],
+  "folders": [
+   "app project:repo repo",
+   "app-fix project:repo repo",
+   "clients group:contains",
+   "clients/shop project:workspace",
+   "clients/shop/api folder",
+   "clients/shop/web folder",
+   "clients/site project:repo repo",
+   "clients/tools folder",
+   "d project:folder",
+   "d/src folder",
+   "deep project:folder",
+   "deep/a folder",
+   "deep/a/b folder",
+   "empty project:folder",
+   "game project:repo repo",
+   "game/libs/engine project:submodule repo",
+   "hg-tool project:repo repo",
+   "hosts project:folder",
+   "hosts/github.com folder",
+   "hosts/github.com/me folder",
+   "hosts/gitlab.com folder",
+   "hosts/gitlab.com/team folder",
+   "jj-tool project:repo repo",
+   "ledger project:repo repo",
+   "ledger-db project:folder",
+   "ledger-db/supabase folder",
+   "make-only project:folder",
+   "misc group:contains",
+   "misc/examples folder",
+   "misc/examples/swift folder",
+   "misc/fastapi_demo folder",
+   "misc/payloads folder",
+   "misc/scratch folder",
+   "misc/scratch/sub folder",
+   "misc/tool-a project:repo repo",
+   "misc/tool-b project:repo repo",
+   "mono project:repo repo",
+   "notes project:folder",
+   "notes/drafts folder",
+   "notes/site folder",
+   "rusty project:workspace",
+   "rusty/core folder",
+   "studio group:contains",
+   "studio/app project:repo repo",
+   "studio/web project:repo repo",
+   "tooling project:workspace",
+   "tooling/a folder",
+   "turbo project:workspace",
+   "turbo/apps folder",
+   "turbo/apps/web folder"
+  ]
+ },
+ "missing": {
+  "projects": [],
+  "scan": {
+   "ok": false,
+   "ms": 0
+  },
+  "folders": null
+ }
+}

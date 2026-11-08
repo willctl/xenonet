@@ -1,0 +1,2 @@
+- geofences per postcode
+- simulate a day of routes

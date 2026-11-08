@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-10-03T11:31:01.000Z","isSidechain":true,"message":{"role":"user","content":"Find rounding bugs in the ledger"}}
+{"type":"assistant","timestamp":"2026-10-03T11:31:02.000Z","isSidechain":true,"message":{"id":"msg_s1","model":"claude-haiku-4-5","stop_reason":"end_turn","usage":{"input_tokens":30,"cache_read_input_tokens":9000,"output_tokens":400},"content":[{"type":"text","text":"Found two."},{"type":"tool_use","id":"tu_s1","name":"Grep","input":{"pattern":"round("}}]}}

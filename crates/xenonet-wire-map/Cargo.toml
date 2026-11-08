@@ -24,5 +24,9 @@ xenonet-sources.workspace = true
 xenonet-state.workspace = true
 xenonet-app.workspace = true
 
+# tests/golden.rs reads the search index's documents back.
+[dev-dependencies]
+rusqlite.workspace = true
+
 [lints]
 workspace = true
