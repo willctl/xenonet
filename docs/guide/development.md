@@ -10,14 +10,11 @@ npm run rust:bin  # the xenonet binary: the service, the command and the MCP ser
 npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this checkout
 npm test          # unit tests
 npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data
-node cli/xenonet.js console launch shot:overview  # drive XenoNet Dev from a terminal (see below)
+npm run drive -- launch shot:overview  # drive XenoNet Dev from a terminal (see below)
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in (see below)
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
-npm run test:bin  # the tests that start the service, the command or an MCP server, against the binary
-npm run rust:build  # the Rust core's Node addon, which the JS tests load in place of core/ (test:rust)
-npm run test:rust   # the unit tests, with the Rust core in place of the JS
 npm run lint:rust   # formatting, clippy, docs and the dependency checks
-cargo test        # the Rust core's own tests
+npm run cargo -- test --workspace  # the Rust tests, golden files included, on the pinned toolchain
 npm run coverage:rust  # how much of the Rust core the tests run, crate by crate (see Coverage)
 ```
 
@@ -33,7 +30,7 @@ XenoNet Dev picks up edits as you save them:
 
 - The UI hot-reloads. `npm run dev` rebuilds it into `dist/` instead: reload the page to see a change.
 - A change under `crates/` takes a build: `npm run rust:bin`. XenoNet Dev sees the binary change, stops its service and relaunches onto the new one.
-- A change under `electron/`, or to the `core/` and `server/` modules Desktop runs itself, relaunches XenoNet Dev.app. If you started XenoNet Dev with `npm run app`, it prints a reminder to restart instead.
+- A change under `electron/`, or to the `src/shared/` modules Desktop imports too, relaunches XenoNet Dev.app. If you started XenoNet Dev with `npm run app`, it prints a reminder to restart instead.
 
 Vite keeps its prebundled dependencies in each checkout's `.xenonet/vite`, which git ignores. So worktrees that link `node_modules` don't share them.
 
@@ -51,7 +48,7 @@ For machines with many cores, `npm test -- --test-concurrency=4` keeps the unit 
 
 ## The page's Content-Security-Policy
 
-The page runs under a Content-Security-Policy, set in `server/static.js`, and in `vite.config.js` for XenoNet Dev. Scripts load only from XenoNet's own server, with nothing inline and no `eval`, and the page connects only to that server. An inline script, an `eval` or a script from elsewhere won't run, so don't add one.
+The page runs under a Content-Security-Policy, set in `crates/xenonet-service/src/static_files.rs` for the service, and in `electron/lib/static.js` for XenoNet Dev's own frontend server and `vite.config.js`. Scripts load only from XenoNet's own server, with nothing inline and no `eval`, and the page connects only to that server. An inline script, an `eval` or a script from elsewhere won't run, so don't add one.
 
 ## The VM lab
 
@@ -101,7 +98,6 @@ Opened from anywhere else, its menu says XenoNet didn't take it. macOS refuses n
 
 `npm run coverage:rust` measures how much of the Rust core the tests run, with cargo-llvm-cov. It runs `cargo test` instrumented, then prints each crate's lines and the share of its lines, functions and regions the tests ran.
 
-- `-- --js` counts the JS tests too: the ones `npm run test:rust` runs on the twins, and the ones `npm run test:bin` runs against the binary. Run `npm run build` first, as for `test:bin`.
 - `-- --html` writes the report, line by line, to `target/llvm-cov/html/index.html`.
 - `-- --no-run` shows the last run's numbers again, and `-- --json` gives them as JSON.
 
@@ -112,35 +108,32 @@ cargo install --locked cargo-llvm-cov
 rustup component add llvm-tools --toolchain 1.99.1  # the channel rust-toolchain.toml pins
 ```
 
-The instrumented builds go to `target/llvm-cov-target` and `target/llvm-cov-js`, apart from the usual ones, so `cargo test`, `npm run lint:rust` and the addon don't build again after a run. Once built, a run takes about a minute, and `--js` about four. While `--js` runs, the twins load an instrumented addon, and the one that was there is put back after. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines.
+The instrumented builds go to `target/llvm-cov-target`, apart from the usual ones, so `cargo test` and `npm run lint:rust` don't build again after a run. Once built, a run takes about a minute. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines.
 
-On 2026-10-19 the tests ran this share of each crate's lines:
+On 2026-10-19 `cargo test` ran this share of each crate's lines. The golden files of the HTTP API, the command and the MCP servers (`crates/xenonet-cli/tests/golden/`, `crates/xenonet-mcp/tests/golden/`) have run since, so `npm run coverage:rust` gives the current numbers.
 
-| Crate | `cargo test` | With the JS tests |
-| --- | --- | --- |
-| xenonet-actors | 40.7% | 93.0% |
-| xenonet-app | 69.0% | 90.2% |
-| xenonet-assistant | 58.8% | 94.7% |
-| xenonet-base | 81.5% | 91.2% |
-| xenonet-blocks | 85.8% | 97.2% |
-| xenonet-cli | 21.4% | 55.5% |
-| xenonet-components | 59.7% | 89.7% |
-| xenonet-doctor | 42.8% | 92.9% |
-| xenonet-engine | 68.1% | 91.1% |
-| xenonet-hosts | 33.6% | 95.2% |
-| xenonet-integrations | 53.9% | 93.9% |
-| xenonet-mcp | 56.6% | 56.9% |
-| xenonet-node | (not run) | 77.2% |
-| xenonet-schema | 72.3% | 84.9% |
-| xenonet-service | 60.0% | 70.0% |
-| xenonet-sources | 79.6% | 91.6% |
-| xenonet-state | 82.4% | 93.6% |
-| xenonet-wire-app | 54.0% | 66.2% |
-| xenonet-wire-engine | 55.3% | 60.7% |
-| xenonet-wire-map | 74.4% | 80.4% |
-| All | 59.9% | 81.3% |
-
-The JS tests reach most of the core through the twins, and the binary only through `test:bin`'s files, so the binary's own parts (`xenonet-cli`, `xenonet-mcp`, `xenonet-service` and the `xenonet-wire-*` crates) are the least covered.
+| Crate | `cargo test` |
+| --- | --- |
+| xenonet-actors | 40.7% |
+| xenonet-app | 69.0% |
+| xenonet-assistant | 58.8% |
+| xenonet-base | 81.5% |
+| xenonet-blocks | 85.8% |
+| xenonet-cli | 21.4% |
+| xenonet-components | 59.7% |
+| xenonet-doctor | 42.8% |
+| xenonet-engine | 68.1% |
+| xenonet-hosts | 33.6% |
+| xenonet-integrations | 53.9% |
+| xenonet-mcp | 56.6% |
+| xenonet-schema | 72.3% |
+| xenonet-service | 60.0% |
+| xenonet-sources | 79.6% |
+| xenonet-state | 82.4% |
+| xenonet-wire-app | 54.0% |
+| xenonet-wire-engine | 55.3% |
+| xenonet-wire-map | 74.4% |
+| All | 59.9% |
 
 ## Fuzzing
 
@@ -175,23 +168,23 @@ The network's targets build well-formed frames, entries and requests from a made
 
 `fuzz/run.sh` keeps what a target learns in `fuzz/corpus/<target>` and reads the seeds in `fuzz/seeds/<target>` too. A crash is saved in `fuzz/artifacts/<target>`. Run the target on that file alone to see the crash again, and `cargo fuzz tmin --fuzz-dir fuzz <target> <file>` makes it smaller. The corpora and crashes stay out of git.
 
-Fix a crash where it starts, and add a unit test with the smallest input that showed it, in the crate that had the bug. The fuzz crate needs nightly, so it holds no tests of its own. The seeds come from the test fixtures and the demo's made-up world, never from real sessions: `node fuzz/seed.mjs` writes them again, and stops if one would hold this machine's home folder.
+Fix a crash where it starts, and add a unit test with the smallest input that showed it, in the crate that had the bug. The fuzz crate needs nightly, so it holds no tests of its own. The seeds come from the test fixtures and the demo's made-up world as the map's golden test froze it (`crates/xenonet-wire-map/tests/fixtures/golden-world/`), never from real sessions: `node fuzz/seed.mjs` writes them again, and stops if one would hold this machine's home folder.
 
 ## Driving XenoNet from agents, scripts and tests
 
 Installed XenoNet and XenoNet Dev both have a control channel, so an agent or a script can launch Desktop, act on it and see it the way you would. Development copies also offer simulation and evaluation for tests. Use the demo to check a change to XenoNet. Agents can operate the installed console for everyday work. [Components](components.md) explains the production MCP setup.
 
-The control channel operates the console. The engine that connects sessions to each other is a separate MCP server, `xenonet`, in `mcp/xenonet.js`. See [Sessions working together](agents.md).
+The control channel operates the console. The engine that connects sessions to each other is a separate MCP server, `xenonet mcp`. See [Sessions working together](agents.md).
 
 - Agents can use the control channel through the `xenonet-console` MCP server's tools, including navigation, search, screenshots, terminals, themes and updates. Installed Tools omit `eval` and `simulate`, which are only for development. `actors` includes the programs waiting for an Allow, and how each token stands. `needs_you` reads the Needs you queue and shows, opens or dismisses an item, but never allows or denies one. `feed` is the activity feed. `machines` reads the load panel and opens, filters and closes the Machines view, whose machine chips are the Filters chips. `mcp_info` opens a shared system's metadata, tools and context catalog without executing tools. `environment` changes the surroundings independently of the theme. `look` draws the panels solid, without the glass blur behind them, or as glass again (`state.look`).
-- `.mcp.json` registers these tools for Claude Code, which asks you once to approve them. `.codex/config.toml` registers them for Codex, in a trusted project. Start Claude Code or Codex in the repo's root folder.
+- `.mcp.json` registers these tools for Claude Code, which asks you once to approve them. `.codex/config.toml` registers them for Codex, in a trusted project. Both start `node scripts/xenonet.mjs mcp console`, which runs the checkout's newer build of the binary and builds one when there's none. Start Claude Code or Codex in the repo's root folder.
 - From a terminal, `xenonet console <steps>` runs the same actions one after another, for example `xenonet console launch select:atlas-api shot:atlas`. `npm run drive -- <steps>` does the same. `xenonet console --help` lists the steps.
 - XenoNet Dev keeps a log of what you do in it, as the same steps. Selecting a node, a palette command, a session's stats, a theme and a film all go in the log. `xenonet script record --instance dev > tour.json` saves it, and `xenonet script run tour.json` plays it back, in any instance, shown or hidden.
 - A script is a JSON list of steps, written as strings such as `"select:atlas-api"`, or as objects such as `{ "op": "select", "args": [...] }`. Any driver method is a step. For anything else, a script can be a JS module whose default export gets the instance and a `step` function.
 - `npm run test:e2e` drives a hidden XenoNet Dev with the demo's data through the same channel, in about five minutes. Run it before you send a change to the UI. A failing test saves a screenshot of what it saw to `.xenonet/`.
 - Starting the service at login is tested without the machine's own launchd or systemd. `XENONET_SUPERVISOR_BIN` names the `launchctl` or `systemctl` the `xenonet` command runs, and `XENONET_SUPERVISOR_DIR` the folder the launch agent or unit goes in. `test/e2e/background.test.js` points both at a made-up supervisor in a temporary folder.
 - `npm run test:real` checks, on a real Mac, that Grok Bot and Muse message each other through XenoNet Dev (the dev instance), through the actor gateway, or with `XENONET_REAL_ROUTE=local` from commands their apps run. It needs both apps signed in, you at XenoNet's window to set up the gateway and connect each, and someone to ask Grok Bot and Muse to do what it prints. It only reads XenoNet's state. `XENONET_REAL_PORT`, `XENONET_REAL_WORD` and `XENONET_REAL_MINUTES` change where it looks, the word the messages carry and how long it waits.
-- Scripts import `core/control.js`, which all of the above use.
+- The end-to-end tests drive it from JS with `test/harness/control.js`, the client for the control channel.
 
 ### Waiting and screenshots
 
@@ -249,53 +242,22 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 ## Layout
 
-XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The service, the command, the hooks and the MCP servers that XenoNet runs are the `xenonet` binary, built from `crates/`. `core/`, `server/`, `cli/` and `mcp/` are the same in JS: the contract the Rust is tested against, and the modules Desktop and the page import. The core holds the logic. Each of the others is a thin layer over it, which imports from `core/` and from no other layer. The one exception is `xenonet mcp`, which starts the MCP server in `mcp/`.
+XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core, the service, the command, the hooks and the MCP servers are the `xenonet` binary, built from `crates/`. Desktop (`electron/`) and the console page (`src/`) are JS, and reach the core through the service: the HTTP API on 127.0.0.1 and the component service's socket.
 
-The console page imports only the core modules that have no Node in them, such as `themes.js`, `units.js`, `needs-you.js` and `apps.js`. The `xenonet` command and the MCP servers reach a running XenoNet through its HTTP API, with `core/client.js`. They reach XenoNet Dev through its control channel, with `core/control.js`.
+The console page and Desktop share the modules in `src/shared/`, which have no Node in them. The Rust's data that comes from them is written by scripts: `node scripts/apps.mjs` writes `crates/xenonet-base/src/apps.json` from `src/shared/apps.js`, and `node crates/xenonet-app/themes.mjs` writes `crates/xenonet-app/src/themes.json` from `src/shared/themes.js`. Each has a `--check`, which a test runs.
 
-### `core/`
+### `crates/`
 
-`core/` is XenoNet's core in JS, which the Rust in `crates/` follows module by module.
+`crates/` is the Rust core, a crate per layer ([Rust core](../design/rust-core.md)), and builds the `xenonet` binary. Its contract with the outside is held by golden files, recorded from the JS implementation XenoNet had before the Rust and replayed by the Rust tests:
 
-| Files | What they cover |
-| --- | --- |
-| `apps.js` | The app registry: the apps XenoNet knows sessions of, and what's fixed about each (its folder, hook events, signing team, edit tools and what XenoNet can do with it). The page uses it too, and `node scripts/apps.mjs` writes the Rust's copy, `crates/xenonet-base/src/apps.json` |
-| `claude.js`, `codex.js`, `grok.js`, `git.js`, `wiki.js`, `demo.js` | The sources XenoNet reads (`wiki.js` reads the shared context) |
-| `native/`, `numbat.js`, `reported-runs.js` | Runs of other apps: the experimental native readers, one for each app the registry gives `native` (the table in `native/index.js`, the contract each keeps in `native/reader.js`), numbat's records, and the runs actors report |
-| `lines.js` | Transcript lines, as all three of XenoNet's readers take them |
-| `vendor.js`, `drift.js`, `schema/` | The apps' data, read leniently against XenoNet's schemas, and the drift kept from it. The schemas themselves are in `schema/`. |
-| `projects.js` | How the projects folder is read |
-| `classify.js` | The Codex pass over the projects folder |
-| `workspace.js` | Which folder the projects folder is |
-| `live.js` | The transcript reader and its signals |
-| `graph.js`, `state.js` | The map's data |
-| `search.js`, `digest.js` | Search and digests |
-| `redact.js`, `export-labels.js`, `frames.js` | What an export of the day may say (star names, the archetype), what the map's own labels show during one, and the frames posters and films come in |
-| `identities.js` | Who sessions ran as |
-| `claude-usage.js` | Claude plan usage |
-| `config.js`, `dirs.js`, `paths.js`, `store.js` | Settings, and the places XenoNet keeps things |
-| `statefile.js`, `migrate.js` | The versions of `state.json` |
-| `blocks/` | The building blocks XenoNet's subsystems are made of: scanners, gatherers, tailers, normalizers and stores |
-| `open.js` | Opening sessions in their apps |
-| `engine/` | The engine that connects sessions to each other, and connecting the apps to it (`connect.js`, with `toml.js` for Grok Build's `config.toml`) |
-| `procs.js` | Which process is on the other end of a connection to the engine |
-| `actors/` | Actors, with the registry, registering and tokens, you, the observers of Hermes Agent, Grok Bot and Muse, remote actors' connections, account links, provider adapters and presence, and what each actor's work costs (`spend.js`) |
-| `assistant/` | What remote actors read: the projection, the read service, the made-up fixture, page tokens, the log, credentials and tombstones, and the adapter's client (see [Remote actors](../design/cloud-assistants.md)) |
-| `doctor/` | The doctor's checks |
-| `stats.js`, `pricing.js` | Sessions' stats, and API prices by date |
-| `units.js` | Money, tokens and durations as people read them. The page uses it too. |
-| `needs-you.js` | Everything waiting on you as one queue, the longest wait first, with what answers each: the Needs you panel, the tray and `xenonet status` read it. The page uses it too. |
-| `themes.js`, `themefiles.js` | Themes. The page uses `themes.js` too, and `themefiles.js` handles your own. |
-| `script.js` | Running steps and scripts against XenoNet Dev |
-| `client.js` | The client for a running XenoNet's API |
-| `command.js` | The `xenonet` command's script on your PATH |
-| `hosts/` | Other machines' XenoNets. It has the relay, the link to each host, merging their maps and keeping only what the schemas declare, each host's last snapshot, `hosts.json` and XenoNet's own ssh config, and the doctor's check for hosts that share a key. |
-| `instances.js` | XenoNet Dev's instances |
-| `control.js` | The client for XenoNet Dev's control channel |
+| Golden files | What they pin | Test |
+| --- | --- | --- |
+| `crates/xenonet-mcp/tests/golden/` | The MCP servers' answers (`xenonet mcp`, `mcp assistant`, `mcp console`): the probe, the handshake, `tools/list` with every schema key for key, and refused calls | `crates/xenonet-mcp/tests/contract.rs` |
+| `crates/xenonet-cli/tests/golden/` | The HTTP API's reads and the command's output, over the made-up home in `tests/fixtures/home/` | `crates/xenonet-cli/tests/golden.rs` |
+| `crates/xenonet-wire-map/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search and the projects scan. `state.json` (the map, identities and repos) is kept there too, but nothing replays it until the map's driver takes a clock | `crates/xenonet-wire-map/tests/golden.rs` |
+| `test/fixtures/net/` | The network's frames, signatures and sealing, as known answers | `crates/xenonet-net/tests/known_answers.rs` |
 
-### `server/`
-
-`server/` is the HTTP API over the core, in `index.js`. `upstream.js` passes XenoNet Dev's reads to another XenoNet, read-only. The routes for actors, remote connections, drift, the engine, hosts, themes and the projects folder are in `routes/`. `assistant-endpoint.js` is the private endpoint remote actors' adapters reach, apart from the API. The server also serves the console page, with its Content-Security-Policy, from `static.js`.
+`schemas/` holds the JSON Schema of every record XenoNet reads or writes; `crates/xenonet-schema` checks against them, and so do the page's tests (`test/harness/schema.js`).
 
 ### `src/`
 
@@ -333,8 +295,8 @@ The console page imports only the core modules that have no Node in them, such a
 
 | Files | What they cover |
 | --- | --- |
-| `main.js` | The window and the server process |
-| `pty.js` | Shells |
+| `main.js` | The window, and starting or connecting to the service |
+| `service-runtime.js`, `service-client.js`, `service-pty.js` | Which `xenonet` binary runs the service, Desktop's connection to it, and the terminal drawer's shells, which live in the service |
 | `tray.js`, `icons.js`, `preload.cjs` | The tray, the icons and the preload bridge |
 | `trust.js` | The only page the app answers |
 | `login.js` | Opening Desktop at login |
@@ -344,40 +306,28 @@ The console page imports only the core modules that have no Node in them, such a
 | `theme-menu.js` | The Theme menu in the tray and the menu bar |
 | `control.js`, `keys.js` | XenoNet Dev's control channel |
 | `recorder.js` | Recording the window to an MP4 |
-
-### `cli/`
-
-`cli/` is the `xenonet` command. `xenonet.js` reads the arguments and loads one command from `commands/`, and `lib/` has its output helpers. Claude Code and Codex run the command too, as `xenonet mcp` and `xenonet hook`. A console on another machine runs `xenonet relay` over SSH.
-
-### `mcp/`
-
-`mcp/` has the MCP servers. `xenonet.js` has the coordination tools, for every session and actor on the machine. `console.js` has the xenonet-console tools, for operating installed Desktop and checking development copies. `assistant.js` has the six read-only tools a remote actor reads through.
+| `desktop-server.js` | XenoNet Dev's frontend server, with Vite for hot reload |
+| `lib/` | The Node modules Desktop runs itself: its folders and paths (`dirs.js`, `paths.js`), its log, XenoNet Dev's instances, actor tokens and token files, the `xenonet` command on your PATH, the page's static files, and the components: installing, updating and connecting to the service (`lib/components/`, with the launcher script `launcher.cjs`, which the binary carries too) |
 
 ### `scripts/`
 
 `scripts/` has build and development tools:
 
-- `check-contracts.mjs`
-- `provider-drift.mjs` and `provider-drift/`, the daily check of new provider releases against the vendor schemas (see [Provider drift](provider-drift.md))
-- `schemas.mjs`, for the schema files in `schemas/`
-- `bench.mjs`, the benchmark
+- `xenonet.mjs`, which runs the checkout's newer build of the binary (`npm run drive`, and the xenonet-console MCP server)
+- `cargo.mjs`, `rust-bin.mjs`, `rust-lint.mjs`, `rust-coverage.mjs`: cargo on the pinned toolchain, the binary, the lint checks and coverage
 - `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, frame time, and the CPU and memory of Desktop and the service, with the window at rest, turning, busy, behind another app, covered, minimized and hidden, beside the machine's GPU use without XenoNet
+- `bench-service.mjs` (`npm run bench:service`), the service's own timings
 - `bench-history.mjs`, a made-up history of Claude Code and Codex sessions in a folder of its own, from a few hundred sessions to a few thousand, with long ones, subagents and files that keep growing, for measuring the service at scale
-- `hook-snippet.mjs`
 - `dev-install.mjs`
-- `dist.mjs`
+- `dist.mjs`, `component-build.mjs`
 - `builder-hooks.mjs`, the build hooks
 - `lab/`, the VM lab
 - `demo/`, OpenCode sessions messaging each other through a XenoNet from the checkout, with the tools it gives them (see [OpenCode sessions messaging each other](opencode-messaging.md))
 
 ### `tray/`
 
-`tray/macos/` is XenoNet Tray, the macOS menu bar app, a Swift package. `Sources/TrayCore` has what it knows without AppKit: the tray API's types, where the service is, the menu, and the event stream's format. `Sources/XenoNetTray` is the app. Its tests decode the fixtures in `test/fixtures/tray`, which the JS and Rust tests check against the tray's schemas.
+`tray/macos/` is XenoNet Tray, the macOS menu bar app, a Swift package. `Sources/TrayCore` has what it knows without AppKit: the tray API's types, where the service is, the menu, and the event stream's format. `Sources/XenoNetTray` is the app. Its tests decode the fixtures in `test/fixtures/tray`, which the Rust tests check against the tray's schemas.
 
 ### `test/`
 
-`test/` has the unit tests, and `test/e2e/` has the end-to-end tests.
-
-### `crates/`
-
-`crates/` is the Rust core, a crate per layer ([Rust core](../design/rust-core.md)), and builds the `xenonet` binary that XenoNet runs. `xenonet-node` puts the Rust behind the JS modules, so the JS tests check it too. Each ported module has a twin in `crates/xenonet-node/js/core/`, with the module's exports, backed by Rust. `npm run rust:build` builds the addon. `npm run test:rust` runs the test files listed in `crates/xenonet-node/parity.json` with every twin loaded in place of its module, and `npm run test:rust -- --all` tries every test file that way. `npm test` still runs the JS.
+`test/` has the unit tests of the page, Desktop and the scripts (`npm test`), `test/e2e/` the end-to-end tests, which drive a hidden XenoNet Dev through `test/harness/control.js`, and `test/real/` the checks that need real apps.

@@ -3,8 +3,12 @@
 A design for moving everything in XenoNet except Electron and the console
 page to Rust: the core, the transcript readers, the HTTP API, the gateway
 and actor gateway, the MCP servers, the `xenonet` command and the drift
-tooling. The port is under way. The last section says which modules are
-done.
+tooling. The port is done: XenoNet's core is the Rust in `crates/`, and
+the JS core, its twins and the addon are gone ([direction.md](direction.md),
+phase 1). Golden files recorded from the JS hold the contract now (the
+Layout section of [development.md](../guide/development.md) lists them).
+The sections on twins and parity say how the port was checked while both
+ran.
 
 **In short:**
 

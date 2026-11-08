@@ -8,14 +8,14 @@ Install dependencies, put [FFmpeg](https://ffmpeg.org/download.html) on your
 PATH, then run:
 
 ```sh
-node cli/xenonet.js script run scripts/showcase.mjs --instance showcase --hidden
+node scripts/xenonet.mjs script run scripts/showcase.mjs --instance showcase --hidden
 ```
 
 The `showcase` instance uses port 47845 and its own app profile. It keeps
 running after capture so you can inspect it. Quit only that instance with:
 
 ```sh
-node cli/xenonet.js console quit --instance showcase
+node scripts/xenonet.mjs console quit --instance showcase
 ```
 
 The script writes `docs/showcase.mp4`, `docs/showcase-poster.png` and a short

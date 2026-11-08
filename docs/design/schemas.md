@@ -32,8 +32,9 @@ Beside them, `core/vendor.js` has a reader per vendor source and the
 transcript normalizers' hooks, and `core/drift.js` keeps the drift they
 find, in `drift.json` in the cache folder.
 
-`npm run schemas` writes the files, and removes those of schemas no longer
-defined; `npm run schemas -- --check` only says whether they're current.
+The files in `schemas/` are the schemas now: edit the JSON Schema itself.
+`crates/xenonet-schema` checks against them, and so do the page's tests
+(`test/harness/schema.js`).
 
 ## The internal schemas
 
@@ -62,8 +63,7 @@ Where the code is loose, the schema is too:
 - A schema's `$id` carries its major version: `define("state", 2, …)` is
   `state/v2`, at `https://xenonet.dev/schemas/state/v2.json`.
 - Additive changes keep the major: a new optional field, a new value of
-  an enum, a new variant of a union. Change the definition in place and
-  run `npm run schemas`.
+  an enum, a new variant of a union. Change the schema file in place.
 - Anything else makes a new major, defined beside the old one: removing,
   renaming or retyping a field, making an optional field required, or
   taking a value away. Data XenoNet has stored in the old shape gets a
@@ -113,7 +113,7 @@ version (`test/statefile.test.js`, `test/engine-store.test.js`).
    - An object holding another app's data as it came is
      `passthrough(obj(...))`, so strict checks don't count its keys.
 3. Import a new module from `index.js`.
-4. Run `npm run schemas` and commit the file with the definition.
+4. Write the schema file in `schemas/` and commit it with the code.
 5. Check what XenoNet really produces against it, strictly
    (`valid(id, data)` in `test/schema-output.test.js`), and add made-up
    cases the real data doesn't reach to `test/fixtures/schemas.js`,
@@ -317,7 +317,7 @@ kept as a shape and never a value:
   variant with the same path, with its history, so drift you've looked at
   isn't new again for saying where it is.
 
-Some made up, as `npm run contracts` would list them:
+Some made up, as `xenonet drift` would list them:
 
 | Source | Record |
 |---|---|
@@ -334,7 +334,7 @@ Some made up, as `npm run contracts` would list them:
   "lookedAt": <ms or null>, "records": [<drift/record/v1>, …] }`, at most
   500 records, the ones seen least lately dropped first. The server
   writes it a moment after it changes and at shutdown. Several processes
-  share it (the server, `xenonet drift`, `npm run contracts`): each adds the
+  share it (the service and `xenonet drift`): each adds the
   counts it saw since it last wrote, and `lookedAt` only moves forward.
 - **The drift report** (`driftReport()` and `reportLines()` in
   `core/vendor.js`) says, for each source: its schema and range, the
@@ -356,22 +356,6 @@ Some made up, as `npm run contracts` would list them:
   meanwhile stays new, and runs the doctor afresh, since a run already
   under way looked before the mark. The contracts let the console mark
   drift seen too, but the page has no view of the report yet.
-- **`npm run contracts`** runs the live checks against your data, then
-  gives the report with what this run read. `--all` lists every record
-  kept, `--json` prints it all as JSON. It doesn't mark what it showed as
-  seen: agents run it too, and the doctor's warning would go quiet before
-  you'd seen it. What it finds goes into the `drift.json` of the XenoNet it
-  runs as (XenoNet Dev's, from a checkout; `XENONET_INSTANCE` picks another),
-  where `xenonet drift` and that XenoNet's doctor read it. It builds a search
-  index of its own, in a temporary folder that it deletes after.
-- **The provider drift check** (`npm run provider-drift`, and daily in
-  GitHub Actions) runs the providers' newest releases, and the versions
-  XenoNet pins, against made-up data in a made-up home, reads what they
-  write through these readers, and compares their published types with
-  these schemas. It keeps nothing in `drift.json`: its report is the run's
-  artifact and a tracking issue, and it widens a range by pull request
-  when a new version reads without a change ([Provider
-  drift](../guide/provider-drift.md)).
 - **The doctor's `contracts.drift`** check looks at what's first been seen
   since you last looked: a change to what XenoNet reads (a field gone or of
   another type, a line that isn't JSON, a version the schema wasn't made
@@ -382,7 +366,7 @@ Some made up, as `npm run contracts` would list them:
 ### When the report shows drift
 
 - Something XenoNet should read: declare it in the schema (optional, so
-  older data still fits), run `npm run schemas`, and read it.
+  older data still fits), and read it.
 - Something XenoNet passes over: list it, a kind with `skipped`, a key of a
   closed object in `known`.
 - A field gone or retyped for good: a new major of the schema with the

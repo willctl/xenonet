@@ -474,9 +474,10 @@ npm run dev       # the service alone, with the UI at http://127.0.0.1:47842
 npm run demo      # the same, with made-up data, at http://127.0.0.1:47841
 npm run rust:bin  # the xenonet binary: the service, the command and the MCP servers
 npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this checkout
-npm test          # unit tests
+npm run cargo -- test --workspace  # the Rust tests, with the golden files of the API, the command and the MCP servers
+npm test          # the page's, Desktop's and the scripts' unit tests
 npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data
-node cli/xenonet.js console launch shot:overview  # drive XenoNet Dev from a terminal
+npm run drive -- launch shot:overview  # drive XenoNet Dev from a terminal
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
 ```
@@ -485,8 +486,9 @@ The desktop app you run from source is XenoNet Dev. It has its own settings,
 port and layout, so it runs beside an installed XenoNet. It reloads as you
 save. Agents, scripts and tests drive XenoNet Dev through a control channel,
 with the `xenonet-console` MCP tools, `xenonet console` and the end-to-end
-tests. [Development](docs/guide/development.md) covers driving XenoNet, the
-test instances, the VM lab and how the code is laid out.
+tests. XenoNet's core is Rust, in `crates/`; Desktop and the console page
+are JS. [Development](docs/guide/development.md) covers driving XenoNet, the
+test instances, the VM lab, the golden files and how the code is laid out.
 
 ## Contributing
 

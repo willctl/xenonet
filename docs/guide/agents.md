@@ -80,4 +80,16 @@ XenoNet keeps one copy of each hook, whichever way you connected first:
 
 XenoNet already catches questions and plan approvals by reading transcripts. Claude Code's hooks also tell it about permission prompts and notifications, which transcripts don't record. [Connecting your agents](#connecting-your-agents) adds these hooks, along with the engine's own.
 
-To add them by hand instead, run `npm run hook:snippet` in a checkout. It prints a settings block for `~/.claude/settings.json`, and it doesn't install anything.
+To add them by hand instead, merge this block into the `hooks` of `~/.claude/settings.json` (47840 is the installed XenoNet's port):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude", "timeout": 2 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude", "timeout": 2 }] }],
+    "Stop": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude", "timeout": 2 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude", "timeout": 2 }] }],
+    "Notification": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:47840/api/hook/claude", "timeout": 2 }] }]
+  }
+}
+```

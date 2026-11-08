@@ -33,11 +33,7 @@ The doctor warns about drift that's new since you last looked. `xenonet drift` l
 
 ## Checking the adapters after an update
 
-In a checkout, run `npm run contracts` after you update Claude Code or Codex. It checks every adapter against your real data, and says which one broke. It reports drift as `xenonet drift` does, but doesn't mark it seen, since agents run it too.
-
-What it finds goes into the `drift.json` of XenoNet Dev, the XenoNet a checkout runs as. There, `xenonet drift` and XenoNet Dev's doctor read it. `npm run contracts` builds its search index in a temporary folder, and deletes the folder after.
-
-Before you update, the [provider drift](provider-drift.md) check has usually looked already. Each day it runs the newest Claude Code, Agent SDK and Codex releases against made-up data, and reports what differs from XenoNet's schemas in an issue on GitHub.
+After you update Claude Code or Codex, the doctor warns about drift the new version brought, and `xenonet drift` lists it, by source.
 
 ## Where XenoNet keeps files
 

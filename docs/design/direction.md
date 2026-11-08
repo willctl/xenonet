@@ -1,8 +1,9 @@
 # Direction: from the prototype to the system
 
 Status: analysis and target shape, 2026-11-08. Written for the goals in
-[goals.md](goals.md). Will decides the open questions at the end; the
-order of work starts once they are answered.
+[goals.md](goals.md). Phase 1 of the order of work is done; phase 2 is
+next. Will decides the open questions at the end as each phase reaches
+them.
 
 ## Where the code stands
 
@@ -383,16 +384,22 @@ Releases are cut at the end of a phase, or when Will wants the installed
 XenoNet on a new build, not per change; between releases the installed
 service runs a local build.
 
-1. **The JS world goes.** Record the HTTP API, MCP tools and network
-   frames as golden files from the Rust service first; they replace the
-   twins as the contract. Point Electron at the Rust installer and updater
-   (`crates/xenonet-components`, which already exist) and confirm an
-   install and an update through them; then delete `core/`, `server/`,
-   the JS `cli/` and `mcp/`, `xenonet-node`, `parity.json`, the twin
-   tests, Electron's JS installer, `launcher.cjs` and the SSH hosts
-   prototype. Move the dozen modules the page imports from `core/` into
-   `src/shared/` or generate them from Rust. About 50k lines of JS and 16k
-   of Rust.
+1. **The JS world goes. Done (2026-11-08).** The JS core and its napi
+   twins are gone: `core/`, `server/`, the JS `cli/` and `mcp/`,
+   `crates/xenonet-node` with `parity.json`, the twin tests and the scripts
+   that ran them. Golden files recorded from the JS replace the twins as
+   the contract: the MCP servers' answers
+   (`crates/xenonet-mcp/tests/golden/`), 42 HTTP routes and 60 command
+   cases over a made-up home (`crates/xenonet-cli/tests/golden/`), the map's
+   golden world (`crates/xenonet-wire-map/tests/golden/`), and the network's
+   known answers (`test/fixtures/net/`). The modules the page and Desktop
+   import moved to `src/shared/` and `electron/lib/`. Left for later, and
+   not blocking phase 2: Electron still installs and updates components
+   with its own JS (`electron/lib/components/`, with `launcher.cjs`) rather
+   than `crates/xenonet-components`; `state.json` in the golden world isn't
+   replayed until the map's driver takes a clock; and the routes and help
+   texts where the JS and the Rust already differed weren't frozen (the
+   commit that froze them lists them).
 2. **A typed core, no more string dispatch.** Add `xenonet-model` and
    `xenonet-adapter`. Delete `Calls`, `Arg`, `peer.rs`, `world.rs`, the
    JS emulation and the runtime schema checker. Dissolve the three

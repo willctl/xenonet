@@ -2,12 +2,13 @@
 
 XenoNet maps the Claude Code, Codex and Grok Build sessions on this
 machine, and on the other machines of its network. It runs as one Rust
-binary, `xenonet` (`crates/`): the service, the command, the hooks and the
-MCP servers. Desktop is Electron (`electron/`) around a three.js page
-(`src/`). The JS in `core/`, `server/`, `cli/` and `mcp/` is the contract
-the binary is tested against. The README's Development section has the
-commands, and `docs/guide/development.md` has the layout and how to drive
-XenoNet Dev.
+binary, `xenonet` (`crates/`): the core, the service, the command, the
+hooks and the MCP servers. Desktop is Electron (`electron/`) around a
+three.js page (`src/`), with the modules both use in `src/shared/`. Golden
+files under the crates' `tests/` folders hold the contract of the HTTP API,
+the command and the MCP servers. The README's Development section has the
+commands, and `docs/guide/development.md` has the layout, the golden files
+and how to drive XenoNet Dev.
 
 ## The goals come first
 
@@ -18,13 +19,19 @@ answer the alignment check in `goals.md` in the design doc or the PR.
 
 ## Checking your work
 
-- `npm test` runs the unit tests. Run it after every change.
+- `npm run cargo -- test --workspace` runs the Rust tests, the golden
+  files included, on the pinned toolchain (a plain `cargo` may be an older
+  Rust). `npm test` runs the page's, Desktop's and the scripts' unit tests.
+  Run both after every change, and `npm run lint:rust` before a commit
+  that touches `crates/`.
+- A golden file changes only when the behaviour should: say why in the
+  commit, never re-record one to make a test pass.
 - To see a change the way a person would, use the `xenonet-console` MCP tools
   (registered in `.mcp.json` and `.codex/config.toml`): `launch`, then act
   with `find`, `select`, `navigate`, `command` or `input`, then `screenshot`.
   Each action waits for the view to settle and returns the new state, so
-  don't add sleeps. Without the tools, `node cli/xenonet.js console <steps>`
-  does the same from a shell; `--help` lists the steps.
+  don't add sleeps. Without the tools, `npm run drive -- <steps>` does the
+  same from a shell; `npm run drive -- --help` lists the steps.
 - Use the `demo` instance, the default, which has made-up data. The `dev`
   instance shows the user's real sessions: use it only when a change depends
   on real data, keep its screenshots out of the repo, and don't quit it
@@ -54,8 +61,9 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   it.
 - When you add something to the UI that a test or an agent should be able
   to reach, add it to the driver (`src/driver.js`), and a new kind of action
-  to the console's MCP tools (`mcp/console.js`) and the end-to-end
-  tests (`test/e2e/`), so this stays the one way to drive XenoNet.
+  to the console's MCP tools (`crates/xenonet-mcp/src/console.rs`), the
+  control client the end-to-end tests use (`test/harness/control.js`) and
+  the tests (`test/e2e/`), so this stays the one way to drive XenoNet.
 
 ## Iterate fast
 
