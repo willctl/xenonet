@@ -9,6 +9,13 @@ the binary is tested against. The README's Development section has the
 commands, and `docs/guide/development.md` has the layout and how to drive
 XenoNet Dev.
 
+## The goals come first
+
+`docs/design/goals.md` is what XenoNet is for, in Will's words, and
+`docs/design/direction.md` is where the code stands against it and what to
+build next. Read both before a design, a plan or a non-trivial change, and
+answer the alignment check in `goals.md` in the design doc or the PR.
+
 ## Checking your work
 
 - `npm test` runs the unit tests. Run it after every change.
