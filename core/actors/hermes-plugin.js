@@ -29,11 +29,15 @@ export function enabledIn(text) {
   const bare = (s) => s.trim().replace(/^["']|["']$/g, "");
   for (let i = at + 1; i < lines.length; i++) {
     const l = lines[i];
+    // A comment at column 0 doesn't end the block: Hermes's own config has
+    // them inside `plugins:`.
+    if (/^#/.test(l)) continue;
     if (/^\S/.test(l)) return false;
     const m = /^(\s+)enabled:\s*(.*?)\s*(#.*)?$/.exec(l);
     if (!m) continue;
     if (m[2].startsWith("[")) return m[2].slice(1, -1).split(",").some((n) => bare(n) === "xenonet");
     for (let j = i + 1; j < lines.length; j++) {
+      if (/^\s*(#.*)?$/.test(lines[j])) continue;
       const item = /^(\s*)-\s*(\S.*?)\s*(#.*)?$/.exec(lines[j]);
       if (!item || item[1].length < m[1].length) return false;
       if (bare(item[2]) === "xenonet") return true;

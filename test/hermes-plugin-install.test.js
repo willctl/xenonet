@@ -18,6 +18,9 @@ const check = (w, now) => CHECKS.find((c) => c.id === "actors.hermes-plugin").ru
 
 test("enabledIn finds xenonet under plugins.enabled in both YAML forms, and nowhere else", () => {
   assert.equal(enabledIn("plugins:\n  enabled:\n    - other\n    - xenonet\n"), true);
+  // Hermes's own config puts column-0 comments inside the block.
+  assert.equal(enabledIn("plugins:\n  clone: 1\n\n# ===\n# Model\n# ===\n  enabled:\n    - xenonet\n  disabled: []\nmodel:\n"), true);
+  assert.equal(enabledIn("plugins:\n  enabled:\n    - other\n# note\n    - xenonet\n"), true);
   assert.equal(enabledIn("plugins:\n  enabled: [other, 'xenonet']\n"), true);
   assert.equal(enabledIn("plugins:\n  enabled: []\n"), false);
   assert.equal(enabledIn("plugins:\n  enabled:\n    - other\nmodel: xenonet\n"), false);
