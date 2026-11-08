@@ -1180,7 +1180,8 @@ impl Engine {
             how = "all";
             (active.iter().chain(remote.iter()).cloned().collect(), "all".into())
         } else {
-            let one = self.resolve(c, me, &to)?;
+            let answered = Self::answered(c, me, &reply_to)?;
+            let one = self.resolve(c, me, &to, &answered)?;
             Self::hop(c)?;
             let id = js_text(&one.field("id"));
             (vec![one], id)
@@ -1352,14 +1353,29 @@ impl Engine {
         Ok(())
     }
 
-    fn resolve(&self, c: &mut dyn Calls, me: &Arg, to: &Arg) -> Result<Arg> {
+    /// Who wrote the message `reply_to`, if it came to `me`: an agent may
+    /// answer whoever wrote to it, whether or not it could have started the
+    /// thread. Null otherwise.
+    fn answered(c: &mut dyn Calls, me: &Arg, reply_to: &Arg) -> Result<Arg> {
+        if !reply_to.truthy() {
+            return Ok(Arg::Null);
+        }
+        let m = c.call("engine.store", "message", vec![Arg::num(num(reply_to))])?;
+        if !m.truthy() || same(&m.field("sender"), me) {
+            return Ok(Arg::Null);
+        }
+        let sent_to_me = list(c.call("engine.store", "deliveries", vec![m.field("id")])?).iter().any(|d| same(&d.field("agent"), me));
+        Ok(if sent_to_me { m.field("sender") } else { Arg::Null })
+    }
+
+    fn resolve(&self, c: &mut dyn Calls, me: &Arg, to: &Arg, answered: &Arg) -> Result<Arg> {
         let to_text = js_text(to);
         if is_agent_id(to) || is_actor_agent(to) {
             if is_actor_agent(to) && (kind_nullish(c, "engine.actors")? || !c.call("engine.actors", "has", vec![to.clone()])?.truthy()) {
                 return err(format!("no actor is {to_text}; peers lists them"));
             }
             let one = self.view(c, to)?;
-            if !self.visible_to(c, me, &one)? {
+            if !same(to, answered) && !self.visible_to(c, me, &one)? {
                 return err(format!("no session or actor you can reach is {to_text}"));
             }
             if !Self::reads(c, to)? {
