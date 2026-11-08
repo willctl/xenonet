@@ -9,7 +9,7 @@ import {
   releaseMaterial, setLineResolution, nebula, LensShader, lensOutputPass, addBloomToLens, skyColors,
 } from "./fx.js";
 import { STARS, GRID, SWEEP, SONAR, LINES, pick } from "./looks/index.js";
-import { sonarGap } from "../core/themes.js";
+import { sonarGap } from "./shared/themes.js";
 import { buildNode, disposeNode, setDim, sizeFor, applyLive, animateLive, setAttention } from "./nodes.js";
 import { createActorLayer, isActorId } from "./actors.js";
 import { pointerTakes } from "./actors-model.js";
@@ -18,8 +18,8 @@ import { hostVisual, STALE_LIGHT, sameHost } from "./hosts.js";
 import { createHostLayer } from "./hosts-draw.js";
 import { onEnvironment, environmentState } from "./environment.js";
 import { createPacer, frameRate, DEFAULT_PACE, paceOf } from "./render-budget.js";
-import { environmentOf } from "../core/environments.js";
-import { exportLabel } from "../core/export-labels.js";
+import { environmentOf } from "./shared/environments.js";
+import { exportLabel } from "./shared/export-labels.js";
 
 const HIERARCHY = new Set(["contains", "nested", "satellite", "native", "zone", "session", "lineage", "resource", "wiki", "page"]);
 const idOf = (end) => (typeof end === "object" ? end.id : end);
@@ -548,7 +548,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     wave.look.dispose(wave);
   }
   // Time since the last wave, for the theme's sonar.every (sonarGap in
-  // core/themes.js: at most one a second, and none for 0 or less).
+  // src/shared/themes.js: at most one a second, and none for 0 or less).
   let sonarClock = 0;
 
   // ---------- arcs: collaboration, shared resources, synchronized work ----------
@@ -1884,7 +1884,7 @@ export function createScene(el, { onSelect, onHover, onPreview, onSonar, onPin, 
     // One frame at poster resolution. At the window's shape, the pixel
     // ratio is raised so everything renders at `width` pixels, and lines
     // keep their on-screen width. With a `height`, the frame has a shape
-    // of its own (a poster's, core/frames.js): the camera takes that shape
+    // of its own (a poster's, src/shared/frames.js): the camera takes that shape
     // and backs off when it's narrower than the window, so what the window
     // shows across still fits, then gets its own view back.
     renderHighRes(width = 3840, height = null) {

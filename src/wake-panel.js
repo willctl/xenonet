@@ -1,5 +1,5 @@
 // How an actor that reports itself is woken when a message arrives
-// (core/actors/wake.js), in the Actors panel (actors-panel.js): a word in
+// (crates/xenonet-actors/src/wake.rs), in the Actors panel (actors-panel.js): a word in
 // its row, and the Wake view, which sets a webhook, a notification to you,
 // or nothing. Never a webhook's URL or key, which stay in the credential
 // store.
@@ -22,7 +22,7 @@ export function wakeHtml(id, w) {
 }
 
 // Waking an actor: a webhook (for Grok Bot, a routine's, with how to make
-// one: `help`, from wakeHelp in core/actors/handoff.js), a notification to
+// one: `help`, from wakeHelp in src/shared/handoff.js), a notification to
 // you, or nothing. A webhook's key is typed into a field that hides it, and
 // the panel holds it only until it's saved: of what was typed before a
 // redraw (`draft`), only the URL goes back into the page.

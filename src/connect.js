@@ -1,7 +1,7 @@
 // Connect your agents (Claude Code, Codex, and Grok Build when it's here):
 // what XenoNet would add to their settings so that every session, in every
 // project, can see the others and message them through XenoNet's engine
-// (core/engine/connect.js does the adding). It shows each change before anything happens, then adds it all,
+// (crates/xenonet-engine/src/connect.rs does the adding). It shows each change before anything happens, then adds it all,
 // or takes it all out again. Connect is marked data-yours, as Allow and New
 // token are (docs/design/actors/interface.md, section 5): yours alone.
 import { escapeHtml as h } from "./format.js";

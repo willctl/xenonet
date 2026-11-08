@@ -413,7 +413,7 @@ async function main() {
   for (const w of wanted) if (!ALL.includes(w)) throw new Error(`no state "${w}"; there's ${ALL.join(", ")}`);
   const states = wanted.length ? ALL.filter((x) => wanted.includes(x)) : ALL;
 
-  const { xenonet, userDataDir, lockHolder, INSTANCES } = await import("../core/control.js");
+  const { xenonet, userDataDir, lockHolder, INSTANCES } = await import("../test/harness/control.js");
   // A copy already running is someone's (another session's checks, or the
   // end-to-end tests): it's left alone, and the bench doesn't run.
   const holder = await lockHolder(userDataDir(INSTANCES[id].name));

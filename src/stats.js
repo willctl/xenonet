@@ -1,6 +1,6 @@
 // A session's stats, large: what it would cost at API prices, which models it
 // used and when, where its tokens went, how long its turns took, how full its
-// context got, and its tools (core/stats.js, through
+// context got, and its tools (crates/xenonet-state/src/stats.rs, through
 // GET /api/session/:id/stats). Opened from the inspector (Stats), the palette
 // (Mod+I on a session) and the driver.
 //
@@ -9,7 +9,7 @@
 // table view for every chart. Colors come from the --st-* variables in
 // style.css, validated on the panel's surface.
 import { escapeHtml as h, shortPath, stamp } from "./format.js";
-import { money, tokens, duration, share } from "../core/units.js";
+import { money, tokens, duration, share } from "./shared/units.js";
 
 const MODEL_SLOTS = 5;
 const KINDS = [

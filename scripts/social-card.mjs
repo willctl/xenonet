@@ -2,7 +2,7 @@
 // show for a link to XenoNet: the demo map on the right, the mark and the
 // tagline on the left. Run through `xenonet script run` in the showcase
 // instance, whose data is made up:
-//   node cli/xenonet.js script run scripts/social-card.mjs --instance showcase --hidden
+//   node scripts/xenonet.mjs script run scripts/social-card.mjs --instance showcase --hidden
 import fs from "node:fs";
 import path from "node:path";
 

@@ -1,4 +1,4 @@
-// The installed console (core/components/console.js), as the xenonet-console
+// The installed console (electron/lib/components/console.js), as the xenonet-console
 // MCP tools and xenonet console drive an installed XenoNet: each action finds
 // the service again, so it survives Desktop and the service restarting;
 // nothing development-only (eval, simulate) is ever sent; a service whose
@@ -11,9 +11,9 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { installedConsole } from "../core/components/console.js";
-import { descriptorFile } from "../core/components/runtime.js";
-import { rpc } from "../core/components/rpc.js";
+import { installedConsole } from "../electron/lib/components/console.js";
+import { descriptorFile } from "../electron/lib/components/runtime.js";
+import { rpc } from "../electron/lib/components/rpc.js";
 
 const TOKEN = "ab".repeat(32);
 

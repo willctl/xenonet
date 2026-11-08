@@ -1,5 +1,5 @@
 // The load panel, between the status and Token use panels
-// (core/system-stats.js). On its own, it's This computer: a ring each for
+// (crates/xenonet-app/src/system_stats.rs). On its own, it's This computer: a ring each for
 // the CPU, the GPU and memory, the GPU's own memory as the GPU's inner
 // ring, each core's use, the last few minutes traced, and what the parts
 // are. In a network (network mode) it's Machines: the rings are the

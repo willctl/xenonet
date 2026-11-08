@@ -1,7 +1,7 @@
-// The frames posters and films come in (core/frames.js).
+// The frames posters and films come in (src/shared/frames.js).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { POSTER_SIZES, posterSize, DEFAULT_SIZE, FILM_FRAMES, filmSeconds, filmPlaySeconds, fitFrame } from "../core/frames.js";
+import { POSTER_SIZES, posterSize, DEFAULT_SIZE, FILM_FRAMES, filmSeconds, filmPlaySeconds, fitFrame } from "../src/shared/frames.js";
 
 test("the four poster sizes, and the default for an unknown one", () => {
   assert.deepEqual(POSTER_SIZES.map((s) => `${s.width}x${s.height}`), ["1080x1920", "1080x1350", "1200x630", "1920x1080"]);

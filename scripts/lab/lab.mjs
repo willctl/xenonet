@@ -21,12 +21,18 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { tilde as tildeIn } from "../../core/paths.js";
-import { trustCommand } from "../../core/hosts/link.js";
+import { tilde as tildeIn } from "../../electron/lib/paths.js";
 import { BASES, VMS, LAB_INSTANCES, DEMO_PORT, REAL_PORT, CONSOLE_KEY_COMMENT, labPaths, sshConfigText, withHostKey, hostKeyOf, authorizedKeyLine, envFileText, guestScript, newPassword, sha512crypt, shq } from "./config.mjs";
 import { reposScript } from "./fixtures.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// The command that checks a host's key, and accepts it once, in a terminal:
+// ssh with the lab's own ssh config, the config's path written without the
+// home folder and quoted for a POSIX shell where it needs it.
+const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : shq(s));
+const shellPath = (p) => (p.startsWith("~/") ? `~/${quote(p.slice(2))}` : quote(p));
+const trustCommand = (id, sshConfig, tilde) => `ssh -F ${shellPath(tilde(sshConfig))} ${id}`;
 const REPO = path.resolve(HERE, "../..");
 const VERSIONS = JSON.parse(fs.readFileSync(path.join(HERE, "versions.json"), "utf8"));
 const GUEST = fs.readFileSync(path.join(HERE, "guest.sh"), "utf8");

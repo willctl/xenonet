@@ -1,5 +1,5 @@
 // The console's colors, fonts, sky, glow and music, from the theme in use
-// (core/themes.js). One theme is in use at a time, and applyTheme changes
+// (src/shared/themes.js). One theme is in use at a time, and applyTheme changes
 // it in place, without a reload: the stylesheet's tokens change at once,
 // and everything drawn with the theme draws itself again (onTheme). The
 // theme applies before anything is drawn, from the copy this browser keeps;
@@ -7,8 +7,8 @@
 // xenonet theme, or an edit to a theme of your own.
 //
 // Read THEME and COLORS when drawing, not once at import: they change.
-import { themes, complete, ringColors, DEFAULT_THEME } from "../core/themes.js";
-import { SESSION_APPS } from "../core/schema/ids.js";
+import { themes, complete, ringColors, DEFAULT_THEME } from "./shared/themes.js";
+import { SESSION_APPS } from "./shared/ids.js";
 
 const STORE = "xenonet.theme";
 
@@ -121,7 +121,7 @@ export function onTheme(fn) {
 }
 
 // Draws everything in `theme` (a theme from the server, or one from
-// core/themes.js), once its fonts are in. `keep` saves it as this
+// src/shared/themes.js), once its fonts are in. `keep` saves it as this
 // browser's. Resolves true once it's drawn, or false if a later change
 // came first.
 export async function applyTheme(theme, { keep: save = true } = {}) {
@@ -199,7 +199,7 @@ export const themeState = () => ({ id: THEME.id, name: THEME.name, builtIn: !!TH
 // What an agent is doing, by tool family.
 export const CATEGORY_LABEL = { shell: "shell", edit: "edit", read: "read", web: "web", mcp: "mcp", agent: "agent", code: "code", other: "other" };
 
-// Each session app's name (core/schema/ids.js): Claude Code, Codex, and
+// Each session app's name (src/shared/ids.js): Claude Code, Codex, and
 // the apps whose runs XenoNet observes.
 export const APP_LABEL = { ...SESSION_APPS };
 export const APP_DESKTOP = { claude: "Claude desktop", codex: "ChatGPT desktop" };

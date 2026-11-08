@@ -1,11 +1,11 @@
 // The export panel: today's constellation as a poster to save or copy, and
-// as a film. A preview comes first, at the size picked (core/frames.js).
+// as a film. A preview comes first, at the size picked (src/shared/frames.js).
 // What an export reveals (the projects' names, the tokens) is off each
 // time the panel opens, until you turn it on here. The film is a story
 // (9:16) of 15 to 30 seconds, which the desktop app records. Everything
 // stays on this computer, and the panel says so.
 import { escapeHtml as h } from "./format.js";
-import { POSTER_SIZES, DEFAULT_SIZE, FILM_SECONDS, posterSize } from "../core/frames.js";
+import { POSTER_SIZES, DEFAULT_SIZE, FILM_SECONDS, posterSize } from "./shared/frames.js";
 import { renderPoster, savePoster, copyPoster, posterBlob } from "./poster.js";
 
 export const LOCAL_LINE = "Made on this computer. Nothing is uploaded, no account is needed, and the file carries no metadata.";

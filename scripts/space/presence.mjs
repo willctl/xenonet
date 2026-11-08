@@ -19,7 +19,7 @@
 //   XENONET_RUN_ID              this run's name, the same each time (the
 //                               sandbox's id, say)
 //   XENONET_RUN_APP             the harness it runs: claude, codex,
-//                               gemini-cli… (core/schema/ids.js)
+//                               gemini-cli… (src/shared/ids.js)
 //   XENONET_STATUS              the run's title line (optional)
 //   XENONET_HEARTBEAT_SECONDS   how often (optional; 60, at least 5)
 //

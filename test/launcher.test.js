@@ -1,4 +1,4 @@
-// XenoNet's stable launcher (core/components/launcher.cjs), which hooks, MCP
+// XenoNet's stable launcher (electron/lib/components/launcher.cjs), which hooks, MCP
 // servers and the xenonet command run from a path that never moves: a hook
 // goes to XenoNet by itself, quickly, and never fails its agent; it says what
 // it is; without Tools it says so in a line; and XenoNet writes a newer one
@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
+import { writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../electron/lib/components/install.js";
 
 const SOURCE = fs.readFileSync(LAUNCHER_SOURCE, "utf8");
 

@@ -6,11 +6,11 @@ import path from "node:path";
 import net from "node:net";
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { installedConsole } from "../../core/components/console.js";
+import { installedConsole } from "../../electron/lib/components/console.js";
 import { consoleMcp } from "../harness/console-mcp.js";
-import { installLauncher, installBundle, activatePackage } from "../../core/components/install.js";
-import { connectService } from "../../core/components/runtime.js";
-import { currentComponent } from "../../core/components/packages.js";
+import { installLauncher, installBundle, activatePackage } from "../../electron/lib/components/install.js";
+import { connectService } from "../../electron/lib/components/runtime.js";
+import { currentComponent } from "../../electron/lib/components/packages.js";
 import { nextComponent } from "../harness/component-fixture.js";
 import { limit } from "../harness/software.js";
 

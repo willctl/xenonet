@@ -1,5 +1,5 @@
 // End to end: the page reports you (src/you.js) to XenoNet Dev's test
-// instance, with the window key only its window holds (core/actors/key.js,
+// instance, with the window key only its window holds (crates/xenonet-actors/src/key.rs,
 // through the preload bridge). The test instance runs the demo, where the
 // made-up you is shown like any actor, so the list says what the window
 // reported; outside the demo your record is the window's alone, which the
@@ -13,7 +13,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet } from "../../core/control.js";
+import { xenonet } from "../harness/control.js";
 import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {

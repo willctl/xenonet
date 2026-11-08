@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hashOf, colorOf, formOf, presenceOf, presenceWord, actorNeeds, beamsOf, allBeams, placeActors, boundsOf, youHere, createTargetWatch, pointerTakes, createSaidEcho, gateOf, gateSpot, PRESENCE, LIVE_MS, BEAMS_MAX, BEAMS_PER_ACTOR, GAP, HOVER, STANDBY } from "../src/actors-model.js";
-import { themes } from "../core/themes.js";
+import { themes } from "../src/shared/themes.js";
 import { scopeGraph, DEFAULT_SCOPE } from "../src/scope.js";
 
 const NOW = 1791234567000;

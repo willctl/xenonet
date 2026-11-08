@@ -1,4 +1,4 @@
-// The projects folder XenoNet reads, from the console (core/workspace.js):
+// The projects folder XenoNet reads, from the console (crates/xenonet-state/src/workspace.rs):
 // the folder in use and where that comes from; another one, picked with
 // the desktop app's folder picker or typed; what XenoNet would find there,
 // as you go; and Use this folder, which rescans and redraws the map.

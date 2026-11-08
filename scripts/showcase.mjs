@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { findFfmpeg } from "../core/dirs.js";
+import { findFfmpeg } from "../electron/lib/dirs.js";
 import { prepareAudio, startAudio, stopAudio } from "./showcase-audio.mjs";
 
 // A clock time or a date in the page's text, which the video must not show:

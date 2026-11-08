@@ -1,4 +1,4 @@
-// Spotify in the console (core/spotify.js; docs/guide/spotify.md): what's
+// Spotify in the console (crates/xenonet-app/src/spotify.rs; docs/guide/spotify.md): what's
 // playing, under the status panel, linked to Spotify, with play or pause
 // and the next track; and the window to connect it. While Spotify plays,
 // XenoNet's own music steps aside (ambient.yieldTo), never mixed with it.

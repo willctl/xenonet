@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { activatePackage, recoverServiceUpdate } from "../core/components/install.js";
-import { digest, stagePackage, selectComponent, currentComponent } from "../core/components/packages.js";
+import { activatePackage, recoverServiceUpdate } from "../electron/lib/components/install.js";
+import { digest, stagePackage, selectComponent, currentComponent } from "../electron/lib/components/packages.js";
 
 // `stopAnswer`: what the service's answer to `stop` does: "answered", lost
 // with its connection ("dropped", as on a busy machine where the service

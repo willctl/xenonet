@@ -1,18 +1,18 @@
 // Posters of the day: the map rendered at one of the sizes for sharing
-// (core/frames.js), drawn up by poster-draw.js, as a PNG to save or copy.
+// (src/shared/frames.js), drawn up by poster-draw.js, as a PNG to save or copy.
 // Everything happens on this computer: the constellation comes from this
 // XenoNet (/api/constellation, with star names in place of project names),
 // the PNG is the canvas alone, so it carries no metadata, and nothing is
 // uploaded. The export panel (export-panel.js) shows a preview first.
 import { THEME, themeFonts } from "./theme.js";
-import { posterSize } from "../core/frames.js";
+import { posterSize } from "./shared/frames.js";
 import { drawPoster } from "./poster-draw.js";
 
 // The day's constellation, with the projects' names only when revealing
 // them.
 export const fetchConstellation = (reveal = {}) => fetch(`/api/constellation${reveal.names ? "?names=1" : ""}`).then((r) => r.json());
 // The map's own labels for an export: each labelled node's star name, by
-// id (core/export-labels.js), the same names the constellation gets.
+// id (src/shared/export-labels.js), the same names the constellation gets.
 export const fetchExportLabels = () => fetch("/api/constellation/labels").then((r) => r.json());
 
 // Renders the poster at `size` (a size's id), with what `reveal` turns on

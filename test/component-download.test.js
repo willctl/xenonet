@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { downloadComponent } from "../core/components/updates.js";
-import { digest } from "../core/components/packages.js";
+import { downloadComponent } from "../electron/lib/components/updates.js";
+import { digest } from "../electron/lib/components/packages.js";
 
 test("failed component downloads clean up and a corrupt cached file can be retried", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-download-"));

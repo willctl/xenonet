@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
-import { rpc } from "../core/components/rpc.js";
-import { negotiate } from "../core/components/protocol.js";
-import { consolePolicy } from "../core/components/console-policy.js";
+import { rpc } from "../electron/lib/components/rpc.js";
+import { negotiate } from "../electron/lib/components/protocol.js";
+import { consolePolicy } from "../electron/lib/components/console-policy.js";
 
 test("components negotiate the highest shared interface, independent of releases", () => {
   assert.equal(negotiate({ min: 1, max: 3 }, { min: 1, max: 2 }), 2);

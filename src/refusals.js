@@ -1,5 +1,5 @@
 import { escapeHtml as h } from "./format.js";
-import { modelOf, categoryOf } from "../core/refusals/query.js";
+import { modelOf, categoryOf } from "./shared/refusals-query.js";
 import "./refusals.css";
 
 const labels = { refusal: "Refusal", "refusal-recovered": "Recovered", reroute: "Reroute", "possible-refusal": "Possible refusal" };

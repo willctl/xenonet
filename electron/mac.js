@@ -3,11 +3,11 @@
 // opening at login, and uninstalling (macOS has no uninstaller, so XenoNet
 // carries its own, with the same keep-or-remove-my-data choice).
 import { app, dialog, Menu, shell } from "electron";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { appDir } from "../core/dirs.js";
+import { appDir } from "./lib/dirs.js";
 import { opensAtLogin, setOpensAtLogin, onLoginChange } from "./login.js";
 import { prefs } from "./prefs.js";
 import { themeItems } from "./theme-menu.js";
@@ -201,7 +201,7 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
   // so it's loaded now. Loaded after the move, the imports failed and the
   // uninstall stopped halfway, with the hooks, the service and the data
   // still in place.
-  const purging = purge ? await Promise.all([import("../core/engine/connect.js"), import("../core/components/runtime.js")]).catch((err) => (console.error(`[xenonet] couldn't load what a purge needs: ${err.message ?? err}`), null)) : null;
+  const runtime = purge ? await import("./lib/components/runtime.js").catch((err) => (console.error(`[xenonet] couldn't load what a purge needs: ${err.message ?? err}`), null)) : null;
   // The login item goes first, while the bundle it points at is still there.
   const atLogin = opensAtLogin();
   if (atLogin) app.setLoginItemSettings({ openAtLogin: false });
@@ -225,11 +225,17 @@ export async function uninstall({ ask = true, purge = false, win = null, stop = 
   if (purge) {
     // A step that fails is said, and the rest still run: the data goes, and
     // XenoNet quits.
-    const [connect, runtime] = purging ?? [];
     // XenoNet's hooks and MCP servers in Claude Code and Codex, the console's
-    // too, run files about to be deleted: take them out first.
+    // too, run files about to be deleted: the xenonet command takes them out
+    // first. It lives in XenoNet's state folder, not the bundle, so it's
+    // still there; with the launcher's variable set it counts the console's
+    // entry as XenoNet's too.
     try {
-      await connect.createConnect({ port: 47840, root: app.getAppPath(), consoleMcp: true }).remove();
+      const launcher = runtime.launcherBin();
+      const bin = fs.existsSync(launcher) ? launcher : runtime.xenonetBin();
+      await new Promise((resolve, reject) => {
+        execFile(bin, ["disconnect", "--yes", "--port", "47840"], { env: { ...process.env, XENONET_PORT: "47840", XENONET_LAUNCHER_BIN: bin }, windowsHide: true, timeout: 60e3 }, (err) => (err ? reject(err) : resolve()));
+      });
     } catch (err) {
       console.error(`[xenonet] couldn't take XenoNet out of Claude Code and Codex: ${err.message ?? err}`);
     }

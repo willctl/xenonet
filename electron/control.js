@@ -17,7 +17,7 @@
 // Screenshots use webContents.capturePage, and input goes through the
 // window's own DevTools Protocol session (webContents.debugger), so both
 // work on a covered, hidden or unfocused window, with no debugging port.
-// Clients: core/control.js, the console MCP server (mcp/console.js), the
+// Clients: test/harness/control.js, the console MCP server (crates/xenonet-mcp/src/console.rs), the
 // end-to-end tests. Installed copies omit eval and raw CDP access.
 //
 // Source copies expose additional development controls.
@@ -26,7 +26,7 @@
 // work doesn't press them in passing; eval and cdp still reach anything
 // the page can (docs/design/actors/interface.md, section 5).
 import { app } from "electron";
-import { consolePolicy } from "../core/components/console-policy.js";
+import { consolePolicy } from "./lib/components/console-policy.js";
 import fs from "node:fs";
 import path from "node:path";
 import { parseKey, parseSize, modifierBits } from "./keys.js";

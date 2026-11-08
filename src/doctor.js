@@ -2,14 +2,14 @@
 // fix for each problem, and a button to check again. The palette opens it
 // (Check XenoNet's setup), and so do the doctor's alerts and notifications.
 //
-// Under the checks, what went wrong lately (XenoNet's error log, core/log.js)
+// Under the checks, what went wrong lately (XenoNet's error log, electron/lib/log.js)
 // by code, and two ways to get help: Copy diagnostics, a summary safe to
-// share (core/diagnostics.js), and Ask Codex or Claude Code, which starts a
+// share (crates/xenonet-app/src/diagnostics.rs), and Ask Codex or Claude Code, which starts a
 // session of the one you pick on this computer, in a terminal here, to look
 // at it with you. That session never files anything; sending an issue stays
 // yours.
 import { escapeHtml as h, timeAgo } from "./format.js";
-import { askedOr } from "../core/apps.js";
+import { askedOr } from "./shared/apps.js";
 
 const MARK = { ok: "✓", info: "·", warn: "!", fail: "✗", skip: "–" };
 const LEVEL_MARK = { error: "✗", warn: "!", info: "·" };

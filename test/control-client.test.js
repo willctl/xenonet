@@ -1,4 +1,4 @@
-// The client for XenoNet Dev's control channel (core/control.js), against a
+// The client for XenoNet Dev's control channel (test/harness/control.js), against a
 // stand-in for an instance's server, and launching and quitting on a
 // made-up machine. Starting XenoNet Dev itself is for the end-to-end tests.
 import { test, after } from "node:test";
@@ -8,7 +8,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet, electronCommand, lockHolder, userDataDir, INSTANCES } from "../core/control.js";
+import { xenonet, electronCommand, lockHolder, userDataDir, INSTANCES } from "./harness/control.js";
 import { fakeProcesses } from "./harness/procs.js";
 
 // Temp folders, and what the made-up machine opens (lock sockets, the

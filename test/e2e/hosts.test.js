@@ -14,7 +14,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet, root } from "../../core/control.js";
+import { xenonet, root } from "../harness/control.js";
 import { service } from "../harness/xenonet-bin.js";
 import { limit } from "../harness/software.js";
 

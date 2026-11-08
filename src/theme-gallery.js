@@ -10,7 +10,7 @@
 import "./themes.css";
 import { escapeHtml as h, tildePath } from "./format.js";
 import { keyLabel } from "./platform.js";
-import { complete } from "../core/themes.js";
+import { complete } from "./shared/themes.js";
 
 // How an agent looks in each actor form, in a few words.
 const FORMS = {

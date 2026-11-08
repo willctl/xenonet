@@ -9,9 +9,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerServicePty } from "./service-pty.js";
-import { connectService, ensureService, launcherBin, runtimeDir, xenonetBin } from "../core/components/runtime.js";
-import { installedRuntime, recoverServiceUpdate } from "../core/components/install.js";
-import { componentUpdates, updateComponent } from "../core/components/updates.js";
+import { connectService, ensureService, launcherBin, runtimeDir, xenonetBin } from "./lib/components/runtime.js";
+import { installedRuntime, recoverServiceUpdate } from "./lib/components/install.js";
+import { componentUpdates, updateComponent } from "./lib/components/updates.js";
 import { desktopClient } from "./service-client.js";
 import { desktopServer, pageHeaders } from "./desktop-server.js";
 import { createUpdates } from "./updates.js";
@@ -24,16 +24,16 @@ import { prefs } from "./prefs.js";
 import { serviceCommand, missingBinary, readyComponents, earlierNotice } from "./service-runtime.js";
 import { installMenu, offerMove, askAboutLogin, uninstall } from "./mac.js";
 import { themeMenuOf } from "./theme-menu.js";
-import { instanceFrom } from "../core/instances.js";
+import { instanceFrom } from "./lib/instances.js";
 import { createControl } from "./control.js";
 import { sameOrigin, fromOwnPage, devtoolsPort } from "./trust.js";
 import { createRecorder } from "./recorder.js";
-import { FILM_FRAMES, DEFAULT_FRAME, fitFrame } from "../core/frames.js";
-import { appDir } from "../core/dirs.js";
-import { createLog, logDir } from "../core/log.js";
-import { isToken } from "../core/actors/tokens.js";
-import { writeTokenFile, gitTreeOf } from "../core/actors/token-file.js";
-import { tilde } from "../core/paths.js";
+import { FILM_FRAMES, DEFAULT_FRAME, fitFrame } from "../src/shared/frames.js";
+import { appDir } from "./lib/dirs.js";
+import { createLog, logDir } from "./lib/log.js";
+import { isToken } from "./lib/tokens.js";
+import { writeTokenFile, gitTreeOf } from "./lib/token-file.js";
+import { tilde } from "./lib/paths.js";
 import { patchExport } from "./patch-export.js";
 import { iconImage, iconDataUrl, sheetDataUrl, artDataUrl, dmgArtDataUrl, pkgArtDataUrl, bmpFromImage, packIco, packIcns, pngWithDpi, closePainter } from "./icons.js";
 
@@ -77,7 +77,7 @@ const dev = fromSource && !process.argv.includes("--prod");
 // notifications, no tray icon. XENONET_OFFSCREEN=1 is the old name for hidden.
 const SHOW = process.env.XENONET_OFFSCREEN === "1" ? "hidden" : (process.env.XENONET_SHOW ?? "front");
 let offscreen = SHOW === "hidden";
-// A XenoNet Dev window the dev tools start (core/control.js: dev, demo and
+// A XenoNet Dev window the dev tools start (test/harness/control.js: dev, demo and
 // test) makes no sound, hidden or shown, so agents driving it stay quiet.
 const MUTED = process.env.XENONET_MUTED === "1";
 const isMac = process.platform === "darwin";
@@ -122,7 +122,7 @@ const gotLock = toolMode || app.requestSingleInstanceLock();
 if (!gotLock) uninstallMode ? app.exit(0) : app.quit();
 
 let win = null;
-// Desktop's error log (core/log.js), beside the service's in the state
+// Desktop's error log (electron/lib/log.js), beside the service's in the state
 // folder: the page's process ending or hanging, a load that fails, and
 // anything thrown here that nothing caught. The demo instances keep none.
 const desktopLog = createLog({ dir: instance?.demo ? null : logDir(fromSource ? appDir("state", { name: instance.name }) : appDir("state")), component: "desktop", instance: instance?.id ?? "installed", version: app.getVersion() });
@@ -132,7 +132,7 @@ let quitting = false;
 // How long a loaded page has to start before it's loaded again.
 const BOOT_MS = 30e3;
 let updates = null;
-// The window key (core/actors/key.js), from the service this app connects
+// The window key (crates/xenonet-actors/src/key.rs), from the service this app connects
 // to, for the routes only XenoNet's own window may use. Held here while
 // connected, and given only to XenoNet's own page (app:window-key); never
 // written down.
@@ -154,7 +154,7 @@ function stop() {
 }
 
 // Whether the window shows, for the server's word on you and the page's
-// (core/actors/you.js, src/you.js): hidden or minimized is away. A hidden
+// (crates/xenonet-actors/src/you.rs, src/you.js): hidden or minimized is away. A hidden
 // test window (XENONET_SHOW=hidden) stands in for a visible one, as it does
 // for screenshots and input.
 function windowState() {
@@ -206,7 +206,7 @@ let appMenu = null;
 // their made-up world.
 function serverEnv() {
   // XENONET_EXEC: this app, which agents' XenoNet tools run on, as Node (see
-  // core/engine/connect.js).
+  // crates/xenonet-engine/src/connect.rs).
   const env = { ...process.env, XENONET_PORT: String(PORT), XENONET_EXEC: process.execPath, XENONET_NAME: app.getName() };
   delete env.XENONET_CONTROL;
   if (!fromSource) return env;
@@ -344,8 +344,8 @@ async function startServer() {
 
 // XenoNet Dev picks up edits as they're saved. The page hot-reloads through
 // Vite (desktop-server.js), and a change to the preload reloads it. A change
-// to the rest of electron/, or to the core/ and server/ modules Desktop runs
-// itself, relaunches XenoNet Dev.app; a terminal run says to restart
+// to the rest of electron/, or to the src/shared/ modules Desktop imports
+// too, relaunches XenoNet Dev.app; a terminal run says to restart
 // instead, since a relaunch would leave the terminal behind. The service is
 // the checkout's xenonet binary: when a build replaces it (npm run
 // rust:bin), XenoNet Dev stops the old service and relaunches onto the new
@@ -360,7 +360,7 @@ function watchSource() {
     if (shell.length) return relaunch(`${shell.join(", ")} changed`);
     if (files.length) win?.webContents.reloadIgnoringCache();
   };
-  for (const dir of ["core", "server", "electron"]) {
+  for (const dir of ["electron", path.join("src", "shared")]) {
     fs.watch(path.join(root, dir), { recursive: true }, (_event, file) => {
       if (!/\.[cm]?js$/.test(file ?? "")) return;
       changed.add(path.join(dir, file));
@@ -746,7 +746,7 @@ function wireIpc() {
 // Recording the window (films of the day), shared by the page and the
 // control channel.
 const recorder = createRecorder(() => win, { onChange: () => tellDrawing() });
-// The frame a film records in (core/frames.js): the window takes the
+// The frame a film records in (src/shared/frames.js): the window takes the
 // largest size in the frame's shape that fits its display, and the film is
 // scaled to the frame's own width.
 function filmFrame(frame) {

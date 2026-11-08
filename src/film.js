@@ -2,13 +2,13 @@
 // framed for the screen, with a title card, running counts while it plays,
 // and an end card with the day's numbers (the cards: film-cards.js). The
 // panels step aside; the map turns slowly. It shows the day's constellation
-// (core/redact.js): star names, the archetype, no clock, unless the film
+// (crates/xenonet-state/src/redact.rs): star names, the archetype, no clock, unless the film
 // reveals more. "Make a film of today" records it in the desktop app
 // (electron/recorder.js), as a story (9:16); xenonet film records it from a
 // hidden window.
 import { fetchConstellation, fetchExportLabels } from "./poster.js";
 import { titleCard, overlay, endCard } from "./film-cards.js";
-import { filmPlaySeconds } from "../core/frames.js";
+import { filmPlaySeconds } from "./shared/frames.js";
 
 const TITLE_MS = 3200;
 const END_MS = 4800;
@@ -23,7 +23,7 @@ export function createFilm({ scene, replay }) {
   let state = "idle"; // idle, title, playing, end
   let raf = 0;
 
-  // Plays the day for `seconds` (the cards add 8 more; core/frames.js),
+  // Plays the day for `seconds` (the cards add 8 more; src/shared/frames.js),
   // revealing what `reveal` turns on (names, tokens).
   async function play({ seconds = filmPlaySeconds(), reveal = {} } = {}) {
     if (state !== "idle") return;
@@ -32,7 +32,7 @@ export function createFilm({ scene, replay }) {
     if (!events.length) throw new Error("nothing happened today to make a film of");
     document.body.classList.add("filming");
     // The map's own labels follow the cards: star names, and none on a
-    // session, unless the film reveals the names (core/export-labels.js).
+    // session, unless the film reveals the names (src/shared/export-labels.js).
     scene.setRedaction(labels);
     root.hidden = false;
     scene.reset();

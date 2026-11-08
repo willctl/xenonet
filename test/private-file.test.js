@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runPrivateCommand, protectFile, userSid } from "../core/private-file.js";
+import { runPrivateCommand, protectFile, userSid } from "../electron/lib/private-file.js";
 
 test("private commands tolerate Windows inspection delays and still time out", () => {
   const slowLookup = (file, args, options) => {

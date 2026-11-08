@@ -4,7 +4,7 @@
 // shard of the suite (scripts/e2e-shard.mjs).
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { xenonet } from "../core/control.js";
+import { xenonet } from "../test/harness/control.js";
 import { parseShard, readTimings, shards, suiteFiles } from "./e2e-shard.mjs";
 
 const instance = xenonet("test");

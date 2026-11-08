@@ -7,7 +7,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { screen } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { findFfmpeg } from "../core/dirs.js";
+import { findFfmpeg } from "./lib/dirs.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

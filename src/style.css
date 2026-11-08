@@ -1,5 +1,5 @@
 :root {
-  /* The theme's colors (core/themes.js), which src/theme.js sets for the
+  /* The theme's colors (src/shared/themes.js), which src/theme.js sets for the
      theme in use; these are XenoNet's own. Each has an -rgb twin for shades
      you can see through: rgb(var(--accent-rgb) / 0.22). */
   --bg: #05070a;

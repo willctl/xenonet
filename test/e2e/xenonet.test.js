@@ -1,6 +1,6 @@
 // End to end: drives a real XenoNet Dev, the test instance with the demo's
 // made-up data, through the same control channel agents use (see
-// core/control.js). The window stays hidden; XENONET_E2E_SHOW=inactive
+// test/harness/control.js). The window stays hidden; XENONET_E2E_SHOW=inactive
 // shows it to watch, and XENONET_E2E_KEEP=1 leaves it running afterwards. A
 // failing test saves a screenshot to .xenonet/e2e-<test>.png.
 //
@@ -11,7 +11,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet, root } from "../../core/control.js";
+import { xenonet, root } from "../harness/control.js";
 import { limit } from "../harness/software.js";
 
 // The test instance, on a spare port only this run knows, so nothing else
@@ -303,13 +303,13 @@ test("what you do is logged as steps, which play back to the same state", { time
   const steps = (await s.driver("ops")).map(({ op, args }) => ({ op, args }));
   assert.deepEqual(steps.map((x) => x.op), ["select", "select"]);
   await home();
-  const { runScript } = await import("../../core/script.js");
+  const { runScript } = await import("../harness/script.js");
   await runScript(s, steps);
   assert.equal((await s.driver("state")).selection.id, there);
   await home();
 }));
 
-test("a film of the day plays to its end card and records an MP4", { timeout: limit(90000), skip: !(await import("../../core/dirs.js")).findFfmpeg() && "no ffmpeg" }, shoot("film", async () => {
+test("a film of the day plays to its end card and records an MP4", { timeout: limit(90000), skip: !(await import("../../electron/lib/dirs.js")).findFfmpeg() && "no ffmpeg" }, shoot("film", async () => {
   await home();
   const file = path.join(root, ".xenonet", "e2e-film.mp4");
   fs.rmSync(file, { force: true });

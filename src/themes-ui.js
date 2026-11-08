@@ -1,4 +1,4 @@
-// Themes from the console (core/themes.js for what they are, theme.js for
+// Themes from the console (src/shared/themes.js for what they are, theme.js for
 // drawing them): a palette command for each; "Theme…", a switcher that
 // shows each theme on the map as you move through it (theme-switcher.js);
 // a gallery of them all (theme-gallery.js); making a theme of your own;
@@ -102,7 +102,7 @@ export function createThemes({ post, sfx, toast, note, desktop = null, onCommand
   };
 
   // A copy of theme `from` (the one in use, unless it's another), as a file
-  // of your own to edit (core/themefiles.js), which XenoNet then uses.
+  // of your own to edit (crates/xenonet-app/src/themefiles.rs), which XenoNet then uses.
   // Resolves to { id, file }, or null if it couldn't.
   async function copy(from = current ?? THEME.id) {
     const taken = list.map((t) => t.id);

@@ -5,9 +5,9 @@
 // service's socket, as it does to an installed service.
 import fs from "node:fs";
 import path from "node:path";
-import { installBundle, hasBinary } from "../core/components/install.js";
-import { currentComponent } from "../core/components/packages.js";
-import { componentUpdates, updateComponent } from "../core/components/updates.js";
+import { installBundle, hasBinary } from "./lib/components/install.js";
+import { currentComponent } from "./lib/components/packages.js";
+import { componentUpdates, updateComponent } from "./lib/components/updates.js";
 
 const found = (f, stat) => {
   try {
@@ -52,7 +52,7 @@ export function missingBinary({ fromSource }) {
 // The Service and Tools a packaged Desktop starts with. A bundle (the Mac
 // disk image, Windows' XenoNet Setup) brings its own for any that's missing
 // or from before 0.4.0, a node and XenoNet's JS with no xenonet binary
-// (core/components/install.js). Any it doesn't bring comes from the latest
+// (electron/lib/components/install.js). Any it doesn't bring comes from the latest
 // release, as it does for a Desktop-only update, Tools first so the service
 // names their launcher.
 //

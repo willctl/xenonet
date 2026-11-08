@@ -11,7 +11,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet } from "../../core/control.js";
+import { xenonet } from "../harness/control.js";
 import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
@@ -159,7 +159,7 @@ test("your rules and Codex's picks stay with their folder", { timeout: limit(120
 }));
 
 test("the script step and no page errors", { timeout: limit(60000) }, async () => {
-  const { runStep } = await import("../../core/script.js");
+  const { runStep } = await import("../harness/script.js");
   const said = [];
   await runStep(s, "root:~/Clients", (v) => said.push(v));
   await runStep(s, "root:reset", (v) => said.push(v));

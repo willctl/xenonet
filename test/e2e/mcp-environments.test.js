@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
-import { xenonet } from "../../core/control.js";
+import { xenonet } from "../harness/control.js";
 import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => { const p = net.createServer().listen(0, "127.0.0.1", () => { const port = p.address().port; p.close(() => resolve(port)); }); });

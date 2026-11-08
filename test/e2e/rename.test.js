@@ -10,7 +10,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet } from "../../core/control.js";
+import { xenonet } from "../harness/control.js";
 import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
@@ -49,7 +49,7 @@ before(async () => {
   await xenonet("test").quit();
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
   // The newest session whose app XenoNet renames in: Claude Code's or
-  // Codex's (core/rename.js).
+  // Codex's (src/shared/rename.js).
   session = (await s.driver("find", { query: "", kind: "session", limit: 40 })).nodes.find((n) => n.app === "claude" || n.app === "codex");
 }, { timeout: limit(180000) });
 

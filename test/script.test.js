@@ -1,8 +1,8 @@
-// Running steps and scripts (core/script.js) against a stand-in for XenoNet
+// Running steps and scripts (test/harness/script.js) against a stand-in for XenoNet
 // Dev's control client, which records what it was asked.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runStep, runScript } from "../core/script.js";
+import { runStep, runScript } from "./harness/script.js";
 
 const STATE = { selection: null, gathered: null, overlays: { modal: false, film: false }, alerts: [], motion: { settled: true } };
 

@@ -1,5 +1,5 @@
 // End to end: XenoNet Dev's test instance, whose data is made up, observes
-// nothing on the machine it runs on (core/actors/observers.js). However
+// nothing on the machine it runs on (crates/xenonet-actors/src/observers.rs). However
 // many of Hermes Agent's, Grok Bot's and Muse's processes run here, its actors are
 // the demo's four, it has no observer among its parts, and its doctor
 // leaves the actors' checks, which read this machine, alone. The window
@@ -12,7 +12,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet } from "../../core/control.js";
+import { xenonet } from "../harness/control.js";
 import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {

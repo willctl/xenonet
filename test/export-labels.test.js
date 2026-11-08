@@ -1,9 +1,9 @@
-// The map's own labels during an export (core/export-labels.js): a star
+// The map's own labels during an export (src/shared/export-labels.js): a star
 // name on every labelled kind of node, a slash after a group's, and no
 // label on a session or on a node the names don't cover.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { exportLabel, LABELLED_KINDS } from "../core/export-labels.js";
+import { exportLabel, LABELLED_KINDS } from "../src/shared/export-labels.js";
 
 const labels = { "core": "Sugus", "project:/home/dana/projects/atlas-api": "Kevis", "project:/home/dana/projects": "Thalor", "zone:/home/dana/clients": "Mira", "page:refunds": "Doun", "resource:github": "Vrae", "host:dana-mbp.local": "Shaeshushi", "native:codex-1": "Lior", "wiki:/home/dana/wiki": "Feim" };
 

@@ -1,4 +1,4 @@
-// Identities on the page (see server/identities.js): the chips under
+// Identities on the page (see crates/xenonet-service): the chips under
 // Filters, the inspector's Identities section, the rings that named
 // identities' projects stand on, and masking.
 //
@@ -87,7 +87,7 @@ export function createIdentities({ sfx = () => {}, toast = () => {}, onFilter = 
     groups = [...g.values()];
     // Each name keeps its ring as others come and go: the one its hash
     // picks, or the next one free. The ring colors are the theme's (see
-    // ringColors in core/themes.js, clear of the colors that mean something
+    // ringColors in src/shared/themes.js, clear of the colors that mean something
     // on the map), so a name keeps its place and the panels follow a change
     // of theme through var(--ring-N).
     const taken = new Set();

@@ -21,7 +21,7 @@
 import { HOST_ID } from "./network-model.js";
 import { hostNodeId } from "./hosts.js";
 
-// As the map counts a session active or recent (core/graph.js's windows).
+// As the map counts a session active or recent (crates/xenonet-state/src/graph.rs's windows).
 const ACTIVE_MS = 10 * 60e3;
 const RECENT_MS = 24 * 3600e3;
 // A project lit as a place where something ran in the last hour.

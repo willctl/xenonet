@@ -1,4 +1,4 @@
-import { ENVIRONMENTS } from "../core/environments.js";
+import { ENVIRONMENTS } from "./shared/environments.js";
 import { environmentState, syncEnvironment, previewEnvironment, revertEnvironment, useEnvironment } from "./environment.js";
 import { escapeHtml as h } from "./format.js";
 import "./environments.css";

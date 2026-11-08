@@ -1,9 +1,9 @@
 // What Token use shows of each actor's spend today (GET /api/spend's
-// `actors`, core/actors/spend.js): the top few actors, the rest folded
+// `actors`, crates/xenonet-actors/src/spend.rs): the top few actors, the rest folded
 // under "more" until it's opened, and the unattributed rest last, each
 // with its share of the day and what it covers on hover. Plain data in
 // and out, so the panel's words can be tested without a page.
-import { plural, tokens } from "../core/units.js";
+import { plural, tokens } from "./shared/units.js";
 
 export const TOP = 3;
 

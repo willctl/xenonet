@@ -5,7 +5,7 @@
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { appDir } from "../../core/dirs.js";
+import { appDir } from "../../electron/lib/dirs.js";
 
 // The golden copies: built once from a template, stopped, protected, and
 // never signed in to. Working VMs are clones of them.

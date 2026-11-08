@@ -1,6 +1,6 @@
 // What you do in the console, as driver steps ({ op, args }; see
 // driver.js), oldest first: what xenonet script record saves, and
-// xenonet script run plays again (core/script.js).
+// xenonet script run plays again (test/harness/script.js).
 const MAX = 500;
 const log = [];
 

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import * as tar from "tar";
-import { digest, stagePackage, selectComponent, currentComponent, withInstallLock, fitsHere, TRAY, TRAY_APP, TRAY_EXE } from "../core/components/packages.js";
+import { digest, stagePackage, selectComponent, currentComponent, withInstallLock, fitsHere, TRAY, TRAY_APP, TRAY_EXE } from "../electron/lib/components/packages.js";
 
 const BIN = path.join("bin", process.platform === "win32" ? "xenonet.exe" : "xenonet");
 

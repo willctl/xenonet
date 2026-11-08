@@ -5,7 +5,7 @@ import { compact } from "./telemetry.js";
 import { fileManager } from "./platform.js";
 import { whereHtml, hostRows, tipText, hostTag, sameHost, alertText } from "./hosts.js";
 import { stoppedWords, turnEndWords } from "./live-words.js";
-import { cleanTitle, renamable, MAX_TITLE } from "../core/rename.js";
+import { cleanTitle, renamable, MAX_TITLE } from "./shared/rename.js";
 
 const $ = (sel) => document.querySelector(sel);
 

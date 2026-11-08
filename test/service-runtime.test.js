@@ -12,8 +12,8 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { rustBinary, missingBinary, serviceCommand, readyComponents, earlierNotice } from "../electron/service-runtime.js";
-import { installedRuntime } from "../core/components/install.js";
-import { currentComponent } from "../core/components/packages.js";
+import { installedRuntime } from "../electron/lib/components/install.js";
+import { currentComponent } from "../electron/lib/components/packages.js";
 import { BIN, NODE, posixOnly, pack, bundle, fakeService, earlierInstall } from "./harness/components.js";
 
 // Each file that exists, with when it was written.

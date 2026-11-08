@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { themes } from "../core/themes.js";
+import { themes } from "../src/shared/themes.js";
 
 // The gallery imports its stylesheet, which only Vite loads: here it's empty.
 register("data:text/javascript," + encodeURIComponent(`export async function load(url, context, next) { return url.endsWith(".css") ? { format: "module", source: "", shortCircuit: true } : next(url, context); }`));

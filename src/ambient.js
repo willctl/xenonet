@@ -88,7 +88,7 @@ function noiseBuffer(ctx, seconds, brown = true) {
 }
 
 export function createAmbient() {
-  // The theme's music (core/themes.js): a chord cycle and a scale in MIDI
+  // The theme's music (src/shared/themes.js): a chord cycle and a scale in MIDI
   // notes, the tempo and the voices. XenoNet's own is a D lydian cycle,
   // Dmaj9 → Bm11 → Gmaj7#11 → Aadd9, at 84 BPM.
   let music = THEME.sound;

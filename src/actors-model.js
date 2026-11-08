@@ -277,7 +277,7 @@ export function youHere(list, { quietMs, hiddenMs = null, awayMs = 10 * 60e3, re
 // inspector, the tooltip, the Actors panel and the request card.
 export const RELATION_WORDS = { "works-on": "works on", spawned: "started", edited: "edited", messaged: "messaged", watches: "watches", reviews: "reads" };
 export const VIA_WORDS = { observed: "XenoNet reads its state", attributed: "XenoNet traces work here back to it", registered: "it reports itself", remote: "it reads through a remote connection you paired", demo: "made up, for the demo" };
-// The routes a remote actor's connections take (core/actors/adapters.js).
+// The routes a remote actor's connections take (crates/xenonet-actors/src/adapters.rs).
 export const TRANSPORT_WORDS = { "openai-secure-mcp-tunnel": "OpenAI Secure MCP Tunnel", "local-stdio": "a local MCP client" };
 export const PRODUCT_NAMES = { "hermes-agent": "Hermes Agent", "grok-bot": "Grok Bot", muse: "Muse", dots: "dots" };
 export const PRESENCE_WORDS = { working: "working", idle: "idle", away: "away", offline: "offline", unknown: "not heard from" };
@@ -298,7 +298,7 @@ export const CAPABILITY_WORDS = { "spawn-sessions": "start sessions", "edit-repo
 //             so its observer's switch is how to keep it away
 //   observer  the product whose observer it falls under, or null
 // The products whose agents work in their makers' clouds, which reach XenoNet
-// through its actor gateway (server/actor-gateway.js), even before they
+// through its actor gateway (crates/xenonet-service/src/gateway), even before they
 // report themselves: a gateway token registers one XenoNet only observes.
 export const GATEWAY_PRODUCTS = new Set(["grok-bot", "muse"]);
 

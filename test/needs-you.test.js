@@ -1,11 +1,11 @@
-// What waits on you as one queue (core/needs-you.js): sessions waiting on a
+// What waits on you as one queue (src/shared/needs-you.js): sessions waiting on a
 // question or a permission, actors waiting on you, programs asking to be
 // actors and asks for a gateway token, the longest wait first, each with
 // what answers it; in a window without the key, only how many programs ask.
 // The sessions, actors and programs are made up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { needsYouQueue, queueOfSummary, countOf, waitsWords, order } from "../core/needs-you.js";
+import { needsYouQueue, queueOfSummary, countOf, waitsWords, order } from "../src/shared/needs-you.js";
 
 const T = 1791230000000;
 const session = (n, kind, since, more = {}) => ({ id: `claude:0190d3e0-0000-7000-8000-00000000000${n}`, app: "claude", title: `Session ${n}`, kind, text: `What about ${n}?`, since, ...more });

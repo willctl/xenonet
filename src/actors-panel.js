@@ -15,7 +15,7 @@
 //     the Agent Card's address and each such agent's default target
 //     (a2a-panel.js), and Connect…'s As an A2A agent;
 //   - how each actor that reports itself is woken when a message arrives
-//     (core/actors/wake.js, wake-panel.js), in its row, and Wake… to set
+//     (crates/xenonet-actors/src/wake.rs, wake-panel.js), in its row, and Wake… to set
 //     it: a webhook, whose URL and key go to the credential store, a
 //     notification, or nothing;
 //   - remote connections (remote-panel.js): who reads what through each,
@@ -43,7 +43,7 @@ import { actorActions, actorOrder, colorOf, presenceWord, PRESENCE_WORDS, CAPABI
 import { askedBy, asksFor, leftWords, tokenParts, JOINS_ALLOW } from "./actor-requests.js";
 import { actorWhat } from "./actor-inspector.js";
 import { productLine } from "./actor-words.js";
-import { handoff, wakeHelp } from "../core/actors/handoff.js";
+import { handoff, wakeHelp } from "./shared/handoff.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur } from "./secret.js";
 import { gatewayHtml, gateHtml, gatewaySetupHtml, readPick, gatewayAskHtml, gatewayTokenHtml, gatewayMovedHtml, connected, waitWords } from "./gateway-panel.js";
 import { wakeHtml, wakeViewHtml, readWake } from "./wake-panel.js";
@@ -295,7 +295,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
   const a2aCard = () => (a2a?.on && a2a.card) || null;
 
   // How each actor that reports itself is woken when a message arrives
-  // (core/actors/wake.js), for a window that can change it; never a
+  // (crates/xenonet-actors/src/wake.rs), for a window that can change it; never a
   // webhook's URL or key, which stay in the credential store.
   let wakes = null;
   async function loadWakes() {

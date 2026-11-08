@@ -15,7 +15,7 @@
 // with it; one that returns nothing keeps running until it exits or is
 // killed. A script can also be that object alone.
 //
-// exec(file, args) answers the way core/procs.js asks the system (ps,
+// exec(file, args) answers the way crates/xenonet-engine/src/procs.rs asks the system (ps,
 // netstat, codesign, lsof, plutil and pgrep), from the table, so
 // createProcs({ exec }) sees this machine instead of the real one; `asked`
 // lists what it was asked. A process's executable is its program unless
@@ -29,7 +29,7 @@ import { PassThrough } from "node:stream";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad = (n, w = 2, c = "0") => String(n).padStart(w, c);
-// ps's lstart, "Sat Oct  3 16:34:29 2026", in UTC: core/procs.js runs ps
+// ps's lstart, "Sat Oct  3 16:34:29 2026", in UTC: crates/xenonet-engine/src/procs.rs runs ps
 // with TZ=UTC.
 const lstart = (ms) => {
   const d = new Date(ms);
@@ -51,7 +51,7 @@ export function fakeProcesses({ clock = null, self = {} } = {}) {
   const asked = [];
   let nextPid = 5000;
 
-  const me = { pid: 4000, ppid: 1, program: "/usr/local/bin/node", args: ["server/index.js"], ...self };
+  const me = { pid: 4000, ppid: 1, program: "/usr/local/bin/node", args: ["crates/xenonet-service"], ...self };
   me.start = second(me.start ?? now());
   table.set(1, { pid: 1, ppid: 0, start: second(now() - 86400e3), program: "/sbin/launchd", args: [] });
   table.set(me.pid, me);
@@ -130,7 +130,7 @@ export function fakeProcesses({ clock = null, self = {} } = {}) {
       exit(null, signal);
       return true;
     };
-    // A detached child the caller lets go of (core/control.js's launch).
+    // A detached child the caller lets go of (test/harness/control.js's launch).
     child.unref = child.ref = () => child;
 
     // What's written to its stdin, a line at a time.
@@ -204,7 +204,7 @@ export function fakeProcesses({ clock = null, self = {} } = {}) {
     return found;
   };
 
-  // The system as core/procs.js asks it: ps, netstat, codesign, lsof and
+  // The system as crates/xenonet-engine/src/procs.rs asks it: ps, netstat, codesign, lsof and
   // pgrep from the table; anything else runs as a program.
   async function exec(file, args = []) {
     asked.push([file, ...args]);

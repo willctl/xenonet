@@ -12,9 +12,9 @@ import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { xenonet } from "../../core/control.js";
-import { installedConsole } from "../../core/components/console.js";
-import { connectService } from "../../core/components/runtime.js";
+import { xenonet } from "../harness/control.js";
+import { installedConsole } from "../../electron/lib/components/console.js";
+import { connectService } from "../../electron/lib/components/runtime.js";
 import { limit } from "../harness/software.js";
 
 const s = xenonet("test");

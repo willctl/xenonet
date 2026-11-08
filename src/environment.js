@@ -1,4 +1,4 @@
-import { DEFAULT_ENVIRONMENT, environmentOf } from "../core/environments.js";
+import { DEFAULT_ENVIRONMENT, environmentOf } from "./shared/environments.js";
 const STORE = "xenonet.environment";
 let inUse = DEFAULT_ENVIRONMENT;
 try { inUse = environmentOf(localStorage.getItem(STORE)).id; } catch {}

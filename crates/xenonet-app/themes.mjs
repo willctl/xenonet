@@ -1,12 +1,12 @@
 // The built-in themes' data for the Rust (src/themes.json), from
-// core/themes.js, which the console page keeps: the object literals before
+// src/shared/themes.js, which the console page keeps: the object literals before
 // its first function, as they are.
 //
 //   node crates/xenonet-app/themes.mjs           writes src/themes.json
 //   node crates/xenonet-app/themes.mjs --check   fails if it's out of date
 import fs from "node:fs";
 
-const source = fs.readFileSync(new URL("../../core/themes.js", import.meta.url), "utf8");
+const source = fs.readFileSync(new URL("../../src/shared/themes.js", import.meta.url), "utf8");
 const end = source.indexOf("\nconst isObject");
 if (end < 0) throw new Error("core/themes.js has changed shape: its data no longer ends at isObject");
 const data = `${source.slice(0, end)}\nexport { THEMES };\n`;

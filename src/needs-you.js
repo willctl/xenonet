@@ -1,5 +1,5 @@
 // The Needs you panel: everything waiting on you in one list, the longest
-// wait first (core/needs-you.js), and what answers each. A session's
+// wait first (src/shared/needs-you.js), and what answers each. A session's
 // question or permission is answered in its own app, so Open goes there,
 // Show selects it on the map and ✓ puts its wait away, as the strip's card
 // does. An actor waiting on you shows on the map, or you write to it. A
@@ -17,7 +17,7 @@ import { askedBy, asksFor, leftWords, JOINS_ALLOW, ARM_MS } from "./actor-reques
 import { CAPABILITY_WORDS, PRODUCT_NAMES } from "./actors-model.js";
 import { gist } from "./alerts.js";
 import { hereId } from "./hosts.js";
-import { waitsWords, countOf } from "../core/needs-you.js";
+import { waitsWords, countOf } from "./shared/needs-you.js";
 import "./needs-you.css";
 
 // A dismissed wait stays hidden this long for the server to drop it, as

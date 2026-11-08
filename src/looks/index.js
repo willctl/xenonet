@@ -1,6 +1,6 @@
 // How the map's surroundings are drawn, by style: the stars, the floor
 // grid, the sweep that circles the floor, the sonar the core sends out, and
-// the lines between nodes. A theme names a style for each (core/themes.js:
+// the lines between nodes. A theme names a style for each (src/shared/themes.js:
 // stars.shape, grid.style, sweep.shape, sonar.style, lines.style), and each
 // registry maps those names to what draws them. The first in each is the
 // look XenoNet has always had, and draws any style this XenoNet doesn't have

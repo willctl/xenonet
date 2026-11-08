@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { connectService } from "../core/components/runtime.js";
+import { connectService } from "./lib/components/runtime.js";
 
 // Reconnect the transport after a service update. Never replay an action.
 export async function desktopClient(options) {

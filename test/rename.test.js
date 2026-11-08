@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanTitle, renamable, MAX_TITLE } from "../core/rename.js";
+import { cleanTitle, renamable, MAX_TITLE } from "../src/shared/rename.js";
 
 test("a session's new name is one line, without control characters, and not too long", () => {
   const lineSeparator = String.fromCharCode(0x2028);

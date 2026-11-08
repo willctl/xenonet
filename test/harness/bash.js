@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { onPath } from "../../core/paths.js";
+import { onPath } from "../../electron/lib/paths.js";
 
 const git = onPath("git");
 const candidates = process.platform === "win32" ? [process.env.CLAUDE_CODE_GIT_BASH_PATH, git && path.resolve(path.dirname(git), "..", "bin", "bash.exe"), process.env.ProgramFiles && path.join(process.env.ProgramFiles, "Git", "bin", "bash.exe")] : [onPath("bash")];

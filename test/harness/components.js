@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as tar from "tar";
-import { currentComponent, digest, selectComponent } from "../../core/components/packages.js";
+import { currentComponent, digest, selectComponent } from "../../electron/lib/components/packages.js";
 
 export const EXE = process.platform === "win32" ? "xenonet.exe" : "xenonet";
 export const BIN = path.join("bin", EXE);
@@ -84,7 +84,7 @@ export function fakeService(env, state, { failing = null } = {}) {
 // An install as XenoNet 0.3.0 left it (git show v0.3.0:core/components/
 // packages.js and install.js): each component a node and XenoNet's JS, with
 // no xenonet binary, in <version>-<sha16> beside its current.json, and the
-// launcher's own node and cli/xenonet.js, which the hooks and MCP servers
+// launcher's own node and crates/xenonet-cli, which the hooks and MCP servers
 // 0.3.0 wrote run. Says what's selected.
 export function earlierInstall(env, { components = ["service", "tools"], version = "0.3.0" } = {}) {
   const selected = {};

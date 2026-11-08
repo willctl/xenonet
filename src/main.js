@@ -25,13 +25,13 @@ import { createIntegrationsPanel } from "./integrations.js";
 import { createRootPanel } from "./root.js";
 import { createAlerts } from "./alerts.js";
 import { createNeedsYou } from "./needs-you.js";
-import { needsYouQueue, countOf } from "../core/needs-you.js";
+import { needsYouQueue, countOf } from "./shared/needs-you.js";
 import { createPalette } from "./palette.js";
 import { createReplay } from "./replay.js";
 import { createFilm } from "./film.js";
 import { note, ops, clearOps } from "./oplog.js";
 import { createExportPanel } from "./export-panel.js";
-import { filmPlaySeconds } from "../core/frames.js";
+import { filmPlaySeconds } from "./shared/frames.js";
 import { createIdentities } from "./identities.js";
 import { keyLabel } from "./platform.js";
 import { WINDOWS, loadScope, saveScope, scopeGraph, scopeCounts } from "./scope.js";
@@ -53,7 +53,7 @@ import { createRemoteConnections } from "./remote-panel.js";
 import { createHostFilters, decorate as decorateHosts, hostOfId, setHere } from "./hosts.js";
 import { inNetwork } from "./network-model.js";
 import { chimes } from "./live-words.js";
-import { renamable } from "../core/rename.js";
+import { renamable } from "./shared/rename.js";
 import "./hosts.css";
 
 const params = new URLSearchParams(location.search);
@@ -214,7 +214,7 @@ async function openInApp(nodeOrId) {
   return { ok: res.ok, error: res.ok ? null : ((await res.json().catch(() => ({}))).error ?? "Couldn't open the desktop app") };
 }
 
-// A session's new name, saved in its own app (core/rename.js), so Claude
+// A session's new name, saved in its own app (src/shared/rename.js), so Claude
 // Code, Claude desktop or Codex shows it too. Answers { ok, title, saved,
 // note, error } and says how it went.
 async function renameSession(id, title) {
@@ -273,7 +273,7 @@ const doctorPanel = createDoctorPanel({
       }
     : null,
 });
-// A session's models, tokens, costs and timing (core/stats.js).
+// A session's models, tokens, costs and timing (crates/xenonet-state/src/stats.rs).
 const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b), read: windowCalls.read });
 const refusalsPanel = createRefusalsPanel({ modals });
 const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls, savePatch: desktop?.savePatch });
@@ -308,7 +308,7 @@ async function decisionKey() {
   });
 }
 
-// A message from you, from XenoNet's own window (core/engine/attest.js): to
+// A message from you, from XenoNet's own window (crates/xenonet-engine/src/attest.rs): to
 // an actor, which reads it in its inbox marked as from you, or to a session,
 // on this machine or another in your network, which gets it as from you at
 // this console. It approves nothing: a session's permission question is
@@ -501,7 +501,7 @@ alerts.setChime(() => chimeHere(network.state));
 // Its machine chips are the Filters chips.
 const machinesView = createMachinesView({ modals, sfx, hosts: hostFilters, graph: () => fullGraph, net: () => network.state, onStart: (host) => network.startSession({ host }) });
 
-// Everything waiting on you, the longest wait first (core/needs-you.js),
+// Everything waiting on you, the longest wait first (src/shared/needs-you.js),
 // from what the strip shows: the map's sessions waiting on a question or a
 // permission, the actors waiting on you and the registrations waiting.
 // Machines whose Claude Code needs a sign-in for XenoNet's runs (the
@@ -699,7 +699,7 @@ const commandList = [
   { id: "background", label: "Background service: start XenoNet's service at login", keywords: "settings login startup boot always on keep running daemon launchd systemd launch agent", run: () => backgroundPanel.open() },
   { id: "doctor", label: "Check XenoNet's setup", keywords: "doctor health sign in login auth permissions problems diagnose", run: () => doctorPanel.open() },
   { id: "connect-agents", label: "Connect your agents to XenoNet", keywords: "si super intelligence agents claude code codex grok build mcp hooks engine coordinate messages work together", run: () => connectPanel.open() },
-  // The kill switch for messages between sessions and actors, and every wake (core/delivery/policy.js).
+  // The kill switch for messages between sessions and actors, and every wake (crates/xenonet-engine/src/delivery/policy.rs).
   { id: "pause-messages", label: "Pause or resume messages between sessions", keywords: "si agents stop kill switch halt wake live delivery actors abuse", run: () => toggleDelivery() },
   { id: "network", label: "Network settings: your other machines", keywords: "settings network machines computers hosts laptop server gateway start create join leave remove replace tunnel lan titles only share", run: () => network.open() },
   { id: "add-machine", label: "Add a machine", keywords: "network another computer laptop server host join ticket second machine", run: () => network.addMachine() },
@@ -715,7 +715,7 @@ const commandList = [
   { id: "identities-all", label: "Show every identity's work", keywords: "identity account filter clear", run: () => identities.setSelected([]) },
   { id: "identities-rescan", label: "Detect identities again", keywords: "accounts sign in github gh git claude chatgpt", run: () => rescanIdentities() },
   { id: "mute", label: "Mute or unmute sound", key: "M", run: () => ambient.toggle() },
-  // The decision model's OpenRouter key (core/decide.js): typed here once,
+  // The decision model's OpenRouter key (crates/xenonet-app/src/decide.rs): typed here once,
   // kept in your credential store, never shown again.
   {
     id: "system-panel",
@@ -804,7 +804,7 @@ const themesUi = createThemes({ post, sfx, toast: (m, b) => hud.toast(m, b), not
 const environmentsUi = createEnvironments({ modals, post, sfx, note, toast: (m, b) => hud.toast(m, b), onCommands: (list) => setCommands("environment-", list) });
 document.getElementById("environment-open").onclick = () => environmentsUi.open();
 
-// The xenonet command for terminals (core/command.js), run by this app.
+// The xenonet command for terminals (electron/lib/command.js), run by this app.
 async function installCommand() {
   const res = await fetch("/api/command", { method: "POST" });
   const st = await res.json().catch(() => ({}));
@@ -1377,7 +1377,7 @@ events.addEventListener("start", (e) => {
   if (s.state !== "ended" || bad || s.outcome) hud.toast(words, bad);
   network.heardStart?.(s);
 });
-// The theme (core/themes.js): the server's choice wins, and a change to it
+// The theme (src/shared/themes.js): the server's choice wins, and a change to it
 // (from the palette, another window, xenonet theme or an edit to a theme of
 // your own) is drawn in place, without a reload.
 events.addEventListener("theme", (e) => {
@@ -1398,7 +1398,7 @@ events.addEventListener("agent-message", (e) => {
   if (replay.active) return;
   const m = JSON.parse(e.data);
   const recipients = Array.isArray(m.to) ? m.to : [];
-  // A host's message may come with no target (core/hosts/merge.js), which
+  // A host's message may come with no target (crates/xenonet-hosts/src/merge.rs), which
   // reads as one to the agents it names.
   const target = typeof m.target === "string" ? m.target : "";
   const named = (id) => fullIndex.get(id)?.title ?? (isActorId(id) ? scene.actor(id)?.snapshot.name : null) ?? id;

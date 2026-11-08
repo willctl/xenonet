@@ -1,7 +1,7 @@
 // Drives XenoNet by meaning rather than by pixel, for scripts, tests and
 // agents. This is the page's half of the control channel: the desktop app's
 // main process calls it (electron/control.js) on behalf of
-// core/control.js, the console MCP server (mcp/console.js) and
+// test/harness/control.js, the console MCP server (crates/xenonet-mcp/src/console.rs) and
 // the end-to-end tests. Available in installed Desktop and development builds.
 //
 // Actions wait for the view to settle (the layout cooled, camera moves and
@@ -591,7 +591,7 @@ export function createDriver(app) {
       return { ...st, stats: d ? { cost: d.totals.cost, tokens: d.totals.tokens, calls: d.totals.calls, turns: d.turns.length, models: d.models.map((m) => m.model), tools: d.tools.length } : null };
     },
     // Renames a session, as typing a name over its title in the inspector
-    // would: the name is saved in its own app (core/rename.js), so Claude
+    // would: the name is saved in its own app (src/shared/rename.js), so Claude
     // Code, Claude desktop or Codex shows it too. Returns the state, with
     // `renamed`: the name as saved, where it went and anything to know.
     async rename(id, title, opts) {
@@ -627,7 +627,7 @@ export function createDriver(app) {
     // The map's own labels as they read now (scene.js, labelTexts), and
     // whether an export has them redacted: star names on projects, groups,
     // folders, pages, shared systems and machines, and none on sessions
-    // (core/export-labels.js), as while a film plays.
+    // (src/shared/export-labels.js), as while a film plays.
     labels: () => ({ redacted: !!scene.redaction, labels: scene.labelTexts() }),
     // Opens the palette with `text` typed in, or closes it with null.
     palette: (text = "", opts) => act(() => (text == null ? palette.close() : palette.open(text)), { settle: false, ...opts }),
@@ -648,7 +648,7 @@ export function createDriver(app) {
     // click on each would set them.
     filters: (set = {}, opts) => act(() => Object.entries(set ?? {}).forEach(([name, on]) => app.hud.setFilter(name, on)), opts),
 
-    // The projects folder XenoNet reads (core/workspace.js): its path, where
+    // The projects folder XenoNet reads (crates/xenonet-state/src/workspace.rs): its path, where
     // that comes from (source: env for XENONET_PROJECTS_DIR, chosen or
     // default) and its last scan.
     root: () => app.root.get(),

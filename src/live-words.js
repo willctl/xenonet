@@ -1,4 +1,4 @@
-// A turn you stopped, as the page says it (core/live.js): a live session's
+// A turn you stopped, as the page says it (crates/xenonet-sources/src/live/telemetry.rs): a live session's
 // interruptedAt, from when you stopped its last turn (Esc in Claude Code,
 // a turn you interrupted in Codex) until its next prompt, and the turn-end
 // that came with it, marked interrupted. It isn't waiting on you, since

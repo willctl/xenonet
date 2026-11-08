@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { POSTER_SIZES } from "../core/frames.js";
+import { POSTER_SIZES } from "../src/shared/frames.js";
 import { drawPoster, posterLines } from "../src/poster-draw.js";
 import { MARK_POLYGONS, MARK_BAND, MARK_URL } from "../src/mark.js";
 

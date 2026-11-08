@@ -2,7 +2,7 @@
 // Keeping one origin preserves browser storage and the existing page API.
 //
 // The service takes a request from this process as one from XenoNet's window
-// (core/engine/verify.js, desktop), so only the page's own requests go
+// (crates/xenonet-engine/src/verify.rs, desktop), so only the page's own requests go
 // through: Desktop adds `secret` to them as they leave its window
 // (pageHeaders), and an API request without it is refused. Other programs
 // talk to the service directly, where it sees who they are.
@@ -10,7 +10,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { staticFile } from "../server/static.js";
+import { staticFile } from "./lib/static.js";
 
 export const PAGE_HEADER = "x-xenonet-desktop";
 

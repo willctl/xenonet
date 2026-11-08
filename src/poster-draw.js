@@ -2,10 +2,10 @@
 // sharing, the mark band, the day's archetype as its headline, the
 // brightest stars by their star names, the day's numbers in one thin
 // band, and the node-X with the site in a corner. No border. Redacted by
-// default (core/redact.js): no project names and no clock, unless an
+// default (crates/xenonet-state/src/redact.rs): no project names and no clock, unless an
 // export reveals more. drawPoster takes any 2D context, so the tests draw
 // onto one that records; src/poster.js gives it the page's canvas.
-import { tokens as compact } from "../core/units.js";
+import { tokens as compact } from "./shared/units.js";
 import { MARK_BAND, MARK_URL, APP_GLYPHS, drawMark, drawGlyph } from "./mark.js";
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");

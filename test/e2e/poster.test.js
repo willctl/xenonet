@@ -13,9 +13,9 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet } from "../../core/control.js";
-import { LABELLED_KINDS } from "../../core/export-labels.js";
-import { POSTER_SIZES } from "../../core/frames.js";
+import { xenonet } from "../harness/control.js";
+import { LABELLED_KINDS } from "../../src/shared/export-labels.js";
+import { POSTER_SIZES } from "../../src/shared/frames.js";
 import { MARK_BAND, MARK_URL } from "../../src/mark.js";
 import { limit } from "../harness/software.js";
 

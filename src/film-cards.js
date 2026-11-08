@@ -1,12 +1,12 @@
 // What a film of the day shows over the map (src/film.js): the title card,
 // the overlay while the day plays, and the end card, from the day's
-// constellation (core/redact.js). So the cards carry the mark, the day's
+// constellation (crates/xenonet-state/src/redact.rs). So the cards carry the mark, the day's
 // archetype and its star names, and no clock: a line fills as the day
 // plays instead. `reveal.names` puts the projects' names in, and
 // `reveal.tokens` the tokens; both are off for every film until it turns
 // them on. Markup only, so the tests read it.
 import { escapeHtml as h } from "./format.js";
-import { tokens } from "../core/units.js";
+import { tokens } from "./shared/units.js";
 import { MARK_BAND, MARK_URL, markSvg } from "./mark.js";
 
 const count = (n) => Number(n ?? 0).toLocaleString("en-US");

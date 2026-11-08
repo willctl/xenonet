@@ -18,7 +18,7 @@ import { timeAgo } from "./format.js";
 // what was there a moment before can't land on it.
 export const ARM_MS = 1000;
 
-// Calls to the window's routes (server/routes/actors.js), with the key.
+// Calls to the window's routes (crates/xenonet-service/src/routes), with the key.
 // A 403 `yours` may mean the server started again with a new key, so the
 // key is asked for again once. Each answers { ok, status, code, error,
 // data }; without a key, status 0 and code no-key.

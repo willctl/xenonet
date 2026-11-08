@@ -1,14 +1,14 @@
 // The actor gateway in the Actors panel (actors-panel.js;
-// server/actor-gateway.js): the gateway at a glance, each actor's app
+// crates/xenonet-service/src/gateway): the gateway at a glance, each actor's app
 // connection under its row, picking the tunnel, and connecting an app:
 // a question first, then numbered steps, each with its Copy, that wait for
-// the app's first call (core/actors/handoff.js).
+// the app's first call (src/shared/handoff.js).
 //
 // Markup only. The panel keeps the gateway's state, reads it again and
 // answers the buttons; what it knows (whether this window can change
 // anything, an actor's name) comes in as arguments.
 import { escapeHtml as h, timeAgo } from "./format.js";
-import { handoff } from "../core/actors/handoff.js";
+import { handoff } from "./shared/handoff.js";
 import { keepSecret, secretHtml } from "./secret.js";
 
 const REFUSED_WORDS = { rotated: "replaced", removed: "taken away", expired: "expired" };

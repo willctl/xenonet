@@ -1,4 +1,4 @@
-// Installing XenoNet's components (core/components/install.js) beyond the
+// Installing XenoNet's components (electron/lib/components/install.js) beyond the
 // service switch component-activation.test.js covers: a bundle installs
 // what's missing, replaces a Service or Tools from before 0.4.0 and never
 // upgrades what else is there, a runtime that fails its startup check is
@@ -14,8 +14,8 @@ import fs from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { activatePackage, checkRuntime, hasBinary, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../core/components/install.js";
-import { currentComponent, selectComponent, stagePackage, digest, TRAY, TRAY_EXE } from "../core/components/packages.js";
+import { activatePackage, checkRuntime, hasBinary, installBundle, installedRuntime, installLauncher, recoverServiceUpdate, writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../electron/lib/components/install.js";
+import { currentComponent, selectComponent, stagePackage, digest, TRAY, TRAY_EXE } from "../electron/lib/components/packages.js";
 import * as tar from "tar";
 import { EXE, BIN, NODE, posixOnly, fakeBin, pack, bundle, fakeService as service, earlierInstall } from "./harness/components.js";
 

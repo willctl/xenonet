@@ -2,7 +2,7 @@
 // (amber), sessions and actors waiting and programs asking to be actors, or
 // how many agents are working, a tooltip listing them, and a menu for the
 // common jumps and the themes. What waits is the Needs you queue
-// (core/needs-you.js), in its order. It polls the server's /api/summary
+// (src/shared/needs-you.js), in its order. It polls the server's /api/summary
 // every few seconds.
 // Notifications come from the page (alerts.js), so each alert gets exactly
 // one. On a Mac, while XenoNet's own tray app runs (tray/macos), this one
@@ -15,7 +15,7 @@ import { Tray, Menu, app } from "electron";
 import { iconImage, trayGlyph } from "./icons.js";
 import { loginSupported, loginLabel, opensAtLogin, setOpensAtLogin, onLoginChange } from "./login.js";
 import { themeItems } from "./theme-menu.js";
-import { queueOfSummary, countOf, waitsWords } from "../core/needs-you.js";
+import { queueOfSummary, countOf, waitsWords } from "../src/shared/needs-you.js";
 
 const isMac = process.platform === "darwin";
 

@@ -37,10 +37,11 @@ pub struct Ctx {
 }
 
 /// The node launcher script this XenoNet ships
-/// (core/components/launcher.cjs), built in, so a package needs none of
-/// XenoNet's JS beside its binary. It runs the Tools' binary for entries an
-/// earlier XenoNet wrote (docs/design/contracts.md, section 12).
-pub const LAUNCHER_SCRIPT: &str = include_str!("../../../core/components/launcher.cjs");
+/// (electron/lib/components/launcher.cjs, which Desktop installs too),
+/// built in, so a package needs none of XenoNet's JS beside its binary. It
+/// runs the Tools' binary for entries an earlier XenoNet wrote
+/// (docs/design/contracts.md, section 12).
+pub const LAUNCHER_SCRIPT: &str = include_str!("../../../electron/lib/components/launcher.cjs");
 
 // The node an earlier XenoNet put in its packages and copied into the
 // launcher's folder, which the entries it wrote run.

@@ -1,12 +1,12 @@
 // A2A agents through the gateway, as the window shows them: the steps that
 // give an agent that speaks A2A its token and XenoNet's Agent Card
-// (core/actors/handoff.js), and the Actors panel's switch with the card's
+// (src/shared/handoff.js), and the Actors panel's switch with the card's
 // address and the agents that called (src/a2a-panel.js). The protocol
 // itself is tested in Rust (crates/xenonet-service/src/a2a/tests.rs, and
 // tests/a2a.rs against test/fixtures/a2a/cases.json).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handoff } from "../core/actors/handoff.js";
+import { handoff } from "../src/shared/handoff.js";
 import { a2aHtml } from "../src/a2a-panel.js";
 
 const CARD = "https://gw.example.com/.well-known/agent-card.json";

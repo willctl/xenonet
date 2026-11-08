@@ -7,7 +7,7 @@
 // false). Systems with none of the three say so (`supported` false).
 import { execFile } from "node:child_process";
 import os from "node:os";
-import { tilde } from "../core/paths.js";
+import { tilde } from "./lib/paths.js";
 
 // Runs the command: { code, out, err }, whatever it exits with.
 export function runCommand(file, args, { env, timeout = 90000 } = {}) {

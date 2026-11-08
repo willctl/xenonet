@@ -12,7 +12,7 @@ import crypto from "node:crypto";
 import * as tar from "tar";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
-import { SERVICE_API, CONSOLE_API } from "../core/components/protocol.js";
+import { SERVICE_API, CONSOLE_API } from "../electron/lib/components/protocol.js";
 import { buildBinary, binaryName } from "./rust-release.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,7 +43,7 @@ export async function buildComponents({ app = root, platform, arch, output = pat
     fs.writeFileSync(path.join(staging, "package.json"), JSON.stringify({ name: `xenonet-${component}`, productName: "XenoNet", version: versions[component], xenonetComponent: component }, null, 2) + "\n");
     fs.copyFileSync(path.join(root, "LICENSE"), path.join(staging, "LICENSE"));
     if (platform === process.platform && arch === process.arch) {
-      const { checkRuntime } = await import("../core/components/install.js");
+      const { checkRuntime } = await import("../electron/lib/components/install.js");
       checkRuntime({ root: staging, version: manifest.version });
     }
     const file = `XenoNet-${component}-${manifest.version}-${platform}-${arch}.tar.gz`;

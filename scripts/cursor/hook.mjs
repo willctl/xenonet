@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A Cursor hook that tells XenoNet's experimental Cursor reader
-// (core/native/cursor.js) about Cursor's agent sessions: which conversation
+// (crates/xenonet-sources/src/native/cursor.rs) about Cursor's agent sessions: which conversation
 // ran where, which files it edited, and when it ended. Cursor runs it for
 // sessionStart, afterFileEdit and sessionEnd (docs/guide/related-work.md),
 // with the hook's input on stdin; it appends one line to the file named on

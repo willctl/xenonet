@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
-import { currentComponent, digest } from "../../core/components/packages.js";
+import { currentComponent, digest } from "../../electron/lib/components/packages.js";
 
 export async function nextComponent(component, env) {
   const previous = currentComponent(component, env);
