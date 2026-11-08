@@ -110,30 +110,33 @@ rustup component add llvm-tools --toolchain 1.99.1  # the channel rust-toolchain
 
 The instrumented builds go to `target/llvm-cov-target`, apart from the usual ones, so `cargo test` and `npm run lint:rust` don't build again after a run. Once built, a run takes about a minute. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines.
 
-On 2026-10-19 `cargo test` ran this share of each crate's lines. The golden files of the HTTP API, the command and the MCP servers (`crates/xenonet-cli/tests/golden/`, `crates/xenonet-mcp/tests/golden/`) have run since, so `npm run coverage:rust` gives the current numbers.
+On 2026-11-08 the tests ran this share of each crate's lines:
 
-| Crate | `cargo test` |
-| --- | --- |
-| xenonet-actors | 40.7% |
-| xenonet-app | 69.0% |
-| xenonet-assistant | 58.8% |
-| xenonet-base | 81.5% |
-| xenonet-blocks | 85.8% |
-| xenonet-cli | 21.4% |
-| xenonet-components | 59.7% |
-| xenonet-doctor | 42.8% |
-| xenonet-engine | 68.1% |
-| xenonet-hosts | 33.6% |
-| xenonet-integrations | 53.9% |
-| xenonet-mcp | 56.6% |
-| xenonet-schema | 72.3% |
-| xenonet-service | 60.0% |
-| xenonet-sources | 79.6% |
-| xenonet-state | 82.4% |
-| xenonet-wire-app | 54.0% |
-| xenonet-wire-engine | 55.3% |
-| xenonet-wire-map | 74.4% |
-| All | 59.9% |
+| Crate | Lines | Run |
+| --- | --- | --- |
+| xenonet-actors | 9,427 | 44.5% |
+| xenonet-app | 5,304 | 72.2% |
+| xenonet-assistant | 2,157 | 58.6% |
+| xenonet-base | 4,957 | 91.0% |
+| xenonet-blocks | 1,046 | 86.3% |
+| xenonet-cli | 8,278 | 25.0% |
+| xenonet-components | 3,684 | 85.9% |
+| xenonet-doctor | 1,792 | 57.0% |
+| xenonet-engine | 9,937 | 79.8% |
+| xenonet-hosts | 3,470 | 66.2% |
+| xenonet-integrations | 2,323 | 53.9% |
+| xenonet-mcp | 3,706 | 57.4% |
+| xenonet-net | 5,923 | 91.4% |
+| xenonet-schema | 3,349 | 74.6% |
+| xenonet-service | 12,132 | 69.7% |
+| xenonet-sources | 10,785 | 85.7% |
+| xenonet-state | 6,350 | 86.3% |
+| xenonet-wire-app | 6,779 | 64.4% |
+| xenonet-wire-engine | 6,708 | 72.5% |
+| xenonet-wire-map | 6,465 | 82.0% |
+| All | 114,572 | 70.0% |
+
+The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-actors`, `xenonet-integrations`, `xenonet-doctor`, `xenonet-mcp` and `xenonet-assistant`.
 
 ## Fuzzing
 
