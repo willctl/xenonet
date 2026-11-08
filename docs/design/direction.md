@@ -268,9 +268,13 @@ Each stream kind declares its order and retention:
   renewed while the session lives, each narrowed to one agent. Delegation
   is attenuation: offline, narrowing only, hop-capped.
 - **A human is proven** by a device signature made after an OS
-  user-presence check (Touch ID, Windows Hello, polkit or a passphrase),
-  carried as a presence block that only a presence-capable surface can
-  mint. The block signs the purpose, the hash of the one act it approves
+  user-presence check, carried as a presence block that only a
+  presence-capable surface can mint. On macOS and Windows the check is
+  biometric (Touch ID, Windows Hello) with no passphrase fallback, so a
+  computer-use agent on the same account cannot pass it; Linux uses
+  polkit or a passphrase and is marked weaker. When the person has
+  enabled a hardware key, the widest acts (admit, widen, publish) also
+  need its tap. The block signs the purpose, the hash of the one act it approves
   (or the receiver's nonce) and the time; the receiver accepts it once,
   and refuses it after 60 seconds. It cannot be lifted off one act and
   put on another. This replaces the window key. The person alone founds,
@@ -306,12 +310,13 @@ therefore gives a machine two keys, as the roster already carries a
 signing and a sealing key: a **transport key** in a file, which proves
 the channel and nothing else, and a **machine signing key** behind a
 `Signer` trait, which signs chain entries, feed entries and agent tokens.
-The machine's chain entry binds the two. The signing key can live in a
-file (simplest install), in a hardware-backed, non-exportable store
-(Secure Enclave, TPM), or in a service running as a separate OS user;
-attestation is recorded honestly either way and used by policy as the
-authorization section says. The hardening choice is Will's (question 2
-below).
+The machine's chain entry binds the two. By Will's decision the signing
+key is hardware-backed and non-exportable by default where the platform
+has a secure element (the Secure Enclave on macOS, the TPM on Windows),
+and a file elsewhere, with attestation recorded honestly either way and
+used by policy as the authorization section says. A service running as
+its own OS user is the fallback hardening for machines without a secure
+element (question 2 below).
 
 ### Adapters and surfaces
 
@@ -439,21 +444,31 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Answers to 1, 2 and 5 gate phase 3; the rest can wait for the phase that
-needs them.
+Questions 1 and 2 are decided. Question 5 still gates phase 3; the rest
+can wait for the phase that needs them.
 
 1. **The person's root key, the presence check and the chain rules.**
-   Print a recovery phrase at first setup and keep daily use on device
-   keys? Accept an OS user-presence prompt (Touch ID, Windows Hello,
-   polkit) as the proof of a human? Is a computer-use agent on the same
-   OS account inside the threat model? Is the chain policy table in the
-   domain model right (who signs what, which changes need two devices)?
-2. **The machine signing key.** Ship with the key in a file and
-   attestation recorded honestly (simplest install), or move the service
-   to its own OS user or a hardware-backed key (harder install, agents
-   cannot sign as the machine)? Recommended: the simple path now, behind
-   the `Signer` trait, with the hardened install as an opt-in
-   `xenonet setup --harden`. Either way the transport key stays a file.
+   Decided by Will on 2026-11-08. The root key lives in the first
+   device's OS keychain by default and is copied to other devices by
+   pairing; a hardware key (FIDO2 or a passkey) can hold it instead when
+   the person enables one. Since a lost first device is then the
+   identity until a second device is paired, setup offers pairing a second
+   device, or exporting a recovery phrase, as the next step. A human is
+   proven by the OS user-presence prompt (Touch ID, Windows Hello,
+   polkit), with a hardware-key tap added for the widest acts only when a
+   hardware key is enabled. The chain policy table in the domain model
+   stands. A computer-use agent on the same OS account is inside the
+   threat model: on macOS and Windows presence is biometric only, with no
+   passphrase fallback, so an agent that can type cannot pass it; Linux
+   uses polkit or a passphrase and the doctor says it is weaker.
+2. **The machine signing key.** Decided by Will on 2026-11-08: hardened
+   by default. On macOS the key lives in the Secure Enclave and on Windows
+   in the TPM, non-exportable, signing only through the service; an agent
+   that reads every file the account owns still cannot sign as the
+   machine. On Linux, and wherever the hardware is missing, the key is a
+   file and attestation says so. Running the service as its own OS user
+   stays an option behind `xenonet setup --harden` for machines without a
+   secure element. The transport key stays a file on every platform.
 3. **Out of contact.** May a machine that has not heard from any other
    member in ten minutes still start runs, admit, widen or answer remote
    prompts? Recommended: it holds them and answers only for itself.
@@ -485,7 +500,10 @@ needs them.
   used, with direct fan-out until gossip 1.0.
 - quint-connect is young (0.1.x); the Quint specs stand on their own if
   the bridge breaks.
-- User-presence proofs differ by OS; Linux may fall back to a passphrase.
+- User-presence proofs differ by OS; Linux falls back to polkit or a
+  passphrase and is weaker by design, which the doctor states.
+- Secure Enclave and TPM signing need platform code (Security.framework,
+  Windows CNG) that nothing in the workspace has today.
 - Biscuit checks on hot paths need caching; presence is checked once per
   connection, never per delta.
 - Mixing old and new ids during phase 4; one id system at a time.
