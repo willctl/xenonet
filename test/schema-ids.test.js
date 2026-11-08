@@ -22,9 +22,7 @@ import {
   normalizeRemote,
   repoId,
   parseRepoId,
-} from "../core/schema/ids.js";
-import { normalizeRemote as fromProjects } from "../core/projects.js";
-
+} from "../src/shared/ids.js";
 const SESSION = "claude:4f1c0000-0000-4000-8000-000000000001";
 
 test("a schema's $id and its short form, both ways", () => {
@@ -84,12 +82,3 @@ test("actor ids, here and from another host", () => {
   assert.ok(isActorId("actor:0") && isActorId(`actor:${"a".repeat(32)}`));
 });
 
-test("repo ids from git remotes, however they're written", () => {
-  assert.equal(normalizeRemote, fromProjects, "the scan uses the same function");
-  for (const url of ["git@github.com:willctl/xenonet.git", "https://github.com/willctl/xenonet.git", "https://user@github.com/willctl/xenonet", "ssh://git@github.com/willctl/xenonet.git", "git+https://github.com/WillCtl/XenoNet.git"]) assert.equal(repoId(url), "repo:github.com/willctl/xenonet", url);
-  assert.equal(repoId(null), null);
-  assert.equal(repoId(""), null);
-  assert.equal(parseRepoId("repo:github.com/willctl/xenonet"), "github.com/willctl/xenonet");
-  assert.equal(parseRepoId("project:/x"), null);
-  assert.equal(parseRepoId("repo:"), null);
-});

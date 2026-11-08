@@ -23,8 +23,8 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { xenonet } from "../../core/control.js";
-import { NetworkState } from "../../core/schema/network.js";
+import { xenonet } from "../harness/control.js";
+import { parse } from "../harness/schema.js";
 import { limit } from "../harness/software.js";
 
 const port = await new Promise((resolve) => {
@@ -67,8 +67,7 @@ const network = () => s.driver("network", "read");
 // owner's), checked against network/state/v1.
 async function served() {
   const raw = await s.driver("network", "served");
-  NetworkState.parse(raw);
-  return raw;
+  return parse("network/state/v1", raw);
 }
 // A simulation, and the page once it has heard of it.
 async function simulate(kind, args = {}, want = () => true) {

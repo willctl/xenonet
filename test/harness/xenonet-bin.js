@@ -1,23 +1,20 @@
-// The XenoNet processes a test starts: the JS ones, or the Rust binary
-// (docs/design/rust-core.md) when XENONET_CLI_BIN or XENONET_SERVICE_BIN
-// names it. XENONET_CLI_BIN stands in for `node cli/xenonet.js`, the
-// command and its MCP servers; XENONET_SERVICE_BIN for `node
-// server/index.js`, run as `xenonet serve`. npm run test:bin builds the
-// binary and runs the tests that start these with it.
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+// The xenonet binary the tests start: XENONET_CLI_BIN when it names one,
+// else this checkout's newer build (target/release or target/debug), which
+// npm run test:e2e builds first.
+import { builtBinary } from "../../scripts/xenonet.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-export const rustCommand = process.env.XENONET_CLI_BIN || null;
-export const rustService = process.env.XENONET_SERVICE_BIN || null;
+const bin = () => {
+  const found = process.env.XENONET_CLI_BIN || builtBinary();
+  if (!found) throw new Error("no xenonet binary: run npm run rust:bin");
+  return found;
+};
 
 // [file, args] that run `xenonet <args>`.
 export function command(args = []) {
-  return rustCommand ? [rustCommand, args] : [process.execPath, [path.join(root, "cli", "xenonet.js"), ...args]];
+  return [bin(), args];
 }
 
 // [file, args] that run the service with `args` (--demo, --dev…).
 export function service(args = []) {
-  return rustService ? [rustService, ["serve", ...args]] : [process.execPath, [path.join(root, "server", "index.js"), ...args]];
+  return [bin(), ["serve", ...args]];
 }

@@ -1,7 +1,7 @@
 // A made-up map for the actor tests, in the shape of mapOf (core/actors):
 // two projects and a folder outside them in nova's home folder, and a
 // session in each project. Nothing here is anyone's real data.
-import { pathKey } from "../../core/paths.js";
+import { pathKey } from "../../electron/lib/paths.js";
 
 export const HOME = "/Users/nova";
 export const ATLAS = "project:/users/nova/projects/atlas-api";

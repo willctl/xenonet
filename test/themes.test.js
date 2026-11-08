@@ -1,13 +1,11 @@
-// Themes (core/themes.js) and your own theme files (core/themefiles.js).
+// Themes (src/shared/themes.js): the built-ins, conforming and merging a
+// theme, contrast, and the colors each theme gives apps, charts and rings.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { themes, merge, conform, complete, contrast, colorDistance, ringColors, sonarGap, STYLES, BUILT_IN, DEFAULT_THEME } from "../core/themes.js";
-import { readThemes, copyTheme } from "../core/themefiles.js";
-import { themeRoutes } from "../server/routes/themes.js";
-
+import { themes, merge, conform, complete, contrast, colorDistance, ringColors, sonarGap, STYLES, BUILT_IN, DEFAULT_THEME } from "../src/shared/themes.js";
 const HEX = /^#[0-9a-f]{6}$/i;
 // Temp folders, taken away after the tests.
 const made = [];
@@ -139,62 +137,8 @@ test("a sonar.every of 0 or less sends no sonar, which a theme keeps; any other 
 // A face plainer than a theme's titles, for its panels' text.
 const PLAIN = '"Gill Sans", "Gill Sans MT", "Segoe UI", sans-serif';
 
-test("a body font for the panels: a theme may set its text plainer than its titles; the built-ins leave it to the display font", () => {
-  const all = themes();
-  for (const t of Object.values(all)) assert.equal(t.fonts.body, undefined, `${t.id} sets its panels in its display font`);
-  // A name, or nothing: a slip leaves what's underneath.
-  const plain = complete({ fonts: { display: '"Futura", sans-serif', body: PLAIN } });
-  assert.equal(conform(plain, { fonts: { body: 7 } }).fonts.body, PLAIN);
-  assert.equal(conform(all.xenonet, { fonts: { body: " " } }).fonts.body, undefined);
-  assert.equal(complete({ fonts: { body: "Optima, serif" } }).fonts.body, "Optima, serif");
-  const dir = tmp();
-  fs.writeFileSync(path.join(dir, "plain.json"), JSON.stringify({ extends: "rime", fonts: { body: PLAIN } }));
-  fs.writeFileSync(path.join(dir, "moss.json"), JSON.stringify({ extends: "plain", fonts: { display: "Optima, sans-serif" } }));
-  const moss = readThemes(dir).themes.moss;
-  assert.deepEqual([moss.fonts.display, moss.fonts.body], ["Optima, sans-serif", PLAIN], "kept from the theme it extends");
-});
-
-test("a theme from before the new tokens, kept or in a file, gets every one of them", () => {
-  const old = { id: "old", name: "Old", colors: { ...themes().phosphor.colors }, sky: themes().phosphor.sky, stars: { count: 10, tints: ["#ffffff"] }, grid: { center: "#111111", lines: "#222222", opacity: 0.5 } };
-  delete old.colors.actor;
-  delete old.colors.human;
-  const t = complete(old);
-  for (const [p, v] of Object.entries(TODAY)) assert.deepEqual(at(t, p), v, p);
-  assert.deepEqual([t.colors.actor, t.colors.human, t.actors.form, t.stars.count, t.grid.center], [themes().xenonet.colors.actor, themes().xenonet.colors.human, "orb", 10, "#111111"]);
-  const dir = tmp();
-  fs.writeFileSync(path.join(dir, "old.json"), JSON.stringify({ extends: "ochre", colors: { accent: "#123456" } }));
-  const fromFile = readThemes(dir).themes.old;
-  assert.deepEqual([fromFile.colors.accent, fromFile.sweep.shape, fromFile.actors.form], ["#123456", "beam", "swarm"]);
-});
-
 test("merging: objects field by field, arrays and values replaced", () => {
   assert.deepEqual(merge({ a: { x: 1, y: 2 }, b: [1, 2], c: 1 }, { a: { y: 3 }, b: [9] }), { a: { x: 1, y: 3 }, b: [9], c: 1 });
-});
-
-test("your own themes: on top of what they extend, problems reported, copies complete", () => {
-  const dir = tmp();
-  fs.writeFileSync(path.join(dir, "ember.json"), JSON.stringify({ name: "Ember", extends: "helios", colors: { accent: "#ff0000" } }));
-  fs.writeFileSync(path.join(dir, "ash.json"), JSON.stringify({ extends: "ember", glow: { bloom: 2 } }));
-  fs.writeFileSync(path.join(dir, "loop-a.json"), JSON.stringify({ extends: "loop-b" }));
-  fs.writeFileSync(path.join(dir, "loop-b.json"), JSON.stringify({ extends: "loop-a" }));
-  fs.writeFileSync(path.join(dir, "broken.json"), "{ not json");
-  fs.writeFileSync(path.join(dir, "Bad Name.json"), "{}");
-  const { themes: all, problems } = readThemes(dir);
-  assert.equal(all.ember.colors.accent, "#ff0000");
-  assert.equal(all.ember.colors.claude, all.helios.colors.claude, "the rest from Helios");
-  assert.deepEqual([all.ash.name, all.ash.glow.bloom, all.ash.colors.accent], ["ash", 2, "#ff0000"]);
-  assert.equal(all.ember.builtIn, false);
-  assert.ok(all["loop-a"].colors, "a loop ends at XenoNet's own");
-  assert.equal(problems.length, 2);
-  assert.ok(problems.some((p) => p.startsWith("broken.json")) && problems.some((p) => p.startsWith("Bad Name.json")));
-
-  const file = copyTheme(dir, "phosphor", "mine");
-  const copy = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.equal(copy.extends, "phosphor");
-  assert.deepEqual(Object.keys(copy.colors), Object.keys(all.xenonet.colors), "every color, to edit");
-  assert.equal(readThemes(dir).themes.mine.colors.accent, all.phosphor.colors.accent);
-  assert.throws(() => copyTheme(dir, "xenonet", "mine"), /already a theme called mine/);
-  assert.throws(() => copyTheme(dir, "xenonet", "Not ok"), /lowercase/);
 });
 
 // The contrast every theme keeps (docs/design/next-phase.md, Budgets): text
@@ -227,49 +171,6 @@ test("contrast as WCAG measures it", () => {
   assert.equal(Math.round(contrast("#767676", "#ffffff") * 100) / 100, 4.54, "the classic gray that just passes on white");
 });
 
-test("every theme, built in or copied to make your own, keeps its text readable", () => {
-  const dir = tmp();
-  for (const id of BUILT_IN) copyTheme(dir, id, `${id}-mine`);
-  const all = readThemes(dir).themes;
-  assert.equal(Object.keys(all).length, BUILT_IN.length * 2);
-  for (const t of Object.values(all)) {
-    for (const [fg, on, min] of BUDGET) {
-      for (const bg of on) {
-        const r = contrast(t.colors[fg], t.colors[bg]);
-        assert.ok(r >= min, `${t.id}: ${fg} (${t.colors[fg]}) on ${bg} (${t.colors[bg]}) is ${r.toFixed(2)}:1, under ${min}:1`);
-      }
-    }
-  }
-});
-
-test("a theme of yours named for a built-in takes its place, and changes no other", () => {
-  const dir = tmp();
-  const builtIn = themes();
-  fs.writeFileSync(path.join(dir, "phosphor.json"), JSON.stringify({ colors: { accent: "#123456" }, sound: { bpm: 70 } }));
-  fs.writeFileSync(path.join(dir, "ochre.json"), JSON.stringify({ extends: "gridline", colors: { accent: "#654321" } }));
-  fs.writeFileSync(path.join(dir, "xenonet.json"), JSON.stringify({ about: "Mine", colors: { accent: "#ff0000" }, charts: { m1: "#000000" }, lattice: { opacity: 0.2 } }));
-  fs.writeFileSync(path.join(dir, "ember.json"), JSON.stringify({ name: "Ember", extends: "phosphor", colors: { claude: "#abcdef" } }));
-  fs.writeFileSync(path.join(dir, "list.json"), "[1, 2]");
-  const { themes: all, problems } = readThemes(dir);
-  // Yours wins, starting from the built-in, and is marked as yours.
-  assert.deepEqual([all.phosphor.colors.accent, all.phosphor.sound.bpm, all.phosphor.colors.claude, all.phosphor.name], ["#123456", 70, builtIn.phosphor.colors.claude, "Phosphor"]);
-  assert.deepEqual([all.phosphor.builtIn, all.phosphor.replacesBuiltIn, all.ember.replacesBuiltIn], [false, true, undefined]);
-  // Unless it says otherwise.
-  assert.deepEqual([all.ochre.colors.accent, all.ochre.colors.claude, all.ochre.sky], ["#654321", builtIn.gridline.colors.claude, builtIn.gridline.sky]);
-  // XenoNet's own too, without touching the built-ins that start from it.
-  assert.deepEqual([all.xenonet.colors.accent, all.xenonet.about, all.xenonet.charts.m1, all.xenonet.builtIn], ["#ff0000", "Mine", "#000000", false]);
-  assert.deepEqual([all.gridline.charts, all.gridline.lattice, all.gridline.builtIn], [builtIn.gridline.charts, builtIn.gridline.lattice, true]);
-  // A theme of yours that extends one you've replaced starts from your version.
-  assert.deepEqual([all.ember.colors.accent, all.ember.colors.claude, all.ember.name], ["#123456", "#abcdef", "Ember"]);
-  // One of each id, and a file that isn't a theme is reported.
-  assert.equal(Object.keys(all).length, BUILT_IN.length + 1);
-  assert.deepEqual(problems, ["list.json: a theme is a JSON object of fields"]);
-  // A copy of a theme that replaces a built-in is a theme of yours like any other.
-  const copy = JSON.parse(fs.readFileSync(copyTheme(dir, "phosphor", "mine"), "utf8"));
-  assert.equal(copy.replacesBuiltIn, undefined);
-  assert.equal(readThemes(dir).themes.mine.colors.accent, "#123456");
-});
-
 test("identity rings: each theme's own five, clear of every color with a meaning", () => {
   const all = themes();
   assert.deepEqual(ringColors(all.xenonet), ["#8fa8ff", "#ff8fb3", "#f2ead3", "#7ef0dd", "#b69bff"]);
@@ -291,45 +192,8 @@ test("identity rings: each theme's own five, clear of every color with a meaning
   assert.deepEqual(all.gridline.identities, all.xenonet.identities);
 });
 
-test("identity rings in a theme of yours: inherited, five or none, and moved over where your colors give one a meaning", () => {
-  const all = themes();
-  const dir = tmp();
-  fs.writeFileSync(path.join(dir, "moss.json"), JSON.stringify({ extends: "helios" }));
-  fs.writeFileSync(path.join(dir, "pink.json"), JSON.stringify({ colors: { codex: "#ff8fb3" } }));
-  fs.writeFileSync(path.join(dir, "few.json"), JSON.stringify({ extends: "rime", identities: ["#ff0000", "#00ff00"] }));
-  fs.writeFileSync(path.join(dir, "mine.json"), JSON.stringify({ identities: ["#112233", "#ABC", "#ffeedd", "#00aa88", "#aa00aa"] }));
-  const yours = readThemes(dir).themes;
-  assert.deepEqual(ringColors(yours.moss), all.helios.identities, "from the theme it extends");
-  assert.deepEqual(yours.few.identities, all.rime.identities, "five or none");
-  assert.deepEqual(yours.mine.identities, ["#112233", "#aabbcc", "#ffeedd", "#00aa88", "#aa00aa"]);
-  // Your Codex in the second ring's pink: that ring moves over, the rest stay.
-  const rings = ringColors(yours.pink);
-  assert.notEqual(rings[1], "#ff8fb3");
-  assert.deepEqual(rings.filter((_, i) => i !== 1), all.xenonet.identities.filter((_, i) => i !== 1));
-});
-
 // Markup where a color goes: what a theme file shared with you might carry.
 const MARKUP = `"><img src=x onerror=pwned()>`;
-
-test("a theme starts only from a theme: a name every object has is none, so its fields are checked like any other", () => {
-  const dir = tmp();
-  const evil = { colors: { bg: MARKUP, accent: MARKUP }, sky: { night: [MARKUP, MARKUP, MARKUP, MARKUP] }, actors: { palette: [MARKUP] } };
-  const names = ["toString", "constructor", "__proto__", "valueOf", "hasOwnProperty", "isPrototypeOf"];
-  names.forEach((name, i) => fs.writeFileSync(path.join(dir, `evil-${i}.json`), JSON.stringify({ extends: name, ...evil })));
-  // A file may be named like one too, and is then a theme of yours like any other.
-  fs.writeFileSync(path.join(dir, "constructor.json"), JSON.stringify({ extends: "constructor", ...evil }));
-  const { themes: all } = readThemes(dir);
-  const xenonet = themes().xenonet;
-  for (const id of [...names.map((_, i) => `evil-${i}`), "constructor"]) {
-    const t = all[id];
-    assert.deepEqual([t.colors.bg, t.colors.accent, t.sky.night, t.actors.palette], [xenonet.colors.bg, xenonet.colors.accent, xenonet.sky.night, xenonet.actors.palette], `${id} starts from XenoNet's, its markup refused`);
-    assert.equal(t.builtIn, false);
-  }
-  assert.equal(all.constructor.replacesBuiltIn, undefined, "constructor isn't a built-in to replace");
-  // Looking one up by id finds only themes.
-  for (const name of names) assert.equal(themes()[name], undefined, `${name} isn't a theme`);
-  assert.equal(readThemes(tmp()).themes.constructor, undefined);
-});
 
 test("a key every object has is never a theme's field, so nothing comes in through what a theme inherits", () => {
   const t = complete(JSON.parse(`{ "__proto__": { "name": "x" }, "colors": { "__proto__": { "bg": "#000000", "glow": 1 }, "accent": "#123456" }, "fonts": { "__proto__": { "body": "${MARKUP.replaceAll('"', '\\"')}" } }, "toString": "x" }`));
@@ -337,18 +201,6 @@ test("a key every object has is never a theme's field, so nothing comes in throu
   assert.equal(Object.getPrototypeOf(t.colors), Object.prototype);
   assert.equal(Object.getPrototypeOf(t.fonts), Object.prototype);
   assert.deepEqual([t.colors.accent, t.colors.glow, t.fonts.body, Object.hasOwn(t, "toString")], ["#123456", undefined, undefined, false]);
-});
-
-test("the theme route serves only themes, never what every object has", async () => {
-  const dir = tmp();
-  const route = themeRoutes({ dir, send: (res, status, body) => Object.assign(res, { status, body }), readJson: async () => ({}), quiet: true });
-  const get = async (id) => {
-    const res = {};
-    await route({ method: "GET" }, res, new URL(`http://127.0.0.1/api/themes/${id}`));
-    return res;
-  };
-  assert.deepEqual([(await get("xenonet")).status, (await get("xenonet")).body.id], [200, "xenonet"]);
-  assert.equal((await get("constructor")).status, 404, "a name every object has");
 });
 
 test("a theme's fonts are lists of font names: one that would add a declaration to a style keeps the font underneath", () => {

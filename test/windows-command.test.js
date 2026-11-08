@@ -5,9 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { commandDir, installCommand, uninstallCommand } from "../core/command.js";
-import { createConnect } from "../core/engine/connect.js";
-import { pathStyle } from "../core/paths.js";
+import { commandDir, installCommand, uninstallCommand } from "../electron/lib/command.js";
+import { pathStyle } from "../electron/lib/paths.js";
 
 const made = [];
 const tmp = () => {
@@ -48,40 +47,3 @@ test("a Windows command wrapper preserves paths, arguments and exit status", { s
   assert.throws(() => installCommand({ dir, bin: "bad\npath", platform: "win32" }), /line break/);
 });
 
-test("Windows hooks run, keep other hooks, and can be reinstalled and removed", { skip: process.platform !== "win32" && "native Windows execution" }, async () => {
-  const home = tmp();
-  const root = path.join(home, "source O'Brien with spaces");
-  const bin = standIn(root, 'let input="";process.stdin.setEncoding("utf8");process.stdin.on("data",s=>input+=s);process.stdin.on("end",()=>console.log(JSON.stringify({port:process.env.XENONET_PORT,args:process.argv.slice(2),input})));');
-  const settings = path.join(home, ".claude", "settings.json");
-  const hooks = path.join(home, ".codex", "hooks.json");
-  const own = { hooks: [{ type: "command", command: "echo owner's hook" }] };
-  fs.mkdirSync(path.dirname(settings));
-  fs.writeFileSync(settings, JSON.stringify({ hooks: { SessionStart: [own] } }));
-  const connect = createConnect({ port: 47842, root, bin, home, env: { PATH: "" }, platform: "win32" });
-  await connect.apply();
-  await connect.apply();
-  const claude = JSON.parse(fs.readFileSync(settings)).hooks.SessionStart;
-  const codex = JSON.parse(fs.readFileSync(hooks)).hooks;
-  assert.deepEqual(claude[0], own);
-  assert.equal(claude.length, 2, "reinstall never duplicates hooks");
-  assert.equal(claude[1].hooks[0].shell, "powershell");
-  for (const [app, command] of [["claude", claude[1].hooks[0].command], ["codex", codex.SessionStart[0].hooks[0].commandWindows]]) {
-    const args = command.split(" ").slice(1);
-    // PowerShell can take over thirty seconds to start on a busy CI runner.
-    const result = spawnSync("powershell.exe", args, { input: '{"hook_event_name":"SessionStart"}', encoding: "utf8", windowsHide: true, timeout: 120000 });
-    assert.equal(result.status, 0, result.error ? `${result.error.message}; stderr: ${result.stderr}` : result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { port: "47842", args: ["hook", app], input: '{"hook_event_name":"SessionStart"}' });
-  }
-  assert.equal(codex.SessionEnd[0].hooks[0].timeout, 3);
-  // Every app that's here is connected; Grok Build isn't here, so
-  // connecting every app leaves it out and the preview says so.
-  const preview = await connect.preview();
-  const here = preview.apps.filter((app) => app.installed !== false);
-  assert.deepEqual(here.map((app) => app.app), ["claude", "codex"]);
-  assert.ok(here.every((app) => app.changes.find((c) => c.id === "hooks").state === "present"));
-  assert.deepEqual(preview.apps.filter((app) => app.installed === false).map((app) => [app.app, app.changes.find((c) => c.id === "hooks").state]), [["grok", "missing"]]);
-  assert.equal(fs.existsSync(path.join(home, ".grok")), false);
-  await connect.remove();
-  assert.deepEqual(JSON.parse(fs.readFileSync(settings)), { hooks: { SessionStart: [own] } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(hooks)), {});
-});

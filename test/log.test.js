@@ -1,16 +1,12 @@
-// XenoNet's error log (core/log.js) and what xenonet diagnose makes of it
-// (core/diagnostics.js): scrubbed as written, one line a code every ten
-// seconds with how many meanwhile, moved aside past its size, read back by
-// level, part and code; and a bundle that refuses to leave holding a home
-// folder or a key. The home folder and keys are made up.
+// XenoNet Desktop's error log (electron/lib/log.js): scrubbed as written,
+// one line a code every ten seconds with how many meanwhile, and moved
+// aside past its size. The home folder and keys are made up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createLog, readLogs, summarize, scrub, unsafe } from "../core/log.js";
-import { makeBundle, bundleMarkdown, agentBrief, askCommand, writeLook } from "../core/diagnostics.js";
-
+import { createLog, readLogs, summarize, scrub, unsafe } from "../electron/lib/log.js";
 const HOME = "C:\\Users\\nova";
 const KEY = "sk-proj-CANARY0123456789abcdefABCDEF";
 
@@ -74,42 +70,3 @@ test("a log past its size moves aside, two are kept, and a log with no folder wr
   }
 });
 
-test("diagnostics: what's wrong by code, safe to share, refused if anything private is left", () => {
-  const doctor = { at: 1, summary: { ok: 30, warn: 1, fail: 1 }, results: [{ id: "agents.codex", status: "fail", title: "Codex sessions are connected to XenoNet", detail: "connected, but C:\\Users\\nova\\old\\cli\\xenonet.js is gone", fix: "Run xenonet connect again." }, { id: "claude.cli", status: "ok", title: "x", detail: "y" }] };
-  const errors = [{ schema: "log/entry/v1", at: Date.parse("2026-10-07T10:00:00Z"), component: "service", level: "error", code: "service.port-in-use", message: "port 47840 is already in use by XenoNet Dev (dev)", fix: "Quit the other XenoNet." }];
-  const connect = { port: 47840, apps: [{ app: "codex", changes: [{ id: "hooks", state: "present" }], broken: [], notes: ["Another XenoNet (port 47842, XenoNet Dev) is connected here too; its entries stay as they are."] }] };
-  const b = makeBundle({ xenonet: { version: "0.8.0", instance: "installed", running: true }, doctor, errors, connect, env: { XENONET_PORT: "47840", XENONET_STATE_DIR: "C:\\Users\\nova\\state", PATH: "x" }, home: HOME, now: Date.parse("2026-10-07T12:00:00Z") });
-  assert.equal(b.schema, "diagnostics/bundle/v1");
-  assert.deepEqual(b.doctor.problems.map((p) => [p.id, p.detail]), [["agents.codex", "connected, but ~\\old\\cli\\xenonet.js is gone"]]);
-  assert.deepEqual(b.errors.map((e) => e.code), ["service.port-in-use"]);
-  assert.deepEqual(b.settings, ["XENONET_PORT=47840", "XENONET_STATE_DIR"], "a path setting's name only");
-  const md = bundleMarkdown(b);
-  assert.match(md, /`agents\.codex`/);
-  assert.match(md, /port 47840 is already in use by XenoNet Dev/);
-  assert.ok(!md.includes("nova"));
-  assert.throws(() => makeBundle({ xenonet: { instance: KEY }, env: {}, home: HOME }), /still held something that looks like a key/, "anything private left is refused");
-  assert.throws(() => makeBundle({ xenonet: { instance: "C:\\Users\\nova\\dev" }, env: {}, home: HOME }), /still held the home folder/, "a Windows home folder too, though JSON doubles its backslashes");
-});
-
-test("asking an agent: a folder of its own with the bundle and a brief that rules out filing anything, and a read-only session", () => {
-  const state = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-diag-"));
-  try {
-    const b = makeBundle({ xenonet: { version: "0.8.0" }, env: {}, home: HOME });
-    const dir = writeLook(state, b, { sources: ["/opt/xenonet"], now: 1_800_000_000_000 });
-    assert.deepEqual(fs.readdirSync(dir).sort(), ["AGENTS.md", "CLAUDE.md", "bundle.json", "bundle.md"]);
-    const brief = agentBrief({ sources: ["/opt/xenonet"] });
-    assert.match(brief, /Never file an issue, open a pull request, push, post or send anything anywhere, and don't run gh/);
-    assert.match(brief, /issue-draft\.md/);
-    // A look older than a week goes when the next is made.
-    writeLook(state, b, { now: 1_800_000_000_000 + 8 * 86400e3 });
-    assert.equal(fs.existsSync(dir), false);
-    const codex = askCommand({ app: "codex", model: "gpt-5.1-codex", dir: "/d", sources: ["/opt/xenonet"] });
-    assert.deepEqual(codex.args.slice(0, 8), ["-C", "/d", "-s", "read-only", "-a", "on-request", "-m", "gpt-5.1-codex"]);
-    assert.ok(codex.args.includes("--add-dir"));
-    const claude = askCommand({ app: "claude", dir: "/d" });
-    assert.deepEqual(claude.args.slice(0, 2), ["--permission-mode", "plan"]);
-    assert.equal(claude.cwd, "/d");
-  } finally {
-    fs.rmSync(state, { recursive: true, force: true });
-  }
-});

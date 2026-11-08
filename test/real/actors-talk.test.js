@@ -5,7 +5,7 @@
 // what it prints. Two routes:
 //
 //   gateway (the default): through XenoNet's actor gateway, from their
-//     makers' clouds (server/actor-gateway.js). The gateway is on, the
+//     makers' clouds (crates/xenonet-service/src/gateway). The gateway is on, the
 //     tunnel picked in XenoNet's window puts it on the internet and its
 //     address checks out, each has a gateway token made with Connect…,
 //     and each app has the gateway as an MCP server (Grok Bot) or a custom
@@ -42,7 +42,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 // Node that runs this test, pointed at the XenoNet under test. Each keeps its
 // token in a file of its own outside any repo, readable only by you.
 const PORT_FLAG = PORT === 47842 ? "--dev" : PORT === 47841 ? "--demo" : `--port ${PORT}`;
-const XENONET = `${process.execPath} ${path.join(ROOT, "cli", "xenonet.js")} ${PORT_FLAG}`;
+const XENONET = `${process.execPath} ${path.join(ROOT, "scripts", "xenonet.mjs")} ${PORT_FLAG}`;
 const TOKEN = (slug) => path.join(os.homedir(), ".config", "xenonet", "actors", `${slug}.token`);
 const AGENTS = {
   "grok-bot": { name: "Grok Bot", other: "muse" },

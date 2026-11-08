@@ -1,12 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { findClaudeDesktopDir, bundledCodexBinaries } from "../core/dirs.js";
-import { pathKey, scratchZone } from "../core/paths.js";
-import { gitAvailable, resetGitCheck } from "../core/git.js";
-import { onPath } from "../core/paths.js";
-import { commandText } from "../core/live.js";
-
+import { findClaudeDesktopDir, bundledCodexBinaries } from "../electron/lib/dirs.js";
+import { pathKey, scratchZone } from "../electron/lib/paths.js";
+import { onPath } from "../electron/lib/paths.js";
 const H = "/Users/me";
 const has = (...files) => (f) => files.includes(f);
 
@@ -49,29 +46,14 @@ test("macOS paths through /private match their short form", () => {
   assert.equal(scratchZone(pathKey("/Users/me/Documents/Codex/2026-10-02/regex"))?.id, "zone:codex-projectless");
 });
 
-test("git is skipped on a Mac whose /usr/bin/git is the developer-tools stub", () => {
-  const run = (opts) => (resetGitCheck(), gitAvailable(opts));
-  const stub = () => "/usr/bin/git";
-  assert.equal(run({ platform: "darwin", which: stub, devTools: () => {} }), true);
-  assert.equal(run({ platform: "darwin", which: stub, devTools: () => { throw new Error("no tools"); } }), false);
-  assert.equal(run({ platform: "darwin", which: () => "/opt/homebrew/bin/git", devTools: () => { throw new Error("no tools"); } }), true);
-  assert.equal(run({ platform: "linux", which: () => null }), false);
-  resetGitCheck();
-});
-
 test("onPath finds the first runnable match", () => {
   const env = { PATH: ["/a", "/b", "/c"].join(path.delimiter) };
   assert.equal(onPath("git", { env, platform: "darwin", canRun: (f) => { if (f !== path.join("/b", "git")) throw new Error(); } }), path.join("/b", "git"));
   assert.equal(onPath("git", { env, platform: "darwin", canRun: () => { throw new Error(); } }), null);
 });
 
-test("commands run through zsh and bash show their script", () => {
-  assert.equal(commandText(["/bin/zsh", "-lc", "npm test"]), "npm test");
-  assert.equal(commandText(["bash", "-c", "ls -la"]), "ls -la");
-});
-
 test("listFiles: the files a name test picks, down to a depth, past folders it can't read", async (t) => {
-  const { listFiles } = await import("../core/paths.js");
+  const { listFiles } = await import("../electron/lib/paths.js");
   const fs = await import("node:fs");
   const os = await import("node:os");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-list-"));

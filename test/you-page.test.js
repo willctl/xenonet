@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createYou, SWITCH } from "../src/you.js";
-import { check, explain } from "../core/schema/index.js";
+import { check, explain } from "./harness/schema.js";
 
 const T = 1791230000000;
 const MIN = 60e3;

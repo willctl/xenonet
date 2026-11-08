@@ -4,12 +4,10 @@
 import { bash, runBash } from "./harness/bash.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { gitAvailable } from "../core/git.js";
 import { BASES, VMS, LAB_INSTANCES, HOST_ID, labPaths, sshPath, sshConfigText, withHostKey, hostKeyOf, authorizedKeyLine, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
 import { REPOS, reposFor, reposScript } from "../scripts/lab/fixtures.mjs";
 
@@ -167,23 +165,3 @@ test("the made-up repos: atlas-api on every host with one remote, the rest on on
   assert.equal(runBash( ["-n"], { input: reposScript("vm1") }).status, 0);
 });
 
-test("the repos script makes the same atlas-api history on two hosts, with a worktree and edits", { skip: (!bash || !gitAvailable()) && "Git and Bash are required" }, () => {
-  const homes = [tmp(), tmp()];
-  for (const [i, host] of [[0, "vm1"], [1, "vm2"]]) {
-    const r = runBash( ["-s"], { input: reposScript(host), env: { PATH: process.env.PATH, HOME: homes[i] }, encoding: "utf8" });
-    assert.equal(r.status, 0, r.stderr);
-  }
-  const git = (home, rel, ...args) => spawnSync("git", ["-C", path.join(home, "Projects", rel), ...args], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } }).stdout.trim();
-  assert.equal(git(homes[0], "atlas-api", "rev-parse", "HEAD"), git(homes[1], "atlas-api", "rev-parse", "HEAD"));
-  assert.equal(git(homes[0], "atlas-api", "status", "--short"), "M src/orders/routes.ts");
-  assert.equal(git(homes[0], "atlas-api-refunds", "rev-parse", "--abbrev-ref", "HEAD"), "feat/partial-refunds");
-  assert.equal(git(homes[0], "atlas-api-refunds", "status", "--short"), "?? src/orders/refunds.test.ts");
-  assert.equal(git(homes[0], "Café Zones", "log", "-1", "--format=%an <%ae>"), "Nova <nova@example.com>");
-  assert.equal(git(homes[0], "labs/geofence", "config", "user.name"), "Orbit");
-  assert.ok(fs.existsSync(path.join(homes[1], "Projects", "atlas-kit", "pnpm-workspace.yaml")));
-  assert.ok(!fs.existsSync(path.join(homes[1], "Projects", "atlas-web")));
-  // A second run ends the same.
-  const before = git(homes[0], "atlas-api", "rev-parse", "HEAD");
-  assert.equal(runBash( ["-s"], { input: reposScript("vm1"), env: { PATH: process.env.PATH, HOME: homes[0] } }).status, 0);
-  assert.equal(git(homes[0], "atlas-api", "rev-parse", "HEAD"), before);
-});

@@ -1,8 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { scopeGraph, scopeCounts, loadScope, saveScope, DEFAULT_SCOPE } from "../src/scope.js";
-import { subAgentOf, threadToSession } from "../core/codex.js";
-
 const now = Date.parse("2026-10-02T12:00:00Z");
 const day = 86400e3;
 const session = (id, ageDays, extra = {}) => ({ id, kind: "session", app: "codex", updatedAt: now - ageDays * day, ...extra });
@@ -83,19 +81,3 @@ test("the scope is remembered, and a bad saved value falls back to the default",
   assert.deepEqual(loadScope(storage), DEFAULT_SCOPE);
 });
 
-test("Codex sub-agents: spawned ones nest under their parent, the rest are background", () => {
-  const spawned = { id: "c1", source: { subAgent: { thread_spawn: { parent_thread_id: "p1", depth: 1, agent_nickname: "Popper" } } } };
-  assert.deepEqual(subAgentOf(spawned), { parent: "p1", nickname: "Popper", kind: "spawned" });
-  const s = threadToSession(spawned, false);
-  assert.equal(s.parentId, "codex:p1");
-  assert.equal(s.parentKind, "subagent");
-  assert.equal(s.agentNickname, "Popper");
-  assert.equal(s.background, false);
-  const guardian = threadToSession({ id: "g1", source: { subAgent: { other: "guardian" } } }, false);
-  assert.equal(guardian.agentKind, "guardian");
-  assert.equal(guardian.background, true);
-  assert.equal(guardian.parentId, null);
-  assert.equal(threadToSession({ id: "r1", source: { subAgent: "review" } }, false).background, true);
-  assert.equal(threadToSession({ id: "e1", source: "exec" }, false).background, true);
-  assert.equal(threadToSession({ id: "v1", source: "vscode" }, false).background, false);
-});
