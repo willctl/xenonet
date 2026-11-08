@@ -1,0 +1,2087 @@
+{
+  "case": "the console operator, 2026-07-28",
+  "recorded_from": "node mcp/console.js",
+  "args": [
+    "console"
+  ],
+  "env": [],
+  "messages": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {},
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "claude-code",
+            "version": "2.1.302"
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {},
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "claude-code",
+            "version": "2.1.302"
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "tools/call",
+      "params": {
+        "name": "theme",
+        "arguments": {
+          "action": "focus"
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {},
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "claude-code",
+            "version": "2.1.302"
+          }
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "result": {
+        "supportedVersions": [
+          "2026-07-28"
+        ],
+        "capabilities": {
+          "tools": {
+            "listChanged": true
+          }
+        },
+        "instructions": "XenoNet maps the Claude Code, Codex and Grok Build sessions on this machine, through a background service, a CLI, MCP tools and a desktop console. These tools operate installed XenoNet and development instances. Use installed for the person's app, or demo for made-up data. The service and the coordination between sessions keep running when Desktop closes or restarts. Simulation and arbitrary page execution work only in development instances.\n\nThe loop: `launch` (the demo instance, with made-up data, unless you need the user's real sessions: instance \"dev\"), then act with `find`, `select`, `navigate`, `command` and `input`, then `screenshot` to look. Every action waits until the view has settled (the layout cooled, the camera and any gathering at rest) and returns the new state, so don't sleep between calls. `simulate` puts sessions into rare states (a question waiting, an edit collision, a stuck loop) and has actors act. `actors` lists the actors beside the map, and `feed` reads the activity feed. After a change, check `logs` for page errors.\n\nXenoNet Dev hot-reloads: saving under src/ reloads the page, under server/ restarts the server, under electron/ relaunches the app; the tools wait for it to come back. The window shows without taking focus, and the user may be watching it. Screenshots of the dev instance show the user's real session titles.",
+        "resultType": "complete",
+        "ttlMs": 0,
+        "cacheScope": "private",
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "xenonet-console",
+            "version": "{version}"
+          }
+        }
+      },
+      "jsonrpc": "2.0",
+      "id": 1
+    },
+    {
+      "result": {
+        "tools": [
+          {
+            "name": "terminal",
+            "title": "XenoNet terminals",
+            "description": "List, open, read, write to or close a terminal in Desktop. write sends the exact text; include a newline to run a command. Installed terminals survive Desktop restarts. read returns the active tab's output.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "list",
+                    "open",
+                    "read",
+                    "write",
+                    "close"
+                  ]
+                },
+                "id": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "text": {
+                  "type": "string"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "string"
+                },
+                "lines": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": true,
+              "openWorldHint": true
+            }
+          },
+          {
+            "name": "updates",
+            "title": "XenoNet updates",
+            "description": "Open Updates and read its state, check for a release, or change automatic checks. Development copies never download or install updates.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "status",
+                    "check",
+                    "automatic",
+                    "components",
+                    "component-update"
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "component": {
+                  "type": "string",
+                  "enum": [
+                    "service",
+                    "tools"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": true
+            }
+          },
+          {
+            "name": "background",
+            "title": "XenoNet background service",
+            "description": "Open Background service and read whether XenoNet's service starts at login, show Desktop's setup offer of it if that's due, or answer the offer Not now. Turning it on or off is yours alone, in XenoNet's window or with xenonet service install.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "status",
+                    "offer",
+                    "dismiss"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "status",
+            "title": "XenoNet status",
+            "description": "Which XenoNet instances are running, and for the current one its window and the page's state: the selection, what's gathered, open panels, alerts, counts and whether the view is still moving.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "launch",
+            "title": "Launch XenoNet",
+            "description": "Starts installed XenoNet or a development instance unless it's running, waits until its page is ready, and makes it the current one. By default the window shows without taking focus (the test instance stays hidden). A demo or test copy stuck holding the instance's lock without answering is ended first, since its data is made up; `ended` in the result says so.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "show": {
+                  "description": "inactive: shown, not focused (default); front: shown and focused; hidden: never shown, still renders and screenshots.",
+                  "type": "string",
+                  "enum": [
+                    "inactive",
+                    "front",
+                    "hidden"
+                  ]
+                },
+                "restart": {
+                  "description": "Quit it first if it's running, for a fresh start. It also ends a copy stuck holding the instance's lock without answering, the dev instance's too.",
+                  "type": "boolean"
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "quit",
+            "title": "Quit XenoNet",
+            "description": "Quits Desktop for the selected instance. Installed XenoNet keeps its service, terminals and coordination running. For development instances it returns once the app has exited, or once it's ended it if it was stuck on its way out (`killed`). The dev instance is the user's own XenoNet Dev, so quit it only when asked.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": true,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "find",
+            "title": "Find nodes",
+            "description": "Finds nodes on the map whose id, title or name contain every word of `query`: projects, sessions, Codex projects (native), folders outside the projects folder (zone), shared systems (resource), the shared context (wiki) and its pages (page), other machines (host: over SSH with XENONET_HOSTS=1, or in a network; their nodes' ids start with @<host>: and say which host), and actors beside the map (kind actor, by id, name and product). Drawn nodes come first, then the most recent, then actors. Each has its id, for select and input, and where it is on screen.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "query": {
+                  "description": "Words to match; empty lists everything.",
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "session",
+                    "native",
+                    "zone",
+                    "resource",
+                    "wiki",
+                    "page",
+                    "core",
+                    "actor",
+                    "host"
+                  ]
+                },
+                "limit": {
+                  "description": "Default 20.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 200
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "select",
+            "title": "Select a node",
+            "description": "Selects a node, as clicking it would: a project, Codex project or folder gathers its sessions around it and the camera frames them; an actor (actor:<slug>) is framed with what it acts on; anything else gets the camera's focus and the inspector. Give an id, or a query to select the best match from find. null clears the selection. Returns the state once the view has settled.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "id": {
+                  "description": "A node id from find or status, or an actor id from actors; null clears the selection.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "query": {
+                  "description": "Instead of an id: select the first node find gives for these words.",
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "With query: only this kind.",
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "session",
+                    "native",
+                    "zone",
+                    "resource",
+                    "wiki",
+                    "page",
+                    "core",
+                    "actor",
+                    "host"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "navigate",
+            "title": "Step through the map",
+            "description": "back: Esc, from a gathered session to its project, then out (putting the gathering back). next / previous: ↓ / ↑, the next or previous gathered node. reset: R, frame the whole map. Returns the state once the view has settled.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "back",
+                    "next",
+                    "previous",
+                    "reset"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              },
+              "required": [
+                "action"
+              ]
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "stats",
+            "title": "Open a session's stats",
+            "description": "Opens a session's stats panel, as Stats in the inspector or Mod+I in the palette would: what it would cost at API prices, its models over time, where its tokens went, its turns, context and tools. Give a session id, or a query for the best matching session. Returns the state and the numbers in brief (cost, tokens, calls, turns, models).",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "id": {
+                  "description": "A session id from find.",
+                  "type": "string"
+                },
+                "query": {
+                  "description": "Instead of an id: the first session find gives for these words.",
+                  "type": "string"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "needs_you",
+            "title": "Needs you",
+            "description": "Reads the Needs you queue: everything waiting on the person, the longest wait first. That is sessions waiting on a question or a permission, actors waiting on them, programs asking to be actors and sessions' asks for an actor's gateway token. Each item has its key, kind (question, permission, actor, request, gateway, or requests: how many programs ask, in a window that can't see who), who it is (title, and the session's app or another machine's host), what it waits for, since when (or until when a request lapses), the actions that answer it and whether its row shows in the open panel. `open` and `close` show or hide the panel. `show` selects an item on the map, `open-app` opens a session in its app (where its question is answered), and `dismiss` puts a session's wait away, as the panel's buttons do; each takes the item's key and returns the state that follows. Allowing or denying a program, and writing to an actor, are the person's, so this tool does neither.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "description": "read (the default) lists the queue.",
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "open",
+                    "close",
+                    "show",
+                    "open-app",
+                    "dismiss"
+                  ]
+                },
+                "key": {
+                  "description": "For show, open-app and dismiss: an item's key from the queue.",
+                  "type": "string"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "refusals",
+            "title": "Browse provider refusals",
+            "description": "Opens the provider refusal browser. Filter the full collection, sort it, or select a record from the current page. Returns result metadata and selected ID. Viewing a saved request is the person's to do, so this tool can't. Browsing does not change recording settings.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "filter",
+                    "select",
+                    "page",
+                    "refresh"
+                  ]
+                },
+                "filters": {
+                  "type": "object",
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "category": {
+                      "type": "string"
+                    },
+                    "context": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "with",
+                        "without"
+                      ]
+                    },
+                    "from": {
+                      "description": "Local date YYYY-MM-DD, inclusive.",
+                      "type": "string"
+                    },
+                    "to": {
+                      "description": "Local date YYYY-MM-DD, inclusive.",
+                      "type": "string"
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "newest",
+                        "oldest",
+                        "provider",
+                        "model",
+                        "category",
+                        "kind"
+                      ]
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string"
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "integrations",
+            "title": "Review agent workflows",
+            "description": "Browse routing decisions, OpenShell jobs and read-only Pi run metadata. Open a tab, filter, page, select a record, open its cached local review or select a reviewed file. Retrieval, export, forgetting, sending decisions, source configuration, launch and deletion stay in the owner's window; this tool never executes them.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "filter",
+                    "select",
+                    "page",
+                    "refresh",
+                    "review",
+                    "file"
+                  ]
+                },
+                "tab": {
+                  "type": "string",
+                  "enum": [
+                    "routing",
+                    "sandbox",
+                    "results",
+                    "pi"
+                  ]
+                },
+                "filters": {
+                  "type": "object",
+                  "properties": {
+                    "q": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "newest",
+                        "oldest"
+                      ]
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string"
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "spend",
+            "title": "Read Token use",
+            "description": "Reads the Token use panel: about what today's work would cost at API prices, by app (costs) and by actor (byActor, and the rows the panel draws in actors), and the configured OpenRouter key's spend or its visible setup/error state. Each session counts for one actor at most: the one that reported it as a run, or started it, or started the session it came from; the rest is unattributed, including sessions the person starts. A run reported from elsewhere is counted apart, unpriced. Refresh asks for current cached provider usage and the breakdown again; actors opens (more) or folds (fewer) the actors past the first few. It never sends a model request or changes credentials.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "refresh": {
+                  "type": "boolean"
+                },
+                "actors": {
+                  "description": "Open or fold the actors past the first few",
+                  "type": "string",
+                  "enum": [
+                    "more",
+                    "fewer"
+                  ]
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "rename",
+            "title": "Rename a session",
+            "description": "Renames a session, as typing over its title in the inspector (F2, or the pencil) would. The name is saved in the session's own app, so it shows there too: Claude Code's transcript and, for a session in Claude desktop, the desktop's record (which the desktop reads when it next starts), or Codex's thread name. The demo keeps the names of its made-up sessions in XenoNet. Another machine's sessions can't be renamed. Give a session id, or a query for the best matching session. Returns the state, and `renamed`: the name as saved, where it went and anything to know.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "id": {
+                  "description": "A session id from find.",
+                  "type": "string"
+                },
+                "query": {
+                  "description": "Instead of an id: the first session find gives for these words.",
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "description": "The new name, on one line."
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              },
+              "required": [
+                "title"
+              ]
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "command",
+            "title": "Run a palette command",
+            "description": "Runs a command from the command palette (⌘K / Ctrl+K) by id, such as wallpaper, replay, poster, daylog, away2, reset, scope-7d or focus-lighting, and returns the state once the view has settled. Without an id, lists the commands.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "poster",
+            "title": "A poster of today",
+            "description": "Renders today's constellation as a poster (src/poster.js) at `size`: story (1080×1920), portrait (1080×1350), card (1200×630) or wide (1920×1080). Projects show as star names and no clock appears, unless `names` or `tokens` reveal them for this one. Returns what it drew (`lines`) and the PNG's size; `save` saves it to the pictures folder, as the export panel's Save PNG does. The panel itself, with its preview, opens with command poster.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "size": {
+                  "type": "string",
+                  "enum": [
+                    "story",
+                    "portrait",
+                    "card",
+                    "wide"
+                  ]
+                },
+                "names": {
+                  "type": "boolean"
+                },
+                "tokens": {
+                  "type": "boolean"
+                },
+                "save": {
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "labels",
+            "title": "The map's labels",
+            "description": "Reads every drawn node's label as it reads now (id, kind, text, visible), and whether an export has them redacted: while a film plays, and during a poster render, projects, groups, folders, pages, shared systems and machines show star names and sessions show no label (core/export-labels.js), unless the export reveals the names. For checking what a film or a poster shows of the map.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "filters",
+            "title": "Filters",
+            "description": "The toggles under Filters: claude, codex and grok show or hide each app's sessions (Claude Code, Codex, Grok Build), archived shows or hides archived ones, and external the folders outside the projects folder. `set` turns some on or off, as a click on each toggle does ({ grok: false } hides Grok Build's sessions). Returns the toggles and how many sessions of each app the map has and draws, once the view has settled.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "set": {
+                  "description": "Toggles by name, on (true) or off (false).",
+                  "type": "object",
+                  "properties": {
+                    "claude": {
+                      "type": "boolean"
+                    },
+                    "codex": {
+                      "type": "boolean"
+                    },
+                    "grok": {
+                      "type": "boolean"
+                    },
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "external": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "identities",
+            "title": "Identities",
+            "description": "The identities sessions ran as and projects belong to (Claude and ChatGPT accounts, GitHub accounts, git identities), as the chips under Filters show them, each with a key. `only` shows just those identities' sessions and projects ([] shows everything again); `masked` hides them as \"GitHub A\", \"Claude B\"… for screenshots, or shows them. Returns the chips, and the state once the view has settled when something changed.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "only": {
+                  "description": "Chip keys from an earlier call; [] clears the filter.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "masked": {
+                  "type": "boolean"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "hosts",
+            "title": "Other machines",
+            "description": "Other machines on the map: other XenoNets over SSH, with XENONET_HOSTS=1 (a prototype: the console reads each with xenonet relay, read-only), and the machines of a network this one is in, drawn from their presence (network: true; their sessions take a message from you). Each host with how it stands (connecting, live, stale, offline or error), its host node (@<host>:core) and where that is on screen, and its constellation beside this machine's map; the bridges between checkouts of one repo; and the machines' chips under Filters. `only` shows just those machines' work: host ids, and \"@here\" for this machine ([] shows every machine). In XenoNet Dev, simulate host-add shows another XenoNet on this machine as a host. Returns the hosts, and the state once the view has settled when something changed.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "only": {
+                  "description": "Host ids, and \"@here\" for this machine; [] clears the filter.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "network",
+            "title": "The network",
+            "description": "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, where you're at, who may start and wake sessions there, and what its XenoNet takes), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch, and this machine's titles-only, share-load, start and wake settings. `open` shows the panel and `join` its form. `start` opens Start a session on a machine (host, this one by default) with its folder, app, mode and prompt filled in; on a machine on its own, with none of those, it opens the form that starts a network. `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the settings (at.set for this machine's, at.setOn for another's), Start (session.at.send, once session.armed) and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. answers lists the answers to the starts you asked for. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "description": "read (the default) says how the network stands without opening anything.",
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "open",
+                    "start",
+                    "join",
+                    "add",
+                    "message",
+                    "close"
+                  ]
+                },
+                "host": {
+                  "description": "For add: the new machine's id. For start: the machine to start a session on.",
+                  "type": "string"
+                },
+                "window": {
+                  "description": "For add: whether you'll use a XenoNet window on it.",
+                  "type": "boolean"
+                },
+                "folder": {
+                  "description": "For start: a project or folder on that machine, by its id or path, or ~.",
+                  "type": "string"
+                },
+                "app": {
+                  "description": "For start: the app.",
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "grok"
+                  ]
+                },
+                "mode": {
+                  "description": "For start: a permission mode (plan, acceptEdits, auto, dontAsk); your own settings when left out.",
+                  "type": "string"
+                },
+                "prompt": {
+                  "description": "For start: the first prompt.",
+                  "type": "string"
+                },
+                "to": {
+                  "description": "For message: a session's id, @<host>:<id> for another machine's, or an actor's.",
+                  "type": "string"
+                },
+                "text": {
+                  "description": "For message: what goes in the box.",
+                  "type": "string"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "machines",
+            "title": "Machines",
+            "description": "The load panel's larger view: each machine's load now (CPU, GPU, memory), what its parts are (CPU model, threads, GHz, memory, each GPU, platform, arch) and its sessions on the map, with the network's totals. On its own that's this computer; in a network, every machine, this one marked here, and other machines' load only on a window host's console. `read` (the default) says how the view stands, and the panel's own reading: the network's sums and each machine's part of each. `open` opens it, at a machine (at: @here or its id). `filter` picks machines (machines: their keys, @here or ids, which are the Filters chips, so the map is filtered too; [] picks all), a platform (darwin, win32, linux), only those with a GPU and only those online, and sorts (name, cpu, gpu, ram, seen) or shows a table (view). `close` closes it. Returns the view's state, and the state once the view has settled when it changed.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "description": "read (the default) changes nothing.",
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "open",
+                    "filter",
+                    "close"
+                  ]
+                },
+                "at": {
+                  "description": "For open: the machine to show first, @here or its id.",
+                  "type": "string"
+                },
+                "machines": {
+                  "description": "For filter: the machines to show, by key (@here or an id); [] shows all.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "platform": {
+                  "description": "For filter: only this platform; empty for all.",
+                  "type": "string",
+                  "enum": [
+                    "darwin",
+                    "win32",
+                    "linux",
+                    ""
+                  ]
+                },
+                "gpu": {
+                  "description": "For filter: only machines with a GPU.",
+                  "type": "boolean"
+                },
+                "online": {
+                  "description": "For filter: only machines online.",
+                  "type": "boolean"
+                },
+                "sort": {
+                  "description": "For filter: the order.",
+                  "type": "string",
+                  "enum": [
+                    "name",
+                    "cpu",
+                    "gpu",
+                    "ram",
+                    "seen"
+                  ]
+                },
+                "view": {
+                  "description": "For filter: cards, or one table row a machine.",
+                  "type": "string",
+                  "enum": [
+                    "cards",
+                    "table"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "root",
+            "title": "The projects folder",
+            "description": "The projects folder XenoNet reads (its root) and where that comes from: XENONET_PROJECTS_DIR, a folder chosen in the console, or the default ~/Projects, with its last scan. `check` says what XenoNet would find in another folder (how many projects and groups, or why it can't use it) without switching. `path` switches to a folder, as Change the projects folder… in the palette does: XenoNet checks it, rescans and returns once the map shows it; null goes back to the default. The layout, your rules and Codex's picks stay with each folder, so switching back brings them back. The demo has a second made-up folder, ~/Clients.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "path": {
+                  "description": "Switch to this folder: a full path, or one starting with ~ (the demo's own home, in the demo). null goes back to the default.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "check": {
+                  "description": "A folder to check without switching to it.",
+                  "type": "string"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "simulate",
+            "title": "Simulate a session state, an actor acting, or another machine",
+            "description": "Puts sessions into states that are otherwise rare, so you can check how they look. The kinds are needs-you (a question waiting), collision (two sessions editing the same file, which needs a and b), stuck (a failing loop), wiki-write (a session writing to the shared context), turn-end, doctor (the doctor finding a problem), and clear, which undoes them all. Without session ids it picks the most recently active sessions. The actor-… kinds have an actor act instead, as an event it reports would. They are actor-spawn (it starts a session), actor-edit (it edits files in a project), actor-message (it messages a session), actor-online and actor-offline. The actor reacts, and a beam runs to what it touched. actor-request makes up a program asking to be an actor (named a, Heron by default), which waits for an Allow in the window. Its card shows in the attention strip, and actors lists it under requests. actor-needs-you has an actor (a, the first by default) wait on you with a made-up question. Its card shows in the attention strip, and its glow beats in the attention color until clear. actor-tunnel gives an actor (a) a made-up remote connection through a tunnel with an adapter connected, so the map draws its gate open between it and what it reads. actor-tunnel-down does the same with no adapter connected, so the gate is shut. actor-read sends a read through it, of node b or what it acts on, with light down the conduit and out to what it read. clear takes the tunnel away. Only the demo and test instances, whose data is made up, answer actor-request, actor-needs-you and the tunnel kinds, and actor-request's token stays out of this answer. With XENONET_HOSTS=1, it covers other machines too. host-add shows another XenoNet on this machine as a host (a is the new host's id, b that XenoNet's port). host-offline and host-online take a host's id as a. host-skew sets a host's clock b ms off, three minutes if b is left out. The net-… kinds make up a network across machines, with other machines' agents, for the Network panel (network), the attention strip and the message box: net-none (this machine on its own), net-founder (this machine started it and is its gateway; two more machines, one offline; on laptop a session waits on you with a question and another seems stuck), net-member (this machine joined; the gateway is another), net-gateway-down (the gateway hasn't answered for 25 minutes, and what's for other machines waits in the outbox), net-ticket (a ticket waits), net-mismatch (a machine sees another list of the network's machines), net-remote-waiting (an agent on another machine waits on you) and net-approval (a window host that isn't the founder signed another in as a window host, which waits for an approval here). For net-founder and net-remote-waiting, a is the machine you're at, this one by default: what waits sounds only there, here or on another machine; and b titles-only has the other machines share titles only, so no question's text, last message or stuck reason comes from them; for net-founder, b ask has a run on laptop wait in Needs you for your Allow or Deny on a permission prompt, and b ask-env one whose command may read the run's environment, with the warning its Allow card shows. clear ends it. Everything stays in memory, apart from actor-request. Returns what was used and the page's state after the update arrives.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "needs-you",
+                    "collision",
+                    "stuck",
+                    "wiki-write",
+                    "turn-end",
+                    "doctor",
+                    "clear",
+                    "actor-spawn",
+                    "actor-edit",
+                    "actor-message",
+                    "actor-online",
+                    "actor-offline",
+                    "actor-request",
+                    "actor-needs-you",
+                    "actor-tunnel",
+                    "actor-tunnel-down",
+                    "actor-read",
+                    "host-add",
+                    "host-offline",
+                    "host-online",
+                    "host-skew",
+                    "net-none",
+                    "net-founder",
+                    "net-member",
+                    "net-gateway-down",
+                    "net-ticket",
+                    "net-mismatch",
+                    "net-remote-waiting",
+                    "net-approval"
+                  ]
+                },
+                "a": {
+                  "description": "A session id (find with kind session); for the actor-… kinds, an actor id (actors lists them, and the first one that isn't you is the default); for actor-request, the name it asks with; for host-…, a host's id; for net-founder and net-remote-waiting, the machine you're at.",
+                  "type": "string"
+                },
+                "b": {
+                  "description": "The second session, for collision; for the actor-… kinds, the node it acts on (a session for actor-spawn and actor-message, a project for actor-edit; the session busy most lately when left out); for host-add, the port of the XenoNet to show; for host-skew, milliseconds; for net-founder and net-remote-waiting, titles-only.",
+                  "type": "string"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "actors",
+            "title": "Actors",
+            "description": "The actors beside the map. They are the person at the console (You), always-on agents and actors of your own, drawn on a layer of their own above the map, with beams into the projects and sessions they act on. Each comes with its id, presence (working, idle, away, offline, unknown), status, how XenoNet knows of it (via), its product, its form and color in the theme, the node ids it beams into now and where it is on screen. The answer also has every beam drawn and the layer's time for its last frame. `requests` lists the programs waiting for an Allow in the window, each with what it asks, who asked, and whether its card is up. `gatewayAsks` lists sessions' asks for an actor's gateway token, each with the actor, who asked, whether it replaces a token, and whether its card is up. It never holds a token, since none exists until the person allows the ask, and no tool here allows one. `tokens` says how each registered actor's token stands, as the Actors panel shows it (works, expired or none, when it expires, and when it was last used, null if never), and never holds a token itself. `remote` lists remote actors' connections (a dot reading through a tunnel, say) and whether cloud access is on. For each connection it gives the actor, state, how many projects it reads, whether labels go, its data mode, expiry and whether an adapter is connected, and never a credential. Its `tunnels` says whether tunnel-client is here, and for each tunnel XenoNet can run, its tunnel id, whether a key is kept (never the key), whether it starts with XenoNet, and whether it runs and why not. The `tunnels` beside the beams give each tunnel's gate on the map, how open it is and where. Allowing an actor, pairing, revoking or turning on a remote connection, and keeping a tunnel's key or starting it, are the person's alone, so no tool here does any of it. The command actors opens the Actors panel for them. `select` selects an actor, as clicking it would. The camera frames it with what it acts on and the inspector shows it (null clears the selection), and the answer then includes the state once the view has settled.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "select": {
+                  "description": "An actor id (actor:<slug>) to select; null clears the selection.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "feed",
+            "title": "Activity feed",
+            "description": "The activity feed as it shows now, newest first: each line's kind (for a session tool, prompt, message, agent-message, turn-start, turn-end, needs-you, stuck and the like; for an actor what it did: presence, status, spawned, edited, ran, messaged, said, finished, failed, or agent-message), who it's about (session: a session's id, or actor: an actor's), its title (a session's title, or an actor's name) and its words, and when.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "limit": {
+                  "description": "Default 20.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "screenshot",
+            "title": "Screenshot XenoNet",
+            "description": "The window as it looks now, returned as an image, with a full-size PNG saved in the repo's .xenonet folder. It works when the window is covered, unfocused or hidden. By default it waits for the view to settle and holds every ambient animation still (sky, sonar, sweep, sparks, CSS animation), so two shots of the same state match; still: false shows them as they are.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "name": {
+                  "description": "The saved file's name, without .png (default shot).",
+                  "type": "string"
+                },
+                "still": {
+                  "description": "Hold ambient animation still for the shot (default true).",
+                  "type": "boolean"
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "maxWidth": {
+                  "description": "Width of the returned image in pixels (default 1568); the saved PNG is full size.",
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 4000
+                },
+                "format": {
+                  "description": "Of the returned image (default jpeg).",
+                  "type": "string",
+                  "enum": [
+                    "jpeg",
+                    "png"
+                  ]
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "input",
+            "title": "Keyboard and mouse",
+            "description": "Real keyboard and mouse input to the page, which needn't have focus. Any of, in this order: keys (combos like \"Mod+K\", \"Escape\", \"ArrowDown\", \"W\"; Mod is ⌘ on a Mac, Ctrl elsewhere), text (typed into whatever has focus), move (hover), click, drag (Alt-drag moves a node), scroll. Points are { x, y } or { node: id }. Prefer select, navigate and command for what they cover; use input to test the real interaction. Returns what it did and the state once the view has settled.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "keys": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "move": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "node": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "node"
+                      ]
+                    }
+                  ],
+                  "description": "A point on the page: { x, y } in CSS pixels from the top left, or { node: id } for a node's centre on screen."
+                },
+                "click": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "node": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "node"
+                      ]
+                    }
+                  ],
+                  "description": "A point on the page: { x, y } in CSS pixels from the top left, or { node: id } for a node's centre on screen."
+                },
+                "count": {
+                  "description": "Clicks: 2 double-clicks (on a session, the transcript preview).",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                },
+                "button": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "right",
+                    "middle"
+                  ]
+                },
+                "drag": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "node": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "node"
+                          ]
+                        }
+                      ],
+                      "description": "A point on the page: { x, y } in CSS pixels from the top left, or { node: id } for a node's centre on screen."
+                    },
+                    "to": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "node": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "node"
+                          ]
+                        }
+                      ],
+                      "description": "A point on the page: { x, y } in CSS pixels from the top left, or { node: id } for a node's centre on screen."
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to"
+                  ]
+                },
+                "scroll": {
+                  "description": "A wheel turn at x, y; dy > 0 scrolls down (zooms the map out).",
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "dx": {
+                      "type": "number"
+                    },
+                    "dy": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ]
+                },
+                "modifiers": {
+                  "description": "Held for move, click, drag and scroll.",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "Alt",
+                      "Control",
+                      "Meta",
+                      "Shift",
+                      "Mod"
+                    ]
+                  }
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "window",
+            "title": "XenoNet's window",
+            "description": "Shows the window (\"inactive\": without taking focus; \"front\": focused), hides it, minimizes it (show brings it back), or sets the page's size, such as \"1600x900\", or \"1600x900@2\" for a pixel ratio of 2 (\"window\" goes back to the window's own size).",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "show": {
+                  "type": "string",
+                  "enum": [
+                    "inactive",
+                    "front"
+                  ]
+                },
+                "hide": {
+                  "type": "boolean"
+                },
+                "minimize": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "type": "string"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "logs",
+            "title": "XenoNet's logs",
+            "description": "Recent page console messages, uncaught page errors, app events (loads, crashes) and server output, oldest first. Pass the returned cursor as since to get only what's new.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "level": {
+                  "description": "error, warning (and errors), or all (default).",
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning",
+                    "all"
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "page",
+                    "server",
+                    "app"
+                  ]
+                },
+                "since": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "description": "Default 200.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 600
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "eval",
+            "title": "Run JavaScript in the page",
+            "description": "Evaluates JavaScript in XenoNet Dev's page and returns the result as JSON: an expression, or a function body with return; await works. window.__xenonet holds the scene, panels and the driver (window.__xenonet.driver). For checks the other tools don't cover.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "expression": {
+                  "type": "string"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              },
+              "required": [
+                "expression"
+              ]
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "theme",
+            "title": "Themes",
+            "description": "The console's themes, switched live without a reload. list: the themes (id, name, built in or the user's) and the one in use. set: use one in every window, as Theme: in the palette does. preview: show one in this window alone, to look at; keep makes it the one in use, revert goes back to it. switcher: open \"Theme…\", the list a person steps through; step: ↓ or ↑ in it (by 1 or -1), showing the theme it lands on in this window alone, then keep (Enter) or revert (Esc). gallery: open the gallery of theme cards (with id, looking at that one); focus: look at a card's theme, as pointing at it does; make: \"Make your own\" from the card looked at, a copy saved as a file of the user's and put in use (state.made has its file); close: close the switcher or the gallery, putting the theme in use back. Except for list, waits until the theme is drawn and the view has settled, and returns the state (state.theme says which is drawn and which is in use, state.themes what the switcher and the gallery show).",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "description": "Default list.",
+                  "type": "string",
+                  "enum": [
+                    "list",
+                    "set",
+                    "preview",
+                    "keep",
+                    "revert",
+                    "switcher",
+                    "step",
+                    "gallery",
+                    "focus",
+                    "make",
+                    "close"
+                  ]
+                },
+                "id": {
+                  "description": "For set, preview and focus: a theme's id from list; for gallery, the card to look at first.",
+                  "type": "string"
+                },
+                "by": {
+                  "description": "For step: 1 (↓, the default) or -1 (↑), or further.",
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "mcp_info",
+            "title": "Inspect an MCP shared system",
+            "description": "Open an MCP shared system's rich inspector, with declared author, client connection and authentication status, searchable tool descriptions and input schemas, resource and template context, and recent usage. This does not execute a server tool or read resource contents. After open, tab selects overview, tools, context or activity; search filters tools.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "tab",
+                    "search"
+                  ]
+                },
+                "id": {
+                  "description": "For open: a shared system's node id from find.",
+                  "type": "string"
+                },
+                "tab": {
+                  "type": "string",
+                  "enum": [
+                    "overview",
+                    "tools",
+                    "context",
+                    "activity"
+                  ]
+                },
+                "query": {
+                  "type": "string"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "environment",
+            "title": "Choose the environment around the map",
+            "description": "List or preview Nebula, Aurora, Trench and Vault independently of the active theme. All inherit the theme's colors. set saves the choice for every window; preview changes only this window; keep saves the preview; revert cancels it; picker opens the person's environment cards. No reload is needed.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "list",
+                    "set",
+                    "preview",
+                    "keep",
+                    "revert",
+                    "picker"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "look",
+            "title": "How the console draws its panels",
+            "description": "Read or change how the console draws its panels. plainPanels true draws them solid, without the glass blur behind them, a large share of a visible frame's GPU time; false brings the glass back. It's kept for this window, as the palette's \"Turn plain panels on or off\" keeps it. Returns the state once the view has settled: state.look says how the panels are drawn.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "plainPanels": {
+                  "description": "true: solid panels, without the glass blur; false: glass panels, the default. Leave it out to only read.",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          }
+        ],
+        "resultType": "complete",
+        "ttlMs": 0,
+        "cacheScope": "private",
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "xenonet-console",
+            "version": "{version}"
+          }
+        }
+      },
+      "jsonrpc": "2.0",
+      "id": 2
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "say which theme to focus: an id from list"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete",
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "xenonet-console",
+            "version": "{version}"
+          }
+        }
+      },
+      "jsonrpc": "2.0",
+      "id": 3
+    }
+  ]
+}

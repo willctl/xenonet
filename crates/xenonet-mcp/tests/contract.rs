@@ -1,16 +1,21 @@
 // The contract (docs/design/rust-core.md, "The MCP servers"): the Rust
-// servers answer as the JS ones do. Each case starts the JS server
-// (node mcp/xenonet.js, node mcp/assistant.js) and the Rust one with the
-// same environment, says the same to both (the 2026-07-28 probe, the 2025
-// handshake, tools/list, calls that don't fit a tool's schema, calls with
-// no XenoNet to reach, and the same in the 2026-07-28 revision) and
-// compares the answers: the same JSON, and each tool's schemas written the
-// same, key for key. A session, a Codex thread, an actor with its token
-// file, and a channel session; and the assistant, for a grant and against
-// the JS server's --fixture.
+// servers answer as the JS ones did. Each file in tests/golden/ holds one
+// case, recorded from the JS servers (node mcp/xenonet.js, mcp/assistant.js
+// and mcp/console.js) on 2026-11-08: the arguments and environment the
+// server starts with, the messages said to it (the 2026-07-28 probe, the
+// 2025 handshake, tools/list, calls that don't fit a tool's schema, calls
+// with no XenoNet to reach, and the same in the 2026-07-28 revision) and
+// the JS answers. Those answers are now the contract. Each case starts the
+// Rust server the same way, says the same and compares: the same result,
+// the same error code, and each tool's schemas written the same, key for
+// key. A session, a Codex thread, an actor with its token file, and a
+// channel session; the assistant, for a grant and against the listing of
+// the JS server's --fixture; and the console operator.
 //
-// It needs node and the checkout's node_modules; without them it says so
-// and passes.
+// What differs from one machine or run to the next is written in the
+// goldens as a placeholder: {token_file} and {runtime_dir} for the paths
+// the cases make, {version} for the server's version, and the assistant's
+// request id and retry jitter as settled() leaves them.
 
 #![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap")]
 
@@ -21,48 +26,14 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-const SESSION: &str = "11111111-2222-3333-4444-555555555555";
-const THREAD: &str = "019a0000-aaaa-bbbb-cccc-000000000001";
-const GRANT: &str = "gr_000000000000000000000000";
-
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-// Whether the JS servers can run here.
-fn js_runs() -> bool {
-    let ok = Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success()) && root().join("node_modules/@modelcontextprotocol/server").exists();
-    if !ok {
-        eprintln!("contract: no node or node_modules here, so the JS servers can't run; skipped");
-    }
-    ok
-}
-
-fn meta26() -> Value {
-    json!({ "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}, "io.modelcontextprotocol/clientInfo": { "name": "claude-code", "version": "2.1.302" } })
-}
-
-fn request(id: u64, method: &str, params: Value) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
-}
-
-fn call(id: u64, name: &str, arguments: Value) -> Value {
-    request(id, "tools/call", json!({ "name": name, "arguments": arguments }))
-}
-
-// The probe, the handshake and the list: what Claude Code says first.
-fn opening() -> Vec<Value> {
-    vec![
-        request(1, "server/discover", json!({ "_meta": meta26() })),
-        request(2, "initialize", json!({ "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": { "name": "claude-code", "version": "2.1.302" } })),
-        json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-        request(3, "tools/list", json!({})),
-    ]
-}
-
-// Says each message to a server, in turn, waiting for the answer to each
-// request; the answers.
-fn talk(program: &str, args: &[&str], env: &[(&str, String)], messages: &[Value]) -> Vec<Value> {
+// Says each message to the Rust server, in turn, waiting for the answer to
+// each request; the answers.
+fn talk(args: &[String], env: &[(String, String)], messages: &[Value]) -> Vec<Value> {
+    let program = env!("CARGO_BIN_EXE_xenonet-mcp");
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(root()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     for v in [
@@ -111,8 +82,9 @@ fn talk(program: &str, args: &[&str], env: &[(&str, String)], messages: &[Value]
     answers
 }
 
-// The answers' contents, without what's random in them (an assistant
-// request's id, the jitter in when to try again).
+// An answer's contents, without what's random in it (an assistant
+// request's id, the jitter in when to try again). The goldens were
+// recorded through this, so it applies to the Rust answers only.
 fn settled(mut v: Value) -> Value {
     if let Some(text) = v.pointer("/result/content/0/text").and_then(Value::as_str) {
         if let Ok(mut inner) = serde_json::from_str::<Value>(text) {
@@ -126,11 +98,60 @@ fn settled(mut v: Value) -> Value {
     v
 }
 
-// The same answers, and the tools' schemas written alike.
-fn same(case: &str, messages: &[Value], js: Vec<Value>, rust: Vec<Value>) {
+// The server's version isn't part of the contract: the JS servers said
+// package.json's, the Rust ones say their crate's.
+fn unversioned(mut v: Value) -> Value {
+    for p in ["/result/_meta/io.modelcontextprotocol~1serverInfo/version", "/result/serverInfo/version"] {
+        if let Some(version) = v.pointer_mut(p) {
+            *version = json!("{version}");
+        }
+    }
+    v
+}
+
+// Puts each placeholder in place of what it stands for, wherever it's
+// written, inside JSON-in-a-string too.
+fn placeheld(v: &mut Value, subs: &[(&str, String)]) {
+    match v {
+        Value::String(s) => {
+            for (placeholder, actual) in subs {
+                if s.contains(actual.as_str()) {
+                    *s = s.replace(actual.as_str(), placeholder);
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| placeheld(x, subs)),
+        Value::Object(o) => o.values_mut().for_each(|x| placeheld(x, subs)),
+        _ => {}
+    }
+}
+
+// Starts the Rust server as the golden says, with each placeholder in its
+// environment filled in from subs, and compares its answers to the JS ones.
+fn replay(file: &str, subs: &[(&str, String)]) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(format!("{file}.json"));
+    let golden: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap();
+    let case = golden["case"].as_str().unwrap();
+    let args: Vec<String> = golden["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_owned()).collect();
+    let env: Vec<(String, String)> = golden["env"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|kv| {
+            let mut v = kv[1].as_str().unwrap().to_owned();
+            for (placeholder, actual) in subs {
+                v = v.replace(placeholder, actual);
+            }
+            (kv[0].as_str().unwrap().to_owned(), v)
+        })
+        .collect();
+    let messages = golden["messages"].as_array().unwrap();
+    let js = golden["answers"].as_array().unwrap();
+    let rust = talk(&args, &env, messages);
     assert_eq!(js.len(), rust.len(), "{case}: as many answers");
     for ((m, j), r) in messages.iter().filter(|m| m.get("id").is_some()).zip(js).zip(rust) {
-        let (j, r) = (settled(j), settled(r));
+        let mut r = unversioned(settled(r));
+        placeheld(&mut r, subs);
         assert_eq!(j.get("result"), r.get("result"), "{case}: the answer to {m}");
         assert_eq!(j.get("error").map(|e| &e["code"]), r.get("error").map(|e| &e["code"]), "{case}: the error for {m}");
         if let (Some(jt), Some(rt)) = (j.pointer("/result/tools").and_then(Value::as_array), r.pointer("/result/tools").and_then(Value::as_array)) {
@@ -143,212 +164,71 @@ fn same(case: &str, messages: &[Value], js: Vec<Value>, rust: Vec<Value>) {
     }
 }
 
-fn compare(case: &str, js: (&str, &[&str]), rust: &[&str], env: &[(&str, String)], messages: &[Value]) {
-    let j = talk("node", &[&[js.0], js.1].concat(), env, messages);
-    let r = talk(env!("CARGO_BIN_EXE_xenonet-mcp"), rust, env, messages);
-    same(case, messages, j, r);
-}
-
-// Calls that don't fit the sessions' tools, as zod and the SDK refuse them.
-fn misfits(from: u64) -> Vec<Value> {
-    [
-        ("send", json!({ "text": 5 })),
-        ("send", json!({})),
-        ("claim", json!({ "paths": [], "minutes": 1.5 })),
-        ("claim", json!({ "paths": ["a", 3], "minutes": 0 })),
-        ("inbox", json!({ "wait_seconds": 121 })),
-        ("inbox", json!({ "wait_seconds": "5" })),
-        ("release", json!({ "paths": "src/" })),
-        ("who_has", json!({ "path": null })),
-        ("peers", json!({ "scope": ["repo"] })),
-        ("focus", json!({ "text": "x", "extra": true })),
-        ("handoff", json!({ "files": "src/" })),
-        ("handoff", json!({ "accept": 5 })),
-        ("nope", json!({})),
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(i, (name, args))| call(from + i as u64, name, args))
-    .collect()
-}
-
-// The sessions' server with no XenoNet to reach (port 1), as each kind of
-// caller.
-fn sessions_case(case: &str, env: &[(&str, String)], extra: Vec<Value>) {
-    let mut messages = opening();
-    messages.extend(misfits(10));
-    messages.extend([call(30, "whoami", json!({})), call(31, "peers", json!({ "scope": "machine" })), call(32, "ask_gateway_token", json!({ "actor": "actor:muse" }))]);
-    messages.push(request(33, "tools/call", json!({ "name": "whoami", "arguments": {}, "_meta": { "threadId": THREAD } })));
-    messages.extend([call(34, "handoff", json!({ "goal": "Finish the refunds", "files": ["src/refunds.ts"] })), call(35, "handoff", json!({ "accept": "hof_x" }))]);
-    // A start, and a permission prompt, with no XenoNet to answer them.
-    messages.extend([
-        call(36, "start_session", json!({ "machine": "desk", "prompt": "Run the fixtures" })),
-        call(37, "permission", json!({ "tool_name": "Bash", "input": { "command": "ls", "n": [1] } })),
-        call(38, "permission", json!({ "tool_name": "Bash", "input": "ls" })),
-    ]);
-    messages.extend(extra);
-    let mut env = env.to_vec();
-    env.push(("XENONET_PORT", "1".into()));
-    compare(case, ("mcp/xenonet.js", &[]), &[], &env, &messages);
-    // The 2026-07-28 revision, with no handshake: each request says it.
-    let m26 = |id: u64, method: &str, mut params: Value| {
-        params["_meta"] = meta26();
-        request(id, method, params)
-    };
-    let mut thread = meta26();
-    thread["threadId"] = json!(THREAD);
-    let era = vec![
-        m26(1, "server/discover", json!({})),
-        m26(2, "tools/list", json!({})),
-        m26(3, "tools/call", json!({ "name": "whoami", "arguments": {} })),
-        m26(4, "tools/call", json!({ "name": "claim", "arguments": { "paths": [] } })),
-        request(5, "tools/call", json!({ "name": "peers", "arguments": {}, "_meta": thread })),
-    ];
-    if !case.contains("channel") {
-        compare(&format!("{case}, 2026-07-28"), ("mcp/xenonet.js", &[]), &[], &env, &era);
+// The sessions' server, and the same in the 2026-07-28 revision, which a
+// channel session doesn't speak.
+fn sessions_case(file: &str, subs: &[(&str, String)]) {
+    replay(file, subs);
+    if !file.contains("channel") {
+        replay(&format!("{file}-2026-07-28"), subs);
     }
 }
 
 #[test]
 fn a_claude_code_session() {
-    if !js_runs() {
-        return;
-    }
-    sessions_case(
-        "a session",
-        &[("CLAUDE_CODE_SESSION_ID", SESSION.into()), ("XENONET_CHANNEL", "0".into()), ("CLAUDE_PROJECT_DIR", "/w/atlas".into()), ("CLAUDE_PID", "4242".into())],
-        vec![],
-    );
+    sessions_case("a-session", &[]);
 }
 
 #[test]
 fn a_codex_thread() {
-    if !js_runs() {
-        return;
-    }
-    sessions_case("a Codex thread", &[], vec![]);
-    sessions_case("a Codex thread from its environment", &[("CODEX_THREAD_ID", THREAD.into())], vec![]);
+    sessions_case("a-codex-thread", &[]);
+    sessions_case("a-codex-thread-from-its-environment", &[]);
 }
 
 #[test]
 fn a_channel_session() {
-    if !js_runs() {
-        return;
-    }
-    sessions_case("a channel session", &[("CLAUDE_CODE_SESSION_ID", SESSION.into()), ("XENONET_CHANNEL", "1".into())], vec![]);
+    sessions_case("a-channel-session", &[]);
 }
 
 #[test]
 fn an_actor() {
-    if !js_runs() {
-        return;
-    }
     let dir = std::env::temp_dir().join(format!("xenonet-mcp-contract-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("xenonet.token");
     std::fs::write(&file, format!("xenonet_actor_{}\n", "ab".repeat(32))).unwrap();
+    let subs = [("{token_file}", file.to_string_lossy().into_owned())];
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    let reports = vec![
-        call(40, "actor_heartbeat", json!({ "presence": "away" })),
-        call(41, "actor_events", json!({ "events": [{ "kind": "said" }] })),
-        call(42, "actor_events", json!({ "events": [] })),
-        call(43, "actor_targets", json!({ "targets": [{ "relation": "owns" }], "replace": "yes" })),
-        call(44, "actor_heartbeat", json!({ "presence": "working", "status": "Triaging" })),
-        request(45, "tools/call", json!({ "name": "actor_heartbeat", "arguments": {}, "_meta": { "threadId": THREAD } })),
-    ];
-    sessions_case("an actor", &[("XENONET_ACTOR_TOKEN_FILE", file.to_string_lossy().into_owned())], reports.clone());
+    sessions_case("an-actor", &subs);
     // One whose file others can read: refused, and said so.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        sessions_case("an actor with a loose token file", &[("XENONET_ACTOR_TOKEN_FILE", file.to_string_lossy().into_owned())], reports);
+        sessions_case("an-actor-with-a-loose-token-file", &subs);
     }
-    sessions_case("an actor with a token that isn't one", &[("XENONET_ACTOR_TOKEN", "xenonet_actor_nope".into())], vec![]);
+    sessions_case("an-actor-with-a-token-that-isn-t-one", &[]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn the_assistant() {
-    if !js_runs() {
-        return;
-    }
     let runtime = std::env::temp_dir().join(format!("xenonet-mcp-contract-runtime-{}", std::process::id()));
     std::fs::create_dir_all(&runtime).unwrap();
-    let env = [("XENONET_RUNTIME_DIR", runtime.to_string_lossy().into_owned()), ("XENONET_PORT", "1".into())];
-    let mut messages = opening();
-    let session = "claude:0190fa00-0000-7000-8000-000000000001";
-    messages.extend(
-        [
-            ("xenonet_sessions", json!({ "path": "/etc" })),
-            ("xenonet_sessions", json!({ "statuses": [], "limit": 51, "updated_since": "yesterday", "cursor": "x.y" })),
-            ("xenonet_sessions", json!({ "statuses": ["idle", "idle", "idle", "idle", "idle", "idle", "idle"], "project_id": "prj_nope" })),
-            ("xenonet_attention", json!({ "kinds": ["waiting", "said"], "limit": 0 })),
-            ("xenonet_session", json!({})),
-            ("xenonet_session", json!({ "session_id": "claude:x", "include_stats": "yes" })),
-            ("xenonet_actors", json!({ "project_id": 5, "cursor": null })),
-            ("xenonet_status", json!({ "x": 1, "y": 2 })),
-            ("terminal", json!({ "action": "write", "text": "rm -rf /" })),
-            ("xenonet_status", json!({})),
-            ("xenonet_session", json!({ "session_id": session, "include_stats": true })),
-            ("xenonet_sessions", json!({ "statuses": ["idle"], "updated_since": "2026-10-07T00:00:00.000Z", "limit": 50 })),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (name, args))| call(10 + i as u64, name, args)),
-    );
-    compare("the assistant, for a grant", ("mcp/assistant.js", &["--grant", GRANT]), &["assistant", "--grant", GRANT], &env, &messages);
-    // The JS server's --fixture lists the same tools.
-    let listing = opening();
-    let fixture = talk("node", &["mcp/assistant.js", "--fixture"], &env, &listing);
-    let rust = talk(env!("CARGO_BIN_EXE_xenonet-mcp"), &["assistant", "--grant", GRANT], &env, &listing);
-    same("the assistant, against the JS --fixture", &listing, fixture, rust);
+    let subs = [("{runtime_dir}", runtime.to_string_lossy().into_owned())];
+    replay("the-assistant-for-a-grant", &subs);
+    // The JS server's --fixture listed the same tools as a grant does.
+    replay("the-assistant-against-the-js-fixture", &subs);
     let _ = std::fs::remove_dir_all(&runtime);
 }
 
 #[test]
 fn the_console_operator() {
-    if !js_runs() {
-        return;
-    }
-    let mut messages = opening();
     // Calls that don't fit a tool, and calls each tool refuses before it
     // reaches an instance: neither drives a XenoNet.
-    messages.extend(
-        [
-            ("select", json!({ "instance": "nope" })),
-            ("navigate", json!({})),
-            ("find", json!({ "limit": 0 })),
-            ("find", json!({ "kind": "planet" })),
-            ("rename", json!({ "title": "" })),
-            ("input", json!({ "move": { "x": 1 } })),
-            ("input", json!({ "keys": 5 })),
-            ("terminal", json!({ "lines": 1001 })),
-            ("feed", json!({ "limit": 1.5 })),
-            ("root", json!({ "path": 5 })),
-            ("logs", json!({ "since": "x" })),
-            ("simulate", json!({ "kind": "nope" })),
-            ("nope", json!({})),
-            ("stats", json!({})),
-            ("rename", json!({ "title": "x" })),
-            ("theme", json!({ "action": "set" })),
-            ("mcp_info", json!({})),
-            ("environment", json!({ "action": "preview" })),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (name, args))| call(10 + i as u64, name, args)),
-    );
-    compare("the console operator", ("mcp/console.js", &[]), &["console"], &[], &messages);
-    let m26 = |id: u64, method: &str, mut params: Value| {
-        params["_meta"] = meta26();
-        request(id, method, params)
-    };
-    let era = vec![m26(1, "server/discover", json!({})), m26(2, "tools/list", json!({})), m26(3, "tools/call", json!({ "name": "theme", "arguments": { "action": "focus" } }))];
-    compare("the console operator, 2026-07-28", ("mcp/console.js", &[]), &["console"], &[], &era);
+    replay("the-console-operator", &[]);
+    replay("the-console-operator-2026-07-28", &[]);
 }
