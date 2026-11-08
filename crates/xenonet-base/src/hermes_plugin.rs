@@ -41,6 +41,11 @@ pub fn enabled_in(text: &str) -> bool {
         return false;
     };
     for (i, l) in lines.iter().enumerate().skip(at + 1) {
+        // A comment at column 0 doesn't end the block: Hermes's own config
+        // has them inside `plugins:`.
+        if l.starts_with('#') {
+            continue;
+        }
         if l.chars().next().is_some_and(|c| !c.is_whitespace()) {
             return false;
         }
@@ -52,6 +57,9 @@ pub fn enabled_in(text: &str) -> bool {
         }
         for item in &lines[i + 1..] {
             let t = item.trim_start();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
             let Some(v) = t.strip_prefix('-') else { return false };
             if item.len() - t.len() < indent {
                 return false;
@@ -167,6 +175,9 @@ mod tests {
         assert!(!enabled_in("other:\n  enabled:\n    - xenonet\n"));
         assert!(!enabled_in("plugins:\n  disabled:\n    - xenonet\n"));
         assert!(!enabled_in(""));
+        // Hermes's own config puts column-0 comments inside the block.
+        assert!(enabled_in("plugins:\n  clone: 1\n\n# ===\n# Model\n# ===\n  enabled:\n    - xenonet\n  disabled: []\nmodel:\n"));
+        assert!(enabled_in("plugins:\n  enabled:\n    - other\n# note\n    - xenonet\n"));
     }
 
     #[test]
