@@ -1,5 +1,5 @@
 # XenoNet's Rust core (docs/design/rust-core.md). Electron and the console
-# page stay in JS; everything else moves here, a crate per layer.
+# page are JS; everything else is here, a crate per layer.
 [workspace]
 resolver = "3"
 members = ["crates/*"]
@@ -69,12 +69,6 @@ url = "2"
 # String.prototype.normalize("NFC"), for the assistant's labels: already
 # in the lock through url's idna.
 icu_normalizer = "2.1"
-# The Node-API bindings that put the crates behind the JS modules during the
-# port. The last releases that build on Rust 1.85; the resolver keeps their
-# dependencies to versions that do too.
-napi = { version = "3.4", default-features = false, features = ["napi8", "serde-json"] }
-napi-derive = "3.3"
-napi-build = "2.2"
 xenonet-mcp = { path = "crates/xenonet-mcp" }
 xenonet-service = { path = "crates/xenonet-service" }
 # The binary's processes: the service's sockets, timers and children, its

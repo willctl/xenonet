@@ -3,14 +3,15 @@
 # nothing from the Mac's environment comes along.
 set -euo pipefail
 umask 022
-export PATH="$HOME/.local/bin:$HOME/.local/node/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.local/bin:$HOME/.local/node/bin:$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
 export DISABLE_AUTOUPDATER=1
 
 say() { printf '  %s\n' "$*"; }
 health() { curl -fsS -m 5 "http://127.0.0.1:$1/api/health"; }
 
-# Node, Codex and Claude Code at the versions in versions.json, the demo
-# world's made-up git identity, and the checkout lab.mjs pushes XenoNet to.
+# Node, Codex and Claude Code at the versions in versions.json, rustup for
+# building XenoNet, the demo world's made-up git identity, and the checkout
+# lab.mjs pushes XenoNet to.
 tools() {
   [ "$(uname -m)" = aarch64 ] || { echo "versions.json pins Node for linux-arm64, and this VM is $(uname -m)" >&2; exit 1; }
   mkdir -p "$HOME/.local/bin"
@@ -59,6 +60,13 @@ tools() {
   ' "$HOME/.claude/settings.json"
   say "claude $(claude --version)"
 
+  # rustup alone: the toolchain is the one the checkout's
+  # rust-toolchain.toml pins, installed at each deploy.
+  if ! command -v rustup >/dev/null; then
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 https://sh.rustup.rs | sh -s -- -y -q --profile minimal --default-toolchain none --no-modify-path
+  fi
+  say "$(rustup --version 2>/dev/null)"
+
   git config --global user.name Nova
   git config --global user.email nova@example.com
   git config --global init.defaultBranch main
@@ -69,13 +77,14 @@ tools() {
   fi
 }
 
-# After a push: XenoNet's dependencies, the xenonet command, and the services'
-# units. Services already enabled restart on the new code.
+# After a push: the xenonet binary built from it, the xenonet command, and
+# the services' units. Services already enabled restart on the new build.
 deploy() {
   cd "$HOME/xenonet"
   git log -1 --format='  xenonet %h %s'
-  npm ci --omit=dev --prefer-offline --no-audit --no-fund --loglevel=error
-  node cli/xenonet.js install
+  rustup toolchain install
+  CARGO_PROFILE_DEV_DEBUG=0 cargo build -q -p xenonet-cli
+  target/debug/xenonet install
   mkdir -p "$HOME/.config/systemd/user" "$HOME/.config/xenonet-lab"
   unit "" "XenoNet, the lab host's own" >"$HOME/.config/systemd/user/xenonet.service"
   unit " --demo" "XenoNet's demo, with made-up data" >"$HOME/.config/systemd/user/xenonet-demo.service"
@@ -106,7 +115,7 @@ Description=$2
 [Service]
 Environment=PATH=%h/.local/bin:%h/.local/node/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-%h/.config/xenonet-lab/xenonet.env
-ExecStart=%h/.local/node/bin/node %h/xenonet/server/index.js$1
+ExecStart=%h/xenonet/target/debug/xenonet serve$1
 Restart=on-failure
 RestartSec=5
 
@@ -119,7 +128,7 @@ EOF
 # it: no XenoNet state goes into a golden copy for its clones to share.
 smoke() {
   cd "$HOME/xenonet"
-  node server/index.js --demo >/tmp/xenonet-smoke.log 2>&1 &
+  target/debug/xenonet serve --demo >/tmp/xenonet-smoke.log 2>&1 &
   local pid=$! i answer
   for i in $(seq 1 60); do
     if health 47841 >/dev/null 2>&1; then break; fi

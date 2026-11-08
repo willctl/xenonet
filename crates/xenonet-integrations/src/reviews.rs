@@ -5,11 +5,10 @@
 //! sandbox returns is ever used as a host path.
 //!
 //! The program that collects text inside the sandbox (COLLECT_TEXT) runs
-//! in the sandbox's Node, so it's the JS's, made from reviews.js's own
-//! functions; the binary carries it as text (collect-text.mjs writes it,
-//! and a test checks the two agree). git runs through the twin.
+//! in the sandbox's Node, so it's JS, kept in `collect_text.js` and carried
+//! by the binary as text.
 
-/// The program that collects text inside a sandbox, as reviews.js makes it.
+/// The program that collects text inside a sandbox.
 pub const COLLECT_TEXT: &str = include_str!("collect_text.js");
 
 use crate::b64;

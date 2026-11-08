@@ -2,9 +2,6 @@
 // lines, functions and regions, crate by crate.
 //
 //   npm run coverage:rust              cargo test, then the table
-//   npm run coverage:rust -- --js      cargo test, and the JS tests too: the
-//                                      ones test:rust runs on the twins, and
-//                                      the ones test:bin runs on the binary
 //   npm run coverage:rust -- --html    and a report in target/llvm-cov/html
 //   npm run coverage:rust -- --no-run  the table (and report) of the last run
 //   npm run coverage:rust -- --json    the table as JSON
@@ -13,15 +10,9 @@
 //   cargo install --locked cargo-llvm-cov
 //   rustup component add llvm-tools --toolchain <the pin in rust-toolchain.toml>
 //
-// The instrumented builds go to target/llvm-cov-target (and, with --js,
-// target/llvm-cov-js), apart from the usual one, so cargo test, the lint
-// and the addon don't build again after it. Without --js, xenonet-node is
-// left out: it's the addon's bindings, which only the JS tests run. With
-// --js, the addon the twins load is the instrumented one while the tests
-// run, and the one that was there is put back after; if the run is stopped
-// half way, npm run rust:build makes it again.
+// The instrumented build goes to target/llvm-cov-target, apart from the
+// usual one, so cargo test and the lint don't build again after it.
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { cargoCommand, pinned } from "./cargo.mjs";
@@ -30,11 +21,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const html = args.includes("--html");
 const asJson = args.includes("--json");
-const withJs = args.includes("--js");
 const run = !args.includes("--no-run");
-const exe = process.platform === "win32" ? ".exe" : "";
-const jsTarget = path.join(root, "target", "llvm-cov-js");
-let failed = 0;
 
 function cargo(argv, { capture = false, env = process.env } = {}) {
   const [file, list, environment] = cargoCommand(argv, { ...env, CARGO_PROFILE_DEV_DEBUG: "0" });
@@ -47,51 +34,8 @@ function cargo(argv, { capture = false, env = process.env } = {}) {
   return r.stdout;
 }
 
-// The tests of a step that fail are counted, and the rest still measured.
-function node(argv, env) {
-  const r = spawnSync(process.execPath, argv, { cwd: root, env, stdio: "inherit", windowsHide: true });
-  if (r.status !== 0) failed++;
-}
-
-// cargo llvm-cov's own environment for building and running outside it
-// (show-env), pointed at a target folder of its own.
-function coverageEnv() {
-  const env = { ...process.env };
-  for (const line of cargo(["llvm-cov", "show-env"], { capture: true }).split("\n")) {
-    const m = /^(\w+)=(.*)$/.exec(line.trim());
-    if (m) env[m[1]] = m[2].replace(/^'(.*)'$/, "$1");
-  }
-  Object.assign(env, { CARGO_TARGET_DIR: jsTarget, CARGO_LLVM_COV_TARGET_DIR: jsTarget, CARGO_LLVM_COV_BUILD_DIR: jsTarget, LLVM_PROFILE_FILE: path.join(jsTarget, "xenonet-%p-%16m.profraw") });
-  return env;
-}
-
-function runWithJs(env) {
-  fs.mkdirSync(jsTarget, { recursive: true });
-  for (const f of fs.readdirSync(jsTarget)) if (/\.prof(raw|data)$/.test(f)) fs.rmSync(path.join(jsTarget, f));
-  cargo(["test", "--workspace", "--exclude", "xenonet-node", "--locked"], { env });
-  // The twins, on the instrumented addon.
-  cargo(["build", "-p", "xenonet-node", "--locked"], { env });
-  const lib = { darwin: "libxenonet_node.dylib", win32: "xenonet_node.dll" }[process.platform] ?? "libxenonet_node.so";
-  const addon = path.join(root, "crates", "xenonet-node", `xenonet.${process.platform}-${process.arch}.node`);
-  const kept = `${addon}.coverage-kept`;
-  const had = fs.existsSync(addon);
-  if (had) fs.renameSync(addon, kept);
-  try {
-    fs.copyFileSync(path.join(jsTarget, "debug", lib), addon);
-    node([path.join("scripts", "rust-parity.mjs")], env);
-  } finally {
-    fs.rmSync(addon, { force: true });
-    if (had) fs.renameSync(kept, addon);
-  }
-  // The binary.
-  cargo(["build", "-p", "xenonet-cli", "--locked"], { env });
-  node([path.join("scripts", "rust-bin-tests.mjs"), `--bin=${path.join(jsTarget, "debug", `xenonet${exe}`)}`], env);
-}
-
-const env = withJs ? coverageEnv() : process.env;
-if (run && withJs) runWithJs(env);
-else if (run) cargo(["llvm-cov", "--workspace", "--exclude", "xenonet-node", "--locked", "--no-report"]);
-const summary = JSON.parse(cargo(["llvm-cov", "report", "--json", "--summary-only"], { capture: true, env }));
+if (run) cargo(["llvm-cov", "--workspace", "--locked", "--no-report"]);
+const summary = JSON.parse(cargo(["llvm-cov", "report", "--json", "--summary-only"], { capture: true }));
 
 // The files' counts, added up by the crate each is in.
 const crates = new Map();
@@ -128,10 +72,6 @@ if (asJson) {
 }
 
 if (html) {
-  cargo(["llvm-cov", "report", "--html", "--output-dir", path.join(root, "target", "llvm-cov")], { env });
+  cargo(["llvm-cov", "report", "--html", "--output-dir", path.join(root, "target", "llvm-cov")]);
   console.log(`\nThe report: ${path.join("target", "llvm-cov", "html", "index.html")}`);
-}
-if (failed) {
-  process.stderr.write(`\n${failed} of the JS test runs failed; the table counts what they ran.\n`);
-  process.exitCode = 1;
 }

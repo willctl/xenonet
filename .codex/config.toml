@@ -3,7 +3,7 @@
 # in trusted projects.
 [mcp_servers.xenonet-console]
 command = "node"
-args = ["mcp/console.js"]
+args = ["scripts/xenonet.mjs", "mcp", "console"]
 startup_timeout_sec = 20
 # Launching XenoNet Dev and waiting for it to settle can take a while.
 tool_timeout_sec = 180

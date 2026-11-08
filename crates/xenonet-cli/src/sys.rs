@@ -70,15 +70,15 @@ pub fn tilde(p: &str) -> String {
 
 /// XenoNet's own folder, beside the command: the first of the folders the
 /// binary is in, and those above it, with XenoNet's package.json and either
-/// cli/ (a checkout's, for target/debug/xenonet) or component.json (a
+/// crates/ (a checkout's, for target/debug/xenonet) or component.json (a
 /// Service or Tools package's, for bin/xenonet), else the binary's own
-/// folder. It stands for the JS's ROOT, the folder its code is in.
+/// folder.
 pub fn xenonet_root() -> String {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.ancestors()
         .skip(1)
         .take(5)
-        .find(|d| d.join("package.json").is_file() && (d.join("cli").is_dir() || d.join("component.json").is_file()))
+        .find(|d| d.join("package.json").is_file() && (d.join("crates").is_dir() || d.join("component.json").is_file()))
         .or_else(|| exe.parent())
         .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default()

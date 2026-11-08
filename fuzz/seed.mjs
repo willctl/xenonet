@@ -1,5 +1,5 @@
 // Writes the fuzz targets' seed inputs, fuzz/seeds/<target>/, from the
-// repo's test fixtures and the demo's made-up world (see "Fuzzing" in
+// repo's test fixtures and the demo's made-up world, frozen (see "Fuzzing" in
 // docs/guide/development.md). Nothing here reads anyone's real data, and
 // the script stops before writing a seed that holds this machine's home
 // folder, user name or temp folder.
@@ -14,13 +14,15 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(repo, "fuzz", "seeds");
 const T = Date.parse("2026-10-05T12:00:00.000Z");
 
-// The demo writes its world under the temp folder, by port: a folder of
-// its own here, gone when the seeds are written.
-const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-seeds-")));
-process.env.TMPDIR = tmp;
-process.env.XENONET_PORT = "47999";
-const { createWorld } = await import("../core/demo.js");
-const world = createWorld(T);
+// The demo's made-up world, as the map's golden test froze it
+// (crates/xenonet-wire-map/tests/fixtures/golden-world): its folders by
+// name, a leading dot in a path part written %2E so git keeps it, and
+// <world> in a file where the world's root was.
+const frozen = path.join(repo, "crates", "xenonet-wire-map", "tests", "fixtures", "golden-world");
+const { dirs } = JSON.parse(fs.readFileSync(path.join(frozen, "manifest.json"), "utf8"));
+const at = (rel) => path.join(frozen, "world", ...rel.split("/").map((p) => (p.startsWith(".") ? `%2E${p.slice(1)}` : p)));
+const world = { root: "<world>", claudeRoot: at(dirs.claudeRoot), codexHome: at(dirs.codexHome), stateDir: at(dirs.stateDir), wikiDir: at(dirs.wikiDir) };
+const tmp = fs.realpathSync.native(os.tmpdir());
 const { VENDOR } = await import("../test/fixtures/vendor.js");
 const hooks = await import("../test/fixtures/hook-payloads.js");
 const numbat = await import("../test/fixtures/numbat.js");

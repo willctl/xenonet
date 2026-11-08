@@ -42,10 +42,9 @@ jobs:
             echo "No Swift toolchain on this runner, so the tray isn't built."
           fi
   # The Rust core (docs/design/rust-core.md) on each platform: clippy, which
-  # sees each platform's own code only there, its own tests, the JS tests
-  # with each twin loaded, and the JS tests that start the service, the
-  # command and the MCP servers against the xenonet binary. Debug builds, so
-  # the addon and the binary reuse what cargo test compiled.
+  # sees each platform's own code only there, and every crate's tests, the
+  # golden files of the HTTP API, the command and the MCP servers among
+  # them.
   rust:
     strategy:
       fail-fast: false
@@ -57,10 +56,6 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
       # The registry and the debug build, keyed on the toolchain, the lock file
       # and the platform; a source change rebuilds only the crates it touches.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -74,15 +69,9 @@ jobs:
           restore-keys: rust-${{ runner.os }}-
       # The toolchain rust-toolchain.toml pins, with clippy and rustfmt.
       - run: rustup toolchain install
-      - run: npm ci
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Every crate's tests, so one run shows every failure.
       - run: cargo test --workspace --locked --no-fail-fast
-      - run: npm run rust:build -- --debug
-      - run: npm run test:rust
-      # The service serves the built page, which one route test asks for.
-      - run: npm run build
-      - run: npm run test:bin
   # What doesn't depend on the platform, once: formatting, docs, advisories,
   # licenses, bans, sources and unused dependencies (npm run lint:rust).
   rust-lint:

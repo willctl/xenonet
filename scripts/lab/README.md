@@ -67,8 +67,10 @@ plans, as on the Mac.
   shell). **The Codex CLI**, pinned the same way, from npm into `~/.local`.
   `versions.json` holds the versions; `build` installs them.
 - **XenoNet**, pushed from this repo with `git push` over SSH into `~/xenonet`
-  (the VMs have no GitHub access), with `npm ci --omit=dev` and the `xenonet`
-  command in `~/.local/bin`.
+  (the VMs have no GitHub access), built there (`target/debug/xenonet`, with
+  rustup and the toolchain `rust-toolchain.toml` pins; the first build takes
+  several minutes, later ones only the crates that changed), and the
+  `xenonet` command in `~/.local/bin`.
 - **Two XenoNets**, as systemd user services that run without anyone logged
   in (linger): `xenonet.service` on 127.0.0.1:47840, which reads the VM's own
   sessions, and `xenonet-demo.service` on 127.0.0.1:47841, with made-up data

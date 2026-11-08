@@ -1,11 +1,8 @@
 // electron-builder hooks (see "build" in package.json).
 //
-// afterPack: the terminal's native module comes as one npm package per
-//   platform and CPU (@lydell/node-pty-darwin-arm64 and so on), and npm only
-//   installs the one for the machine doing the build. Each packaged app gets
-//   exactly the one it runs on, fetched from the registry when it's missing
-//   (an Intel build on an Apple silicon Mac, say). It also refuses to ship
-//   files that contain the builder's home folder path.
+// afterPack: refuses to ship files that contain the builder's home folder
+//   path, then builds the components (the xenonet binary's packages) beside
+//   the app.
 // afterSign, afterAllArtifactBuild: the macOS app is ad-hoc signed and the
 //   package unsigned, so no certificate (which carries a personal name) ends
 //   up in a release by accident. Set XENONET_SIGN=1 to sign on purpose.
@@ -16,47 +13,9 @@ import os from "node:os";
 import path from "node:path";
 
 const ARCH = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal" };
-const PTY = "@lydell/node-pty";
 
 function appDir(context) {
   return path.join(context.packager.getResourcesDir(context.appOutDir), "app");
-}
-
-function fetchPackage(name, version, into) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-pty-"));
-  try {
-    const tgz = execFileSync("npm", ["pack", `${name}@${version}`, "--silent", "--pack-destination", tmp], { encoding: "utf8", shell: process.platform === "win32" }).trim().split(/\r?\n/).pop();
-    execFileSync("tar", ["-xzf", path.join(tmp, tgz), "-C", tmp]);
-    fs.mkdirSync(path.dirname(into), { recursive: true });
-    fs.cpSync(path.join(tmp, "package"), into, { recursive: true });
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-}
-
-function nativePty(context) {
-  const platform = context.electronPlatformName;
-  const arch = ARCH[context.arch];
-  const scope = path.join(appDir(context), "node_modules", "@lydell");
-  const want = `node-pty-${platform}-${arch}`;
-  for (const dir of fs.readdirSync(scope)) {
-    if (dir.startsWith("node-pty-") && dir !== want) fs.rmSync(path.join(scope, dir), { recursive: true, force: true });
-  }
-  const target = path.join(scope, want);
-  if (!fs.existsSync(target)) {
-    const version = JSON.parse(fs.readFileSync(path.join(scope, "node-pty", "package.json"), "utf8")).optionalDependencies?.[`${PTY}-${platform}-${arch}`];
-    if (!version) throw new Error(`${PTY} has no prebuilt package for ${platform}-${arch}`);
-    console.log(`  • fetching ${PTY}-${platform}-${arch}@${version} for this build`);
-    fetchPackage(`${PTY}-${platform}-${arch}`, version, target);
-  }
-  if (platform === "darwin") {
-    const bin = path.join(target, "prebuilds", `${platform}-${arch}`);
-    fs.chmodSync(path.join(bin, "spawn-helper"), 0o755);
-    for (const file of ["pty.node", "spawn-helper"]) {
-      const archs = execFileSync("lipo", ["-archs", path.join(bin, file)], { encoding: "utf8" }).trim().split(/\s+/);
-      if (!archs.includes(arch === "x64" ? "x86_64" : arch)) throw new Error(`${file} in ${want} is built for ${archs.join(", ")}, not ${arch}`);
-    }
-  }
 }
 
 // Bundled text that mentions the home folder would publish the builder's
@@ -80,7 +39,6 @@ function noHomePaths(context) {
 }
 
 export async function afterPack(context) {
-  nativePty(context);
   noHomePaths(context);
   const app = appDir(context);
   if (process.env.XENONET_BUNDLE !== "0") await buildComponents({ app, platform: context.electronPlatformName, arch: ARCH[context.arch], output: context.outDir, bundle: path.join(path.dirname(app), "components") });
