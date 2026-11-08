@@ -145,7 +145,7 @@ pub fn owner_steps(st: &State, shown: &dyn Fn(&Path) -> String) -> Vec<String> {
     if st.token != "ok" {
         let loose = if st.token == "loose" { " The file there is readable by others, so the plugin ignores it: chmod 600 it." } else { "" };
         steps.push(format!(
-            "Give the plugin a token: in XenoNet's Actors panel, add an actor for Hermes Agent and save its token to {} (only you can read it).{loose}",
+            "Give the plugin a token: start a Hermes session. The plugin asks XenoNet for one, and a card for Hermes Agent appears in XenoNet's window: Allow it. The token goes into {}, readable only by you.{loose}",
             shown(&st.dir.join("token"))
         ));
     }

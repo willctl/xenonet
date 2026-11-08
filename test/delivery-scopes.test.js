@@ -91,6 +91,15 @@ test("an actor sees and reaches nothing until its token is granted a scope, then
   assert.deepEqual(policy.readAudit().map((a) => a.kind).filter((k) => k !== "refused"), ["grant", "grant", "revoke"]);
 });
 
+test("an actor with no grant answers a message it was sent, to its sender and no one else", async () => {
+  const { engine } = world();
+  const sent = await engine.send(A, { to: WREN, text: "ping" });
+  assert.deepEqual((await engine.send(WREN, { text: "pong", replyTo: sent.id })).to.map((r) => r.id), [A], "the sender is answered, though WREN has no grant");
+  assert.deepEqual((await engine.send(WREN, { to: A, text: "pong again", replyTo: sent.id })).to.map((r) => r.id), [A]);
+  await assert.rejects(engine.send(WREN, { to: C, text: "x", replyTo: sent.id }), /can reach/, "someone else is still out of reach");
+  await assert.rejects(engine.send(WREN, { to: B, text: "x", replyTo: 9999 }), /can reach/, "a message that never came to it opens nothing");
+});
+
 test("outside its scope an actor learns nothing of a session: not from whoami's counts, who_has or a claim", async () => {
   const { engine, store, policy, t } = world();
   store.claim(C, "/w/ledger/books.js", "reworking", t.now + 3600e3, t.now);

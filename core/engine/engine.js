@@ -437,7 +437,7 @@ export class Engine extends EventEmitter {
     }
     else if (to === "all") [recipients, target] = [active, "all"];
     else {
-      const one = await this.#resolve(me, to);
+      const one = await this.#resolve(me, to, this.#answered(me, replyTo));
       [recipients, target] = [[one], one.id];
     }
     // A message to the repo also waits for agents that join it soon after.
@@ -484,17 +484,24 @@ export class Engine extends EventEmitter {
     for (const m of this.store.scoped(key, this.now() - RECENT_MS)) if (m.sender !== me) this.store.deliver(m.id, me);
   }
 
-  async #resolve(me, to) {
+  // Who wrote the message `replyTo`, if it came to `me`: an agent may answer
+  // whoever wrote to it, whether or not it could have started the thread.
+  #answered(me, replyTo) {
+    const m = replyTo ? this.store.message(Number(replyTo)) : null;
+    return m && m.sender !== me && this.store.deliveries(m.id).some((d) => d.agent === me) ? m.sender : null;
+  }
+
+  async #resolve(me, to, answered = null) {
     if (isAgentId(to)) {
       const one = await this.view(to);
-      if (!this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
+      if (to !== answered && !this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
       if (!this.#reads(to)) throw this.#deaf(one);
       return one;
     }
     if (isActorAgent(to)) {
       if (!this.actors?.has(to)) throw new Error(`no actor is ${to}; peers lists them`);
       const one = await this.view(to);
-      if (!this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
+      if (to !== answered && !this.visibleTo(me, one)) throw new Error(`no session or actor you can reach is ${to}`);
       if (!this.#reads(to)) throw this.#deaf(one);
       return one;
     }

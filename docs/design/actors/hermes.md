@@ -744,9 +744,12 @@ copies the two files into `$HERMES_HOME/plugins/xenonet` (default
 `xenonet disconnect hermes` takes the folder out again. Two steps stay the
 owner's, and connect prints them:
 
-1. **A token.** In XenoNet's Actors panel, add an actor for Hermes Agent
-   (`actor:hermes`, which joins the observed actor) and save its token, with
-   **Save to a file…**, to `plugins/xenonet/token`. The plugin uses the file
+1. **A token.** On its first session without one, the plugin runs
+   `xenonet actor register --product hermes-agent` itself (XenoNet takes
+   Hermes's registration only from a command under Hermes's own processes),
+   at most once every six hours. An Allow card for Hermes Agent
+   (`actor:hermes`, which joins the observed actor) appears in XenoNet's
+   window, and the token is written to `plugins/xenonet/token`. The plugin uses the file
    only if others can't read it, keeps the token in memory, sends it only to
    127.0.0.1 as a bearer, and never prints or logs it. On macOS XenoNet also
    holds the token to Hermes's own processes.

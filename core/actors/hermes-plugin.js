@@ -96,7 +96,7 @@ export function uninstall({ home, env = process.env } = {}) {
 // What the owner still does, as lines to print, given inspect()'s answer.
 export function ownerSteps(st, tilde = (p) => p) {
   const steps = [];
-  if (st.token !== "ok") steps.push(`Give the plugin a token: in XenoNet's Actors panel, add an actor for Hermes Agent and save its token to ${tilde(path.join(st.dir, "token"))} (only you can read it).${st.token === "loose" ? " The file there is readable by others, so the plugin ignores it: chmod 600 it." : ""}`);
+  if (st.token !== "ok") steps.push(`Give the plugin a token: start a Hermes session. The plugin asks XenoNet for one, and a card for Hermes Agent appears in XenoNet's window: Allow it. The token goes into ${tilde(path.join(st.dir, "token"))}, readable only by you.${st.token === "loose" ? " The file there is readable by others, so the plugin ignores it: chmod 600 it." : ""}`);
   if (!st.enabled) steps.push("Turn the plugin on, which Hermes leaves to you: hermes plugins enable xenonet, or add xenonet to plugins.enabled in config.yaml. It takes effect with the next Hermes session.");
   return steps;
 }
