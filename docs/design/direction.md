@@ -147,7 +147,7 @@ core crate depends on a surface crate or contains a registry id literal.
   |---|---|---|
   | Person | Adding or removing a device: the root key, or two existing devices each with a presence block. Revoking: any one device with presence. | The root is used rarely; losing every device means the root or the recovery kit |
   | Network | Adding a member or mailbox: one admin device with presence. Adding or removing an admin, moving relays, widening settings: the founder's root or two admin devices. Removing a member: one admin device. | Today's roster rules, with "window host" read as "admin device" |
-  | Org | Adding a member: one admin. Adding or removing an admin: two admins, or the owner. | Orgs are an entry kind; the first cut needs none |
+  | Org | Adding a member: one admin. Adding or removing an admin: two admins, or the owner. | Orgs are an entry kind; the first cut builds none (question 5) |
   | Project | Sharing: one owner or maintainer device with presence. Merging two chains: an owner of each. | Readers and contributors cannot share |
   | Space | Sharing or moving the curator: the space's owner (the owner of the entity it is about). | Exactly one curator at a time |
 
@@ -444,7 +444,7 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Questions 1 and 2 are decided. Question 5 still gates phase 3; the rest
+Questions 1, 2 and 5 are decided, so nothing gates phase 3. The rest
 can wait for the phase that needs them.
 
 1. **The person's root key, the presence check and the chain rules.**
@@ -476,9 +476,13 @@ can wait for the phase that needs them.
    with no person present, as today's delegation does? Recommended: yes,
    per machine, as an explicit person-signed grant with limits, and only
    for runs the asker's attestation is `HarnessSigned` or `ProcessChecked`.
-5. **The first cut.** One person with many machines and several networks,
-   or orgs and several people too? Recommended: one person first; the
-   chains are built so orgs are an entry kind, not a redesign.
+5. **The first cut.** Decided by Will on 2026-11-08: one person with
+   many machines and several networks. Phases 2 to 4 build the person,
+   machine, network, project and space chains and no org chain; orgs are
+   an entry kind the `Policy` trait admits later, not a redesign, and the
+   org row of the chain table stays as the default for that day. Two
+   persons sharing a project is not in the first cut, so `Merge` ships
+   with the data model but is exercised only by tests until then.
 6. **Wire format.** Keep the line head and JSON, or move to CBOR with
    COSE_Sign1 for outside interop? Recommended: keep, revisit in phase 6.
 7. **Claims.** Stay advisory with a deterministic winner, or allow a
