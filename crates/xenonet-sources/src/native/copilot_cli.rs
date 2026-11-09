@@ -22,7 +22,7 @@ pub const SOURCE: &str = "github/copilot-cli/session-event";
 /// Copilot CLI's built-in file tools, as the app registry has them;
 /// str_replace_editor's view isn't an edit.
 pub fn edit_tools() -> &'static [String] {
-    xenonet_base::apps::edit_tools("copilot")
+    xenonet_adapter::apps::edit_tools("copilot")
 }
 const FILE_MAX: f64 = (32u64 << 20) as f64;
 const CHECKS_PER_FILE: usize = 16;

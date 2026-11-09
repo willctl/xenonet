@@ -459,7 +459,7 @@ struct Rollout {
 /// that isn't tailed reads as Claude Code, whose events are put in time
 /// order.
 pub fn session_events(app: &str, files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
-    let app = xenonet_base::apps::tailed_app(app, "claude");
+    let app = xenonet_adapter::apps::tailed_app(app, "claude");
     let codex = app == "codex";
     let ids = &mut ids.0;
     let mut events = Vec::new();
@@ -1292,8 +1292,8 @@ pub fn session_stats(session_id: &str, files: Vec<File>, grok: GrokFiles<'_>) ->
     let app = session_id.split(':').next().unwrap_or_default();
     let mut ids = EventIds::default();
     // An app XenoNet doesn't tail is refused, not read as Claude Code.
-    let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None) else {
-        return Err(TypeError(xenonet_base::apps::untailed(app)));
+    let Some(tailed) = xenonet_adapter::apps::tailed_or_text(Some(app), None) else {
+        return Err(TypeError(xenonet_adapter::apps::untailed(app)));
     };
     let mut events = session_events(tailed, files, &mut ids)?;
     if app == "grok" {

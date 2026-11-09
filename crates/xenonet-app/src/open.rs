@@ -128,7 +128,7 @@ fn opener_of(app: &str) -> Option<Opener> {
 /// The apps the registry gives `open`, each with its opener, in its order.
 fn openers() -> &'static [(&'static str, Opener)] {
     static O: OnceLock<Vec<(&'static str, Opener)>> = OnceLock::new();
-    O.get_or_init(|| xenonet_base::apps::with("open").filter_map(|a| Some((a.id.as_str(), opener_of(&a.id)?))).collect())
+    O.get_or_init(|| xenonet_adapter::apps::with("open").filter_map(|a| Some((a.id.as_str(), opener_of(&a.id)?))).collect())
 }
 
 /// An app's opener, by the id a node or a request names.

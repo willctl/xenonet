@@ -264,7 +264,7 @@ pub fn claude_edits(name: &str, input: Option<&Value>, app: &str) -> Result<Vec<
         return Ok(Vec::new());
     }
     let file = field("file_path").filter(|v| !v.is_null()).or(field("notebook_path")).cloned().unwrap_or(Value::Null);
-    if xenonet_base::apps::app(app).is_some_and(|a| a.edits_with(name)) {
+    if xenonet_adapter::apps::app(app).is_some_and(|a| a.edits_with(name)) {
         if field("content").is_some() {
             return Ok(vec![edit(&file, "write", diff_lines("+ ", field("content"), 30))]);
         }

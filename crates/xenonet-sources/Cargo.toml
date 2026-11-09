@@ -16,6 +16,7 @@ regex.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+xenonet-adapter.workspace = true
 xenonet-base.workspace = true
 xenonet-schema.workspace = true
 

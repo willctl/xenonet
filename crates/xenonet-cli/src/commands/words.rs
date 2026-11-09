@@ -1,5 +1,5 @@
 //! What the help says of the apps and of the doctor's checks, read from the
-//! app registry (xenonet_base::apps) and from the checks themselves
+//! app registry (xenonet_adapter::apps) and from the checks themselves
 //! (xenonet_doctor), so an app or a group of checks added there shows in
 //! the help without anyone writing it in by hand.
 //!
@@ -19,7 +19,7 @@
 //! the same way.
 
 use crate::out::wrap_text;
-use xenonet_base::apps;
+use xenonet_adapter::apps;
 
 /// How wide a paragraph the help fills in runs, as the help's text does.
 const WIDTH: usize = 76;

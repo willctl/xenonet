@@ -14,7 +14,7 @@ const FLAGS: [&str; 7] = ["--json", "--dev", "--demo", "--port", "--no-color", "
 // registry's.
 fn args() -> Vec<(&'static str, String)> {
     let themes = [BUILT_IN.as_slice(), &["copy"]].concat().join(" ");
-    let apps = xenonet_base::apps::with("connect").map(|a| a.id.as_str()).collect::<Vec<_>>().join(" ");
+    let apps = xenonet_adapter::apps::with("connect").map(|a| a.id.as_str()).collect::<Vec<_>>().join(" ");
     vec![
         ("connect", apps.clone()),
         ("hook", apps),

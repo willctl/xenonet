@@ -252,13 +252,13 @@ mod tests {
             assert!(!text.contains("Node"), "{name}: no Node in the binary's help");
         }
         let of = |name: &str| every_help().into_iter().find(|(n, _)| n == name).map(|(_, t)| t).unwrap_or_default();
-        for app in xenonet_base::apps::with("connect") {
+        for app in xenonet_adapter::apps::with("connect") {
             for name in ["connect", "disconnect", "mcp", "hook", "doctor"] {
                 assert!(of(name).contains(&app.name), "{name} --help names {}, whole on a line", app.name);
             }
             assert!(of("connect").contains(&format!("[{}]", app.id)), "connect takes {}", app.id);
         }
-        for app in xenonet_base::apps::with("lines") {
+        for app in xenonet_adapter::apps::with("lines") {
             assert!(of("search").contains(&app.name), "search reads {}'s transcripts", app.name);
         }
         assert!(of("connect").starts_with("xenonet connect [claude] [codex] [grok]\n"));

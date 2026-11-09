@@ -25,11 +25,12 @@ use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use xenonet_adapter::apps;
 use xenonet_base::json::{number, number_string};
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::{join, js_number, js_string, js_trim, truthy};
 use xenonet_base::usage::{Speed, TokenUsage};
-use xenonet_base::{apps, jsstr, paths, pricing};
+use xenonet_base::{jsstr, paths, pricing};
 
 pub const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
 const RATE_WINDOW_S: f64 = 300.0;

@@ -1,0 +1,18 @@
+[package]
+name = "xenonet-adapter"
+description = "How a platform plugs into XenoNet: the Platform trait, the registry of apps and actor products, and the checks, hooks and readers an adapter provides."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+xenonet-model.workspace = true
+
+[lints]
+workspace = true

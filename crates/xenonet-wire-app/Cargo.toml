@@ -14,6 +14,7 @@ publish.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+xenonet-adapter.workspace = true
 xenonet-base.workspace = true
 xenonet-service.workspace = true
 xenonet-actors.workspace = true

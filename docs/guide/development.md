@@ -247,7 +247,7 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core, the service, the command, the hooks and the MCP servers are the `xenonet` binary, built from `crates/`. Desktop (`electron/`) and the console page (`src/`) are JS, and reach the core through the service: the HTTP API on 127.0.0.1 and the component service's socket.
 
-The console page and Desktop share the modules in `src/shared/`, which have no Node in them. The Rust's data that comes from them is written by scripts: `node scripts/apps.mjs` writes `crates/xenonet-base/src/apps.json` from `src/shared/apps.js`, and `node crates/xenonet-app/themes.mjs` writes `crates/xenonet-app/src/themes.json` from `src/shared/themes.js`. Each has a `--check`, which a test runs.
+The console page and Desktop share the modules in `src/shared/`, which have no Node in them. The Rust's data that comes from them is written by scripts: `node scripts/apps.mjs` writes `crates/xenonet-adapter/src/apps.json` from `src/shared/apps.js`, and `node crates/xenonet-app/themes.mjs` writes `crates/xenonet-app/src/themes.json` from `src/shared/themes.js`. Each has a `--check`, which a test runs.
 
 ### `crates/`
 
@@ -260,7 +260,7 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 | `crates/xenonet-wire-map/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search and the projects scan. `state.json` (the map, identities and repos) is kept there too, but nothing replays it until the map's driver takes a clock | `crates/xenonet-wire-map/tests/golden.rs` |
 | `test/fixtures/net/` | The network's frames, signatures and sealing, as known answers | `crates/xenonet-net/tests/known_answers.rs` |
 
-`schemas/` holds the JSON Schema of every record XenoNet reads or writes; `crates/xenonet-schema` checks against them, and so do the page's tests (`test/harness/schema.js`).
+`schemas/` holds the JSON Schema of every record XenoNet reads or writes. XenoNet's own are written from the types in `crates/xenonet-model` (`XENONET_SCHEMAS_WRITE=1 cargo test -p xenonet-model` rewrites them, and the same test fails when a file is stale); the vendors' under `schemas/vendor/` are hand-kept. `crates/xenonet-schema` checks against them, and so do the page's tests (`test/harness/schema.js`).
 
 ### `src/`
 

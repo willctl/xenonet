@@ -85,7 +85,7 @@ impl TranscriptSearch {
     // Indexes a file's new lines; how many documents went in.
     fn index_file(&self, file: &str, app: &str) -> Result<f64, String> {
         // Nothing of an app XenoNet doesn't tail is indexed.
-        let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Ok(0.0) };
+        let Some(tailed) = xenonet_adapter::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Ok(0.0) };
         let core = lock(&self.core);
         let Some(mut plan): Option<Plan> = core.plan(file, app).map_err(message)? else { return Ok(0.0) };
         // What isn't compressed and isn't a Codex rollout is read a piece at

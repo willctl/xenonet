@@ -394,8 +394,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
         let body = req.json(4096).await?;
         // Codex, unless you ask for Claude Code; another app is refused.
-        let Some(app) = xenonet_base::apps::asked_or(body.get("app"), Some("codex")) else {
-            return Ok(Reply::error(400, xenonet_base::apps::app_refusal_among("app", body.get("app").unwrap_or(&Value::Null), &xenonet_base::apps::ASKED)));
+        let Some(app) = xenonet_adapter::apps::asked_or(body.get("app"), Some("codex")) else {
+            return Ok(Reply::error(400, xenonet_adapter::apps::app_refusal_among("app", body.get("app").unwrap_or(&Value::Null), &xenonet_adapter::apps::ASKED)));
         };
         let model = body.get("model").and_then(Value::as_str).filter(|s| model_ok(s)).map(str::to_string);
         let b = cores.diagnostics.bundle().await?;
@@ -481,10 +481,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/handoff" {
         if m == "GET" {
             // Claude Code, unless you ask for Codex; another app is refused.
-            let Some(target) = xenonet_base::apps::asked_or_text(req.param("target"), Some("claude")) else {
+            let Some(target) = xenonet_adapter::apps::asked_or_text(req.param("target"), Some("claude")) else {
                 return Ok(Reply::error(
                     400,
-                    xenonet_base::apps::app_refusal_among("target", &Value::String(req.param("target").unwrap_or_default().to_string()), &xenonet_base::apps::ASKED),
+                    xenonet_adapter::apps::app_refusal_among("target", &Value::String(req.param("target").unwrap_or_default().to_string()), &xenonet_adapter::apps::ASKED),
                 ));
             };
             let node = req.param("nodeId").map(str::to_string);
@@ -697,7 +697,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         // Cursor and Grok Build run Claude Code's hooks too, with payloads
         // of their own. Such an event isn't a Claude Code session's: it's
         // passed over, not refused.
-        if xenonet_base::apps::hook_written_by(&body).is_some() {
+        if xenonet_adapter::apps::hook_written_by(&body).is_some() {
             return Ok(Reply::empty(204));
         }
         // XenoNet's plugin for Claude Code posts the same events as
@@ -785,7 +785,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // over. If the session stops waiting first, the message stays unread.
     if m == "POST" && route == "/api/hook/claude/listen" {
         let body = req.json_body().await.unwrap_or_else(|_| json!({}));
-        let sid = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s) && xenonet_base::apps::hook_written_by(&body).is_none());
+        let sid = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s) && xenonet_adapter::apps::hook_written_by(&body).is_none());
         if let (Some("Stop"), Some(sid)) = (body.get("hook_event_name").and_then(Value::as_str), sid) {
             let me = format!("claude:{sid}");
             let verdict = cores.verify.check(req.peer, &me, true).await;

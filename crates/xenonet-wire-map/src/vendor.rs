@@ -32,7 +32,7 @@ pub enum Tailed {
 
 impl Tailed {
     pub fn of(app: &str) -> Tailed {
-        match xenonet_base::apps::tailed_app(app, "claude") {
+        match xenonet_adapter::apps::tailed_app(app, "claude") {
             "codex" => Tailed::Codex,
             "grok" => Tailed::Grok,
             _ => Tailed::Claude,

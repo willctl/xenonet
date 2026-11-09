@@ -12,7 +12,7 @@ use crate::util::{lock, native_out, now_ms, obj};
 use crate::vendor::Vendor;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use xenonet_base::apps::App;
+use xenonet_adapter::apps::App;
 use xenonet_blocks::lifecycle::Lifecycle;
 use xenonet_sources::native::files::StdFiles;
 use xenonet_sources::native::{self, copilot_cli, cursor, gemini_cli, opencode, Checked, NativeReader, Threw};
@@ -132,7 +132,7 @@ impl Observed {
     /// in the order the state lists them: the native readers first, so a
     /// run they read wins over numbat's.
     pub fn all(cfg: &MapConfig, vendor: &Arc<Vendor>) -> Vec<Arc<Observed>> {
-        let mut out = Self::native(cfg, vendor, xenonet_base::apps::apps(), &NATIVE);
+        let mut out = Self::native(cfg, vendor, xenonet_adapter::apps::apps(), &NATIVE);
         if let Some(file) = cfg.numbat_file.clone() {
             out.push(Observed::make(NUMBAT, file, Box::new(Numbat::new()), vendor.clone()));
         }
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn a_reader_for_each_app_the_registry_gives_one_that_xenonet_readers_names() {
         let mut apps: Vec<&str> = NATIVE.iter().map(|r| r.app).collect();
-        let mut native: Vec<&str> = xenonet_base::apps::with("native").map(|a| a.id.as_str()).collect();
+        let mut native: Vec<&str> = xenonet_adapter::apps::with("native").map(|a| a.id.as_str()).collect();
         apps.sort_unstable();
         native.sort_unstable();
         assert_eq!(apps, native, "a row for each app with `native`, and none else");
@@ -267,7 +267,7 @@ mod tests {
         );
         assert_eq!(on("vscode,claude,nope"), [], "only apps with a native reader");
         // An app the registry doesn't give `native` has no reader, even with a row.
-        let apps: Vec<App> = xenonet_base::apps::apps().iter().map(|a| if a.id == "cursor" { App { has: Vec::new(), ..a.clone() } } else { a.clone() }).collect();
+        let apps: Vec<App> = xenonet_adapter::apps::apps().iter().map(|a| if a.id == "cursor" { App { has: Vec::new(), ..a.clone() } } else { a.clone() }).collect();
         let made = Observed::native(&config("cursor,opencode"), &vendor(), &apps, &NATIVE);
         assert_eq!(made.iter().map(|o| o.source).collect::<Vec<_>>(), ["opencode"]);
     }
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn a_made_up_reader_for_a_made_up_app_is_on_the_map() {
-        let mut apps = xenonet_base::apps::apps().to_vec();
+        let mut apps = xenonet_adapter::apps::apps().to_vec();
         apps.push(App { id: "kite".into(), name: "Kite".into(), numbat: vec!["kite".into()], has: vec!["native".into()], ..App::default() });
         let kite = |at: fn(&MapConfig) -> String| Row {
             app: "kite",
@@ -354,7 +354,7 @@ mod tests {
         // Off unless XENONET_READERS names it, and off for an app the
         // registry doesn't give `native`.
         assert!(Observed::native(&config("opencode"), &vendor(), &apps, &table).is_empty());
-        assert!(Observed::native(&config("kite"), &vendor(), xenonet_base::apps::apps(), &table).is_empty());
+        assert!(Observed::native(&config("kite"), &vendor(), xenonet_adapter::apps::apps(), &table).is_empty());
         // A read that fails is its block's problem.
         let broken = Observed::native(&config("kite"), &vendor(), &apps, &[kite(|_| String::new())]);
         broken[0].read();

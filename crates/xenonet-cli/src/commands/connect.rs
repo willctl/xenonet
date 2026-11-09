@@ -135,7 +135,7 @@ fn here(words: &[String], flags: &Flags) -> Done {
 
 /// The apps connect goes through, as the app registry has them.
 pub fn connected() -> Vec<&'static str> {
-    xenonet_base::apps::with("connect").map(|a| a.id.as_str()).collect()
+    xenonet_adapter::apps::with("connect").map(|a| a.id.as_str()).collect()
 }
 
 /// XenoNet's plugin for Hermes Agent: copied into Hermes's plugins folder,

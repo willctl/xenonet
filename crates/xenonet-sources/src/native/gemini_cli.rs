@@ -20,7 +20,7 @@ use xenonet_base::text::{is_blank, js_trim, js_trim_start, truthy};
 pub const SOURCE: &str = "google/gemini-cli/chat-record";
 /// The tools whose calls are edits, as the app registry has them.
 pub fn edit_tools() -> &'static [String] {
-    xenonet_base::apps::edit_tools("gemini-cli")
+    xenonet_adapter::apps::edit_tools("gemini-cli")
 }
 
 fn is_edit(tool: &str) -> bool {

@@ -240,7 +240,7 @@ impl source::Around for Around<'_> {
 
 // productOf(id)?.id ?? null.
 fn product(id: Option<&Value>) -> Value {
-    id.and_then(Value::as_str).and_then(xenonet_engine::products::product_of).map_or(Value::Null, |p| json!(p.id))
+    id.and_then(Value::as_str).and_then(xenonet_adapter::products::product_of).map_or(Value::Null, |p| json!(p.id))
 }
 
 impl Reads {
@@ -509,7 +509,7 @@ pub fn products() -> Value {
         ADAPTERS
             .iter()
             .map(|a| {
-                let name = a.product.and_then(xenonet_engine::products::product_of).map_or("An actor of your own", |p| p.name);
+                let name = a.product.and_then(xenonet_adapter::products::product_of).map_or("An actor of your own", |p| p.name);
                 let transports: Vec<Value> = a.transports.iter().map(|t| json!({ "id": t, "name": TRANSPORTS.iter().find(|x| x.id == *t).map(|x| x.name) })).collect();
                 json!({ "key": a.key, "product": a.product, "name": name, "transports": transports, "support": a.support })
             })

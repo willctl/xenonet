@@ -44,7 +44,7 @@ use crate::peer::{Calls, Thrown};
 use crate::sql::Arg;
 use crate::store::js_text;
 use serde_json::{json, Map, Value};
-use xenonet_base::apps::App;
+use xenonet_adapter::apps::App;
 use xenonet_base::json::stringify;
 use xenonet_base::nodepath::{Style, NATIVE};
 use xenonet_base::paths::tilde;
@@ -1289,7 +1289,7 @@ pub struct Connect {
 
 impl Connect {
     pub fn new(o: Options) -> Self {
-        Self::with(o, xenonet_base::apps::apps(), &format)
+        Self::with(o, xenonet_adapter::apps::apps(), &format)
     }
 
     /// Connect over a registry and formats of a test's own.
@@ -1482,7 +1482,7 @@ mod tests {
     /// Claude Code's settings format as connect makes it for that port.
     fn claude_at(port: f64) -> (Shared, ClaudeSettings) {
         let k = Shared::new(options(port));
-        let f = ClaudeSettings::new(xenonet_base::apps::app("claude").unwrap(), &k);
+        let f = ClaudeSettings::new(xenonet_adapter::apps::app("claude").unwrap(), &k);
         (k, f)
     }
 
@@ -1715,7 +1715,7 @@ mod tests {
         let wren = App {
             id: "wren".into(),
             name: "Wren".into(),
-            connect: Some(xenonet_base::apps::Connect {
+            connect: Some(xenonet_adapter::apps::Connect {
                 format: "wren-hooks".into(),
                 events: vec![("Start".into(), None), ("Edit".into(), Some("write".into()))],
                 unheard: vec![],
@@ -1728,7 +1728,7 @@ mod tests {
         let observed = App { id: "amp".into(), name: "Amp".into(), ..App::default() };
         let unknown = App {
             id: "kiro".into(),
-            connect: Some(xenonet_base::apps::Connect { format: "kiro-toml".into(), events: vec![], unheard: vec![] }),
+            connect: Some(xenonet_adapter::apps::Connect { format: "kiro-toml".into(), events: vec![], unheard: vec![] }),
             has: vec!["connect".into()],
             ..App::default()
         };

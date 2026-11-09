@@ -31,11 +31,11 @@ use crate::names::{check_name, product_word_refusal, slug_from, slug_refusal, su
 use crate::registry::value_arg;
 use crate::tokens::{hash_token, is_gateway_token, is_token, new_gateway_token, new_token};
 use serde_json::{json, Map, Value};
+use xenonet_adapter::products::{product_of, PRODUCTS, WHY_NOT};
 use xenonet_base::ids::YOU;
 use xenonet_base::paths::tilde;
 use xenonet_engine::js::truthy;
 use xenonet_engine::peer::{Calls, Thrown};
-use xenonet_engine::products::{product_of, PRODUCTS, WHY_NOT};
 use xenonet_engine::sql::{Arg, Row};
 use xenonet_engine::store::Shared;
 

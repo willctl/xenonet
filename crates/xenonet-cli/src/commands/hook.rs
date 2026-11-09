@@ -41,11 +41,11 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
 
 pub fn hook(given: Option<&str>, port_flag: Option<&str>, plugin: bool) -> i32 {
     // Codex when no app is named; another app is refused.
-    let app = xenonet_base::apps::tailed_or_text(given, Some("codex"));
+    let app = xenonet_adapter::apps::tailed_or_text(given, Some("codex"));
     let mut input = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut input);
     let Some(app) = app else {
-        let why = xenonet_base::apps::app_refusal("xenonet hook", &Value::String(given.unwrap_or_default().to_string()));
+        let why = xenonet_adapter::apps::app_refusal("xenonet hook", &Value::String(given.unwrap_or_default().to_string()));
         Log::new(Some(&log_dir(&sys::state_dir(false))), "cli", None, None, &sys::home(), MAX_BYTES).write("warn", "cli.hook", Some(&why), None, None, None, crate::out::now());
         return 0;
     };

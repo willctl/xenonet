@@ -128,7 +128,7 @@ pub enum QualifyError {
 /// order core/schema/ids.js lists them: the app registry's (`apps`).
 pub fn session_apps() -> &'static [(&'static str, &'static str)] {
     static A: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
-    A.get_or_init(|| crate::apps::apps().iter().map(|a| (a.id.as_str(), a.name.as_str())).collect())
+    A.get_or_init(|| xenonet_adapter::apps::apps().iter().map(|a| (a.id.as_str(), a.name.as_str())).collect())
 }
 
 pub fn is_session_app(app: &str) -> bool {

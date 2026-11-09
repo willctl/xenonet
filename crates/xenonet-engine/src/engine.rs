@@ -29,11 +29,11 @@ use crate::attest::quoted;
 use crate::delivery::selector::{format_selector, matches as selects, parse_selector};
 use crate::network::{self, network_host, NetHandle};
 use crate::peer::{list, opt_call, Calls, Thrown};
-use crate::products::product_of;
 use crate::sql::Arg;
 use crate::store::js_text;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use xenonet_adapter::products::product_of;
 use xenonet_base::ids::{is_session_id, parse_actor_id, YOU};
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::sync::Locked;
@@ -1819,7 +1819,7 @@ impl Engine {
         // An app that passes over what an event answers (Grok Build's
         // SessionStart and UserPromptSubmit) hears nothing then: its
         // messages wait for an event it hears.
-        if app.as_str().and_then(xenonet_base::apps::app).and_then(|a| a.connect.as_ref()).is_some_and(|c| c.unheard.iter().any(|e| e == ev)) {
+        if app.as_str().and_then(xenonet_adapter::apps::app).and_then(|a| a.connect.as_ref()).is_some_and(|c| c.unheard.iter().any(|e| e == ev)) {
             return Ok(Arg::Null);
         }
         match ev {

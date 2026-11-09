@@ -33,7 +33,7 @@ fn finite(a: &Arg) -> Option<f64> {
 /// The plan limits an app has, as live/snapshot/v1 names them (the
 /// registry's limits): Claude Code's or Codex's.
 fn limits_of(app: &Arg) -> Option<&'static str> {
-    xenonet_base::apps::app(app.as_str()?)?.limits.as_deref()
+    xenonet_adapter::apps::app(app.as_str()?)?.limits.as_deref()
 }
 
 pub fn plan_usage(limits: &Arg, app: &Arg, now: f64) -> Option<f64> {

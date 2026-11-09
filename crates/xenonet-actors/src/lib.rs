@@ -31,4 +31,4 @@ pub mod tokens;
 pub mod wake;
 pub mod you;
 
-pub use xenonet_engine::products;
+pub use xenonet_adapter::products;

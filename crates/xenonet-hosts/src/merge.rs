@@ -917,11 +917,11 @@ pub fn qualify_live(live: &Value, host: &Value, schemas: &mut dyn Schemas) -> Li
 // The apps with plan limits a host reads (Claude Code's and Codex's), and
 // the ones whose token rates it keeps a series of (the tailed ones).
 fn limited() -> impl Iterator<Item = &'static str> {
-    xenonet_base::apps::apps().iter().filter(|a| a.limits.is_some()).map(|a| a.id.as_str())
+    xenonet_adapter::apps::apps().iter().filter(|a| a.limits.is_some()).map(|a| a.id.as_str())
 }
 
 fn tailed() -> impl Iterator<Item = &'static str> {
-    xenonet_base::apps::with("lines").map(|a| a.id.as_str())
+    xenonet_adapter::apps::with("lines").map(|a| a.id.as_str())
 }
 
 // Adds a host's per-second series into this machine's, lined up by time:
@@ -1127,7 +1127,7 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
             // An app this XenoNet doesn't tail (one a newer host knows, say)
             // isn't counted as Claude Code's: its tokens are left out, and
             // event_note says so.
-            let app = xenonet_base::apps::tailed_or(data.get("app"), None)?;
+            let app = xenonet_adapter::apps::tailed_or(data.get("app"), None)?;
             let tokens = finite(data.get("n"))?;
             Some(json!({ "sessionId": session, "app": app, "n": n(tokens), "ts": shift.at(data.get("ts")), "host": h }))
         }
@@ -1172,7 +1172,7 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
 /// the drift log notes a vendor's new variant: tokens for an app this
 /// XenoNet doesn't tail. None for any other event.
 pub fn event_note(name: &str, data: &Value, host: &Value) -> Option<String> {
-    if name != "tokens" || !data.is_object() || xenonet_base::apps::tailed_or(data.get("app"), None).is_some() {
+    if name != "tokens" || !data.is_object() || xenonet_adapter::apps::tailed_or(data.get("app"), None).is_some() {
         return None;
     }
     let app = xenonet_base::json::stringify(data.get("app").unwrap_or(&Value::Null), 0);

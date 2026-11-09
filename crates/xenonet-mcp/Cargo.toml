@@ -25,6 +25,7 @@ regex.workspace = true
 rmcp.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
 # The doctor's checks, run here when no XenoNet answers, and what they read

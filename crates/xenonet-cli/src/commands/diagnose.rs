@@ -43,10 +43,10 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     // Codex, unless you ask for Claude Code; another app is refused before
     // anything is gathered.
     let asked = flags.text("app").or_else(|| sys::var("XENONET_DIAGNOSE_APP")).unwrap_or_else(|| "codex".into());
-    let app = xenonet_base::apps::asked_or_text(Some(&asked), Some("codex"));
+    let app = xenonet_adapter::apps::asked_or_text(Some(&asked), Some("codex"));
     let app = match app {
         Some(app) => app,
-        None if flags.on("ask") => return Err(Fail::new(xenonet_base::apps::app_refusal_among("--app", &Value::String(asked), &xenonet_base::apps::ASKED), 2)),
+        None if flags.on("ask") => return Err(Fail::new(xenonet_adapter::apps::app_refusal_among("--app", &Value::String(asked), &xenonet_adapter::apps::ASKED), 2)),
         None => "codex",
     };
     let (state_dir, bundle) = gather(flags)?;

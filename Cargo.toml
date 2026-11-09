@@ -38,6 +38,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde = { version = "1", features = ["derive"] }
 schemars = { version = "1", default-features = false, features = ["derive", "std"] }
 xenonet-model = { path = "crates/xenonet-model" }
+xenonet-adapter = { path = "crates/xenonet-adapter" }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
 regex = "1"

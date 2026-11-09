@@ -176,7 +176,7 @@ pub fn calling(app: &str) -> Option<Calling> {
 /// those with `caller` that have a way.
 pub fn calling_apps() -> &'static [(&'static str, Calling)] {
     static A: std::sync::OnceLock<Vec<(&'static str, Calling)>> = std::sync::OnceLock::new();
-    A.get_or_init(|| xenonet_base::apps::with("caller").filter_map(|a| Some((a.id.as_str(), calling(&a.id)?))).collect())
+    A.get_or_init(|| xenonet_adapter::apps::with("caller").filter_map(|a| Some((a.id.as_str(), calling(&a.id)?))).collect())
 }
 
 /// The session calling, as `<app>:<its id>`, from the first of these apps

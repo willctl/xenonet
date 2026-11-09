@@ -1,11 +1,11 @@
-//! core/apps.js: the apps XenoNet knows sessions of, and what's fixed about
+//! The registry of apps XenoNet knows sessions of, and what's fixed about
 //! each (its numbat names, vendor products, folder, context window, account
 //! and plan limits, signing team, hook events, edit tools and capabilities),
 //! as app/v1 describes an entry.
 //!
-//! The JS is the source. Its data is src/apps.json, written from it by
-//! `node scripts/apps.mjs` (and checked with `--check`), embedded here and
-//! read once into typed entries.
+//! The entries are src/apps.json, embedded here and read once into typed
+//! entries. The page keeps the same list in src/shared/apps.js;
+//! `node scripts/apps.mjs --check` fails when the two differ.
 
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
@@ -108,7 +108,7 @@ fn entry(v: &Value) -> Option<App> {
 /// Every app, in core/apps.js's order.
 pub fn apps() -> &'static [App] {
     static A: OnceLock<Vec<App>> = OnceLock::new();
-    A.get_or_init(|| match crate::json::parse(include_str!("apps.json")) {
+    A.get_or_init(|| match serde_json::from_str::<Value>(include_str!("apps.json")) {
         Ok(Value::Array(list)) => list.iter().filter_map(entry).collect(),
         _ => Vec::new(),
     })
@@ -183,6 +183,16 @@ fn or_list(ids: &[&str]) -> String {
     }
 }
 
+/// A refused value as JSON writes it, for a refusal's words: a whole
+/// number without a fraction, as every reader of XenoNet's answers writes
+/// one.
+fn shown(v: &Value) -> String {
+    match v.as_f64() {
+        Some(n) if n.fract() == 0.0 && n.abs() < 1e21 => format!("{}", n as i64),
+        _ => v.to_string(),
+    }
+}
+
 /// Why a command or a route refused `app` where `what` takes a tailed app:
 /// `--app takes claude, codex or grok, not "gemini-cli"`.
 pub fn app_refusal(what: &str, app: &Value) -> String {
@@ -191,12 +201,12 @@ pub fn app_refusal(what: &str, app: &Value) -> String {
 
 /// The same, where `what` takes one of `apps`.
 pub fn app_refusal_among(what: &str, app: &Value, apps: &[&str]) -> String {
-    format!("{what} takes {}, not {}", or_list(apps), crate::json::stringify(app, 0))
+    format!("{what} takes {}, not {}", or_list(apps), shown(app))
 }
 
 /// What a reader of transcripts says of an app XenoNet doesn't tail.
 pub fn untailed(id: &str) -> String {
-    let name = app(id).map_or_else(|| crate::json::stringify(&Value::String(id.to_string()), 0), |a| a.name.clone());
+    let name = app(id).map_or_else(|| shown(&Value::String(id.to_string())), |a| a.name.clone());
     format!("XenoNet doesn't read {name}'s transcripts")
 }
 

@@ -13,6 +13,7 @@ publish.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 url.workspace = true
+xenonet-adapter.workspace = true
 xenonet-app.workspace = true
 xenonet-base.workspace = true
 

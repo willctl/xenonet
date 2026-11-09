@@ -49,7 +49,7 @@ fn app_name(app: &str) -> Option<&'static str> {
 /// Why a request in `agent`'s name, a session of `app`, which XenoNet
 /// doesn't check, is refused.
 fn uncheckable(agent: &str, app: &str) -> String {
-    let why = match xenonet_base::apps::app(app) {
+    let why = match xenonet_adapter::apps::app(app) {
         Some(a) => format!("XenoNet can't tell {}'s processes apart, so it can't check that the request comes from that session", a.name),
         None => format!("XenoNet doesn't know an app called \"{app}\""),
     };

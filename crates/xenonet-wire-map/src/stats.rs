@@ -74,7 +74,7 @@ impl Stats {
         }
         // An app XenoNet doesn't tail is refused, not read as Claude Code.
         let app = session_id.split(':').next().unwrap_or_default();
-        let Some(app) = xenonet_base::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Err(xenonet_base::apps::untailed(app)) };
+        let Some(app) = xenonet_adapter::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Err(xenonet_adapter::apps::untailed(app)) };
         let read: Vec<File> = files
             .iter()
             .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, app).unwrap_or_default() })

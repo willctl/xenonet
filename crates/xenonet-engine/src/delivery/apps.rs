@@ -4,7 +4,7 @@
 
 use crate::sql::Arg;
 use std::sync::OnceLock;
-use xenonet_base::apps::App;
+use xenonet_adapter::apps::App;
 
 /// The command for one headless turn of a session whose process has gone,
 /// given the session's id and the settings file the turn listens with (if
@@ -69,7 +69,7 @@ pub fn delivery_apps<'a>(registry: &'a [App], ways: &dyn Fn(&str) -> Option<Ways
 /// The registry's, read once.
 pub fn apps() -> &'static [(&'static App, Ways)] {
     static A: OnceLock<Vec<(&'static App, Ways)>> = OnceLock::new();
-    A.get_or_init(|| delivery_apps(xenonet_base::apps::apps(), &ways))
+    A.get_or_init(|| delivery_apps(xenonet_adapter::apps::apps(), &ways))
 }
 
 /// An app's ways in, by its id.

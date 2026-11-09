@@ -21,7 +21,7 @@ use super::apps::{self, Ways};
 use crate::peer::{Calls, Result};
 use crate::sql::Arg;
 use crate::store::js_text;
-use xenonet_base::apps::App;
+use xenonet_adapter::apps::App;
 
 fn is_uuid(s: &str) -> bool {
     let b = s.as_bytes();

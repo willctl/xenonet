@@ -1,10 +1,9 @@
-//! The actor products XenoNet knows (core/actors/products.js;
-//! docs/design/actors/interface.md, section 7): the actor each one is
+//! The actor products XenoNet knows (docs/design/actors/interface.md,
+//! section 7): the actor each one is
 //! (`slug`), what it's called, who makes it, whether XenoNet observes it,
 //! whether its actor may report itself (register), and whether you may pair
 //! it as a remote actor. A product's slug, and the name it goes by, are that
-//! product's alone. Here, below the actors, because the engine names them
-//! too.
+//! product's alone.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Product {

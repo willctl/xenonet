@@ -40,7 +40,7 @@ const BUNDLES_AT_ONCE: usize = 16;
 /// TeamIdentifier), as the app registry has it: Anthropic's for Claude
 /// Code, OpenAI's for Codex.
 pub fn team_of_agent(agent: &str) -> Option<&'static str> {
-    xenonet_base::apps::team(agent)
+    xenonet_adapter::apps::team(agent)
 }
 
 /// The teams that sign the actor apps whose makers sign them, by product:

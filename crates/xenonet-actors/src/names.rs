@@ -18,11 +18,11 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use unicode_normalization::UnicodeNormalization;
+use xenonet_adapter::products::{product_of, product_of_slug};
 use xenonet_base::ids::is_actor_slug;
 use xenonet_base::log::js_slice;
 use xenonet_base::text::js_trim;
 use xenonet_engine::js::{template, truthy};
-use xenonet_engine::products::{product_of, product_of_slug};
 
 fn re(p: &str) -> Regex {
     Regex::new(p).expect("a fixed pattern")

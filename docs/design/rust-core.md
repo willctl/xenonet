@@ -66,6 +66,9 @@ ran.
 ```
 Cargo.toml                 the workspace: shared versions, the release profile
 crates/
+  xenonet-model            the data model: typed ids, every document (serde + schemars, written to schemas/),
+                           the operations' kinds and the action vocabulary; no IO, no vendor
+  xenonet-adapter          the Platform trait, the registry of apps (apps.json) and actor products, doctor rows
   xenonet-base             paths.js, pricing.js, dirs.js, log.js, schema/ids.js, JSON and time as JS reads them,
                            units.js for the command, private-file.js, client.js
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores

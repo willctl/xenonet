@@ -97,7 +97,7 @@ retiring the JS core.
 **Where.** `core/apps.js`: plain data, no imports, so the page and
 `core/schema/ids.js` can both use it. As with themes, JS is the source
 and Rust gets a generated copy: `scripts/apps.mjs` writes
-`crates/xenonet-base/src/apps.json`, which `xenonet-base` embeds and
+`crates/xenonet-adapter/src/apps.json`, which `xenonet-adapter` embeds and
 parses once into typed entries, and `scripts/apps.mjs --check` in a test
 fails when the copy is stale. `ids.rs`'s hand-kept `SESSION_APPS` goes.
 The registry gets a schema, `app/v1`, listed in `contracts.md` section 1

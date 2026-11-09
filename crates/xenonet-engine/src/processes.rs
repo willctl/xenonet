@@ -7,7 +7,7 @@
 use crate::procs::slashes;
 use crate::re;
 use std::sync::OnceLock;
-use xenonet_base::apps::App;
+use xenonet_adapter::apps::App;
 use xenonet_base::nodepath::Style;
 
 /// An app's rules.
@@ -99,7 +99,7 @@ pub fn agent_apps(registry: &[App], rules: &dyn Fn(&str) -> Option<Rules>) -> Ve
 /// The registry's, read once.
 pub fn agents() -> &'static [Agent] {
     static A: OnceLock<Vec<Agent>> = OnceLock::new();
-    A.get_or_init(|| agent_apps(xenonet_base::apps::apps(), &rules))
+    A.get_or_init(|| agent_apps(xenonet_adapter::apps::apps(), &rules))
 }
 
 /// An app whose processes XenoNet tells apart, by its id.

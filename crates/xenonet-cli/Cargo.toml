@@ -23,6 +23,7 @@ serde_json.workspace = true
 tokio.workspace = true
 # URLs as fetch reads them, for the reads the cores ask for.
 url.workspace = true
+xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
 # The doctor's groups of checks, which xenonet doctor --help lists.

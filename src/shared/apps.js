@@ -25,7 +25,7 @@
 // actor reports, have their name and numbat's only.
 //
 // No imports, so the page and src/shared/ids.js can use it. The Rust has a
-// copy, crates/xenonet-base/src/apps.json: node scripts/apps.mjs writes it.
+// copy, crates/xenonet-adapter/src/apps.json: node scripts/apps.mjs writes it.
 export const APPS = [
   {
     id: "claude",
