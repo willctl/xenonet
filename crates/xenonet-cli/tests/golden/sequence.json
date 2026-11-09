@@ -741,7 +741,7 @@
     "net",
     "status"
    ],
-   "golden": "cli/net_status.json"
+   "golden": null
   },
   {
    "run": [
@@ -749,14 +749,14 @@
     "status",
     "--json"
    ],
-   "golden": "cli/net_status_--json.json"
+   "golden": null
   },
   {
    "run": [
     "net",
     "hosts"
    ],
-   "golden": "cli/net_hosts.json"
+   "golden": null
   },
   {
    "run": [
@@ -764,14 +764,14 @@
     "hosts",
     "--json"
    ],
-   "golden": "cli/net_hosts_--json.json"
+   "golden": null
   },
   {
    "run": [
     "svc",
     "list"
    ],
-   "golden": "cli/svc_list.json"
+   "golden": null
   },
   {
    "run": [
@@ -779,7 +779,7 @@
     "list",
     "--json"
    ],
-   "golden": "cli/svc_list_--json.json"
+   "golden": null
   },
   {
    "run": [

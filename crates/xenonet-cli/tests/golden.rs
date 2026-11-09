@@ -24,6 +24,10 @@
 // time zone where it's about noon (so the fixture's hours fall on one
 // day), and a home whose path is always 160 bytes long, so the
 // transcripts holding it are of one size.
+//
+// The network's commands (net, svc) have no goldens: the JS command passed
+// them to the binary, and the binary refuses them from under an agent, so
+// what was recorded was that refusal, not an answer of the JS.
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap or panic")]
