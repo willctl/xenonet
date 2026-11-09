@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/connection/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A remote connection",
   "description": "One way a remote actor reaches XenoNet, as the owner sees it in XenoNet's window: who may call it, what it may read, until when, and whether it's in use. Never its credential.",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "schema": {
       "type": "string",
@@ -24,9 +25,9 @@
     },
     "label": {
       "type": "string",
+      "description": "The name you gave it",
       "minLength": 1,
-      "maxLength": 64,
-      "description": "The name you gave it"
+      "maxLength": 64
     },
     "adapter_id": {
       "type": "string",
@@ -42,11 +43,12 @@
     },
     "audience": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "description": {
           "type": "string",
-          "maxLength": 200,
-          "description": "Who can call the endpoint, in your words"
+          "description": "Who can call the endpoint, in your words",
+          "maxLength": 200
         },
         "verification": {
           "type": "string",
@@ -68,11 +70,11 @@
         "description",
         "verification",
         "scope"
-      ],
-      "additionalProperties": false
+      ]
     },
     "account_link": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "state": {
           "type": "string",
@@ -97,11 +99,11 @@
       "required": [
         "state",
         "identity"
-      ],
-      "additionalProperties": false
+      ]
     },
     "device": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
@@ -122,8 +124,7 @@
       "required": [
         "id",
         "alias"
-      ],
-      "additionalProperties": false
+      ]
     },
     "permissions": {
       "type": "array",
@@ -150,24 +151,32 @@
           },
           "place": {
             "description": "The project's node id on your map, for this window only",
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "name": {
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
+        "additionalProperties": false,
         "required": [
           "project_id",
           "place",
           "name"
-        ],
-        "additionalProperties": false
+        ]
       }
     },
     "labels": {
@@ -251,6 +260,7 @@
     },
     "launch": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "command": {
           "type": "string"
@@ -266,7 +276,6 @@
         "command",
         "args"
       ],
-      "additionalProperties": false,
       "description": "What the tunnel client runs: the adapter for this grant, holding no secret"
     }
   },
@@ -296,6 +305,5 @@
     "revoked_reason",
     "last_used_at",
     "launch"
-  ],
-  "additionalProperties": false
+  ]
 }

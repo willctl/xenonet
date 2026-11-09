@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/svc/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A service between hosts",
   "description": "A request to a service another host published to the network, and its answer, sealed between the two hosts.",
   "anyOf": [
@@ -34,11 +34,10 @@
         },
         "path": {
           "type": "string",
-          "maxLength": 4096,
-          "description": "The path after /api/svc/<host>/<name>, with its query: the publishing host normalizes it and checks it against the paths it publishes"
+          "description": "The path after /api/svc/<host>/<name>, with its query: the publishing host normalizes it and checks it against the paths it publishes",
+          "maxLength": 4096
         },
         "headers": {
-          "maxItems": 64,
           "type": "array",
           "items": {
             "type": "array",
@@ -57,7 +56,8 @@
             "minItems": 2,
             "maxItems": 2
           },
-          "description": "Only the caller's Authorization, Content-Type, Accept and User-Agent cross; the publishing host adds Host and Forwarded itself"
+          "description": "Only the caller's Authorization, Content-Type, Accept and User-Agent cross; the publishing host adds Host and Forwarded itself",
+          "maxItems": 64
         },
         "body": {
           "type": "string",
@@ -100,7 +100,6 @@
           "maximum": 599
         },
         "headers": {
-          "maxItems": 64,
           "type": "array",
           "items": {
             "type": "array",
@@ -119,7 +118,8 @@
             "minItems": 2,
             "maxItems": 2
           },
-          "description": "The service's answer's headers, without Set-Cookie and hop-by-hop headers"
+          "description": "The service's answer's headers, without Set-Cookie and hop-by-hop headers",
+          "maxItems": 64
         },
         "body": {
           "type": "string",
@@ -127,9 +127,9 @@
           "description": "The answer's body, at most 4 MiB"
         },
         "code": {
-          "description": "Set when XenoNet answered rather than the service: not-published, not-allowed, rate, path-refused, too-big, timeout…",
           "type": "string",
-          "pattern": "^[a-z-]{1,32}$"
+          "pattern": "^[a-z-]{1,32}$",
+          "description": "Set when XenoNet answered rather than the service: not-published, not-allowed, rate, path-refused, too-big, timeout…"
         }
       },
       "required": [

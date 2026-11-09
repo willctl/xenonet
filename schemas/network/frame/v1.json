@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/frame/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A network frame",
   "description": "One line of a link's NDJSON: signed by the host that sent it and, between hosts, sealed for the host it's for. The gateway sees the head and never the body.",
   "type": "object",
@@ -15,10 +15,10 @@
       "pattern": "^frm_[0-9a-f-]{36}$"
     },
     "seq": {
-      "description": "Set by the gateway, per recipient, within its epoch: what a host resumes after",
       "type": "integer",
       "minimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "description": "Set by the gateway, per recipient, within its epoch: what a host resumes after"
     },
     "kind": {
       "type": "string",

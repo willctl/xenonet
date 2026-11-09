@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/graph/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Graph",
   "description": "The map: the projects folder, its groups and projects, Codex desktop projects, the folders outside it where sessions ran, the sessions, Xenolith and the MCP servers sessions share, with the identities work ran as.",
   "type": "object",
@@ -15,6 +15,7 @@
       "items": {
         "anyOf": [
           {
+            "description": "A session (session/v1) where it lives on the map",
             "allOf": [
               {
                 "$ref": "https://xenonet.dev/schemas/session/v1.json"
@@ -27,66 +28,74 @@
                     "const": "session"
                   },
                   "activity": {
+                    "description": "By its last write; an archived session is at most recent",
                     "type": "string",
                     "enum": [
                       "active",
                       "recent",
                       "idle"
-                    ],
-                    "description": "By its last write; an archived session is at most recent"
+                    ]
                   },
                   "ranAs": {
                     "description": "Who it ran as; left out when identities are off",
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "confidence": {
+                        "description": "yours: you pinned it; exact: the app recorded it; likely: signed in at the time; assumed: the only account XenoNet has seen",
+                        "type": "string",
+                        "enum": [
+                          "yours",
+                          "exact",
+                          "likely",
+                          "assumed"
+                        ]
+                      },
+                      "via": {
+                        "description": "How XenoNet knows, in words",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "confidence",
+                      "via"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "fx": {
                     "anyOf": [
                       {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "confidence": {
-                            "type": "string",
-                            "enum": [
-                              "yours",
-                              "exact",
-                              "likely",
-                              "assumed"
-                            ],
-                            "description": "yours: you pinned it; exact: the app recorded it; likely: signed in at the time; assumed: the only account XenoNet has seen"
-                          },
-                          "via": {
-                            "type": "string",
-                            "description": "How XenoNet knows, in words"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "confidence",
-                          "via"
-                        ],
-                        "additionalProperties": {}
+                        "type": "number"
                       },
                       {
                         "type": "null"
                       }
                     ]
                   },
-                  "fx": {
-                    "type": [
-                      "number",
-                      "null"
-                    ]
-                  },
                   "fy": {
-                    "type": [
-                      "number",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "fz": {
-                    "type": [
-                      "number",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "pinned": {
@@ -146,10 +155,10 @@
                 ],
                 "additionalProperties": {}
               }
-            ],
-            "description": "A session (session/v1) where it lives on the map"
+            ]
           },
           {
+            "description": "A project or group (project/v1) on the map",
             "allOf": [
               {
                 "$ref": "https://xenonet.dev/schemas/project/v1.json"
@@ -170,9 +179,13 @@
                   },
                   "satelliteOf": {
                     "description": "The key of the project it orbits: its repo for a worktree, or the project it's named after",
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "repo": {
@@ -181,9 +194,13 @@
                         "type": "object",
                         "properties": {
                           "branch": {
-                            "type": [
-                              "string",
-                              "null"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
                             ]
                           },
                           "ahead": {
@@ -212,14 +229,14 @@
                             "maximum": 9007199254740991
                           },
                           "dirty": {
+                            "description": "Lines git status reports: files changed, staged or new",
                             "type": "integer",
                             "minimum": 0,
-                            "maximum": 9007199254740991,
-                            "description": "Lines git status reports: files changed, staged or new"
+                            "maximum": 9007199254740991
                           },
                           "checkedAt": {
-                            "type": "number",
-                            "description": "Epoch milliseconds"
+                            "description": "Epoch milliseconds",
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -283,21 +300,33 @@
                     "type": "string"
                   },
                   "fx": {
-                    "type": [
-                      "number",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "fy": {
-                    "type": [
-                      "number",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "fz": {
-                    "type": [
-                      "number",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "pinned": {
@@ -350,8 +379,8 @@
                   "lastActivity": {
                     "anyOf": [
                       {
-                        "type": "number",
-                        "description": "Epoch milliseconds"
+                        "description": "Epoch milliseconds",
+                        "type": "number"
                       },
                       {
                         "type": "null"
@@ -361,8 +390,8 @@
                   "lastSessionAt": {
                     "anyOf": [
                       {
-                        "type": "number",
-                        "description": "Epoch milliseconds"
+                        "description": "Epoch milliseconds",
+                        "type": "number"
                       },
                       {
                         "type": "null"
@@ -400,10 +429,10 @@
                 ],
                 "additionalProperties": {}
               }
-            ],
-            "description": "A project or group (project/v1) on the map"
+            ]
           },
           {
+            "description": "The projects folder, at the center",
             "type": "object",
             "properties": {
               "id": {
@@ -415,34 +444,50 @@
                 "const": "core"
               },
               "name": {
-                "type": "string",
-                "description": "~/ and the projects folder's name"
+                "description": "~/ and the projects folder's name",
+                "type": "string"
               },
               "path": {
                 "type": "string"
               },
               "home": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -495,8 +540,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -506,8 +551,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -531,10 +576,10 @@
               "lastActivity",
               "lastSessionAt"
             ],
-            "additionalProperties": {},
-            "description": "The projects folder, at the center"
+            "additionalProperties": {}
           },
           {
+            "description": "A Codex desktop project",
             "type": "object",
             "properties": {
               "id": {
@@ -559,21 +604,33 @@
                 }
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -626,8 +683,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -637,8 +694,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -674,10 +731,10 @@
               "lastSessionAt",
               "active"
             ],
-            "additionalProperties": {},
-            "description": "A Codex desktop project"
+            "additionalProperties": {}
           },
           {
+            "description": "A folder outside the projects folder where sessions ran: the home folder, scratch folders, temp, or one folder",
             "type": "object",
             "properties": {
               "id": {
@@ -692,9 +749,13 @@
                 "type": "string"
               },
               "path": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "app": {
@@ -716,21 +777,33 @@
                 "const": true
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -783,8 +856,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -794,8 +867,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -832,10 +905,10 @@
               "lastSessionAt",
               "active"
             ],
-            "additionalProperties": {},
-            "description": "A folder outside the projects folder where sessions ran: the home folder, scratch folders, temp, or one folder"
+            "additionalProperties": {}
           },
           {
+            "description": "The shared context: Xenolith, or Agent Wiki before it",
             "type": "object",
             "properties": {
               "id": {
@@ -874,9 +947,13 @@
                       "type": "string"
                     },
                     "app": {
-                      "type": [
-                        "string",
-                        "null"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
                       ]
                     }
                   },
@@ -893,21 +970,33 @@
                 "type": "string"
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -960,8 +1049,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -971,8 +1060,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1005,10 +1094,10 @@
               "lastActivity",
               "lastSessionAt"
             ],
-            "additionalProperties": {},
-            "description": "The shared context: Xenolith, or Agent Wiki before it"
+            "additionalProperties": {}
           },
           {
+            "description": "A context page: a page of the shared context",
             "type": "object",
             "properties": {
               "id": {
@@ -1020,6 +1109,7 @@
                 "const": "page"
               },
               "name": {
+                "description": "A front matter value: text, or a JSON list when it starts with [",
                 "anyOf": [
                   {
                     "type": "string"
@@ -1028,13 +1118,13 @@
                     "type": "array",
                     "items": {}
                   }
-                ],
-                "description": "A front matter value: text, or a JSON list when it starts with ["
+                ]
               },
               "slug": {
                 "type": "string"
               },
               "type": {
+                "description": "A front matter value: text, or a JSON list when it starts with [",
                 "anyOf": [
                   {
                     "type": "string"
@@ -1043,10 +1133,10 @@
                     "type": "array",
                     "items": {}
                   }
-                ],
-                "description": "A front matter value: text, or a JSON list when it starts with ["
+                ]
               },
               "summary": {
+                "description": "A front matter value: text, or a JSON list when it starts with [",
                 "anyOf": [
                   {
                     "type": "string"
@@ -1055,8 +1145,7 @@
                     "type": "array",
                     "items": {}
                   }
-                ],
-                "description": "A front matter value: text, or a JSON list when it starts with ["
+                ]
               },
               "tags": {
                 "type": "array",
@@ -1065,8 +1154,8 @@
               "updated": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1076,6 +1165,7 @@
               "updatedBy": {
                 "anyOf": [
                   {
+                    "description": "A front matter value: text, or a JSON list when it starts with [",
                     "anyOf": [
                       {
                         "type": "string"
@@ -1084,8 +1174,7 @@
                         "type": "array",
                         "items": {}
                       }
-                    ],
-                    "description": "A front matter value: text, or a JSON list when it starts with ["
+                    ]
                   },
                   {
                     "type": "null"
@@ -1096,14 +1185,13 @@
                 "type": "string"
               },
               "writes": {
-                "maxItems": 6,
                 "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
                     "ts": {
-                      "type": "number",
-                      "description": "Epoch milliseconds"
+                      "description": "Epoch milliseconds",
+                      "type": "number"
                     },
                     "app": {
                       "type": "string"
@@ -1125,7 +1213,8 @@
                     "pages"
                   ],
                   "additionalProperties": {}
-                }
+                },
+                "maxItems": 6
               },
               "aliases": {
                 "description": "Other names it goes by, from its aliases, in lowercase; left out when it has none",
@@ -1139,21 +1228,33 @@
                 "type": "string"
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -1206,8 +1307,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1217,8 +1318,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1256,10 +1357,10 @@
               "lastActivity",
               "lastSessionAt"
             ],
-            "additionalProperties": {},
-            "description": "A context page: a page of the shared context"
+            "additionalProperties": {}
           },
           {
+            "description": "A shared system sessions reach through MCP",
             "type": "object",
             "properties": {
               "id": {
@@ -1271,8 +1372,8 @@
                 "const": "resource"
               },
               "name": {
-                "type": "string",
-                "description": "What the shared system is called: the MCP server, or for a server whose id is a uuid the name it says it is, or \"Connector\" and the start of the id"
+                "description": "What the shared system is called: the MCP server, or for a server whose id is a uuid the name it says it is, or \"Connector\" and the start of the id",
+                "type": "string"
               },
               "server": {
                 "description": "The MCP server's id, when name is something else",
@@ -1288,21 +1389,33 @@
                 ]
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -1355,8 +1468,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1366,8 +1479,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1397,10 +1510,10 @@
               "lastActivity",
               "lastSessionAt"
             ],
-            "additionalProperties": {},
-            "description": "A shared system sessions reach through MCP"
+            "additionalProperties": {}
           },
           {
+            "description": "Another machine's XenoNet, at the center of its constellation (with hosts on)",
             "type": "object",
             "properties": {
               "id": {
@@ -1415,24 +1528,33 @@
                 "type": "string"
               },
               "name": {
-                "type": "string",
-                "description": "Its id here"
+                "description": "Its id here",
+                "type": "string"
               },
               "path": {
                 "description": "Its projects folder, as it names it (~/Projects)",
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "calls": {
                 "description": "What it calls itself, when that isn't its id here",
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "state": {
+                "description": "connecting; live; stale (no word for 45 seconds); offline (the connection ended, and XenoNet tries again); error (it needs you)",
                 "type": "string",
                 "enum": [
                   "connecting",
@@ -1440,18 +1562,17 @@
                   "stale",
                   "offline",
                   "error"
-                ],
-                "description": "connecting; live; stale (no word for 45 seconds); offline (the connection ended, and XenoNet tries again); error (it needs you)"
+                ]
               },
               "since": {
-                "type": "number",
-                "description": "Epoch milliseconds"
+                "description": "Epoch milliseconds",
+                "type": "number"
               },
               "lastHeard": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1460,65 +1581,97 @@
               },
               "offsetMs": {
                 "description": "Its clock minus this one's, once known",
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "version": {
                 "description": "Its XenoNet",
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "platform": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "demo": {
                 "description": "It shows made-up data",
-                "type": [
-                  "boolean",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "error": {
                 "description": "Why it isn't live, in words",
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "cached": {
-                "type": "boolean",
-                "description": "What's shown is its last snapshot, kept from before this XenoNet started"
+                "description": "What's shown is its last snapshot, kept from before this XenoNet started",
+                "type": "boolean"
               },
               "truncated": {
-                "type": "boolean",
-                "description": "It sent more than the 5,000 nodes a host may have on the map, so its oldest sessions are left out"
+                "description": "It sent more than the 5,000 nodes a host may have on the map, so its oldest sessions are left out",
+                "type": "boolean"
               },
               "stale": {
                 "type": "boolean"
               },
               "fx": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fy": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "fz": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "pinned": {
@@ -1571,8 +1724,8 @@
               "lastActivity": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1582,8 +1735,8 @@
               "lastSessionAt": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -1619,8 +1772,7 @@
               "lastActivity",
               "lastSessionAt"
             ],
-            "additionalProperties": {},
-            "description": "Another machine's XenoNet, at the center of its constellation (with hosts on)"
+            "additionalProperties": {}
           }
         ]
       }
@@ -1766,11 +1918,10 @@
       "description": "Start with identities masked (XENONET_HIDE_IDENTITIES=1)"
     },
     "demo": {
-      "description": "The demo's made-up map, whose sessions exist only in XenoNet",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "The demo's made-up map, whose sessions exist only in XenoNet"
     },
     "hosts": {
-      "description": "The other machines on the map and how each is, with hosts on",
       "type": "array",
       "items": {
         "type": "object",
@@ -1789,14 +1940,14 @@
             ]
           },
           "since": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           },
           "lastHeard": {
             "anyOf": [
               {
-                "type": "number",
-                "description": "Epoch milliseconds"
+                "description": "Epoch milliseconds",
+                "type": "number"
               },
               {
                 "type": "null"
@@ -1804,33 +1955,53 @@
             ]
           },
           "offsetMs": {
-            "type": [
-              "number",
-              "null"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "version": {
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "platform": {
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "demo": {
-            "type": [
-              "boolean",
-              "null"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "error": {
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "cached": {
@@ -1866,14 +2037,15 @@
           "sessions"
         ],
         "additionalProperties": {}
-      }
+      },
+      "description": "The other machines on the map and how each is, with hosts on"
     },
     "self": {
-      "description": "This XenoNet's own host id, if it named itself, with hosts on",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "This XenoNet's own host id, if it named itself, with hosts on"
     },
     "sources": {
       "type": "array",
@@ -1881,8 +2053,8 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "description": "projects, codex, codex-projects, claude, live, wiki (the shared context), search, identities"
+            "description": "projects, codex, codex-projects, claude, live, wiki (the shared context), search, identities",
+            "type": "string"
           },
           "ok": {
             "type": "boolean"
@@ -1891,13 +2063,15 @@
             "type": [
               "number",
               "null"
-            ]
+            ],
+            "format": "double"
           },
           "count": {
             "type": [
               "number",
               "null"
-            ]
+            ],
+            "format": "double"
           },
           "error": {
             "type": "string"

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/engine/claim/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A claim",
   "description": "A file, folder or glob an agent has said it's working on, until a time.",
   "anyOf": [
@@ -13,9 +13,13 @@
           "description": "An absolute path, a folder (ending in /) or a glob"
         },
         "note": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "until": {
@@ -28,8 +32,8 @@
         "note",
         "until"
       ],
-      "additionalProperties": {},
-      "description": "A claim, as an agent's claims list it"
+      "description": "A claim, as an agent's claims list it",
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -47,9 +51,13 @@
           "type": "string"
         },
         "note": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "created_at": {
@@ -69,8 +77,8 @@
         "created_at",
         "expires_at"
       ],
-      "additionalProperties": {},
-      "description": "As engine.sqlite keeps it"
+      "description": "As engine.sqlite keeps it",
+      "additionalProperties": {}
     }
   ]
 }

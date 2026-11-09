@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/event/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "An actor's event",
   "description": "Something an actor did: came or went, changed what it's doing, spawned a session, edited, ran a command, messaged someone, said something, finished or failed.",
   "type": "object",
@@ -45,11 +45,15 @@
       ]
     },
     "target": {
-      "description": "A graph node id, an actor id, or null",
-      "type": [
-        "string",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A graph node id, an actor id, or null"
     },
     "detail": {
       "anyOf": [

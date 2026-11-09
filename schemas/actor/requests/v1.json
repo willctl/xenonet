@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/requests/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Registrations waiting for you",
   "description": "What GET /api/actors/requests answers XenoNet's own window, with its key: each program waiting for an Allow, what it asks, who asked and when it lapses, and any session's ask for an actor's gateway token.",
   "type": "object",
@@ -20,14 +20,14 @@
         "type": "object",
         "properties": {
           "id": {
+            "description": "The request's own id: POST /api/actors/requests/<id> answers it",
             "type": "string",
-            "minLength": 1,
-            "description": "The request's own id: POST /api/actors/requests/<id> answers it"
+            "minLength": 1
           },
           "actor": {
+            "description": "The actor it would be",
             "type": "string",
-            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
-            "description": "The actor it would be"
+            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$"
           },
           "name": {
             "type": "string",
@@ -35,25 +35,34 @@
             "maxLength": 64
           },
           "product": {
+            "description": "The product it says it is; null for a program of your own",
             "anyOf": [
               {
                 "type": "object",
                 "properties": {
                   "id": {
+                    "description": "A slug: hermes-agent, grok-bot, muse, dots",
                     "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-                    "description": "A slug: hermes-agent, grok-bot, muse, dots"
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
                   },
                   "vendor": {
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "version": {
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
                 },
@@ -67,10 +76,10 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "The product it says it is; null for a program of your own"
+            ]
           },
           "capabilities": {
+            "description": "What it asks to be allowed",
             "type": "array",
             "items": {
               "anyOf": [
@@ -91,8 +100,7 @@
                   "type": "string"
                 }
               ]
-            },
-            "description": "What it asks to be allowed"
+            }
           },
           "heartbeatMs": {
             "anyOf": [
@@ -107,6 +115,7 @@
             ]
           },
           "pid": {
+            "description": "The process it named, if any",
             "anyOf": [
               {
                 "type": "integer",
@@ -116,10 +125,10 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "The process it named, if any"
+            ]
           },
           "asker": {
+            "description": "Who asked, with ~ for the home folder; null where XenoNet couldn't look",
             "anyOf": [
               {
                 "type": "object",
@@ -128,16 +137,20 @@
                     "type": "string"
                   },
                   "parents": {
+                    "description": "Its parents, up to the first app or terminal",
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "description": "Its parents, up to the first app or terminal"
+                    }
                   },
                   "folder": {
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
                 },
@@ -151,20 +164,19 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "Who asked, with ~ for the home folder; null where XenoNet couldn't look"
+            ]
           },
           "joins": {
-            "type": "boolean",
-            "description": "It would join an actor XenoNet already knows, such as a product's observed one"
+            "description": "It would join an actor XenoNet already knows, such as a product's observed one",
+            "type": "boolean"
           },
           "at": {
-            "type": "number",
-            "description": "When it asked, in epoch milliseconds"
+            "description": "When it asked, in epoch milliseconds",
+            "type": "number"
           },
           "expiresAt": {
-            "type": "number",
-            "description": "When it lapses unanswered, in epoch milliseconds"
+            "description": "When it lapses unanswered, in epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [
@@ -185,20 +197,19 @@
       "description": "Oldest first"
     },
     "gatewayAsks": {
-      "description": "Sessions' asks for an actor's gateway token, oldest first. Never a token: it's made only when you Allow",
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "id": {
+            "description": "The ask's own id: POST /api/actors/requests/<id> answers it, and Allow makes the token",
             "type": "string",
-            "minLength": 1,
-            "description": "The ask's own id: POST /api/actors/requests/<id> answers it, and Allow makes the token"
+            "minLength": 1
           },
           "actor": {
+            "description": "The actor whose app would get the token",
             "type": "string",
-            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$",
-            "description": "The actor whose app would get the token"
+            "pattern": "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$"
           },
           "name": {
             "type": "string",
@@ -206,10 +217,11 @@
             "maxLength": 64
           },
           "replaces": {
-            "type": "boolean",
-            "description": "The actor's app has a gateway token already, which Allow replaces"
+            "description": "The actor's app has a gateway token already, which Allow replaces",
+            "type": "boolean"
           },
           "asker": {
+            "description": "Who asked, with ~ for the home folder; null where XenoNet couldn't look",
             "anyOf": [
               {
                 "type": "object",
@@ -218,16 +230,20 @@
                     "type": "string"
                   },
                   "parents": {
+                    "description": "Its parents, up to the first app or terminal",
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "description": "Its parents, up to the first app or terminal"
+                    }
                   },
                   "folder": {
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
                 },
@@ -241,16 +257,15 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "Who asked, with ~ for the home folder; null where XenoNet couldn't look"
+            ]
           },
           "at": {
-            "type": "number",
-            "description": "When it asked, in epoch milliseconds"
+            "description": "When it asked, in epoch milliseconds",
+            "type": "number"
           },
           "expiresAt": {
-            "type": "number",
-            "description": "When it lapses unanswered, in epoch milliseconds"
+            "description": "When it lapses unanswered, in epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [
@@ -263,7 +278,8 @@
           "expiresAt"
         ],
         "additionalProperties": {}
-      }
+      },
+      "description": "Sessions' asks for an actor's gateway token, oldest first. Never a token: it's made only when you Allow"
     }
   },
   "required": [

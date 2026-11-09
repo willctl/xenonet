@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/project/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Project",
   "description": "A project, or a group of projects, in the projects folder, as XenoNet's scan finds it.",
   "type": "object",
@@ -42,63 +42,59 @@
       "description": "What made it one: a project's own repo, a rule, being a submodule, a workspace file, sessions run in it, or being a plain top-level folder; a group's projects (contains) or a rule"
     },
     "marker": {
-      "description": "The file that marks it: a version control folder (.git, .hg, …) or a workspace file",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The file that marks it: a version control folder (.git, .hg, …) or a workspace file"
     },
     "parent": {
-      "description": "The key of the group or project it's inside",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The key of the group or project it's inside"
     },
     "git": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "branch": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "origin": {
-              "description": "The origin remote's URL",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "worktreeOf": {
-              "description": "For a linked worktree, the folder of the repo it belongs to",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "submoduleOf": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "branch",
-            "origin",
-            "worktreeOf",
-            "submoduleOf"
-          ],
-          "additionalProperties": {}
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "type": "null"
+        "origin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The origin remote's URL"
+        },
+        "worktreeOf": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For a linked worktree, the folder of the repo it belongs to"
+        },
+        "submoduleOf": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      ]
+      },
+      "required": [
+        "branch",
+        "origin",
+        "worktreeOf",
+        "submoduleOf"
+      ],
+      "additionalProperties": {}
     },
     "stack": {
       "type": "array",
@@ -125,49 +121,45 @@
       ]
     },
     "rule": {
-      "description": "The rule that applies to its folder: yours, or one of Codex's picks",
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "as": {
-              "type": "string",
-              "enum": [
-                "project",
-                "group",
-                "ignore"
-              ]
-            },
-            "by": {
-              "type": "string",
-              "enum": [
-                "you",
-                "codex"
-              ]
-            },
-            "at": {
-              "description": "When you set it; yours only",
-              "type": "number"
-            },
-            "reason": {
-              "description": "Why Codex picked it; Codex's only",
-              "type": "string"
-            }
-          },
-          "required": [
-            "path",
-            "as",
-            "by"
-          ],
-          "additionalProperties": {}
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
         },
-        {
-          "type": "null"
+        "as": {
+          "type": "string",
+          "enum": [
+            "project",
+            "group",
+            "ignore"
+          ]
+        },
+        "by": {
+          "type": "string",
+          "enum": [
+            "you",
+            "codex"
+          ]
+        },
+        "at": {
+          "type": "number",
+          "description": "When you set it; yours only"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why Codex picked it; Codex's only"
         }
-      ]
+      },
+      "required": [
+        "path",
+        "as",
+        "by"
+      ],
+      "description": "The rule that applies to its folder: yours, or one of Codex's picks",
+      "additionalProperties": {}
     }
   },
   "required": [

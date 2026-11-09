@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/theme/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Theme",
   "description": "How the console looks and sounds: colors, fonts, the sky, stars, floor, sweep and sonar, the glow, the music, and the actors layer. Every field is optional: what a theme leaves out comes from the one it extends.",
   "type": "object",
   "properties": {
     "id": {
-      "description": "Lowercase letters, digits and dashes; a file's name is its id",
       "type": "string",
+      "description": "Lowercase letters, digits and dashes; a file's name is its id",
       "pattern": "^[a-z0-9][a-z0-9-]{0,40}$"
     },
     "name": {
@@ -21,15 +21,14 @@
       "type": "boolean"
     },
     "replacesBuiltIn": {
-      "description": "A theme of yours with a built-in's id: it takes that one's place",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "A theme of yours with a built-in's id: it takes that one's place"
     },
     "extends": {
-      "description": "The theme it starts from; xenonet when left out",
-      "type": "string"
+      "type": "string",
+      "description": "The theme it starts from; xenonet when left out"
     },
     "colors": {
-      "description": "By role; wiki is the shared context's. The page applies only #rrggbb values. actor and human are the actors layer's defaults",
       "type": "object",
       "properties": {
         "bg": {
@@ -198,21 +197,21 @@
           "description": "A color, #rrggbb"
         }
       },
+      "description": "By role; wiki is the shared context's. The page applies only #rrggbb values. actor and human are the actors layer's defaults",
       "additionalProperties": {}
     },
     "identities": {
-      "description": "The rings named identities' projects stand on: five colors that mean nothing else on the map. One a theme brings close to a color with a meaning is swapped for a spare",
-      "minItems": 5,
-      "maxItems": 5,
       "type": "array",
       "items": {
+        "description": "A color, #rrggbb",
         "type": "string",
-        "pattern": "^#[0-9a-fA-F]{6}$",
-        "description": "A color, #rrggbb"
-      }
+        "pattern": "^#[0-9a-fA-F]{6}$"
+      },
+      "description": "The rings named identities' projects stand on: five colors that mean nothing else on the map. One a theme brings close to a color with a meaning is swapped for a spare",
+      "minItems": 5,
+      "maxItems": 5
     },
     "categories": {
-      "description": "What an agent is doing, by tool family",
       "type": "object",
       "properties": {
         "shell": {
@@ -256,10 +255,10 @@
           "description": "A color, #rrggbb"
         }
       },
+      "description": "What an agent is doing, by tool family",
       "additionalProperties": {}
     },
     "pages": {
-      "description": "Context page types",
       "type": "object",
       "properties": {
         "project": {
@@ -298,67 +297,68 @@
           "description": "A color, #rrggbb"
         }
       },
+      "description": "Context page types",
       "additionalProperties": {}
     },
     "fonts": {
-      "description": "CSS font families",
       "type": "object",
       "properties": {
         "display": {
-          "description": "Titles, and the map's labels",
-          "type": "string"
+          "type": "string",
+          "description": "Titles, and the map's labels"
         },
         "mono": {
           "type": "string"
         },
         "body": {
-          "description": "Body text in the panels; the display font when left out",
-          "type": "string"
+          "type": "string",
+          "description": "Body text in the panels; the display font when left out"
         }
       },
+      "description": "CSS font families",
       "additionalProperties": {}
     },
     "sky": {
-      "description": "The sky through the day: deep, primary cloud, secondary cloud, band",
       "type": "object",
       "properties": {
         "night": {
-          "minItems": 4,
           "type": "array",
           "items": {
+            "description": "A color, #rrggbb",
             "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "A color, #rrggbb"
-          }
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "minItems": 4
         },
         "dawn": {
-          "minItems": 4,
           "type": "array",
           "items": {
+            "description": "A color, #rrggbb",
             "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "A color, #rrggbb"
-          }
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "minItems": 4
         },
         "day": {
-          "minItems": 4,
           "type": "array",
           "items": {
+            "description": "A color, #rrggbb",
             "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "A color, #rrggbb"
-          }
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "minItems": 4
         },
         "dusk": {
-          "minItems": 4,
           "type": "array",
           "items": {
+            "description": "A color, #rrggbb",
             "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "A color, #rrggbb"
-          }
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "minItems": 4
         }
       },
+      "description": "The sky through the day: deep, primary cloud, secondary cloud, band",
       "additionalProperties": {}
     },
     "stars": {
@@ -372,9 +372,9 @@
         "tints": {
           "type": "array",
           "items": {
+            "description": "A color, #rrggbb",
             "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "A color, #rrggbb"
+            "pattern": "^#[0-9a-fA-F]{6}$"
           }
         },
         "shape": {
@@ -393,7 +393,6 @@
           ]
         },
         "drift": {
-          "description": "Units a second; [0, -0.6, 0] is falling snow",
           "type": "array",
           "prefixItems": [
             {
@@ -406,9 +405,10 @@
               "type": "number"
             }
           ],
-          "items": false,
           "minItems": 3,
-          "maxItems": 3
+          "maxItems": 3,
+          "description": "Units a second; [0, -0.6, 0] is falling snow",
+          "items": false
         },
         "twinkle": {
           "type": "number",
@@ -432,8 +432,8 @@
         },
         "opacity": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "minimum": 0
         },
         "style": {
           "anyOf": [
@@ -459,8 +459,8 @@
       "properties": {
         "opacity": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "minimum": 0
         }
       },
       "additionalProperties": {}
@@ -470,8 +470,8 @@
       "properties": {
         "opacity": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "minimum": 0
         },
         "speed": {
           "type": "number"
@@ -507,8 +507,8 @@
         },
         "opacity": {
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "minimum": 0
         },
         "size": {
           "type": "number",
@@ -547,9 +547,9 @@
       "type": "object",
       "properties": {
         "every": {
-          "description": "Seconds between pings",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Seconds between pings"
         },
         "style": {
           "anyOf": [
@@ -571,7 +571,6 @@
       "additionalProperties": {}
     },
     "charts": {
-      "description": "The stats panel's charts",
       "type": "object",
       "properties": {
         "m1": {
@@ -635,13 +634,13 @@
           "description": "A color, #rrggbb"
         }
       },
+      "description": "The stats panel's charts",
       "additionalProperties": {}
     },
     "sound": {
       "type": "object",
       "properties": {
         "chords": {
-          "description": "A cycle of chords, as MIDI notes",
           "type": "array",
           "items": {
             "type": "array",
@@ -650,7 +649,8 @@
               "minimum": 0,
               "maximum": 127
             }
-          }
+          },
+          "description": "A cycle of chords, as MIDI notes"
         },
         "scale": {
           "type": "array",
@@ -708,9 +708,9 @@
       "type": "object",
       "properties": {
         "pace": {
-          "description": "A multiplier for ambient motion; 1 is today's",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "description": "A multiplier for ambient motion; 1 is today's"
         },
         "ease": {
           "anyOf": [
@@ -727,10 +727,10 @@
           ]
         },
         "breathe": {
-          "description": "How much nodes swell and fade at rest",
           "type": "number",
-          "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "description": "How much nodes swell and fade at rest",
+          "minimum": 0
         }
       },
       "additionalProperties": {}
@@ -788,7 +788,6 @@
           ]
         },
         "params": {
-          "description": "Knobs for the form: rings, facets, tendrils",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -798,20 +797,20 @@
               "number",
               "boolean"
             ]
-          }
+          },
+          "description": "Knobs for the form: rings, facets, tendrils"
         },
         "palette": {
-          "description": "Each agent takes one by a stable hash of its id",
-          "minItems": 1,
           "type": "array",
           "items": {
+            "description": "A color, #rrggbb",
             "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$",
-            "description": "A color, #rrggbb"
-          }
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "description": "Each agent takes one by a stable hash of its id",
+          "minItems": 1
         },
         "human": {
-          "description": "The person at the console",
           "type": "object",
           "properties": {
             "form": {
@@ -833,22 +832,23 @@
               ]
             }
           },
+          "description": "The person at the console",
           "additionalProperties": {}
         },
         "glow": {
-          "description": "The glow round each actor",
           "type": "object",
           "properties": {
             "opacity": {
               "type": "number",
-              "minimum": 0,
-              "maximum": 1
+              "maximum": 1,
+              "minimum": 0
             },
             "scale": {
               "type": "number",
               "minimum": 0
             }
           },
+          "description": "The glow round each actor",
           "additionalProperties": {}
         },
         "breathe": {
@@ -860,8 +860,8 @@
             },
             "depth": {
               "type": "number",
-              "minimum": 0,
-              "maximum": 1
+              "maximum": 1,
+              "minimum": 0
             }
           },
           "additionalProperties": {}

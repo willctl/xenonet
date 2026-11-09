@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/receipt/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A receipt",
   "description": "What happened to a message on the host it went to.",
   "type": "object",
@@ -17,9 +17,9 @@
     },
     "agent": {
       "type": "string",
+      "description": "The recipient, unqualified: xenonet:start for a start request",
       "minLength": 1,
-      "maxLength": 200,
-      "description": "The recipient, unqualified: xenonet:start for a start request"
+      "maxLength": 200
     },
     "state": {
       "type": "string",
@@ -50,26 +50,22 @@
       "description": "Epoch milliseconds"
     },
     "session": {
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "For started and ended: the new session's id (null for Codex until it names its thread)",
-      "anyOf": [
-        {
-          "type": "string",
-          "maxLength": 200
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "maxLength": 200
     },
     "pid": {
-      "description": "For started: its process",
       "type": "integer",
       "minimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "description": "For started: its process"
     },
     "folder": {
-      "description": "For started: its folder, with the home folder as ~",
       "type": "string",
+      "description": "For started: its folder, with the home folder as ~",
       "maxLength": 1000
     },
     "app": {
@@ -81,27 +77,23 @@
       ]
     },
     "exit": {
-      "description": "For ended: its exit code, null when it was stopped",
-      "anyOf": [
-        {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "description": "For ended: its exit code, null when it was stopped"
     },
     "minutes": {
-      "description": "For ended: how long it ran",
       "type": "integer",
       "minimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "description": "For ended: how long it ran"
     },
     "signIn": {
-      "description": "For ended: Claude Code there needs a sign-in for XenoNet's runs",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "For ended: Claude Code there needs a sign-in for XenoNet's runs"
     }
   },
   "required": [

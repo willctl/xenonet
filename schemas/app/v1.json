@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/app/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "An app",
   "description": "An app XenoNet knows sessions of, and what's fixed about it, as the app registry (core/apps.js) lists it. The apps XenoNet only observes have their id, name and numbat's names only.",
   "type": "object",
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]*$",
-      "description": "What its session ids begin with: <id>:<the run's id>"
+      "description": "What its session ids begin with: <id>:<the run's id>",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
     },
     "name": {
       "type": "string",
@@ -23,12 +23,12 @@
       "description": "The names numbat records its runs under"
     },
     "products": {
-      "description": "Its vendor products (<vendor>/<product>), each one of the provider drift check's, which lists their sources",
       "type": "array",
       "items": {
         "type": "string",
         "pattern": "^[a-z0-9-]+\\/[a-z0-9-]+$"
-      }
+      },
+      "description": "Its vendor products (<vendor>/<product>), each one of the provider drift check's, which lists their sources"
     },
     "roots": {
       "type": "object",
@@ -43,7 +43,6 @@
           "description": "Its folder when the variable isn't set"
         },
         "elsewhere": {
-          "description": "Files the variable moves too, which are elsewhere when it isn't set: each file's name, and the folder it's in then",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -51,7 +50,8 @@
           "additionalProperties": {
             "type": "string",
             "pattern": "^~(\\/.*)?$"
-          }
+          },
+          "description": "Files the variable moves too, which are elsewhere when it isn't set: each file's name, and the folder it's in then"
         }
       },
       "required": [
@@ -61,30 +61,30 @@
       "additionalProperties": {}
     },
     "context": {
-      "description": "Its context window, in tokens, until a transcript says otherwise",
       "type": "integer",
       "minimum": 1,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "description": "Its context window, in tokens, until a transcript says otherwise"
     },
     "identity": {
-      "description": "The kind of account it runs under, as identity/v1 has it",
       "type": "string",
       "enum": [
         "claude",
         "chatgpt"
-      ]
+      ],
+      "description": "The kind of account it runs under, as identity/v1 has it"
     },
     "limits": {
-      "description": "Its plan limits, as live/snapshot/v1's limits name them",
       "type": "string",
       "enum": [
         "claude",
         "codex"
-      ]
+      ],
+      "description": "Its plan limits, as live/snapshot/v1's limits name them"
     },
     "team": {
-      "description": "The developer team that signs it, codesign's TeamIdentifier",
       "type": "string",
+      "description": "The developer team that signs it, codesign's TeamIdentifier",
       "pattern": "^[A-Z0-9]{10}$"
     },
     "connect": {
@@ -110,9 +110,9 @@
                     "type": "string"
                   }
                 ],
-                "items": false,
                 "minItems": 1,
-                "maxItems": 1
+                "maxItems": 1,
+                "items": false
               },
               {
                 "type": "array",
@@ -124,20 +124,20 @@
                     "type": "string"
                   }
                 ],
-                "items": false,
                 "minItems": 2,
-                "maxItems": 2
+                "maxItems": 2,
+                "items": false
               }
             ]
           },
           "description": "The hook events XenoNet adds, in order, each with the matcher it takes, if any"
         },
         "unheard": {
-          "description": "The hook events whose answers it passes over: XenoNet tells it nothing then, and keeps its messages for an event it hears",
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The hook events whose answers it passes over: XenoNet tells it nothing then, and keeps its messages for an event it hears"
         }
       },
       "required": [
@@ -147,14 +147,13 @@
       "additionalProperties": {}
     },
     "editTools": {
-      "description": "For a native reader, the tools whose calls are edits",
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "For a native reader, the tools whose calls are edits"
     },
     "has": {
-      "description": "What XenoNet can do with it at most; what it can do with a session is the session's own",
       "type": "array",
       "items": {
         "type": "string",
@@ -168,7 +167,8 @@
           "caller",
           "open"
         ]
-      }
+      },
+      "description": "What XenoNet can do with it at most; what it can do with a session is the session's own"
     }
   },
   "required": [

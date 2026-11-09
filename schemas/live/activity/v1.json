@@ -1,13 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/live/activity/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Activity",
   "description": "One thing that happened in a session, as the activity feed, the replay and the history get it.",
   "oneOf": [
     {
       "type": "object",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "tool"
+        },
         "sessionId": {
           "type": "string"
         },
@@ -19,17 +23,13 @@
             "grok"
           ]
         },
-        "kind": {
-          "type": "string",
-          "const": "tool"
-        },
         "ts": {
           "type": "number",
           "description": "Epoch milliseconds"
         },
         "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
         },
         "tool": {
           "type": "string"
@@ -57,32 +57,36 @@
           }
         },
         "server": {
-          "description": "The MCP server, for an MCP tool",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The MCP server, for an MCP tool"
         },
         "agentId": {
-          "description": "The subagent that called it",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The subagent that called it"
         },
         "pages": {
-          "description": "The context pages a write to the shared context names: a slug, or <space>/<slug> for a page of another Xenolith space than this machine's",
-          "maxItems": 6,
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The context pages a write to the shared context names: a slug, or <space>/<slug> for a page of another Xenolith space than this machine's",
+          "maxItems": 6
         }
       },
       "required": [
+        "kind",
         "sessionId",
         "app",
-        "kind",
         "ts",
         "tool",
         "category",
@@ -90,52 +94,16 @@
         "files",
         "server"
       ],
-      "additionalProperties": {},
-      "description": "A tool call"
+      "description": "A tool call",
+      "additionalProperties": {}
     },
     {
       "type": "object",
       "properties": {
-        "sessionId": {
-          "type": "string"
-        },
-        "app": {
-          "type": "string",
-          "enum": [
-            "claude",
-            "codex",
-            "grok"
-          ]
-        },
         "kind": {
           "type": "string",
           "const": "prompt"
         },
-        "ts": {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
-        },
-        "detail": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "sessionId",
-        "app",
-        "kind",
-        "ts",
-        "detail"
-      ],
-      "additionalProperties": {},
-      "description": "A prompt, the start of a turn"
-    },
-    {
-      "type": "object",
-      "properties": {
         "sessionId": {
           "type": "string"
         },
@@ -147,35 +115,35 @@
             "grok"
           ]
         },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "app",
+        "ts",
+        "detail"
+      ],
+      "description": "A prompt, the start of a turn",
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "type": "string",
           "const": "message"
         },
-        "ts": {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
-        },
-        "detail": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "sessionId",
-        "app",
-        "kind",
-        "ts",
-        "detail"
-      ],
-      "additionalProperties": {},
-      "description": "Something the agent said"
-    },
-    {
-      "type": "object",
-      "properties": {
         "sessionId": {
           "type": "string"
         },
@@ -187,31 +155,35 @@
             "grok"
           ]
         },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "app",
+        "ts",
+        "detail"
+      ],
+      "description": "Something the agent said",
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "type": "string",
           "const": "turn-start"
         },
-        "ts": {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
-        }
-      },
-      "required": [
-        "sessionId",
-        "app",
-        "kind",
-        "ts"
-      ],
-      "additionalProperties": {},
-      "description": "A Codex turn starting"
-    },
-    {
-      "type": "object",
-      "properties": {
         "sessionId": {
           "type": "string"
         },
@@ -223,43 +195,31 @@
             "grok"
           ]
         },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "app",
+        "ts"
+      ],
+      "description": "A Codex turn starting",
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "type": "string",
           "const": "turn-end"
         },
-        "ts": {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
-        },
-        "duration": {
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "interrupted": {
-          "description": "You stopped it",
-          "type": "boolean",
-          "const": true
-        }
-      },
-      "required": [
-        "sessionId",
-        "app",
-        "kind",
-        "ts",
-        "duration"
-      ],
-      "additionalProperties": {},
-      "description": "A turn ending"
-    },
-    {
-      "type": "object",
-      "properties": {
         "sessionId": {
           "type": "string"
         },
@@ -271,35 +231,87 @@
             "grok"
           ]
         },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interrupted": {
+          "type": "boolean",
+          "const": true,
+          "description": "You stopped it"
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "app",
+        "ts",
+        "duration"
+      ],
+      "description": "A turn ending",
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "type": "string",
           "const": "needs-you"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "grok"
+          ]
         },
         "ts": {
           "type": "number",
           "description": "Epoch milliseconds"
         },
         "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
         },
         "detail": {
           "type": "string"
         }
       },
       "required": [
+        "kind",
         "sessionId",
         "app",
-        "kind",
         "ts",
         "detail"
       ],
-      "additionalProperties": {},
-      "description": "A question for you, or a plan to approve"
+      "description": "A question for you, or a plan to approve",
+      "additionalProperties": {}
     },
     {
       "type": "object",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "tool-error"
+        },
         "sessionId": {
           "type": "string"
         },
@@ -311,17 +323,13 @@
             "grok"
           ]
         },
-        "kind": {
-          "type": "string",
-          "const": "tool-error"
-        },
         "ts": {
           "type": "number",
           "description": "Epoch milliseconds"
         },
         "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
         },
         "agentId": {
           "type": [
@@ -331,17 +339,21 @@
         }
       },
       "required": [
+        "kind",
         "sessionId",
         "app",
-        "kind",
         "ts"
       ],
-      "additionalProperties": {},
-      "description": "A tool call that failed"
+      "description": "A tool call that failed",
+      "additionalProperties": {}
     },
     {
       "type": "object",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "refusal"
+        },
         "sessionId": {
           "type": "string"
         },
@@ -353,79 +365,35 @@
             "grok"
           ]
         },
-        "kind": {
-          "type": "string",
-          "const": "refusal"
-        },
         "ts": {
           "type": "number",
           "description": "Epoch milliseconds"
         },
         "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
         },
         "detail": {
           "type": "string"
         }
       },
       "required": [
+        "kind",
         "sessionId",
         "app",
-        "kind",
         "ts",
         "detail"
       ],
-      "additionalProperties": {},
-      "description": "The provider refused the turn (core/refusals); the detail is its own words or category"
+      "description": "The provider refused the turn (core/refusals); the detail is its own words or category",
+      "additionalProperties": {}
     },
     {
       "type": "object",
       "properties": {
-        "sessionId": {
-          "type": "string"
-        },
-        "app": {
-          "type": "string",
-          "enum": [
-            "claude",
-            "codex",
-            "grok"
-          ]
-        },
         "kind": {
           "type": "string",
           "const": "subagent-start"
         },
-        "ts": {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
-        },
-        "agentId": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "sessionId",
-        "app",
-        "kind",
-        "ts",
-        "agentId",
-        "label"
-      ],
-      "additionalProperties": {},
-      "description": "A subagent starting"
-    },
-    {
-      "type": "object",
-      "properties": {
         "sessionId": {
           "type": "string"
         },
@@ -437,39 +405,39 @@
             "grok"
           ]
         },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "app",
+        "ts",
+        "agentId",
+        "label"
+      ],
+      "description": "A subagent starting",
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "type": "string",
           "const": "subagent-stop"
         },
-        "ts": {
-          "type": "number",
-          "description": "Epoch milliseconds"
-        },
-        "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
-        },
-        "agentId": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "sessionId",
-        "app",
-        "kind",
-        "ts",
-        "agentId",
-        "label"
-      ],
-      "additionalProperties": {},
-      "description": "A subagent finishing"
-    },
-    {
-      "type": "object",
-      "properties": {
         "sessionId": {
           "type": "string"
         },
@@ -481,17 +449,57 @@
             "grok"
           ]
         },
+        "ts": {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        "host": {
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "app",
+        "ts",
+        "agentId",
+        "label"
+      ],
+      "description": "A subagent finishing",
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "type": "string",
           "const": "hook"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "grok"
+          ]
         },
         "ts": {
           "type": "number",
           "description": "Epoch milliseconds"
         },
         "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
         },
         "detail": {
           "type": "string",
@@ -499,18 +507,22 @@
         }
       },
       "required": [
+        "kind",
         "sessionId",
         "app",
-        "kind",
         "ts",
         "detail"
       ],
-      "additionalProperties": {},
-      "description": "A Claude Code hook"
+      "description": "A Claude Code hook",
+      "additionalProperties": {}
     },
     {
       "type": "object",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "ship-it"
+        },
         "sessionId": {
           "type": "string"
         },
@@ -522,17 +534,13 @@
             "grok"
           ]
         },
-        "kind": {
-          "type": "string",
-          "const": "ship-it"
-        },
         "ts": {
           "type": "number",
           "description": "Epoch milliseconds"
         },
         "host": {
-          "description": "The host it's from, for a session on another machine",
-          "type": "string"
+          "type": "string",
+          "description": "The host it's from, for a session on another machine"
         },
         "detail": {
           "type": "string"
@@ -542,15 +550,15 @@
         }
       },
       "required": [
+        "kind",
         "sessionId",
         "app",
-        "kind",
         "ts",
         "detail",
         "projectId"
       ],
-      "additionalProperties": {},
-      "description": "A nudge to commit: a turn ended in a repo with uncommitted work (not kept in the history)"
+      "description": "A nudge to commit: a turn ended in a repo with uncommitted work (not kept in the history)",
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -568,15 +576,23 @@
           ]
         },
         "identity": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "before": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ts": {
@@ -591,8 +607,8 @@
         "before",
         "ts"
       ],
-      "additionalProperties": {},
-      "description": "A sign-in that changed (not kept in the history)"
+      "description": "A sign-in that changed (not kept in the history)",
+      "additionalProperties": {}
     }
   ]
 }

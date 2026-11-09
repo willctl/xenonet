@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/snapshot/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "An actor",
   "description": "An actor as the console draws it: who or what it is, how XenoNet knows of it, whether it's there and what it's doing, and what it's acting on.",
   "type": "object",
@@ -40,19 +40,27 @@
           "properties": {
             "id": {
               "type": "string",
-              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-              "description": "A slug: hermes-agent, grok-bot, muse, dots"
+              "description": "A slug: hermes-agent, grok-bot, muse, dots",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
             },
             "vendor": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "version": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },
@@ -70,15 +78,20 @@
       "description": "What it is; null for a custom actor"
     },
     "host": {
-      "description": "Null on this machine, else the host id, and the id is then qualified",
-      "type": [
-        "string",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null on this machine, else the host id, and the id is then qualified"
     },
     "via": {
       "type": "array",
       "items": {
+        "description": "observed: XenoNet reads its state; attributed: XenoNet traces work here back to it; registered: it reports itself; remote: it reads through a connection you approved; demo: made up",
         "anyOf": [
           {
             "type": "string",
@@ -93,8 +106,7 @@
           {
             "type": "string"
           }
-        ],
-        "description": "observed: XenoNet reads its state; attributed: XenoNet traces work here back to it; registered: it reports itself; remote: it reads through a connection you approved; demo: made up"
+        ]
       },
       "description": "How XenoNet knows of it"
     },
@@ -163,49 +175,44 @@
       "description": "What it says, or XenoNet infers, it's doing"
     },
     "needsYou": {
-      "description": "When it waits on you, for the alert strip; null or left out otherwise",
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "enum": [
-                    "question",
-                    "permission",
-                    "review"
-                  ]
-                },
-                {
-                  "type": "string"
-                }
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "question",
+                "permission",
+                "review"
               ]
             },
-            "text": {
-              "type": "string",
-              "maxLength": 140
-            },
-            "since": {
-              "type": "number",
-              "description": "Epoch milliseconds"
+            {
+              "type": "string"
             }
-          },
-          "required": [
-            "kind",
-            "text",
-            "since"
-          ],
-          "additionalProperties": {}
+          ]
         },
-        {
-          "type": "null"
+        "text": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "since": {
+          "type": "number",
+          "description": "Epoch milliseconds"
         }
-      ]
+      },
+      "required": [
+        "kind",
+        "text",
+        "since"
+      ],
+      "description": "When it waits on you, for the alert strip; null or left out otherwise",
+      "additionalProperties": {}
     },
     "usage": {
-      "description": "What the app's own records say its sessions used and cost (Hermes's session database); left out when it keeps none",
       "type": "object",
       "properties": {
         "since": {
@@ -219,11 +226,15 @@
           "description": "The sessions its own records show at work since then, counted by their whole totals"
         },
         "costUsd": {
-          "description": "What the app totalled for them, in USD: the sessions it priced; null when it priced none. Not XenoNet's estimate at API prices",
-          "type": [
-            "number",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the app totalled for them, in USD: the sessions it priced; null when it priced none. Not XenoNet's estimate at API prices"
         },
         "estimated": {
           "type": "boolean",
@@ -264,36 +275,51 @@
           "additionalProperties": {}
         },
         "models": {
-          "maxItems": 5,
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "provider": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "model": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "mode": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "tokens": {
                 "type": "number"
               },
               "costUsd": {
-                "type": [
-                  "number",
-                  "null"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               }
             },
@@ -306,7 +332,8 @@
             ],
             "additionalProperties": {}
           },
-          "description": "The five that used the most tokens"
+          "description": "The five that used the most tokens",
+          "maxItems": 5
         }
       },
       "required": [
@@ -318,6 +345,7 @@
         "tokens",
         "models"
       ],
+      "description": "What the app's own records say its sessions used and cost (Hermes's session database); left out when it keeps none",
       "additionalProperties": {}
     },
     "capabilities": {
@@ -349,8 +377,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "description": "A graph node id"
+            "description": "A graph node id",
+            "type": "string"
           },
           "relation": {
             "anyOf": [
@@ -371,12 +399,12 @@
             ]
           },
           "since": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           },
           "lastAt": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [
@@ -390,12 +418,12 @@
       "description": "What it's acting on"
     },
     "recent": {
-      "maxItems": 20,
       "type": "array",
       "items": {
         "$ref": "https://xenonet.dev/schemas/actor/event/v1.json"
       },
-      "description": "Its last events, newest last"
+      "description": "Its last events, newest last",
+      "maxItems": 20
     },
     "counts": {
       "type": "object",
@@ -424,14 +452,17 @@
       "additionalProperties": {}
     },
     "identity": {
-      "description": "The identity it acts as (claude:…, chatgpt:…, github:…), if XenoNet knows it",
-      "type": [
-        "string",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The identity it acts as (claude:…, chatgpt:…, github:…), if XenoNet knows it"
     },
     "remote": {
-      "description": "Left out for an actor with no remote connection",
       "type": "object",
       "properties": {
         "connections": {
@@ -493,7 +524,6 @@
           "description": "What it may do through them, apart from its capabilities elsewhere"
         },
         "transports": {
-          "description": "The routes its active connections take: a tunnel such as OpenAI's Secure MCP Tunnel, or a local MCP client",
           "type": "array",
           "items": {
             "anyOf": [
@@ -508,7 +538,8 @@
                 "type": "string"
               }
             ]
-          }
+          },
+          "description": "The routes its active connections take: a tunnel such as OpenAI's Secure MCP Tunnel, or a local MCP client"
         }
       },
       "required": [
@@ -518,6 +549,7 @@
         "accountLink",
         "permissions"
       ],
+      "description": "Left out for an actor with no remote connection",
       "additionalProperties": {}
     }
   },

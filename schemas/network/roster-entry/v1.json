@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/roster-entry/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A roster entry",
   "description": "One link in a network's chain of hosts: who joined, who left, who's the gateway, and which hosts signed it.",
   "type": "object",
@@ -99,21 +99,19 @@
       "description": "Epoch milliseconds"
     },
     "signers": {
-      "minItems": 1,
-      "maxItems": 4,
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "host": {
+            "description": "The host's id in the network, picked by the person: never the machine's own name",
             "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{1,31}$",
-            "description": "The host's id in the network, picked by the person: never the machine's own name"
+            "pattern": "^[a-z][a-z0-9-]{1,31}$"
           },
           "sig": {
+            "description": "base64url, no padding",
             "type": "string",
-            "pattern": "^[A-Za-z0-9_-]*$",
-            "description": "base64url, no padding"
+            "pattern": "^[A-Za-z0-9_-]*$"
           }
         },
         "required": [
@@ -121,7 +119,9 @@
           "sig"
         ],
         "additionalProperties": {}
-      }
+      },
+      "minItems": 1,
+      "maxItems": 4
     }
   },
   "required": [

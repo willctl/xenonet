@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/console/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "The person at the console",
   "description": "What XenoNet's own window reports of you to POST /api/actors/you, with the key only the window holds: your presence, and what you did as node ids and action names. Never what you type.",
   "type": "object",
@@ -19,12 +19,13 @@
       ]
     },
     "did": {
-      "maxItems": 20,
       "type": "array",
       "items": {
+        "description": "Something you did, as a node id and an action's name: never text",
         "type": "object",
         "properties": {
           "what": {
+            "description": "looked: a selection that held 3 s; read: a preview or stats; opened: in its app; handed-off and started: a session; terminal: one opened in a folder",
             "anyOf": [
               {
                 "type": "string",
@@ -40,18 +41,17 @@
               {
                 "type": "string"
               }
-            ],
-            "description": "looked: a selection that held 3 s; read: a preview or stats; opened: in its app; handed-off and started: a session; terminal: one opened in a folder"
+            ]
           },
           "node": {
+            "description": "The graph node it was done to",
             "type": "string",
             "minLength": 1,
-            "maxLength": 1024,
-            "description": "The graph node it was done to"
+            "maxLength": 1024
           },
           "at": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           },
           "to": {
             "description": "For handed-off: the app it went to",
@@ -88,9 +88,9 @@
           "what",
           "node"
         ],
-        "additionalProperties": {},
-        "description": "Something you did, as a node id and an action's name: never text"
-      }
+        "additionalProperties": {}
+      },
+      "maxItems": 20
     }
   },
   "additionalProperties": {}

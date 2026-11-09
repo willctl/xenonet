@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/host/hello/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A relay's hello",
   "description": "The first frame xenonet relay writes on its standard output: which XenoNet is talking, in which protocol, and what it will send.",
   "type": "object",
@@ -22,9 +22,9 @@
     },
     "version": {
       "type": "string",
+      "description": "The host's XenoNet",
       "minLength": 1,
-      "maxLength": 64,
-      "description": "The host's XenoNet"
+      "maxLength": 64
     },
     "host": {
       "type": "object",
@@ -56,9 +56,9 @@
     },
     "platform": {
       "type": "string",
+      "description": "process.platform on the host: darwin, linux, win32",
       "minLength": 1,
-      "maxLength": 32,
-      "description": "process.platform on the host: darwin, linux, win32"
+      "maxLength": 32
     },
     "demo": {
       "type": "boolean",

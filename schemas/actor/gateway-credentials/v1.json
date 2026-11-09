@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/gateway-credentials/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "An actor's gateway credentials",
   "description": "The answer to making a gateway token in XenoNet's window: the actor's id and a token that works only at XenoNet's actor gateway, once.",
   "type": "object",
@@ -17,15 +17,15 @@
     },
     "token": {
       "type": "string",
-      "pattern": "^xenonet_gateway_[0-9a-f]{64}$",
-      "description": "Shown once: XenoNet keeps only its SHA-256. It works only at XenoNet's actor gateway, as Authorization: Bearer"
+      "description": "Shown once: XenoNet keeps only its SHA-256. It works only at XenoNet's actor gateway, as Authorization: Bearer",
+      "pattern": "^xenonet_gateway_[0-9a-f]{64}$"
     },
     "url": {
-      "description": "The gateway's address, when XenoNet knows it: where the program sends its MCP requests",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The gateway's address, when XenoNet knows it: where the program sends its MCP requests"
     }
   },
   "required": [

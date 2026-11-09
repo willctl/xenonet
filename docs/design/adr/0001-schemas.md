@@ -1,6 +1,9 @@
 # 0001. Schemas: zod 4, written out as JSON Schema
 
-Accepted on 2026-10-05, after core-1's spike. `contracts.md` section 1 has
+Accepted on 2026-10-05, after core-1's spike. Superseded on 2026-11-09:
+the definitions are Rust types in `crates/xenonet-model` (serde with
+schemars), and the files in `schemas/` are written from them
+(`direction.md`, "Reuse decisions"). `contracts.md` section 1 has
 what the schemas are for; `schemas.md` has the layout and the rules.
 
 ## Context

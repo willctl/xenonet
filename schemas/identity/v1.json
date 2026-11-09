@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/identity/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Identity",
   "description": "An account work happens under: a Claude account in an organization, a ChatGPT workspace, an OpenAI API key, a GitHub account, or the email git commits with.",
   "type": "object",
@@ -21,11 +21,11 @@
       ]
     },
     "handle": {
-      "description": "The email or login it shows as",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The email or login it shows as"
     },
     "detail": {
       "type": "object",
@@ -37,22 +37,22 @@
           ]
         },
         "org": {
-          "description": "A Claude team's or enterprise's name",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "A Claude team's or enterprise's name"
         },
         "host": {
-          "description": "A GitHub account's host",
-          "type": "string"
+          "type": "string",
+          "description": "A GitHub account's host"
         },
         "name": {
-          "description": "The name git commits carry",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The name git commits carry"
         }
       },
       "additionalProperties": {}
@@ -80,11 +80,11 @@
       "description": "Epoch milliseconds"
     },
     "name": {
-      "description": "The name you gave it; identities with the same name show as one",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The name you gave it; identities with the same name show as one"
     },
     "hidden": {
       "type": "boolean"
@@ -100,24 +100,24 @@
       "maximum": 9007199254740991
     },
     "hosts": {
-      "description": "With hosts on: the machines it was seen on, null for this one",
       "type": "array",
       "items": {
         "type": [
           "string",
           "null"
         ]
-      }
+      },
+      "description": "With hosts on: the machines it was seen on, null for this one"
     },
     "signedInOn": {
-      "description": "With hosts on: the machines it's signed in on, null for this one",
       "type": "array",
       "items": {
         "type": [
           "string",
           "null"
         ]
-      }
+      },
+      "description": "With hosts on: the machines it's signed in on, null for this one"
     }
   },
   "required": [

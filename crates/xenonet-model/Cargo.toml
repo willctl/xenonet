@@ -1,0 +1,18 @@
+[package]
+name = "xenonet-model"
+description = "XenoNet's data model: ids, entities, relations, operations and the action vocabulary as plain types, with no IO. The JSON Schemas in schemas/ are written from them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

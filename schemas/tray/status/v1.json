@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/tray/status/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "The tray's status",
   "description": "What GET /api/tray/v1/status answers XenoNet's tray app: that the service runs, what waits on you in the console's words, the actor gateway's state and this machine's link to its network.",
   "type": "object",
@@ -17,8 +17,8 @@
     },
     "version": {
       "type": "string",
-      "maxLength": 40,
-      "description": "The service's version"
+      "description": "The service's version",
+      "maxLength": 40
     },
     "instance": {
       "anyOf": [
@@ -34,8 +34,8 @@
     },
     "url": {
       "type": "string",
-      "maxLength": 100,
-      "description": "The console in a browser: http://127.0.0.1:<port>/"
+      "description": "The console in a browser: http://127.0.0.1:<port>/",
+      "maxLength": 100
     },
     "desktop": {
       "type": "boolean",
@@ -57,16 +57,15 @@
           "description": "How many wait on you, as the console's strip counts them"
         },
         "items": {
-          "maxItems": 20,
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "key": {
+                "description": "The item's key in the Needs you queue (core/needs-you.js): session:<id>, actor:<id>, requests…",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 300,
-                "description": "The item's key in the Needs you queue (core/needs-you.js): session:<id>, actor:<id>, requests…"
+                "maxLength": 300
               },
               "kind": {
                 "type": "string",
@@ -82,6 +81,7 @@
                 ]
               },
               "id": {
+                "description": "The session or actor it's about, which open-console selects; null for programs asking to be actors",
                 "anyOf": [
                   {
                     "type": "string",
@@ -90,19 +90,19 @@
                   {
                     "type": "null"
                   }
-                ],
-                "description": "The session or actor it's about, which open-console selects; null for programs asking to be actors"
+                ]
               },
               "title": {
                 "type": "string",
                 "maxLength": 200
               },
               "words": {
+                "description": "What it waits for, after its title, as the console says it: asks, needs permission, asks to join XenoNet…",
                 "type": "string",
-                "maxLength": 60,
-                "description": "What it waits for, after its title, as the console says it: asks, needs permission, asks to join XenoNet…"
+                "maxLength": 60
               },
               "app": {
+                "description": "The session's app (claude, codex, grok, opencode), or null",
                 "anyOf": [
                   {
                     "type": "string",
@@ -111,8 +111,7 @@
                   {
                     "type": "null"
                   }
-                ],
-                "description": "The session's app (claude, codex, grok, opencode), or null"
+                ]
               },
               "host": {
                 "description": "The machine it's on, when it isn't this one",
@@ -120,6 +119,7 @@
                 "pattern": "^[a-z][a-z0-9-]{1,31}$"
               },
               "text": {
+                "description": "The question or what it asks, when XenoNet has it",
                 "anyOf": [
                   {
                     "type": "string",
@@ -128,14 +128,13 @@
                   {
                     "type": "null"
                   }
-                ],
-                "description": "The question or what it asks, when XenoNet has it"
+                ]
               },
               "since": {
                 "anyOf": [
                   {
-                    "type": "number",
-                    "description": "Epoch milliseconds"
+                    "description": "Epoch milliseconds",
+                    "type": "number"
                   },
                   {
                     "type": "null"
@@ -165,7 +164,8 @@
             ],
             "additionalProperties": {}
           },
-          "description": "The Needs you queue in its order, the longest wait first"
+          "description": "The Needs you queue in its order, the longest wait first",
+          "maxItems": 20
         }
       },
       "required": [
@@ -219,8 +219,8 @@
         "url",
         "problem"
       ],
-      "additionalProperties": {},
-      "description": "The actor gateway, which actors reach this machine through"
+      "description": "The actor gateway, which actors reach this machine through",
+      "additionalProperties": {}
     },
     "network": {
       "type": "object",

@@ -66,15 +66,15 @@ orchestrator's OK and a note to every lane it touches.
 
 ### Layout
 
-- `core/schema/`: the definitions, the source of truth, one module per
-  area (`core/schema/vendor/<vendor>/<product>.js` for vendors), and
-  `core/schema/ids.js`, which builds `$id`s and parses and qualifies host
-  ids (section 2).
-- `schemas/`: the generated JSON Schema files, mirroring the `$id` paths,
-  committed. `npm run schemas` regenerates them, and a unit test fails
-  when they're out of date.
-- `docs/design/schemas.md`: the layout and the rules, and
-  `docs/design/adr/0001-schemas.md`: zod or hand-written, and why.
+- `crates/xenonet-model/src/`: the definitions, the source of truth, one
+  module per area, as Rust types with serde and schemars; `ids.rs` builds
+  `$id`s and parses and qualifies host ids (section 2). The vendor schemas
+  are hand-kept JSON Schema under `schemas/vendor/`.
+- `schemas/`: XenoNet's own JSON Schema files, written from the types,
+  mirroring the `$id` paths, committed. `XENONET_SCHEMAS_WRITE=1 cargo test
+  -p xenonet-model` writes them, and the same test fails when they're out
+  of date.
+- `docs/design/schemas.md`: the layout and the rules.
 
 ### Reading vendor data leniently
 

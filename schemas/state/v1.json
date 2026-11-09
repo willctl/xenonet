@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/state/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "XenoNet's state, v1",
   "description": "state.json before it had a version. Every part is optional: XenoNet filled in what was missing when it read the file.",
   "type": "object",
   "properties": {
     "version": {
-      "description": "Not written: a file without a version is v1",
       "type": "number",
-      "const": 1
+      "const": 1,
+      "description": "Not written: a file without a version is v1"
     },
     "layout": {
       "type": "object",
@@ -94,68 +94,64 @@
           "description": "Your rules for folders in the projects folder, by path key"
         },
         "codex": {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "ranAt": {
-                  "type": "number",
-                  "description": "Epoch milliseconds"
-                },
-                "ms": {
-                  "type": "number"
-                },
-                "fingerprint": {
-                  "description": "Of the folders it was sent, to tell when they've changed",
-                  "type": "string"
-                },
-                "sent": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "by": {
-                  "description": "Who made them: codex, or a decision model by its id (core/decide.js)",
-                  "type": "string"
-                },
-                "picks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string",
-                        "description": "Inside the projects folder, with forward slashes"
-                      },
-                      "as": {
-                        "type": "string",
-                        "enum": [
-                          "project",
-                          "group"
-                        ]
-                      },
-                      "reason": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "path",
-                      "as"
-                    ],
-                    "additionalProperties": {}
-                  }
-                }
-              },
-              "required": [
-                "ranAt",
-                "picks"
-              ],
-              "additionalProperties": {}
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "ranAt": {
+              "type": "number",
+              "description": "Epoch milliseconds"
             },
-            {
-              "type": "null"
+            "ms": {
+              "type": "number"
+            },
+            "fingerprint": {
+              "type": "string",
+              "description": "Of the folders it was sent, to tell when they've changed"
+            },
+            "sent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "by": {
+              "type": "string",
+              "description": "Who made them: codex, or a decision model by its id (core/decide.js)"
+            },
+            "picks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "description": "Inside the projects folder, with forward slashes",
+                    "type": "string"
+                  },
+                  "as": {
+                    "type": "string",
+                    "enum": [
+                      "project",
+                      "group"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "as"
+                ],
+                "additionalProperties": {}
+              }
             }
-          ]
+          },
+          "required": [
+            "ranAt",
+            "picks"
+          ],
+          "additionalProperties": {}
         }
       },
       "additionalProperties": {}
@@ -164,14 +160,14 @@
       "type": "object",
       "properties": {
         "names": {
-          "description": "Names you gave identities, by id",
           "type": "object",
           "propertyNames": {
             "type": "string"
           },
           "additionalProperties": {
             "type": "string"
-          }
+          },
+          "description": "Names you gave identities, by id"
         },
         "hidden": {
           "type": "object",
@@ -184,7 +180,6 @@
           }
         },
         "pins": {
-          "description": "Sessions and projects you tied to an identity, by node id",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -205,10 +200,10 @@
               "at"
             ],
             "additionalProperties": {}
-          }
+          },
+          "description": "Sessions and projects you tied to an identity, by node id"
         },
         "known": {
-          "description": "Every identity XenoNet has seen, by id",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -235,22 +230,22 @@
                     ]
                   },
                   "org": {
-                    "description": "A Claude team's or enterprise's name",
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "A Claude team's or enterprise's name"
                   },
                   "host": {
-                    "description": "A GitHub account's host",
-                    "type": "string"
+                    "type": "string",
+                    "description": "A GitHub account's host"
                   },
                   "name": {
-                    "description": "The name git commits carry",
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "The name git commits carry"
                   }
                 },
                 "additionalProperties": {}
@@ -272,10 +267,10 @@
               "lastSeen"
             ],
             "additionalProperties": {}
-          }
+          },
+          "description": "Every identity XenoNet has seen, by id"
         },
         "signins": {
-          "description": "Who each app was signed in as, over time, by app",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -289,12 +284,12 @@
                   "type": "string"
                 },
                 "from": {
-                  "type": "number",
-                  "description": "Epoch milliseconds"
+                  "description": "Epoch milliseconds",
+                  "type": "number"
                 },
                 "to": {
-                  "type": "number",
-                  "description": "Epoch milliseconds"
+                  "description": "Epoch milliseconds",
+                  "type": "number"
                 }
               },
               "required": [
@@ -304,14 +299,15 @@
               ],
               "additionalProperties": {}
             }
-          }
+          },
+          "description": "Who each app was signed in as, over time, by app"
         }
       },
       "additionalProperties": {}
     },
     "theme": {
-      "description": "The theme in use, by id",
-      "type": "string"
+      "type": "string",
+      "description": "The theme in use, by id"
     }
   },
   "additionalProperties": {}

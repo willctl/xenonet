@@ -1,40 +1,34 @@
 # Schemas
 
 XenoNet's own data, and the vendor data it reads, as versioned JSON Schemas.
-`contracts.md` section 1 fixes the ids and the version rules;
-`adr/0001-schemas.md` says why the definitions are zod.
+`contracts.md` section 1 fixes the ids and the version rules. The
+definitions are Rust types in `crates/xenonet-model`
+(`adr/0001-schemas.md` records the zod definitions they replaced).
 
 ## Layout
 
 | Where | What |
 |---|---|
-| `core/schema/` | The definitions, the source of truth, one module per area |
-| `schemas/<path>/v<major>.json` | The JSON Schema files, written from the definitions and committed. The path is the `$id`'s |
-| `test/schemas.test.js` | Every schema the contracts list is defined, their `$ref`s lead somewhere, and the files are current |
-| `test/schema-output.test.js` | What XenoNet really produces, checked against the definitions and the files |
-| `test/fixtures/schemas.js` | Made-up data for the edge cases the demo world doesn't reach, and cases that mustn't pass |
+| `crates/xenonet-model/src/` | The definitions, the source of truth: plain Rust types with serde and schemars, one module per area (`actor.rs`, `network.rs`, `live.rs`, `graph.rs`…), with no IO and no vendor in them |
+| `schemas/<path>/v<major>.json` | XenoNet's own JSON Schema files, written from the types and committed. The path is the `$id`'s |
+| `schemas/vendor/<vendor>/<product>/…` | The vendor schemas, hand-kept JSON Schema (see [Vendor data](#vendor-data)) |
+| `crates/xenonet-model/tests/schemas.rs` | Every file is what its type writes, none is stale and none is left over. `XENONET_SCHEMAS_WRITE=1 cargo test -p xenonet-model` writes the missing and stale ones |
+| `crates/xenonet-model/src/ids.rs` | Typed ids: `$id`s and short ids (`SchemaId`), host-qualified ids (`parse_qualified`, `qualify`), agents (`AgentId`), actors (`ActorId`, `YOU`), repos (`RepoId`) |
 
-In `core/schema/`:
+In `crates/xenonet-model/src/schema.rs`:
 
-| Module | What |
+| Item | What |
 |---|---|
-| `ids.js` | `$id`s and short ids (`schemaId`, `parseSchemaId`), host-qualified ids (`parseQualified`, `qualify`, `formatQualified`), session ids (`SESSION_APPS`, from the app registry, `core/apps.js`), actor ids (`actorId`, `parseActorId`, `YOU`) and repo ids (`repoId`, `normalizeRemote`). It imports only `core/apps.js`, which has no imports, so the page can use it |
-| `registry.js` | `define(path, major, schema, { title, description })`, `schemaFor(id)`, `schemaIds()`, `jsonSchemas()` |
-| `common.js` | What schemas are made of: `obj` (a loose object), `ms`, `count`, `nstr`, `openEnum`, `hex`, `passthrough` |
-| `check.js` | `check(idOrSchema, data, { strict })` and `explain()` |
-| `files.js` | The files in `schemas/` against the definitions, and writing them |
-| `index.js` | Imports every area, so every schema is registered. Import this to look one up by id |
-| `app.js`, `session.js`, `project.js`, `identity.js`, `graph.js`, `live.js`, `engine.js`, `doctor.js`, `theme.js`, `state.js`, `actor.js`, `drift.js` | The internal schemas, by area |
-| `vendor/<vendor>/<product>.js` | The vendor schemas, made of `vendor/common.js`'s `vendor()`, `open`, `closed`, `variants` and `skipped` (see [Vendor data](#vendor-data)) |
-| `lenient.js` | Vendor data checked against the schema files in `schemas/vendor/`, with no zod at runtime: `compile`, `inspect`, `strip`, `recheck`, `loadVendor`, `vendorSources`. No zod import, so the server can load it |
+| `Document` | A type that is a schema document: its `ID` (`engine/claim/v1`), `TITLE` and `DESCRIPTION` |
+| `Ref<T>` | A field whose schema refers to another document by its `$id`, and whose value is that document's type |
+| `Opt<T>` | A field that may be left out and is never null when it's there (`Option<T>` is nullable) |
+| `Record<V, K>` | A record: `propertyNames` from the key's schema, `additionalProperties` from the value's |
+| `tag!` | A unit type that is always one string (a document's `schema` field) |
+| `Shapes` | The transform that writes the shapes the files have always had: a loose object says `"additionalProperties": {}`, numbers carry no `format`, subschemas no `title` |
+| `documents()` | Every document's file, by id |
 
-Beside them, `core/vendor.js` has a reader per vendor source and the
-transcript normalizers' hooks, and `core/drift.js` keeps the drift they
-find, in `drift.json` in the cache folder.
-
-The files in `schemas/` are the schemas now: edit the JSON Schema itself.
-`crates/xenonet-schema` checks against them, and so do the page's tests
-(`test/harness/schema.js`).
+The files are read back by `crates/xenonet-schema` (`check.rs`, the lenient
+vendor readers) and the page's tests (`test/harness/schema.js`).
 
 ## The internal schemas
 
@@ -56,7 +50,7 @@ Where the code is loose, the schema is too:
 | `state/v1`, `state/v2` | state.json before versions, and now | v1's parts are all optional |
 | `actor/*/v1`, `drift/record/v1` | As the contracts define them | The actors' enums are open |
 | `drift/log/v1` | drift.json: when you last looked, and the `drift/record/v1`s kept | |
-| `app/v1` | An entry of the app registry (`core/apps.js`): an app XenoNet knows sessions of, and what's fixed about it. `test/apps.test.js` checks every entry | The apps XenoNet only observes have their id, name and numbat's names only |
+| `app/v1` | An entry of the app registry (`src/shared/apps.js`, embedded in `crates/xenonet-adapter` as `apps.json`): an app XenoNet knows sessions of, and what's fixed about it. `test/apps.test.js` checks every entry | The apps XenoNet only observes have their id, name and numbat's names only |
 
 ## Versions
 
@@ -93,43 +87,52 @@ version (`test/statefile.test.js`, `test/engine-store.test.js`).
 ## Adding a schema
 
 1. A new internal schema goes in the contracts first (`contracts.md`
-   section 1): the test fails for one it doesn't list. A vendor schema
-   goes under `vendor/`, made as [Vendor data](#vendor-data) says.
-2. Define it in its area's module, and use what `define` returns:
+   section 1). A vendor schema goes under `schemas/vendor/`, made as
+   [Vendor data](#vendor-data) says.
+2. Define it as a type in its area's module of `crates/xenonet-model`,
+   deriving `Serialize`, `Deserialize` and `JsonSchema`, and implement
+   `Document` for it:
 
-   ```js
-   export const Thing = define("area/thing", 1, obj({ id: z.string(), at: ms, note: nstr }), {
-     title: "A thing",
-     description: "What it is, and where XenoNet sends or keeps it.",
-   });
+   ```rust
+   /// What it is, and where XenoNet sends or keeps it.
+   #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+   pub struct Thing {
+       pub id: String,
+       pub at: Ms,
+       pub note: Option<String>,
+   }
+
+   impl Document for Thing {
+       const ID: &'static str = "area/thing/v1";
+       const TITLE: &'static str = "A thing";
+       const DESCRIPTION: &'static str = "What it is, and where XenoNet sends or keeps it.";
+   }
    ```
 
-   - Objects are `obj(...)`, so they're loose.
-   - No transforms, refinements or defaults: they don't survive the trip
-     to JSON Schema. Check the data, then convert it in code.
-   - Use a registered schema inside another (`z.array(Thing)`) and the
-     file refers to it with a `$ref`, rather than copying it.
-   - Describe what isn't obvious with `.describe()`.
-   - An object holding another app's data as it came is
-     `passthrough(obj(...))`, so strict checks don't count its keys.
-3. Import a new module from `index.js`.
-4. Write the schema file in `schemas/` and commit it with the code.
-5. Check what XenoNet really produces against it, strictly
-   (`valid(id, data)` in `test/schema-output.test.js`), and add made-up
-   cases the real data doesn't reach to `test/fixtures/schemas.js`,
-   including some that mustn't pass.
+   - Objects are loose unless the type says `#[serde(deny_unknown_fields)]`.
+   - A field that may be left out is `Opt<T>`; a nullable one is `Option<T>`
+     (with `#[schemars(required)]` when it must be there).
+   - Another document inside this one is `Ref<Other>`, and the file refers
+     to it with a `$ref`, rather than copying it.
+   - A doc comment on a field or type is its description: write one where
+     a reader of the file needs it.
+   - A string's pattern or length, a number's range: schemars's `regex`,
+     `length` and `range` attributes.
+3. Add `schema::file::<Thing>` to the module's `DOCUMENTS` list.
+4. Write the file: `XENONET_SCHEMAS_WRITE=1 cargo test -p xenonet-model`,
+   and commit it with the type.
+5. Check what XenoNet really produces against it (the route and golden
+   tests do, through `xenonet_schema::check`).
 
 ## Checking data
 
-- `check(id, data)` gives zod's issues as paths and messages. For a union
-  that fits no option, it reports the option that came closest.
-- `check(id, data, { strict: true })` also lists the keys the data has
-  that its schema doesn't declare. Tests check strictly, so the schemas
-  stay complete.
-- zod costs about 30 ms to load, so nothing on the server's way up
-  imports `core/schema/index.js`: the doctor imports it when it checks
-  state.json. Vendor data is checked against the schema files instead,
-  by `lenient.js`, which doesn't load zod (see [Vendor data](#vendor-data)).
+- `xenonet_schema::check` gives a document's issues as paths and
+  messages. For a union that fits no option, it reports the option that
+  came closest.
+- Checked strictly, it also lists the keys the data has that its schema
+  doesn't declare. Tests check strictly, so the schemas stay complete.
+- Vendor data is checked against the files under `schemas/vendor/` by the
+  lenient readers (see [Vendor data](#vendor-data)).
 
 ## Vendor data
 
@@ -222,14 +225,13 @@ observer reads processes only, so it has no vendor schema.
   people's work.
 - Made-up records for each source, ones that fit and odd ones with the
   drift each should show, are in `test/fixtures/vendor.js`;
-  `test/vendor-schemas.test.js` checks zod and the files agree on them.
+  the lenient readers' tests in `crates/xenonet-schema` read them.
 
 ### Reading leniently
 
-- At runtime the readers walk the JSON Schema files (`lenient.js`), not
-  zod: zod costs about 30 ms to load, and the files are what anyone
-  else reads. A unit test keeps the files in step with the definitions,
-  and `package.json`'s `build.files` ships them.
+- At runtime the readers walk the JSON Schema files
+  (`crates/xenonet-schema/src/lenient.rs`), which are what anyone else
+  reads too; `package.json`'s `build.files` ships them.
 - Each source has a reader (`reader(source)` in `core/vendor.js`). It
   picks the schema for the version the data carries: the newest major
   whose range has it; for a version none has, the newest, and the version

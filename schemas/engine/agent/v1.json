@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/engine/agent/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "An agent",
   "description": "A session at work, as the engine sees it. The brief form (id, title, app, project, branch) names an agent in messages and answers; the agents list and peers send the whole view; the console's snapshot sends the brief form with status, focus, claims, reachability and how many files it's editing.",
   "type": "object",
@@ -24,23 +24,31 @@
       "maxLength": 90
     },
     "project": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "branch": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "projectId": {
-      "description": "The map node it lives in",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The map node it lives in"
     },
     "projectKind": {
       "type": [
@@ -55,18 +63,18 @@
       ]
     },
     "top": {
-      "description": "Its working tree's top",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Its working tree's top"
     },
     "repo": {
-      "description": "Its repo's shared git folder, the same for every worktree",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Its repo's shared git folder, the same for every worktree"
     },
     "status": {
       "type": "string",
@@ -94,7 +102,6 @@
       ]
     },
     "reader": {
-      "description": "Read from its own records by an experimental reader (core/native), so no message reaches it",
       "anyOf": [
         {
           "type": "string",
@@ -105,21 +112,21 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "Read from its own records by an experimental reader (core/native), so no message reaches it"
     },
     "lastActive": {
       "type": "number",
       "description": "Epoch milliseconds"
     },
     "focus": {
-      "description": "What it says it's doing",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "What it says it's doing"
     },
     "editing": {
-      "description": "Files it edited in the last half hour; the console's snapshot sends how many",
       "anyOf": [
         {
           "type": "array",
@@ -130,8 +137,8 @@
                 "type": "string"
               },
               "at": {
-                "type": "number",
-                "description": "Epoch milliseconds"
+                "description": "Epoch milliseconds",
+                "type": "number"
               },
               "observed": {
                 "description": "An actor's edit XenoNet inferred from what it observes; the actor didn't report it",
@@ -150,26 +157,32 @@
           "minimum": 0,
           "maximum": 9007199254740991
         }
-      ]
+      ],
+      "description": "Files it edited in the last half hour; the console's snapshot sends how many"
     },
     "claims": {
       "type": "array",
       "items": {
+        "description": "A claim, as an agent's claims list it",
         "type": "object",
         "properties": {
           "pattern": {
-            "type": "string",
-            "description": "An absolute path, a folder (ending in /) or a glob"
+            "description": "An absolute path, a folder (ending in /) or a glob",
+            "type": "string"
           },
           "note": {
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "until": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [
@@ -177,31 +190,29 @@
           "note",
           "until"
         ],
-        "additionalProperties": {},
-        "description": "A claim, as an agent's claims list it"
+        "additionalProperties": {}
       }
     },
     "reachable": {
-      "description": "In touch directly lately, so messages reach it",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "In touch directly lately, so messages reach it"
     },
     "overlap": {
-      "description": "From peers: files you've both edited lately",
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "From peers: files you've both edited lately"
     },
     "delivery": {
-      "description": "From send: when it will see the message",
-      "type": "string"
+      "type": "string",
+      "description": "From send: when it will see the message"
     },
     "host": {
-      "description": "In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>",
-      "type": "string"
+      "type": "string",
+      "description": "In a XenoNet network, the host an agent on another machine is on; its id is @<host>:<id>"
     },
     "seen": {
-      "description": "For an agent on another host: when that host was last heard from",
       "anyOf": [
         {
           "type": "number",
@@ -210,50 +221,47 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "For an agent on another host: when that host was last heard from"
     },
     "online": {
-      "description": "For an agent on another host: whether its host's link is up; offline since seen when it isn't",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "For an agent on another host: whether its host's link is up; offline since seen when it isn't"
     },
     "repoKey": {
-      "description": "For an agent on another host: the normalized git remote of its folder, which clones of one repo share",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "For an agent on another host: the normalized git remote of its folder, which clones of one repo share"
     },
     "waitsOnYou": {
-      "description": "For an agent on another host: a question or a stuck state waits on the person",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "For an agent on another host: a question or a stuck state waits on the person"
     },
     "question": {
-      "description": "For an agent on another host, in the console's snapshot only: the text of what waits on the person, as its host's presence carries it; null when it shares titles only",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "For an agent on another host, in the console's snapshot only: the text of what waits on the person, as its host's presence carries it; null when it shares titles only"
     },
     "lastMessage": {
-      "description": "For an agent on another host, in the console's snapshot only: what it said last, at most 280 characters",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "For an agent on another host, in the console's snapshot only: what it said last, at most 280 characters"
     },
     "stuck": {
-      "description": "For an agent on another host, in the console's snapshot only: why it seems stuck",
-      "anyOf": [
-        {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "For an agent on another host, in the console's snapshot only: why it seems stuck"
     }
   },
   "required": [

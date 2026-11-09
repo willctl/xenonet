@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/live/session/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A live session",
   "description": "One session as the tailer sees it: what it's doing, its tokens and context, its tools, files and subagents, and whether it needs you or seems stuck.",
   "type": "object",
@@ -40,8 +40,8 @@
         "processed",
         "output"
       ],
-      "additionalProperties": {},
-      "description": "Over the last 24 hours of its transcript"
+      "description": "Over the last 24 hours of its transcript",
+      "additionalProperties": {}
     },
     "tokensToday": {
       "type": "number"
@@ -74,9 +74,13 @@
           "description": "How full the context is, 0 to 1"
         },
         "growthPerTurn": {
-          "type": [
-            "number",
-            "null"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "turnsLeft": {
@@ -101,9 +105,13 @@
       "additionalProperties": {}
     },
     "model": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "turnStartedAt": {
@@ -172,7 +180,6 @@
       "description": "Tool calls by category"
     },
     "subagents": {
-      "maxItems": 12,
       "type": "array",
       "items": {
         "type": "object",
@@ -184,12 +191,12 @@
             "type": "string"
           },
           "startedAt": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           },
           "lastAt": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           },
           "tools": {
             "type": "integer",
@@ -213,10 +220,10 @@
           "active"
         ],
         "additionalProperties": {}
-      }
+      },
+      "maxItems": 12
     },
     "files": {
-      "maxItems": 10,
       "type": "array",
       "items": {
         "type": "object",
@@ -225,8 +232,8 @@
             "type": "string"
           },
           "ts": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [
@@ -235,7 +242,8 @@
         ],
         "additionalProperties": {}
       },
-      "description": "Files it touched in the last 20 minutes, newest first"
+      "description": "Files it touched in the last 20 minutes, newest first",
+      "maxItems": 10
     },
     "mcp": {
       "type": "array",
@@ -246,8 +254,8 @@
             "type": "string"
           },
           "ts": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [
@@ -278,7 +286,6 @@
               "description": "Epoch milliseconds"
             },
             "asOf": {
-              "description": "From a host that isn't live: when it last was",
               "anyOf": [
                 {
                   "type": "number",
@@ -287,7 +294,8 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "From a host that isn't live: when it last was"
             }
           },
           "required": [
@@ -309,11 +317,11 @@
           "type": "object",
           "properties": {
             "reasons": {
-              "minItems": 1,
               "type": "array",
               "items": {
                 "type": "string"
-              }
+              },
+              "minItems": 1
             }
           },
           "required": [
@@ -327,9 +335,13 @@
       ]
     },
     "lastMessage": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "lastTurnEndAt": {
@@ -344,7 +356,6 @@
       ]
     },
     "interruptedAt": {
-      "description": "When you stopped its last turn (a Claude interruption, or a Codex turn you aborted), until its next prompt: it waits on you, but isn't ready for review",
       "anyOf": [
         {
           "type": "number",
@@ -353,23 +364,24 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "When you stopped its last turn (a Claude interruption, or a Codex turn you aborted), until its next prompt: it waits on you, but isn't ready for review"
     },
     "lastEventAt": {
       "type": "number",
       "description": "Epoch milliseconds"
     },
     "permissionMode": {
-      "description": "How it asks before it acts (default, acceptEdits, plan, bypassPermissions…), as its hooks last said",
-      "type": "string"
+      "type": "string",
+      "description": "How it asks before it acts (default, acceptEdits, plan, bypassPermissions…), as its hooks last said"
     },
     "host": {
-      "description": "The host it's from, for a session on another machine",
-      "type": "string"
+      "type": "string",
+      "description": "The host it's from, for a session on another machine"
     },
     "stale": {
-      "description": "Its host isn't live: it's shown idle, as of when the host last was",
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Its host isn't live: it's shown idle, as of when the host last was"
     }
   },
   "required": [

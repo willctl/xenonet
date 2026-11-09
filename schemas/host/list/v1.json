@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/host/list/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Hosts",
   "description": "hosts.json in XenoNet's state folder: this XenoNet's own host id and key, and the other machines' XenoNets it shows, with how to reach each.",
   "type": "object",
@@ -57,27 +57,29 @@
         "type": "object",
         "properties": {
           "id": {
+            "description": "This console's name for the host, which its ids carry: @<id>:…",
             "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{1,31}$",
-            "description": "This console's name for the host, which its ids carry: @<id>:…"
+            "pattern": "^[a-z][a-z0-9-]{1,31}$"
           },
           "transport": {
+            "description": "ssh: ssh -F <XenoNet's ssh config> <id> xenonet relay; local: the relay of another XenoNet on this machine",
             "type": "string",
             "enum": [
               "ssh",
               "local"
-            ],
-            "description": "ssh: ssh -F <XenoNet's ssh config> <id> xenonet relay; local: the relay of another XenoNet on this machine"
+            ]
           },
           "ssh": {
+            "description": "Null for local",
             "anyOf": [
               {
+                "description": "How ssh reaches the host, as XenoNet writes it into its own ssh config",
                 "type": "object",
                 "properties": {
                   "hostname": {
+                    "description": "ssh's HostName: the machine's name or address",
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$",
-                    "description": "ssh's HostName: the machine's name or address"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
                   },
                   "user": {
                     "anyOf": [
@@ -91,6 +93,7 @@
                     ]
                   },
                   "port": {
+                    "description": "ssh's port, when it isn't 22",
                     "anyOf": [
                       {
                         "type": "integer",
@@ -100,10 +103,10 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "ssh's port, when it isn't 22"
+                    ]
                   },
                   "identity": {
+                    "description": "A key of its own for this host (IdentityFile, with IdentitiesOnly)",
                     "anyOf": [
                       {
                         "type": "string",
@@ -112,10 +115,10 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "A key of its own for this host (IdentityFile, with IdentitiesOnly)"
+                    ]
                   },
                   "knownHosts": {
+                    "description": "A known_hosts file of its own (UserKnownHostsFile)",
                     "anyOf": [
                       {
                         "type": "string",
@@ -124,10 +127,10 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "A known_hosts file of its own (UserKnownHostsFile)"
+                    ]
                   },
                   "hostKeyAlias": {
+                    "description": "The name its host key is kept under (HostKeyAlias)",
                     "anyOf": [
                       {
                         "type": "string",
@@ -136,8 +139,7 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "The name its host key is kept under (HostKeyAlias)"
+                    ]
                   }
                 },
                 "required": [
@@ -148,22 +150,21 @@
                   "knownHosts",
                   "hostKeyAlias"
                 ],
-                "additionalProperties": {},
-                "description": "How ssh reaches the host, as XenoNet writes it into its own ssh config"
+                "additionalProperties": {}
               },
               {
                 "type": "null"
               }
-            ],
-            "description": "Null for local"
+            ]
           },
           "port": {
+            "description": "The port of the XenoNet it reads on that machine",
             "type": "integer",
             "minimum": 1,
-            "maximum": 65535,
-            "description": "The port of the XenoNet it reads on that machine"
+            "maximum": 65535
           },
           "command": {
+            "description": "The xenonet command on the host: xenonet, or its absolute path where commands run over SSH don't find it; null for local",
             "anyOf": [
               {
                 "type": "string",
@@ -172,51 +173,50 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "The xenonet command on the host: xenonet, or its absolute path where commands run over SSH don't find it; null for local"
+            ]
           },
           "since": {
+            "description": "How far back the relay sends sessions: 7d, 12h, 90m",
             "type": "string",
-            "pattern": "^\\d{1,4}[mhd]$",
-            "description": "How far back the relay sends sessions: 7d, 12h, 90m"
+            "pattern": "^\\d{1,4}[mhd]$"
           },
           "detail": {
-            "type": "boolean",
-            "description": "Whether live detail crosses too (a waiting question's text, the last message, tool details, files touched), or only titles, states and counts"
+            "description": "Whether live detail crosses too (a waiting question's text, the last message, tool details, files touched), or only titles, states and counts",
+            "type": "boolean"
           },
           "start": {
             "description": "The relay starts a XenoNet there, for as long as it runs, when none is running: for a machine with no service set up",
             "type": "boolean"
           },
           "key": {
+            "description": "The host's key, learned the first time it answered",
             "anyOf": [
               {
+                "description": "Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that",
                 "type": "string",
-                "pattern": "^[0-9a-f]{32}$",
-                "description": "Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that"
+                "pattern": "^[0-9a-f]{32}$"
               },
               {
                 "type": "null"
               }
-            ],
-            "description": "The host's key, learned the first time it answered"
+            ]
           },
           "name": {
+            "description": "What the host calls itself, when that isn't the id here",
             "anyOf": [
               {
+                "description": "A name someone chose, ^[a-z][a-z0-9-]{1,31}$: never the machine's own name, which often holds a person's",
                 "type": "string",
-                "pattern": "^[a-z][a-z0-9-]{1,31}$",
-                "description": "A name someone chose, ^[a-z][a-z0-9-]{1,31}$: never the machine's own name, which often holds a person's"
+                "pattern": "^[a-z][a-z0-9-]{1,31}$"
               },
               {
                 "type": "null"
               }
-            ],
-            "description": "What the host calls itself, when that isn't the id here"
+            ]
           },
           "addedAt": {
-            "type": "number",
-            "description": "Epoch milliseconds"
+            "description": "Epoch milliseconds",
+            "type": "number"
           }
         },
         "required": [

@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/assistant/result/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A remote actor's answer",
   "description": "What one of the six read-only tools of xenonet mcp assistant answers: who asked (request_id), from which device and grant revision, how fresh it is, and the data. Strict: nothing the contract doesn't name.",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "schema": {
       "type": "string",
@@ -28,8 +29,8 @@
         {
           "type": "string",
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-          "description": "ISO 8601, UTC"
+          "description": "ISO 8601, UTC",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         {
           "type": "null"
@@ -40,8 +41,8 @@
     "served_at": {
       "type": "string",
       "format": "date-time",
-      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-      "description": "When this answer was sent, which is not when it was observed"
+      "description": "When this answer was sent, which is not when it was observed",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     },
     "freshness": {
       "type": "string",
@@ -55,7 +56,6 @@
       "type": "boolean"
     },
     "warnings": {
-      "maxItems": 16,
       "type": "array",
       "items": {
         "type": "object",
@@ -81,16 +81,18 @@
             ]
           }
         },
+        "additionalProperties": false,
         "required": [
           "code"
-        ],
-        "additionalProperties": false
-      }
+        ]
+      },
+      "maxItems": 16
     },
     "data": {
       "anyOf": [
         {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "mode": {
               "type": "string",
@@ -128,6 +130,7 @@
             },
             "actor": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "actor_id": {
                   "type": "string",
@@ -167,11 +170,11 @@
                 "account_link_state",
                 "participation",
                 "messaging"
-              ],
-              "additionalProperties": false
+              ]
             },
             "device": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "id": {
                   "type": "string",
@@ -192,8 +195,7 @@
               "required": [
                 "id",
                 "alias"
-              ],
-              "additionalProperties": false
+              ]
             },
             "authorized_project_count": {
               "type": "integer",
@@ -235,10 +237,10 @@
                   "observed_at": {
                     "anyOf": [
                       {
+                        "description": "ISO 8601, UTC",
                         "type": "string",
                         "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                        "description": "ISO 8601, UTC"
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                       },
                       {
                         "type": "null"
@@ -254,24 +256,24 @@
                     ]
                   },
                   "reason": {
+                    "description": "A fixed reason, never the source's own error",
                     "type": "string",
                     "enum": [
                       "ok",
                       "read_failed",
                       "not_started",
                       "stopped"
-                    ],
-                    "description": "A fixed reason, never the source's own error"
+                    ]
                   }
                 },
+                "additionalProperties": false,
                 "required": [
                   "source",
                   "state",
                   "observed_at",
                   "coverage",
                   "reason"
-                ],
-                "additionalProperties": false
+                ]
               }
             },
             "transport_scope": {
@@ -308,20 +310,19 @@
             "sources",
             "transport_scope",
             "audience_label"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "window_start": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-              "description": "ISO 8601, UTC"
+              "description": "ISO 8601, UTC",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
             },
             "projects": {
-              "maxItems": 50,
               "type": "array",
               "items": {
                 "type": "object",
@@ -331,6 +332,7 @@
                     "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                   },
                   "label": {
+                    "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything",
                     "anyOf": [
                       {
                         "type": "string",
@@ -339,8 +341,7 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything"
+                    ]
                   },
                   "session_counts": {
                     "type": "object",
@@ -376,6 +377,7 @@
                         "maximum": 9007199254740991
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
                       "working",
                       "waiting",
@@ -383,16 +385,15 @@
                       "completed",
                       "stuck",
                       "unknown"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "observed_at": {
                     "anyOf": [
                       {
+                        "description": "ISO 8601, UTC",
                         "type": "string",
                         "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                        "description": "ISO 8601, UTC"
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                       },
                       {
                         "type": "null"
@@ -400,21 +401,22 @@
                     ]
                   }
                 },
+                "additionalProperties": false,
                 "required": [
                   "project_id",
                   "label",
                   "session_counts",
                   "observed_at"
-                ],
-                "additionalProperties": false
-              }
+                ]
+              },
+              "maxItems": 50
             },
             "next_cursor": {
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
-                  "description": "An opaque page token from next_cursor, good for five minutes"
+                  "description": "An opaque page token from next_cursor, good for five minutes",
+                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$"
                 },
                 {
                   "type": "null"
@@ -426,14 +428,13 @@
             "window_start",
             "projects",
             "next_cursor"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "sessions": {
-              "maxItems": 50,
               "type": "array",
               "items": {
                 "type": "object",
@@ -455,6 +456,7 @@
                     ]
                   },
                   "label": {
+                    "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything",
                     "anyOf": [
                       {
                         "type": "string",
@@ -463,8 +465,7 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything"
+                    ]
                   },
                   "status": {
                     "type": "string",
@@ -493,10 +494,10 @@
                   "updated_at": {
                     "anyOf": [
                       {
+                        "description": "ISO 8601, UTC",
                         "type": "string",
                         "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                        "description": "ISO 8601, UTC"
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                       },
                       {
                         "type": "null"
@@ -506,10 +507,10 @@
                   "last_activity_at": {
                     "anyOf": [
                       {
+                        "description": "ISO 8601, UTC",
                         "type": "string",
                         "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                        "description": "ISO 8601, UTC"
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                       },
                       {
                         "type": "null"
@@ -525,6 +526,7 @@
                     ]
                   }
                 },
+                "additionalProperties": false,
                 "required": [
                   "session_id",
                   "project_id",
@@ -535,16 +537,16 @@
                   "updated_at",
                   "last_activity_at",
                   "source_state"
-                ],
-                "additionalProperties": false
-              }
+                ]
+              },
+              "maxItems": 50
             },
             "next_cursor": {
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
-                  "description": "An opaque page token from next_cursor, good for five minutes"
+                  "description": "An opaque page token from next_cursor, good for five minutes",
+                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$"
                 },
                 {
                   "type": "null"
@@ -554,22 +556,21 @@
             "window_start": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-              "description": "ISO 8601, UTC"
+              "description": "ISO 8601, UTC",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
             }
           },
           "required": [
             "sessions",
             "next_cursor",
             "window_start"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "items": {
-              "maxItems": 50,
               "type": "array",
               "items": {
                 "type": "object",
@@ -588,13 +589,13 @@
                     ]
                   },
                   "session_ids": {
-                    "minItems": 1,
-                    "maxItems": 2,
                     "type": "array",
                     "items": {
                       "type": "string",
                       "pattern": "^(claude|codex|grok):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-                    }
+                    },
+                    "minItems": 1,
+                    "maxItems": 2
                   },
                   "project_id": {
                     "type": "string",
@@ -603,10 +604,10 @@
                   "first_observed_at": {
                     "anyOf": [
                       {
+                        "description": "ISO 8601, UTC",
                         "type": "string",
                         "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                        "description": "ISO 8601, UTC"
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                       },
                       {
                         "type": "null"
@@ -616,10 +617,10 @@
                   "last_observed_at": {
                     "anyOf": [
                       {
+                        "description": "ISO 8601, UTC",
                         "type": "string",
                         "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                        "description": "ISO 8601, UTC"
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                       },
                       {
                         "type": "null"
@@ -649,6 +650,7 @@
                     "const": false
                   }
                 },
+                "additionalProperties": false,
                 "required": [
                   "attention_id",
                   "kind",
@@ -658,16 +660,16 @@
                   "last_observed_at",
                   "reason_code",
                   "resolved"
-                ],
-                "additionalProperties": false
-              }
+                ]
+              },
+              "maxItems": 50
             },
             "next_cursor": {
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
-                  "description": "An opaque page token from next_cursor, good for five minutes"
+                  "description": "An opaque page token from next_cursor, good for five minutes",
+                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$"
                 },
                 {
                   "type": "null"
@@ -678,14 +680,15 @@
           "required": [
             "items",
             "next_cursor"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "session": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "session_id": {
                   "type": "string",
@@ -744,8 +747,8 @@
                     {
                       "type": "string",
                       "format": "date-time",
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                      "description": "ISO 8601, UTC"
+                      "description": "ISO 8601, UTC",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                     },
                     {
                       "type": "null"
@@ -757,8 +760,8 @@
                     {
                       "type": "string",
                       "format": "date-time",
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                      "description": "ISO 8601, UTC"
+                      "description": "ISO 8601, UTC",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                     },
                     {
                       "type": "null"
@@ -784,13 +787,13 @@
                 "updated_at",
                 "last_activity_at",
                 "source_state"
-              ],
-              "additionalProperties": false
+              ]
             },
             "stats": {
               "anyOf": [
                 {
                   "type": "object",
+                  "additionalProperties": false,
                   "properties": {
                     "input_tokens": {
                       "anyOf": [
@@ -860,8 +863,8 @@
                     "stats_observed_at": {
                       "type": "string",
                       "format": "date-time",
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-                      "description": "ISO 8601, UTC"
+                      "description": "ISO 8601, UTC",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                     },
                     "complete": {
                       "type": "boolean"
@@ -875,8 +878,7 @@
                     "turn_count",
                     "stats_observed_at",
                     "complete"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "null"
@@ -887,18 +889,17 @@
           "required": [
             "session",
             "stats"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "self_actor_id": {
               "type": "string",
               "pattern": "^actor:[a-z0-9][a-z0-9-]{0,31}$"
             },
             "actors": {
-              "maxItems": 50,
               "type": "array",
               "items": {
                 "type": "object",
@@ -908,6 +909,7 @@
                     "pattern": "^actor:[a-z0-9][a-z0-9-]{0,31}$"
                   },
                   "product_id": {
+                    "description": "From XenoNet's own product table; null for an actor of the owner's own",
                     "anyOf": [
                       {
                         "type": "string",
@@ -916,10 +918,10 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "From XenoNet's own product table; null for an actor of the owner's own"
+                    ]
                   },
                   "label": {
+                    "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything",
                     "anyOf": [
                       {
                         "type": "string",
@@ -928,8 +930,7 @@
                       {
                         "type": "null"
                       }
-                    ],
-                    "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything"
+                    ]
                   },
                   "presence": {
                     "type": "string",
@@ -967,7 +968,6 @@
                     ]
                   },
                   "relations": {
-                    "maxItems": 16,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -996,18 +996,20 @@
                           ]
                         }
                       },
+                      "additionalProperties": false,
                       "required": [
                         "target_id",
                         "relation"
-                      ],
-                      "additionalProperties": false
-                    }
+                      ]
+                    },
+                    "maxItems": 16
                   },
                   "reachable": {
-                    "type": "boolean",
-                    "description": "Whether messages reach it; false for every remote actor in this version"
+                    "description": "Whether messages reach it; false for every remote actor in this version",
+                    "type": "boolean"
                   }
                 },
+                "additionalProperties": false,
                 "required": [
                   "actor_id",
                   "product_id",
@@ -1018,16 +1020,16 @@
                   "account_link_state",
                   "relations",
                   "reachable"
-                ],
-                "additionalProperties": false
-              }
+                ]
+              },
+              "maxItems": 50
             },
             "next_cursor": {
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
-                  "description": "An opaque page token from next_cursor, good for five minutes"
+                  "description": "An opaque page token from next_cursor, good for five minutes",
+                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$"
                 },
                 {
                   "type": "null"
@@ -1039,8 +1041,7 @@
             "self_actor_id",
             "actors",
             "next_cursor"
-          ],
-          "additionalProperties": false
+          ]
         }
       ]
     }
@@ -1056,6 +1057,5 @@
     "partial",
     "warnings",
     "data"
-  ],
-  "additionalProperties": false
+  ]
 }

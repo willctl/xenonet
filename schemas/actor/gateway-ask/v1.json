@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/actor/gateway-ask/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A session's ask for a gateway token",
   "description": "The answer to asking for an actor's gateway token: that it waits for an Allow in XenoNet's window. It never holds a token, so whoever asks never sees one: the token is made, and shown masked, only in the window.",
   "type": "object",
@@ -21,8 +21,8 @@
     },
     "request": {
       "type": "string",
-      "minLength": 1,
-      "description": "The ask's id, which the window answers with POST /api/actors/requests/<id>"
+      "description": "The ask's id, which the window answers with POST /api/actors/requests/<id>",
+      "minLength": 1
     },
     "expiresAt": {
       "type": "number",

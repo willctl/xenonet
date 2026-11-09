@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/message/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A message between hosts",
   "description": "One message from an agent, actor or the person on one host to an agent or actor on another.",
   "type": "object",
@@ -17,9 +17,9 @@
     },
     "sender": {
       "type": "string",
+      "description": "The sender's id on its own host; the receiver qualifies it",
       "minLength": 1,
-      "maxLength": 200,
-      "description": "The sender's id on its own host; the receiver qualifies it"
+      "maxLength": 200
     },
     "senderKind": {
       "type": "string",
@@ -49,14 +49,14 @@
         "method",
         "strength"
       ],
-      "additionalProperties": {},
-      "description": "How the sender's own host checked it"
+      "description": "How the sender's own host checked it",
+      "additionalProperties": {}
     },
     "target": {
       "type": "string",
+      "description": "The recipient's id on the receiving host, unqualified",
       "minLength": 1,
-      "maxLength": 200,
-      "description": "The recipient's id on the receiving host, unqualified"
+      "maxLength": 200
     },
     "body": {
       "type": "string",

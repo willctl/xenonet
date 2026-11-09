@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/handoff/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A handoff",
   "description": "Work one session leaves for another, perhaps on another machine; taken by the first that accepts it.",
   "type": "object",
@@ -26,8 +26,8 @@
     },
     "from": {
       "type": "string",
-      "maxLength": 200,
-      "description": "The maker, unqualified, on the frame's sender"
+      "description": "The maker, unqualified, on the frame's sender",
+      "maxLength": 200
     },
     "to": {
       "type": "object",
@@ -108,12 +108,12 @@
       ]
     },
     "files": {
-      "maxItems": 200,
       "type": "array",
       "items": {
         "type": "string",
         "maxLength": 1000
-      }
+      },
+      "maxItems": 200
     },
     "branch": {
       "anyOf": [

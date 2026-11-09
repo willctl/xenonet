@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/doctor/run/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A doctor run",
   "description": "Every check the doctor ran, and how many came out each way.",
   "type": "object",
   "properties": {
     "schema": {
-      "description": "In doctor.json",
       "type": "string",
-      "const": "doctor/run/v1"
+      "const": "doctor/run/v1",
+      "description": "In doctor.json"
     },
     "at": {
       "type": "number",
@@ -63,11 +63,11 @@
       "additionalProperties": {}
     },
     "by": {
-      "description": "Which XenoNet ran it, when the xenonet command asked one; null when it ran in the command itself",
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Which XenoNet ran it, when the xenonet command asked one; null when it ran in the command itself"
     }
   },
   "required": [

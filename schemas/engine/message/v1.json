@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/engine/message/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A message between agents",
   "description": "A message from one agent to another, to everyone in a repo (target repo:<name>) or to all (\"all\"), at most 4,000 characters.",
   "anyOf": [
@@ -28,7 +28,6 @@
           "description": "Epoch milliseconds"
         },
         "how": {
-          "description": "How XenoNet knows who sent it (its envelope's method); null for one sent before XenoNet kept that",
           "anyOf": [
             {
               "anyOf": [
@@ -50,7 +49,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "How XenoNet knows who sent it (its envelope's method); null for one sent before XenoNet kept that"
         },
         "to": {
           "type": "array",
@@ -58,8 +58,8 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string",
-                "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+                "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>",
+                "type": "string"
               },
               "seen": {
                 "type": "boolean"
@@ -95,8 +95,8 @@
         "at",
         "to"
       ],
-      "additionalProperties": {},
-      "description": "In the console's snapshot, GET /api/engine/state"
+      "description": "In the console's snapshot, GET /api/engine/state",
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -126,15 +126,23 @@
               ]
             },
             "project": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "branch": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },
@@ -171,217 +179,221 @@
           ]
         },
         "envelope": {
-          "description": "How XenoNet knows who sent it; null for one sent before XenoNet kept that",
-          "anyOf": [
-            {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "message/envelope/v1"
+            },
+            "mid": {
+              "type": "string"
+            },
+            "at": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            "sender": {
               "type": "object",
               "properties": {
-                "schema": {
-                  "type": "string",
-                  "const": "message/envelope/v1"
-                },
-                "mid": {
+                "id": {
                   "type": "string"
                 },
-                "at": {
-                  "type": "number",
-                  "description": "Epoch milliseconds"
-                },
-                "sender": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "kind": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "agent",
-                            "actor",
-                            "you"
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "product": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "kind",
-                    "name",
-                    "product"
-                  ],
-                  "additionalProperties": {}
-                },
-                "auth": {
-                  "type": "object",
-                  "properties": {
-                    "method": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "session",
-                            "token",
-                            "window",
-                            "grant",
-                            "gateway",
-                            "host"
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "How it proved who it is; host: another host of the network signed the frame that brought it"
-                    },
-                    "process": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "signed",
-                            "checked",
-                            "unchecked",
-                            "n/a"
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "description": "What XenoNet saw of the program that sent it"
-                    },
-                    "strength": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "strong",
-                            "partial",
-                            "weak"
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "method",
-                    "process",
-                    "strength"
-                  ],
-                  "additionalProperties": {}
-                },
-                "client": {
+                "kind": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "exe": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "exe",
-                        "name"
-                      ],
-                      "additionalProperties": {}
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "actor",
+                        "you"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
                     },
                     {
                       "type": "null"
                     }
-                  ],
-                  "description": "The program it came from, with the home folder as ~, when XenoNet saw it"
+                  ]
                 },
-                "transport": {
-                  "type": "string",
-                  "description": "this machine, tunnel, gateway, or network: from another host of a XenoNet network"
-                },
-                "host": {
-                  "description": "For transport network: the host it came from",
-                  "type": "string"
-                },
-                "original": {
-                  "description": "For transport network: how the host it came from checked the sender; a weak check stays weak",
-                  "type": "object",
-                  "properties": {
-                    "kind": {
+                "product": {
+                  "anyOf": [
+                    {
                       "type": "string"
                     },
-                    "method": {
-                      "type": "string"
-                    },
-                    "strength": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "strong",
-                            "weak"
-                          ]
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ]
+                    {
+                      "type": "null"
                     }
-                  },
-                  "required": [
-                    "kind",
-                    "method",
-                    "strength"
-                  ],
-                  "additionalProperties": {}
-                },
-                "hops": {
-                  "description": "For transport network: the messages before it in its thread, across hosts",
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "line": {
-                  "type": "string",
-                  "description": "The same in a sentence: verified: …"
+                  ]
                 }
               },
               "required": [
-                "schema",
-                "mid",
-                "at",
-                "sender",
-                "auth",
-                "client",
-                "transport",
-                "line"
+                "id",
+                "kind",
+                "name",
+                "product"
               ],
               "additionalProperties": {}
             },
-            {
-              "type": "null"
+            "auth": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "session",
+                        "token",
+                        "window",
+                        "grant",
+                        "gateway",
+                        "host"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "How it proved who it is; host: another host of the network signed the frame that brought it"
+                },
+                "process": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "signed",
+                        "checked",
+                        "unchecked",
+                        "n/a"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "What XenoNet saw of the program that sent it"
+                },
+                "strength": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "strong",
+                        "partial",
+                        "weak"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "method",
+                "process",
+                "strength"
+              ],
+              "additionalProperties": {}
+            },
+            "client": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "exe": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "exe",
+                    "name"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The program it came from, with the home folder as ~, when XenoNet saw it"
+            },
+            "transport": {
+              "type": "string",
+              "description": "this machine, tunnel, gateway, or network: from another host of a XenoNet network"
+            },
+            "host": {
+              "type": "string",
+              "description": "For transport network: the host it came from"
+            },
+            "original": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "strength": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "strong",
+                        "weak"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "method",
+                "strength"
+              ],
+              "description": "For transport network: how the host it came from checked the sender; a weak check stays weak",
+              "additionalProperties": {}
+            },
+            "hops": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "For transport network: the messages before it in its thread, across hosts"
+            },
+            "line": {
+              "type": "string",
+              "description": "The same in a sentence: verified: …"
             }
-          ]
+          },
+          "required": [
+            "schema",
+            "mid",
+            "at",
+            "sender",
+            "auth",
+            "client",
+            "transport",
+            "line"
+          ],
+          "description": "How XenoNet knows who sent it; null for one sent before XenoNet kept that",
+          "additionalProperties": {}
         }
       },
       "required": [
@@ -392,8 +404,8 @@
         "at",
         "replyTo"
       ],
-      "additionalProperties": {},
-      "description": "In an agent's inbox"
+      "description": "In an agent's inbox",
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -410,8 +422,8 @@
         "to": {
           "type": "array",
           "items": {
-            "type": "string",
-            "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>"
+            "description": "An agent: claude:<session id>, codex:<thread id> or grok:<session id>, or an actor, actor:<slug>",
+            "type": "string"
           }
         },
         "target": {
@@ -425,8 +437,8 @@
           "description": "Epoch milliseconds"
         },
         "verified": {
-          "description": "How XenoNet knows who sent it, in a sentence",
-          "type": "string"
+          "type": "string",
+          "description": "How XenoNet knows who sent it, in a sentence"
         },
         "strength": {
           "anyOf": [
@@ -452,8 +464,8 @@
         "text",
         "ts"
       ],
-      "additionalProperties": {},
-      "description": "The agent-message event"
+      "description": "The agent-message event",
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -471,11 +483,15 @@
           "type": "string"
         },
         "scope": {
-          "description": "For a message to a repo, the repo's git folder or project",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For a message to a repo, the repo's git folder or project"
         },
         "body": {
           "type": "string"
@@ -497,25 +513,25 @@
           "description": "Epoch milliseconds"
         },
         "envelope": {
-          "description": "How XenoNet knew who sent it, as message/envelope/v1 JSON (core/engine/attest.js); null before it kept that",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "How XenoNet knew who sent it, as message/envelope/v1 JSON (core/engine/attest.js); null before it kept that"
         },
         "host": {
-          "description": "The host of a XenoNet network it came from; null for one made on this machine",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The host of a XenoNet network it came from; null for one made on this machine"
         },
         "mid": {
-          "description": "Its id across the network (its envelope's mid), for one that went to or came from another host",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Its id across the network (its envelope's mid), for one that went to or came from another host"
         }
       },
       "required": [
@@ -527,8 +543,8 @@
         "reply_to",
         "created_at"
       ],
-      "additionalProperties": {},
-      "description": "As engine.sqlite keeps it"
+      "description": "As engine.sqlite keeps it",
+      "additionalProperties": {}
     }
   ]
 }

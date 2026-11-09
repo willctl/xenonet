@@ -33,6 +33,11 @@ xenonet-doctor = { path = "crates/xenonet-doctor" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde_json = { version = "1", features = ["preserve_order"] }
+# The data model's types (crates/xenonet-model), from which the JSON Schemas
+# in schemas/ are written: serde for the data, schemars for the schemas.
+serde = { version = "1", features = ["derive"] }
+schemars = { version = "1", default-features = false, features = ["derive", "std"] }
+xenonet-model = { path = "crates/xenonet-model" }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
 regex = "1"

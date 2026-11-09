@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/network/claims/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "Claims across clones",
   "description": "What a host's agents claimed or are changing, by repo remote and path inside the repo, so agents on other hosts are warned.",
   "type": "object",
@@ -14,7 +14,6 @@
       "type": "boolean"
     },
     "claims": {
-      "maxItems": 5000,
       "type": "array",
       "items": {
         "type": "object",
@@ -25,10 +24,10 @@
             "maxLength": 300
           },
           "path": {
+            "description": "Inside the repo, with / between parts",
             "type": "string",
             "minLength": 1,
-            "maxLength": 1000,
-            "description": "Inside the repo, with / between parts"
+            "maxLength": 1000
           },
           "agent": {
             "type": "string",
@@ -47,18 +46,18 @@
             ]
           },
           "kind": {
+            "description": "claim: the agent claimed it; edit: XenoNet saw it change",
             "type": "string",
             "enum": [
               "claim",
               "edit"
-            ],
-            "description": "claim: the agent claimed it; edit: XenoNet saw it change"
+            ]
           },
           "until": {
             "anyOf": [
               {
-                "type": "number",
-                "description": "Epoch milliseconds"
+                "description": "Epoch milliseconds",
+                "type": "number"
               },
               {
                 "type": "null"
@@ -75,10 +74,10 @@
           "until"
         ],
         "additionalProperties": {}
-      }
+      },
+      "maxItems": 5000
     },
     "released": {
-      "maxItems": 5000,
       "type": "array",
       "items": {
         "type": "object",
@@ -102,7 +101,8 @@
           "agent"
         ],
         "additionalProperties": {}
-      }
+      },
+      "maxItems": 5000
     }
   },
   "required": [

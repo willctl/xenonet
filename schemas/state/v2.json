@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/state/v2.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "XenoNet's state",
   "description": "state.json: where you dragged nodes, the alerts you dismissed, the projects folder and how to read it (your rules, and Codex's picks for each root), identities (your names and pins, and the sign-ins XenoNet has seen), and the theme.",
   "type": "object",
@@ -14,11 +14,11 @@
       "type": "object",
       "properties": {
         "root": {
-          "description": "The projects folder; null for XENONET_PROJECTS_DIR, or else ~/Projects",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The projects folder; null for XENONET_PROJECTS_DIR, or else ~/Projects"
         }
       },
       "required": [
@@ -124,8 +124,8 @@
                 "type": "number"
               },
               "fingerprint": {
-                "description": "Of the folders it was sent, to tell when they've changed",
-                "type": "string"
+                "type": "string",
+                "description": "Of the folders it was sent, to tell when they've changed"
               },
               "sent": {
                 "type": "integer",
@@ -133,8 +133,8 @@
                 "maximum": 9007199254740991
               },
               "by": {
-                "description": "Who made them: codex, or a decision model by its id (core/decide.js)",
-                "type": "string"
+                "type": "string",
+                "description": "Who made them: codex, or a decision model by its id (core/decide.js)"
               },
               "picks": {
                 "type": "array",
@@ -142,8 +142,8 @@
                   "type": "object",
                   "properties": {
                     "path": {
-                      "type": "string",
-                      "description": "Inside the projects folder, with forward slashes"
+                      "description": "Inside the projects folder, with forward slashes",
+                      "type": "string"
                     },
                     "as": {
                       "type": "string",
@@ -183,14 +183,14 @@
       "type": "object",
       "properties": {
         "names": {
-          "description": "Names you gave identities, by id",
           "type": "object",
           "propertyNames": {
             "type": "string"
           },
           "additionalProperties": {
             "type": "string"
-          }
+          },
+          "description": "Names you gave identities, by id"
         },
         "hidden": {
           "type": "object",
@@ -203,7 +203,6 @@
           }
         },
         "pins": {
-          "description": "Sessions and projects you tied to an identity, by node id",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -224,10 +223,10 @@
               "at"
             ],
             "additionalProperties": {}
-          }
+          },
+          "description": "Sessions and projects you tied to an identity, by node id"
         },
         "known": {
-          "description": "Every identity XenoNet has seen, by id",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -254,22 +253,22 @@
                     ]
                   },
                   "org": {
-                    "description": "A Claude team's or enterprise's name",
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "A Claude team's or enterprise's name"
                   },
                   "host": {
-                    "description": "A GitHub account's host",
-                    "type": "string"
+                    "type": "string",
+                    "description": "A GitHub account's host"
                   },
                   "name": {
-                    "description": "The name git commits carry",
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "The name git commits carry"
                   }
                 },
                 "additionalProperties": {}
@@ -291,10 +290,10 @@
               "lastSeen"
             ],
             "additionalProperties": {}
-          }
+          },
+          "description": "Every identity XenoNet has seen, by id"
         },
         "signins": {
-          "description": "Who each app was signed in as, over time, by app",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -308,12 +307,12 @@
                   "type": "string"
                 },
                 "from": {
-                  "type": "number",
-                  "description": "Epoch milliseconds"
+                  "description": "Epoch milliseconds",
+                  "type": "number"
                 },
                 "to": {
-                  "type": "number",
-                  "description": "Epoch milliseconds"
+                  "description": "Epoch milliseconds",
+                  "type": "number"
                 }
               },
               "required": [
@@ -323,18 +322,19 @@
               ],
               "additionalProperties": {}
             }
-          }
+          },
+          "description": "Who each app was signed in as, over time, by app"
         }
       },
       "additionalProperties": {}
     },
     "theme": {
-      "description": "The theme in use, by id",
-      "type": "string"
+      "type": "string",
+      "description": "The theme in use, by id"
     },
     "environment": {
-      "description": "The environment around the map, independent of the theme",
-      "type": "string"
+      "type": "string",
+      "description": "The environment around the map, independent of the theme"
     }
   },
   "required": [
