@@ -230,8 +230,8 @@ pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Do
 /// are read in order (`file`, what the mapper keeps for it). An app XenoNet
 /// doesn't tail is refused.
 pub fn docs_in(raw: Value, app: &str, file: &LineFile) -> Result<Vec<Doc>, TypeError> {
-    let Some(tailed) = xenonet_base::apps::tailed_or_text(Some(app), None) else {
-        return Err(TypeError(xenonet_base::apps::untailed(app)));
+    let Some(tailed) = xenonet_adapter::apps::tailed_or_text(Some(app), None) else {
+        return Err(TypeError(xenonet_adapter::apps::untailed(app)));
     };
     if tailed == "grok" {
         return docs_of(&line_events::grok(&GrokLine::new(raw), file));
@@ -281,7 +281,7 @@ static UUID_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9a-f]{8}-[
 /// app XenoNet doesn't tail.
 pub fn session_of(file: &str, app: &str) -> Option<String> {
     let norm = file.replace('\\', "/");
-    let tailed = xenonet_base::apps::tailed_or_text(Some(app), None)?;
+    let tailed = xenonet_adapter::apps::tailed_or_text(Some(app), None)?;
     // A Grok Build session's updates are in its folder, which is named for
     // it; its other files aren't read.
     if tailed == "grok" {
@@ -857,7 +857,7 @@ impl Search {
     pub fn query(&self, generation: u64, sql: &str, params: &[Value], all: bool) -> Result<Vec<Vec<(String, Out)>>, Error> {
         let db = self.handle(generation)?;
         let mut stmt = db.prepare(sql)?;
-        let names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+        let names: Vec<String> = stmt.column_names().map(String::from).collect();
         let mut rows = stmt.query(params_from_iter(Self::binds(params)?))?;
         let mut out = Vec::new();
         while let Some(r) = rows.next()? {

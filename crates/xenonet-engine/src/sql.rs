@@ -322,7 +322,7 @@ pub fn bind(stmt: &mut Statement<'_>, args: &[Arg]) -> Result<()> {
 const MAX_SAFE: i64 = 9_007_199_254_740_991;
 
 fn read_rows(stmt: &mut Statement<'_>, first: bool) -> Result<Vec<Row>> {
-    let names: Vec<String> = stmt.column_names().into_iter().map(str::to_string).collect();
+    let names: Vec<String> = stmt.column_names().map(str::to_string).collect();
     let mut rows = stmt.raw_query();
     let mut out = Vec::new();
     while let Some(r) = rows.next()? {

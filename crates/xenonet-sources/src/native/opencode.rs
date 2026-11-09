@@ -20,7 +20,7 @@ use xenonet_schema::drift::clean_version;
 pub const SOURCE: &str = "anomaly/opencode/db";
 /// The tools whose calls are edits, as the app registry has them.
 pub fn edit_tools() -> &'static [String] {
-    xenonet_base::apps::edit_tools("opencode")
+    xenonet_adapter::apps::edit_tools("opencode")
 }
 pub const PATCH_TOOLS: [&str; 2] = ["apply_patch", "patch"];
 const SESSION_COLUMNS: [&str; 8] = ["id", "parent_id", "directory", "title", "version", "time_created", "time_updated", "time_archived"];
@@ -128,7 +128,7 @@ impl Sqlite {
     fn rows(&mut self, sql: &str, param: Option<f64>, first_only: bool) -> Result<Vec<Value>, String> {
         let conn = self.0.as_ref().ok_or("database is closed")?;
         let mut st = conn.prepare(sql).map_err(|e| e.to_string())?;
-        let names: Vec<String> = st.column_names().iter().map(ToString::to_string).collect();
+        let names: Vec<String> = st.column_names().map(ToString::to_string).collect();
         let mut rows = match param {
             Some(p) => st.query([p]),
             None => st.query([]),

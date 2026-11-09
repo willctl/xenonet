@@ -38,7 +38,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
 # engine.sqlite and search.sqlite. Bundled, so FTS5 and VACUUM INTO are
 # there whatever SQLite the system has.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # Names are compared after NFKC and NFD (core/actors/names.js), which std
 # doesn't do.
 unicode-normalization = "0.1"
@@ -79,7 +79,7 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
-rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io"] }
 # The service's cores are traits the routes call through, async where the
 # JS awaits (crates/xenonet-service/src/cores).
 async-trait = "0.1"
