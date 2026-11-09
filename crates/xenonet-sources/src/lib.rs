@@ -1,12 +1,12 @@
-//! What XenoNet reads: the transcripts' lines (`lines`), the readers built on
-//! them (Claude Code's, Codex's, the native readers', numbat's) and the
-//! sessions each writes (`session`), what the transcripts say as they're
-//! written (`live`), the shared context (`xenolith`, `wiki`), plan usage and
-//! refusals.
+//! What XenoNet reads: the transcripts' lines (`lines`) and their events,
+//! the records the adapters' readers make (`record`, `session`), the
+//! native readers' contract and numbat's, what the transcripts say as
+//! they're written (`live`), Codex's archived rollouts (`archive`), Grok
+//! Build's usage ledger (`grok`), the shared context (`xenolith`, `wiki`),
+//! plan usage and refusals.
 
-pub mod claude;
+pub mod archive;
 pub mod claude_usage;
-pub mod codex;
 pub mod desktop_connectors;
 pub mod git;
 pub mod grok;

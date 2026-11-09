@@ -1,7 +1,7 @@
-//! The engine's database (core/engine/store.js over engine.sqlite,
-//! crates/xenonet-engine/src/store.rs): its calls by their JS names, for
-//! the cores that call "engine.store", "actors.store" and the like, and the
-//! service's own reads of it (the EngineStore trait).
+//! The engine's database (crates/xenonet-engine/src/store.rs): its calls
+//! by their JS names, for the actors' cores that still call "actors.store"
+//! by string (they go when the actors are typed), and the service's own
+//! reads of it (the EngineStore trait).
 
 use crate::js::{at, rows};
 use serde_json::Value;
@@ -37,37 +37,11 @@ fn dispatch(s: &mut EngineStore, name: &str, v: &[Arg]) -> sql::Result<Arg> {
     match name {
         "prune" => s.prune(now(0).as_f64().unwrap_or(f64::NAN)).map(|()| Arg::Undef),
         "pruneAudit" => unit(s.prune_audit(now(0).as_f64().unwrap_or(f64::NAN))),
-        "touch" => unit(s.touch(x(0), &x(1), now(2))),
-        "ended" => unit(s.ended(x(0), now(1))),
-        "contact" => row(s.contact(x(0))),
-        "contacts" => many(s.contacts(x(0))),
         "pins" => many(s.pins(x(0))),
         "pinnedTo" => many(s.pinned_to(x(0))),
         "pin" => unit(s.pin(x(0), &x(1), x(2), now(3))),
         "dropGuesses" => unit(s.drop_guesses(x(0))),
         "unpin" => unit(s.unpin(x(0), &x(1))),
-        "send" => s.send(&x(0), now(1)).map(Arg::Num),
-        "deliver" => unit(s.deliver(x(0), x(1))),
-        "scoped" => many(s.scoped(x(0), x(1))),
-        "message" => row(s.message(x(0))),
-        "unseen" => many(s.unseen(x(0))),
-        "markSeen" => unit(s.mark_seen(x(0), &x(1), now(2))),
-        "markUnseen" => unit(s.mark_unseen(x(0), &x(1))),
-        "deliveries" => many(s.deliveries(x(0))),
-        "recent" => many(s.recent(x(0))),
-        "claim" => unit(s.claim(x(0), x(1), x(2), x(3), now(4))),
-        "release" => {
-            let p = match x(1) {
-                Arg::Undef => Arg::Null,
-                p => p,
-            };
-            s.release(x(0), &p).map(Arg::Num)
-        }
-        "claims" => many(s.claims(now(0))),
-        "setFocus" => s
-            .set_focus(x(0), x(1), now(2))
-            .map(|c| c.map_or(Arg::Undef, |c| crate::js::obj(vec![("lastInsertRowid", Arg::Num(c.last_insert_rowid as f64)), ("changes", Arg::Num(c.changes as f64))]))),
-        "focus" => row(s.focus(x(0))),
         "actorRows" => many(s.actor_rows()),
         "actorRow" => row(s.actor_row(x(0))),
         "saveActor" => unit(s.save_actor(&x(0))),
@@ -160,29 +134,11 @@ pub fn call(store: &Shared, name: &str, args: &[Arg]) -> Result<Arg> {
 const CALLS: &[&str] = &[
     "prune",
     "pruneAudit",
-    "touch",
-    "ended",
-    "contact",
-    "contacts",
     "pins",
     "pinnedTo",
     "pin",
     "dropGuesses",
     "unpin",
-    "send",
-    "deliver",
-    "scoped",
-    "message",
-    "unseen",
-    "markSeen",
-    "markUnseen",
-    "deliveries",
-    "recent",
-    "claim",
-    "release",
-    "claims",
-    "setFocus",
-    "focus",
     "actorRows",
     "actorRow",
     "saveActor",
@@ -322,16 +278,16 @@ mod tests {
     #[test]
     fn calls_go_by_their_js_names_with_the_js_defaults() {
         let s = Shared::new(EngineStore::open(":memory:", 1000.0).unwrap());
-        let m = obj(vec![("sender", Arg::text("claude:a")), ("target", Arg::text("codex:b")), ("body", Arg::text("hi")), ("recipients", Arg::List(vec![Arg::text("codex:b")]))]);
-        assert_eq!(call(&s, "send", &[m, Arg::Num(2000.0)]).unwrap(), Arg::Num(1.0));
-        let unseen = crate::js::list(call(&s, "unseen", &[Arg::text("codex:b")]).unwrap());
-        assert_eq!(unseen.len(), 1);
+        let pin = obj(vec![("pid", Arg::Num(7.0)), ("start", Arg::Num(2000.0))]);
+        assert_eq!(call(&s, "pin", &[Arg::text("claude:a"), pin, Arg::Bool(true)]).unwrap(), Arg::Undef, "`now` is filled in");
+        let pins = crate::js::list(call(&s, "pins", &[Arg::text("claude:a")]).unwrap());
+        assert_eq!(pins.len(), 1);
         // An integer column reads as a number, as node:sqlite reads it.
-        assert_eq!(unseen[0].field("created_at"), Arg::Num(2000.0));
-        assert_eq!(call(&s, "message", &[Arg::Num(9.0)]).unwrap(), Arg::Null);
-        assert_eq!(call(&s, "release", &[Arg::text("codex:b")]).unwrap(), Arg::Num(0.0));
+        assert_eq!(pins[0].field("pid"), Arg::Num(7.0));
+        assert_eq!(call(&s, "actorRow", &[Arg::text("nobody")]).unwrap(), Arg::Null);
+        assert_eq!(call(&s, "hasActorRef", &[Arg::text("actor:a"), Arg::text("r"), Arg::Num(0.0)]).unwrap(), Arg::Bool(false));
         assert!(call(&s, "nope", &[]).unwrap_err().message.contains("is not a function"));
-        assert_eq!((kind("unseen"), kind("nope")), ("function", "undefined"));
+        assert_eq!((kind("pins"), kind("nope")), ("function", "undefined"));
         let t = Store(s);
         t.set_meta("gateway", "{}").unwrap();
         assert_eq!(t.meta("gateway").unwrap().as_deref(), Some("{}"));

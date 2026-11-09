@@ -218,7 +218,7 @@ mod tests {
         let before = c.preview(&mut m).unwrap();
         let entry = &before["apps"][0];
         assert_eq!((entry["installed"].as_bool(), entry["cli"].as_str()), (Some(false), None));
-        assert_eq!(entry["changes"][0]["where"], json!("~/.grok/config.toml"));
+        assert_eq!(entry["changes"][0]["where"], json!(xenonet_base::nodepath::join(&["~", ".grok", "config.toml"])));
         assert_eq!(entry["notes"][0], json!("XenoNet can't find the grok command. Connecting writes Grok Build's settings all the same, for when you install it."));
 
         // Its folder is here (the fake machine knows paths, folders too).

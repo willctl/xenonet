@@ -28,7 +28,6 @@ use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use xenonet_engine::engine::is_agent_id;
-use xenonet_engine::sql::Arg;
 
 /// Why a call as you is refused where you can't be told from an agent: a
 /// start, or another machine's settings, from a terminal on Linux or
@@ -84,7 +83,7 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
         return Ok((json!({ "kind": "actor", "id": id, "title": name }), false));
     }
     if let Some(me) = req.header("x-xenonet-agent").map(str::to_string) {
-        if !is_agent_id(&Arg::text(me.as_str())) {
+        if !is_agent_id(&me) {
             return Err(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
         }
         let verdict = cores.verify.check(req.peer, &me, false).await;
@@ -123,7 +122,7 @@ async fn permission(ctx: &Ctx, req: &mut Req) -> Reply {
     if req.header("authorization").is_some() {
         return Reply::coded(403, "not-a-run", "an actor's own prompts aren't asked here");
     }
-    let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(&Arg::text(*m))).map(str::to_string) else {
+    let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(m)).map(str::to_string) else {
         return Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id>)");
     };
     let verdict = ctx.cores.verify.check(req.peer, &me, false).await;

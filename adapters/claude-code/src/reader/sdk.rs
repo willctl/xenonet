@@ -13,12 +13,12 @@
 //! precedes the last compaction in files over 5 MiB, which the chain stops
 //! at anyway.
 
+use super::desktop::is_uuid;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use xenonet_base::text::{js_trim, truthy};
-use xenonet_sources::claude::is_uuid;
 
 /// The Agent SDK release whose readings these are, as the lenient
 /// readers pick their schema by it.

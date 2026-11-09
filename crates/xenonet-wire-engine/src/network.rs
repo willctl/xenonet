@@ -309,11 +309,7 @@ fn tilde(w: &World, p: &str) -> String {
 /// This host's agents as presence lists them: with their detail, unless
 /// the host shares titles only.
 fn agents_now(w: &World, titles_only: bool) -> Result<BTreeMap<String, Value>> {
-    let mut c = EngineCalls::new(w, None);
-    let agents = w.engine.agents(&mut c, ACTIVE_MS).map_err(|e| match e {
-        Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
-        Fail::Thrown(t) => t,
-    })?;
+    let agents = EngineCalls::new(w, None).agents(ACTIVE_MS)?;
     // The relay's rule for text that leaves the machine: the home folder,
     // and any other folder named for a person that the agents work in, as ~.
     let scrub = (!titles_only).then(|| {
@@ -332,7 +328,7 @@ fn agents_now(w: &World, titles_only: bool) -> Result<BTreeMap<String, Value>> {
     let mut out = BTreeMap::new();
     for a in agents {
         let id = text(&a.field("id"));
-        if is_remote(&a.field("id")) || id == YOU {
+        if is_remote(&id) || id == YOU {
             continue;
         }
         let cwd = a.field("cwd");
@@ -747,7 +743,7 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool, at: f64) -> R
         return Ok(());
     }
     let t = Arg::text(target.clone());
-    if !(is_agent_id(&t) || is_actor_agent(&t)) {
+    if !(is_agent_id(&target) || is_actor_agent(&target)) {
         receipt(w, from, &mid, &target, "refused", Some("no session or actor here has that id"));
         return Ok(());
     }
@@ -786,21 +782,18 @@ fn message_in(w: &World, from: &str, b: &Value, window_host: bool, at: f64) -> R
         receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
     }
-    let mut c = EngineCalls::new(w, None);
+    let c = EngineCalls::new(w, None);
     let view = c.view(&t)?;
     // An actor XenoNet only observes reads nothing: refused, as a message
     // sent on this machine is, rather than stored for no one.
-    let unreached = xenonet_engine::engine::Engine::unreached(&mut c, &view).map_err(|e| match e {
-        Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
-        Fail::Thrown(t) => t,
-    })?;
+    let unreached = c.unreached(&view)?;
     if let Some(why) = unreached {
         receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
     }
     // This host's own limits hold for it too: paused, too fast, a repeat.
     let ask = obj(vec![("sender", Arg::text(sender_id.clone())), ("recipients", Arg::List(vec![view.clone()])), ("text", Arg::text(body.clone())), ("depth", Arg::num(hops))]);
-    if let Err(e) = xenonet_engine::peer::Calls::call(&mut c, "engine.policy", "checkSend", vec![ask]) {
+    if let Err(e) = c.check_send(&ask) {
         receipt(w, from, &mid, &target, "refused", Some(&e.message));
         return Ok(());
     }
@@ -941,11 +934,7 @@ fn inside(top: &str, p: &str) -> Option<String> {
 /// This host's claims and edits as the others see them: by repo key and
 /// path inside the repo.
 fn claims_now(w: &World) -> Result<BTreeMap<String, Value>> {
-    let mut c = EngineCalls::new(w, None);
-    let agents = w.engine.agents(&mut c, ACTIVE_MS).map_err(|e| match e {
-        Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
-        Fail::Thrown(t) => t,
-    })?;
+    let agents = EngineCalls::new(w, None).agents(ACTIVE_MS)?;
     let mut out = BTreeMap::new();
     for a in agents {
         let top = a.field("top");
@@ -1055,7 +1044,7 @@ fn claim_hits(w: &World, c: &mut EngineCalls<'_>, me: &Arg, files: &[Arg]) -> Re
         let Some(rel) = inside(&top, &file) else { continue };
         for r in &rows {
             let path = r.text("path").unwrap_or("");
-            if !xenonet_engine::engine::matches(&Arg::text(path), &Arg::text(rel.clone())) {
+            if !xenonet_engine::engine::matches(path, &rel) {
                 continue;
             }
             let host = r.text("host").unwrap_or("");
@@ -1217,7 +1206,7 @@ fn offer(w: &World, c: &mut EngineCalls<'_>, me: &Arg, a: &Value, envelope: &Val
         (None, host.clone(), None)
     } else {
         // Named as send names it; a message tells it now.
-        let sent = w.engine.send(c, me, &obj(vec![("to", Arg::text(to.clone())), ("text", Arg::text(words.clone())), ("replyTo", Arg::Null)]), &arg(envelope))?;
+        let sent = c.send(me, &obj(vec![("to", Arg::text(to.clone())), ("text", Arg::text(words.clone())), ("replyTo", Arg::Null)]), &arg(envelope))?;
         let first = list(sent.field("to")).first().map(|t| text(&t.field("id"))).unwrap_or(to);
         (Some(first.clone()), host_of(&first).map(str::to_string), Some(sent))
     };
@@ -1252,7 +1241,7 @@ fn offer(w: &World, c: &mut EngineCalls<'_>, me: &Arg, a: &Value, envelope: &Val
             None => Some("repo".into()),
         };
         if let Some(to) = to {
-            if let Ok(sent) = w.engine.send(c, me, &obj(vec![("to", Arg::text(to)), ("text", Arg::text(words)), ("replyTo", Arg::Null)]), &arg(envelope)) {
+            if let Ok(sent) = c.send(me, &obj(vec![("to", Arg::text(to)), ("text", Arg::text(words)), ("replyTo", Arg::Null)]), &arg(envelope)) {
                 told_now = list(sent.field("to")).iter().map(|x| json(&x.field("id"))).collect();
             }
         }
@@ -1397,7 +1386,7 @@ fn accept(w: &World, c: &mut EngineCalls<'_>, me: &Arg, id: &str, envelope: &Val
             let maker = r.text("maker").unwrap_or("").to_string();
             if maker != me_id {
                 let words = format!("I took your handoff {id}.");
-                if w.engine.send(c, me, &obj(vec![("to", Arg::text(maker)), ("text", Arg::text(words)), ("replyTo", Arg::Null)]), &arg(envelope)).is_err() {
+                if c.send(me, &obj(vec![("to", Arg::text(maker)), ("text", Arg::text(words)), ("replyTo", Arg::Null)]), &arg(envelope)).is_err() {
                     // The maker may have gone; the handoff is taken all the same.
                 }
             }
@@ -1482,7 +1471,7 @@ fn handoff_in(w: &World, from: &str, b: &Value) -> Result<()> {
                 return Ok(());
             }
             let by = here(&s(b, "by").unwrap_or_default());
-            if !is_remote(&Arg::text(by.clone())) || host_of(&by) != Some(from) {
+            if !is_remote(&by) || host_of(&by) != Some(from) {
                 return Err(Thrown::new("an accept from a session that isn't on the host that sent it"));
             }
             if r.text("to_agent").is_some_and(|a| a != by) {
@@ -1496,7 +1485,7 @@ fn handoff_in(w: &World, from: &str, b: &Value) -> Result<()> {
             } else if let Some(now_row) = store(w, |s| s.handoff(&id))? {
                 // Taken already: the asking host hears by whom.
                 let taker = now_row.text("taken_by").unwrap_or("");
-                let qualified = if is_remote(&Arg::text(taker)) { taker.to_string() } else { format!("@{}:{taker}", me.host) };
+                let qualified = if is_remote(taker) { taker.to_string() } else { format!("@{}:{taker}", me.host) };
                 let state = now_row.text("state").unwrap_or("taken").to_string();
                 send(w, To::Host(from.to_string()), Kind::Handoff, body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(&qualified)));
             }

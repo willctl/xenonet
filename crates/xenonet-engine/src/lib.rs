@@ -10,6 +10,7 @@
 pub mod attest;
 pub mod delivery;
 pub mod engine;
+pub mod host;
 pub mod js;
 pub mod jsre;
 pub mod network;

@@ -2233,7 +2233,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
  "xenonet-base",
+ "xenonet-blocks",
  "xenonet-model",
  "xenonet-schema",
 ]
@@ -2334,9 +2336,14 @@ version = "0.2.0"
 dependencies = [
  "async-trait",
  "regex",
+ "rusqlite",
+ "ruzstd",
  "serde_json",
+ "tokio",
  "xenonet-adapter",
  "xenonet-base",
+ "xenonet-blocks",
+ "xenonet-schema",
  "xenonet-sources",
 ]
 
@@ -2608,12 +2615,13 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "regex",
- "rusqlite",
+ "ruzstd",
  "serde_json",
  "sha2 0.10.9",
  "xenonet-adapter",
  "xenonet-base",
  "xenonet-platforms",
+ "xenonet-schema",
 ]
 
 [[package]]

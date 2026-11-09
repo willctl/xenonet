@@ -1,8 +1,8 @@
 //! How XenoNet knows who sent a message (docs/guide/agents.md, Messages):
 //! an envelope, message/envelope/v1, that XenoNet writes from what its own
 //! checks found when the message came in, kept apart from what the sender
-//! said: core/engine/attest.js. The sender's words can't write into it:
-//! it's built from the route's verdict, never from the request's body.
+//! said. The sender's words can't write into it: it's built from the
+//! route's verdict, never from the request's body.
 //!
 //!   sender     { id, kind: agent|actor|you, name, product }
 //!   auth       how it proved who it is: session, token, window, grant or
@@ -16,20 +16,31 @@
 //! It says what XenoNet checked and names what it couldn't; it's never an
 //! approval of anything the message asks.
 
+use crate::js::template;
 use crate::peer::Thrown;
-use crate::sql::Arg;
-use crate::store::js_text;
+use serde_json::{json, Value};
+use xenonet_base::text::truthy;
 
 pub const SCHEMA: &str = "message/envelope/v1";
 
-fn process_of(verdict: &Arg, method: &str) -> &'static str {
+/// Who sent a message, as the route knows it.
+#[derive(Clone, Copy, Debug)]
+pub struct Sender<'a> {
+    pub id: &'a str,
+    /// agent, actor or you.
+    pub kind: &'a str,
+    pub name: Option<&'a str>,
+    pub product: Option<&'a str>,
+}
+
+fn process_of(verdict: &Value, method: &str) -> &'static str {
     if method == "window" || method == "gateway" {
         return "n/a";
     }
-    if !verdict.field("checked").truthy() {
+    if !truthy(verdict.get("checked")) {
         return "unchecked";
     }
-    if verdict.field("sure").truthy() {
+    if truthy(verdict.get("sure")) {
         "signed"
     } else {
         "checked"
@@ -58,83 +69,72 @@ fn uuid() -> Result<String, Thrown> {
     Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
-fn obj(fields: Vec<(&str, Arg)>) -> Arg {
-    Arg::Obj(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
-}
-
-/// The envelope for a message from `sender` ({ id, kind, name, product }),
-/// authenticated by `method`, with the route's `verdict` (verify).
-pub fn attest(sender: &Arg, method: &Arg, verdict: &Arg, home: &Arg, now: &Arg, platform: &str) -> Result<Arg, Thrown> {
-    let m = js_text(method);
-    let process = process_of(verdict, method.as_str().unwrap_or(""));
-    let strength = strength_of(method.as_str().unwrap_or(""), process);
-    let first = match verdict.field("chain") {
-        Arg::List(l) => l.first().cloned().unwrap_or(Arg::Undef),
-        _ => Arg::Undef,
+/// The envelope for a message from `sender`, authenticated by `method`,
+/// with the route's `verdict` (verify): { checked, sure, chain: [{ exe }] }.
+/// It fails only when the system has no random numbers for the id.
+pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now: f64, platform: &str) -> Result<Value, Thrown> {
+    let process = process_of(verdict, method);
+    let strength = strength_of(method, process);
+    let exe = verdict.get("chain").and_then(Value::as_array).and_then(|l| l.first()).and_then(|f| f.get("exe")).filter(|e| truthy(Some(e)));
+    let client = match exe {
+        Some(exe) => {
+            let text = template(Some(exe));
+            let shown = if home.is_empty() { text.clone() } else { xenonet_base::paths::tilde(&text, home) };
+            json!({ "exe": shown, "name": xenonet_base::nodepath::basename(&text) })
+        }
+        None => Value::Null,
     };
-    let exe = first.field("exe").or(Arg::Null);
-    let client = if exe.truthy() {
-        let text = js_text(&exe);
-        let home = if home.truthy() { js_text(home) } else { String::new() };
-        let shown = if home.is_empty() { text.clone() } else { xenonet_base::paths::tilde(&text, &home) };
-        obj(vec![("exe", Arg::text(shown)), ("name", Arg::text(xenonet_base::nodepath::basename(&text)))])
-    } else {
-        Arg::Null
-    };
-    let transport = match m.as_str() {
-        "grant" if method.as_str().is_some() => "tunnel",
-        "gateway" if method.as_str().is_some() => "gateway",
+    let transport = match method {
+        "grant" => "tunnel",
+        "gateway" => "gateway",
         _ => "this machine",
     };
-    let mut env = obj(vec![
-        ("schema", Arg::text(SCHEMA)),
-        ("mid", Arg::text(format!("msg_{}", uuid()?))),
-        ("at", now.clone()),
-        (
-            "sender",
-            obj(vec![("id", sender.field("id")), ("kind", sender.field("kind")), ("name", sender.field("name").or(Arg::Null)), ("product", sender.field("product").or(Arg::Null))]),
-        ),
-        ("auth", obj(vec![("method", method.clone()), ("process", Arg::text(process)), ("strength", Arg::text(strength))])),
-        ("client", client),
-        ("transport", Arg::text(transport)),
-    ]);
+    let mut env = json!({
+        "schema": SCHEMA,
+        "mid": format!("msg_{}", uuid()?),
+        "at": xenonet_base::json::number(now),
+        "sender": { "id": sender.id, "kind": sender.kind, "name": sender.name, "product": sender.product },
+        "auth": { "method": method, "process": process, "strength": strength },
+        "client": client,
+        "transport": transport,
+    });
     let line = verified_line(&env, platform);
-    if let Arg::Obj(f) = &mut env {
-        f.push(("line".into(), Arg::text(line)));
-    }
+    env["line"] = Value::String(line);
     Ok(env)
 }
 
 /// How each method proves who sent it, in words.
-fn how(method: &Arg) -> String {
-    match method.as_str() {
-        Some("session") => "its own session's process".into(),
-        Some("token") => "its token".into(),
-        Some("window") => "XenoNet's own window, with its key".into(),
-        Some("grant") => "its remote connection's credential".into(),
-        Some("gateway") => "its gateway token alone".into(),
-        _ => crate::js::proto_member(&js_text(method)).unwrap_or_else(|| js_text(method)),
+fn how(method: &str) -> String {
+    match method {
+        "session" => "its own session's process".into(),
+        "token" => "its token".into(),
+        "window" => "XenoNet's own window, with its key".into(),
+        "grant" => "its remote connection's credential".into(),
+        "gateway" => "its gateway token alone".into(),
+        other => crate::js::proto_member(other).unwrap_or_else(|| other.to_string()),
     }
 }
 
 /// "verified: …": what XenoNet checked, in a sentence, and what it
 /// couldn't.
-pub fn verified_line(env: &Arg, platform: &str) -> String {
-    let sender = env.field("sender");
-    let who = if sender.field("kind").as_str() == Some("you") {
+pub fn verified_line(env: &Value, platform: &str) -> String {
+    let sender = &env["sender"];
+    let kind = sender.get("kind").and_then(Value::as_str);
+    let who = if kind == Some("you") {
         "you, at XenoNet's own window".to_string()
     } else {
-        let what = if sender.field("kind").as_str() == Some("actor") { "the actor" } else { "the session" };
-        format!("{what} \"{}\" ({})", js_text(&sender.field("name").or(sender.field("id"))), js_text(&sender.field("id")))
+        let what = if kind == Some("actor") { "the actor" } else { "the session" };
+        let name = sender.get("name").filter(|n| !n.is_null()).or_else(|| sender.get("id"));
+        format!("{what} \"{}\" ({})", template(name), template(sender.get("id")))
     };
-    let auth = env.field("auth");
-    let method = auth.field("method");
+    let auth = &env["auth"];
+    let method = template(auth.get("method"));
     let how = how(&method);
-    let process = match auth.field("process").as_str() {
+    let process = match auth.get("process").and_then(Value::as_str) {
         Some("signed") => "; XenoNet checked its process and the app's signature".to_string(),
         Some("checked") => {
-            let client = env.field("client");
-            let name = if client.truthy() { format!(" ({})", js_text(&client.field("name"))) } else { String::new() };
+            let client = &env["client"];
+            let name = if truthy(Some(client)) { format!(" ({})", template(client.get("name"))) } else { String::new() };
             format!("; XenoNet checked the process it came from{name}")
         }
         Some("unchecked") => {
@@ -143,12 +143,12 @@ pub fn verified_line(env: &Arg, platform: &str) -> String {
                 "darwin" => "this Mac",
                 _ => "Linux",
             };
-            let word = if method.as_str() == Some("token") { "the token alone" } else { "its word" };
+            let word = if method == "token" { "the token alone" } else { "its word" };
             format!("; XenoNet can't check which process sent it on {os} yet, so it's {word}")
         }
         _ => String::new(),
     };
-    let place = if method.as_str() == Some("gateway") { "from outside this machine, through XenoNet's actor gateway" } else { "on this machine" };
+    let place = if method == "gateway" { "from outside this machine, through XenoNet's actor gateway" } else { "on this machine" };
     format!("verified: {who}, by {how}{process}, {place}. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.")
 }
 
@@ -168,12 +168,12 @@ mod tests {
 
     #[test]
     fn a_signed_session_is_strong() {
-        let verdict = obj(vec![("checked", Arg::Bool(true)), ("sure", Arg::Bool(true)), ("chain", Arg::List(vec![obj(vec![("exe", Arg::text("/Users/me/bin/claude"))])]))]);
-        let sender = obj(vec![("id", Arg::text("claude:a")), ("kind", Arg::text("agent")), ("name", Arg::text("Docs"))]);
-        let env = attest(&sender, &Arg::text("session"), &verdict, &Arg::text("/Users/me"), &Arg::num(1.0), "darwin").unwrap();
-        assert_eq!(env.field("auth").field("strength"), Arg::text("strong"));
-        assert_eq!(env.field("client").field("exe"), Arg::text("~/bin/claude"));
-        assert!(js_text(&env.field("line")).starts_with("verified: the session \"Docs\" (claude:a), by its own session's process; XenoNet checked its process"));
+        let verdict = json!({ "checked": true, "sure": true, "chain": [{ "exe": "/Users/me/bin/claude" }] });
+        let sender = Sender { id: "claude:a", kind: "agent", name: Some("Docs"), product: None };
+        let env = attest(sender, "session", &verdict, "/Users/me", 1.0, "darwin").unwrap();
+        assert_eq!(env["auth"]["strength"], "strong");
+        assert_eq!(env["client"]["exe"], "~/bin/claude");
+        assert!(env["line"].as_str().unwrap().starts_with("verified: the session \"Docs\" (claude:a), by its own session's process; XenoNet checked its process"));
     }
 
     #[test]

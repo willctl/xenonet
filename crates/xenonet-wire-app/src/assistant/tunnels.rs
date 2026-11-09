@@ -148,7 +148,7 @@ impl Runner {
 
     fn binding_of(&self, connection: &Value) -> Binding {
         let row = self.store.with(|s| s.connection(super::arg(connection))).ok().flatten();
-        let text = row.as_ref().map(|r| xenonet_engine::store::js_text(&xenonet_actors::connections::row_arg(r).field("transport_binding")));
+        let text = row.as_ref().map(|r| xenonet_base::text::js_string(super::row_json(r).get("transport_binding").unwrap_or(&Value::Null)));
         core::binding_of(text.as_deref().filter(|t| !t.is_empty() && *t != "null"), &target_ok)
     }
 

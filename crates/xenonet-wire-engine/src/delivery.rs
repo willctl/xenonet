@@ -535,10 +535,10 @@ impl router::Host for RouterHost<'_> {
         self.w.store.with(|s| s.contact(Arg::text(agent))).ok().flatten().and_then(|r| r.num("pid"))
     }
     fn mark_seen(&mut self, agent: &str, ids: &[Value], now: f64) -> xenonet_engine::delivery::Result<()> {
-        self.w.store.with(|s| s.mark_seen(Arg::text(agent), &Arg::List(ids.iter().map(arg).collect()), Arg::Num(now))).map_err(store_error)
+        self.w.store.with(|s| s.mark_seen(Arg::text(agent), Arg::List(ids.iter().map(arg).collect()), Arg::Num(now))).map_err(store_error)
     }
     fn mark_unseen(&mut self, agent: &str, ids: &[Value]) -> xenonet_engine::delivery::Result<()> {
-        self.w.store.with(|s| s.mark_unseen(Arg::text(agent), &Arg::List(ids.iter().map(arg).collect()))).map_err(store_error)
+        self.w.store.with(|s| s.mark_unseen(Arg::text(agent), Arg::List(ids.iter().map(arg).collect()))).map_err(store_error)
     }
 
     fn consented(&mut self, session: &str, remote: bool) -> bool {

@@ -2,7 +2,7 @@
 //! over crates/xenonet-actors/src/spend.rs): the live state's costs, the
 //! map's sessions and who started them, from the local day's start.
 
-use crate::js::{day_start, list, now_ms, number, text};
+use crate::js::{day_start, now_ms, number};
 use crate::world::World;
 use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex};
@@ -28,25 +28,14 @@ impl Spend for SpendDriver {
         let w = &self.world;
         let Some(a) = &w.actors else { return Ok(Value::Null) };
         let now = now_ms();
-        let started = a.call(w, "sessionsStarted", &[crate::js::obj(vec![("now", xenonet_engine::sql::Arg::Num(now))])]).map_err(crate::actors::core_error)?;
-        let names: Vec<(String, Value)> = list(started.field("names"))
-            .into_iter()
-            .map(|p| {
-                let p = list(p);
-                (p.first().map(text).unwrap_or_default(), p.get(1).map_or(Value::Null, crate::js::json))
-            })
-            .collect();
-        let starts: Vec<Value> = list(started.field("starts")).iter().map(crate::js::json).collect();
+        let (names, starts) = a.read(|r| r.sessions_started(now)).map_err(|f| crate::actors::core_error(crate::actors::thrown(f)))?;
         let spend = w.state().session_costs(now)?;
         let sessions: Vec<Value> = w.state().nodes().or_else(|e| if e.is_pending() { Ok(Vec::new()) } else { Err(e) })?.into_iter().filter(|n| n["kind"] == "session").collect();
         let since = day_start(now);
         // Each actor's usage, as its snapshot says it.
         let mut usages: Vec<Value> = Vec::new();
         for (id, _) in &names {
-            let snap = a
-                .call(w, "snapshot", &[crate::js::arg(&Value::String(id.clone())), crate::js::obj(vec![("now", xenonet_engine::sql::Arg::Num(now))])])
-                .map_err(crate::actors::core_error)?;
-            let snap = crate::js::json(&snap);
+            let snap = a.with(w, |r, h| r.snapshot(id, "public", Some(now), None, h)).map_err(crate::actors::core_error)?;
             if snap.get("usage").is_some_and(Value::is_object) {
                 usages.push(serde_json::json!({ "id": id, "product": snap.get("product").cloned().unwrap_or(Value::Null), "usage": snap["usage"] }));
             }

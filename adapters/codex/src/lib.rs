@@ -6,7 +6,7 @@ use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
 use xenonet_adapter::delivery::{Start, Ways};
 use xenonet_adapter::processes::Rules;
-use xenonet_adapter::reader::Tailed;
+use xenonet_adapter::reader::{Lister, ListerEnv, Tailed};
 use xenonet_adapter::{Check, Platform};
 
 /// A pattern compiled once.
@@ -75,5 +75,9 @@ impl Platform for Adapter {
 
     fn tailed(&self) -> Option<Box<dyn Tailed>> {
         Some(Box::new(reader::Reader::new()))
+    }
+
+    fn lister(&self, env: &ListerEnv<'_>) -> Option<Box<dyn Lister>> {
+        Some(Box::new(reader::app_server::Codex::new(env)))
     }
 }

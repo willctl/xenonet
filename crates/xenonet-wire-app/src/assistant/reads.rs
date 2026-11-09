@@ -18,12 +18,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use xenonet_actors::adapters::{ADAPTERS, TRANSPORTS};
 use xenonet_actors::limits::Buckets;
-use xenonet_actors::remote_presence::RemotePresence;
+use xenonet_actors::remote_presence::{self, RemotePresence};
 use xenonet_assistant::cursors::Cursors;
 use xenonet_assistant::service::{self, Config, Inflight, LIMITS};
 use xenonet_assistant::{audit, fixtures, projection, source};
-use xenonet_engine::peer::{Calls, Result as CallResult, Thrown};
-use xenonet_engine::sql::Arg;
 use xenonet_schema::check::{compile, Checker, Data};
 use xenonet_service::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, State, R};
 use xenonet_service::wire::Emitter;
@@ -189,35 +187,37 @@ pub struct Reads {
     presence: Mutex<RemotePresence>,
 }
 
-// The registry, as remote presence calls it, and onRead.
-struct PresenceCalls<'a> {
+// The registry, as a remote actor's reads put it to it, and who shows the
+// reads.
+struct Presence<'a> {
     r: &'a Reads,
 }
 
-impl Calls for PresenceCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> CallResult<Arg> {
-        match (path, method) {
-            ("actors", m) => {
-                let Some(a) = &self.r.actors else { return Ok(Arg::Undef) };
-                a.registry(m, args.iter().map(Arg::to_json).collect()).map(|v| arg(&v)).map_err(|e| super::thrown_of(&e))
-            }
-            ("", "onRead") => {
-                let read = args.first().map_or(Value::Null, Arg::to_json);
-                let connection = xenonet_base::text::js_string(&read["connection"]);
-                let transport = self.r.engine_store.connection(&connection).ok().flatten().and_then(|c| c.get("transport_kind").cloned()).unwrap_or(Value::Null);
-                if let Some(ctx) = self.r.emitter.ctx() {
-                    ctx.broadcast("remote-read", &json!({ "actor": read["actor"], "transport": transport, "reach": read["reach"], "at": read["at"] }));
-                }
-                Ok(Arg::Undef)
-            }
-            (p, m) => Err(Thrown::new(format!("{p}.{m} is not a function"))),
+impl Presence<'_> {
+    /// The registry by the JS names the actors' driver answers; nothing
+    /// without actors.
+    fn registry(&self, method: &str, args: Vec<Value>) -> Result<Value, xenonet_actors::store::Error> {
+        let Some(a) = &self.r.actors else { return Ok(Value::Null) };
+        a.registry(method, args).map_err(|e| xenonet_actors::store::Error { message: e.message, code: e.code })
+    }
+}
+
+impl remote_presence::Host for Presence<'_> {
+    fn has(&mut self, id: &str) -> bool {
+        xenonet_base::text::truthy(self.registry("has", vec![json!(id)]).ok().as_ref())
+    }
+    fn report(&mut self, id: &str, report: &Value) -> Result<(), xenonet_actors::store::Error> {
+        self.registry("report", vec![json!(id), report.clone()]).map(|_| ())
+    }
+    fn target(&mut self, id: &str, node: &str, relation: &str, at: f64) -> Result<(), xenonet_actors::store::Error> {
+        self.registry("target", vec![json!(id), json!(node), json!(relation), xenonet_base::json::number(at)]).map(|_| ())
+    }
+    fn on_read(&mut self, read: Value) {
+        let connection = xenonet_base::text::js_string(&read["connection"]);
+        let transport = self.r.engine_store.connection(&connection).ok().flatten().and_then(|c| c.get("transport_kind").cloned()).unwrap_or(Value::Null);
+        if let Some(ctx) = self.r.emitter.ctx() {
+            ctx.broadcast("remote-read", &json!({ "actor": read["actor"], "transport": transport, "reach": read["reach"], "at": read["at"] }));
         }
-    }
-    fn get(&mut self, _path: &str) -> CallResult<Arg> {
-        Ok(Arg::Undef)
-    }
-    fn kind(&mut self, path: &str) -> CallResult<String> {
-        Ok(if path == "actors" { "object".into() } else { "undefined".into() })
     }
 }
 
@@ -408,9 +408,10 @@ impl Reads {
                     continue;
                 }
                 remote.used(&grant);
-                let targets: Vec<Arg> = out["targets"].as_array().map(|a| a.iter().map(arg).collect()).unwrap_or_default();
-                let reach: Vec<Arg> = out["reach"].as_array().map(|a| a.iter().map(arg).collect()).unwrap_or_default();
-                let _ = self.presence.locked().read(&mut PresenceCalls { r: self }, &arg(&session["actorId"]), &arg(&session["connectionId"]), &targets, &reach, now_ms(), true);
+                let targets: Vec<Value> = out["targets"].as_array().cloned().unwrap_or_default();
+                let reach: Vec<Value> = out["reach"].as_array().cloned().unwrap_or_default();
+                let (actor, connection) = (xenonet_base::text::js_string(&session["actorId"]), xenonet_base::text::js_string(&session["connectionId"]));
+                let _ = self.presence.locked().read(&mut Presence { r: self }, &actor, &connection, &targets, &reach, now_ms(), true);
                 log("ok", extra(&[("revision", policy["revision"].clone()), ("bytes", out["bytes"].clone()), ("projects", out["projects"].clone())]));
                 return json!({ "ok": true, "result": out["envelope"] });
             }
@@ -556,7 +557,7 @@ impl Audit for AuditCore {
         let Some(s) = &self.0.store else { return Ok(json!([])) };
         let ask = arg(&json!({ "since": xenonet_base::json::number(now_ms() - 7.0 * 24.0 * 3600e3), "limit": xenonet_base::json::number(audit::limit_of(limit)), "grant": grant }));
         let rows = s.with(|st| st.audit(&ask)).map_err(|e| CoreError::new(e.to_string()))?;
-        let rows: Vec<Value> = rows.iter().map(|r| xenonet_actors::connections::row_arg(r).to_json()).collect();
+        let rows: Vec<Value> = rows.iter().map(super::row_json).collect();
         Ok(Value::Array(audit::recent(&rows)))
     }
 

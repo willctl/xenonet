@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-sources"
-description = "What XenoNet reads: Claude Code's and Codex's transcripts, and the other sources of the map."
+description = "What XenoNet reads: the transcripts' lines and events, the records the readers make, and the other sources of the map."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,11 +13,15 @@ publish.workspace = true
 flate2.workspace = true
 getrandom.workspace = true
 regex.workspace = true
-rusqlite.workspace = true
+# Codex's archived rollouts (.jsonl.zst), read whole.
+ruzstd.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
+# A transcript's lines are sampled per file as they go through the
+# normalizer (`lines::records`).
+xenonet-schema.workspace = true
 
 # The telemetry's tests read lines through the adapters' readers.
 [dev-dependencies]

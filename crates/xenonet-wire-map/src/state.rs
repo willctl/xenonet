@@ -7,8 +7,7 @@
 //! map's index and the events (pulse, activity, refusal, tokens, graph,
 //! live) are here.
 
-use crate::blocks::{Blocks, Reported};
-use crate::codex::CodexClient;
+use crate::blocks::{health_of, Blocks, Reported};
 use crate::config::MapConfig;
 use crate::demo::DemoWorld;
 use crate::gatherer::{Gather, Options};
@@ -29,7 +28,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::watch;
-use xenonet_adapter::apps::{tailed_or_text, untailed};
+use xenonet_adapter::apps::{tailed_or_text, untailed, App};
+use xenonet_adapter::reader::{Lister, ListerEnv};
 use xenonet_base::paths::path_key;
 use xenonet_base::text::{js_string, truthy};
 use xenonet_service::cores::{CoreError, Runs, State, R};
@@ -53,10 +53,10 @@ const WIKI_LOOK_MS: u64 = 1000;
 const WIKI_SETTLE_MS: u64 = 800;
 
 /// What the map is read from: the demo's made-up world, or this machine's
-/// apps.
+/// apps, through the adapters' listers.
 pub enum Readers {
     Demo(Arc<DemoWorld>),
-    Real { claude: Arc<crate::claude::Claude> },
+    Real,
 }
 
 /// The map as the last refresh made it, and its index.
@@ -93,7 +93,9 @@ pub struct MapState {
     emitter: Emitter,
     readers: Readers,
     pub live: Arc<Live>,
-    codex: Arc<CodexClient>,
+    /// The adapters' listers of their apps' sessions, in the registry's
+    /// order.
+    listers: Vec<(&'static App, Arc<dyn Lister>)>,
     projects_scan: Arc<Projects>,
     repos: Arc<RepoWatch>,
     identities: Option<Arc<IdentityWatch>>,
@@ -141,18 +143,20 @@ fn gathered(name: &str, g: &Gather, value: Value) -> (Value, Value) {
     (value, st)
 }
 
+/// The folder an app's sessions are read from, as the settings have it.
+fn root_of<'a>(cfg: &'a MapConfig, app: &App) -> &'a str {
+    match app.id.as_str() {
+        "claude" => &cfg.claude_projects_dir,
+        "codex" => &cfg.codex_home,
+        "grok" => &cfg.grok_home,
+        _ => "",
+    }
+}
+
 impl MapState {
-    #[expect(clippy::too_many_arguments, reason = "the parts a state is made of, each made by wire")]
-    pub fn new(
-        cfg: MapConfig,
-        store: Arc<StateStore>,
-        vendor: Arc<Vendor>,
-        emitter: Emitter,
-        readers: Readers,
-        live: Arc<Live>,
-        codex: Arc<CodexClient>,
-        version: &str,
-    ) -> Arc<MapState> {
+    /// A state over `cfg`, with a lister for each app the adapters list
+    /// sessions of, made on the runtime this is called on.
+    pub fn new(cfg: MapConfig, store: Arc<StateStore>, vendor: Arc<Vendor>, emitter: Emitter, readers: Readers, live: Arc<Live>, version: &str) -> Arc<MapState> {
         let codex_roots =
             [std::path::Path::new(&cfg.codex_home).join("sessions"), std::path::Path::new(&cfg.codex_home).join("archived_sessions")].map(|p| p.to_string_lossy().into_owned());
         let grok_root = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
@@ -186,7 +190,20 @@ impl MapState {
         let saved = workspace::saved_root(&std::path::Path::new(&cfg.state_dir).join("state.json").to_string_lossy()).map(Value::String);
         let root = workspace::root(cfg.env_projects_dir.as_deref(), saved.as_ref(), &cfg.home_dir);
         let projects_dir = root["path"].as_str().unwrap_or(&cfg.projects_dir).to_string();
-        let _ = version;
+        let handle = tokio::runtime::Handle::current();
+        let listers: Vec<(&'static App, Arc<dyn Lister>)> = xenonet_adapter::platforms()
+            .listers(|app| ListerEnv {
+                home_dir: &cfg.home_dir,
+                root: root_of(&cfg, app),
+                desktop_dir: cfg.claude_desktop_dir.as_deref(),
+                state_dir: &cfg.state_dir,
+                env: &cfg.env,
+                version,
+                handle: handle.clone(),
+            })
+            .into_iter()
+            .map(|(app, l)| (app, Arc::from(l)))
+            .collect();
         let state = Arc::new_cyclic(|me| MapState {
             me: me.clone(),
             store: store.clone(),
@@ -194,7 +211,7 @@ impl MapState {
             emitter,
             readers,
             live: live.clone(),
-            codex: codex.clone(),
+            listers,
             projects_scan: Arc::new(Projects::default()),
             repos: Arc::new(RepoWatch::default()),
             identities,
@@ -227,7 +244,12 @@ impl MapState {
         let _ = b.add(state.claude_sessions.clone(), Some("claude"));
         let _ = b.add(state.codex_threads.clone(), Some("codex"));
         let _ = b.add(state.codex_projects.clone(), Some("codex-projects"));
-        let _ = b.add(codex, Some("codex"));
+        for (app, l) in &state.listers {
+            if l.block().is_some() {
+                let l = l.clone();
+                let _ = b.add(Arc::new(Reported(Arc::new(move || l.block().map_or(Value::Null, |h| health_of(h.name, h.kind, &h.life, &[], Value::Null))))), Some(app.id.as_str()));
+            }
+        }
         let _ = b.add(state.grok_sessions.clone(), Some("grok"));
         let _ = b.add(live.block(), Some("live"));
         for l in vendor.blocks() {
@@ -263,8 +285,13 @@ impl MapState {
     fn demo(&self) -> Option<&Arc<DemoWorld>> {
         match &self.readers {
             Readers::Demo(d) => Some(d),
-            Readers::Real { .. } => None,
+            Readers::Real => None,
         }
+    }
+
+    /// The lister of `app`'s sessions, when an adapter brings one.
+    fn lister(&self, app: &str) -> Option<Arc<dyn Lister>> {
+        self.listers.iter().find(|(a, _)| a.id == app).map(|(_, l)| l.clone())
     }
 
     pub fn projects_dir(&self) -> String {
@@ -350,27 +377,23 @@ impl MapState {
     async fn gather_sessions(&self, app: &str) -> Result<Value, String> {
         match &self.readers {
             Readers::Demo(d) => d.sessions(app).map(Value::Array),
-            Readers::Real { claude } => match app {
-                "codex" => self.codex.threads().await.map(Value::Array),
-                "claude" => claude.sessions().await.map(Value::Array),
-                "grok" => {
-                    let (home, vendor) = (self.cfg.grok_home.clone(), self.vendor.clone());
-                    Ok(Value::Array(
-                        crate::util::blocking(move || xenonet_sources::grok::list_sessions(&home, &mut |source, raw| vendor.sample(source, raw, None, None, 16))).await,
-                    ))
-                }
-                _ => Err(format!("XenoNet doesn't list {app}'s sessions")),
-            },
+            Readers::Real => {
+                let Some(l) = self.lister(app) else { return Err(format!("XenoNet doesn't list {app}'s sessions")) };
+                let vendor = self.vendor.clone();
+                crate::util::blocking(move || l.sessions(&*vendor)).await.map(Value::Array)
+            }
         }
     }
 
+    // The apps' own projects (Codex desktop's), from the listers that
+    // keep some.
     async fn gather_native(&self) -> Result<Value, String> {
         match &self.readers {
             Readers::Demo(d) => Ok(d.native_projects()),
-            Readers::Real { .. } => {
-                let home = self.cfg.codex_home.clone();
+            Readers::Real => {
+                let listers: Vec<Arc<dyn Lister>> = self.listers.iter().map(|(_, l)| l.clone()).collect();
                 let vendor = self.vendor.clone();
-                Ok(Value::Array(crate::util::blocking(move || crate::codex::native_projects(&home, &vendor)).await))
+                Ok(Value::Array(crate::util::blocking(move || listers.iter().filter_map(|l| l.projects(&*vendor)).flatten().collect()).await))
             }
         }
     }
@@ -820,7 +843,9 @@ impl MapState {
             t.abort();
         }
         self.live.stop();
-        self.codex.stop();
+        for (_, l) in &self.listers {
+            l.stop();
+        }
         self.search.close();
         self.store.flush();
     }
@@ -860,25 +885,19 @@ impl MapState {
             Readers::Demo(d) => d.transcript(&raw),
             // A session of an app XenoNet doesn't tail isn't read as Claude
             // Code's.
-            Readers::Real { claude } => match tailed_or_text(s(node, "app"), None) {
-                Some("codex") => {
-                    let id = s(node, "id").unwrap_or_default().to_string();
-                    let rollout = self.stats.files(&id).into_iter().next().map(|(f, _)| f);
-                    self.codex.read_thread(&raw, cursor, limit, rollout).await
-                }
-                Some("grok") => {
-                    let (home, vendor, cursor) = (self.cfg.grok_home.clone(), self.vendor.clone(), cursor.map(str::to_string));
-                    crate::util::blocking(move || {
-                        let dir = xenonet_sources::grok::folder(&home, &raw).ok_or("XenoNet can't find this Grok Build session's folder")?;
-                        let lines = crate::stats::read_lines(&vendor, &dir.join("updates.jsonl").to_string_lossy(), "grok").map_err(|e| e.to_string())?;
-                        let lines: Vec<_> = lines.into_iter().map(xenonet_sources::lines::GrokLine::new).collect();
-                        Ok(xenonet_sources::grok::page(xenonet_sources::grok::entries(&lines), cursor.as_deref(), limit as usize))
-                    })
-                    .await
-                }
-                Some(_) => claude.read(&raw, cursor, limit).await,
-                None => Err(untailed(s(node, "app").unwrap_or_default())),
-            },
+            Readers::Real => {
+                let Some(app) = tailed_or_text(s(node, "app"), None) else { return Err(untailed(s(node, "app").unwrap_or_default())) };
+                let Some(l) = self.lister(app) else { return Err(format!("XenoNet doesn't read {app}'s transcripts")) };
+                let (vendor, stats, cursor) = (self.vendor.clone(), self.stats.clone(), cursor.map(str::to_string));
+                let id = s(node, "id").unwrap_or_default().to_string();
+                crate::util::blocking(move || {
+                    // The session's files as the map finds them, for a
+                    // reader that falls back to them (a Codex rollout).
+                    let files = || stats.files(&id).into_iter().map(|(f, _)| f).collect();
+                    l.transcript(&*vendor, &raw, cursor.as_deref(), limit, &files)
+                })
+                .await
+            }
         }
     }
 
@@ -1321,7 +1340,7 @@ impl State for MapState {
     }
     async fn read_transcript(&self, node: &Value, cursor: Option<&str>, limit: f64) -> R<Value> {
         // A session of an app XenoNet doesn't tail is refused, a 400.
-        if matches!(self.readers, Readers::Real { .. }) && tailed_or_text(s(node, "app"), None).is_none() {
+        if matches!(self.readers, Readers::Real) && tailed_or_text(s(node, "app"), None).is_none() {
             return Err(status(400, untailed(s(node, "app").unwrap_or_default())));
         }
         self.transcript(node, cursor, limit).await.map_err(err)
@@ -1347,19 +1366,20 @@ impl State for MapState {
                     None => g.demo_titles.push((id.clone(), json!(name))),
                 }
             }
-            Readers::Real { claude } => {
-                // renamable takes Claude Code's sessions and Codex's alone.
-                if s(&n, "app") == Some("codex") {
-                    self.codex.rename(s(&n, "rawId").unwrap_or_default(), &name).await.map_err(err)?;
-                    saved.push("Codex");
-                } else {
-                    let done = claude.rename(&n, &name).await.map_err(err)?;
-                    saved.push("Claude Code");
-                    if done.desktop {
-                        saved.push("Claude desktop");
-                    }
-                    note = decide::rename_note(done.desktop, done.desktop_error.map(Value::String).as_ref());
-                }
+            Readers::Real => {
+                // renamable takes the sessions of the apps whose listers
+                // rename (Claude Code's and Codex's).
+                let app = s(&n, "app").unwrap_or_default();
+                let l = self.lister(app).ok_or_else(|| err(format!("XenoNet can't rename {app}'s sessions")))?;
+                let (vendor, node, title) = (self.vendor.clone(), n.clone(), name.clone());
+                let done = crate::util::blocking(move || l.rename(&*vendor, &node, &title)).await.map_err(err)?;
+                saved = done.saved;
+                let (desktop, desktop_error) = match done.desktop {
+                    Some(Ok(())) => (true, None),
+                    Some(Err(e)) => (false, Some(Value::String(e))),
+                    None => (false, None),
+                };
+                note = decide::rename_note(desktop, desktop_error.as_ref());
             }
         }
         self.after_change().await?;
@@ -1506,7 +1526,11 @@ impl State for MapState {
         Ok(items(Some(&lock(&self.live.telemetry).session_costs(now))).to_vec())
     }
     async fn codex_request(&self, method: &str, params: Value) -> R<Value> {
-        self.codex.request(method, params).await.map_err(|e| CoreError::new(e.message).with_extra(e.rpc.map_or(Value::Null, |rpc| json!({ "rpc": rpc }))))
+        let Some(l) = self.lister("codex") else { return Err(err("XenoNet has no Codex to ask")) };
+        let (vendor, method, params) = (self.vendor.clone(), method.to_string(), params);
+        crate::util::blocking(move || l.request(&*vendor, &method, params))
+            .await
+            .map_err(|e| CoreError::new(e.message).with_extra(e.rpc.map_or(Value::Null, |rpc| json!({ "rpc": rpc }))))
     }
     fn add_block(&self, health: Arc<dyn Fn() -> Value + Send + Sync>, source: Option<String>) -> R<()> {
         self.blocks.add(Arc::new(Reported(health)), source.as_deref()).map_err(err)

@@ -5,7 +5,11 @@
 //! shapes, read through Claude Code's `claude_line`, with the run of
 //! chunks each session's mapper keeps between lines; its tokens and cost
 //! come from the usage.json beside its updates, read again when it was
-//! written since.
+//! written since. The map's listing of its sessions and a page of a conversation are
+//! `listing` (over `entries`).
+
+pub mod entries;
+pub mod listing;
 
 use serde_json::Value;
 use std::cell::RefCell;

@@ -164,6 +164,18 @@ impl VendorCheck for Vendor {
     fn sample(&self, source: &str, record: Value, version: Option<&str>, kind: Option<&str>, every: u64) -> Option<Value> {
         Vendor::sample(self, source, record, version, kind, every)
     }
+    fn line(&self, app: &str, text: &str, sampling: &mut Sampling) -> Option<Value> {
+        Vendor::line(self, app, text, sampling)
+    }
+    fn record(&self, app: &str, raw: Value, sampling: &mut Sampling) -> Option<Value> {
+        Vendor::record(self, app, raw, sampling)
+    }
+    fn pick(&self, source: &str, version: Option<&str>) {
+        Vendor::pick(self, source, version);
+    }
+    fn missing(&self, source: &str, path: &str, version: Option<&str>) {
+        Vendor::missing(self, source, path, version);
+    }
 }
 
 // The transcript hooks (vendor.js's transcriptHooks): each line counted,

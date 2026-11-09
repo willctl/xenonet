@@ -11,10 +11,14 @@
 //! - `Native`: an app with a reader of its own records (OpenCode's
 //!   database, Gemini CLI's folder): where it reads from, and a reader,
 //!   over the contract in `native`.
+//! - `Lister`: an app whose sessions the map lists and whose transcripts
+//!   it shows (Claude Code's transcripts, Codex's app-server, Grok Build's
+//!   folders): its sessions, a page of a session, a rename, its own
+//!   projects, and the block of a client it keeps running.
 //!
 //! The core asks the registry for these (`Platform::tailed`,
-//! `Platform::native`); the drivers in xenonet-sources and xenonet-wire-map
-//! implement `Tail` and run the readers.
+//! `Platform::native`, `Platform::lister`); the drivers in xenonet-sources
+//! and xenonet-wire-map implement `Tail` and run the readers.
 
 pub mod files;
 pub mod native;
@@ -22,6 +26,8 @@ pub mod native;
 use serde_json::{Map, Value};
 use xenonet_base::json::number;
 use xenonet_base::usage::TokenUsage;
+use xenonet_blocks::lifecycle::Lifecycle;
+use xenonet_schema::vendor::Sampling;
 
 /// What JS would throw reading a record: the error every reader of
 /// transcripts gives where a line isn't shaped as its app writes it.
@@ -109,10 +115,28 @@ pub struct Classified {
 /// The vendor-schema checks the map offers a reader: a record checked
 /// whole, or one of every `every` sampled, each against its source's
 /// schema, with what differs recorded as drift. Gives the record to use,
-/// or None to drop it.
+/// or None to drop it. A transcript's lines go through their app's
+/// normalizer (`line`, `record`), and a reader says what it looked for
+/// and didn't find (`pick`, `missing`); without the map's schemas these
+/// take every line as it is and record nothing.
 pub trait VendorCheck: Sync {
     fn check(&self, source: &str, record: Value, version: Option<&str>, kind: Option<&str>) -> Option<Value>;
     fn sample(&self, source: &str, record: Value, version: Option<&str>, kind: Option<&str>, every: u64) -> Option<Value>;
+    /// A transcript line of `app`'s through its normalizer: the record to
+    /// read, or None for a line that isn't JSON or is dropped. `sampling`
+    /// is the file's: which of its lines are checked whole.
+    fn line(&self, _app: &str, text: &str, _sampling: &mut Sampling) -> Option<Value> {
+        xenonet_base::json::parse(text).ok()
+    }
+    /// A record already parsed, through the normalizer, as the last line
+    /// of a file without a newline is read.
+    fn record(&self, _app: &str, raw: Value, _sampling: &mut Sampling) -> Option<Value> {
+        Some(raw)
+    }
+    /// A version of a source none of its schemas has: drift.
+    fn pick(&self, _source: &str, _version: Option<&str>) {}
+    /// A field a reader looks for and didn't find.
+    fn missing(&self, _source: &str, _path: &str, _version: Option<&str>) {}
 }
 
 /// Checks that take every record as it is, for a reader run without the
@@ -311,4 +335,96 @@ pub trait Native: Send + Sync {
     fn at(&self, paths: &Paths<'_>) -> String;
     /// A new reader.
     fn make(&self) -> Box<dyn native::NativeReader>;
+}
+
+/// Where an app's lister reads: the map's folders, the service's
+/// environment and its runtime.
+pub struct ListerEnv<'a> {
+    pub home_dir: &'a str,
+    /// The app's own folder, as the settings have it: Claude Code's
+    /// projects folder, Codex's home, Grok Build's home.
+    pub root: &'a str,
+    /// Claude desktop's folder, when it was found.
+    pub desktop_dir: Option<&'a str>,
+    pub state_dir: &'a str,
+    /// The service's environment.
+    pub env: &'a Map<String, Value>,
+    /// XenoNet's version, for a client to say who it is.
+    pub version: &'a str,
+    /// The service's runtime, for a lister that keeps a client running.
+    pub handle: tokio::runtime::Handle,
+}
+
+impl ListerEnv<'_> {
+    /// A variable of the service's environment, when it's set.
+    pub fn var(&self, k: &str) -> Option<String> {
+        self.env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string)
+    }
+}
+
+/// A request of an app's own server that failed: its message, and the
+/// server's error when it gave one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Failed {
+    pub message: String,
+    pub rpc: Option<Value>,
+}
+
+impl Failed {
+    pub fn said(m: impl Into<String>) -> Failed {
+        Failed { message: m.into(), rpc: None }
+    }
+}
+
+/// Where a renamed session's name went: the places it was saved, as the
+/// console names them, and, for an app whose desktop keeps the name too,
+/// whether it was written there or why not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Renamed {
+    pub saved: Vec<&'static str>,
+    pub desktop: Option<Result<(), String>>,
+}
+
+/// A lister's block, for an app with a client XenoNet keeps running: its
+/// name, its kind and its lifecycle now.
+#[derive(Clone, Debug)]
+pub struct BlockHealth {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub life: Lifecycle,
+}
+
+/// An app whose sessions the map lists and whose transcripts it shows.
+/// One is made for each map (`Platform::lister`), and keeps what is the
+/// app's own: a client it runs, what its last listing read. Every method
+/// blocks: the map calls them off its runtime's threads.
+pub trait Lister: Send + Sync {
+    /// Its sessions, as the map lists them (session/v1), checked through
+    /// `vendor`.
+    fn sessions(&self, vendor: &dyn VendorCheck) -> Result<Vec<Value>, String>;
+    /// A page of a session's transcript ({ entries, cursor, total }),
+    /// newest first; `cursor` continues further back. `files` finds the
+    /// session's transcript files as the map knows them (its own first),
+    /// for a reader that falls back to them.
+    fn transcript(&self, vendor: &dyn VendorCheck, raw_id: &str, cursor: Option<&str>, limit: f64, files: &dyn Fn() -> Vec<String>) -> Result<Value, String>;
+    /// Renames a session where its app keeps the name; `node` is the
+    /// session as the map has it.
+    fn rename(&self, _vendor: &dyn VendorCheck, _node: &Value, _title: &str) -> Result<Renamed, String> {
+        Err("XenoNet can't rename this app's sessions".into())
+    }
+    /// The app's own projects (Codex desktop's), for an app that keeps
+    /// some.
+    fn projects(&self, _vendor: &dyn VendorCheck) -> Option<Vec<Value>> {
+        None
+    }
+    /// Its block, for an app with a client XenoNet keeps running.
+    fn block(&self) -> Option<BlockHealth> {
+        None
+    }
+    /// A request of the app's own server, for an app with one.
+    fn request(&self, _vendor: &dyn VendorCheck, _method: &str, _params: Value) -> Result<Value, Failed> {
+        Err(Failed::said("XenoNet has no server of this app's to ask"))
+    }
+    /// Stops what it keeps running.
+    fn stop(&self) {}
 }

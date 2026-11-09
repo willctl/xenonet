@@ -47,31 +47,6 @@ pub fn fields(f: &[(String, Option<Value>)]) -> Value {
     Value::Object(m)
 }
 
-/// A field of an object the readers made for JS (a session, a transcript's
-/// or a thread's entry) as JSON: None for undefined.
-pub fn field_json(f: &xenonet_sources::record::F) -> Option<Value> {
-    use xenonet_sources::record::F;
-    match f {
-        F::Undef => None,
-        F::Num(n) => Some(number(*n)),
-        F::V(v) => Some(v.clone()),
-        F::Arr(a) => Some(Value::Array(a.iter().map(|x| field_json(x).unwrap_or(Value::Null)).collect())),
-    }
-}
-
-/// An object the readers made for JS (a Claude Code or Codex session, a
-/// transcript's or a thread's entry) as JSON, its keys in order and its
-/// undefined fields left out.
-pub fn record_json(o: &xenonet_sources::record::Obj) -> Value {
-    let mut m = Map::new();
-    for (k, v) in o {
-        if let Some(v) = field_json(v) {
-            m.insert((*k).to_string(), v);
-        }
-    }
-    Value::Object(m)
-}
-
 /// The native readers' answers as JSON.
 pub fn native_out(o: &xenonet_sources::native::Out) -> Option<Value> {
     use xenonet_sources::native::Out;

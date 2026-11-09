@@ -36,7 +36,6 @@ use xenonet_base::log::{log_dir, read_logs, summarize, LEVELS};
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_engine::engine::{is_actor_agent, is_agent_id};
-use xenonet_engine::sql::Arg;
 
 pub const SERVICE_API: (u32, u32) = (1, 1);
 pub const CONSOLE_API: (u32, u32) = (1, 1);
@@ -101,7 +100,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
         // Another host's session or actor, by its qualified id.
-        let local_id = |id: &str| is_agent_id(&Arg::text(id)) || is_actor_agent(&Arg::text(id));
+        let local_id = |id: &str| is_agent_id(id) || is_actor_agent(id);
         let remote = xenonet_base::ids::parse_qualified(&to).is_some_and(|(h, local)| h.is_some() && local_id(local));
         if !(local_id(&to) || remote) {
             return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));

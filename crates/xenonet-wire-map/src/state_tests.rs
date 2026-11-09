@@ -29,14 +29,18 @@ fn world() -> World {
     let demo = Arc::new(DemoWorld::new(port));
     let w = demo.create().expect("the demo's world");
     let home = std::env::var("HOME").unwrap_or_default();
-    let cfg = MapConfig::new(true, false, process_env(), &home, Some(&w));
+    // No Codex is asked here: a request would spawn this binary, which
+    // isn't there.
+    let mut env = process_env();
+    env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));
+    xenonet_platforms::install();
+    let cfg = MapConfig::new(true, false, env, &home, Some(&w));
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
     let live = Live::new(&cfg.claude_projects_dir, &codex_sessions, "", cfg.claude_desktop_dir.as_deref(), false, &cfg.home_dir, vendor.clone());
-    let codex = CodexClient::new("/nonexistent/codex".into(), "0.0.0".into(), vendor.clone());
-    let state = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Demo(demo), live, codex, "0.0.0");
+    let state = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Demo(demo), live, "0.0.0");
     let root = w["root"].as_str().unwrap_or_default().to_string();
     World { state, root, home: w["home"].as_str().unwrap_or_default().to_string() }
 }
@@ -386,15 +390,14 @@ async fn a_home_folders_own_sessions_and_projects() {
     for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XENONET_PROJECTS_DIR", "XENONET_READERS", "XENONET_NUMBAT_FILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"] {
         env.shift_remove(k);
     }
+    xenonet_platforms::install();
     let cfg = MapConfig::new(false, false, env, &home_s, None);
     assert!(!cfg.demo && cfg.claude_projects_dir.starts_with(&home_s), "nothing of yours is read");
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
     let live = Live::new(&cfg.claude_projects_dir, "", "", None, false, &cfg.home_dir, vendor.clone());
-    let codex = CodexClient::new(cfg.codex_binary(), "0.0.0".into(), vendor.clone());
-    let claude = crate::claude::Claude::new(&cfg.claude_projects_dir, None, vendor.clone());
-    let s = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Real { claude }, live, codex, "0.0.0");
+    let s = MapState::new(cfg, store, vendor, Emitter::new(), Readers::Real, live, "0.0.0");
     let g = s.refresh_map().await.expect("a map");
     let session = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(&format!("claude:{id}"))).cloned().expect("the session, on the map");
     assert_eq!((session["title"].as_str(), session["cwd"].as_str()), (Some("Add a health check route"), Some(cwd.as_str())));

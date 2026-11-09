@@ -2,10 +2,9 @@
 //! sections 5, 6, 8 and 11): the handle it reaches other hosts through, and
 //! what its own words about them are. The engine's paths for other hosts
 //! run only while `Net::me()` says this machine is in a network; with
-//! `NoNet`, which the twins always have, every path is the one it was.
+//! `NoNet`, every path is the one it was.
 
-use crate::sql::Arg;
-use crate::store::js_text;
+use serde_json::Value;
 use std::sync::{Arc, RwLock};
 use xenonet_base::network::{Me, Net, NoNet};
 use xenonet_base::sync::ReadWrite;
@@ -74,19 +73,19 @@ pub fn from_you_line(host: &str) -> String {
 
 /// The host a stored message's envelope says it came from over the
 /// network, or None for one made on this machine.
-pub fn network_host(envelope: &Arg) -> Option<String> {
-    if envelope.field("transport").as_str() != Some("network") {
+pub fn network_host(envelope: &Value) -> Option<String> {
+    if envelope.get("transport").and_then(Value::as_str) != Some("network") {
         return None;
     }
-    match envelope.field("host") {
-        Arg::Text(h) if !h.is_empty() => Some(h),
+    match envelope.get("host").and_then(Value::as_str) {
+        Some(h) if !h.is_empty() => Some(h.to_string()),
         _ => None,
     }
 }
 
 /// Whether an id names an agent on another host (`@<host>:<id>`).
-pub fn is_remote(id: &Arg) -> bool {
-    id.as_str().and_then(xenonet_base::ids::parse_qualified).is_some_and(|(h, _)| h.is_some())
+pub fn is_remote(id: &str) -> bool {
+    xenonet_base::ids::parse_qualified(id).is_some_and(|(h, _)| h.is_some())
 }
 
 /// The host of a qualified id.
@@ -109,15 +108,6 @@ pub fn new_id(prefix: &str) -> Result<String, crate::peer::Thrown> {
     Ok(format!("{prefix}_{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
-/// What the engine's text calls a time: the hour and minute, as a host's
-/// "offline since" says it.
-pub fn since_words(c: &mut dyn crate::peer::Calls, at: &Arg) -> String {
-    match c.call("", "timeOf", vec![at.clone()]) {
-        Ok(t) => js_text(&t),
-        Err(_) => js_text(at),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,14 +125,14 @@ mod tests {
 
     #[test]
     fn ids_on_other_hosts() {
-        assert!(is_remote(&Arg::text("@laptop:claude:abcdefgh")));
-        assert!(!is_remote(&Arg::text("claude:abcdefgh")));
+        assert!(is_remote("@laptop:claude:abcdefgh"));
+        assert!(!is_remote("claude:abcdefgh"));
         assert_eq!(host_of("@laptop:claude:abcdefgh"), Some("laptop"));
         assert_eq!(local_of("@laptop:claude:abcdefgh"), "claude:abcdefgh");
         assert_eq!(local_of("claude:abcdefgh"), "claude:abcdefgh");
-        let env = Arg::Obj(vec![("transport".into(), Arg::text("network")), ("host".into(), Arg::text("laptop"))]);
+        let env = serde_json::json!({ "transport": "network", "host": "laptop" });
         assert_eq!(network_host(&env).as_deref(), Some("laptop"));
-        assert_eq!(network_host(&Arg::Null), None);
+        assert_eq!(network_host(&Value::Null), None);
         assert!(NetHandle::default().me().is_none(), "no network until the service puts one here");
     }
 }

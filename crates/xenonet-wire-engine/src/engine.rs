@@ -1,23 +1,23 @@
-//! The engine (core/engine/engine.js over crates/xenonet-engine/src/engine.rs):
-//! its collaborators as the twin hands them over, natively. "engine" is
-//! the engine itself (its store, actors, policy, delivery, repos and
-//! listening hooks); the map's state is read through the State trait; and
-//! the waits an inbox and a listening Stop hook hold, the events, the
-//! processes and the clock are here. An engine call blocks on its waits
-//! and on git, so each runs on a blocking thread.
+//! The engine's collaborators in the binary (`Side`, one `Collaborators`
+//! for a call): the clock, the processes, the map's readers, the actors,
+//! the router and the policy, the repos, the sessions listening after a
+//! turn, the waits an inbox and a listening Stop hook hold, the events and
+//! the network. An engine call blocks on its waits and on git, so each
+//! runs on a blocking thread (`EngineDriver`).
 
-use crate::delivery::{self, policy_thrown};
-use crate::js::{alive, at, json, list, no_method, now_ms, obj, text, time_of, Locked};
+use crate::delivery::{self, policy_thrown, RouterDriver};
+use crate::js::{alive, arg, json, list, now_ms, text, time_of, Locked};
 use crate::world::World;
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use xenonet_engine::engine::{Fail, ACTIVE_MS};
-use xenonet_engine::peer::{Calls, Result, Thrown};
+use xenonet_engine::host::{self, Collaborators, IndexEntry, Repo, StatusSet};
+use xenonet_engine::peer::Thrown;
 use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{CoreError, Engine, Kind, R};
 use xenonet_service::glue::From;
@@ -136,13 +136,13 @@ impl Mail {
 /// few git commands run at once.
 #[derive(Default)]
 pub struct Repos {
-    cache: Mutex<Vec<(String, f64, Arg)>>,
+    cache: Mutex<Vec<(String, f64, Option<Repo>)>>,
     running: Mutex<usize>,
     room: Condvar,
     /// Each folder's repo key across the network (its remote), kept as
     /// long as its repo; asked only while this machine is in a network or
     /// for a handoff.
-    remotes: Mutex<Vec<(String, f64, Arg)>>,
+    remotes: Mutex<Vec<(String, f64, Option<String>)>>,
 }
 
 const REPO_TTL_MS: f64 = 60e3;
@@ -150,7 +150,7 @@ const REPOS_KEPT: usize = 512;
 const GIT_AT_ONCE: usize = 8;
 
 impl Repos {
-    fn read(&self, cwd: &str) -> Arg {
+    fn read(&self, cwd: &str) -> Option<Repo> {
         {
             let mut n = self.running.locked();
             while *n >= GIT_AT_ONCE {
@@ -163,50 +163,53 @@ impl Repos {
         let out = crate::exec::run(&crate::exec::Spec::new("git", &args, 3000));
         *self.running.locked() -= 1;
         self.room.notify_one();
-        match out {
-            Ok(stdout) => xenonet_engine::engine::parse_repo(&stdout).unwrap_or(Arg::Null),
-            Err(_) => Arg::Null,
-        }
+        out.ok().and_then(|stdout| xenonet_engine::engine::parse_repo(&stdout))
     }
 
     /// A folder's repo key across the network: its repo's remote (origin,
-    /// else the first), normalized; null outside git or with no remote.
-    pub fn remote_key(&self, cwd: &Arg) -> Arg {
-        if !cwd.truthy() {
-            return Arg::Null;
+    /// else the first), normalized; None outside git or with no remote.
+    pub fn remote_key_of(&self, cwd: &str) -> Option<String> {
+        if cwd.is_empty() {
+            return None;
         }
-        let cwd = text(cwd);
         let now = now_ms();
-        if let Some((_, _, v)) = self.remotes.locked().iter().find(|(k, at, _)| *k == cwd && now - at < REPO_TTL_MS) {
+        if let Some((_, _, v)) = self.remotes.locked().iter().find(|(k, at, _)| k == cwd && now - at < REPO_TTL_MS) {
             return v.clone();
         }
-        let args: Vec<String> = ["-C", &cwd, "config", "--get-regexp", r"^remote\..*\.url$"].iter().map(ToString::to_string).collect();
-        let v = match crate::exec::run(&crate::exec::Spec::new("git", &args, 3000)) {
-            Ok(out) => xenonet_engine::network::first_remote(&out).and_then(|u| xenonet_engine::network::repo_key_of(&u)).map_or(Arg::Null, Arg::Text),
-            Err(_) => Arg::Null,
-        };
+        let args: Vec<String> = ["-C", cwd, "config", "--get-regexp", r"^remote\..*\.url$"].iter().map(ToString::to_string).collect();
+        let v = crate::exec::run(&crate::exec::Spec::new("git", &args, 3000))
+            .ok()
+            .and_then(|out| xenonet_engine::network::first_remote(&out))
+            .and_then(|u| xenonet_engine::network::repo_key_of(&u));
         let mut c = self.remotes.locked();
-        c.retain(|(k, at, _)| *k != cwd && now - at < REPO_TTL_MS);
-        c.push((cwd, now, v.clone()));
+        c.retain(|(k, at, _)| k != cwd && now - at < REPO_TTL_MS);
+        c.push((cwd.to_string(), now, v.clone()));
         let over = c.len().saturating_sub(REPOS_KEPT);
         c.drain(..over);
         v
     }
 
-    pub fn of(&self, cwd: &Arg) -> Arg {
+    /// The same, as network.rs still asks it: goes with network.rs.
+    pub fn remote_key(&self, cwd: &Arg) -> Arg {
         if !cwd.truthy() {
             return Arg::Null;
         }
-        let cwd = text(cwd);
+        self.remote_key_of(&text(cwd)).map_or(Arg::Null, Arg::Text)
+    }
+
+    pub fn of(&self, cwd: &str) -> Option<Repo> {
+        if cwd.is_empty() {
+            return None;
+        }
         let now = now_ms();
-        if let Some((_, _, v)) = self.cache.locked().iter().find(|(k, at, _)| *k == cwd && now - at < REPO_TTL_MS) {
+        if let Some((_, _, v)) = self.cache.locked().iter().find(|(k, at, _)| k == cwd && now - at < REPO_TTL_MS) {
             return v.clone();
         }
-        let v = self.read(&cwd);
+        let v = self.read(cwd);
         let mut c = self.cache.locked();
         // Read again, it goes to the end, the last to be let go.
-        c.retain(|(k, _, _)| *k != cwd);
-        c.push((cwd, now_ms(), v.clone()));
+        c.retain(|(k, _, _)| k != cwd);
+        c.push((cwd.to_string(), now_ms(), v.clone()));
         if c.len() > REPOS_KEPT {
             let t = now_ms();
             c.retain(|(_, at, _)| t - at < REPO_TTL_MS);
@@ -217,55 +220,39 @@ impl Repos {
     }
 }
 
-/// The engine's collaborators, for one call. `signal`: a listening hook's
-/// request. What the policy refused is kept by its handle, with its status.
-pub struct EngineCalls<'a> {
-    pub w: &'a World,
+/// The engine's collaborators for one call, over the world. `signal`: a
+/// listening hook's request.
+pub struct Side<'a> {
+    w: &'a World,
     signal: Option<Arc<Signal>>,
-    refused: Vec<(u64, u16)>,
-    next: u64,
+    /// Live delivery, which holds the world: None only while the world is
+    /// going.
+    router: Option<RouterDriver>,
 }
 
-impl<'a> EngineCalls<'a> {
-    pub fn new(w: &'a World, signal: Option<Arc<Signal>>) -> EngineCalls<'a> {
-        EngineCalls { w, signal, refused: Vec::new(), next: 0 }
+impl<'a> Side<'a> {
+    pub fn new(w: &'a World, signal: Option<Arc<Signal>>) -> Side<'a> {
+        Side { w, signal, router: w.arc().map(RouterDriver) }
     }
 
-    /// `engine.view(id)`, as a collaborator asks for it.
-    pub fn view(&mut self, id: &Arg) -> Result<Arg> {
-        let w = self.w;
-        w.engine.view(self, id).map_err(thrown_of)
-    }
-
-    fn policy(&mut self, method: &str, args: &[Arg]) -> Result<Arg> {
-        self.w.policy.call(method, args).map_err(|f| {
-            let (mut t, status) = policy_thrown(f);
-            if let Some(s) = status {
-                self.next += 1;
-                t.handle = Some(self.next);
-                self.refused.push((self.next, s));
-            }
-            t
-        })
-    }
-
-    /// What the engine failed with, as the routes answer it.
-    fn error(&self, f: Fail) -> CoreError {
-        match f {
-            Fail::Error(m) => CoreError::new(m),
-            Fail::Bad(m) => CoreError::of(Kind::Error, 400, "bad-request", m),
-            Fail::Thrown(t) => {
-                let status = t.handle.and_then(|h| self.refused.iter().find(|(k, _)| *k == h)).map(|(_, s)| *s);
-                let code = t.code.as_deref().and_then(Value::as_str).map(str::to_string);
-                match status {
-                    Some(s) => CoreError { status: Some(s), code, ..CoreError::new(t.message) },
-                    None => CoreError { code, ..CoreError::new(t.message) },
-                }
-            }
+    pub fn collaborators(&self) -> Collaborators<'_> {
+        Collaborators {
+            store: &self.w.store,
+            clock: self,
+            processes: self,
+            map: self,
+            actors: self.w.actors.as_ref().map(|_| self as &dyn host::ActorsView),
+            delivery: self.router.as_ref().map(|r| r as &dyn xenonet_engine::delivery::router::Delivery),
+            policy: Some(&self.w.policy),
+            repos: self,
+            listening: self,
+            waits: self,
+            events: self,
+            net: Some(self),
         }
     }
 
-    fn wait(&mut self, me: &str, ms: f64, listen: bool) {
+    fn wait(&self, me: &str, ms: f64, listen: bool) {
         let waiter = Arc::new(Waiter { listen, ..Waiter::default() });
         self.w.mail.add(me, &waiter);
         if listen {
@@ -283,174 +270,288 @@ impl<'a> EngineCalls<'a> {
         self.w.mail.drop_waiter(me, &waiter);
     }
 
-    fn actors(&self) -> Option<&crate::actors::ActorSide> {
-        self.w.actors.as_ref()
+    /// A call on the actors' registry, with what it told told after.
+    fn actors<T>(
+        &self,
+        f: impl FnOnce(&mut xenonet_actors::registry::Actors, &mut crate::actors::ActorHost<'_>) -> xenonet_actors::registry::Result<T>,
+    ) -> xenonet_engine::engine::Result<T> {
+        let Some(a) = &self.w.actors else { return Err(Fail::Error("actors is not an object".into())) };
+        a.with(self.w, f).map_err(Fail::from)
+    }
+
+    /// `engine.net.<method>`, as network.rs answers it: goes with
+    /// network.rs.
+    fn net(&self, method: &str, args: &[Arg]) -> xenonet_engine::engine::Result<Arg> {
+        let mut c = EngineCalls::new(self.w, None);
+        crate::network::call(self.w, &mut c, method, args).map_err(Fail::from)
+    }
+}
+
+impl host::Clock for Side<'_> {
+    fn now(&self) -> f64 {
+        now_ms()
+    }
+    fn time_of(&self, ms: f64) -> String {
+        time_of(ms)
+    }
+}
+
+impl host::Processes for Side<'_> {
+    fn alive(&self, pid: f64) -> bool {
+        alive(pid)
+    }
+}
+
+impl host::MapReader for Side<'_> {
+    fn live_ids(&self) -> xenonet_engine::engine::Result<Vec<(String, f64)>> {
+        self.w.map.live_ids()
+    }
+    fn index(&self) -> xenonet_engine::engine::Result<Vec<IndexEntry>> {
+        self.w.map.index()
+    }
+    fn node(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        self.w.map.node(id)
+    }
+    fn live(&self, id: &str, now: f64) -> xenonet_engine::engine::Result<Option<Value>> {
+        self.w.map.live(id, now)
+    }
+    fn observed_live(&self, id: &str) -> xenonet_engine::engine::Result<bool> {
+        self.w.map.observed_live(id)
+    }
+    fn home_of(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        self.w.map.home_of(id)
+    }
+    fn identities(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
+        self.w.map.identities()
+    }
+}
+
+impl host::ActorsView for Side<'_> {
+    fn has(&self, id: &str) -> xenonet_engine::engine::Result<bool> {
+        self.actors(|r, _| Ok(r.has(id)))
+    }
+    fn is_registered(&self, id: &str) -> xenonet_engine::engine::Result<bool> {
+        self.actors(|r, _| Ok(r.is_registered(id)))
+    }
+    fn place_of(&self, dir: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        self.actors(|r, h| Ok(r.place_of(&Value::String(dir.to_string()), h))).map(|v| (!v.is_null()).then_some(v))
+    }
+    fn engine_ids(&self, since: f64) -> xenonet_engine::engine::Result<Vec<String>> {
+        self.actors(|r, _| Ok(r.engine_ids(since, now_ms())))
+    }
+    fn engine_view(&self, id: &str, now: f64) -> xenonet_engine::engine::Result<Option<Value>> {
+        self.actors(|r, h| r.engine_view(id, now, None, h)).map(|v| (!v.is_null()).then_some(v))
+    }
+    fn set_status(&self, id: &str, status: &str) -> xenonet_engine::engine::Result<StatusSet> {
+        let set = self.actors(|r, _| r.set_status(id, status, None, now_ms()))?;
+        Ok(match set {
+            Ok(status) => StatusSet::Ok(status),
+            Err(reason) => StatusSet::Refused(reason.to_string()),
+        })
+    }
+    fn info(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        self.actors(|r, _| Ok(r.info(id))).map(|v| (!v.is_null()).then_some(v))
+    }
+}
+
+impl host::Repos for Side<'_> {
+    fn of(&self, dir: &str) -> xenonet_engine::engine::Result<Option<Repo>> {
+        Ok(self.w.repos.of(dir))
+    }
+    /// Git for several folders at once.
+    fn of_each(&self, dirs: &[String]) -> Vec<xenonet_engine::engine::Result<Option<Repo>>> {
+        if dirs.len() < 2 {
+            return dirs.iter().map(|d| Ok(self.w.repos.of(d))).collect();
+        }
+        let repos = &self.w.repos;
+        std::thread::scope(|s| {
+            let hs: Vec<_> = dirs.iter().map(|d| s.spawn(move || repos.of(d))).collect();
+            hs.into_iter().map(|h| Ok(h.join().unwrap_or(None))).collect()
+        })
+    }
+}
+
+impl host::Listening for Side<'_> {
+    fn set(&self, id: &str, until: f64) {
+        self.w.mail.set_listening(id, until);
+    }
+    fn delete(&self, id: &str) {
+        self.w.mail.stop_listening(id);
+    }
+    fn has(&self, id: &str) -> bool {
+        self.w.mail.listening_has(id)
+    }
+}
+
+impl host::Waits for Side<'_> {
+    fn wake_waiters(&self, id: &str) {
+        self.w.mail.wake(id);
+    }
+    fn wait(&self, me: &str, ms: f64) {
+        Side::wait(self, me, ms, false);
+    }
+    fn listen_wait(&self, me: &str, ms: f64) {
+        Side::wait(self, me, ms, true);
+    }
+    fn aborted(&self) -> bool {
+        self.signal.as_ref().is_some_and(|s| s.aborted.load(Ordering::SeqCst))
+    }
+}
+
+impl host::Events for Side<'_> {
+    fn emit(&self, name: &str, payload: Value) {
+        event(self.w, name, &payload);
+    }
+}
+
+impl host::Net for Side<'_> {
+    fn agents(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
+        Ok(list(self.net("agents", &[])?).iter().map(json).collect())
+    }
+    fn console(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
+        Ok(list(self.net("console", &[])?).iter().map(json).collect())
+    }
+    fn view(&self, id: &str) -> xenonet_engine::engine::Result<Value> {
+        Ok(json(&self.net("view", &[Arg::text(id)])?))
+    }
+    fn repo_key(&self, cwd: &str) -> xenonet_engine::engine::Result<Option<String>> {
+        Ok(self.w.repos.remote_key_of(cwd))
+    }
+    fn sent(&self, message: &Value) -> xenonet_engine::engine::Result<()> {
+        self.net("sent", &[arg(message)]).map(|_| ())
+    }
+    fn claim_hits(&self, me: &str, files: &[String]) -> xenonet_engine::engine::Result<Vec<Value>> {
+        let files = Arg::List(files.iter().map(Arg::text).collect());
+        Ok(list(self.net("claimHits", &[Arg::text(me), files])?).iter().map(json).collect())
+    }
+    fn handoffs(&self, view: &Value) -> xenonet_engine::engine::Result<Vec<Value>> {
+        Ok(list(self.net("handoffs", &[arg(view)])?).iter().map(json).collect())
+    }
+    fn receipt(&self, message_id: f64, agent: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        let r = self.net("receipt", &[Arg::Num(message_id), Arg::text(agent)])?;
+        Ok((!r.is_nullish()).then(|| json(&r)))
+    }
+}
+
+/// The engine as network.rs still calls it, with its values as `Arg`:
+/// goes with network.rs. `signal`: a listening hook's request.
+pub struct EngineCalls<'a> {
+    side: Side<'a>,
+}
+
+impl<'a> EngineCalls<'a> {
+    pub fn new(w: &'a World, signal: Option<Arc<Signal>>) -> EngineCalls<'a> {
+        EngineCalls { side: Side::new(w, signal) }
+    }
+
+    fn engine(&self) -> &xenonet_engine::engine::Engine {
+        &self.side.w.engine
+    }
+
+    /// `engine.view(id)`.
+    pub fn view(&self, id: &Arg) -> xenonet_engine::peer::Result<Arg> {
+        self.engine().view(&self.side.collaborators(), &text(id)).map(|v| arg(&v)).map_err(thrown_of)
+    }
+
+    /// Everyone who worked in the last `within_ms`.
+    pub fn agents(&self, within_ms: f64) -> xenonet_engine::peer::Result<Vec<Arg>> {
+        self.engine().agents(&self.side.collaborators(), within_ms).map(|l| l.iter().map(arg).collect()).map_err(thrown_of)
+    }
+
+    /// Why a message from another machine can't reach an agent here, or
+    /// None when it can.
+    pub fn unreached(&self, view: &Arg) -> xenonet_engine::peer::Result<Option<String>> {
+        xenonet_engine::engine::Engine::unreached(&self.side.collaborators(), &json(view)).map_err(thrown_of)
+    }
+
+    /// The policy's checks on a message, `{ sender, recipients, text, depth }`.
+    pub fn check_send(&self, ask: &Arg) -> xenonet_engine::peer::Result<()> {
+        use xenonet_engine::delivery::policy::Guard;
+        let depth = match ask.field("depth") {
+            Arg::Undef => 0.0,
+            d => crate::js::num(&d),
+        };
+        let recipients: Vec<Value> = list(ask.field("recipients")).iter().map(json).collect();
+        self.side.w.policy.check_send(&text(&ask.field("sender")), &recipients, &text(&ask.field("text")), depth).map_err(|f| policy_thrown(f).0)
+    }
+
+    /// A message from `me`: `{ to, text, replyTo }`, with its envelope.
+    pub fn send(&self, me: &Arg, ask: &Arg, envelope: &Arg) -> Result<Arg, Fail> {
+        self.engine().send(&self.side.collaborators(), &text(me), &json(ask), &json(envelope)).map(|v| arg(&v))
     }
 }
 
 fn thrown_of(f: Fail) -> Thrown {
     match f {
         Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
+        Fail::Refused { why, code } => Thrown::coded(why, code),
         Fail::Thrown(t) => t,
+    }
+}
+
+/// What the engine failed with, as the routes answer it.
+fn error(f: Fail) -> CoreError {
+    match f {
+        Fail::Error(m) => CoreError::new(m),
+        Fail::Bad(m) => CoreError::of(Kind::Error, 400, "bad-request", m),
+        Fail::Refused { why, code } => CoreError::of(Kind::Error, 429, code, why),
+        Fail::Thrown(t) => CoreError { code: t.code.as_deref().and_then(Value::as_str).map(str::to_string), ..CoreError::new(t.message) },
     }
 }
 
 /// What the engine tells: a message to the page, the actors, the router and
 /// the wakes; mail taken to the router and the listening hooks; a hook's
 /// contact to the router.
-pub fn told(w: &World, name: &str, payload: &Arg) {
+pub fn event(w: &World, name: &str, payload: &Value) {
     match name {
         "message" => {
-            w.emit(From::Engine, "message", json(payload));
+            w.emit(From::Engine, "message", payload.clone());
             // A message from another machine to a session that holds them
             // waits until the session asks.
-            if payload.field("held").truthy() {
+            if crate::js::truthy_json(&payload["held"]) {
                 return;
             }
             // Agents on other hosts get it there, through the network.
-            let to = list(payload.field("to"));
+            let to: Vec<Value> = payload["to"].as_array().cloned().unwrap_or_default();
             let mut m = payload.clone();
-            if to.iter().any(xenonet_engine::network::is_remote) {
-                if let Arg::Obj(f) = &mut m {
-                    f.retain(|(k, _)| k != "to");
-                    f.push(("to".into(), Arg::List(to.iter().filter(|r| !xenonet_engine::network::is_remote(r)).cloned().collect())));
+            if to.iter().any(|r| xenonet_engine::network::is_remote(&xenonet_base::text::js_string(r))) {
+                if let Value::Object(f) = &mut m {
+                    f.retain(|k, _| k != "to");
+                    f.insert("to".into(), Value::Array(to.iter().filter(|r| !xenonet_engine::network::is_remote(&xenonet_base::text::js_string(r))).cloned().collect()));
                 }
             }
             // Who is listening now, before the route below runs.
-            let listening: Vec<String> = list(m.field("to")).iter().map(text).filter(|id| w.mail.listening_has(id)).collect();
-            let here = list(m.field("to"));
+            let here: Vec<Value> = m["to"].as_array().cloned().unwrap_or_default();
+            let listening: Vec<String> = here.iter().map(xenonet_base::text::js_string).filter(|id| w.mail.listening_has(id)).collect();
+            let m = arg(&m);
             w.spawn_blocking(move |w| {
                 delivery::route(w, &m, &listening);
                 crate::network::delivered(w, &m);
             });
             if let Some(wakes) = &w.wakes {
                 for r in here {
-                    wakes.arrived(w, &r);
+                    wakes.arrived(w, &arg(&r));
                 }
             }
         }
         "seen" => {
-            let agent = payload.field("agent");
+            let agent = arg(&payload["agent"]);
+            let ids: Vec<Arg> = payload["ids"].as_array().map(|l| l.iter().map(arg).collect()).unwrap_or_default();
             w.mail.seen(&text(&agent));
-            delivery::seen(w, &agent, &list(payload.field("ids")));
-            crate::network::seen(w, &agent, &list(payload.field("ids")));
+            delivery::seen(w, &agent, &ids);
+            crate::network::seen(w, &agent, &ids);
         }
-        "contact" if payload.field("via").as_str() == Some("hook") => {
-            delivery::contact(w, &payload.field("agent"));
+        "contact" if payload["via"].as_str() == Some("hook") => {
+            delivery::contact(w, &arg(&payload["agent"]));
         }
         _ => {}
     }
 }
 
-impl Calls for EngineCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        let w = self.w;
-        let x = |i| at(&args, i);
-        match (path, method) {
-            ("engine", "now") => Ok(Arg::Num(now_ms())),
-            ("engine.store", m) => crate::store::call(&w.store, m, &args),
-            ("engine.actors", m) => match self.actors() {
-                Some(a) => a.call(w, m, &args),
-                None => Err(no_method("engine.actors", m)),
-            },
-            ("engine.delivery", m) => delivery::router_call(w, m, &args),
-            ("engine.policy", m) => self.policy(m, &args),
-            ("engine.repos", "of") => Ok(w.repos.of(&x(0))),
-            ("engine.net", m) => crate::network::call(w, self, m, &args),
-            ("engine.listening", "set") => {
-                w.mail.set_listening(&text(&x(0)), crate::js::num(&x(1)));
-                Ok(Arg::Undef)
-            }
-            ("engine.listening", "delete") => {
-                w.mail.stop_listening(&text(&x(0)));
-                Ok(Arg::Undef)
-            }
-            ("engine.listening", "has") => Ok(Arg::Bool(w.mail.listening_has(&text(&x(0))))),
-            ("", "liveIds") => w.map.live_ids(),
-            ("", "index") => w.map.index(),
-            ("", "node") => w.map.node(&x(0)),
-            ("", "live") => w.map.live(&x(0), crate::js::num(&x(1))),
-            ("", "observedLive") => w.map.observed_live(&x(0)).map(Arg::Bool),
-            ("", "homeOf") => w.map.home_of(&x(0)),
-            ("", "identities") => w.map.identities(),
-            ("", "alive") => Ok(Arg::Bool(x(0).as_f64().is_some_and(alive))),
-            ("", "emit") => {
-                told(w, &text(&x(0)), &x(1));
-                Ok(Arg::Undef)
-            }
-            ("", "wakeWaiters") => {
-                w.mail.wake(&text(&x(0)));
-                Ok(Arg::Undef)
-            }
-            ("", "wait") => {
-                self.wait(&text(&x(0)), crate::js::num(&x(1)), false);
-                Ok(Arg::Undef)
-            }
-            ("", "listenWait") => {
-                self.wait(&text(&x(0)), crate::js::num(&x(1)), true);
-                Ok(Arg::Undef)
-            }
-            ("", "wall") => Ok(Arg::Num(now_ms())),
-            ("", "tick") => Ok(Arg::Undef),
-            ("", "timeOf") => Ok(Arg::Text(time_of(crate::js::num(&x(0))))),
-            _ => Err(no_method(path, method)),
-        }
-    }
-
-    fn call_all(&mut self, calls: Vec<(&str, &str, Vec<Arg>)>) -> Vec<Result<Arg>> {
-        // Git for several folders at once, as Promise.all started them.
-        if calls.len() > 1 && calls.iter().all(|(p, m, _)| *p == "engine.repos" && *m == "of") {
-            let repos = &self.w.repos;
-            return std::thread::scope(|s| {
-                let hs: Vec<_> = calls.iter().map(|(_, _, a)| s.spawn(move || repos.of(&at(a, 0)))).collect();
-                hs.into_iter().map(|h| Ok(h.join().unwrap_or(Arg::Null))).collect()
-            });
-        }
-        calls.into_iter().map(|(p, m, a)| self.call(p, m, a)).collect()
-    }
-
-    fn get(&mut self, path: &str) -> Result<Arg> {
-        Ok(match path {
-            "signal.aborted" => Arg::Bool(self.signal.as_ref().is_some_and(|s| s.aborted.load(Ordering::SeqCst))),
-            _ => Arg::Undef,
-        })
-    }
-
-    fn kind(&mut self, path: &str) -> Result<String> {
-        let actors = self.actors().is_some();
-        Ok(match path {
-            "signal" => {
-                if self.signal.is_some() {
-                    "object"
-                } else {
-                    "null"
-                }
-            }
-            "engine.actors" => {
-                if actors {
-                    "object"
-                } else {
-                    "null"
-                }
-            }
-            "engine.store" | "engine.policy" | "engine.delivery" | "engine.repos" | "engine.listening" | "engine.net" => "object",
-            p => match p.strip_prefix("engine.delivery.") {
-                Some(m) => delivery::router_kind(m),
-                None => match p.strip_prefix("engine.store.") {
-                    Some(m) => crate::store::kind(m),
-                    None => match p.strip_prefix("engine.actors.") {
-                        Some(m) if actors => crate::actors::kind(m),
-                        _ => "undefined",
-                    },
-                },
-            },
-        }
-        .into())
-    }
-
-    fn now(&mut self) -> f64 {
-        now_ms()
-    }
+/// The same, with the event as network.rs still builds it: goes with
+/// network.rs.
+pub fn told(w: &World, name: &str, payload: &Arg) {
+    event(w, name, &json(payload));
 }
 
 /// The engine, as the routes call it.
@@ -458,89 +559,92 @@ pub struct EngineDriver(pub Arc<World>);
 
 impl EngineDriver {
     /// An engine call on a blocking thread.
-    async fn run<T: Send + 'static>(&self, signal: Option<Arc<Signal>>, f: impl FnOnce(&World, &mut EngineCalls<'_>) -> std::result::Result<T, Fail> + Send + 'static) -> R<T> {
+    async fn run<T: Send + 'static>(
+        &self,
+        signal: Option<Arc<Signal>>,
+        f: impl FnOnce(&xenonet_engine::engine::Engine, &Collaborators<'_>) -> Result<T, Fail> + Send + 'static,
+    ) -> R<T> {
         let w = self.0.clone();
         let out = tokio::task::spawn_blocking(move || {
-            let mut c = EngineCalls::new(&w, signal);
-            f(&w, &mut c).map_err(|e| c.error(e))
+            let side = Side::new(&w, signal);
+            f(&w.engine, &side.collaborators()).map_err(error)
         })
         .await;
         out.map_err(|e| CoreError::new(e.to_string()))?
     }
 
-    fn now<T>(&self, f: impl FnOnce(&World, &mut EngineCalls<'_>) -> std::result::Result<T, Fail>) -> R<T> {
-        let mut c = EngineCalls::new(&self.0, None);
-        f(&self.0, &mut c).map_err(|e| c.error(e))
+    fn now<T>(&self, f: impl FnOnce(&xenonet_engine::engine::Engine, &Collaborators<'_>) -> Result<T, Fail>) -> R<T> {
+        let side = Side::new(&self.0, None);
+        f(&self.0.engine, &side.collaborators()).map_err(error)
     }
 }
 
-fn some(v: Arg) -> Option<Value> {
-    (!v.is_nullish()).then(|| json(&v))
+/// An object with the fields that have a value, in this order.
+fn fields(fields: Vec<(&str, Option<Value>)>) -> Value {
+    Value::Object(fields.into_iter().filter_map(|(k, v)| v.map(|v| (k.to_string(), v))).collect::<Map<String, Value>>())
+}
+
+fn or_null(v: Option<&Value>) -> Value {
+    v.cloned().unwrap_or(Value::Null)
 }
 
 #[async_trait]
 impl Engine for EngineDriver {
     async fn hook(&self, app: &str, event: Option<&str>, body: &Value) -> R<Option<Value>> {
-        let (app, event, input) = (Arg::text(app), event.map_or(Arg::Undef, Arg::text), crate::js::arg(body));
-        self.run(None, move |w, c| w.engine.hook(c, &app, &event, &input)).await.map(some)
+        let (app, event, input) = (app.to_string(), event.map(str::to_string), body.clone());
+        self.run(None, move |e, c| e.hook(c, &app, event.as_deref(), &input)).await
     }
     async fn snapshot(&self) -> R<Value> {
-        self.run(None, |w, c| w.engine.snapshot(c)).await.map(|a| json(&a))
+        self.run(None, xenonet_engine::engine::Engine::snapshot).await
     }
     async fn agents(&self) -> R<Value> {
-        self.run(None, |w, c| w.engine.agents(c, ACTIVE_MS)).await.map(|l| Value::Array(l.iter().map(json).collect()))
+        self.run(None, |e, c| e.agents(c, ACTIVE_MS)).await.map(Value::Array)
     }
     async fn who_has(&self, me: Option<&str>, path: &str) -> R<Value> {
-        let (me, path) = (me.map_or(Arg::Null, Arg::text), Arg::text(path));
-        self.run(None, move |w, c| w.engine.who_has(c, &me, &path)).await.map(|l| Value::Array(l.iter().map(json).collect()))
+        let (me, path) = (me.map(str::to_string), path.to_string());
+        self.run(None, move |e, c| e.who_has(c, me.as_deref(), &path)).await.map(Value::Array)
     }
     async fn whoami(&self, me: &str) -> R<Value> {
-        let me = Arg::text(me);
-        self.run(None, move |w, c| w.engine.whoami(c, &me)).await.map(|a| json(&a))
+        let me = me.to_string();
+        self.run(None, move |e, c| e.whoami(c, &me)).await
     }
     async fn peers(&self, me: &str, scope: &str) -> R<Value> {
-        let (me, scope) = (Arg::text(me), Arg::text(scope));
-        self.run(None, move |w, c| w.engine.peers(c, &me, &scope, ACTIVE_MS)).await.map(|l| Value::Array(l.iter().map(json).collect()))
+        let (me, scope) = (me.to_string(), scope.to_string());
+        self.run(None, move |e, c| e.peers(c, &me, &scope, ACTIVE_MS)).await.map(Value::Array)
     }
     async fn send(&self, me: &str, msg: Value, extra: Option<Value>) -> R<Value> {
-        let me = Arg::text(me);
-        let m = crate::js::arg(&msg);
+        let me = me.to_string();
         // { to, text, replyTo = null }, and { envelope = null }.
-        let ask = obj(vec![("to", m.field("to")), ("text", m.field("text")), ("replyTo", m.field("replyTo").or(Arg::Null))]);
-        let envelope = extra.as_ref().and_then(|e| e.get("envelope")).map_or(Arg::Null, crate::js::arg);
-        self.run(None, move |w, c| w.engine.send(c, &me, &ask, &envelope)).await.map(|a| json(&a))
+        let ask = fields(vec![("to", msg.get("to").cloned()), ("text", msg.get("text").cloned()), ("replyTo", Some(or_null(msg.get("replyTo"))))]);
+        let envelope = extra.as_ref().and_then(|e| e.get("envelope")).cloned().unwrap_or(Value::Null);
+        self.run(None, move |e, c| e.send(c, &me, &ask, &envelope)).await
     }
     async fn inbox(&self, me: &str, wait: Duration) -> R<Value> {
-        let me = Arg::text(me);
-        let ms = Arg::Num(wait.as_secs_f64() * 1000.0);
-        self.run(None, move |w, c| w.engine.inbox(c, &me, &ms)).await.map(|l| Value::Array(l.iter().map(json).collect()))
+        let me = me.to_string();
+        let ms = wait.as_secs_f64() * 1000.0;
+        self.run(None, move |e, c| e.inbox(c, &me, ms)).await.map(Value::Array)
     }
     async fn claim(&self, me: &str, args: Value) -> R<Value> {
-        let me = Arg::text(me);
-        let a = crate::js::arg(&args);
-        let minutes = match a.field("minutes") {
-            Arg::Undef => Arg::Num(CLAIM_MINUTES),
-            m => m,
-        };
-        let ask = obj(vec![("paths", a.field("paths")), ("note", a.field("note").or(Arg::Null)), ("minutes", minutes)]);
-        self.run(None, move |w, c| w.engine.claim(c, &me, &ask)).await.map(|a| json(&a))
+        let me = me.to_string();
+        let minutes = args.get("minutes").cloned().unwrap_or_else(|| crate::js::number(CLAIM_MINUTES));
+        let ask = fields(vec![("paths", args.get("paths").cloned()), ("note", Some(or_null(args.get("note")))), ("minutes", Some(minutes))]);
+        self.run(None, move |e, c| e.claim(c, &me, &ask)).await
     }
     async fn release(&self, me: &str, paths: Value) -> R<Value> {
-        let (me, paths) = (Arg::text(me), crate::js::arg(&paths));
-        self.run(None, move |w, c| w.engine.release(c, &me, &paths)).await.map(|a| json(&a))
+        let me = me.to_string();
+        self.run(None, move |e, c| e.release(c, &me, &paths)).await
     }
     async fn set_focus(&self, me: &str, text: Value) -> R<Value> {
-        let (me, t) = (Arg::text(me), crate::js::arg(&text));
-        self.run(None, move |w, c| w.engine.set_focus(c, &me, &t)).await.map(|a| json(&a))
+        let me = me.to_string();
+        self.run(None, move |e, c| e.set_focus(c, &me, &text)).await
     }
     fn touch(&self, me: &str, info: Value) -> R<()> {
-        let i = crate::js::arg(&info);
-        let ask = obj(vec![("app", i.field("app")), ("cwd", i.field("cwd")), ("via", i.field("via")), ("pid", i.field("pid").or(Arg::Null))]);
-        self.now(|w, c| w.engine.touch(c, &Arg::text(me), &ask))
+        let ask = fields(vec![("app", info.get("app").cloned()), ("cwd", info.get("cwd").cloned()), ("via", info.get("via").cloned()), ("pid", Some(or_null(info.get("pid"))))]);
+        self.now(|e, c| e.touch(c, me, &ask))
     }
     async fn view(&self, me: &str) -> R<Option<Value>> {
-        let me = Arg::text(me);
-        self.run(None, move |w, c| w.engine.view(c, &me)).await.map(some)
+        let me = me.to_string();
+        self.run(None, move |e, c| e.view(c, &me)).await.map(Some)
     }
     async fn listen(&self, me: &str, wait: Duration, mut gone: watch::Receiver<bool>) -> R<Option<Value>> {
         let signal = Arc::new(Signal::default());
@@ -556,16 +660,22 @@ impl Engine for EngineDriver {
                 s.abort();
             })
         };
-        let me = Arg::text(me);
-        let ms = Arg::Num(wait.as_secs_f64() * 1000.0);
-        let out = self.run(Some(signal), move |w, c| w.engine.listen(c, &me, &ms)).await;
+        let me = me.to_string();
+        let ms = wait.as_secs_f64() * 1000.0;
+        let out = self.run(Some(signal), move |e, c| e.listen(c, &me, ms)).await;
         watching.abort();
-        out.map(some)
+        out
     }
     async fn handoff(&self, me: &str, args: Value, extra: Option<Value>) -> R<Value> {
         let me = Arg::text(me);
         let envelope = extra.as_ref().and_then(|e| e.get("envelope")).cloned().unwrap_or(Value::Null);
-        self.run(None, move |w, c| crate::network::handoff(w, c, &me, &args, &envelope)).await
+        let w = self.0.clone();
+        let out = tokio::task::spawn_blocking(move || {
+            let mut c = EngineCalls::new(&w, None);
+            crate::network::handoff(&w, &mut c, &me, &args, &envelope).map_err(error)
+        })
+        .await;
+        out.map_err(|e| CoreError::new(e.to_string()))?
     }
     async fn start(&self, by: Value, req: Value, strong: bool) -> R<Value> {
         let w = self.0.clone();
@@ -599,7 +709,7 @@ impl Engine for EngineDriver {
         )
     }
     fn mark_unseen(&self, me: &str, ids: &Value) -> R<()> {
-        crate::store::call(&self.0.store, "markUnseen", &[Arg::text(me), crate::js::arg(ids)]).map(|_| ()).map_err(|t| CoreError::new(t.message))
+        self.0.store.with(|s| s.mark_unseen(me, ids)).map_err(|e| CoreError::new(e.message().to_string()))
     }
     fn listening(&self) -> R<Vec<(String, Value)>> {
         Ok(self.0.mail.listening())

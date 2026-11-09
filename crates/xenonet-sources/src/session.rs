@@ -7,8 +7,8 @@
 //! the runs of the native readers, numbat and the gateway are answers as
 //! the native readers give them (`native::Out`), and share one order.
 
-use crate::codex::tpl;
 use crate::native::Out;
+use crate::record::tpl;
 use crate::record::{Obj, F};
 use serde_json::Value;
 

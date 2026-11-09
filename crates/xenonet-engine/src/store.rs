@@ -11,9 +11,10 @@
 //! file with data in it before taking it a step up (`engine.v<n>.sqlite`
 //! beside it).
 //!
-//! Every call binds and reads as node:sqlite does (`sql`), with the
-//! arguments as JS gave them, so the store behaves the same behind its JS
-//! twin as in the binary.
+//! Every call binds and reads as node:sqlite does (`sql`). The engine's
+//! calls take whatever binds (`Into<Arg>`: a text, a number, a JSON
+//! document), and every call answers rows; `row_json` reads one as the
+//! engine does, with every integer a number.
 
 use crate::sql::{self, Arg, Cell, Changes, Result, Row, SqlError};
 use rusqlite::Connection;
@@ -295,6 +296,29 @@ fn items(v: &Arg) -> Result<Vec<Arg>> {
 
 fn num(c: &Cell) -> Arg {
     c.as_f64().map_or(Arg::Null, Arg::Num)
+}
+
+/// A caller's own value, bound as it is.
+impl From<&Arg> for Arg {
+    fn from(a: &Arg) -> Self {
+        a.clone()
+    }
+}
+
+/// A cell as the engine reads it: every integer a number.
+fn cell_json(c: &Cell) -> Value {
+    match c {
+        Cell::Int(i) => xenonet_base::json::number(*i as f64),
+        Cell::Real(f) => xenonet_base::json::number(*f),
+        Cell::Text(s) => Value::String(s.clone()),
+        Cell::Null => Value::Null,
+        Cell::Blob(b) => Value::Object(b.iter().enumerate().map(|(i, x)| (i.to_string(), Value::from(*x))).collect()),
+    }
+}
+
+/// A row as a JSON object, in its columns' order.
+pub fn row_json(r: &Row) -> Value {
+    Value::Object(r.0.iter().map(|(k, c)| (k.clone(), cell_json(c))).collect())
 }
 
 pub struct EngineStore {
@@ -604,22 +628,23 @@ impl EngineStore {
 
     // ---------- contacts ----------
 
-    pub fn touch(&self, agent: Arg, o: &Arg, now: Arg) -> Result<()> {
+    pub fn touch(&self, agent: impl Into<Arg>, o: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
+        let (agent, o, now) = (agent.into(), o.into(), now.into());
         self.run(
             "INSERT INTO contacts (agent, app, cwd, via, at, pid) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent) DO UPDATE SET app = excluded.app, cwd = COALESCE(excluded.cwd, contacts.cwd), via = excluded.via, at = excluded.at, pid = COALESCE(excluded.pid, contacts.pid), ended_at = NULL",
             &[agent, o.field("app"), def(o.field("cwd"), Arg::Null), o.field("via"), now, def(o.field("pid"), Arg::Null)],
         )?;
         Ok(())
     }
-    pub fn ended(&self, agent: Arg, now: Arg) -> Result<()> {
-        self.run("UPDATE contacts SET ended_at = ? WHERE agent = ?", &[now, agent])?;
+    pub fn ended(&self, agent: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
+        self.run("UPDATE contacts SET ended_at = ? WHERE agent = ?", &[now.into(), agent.into()])?;
         Ok(())
     }
-    pub fn contact(&self, agent: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM contacts WHERE agent = ?", &[agent])
+    pub fn contact(&self, agent: impl Into<Arg>) -> Result<Option<Row>> {
+        self.get("SELECT * FROM contacts WHERE agent = ?", &[agent.into()])
     }
-    pub fn contacts(&self, since: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM contacts WHERE at >= ?", &[since])
+    pub fn contacts(&self, since: impl Into<Arg>) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM contacts WHERE at >= ?", &[since.into()])
     }
 
     // ---------- pins: the process (pid and start time) holding a session ----------
@@ -651,7 +676,8 @@ impl EngineStore {
     // ---------- messages ----------
 
     /// A message, delivered to its recipients: its id.
-    pub fn send(&self, m: &Arg, now: Arg) -> Result<f64> {
+    pub fn send(&self, m: impl Into<Arg>, now: impl Into<Arg>) -> Result<f64> {
+        let (m, now) = (m.into(), now.into());
         let envelope = def(m.field("envelope"), Arg::Null);
         let envelope = if envelope.truthy() { Arg::Text(xenonet_base::json::stringify(&envelope.to_json(), 0)) } else { Arg::Null };
         let c = self.run(
@@ -664,78 +690,86 @@ impl EngineStore {
         }
         Ok(id)
     }
-    pub fn deliver(&self, id: Arg, agent: Arg) -> Result<()> {
-        self.run("INSERT OR IGNORE INTO deliveries (message_id, agent) VALUES (?, ?)", &[id, agent])?;
+    pub fn deliver(&self, id: impl Into<Arg>, agent: impl Into<Arg>) -> Result<()> {
+        self.run("INSERT OR IGNORE INTO deliveries (message_id, agent) VALUES (?, ?)", &[id.into(), agent.into()])?;
         Ok(())
     }
     /// Messages to everyone in a repo since `since`, for an agent that
     /// joins it.
-    pub fn scoped(&self, scope: Arg, since: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM messages WHERE scope = ? AND created_at >= ? ORDER BY id", &[scope, since])
+    pub fn scoped(&self, scope: impl Into<Arg>, since: impl Into<Arg>) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM messages WHERE scope = ? AND created_at >= ? ORDER BY id", &[scope.into(), since.into()])
     }
-    pub fn message(&self, id: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM messages WHERE id = ?", &[id])
+    pub fn message(&self, id: impl Into<Arg>) -> Result<Option<Row>> {
+        self.get("SELECT * FROM messages WHERE id = ?", &[id.into()])
     }
-    pub fn unseen(&self, agent: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT m.* FROM deliveries d JOIN messages m ON m.id = d.message_id WHERE d.agent = ? AND d.seen_at IS NULL ORDER BY m.id", &[agent])
+    pub fn unseen(&self, agent: impl Into<Arg>) -> Result<Vec<Row>> {
+        self.all("SELECT m.* FROM deliveries d JOIN messages m ON m.id = d.message_id WHERE d.agent = ? AND d.seen_at IS NULL ORDER BY m.id", &[agent.into()])
     }
-    pub fn mark_seen(&self, agent: Arg, ids: &Arg, now: Arg) -> Result<()> {
-        for id in items(ids)? {
+    pub fn mark_seen(&self, agent: impl Into<Arg>, ids: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
+        let (agent, now) = (agent.into(), now.into());
+        for id in items(&ids.into())? {
             self.run("UPDATE deliveries SET seen_at = ? WHERE agent = ? AND message_id = ? AND seen_at IS NULL", &[now.clone(), agent.clone(), id])?;
         }
         Ok(())
     }
     /// A message pushed into a session that never showed it got there waits
     /// for the session's hooks again.
-    pub fn mark_unseen(&self, agent: Arg, ids: &Arg) -> Result<()> {
-        for id in items(ids)? {
+    pub fn mark_unseen(&self, agent: impl Into<Arg>, ids: impl Into<Arg>) -> Result<()> {
+        let agent = agent.into();
+        for id in items(&ids.into())? {
             self.run("UPDATE deliveries SET seen_at = NULL WHERE agent = ? AND message_id = ?", &[agent.clone(), id])?;
         }
         Ok(())
     }
     /// Who a message went to, and who has seen it.
-    pub fn deliveries(&self, id: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT agent, seen_at FROM deliveries WHERE message_id = ?", &[id])
+    pub fn deliveries(&self, id: impl Into<Arg>) -> Result<Vec<Row>> {
+        self.all("SELECT agent, seen_at FROM deliveries WHERE message_id = ?", &[id.into()])
     }
-    pub fn recent(&self, since: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM messages WHERE created_at >= ? ORDER BY id", &[since])
+    pub fn recent(&self, since: impl Into<Arg>) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM messages WHERE created_at >= ? ORDER BY id", &[since.into()])
     }
 
     // ---------- claims ----------
 
-    pub fn claim(&self, agent: Arg, pattern: Arg, note: Arg, expires_at: Arg, now: Arg) -> Result<()> {
+    pub fn claim(&self, agent: impl Into<Arg>, pattern: impl Into<Arg>, note: impl Into<Arg>, expires_at: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
+        let (agent, pattern) = (agent.into(), pattern.into());
         self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.clone(), pattern.clone()])?;
-        self.run("INSERT INTO claims (agent, pattern, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)", &[agent, pattern, note.or(Arg::Null), now, expires_at])?;
+        self.run(
+            "INSERT INTO claims (agent, pattern, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+            &[agent, pattern, note.into().or(Arg::Null), now.into(), expires_at.into()],
+        )?;
         Ok(())
     }
     /// The claims let go: all of an agent's, or those of `patterns`.
-    pub fn release(&self, agent: Arg, patterns: &Arg) -> Result<f64> {
+    pub fn release(&self, agent: impl Into<Arg>, patterns: impl Into<Arg>) -> Result<f64> {
+        let (agent, patterns) = (agent.into(), patterns.into());
         if !patterns.truthy() {
             return Ok(self.run("DELETE FROM claims WHERE agent = ?", &[agent])?.changes as f64);
         }
         let mut count = 0.0;
-        for p in items(patterns)? {
+        for p in items(&patterns)? {
             count += self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.clone(), p])?.changes as f64;
         }
         Ok(count)
     }
-    pub fn claims(&self, now: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM claims WHERE expires_at >= ? ORDER BY created_at", &[now])
+    pub fn claims(&self, now: impl Into<Arg>) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM claims WHERE expires_at >= ? ORDER BY created_at", &[now.into()])
     }
 
     // ---------- focus ----------
 
     /// Sets what an agent says it's doing; a falsy text takes it away (and
     /// says what that changed, as JS returned the run's result).
-    pub fn set_focus(&self, agent: Arg, text: Arg, now: Arg) -> Result<Option<Changes>> {
+    pub fn set_focus(&self, agent: impl Into<Arg>, text: impl Into<Arg>, now: impl Into<Arg>) -> Result<Option<Changes>> {
+        let (agent, text) = (agent.into(), text.into());
         if !text.truthy() {
             return self.run("DELETE FROM focus WHERE agent = ?", &[agent]).map(Some);
         }
-        self.run("INSERT INTO focus (agent, text, at) VALUES (?, ?, ?) ON CONFLICT(agent) DO UPDATE SET text = excluded.text, at = excluded.at", &[agent, text, now])?;
+        self.run("INSERT INTO focus (agent, text, at) VALUES (?, ?, ?) ON CONFLICT(agent) DO UPDATE SET text = excluded.text, at = excluded.at", &[agent, text, now.into()])?;
         Ok(None)
     }
-    pub fn focus(&self, agent: Arg) -> Result<Option<Row>> {
-        self.get("SELECT text, at FROM focus WHERE agent = ?", &[agent])
+    pub fn focus(&self, agent: impl Into<Arg>) -> Result<Option<Row>> {
+        self.get("SELECT text, at FROM focus WHERE agent = ?", &[agent.into()])
     }
 
     // ---------- actors ----------
@@ -1154,16 +1188,16 @@ mod tests {
     fn a_new_store_takes_every_step_and_keeps_messages() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
         assert_eq!(s.version().unwrap(), Version { from: 0, version: 8, newer: false });
-        let id = s
-            .send(&obj(&[("sender", "claude:a".into()), ("target", "codex:b".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["codex:b".into()]))]), n(1000.0))
-            .unwrap();
+        let id =
+            s.send(obj(&[("sender", "claude:a".into()), ("target", "codex:b".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["codex:b".into()]))]), 1000.0).unwrap();
         assert_eq!(id, 1.0);
-        let unseen = s.unseen("codex:b".into()).unwrap();
+        let unseen = s.unseen("codex:b").unwrap();
         assert_eq!(unseen.len(), 1);
         assert_eq!(unseen[0].get("created_at"), &Cell::Int(1000));
-        s.touch("claude:a".into(), &obj(&[("app", "claude".into()), ("via", "mcp".into())]), n(5.0)).unwrap();
-        assert_eq!(s.contact("claude:a".into()).unwrap().unwrap().get("pid"), &Cell::Null);
-        assert!(matches!(s.touch("claude:a".into(), &obj(&[("via", "mcp".into())]), n(5.0)), Err(SqlError::Bind(_))));
+        assert_eq!(row_json(&unseen[0])["created_at"], Value::from(1000), "read as a number");
+        s.touch("claude:a", &json!({ "app": "claude", "via": "mcp" }), 5.0).unwrap();
+        assert_eq!(s.contact("claude:a").unwrap().unwrap().get("pid"), &Cell::Null);
+        assert!(matches!(s.touch("claude:a", &json!({ "via": "mcp" }), 5.0), Err(SqlError::Bind(_))));
     }
 
     #[test]
@@ -1174,7 +1208,7 @@ mod tests {
         assert_eq!(s.net_presence("laptop").unwrap().unwrap().num("counter"), Some(6.0));
         let id = s
             .send(
-                &obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:x".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:x".into()]))]),
+                obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:x".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:x".into()]))]),
                 n(1000.0),
             )
             .unwrap();
@@ -1188,7 +1222,7 @@ mod tests {
         // it's read after all.
         let later = s
             .send(
-                &obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:y".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:y".into()]))]),
+                obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:y".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:y".into()]))]),
                 n(1000.0),
             )
             .unwrap();

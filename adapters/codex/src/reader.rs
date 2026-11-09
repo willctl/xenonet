@@ -3,7 +3,15 @@
 //! line means on the telemetry: a turn's start and end, a call's tokens,
 //! the context, its items (what you said, what it said, a command, an MCP
 //! call, a patch, a search, a subagent), and its rate limits, which are
-//! the snapshot's limits.codex.
+//! the snapshot's limits.codex. The map's listing of its threads, a
+//! thread's items and a rename go through its app-server (`app_server`,
+//! over `threads` and `rollouts`); Codex desktop's projects are
+//! `state_db`.
+
+pub mod app_server;
+pub mod rollouts;
+pub mod state_db;
+pub mod threads;
 
 use serde_json::{Map, Value};
 use std::collections::HashMap;

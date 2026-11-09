@@ -25,7 +25,6 @@ use tokio::sync::mpsc;
 use xenonet_base::sync::Locked;
 use xenonet_base::text::truthy;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id};
-use xenonet_engine::sql::Arg;
 use xenonet_state::needs_you;
 
 /// The most items a status lists (core/schema/tray.js's TRAY_ITEMS).
@@ -205,7 +204,7 @@ fn events(ctx: &Arc<Ctx>) -> mpsc::UnboundedReceiver<Bytes> {
 
 /// A session's or an actor's id, here or on another machine of the network.
 fn selectable(id: &str) -> bool {
-    let local = |id: &str| is_agent_id(&Arg::text(id)) || is_actor_agent(&Arg::text(id));
+    let local = |id: &str| is_agent_id(id) || is_actor_agent(id);
     id.len() <= 300 && (local(id) || xenonet_base::ids::parse_qualified(id).is_some_and(|(h, l)| h.is_some() && local(l)))
 }
 

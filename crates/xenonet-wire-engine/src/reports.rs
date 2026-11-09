@@ -1,19 +1,18 @@
 //! What a registered actor reports, taken into the registry a part at a
-//! time (core/actors/reports.js over crates/xenonet-actors/src/reports.rs),
-//! and the checks on it: an event or a target against the schema
-//! (core/schema/actor.js's ReportEvent and ReportTarget, as npm run
-//! schemas writes them), a status line (core/actors/detail.js) and the
-//! processes below the first app in a verdict's chain (verify.ownOf).
+//! time (crates/xenonet-actors/src/reports.rs), and the checks on it: an
+//! event or a target against the schema (schemas/actor/report/v1.json's
+//! ReportEvent and ReportTarget, as npm run schemas writes them), a status
+//! line (detail.rs) and the processes below the first app in a verdict's
+//! chain (verify.ownOf).
 
-use crate::actors::{collab_call, collab_get, collab_kind};
-use crate::js::{arg, at, json, no_method, now_ms, obj};
+use crate::js::{arg, items, json, now_ms, Locked};
 use crate::world::World;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 use std::sync::{Arc, OnceLock};
 use xenonet_actors::registration::Fail;
 use xenonet_actors::reports;
-use xenonet_engine::peer::{Calls, Result};
+use xenonet_engine::peer::Thrown;
 use xenonet_engine::sql::Arg;
 use xenonet_schema::check::{compile, Checker, Data};
 use xenonet_service::cores::{CoreError, Reports, R};
@@ -21,61 +20,101 @@ use xenonet_service::cores::{CoreError, Reports, R};
 /// What a report reads besides the registry: the actor's processes as
 /// given, how to read a process's lineage, the indexes already dropped,
 /// and the targets to take away.
-struct ReportCalls<'a> {
+struct ReportHost<'a> {
     w: &'a World,
     own: Option<Vec<u32>>,
     skip: Vec<usize>,
-    remove: Vec<Arg>,
+    remove: Vec<Value>,
 }
 
-impl ReportCalls<'_> {
-    fn own_set(&self) -> Option<&Vec<u32>> {
-        self.own.as_ref().filter(|o| !o.is_empty())
+fn thrown(t: Thrown) -> Fail {
+    Fail::Error(crate::actors::store_error(t))
+}
+
+impl ReportHost<'_> {
+    /// The registry, or the refusal a call on it gets without actors.
+    fn actors(&self, method: &str) -> Result<&crate::actors::ActorSide, Fail> {
+        self.w.actors.as_ref().ok_or_else(|| thrown(crate::js::no_method("actors", method)))
+    }
+
+    fn with<T>(
+        &self,
+        method: &str,
+        f: impl FnOnce(&mut xenonet_actors::registry::Actors, &mut crate::actors::ActorHost<'_>) -> xenonet_actors::registry::Result<T>,
+    ) -> Result<T, Fail> {
+        let a = self.actors(method)?;
+        a.with(self.w, f).map_err(thrown)
+    }
+
+    fn read<T: Default>(&self, f: impl FnOnce(&xenonet_actors::registry::Actors) -> T) -> T {
+        self.w.actors.as_ref().map_or_else(T::default, |a| a.read(f))
+    }
+
+    fn store(&self, name: &str, args: &[Arg]) -> Result<Value, Fail> {
+        crate::store::call(&self.w.store, name, args).map(|a| json(&a)).map_err(thrown)
     }
 }
 
-impl Calls for ReportCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        let x = |i| at(&args, i);
-        match (path, method) {
-            ("own", "has") => Ok(Arg::Bool(self.own_set().is_some_and(|o| x(0).as_f64().is_some_and(|p| o.iter().any(|q| f64::from(*q) == p))))),
-            ("skip", "has") => Ok(Arg::Bool(x(0).as_f64().is_some_and(|i| self.skip.iter().any(|s| *s as f64 == i)))),
-            ("", "lineage") => Ok(self.w.checks.lineage(&x(0))),
-            ("", "removeList") => Ok(Arg::List(self.remove.clone())),
-            ("", "awaitSession") => {
-                let own = Arg::List(self.own.clone().unwrap_or_default().into_iter().map(|p| Arg::Num(f64::from(p))).collect());
-                let o = obj(vec![("app", x(1)), ("place", x(2)), ("own", own), ("at", x(3))]);
-                collab_call(self.w, "actors", "awaitSession", &[x(0), o])
-            }
-            (p, m) if p == "actors" || p.starts_with("actors.") => collab_call(self.w, p, m, &args),
-            _ => Err(no_method(path, method)),
+impl reports::Host for ReportHost<'_> {
+    fn can(&mut self, id: &str, capability: &str) -> bool {
+        self.read(|r| r.can(id, &Value::String(capability.into())))
+    }
+    fn place_of(&mut self, path: &Value) -> Value {
+        self.with("placeOf", |r, h| Ok(r.place_of(path, h))).unwrap_or(Value::Null)
+    }
+    fn report(&mut self, id: &str, report: &Value) -> Result<(), Fail> {
+        self.with("report", |r, h| r.report(id, report, h))
+    }
+    fn record(&mut self, id: &str, record: &Value) -> Result<(), Fail> {
+        self.with("record", |r, h| r.record(id, record, h)).map(|_| ())
+    }
+    fn targets_of(&mut self, id: &str) -> Vec<Value> {
+        self.read(|r| r.targets_of(id))
+    }
+    fn untarget(&mut self, id: &str, node: &str, relation: &str) -> Result<(), Fail> {
+        self.with("untarget", |r, _| r.untarget(id, node, relation))
+    }
+    fn target(&mut self, id: &str, node: &str, relation: &str, at: f64) -> Result<(), Fail> {
+        self.with("target", |r, _| r.target(id, node, relation, at))
+    }
+    fn pins(&mut self, session: &str) -> Result<Vec<Value>, Fail> {
+        self.store("pins", &[Arg::text(session)]).map(items)
+    }
+    fn has_actor_ref(&mut self, id: &str, r: &Value, since: f64) -> Result<bool, Fail> {
+        self.store("hasActorRef", &[Arg::text(id), arg(r), Arg::Num(since)]).map(|v| crate::js::truthy_json(&v))
+    }
+    fn map_ready(&mut self) -> bool {
+        self.w.actors.is_some() && self.w.map.ready()
+    }
+    fn map_has(&mut self, id: &str) -> bool {
+        self.w.map.has(id).unwrap_or(false)
+    }
+    fn own_known(&mut self) -> bool {
+        self.own.as_ref().is_some_and(|o| !o.is_empty())
+    }
+    fn owns(&mut self, pid: &Value) -> Option<bool> {
+        let own = self.own.as_ref().filter(|o| !o.is_empty())?;
+        Some(pid.as_f64().is_some_and(|p| own.iter().any(|q| f64::from(*q) == p)))
+    }
+    fn lineage(&mut self, pid: &Value) -> Option<Vec<Value>> {
+        let line = self.w.checks.lineage(&arg(pid));
+        if line.is_nullish() {
+            return None;
         }
+        Some(items(json(&line)))
     }
-    fn get(&mut self, path: &str) -> Result<Arg> {
-        Ok(match path {
-            "own.size" => Arg::Num(self.own.as_ref().map_or(0, Vec::len) as f64),
-            "skip.size" => Arg::Num(self.skip.len() as f64),
-            p => collab_get(self.w, p),
-        })
+    fn skipped(&mut self, index: usize) -> bool {
+        self.skip.contains(&index)
     }
-    fn kind(&mut self, path: &str) -> Result<String> {
-        Ok(match path {
-            "own" => {
-                if self.own.is_some() {
-                    "object"
-                } else {
-                    "null"
-                }
-            }
-            "own.size" | "skip.size" => "number",
-            "skip" => "object",
-            "lineage" | "awaitSession" | "removeList" => "function",
-            p => collab_kind(self.w, p),
-        }
-        .into())
+    fn await_session(&mut self, id: &str, app: &Value, place: &Value, at: &Value) -> Result<(), Fail> {
+        let a = self.actors("awaitSession")?;
+        let own: Vec<f64> = self.own.clone().unwrap_or_default().into_iter().map(f64::from).collect();
+        let at = xenonet_base::text::js_number(Some(at));
+        a.reg.locked().await_session(id, app.clone(), place.clone(), own, at, now_ms());
+        Ok(())
     }
-    fn now(&mut self) -> f64 {
-        now_ms()
+    fn remove_list(&mut self) -> Vec<Value> {
+        self.remove.clone()
     }
 }
 
@@ -133,7 +172,7 @@ fn dotted(path: &str) -> String {
 
 /// `X.safeParse(v)`: the value as a loose object gives it back (its
 /// shape's keys first, then the rest), or the first issue.
-fn parse(i: usize, v: &Value) -> std::result::Result<Value, String> {
+fn parse(i: usize, v: &Value) -> Result<Value, String> {
     let Some(s) = schemas() else { return Err("it can't be checked: the report's schema isn't there".into()) };
     let checked = s.checker.check(s.checker.root(i), &Data::from(v), false);
     if let Some(first) = checked.issues.first() {
@@ -157,38 +196,28 @@ fn parse(i: usize, v: &Value) -> std::result::Result<Value, String> {
 
 pub struct ReportsDriver(pub Arc<World>);
 
-impl ReportsDriver {
-    fn calls(&self, own: Option<Vec<u32>>, skip: Vec<usize>, remove: Vec<Arg>) -> ReportCalls<'_> {
-        ReportCalls { w: &self.0, own, skip, remove }
-    }
-}
-
-fn items(list: &[Value]) -> Vec<Arg> {
-    list.iter().map(arg).collect()
-}
-
 #[async_trait]
 impl Reports for ReportsDriver {
     fn take_heartbeat(&self, id: &str, body: &Value) -> R<()> {
-        let mut c = self.calls(None, Vec::new(), Vec::new());
-        reports::take_heartbeat(&mut c, &Arg::text(id), &arg(body), &Arg::Num(now_ms())).map_err(error)
+        let mut h = ReportHost { w: &self.0, own: None, skip: Vec::new(), remove: Vec::new() };
+        reports::take_heartbeat(&mut h, id, body, now_ms()).map_err(error)
     }
     async fn take_events(&self, id: &str, list: Vec<Value>, own: Option<Vec<u32>>, skip: Vec<usize>) -> R<Value> {
         let w = self.0.clone();
-        let id = Arg::text(id);
+        let id = id.to_string();
         tokio::task::spawn_blocking(move || {
-            let mut c = ReportCalls { w: &w, own, skip, remove: Vec::new() };
-            reports::take_events(&mut c, &id, &items(&list), &Arg::Num(now_ms())).map(|t| json(&t.to_arg())).map_err(error)
+            let mut h = ReportHost { w: &w, own, skip, remove: Vec::new() };
+            reports::take_events(&mut h, &id, &list, now_ms()).map(|t| t.to_json()).map_err(error)
         })
         .await
         .map_err(|e| CoreError::new(e.to_string()))?
     }
     async fn take_targets(&self, id: &str, targets: Vec<Value>, remove: Vec<Value>, replace: bool, own: Option<Vec<u32>>, skip: Vec<usize>) -> R<Value> {
         let w = self.0.clone();
-        let id = Arg::text(id);
+        let id = id.to_string();
         tokio::task::spawn_blocking(move || {
-            let mut c = ReportCalls { w: &w, own, skip, remove: items(&remove) };
-            reports::take_targets(&mut c, &id, &items(&targets), replace, &Arg::Num(now_ms())).map(|t| json(&t.to_arg())).map_err(error)
+            let mut h = ReportHost { w: &w, own, skip, remove };
+            reports::take_targets(&mut h, &id, &targets, replace, now_ms()).map(|t| t.to_json()).map_err(error)
         })
         .await
         .map_err(|e| CoreError::new(e.to_string()))?
@@ -199,10 +228,10 @@ impl Reports for ReportsDriver {
             Err(reason) => serde_json::json!({ "ok": false, "reason": reason }),
         }
     }
-    fn parse_event(&self, event: &Value) -> std::result::Result<Value, String> {
+    fn parse_event(&self, event: &Value) -> Result<Value, String> {
         parse(0, event)
     }
-    fn parse_target(&self, target: &Value) -> std::result::Result<Value, String> {
+    fn parse_target(&self, target: &Value) -> Result<Value, String> {
         parse(1, target)
     }
     fn own_of(&self, chain: &Value) -> Vec<u32> {

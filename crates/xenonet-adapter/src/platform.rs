@@ -14,7 +14,7 @@ use crate::connect::{Format, Shared};
 use crate::delivery::Ways;
 use crate::observe::Observer;
 use crate::processes::Rules;
-use crate::reader::{Native, Tailed};
+use crate::reader::{Lister, ListerEnv, Native, Tailed};
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_model::actions::HookEvent;
@@ -101,6 +101,12 @@ pub trait Platform: Send + Sync {
     fn native(&self) -> Option<Box<dyn Native>> {
         None
     }
+
+    /// Its lister of its sessions and transcripts, new for each map, for
+    /// an app whose sessions the map lists.
+    fn lister(&self, _env: &ListerEnv<'_>) -> Option<Box<dyn Lister>> {
+        None
+    }
 }
 
 /// A hook in Claude Code's shape (`session_id`, `cwd`, `tool_name`,
@@ -182,6 +188,12 @@ impl Registry {
     /// the reader's row, in order.
     pub fn native(&self) -> Vec<(&App, Box<dyn Native>)> {
         self.platforms.iter().filter_map(|p| Some((p.app(), p.native()?))).collect()
+    }
+
+    /// New listers of the apps whose sessions the map lists, in order,
+    /// each made for its app's own folders (`env`).
+    pub fn listers<'e>(&self, env: impl Fn(&App) -> ListerEnv<'e>) -> Vec<(&App, Box<dyn Lister>)> {
+        self.platforms.iter().filter_map(|p| Some((p.app(), p.lister(&env(p.app()))?))).collect()
     }
 }
 

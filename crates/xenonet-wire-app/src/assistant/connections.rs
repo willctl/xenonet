@@ -1,21 +1,24 @@
-//! Remote actors' connections and their grants (core/actors/connections.js,
-//! crates/xenonet-actors/src/connections.rs), over the engine's store.
-//! Every check, what a grant may read and how it stands are the Rust's;
-//! the actors' registry, the credentials' files
-//! (core/assistant/credentials.js) and the adapters are called as the JS
-//! called them, and its events go to whoever listens (the endpoint, the
-//! tunnels).
+//! Remote actors' connections and their grants
+//! (crates/xenonet-actors/src/connections.rs), over the engine's store.
+//! Every check, what a grant may read and how it stands are the core's;
+//! this answers what it asks of the world: the actors' registry, the
+//! credentials' files (xenonet_assistant::credentials), the adapters, the
+//! map's places and the identities for a pairing, and its events go to
+//! whoever listens (the endpoint, the tunnels).
 
-use super::{arg, connection_error, thrown_of};
+use super::{connection_error, row_json};
 use crate::fx::{now_ms, Locked};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::mpsc;
+use xenonet_actors::account_links::Links;
 use xenonet_actors::adapters::ADAPTERS;
-use xenonet_actors::connections::{self as core, Connections as Core};
+use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Host, Store};
+use xenonet_actors::store::{self, Tx};
 use xenonet_assistant::credentials as disk;
-use xenonet_engine::peer::{Calls, Result as CallResult, Thrown};
-use xenonet_engine::sql::Arg;
+use xenonet_base::text::js_string;
+use xenonet_engine::sql::{Arg, SqlError};
+use xenonet_engine::store::Shared;
 use xenonet_service::cores::assistant::ConnectionEvents;
 use xenonet_service::cores::{Actors, Connections, EngineStore, State, R};
 
@@ -41,18 +44,14 @@ struct Base<'a> {
     also: Option<Also<'a>>,
 }
 
-fn text(a: &Arg) -> String {
-    xenonet_engine::store::js_text(a)
+/// What a file of the credentials couldn't do, as the core hears it.
+fn fs(e: xenonet_base::fs::FsError) -> core::Fail {
+    core::Fail::Error(store::Error { message: e.message, code: e.code })
 }
 
-fn value(a: &Arg) -> Value {
-    a.to_json()
-}
-
-fn fs(e: xenonet_base::fs::FsError) -> Thrown {
-    let mut t = Thrown::new(e.message);
-    t.code = e.code.map(|c| Box::new(Value::String(c)));
-    t
+/// What the actors' registry failed with, as the core hears it.
+fn failed(e: xenonet_service::cores::CoreError) -> core::Fail {
+    core::Fail::Error(store::Error { message: e.message, code: e.code })
 }
 
 struct Private;
@@ -69,135 +68,256 @@ impl disk::Private for Private {
 }
 
 impl Base<'_> {
-    fn disk(method: &str, args: &[Arg]) -> CallResult<Arg> {
-        let a = |i: usize| args.get(i).map_or(Value::Null, value);
-        let dir = || args.first().map(text).unwrap_or_default();
-        Ok(match method {
-            "hashToken" => Arg::text(disk::hash_token(&text(args.first().unwrap_or(&Arg::Undef)))),
-            "isToken" => Arg::Bool(disk::is_token(&text(args.first().unwrap_or(&Arg::Undef)))),
-            "newToken" => {
-                let (token, hash) = disk::new_token();
-                Arg::Obj(vec![("token".into(), Arg::text(token)), ("hash".into(), Arg::text(hash))])
-            }
-            "deleteCredential" => {
-                disk::delete_credential(&dir(), &a(1)).map_err(fs)?;
-                Arg::Undef
-            }
-            "markRevision" => {
-                disk::mark_revision(&dir(), &a(1), &a(2)).map_err(fs)?;
-                Arg::Undef
-            }
-            "markRevoked" => {
-                disk::mark_revoked(&dir(), &a(1), args.get(2).and_then(Arg::as_f64).unwrap_or_else(now_ms)).map_err(fs)?;
-                Arg::Undef
-            }
-            "isMarkedRevoked" => Arg::Bool(disk::is_marked_revoked(&dir(), &a(1))),
-            "markedRevoked" => Arg::List(disk::marked_revoked(&dir()).into_iter().map(Arg::text).collect()),
-            "markDisabled" => {
-                disk::mark_disabled(&dir(), args.get(1).and_then(Arg::as_f64).unwrap_or_else(now_ms)).map_err(fs)?;
-                Arg::Undef
-            }
-            "isDisabled" => Arg::Bool(disk::is_disabled(&dir())),
-            "clearDisabled" => {
-                disk::clear_disabled(&dir()).map_err(fs)?;
-                Arg::Undef
-            }
-            "revisionOf" => disk::revision_of(&dir(), &a(1)).map_or(Arg::Null, Arg::num),
-            "readCredential" => disk::read_credential(&dir(), &a(1)).map_or(Arg::Null, |v| arg(&v)),
-            other => return Err(Thrown::new(format!("disk.{other} is not a function"))),
-        })
+    /// The registry, by the JS names the actors' driver still answers.
+    fn registry(&self, method: &str, args: Vec<Value>) -> core::Result<Value> {
+        self.r.actors.registry(method, args).map_err(failed)
+    }
+
+    /// A read of the registry; what it can't answer is nothing.
+    fn ask(&self, method: &str, args: Vec<Value>) -> Value {
+        self.registry(method, args).unwrap_or(Value::Null)
     }
 }
 
-impl Calls for Base<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> CallResult<Arg> {
-        let r = self.r;
-        match (path, method) {
-            ("actors", m) => r.actors.registry(m, args.iter().map(value).collect()).map(|v| arg(&v)).map_err(|e| thrown_of(&e)),
-            ("disk", m) => Self::disk(m, &args),
-            ("", "now" | "wall") => Ok(Arg::num(now_ms())),
-            ("", "emit") => {
-                let name = args.first().map(text).unwrap_or_default();
-                r.emit(&name, args.get(1).map_or(Value::Null, value));
-                Ok(Arg::Undef)
-            }
-            ("", "describe") => {
-                let place = args.first().map(text).unwrap_or_default();
-                Ok(r.state.node(&place).ok().flatten().and_then(|n| n.get("name").cloned()).map_or(Arg::Null, |n| arg(&n)))
-            }
-            ("", "taken") => {
-                let slug = args.first().map_or(Value::Null, value);
-                Ok(Arg::Bool(r.engine_store.waiting_actor_requests(now_ms()).unwrap_or_default().iter().any(|q| q.get("slug") == Some(&slug))))
-            }
-            ("", "adapterFor") => {
-                let product = args.first().map(value).filter(|p| !p.is_null());
-                let products: Vec<Option<Value>> = ADAPTERS.iter().map(|a| a.product.map(|p| json!(p))).collect();
-                let custom = ADAPTERS.iter().position(|a| a.key == "custom");
-                let i = xenonet_actors::adapters::adapter_for(product.as_ref(), &products, custom);
-                *r.picked.locked() = i;
-                Ok(match i.and_then(|i| ADAPTERS.get(i)) {
-                    Some(a) => arg(&json!({ "id": a.id, "product": a.product, "provider": a.provider, "transports": a.transports })),
-                    None => Arg::Null,
-                })
-            }
-            ("picked", "capabilities") => {
-                let i = (*r.picked.locked()).ok_or_else(|| Thrown::new("picked.capabilities is not a function"))?;
-                Ok(Arg::List(ADAPTERS.get(i).map(|a| a.capabilities.iter().map(|c| Arg::text(*c)).collect()).unwrap_or_default()))
-            }
-            ("", "writeCredential") => {
-                let c = args.first().map_or(Value::Null, value);
-                let file = disk::write_credential(&r.dir, &c["grant"], &c["token"], c.get("device"), c.get("expiresAt").unwrap_or(&Value::Null), &mut Private).map_err(fs)?;
-                Ok(Arg::text(file))
-            }
-            ("places", "has") => {
-                let id = args.first().map(text).unwrap_or_default();
-                Ok(Arg::Bool(self.also.as_ref().is_some_and(|a| a.places.get(&id).is_some())))
-            }
-            ("identities", "has") => {
-                let id = args.first().map(text).unwrap_or_default();
-                Ok(Arg::Bool(self.also.as_ref().is_some_and(|a| a.identities.contains(&id))))
-            }
-            (p, m) => Err(Thrown::new(format!("{}{m} is not a function", if p.is_empty() { String::new() } else { format!("{p}.") }))),
-        }
-    }
-
-    fn get(&mut self, path: &str) -> CallResult<Arg> {
-        match path {
-            "identities" => Ok(Arg::List(self.also.as_ref().map(|a| a.identities.iter().map(|i| Arg::text(i.clone())).collect()).unwrap_or_default())),
-            "places" => Ok(self.also.as_ref().map_or(Arg::Undef, |a| arg(a.places))),
-            _ => Ok(Arg::Undef),
-        }
-    }
-
-    fn kind(&mut self, path: &str) -> CallResult<String> {
-        Ok(match path {
-            "actors" | "disk" => "object".into(),
-            "places" | "identities" if self.also.is_some() => "object".into(),
-            _ => "undefined".into(),
-        })
-    }
-
+impl Host for Base<'_> {
     fn now(&mut self) -> f64 {
         now_ms()
+    }
+    fn wall(&mut self) -> f64 {
+        now_ms()
+    }
+    fn emit(&mut self, name: &str, what: Value) {
+        self.r.emit(name, what);
+    }
+    fn describe(&mut self, place: &str) -> Value {
+        self.r.state.node(place).ok().flatten().and_then(|n| n.get("name").cloned()).unwrap_or(Value::Null)
+    }
+    fn taken(&mut self, slug: &str) -> bool {
+        let slug = json!(slug);
+        self.r.engine_store.waiting_actor_requests(now_ms()).unwrap_or_default().iter().any(|q| q.get("slug") == Some(&slug))
+    }
+    fn adapter_for(&mut self, product: Option<&Value>) -> Option<Adapter> {
+        let products: Vec<Option<Value>> = ADAPTERS.iter().map(|a| a.product.map(|p| json!(p))).collect();
+        let custom = ADAPTERS.iter().position(|a| a.key == "custom");
+        let i = xenonet_actors::adapters::adapter_for(product, &products, custom);
+        *self.r.picked.locked() = i;
+        let a = ADAPTERS.get(i?)?;
+        Some(Adapter { id: a.id.into(), product: a.product.map(Into::into), provider: a.provider.into(), transports: a.transports.iter().map(ToString::to_string).collect() })
+    }
+    fn picked_capabilities(&mut self) -> core::Result<Vec<String>> {
+        let i = (*self.r.picked.locked()).ok_or_else(|| core::Fail::Error(store::Error::new("picked.capabilities is not a function")))?;
+        Ok(ADAPTERS.get(i).map(|a| a.capabilities.iter().map(ToString::to_string).collect()).unwrap_or_default())
+    }
+    fn write_credential(&mut self, grant: &str, token: &Value, device: &Value, expires_at: &Value) -> core::Result<()> {
+        disk::write_credential(&self.r.dir, &json!(grant), token, Some(device), expires_at, &mut Private).map(|_| ()).map_err(fs)
+    }
+    fn places_has(&mut self, id: &str) -> bool {
+        self.also.as_ref().is_some_and(|a| a.places.get(id).is_some())
+    }
+    fn identities_has(&mut self, id: &str) -> bool {
+        self.also.as_ref().is_some_and(|a| a.identities.iter().any(|i| i == id))
+    }
+    fn identities(&mut self) -> Vec<String> {
+        self.also.as_ref().map(|a| a.identities.to_vec()).unwrap_or_default()
+    }
+    fn is_disabled(&mut self) -> bool {
+        disk::is_disabled(&self.r.dir)
+    }
+    fn is_marked_revoked(&mut self, grant: &str) -> bool {
+        disk::is_marked_revoked(&self.r.dir, &json!(grant))
+    }
+    fn mark_revision(&mut self, grant: &str, revision: &Value) -> core::Result<()> {
+        disk::mark_revision(&self.r.dir, &json!(grant), revision).map_err(fs)
+    }
+    fn mark_revoked(&mut self, grant: &str, at: f64) -> core::Result<()> {
+        disk::mark_revoked(&self.r.dir, &json!(grant), at).map_err(fs)
+    }
+    fn delete_credential(&mut self, grant: &str) -> core::Result<()> {
+        disk::delete_credential(&self.r.dir, &json!(grant)).map_err(fs)
+    }
+    fn marked_revoked(&mut self) -> Vec<String> {
+        disk::marked_revoked(&self.r.dir)
+    }
+    fn new_token(&mut self) -> (String, String) {
+        disk::new_token()
+    }
+    fn mark_disabled(&mut self, at: f64) -> core::Result<()> {
+        disk::mark_disabled(&self.r.dir, at).map_err(fs)
+    }
+    fn clear_disabled(&mut self) -> core::Result<()> {
+        disk::clear_disabled(&self.r.dir).map_err(fs)
+    }
+    fn is_token(&mut self, token: &Value) -> bool {
+        disk::is_token(&js_string(token))
+    }
+    fn hash_token(&mut self, token: &Value) -> String {
+        disk::hash_token(&js_string(token))
+    }
+    fn ids(&mut self) -> Vec<String> {
+        self.ask("ids", vec![]).as_array().map(|l| l.iter().map(js_string).collect()).unwrap_or_default()
+    }
+    fn remote_of(&mut self, id: &str) -> Value {
+        self.ask("remoteOf", vec![json!(id)])
+    }
+    fn set_remote(&mut self, id: &str, remote: &Value) -> core::Result<()> {
+        self.registry("setRemote", vec![json!(id), remote.clone()]).map(|_| ())
+    }
+    fn has(&mut self, id: &str) -> bool {
+        xenonet_base::text::truthy(Some(&self.ask("has", vec![json!(id)])))
+    }
+    fn info(&mut self, id: &str) -> Value {
+        self.ask("info", vec![json!(id)])
+    }
+    fn is_remote(&mut self, id: &str) -> bool {
+        xenonet_base::text::truthy(Some(&self.ask("isRemote", vec![json!(id)])))
+    }
+    fn upsert(&mut self, def: &Value) -> core::Result<()> {
+        self.registry("upsert", vec![def.clone()]).map(|_| ())
+    }
+    fn add_via(&mut self, id: &str, via: &str) -> core::Result<()> {
+        self.registry("addVia", vec![json!(id), json!(via)]).map(|_| ())
+    }
+}
+
+/// The connections' rows in the engine's store, each as JSON.
+pub struct EngineRows(pub Shared);
+
+fn sql(e: SqlError) -> store::Error {
+    store::Error { message: e.message().to_string(), code: e.code().map(str::to_string) }
+}
+
+/// A JSON value as the store binds it.
+fn arg(v: &Value) -> Arg {
+    super::arg(v)
+}
+
+/// Rows answered, as JSON.
+fn rows(r: Result<Vec<xenonet_engine::sql::Row>, SqlError>) -> store::Result<Vec<Value>> {
+    r.map(|rows| rows.iter().map(row_json).collect()).map_err(sql)
+}
+
+/// A row answered, if any, as JSON.
+fn row(r: Result<Option<xenonet_engine::sql::Row>, SqlError>) -> store::Result<Option<Value>> {
+    r.map(|row| row.as_ref().map(row_json)).map_err(sql)
+}
+
+impl EngineRows {
+    fn exec(&self, sql_text: &str) -> store::Result<()> {
+        self.0.with(|s| s.db().and_then(|db| xenonet_engine::sql::exec(db, sql_text))).map_err(sql)
+    }
+}
+
+impl Tx for EngineRows {
+    fn in_transaction(&self) -> bool {
+        self.0.with(|s| s.in_transaction())
+    }
+    fn begin(&self) -> store::Result<()> {
+        self.exec("BEGIN")
+    }
+    fn commit(&self) -> store::Result<()> {
+        self.exec("COMMIT")
+    }
+    fn rollback(&self) {
+        let _ = self.exec("ROLLBACK");
+    }
+}
+
+impl Links for EngineRows {
+    fn account_links(&self, slug: &str) -> store::Result<Vec<Value>> {
+        rows(self.0.with(|s| s.account_links(Arg::text(slug))))
+    }
+    fn add_account_link(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.add_account_link(&arg(row))).map_err(sql)
+    }
+    fn expire_account_link(&self, link_id: &Value, at: f64) -> store::Result<()> {
+        self.0.with(|s| s.expire_account_link(arg(link_id), Arg::Num(at))).map_err(sql)
+    }
+    fn external_ref(&self, key: &Value) -> store::Result<Option<Value>> {
+        row(self.0.with(|s| s.external_ref(&arg(key))))
+    }
+    fn add_external_ref(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.add_external_ref(&arg(row))).map_err(sql)
+    }
+}
+
+/// How a project id's making failed: the store's own way, or the maker's.
+enum MakeFail {
+    Sql(SqlError),
+    Store(store::Error),
+}
+
+impl From<SqlError> for MakeFail {
+    fn from(e: SqlError) -> Self {
+        MakeFail::Sql(e)
+    }
+}
+
+impl Store for EngineRows {
+    fn meta(&self, key: &str) -> store::Result<Value> {
+        self.0.with(|s| s.meta(Arg::text(key))).map_err(sql)
+    }
+    fn set_meta(&self, key: &str, value: &str) -> store::Result<()> {
+        self.0.with(|s| s.set_meta(Arg::text(key), Arg::text(value))).map_err(sql)
+    }
+    fn grants(&self) -> store::Result<Vec<Value>> {
+        rows(self.0.with(|s| s.grants()))
+    }
+    fn grant(&self, id: &str) -> store::Result<Option<Value>> {
+        row(self.0.with(|s| s.grant(Arg::text(id))))
+    }
+    fn connection(&self, id: &str) -> store::Result<Option<Value>> {
+        row(self.0.with(|s| s.connection(Arg::text(id))))
+    }
+    fn connections(&self) -> store::Result<Vec<Value>> {
+        rows(self.0.with(|s| s.connections()))
+    }
+    fn connections_of(&self, slug: &str) -> store::Result<Vec<Value>> {
+        rows(self.0.with(|s| s.connections_of(Arg::text(slug))))
+    }
+    fn add_connection(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.add_connection(&arg(row))).map_err(sql)
+    }
+    fn add_grant(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.add_grant(&arg(row))).map_err(sql)
+    }
+    fn change_grant(&self, id: &str, change: &Value) -> store::Result<bool> {
+        self.0.with(|s| s.change_grant(Arg::text(id), &arg(change))).map_err(sql)
+    }
+    fn revoke_grant(&self, id: &str, reason: &str, at: f64) -> store::Result<bool> {
+        self.0.with(|s| s.revoke_grant(Arg::text(id), Arg::text(reason), Arg::Num(at))).map_err(sql)
+    }
+    fn end_connection(&self, id: &str, at: f64) -> store::Result<()> {
+        self.0.with(|s| s.end_connection(Arg::text(id), Arg::Num(at))).map_err(sql)
+    }
+    fn touch_grant(&self, id: &str, at: f64) -> store::Result<()> {
+        self.0.with(|s| s.touch_grant(Arg::text(id), Arg::Num(at))).map_err(sql)
+    }
+    fn add_audit(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.add_audit(&arg(row))).map_err(sql)
+    }
+    fn project_id_of(&self, place: &Value, make: &mut dyn FnMut() -> store::Result<Value>, now: f64) -> store::Result<Value> {
+        let mut made = || make().map(|v| arg(&v)).map_err(MakeFail::Store);
+        self.0.with(|s| s.project_id_of(arg(place), &mut made, Arg::Num(now))).map_err(|e| match e {
+            MakeFail::Sql(e) => sql(e),
+            MakeFail::Store(e) => e,
+        })
+    }
+    fn project_id_for(&self, place: &Value) -> store::Result<Value> {
+        self.0.with(|s| s.project_id_for(arg(place))).map_err(sql)
+    }
+    fn place_of_project(&self, project_id: &Value) -> store::Result<Value> {
+        self.0.with(|s| s.place_of_project(arg(project_id))).map_err(sql)
     }
 }
 
 impl Remote {
     /// The connections over this store, their credentials in `dir`, or the
     /// error that kept them from starting.
-    pub fn start(
-        store: xenonet_engine::store::Shared,
-        dir: &str,
-        state_dir: &str,
-        port: u16,
-        actors: Arc<dyn Actors>,
-        engine_store: Arc<dyn EngineStore>,
-        state: Arc<dyn State>,
-    ) -> R<Arc<Remote>> {
+    pub fn start(store: Shared, dir: &str, state_dir: &str, port: u16, actors: Arc<dyn Actors>, engine_store: Arc<dyn EngineStore>, state: Arc<dyn State>) -> R<Arc<Remote>> {
         let (host, user) = super::host_and_user();
-        let fingerprint = core::fingerprint_of(&Arg::text(host), &Arg::text(user), &Arg::text(state_dir));
+        let fingerprint = core::fingerprint_of(&host, &user, state_dir);
         let r = Arc::new(Remote {
-            core: Core::new(store, Arg::text(dir), Arg::text(fingerprint), Arg::num(f64::from(port))),
+            core: Core::new(Arc::new(EngineRows(store)), &fingerprint, f64::from(port)),
             dir: dir.into(),
             actors: actors.clone(),
             engine_store,
@@ -209,7 +329,7 @@ impl Remote {
         let weak: Weak<Remote> = Arc::downgrade(&r);
         actors.before_remove(Arc::new(move |slug: &str| {
             if let Some(r) = weak.upgrade() {
-                let _ = r.core.before_remove(&mut r.base(), &Arg::text(slug));
+                let _ = r.core.before_remove(&mut r.base(), slug);
             }
         }));
         r.core.start(&mut r.base()).map_err(connection_error)?;
@@ -233,16 +353,17 @@ impl Remote {
 
     /// connections.list().connections.
     pub fn view_all(&self) -> R<Vec<Value>> {
-        let l = self.core.list(&mut self.base()).map(|a| value(&a)).map_err(connection_error)?;
+        let l = self.core.list(&mut self.base()).map_err(connection_error)?;
         Ok(l["connections"].as_array().cloned().unwrap_or_default())
     }
 
     pub fn view(&self, grant: &str) -> R<Value> {
-        self.core.view(&mut self.base(), &Arg::text(grant)).map(|a| value(&a)).map_err(connection_error)
+        self.core.view(&mut self.base(), grant).map_err(connection_error)
     }
 
+    /// Whether every connection is off, as the credentials' files say.
     pub fn disabled(&self) -> R<bool> {
-        self.core.disabled(&mut self.base()).map_err(connection_error)
+        Ok(disk::is_disabled(&self.dir))
     }
 
     pub fn id_key(&self) -> R<Value> {
@@ -250,18 +371,18 @@ impl Remote {
     }
 
     pub fn used(&self, grant: &str) {
-        let _ = self.core.used(&Arg::text(grant), now_ms());
+        let _ = self.core.used(grant, now_ms());
     }
 
     pub fn recheck_at(&self, grant: &Value, revision: &Value) -> Value {
-        match self.core.recheck(&mut self.base(), &arg(grant), &arg(revision)) {
-            Ok(a) => value(&a),
+        match self.core.recheck(&mut self.base(), &js_string(grant), revision) {
+            Ok(a) => a,
             Err(e) => json!({ "ok": false, "code": "SERVICE_UNAVAILABLE", "reason": connection_error(e).message }),
         }
     }
 
     pub fn policy_of(&self, standing: &Value) -> R<Value> {
-        self.core.policy(&mut self.base(), &arg(standing)).map(|a| value(&a)).map_err(connection_error)
+        self.core.policy(&mut self.base(), standing).map_err(connection_error)
     }
 }
 
@@ -270,52 +391,52 @@ pub struct ConnectionsCore(pub Arc<Remote>);
 
 impl Connections for ConnectionsCore {
     fn list(&self) -> R<Value> {
-        self.0.core.list(&mut self.0.base()).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.list(&mut self.0.base()).map_err(connection_error)
     }
 
     fn disable(&self) -> R<Value> {
-        self.0.core.disable(&mut self.0.base()).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.disable(&mut self.0.base()).map_err(connection_error)
     }
 
     fn enable(&self) -> R<Value> {
-        self.0.core.enable(&mut self.0.base()).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.enable(&mut self.0.base()).map_err(connection_error)
     }
 
     fn pair(&self, body: &Value, places: &Value, identities: &[String]) -> R<Value> {
         let mut base = Base { r: &self.0, also: Some(Also { places, identities }) };
-        self.0.core.pair(&mut base, &arg(body)).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.pair(&mut base, body).map_err(connection_error)
     }
 
     fn revoke(&self, grant: &str) -> R<Value> {
-        self.0.core.revoke(&mut self.0.base(), &Arg::text(grant), &Arg::text("revoked")).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.revoke(&mut self.0.base(), grant, "revoked").map_err(connection_error)
     }
 
     fn rotate(&self, grant: &str) -> R<Value> {
-        self.0.core.rotate(&mut self.0.base(), &Arg::text(grant)).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.rotate(&mut self.0.base(), grant).map_err(connection_error)
     }
 
     fn update(&self, grant: &str, projects: &Value, labels: &Value, places: &Value) -> R<Value> {
         let mut base = Base { r: &self.0, also: Some(Also { places, identities: &[] }) };
-        let mut change = Vec::new();
+        let mut change = serde_json::Map::new();
         if !projects.is_null() {
-            change.push(("projects".to_string(), arg(projects)));
+            change.insert("projects".to_string(), projects.clone());
         }
         if !labels.is_null() {
-            change.push(("labels".to_string(), arg(labels)));
+            change.insert("labels".to_string(), labels.clone());
         }
-        self.0.core.update(&mut base, &Arg::text(grant), &Arg::Obj(change)).map(|a| value(&a)).map_err(connection_error)
+        self.0.core.update(&mut base, grant, &Value::Object(change)).map_err(connection_error)
     }
 
     fn authenticate(&self, grant: &Value, token: &Value) -> Value {
-        let ask = Arg::Obj(vec![("grant".into(), arg(grant)), ("token".into(), arg(token))]);
+        let ask = json!({ "grant": grant, "token": token });
         match self.0.core.authenticate(&mut self.0.base(), &ask) {
-            Ok(s) => value(&s.to_arg()),
+            Ok(s) => s.to_json(),
             Err(e) => json!({ "ok": false, "code": "SERVICE_UNAVAILABLE", "reason": connection_error(e).message }),
         }
     }
 
     fn bridge(&self, connection: &str, delta: i32) {
-        let _ = self.0.core.bridge(&mut self.0.base(), &Arg::text(connection), f64::from(delta));
+        let _ = self.0.core.bridge(&mut self.0.base(), connection, f64::from(delta));
     }
 
     fn policy(&self, session: &Value) -> R<Value> {
@@ -356,7 +477,7 @@ mod tests {
     type Hook = Arc<dyn Fn(&str) + Send + Sync>;
 
     struct FakeActors {
-        store: xenonet_engine::store::Shared,
+        store: Shared,
         known: Mutex<HashMap<String, Value>>,
         hooks: Mutex<Vec<Hook>>,
     }
@@ -364,7 +485,7 @@ mod tests {
     impl Actors for FakeActors {
         fn registry(&self, method: &str, args: Vec<Value>) -> R<Value> {
             let mut known = self.known.locked();
-            let id = args.first().map(xenonet_base::text::js_string).unwrap_or_default();
+            let id = args.first().map(js_string).unwrap_or_default();
             Ok(match method {
                 "ids" => json!(known.keys().cloned().collect::<Vec<_>>()),
                 "has" => json!(known.contains_key(&id)),
@@ -387,7 +508,7 @@ mod tests {
                 }
                 "upsert" => {
                     let def = args.first().cloned().unwrap_or(Value::Null);
-                    let id = xenonet_base::text::js_string(&def["id"]);
+                    let id = js_string(&def["id"]);
                     let mut a = def.clone();
                     a["via"] = json!([def.get("via").cloned().unwrap_or(json!("remote"))]);
                     // The actor's row, which its connections refer to.
@@ -413,7 +534,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-wire-connections-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let store = xenonet_engine::store::Shared::new(xenonet_engine::store::EngineStore::open(&dir.join("engine.sqlite").to_string_lossy(), now_ms()).unwrap());
+        let store = Shared::new(xenonet_engine::store::EngineStore::open(&dir.join("engine.sqlite").to_string_lossy(), now_ms()).unwrap());
         let creds = dir.join("assistant").to_string_lossy().into_owned();
         let actors = Arc::new(FakeActors { store: store.clone(), known: Mutex::new(HashMap::new()), hooks: Mutex::new(Vec::new()) });
         let remote = Remote::start(store.clone(), &creds, &dir.to_string_lossy(), 47999, actors.clone(), Arc::new(Pending), Arc::new(Pending)).unwrap();

@@ -521,6 +521,20 @@ pub fn read_from(size: u64, offset: u64) -> (bool, u64) {
     }
 }
 
+/// A whole transcript's records, through its app's normalizer (`vendor`):
+/// each line, and a last one without a newline too.
+pub fn records(vendor: &dyn xenonet_adapter::reader::VendorCheck, app: &str, data: &[u8]) -> Vec<Value> {
+    let t = take(data);
+    let mut sampling = xenonet_schema::vendor::Sampling::default();
+    let mut out: Vec<Value> = t.lines.iter().filter_map(|l| vendor.line(app, l, &mut sampling)).collect();
+    if let Some(last) = t.last {
+        if let Some(r) = vendor.record(app, last, &mut sampling) {
+            out.push(r);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

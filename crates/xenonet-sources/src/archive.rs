@@ -1,6 +1,6 @@
-//! Codex's archived rollouts (.jsonl.zst), read as the JS reads them with
-//! zlib.zstdDecompressSync: stats, search and a thread's transcript read
-//! one whole, decompressed. The live tailer doesn't read them (blocks.md).
+//! Codex's archived rollouts (.jsonl.zst): stats, search and a thread's
+//! transcript read one whole, decompressed. The live tailer doesn't read
+//! them (blocks.md).
 
 use ruzstd::decoding::errors::{FrameDecoderError, ReadFrameHeaderError};
 use ruzstd::decoding::StreamingDecoder;

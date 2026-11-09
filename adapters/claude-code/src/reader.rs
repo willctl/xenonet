@@ -5,7 +5,14 @@
 //! tool results, a turn's end, a subagent's start and stop. Grok Build's
 //! lines have the same shapes and are read through `claude_line` too.
 //! Claude's plan limits are read here from Anthropic's answers and Claude
-//! desktop's samples.
+//! desktop's samples. The map's listing of its sessions, a transcript's
+//! page and a rename are `listing` (over `sdk`, `desktop` and
+//! `transcript`).
+
+pub mod desktop;
+pub mod listing;
+pub mod sdk;
+pub mod transcript;
 
 use serde_json::{Map, Value};
 use xenonet_adapter::reader::{Call, Classified, Emit, Run, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};

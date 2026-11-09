@@ -159,7 +159,8 @@ mod tests {
         let c = Connect::with(options(), std::slice::from_ref(app("codex").unwrap()), &|app, k| Some(format(app, k)));
         let k = Shared::new(options());
         let f = CodexHooks::new(app("codex").unwrap(), &k);
-        assert_eq!(f.hooks_file, "/h/.codex/hooks.json");
+        // Joined as this machine joins paths, so the test holds on Windows too.
+        assert_eq!(f.hooks_file, xenonet_base::nodepath::join(&["/h", ".codex", "hooks.json"]));
         assert_eq!(f.hooks["SessionEnd"]["hooks"][0]["timeout"], json!(3));
         let mut m = FakeMachine { clis: vec!["codex".into()], ..FakeMachine::default() };
         let before = c.preview(&mut m).unwrap();

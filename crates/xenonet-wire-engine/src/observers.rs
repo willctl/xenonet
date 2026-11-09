@@ -203,19 +203,16 @@ impl Actors for Host<'_> {
         self.reg(|r| r.targets_of(id))
     }
     fn upsert(&self, def: &Value) -> observe::Result<()> {
-        let def = arg(def);
-        self.with(|r, h| r.upsert(&def, h))
+        self.with(|r, h| r.upsert(def, h))
     }
     fn set_installed(&self, id: &str, installed: bool) -> observe::Result<()> {
         self.with(|r, _| r.set_installed(id, installed))
     }
     fn report(&self, id: &str, report: &Value) -> observe::Result<()> {
-        let o = arg(report);
-        self.with(|r, h| r.report(id, &o, h))
+        self.with(|r, h| r.report(id, report, h))
     }
     fn record(&self, id: &str, event: &Value) -> observe::Result<Value> {
-        let o = arg(event);
-        self.with(|r, h| r.record(id, &o, h))
+        self.with(|r, h| r.record(id, event, h))
     }
     fn target(&self, id: &str, node: &str, relation: &str, at: f64) -> observe::Result<()> {
         self.with(|r, _| r.target(id, node, relation, at))

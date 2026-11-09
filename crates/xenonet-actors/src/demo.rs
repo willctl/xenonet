@@ -16,11 +16,11 @@
 //! own calls. The demo world's nodes (its projects, sessions and files,
 //! and Wren's Claude account) are the world's to say: `Resolve` asks.
 
-use crate::registry::{value_arg, Actors, Host, Result};
-use serde_json::{json, Value};
+use crate::registry::{Actors, Host, Result};
+use serde_json::{json, Map, Value};
 use xenonet_base::ids::YOU;
+use xenonet_base::json::number;
 use xenonet_base::units::js_round;
-use xenonet_engine::sql::Arg;
 
 const WREN: &str = "actor:wren";
 const KESTREL: &str = "actor:kestrel";
@@ -140,11 +140,12 @@ pub struct Demo {
     turn: usize,
 }
 
-fn with_at(v: &Value, at: f64) -> Arg {
-    let mut a = value_arg(v);
-    if let Arg::Obj(f) = &mut a {
-        f.retain(|(k, _)| k != "at");
-        f.push(("at".into(), Arg::Num(at)));
+// A step's object with `at` set, last.
+fn with_at(v: &Value, at: f64) -> Value {
+    let mut a = v.clone();
+    if let Value::Object(f) = &mut a {
+        f.shift_remove("at");
+        f.insert("at".into(), number(at));
     }
     a
 }
@@ -170,17 +171,20 @@ impl Demo {
             return Ok(Value::Null);
         }
         if let Some(console) = step.get("console") {
-            return actors.you_report(&value_arg(console), when, host);
+            return actors.you_report(console, when, host);
         }
         if step.get("presence").is_some() || step.get("status").is_some() {
-            let mut o = vec![("instance".to_string(), instance(id).map_or(Arg::Undef, Arg::text))];
+            let mut o = Map::new();
+            if let Some(inst) = instance(id) {
+                o.insert("instance".into(), json!(inst));
+            }
             for k in ["presence", "status"] {
                 if let Some(v) = step.get(k) {
-                    o.push((k.into(), value_arg(v)));
+                    o.insert(k.into(), v.clone());
                 }
             }
-            o.push(("at".into(), Arg::Num(when)));
-            actors.report(id, &Arg::Obj(o), host)?;
+            o.insert("at".into(), number(when));
+            actors.report(id, &Value::Object(o), host)?;
         }
         for t in step.get("targets").and_then(Value::as_array).cloned().unwrap_or_default() {
             let node = xenonet_engine::js::template(t.get(0));
@@ -205,9 +209,9 @@ impl Demo {
                 continue;
             }
             if id == YOU {
-                actors.you_report(&Arg::Obj(vec![]), when, host)?;
+                actors.you_report(&json!({}), when, host)?;
             } else if let Some(inst) = instance(&id) {
-                actors.report(&id, &Arg::Obj(vec![("instance".into(), Arg::text(inst)), ("at".into(), Arg::Num(when))]), host)?;
+                actors.report(&id, &json!({ "instance": inst, "at": number(when) }), host)?;
             }
         }
         Ok(())
@@ -222,7 +226,7 @@ impl Demo {
         let mut demo = Demo { scripts, at, turn: 0 };
         let defs = demo_actors(host);
         let store = actors.store.clone();
-        store.transaction(|| -> Result<()> {
+        crate::store::transaction(store.as_ref(), || -> Result<()> {
             for d in defs.as_array().into_iter().flatten() {
                 actors.upsert(&with_at(d, now - history), host)?;
             }

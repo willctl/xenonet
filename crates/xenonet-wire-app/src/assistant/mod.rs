@@ -14,8 +14,7 @@ pub mod reads;
 pub mod tunnels;
 
 use serde_json::{Map, Value};
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
+use xenonet_engine::sql::{Arg, Cell, Row};
 use xenonet_service::cores::{CoreError, Kind};
 
 /// A JSON value as the cores' JS-shaped arguments.
@@ -30,20 +29,21 @@ pub fn arg(v: &Value) -> Arg {
     }
 }
 
-pub fn thrown(t: Thrown) -> CoreError {
-    let mut e = CoreError::new(t.message);
-    e.code = t.code.as_deref().map(xenonet_base::text::js_string);
-    e
-}
-
-pub fn thrown_of(e: &CoreError) -> Thrown {
-    let mut t = Thrown::new(e.message.clone());
-    t.code = e.code.clone().map(|c| Box::new(Value::String(c)));
-    t
+/// A row of the engine's store as JSON: each column as node:sqlite read it,
+/// an integer as a number.
+pub fn row_json(r: &Row) -> Value {
+    let cell = |c: &Cell| match c {
+        Cell::Null => Value::Null,
+        Cell::Int(i) => xenonet_base::json::number(*i as f64),
+        Cell::Real(f) => xenonet_base::json::number(*f),
+        Cell::Text(s) => Value::String(s.clone()),
+        Cell::Blob(b) => Value::Array(b.iter().map(|x| Value::from(*x)).collect()),
+    };
+    Value::Object(r.0.iter().map(|(k, c)| (k.clone(), cell(c))).collect())
 }
 
 /// A connection's refusal as the routes answer it (ConnectionError), a
-/// link's (LinkError), or what the core threw.
+/// link's (LinkError), or what the store or a collaborator failed with.
 pub fn connection_error(f: xenonet_actors::connections::Fail) -> CoreError {
     use xenonet_actors::connections::Fail;
     match f {
@@ -53,7 +53,11 @@ pub fn connection_error(f: xenonet_actors::connections::Fail) -> CoreError {
             e.code = Some(code.to_string());
             e
         }
-        Fail::Thrown(t) => thrown(t),
+        Fail::Error(e) => {
+            let mut c = CoreError::new(e.message);
+            c.code = e.code;
+            c
+        }
     }
 }
 

@@ -10,23 +10,14 @@ use crate::vendor::Vendor;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use xenonet_schema::vendor::Sampling;
 use xenonet_state::stats::{self, File, Kept, Transcripts};
 
 /// A whole transcript's records, through its app's normalizer (lines.js's
 /// readLines): a last line without a newline too, and a compressed
 /// archive (.jsonl.zst) decompressed.
 pub fn read_lines(vendor: &Vendor, file: &str, app: &str) -> std::io::Result<Vec<Value>> {
-    let data = crate::archive::read(file)?;
-    let t = xenonet_sources::lines::take(&data);
-    let mut sampling = Sampling::default();
-    let mut out: Vec<Value> = t.lines.iter().filter_map(|l| vendor.line(app, l, &mut sampling)).collect();
-    if let Some(last) = t.last {
-        if let Some(r) = vendor.record(app, last, &mut sampling) {
-            out.push(r);
-        }
-    }
-    Ok(out)
+    let data = xenonet_sources::archive::read(file)?;
+    Ok(xenonet_sources::lines::records(vendor, app, &data))
 }
 
 pub struct Stats {

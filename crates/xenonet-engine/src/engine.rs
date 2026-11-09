@@ -1,11 +1,11 @@
 //! XenoNet's engine: what the agents on this machine are doing, and the
-//! means for them to work together: core/engine/engine.js. It starts from
-//! what XenoNet already sees in every Claude Code and Codex transcript (who
-//! is working where, on which branch, editing which files) and adds what
-//! agents tell it: messages to each other, claims on files, and a line
-//! about what each is doing. Agents reach it through the MCP tools and
-//! through Claude Code's and Codex's hooks, which put what concerns them in
-//! front of them without their asking.
+//! means for them to work together. It starts from what XenoNet already
+//! sees in every Claude Code and Codex transcript (who is working where, on
+//! which branch, editing which files) and adds what agents tell it:
+//! messages to each other, claims on files, and a line about what each is
+//! doing. Agents reach it through the MCP tools and through Claude Code's
+//! and Codex's hooks, which put what concerns them in front of them
+//! without their asking.
 //!
 //! An agent is a session ("`claude:<session id>`", "`codex:<thread id>`"). An
 //! actor that registered calls the engine as "`actor:<slug>`", with its
@@ -16,28 +16,32 @@
 //! marked observed.
 //!
 //! What the engine keeps (when each warning was given, when a Stop hook
-//! handed mail over) is Rust's. Its collaborators are called as the JS
-//! called them, through `Calls`: "engine" is the twin (its store, actors,
-//! policy, delivery, repos, listening and now); the map's state is read
-//! through the twin's narrow readers ("liveIds", "index", "node", "live",
-//! "observedLive", "homeOf", "identities"), since it belongs to the state's
-//! own layer; and "alive", "emit", "wakeWaiters", "wait", "listenWait",
-//! "wall" and "timeOf" are the twin's for processes, events, promises, the
-//! wall clock and the time as your locale writes it.
+//! handed mail over) is its own. Everything else it asks of its
+//! collaborators (`host::Collaborators`): the store, the clock, the map's
+//! narrow readers, the actors, live delivery, the policy, the repos, the
+//! sessions listening after a turn, the waits on mail, the events and the
+//! network. An agent's view, a message and a claim are JSON documents,
+//! their keys in the order the schemas (xenonet-model's engine module)
+//! list them.
 
 use crate::attest::quoted;
-use crate::delivery::selector::{format_selector, matches as selects, parse_selector};
+use crate::delivery::policy;
+use crate::delivery::selector::{format_selector, Selector};
+use crate::host::{Collaborators, Repo, StatusSet};
 use crate::network::{self, network_host, NetHandle};
-use crate::peer::{list, opt_call, Calls, Thrown};
-use crate::sql::Arg;
-use crate::store::js_text;
-use std::collections::HashMap;
+use crate::peer::Thrown;
+use crate::sql::{self, Row};
+use crate::store::row_json;
+use serde_json::{Map, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use xenonet_adapter::apps::is_session_id;
 use xenonet_adapter::products::product_of;
 use xenonet_base::ids::{parse_actor_id, YOU};
+use xenonet_base::json::number;
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::sync::Locked;
+use xenonet_base::text::{js_number, js_trim, truthy};
 
 pub const ACTIVE_MS: f64 = 2.0 * 3600e3;
 const EDIT_HOLD_MS: f64 = 30.0 * 60e3;
@@ -49,12 +53,14 @@ const CLAIM_MINUTES: f64 = 60.0;
 const MAX_TEXT: usize = 4000;
 const ACTOR_CLAIMS: usize = 50;
 
-/// How a call went wrong: an Error with its sentence, one with status 400
-/// and code bad-request, or what a collaborator threw.
+/// How a call went wrong: an error with its sentence, one with status 400
+/// and code bad-request, the policy's refusal (status 429, with its code),
+/// or what a collaborator or the store failed with.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Fail {
     Error(String),
     Bad(String),
+    Refused { why: String, code: &'static str },
     Thrown(Thrown),
 }
 
@@ -64,9 +70,18 @@ impl From<Thrown> for Fail {
     }
 }
 
-impl From<crate::sql::SqlError> for Fail {
-    fn from(e: crate::sql::SqlError) -> Self {
+impl From<sql::SqlError> for Fail {
+    fn from(e: sql::SqlError) -> Self {
         Fail::Thrown(e.into())
+    }
+}
+
+impl From<policy::Fail> for Fail {
+    fn from(f: policy::Fail) -> Self {
+        match f {
+            policy::Fail::Refused { why, code } => Fail::Refused { why, code },
+            policy::Fail::Error(m) => Fail::Error(m),
+        }
     }
 }
 
@@ -76,22 +91,133 @@ fn err<T>(message: impl Into<String>) -> Result<T> {
     Err(Fail::Error(message.into()))
 }
 
-pub fn is_agent_id(id: &Arg) -> bool {
-    !id.is_nullish() && is_session_id(&js_text(id))
+// ---------- JSON as the engine reads it ----------
+//
+// A field an object hasn't is None, and a key is written only when there
+// is a value for it; null is a value. Text, numbers and truth are read as
+// JS reads them, since agents and the console read the same documents.
+
+fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    v.get(k)
+}
+
+fn nullish(v: Option<&Value>) -> bool {
+    matches!(v, None | Some(Value::Null))
+}
+
+fn as_str(v: Option<&Value>) -> Option<&str> {
+    v.and_then(Value::as_str)
+}
+
+/// A value as a template literal writes it (undefined for none).
+fn text(v: Option<&Value>) -> String {
+    crate::js::template(v)
+}
+
+/// `x ?? ""` as text.
+fn text_or_empty(v: Option<&Value>) -> String {
+    if nullish(v) {
+        String::new()
+    } else {
+        text(v)
+    }
+}
+
+/// Number(x).
+fn num(v: Option<&Value>) -> f64 {
+    js_number(v)
+}
+
+/// `x ?? 0`, as a number.
+fn num0(v: Option<&Value>) -> f64 {
+    if nullish(v) {
+        0.0
+    } else {
+        num(v)
+    }
+}
+
+/// `a === b`, for the plain values the engine compares (ids, texts,
+/// numbers): two documents are never the same one.
+fn same(a: Option<&Value>, b: Option<&Value>) -> bool {
+    match (a, b) {
+        (None, None) | (Some(Value::Null), Some(Value::Null)) => true,
+        (Some(Value::Bool(x)), Some(Value::Bool(y))) => x == y,
+        (Some(Value::Number(x)), Some(Value::Number(y))) => x.as_f64() == y.as_f64(),
+        (Some(Value::String(x)), Some(Value::String(y))) => x == y,
+        _ => false,
+    }
+}
+
+/// `x ?? null`.
+fn or_null(v: Option<&Value>) -> Value {
+    v.cloned().unwrap_or(Value::Null)
+}
+
+/// A value that isn't null, for `a ?? b` chains.
+fn some(v: Option<&Value>) -> Option<&Value> {
+    v.filter(|x| !x.is_null())
+}
+
+/// A list's items, or none.
+fn items(v: Option<&Value>) -> &[Value] {
+    v.and_then(Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+fn string(s: impl Into<String>) -> Value {
+    Value::String(s.into())
+}
+
+/// An object with these fields, in this order.
+fn obj(fields: Vec<(&str, Value)>) -> Value {
+    Value::Object(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<Map<String, Value>>())
+}
+
+/// An object with the fields that have a value, in this order.
+fn obj_some(fields: Vec<(&str, Option<Value>)>) -> Value {
+    Value::Object(fields.into_iter().filter_map(|(k, v)| v.map(|v| (k.to_string(), v))).collect::<Map<String, Value>>())
+}
+
+fn put(v: &mut Value, k: &str, x: Value) {
+    if let Value::Object(m) = v {
+        m.insert(k.to_string(), x);
+    }
+}
+
+/// Sets a field when there is a value for it.
+fn put_some(v: &mut Value, k: &str, x: Option<Value>) {
+    if let Some(x) = x {
+        put(v, k, x);
+    }
+}
+
+/// A row of the store, or null for none.
+fn row(r: sql::Result<Option<Row>>) -> Result<Value> {
+    Ok(r?.as_ref().map_or(Value::Null, row_json))
+}
+
+fn rows(r: sql::Result<Vec<Row>>) -> Result<Vec<Value>> {
+    Ok(r?.iter().map(row_json).collect())
+}
+
+// ---------- ids, paths and words ----------
+
+pub fn is_agent_id(id: &str) -> bool {
+    is_session_id(id)
 }
 
 /// An actor of this machine as the engine has it, never you.
-pub fn is_actor_agent(id: &Arg) -> bool {
-    let s = js_text(id);
-    id.as_str().is_some() && parse_actor_id(&s).is_some_and(|(host, _)| host.is_none()) && s != YOU
+pub fn is_actor_agent(id: &str) -> bool {
+    parse_actor_id(id).is_some_and(|(host, _)| host.is_none()) && id != YOU
+}
+
+/// Whether a document's id names an actor here.
+fn actor_value(id: Option<&Value>) -> bool {
+    as_str(id).is_some_and(is_actor_agent)
 }
 
 fn key_of(p: &str) -> String {
     p.replace('\\', "/").to_lowercase()
-}
-
-fn key_arg(p: &Arg) -> String {
-    key_of(&js_text(p))
 }
 
 fn js_round(x: f64) -> f64 {
@@ -107,20 +233,27 @@ fn ago(ms: f64) -> String {
     if ms < 90e3 {
         "just now".into()
     } else if ms < 3600e3 {
-        format!("{} min ago", js_text(&Arg::num(js_round(ms / 60e3))))
+        format!("{} min ago", text(Some(&number(js_round(ms / 60e3)))))
     } else {
-        format!("{} h ago", js_text(&Arg::num(js_round(ms / 3600e3))))
+        format!("{} h ago", text(Some(&number(js_round(ms / 3600e3)))))
     }
 }
 
 /// `s.length > n ? s.slice(0, n - 1) + "…" : s`, in UTF-16 units.
-fn clip(s: &Arg, n: usize) -> Arg {
-    let Arg::Text(t) = s else { return s.clone() };
+fn clip_text(t: &str, n: usize) -> String {
     let units: Vec<u16> = t.encode_utf16().collect();
     if units.len() > n {
-        Arg::text(format!("{}…", String::from_utf16_lossy(&units[..n - 1])))
+        format!("{}…", String::from_utf16_lossy(&units[..n - 1]))
     } else {
-        s.clone()
+        t.to_string()
+    }
+}
+
+/// The same for a value: only text is clipped.
+fn clip(v: &Value, n: usize) -> Value {
+    match v {
+        Value::String(t) => string(clip_text(t, n)),
+        other => other.clone(),
     }
 }
 
@@ -131,79 +264,10 @@ fn short(id: &str) -> String {
     String::from_utf16_lossy(&units[..end.min(units.len())])
 }
 
-fn num(a: &Arg) -> f64 {
-    match a {
-        Arg::Num(n) => *n,
-        Arg::Null => 0.0,
-        Arg::Undef => f64::NAN,
-        Arg::Bool(b) => f64::from(u8::from(*b)),
-        other => xenonet_base::text::js_number(Some(&other.to_json())),
-    }
-}
-
-/// `x ?? 0`, as a number.
-fn num0(a: &Arg) -> f64 {
-    if a.is_nullish() {
-        0.0
-    } else {
-        num(a)
-    }
-}
-
-fn obj(fields: Vec<(&str, Arg)>) -> Arg {
-    Arg::Obj(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
-}
-
-fn push(a: &mut Arg, k: &str, v: Arg) {
-    if let Arg::Obj(f) = a {
-        match f.iter_mut().find(|(n, _)| n == k) {
-            Some(e) => e.1 = v,
-            None => f.push((k.to_string(), v)),
-        }
-    }
-}
-
-/// `a === b`.
-fn same(a: &Arg, b: &Arg) -> bool {
-    match (a, b) {
-        (Arg::Num(x), Arg::Num(y)) => x == y,
-        (Arg::Text(x), Arg::Text(y)) => x == y,
-        (Arg::Bool(x), Arg::Bool(y)) => x == y,
-        (Arg::Null, Arg::Null) | (Arg::Undef, Arg::Undef) => true,
-        (Arg::Big(x), Arg::Big(y)) => x == y,
-        _ => false,
-    }
-}
-
-fn kind_nullish(c: &mut dyn Calls, path: &str) -> std::result::Result<bool, Thrown> {
-    Ok(matches!(c.kind(path)?.as_str(), "undefined" | "null"))
-}
-
-/// Whether `<path>` is truthy, read without converting an object.
-fn truthy_at(c: &mut dyn Calls, path: &str) -> std::result::Result<bool, Thrown> {
-    Ok(match c.kind(path)?.as_str() {
-        "undefined" | "null" => false,
-        "function" | "object" | "symbol" => true,
-        _ => c.get(path)?.truthy(),
-    })
-}
-
-fn value_arg(v: &serde_json::Value) -> Arg {
-    use serde_json::Value;
-    match v {
-        Value::Null => Arg::Null,
-        Value::Bool(b) => Arg::Bool(*b),
-        Value::Number(n) => Arg::Num(n.as_f64().unwrap_or(f64::NAN)),
-        Value::String(s) => Arg::text(s.clone()),
-        Value::Array(a) => Arg::List(a.iter().map(value_arg).collect()),
-        Value::Object(o) => Arg::Obj(o.iter().map(|(k, v)| (k.clone(), value_arg(v))).collect()),
-    }
-}
-
 /// A claim's pattern against a file: an exact path, a folder ("src/" or
 /// "src/**"), or a glob with * and **.
-pub fn matches(pattern: &Arg, file: &Arg) -> bool {
-    let (p, f) = (key_arg(pattern), key_arg(file));
+pub fn matches(pattern: &str, file: &str) -> bool {
+    let (p, f) = (key_of(pattern), key_of(file));
     if p.ends_with('/') || p.ends_with("/**") {
         return f.starts_with(p.strip_suffix("**").unwrap_or(&p));
     }
@@ -228,14 +292,12 @@ pub fn matches(pattern: &Arg, file: &Arg) -> bool {
 /// The files an edit tool is about to change. Claude Code's Edit, Write,
 /// MultiEdit and NotebookEdit name one; Codex's apply_patch lists them in
 /// its patch.
-pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
-    let cwd = if cwd.is_nullish() { None } else { Some(js_text(cwd)) };
+pub fn edit_paths(tool_name: &str, input: &Value, cwd: Option<&str>) -> Vec<String> {
     let abs = |p: &str| -> String {
         if NATIVE.is_absolute(p) {
             p.to_string()
         } else {
-            let style = cwd.clone().unwrap_or_else(|| p.to_string());
-            style_of(&style).resolve(&[cwd.as_deref().unwrap_or("/"), p])
+            style_of(cwd.unwrap_or(p)).resolve(&[cwd.unwrap_or("/"), p])
         }
     };
     let mut out: Vec<String> = Vec::new();
@@ -245,22 +307,21 @@ pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
         }
     };
     for k in ["file_path", "notebook_path", "path"] {
-        if let Arg::Text(p) = input.field(k) {
-            add(abs(&p));
+        if let Some(Value::String(p)) = get(input, k) {
+            add(abs(p));
         }
     }
-    fn scan(v: &Arg, found: &mut Vec<String>) {
+    fn scan(v: &Value, found: &mut Vec<String>) {
         match v {
             // The files it adds, updates and deletes, and the names it
             // moves them to.
-            Arg::Text(s) => found.extend(xenonet_base::patch::paths(s, true)),
-            Arg::List(l) => l.iter().for_each(|x| scan(x, found)),
-            Arg::Obj(o) => o.iter().for_each(|(_, x)| scan(x, found)),
+            Value::String(s) => found.extend(xenonet_base::patch::paths(s, true)),
+            Value::Array(l) => l.iter().for_each(|x| scan(x, found)),
+            Value::Object(o) => o.values().for_each(|x| scan(x, found)),
             _ => {}
         }
     }
-    let tool = if tool_name.is_nullish() { String::new() } else { js_text(tool_name) };
-    if crate::re!(r"(?i)apply_patch|patch").is_match(&tool) {
+    if crate::re!(r"(?i)apply_patch|patch").is_match(tool_name) {
         let mut found = Vec::new();
         scan(input, &mut found);
         for f in found {
@@ -272,53 +333,53 @@ pub fn edit_paths(tool_name: &Arg, input: &Arg, cwd: &Arg) -> Vec<String> {
 
 /// What git printed for `rev-parse`, as a repo, or None when it didn't print
 /// a top and a common dir.
-pub fn parse_repo(stdout: &str) -> Option<Arg> {
-    let t = xenonet_base::text::js_trim(stdout);
+pub fn parse_repo(stdout: &str) -> Option<Repo> {
+    let t = js_trim(stdout);
     let mut lines = t.split('\n');
     let top = lines.next().filter(|s| !s.is_empty())?;
     let common = lines.next().filter(|s| !s.is_empty())?;
     let branch = match lines.next() {
-        None => Arg::Undef,
-        Some("HEAD") => Arg::Null,
-        Some(b) => Arg::text(b),
+        None | Some("HEAD") => None,
+        Some(b) => Some(b.to_string()),
     };
-    Some(obj(vec![("top", Arg::text(top)), ("common", Arg::text(xenonet_base::paths::resolve(common))), ("branch", branch)]))
+    Some(Repo { top: top.to_string(), common: xenonet_base::paths::resolve(common), branch })
 }
 
 /// Two agents share a repo if their working trees share a git dir. Outside
 /// git, if they work in the same folder or the same project.
-pub fn together(a: &Arg, b: &Arg) -> bool {
-    let (ra, rb) = (a.field("repo"), b.field("repo"));
-    if ra.truthy() || rb.truthy() {
-        return ra.truthy() && same(&ra, &rb);
+pub fn together(a: &Value, b: &Value) -> bool {
+    let (ra, rb) = (get(a, "repo"), get(b, "repo"));
+    if truthy(ra) || truthy(rb) {
+        return truthy(ra) && same(ra, rb);
     }
-    let (ca, cb) = (a.field("cwd"), b.field("cwd"));
-    (ca.truthy() && cb.truthy() && key_arg(&ca) == key_arg(&cb)) || (a.field("projectKind").as_str() == Some("project") && same(&a.field("projectId"), &b.field("projectId")))
+    let (ca, cb) = (get(a, "cwd"), get(b, "cwd"));
+    (truthy(ca) && truthy(cb) && key_of(&text(ca)) == key_of(&text(cb))) || (as_str(get(a, "projectKind")) == Some("project") && same(get(a, "projectId"), get(b, "projectId")))
 }
 
 /// Who a reply with no `to` is for: the sender of the message it answers,
-/// unless that's you, in which case it goes to the same audience.
-pub fn reply_target(me: &Arg, m: &Arg) -> Arg {
-    if !m.truthy() {
-        return Arg::Undef;
+/// unless that's you, in which case it goes to the same audience. Null
+/// when there's no such message.
+pub fn reply_target(me: &str, m: &Value) -> Value {
+    if !truthy(Some(m)) {
+        return Value::Null;
     }
-    if !same(&m.field("sender"), me) {
-        return m.field("sender");
+    if as_str(get(m, "sender")) != Some(me) {
+        return or_null(get(m, "sender"));
     }
-    if m.field("target").as_str() == Some("all") {
-        return Arg::text("all");
+    if as_str(get(m, "target")) == Some("all") {
+        return string("all");
     }
-    if m.field("scope").truthy() || js_text(&m.field("target")).starts_with("repo:") {
-        return Arg::text("repo");
+    if truthy(get(m, "scope")) || text(get(m, "target")).starts_with("repo:") {
+        return string("repo");
     }
-    m.field("target")
+    or_null(get(m, "target"))
 }
 
 /// A path as it reads inside a working tree, when it's in it.
-fn inside(top: &Arg, p: &Arg) -> String {
-    let ps = js_text(p);
-    if top.truthy() && key_of(&ps).starts_with(&key_of(&format!("{}/", js_text(top)))) {
-        let n = js_text(top).encode_utf16().count() + 1;
+fn inside(top: Option<&Value>, p: Option<&Value>) -> String {
+    let ps = text(p);
+    if truthy(top) && key_of(&ps).starts_with(&key_of(&format!("{}/", text(top)))) {
+        let n = text(top).encode_utf16().count() + 1;
         let units: Vec<u16> = ps.encode_utf16().collect();
         return String::from_utf16_lossy(&units[n.min(units.len())..]);
     }
@@ -327,74 +388,72 @@ fn inside(top: &Arg, p: &Arg) -> String {
 
 /// Where messages to "everyone in this repo" are kept: the repo's git dir,
 /// or else the project.
-fn repo_key(a: &Arg) -> Arg {
-    let r = a.field("repo");
-    if !r.is_nullish() {
-        return r;
+fn repo_key(a: &Value) -> Value {
+    if let Some(r) = some(get(a, "repo")) {
+        return r.clone();
     }
-    if a.field("projectKind").as_str() == Some("project") {
-        a.field("projectId")
+    if as_str(get(a, "projectKind")) == Some("project") {
+        or_null(get(a, "projectId"))
     } else {
-        Arg::Null
+        Value::Null
     }
 }
 
-fn brief(a: &Arg) -> Arg {
-    obj(vec![("id", a.field("id")), ("title", a.field("title")), ("app", a.field("app")), ("project", a.field("project")), ("branch", a.field("branch"))])
+/// The brief form of an agent: what names it in messages and answers.
+fn brief(a: &Value) -> Value {
+    obj_some(["id", "title", "app", "project", "branch"].into_iter().map(|k| (k, get(a, k).cloned())).collect())
 }
 
-fn delivery_of(a: &Arg) -> &'static str {
-    let reachable = a.field("reachable").truthy();
-    if a.field("app").as_str() == Some("actor") {
+fn delivery_of(a: &Value) -> &'static str {
+    let reachable = truthy(get(a, "reachable"));
+    if as_str(get(a, "app")) == Some("actor") {
         return if reachable { "when it next reads its inbox" } else { "when it next reads its inbox, if it comes back: it's offline" };
     }
     if !reachable {
         return "only if it checks its inbox: it isn't connected to XenoNet, so tell your user if it matters";
     }
-    if a.field("status").as_str() == Some("idle") {
+    if as_str(get(a, "status")) == Some("idle") {
         "when it next starts a turn (it's idle now)"
     } else {
         "during its current turn"
     }
 }
 
-fn line(a: &Arg, me: &Arg, kind: &str, reads: bool) -> String {
+fn line(a: &Value, me: &Value, kind: &str, reads: bool) -> String {
     let mut parts = vec![format!(
         "\"{}\" ({kind}, {}{}, {})",
-        js_text(&a.field("title")),
-        if a.field("status").as_str() == Some("idle") { "idle" } else { "working" },
-        if a.field("needsYou").truthy() { ", waiting on the user" } else { "" },
-        js_text(&a.field("id"))
+        text(get(a, "title")),
+        if as_str(get(a, "status")) == Some("idle") { "idle" } else { "working" },
+        if truthy(get(a, "needsYou")) { ", waiting on the user" } else { "" },
+        text(get(a, "id"))
     )];
-    let (top, mine) = (a.field("top"), me.field("top"));
-    let place = if a.field("host").truthy() {
-        format!("on {}, another machine in your XenoNet network, in its clone of this repo", js_text(&a.field("host")))
-    } else if top.truthy() && mine.truthy() && !same(&top, &mine) {
-        format!("in another worktree, {}", js_text(&top))
+    let (top, mine) = (get(a, "top"), get(me, "top"));
+    let place = if truthy(get(a, "host")) {
+        format!("on {}, another machine in your XenoNet network, in its clone of this repo", text(get(a, "host")))
+    } else if truthy(top) && truthy(mine) && !same(top, mine) {
+        format!("in another worktree, {}", text(top))
     } else {
         "in this same working tree".into()
     };
-    let branch = a.field("branch");
-    parts.push(if branch.truthy() { format!("{place}, on {}", js_text(&branch)) } else { place });
-    let focus = a.field("focus");
-    if focus.truthy() {
-        parts.push(format!("says: {}", js_text(&focus)));
+    let branch = get(a, "branch");
+    parts.push(if truthy(branch) { format!("{place}, on {}", text(branch)) } else { place });
+    let focus = get(a, "focus");
+    if truthy(focus) {
+        parts.push(format!("says: {}", text(focus)));
     }
-    let editing = list(a.field("editing"));
+    let editing = items(get(a, "editing"));
     if !editing.is_empty() {
         let shown = &editing[..editing.len().min(4)];
-        let all = shown.iter().all(|e| e.field("observed").truthy());
-        let names: Vec<String> = shown
-            .iter()
-            .map(|e| format!("{}{}", NATIVE.basename(&js_text(&e.field("path")), None), if e.field("observed").truthy() && !all { " (observed)" } else { "" }))
-            .collect();
+        let all = shown.iter().all(|e| truthy(get(e, "observed")));
+        let names: Vec<String> =
+            shown.iter().map(|e| format!("{}{}", NATIVE.basename(&text(get(e, "path")), None), if truthy(get(e, "observed")) && !all { " (observed)" } else { "" })).collect();
         parts.push(format!("editing {}{}{}", names.join(", "), if editing.len() > 4 { "…" } else { "" }, if all { " (observed by XenoNet)" } else { "" }));
     }
-    let claims = list(a.field("claims"));
+    let claims = items(get(a, "claims"));
     if !claims.is_empty() {
-        let names: Vec<String> = claims.iter().map(|c| inside(&top, &c.field("pattern"))).collect();
-        let note = claims[0].field("note");
-        parts.push(format!("claimed {}{}", names.join(", "), if note.truthy() { format!(" (\"{}\")", js_text(&note)) } else { String::new() }));
+        let names: Vec<String> = claims.iter().map(|c| inside(top, get(c, "pattern"))).collect();
+        let note = get(&claims[0], "note");
+        parts.push(format!("claimed {}{}", names.join(", "), if truthy(note) { format!(" (\"{}\")", text(note)) } else { String::new() }));
     }
     if !reads {
         parts.push("XenoNet only observes it, so it can't read messages".into());
@@ -403,35 +462,33 @@ fn line(a: &Arg, me: &Arg, kind: &str, reads: bool) -> String {
 }
 
 /// The method a stored envelope names, or null.
-fn envelope_method(raw: &Arg) -> Arg {
-    let text = if raw.is_nullish() { "null".to_string() } else { js_text(raw) };
+fn envelope_method(raw: Option<&Value>) -> Value {
+    let text = if nullish(raw) { "null".to_string() } else { text(raw) };
     match xenonet_base::json::parse(&text) {
         Ok(v) => match v.get("auth").and_then(|a| a.get("method")) {
-            Some(m) if !m.is_null() => value_arg(m),
-            _ => Arg::Null,
+            Some(m) if !m.is_null() => m.clone(),
+            _ => Value::Null,
         },
-        Err(_) => Arg::Null,
+        Err(_) => Value::Null,
     }
 }
 
-fn envelope_of(m: &Arg) -> Arg {
-    let e = m.field("envelope");
-    if !e.truthy() {
-        return Arg::Null;
+/// A stored message's envelope, parsed, or null.
+fn envelope_of(m: &Value) -> Value {
+    let e = get(m, "envelope");
+    if !truthy(e) {
+        return Value::Null;
     }
-    match xenonet_base::json::parse(&js_text(&e)) {
-        Ok(v) => value_arg(&v),
-        Err(_) => Arg::Null,
-    }
+    xenonet_base::json::parse(&text(e)).unwrap_or(Value::Null)
 }
 
-/// What view() read before its first await.
+/// What view() read first, before the sessions' own apps are asked.
 struct Pending {
-    id: Arg,
+    id: String,
     now: f64,
-    node: Arg,
-    live: Arg,
-    contact: Arg,
+    node: Value,
+    live: Value,
+    contact: Value,
     /// Whether the session's own app is to be asked of it.
     describe: bool,
 }
@@ -450,7 +507,7 @@ struct Inner {
 pub struct Engine {
     inner: Mutex<Inner>,
     /// The network across machines: NoNet until the service puts its link
-    /// here (`set_net`), and always NoNet behind the twins.
+    /// here (`set_net`).
     pub net: NetHandle,
 }
 
@@ -459,10 +516,10 @@ const FAN_OUT: usize = 25;
 
 /// A remote agent as a message's answer names it: the brief form and its
 /// host.
-fn brief_of(a: &Arg) -> Arg {
+fn brief_of(a: &Value) -> Value {
     let mut b = brief(a);
-    if a.field("host").truthy() {
-        push(&mut b, "host", a.field("host"));
+    if truthy(get(a, "host")) {
+        put_some(&mut b, "host", get(a, "host").cloned());
     }
     b
 }
@@ -479,10 +536,15 @@ fn remote_way(host: &str, online: bool) -> String {
 }
 
 /// The hops a stored message from another host had come, from its envelope.
-fn hops_of(m: &Arg) -> Option<f64> {
+fn hops_of(m: &Value) -> Option<f64> {
     let env = envelope_of(m);
     network_host(&env)?;
-    env.field("hops").as_f64()
+    get(&env, "hops").and_then(Value::as_f64)
+}
+
+/// Whether an agent's repo key across the network is `key`.
+fn in_clone(a: &Value, key: Option<&str>) -> bool {
+    key.is_some_and(|k| as_str(get(a, "repoKey")) == Some(k))
 }
 
 impl Engine {
@@ -503,12 +565,10 @@ impl Engine {
 
     /// The agents on other hosts that `me` may see, while this machine is
     /// in a network: none otherwise.
-    fn remote_agents(&self, c: &mut dyn Calls, me: &Arg) -> Result<Vec<Arg>> {
-        if !self.networked() {
-            return Ok(Vec::new());
-        }
+    fn remote_agents(&self, c: &Collaborators<'_>, me: &str) -> Result<Vec<Value>> {
+        let (true, Some(net)) = (self.networked(), c.net) else { return Ok(Vec::new()) };
         let mut out = Vec::new();
-        for a in list(c.call("engine.net", "agents", vec![])?) {
+        for a in net.agents()? {
             if self.visible_to(c, me, &a)? {
                 out.push(a);
             }
@@ -517,232 +577,211 @@ impl Engine {
     }
 
     /// An agent's repo across the network, from the remote of its folder.
-    fn net_repo_key(c: &mut dyn Calls, view: &Arg) -> Result<Arg> {
-        let cwd = view.field("cwd");
-        if !cwd.truthy() {
-            return Ok(Arg::Null);
-        }
-        Ok(c.call("engine.net", "repoKey", vec![cwd])?)
+    fn net_repo_key(c: &Collaborators<'_>, view: &Value) -> Result<Option<String>> {
+        let cwd = get(view, "cwd");
+        let (true, Some(net)) = (truthy(cwd), c.net) else { return Ok(None) };
+        net.repo_key(&text(cwd))
     }
 
     /// An agent on another host as the engine sees it, from that host's
-    /// presence; a stand-in when the binary's network part isn't there.
-    fn remote_view(c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        if c.kind("engine.net")? == "object" {
-            return Ok(c.call("engine.net", "view", vec![id.clone()])?);
+    /// presence; a stand-in when the network part isn't there.
+    fn remote_view(c: &Collaborators<'_>, id: &str) -> Result<Value> {
+        if let Some(net) = c.net {
+            return net.view(id);
         }
-        let s = js_text(id);
-        let local = network::local_of(&s).to_string();
+        let local = network::local_of(id).to_string();
         Ok(obj(vec![
-            ("id", id.clone()),
-            ("app", Arg::text(local.split(':').next().unwrap_or(""))),
-            ("title", Arg::text(short(&local))),
-            ("project", Arg::Null),
-            ("branch", Arg::Null),
-            ("host", network::host_of(&s).map_or(Arg::Null, Arg::text)),
+            ("id", string(id)),
+            ("app", string(local.split(':').next().unwrap_or(""))),
+            ("title", string(short(&local))),
+            ("project", Value::Null),
+            ("branch", Value::Null),
+            ("host", network::host_of(id).map_or(Value::Null, string)),
         ]))
-    }
-    fn now(c: &mut dyn Calls) -> Result<f64> {
-        Ok(num(&c.call("engine", "now", vec![])?))
-    }
-
-    /// A turn of the event loop where the JS awaited one of the engine's
-    /// own async functions, so that what runs between steps runs as it did.
-    fn hop(c: &mut dyn Calls) -> Result<()> {
-        c.call("", "tick", vec![])?;
-        Ok(())
     }
 
     // ---------- agents ----------
 
     /// Everyone who worked in the last `within_ms`.
-    pub fn agents(&self, c: &mut dyn Calls, within_ms: f64) -> Result<Vec<Arg>> {
-        let since = Self::now(c)? - within_ms;
-        let mut ids: Vec<Arg> = Vec::new();
-        let add = |ids: &mut Vec<Arg>, id: Arg| {
-            if !ids.iter().any(|x| same(x, &id)) {
+    pub fn agents(&self, c: &Collaborators<'_>, within_ms: f64) -> Result<Vec<Value>> {
+        let since = c.clock.now() - within_ms;
+        let mut ids: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut add = |id: String| {
+            if seen.insert(id.clone()) {
                 ids.push(id);
             }
         };
-        for pair in list(c.call("", "liveIds", vec![])?) {
-            let p = list(pair);
-            if num(p.get(1).unwrap_or(&Arg::Undef)) >= since {
-                add(&mut ids, p[0].clone());
+        for (id, at) in c.map.live_ids()? {
+            if at >= since {
+                add(id);
             }
         }
-        for pair in list(c.call("", "index", vec![])?) {
-            let p = list(pair);
-            let n = p.get(1).cloned().unwrap_or(Arg::Undef);
-            if n.field("kind").as_str() == Some("session") && !n.field("archived").truthy() && num0(&n.field("updatedAt")) >= since {
-                add(&mut ids, p[0].clone());
+        for n in c.map.index()? {
+            if n.kind.as_deref() == Some("session") && !n.archived && n.updated_at.unwrap_or(0.0) >= since {
+                add(n.id);
             }
         }
-        for contact in list(c.call("engine.store", "contacts", vec![Arg::num(since)])?) {
-            if !contact.field("ended_at").truthy() {
-                add(&mut ids, contact.field("agent"));
+        for contact in rows(c.store.with(|s| s.contacts(since)))? {
+            if !truthy(get(&contact, "ended_at")) {
+                add(text(get(&contact, "agent")));
             }
         }
-        if !kind_nullish(c, "engine.actors")? {
-            for id in list(c.call("engine.actors", "engineIds", vec![Arg::num(since)])?) {
-                add(&mut ids, id);
+        if let Some(actors) = c.actors {
+            for id in actors.engine_ids(since)? {
+                add(id);
             }
         }
-        for id in list(opt_call(c, "engine.delivery", "known", vec![])?) {
-            add(&mut ids, id);
+        if let Some(delivery) = c.delivery {
+            for id in delivery.known() {
+                add(id);
+            }
         }
-        let wanted: Vec<Arg> = ids.into_iter().filter(|id| is_agent_id(id) || is_actor_agent(id)).collect();
+        let wanted: Vec<String> = ids.into_iter().filter(|id| is_agent_id(id) || is_actor_agent(id)).collect();
         let views = Self::views(c, &wanted)?;
         // Working agents first, then the most recent; sessions that ended
         // drop out, unless you allowed XenoNet to resume one for a message.
         let mut kept = Vec::new();
         for v in views {
-            let recent = num(&v.field("lastActive")) >= since;
-            if !recent {
+            if num(get(&v, "lastActive")) < since {
                 continue;
             }
-            if v.field("ended").truthy() && !opt_call(c, "engine.delivery", "resumable", vec![v.clone()])?.truthy() {
+            if truthy(get(&v, "ended")) && !c.delivery.is_some_and(|d| d.resumable(&v)) {
                 continue;
             }
             kept.push(v);
         }
         xenonet_base::sort::sort_by(&mut kept, |a, b| {
-            let w = |x: &Arg| f64::from(u8::from(x.field("status").as_str() == Some("working")));
+            let w = |x: &Value| f64::from(u8::from(as_str(get(x, "status")) == Some("working")));
             let d = w(b) - w(a);
-            let d = if d != 0.0 { d } else { num(&b.field("lastActive")) - num(&a.field("lastActive")) };
+            let d = if d == 0.0 { num(get(b, "lastActive")) - num(get(a, "lastActive")) } else { d };
             d.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
         });
-        Self::hop(c)?;
-        Self::hop(c)?;
         Ok(kept)
     }
 
-    /// Several views at once, as Promise.all of view(): what each reads at
-    /// once, then the sessions' own apps asked together, then their repos.
-    fn views(c: &mut dyn Calls, ids: &[Arg]) -> Result<Vec<Arg>> {
+    /// Several views at once: what each reads first, then the sessions' own
+    /// apps asked, then their repos together.
+    fn views(c: &Collaborators<'_>, ids: &[String]) -> Result<Vec<Value>> {
         enum Stage {
-            Done(Arg),
-            Actor { id: Arg, a: Arg, claims: Arg, cwd: Arg },
+            Done(Value),
+            Actor { id: String, a: Value, claims: Vec<Value>, cwd: Value },
             Session(Pending),
         }
         let mut stages = Vec::new();
         for id in ids {
             stages.push(if is_actor_agent(id) {
-                let now = Self::now(c)?;
-                let a = if kind_nullish(c, "engine.actors")? { Arg::Undef } else { c.call("engine.actors", "engineView", vec![id.clone(), obj(vec![("now", Arg::num(now))])])? };
+                let now = c.clock.now();
+                let a = match c.actors {
+                    Some(actors) => actors.engine_view(id, now)?,
+                    None => None,
+                };
                 let claims = Self::claims_of(c, id, now)?;
-                if !a.truthy() {
-                    Stage::Done(Self::gone_actor(id, claims))
-                } else {
-                    let cwd = a.field("cwd").or(a.field("place").field("path")).or(Arg::Null);
-                    Stage::Actor { id: id.clone(), a, claims, cwd }
+                match a.filter(|a| truthy(Some(a))) {
+                    None => Stage::Done(Self::gone_actor(id, claims)),
+                    Some(a) => {
+                        let cwd = or_null(some(get(&a, "cwd")).or_else(|| some(get(&a, "place").and_then(|p| get(p, "path")))));
+                        Stage::Actor { id: id.clone(), a, claims, cwd }
+                    }
                 }
-            } else if id.as_str() == Some(YOU) {
-                let now = Self::now(c)?;
-                Stage::Done(Self::you_view(now))
+            } else if id == YOU {
+                Stage::Done(Self::you_view(c.clock.now()))
             } else {
                 Stage::Session(Self::view_start(c, id)?)
             });
         }
         // The sessions XenoNet has no record of, asked of their own app.
-        let asks: Vec<(usize, Arg)> = stages
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| match s {
-                Stage::Session(p) if p.describe => Some((i, p.id.clone())),
-                _ => None,
-            })
-            .collect();
-        let told_list = c.call_all(asks.iter().map(|(_, id)| ("engine.delivery", "describe", vec![id.clone()])).collect());
-        let mut told: HashMap<usize, Arg> = HashMap::new();
-        for ((i, _), r) in asks.iter().zip(told_list) {
-            told.insert(*i, r.unwrap_or(Arg::Null));
+        let mut told: HashMap<usize, Value> = HashMap::new();
+        for (i, s) in stages.iter().enumerate() {
+            if let Stage::Session(p) = s {
+                if p.describe {
+                    told.insert(i, c.delivery.and_then(|d| d.describe(&p.id)).unwrap_or(Value::Null));
+                }
+            }
         }
         // Where each works, and whether its process is gone.
-        let mut cwds = Vec::new();
+        let mut cwds: Vec<Option<Value>> = Vec::new();
         let mut gone = HashMap::new();
         for (i, s) in stages.iter().enumerate() {
             match s {
                 Stage::Done(_) => cwds.push(None),
                 Stage::Actor { cwd, .. } => cwds.push(Some(cwd.clone())),
                 Stage::Session(p) => {
-                    let t = told.get(&i).cloned().unwrap_or(Arg::Null);
-                    let cwd = [p.node.field("worktree"), p.node.field("cwd"), p.contact.field("cwd"), t.field("directory")].into_iter().find(Arg::truthy).unwrap_or(Arg::Null);
-                    let pid = p.contact.field("pid");
-                    gone.insert(i, pid.truthy() && !c.call("", "alive", vec![pid])?.truthy());
+                    let t = told.get(&i).cloned().unwrap_or(Value::Null);
+                    let cwd = or_null([get(&p.node, "worktree"), get(&p.node, "cwd"), get(&p.contact, "cwd"), get(&t, "directory")].into_iter().find(|v| truthy(*v)).flatten());
+                    let pid = get(&p.contact, "pid");
+                    gone.insert(i, truthy(pid) && !pid.and_then(Value::as_f64).is_some_and(|pid| c.processes.alive(pid)));
                     cwds.push(Some(cwd));
                 }
             }
         }
-        let repo_asks: Vec<(usize, Arg)> = cwds.iter().enumerate().filter_map(|(i, cwd)| cwd.clone().map(|c| (i, c))).collect();
-        let repo_list = c.call_all(repo_asks.iter().map(|(_, cwd)| ("engine.repos", "of", vec![cwd.clone()])).collect());
-        let mut repos: HashMap<usize, Arg> = HashMap::new();
-        for ((i, _), r) in repo_asks.iter().zip(repo_list) {
+        let asks: Vec<(usize, String)> = cwds.iter().enumerate().filter_map(|(i, cwd)| cwd.as_ref().filter(|cwd| truthy(Some(cwd))).map(|cwd| (i, text(Some(cwd))))).collect();
+        let dirs: Vec<String> = asks.iter().map(|(_, d)| d.clone()).collect();
+        let mut repos: HashMap<usize, Option<Repo>> = HashMap::new();
+        for ((i, _), r) in asks.iter().zip(c.repos.of_each(&dirs)) {
             repos.insert(*i, r?);
         }
         let mut out = Vec::new();
         for (i, s) in stages.into_iter().enumerate() {
             out.push(match s {
                 Stage::Done(v) => v,
-                Stage::Actor { id, a, claims, cwd } => Self::actor_view_end(c, &id, &a, claims, cwd, repos.remove(&i).unwrap_or(Arg::Null))?,
+                Stage::Actor { id, a, claims, cwd } => Self::actor_view_end(c, &id, &a, claims, cwd, repos.remove(&i).flatten())?,
                 Stage::Session(p) => {
-                    let t = told.remove(&i).unwrap_or(Arg::Null);
-                    let cwd = cwds[i].clone().unwrap_or(Arg::Null);
-                    Self::view_end(c, p, t, cwd, gone[&i], repos.remove(&i).unwrap_or(Arg::Null))?
+                    let t = told.remove(&i).unwrap_or(Value::Null);
+                    let cwd = cwds[i].clone().unwrap_or(Value::Null);
+                    Self::view_end(c, p, &t, cwd, gone[&i], repos.remove(&i).flatten())?
                 }
             });
         }
-        Self::hop(c)?;
         Ok(out)
     }
 
-    pub fn view(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        Ok(Self::views(c, std::slice::from_ref(id))?.remove(0))
+    pub fn view(&self, c: &Collaborators<'_>, id: &str) -> Result<Value> {
+        Ok(Self::views(c, std::slice::from_ref(&id.to_string()))?.remove(0))
     }
 
-    fn you_view(now: f64) -> Arg {
+    fn you_view(now: f64) -> Value {
         obj(vec![
-            ("id", Arg::text(YOU)),
-            ("app", Arg::text("you")),
-            ("title", Arg::text("you")),
-            ("project", Arg::Null),
-            ("top", Arg::Null),
-            ("status", Arg::text("working")),
-            ("lastActive", Arg::num(now)),
-            ("ended", Arg::Bool(false)),
+            ("id", string(YOU)),
+            ("app", string("you")),
+            ("title", string("you")),
+            ("project", Value::Null),
+            ("top", Value::Null),
+            ("status", string("working")),
+            ("lastActive", number(now)),
+            ("ended", Value::Bool(false)),
         ])
     }
 
-    fn claims_of(c: &mut dyn Calls, id: &Arg, now: f64) -> Result<Arg> {
-        let all = list(c.call("engine.store", "claims", vec![Arg::num(now)])?);
-        Ok(Arg::List(
-            all.into_iter()
-                .filter(|cl| same(&cl.field("agent"), id))
-                .map(|cl| obj(vec![("pattern", cl.field("pattern")), ("note", cl.field("note")), ("until", cl.field("expires_at"))]))
-                .collect(),
-        ))
+    fn claims_of(c: &Collaborators<'_>, id: &str, now: f64) -> Result<Vec<Value>> {
+        Ok(rows(c.store.with(|s| s.claims(now)))?
+            .into_iter()
+            .filter(|cl| as_str(get(cl, "agent")) == Some(id))
+            .map(|cl| obj_some(vec![("pattern", get(&cl, "pattern").cloned()), ("note", get(&cl, "note").cloned()), ("until", get(&cl, "expires_at").cloned())]))
+            .collect())
     }
 
-    fn gone_actor(id: &Arg, claims: Arg) -> Arg {
-        let slug: String = js_text(id).chars().skip("actor:".len()).collect();
+    fn gone_actor(id: &str, claims: Vec<Value>) -> Value {
+        let slug: String = id.chars().skip("actor:".len()).collect();
         obj(vec![
-            ("id", id.clone()),
-            ("app", Arg::text("actor")),
-            ("title", Arg::text(slug)),
-            ("project", Arg::Null),
-            ("projectId", Arg::Null),
-            ("projectKind", Arg::Null),
-            ("cwd", Arg::Null),
-            ("top", Arg::Null),
-            ("repo", Arg::Null),
-            ("branch", Arg::Null),
-            ("status", Arg::text("ended")),
-            ("ended", Arg::Bool(true)),
-            ("needsYou", Arg::Null),
-            ("lastActive", Arg::num(0.0)),
-            ("focus", Arg::Null),
-            ("editing", Arg::List(vec![])),
-            ("claims", claims),
-            ("reachable", Arg::Bool(false)),
+            ("id", string(id)),
+            ("app", string("actor")),
+            ("title", string(slug)),
+            ("project", Value::Null),
+            ("projectId", Value::Null),
+            ("projectKind", Value::Null),
+            ("cwd", Value::Null),
+            ("top", Value::Null),
+            ("repo", Value::Null),
+            ("branch", Value::Null),
+            ("status", string("ended")),
+            ("ended", Value::Bool(true)),
+            ("needsYou", Value::Null),
+            ("lastActive", number(0.0)),
+            ("focus", Value::Null),
+            ("editing", Value::Array(vec![])),
+            ("claims", Value::Array(claims)),
+            ("reachable", Value::Bool(false)),
         ])
     }
 
@@ -750,111 +789,105 @@ impl Engine {
     /// folder, else its latest works-on target; it's working or idle from
     /// its presence, and ended once it's offline; it's reachable while it
     /// isn't offline and reports itself.
-    fn actor_view_end(c: &mut dyn Calls, id: &Arg, a: &Arg, claims: Arg, cwd: Arg, repo: Arg) -> Result<Arg> {
-        let ended = a.field("presence").as_str() == Some("offline");
-        let place = a.field("place");
+    fn actor_view_end(c: &Collaborators<'_>, id: &str, a: &Value, claims: Vec<Value>, cwd: Value, repo: Option<Repo>) -> Result<Value> {
+        let ended = as_str(get(a, "presence")) == Some("offline");
+        let place = get(a, "place");
         let status = if ended {
             "ended"
-        } else if a.field("presence").as_str() == Some("working") {
+        } else if as_str(get(a, "presence")) == Some("working") {
             "working"
         } else {
             "idle"
         };
         let reachable = !ended && Self::reads(c, id)?;
-        Ok(obj(vec![
-            ("id", id.clone()),
-            ("app", Arg::text("actor")),
-            ("title", clip(&a.field("name"), 90)),
-            ("project", place.field("name").or(Arg::Null)),
-            ("projectId", place.field("id").or(Arg::Null)),
-            ("projectKind", place.field("kind").or(Arg::Null)),
-            ("cwd", cwd),
-            ("top", repo.field("top").or(Arg::Null)),
-            ("repo", repo.field("common").or(Arg::Null)),
-            ("branch", repo.field("branch").or(Arg::Null)),
-            ("status", Arg::text(status)),
-            ("ended", Arg::Bool(ended)),
-            ("needsYou", Arg::Null),
-            ("lastActive", a.field("lastSeen").or(Arg::num(0.0))),
-            ("focus", a.field("status")),
-            ("editing", a.field("edits")),
-            ("claims", claims),
-            ("reachable", Arg::Bool(reachable)),
+        let of = |k: &str| or_null(place.and_then(|p| get(p, k)));
+        Ok(obj_some(vec![
+            ("id", Some(string(id))),
+            ("app", Some(string("actor"))),
+            ("title", get(a, "name").map(|n| clip(n, 90))),
+            ("project", Some(of("name"))),
+            ("projectId", Some(of("id"))),
+            ("projectKind", Some(of("kind"))),
+            ("cwd", Some(cwd)),
+            ("top", Some(repo.as_ref().map_or(Value::Null, |r| string(&r.top)))),
+            ("repo", Some(repo.as_ref().map_or(Value::Null, |r| string(&r.common)))),
+            ("branch", Some(repo.as_ref().and_then(|r| r.branch.clone()).map_or(Value::Null, string))),
+            ("status", Some(string(status))),
+            ("ended", Some(Value::Bool(ended))),
+            ("needsYou", Some(Value::Null)),
+            ("lastActive", Some(some(get(a, "lastSeen")).cloned().unwrap_or_else(|| number(0.0)))),
+            ("focus", get(a, "status").cloned()),
+            ("editing", get(a, "edits").cloned()),
+            ("claims", Some(Value::Array(claims))),
+            ("reachable", Some(Value::Bool(reachable))),
         ]))
     }
 
-    fn view_start(c: &mut dyn Calls, id: &Arg) -> Result<Pending> {
-        let now = Self::now(c)?;
-        let node = c.call("", "node", vec![id.clone()])?;
-        let live = c.call("", "live", vec![id.clone(), Arg::num(now)])?;
-        let contact = c.call("engine.store", "contact", vec![id.clone()])?;
-        let describe = !node.truthy() && !live.truthy() && truthy_at(c, "engine.delivery.describe")?;
-        Ok(Pending { id: id.clone(), now, node, live, contact, describe })
+    fn view_start(c: &Collaborators<'_>, id: &str) -> Result<Pending> {
+        let now = c.clock.now();
+        let node = c.map.node(id)?.unwrap_or(Value::Null);
+        let live = c.map.live(id, now)?.unwrap_or(Value::Null);
+        let contact = row(c.store.with(|s| s.contact(id)))?;
+        let describe = !truthy(Some(&node)) && !truthy(Some(&live)) && c.delivery.is_some();
+        Ok(Pending { id: id.to_string(), now, node, live, contact, describe })
     }
 
-    fn view_end(c: &mut dyn Calls, p: Pending, told: Arg, cwd: Arg, gone: bool, repo: Arg) -> Result<Arg> {
+    fn view_end(c: &Collaborators<'_>, p: Pending, told: &Value, cwd: Value, gone: bool, repo: Option<Repo>) -> Result<Value> {
         let Pending { id, now, node, live, contact, .. } = p;
-        let observed = live.field("observed").truthy();
-        let app = js_text(&id).split(':').next().unwrap_or("").to_string();
+        let observed = truthy(get(&live, "observed"));
+        let app = id.split(':').next().unwrap_or("").to_string();
         let place = Self::place_of(c, &id, &cwd)?;
-        let mut edits: Vec<Arg> = list(live.field("edits")).into_iter().filter(|e| now - num(&e.field("ts")) < EDIT_HOLD_MS).collect();
-        xenonet_base::sort::sort_by(&mut edits, |a, b| (num(&b.field("ts")) - num(&a.field("ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
-        let base = if cwd.is_nullish() { None } else { Some(js_text(&cwd)) };
-        let editing: Vec<Arg> = edits
+        let mut edits: Vec<&Value> = items(get(&live, "edits")).iter().filter(|e| now - num(get(e, "ts")) < EDIT_HOLD_MS).collect();
+        xenonet_base::sort::sort_by(&mut edits, |a, b| (num(get(b, "ts")) - num(get(a, "ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+        let base = if nullish(Some(&cwd)) { None } else { Some(text(Some(&cwd))) };
+        let editing: Vec<Value> = edits
             .iter()
             .map(|e| {
-                let p = js_text(&e.field("path"));
+                let p = text(get(e, "path"));
                 let path = if NATIVE.is_absolute(&p) { p } else { style_of(base.as_deref().unwrap_or(&p)).resolve(&[base.as_deref().unwrap_or("/"), &p]) };
-                let mut f = vec![("path", Arg::text(path)), ("at", e.field("ts"))];
+                let mut f = obj_some(vec![("path", Some(string(path))), ("at", get(e, "ts").cloned())]);
                 if observed {
-                    f.push(("observed", Arg::Bool(true)));
+                    put(&mut f, "observed", Value::Bool(true));
                 }
-                obj(f)
+                f
             })
             .collect();
         // Working: a turn under way, or anything in the transcript in the
         // last minute and a half.
-        let working = (live.truthy() && (live.field("status").as_str() != Some("idle") || now - num(&live.field("lastEventAt")) < WORKING_MS)) || told.field("busy").truthy();
-        let all = [num0(&live.field("lastEventAt")), num0(&node.field("updatedAt")), num0(&contact.field("at")), num0(&told.field("updated"))];
+        let working = (truthy(Some(&live)) && (as_str(get(&live, "status")) != Some("idle") || now - num(get(&live, "lastEventAt")) < WORKING_MS)) || truthy(get(told, "busy"));
+        let all = [num0(get(&live, "lastEventAt")), num0(get(&node, "updatedAt")), num0(get(&contact, "at")), num0(get(told, "updated"))];
         let last_active = if all.iter().any(|x| x.is_nan()) { f64::NAN } else { all.iter().copied().fold(f64::NEG_INFINITY, f64::max) };
         // Ended: its SessionEnd hook said so (unless it has been at work
         // since), or the process its tools ran under is gone.
-        let ended_at = contact.field("ended_at");
+        let ended_at = get(&contact, "ended_at");
         let ended = gone
-            || (ended_at.truthy() && num0(&live.field("lastEventAt")) < num(&ended_at) + 5000.0)
-            || (!live.field("endedAt").is_nullish() && num(&live.field("lastEventAt")) <= num(&live.field("endedAt")));
-        let need = live.field("needsYou");
-        let title = {
-            let t = node.field("title");
-            if !t.is_nullish() {
-                t
-            } else if told.field("title").truthy() {
-                told.field("title")
-            } else if cwd.truthy() {
-                Arg::text(format!("{app} in {}", NATIVE.basename(&js_text(&cwd), None)))
-            } else {
-                Arg::text(short(&js_text(&id)))
-            }
+            || (truthy(ended_at) && num0(get(&live, "lastEventAt")) < num(ended_at) + 5000.0)
+            || (!nullish(get(&live, "endedAt")) && num(get(&live, "lastEventAt")) <= num(get(&live, "endedAt")));
+        let need = get(&live, "needsYou");
+        let title = match get(&node, "title") {
+            Some(t) if !t.is_null() => t.clone(),
+            _ if truthy(get(told, "title")) => or_null(get(told, "title")),
+            _ if truthy(Some(&cwd)) => string(format!("{app} in {}", NATIVE.basename(&text(Some(&cwd)), None))),
+            _ => string(short(&id)),
         };
-        let focus = c.call("engine.store", "focus", vec![id.clone()])?.field("text").or(Arg::Null);
+        let focus = or_null(get(&row(c.store.with(|s| s.focus(id.as_str())))?, "text"));
         let claims = Self::claims_of(c, &id, now)?;
-        let reachable =
-            (contact.truthy() && !ended_at.truthy() && now - num(&contact.field("at")) < REACHABLE_MS) || opt_call(c, "engine.delivery", "reaches", vec![id.clone()])?.truthy();
+        let reachable = (truthy(Some(&contact)) && !truthy(ended_at) && now - num(get(&contact, "at")) < REACHABLE_MS) || c.delivery.is_some_and(|d| d.reaches(&id));
         let mut v = obj(vec![
-            ("id", id.clone()),
-            ("app", Arg::text(app)),
+            ("id", string(&id)),
+            ("app", string(app)),
             ("title", clip(&title, 90)),
-            ("reader", node.field("reader").or(Arg::Null)),
-            ("project", place.field("name").or(Arg::Null)),
-            ("projectId", place.field("id").or(Arg::Null)),
-            ("projectKind", place.field("kind").or(Arg::Null)),
-            ("cwd", cwd.clone()),
-            ("top", repo.field("top").or(Arg::Null)),
-            ("repo", repo.field("common").or(Arg::Null)),
-            ("branch", node.field("branch").or(repo.field("branch")).or(Arg::Null)),
+            ("reader", or_null(get(&node, "reader"))),
+            ("project", or_null(get(&place, "name"))),
+            ("projectId", or_null(get(&place, "id"))),
+            ("projectKind", or_null(get(&place, "kind"))),
+            ("cwd", cwd),
+            ("top", repo.as_ref().map_or(Value::Null, |r| string(&r.top))),
+            ("repo", repo.as_ref().map_or(Value::Null, |r| string(&r.common))),
+            ("branch", some(get(&node, "branch")).cloned().or_else(|| repo.as_ref().and_then(|r| r.branch.clone()).map(string)).unwrap_or(Value::Null)),
             (
                 "status",
-                Arg::text(if ended {
+                string(if ended {
                     "ended"
                 } else if working {
                     "working"
@@ -862,150 +895,168 @@ impl Engine {
                     "idle"
                 }),
             ),
-            ("ended", Arg::Bool(ended)),
-            ("needsYou", if need.truthy() && need.as_str() != Some("review") { need } else { Arg::Null }),
-            ("lastActive", Arg::num(last_active)),
+            ("ended", Value::Bool(ended)),
+            ("needsYou", if truthy(need) && as_str(need) != Some("review") { or_null(need) } else { Value::Null }),
+            ("lastActive", number(last_active)),
             ("focus", focus),
-            ("editing", Arg::List(editing)),
-            ("claims", claims),
-            ("reachable", Arg::Bool(reachable)),
+            ("editing", Value::Array(editing)),
+            ("claims", Value::Array(claims)),
+            ("reachable", Value::Bool(reachable)),
         ]);
         if observed {
-            push(&mut v, "observed", node.field("observed").or(Arg::Bool(true)));
+            put(&mut v, "observed", some(get(&node, "observed")).cloned().unwrap_or(Value::Bool(true)));
         }
         Ok(v)
     }
 
     /// Whether messages can reach an agent.
-    fn reads(c: &mut dyn Calls, id: &Arg) -> Result<bool> {
-        if opt_call(c, "engine.delivery", "reaches", vec![id.clone()])?.truthy() {
+    fn reads(c: &Collaborators<'_>, id: &str) -> Result<bool> {
+        if c.delivery.is_some_and(|d| d.reaches(id)) {
             return Ok(true);
         }
-        if c.call("", "observedLive", vec![id.clone()])?.truthy() {
+        if c.map.observed_live(id)? {
             return Ok(false);
         }
-        Ok(!is_actor_agent(id) || (!kind_nullish(c, "engine.actors")? && c.call("engine.actors", "isRegistered", vec![id.clone()])?.truthy()))
+        if !is_actor_agent(id) {
+            return Ok(true);
+        }
+        match c.actors {
+            Some(actors) => actors.is_registered(id),
+            None => Ok(false),
+        }
     }
 
     /// Why an actor XenoNet only observes isn't sent messages.
-    fn deaf(a: &Arg) -> Fail {
+    fn deaf(a: &Value) -> Fail {
         Fail::Error(Self::deaf_why(a))
     }
 
-    fn deaf_why(a: &Arg) -> String {
-        let how = if a.field("reader").truthy() { "XenoNet reads its records but has no way to message it" } else { "XenoNet only observes it" };
-        format!("{} (\"{}\") can't read messages: {how}, so nothing would reach it", js_text(&a.field("id")), js_text(&a.field("title")))
+    fn deaf_why(a: &Value) -> String {
+        let how = if truthy(get(a, "reader")) { "XenoNet reads its records but has no way to message it" } else { "XenoNet only observes it" };
+        format!("{} (\"{}\") can't read messages: {how}, so nothing would reach it", text(get(a, "id")), text(get(a, "title")))
     }
 
     /// Why a message from another machine can't reach an agent here (its
     /// view): no actor here has its id, or it reads no messages, as a
     /// message sent on this machine is refused. None when it can.
-    pub fn unreached(c: &mut dyn Calls, a: &Arg) -> Result<Option<String>> {
-        let id = a.field("id");
-        if is_actor_agent(&id) && (kind_nullish(c, "engine.actors")? || !c.call("engine.actors", "has", vec![id.clone()])?.truthy()) {
-            return Ok(Some("no session or actor here has that id".into()));
+    pub fn unreached(c: &Collaborators<'_>, a: &Value) -> Result<Option<String>> {
+        let id = text(get(a, "id"));
+        if is_actor_agent(&id) {
+            let has = match c.actors {
+                Some(actors) => actors.has(&id)?,
+                None => false,
+            };
+            if !has {
+                return Ok(Some("no session or actor here has that id".into()));
+            }
         }
         Ok((!Self::reads(c, &id)?).then(|| Self::deaf_why(a)))
     }
 
     /// What kind of agent another is, as agents read it.
-    fn kind_of(c: &mut dyn Calls, a: &Arg) -> Result<String> {
-        if a.field("app").as_str() != Some("actor") {
-            return Ok(js_text(&a.field("app")));
+    fn kind_of(c: &Collaborators<'_>, a: &Value) -> Result<String> {
+        if as_str(get(a, "app")) != Some("actor") {
+            return Ok(text(get(a, "app")));
         }
-        let info = opt_call(c, "engine.actors", "info", vec![a.field("id")])?;
-        let product = info.field("product").field("id");
-        Ok(match product.as_str().and_then(product_of) {
+        let info = Self::actor_info(c, &text(get(a, "id")))?;
+        let product = info.as_ref().and_then(|i| get(i, "product")).and_then(|p| get(p, "id"));
+        Ok(match as_str(product).and_then(product_of) {
             Some(p) => format!("actor, {}", p.name),
             None => "actor".into(),
         })
     }
 
+    /// What's known of an actor, when there are actors.
+    fn actor_info(c: &Collaborators<'_>, id: &str) -> Result<Option<Value>> {
+        match c.actors {
+            Some(actors) => actors.info(id),
+            None => Ok(None),
+        }
+    }
+
     /// The project (or folder) a session lives in, from the map, or for one
     /// the map hasn't seen yet, the project whose folder holds `cwd`.
-    fn place_of(c: &mut dyn Calls, id: &Arg, cwd: &Arg) -> Result<Arg> {
-        let home = c.call("", "homeOf", vec![id.clone()])?;
-        if home.truthy() {
-            let node = c.call("", "node", vec![home])?;
-            if node.truthy() {
-                return Ok(obj(vec![("id", node.field("id")), ("name", node.field("name").or(node.field("title"))), ("kind", node.field("kind"))]));
+    fn place_of(c: &Collaborators<'_>, id: &str, cwd: &Value) -> Result<Value> {
+        let home = c.map.home_of(id)?;
+        if truthy(home.as_ref()) {
+            if let Some(node) = c.map.node(&text(home.as_ref()))?.filter(|n| truthy(Some(n))) {
+                return Ok(obj_some(vec![
+                    ("id", get(&node, "id").cloned()),
+                    ("name", some(get(&node, "name")).or_else(|| get(&node, "title")).cloned()),
+                    ("kind", get(&node, "kind").cloned()),
+                ]));
             }
         }
-        let mut best: Option<Arg> = None;
-        if cwd.truthy() {
-            let key = key_of(&format!("{}/", js_text(cwd)));
-            for pair in list(c.call("", "index", vec![])?) {
-                let n = list(pair).get(1).cloned().unwrap_or(Arg::Undef);
-                let kind = n.field("kind");
-                let path = n.field("path");
-                if matches!(kind.as_str(), Some("project" | "zone")) && path.truthy() && key.starts_with(&key_of(&format!("{}/", js_text(&path)))) {
-                    let len = js_text(&path).encode_utf16().count();
-                    if best.as_ref().is_none_or(|b| len > js_text(&b.field("path")).encode_utf16().count()) {
+        let mut best: Option<crate::host::IndexEntry> = None;
+        if truthy(Some(cwd)) {
+            let key = key_of(&format!("{}/", text(Some(cwd))));
+            for n in c.map.index()? {
+                let Some(path) = n.path.as_deref().filter(|p| !p.is_empty()) else { continue };
+                if matches!(n.kind.as_deref(), Some("project" | "zone")) && key.starts_with(&key_of(&format!("{path}/"))) {
+                    let len = path.encode_utf16().count();
+                    if best.as_ref().is_none_or(|b| len > b.path.as_deref().unwrap_or("").encode_utf16().count()) {
                         best = Some(n);
                     }
                 }
             }
         }
-        Ok(best.map_or(Arg::Null, |b| obj(vec![("id", b.field("id")), ("name", b.field("name")), ("kind", b.field("kind"))])))
+        Ok(best.map_or(Value::Null, |b| obj_some(vec![("id", Some(string(b.id))), ("name", b.name.map(string)), ("kind", b.kind.map(string))])))
     }
 
-    pub fn whoami(&self, c: &mut dyn Calls, me: &Arg) -> Result<Arg> {
+    pub fn whoami(&self, c: &Collaborators<'_>, me: &str) -> Result<Value> {
         let me_view = self.view(c, me)?;
         let mut others = Vec::new();
         for a in self.agents(c, ACTIVE_MS)? {
-            if !same(&a.field("id"), me) && self.visible_to(c, me, &a)? {
+            if as_str(get(&a, "id")) != Some(me) && self.visible_to(c, me, &a)? {
                 others.push(a);
             }
         }
-        let unread = list(c.call("engine.store", "unseen", vec![me.clone()])?).len();
+        let unread = c.store.with(|s| s.unseen(me))?.len();
         let in_repo = others.iter().filter(|a| together(a, &me_view)).count();
         let mut out =
-            obj(vec![("you", me_view.clone()), ("unread", Arg::num(unread as f64)), ("peersInRepo", Arg::num(in_repo as f64)), ("peersOnMachine", Arg::num(others.len() as f64))]);
+            obj(vec![("you", me_view.clone()), ("unread", number(unread as f64)), ("peersInRepo", number(in_repo as f64)), ("peersOnMachine", number(others.len() as f64))]);
         // In a network: which host this is, and who else is in it.
         if let Some(m) = self.net.me() {
             let remote = self.remote_agents(c, me)?;
             let key = Self::net_repo_key(c, &me_view)?;
-            let in_clones = remote.iter().filter(|a| key.truthy() && same(&a.field("repoKey"), &key)).count();
-            push(&mut out, "host", Arg::text(m.host));
-            push(&mut out, "network", obj(vec![("id", Arg::text(m.network)), ("name", Arg::text(m.name))]));
-            push(&mut out, "peersInClones", Arg::num(in_clones as f64));
-            push(&mut out, "peersOnNetwork", Arg::num(remote.len() as f64));
+            let in_clones = remote.iter().filter(|a| in_clone(a, key.as_deref())).count();
+            put(&mut out, "host", string(m.host));
+            put(&mut out, "network", obj(vec![("id", string(m.network)), ("name", string(m.name))]));
+            put(&mut out, "peersInClones", number(in_clones as f64));
+            put(&mut out, "peersOnNetwork", number(remote.len() as f64));
         }
         Ok(out)
     }
 
     /// Other agents at work: in this repo (and its worktrees), or on the
     /// whole machine; `overlap` lists files both have edited lately.
-    pub fn peers(&self, c: &mut dyn Calls, me: &Arg, scope: &Arg, within_ms: f64) -> Result<Vec<Arg>> {
+    pub fn peers(&self, c: &Collaborators<'_>, me: &str, scope: &str, within_ms: f64) -> Result<Vec<Value>> {
         let me_view = self.view(c, me)?;
-        let mine: Vec<String> = list(me_view.field("editing")).iter().map(|e| rel(&me_view, &e.field("path"))).collect();
-        let wide = scope.as_str() == Some("machine") || is_actor_agent(me);
-        let sel = if !matches!(scope.as_str(), Some("repo" | "machine")) { parse_selector(scope) } else { None };
+        let mine: Vec<String> = items(get(&me_view, "editing")).iter().map(|e| rel(&me_view, &text(get(e, "path")))).collect();
+        let wide = scope == "machine" || is_actor_agent(me);
+        let sel = if matches!(scope, "repo" | "machine") { None } else { Selector::parse(scope) };
         // In a network, every row says which machine it's on, this one's
         // too (`here`): for showing only. `host` stays the mark of another
         // machine's agent, which messages go to through the network.
         let here = self.net.me().map(|m| m.host);
         let mut out = Vec::new();
         for a in self.agents(c, within_ms)? {
-            if same(&a.field("id"), me) || !self.visible_to(c, me, &a)? {
+            if as_str(get(&a, "id")) == Some(me) || !self.visible_to(c, me, &a)? {
                 continue;
             }
             let ok = match &sel {
-                Some(s) => {
-                    let f = self.facts(c, &a)?;
-                    selects(Some(s), &f)
-                }
+                Some(s) => s.matches(&self.facts(c, &a)?),
                 None => wide || together(&a, &me_view),
             };
             if !ok {
                 continue;
             }
-            let overlap: Vec<Arg> = list(a.field("editing")).iter().map(|e| rel(&a, &e.field("path"))).filter(|r| mine.contains(r)).map(Arg::text).collect();
+            let overlap: Vec<Value> = items(get(&a, "editing")).iter().map(|e| rel(&a, &text(get(e, "path")))).filter(|r| mine.contains(r)).map(string).collect();
             let mut a = a;
-            push(&mut a, "overlap", Arg::List(overlap));
+            put(&mut a, "overlap", Value::Array(overlap));
             if let Some(h) = &here {
-                push(&mut a, "machine", Arg::text(h.clone()));
-                push(&mut a, "here", Arg::Bool(true));
+                put(&mut a, "machine", string(h.clone()));
+                put(&mut a, "here", Value::Bool(true));
             }
             out.push(a);
         }
@@ -1015,176 +1066,181 @@ impl Engine {
             let key = Self::net_repo_key(c, &me_view)?;
             for a in self.remote_agents(c, me)? {
                 let ok = match &sel {
-                    Some(s) => {
-                        let f = self.facts(c, &a)?;
-                        selects(Some(s), &f)
-                    }
-                    None => wide || (key.truthy() && same(&a.field("repoKey"), &key)),
+                    Some(s) => s.matches(&self.facts(c, &a)?),
+                    None => wide || in_clone(&a, key.as_deref()),
                 };
                 if ok {
                     let mut a = a;
-                    push(&mut a, "overlap", Arg::List(vec![]));
-                    let host = a.field("host");
-                    push(&mut a, "machine", host);
+                    put(&mut a, "overlap", Value::Array(vec![]));
+                    let host = get(&a, "host").cloned();
+                    put_some(&mut a, "machine", host);
                     out.push(a);
                 }
             }
         }
-        Self::hop(c)?;
         Ok(out)
     }
 
-    pub fn conflicts(&self, c: &mut dyn Calls, me: &Arg, files: &[Arg]) -> Result<Vec<Arg>> {
+    pub fn conflicts(&self, c: &Collaborators<'_>, me: &str, files: &[String]) -> Result<Vec<Value>> {
         let me_view = self.view(c, me)?;
         self.conflicts_of(c, &me_view, files)
     }
 
-    fn conflicts_of(&self, c: &mut dyn Calls, me: &Arg, files: &[Arg]) -> Result<Vec<Arg>> {
+    fn conflicts_of(&self, c: &Collaborators<'_>, me: &Value, files: &[String]) -> Result<Vec<Value>> {
         let mut out = Vec::new();
-        let my_id = me.field("id");
+        let my_id = get(me, "id");
         for other in self.agents(c, ACTIVE_MS)? {
             // An actor hears only of those inside its scope; a person (no
             // id) and the sessions here, of everyone.
-            if same(&other.field("id"), &my_id) || (my_id.truthy() && !self.visible_to(c, &my_id, &other)?) {
+            if same(get(&other, "id"), my_id) || (truthy(my_id) && !self.visible_to(c, &text(my_id), &other)?) {
                 continue;
             }
             let with = together(&other, me);
             for file in files {
                 let r = rel(me, file);
-                for e in list(other.field("editing")) {
-                    let seen = e.field("observed").truthy();
+                for e in items(get(&other, "editing")) {
+                    let seen = truthy(get(e, "observed"));
                     let mut hit = |how: &str| {
-                        let mut f = vec![("agent", other.clone()), ("file", file.clone()), ("how", Arg::text(how)), ("at", e.field("at"))];
+                        let mut f = obj_some(vec![("agent", Some(other.clone())), ("file", Some(string(file))), ("how", Some(string(how))), ("at", get(e, "at").cloned())]);
                         if seen {
-                            f.push(("observed", Arg::Bool(true)));
+                            put(&mut f, "observed", Value::Bool(true));
                         }
-                        out.push(obj(f));
+                        out.push(f);
                     };
-                    if key_arg(&e.field("path")) == key_arg(file) {
+                    if key_of(&text(get(e, "path"))) == key_of(file) {
                         hit("editing");
-                    } else if with && rel(&other, &e.field("path")) == r {
+                    } else if with && rel(&other, &text(get(e, "path"))) == r {
                         hit("worktree");
                     }
                 }
-                for cl in list(other.field("claims")) {
-                    let pattern = cl.field("pattern");
-                    if matches(&pattern, file) || (with && other.field("top").truthy() && matches(&Arg::text(rel(&other, &pattern)), &Arg::text(r.clone()))) {
-                        out.push(obj(vec![
-                            ("agent", other.clone()),
-                            ("file", file.clone()),
-                            ("how", Arg::text("claimed")),
-                            ("note", cl.field("note")),
-                            ("until", cl.field("until")),
+                for cl in items(get(&other, "claims")) {
+                    let pattern = text(get(cl, "pattern"));
+                    if matches(&pattern, file) || (with && truthy(get(&other, "top")) && matches(&rel(&other, &pattern), &r)) {
+                        out.push(obj_some(vec![
+                            ("agent", Some(other.clone())),
+                            ("file", Some(string(file))),
+                            ("how", Some(string("claimed"))),
+                            ("note", get(cl, "note").cloned()),
+                            ("until", get(cl, "until").cloned()),
                         ]));
                     }
                 }
             }
         }
-        Self::hop(c)?;
         Ok(out)
     }
 
     /// For an agent, next to its own working tree; for a person, next to
     /// the repo the file is in.
-    pub fn who_has(&self, c: &mut dyn Calls, me: &Arg, file: &Arg) -> Result<Vec<Arg>> {
-        let me_view = if me.truthy() { self.view(c, me)? } else { Self::place_at(c, file)? };
+    pub fn who_has(&self, c: &Collaborators<'_>, me: Option<&str>, file: &str) -> Result<Vec<Value>> {
+        let me_view = match me.filter(|m| !m.is_empty()) {
+            Some(me) => self.view(c, me)?,
+            None => Self::place_at(c, file)?,
+        };
         Ok(self
-            .conflicts_of(c, &me_view, std::slice::from_ref(file))?
+            .conflicts_of(c, &me_view, std::slice::from_ref(&file.to_string()))?
             .into_iter()
             .map(|x| {
-                let mut f = vec![("agent", brief(&x.field("agent"))), ("how", x.field("how")), ("at", x.field("at")), ("note", x.field("note")), ("until", x.field("until"))];
-                if x.field("observed").truthy() {
-                    f.push(("observed", Arg::Bool(true)));
+                let mut f = obj_some(vec![
+                    ("agent", Some(brief(&x["agent"]))),
+                    ("how", get(&x, "how").cloned()),
+                    ("at", get(&x, "at").cloned()),
+                    ("note", get(&x, "note").cloned()),
+                    ("until", get(&x, "until").cloned()),
+                ]);
+                if truthy(get(&x, "observed")) {
+                    put(&mut f, "observed", Value::Bool(true));
                 }
-                obj(f)
+                f
             })
             .collect())
     }
 
-    fn place_at(c: &mut dyn Calls, file: &Arg) -> Result<Arg> {
-        let file = js_text(file);
-        let dir = style_of(&file).dirname(&file);
-        let repo = c.call("engine.repos", "of", vec![Arg::text(dir.clone())])?;
-        Self::hop(c)?;
+    fn place_at(c: &Collaborators<'_>, file: &str) -> Result<Value> {
+        let dir = style_of(file).dirname(file);
+        let repo = if dir.is_empty() { None } else { c.repos.of(&dir)? };
         Ok(obj(vec![
-            ("id", Arg::Null),
-            ("cwd", Arg::text(dir)),
-            ("top", repo.field("top").or(Arg::Null)),
-            ("repo", repo.field("common").or(Arg::Null)),
-            ("projectKind", Arg::Null),
-            ("projectId", Arg::Null),
+            ("id", Value::Null),
+            ("cwd", string(dir)),
+            ("top", repo.as_ref().map_or(Value::Null, |r| string(&r.top))),
+            ("repo", repo.as_ref().map_or(Value::Null, |r| string(&r.common))),
+            ("projectKind", Value::Null),
+            ("projectId", Value::Null),
         ]))
     }
 
     // ---------- messages ----------
 
     /// A message: to an agent's id (or its first characters), words from
-    /// its title, "repo", "all" or a selector. `envelope`: how XenoNet
-    /// knows who sent it, from the route's own checks.
-    pub fn send(&self, c: &mut dyn Calls, me: &Arg, ask: &Arg, envelope: &Arg) -> Result<Arg> {
-        let raw = ask.field("text");
-        let mut text = xenonet_base::text::js_trim(&if raw.is_nullish() { String::new() } else { js_text(&raw) }).to_string();
-        if text.is_empty() {
+    /// its title, "repo", "all" or a selector. `ask`: { to, text, replyTo }.
+    /// `envelope`: how XenoNet knows who sent it, from the route's own
+    /// checks, or null.
+    pub fn send(&self, c: &Collaborators<'_>, me: &str, ask: &Value, envelope: &Value) -> Result<Value> {
+        let mut body = js_trim(&text_or_empty(get(ask, "text"))).to_string();
+        if body.is_empty() {
             return err("the message is empty");
         }
-        if text.encode_utf16().count() > MAX_TEXT {
+        if body.encode_utf16().count() > MAX_TEXT {
             return err(format!("keep messages under {MAX_TEXT} characters"));
         }
-        let reply_to = ask.field("replyTo").or(Arg::Null);
-        let mut to = ask.field("to");
-        if !to.truthy() && reply_to.truthy() {
-            let m = c.call("engine.store", "message", vec![Arg::num(num(&reply_to))])?;
+        let reply_to = or_null(get(ask, "replyTo"));
+        let replying = truthy(Some(&reply_to));
+        let mut to = or_null(get(ask, "to"));
+        if !truthy(Some(&to)) && replying {
+            let m = row(c.store.with(|s| s.message(num(Some(&reply_to)))))?;
             to = reply_target(me, &m);
         }
-        if !to.truthy() {
+        if !truthy(Some(&to)) {
             return err("say who it's for: a session's id, words from its title, \"repo\" or \"all\"");
         }
         let me_view = self.view(c, me)?;
         let mut active = Vec::new();
         for a in self.agents(c, ACTIVE_MS)? {
-            if !same(&a.field("id"), me) && Self::reads(c, &a.field("id"))? && self.visible_to(c, me, &a)? {
+            let id = text(get(&a, "id"));
+            if id != me && Self::reads(c, &id)? && self.visible_to(c, me, &a)? {
                 active.push(a);
             }
         }
         // The agents on other hosts, while this machine is in a network.
         let networked = self.networked();
         let remote = self.remote_agents(c, me)?;
-        let mut scope = Arg::Null;
+        let mut scope = Value::Null;
         let mut how = "direct";
-        let sel = if to.as_str() != Some("all") { parse_selector(&to) } else { None };
-        let (recipients, target): (Vec<Arg>, String) = if let Some(s) = &sel {
+        let sel = if as_str(Some(&to)) == Some("all") { None } else { Selector::parse(&text(Some(&to))) };
+        let (recipients, target): (Vec<Value>, String) = if let Some(s) = &sel {
             let mut r = Vec::new();
             for a in active.iter().chain(remote.iter()) {
-                let f = self.facts(c, a)?;
-                if selects(Some(s), &f) {
+                if s.matches(&self.facts(c, a)?) {
                     r.push(a.clone());
                 }
             }
             how = "all";
             (r, format_selector(Some(s)))
-        } else if matches!(to.as_str(), Some("repo" | "project")) {
-            let top = me_view.field("top");
-            let target =
-                if top.truthy() { format!("repo:{}", NATIVE.basename(&js_text(&top), None)) } else { format!("repo:{}", js_text(&me_view.field("project").or(Arg::text("?")))) };
+        } else if matches!(as_str(Some(&to)), Some("repo" | "project")) {
+            let top = get(&me_view, "top");
+            let target = if truthy(top) {
+                format!("repo:{}", NATIVE.basename(&text(top), None))
+            } else {
+                format!("repo:{}", some(get(&me_view, "project")).map_or_else(|| "?".to_string(), |p| text(Some(p))))
+            };
             scope = repo_key(&me_view);
-            let mut r: Vec<Arg> = active.iter().filter(|a| together(a, &me_view)).cloned().collect();
+            let mut r: Vec<Value> = active.iter().filter(|a| together(a, &me_view)).cloned().collect();
             // Clones of the same remote on other hosts.
             if networked {
                 let key = Self::net_repo_key(c, &me_view)?;
-                if key.truthy() {
-                    r.extend(remote.iter().filter(|a| same(&a.field("repoKey"), &key)).cloned());
+                if key.is_some() {
+                    r.extend(remote.iter().filter(|a| in_clone(a, key.as_deref())).cloned());
                 }
             }
             how = "repo";
             (r, target)
-        } else if to.as_str() == Some("all") {
+        } else if as_str(Some(&to)) == Some("all") {
             how = "all";
             (active.iter().chain(remote.iter()).cloned().collect(), "all".into())
         } else {
             let answered = Self::answered(c, me, &reply_to)?;
             let one = self.resolve(c, me, &to, &answered)?;
-            Self::hop(c)?;
-            let id = js_text(&one.field("id"));
+            let id = text(get(&one, "id"));
             (vec![one], id)
         };
         // Across the network, a message reaches at most 25 agents, the
@@ -1193,123 +1249,110 @@ impl Engine {
         let (recipients, left_out) = if networked { Self::nearest(c, &me_view, recipients)? } else { (recipients, 0) };
         // A message to the repo also waits for agents that join it soon
         // after.
-        if recipients.is_empty() && !scope.truthy() {
+        if recipients.is_empty() && !truthy(Some(&scope)) {
             return err(match &sel {
                 Some(s) => format!("no session or actor you can reach matches {}", format_selector(Some(s))),
-                None if to.as_str() == Some("all") => "no other session or actor has been at work in the last two hours".into(),
+                None if as_str(Some(&to)) == Some("all") => "no other session or actor has been at work in the last two hours".into(),
                 None => "no other session or actor has been at work in this repo in the last two hours".into(),
             });
         }
         let mut hops = 0.0;
-        if !kind_nullish(c, "engine.policy")? {
+        if let Some(policy) = c.policy {
             let mut depth: f64 = 0.0;
-            let mut r = if reply_to.truthy() { c.call("engine.store", "message", vec![Arg::num(num(&reply_to))])? } else { Arg::Null };
+            let mut r = if replying { row(c.store.with(|s| s.message(num(Some(&reply_to)))))? } else { Value::Null };
             // A reply to a message from another host counts the hops it
             // had come there too.
             let came = if networked { hops_of(&r) } else { None };
-            while r.truthy() && depth < 50.0 {
+            while truthy(Some(&r)) && depth < 50.0 {
                 depth += 1.0;
-                let next = r.field("reply_to");
-                r = if next.truthy() { c.call("engine.store", "message", vec![next])? } else { Arg::Null };
+                let next = or_null(get(&r, "reply_to"));
+                r = if truthy(Some(&next)) { row(c.store.with(|s| s.message(&next)))? } else { Value::Null };
             }
             if let Some(h) = came {
                 depth = depth.max(h + 1.0);
             }
             hops = depth;
-            c.call(
-                "engine.policy",
-                "checkSend",
-                vec![obj(vec![("sender", me.clone()), ("recipients", Arg::List(recipients.clone())), ("text", Arg::text(text.clone())), ("depth", Arg::num(depth))])],
-            )?;
+            policy.check_send(me, &recipients, &body, depth)?;
             // Secrets don't cross identities, or go to or from an actor.
             let mine = self.facts(c, &me_view)?;
-            let mut redacted = Arg::num(0.0);
+            let mut redacted = 0;
             for r in &recipients {
                 let f = self.facts(c, r)?;
-                let out = c.call(
-                    "engine.policy",
-                    "textFor",
-                    vec![obj(vec![("text", Arg::text(text.clone())), ("sender", me.clone()), ("senderFacts", mine.clone()), ("recipientFacts", f)])],
-                )?;
-                if out.field("redacted").truthy() {
-                    text = js_text(&out.field("text"));
-                    redacted = out.field("redacted");
+                let (out, n) = policy.text_for(&body, me, &mine, &f);
+                if n > 0 {
+                    body = out;
+                    redacted = n;
                 }
             }
-            if redacted.truthy() {
-                c.call("engine.policy", "audit", vec![obj(vec![("kind", Arg::text("redacted")), ("sender", me.clone()), ("count", redacted)])])?;
+            if redacted > 0 {
+                policy.audit(obj(vec![("kind", string("redacted")), ("sender", string(me)), ("count", number(redacted as f64))]))?;
             }
         }
-        let now = Self::now(c)?;
-        let ids: Vec<Arg> = recipients.iter().map(|r| r.field("id")).collect();
+        let now = c.clock.now();
+        let ids: Vec<Value> = recipients.iter().map(|r| or_null(get(r, "id"))).collect();
+        let reply_to_num = if replying { number(num(Some(&reply_to))) } else { Value::Null };
         let stored = obj(vec![
-            ("sender", me.clone()),
-            ("target", Arg::text(target.clone())),
+            ("sender", string(me)),
+            ("target", string(&target)),
             ("scope", scope.clone()),
-            ("body", Arg::text(text.clone())),
-            ("replyTo", if reply_to.truthy() { Arg::num(num(&reply_to)) } else { Arg::Null }),
-            ("recipients", Arg::List(ids.clone())),
+            ("body", string(&body)),
+            ("replyTo", reply_to_num.clone()),
+            ("recipients", Value::Array(ids.clone())),
             ("envelope", envelope.clone()),
         ]);
-        let id = c.call("engine.store", "send", vec![stored, Arg::num(now)])?;
+        let id = c.store.with(|s| s.send(&stored, now))?;
         // What goes to other hosts goes out now, as sent, and waits in the
         // outbox for its stored receipt.
-        let far: Vec<Arg> = recipients.iter().filter(|r| r.field("host").truthy()).cloned().collect();
-        if networked && !far.is_empty() {
-            c.call(
-                "engine.net",
-                "sent",
-                vec![obj(vec![
-                    ("id", id.clone()),
-                    ("sender", me.clone()),
-                    ("text", Arg::text(text.clone())),
-                    ("replyTo", if reply_to.truthy() { Arg::num(num(&reply_to)) } else { Arg::Null }),
-                    ("scope", Arg::text(how)),
-                    ("hops", Arg::num(hops)),
-                    ("envelope", envelope.clone()),
-                    ("recipients", Arg::List(far)),
-                    ("at", Arg::num(now)),
-                ])],
-            )?;
+        let far: Vec<Value> = recipients.iter().filter(|r| truthy(get(r, "host"))).cloned().collect();
+        if let (true, false, Some(net)) = (networked, far.is_empty(), c.net) {
+            net.sent(&obj(vec![
+                ("id", number(id)),
+                ("sender", string(me)),
+                ("text", string(&body)),
+                ("replyTo", reply_to_num),
+                ("scope", string(how)),
+                ("hops", number(hops)),
+                ("envelope", envelope.clone()),
+                ("recipients", Value::Array(far)),
+                ("at", number(now)),
+            ]))?;
         }
         for r in &recipients {
-            c.call("", "wakeWaiters", vec![r.field("id")])?;
+            c.waits.wake_waiters(&text(get(r, "id")));
         }
         // How each will get it, asked before the router spends a wake on it.
         let mut ways = Vec::new();
         let hosts = if networked { self.net.get().hosts() } else { Vec::new() };
         for r in &recipients {
-            if r.field("host").truthy() {
-                let host = js_text(&r.field("host"));
+            if truthy(get(r, "host")) {
+                let host = text(get(r, "host"));
                 let online = hosts.iter().any(|h| h.id == host && h.online);
-                ways.push(Arg::text(remote_way(&host, online)));
+                ways.push(remote_way(&host, online));
                 continue;
             }
-            let w = opt_call(c, "engine.delivery", "way", vec![me.clone(), r.clone()])?;
-            ways.push(if w.is_nullish() { Arg::text(delivery_of(r)) } else { w });
+            ways.push(c.delivery.and_then(|d| d.way(me, r)).map_or_else(|| delivery_of(r).to_string(), str::to_string));
         }
-        let mut event =
-            obj(vec![("id", id.clone()), ("from", me.clone()), ("to", Arg::List(ids)), ("target", Arg::text(target)), ("text", Arg::text(text)), ("ts", Arg::num(now))]);
-        if envelope.truthy() {
-            push(&mut event, "verified", envelope.field("line"));
-            push(&mut event, "strength", envelope.field("auth").field("strength"));
+        let mut event = obj(vec![("id", number(id)), ("from", string(me)), ("to", Value::Array(ids)), ("target", string(&target)), ("text", string(&body)), ("ts", number(now))]);
+        if truthy(Some(envelope)) {
+            put_some(&mut event, "verified", get(envelope, "line").cloned());
+            put_some(&mut event, "strength", get(envelope, "auth").and_then(|a| get(a, "strength")).cloned());
         }
-        c.call("", "emit", vec![Arg::text("message"), event])?;
+        c.events.emit("message", event);
         let to_list = recipients
             .iter()
             .zip(ways)
             .map(|(r, w)| {
                 let mut b = brief_of(r);
-                push(&mut b, "delivery", w);
+                put(&mut b, "delivery", string(w));
                 b
             })
             .collect();
-        let mut out = obj(vec![("id", id), ("to", Arg::List(to_list))]);
-        if scope.truthy() {
-            push(&mut out, "alsoTo", Arg::text("sessions that start work in this repo in the next half hour"));
+        let mut out = obj(vec![("id", number(id)), ("to", Value::Array(to_list))]);
+        if truthy(Some(&scope)) {
+            put(&mut out, "alsoTo", string("sessions that start work in this repo in the next half hour"));
         }
         if left_out > 0 {
-            push(&mut out, "leftOut", Arg::num(left_out as f64));
+            put(&mut out, "leftOut", number(left_out as f64));
         }
         Ok(out)
     }
@@ -1318,16 +1361,16 @@ impl Engine {
     /// this machine's, then other hosts' in clones of this repo, then the
     /// most recently active; and how many it left out. This machine's are
     /// never left out here: the policy refuses more than it allows.
-    fn nearest(c: &mut dyn Calls, me: &Arg, recipients: Vec<Arg>) -> Result<(Vec<Arg>, usize)> {
-        let (mut out, mut far): (Vec<Arg>, Vec<Arg>) = recipients.into_iter().partition(|r| !r.field("host").truthy());
+    fn nearest(c: &Collaborators<'_>, me: &Value, recipients: Vec<Value>) -> Result<(Vec<Value>, usize)> {
+        let (mut out, mut far): (Vec<Value>, Vec<Value>) = recipients.into_iter().partition(|r| !truthy(get(r, "host")));
         if far.is_empty() {
             return Ok((out, 0));
         }
         let key = Self::net_repo_key(c, me)?;
-        let near = |a: &Arg| key.truthy() && same(&a.field("repoKey"), &key);
+        let near = |a: &Value| in_clone(a, key.as_deref());
         xenonet_base::sort::sort_by(&mut far, |a, b| {
             let d = f64::from(u8::from(near(b))) - f64::from(u8::from(near(a)));
-            let d = if d != 0.0 { d } else { num(&b.field("lastActive")) - num(&a.field("lastActive")) };
+            let d = if d == 0.0 { num(get(b, "lastActive")) - num(get(a, "lastActive")) } else { d };
             d.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
         });
         let room = FAN_OUT.saturating_sub(out.len());
@@ -1338,48 +1381,52 @@ impl Engine {
 
     /// An agent new to a repo gets what was said to everyone there in the
     /// last half hour.
-    fn catch_up(&self, c: &mut dyn Calls, me: &Arg) -> Result<()> {
+    fn catch_up(&self, c: &Collaborators<'_>, me: &str) -> Result<()> {
         let key = repo_key(&self.view(c, me)?);
-        if !key.truthy() {
-            Self::hop(c)?;
+        if !truthy(Some(&key)) {
             return Ok(());
         }
-        let since = Self::now(c)? - RECENT_MS;
-        for m in list(c.call("engine.store", "scoped", vec![key, Arg::num(since)])?) {
-            if !same(&m.field("sender"), me) {
-                c.call("engine.store", "deliver", vec![m.field("id"), me.clone()])?;
+        let since = c.clock.now() - RECENT_MS;
+        for m in rows(c.store.with(|s| s.scoped(&key, since)))? {
+            if as_str(get(&m, "sender")) != Some(me) {
+                c.store.with(|s| s.deliver(&m["id"], me))?;
             }
         }
-        Self::hop(c)?;
         Ok(())
     }
 
     /// Who wrote the message `reply_to`, if it came to `me`: an agent may
     /// answer whoever wrote to it, whether or not it could have started the
     /// thread. Null otherwise.
-    fn answered(c: &mut dyn Calls, me: &Arg, reply_to: &Arg) -> Result<Arg> {
-        if !reply_to.truthy() {
-            return Ok(Arg::Null);
+    fn answered(c: &Collaborators<'_>, me: &str, reply_to: &Value) -> Result<Value> {
+        if !truthy(Some(reply_to)) {
+            return Ok(Value::Null);
         }
-        let m = c.call("engine.store", "message", vec![Arg::num(num(reply_to))])?;
-        if !m.truthy() || same(&m.field("sender"), me) {
-            return Ok(Arg::Null);
+        let m = row(c.store.with(|s| s.message(num(Some(reply_to)))))?;
+        if !truthy(Some(&m)) || as_str(get(&m, "sender")) == Some(me) {
+            return Ok(Value::Null);
         }
-        let sent_to_me = list(c.call("engine.store", "deliveries", vec![m.field("id")])?).iter().any(|d| same(&d.field("agent"), me));
-        Ok(if sent_to_me { m.field("sender") } else { Arg::Null })
+        let sent_to_me = rows(c.store.with(|s| s.deliveries(&m["id"])))?.iter().any(|d| as_str(get(d, "agent")) == Some(me));
+        Ok(if sent_to_me { or_null(get(&m, "sender")) } else { Value::Null })
     }
 
-    fn resolve(&self, c: &mut dyn Calls, me: &Arg, to: &Arg, answered: &Arg) -> Result<Arg> {
-        let to_text = js_text(to);
-        if is_agent_id(to) || is_actor_agent(to) {
-            if is_actor_agent(to) && (kind_nullish(c, "engine.actors")? || !c.call("engine.actors", "has", vec![to.clone()])?.truthy()) {
-                return err(format!("no actor is {to_text}; peers lists them"));
+    fn resolve(&self, c: &Collaborators<'_>, me: &str, to: &Value, answered: &Value) -> Result<Value> {
+        let to_text = text(Some(to));
+        if is_agent_id(&to_text) || is_actor_agent(&to_text) {
+            if is_actor_agent(&to_text) {
+                let has = match c.actors {
+                    Some(actors) => actors.has(&to_text)?,
+                    None => false,
+                };
+                if !has {
+                    return err(format!("no actor is {to_text}; peers lists them"));
+                }
             }
-            let one = self.view(c, to)?;
-            if !same(to, answered) && !self.visible_to(c, me, &one)? {
+            let one = self.view(c, &to_text)?;
+            if !same(Some(to), Some(answered)) && !self.visible_to(c, me, &one)? {
                 return err(format!("no session or actor you can reach is {to_text}"));
             }
-            if !Self::reads(c, to)? {
+            if !Self::reads(c, &to_text)? {
                 return Err(Self::deaf(&one));
             }
             return Ok(one);
@@ -1388,11 +1435,11 @@ impl Engine {
         // the network: as that host's presence shows it, or a stand-in for
         // one presence doesn't list, such as an actor there, which a reply
         // goes back to by reply_to.
-        if network::is_remote(to) && self.networked() {
-            let local = Arg::text(network::local_of(&to_text));
+        if network::is_remote(&to_text) && self.networked() {
+            let local = network::local_of(&to_text);
             let known = network::host_of(&to_text).is_some_and(|h| self.net.get().hosts().iter().any(|x| x.id == h));
-            if known && (is_agent_id(&local) || is_actor_agent(&local)) {
-                let one = Self::remote_view(c, to)?;
+            if known && (is_agent_id(local) || is_actor_agent(local)) {
+                let one = Self::remote_view(c, &to_text)?;
                 if !self.visible_to(c, me, &one)? {
                     return err(format!("no session or actor you can reach is {to_text}"));
                 }
@@ -1401,7 +1448,7 @@ impl Engine {
         }
         let mut all = Vec::new();
         for a in self.agents(c, 7.0 * 24.0 * 3600e3)? {
-            if !same(&a.field("id"), me) && self.visible_to(c, me, &a)? {
+            if as_str(get(&a, "id")) != Some(me) && self.visible_to(c, me, &a)? {
                 all.push(a);
             }
         }
@@ -1409,13 +1456,13 @@ impl Engine {
         let far = self.remote_agents(c, me)?;
         let lower = to_text.to_lowercase();
         let words: Vec<&str> = crate::re!(r"\s+").split(&lower).filter(|w| !w.is_empty()).collect();
-        let pick = |list: Vec<Arg>| -> Vec<Arg> {
-            let by_id: Vec<Arg> = list
+        let pick = |list: Vec<Value>| -> Vec<Value> {
+            let by_id: Vec<Value> = list
                 .iter()
                 .filter(|a| {
-                    let id = js_text(&a.field("id"));
+                    let id = text(get(a, "id"));
                     let prefixed = |id: &str| id.starts_with(&to_text) || id.split(':').nth(1).is_some_and(|rest| rest.starts_with(&to_text));
-                    prefixed(&id) || (network::is_remote(&a.field("id")) && prefixed(network::local_of(&id)))
+                    prefixed(&id) || (network::is_remote(&id) && prefixed(network::local_of(&id)))
                 })
                 .cloned()
                 .collect();
@@ -1424,14 +1471,15 @@ impl Engine {
             }
             list.into_iter()
                 .filter(|a| {
-                    let hay = format!("{} {}", js_text(&a.field("title")), js_text(&a.field("project").or(Arg::text("")))).to_lowercase();
+                    let project = some(get(a, "project")).map_or_else(String::new, |p| text(Some(p)));
+                    let hay = format!("{} {project}", text(get(a, "title"))).to_lowercase();
                     words.iter().all(|w| hay.contains(w))
                 })
                 .collect()
         };
         let (mut reading, mut deaf) = (Vec::new(), Vec::new());
         for a in all {
-            if Self::reads(c, &a.field("id"))? {
+            if Self::reads(c, &text(get(&a, "id")))? {
                 reading.push(a);
             } else {
                 deaf.push(a);
@@ -1444,7 +1492,7 @@ impl Engine {
             return Ok(found.remove(0));
         }
         if !found.is_empty() {
-            let names: Vec<String> = found.iter().take(6).map(|a| format!("{} (\"{}\")", js_text(&a.field("id")), js_text(&a.field("title")))).collect();
+            let names: Vec<String> = found.iter().take(6).map(|a| format!("{} (\"{}\")", text(get(a, "id")), text(get(a, "title")))).collect();
             return err(format!("\"{to_text}\" could be any of: {}", names.join(", ")));
         }
         // Only an actor XenoNet observes answers to it: say why it isn't
@@ -1458,116 +1506,112 @@ impl Engine {
 
     /// Unread messages, which then count as read. With `wait_ms`, waits
     /// that long for one to arrive first.
-    pub fn inbox(&self, c: &mut dyn Calls, me: &Arg, wait_ms: &Arg) -> Result<Vec<Arg>> {
+    pub fn inbox(&self, c: &Collaborators<'_>, me: &str, wait_ms: f64) -> Result<Vec<Value>> {
         self.catch_up(c, me)?;
-        let ms = num(wait_ms);
-        if list(c.call("engine.store", "unseen", vec![me.clone()])?).is_empty() && ms > 0.0 {
-            c.call("", "wait", vec![me.clone(), Arg::num(ms.min(120e3))])?;
+        if c.store.with(|s| s.unseen(me))?.is_empty() && wait_ms > 0.0 {
+            c.waits.wait(me, wait_ms.min(120e3));
         }
         self.take(c, me, true)
     }
 
     /// Whether a session holds this message until it asks: one from
     /// another machine, to a session that bypasses its permission checks.
-    fn held(&self, me: &Arg, m: &Arg) -> bool {
-        self.bypassed(&js_text(me)) && network_host(&envelope_of(m)).is_some()
+    fn held(&self, me: &str, m: &Value) -> bool {
+        self.bypassed(me) && network_host(&envelope_of(m)).is_some()
     }
 
     /// A session's listening Stop hook: after a turn it waits up to `ms`
     /// for a message and hands it over, which keeps the session going.
     /// Each message it hands over is a wake, checked against the budget; it
     /// stops as soon as the session goes on anyway or the hook's request
-    /// goes away. The hook's answer and the ids it took, or null.
-    pub fn listen(&self, c: &mut dyn Calls, me: &Arg, ms: &Arg) -> Result<Arg> {
-        let deadline = num(&c.call("", "wall", vec![])?) + num(ms);
-        c.call("engine.listening", "set", vec![me.clone(), Arg::num(deadline)])?;
+    /// goes away. The hook's answer and the ids it took, or None.
+    pub fn listen(&self, c: &Collaborators<'_>, me: &str, ms: f64) -> Result<Option<Value>> {
+        let deadline = c.clock.wall() + ms;
+        c.listening.set(me, deadline);
         let out = self.listen_loop(c, me, deadline);
-        c.call("engine.listening", "delete", vec![me.clone()])?;
+        c.listening.delete(me);
         out
     }
 
-    fn listen_loop(&self, c: &mut dyn Calls, me: &Arg, deadline: f64) -> Result<Arg> {
-        let key = js_text(me);
+    fn listen_loop(&self, c: &Collaborators<'_>, me: &str, deadline: f64) -> Result<Option<Value>> {
         loop {
-            let aborted = !kind_nullish(c, "signal")? && c.get("signal.aborted")?.truthy();
-            let since = self.inner.locked().stop_mail.get(&key).copied().unwrap_or(f64::NEG_INFINITY);
-            if aborted || Self::now(c)? - since < 5000.0 {
-                return Ok(Arg::Null);
+            let since = self.inner.locked().stop_mail.get(me).copied().unwrap_or(f64::NEG_INFINITY);
+            if c.waits.aborted() || c.clock.now() - since < 5000.0 {
+                return Ok(None);
             }
             self.catch_up(c, me)?;
-            let waiting: Vec<Arg> = list(c.call("engine.store", "unseen", vec![me.clone()])?).into_iter().filter(|m| !self.held(me, m)).collect();
+            let waiting: Vec<Value> = rows(c.store.with(|s| s.unseen(me)))?.into_iter().filter(|m| !self.held(me, m)).collect();
             if let Some(first) = waiting.first() {
-                let w = opt_call(c, "engine.delivery", "wake", vec![first.field("sender"), me.clone()])?;
-                let ok = if w.is_nullish() { true } else { w.field("ok").truthy() };
+                let ok = c.delivery.is_none_or(|d| d.wake(&text(get(first, "sender")), me).ok());
                 if !ok {
-                    return Ok(Arg::Null);
+                    return Ok(None);
                 }
                 let taken = self.take(c, me, false)?;
                 let text = Self::mail(c, &taken)?;
                 if !text.is_empty() {
-                    return Ok(obj(vec![("decision", Arg::text("block")), ("reason", Arg::text(text)), ("ids", Arg::List(taken.iter().map(|m| m.field("id")).collect()))]));
+                    let ids: Vec<Value> = taken.iter().map(|m| or_null(get(m, "id"))).collect();
+                    return Ok(Some(obj(vec![("decision", string("block")), ("reason", string(text)), ("ids", Value::Array(ids))])));
                 }
             }
-            let left = deadline - num(&c.call("", "wall", vec![])?);
+            let left = deadline - c.clock.wall();
             if left <= 0.0 {
-                return Ok(Arg::Null);
+                return Ok(None);
             }
             // Until a message comes, the main Stop hook takes one, the
             // request goes, or the window ends.
-            c.call("", "listenWait", vec![me.clone(), Arg::num(left)])?;
+            c.waits.listen_wait(me, left);
         }
     }
 
     /// The messages waiting for `me`, which then count as read. `asked`:
     /// the session asked (its inbox), so what it holds comes too.
-    fn take(&self, c: &mut dyn Calls, me: &Arg, asked: bool) -> Result<Vec<Arg>> {
+    fn take(&self, c: &Collaborators<'_>, me: &str, asked: bool) -> Result<Vec<Value>> {
         self.catch_up(c, me)?;
-        let list_: Vec<Arg> = list(c.call("engine.store", "unseen", vec![me.clone()])?).into_iter().filter(|m| asked || !self.held(me, m)).collect();
-        let ids: Vec<Arg> = list_.iter().map(|m| m.field("id")).collect();
-        let now = Self::now(c)?;
-        c.call("engine.store", "markSeen", vec![me.clone(), Arg::List(ids.clone()), Arg::num(now)])?;
-        if !list_.is_empty() {
-            c.call("", "emit", vec![Arg::text("seen"), obj(vec![("agent", me.clone()), ("ids", Arg::List(ids))])])?;
+        let waiting: Vec<Value> = rows(c.store.with(|s| s.unseen(me)))?.into_iter().filter(|m| asked || !self.held(me, m)).collect();
+        let ids: Vec<Value> = waiting.iter().map(|m| or_null(get(m, "id"))).collect();
+        let now = c.clock.now();
+        c.store.with(|s| s.mark_seen(me, &Value::Array(ids.clone()), now))?;
+        if !waiting.is_empty() {
+            c.events.emit("seen", obj(vec![("agent", string(me)), ("ids", Value::Array(ids))]));
         }
         let mut out = Vec::new();
-        for m in &list_ {
-            let sender = m.field("sender");
+        for m in &waiting {
+            let sender = text(get(m, "sender"));
             let from = if network::is_remote(&sender) && self.networked() { Self::remote_view(c, &sender)? } else { self.view(c, &sender)? };
-            let target = m.field("target");
-            out.push(obj(vec![
-                ("id", m.field("id")),
-                ("from", brief(&from)),
-                ("to", if same(&target, me) { Arg::text("you") } else { target }),
-                ("text", m.field("body")),
-                ("at", m.field("created_at")),
-                ("replyTo", m.field("reply_to")),
-                ("envelope", envelope_of(m)),
+            let target = get(m, "target");
+            out.push(obj_some(vec![
+                ("id", get(m, "id").cloned()),
+                ("from", Some(brief(&from))),
+                ("to", Some(if as_str(target) == Some(me) { string("you") } else { or_null(target) })),
+                ("text", get(m, "body").cloned()),
+                ("at", get(m, "created_at").cloned()),
+                ("replyTo", get(m, "reply_to").cloned()),
+                ("envelope", Some(envelope_of(m))),
             ]));
         }
-        Self::hop(c)?;
         Ok(out)
     }
 
     // ---------- claims and focus ----------
 
-    pub fn claim(&self, c: &mut dyn Calls, me: &Arg, ask: &Arg) -> Result<Arg> {
+    /// `ask`: { paths, note, minutes }.
+    pub fn claim(&self, c: &Collaborators<'_>, me: &str, ask: &Value) -> Result<Value> {
         let me_view = self.view(c, me)?;
-        let paths = ask.field("paths");
-        let list_: Vec<String> = match paths {
-            Arg::Undef | Arg::Null => Vec::new(),
-            Arg::List(l) => l.iter().map(js_text).collect(),
-            other => vec![js_text(&other)],
+        let paths: Vec<String> = match get(ask, "paths") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(l)) => l.iter().map(|p| text(Some(p))).collect(),
+            Some(other) => vec![text(Some(other))],
         }
         .into_iter()
         .filter(|p| !p.is_empty())
         .collect();
-        if list_.is_empty() {
+        if paths.is_empty() {
             return err("claim takes paths: files, folders (src/) or globs (src/**/*.ts)");
         }
-        let minutes = match ask.field("minutes") {
-            Arg::Undef => CLAIM_MINUTES,
+        let minutes = match get(ask, "minutes") {
+            None => CLAIM_MINUTES,
             m => {
-                let n = num(&m);
+                let n = num(m);
                 if n == 0.0 || n.is_nan() {
                     CLAIM_MINUTES
                 } else {
@@ -1575,20 +1619,18 @@ impl Engine {
                 }
             }
         };
-        let until = Self::now(c)? + minutes.clamp(1.0, 8.0 * 60.0) * 60e3;
-        let note = ask.field("note").or(Arg::Null);
-        let note = if matches!(ask.field("note"), Arg::Undef) { Arg::Null } else { note };
+        let until = c.clock.now() + minutes.clamp(1.0, 8.0 * 60.0) * 60e3;
+        let note = or_null(get(ask, "note"));
         // Relative to your working tree; a folder keeps its trailing slash.
-        let base = [me_view.field("top"), me_view.field("cwd")].into_iter().find(|x| !x.is_nullish());
-        let abs: Vec<String> = list_
+        let base = [get(&me_view, "top"), get(&me_view, "cwd")].into_iter().find(|x| !nullish(*x)).flatten().map(|b| text(Some(b)));
+        let abs: Vec<String> = paths
             .iter()
             .map(|p| {
                 let full = if NATIVE.is_absolute(p) {
                     p.clone()
                 } else {
-                    let style = base.as_ref().map_or_else(|| p.clone(), js_text);
-                    let root = base.as_ref().map_or_else(|| "/".to_string(), js_text);
-                    style_of(&style).join(&[&root, p])
+                    let root = base.as_deref().unwrap_or("/");
+                    style_of(base.as_deref().unwrap_or(p)).join(&[root, p])
                 };
                 let slash = |s: &str| s.ends_with('/') || s.ends_with('\\');
                 if slash(p) && !slash(&full) {
@@ -1602,43 +1644,50 @@ impl Engine {
             Self::actor_claims(c, me, &abs)?;
         }
         for p in &abs {
-            let t = Self::now(c)?;
-            c.call("engine.store", "claim", vec![me.clone(), Arg::text(p.clone()), note.clone(), Arg::num(until), Arg::num(t)])?;
+            let t = c.clock.now();
+            c.store.with(|s| s.claim(me, p.as_str(), &note, until, t))?;
         }
         // Claiming what someone else holds is allowed; say so.
-        let plain: Vec<Arg> = abs.iter().filter(|p| !p.contains('*') && !p.ends_with('/')).map(|p| Arg::text(p.clone())).collect();
+        let plain: Vec<String> = abs.iter().filter(|p| !p.contains('*') && !p.ends_with('/')).cloned().collect();
         let clashes = self.conflicts(c, me, &plain)?;
         Ok(obj(vec![
-            ("claimed", Arg::List(abs.into_iter().map(Arg::text).collect())),
-            ("until", Arg::num(until)),
-            ("alsoHeldBy", Arg::List(clashes.iter().map(|x| obj(vec![("agent", brief(&x.field("agent"))), ("file", x.field("file")), ("how", x.field("how"))])).collect())),
+            ("claimed", Value::Array(abs.into_iter().map(string).collect())),
+            ("until", number(until)),
+            (
+                "alsoHeldBy",
+                Value::Array(
+                    clashes.iter().map(|x| obj_some(vec![("agent", Some(brief(&x["agent"]))), ("file", get(x, "file").cloned()), ("how", get(x, "how").cloned())])).collect(),
+                ),
+            ),
         ]))
     }
 
     /// An actor's claims stay inside the projects and folders XenoNet knows,
     /// never a whole folder that isn't a project, and it holds at most 50 at
     /// once.
-    fn actor_claims(c: &mut dyn Calls, me: &Arg, abs: &[String]) -> Result<()> {
+    fn actor_claims(c: &Collaborators<'_>, me: &str, abs: &[String]) -> Result<()> {
         for p in abs {
             let head = p.split('*').next().unwrap_or("");
             let dir = head.trim_end_matches(['\\', '/']);
             let dir = if dir.is_empty() { "/" } else { dir };
-            let place = if kind_nullish(c, "engine.actors")? { Arg::Undef } else { c.call("engine.actors", "placeOf", vec![Arg::text(dir)])? };
-            if !place.truthy() {
+            let place = match c.actors {
+                Some(actors) => actors.place_of(dir)?,
+                None => None,
+            };
+            let Some(place) = place.filter(|p| truthy(Some(p))) else {
                 return Err(Fail::Bad(format!("an actor's claims stay inside the projects and folders XenoNet knows, and {p} isn't in one")));
-            }
-            let node = c.call("", "node", vec![place])?;
-            let path = node.field("path");
-            if node.field("kind").as_str() != Some("project") && path.truthy() && key_arg(&path).trim_end_matches('/') == key_of(dir) {
+            };
+            let node = c.map.node(&text(Some(&place)))?.unwrap_or(Value::Null);
+            let path = get(&node, "path");
+            if as_str(get(&node, "kind")) != Some("project") && truthy(path) && key_of(&text(path)).trim_end_matches('/') == key_of(dir) {
                 return Err(Fail::Bad(format!(
                     "an actor can claim files and folders inside {}, but not all of a folder that isn't a project",
-                    js_text(&node.field("name").or(Arg::text("a folder")))
+                    some(get(&node, "name")).map_or_else(|| "a folder".to_string(), |n| text(Some(n)))
                 )));
             }
         }
-        let now = Self::now(c)?;
-        let mut held: Vec<String> =
-            list(c.call("engine.store", "claims", vec![Arg::num(now)])?).into_iter().filter(|cl| same(&cl.field("agent"), me)).map(|cl| js_text(&cl.field("pattern"))).collect();
+        let now = c.clock.now();
+        let mut held: Vec<String> = rows(c.store.with(|s| s.claims(now)))?.iter().filter(|cl| as_str(get(cl, "agent")) == Some(me)).map(|cl| text(get(cl, "pattern"))).collect();
         for p in abs {
             if !held.contains(p) {
                 held.push(p.clone());
@@ -1650,183 +1699,184 @@ impl Engine {
         Ok(())
     }
 
-    pub fn release(&self, c: &mut dyn Calls, me: &Arg, paths: &Arg) -> Result<Arg> {
-        Ok(obj(vec![("released", c.call("engine.store", "release", vec![me.clone(), paths.clone()])?)]))
+    /// Lets claims go: all of `me`'s with null, else the patterns listed.
+    pub fn release(&self, c: &Collaborators<'_>, me: &str, paths: &Value) -> Result<Value> {
+        let n = c.store.with(|s| s.release(me, paths))?;
+        Ok(obj(vec![("released", number(n))]))
     }
 
     /// What an agent says it's doing. An actor's focus is its status line,
     /// held to the same rules.
-    pub fn set_focus(&self, c: &mut dyn Calls, me: &Arg, text: &Arg) -> Result<Arg> {
-        let t = xenonet_base::text::js_trim(&if text.is_nullish() { String::new() } else { js_text(text) }).to_string();
-        if is_actor_agent(me) && truthy_at(c, "engine.actors")? {
-            let r = c.call("engine.actors", "setStatus", vec![me.clone(), Arg::text(t)])?;
-            if !r.field("ok").truthy() {
-                return Err(Fail::Bad(js_text(&r.field("reason"))));
-            }
-            return Ok(obj(vec![("focus", r.field("status"))]));
+    pub fn set_focus(&self, c: &Collaborators<'_>, me: &str, text: &Value) -> Result<Value> {
+        let t = js_trim(&text_or_empty(Some(text))).to_string();
+        if let (true, Some(actors)) = (is_actor_agent(me), c.actors) {
+            return match actors.set_status(me, &t)? {
+                StatusSet::Ok(status) => Ok(obj(vec![("focus", status)])),
+                StatusSet::Refused(reason) => Err(Fail::Bad(reason)),
+            };
         }
-        let now = Self::now(c)?;
-        c.call("engine.store", "setFocus", vec![me.clone(), clip(&Arg::text(t), 200), Arg::num(now)])?;
-        Ok(obj(vec![("focus", c.call("engine.store", "focus", vec![me.clone()])?.field("text").or(Arg::Null))]))
+        let now = c.clock.now();
+        c.store.with(|s| s.set_focus(me, clip_text(&t, 200), now))?;
+        let focus = row(c.store.with(|s| s.focus(me)))?;
+        Ok(obj(vec![("focus", or_null(get(&focus, "text")))]))
     }
 
     /// Note that an agent was in touch directly, which means messages
-    /// reach it.
-    pub fn touch(&self, c: &mut dyn Calls, me: &Arg, ask: &Arg) -> Result<()> {
-        let pid = ask.field("pid");
-        let pid = match pid {
-            Arg::Num(n) if n.fract() == 0.0 && n.is_finite() && n > 1.0 => Arg::Num(n),
-            _ => Arg::Null,
+    /// reach it. `ask`: { app, cwd, via, pid }.
+    pub fn touch(&self, c: &Collaborators<'_>, me: &str, ask: &Value) -> Result<()> {
+        let pid = match get(ask, "pid").and_then(Value::as_f64) {
+            Some(n) if n.fract() == 0.0 && n.is_finite() && n > 1.0 => number(n),
+            _ => Value::Null,
         };
-        let now = Self::now(c)?;
-        let via = ask.field("via");
-        c.call("engine.store", "touch", vec![me.clone(), obj(vec![("app", ask.field("app")), ("cwd", ask.field("cwd")), ("via", via.clone()), ("pid", pid)]), Arg::num(now)])?;
-        c.call("", "emit", vec![Arg::text("contact"), obj(vec![("agent", me.clone()), ("via", via)])])?;
+        let now = c.clock.now();
+        let via = get(ask, "via").cloned();
+        let contact = obj_some(vec![("app", get(ask, "app").cloned()), ("cwd", get(ask, "cwd").cloned()), ("via", via.clone()), ("pid", Some(pid))]);
+        c.store.with(|s| s.touch(me, &contact, now))?;
+        c.events.emit("contact", obj_some(vec![("agent", Some(string(me))), ("via", via)]));
         Ok(())
     }
 
     // ---------- scopes ----------
 
-    /// What a selector is matched against for one agent.
-    pub fn facts(&self, c: &mut dyn Calls, a: &Arg) -> Result<Arg> {
-        let node = c.call("", "node", vec![a.field("id")])?;
-        let known = list(c.call("", "identities", vec![])?);
+    /// What a selector is matched against for one agent: { id, app,
+    /// projectNames, identities, machine, status, actors }.
+    pub fn facts(&self, c: &Collaborators<'_>, a: &Value) -> Result<Value> {
+        let node = c.map.node(&text(get(a, "id")))?.unwrap_or(Value::Null);
+        let known = c.map.identities()?;
         let mut identities: Vec<String> = Vec::new();
         let mut add = |s: String| {
             if !identities.contains(&s) {
                 identities.push(s);
             }
         };
-        for link in list(node.field("identities")) {
-            let raw = link.field("id");
-            let id = if raw.is_nullish() { String::new() } else { js_text(&raw) }.to_lowercase();
+        for link in items(get(&node, "identities")) {
+            let raw = get(link, "id");
+            let id = text_or_empty(raw).to_lowercase();
             if id.is_empty() {
                 continue;
             }
             add(id.clone());
             add(id.rsplit(['/', ':']).next().unwrap_or("").to_string());
-            if let Some(rec) = known.iter().find(|i| same(&i.field("id"), &raw)) {
-                let handle = rec.field("handle");
-                if handle.truthy() {
-                    let h = js_text(&handle).to_lowercase();
+            if let Some(rec) = known.iter().find(|i| same(get(i, "id"), raw)) {
+                let handle = get(rec, "handle");
+                if truthy(handle) {
+                    let h = text(handle).to_lowercase();
                     add(h.strip_prefix('@').unwrap_or(&h).to_string());
                 }
             }
         }
         let mut names = Vec::new();
-        let project = a.field("project");
-        if project.truthy() {
-            names.push(project);
+        if let Some(project) = get(a, "project").filter(|p| truthy(Some(p))) {
+            names.push(project.clone());
         }
-        let top = a.field("top");
-        if top.truthy() {
-            let b = NATIVE.basename(&js_text(&top), None);
+        let top = get(a, "top");
+        if truthy(top) {
+            let b = NATIVE.basename(&text(top), None);
             if !b.is_empty() {
-                names.push(Arg::text(b));
+                names.push(string(b));
             }
         }
         // The actors that act on it, as they reported.
-        let targets = list(opt_call(c, "engine.store", "actorTargets", vec![])?);
-        let actors: Vec<Arg> = targets
+        let targets = rows(c.store.with(|s| s.actor_targets()))?;
+        let actors: Vec<Value> = targets
             .iter()
-            .filter(|t| same(&t.field("target"), &a.field("id")))
+            .filter(|t| same(get(t, "target"), get(a, "id")))
             .map(|t| {
-                let s = js_text(&t.field("actor"));
-                Arg::text(s.strip_prefix("actor:").unwrap_or(&s))
+                let s = text(get(t, "actor"));
+                string(s.strip_prefix("actor:").unwrap_or(&s))
             })
             .collect();
-        let status = if a.field("ended").truthy() { Arg::text("ended") } else { a.field("status") };
+        let status = if truthy(get(a, "ended")) { Some(string("ended")) } else { get(a, "status").cloned() };
         // The machine is its host in a network: another host's for its
         // agents, this one's for the agents here; "local" outside one.
-        let machine = match a.field("host") {
-            Arg::Text(h) => Arg::text(h),
-            _ => Arg::text(self.net.me().map_or_else(|| "local".to_string(), |m| m.host)),
+        let machine = match as_str(get(a, "host")) {
+            Some(h) => h.to_string(),
+            None => self.net.me().map_or_else(|| "local".to_string(), |m| m.host),
         };
-        Ok(obj(vec![
-            ("id", a.field("id")),
-            ("app", a.field("app")),
-            ("projectNames", Arg::List(names)),
-            ("identities", Arg::List(identities.into_iter().map(Arg::text).collect())),
-            ("machine", machine),
+        Ok(obj_some(vec![
+            ("id", get(a, "id").cloned()),
+            ("app", get(a, "app").cloned()),
+            ("projectNames", Some(Value::Array(names))),
+            ("identities", Some(Value::Array(identities.into_iter().map(string).collect()))),
+            ("machine", Some(string(machine))),
             ("status", status),
-            ("actors", Arg::List(actors)),
+            ("actors", Some(Value::Array(actors))),
         ]))
     }
 
     /// Whether `me` may see or message `a`: always, without a policy; else
     /// as the caller's scope allows.
-    pub fn visible_to(&self, c: &mut dyn Calls, me: &Arg, a: &Arg) -> Result<bool> {
-        if kind_nullish(c, "engine.policy")? || !a.truthy() {
+    pub fn visible_to(&self, c: &Collaborators<'_>, me: &str, a: &Value) -> Result<bool> {
+        let Some(policy) = c.policy else { return Ok(true) };
+        if !truthy(Some(a)) {
             return Ok(true);
         }
         let f = self.facts(c, a)?;
-        Ok(c.call("engine.policy", "visible", vec![me.clone(), f])?.truthy())
+        Ok(policy.visible(me, &f)?)
     }
 
     // ---------- hooks ----------
 
     /// Claude Code's and Codex's hooks: the event's input, and back
     /// what to tell the agent, or for Stop, a block with a reason.
-    pub fn hook(&self, c: &mut dyn Calls, app: &Arg, event: &Arg, input: &Arg) -> Result<Arg> {
-        let session = input.field("session_id");
-        if !session.truthy() {
-            return Ok(Arg::Null);
+    pub fn hook(&self, c: &Collaborators<'_>, app: &str, event: Option<&str>, input: &Value) -> Result<Option<Value>> {
+        let session = get(input, "session_id");
+        if !truthy(session) {
+            return Ok(None);
         }
-        let me = Arg::text(format!("{}:{}", js_text(app), js_text(&session)));
+        let me = format!("{app}:{}", text(session));
         if !is_agent_id(&me) {
-            return Ok(Arg::Null);
+            return Ok(None);
         }
-        let ev = event.as_str().unwrap_or("");
+        let ev = event.unwrap_or("");
         if ev == "SessionEnd" {
-            let now = Self::now(c)?;
-            c.call("engine.store", "ended", vec![me.clone(), Arg::num(now)])?;
-            return Ok(Arg::Null);
+            let now = c.clock.now();
+            c.store.with(|s| s.ended(me.as_str(), now))?;
+            return Ok(None);
         }
         // Whether the session bypasses its permission checks, as Claude
         // Code's hooks say: such a session holds messages from other
         // machines until it asks.
-        if let Arg::Text(mode) = input.field("permission_mode") {
-            self.inner.locked().bypassed.insert(js_text(&me), mode == "bypassPermissions");
+        if let Some(Value::String(mode)) = get(input, "permission_mode") {
+            self.inner.locked().bypassed.insert(me.clone(), mode == "bypassPermissions");
         }
         // A subagent's events come under its session's id with agent_id
         // set: they show the session at work, and the subagent hears edit
         // warnings, but mail and the briefing wait for the main thread.
-        let sub = match input.field("agent_id") {
-            Arg::Text(s) if !s.is_empty() => Some(s),
+        let sub = match get(input, "agent_id") {
+            Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
             _ => None,
         };
-        let cwd = if sub.is_some() { Arg::Null } else { input.field("cwd").or(Arg::Null) };
-        self.touch(c, &me, &obj(vec![("app", app.clone()), ("cwd", cwd), ("via", Arg::text("hook"))]))?;
+        let cwd = if sub.is_some() { Value::Null } else { or_null(get(input, "cwd")) };
+        self.touch(c, &me, &obj(vec![("app", string(app)), ("cwd", cwd), ("via", string("hook"))]))?;
         let say = |text: String| {
             if text.is_empty() {
-                Arg::Null
+                None
             } else {
-                obj(vec![("hookSpecificOutput", obj(vec![("hookEventName", event.clone()), ("additionalContext", Arg::text(text))]))])
+                Some(obj(vec![("hookSpecificOutput", obj_some(vec![("hookEventName", event.map(string)), ("additionalContext", Some(string(text)))]))]))
             }
         };
         if ev == "PreToolUse" {
-            let files = edit_paths(&input.field("tool_name"), &input.field("tool_input"), &input.field("cwd"));
+            let cwd = some(get(input, "cwd")).map(|v| text(Some(v)));
+            let files = edit_paths(&text_or_empty(get(input, "tool_name")), &input["tool_input"], cwd.as_deref());
             if files.is_empty() {
-                return Ok(Arg::Null);
+                return Ok(None);
             }
-            let files: Vec<Arg> = files.into_iter().map(Arg::text).collect();
             let text = self.warn(c, &me, &files, sub.as_deref())?;
-            Self::hop(c)?;
             return Ok(say(text));
         }
         if sub.is_some() {
-            return Ok(Arg::Null);
+            return Ok(None);
         }
         // An app that passes over what an event answers (Grok Build's
         // SessionStart and UserPromptSubmit) hears nothing then: its
         // messages wait for an event it hears.
-        if app.as_str().and_then(xenonet_adapter::apps::app).and_then(|a| a.connect.as_ref()).is_some_and(|c| c.unheard.iter().any(|e| e == ev)) {
-            return Ok(Arg::Null);
+        if xenonet_adapter::apps::app(app).and_then(|a| a.connect.as_ref()).is_some_and(|c| c.unheard.iter().any(|e| e == ev)) {
+            return Ok(None);
         }
         match ev {
             "SessionStart" => {
                 let brief = self.briefing(c, &me)?;
-                Self::hop(c)?;
                 let taken = self.take(c, &me, false)?;
                 let mail = Self::mail(c, &taken)?;
                 Ok(say([brief, mail].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n")))
@@ -1836,43 +1886,46 @@ impl Engine {
                 Ok(say(Self::mail(c, &taken)?))
             }
             "Stop" => {
-                if input.field("stop_hook_active").truthy() {
-                    return Ok(Arg::Null);
+                if truthy(get(input, "stop_hook_active")) {
+                    return Ok(None);
                 }
                 // Grok Build fires one more Stop as its session closes
                 // (reason channel_closed or shutdown) and reads no answer
                 // to it, so mail taken then would be lost: only a turn that
                 // ended (end_turn) takes it. Claude Code's and Codex's
                 // Stops carry no reason.
-                if input.field("reason").as_str().is_some_and(|r| r != "end_turn") {
-                    return Ok(Arg::Null);
+                if as_str(get(input, "reason")).is_some_and(|r| r != "end_turn") {
+                    return Ok(None);
                 }
                 let taken = self.take(c, &me, false)?;
                 let text = Self::mail(c, &taken)?;
                 if !text.is_empty() {
-                    let now = Self::now(c)?;
-                    self.inner.locked().stop_mail.insert(js_text(&me), now);
-                    return Ok(obj(vec![("decision", Arg::text("block")), ("reason", Arg::text(text))]));
+                    let now = c.clock.now();
+                    self.inner.locked().stop_mail.insert(me.clone(), now);
+                    return Ok(Some(obj(vec![("decision", string("block")), ("reason", string(text))])));
                 }
-                Ok(Arg::Null)
+                Ok(None)
             }
-            _ => Ok(Arg::Null),
+            _ => Ok(None),
         }
     }
 
     /// Who else is at work in this repo, for an agent that's just starting.
-    pub fn briefing(&self, c: &mut dyn Calls, me: &Arg) -> Result<String> {
+    pub fn briefing(&self, c: &Collaborators<'_>, me: &str) -> Result<String> {
         let me_view = self.view(c, me)?;
-        let all = self.peers(c, me, &Arg::text("repo"), ACTIVE_MS)?;
+        let all = self.peers(c, me, "repo", ACTIVE_MS)?;
         let mut others = Vec::new();
         for a in &all {
-            if a.field("status").as_str() == Some("working") || Self::now(c)? - num(&a.field("lastActive")) < RECENT_MS {
+            if as_str(get(a, "status")) == Some("working") || c.clock.now() - num(get(a, "lastActive")) < RECENT_MS {
                 others.push(a.clone());
             }
         }
         // Work handed off for this repo, or to this session, that no one
-        // has taken: the binary keeps handoffs, the twins don't.
-        let offers = if c.kind("engine.net")? == "object" { list(c.call("engine.net", "handoffs", vec![me_view.clone()])?) } else { Vec::new() };
+        // has taken.
+        let offers = match c.net {
+            Some(net) => net.handoffs(&me_view)?,
+            None => Vec::new(),
+        };
         let offered = Self::offers(&offers);
         if others.is_empty() {
             return Ok(offered);
@@ -1882,7 +1935,7 @@ impl Engine {
     }
 
     /// The handoffs a starting session is offered, in words.
-    fn offers(offers: &[Arg]) -> String {
+    fn offers(offers: &[Value]) -> String {
         if offers.is_empty() {
             return String::new();
         }
@@ -1892,13 +1945,14 @@ impl Engine {
             if offers.len() == 1 { "it" } else { "them" }
         )];
         for h in offers.iter().take(6) {
-            let mut parts = vec![format!("- {}: \"{}\"", js_text(&h.field("id")), js_text(&h.field("goal").or(Arg::text("no goal given"))))];
-            parts.push(format!("from {}", js_text(&h.field("from"))));
-            if h.field("branch").truthy() {
-                parts.push(format!("branch {}", js_text(&h.field("branch"))));
+            let goal = some(get(h, "goal")).map_or_else(|| "no goal given".to_string(), |g| text(Some(g)));
+            let mut parts = vec![format!("- {}: \"{goal}\"", text(get(h, "id")))];
+            parts.push(format!("from {}", text(get(h, "from"))));
+            if truthy(get(h, "branch")) {
+                parts.push(format!("branch {}", text(get(h, "branch"))));
             }
-            if h.field("next").truthy() {
-                parts.push(format!("next: {}", js_text(&clip(&h.field("next"), 200))));
+            if let Some(next) = get(h, "next").filter(|n| truthy(Some(n))) {
+                parts.push(format!("next: {}", text(Some(&clip(next, 200)))));
             }
             lines.push(parts.join("; "));
         }
@@ -1907,12 +1961,12 @@ impl Engine {
     }
 
     /// The peers part of the briefing.
-    fn peers_briefing(c: &mut dyn Calls, me: &Arg, me_view: &Arg, all: &[Arg], others: &[Arg]) -> Result<String> {
+    fn peers_briefing(c: &Collaborators<'_>, me: &str, me_view: &Value, all: &[Value], others: &[Value]) -> Result<String> {
         let mut lines = Vec::new();
         for a in others.iter().take(6) {
             let kind = Self::kind_of(c, a)?;
             // Another host's agent takes messages there.
-            let reads = a.field("host").truthy() || Self::reads(c, &a.field("id"))?;
+            let reads = truthy(get(a, "host")) || Self::reads(c, &text(get(a, "id")))?;
             lines.push(format!("- {}", line(a, me_view, &kind, reads)));
         }
         let rest = all.len() as i64 - others.len().min(6) as i64;
@@ -1923,55 +1977,45 @@ impl Engine {
             "XenoNet: {} been working in this repo in the last half hour. They can't see your conversation.",
             if others.len() == 1 { "another agent has".to_string() } else { format!("{} other agents have", others.len()) }
         );
-        let tail = format!("You are {}. To coordinate, use the xenonet tools: peers, who_has, send (to a session, or \"repo\" for all of them), inbox, claim. Before you edit a file another session is working on, XenoNet will tell you.", js_text(me));
+        let tail = format!("You are {me}. To coordinate, use the xenonet tools: peers, who_has, send (to a session, or \"repo\" for all of them), inbox, claim. Before you edit a file another session is working on, XenoNet will tell you.");
         let mut all_lines = vec![head];
         all_lines.extend(lines);
         all_lines.push(tail);
         Ok(all_lines.join("\n"))
     }
 
+    /// Whether a warning with this key was given in the last ten minutes;
+    /// if not, it counts as given now.
+    fn fresh(&self, key: String, now: f64) -> bool {
+        let mut i = self.inner.locked();
+        if now - i.noticed.get(&key).copied().unwrap_or(0.0) < NOTICE_EVERY_MS {
+            return false;
+        }
+        i.noticed.insert(key, now);
+        true
+    }
+
     /// Each thread hears a warning once: a subagent can't see what the main
     /// thread was told, nor the other way round.
-    fn warn(&self, c: &mut dyn Calls, me: &Arg, files: &[Arg], sub: Option<&str>) -> Result<String> {
-        let now = Self::now(c)?;
+    fn warn(&self, c: &Collaborators<'_>, me: &str, files: &[String], sub: Option<&str>) -> Result<String> {
+        let now = c.clock.now();
+        let thread = format!("{me}{}", sub.map_or(String::new(), |s| format!("/{s}")));
         let mut fresh = Vec::new();
         for x in self.conflicts(c, me, files)? {
-            let key = format!(
-                "{}{}|{}|{}|{}",
-                js_text(me),
-                sub.map_or(String::new(), |s| format!("/{s}")),
-                key_arg(&x.field("file")),
-                js_text(&x.field("agent").field("id")),
-                js_text(&x.field("how"))
-            );
-            let mut i = self.inner.locked();
-            if now - i.noticed.get(&key).copied().unwrap_or(0.0) < NOTICE_EVERY_MS {
-                continue;
+            let key = format!("{thread}|{}|{}|{}", key_of(&text(get(&x, "file"))), text(get(&x["agent"], "id")), text(get(&x, "how")));
+            if self.fresh(key, now) {
+                fresh.push(x);
             }
-            i.noticed.insert(key, now);
-            drop(i);
-            fresh.push(x);
         }
         // In a network, agents on other hosts changing the same file in
         // their clones of this repo.
         let mut far = Vec::new();
-        if self.networked() {
-            for x in list(c.call("engine.net", "claimHits", vec![me.clone(), Arg::List(files.to_vec())])?) {
-                let key = format!(
-                    "{}{}|{}|{}|{}",
-                    js_text(me),
-                    sub.map_or(String::new(), |s| format!("/{s}")),
-                    key_arg(&x.field("file")),
-                    js_text(&x.field("agent")),
-                    js_text(&x.field("kind"))
-                );
-                let mut i = self.inner.locked();
-                if now - i.noticed.get(&key).copied().unwrap_or(0.0) < NOTICE_EVERY_MS {
-                    continue;
+        if let (true, Some(net)) = (self.networked(), c.net) {
+            for x in net.claim_hits(me, files)? {
+                let key = format!("{thread}|{}|{}|{}", key_of(&text(get(&x, "file"))), text(get(&x, "agent")), text(get(&x, "kind")));
+                if self.fresh(key, now) {
+                    far.push(x);
                 }
-                i.noticed.insert(key, now);
-                drop(i);
-                far.push(x);
             }
         }
         if fresh.is_empty() && far.is_empty() {
@@ -1979,52 +2023,52 @@ impl Engine {
         }
         let mut lines = Vec::new();
         for x in &fresh {
-            let agent = x.field("agent");
-            let kind = Self::kind_of(c, &agent)?;
+            let agent = &x["agent"];
+            let kind = Self::kind_of(c, agent)?;
             let who = format!(
                 "\"{}\" ({kind}, {}, {})",
-                js_text(&agent.field("title")),
-                if agent.field("status").as_str() == Some("idle") { "idle" } else { "working now" },
-                js_text(&agent.field("id"))
+                text(get(agent, "title")),
+                if as_str(get(agent, "status")) == Some("idle") { "idle" } else { "working now" },
+                text(get(agent, "id"))
             );
-            let seen = if !x.field("observed").truthy() {
+            let seen = if !truthy(get(x, "observed")) {
                 None
-            } else if is_actor_agent(&agent.field("id")) {
+            } else if actor_value(get(agent, "id")) {
                 Some("observed: XenoNet inferred it, the actor didn't report it".to_string())
             } else {
                 Some(format!(
                     "observed{}: XenoNet inferred it from records, not a transcript",
-                    if agent.field("observed").as_str() == Some("numbat") { " through numbat" } else { "" }
+                    if as_str(get(agent, "observed")) == Some("numbat") { " through numbat" } else { "" }
                 ))
             };
-            let file = js_text(&x.field("file"));
-            lines.push(match x.field("how").as_str() {
+            let file = text(get(x, "file"));
+            lines.push(match as_str(get(x, "how")) {
                 Some("editing") => format!(
                     "- {who} edited {} {}, in this same working tree{}.",
                     NATIVE.basename(&file, None),
-                    ago(now - num(&x.field("at"))),
+                    ago(now - num(get(x, "at"))),
                     seen.map_or(String::new(), |s| format!(" ({s})"))
                 ),
                 Some("worktree") => {
-                    let branch = agent.field("branch");
-                    let notes: Vec<String> = [branch.truthy().then(|| format!("branch {}", js_text(&branch))), seen].into_iter().flatten().collect();
+                    let branch = get(agent, "branch");
+                    let notes: Vec<String> = [truthy(branch).then(|| format!("branch {}", text(branch))), seen].into_iter().flatten().collect();
                     format!(
                         "- {who} is changing the same file in another worktree{}: expect a merge conflict.",
                         if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) }
                     )
                 }
                 _ => {
-                    let note = x.field("note");
-                    let when = js_text(&c.call("", "timeOf", vec![x.field("until")])?);
-                    format!("- {who} claimed it{}, until {when}.", if note.truthy() { format!(": \"{}\"", js_text(&note)) } else { String::new() })
+                    let note = get(x, "note");
+                    let when = c.clock.time_of(num(get(x, "until")));
+                    format!("- {who} claimed it{}, until {when}.", if truthy(note) { format!(": \"{}\"", text(note)) } else { String::new() })
                 }
             });
         }
         for x in &far {
-            let branch = x.field("branch");
-            let at = if branch.truthy() { format!(" (branch {})", js_text(&branch)) } else { String::new() };
-            let doing = if x.field("kind").as_str() == Some("claim") { "claimed this file" } else { "is changing this file" };
-            lines.push(format!("- An agent on {}{at} {doing} in its clone. Expect a merge conflict. ({})", js_text(&x.field("host")), js_text(&x.field("agent"))));
+            let branch = get(x, "branch");
+            let at = if truthy(branch) { format!(" (branch {})", text(branch)) } else { String::new() };
+            let doing = if as_str(get(x, "kind")) == Some("claim") { "claimed this file" } else { "is changing this file" };
+            lines.push(format!("- An agent on {}{at} {doing} in its clone. Expect a merge conflict. ({})", text(get(x, "host")), text(get(x, "agent"))));
         }
         // Actors XenoNet only observes aren't ones to tell; agents on other
         // hosts are.
@@ -2033,13 +2077,13 @@ impl Engine {
             if !deaf {
                 break;
             }
-            if Self::reads(c, &x.field("agent").field("id"))? {
+            if Self::reads(c, &text(get(&x["agent"], "id")))? {
                 deaf = false;
                 break;
             }
         }
         let mut who: Vec<String> = Vec::new();
-        for id in fresh.iter().map(|x| js_text(&x.field("agent").field("id"))).chain(far.iter().map(|x| js_text(&x.field("agent")))) {
+        for id in fresh.iter().map(|x| text(get(&x["agent"], "id"))).chain(far.iter().map(|x| text(get(x, "agent")))) {
             if !who.contains(&id) {
                 who.push(id);
             }
@@ -2056,7 +2100,7 @@ impl Engine {
         };
         let mut names: Vec<String> = Vec::new();
         for x in fresh.iter().chain(far.iter()) {
-            let n = NATIVE.basename(&js_text(&x.field("file")), None);
+            let n = NATIVE.basename(&text(get(x, "file")), None);
             if !names.contains(&n) {
                 names.push(n);
             }
@@ -2069,38 +2113,39 @@ impl Engine {
 
     /// Messages as an agent reads them, framed as other agents' (and
     /// actors'), never your user's.
-    fn mail(c: &mut dyn Calls, messages: &[Arg]) -> Result<String> {
+    fn mail(c: &Collaborators<'_>, messages: &[Value]) -> Result<String> {
         if messages.is_empty() {
             return Ok(String::new());
         }
-        let now = Self::now(c)?;
-        let who = if messages.iter().any(|m| m.field("from").field("app").as_str() == Some("actor")) { "sessions and actors" } else { "sessions" };
+        let now = c.clock.now();
+        let who = if messages.iter().any(|m| as_str(get(&m["from"], "app")) == Some("actor")) { "sessions and actors" } else { "sessions" };
         let mut parts = Vec::new();
         let mut far = 0;
         for m in messages {
-            let to = m.field("to");
-            let line = m.field("envelope").field("line");
-            let text = m.field("text");
+            let to = get(m, "to");
+            let line = get(&m["envelope"], "line");
+            let body = get(m, "text");
             // One from another machine in the network says so first.
-            let host = network_host(&m.field("envelope"));
+            let host = network_host(&m["envelope"]);
+            let from_you = as_str(get(&m["from"], "id")) == Some(YOU);
             let mut part = vec![format!(
                 "[#{}] from {}, {}{}.",
-                js_text(&m.field("id")),
+                text(get(m, "id")),
                 match &host {
-                    Some(h) if m.field("from").field("id").as_str() == Some(YOU) => format!("your user, at {h}'s console"),
-                    _ => Self::sender(c, &m.field("from"))?,
+                    Some(h) if from_you => format!("your user, at {h}'s console"),
+                    _ => Self::sender(c, &m["from"])?,
                 },
-                ago(now - num(&m.field("at"))),
-                if to.as_str() == Some("you") { String::new() } else { format!(", to {}", js_text(&to)) }
+                ago(now - num(get(m, "at"))),
+                if as_str(to) == Some("you") { String::new() } else { format!(", to {}", text(to)) }
             )];
             if let Some(h) = &host {
                 far += 1;
-                part.push(if m.field("from").field("id").as_str() == Some(YOU) { network::from_you_line(h) } else { network::from_host_line(h) });
+                part.push(if from_you { network::from_you_line(h) } else { network::from_host_line(h) });
             }
             part.extend([
-                if line.is_nullish() { "verified: nothing more than its sender's id (sent before XenoNet kept how it knew).".into() } else { js_text(&line) },
+                if nullish(line) { "verified: nothing more than its sender's id (sent before XenoNet kept how it knew).".into() } else { text(line) },
                 "It says:".into(),
-                quoted(&if text.is_nullish() { String::new() } else { js_text(&text) }),
+                quoted(&text_or_empty(body)),
             ]);
             parts.push(part.join("\n"));
         }
@@ -2122,133 +2167,134 @@ impl Engine {
     }
 
     /// Who a message is from, with how XenoNet knows it.
-    fn sender(c: &mut dyn Calls, from: &Arg) -> Result<String> {
-        if from.field("id").as_str() == Some(YOU) {
+    fn sender(c: &Collaborators<'_>, from: &Value) -> Result<String> {
+        if as_str(get(from, "id")) == Some(YOU) {
             return Ok("your user, at XenoNet's own window".into());
         }
-        let project = from.field("project");
-        let at = if project.truthy() { format!(", in {}", js_text(&project)) } else { String::new() };
-        if from.field("app").as_str() != Some("actor") {
-            return Ok(format!("\"{}\" ({}, {}{at})", js_text(&from.field("title")), js_text(&from.field("app")), js_text(&from.field("id"))));
+        let project = get(from, "project");
+        let at = if truthy(project) { format!(", in {}", text(project)) } else { String::new() };
+        if as_str(get(from, "app")) != Some("actor") {
+            return Ok(format!("\"{}\" ({}, {}{at})", text(get(from, "title")), text(get(from, "app")), text(get(from, "id"))));
         }
-        let via = opt_call(c, "engine.actors", "info", vec![from.field("id")])?.field("via");
-        let how = if !via.truthy() {
+        let info = Self::actor_info(c, &text(get(from, "id")))?;
+        let via = info.as_ref().and_then(|i| get(i, "via"));
+        let how = if !truthy(via) {
             "no longer here"
-        } else if list(via).iter().any(|v| v.as_str() == Some("registered")) {
+        } else if items(via).iter().any(|v| v.as_str() == Some("registered")) {
             "registered"
         } else {
             "observed"
         };
-        Ok(format!("the actor \"{}\" ({how}, {}{at})", js_text(&from.field("title")), js_text(&from.field("id"))))
+        Ok(format!("the actor \"{}\" ({how}, {}{at})", text(get(from, "title")), text(get(from, "id"))))
     }
 
     // ---------- for the console ----------
 
-    pub fn snapshot(&self, c: &mut dyn Calls) -> Result<Arg> {
-        let now = Self::now(c)?;
-        let agents: Vec<Arg> = self
+    pub fn snapshot(&self, c: &Collaborators<'_>) -> Result<Value> {
+        let now = c.clock.now();
+        let mut agents: Vec<Value> = self
             .agents(c, ACTIVE_MS)?
             .iter()
             .map(|a| {
                 let mut b = brief(a);
                 for k in ["status", "focus"] {
-                    push(&mut b, k, a.field(k));
+                    put_some(&mut b, k, get(a, k).cloned());
                 }
-                push(&mut b, "editing", Arg::num(list(a.field("editing")).len() as f64));
-                push(&mut b, "claims", a.field("claims"));
-                push(&mut b, "reachable", a.field("reachable"));
+                put(&mut b, "editing", number(items(get(a, "editing")).len() as f64));
+                put_some(&mut b, "claims", get(a, "claims").cloned());
+                put_some(&mut b, "reachable", get(a, "reachable").cloned());
                 b
             })
             .collect();
         // Then other hosts' agents, in a network, with their host and when
         // it was last heard from, and for the console what their presence
         // says waits on you (detail no agent's view has).
-        let mut agents = agents;
-        if self.networked() {
-            for a in list(c.call("engine.net", "console", vec![])?) {
+        let networked = self.networked();
+        if let (true, Some(net)) = (networked, c.net) {
+            for a in net.console()? {
                 let mut b = brief(&a);
                 for k in ["status", "focus"] {
-                    push(&mut b, k, a.field(k));
+                    put_some(&mut b, k, get(&a, k).cloned());
                 }
-                push(&mut b, "editing", Arg::num(0.0));
-                push(&mut b, "claims", Arg::List(vec![]));
+                put(&mut b, "editing", number(0.0));
+                put(&mut b, "claims", Value::Array(vec![]));
                 for k in ["reachable", "host", "seen", "online", "waitsOnYou", "repoKey", "cwd", "lastActive", "question", "lastMessage", "stuck"] {
-                    let v = a.field(k);
-                    if k != "lastActive" || !v.is_nullish() {
-                        push(&mut b, k, v);
+                    let v = get(&a, k);
+                    if k == "lastActive" && nullish(v) {
+                        continue;
                     }
+                    put_some(&mut b, k, v.cloned());
                 }
                 agents.push(b);
             }
         }
-        let networked = self.networked();
         let mut messages = Vec::new();
-        for m in list(c.call("engine.store", "recent", vec![Arg::num(now - 24.0 * 3600e3)])?) {
-            let mut to: Vec<Arg> = list(c.call("engine.store", "deliveries", vec![m.field("id")])?)
+        for m in rows(c.store.with(|s| s.recent(now - 24.0 * 3600e3)))? {
+            let mut to: Vec<Value> = rows(c.store.with(|s| s.deliveries(&m["id"])))?
                 .iter()
-                .map(|d| obj(vec![("id", d.field("agent")), ("seen", Arg::Bool(d.field("seen_at").truthy()))]))
+                .map(|d| obj_some(vec![("id", get(d, "agent").cloned()), ("seen", Some(Value::Bool(truthy(get(d, "seen_at")))))]))
                 .collect();
             // A delivery to another host says what that host last said of it.
-            if networked && to.iter().any(|d| network::is_remote(&d.field("id"))) {
+            if let (true, Some(net)) = (networked && to.iter().any(|d| network::is_remote(&text(get(d, "id")))), c.net) {
                 for d in &mut to {
-                    if network::is_remote(&d.field("id")) {
-                        let r = c.call("engine.net", "receipt", vec![m.field("id"), d.field("id")])?;
-                        push(d, "host", r.field("host"));
-                        push(d, "receipt", r.field("receipt"));
+                    let agent = text(get(d, "id"));
+                    if network::is_remote(&agent) {
+                        let r = net.receipt(num(get(&m, "id")), &agent)?;
+                        put_some(d, "host", r.as_ref().and_then(|r| get(r, "host")).cloned());
+                        put_some(d, "receipt", r.as_ref().and_then(|r| get(r, "receipt")).cloned());
                     }
                 }
             }
-            messages.push(obj(vec![
-                ("id", m.field("id")),
-                ("from", m.field("sender")),
-                ("target", m.field("target")),
-                ("text", m.field("body")),
-                ("at", m.field("created_at")),
-                ("how", envelope_method(&m.field("envelope"))),
-                ("to", Arg::List(to)),
+            messages.push(obj_some(vec![
+                ("id", get(&m, "id").cloned()),
+                ("from", get(&m, "sender").cloned()),
+                ("target", get(&m, "target").cloned()),
+                ("text", get(&m, "body").cloned()),
+                ("at", get(&m, "created_at").cloned()),
+                ("how", Some(envelope_method(get(&m, "envelope")))),
+                ("to", Some(Value::Array(to))),
             ]));
         }
-        Ok(obj(vec![("agents", Arg::List(agents)), ("messages", Arg::List(messages))]))
+        Ok(obj(vec![("agents", Value::Array(agents)), ("messages", Value::Array(messages))]))
     }
 }
 
 /// A file's path inside its working tree, so the same file in two
 /// worktrees compares equal.
-fn rel(agent: &Arg, file: &Arg) -> String {
-    let top = agent.field("top");
-    let f = js_text(file);
-    if top.truthy() && key_of(&f).starts_with(&key_of(&format!("{}/", js_text(&top)))) {
-        key_of(&NATIVE.relative(&js_text(&top), &f))
+fn rel(agent: &Value, file: &str) -> String {
+    let top = get(agent, "top");
+    if truthy(top) && key_of(file).starts_with(&key_of(&format!("{}/", text(top)))) {
+        key_of(&NATIVE.relative(&text(top), file))
     } else {
-        key_of(&f)
+        key_of(file)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn claims_match_paths_folders_and_globs() {
-        assert!(matches(&Arg::text("/w/src/"), &Arg::text("/w/src/a.ts")));
-        assert!(matches(&Arg::text("/w/src/**"), &Arg::text("/w/src/x/a.ts")));
-        assert!(matches(&Arg::text("/w/src/**/*.ts"), &Arg::text("/w/src/x/y/a.ts")));
-        assert!(!matches(&Arg::text("/w/src/*.ts"), &Arg::text("/w/src/x/a.ts")));
-        assert!(matches(&Arg::text("C:\\W\\a.ts"), &Arg::text("c:/w/a.ts")));
+        assert!(matches("/w/src/", "/w/src/a.ts"));
+        assert!(matches("/w/src/**", "/w/src/x/a.ts"));
+        assert!(matches("/w/src/**/*.ts", "/w/src/x/y/a.ts"));
+        assert!(!matches("/w/src/*.ts", "/w/src/x/a.ts"));
+        assert!(matches("C:\\W\\a.ts", "c:/w/a.ts"));
     }
 
     #[test]
     fn an_edit_tool_names_its_files() {
-        let input = Arg::Obj(vec![("file_path".into(), Arg::text("src/a.ts"))]);
-        assert_eq!(edit_paths(&Arg::text("Edit"), &input, &Arg::text("/w")), vec!["/w/src/a.ts".to_string()]);
-        let patch = Arg::Obj(vec![("input".into(), Arg::text("*** Begin Patch\n*** Update File: b.rs\n*** Move to: c.rs\r\n"))]);
-        assert_eq!(edit_paths(&Arg::text("apply_patch"), &patch, &Arg::text("/w")), vec!["/w/b.rs".to_string(), "/w/c.rs".to_string()]);
+        assert_eq!(edit_paths("Edit", &json!({ "file_path": "src/a.ts" }), Some("/w")), vec!["/w/src/a.ts".to_string()]);
+        let patch = json!({ "input": "*** Begin Patch\n*** Update File: b.rs\n*** Move to: c.rs\r\n" });
+        assert_eq!(edit_paths("apply_patch", &patch, Some("/w")), vec!["/w/b.rs".to_string(), "/w/c.rs".to_string()]);
     }
 
     #[test]
     fn a_repo_is_its_top_and_common_dir() {
         let r = parse_repo("/w/a\n/w/a/.git\nHEAD\n").unwrap();
-        assert_eq!(r.field("branch"), Arg::Null);
+        assert_eq!(r.branch, None);
         assert!(parse_repo("/w/a\n").is_none());
         assert_eq!(ago(30e3), "just now");
         assert_eq!(ago(150e3), "3 min ago");
@@ -2259,5 +2305,14 @@ mod tests {
     fn a_message_to_another_host_waits_only_while_the_host_is_away() {
         assert_eq!(remote_way("neo-rex", true), "through your XenoNet network, as soon as neo-rex has it; then as a session there gets messages");
         assert_eq!(remote_way("neo-rex", false), "when neo-rex is back online: it waits in this machine's outbox");
+    }
+
+    #[test]
+    fn the_brief_form_keeps_only_the_fields_an_agent_has() {
+        let you = Engine::you_view(5.0);
+        assert_eq!(brief(&you), json!({ "id": YOU, "title": "you", "app": "you", "project": null }));
+        assert_eq!(reply_target("claude:a", &json!({ "sender": "codex:b", "target": "claude:a" })), json!("codex:b"));
+        assert_eq!(reply_target("claude:a", &json!({ "sender": "claude:a", "target": "repo:x", "scope": null })), json!("repo"));
+        assert_eq!(reply_target("claude:a", &Value::Null), Value::Null);
     }
 }

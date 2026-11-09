@@ -52,7 +52,7 @@ fn read_from(file: &str, offset: f64, size: f64) -> std::io::Result<String> {
 
 // A transcript's text: a compressed archive's decompressed.
 fn read_whole(file: &str) -> std::io::Result<String> {
-    Ok(text_of(crate::archive::read(file)?))
+    Ok(text_of(xenonet_sources::archive::read(file)?))
 }
 
 fn message(e: xenonet_state::search::Error) -> String {

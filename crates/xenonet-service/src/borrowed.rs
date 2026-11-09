@@ -3,7 +3,6 @@
 //! engine's attest for a sender they name with plain values.
 
 use serde_json::Value;
-use xenonet_engine::sql::Arg;
 
 /// Milliseconds since the epoch, as Date.now() gives them.
 pub use xenonet_base::time::now_ms;
@@ -30,15 +29,9 @@ pub struct Sender<'a> {
 /// message from `sender`, authenticated by `method`, with the route's
 /// verdict.
 pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now: f64, platform: &str) -> Value {
-    let sender = Arg::Obj(vec![
-        ("id".into(), Arg::text(sender.id)),
-        ("kind".into(), Arg::text(sender.kind)),
-        ("name".into(), Arg::opt_text(sender.name.as_deref())),
-        ("product".into(), Arg::opt_text(sender.product.as_deref())),
-    ]);
+    let sender = xenonet_engine::attest::Sender { id: sender.id, kind: sender.kind, name: sender.name.as_deref(), product: sender.product.as_deref() };
     // It fails only when the system has no random numbers for the id.
-    let env = xenonet_engine::attest::attest(&sender, &Arg::text(method), &Arg::from(verdict), &Arg::text(home), &Arg::num(now), platform).expect("the system's random numbers");
-    env.to_json()
+    xenonet_engine::attest::attest(sender, method, verdict, home, now, platform).expect("the system's random numbers")
 }
 
 /// process.platform's name for this one.

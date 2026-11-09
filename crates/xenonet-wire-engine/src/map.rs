@@ -1,15 +1,17 @@
 //! What the engine and the actors read of the map, through the State
-//! trait: the engine twin's narrow readers (liveIds, index, node, live,
-//! observedLive, homeOf, identities) and the actors' map adapter (mapOf in
-//! core/actors/index.js: ready, has, sessions, recentSession, describe,
-//! placeOf). A map that isn't in Rust yet reads as an empty one, so the
-//! engine still answers from its own store.
+//! trait: the engine's narrow readers (`host::MapReader`: live ids, the
+//! index, a node, a live session, whether one is only observed, a
+//! session's home, the identities) and the actors' map adapter (ready, has,
+//! sessions, recentSession, describe, placeOf). A map that isn't made yet
+//! reads as an empty one, so the engine still answers from its own store.
 
+use crate::js::arg;
 use crate::js::Locked;
-use crate::js::{arg, json, obj};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use xenonet_engine::engine::Fail;
+use xenonet_engine::host::IndexEntry;
 use xenonet_engine::peer::{Result, Thrown};
 use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{CoreError, State, R};
@@ -27,8 +29,14 @@ pub fn thrown(e: CoreError) -> Thrown {
     Thrown { message: e.message, code: e.code.map(|c| Box::new(Value::String(c))), handle: None, stdout: None }
 }
 
-fn field(n: &Value, k: &str) -> Arg {
-    n.get(k).map_or(Arg::Undef, arg)
+/// A map answer as the engine takes it.
+fn engine<T>(r: Result<T>) -> xenonet_engine::engine::Result<T> {
+    r.map_err(Fail::from)
+}
+
+/// An object with the fields a node has, of these, in this order.
+fn pick(n: &Value, keys: &[&str]) -> Value {
+    Value::Object(keys.iter().filter_map(|k| n.get(*k).map(|v| ((*k).to_string(), v.clone()))).collect::<serde_json::Map<String, Value>>())
 }
 
 /// The places (projects and zones) by their path key, and the sessions as
@@ -60,80 +68,55 @@ impl Map {
 
     // ---------- the engine's readers ----------
 
-    /// [id, lastEventAt] of each live session.
-    pub fn live_ids(&self) -> Result<Arg> {
-        let ids = read(self.state.live_ids(), Vec::new)?;
-        Ok(Arg::List(ids.into_iter().map(|(id, at)| Arg::List(vec![Arg::Text(id), arg(&at)])).collect()))
+    /// Each live session's id and when its transcript last moved.
+    pub fn live_ids(&self) -> xenonet_engine::engine::Result<Vec<(String, f64)>> {
+        let ids = engine(read(self.state.live_ids(), Vec::new))?;
+        Ok(ids.into_iter().map(|(id, at)| (id, xenonet_base::text::js_number(Some(&at)))).collect())
     }
 
-    /// [id, { id, kind, archived, updatedAt, name, path }] of each node.
-    pub fn index(&self) -> Result<Arg> {
-        Ok(Arg::List(
-            self.nodes()?
-                .iter()
-                .map(|n| {
-                    let id = field(n, "id");
-                    Arg::List(vec![
-                        id.clone(),
-                        obj(vec![
-                            ("id", id),
-                            ("kind", field(n, "kind")),
-                            ("archived", field(n, "archived")),
-                            ("updatedAt", field(n, "updatedAt")),
-                            ("name", field(n, "name")),
-                            ("path", field(n, "path")),
-                        ]),
-                    ])
-                })
-                .collect(),
-        ))
+    /// Every node, as the engine indexes it.
+    pub fn index(&self) -> xenonet_engine::engine::Result<Vec<IndexEntry>> {
+        let s = |n: &Value, k: &str| n.get(k).and_then(Value::as_str).map(str::to_string);
+        Ok(engine(self.nodes())?
+            .iter()
+            .map(|n| IndexEntry {
+                id: s(n, "id").unwrap_or_default(),
+                kind: s(n, "kind"),
+                archived: crate::js::truthy_json(&n["archived"]),
+                updated_at: n.get("updatedAt").and_then(Value::as_f64),
+                name: s(n, "name"),
+                path: s(n, "path"),
+            })
+            .collect())
     }
 
-    /// A node as the engine reads it, or null.
-    pub fn node(&self, id: &Arg) -> Result<Arg> {
-        let Some(n) = self.node_value(&crate::js::text(id))? else { return Ok(Arg::Null) };
-        let identities =
-            n.get("identities").and_then(Value::as_array).map(|l| l.iter().map(|i| obj(vec![("id", i.get("id").map_or(Arg::Undef, arg))])).collect()).unwrap_or_default();
-        Ok(obj(vec![
-            ("id", field(&n, "id")),
-            ("kind", field(&n, "kind")),
-            ("title", field(&n, "title")),
-            ("name", field(&n, "name")),
-            ("worktree", field(&n, "worktree")),
-            ("cwd", field(&n, "cwd")),
-            ("updatedAt", field(&n, "updatedAt")),
-            ("branch", field(&n, "branch")),
-            ("reader", field(&n, "reader")),
-            ("observed", field(&n, "observed")),
-            ("path", field(&n, "path")),
-            ("archived", field(&n, "archived")),
-            ("identities", Arg::List(identities)),
-        ]))
+    /// A node as the engine reads it, or None.
+    pub fn node(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        let Some(n) = engine(self.node_value(id))? else { return Ok(None) };
+        let identities: Vec<Value> = n.get("identities").and_then(Value::as_array).map(|l| l.iter().map(|i| pick(i, &["id"])).collect()).unwrap_or_default();
+        let mut out = pick(&n, &["id", "kind", "title", "name", "worktree", "cwd", "updatedAt", "branch", "reader", "observed", "path", "archived"]);
+        out["identities"] = Value::Array(identities);
+        Ok(Some(out))
     }
 
-    /// A live session (or an observed run) as the engine reads it, or null.
-    pub fn live(&self, id: &Arg, now: f64) -> Result<Arg> {
-        Ok(read(self.state.live_info(&crate::js::text(id), now), || None)?.as_ref().map_or(Arg::Null, arg))
+    /// A live session (or an observed run) as the engine reads it, or None.
+    pub fn live(&self, id: &str, now: f64) -> xenonet_engine::engine::Result<Option<Value>> {
+        engine(read(self.state.live_info(id, now), || None))
     }
 
-    pub fn observed_live(&self, id: &Arg) -> Result<bool> {
-        read(self.state.observed_live(&crate::js::text(id)), || false)
+    pub fn observed_live(&self, id: &str) -> xenonet_engine::engine::Result<bool> {
+        engine(read(self.state.observed_live(id), || false))
     }
 
-    /// The project or zone a session counts under, or null.
-    pub fn home_of(&self, id: &Arg) -> Result<Arg> {
-        let v = read(self.state.home_of(&crate::js::text(id)), || Value::Null)?;
-        Ok(if v.is_null() { Arg::Null } else { arg(&v) })
+    /// The project or zone a session counts under, or None.
+    pub fn home_of(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
+        let v = engine(read(self.state.home_of(id), || Value::Null))?;
+        Ok((!v.is_null()).then_some(v))
     }
 
     /// The identities on the map, as { id, handle }.
-    pub fn identities(&self) -> Result<Arg> {
-        Ok(Arg::List(
-            read(self.state.identities(), Vec::new)?
-                .iter()
-                .map(|i| obj(vec![("id", i.get("id").map_or(Arg::Undef, arg)), ("handle", i.get("handle").map_or(Arg::Undef, arg))]))
-                .collect(),
-        ))
+    pub fn identities(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
+        Ok(engine(read(self.state.identities(), Vec::new))?.iter().map(|i| pick(i, &["id", "handle"])).collect())
     }
 
     // ---------- the actors' map ----------
@@ -235,11 +218,6 @@ impl Map {
     }
 }
 
-/// A map node as JSON, for what the routes hand back.
-pub fn node_json(n: &Arg) -> Value {
-    json(n)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,10 +253,11 @@ mod tests {
         assert_eq!(m.place_of("/elsewhere").unwrap(), Value::Null);
         assert_eq!(m.describe("claude:s1").unwrap()["place"], json!("app"));
         assert_eq!(m.sessions().unwrap()[0]["cwd"], json!("/w/app"));
-        let n = m.node(&Arg::text("claude:s1")).unwrap();
-        assert_eq!(json(&n.field("identities")), json!([{ "id": "claude:a:o" }]));
+        let n = m.node("claude:s1").unwrap().unwrap();
+        assert_eq!(n["identities"], json!([{ "id": "claude:a:o" }]));
+        assert_eq!(n.as_object().unwrap().keys().collect::<Vec<_>>(), ["id", "kind", "title", "cwd", "identities"], "the fields it has, in the engine's order");
         // What the map can't say yet reads as nothing there.
-        assert_eq!(m.live_ids().unwrap(), Arg::List(vec![]));
-        assert!(!m.observed_live(&Arg::text("claude:s1")).unwrap());
+        assert_eq!(m.live_ids().unwrap(), vec![]);
+        assert!(!m.observed_live("claude:s1").unwrap());
     }
 }

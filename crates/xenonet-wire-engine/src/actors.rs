@@ -1,24 +1,134 @@
-//! Actors (core/actors/index.js over crates/xenonet-actors/src/registry.rs,
-//! with you.js and demo.js): the registry, its host (the clock, the map,
-//! whether a process runs), the list's throttle, the clock that ticks it,
-//! the demo's made-up actors and their scripts, and the JS API the other
-//! cores call it by ("actors.has", "actors.upsert"…). What it tells goes
-//! to the page once the call is done, never while it's held.
+//! Actors (crates/xenonet-actors/src/registry.rs, with you.rs and
+//! demo.rs): the registry, its host (the clock, the map, whether a process
+//! runs), its rows in the engine's store, the list's throttle, the clock
+//! that ticks it, the demo's made-up actors and their scripts, and the
+//! calls by name the engine still makes on it ("has", "upsert"…). What it
+//! tells goes to the page once the call is done, never while it's held.
 
-use crate::js::{arg, at, json, list, no_method, now_ms, obj, text, Locked};
+use crate::js::{at, items, json, list, no_method, now_ms, obj, text, Locked};
 use crate::map::Map;
 use crate::world::World;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{json, Map as JsonMap, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::demo::{Demo, Resolve, STEP_MS};
 use xenonet_actors::registry::{self, Actors as Registry, Fail, Host, CLOCK_MS, LIST_THROTTLE_MS, PRUNE_MS};
+use xenonet_actors::store::{self as rows, Tx};
 use xenonet_engine::peer::{Result, Thrown};
 use xenonet_engine::sql::Arg;
 use xenonet_engine::store::Shared;
 use xenonet_service::cores::{Actors, CoreError, R};
 use xenonet_service::glue::From;
+
+/// The actors' rows in the engine's store, as the registry, registration
+/// and the wakes keep them: each call by the store's name, its rows as
+/// JSON.
+pub struct Rows(pub Shared);
+
+/// What a store call failed with, kept whole: its message and code.
+pub fn store_error(t: Thrown) -> rows::Error {
+    rows::Error { message: t.message, code: t.code.as_deref().map(xenonet_base::text::js_string) }
+}
+
+fn sql_error(e: xenonet_engine::sql::SqlError) -> rows::Error {
+    store_error(Thrown::from(e))
+}
+
+impl Rows {
+    /// `store.<name>(...args)`, as JSON.
+    pub fn call(&self, name: &str, args: &[Arg]) -> rows::Result<Value> {
+        crate::store::call(&self.0, name, args).map(|a| json(&a)).map_err(store_error)
+    }
+    /// The same, for a call that answers rows.
+    pub fn rows(&self, name: &str, args: &[Arg]) -> rows::Result<Vec<Value>> {
+        self.call(name, args).map(items)
+    }
+    /// The same, for a call that answers nothing.
+    pub fn run(&self, name: &str, args: &[Arg]) -> rows::Result<()> {
+        self.call(name, args).map(|_| ())
+    }
+    /// A call on the store itself, for what the calls by name don't cover
+    /// (the mail, claims and focus the engine keeps there).
+    pub fn direct<T>(&self, f: impl FnOnce(&mut xenonet_engine::store::EngineStore) -> xenonet_engine::sql::Result<T>) -> rows::Result<T> {
+        self.0.with(f).map_err(sql_error)
+    }
+    fn exec(&self, sql: &str) -> rows::Result<()> {
+        self.direct(|s| s.db().and_then(|db| xenonet_engine::sql::exec(db, sql)))
+    }
+}
+
+impl Tx for Rows {
+    fn in_transaction(&self) -> bool {
+        self.0.with(|s| s.in_transaction())
+    }
+    fn begin(&self) -> rows::Result<()> {
+        self.exec("BEGIN")
+    }
+    fn commit(&self) -> rows::Result<()> {
+        self.exec("COMMIT")
+    }
+    fn rollback(&self) {
+        let _ = self.exec("ROLLBACK");
+    }
+}
+
+/// A JSON value as the store's calls take it.
+pub fn arg(v: &Value) -> Arg {
+    crate::js::arg(v)
+}
+
+fn opt_text(s: Option<&str>) -> Arg {
+    s.map_or(Arg::Null, Arg::text)
+}
+
+impl registry::Store for Rows {
+    fn actor_rows(&self) -> rows::Result<Vec<Value>> {
+        self.rows("actorRows", &[])
+    }
+    fn actor_targets(&self) -> rows::Result<Vec<Value>> {
+        self.rows("actorTargets", &[])
+    }
+    fn last_actor_events(&self, actor: &str, limit: f64) -> rows::Result<Vec<Value>> {
+        self.rows("lastActorEvents", &[Arg::text(actor), Arg::Num(limit)])
+    }
+    fn save_actor(&self, row: &Value) -> rows::Result<()> {
+        self.run("saveActor", &[arg(row)])
+    }
+    fn remove_actor(&self, slug: &str) -> rows::Result<()> {
+        self.run("removeActor", &[Arg::text(slug)])
+    }
+    fn forget_actor(&self, slug: &str) -> rows::Result<()> {
+        self.run("forgetActor", &[Arg::text(slug)])
+    }
+    fn add_actor_event(&self, event: &Value) -> rows::Result<()> {
+        self.run("addActorEvent", &[arg(event)])
+    }
+    fn save_actor_target(&self, target: &Value) -> rows::Result<()> {
+        self.run("saveActorTarget", &[arg(target)])
+    }
+    fn drop_actor_target(&self, actor: &str, target: &str, relation: &str) -> rows::Result<()> {
+        self.run("dropActorTarget", &[Arg::text(actor), Arg::text(target), Arg::text(relation)])
+    }
+    fn actor_event_counts(&self, since: f64) -> rows::Result<Vec<Value>> {
+        self.rows("actorEventCounts", &[Arg::Num(since)])
+    }
+    fn actor_spawns(&self, since: f64) -> rows::Result<Vec<Value>> {
+        self.rows("actorSpawns", &[Arg::Num(since)])
+    }
+    fn actor_facts_since(&self, actor: &str, kind: &str, since: f64) -> rows::Result<Vec<Value>> {
+        self.rows("actorFactsSince", &[Arg::text(actor), Arg::text(kind), Arg::Num(since)])
+    }
+    fn actor_events_since(&self, since: f64, limit: f64, only: Option<&str>, except: Option<&str>) -> rows::Result<Vec<Value>> {
+        self.rows("actorEventsSince", &[Arg::Num(since), obj(vec![("limit", Arg::Num(limit)), ("only", opt_text(only)), ("except", opt_text(except))])])
+    }
+    fn actor_token_times(&self) -> rows::Result<Vec<Value>> {
+        self.rows("actorTokenTimes", &[])
+    }
+    fn prune(&self, now: f64) -> rows::Result<()> {
+        self.run("prune", &[Arg::Num(now)])
+    }
+}
 
 /// The demo world's nodes, as resolveDemo finds them: its projects folder,
 /// and its sessions by title.
@@ -90,10 +200,11 @@ impl Resolve for ActorHost<'_> {
     }
 }
 
-fn thrown(f: Fail) -> Thrown {
+/// What the registry failed with, as the engine's calls pass it on.
+pub fn thrown(f: Fail) -> Thrown {
     match f {
         Fail::Error(m) => Thrown::new(m),
-        Fail::Sql(e) => e.into(),
+        Fail::Store(e) => Thrown { message: e.message, code: e.code.map(|c| Box::new(Value::String(c))), handle: None, stdout: None },
     }
 }
 
@@ -125,7 +236,7 @@ impl ActorSide {
     /// with three hours of their scripts behind them.
     pub fn new(store: Shared, demo: bool, map: &Map, names: DemoNames) -> std::result::Result<ActorSide, String> {
         let mut host = ActorHost { map, names: &names };
-        let mut reg = Registry::new(store.clone(), demo, &mut host).map_err(|f| thrown(f).message)?;
+        let mut reg = Registry::new(Arc::new(Rows(store.clone())), demo, &mut host).map_err(|f| thrown(f).message)?;
         let d = if demo { Some(Demo::add(&mut reg, 3.0 * 3600e3, &mut host).map_err(|f| thrown(f).message)?) } else { None };
         // Nothing listens yet: what the demo's history told is in the store.
         let _ = (reg.take_emits(), reg.take_changed());
@@ -155,7 +266,8 @@ impl ActorSide {
         out.map_err(thrown)
     }
 
-    fn read<T>(&self, f: impl FnOnce(&Registry) -> T) -> T {
+    /// A read of the registry.
+    pub fn read<T>(&self, f: impl FnOnce(&Registry) -> T) -> T {
         f(&self.reg.locked())
     }
 
@@ -189,7 +301,9 @@ impl ActorSide {
         self.read(|r| r.slug_of(id)).map_err(thrown)
     }
 
-    fn remove(&self, w: &World, id: &str) -> Result<()> {
+    /// An actor gone: what runs before it goes (its remote connections
+    /// revoked) first, then its record.
+    pub fn remove(&self, w: &World, id: &str) -> Result<()> {
         let slug = self.slug_of(id)?;
         let hooks = self.before_remove.locked().clone();
         for f in hooks {
@@ -198,7 +312,27 @@ impl ActorSide {
         self.with(w, |r, _| r.remove(id))
     }
 
-    /// `actors.<method>(...args)`, as the Actors class answers it.
+    /// A registered actor that no longer reports itself: its remote
+    /// connections revoked first unless kept, and its record gone when
+    /// nothing else speaks for it.
+    pub fn unregister(&self, w: &World, id: &str, keep_remote: bool) -> Result<()> {
+        let revokes = self.read(|r| r.unregister_revokes(id, keep_remote)).map_err(thrown)?;
+        if revokes {
+            let slug = self.slug_of(id)?;
+            for f in self.before_remove.locked().clone() {
+                f(&slug);
+            }
+        }
+        if self.with(w, |r, _| r.unregister(id, revokes))? {
+            self.remove(w, id)?;
+        }
+        Ok(())
+    }
+
+    /// `actors.<method>(...args)`, by the JS names the engine's core still
+    /// calls them by ("engine.actors"), and the connections' `registry`:
+    /// each dispatched onto the registry's own method. Goes with engine.rs,
+    /// once it calls the registry directly.
     pub fn call(&self, w: &World, method: &str, args: &[Arg]) -> Result<Arg> {
         let x = |i| at(args, i);
         let s = |i| text(&at(args, i));
@@ -226,7 +360,7 @@ impl ActorSide {
             "remoteOf" => arg(&self.read(|r| r.remote_of(&s(0)))),
             "simulationHeld" => Arg::Bool(self.read(|r| r.simulation_held(&s(0)))),
             "upsert" => {
-                let def = x(0);
+                let def = json(&x(0));
                 self.with(w, |r, h| r.upsert(&def, h))?;
                 Arg::Undef
             }
@@ -252,21 +386,11 @@ impl ActorSide {
                 Arg::Undef
             }
             "unregister" => {
-                let id = s(0);
                 let keep = match x(1).field("keepRemote") {
                     Arg::Undef => true,
                     k => k.truthy(),
                 };
-                let revokes = self.read(|r| r.unregister_revokes(&id, keep)).map_err(thrown)?;
-                if revokes {
-                    let slug = self.slug_of(&id)?;
-                    for f in self.before_remove.locked().clone() {
-                        f(&slug);
-                    }
-                }
-                if self.with(w, |r, _| r.unregister(&id, revokes))? {
-                    self.remove(w, &id)?;
-                }
+                self.unregister(w, &s(0), keep)?;
                 Arg::Undef
             }
             "allow" => {
@@ -300,20 +424,20 @@ impl ActorSide {
                 Arg::Undef
             }
             "watchPid" => {
-                let pid = x(1);
+                let pid = json(&x(1));
                 self.reg.locked().watch_pid(&s(0), &pid).map_err(thrown)?;
                 Arg::Undef
             }
             "report" => {
                 let o = match x(1) {
-                    Arg::Undef => Arg::Obj(vec![]),
-                    o => o,
+                    Arg::Undef => json!({}),
+                    o => json(&o),
                 };
                 self.with(w, |r, h| r.report(&s(0), &o, h))?;
                 Arg::Undef
             }
             "record" => {
-                let o = x(1);
+                let o = json(&x(1));
                 arg(&self.with(w, |r, h| r.record(&s(0), &o, h))?)
             }
             "where" => {
@@ -358,8 +482,12 @@ impl ActorSide {
             }
             "setStatus" => {
                 let o = x(2);
-                let (text_, via, at) = (x(1), o.field("via"), now_or(o.field("at")));
-                match self.with(w, |r, _| r.set_status(&s(0), &text_, &via, at))? {
+                let (text_, at) = (crate::js::text_or_empty(&x(1)), now_or(o.field("at")));
+                let via = match o.field("via") {
+                    Arg::Undef => None,
+                    v => Some(text(&v)),
+                };
+                match self.with(w, |r, _| r.set_status(&s(0), &text_, via.as_deref(), at))? {
                     Ok(status) => obj(vec![("ok", Arg::Bool(true)), ("status", arg(&status))]),
                     Err(reason) => obj(vec![("ok", Arg::Bool(false)), ("reason", Arg::text(reason))]),
                 }
@@ -388,6 +516,7 @@ impl ActorSide {
             "events" => {
                 let o = x(0);
                 let now = now_or(o.field("now"));
+                let o = json(&o);
                 arg(&self.read(|r| r.events(&o, now)).map_err(thrown)?)
             }
             "tick" => {
@@ -492,45 +621,6 @@ pub fn kind(method: &str) -> &'static str {
     }
 }
 
-/// The "actors" collaborator as a core sees it: the registry's calls, its
-/// store, its map and whether it's the demo's.
-pub fn collab_call(w: &World, path: &str, method: &str, args: &[Arg]) -> Result<Arg> {
-    let Some(a) = &w.actors else { return Err(no_method(path, method)) };
-    match path {
-        "actors" => a.call(w, method, args),
-        "actors.store" => crate::store::call(&a.store, method, args),
-        "actors.map" => w.map.call(method, args),
-        _ => Err(no_method(path, method)),
-    }
-}
-
-pub fn collab_get(w: &World, path: &str) -> Arg {
-    match (&w.actors, path) {
-        (None, _) => Arg::Undef,
-        (Some(a), "actors.demo") => Arg::Bool(a.is_demo),
-        (Some(a), "actors.waiting") => waiting_arg(&a.reg.locked().waiting),
-        _ => Arg::Undef,
-    }
-}
-
-pub fn collab_kind(w: &World, path: &str) -> &'static str {
-    if w.actors.is_none() {
-        return if path == "actors" { "null" } else { "undefined" };
-    }
-    match path {
-        "actors" => "object",
-        p => match p.strip_prefix("actors.") {
-            Some(rest) => match rest.split_once('.') {
-                Some(("store", m)) => crate::store::kind(m),
-                Some(("map", m)) => Map::kind(m),
-                Some(_) => "undefined",
-                None => kind(rest),
-            },
-            None => "undefined",
-        },
-    }
-}
-
 /// The actors, as the routes call them.
 pub struct ActorsDriver(pub Arc<World>);
 
@@ -547,7 +637,7 @@ impl ActorsDriver {
 #[async_trait]
 impl Actors for ActorsDriver {
     fn list(&self) -> R<Value> {
-        self.call("list", &[])
+        self.side()?.with(&self.0, |r, h| r.list("public", Some(now_ms()), h)).map_err(core_error)
     }
     fn snapshot(&self, id: &str, view: Option<&str>, counts: bool) -> R<Option<Value>> {
         let a = self.side()?;
@@ -557,24 +647,27 @@ impl Actors for ActorsDriver {
         Ok((!v.is_null()).then_some(v))
     }
     fn events(&self, since: Option<f64>, only: Option<&str>, view: Option<&str>, limit: f64) -> R<Value> {
-        let o = obj(vec![
-            ("since", since.map_or(Arg::Undef, Arg::Num)),
-            ("limit", Arg::Num(limit)),
-            ("view", view.map_or(Arg::Undef, Arg::text)),
-            ("only", only.map_or(Arg::Null, Arg::text)),
-        ]);
-        self.call("events", &[o])
+        let mut o = JsonMap::new();
+        if let Some(since) = since {
+            o.insert("since".into(), xenonet_base::json::number(since));
+        }
+        o.insert("limit".into(), xenonet_base::json::number(limit));
+        if let Some(view) = view {
+            o.insert("view".into(), json!(view));
+        }
+        o.insert("only".into(), only.map_or(Value::Null, |o| json!(o)));
+        let o = Value::Object(o);
+        self.side()?.read(|r| r.events(&o, now_ms())).map_err(|f| core_error(thrown(f)))
     }
     fn you_forget(&self) -> R<()> {
         self.side()?.with(&self.0, |r, _| r.you_forget()).map_err(core_error)
     }
     fn you_report(&self, body: &Value) -> R<Value> {
-        let b = arg(body);
-        self.side()?.with(&self.0, |r, h| r.you_report(&b, now_ms(), h)).map_err(core_error)
+        self.side()?.with(&self.0, |r, h| r.you_report(body, now_ms(), h)).map_err(core_error)
     }
     fn you_window(&self, state: &Value) {
         if let Ok(a) = self.side() {
-            let s = text(&arg(state));
+            let s = xenonet_base::text::js_string(state);
             let _ = a.with(&self.0, |r, h| r.you_window(&s, now_ms(), h));
         }
     }
@@ -582,7 +675,7 @@ impl Actors for ActorsDriver {
         Ok(self.side()?.read(|r| r.pids_of(id)).into_iter().filter(|p| p.is_finite() && *p >= 0.0).map(|p| p as u32).collect())
     }
     fn tokens(&self, now: f64) -> R<Value> {
-        self.call("tokens", &[Arg::Num(now)])
+        self.side()?.read(|r| r.tokens(now)).map(Value::Array).map_err(|f| core_error(thrown(f)))
     }
     fn can(&self, id: &str, capability: &str) -> bool {
         self.side().is_ok_and(|a| a.read(|r| r.can(id, &json!(capability))))
@@ -592,7 +685,11 @@ impl Actors for ActorsDriver {
         (!v.is_null()).then_some(v)
     }
     fn said(&self, message: &Value) {
-        let _ = self.call("said", &[arg(message)]);
+        let Ok(a) = self.side() else { return };
+        let to: Vec<String> = message.get("to").and_then(Value::as_array).map(|l| l.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default();
+        let from = xenonet_base::text::js_string(message.get("from").unwrap_or(&Value::Null));
+        let ts = message.get("ts").and_then(Value::as_f64);
+        let _ = a.with(&self.0, |r, h| r.said(&from, &to, ts, h));
     }
     fn refresh(&self) {
         if let Ok(a) = self.side() {
@@ -600,7 +697,7 @@ impl Actors for ActorsDriver {
         }
     }
     fn target(&self, actor: &str, id: &str, relation: &str) -> R<()> {
-        self.call("target", &[Arg::text(actor), Arg::text(id), Arg::text(relation)]).map(|_| ())
+        self.side()?.with(&self.0, |r, _| r.target(actor, id, relation, now_ms())).map_err(core_error)
     }
     fn simulate(&self, kind: &str, a: Option<String>, b: Option<String>) -> R<Option<Value>> {
         let side = self.side()?;

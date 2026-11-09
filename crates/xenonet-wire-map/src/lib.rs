@@ -6,10 +6,7 @@
 // A core's failure is the service's CoreError, as its traits return it.
 #![expect(clippy::result_large_err, reason = "the cores' traits return the service's CoreError")]
 
-pub mod archive;
 pub mod blocks;
-pub mod claude;
-pub mod codex;
 pub mod config;
 pub mod demo;
 pub mod gatherer;
@@ -20,7 +17,6 @@ pub mod narrate;
 pub mod observed;
 pub mod projects;
 pub mod schemas;
-pub mod sdk;
 pub mod search;
 pub mod state;
 pub mod stats;
@@ -73,12 +69,11 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     let grok_sessions = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
     let live = live::Live::new(&cfg.claude_projects_dir, &codex_sessions, &grok_sessions, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone());
     live.context_server(cfg.wiki_server.as_str());
-    let codex = codex::CodexClient::new(cfg.codex_binary(), env.version.clone(), vendor.clone());
     let readers = match &demo {
         Some(d) => state::Readers::Demo(d.clone()),
-        None => state::Readers::Real { claude: claude::Claude::new(&cfg.claude_projects_dir, cfg.claude_desktop_dir.as_deref(), vendor.clone()) },
+        None => state::Readers::Real,
     };
-    let map = state::MapState::new(cfg, store.clone(), vendor.clone(), env.emitter.clone(), readers, live, codex, &env.version);
+    let map = state::MapState::new(cfg, store.clone(), vendor.clone(), env.emitter.clone(), readers, live, &env.version);
     cores.state = map.clone();
     cores.store = Arc::new(store::StoreCore(store));
     cores.schemas = Arc::new(schemas::SchemaCore::new(dir));
