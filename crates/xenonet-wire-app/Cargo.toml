@@ -17,6 +17,8 @@ tokio.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
 xenonet-service.workspace = true
+# Grok Build's config.toml, read for the MCP-info catalog.
+xenonet-grok-build.workspace = true
 xenonet-actors.workspace = true
 xenonet-app.workspace = true
 xenonet-assistant.workspace = true

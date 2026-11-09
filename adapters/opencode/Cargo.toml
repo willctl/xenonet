@@ -1,0 +1,16 @@
+[package]
+name = "xenonet-opencode"
+description = "OpenCode's adapter: how XenoNet tells its processes apart and reaches its sessions through its server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+xenonet-adapter.workspace = true
+
+[lints]
+workspace = true

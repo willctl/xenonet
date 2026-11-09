@@ -177,6 +177,9 @@ mod tests {
 
     #[test]
     fn the_doctors_groups_come_from_its_checks() {
+        // The apps' groups come from their adapters, which the binary puts
+        // in place at start.
+        xenonet_platforms::install();
         let groups = groups();
         assert_eq!(groups[..2], ["xenonet", "contracts"], "in the order the checks run");
         for g in ["claude", "codex", "grok", "system", "agents", "actors", "service"] {

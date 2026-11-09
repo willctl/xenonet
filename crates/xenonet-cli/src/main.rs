@@ -161,6 +161,7 @@ fn serve(args: &[String]) -> i32 {
 }
 
 fn main() {
+    xenonet_platforms::install();
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.first().map(String::as_str) == Some("serve") {
         std::process::exit(serve(&argv[1..]));

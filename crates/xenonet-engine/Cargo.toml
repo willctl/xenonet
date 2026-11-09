@@ -17,8 +17,11 @@ serde_json.workspace = true
 sha2.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
-xenonet-schema.workspace = true
 xenonet-blocks.workspace = true
+
+# The tests check the real apps' rules and ways, which their adapters bring.
+[dev-dependencies]
+xenonet-platforms.workspace = true
 
 [lints]
 workspace = true

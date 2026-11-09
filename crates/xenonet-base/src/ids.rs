@@ -4,11 +4,10 @@
 //!   its short form, `<path>/v<major>`, which data carries as "schema";
 //! - host-qualified ids: an unqualified id is this XenoNet's own host's,
 //!   and one from another host is `@<host>:<local id>`;
-//! - sessions, `<app>:<the run's id>`;
+//! - sessions, `<app>:<the run's id>` (which apps there are is the
+//!   registry's to say: `xenonet_adapter::apps`);
 //! - actors, `actor:<slug>` (the person at the console is actor:you), and
 //!   projects merged across hosts by their git remote, `repo:<remote>`.
-
-use std::sync::OnceLock;
 
 pub const SCHEMA_BASE: &str = "https://xenonet.dev/schemas";
 
@@ -120,41 +119,6 @@ pub fn qualify(id: &str, host: Option<&str>, self_host: Option<&str>) -> Result<
 pub enum QualifyError {
     NotAnId,
     NotAHost,
-}
-
-// ---------- sessions ----------
-
-/// The apps XenoNet knows sessions of, and what each is called, in the
-/// order core/schema/ids.js lists them: the app registry's (`apps`).
-pub fn session_apps() -> &'static [(&'static str, &'static str)] {
-    static A: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
-    A.get_or_init(|| xenonet_adapter::apps::apps().iter().map(|a| (a.id.as_str(), a.name.as_str())).collect())
-}
-
-pub fn is_session_app(app: &str) -> bool {
-    session_apps().iter().any(|(a, _)| *a == app)
-}
-
-/// The app a session id begins with, when it's one XenoNet knows.
-pub fn app_of_session(id: &str) -> Option<&'static str> {
-    let (app, _) = id.split_once(':')?;
-    session_apps().iter().find(|(a, _)| *a == app).map(|(a, _)| *a)
-}
-
-/// A session's id, unqualified: the app, then the run's own id (a letter or
-/// digit, then six or more letters, digits and dashes).
-pub fn is_session_id(id: &str) -> bool {
-    let Some(app) = app_of_session(id) else { return false };
-    let run = &id.as_bytes()[app.len() + 1..];
-    run.len() >= 7 && run[0].is_ascii_alphanumeric() && run.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-')
-}
-
-/// The alternation of the apps, longest first, as the JS's SESSION_LOCAL
-/// and SESSION_PREFIX are made from it.
-pub fn session_app_alternation() -> String {
-    let mut apps: Vec<&str> = session_apps().iter().map(|(a, _)| *a).collect();
-    apps.sort_by_key(|a| std::cmp::Reverse(a.len()));
-    apps.join("|")
 }
 
 // ---------- actors ----------
@@ -320,8 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn sessions_actors_and_repos() {
-        assert!(is_session_id("claude:0190d3e0-0000") && is_session_id("devin-cli:abcdefg") && !is_session_id("claude:abc") && !is_session_id("nope:abcdefgh"));
+    fn actors_and_repos() {
         assert_eq!(parse_actor_id("@vm1:actor:grok-bot"), Some((Some("vm1"), "grok-bot")));
         assert_eq!(normalize_remote("git@github.com:willctl/xenonet.git"), "github.com/willctl/xenonet");
         assert_eq!(normalize_remote("https://user@github.com/willctl/xenonet"), "github.com/willctl/xenonet");

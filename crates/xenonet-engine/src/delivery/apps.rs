@@ -1,64 +1,10 @@
-//! How live delivery reaches each app's sessions (core/delivery/apps.js):
-//! the apps the registry gives `delivery`, each with its own ways in here,
-//! by its id.
+//! How live delivery reaches each app's sessions: the apps the registry
+//! gives `delivery`, each with the ways in its adapter brings
+//! (`xenonet_adapter::delivery::Ways`).
 
-use crate::sql::Arg;
-use std::sync::OnceLock;
 use xenonet_adapter::apps::App;
 
-/// The command for one headless turn of a session whose process has gone,
-/// given the session's id and the settings file the turn listens with (if
-/// any): the program and its arguments.
-pub type Resume = fn(&str, &Arg) -> (String, Vec<Arg>);
-
-/// An app's ways in.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Ways {
-    /// Its headless resume, if it has one.
-    pub resume: Option<Resume>,
-    /// The start of the variables that mark a process as one of the app's
-    /// sessions, which a resumed turn leaves out; where the app keeps its
-    /// sessions (the registry's roots.env) stays.
-    pub marks: Option<&'static str>,
-    /// A session started with XenoNet as a channel takes messages pushed
-    /// into it.
-    pub channel: bool,
-    /// The app's own server takes a message for a session: OpenCode's,
-    /// which the router reaches through its `opencode`.
-    pub server: bool,
-}
-
-// claude -p --resume <id> [--settings <listen file>]
-fn claude_resume(id: &str, settings: &Arg) -> (String, Vec<Arg>) {
-    let mut args = vec![Arg::text("-p"), Arg::text("--resume"), Arg::text(id)];
-    if settings.truthy() {
-        args.push(Arg::text("--settings"));
-        args.push(settings.clone());
-    }
-    ("claude".into(), args)
-}
-
-// grok -r <id> --output-format json --prompt-file <file>: Grok Build reads
-// a single turn's prompt from a file, which the deliverer writes and adds.
-fn grok_resume(id: &str, _: &Arg) -> (String, Vec<Arg>) {
-    ("grok".into(), ["-r", id, "--output-format", "json", "--prompt-file"].into_iter().map(Arg::text).collect())
-}
-
-// codex exec resume <id> -
-fn codex_resume(id: &str, _: &Arg) -> (String, Vec<Arg>) {
-    ("codex".into(), vec![Arg::text("exec"), Arg::text("resume"), Arg::text(id), Arg::text("-")])
-}
-
-/// An app's ways in, by its id, for the apps XenoNet has them for.
-pub fn ways(id: &str) -> Option<Ways> {
-    match id {
-        "claude" => Some(Ways { resume: Some(claude_resume), marks: Some("CLAUDE"), channel: true, server: false }),
-        "codex" => Some(Ways { resume: Some(codex_resume), marks: Some("CODEX_"), ..Ways::default() }),
-        "grok" => Some(Ways { resume: Some(grok_resume), marks: Some("GROK_"), ..Ways::default() }),
-        "opencode" => Some(Ways { server: true, ..Ways::default() }),
-        _ => None,
-    }
-}
+pub use xenonet_adapter::delivery::{Resume, Ways};
 
 /// The apps live delivery reaches, in the registry's order, each with its
 /// ways in. A test can give its own registry and ways.
@@ -66,10 +12,15 @@ pub fn delivery_apps<'a>(registry: &'a [App], ways: &dyn Fn(&str) -> Option<Ways
     registry.iter().filter(|a| a.has("delivery")).filter_map(|a| Some((a, ways(&a.id)?))).collect()
 }
 
-/// The registry's, read once.
-pub fn apps() -> &'static [(&'static App, Ways)] {
-    static A: OnceLock<Vec<(&'static App, Ways)>> = OnceLock::new();
-    A.get_or_init(|| delivery_apps(xenonet_adapter::apps::apps(), &ways))
+/// The adapters' ways in, by app id.
+fn installed(id: &str) -> Option<Ways> {
+    xenonet_adapter::platforms().get(id).and_then(|p| p.delivery())
+}
+
+/// The registry's apps with `delivery` whose adapter is in place, with
+/// its ways in.
+pub fn apps() -> Vec<(&'static App, Ways)> {
+    delivery_apps(xenonet_adapter::apps::apps(), &installed)
 }
 
 /// An app's ways in, by its id.
@@ -88,6 +39,7 @@ mod tests {
 
     #[test]
     fn the_apps_delivery_reaches_and_how() {
+        xenonet_platforms::install();
         let ids: Vec<&str> = apps().iter().map(|(a, _)| a.id.as_str()).collect();
         assert_eq!(ids, ["claude", "codex", "grok", "opencode"]);
         assert!(of("claude").unwrap().channel && !of("codex").unwrap().channel);

@@ -14,8 +14,8 @@ use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edi
 use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use xenonet_adapter::apps::{is_session_app, session_apps};
 use xenonet_base::fs::FsError;
-use xenonet_base::ids::{is_session_app, session_apps};
 use xenonet_base::json::{self, number_string};
 use xenonet_base::jsstr;
 use xenonet_base::nodepath::Style;

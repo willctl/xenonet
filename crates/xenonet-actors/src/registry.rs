@@ -28,7 +28,8 @@ use crate::detail::{clip, place_name, presence_words, status_line, write_detail}
 use crate::registration::{token_expired, TOKEN_UNUSED_MS};
 use crate::you::You;
 use serde_json::{json, Map, Value};
-use xenonet_base::ids::{app_of_session, parse_actor_id, YOU};
+use xenonet_adapter::apps::app_of_session;
+use xenonet_base::ids::{parse_actor_id, YOU};
 use xenonet_base::json::number;
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_engine::js::truthy;

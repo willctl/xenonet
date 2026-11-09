@@ -98,6 +98,10 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc
 /// the map the cores already have; None when engine.sqlite can't be
 /// opened, and the engine's routes stay pending.
 pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<World>> {
+    // The adapters the engine's checks and delivery ask for, in place
+    // before anything asks: the binary installs them at start, and a test
+    // that makes a world here gets them too.
+    xenonet_platforms::install();
     demo_folders(cores, config);
     let file = Path::new(&config.state_dir).join("engine.sqlite");
     if let Err(e) = std::fs::create_dir_all(&config.state_dir) {

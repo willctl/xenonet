@@ -10,7 +10,7 @@ use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
-use xenonet_base::ids::{is_session_app, session_apps};
+use xenonet_adapter::apps::{is_session_app, session_apps};
 use xenonet_base::jsstr;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::js_trim;

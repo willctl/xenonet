@@ -68,7 +68,12 @@ Cargo.toml                 the workspace: shared versions, the release profile
 crates/
   xenonet-model            the data model: typed ids, every document (serde + schemars, written to schemas/),
                            the operations' kinds and the action vocabulary; no IO, no vendor
-  xenonet-adapter          the Platform trait, the registry of apps (apps.json) and actor products, doctor rows
+  xenonet-adapter          the Platform trait, the registry of apps (apps.json) and actor products, and what an
+                           adapter brings: process rules, ways in for delivery, connect (Machine, Format), checks
+adapters/
+  claude-code, codex,      one crate per platform, each implementing Platform: its process rules, its ways in,
+  grok-build, opencode     its connect format and its doctor checks
+  all                      xenonet-platforms: every adapter, installed at the binary's start
   xenonet-base             paths.js, pricing.js, dirs.js, log.js, schema/ids.js, JSON and time as JS reads them,
                            units.js for the command, private-file.js, client.js
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores

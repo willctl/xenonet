@@ -43,7 +43,7 @@ use xenonet_base::sync::Locked;
 /// tokens, and the runs an actor reports come through the gateway, so
 /// neither meets this rule.
 fn app_name(app: &str) -> Option<&'static str> {
-    crate::processes::agent(app).map(|a| a.name.as_str())
+    crate::processes::agent(app).map(|a| a.name)
 }
 
 /// Why a request in `agent`'s name, a session of `app`, which XenoNet
@@ -747,6 +747,7 @@ mod tests {
 
     #[test]
     fn an_actor_is_held_to_its_own_processes() {
+        xenonet_platforms::install();
         let chain = vec![p(10.0, "/bin/zsh", None, None), p(5.0, "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", None, None)];
         assert_eq!(own_of(&chain).len(), 1);
         assert_eq!(actor_refusal(&chain, &Arg::Null, &Arg::Null, false), None);
@@ -758,6 +759,7 @@ mod tests {
 
     #[test]
     fn bundles_are_the_app_or_the_folder() {
+        xenonet_platforms::install();
         assert_eq!(bundle_of(&Arg::text("/Applications/XenoNet.app/Contents/MacOS/XenoNet")), "/Applications/XenoNet.app/");
         assert_eq!(bundle_of(&Arg::text("/usr/local/bin/node")), "/usr/local/bin/");
         assert_eq!(bundle_of(&Arg::Null), "");
@@ -765,6 +767,7 @@ mod tests {
 
     #[test]
     fn an_apps_name_is_read_as_an_object_literal_reads_it() {
+        xenonet_platforms::install();
         assert_eq!(app_lookup("toString").as_deref(), Some("function toString() { [native code] }"));
         assert_eq!(a_app("opencode"), "an OpenCode");
         assert_eq!(app_lookup("nobody"), None);
@@ -863,6 +866,7 @@ mod tests {
 
     #[test]
     fn a_sessions_requests_come_from_its_own_apps_process() {
+        xenonet_platforms::install();
         let shell = proc(40.0, "/bin/zsh", None, None);
         let claude = |pid: f64| proc(pid, "/Users/me/.local/bin/claude", Some("claude"), None);
         let mut t = Table::new(vec![
@@ -928,6 +932,7 @@ mod tests {
 
     #[test]
     fn whats_yours_comes_only_from_outside_every_agent_and_actor_product() {
+        xenonet_platforms::install();
         let mut t = Table::new(vec![
             vec![proc(30.0, "/usr/bin/curl", None, None), proc(29.0, "/bin/zsh", None, None), proc(5.0, TERMINAL, None, None)],
             vec![proc(31.0, "/usr/bin/curl", None, None), proc(23.0, "/usr/local/bin/codex", Some("codex"), None), proc(5.0, TERMINAL, None, None)],
@@ -952,6 +957,7 @@ mod tests {
 
     #[test]
     fn on_linux_and_windows_whats_yours_is_held_to_the_chain_alone() {
+        xenonet_platforms::install();
         // As procs reads them there: a program's path, no app bundles.
         let claude = |pid: f64| proc(pid, "C:/Users/me/.local/bin/claude.exe", Some("claude"), None);
         let desktop = proc(100.0, "C:/Users/me/AppData/Local/Programs/XenoNet/XenoNet.exe", None, None);
@@ -990,6 +996,7 @@ mod tests {
 
     #[test]
     fn the_windows_routes_answer_only_xenonets_own_app() {
+        xenonet_platforms::install();
         let helper = "/Applications/XenoNet.app/Contents/Frameworks/XenoNet Helper (Renderer).app/Contents/MacOS/XenoNet Helper (Renderer)";
         let home = proc(100.0, XENONET, None, None);
         let mut t = Table::new(vec![
@@ -1038,6 +1045,7 @@ mod tests {
 
     #[test]
     fn the_tray_is_only_xenonet_trays_own_executable_in_an_applications_folder() {
+        xenonet_platforms::install();
         const TRAY: &str = "/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
         const MINE: &str = "/Users/me/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
         let launchd = proc(1.0, "/sbin/launchd", None, None);
@@ -1080,6 +1088,7 @@ mod tests {
 
     #[test]
     fn an_actors_token_works_only_from_its_own_processes() {
+        xenonet_platforms::install();
         let script = proc(50.0, "/Users/me/bin/wren", None, None);
         let shell = proc(49.0, "/bin/zsh", None, None);
         let terminal = proc(5.0, TERMINAL, None, None);
@@ -1129,6 +1138,7 @@ mod tests {
 
     #[test]
     fn registering_an_actor_is_held_to_the_same_and_shows_who_asked() {
+        xenonet_platforms::install();
         let mut t = Table::new(vec![
             vec![proc(50.0, "/Users/me/bin/wren", None, None), proc(5.0, TERMINAL, None, None)],
             vec![proc(51.0, "/usr/bin/node", None, None), proc(23.0, "/usr/local/bin/codex", Some("codex"), None)],

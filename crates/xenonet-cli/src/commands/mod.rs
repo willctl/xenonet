@@ -268,6 +268,8 @@ mod tests {
 
     #[test]
     fn doctor_help_lists_every_group_of_checks() {
+        // The apps' groups come from their adapters, in place at start.
+        xenonet_platforms::install();
         let text = help("doctor");
         let only: String = text.lines().skip_while(|l| !l.trim_start().starts_with("--only")).take_while(|l| !l.trim_start().starts_with("--json")).collect::<Vec<_>>().join(" ");
         for group in words::groups() {

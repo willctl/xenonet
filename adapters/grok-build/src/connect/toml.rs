@@ -1,7 +1,7 @@
-//! core/engine/toml.js: just enough TOML to add and take out one MCP server
-//! in Grok Build's config.toml and leave the rest of the file as it is.
-//! `grok mcp add` rewrites the whole file and drops its comments, so
-//! XenoNet edits the text itself (connect.rs's GrokHooks).
+//! Just enough TOML to add and take out one MCP server in Grok Build's
+//! config.toml and leave the rest of the file as it is. `grok mcp add`
+//! rewrites the whole file and drops its comments, so XenoNet edits the
+//! text itself.
 //!
 //! XenoNet's server is two tables, `[mcp_servers.<name>]` and
 //! `[mcp_servers.<name>.env]`, each line of them a string or a list of
@@ -12,7 +12,16 @@
 
 use serde_json::{Map, Value};
 use xenonet_base::json::stringify;
-use xenonet_base::text::{is_js_space, js_trim};
+use xenonet_base::text::{is_js_space, js_trim, JS_DOT, JS_SPACE};
+
+/// A pattern compiled once. A settings file's white space and line ends
+/// are JS's, not Unicode's, so `\s` and `.` are spelled out.
+macro_rules! re {
+    ($p:expr) => {{
+        static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        R.get_or_init(|| regex::Regex::new(&$p).expect("a pattern that compiles"))
+    }};
+}
 
 // A key as a header or a key line has it: bare, or quoted.
 fn toml_key(k: &str) -> String {
@@ -80,6 +89,8 @@ pub struct Line {
 /// The file's lines. A line inside a multi-line string (""" or ''') is one
 /// of its value's.
 pub fn toml_lines(text: &str) -> Vec<Line> {
+    let header = re!(format!(r"^[{JS_SPACE}]*\[\[?([^\[\]#]+)\]\]?[{JS_SPACE}]*(#{JS_DOT}*)?$"));
+    let pair = re!(format!(r"^[{JS_SPACE}]*([^=#{JS_SPACE}][^=#]*?)[{JS_SPACE}]*=[{JS_SPACE}]*({JS_DOT}*)$"));
     let mut out = Vec::new();
     let mut path: Vec<String> = Vec::new();
     let mut open: Option<&str> = None;
@@ -92,13 +103,13 @@ pub fn toml_lines(text: &str) -> Vec<Line> {
             }
             continue;
         }
-        let parts = crate::re!(r"^\s*\[\[?([^\[\]#]+)\]\]?\s*(#.*)?$").captures(bare).and_then(|h| key_parts(&h[1]));
+        let parts = header.captures(bare).and_then(|h| key_parts(&h[1]));
         if let Some(parts) = parts {
             path = parts;
             out.push(Line { text: line.into(), header: true, path: path.clone(), key: None, value: None });
             continue;
         }
-        let m = crate::re!(r"^\s*([^=#\s][^=#]*?)\s*=\s*(.*)$").captures(bare);
+        let m = pair.captures(bare);
         let key = m.as_ref().and_then(|m| key_parts(&m[1]));
         let value = key.as_ref().and_then(|_| m.as_ref().map(|m| m[2].to_string()));
         if let Some(v) = &value {
@@ -226,7 +237,7 @@ pub fn mcp_servers(text: &str) -> Value {
 /// {} for one that isn't there or doesn't read.
 pub fn read_settings(file: Option<&str>) -> Value {
     let Some(text) = file.and_then(|f| std::fs::read(f).ok()).map(|b| String::from_utf8_lossy(&b).into_owned()) else { return Value::Object(Map::new()) };
-    // By its name exactly, as JS's endsWith(".toml") has it.
+    // By its name's extension exactly.
     if file.is_some_and(|f| std::path::Path::new(f).extension().is_some_and(|e| e == "toml")) {
         return mcp_servers(&text);
     }
@@ -235,7 +246,7 @@ pub fn read_settings(file: Option<&str>) -> Value {
 
 /// Server `name` as the file has it: { command, args, env } from its
 /// tables (a part it doesn't have is null; one it has in a form XenoNet
-/// doesn't write is left out, as JS's undefined), or None when it has none.
+/// doesn't write is left out), or None when it has none.
 pub fn read_server(text: &str, name: &str) -> Option<Value> {
     let lines: Vec<Line> = toml_lines(text).into_iter().filter(|l| is_server(&l.path, name)).collect();
     if !lines.iter().any(|l| l.header && l.path.len() == 2) {
@@ -245,7 +256,7 @@ pub fn read_server(text: &str, name: &str) -> Option<Value> {
     for k in ["command", "args", "env"] {
         server.insert(k.into(), Value::Null);
     }
-    // undefined: the key goes.
+    // A part in a form XenoNet doesn't write: the key goes.
     let set = |m: &mut Map<String, Value>, k: &str, v: Option<Value>| match v {
         Some(v) => {
             m.insert(k.into(), v);
@@ -271,7 +282,7 @@ pub fn read_server(text: &str, name: &str) -> Option<Value> {
             _ => {}
         }
     }
-    // The keys in the order JS gave them.
+    // The keys in a fixed order.
     let mut ordered = Map::new();
     for k in ["command", "args", "env"] {
         if let Some(v) = server.remove(k) {

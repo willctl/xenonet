@@ -22,6 +22,7 @@ impl xenonet_mcp::Control for NoControl {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    xenonet_platforms::install();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "mcp") {
         args.remove(0);

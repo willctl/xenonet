@@ -1056,6 +1056,7 @@ mod tests {
 
     #[test]
     fn on_windows_and_linux_the_processes_are_read_natively_and_a_reused_parent_pid_isnt_a_parent() {
+        xenonet_platforms::install();
         // Windows: Claude Code's claude.exe runs cmd, which runs the xenonet
         // command; Node runs the npm Claude Code, known by its command line.
         // 30's parent pid 9 was a process that's gone, and 9 now belongs to
@@ -1114,6 +1115,7 @@ mod tests {
 
     #[test]
     fn what_proc_net_tcp_and_a_table_line_say() {
+        xenonet_platforms::install();
         let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:BAB0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0000000000000000 100 0 0 10 0\n   1: 0100007F:C738 0100007F:BAB0 01 00000000:00000000 00:00000000 00000000  1000        0 22222 1 0000000000000000 20 4 30 10 -1\n   2: 0100007F:C739 0100007F:BAB0 06 00000000:00000000 03:00000000 00000000     0        0 0 3 0000000000000000\n";
         assert_eq!(parse_proc_net_tcp(tcp, 47792, 51000).as_deref(), Some("22222"));
         assert_eq!(parse_proc_net_tcp(tcp, 47792, 51001), None, "a socket that's closing has no inode");
@@ -1125,6 +1127,7 @@ mod tests {
 
     #[test]
     fn agents_by_program() {
+        xenonet_platforms::install();
         assert_eq!(agent_of("/Users/me/.local/bin/claude", ""), Some("claude"));
         assert_eq!(agent_of("/Users/me/.local/share/claude/versions/2.1.288", ""), Some("claude"));
         assert_eq!(agent_of("/path/codex-aarch64-apple-darwin", ""), Some("codex"));
@@ -1136,6 +1139,7 @@ mod tests {
 
     #[test]
     fn products_by_path() {
+        xenonet_platforms::install();
         let py = "/Users/nova/.hermes/tools/python-3.14.7/bin/python3.14";
         assert_eq!(product_of(py, "-m tui_gateway.entry"), Some(Product { product: "hermes-agent", role: "host" }));
         assert_eq!(product_of(py, "-m pip install requests"), None);
@@ -1146,6 +1150,7 @@ mod tests {
 
     #[test]
     fn ps_and_netstat() {
+        xenonet_platforms::install();
         let t = parse_ps("  510     1 Fri Oct  3 16:34:29 2026 /Users/me/claude.app/Contents/MacOS/claude\nx\n");
         assert_eq!(t.len(), 1);
         assert_eq!(t.get(510.0).unwrap().start, 1_791_045_269_000.0);
@@ -1180,6 +1185,7 @@ mod tests {
 
     #[test]
     fn signed_is_the_running_code_as_its_apps_maker_signed_it() {
+        xenonet_platforms::install();
         let p = Procs::new("darwin");
         let mut io = Codesign { good: vec!["10", "30"], asked: vec![] };
         let n = |x: f64| Value::from(x);

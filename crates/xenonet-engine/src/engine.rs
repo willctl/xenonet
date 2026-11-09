@@ -33,8 +33,9 @@ use crate::sql::Arg;
 use crate::store::js_text;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use xenonet_adapter::apps::is_session_id;
 use xenonet_adapter::products::product_of;
-use xenonet_base::ids::{is_session_id, parse_actor_id, YOU};
+use xenonet_base::ids::{parse_actor_id, YOU};
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::sync::Locked;
 

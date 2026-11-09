@@ -23,7 +23,7 @@ use crate::detail::status_line;
 use crate::registration::{to_number, ActorError, Fail, Result};
 use crate::registry::node_kind;
 use serde_json::json;
-use xenonet_base::ids::is_session_id;
+use xenonet_adapter::apps::is_session_id;
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_engine::peer::{list, opt_call, Calls, Thrown};
 use xenonet_engine::sql::Arg;

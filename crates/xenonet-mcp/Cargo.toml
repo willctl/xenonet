@@ -25,6 +25,8 @@ regex.workspace = true
 rmcp.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# The adapters the binary runs with (adapters/*), put in place at start.
+xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true

@@ -2,7 +2,7 @@
 # page are JS; everything else is here, a crate per layer.
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "adapters/*"]
 # Xenolith's crates join once its own workspace folds into this one.
 exclude = ["xenolith"]
 
@@ -39,6 +39,12 @@ serde = { version = "1", features = ["derive"] }
 schemars = { version = "1", default-features = false, features = ["derive", "std"] }
 xenonet-model = { path = "crates/xenonet-model" }
 xenonet-adapter = { path = "crates/xenonet-adapter" }
+# The adapters (adapters/*): one crate per platform, and all of them.
+xenonet-claude-code = { path = "adapters/claude-code" }
+xenonet-codex = { path = "adapters/codex" }
+xenonet-grok-build = { path = "adapters/grok-build" }
+xenonet-opencode = { path = "adapters/opencode" }
+xenonet-platforms = { path = "adapters/all" }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
 regex = "1"

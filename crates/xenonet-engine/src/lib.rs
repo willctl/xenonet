@@ -8,7 +8,6 @@
 //! runs in the binary and behind a JS twin, where the twin does the reading.
 
 pub mod attest;
-pub mod connect;
 pub mod delivery;
 pub mod engine;
 pub mod js;
@@ -20,5 +19,4 @@ pub mod procs;
 pub mod procs_native;
 pub mod sql;
 pub mod store;
-pub mod toml;
 pub mod verify;

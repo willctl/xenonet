@@ -8,7 +8,7 @@ use crate::ctx::pending_reply;
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_base::ids::is_session_id;
+use xenonet_adapter::apps::is_session_id;
 use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_engine::delivery::opencode::from_open_code_id;
 use xenonet_engine::sql::Arg;

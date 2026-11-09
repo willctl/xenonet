@@ -173,6 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_with_no_process_to_see_passes_unchecked_or_is_refused_as_unseen() {
+        xenonet_platforms::install();
         let c = checks();
         // A loopback address with no connection behind it: nothing owns it.
         let peer = Peer::new("127.0.0.1:9".parse().unwrap(), "127.0.0.1:1".parse().unwrap());
@@ -233,6 +234,7 @@ mod tests {
     // Claude Code (510); lsof names each executable by its real path.
     #[tokio::test]
     async fn the_tray_passes_from_its_bundle_in_an_applications_folder_and_never_under_an_agent() {
+        xenonet_platforms::install();
         const TRAY: &str = "/Users/me/Applications/XenoNet Tray.app/Contents/MacOS/XenoNet Tray";
         let rows = [
             (1, 0, "/sbin/launchd"),
@@ -273,6 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_in_a_sessions_name_is_held_to_the_process_it_comes_from() {
+        xenonet_platforms::install();
         let c = Checks::new(Shared::new(xenonet_engine::store::EngineStore::open(":memory:", 0.0).unwrap()), machine());
         let s = "claude:0190d3e0-0000-7000-8000-00000000000a";
         // From the shell under Claude Code: it's that session's, now pinned

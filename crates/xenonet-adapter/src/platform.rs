@@ -8,7 +8,10 @@
 //! ways to deliver to, start and connect its app.
 
 use crate::apps::App;
-use crate::check::CheckRow;
+use crate::check::{Check, CheckRow};
+use crate::connect::{Format, Shared};
+use crate::delivery::Ways;
+use crate::processes::Rules;
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_model::actions::HookEvent;
@@ -54,9 +57,27 @@ pub trait Platform: Send + Sync {
         decode_claude_style(event, body)
     }
 
-    /// The doctor rows this adapter brings, in the order they show.
-    fn checks(&self) -> Vec<CheckRow> {
+    /// The doctor checks this adapter brings, in the order they show.
+    fn checks(&self) -> Vec<Box<dyn Check>> {
         Vec::new()
+    }
+
+    /// How the app's processes are told apart, for an app whose sessions
+    /// XenoNet holds to its processes (the registry's `processes`).
+    fn processes(&self) -> Option<Rules> {
+        None
+    }
+
+    /// How live delivery reaches the app's sessions (the registry's
+    /// `delivery`).
+    fn delivery(&self) -> Option<Ways> {
+        None
+    }
+
+    /// The app's connect, through its config format (the registry's
+    /// `connect`).
+    fn connect(&self, _app: &App, _shared: &Shared) -> Option<Box<dyn Format>> {
+        None
     }
 }
 
@@ -104,10 +125,41 @@ impl Registry {
         self.platforms.iter().map(|p| p.id()).collect()
     }
 
-    /// Every adapter's doctor rows, in order.
-    pub fn checks(&self) -> Vec<CheckRow> {
+    /// Every adapter's doctor checks, in order.
+    pub fn checks(&self) -> Vec<Box<dyn Check>> {
         self.platforms.iter().flat_map(|p| p.checks()).collect()
     }
+
+    /// Their rows.
+    pub fn check_rows(&self) -> Vec<CheckRow> {
+        self.checks().iter().map(|c| c.row()).collect()
+    }
+
+    /// The adapters whose apps' processes XenoNet tells apart, with their
+    /// rules, in order.
+    pub fn processes(&self) -> Vec<(&App, Rules)> {
+        self.platforms.iter().filter_map(|p| Some((p.app(), p.processes()?))).collect()
+    }
+
+    /// The adapters whose apps live delivery reaches, with their ways in.
+    pub fn delivery(&self) -> Vec<(&App, Ways)> {
+        self.platforms.iter().filter_map(|p| Some((p.app(), p.delivery()?))).collect()
+    }
+}
+
+static INSTALLED: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+
+/// Puts the adapters this XenoNet runs with in place, once: the composition
+/// root (the binary's main) does, before anything asks. A second call
+/// changes nothing.
+pub fn install(platforms: Vec<Arc<dyn Platform>>) {
+    let _ = INSTALLED.set(Registry::new(platforms));
+}
+
+/// The adapters in place: none, until `install` is called.
+pub fn platforms() -> &'static Registry {
+    static EMPTY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+    INSTALLED.get().unwrap_or_else(|| EMPTY.get_or_init(Registry::default))
 }
 
 #[cfg(test)]
@@ -137,6 +189,6 @@ mod tests {
         let claude = crate::apps::app("claude").unwrap().clone();
         let r = Registry::new(vec![Arc::new(Plain(codex)), Arc::new(Plain(claude))]);
         assert_eq!(r.ids(), ["claude", "codex"]);
-        assert!(r.get("grok").is_none() && r.checks().is_empty());
+        assert!(r.get("grok").is_none() && r.check_rows().is_empty());
     }
 }

@@ -1,59 +1,73 @@
-//! core/engine/connect.js for the command: what XenoNet adds to Claude
-//! Code's and Codex's settings on this computer, shown first and taken out
-//! again (xenonet-engine's connect), with the files and the CLIs it reads
-//! done here, as the twin's createConnect did them.
+//! Connecting the agents from the command: what XenoNet adds to Claude
+//! Code's, Codex's and Grok Build's settings on this computer, shown first
+//! and taken out again (xenonet-adapter's connect, through the adapters
+//! in place), with the files and the CLIs it reads done here.
 
 use super::native::{fs_call, on_path_existing, run, text};
 use crate::out::Fail;
 use crate::sys;
 use serde_json::Value;
-use xenonet_engine::connect::{Connect, Instance, Options};
-use xenonet_engine::peer::{Calls, Result, Thrown};
+use xenonet_adapter::connect::{Connect, Instance, Machine, Options, Problem};
+use xenonet_engine::peer::Thrown;
 use xenonet_engine::sql::Arg;
 
-/// What the core asks for: "fs" (node:fs), "cli" (a CLI on PATH, or null)
-/// and "run" (a CLI's output, or what it wrote to stderr, thrown).
-struct Machine;
+/// This computer: its files, and the agents' CLIs on PATH.
+struct Here;
 
-impl Calls for Machine {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        match (path, method) {
-            ("fs", m) => fs_call(m, &args),
-            ("", "cli") => Ok(on_path_existing(&args.first().map(text).unwrap_or_default()).map_or(Arg::Null, Arg::Text)),
-            ("", "run") => {
-                let file = args.first().map(text).unwrap_or_default();
-                let argv: Vec<String> = match args.get(1) {
-                    Some(Arg::List(l)) => l.iter().map(text).collect(),
-                    _ => Vec::new(),
-                };
-                let r = run(&file, &argv, 20000.0, None);
-                match r.error {
-                    None => Ok(Arg::Text(r.stdout)),
-                    Some(message) => {
-                        let said = xenonet_base::text::js_trim(&r.stderr).to_string();
-                        Err(Thrown::new(if said.is_empty() { message } else { said }))
-                    }
-                }
+fn problem(t: Thrown) -> Problem {
+    Problem { message: t.message, code: t.code.as_deref().filter(|v| !v.is_null()).map(xenonet_base::text::js_string) }
+}
+
+fn fs(method: &str, args: Vec<Arg>) -> Result<Arg, Problem> {
+    fs_call(method, &args).map_err(problem)
+}
+
+impl Machine for Here {
+    fn read_text(&mut self, file: &str) -> Result<String, Problem> {
+        fs("readFileSync", vec![Arg::text(file), Arg::text("utf8")]).map(|a| text(&a))
+    }
+    fn write_text(&mut self, file: &str, text: &str) -> Result<(), Problem> {
+        fs("writeFileSync", vec![Arg::text(file), Arg::text(text)]).map(drop)
+    }
+    fn exists(&mut self, path: &str) -> bool {
+        fs("existsSync", vec![Arg::text(path)]).is_ok_and(|a| a.truthy())
+    }
+    fn make_dir(&mut self, dir: &str) -> Result<(), Problem> {
+        fs("mkdirSync", vec![Arg::text(dir), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).map(drop)
+    }
+    fn copy(&mut self, from: &str, to: &str) -> Result<(), Problem> {
+        fs("copyFileSync", vec![Arg::text(from), Arg::text(to)]).map(drop)
+    }
+    fn rename(&mut self, from: &str, to: &str) -> Result<(), Problem> {
+        fs("renameSync", vec![Arg::text(from), Arg::text(to)]).map(drop)
+    }
+    fn remove(&mut self, file: &str) -> Result<(), Problem> {
+        fs("rmSync", vec![Arg::text(file), Arg::Obj(vec![("force".into(), Arg::Bool(true))])]).map(drop)
+    }
+    fn cli(&mut self, name: &str) -> Option<String> {
+        on_path_existing(name)
+    }
+    /// A CLI's output, or what it wrote to stderr as the problem.
+    fn run(&mut self, bin: &str, args: &[String]) -> Result<String, Problem> {
+        let r = run(bin, args, 20000.0, None);
+        match r.error {
+            None => Ok(r.stdout),
+            Some(message) => {
+                let said = xenonet_base::text::js_trim(&r.stderr).to_string();
+                Err(Problem::new(if said.is_empty() { message } else { said }))
             }
-            _ => Err(Thrown::new(format!("connect asked for {path}.{method}"))),
         }
-    }
-    fn get(&mut self, path: &str) -> Result<Arg> {
-        Err(Thrown::new(format!("connect asked for {path}")))
-    }
-    fn kind(&mut self, _: &str) -> Result<String> {
-        Ok("undefined".into())
     }
 }
 
-/// createConnect({ port, bin }) as the command makes it, for this
-/// computer's own settings: its home folder, CLAUDE_CONFIG_DIR, CODEX_HOME
-/// and the instances XenoNet Dev runs as.
+/// A connect for this computer's own settings, with the port and binary
+/// the command was given: its home folder, CLAUDE_CONFIG_DIR, CODEX_HOME,
+/// GROK_HOME and the instances XenoNet Dev runs as.
 fn core(opts: &Value) -> Connect {
     let t = |k: &str| opts.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
     Connect::new(Options {
-        port: opts.get("port").map_or(Arg::Undef, super::native::arg_of),
-        demo: Arg::Bool(false),
+        port: xenonet_base::text::js_number(opts.get("port")),
+        demo: false,
         bin: t("bin"),
         home: sys::home(),
         claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
@@ -61,19 +75,22 @@ fn core(opts: &Value) -> Connect {
         grok_home: std::env::var("GROK_HOME").ok(),
         console_mcp: sys::var("XENONET_LAUNCHER_BIN").or_else(|| sys::var("XENONET_LAUNCHER_EXEC")).is_some(),
         platform: sys::platform().into(),
-        instances: xenonet_app::instances::INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: Arg::Num(f64::from(i.port)) }).collect(),
+        instances: xenonet_app::instances::INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: f64::from(i.port) }).collect(),
     })
 }
 
-pub fn preview(opts: &Value) -> std::result::Result<Value, Fail> {
-    core(opts).preview(&mut Machine).map_err(super::thrown)
+fn fail(p: Problem) -> Fail {
+    Fail::error(p.message)
 }
 
-pub fn apply(opts: &Value, apps: &[String]) -> std::result::Result<Value, Fail> {
-    let apps: Vec<Arg> = apps.iter().map(|a| Arg::Text(a.clone())).collect();
-    core(opts).apply(&mut Machine, &apps).map_err(super::thrown)
+pub fn preview(opts: &Value) -> Result<Value, Fail> {
+    core(opts).preview(&mut Here).map_err(fail)
 }
 
-pub fn remove(opts: &Value) -> std::result::Result<Value, Fail> {
-    core(opts).remove(&mut Machine).map_err(super::thrown)
+pub fn apply(opts: &Value, apps: &[String]) -> Result<Value, Fail> {
+    core(opts).apply(&mut Here, apps).map_err(fail)
+}
+
+pub fn remove(opts: &Value) -> Result<Value, Fail> {
+    core(opts).remove(&mut Here).map_err(fail)
 }

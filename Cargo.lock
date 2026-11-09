@@ -2229,9 +2229,13 @@ dependencies = [
 name = "xenonet-adapter"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
+ "regex",
  "serde",
  "serde_json",
+ "xenonet-base",
  "xenonet-model",
+ "xenonet-schema",
 ]
 
 [[package]]
@@ -2269,7 +2273,6 @@ dependencies = [
  "regex",
  "serde_json",
  "windows-sys 0.61.2",
- "xenonet-adapter",
 ]
 
 [[package]]
@@ -2278,6 +2281,17 @@ version = "0.2.0"
 dependencies = [
  "rusqlite",
  "serde_json",
+ "xenonet-base",
+]
+
+[[package]]
+name = "xenonet-claude-code"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "serde_json",
+ "xenonet-adapter",
  "xenonet-base",
 ]
 
@@ -2302,6 +2316,7 @@ dependencies = [
  "xenonet-engine",
  "xenonet-hosts",
  "xenonet-mcp",
+ "xenonet-platforms",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
@@ -2309,6 +2324,17 @@ dependencies = [
  "xenonet-wire-app",
  "xenonet-wire-engine",
  "xenonet-wire-map",
+]
+
+[[package]]
+name = "xenonet-codex"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
 ]
 
 [[package]]
@@ -2329,8 +2355,10 @@ dependencies = [
 name = "xenonet-doctor"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "regex",
  "serde_json",
+ "xenonet-adapter",
  "xenonet-app",
  "xenonet-base",
  "xenonet-schema",
@@ -2348,7 +2376,18 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-base",
  "xenonet-blocks",
- "xenonet-schema",
+ "xenonet-platforms",
+]
+
+[[package]]
+name = "xenonet-grok-build"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
 ]
 
 [[package]]
@@ -2394,6 +2433,7 @@ dependencies = [
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
+ "xenonet-platforms",
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",
@@ -2422,6 +2462,25 @@ dependencies = [
  "tokio",
  "x25519-dalek",
  "xenonet-base",
+]
+
+[[package]]
+name = "xenonet-opencode"
+version = "0.2.0"
+dependencies = [
+ "xenonet-adapter",
+]
+
+[[package]]
+name = "xenonet-platforms"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-claude-code",
+ "xenonet-codex",
+ "xenonet-grok-build",
+ "xenonet-opencode",
 ]
 
 [[package]]
@@ -2454,6 +2513,7 @@ dependencies = [
  "xenonet-base",
  "xenonet-engine",
  "xenonet-net",
+ "xenonet-platforms",
  "xenonet-schema",
  "xenonet-state",
  "xenonet-wire-app",
@@ -2507,6 +2567,7 @@ dependencies = [
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
+ "xenonet-grok-build",
  "xenonet-hosts",
  "xenonet-integrations",
  "xenonet-net",
@@ -2535,6 +2596,7 @@ dependencies = [
  "xenonet-components",
  "xenonet-engine",
  "xenonet-hosts",
+ "xenonet-platforms",
  "xenonet-schema",
  "xenonet-service",
 ]

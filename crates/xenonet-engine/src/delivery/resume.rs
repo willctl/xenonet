@@ -30,8 +30,8 @@ fn is_uuid(s: &str) -> bool {
 
 /// The apps whose sessions can be resumed, each with its command
 /// (`apps`).
-fn resumed() -> impl Iterator<Item = &'static (&'static App, Ways)> {
-    apps::apps().iter().filter(|(_, w)| w.resume.is_some())
+fn resumed() -> impl Iterator<Item = (&'static App, Ways)> {
+    apps::apps().into_iter().filter(|(_, w)| w.resume.is_some())
 }
 
 /// The environment a resumed turn runs with: XenoNet's own, without what
@@ -55,7 +55,8 @@ pub fn resume_command(agent: &Arg, settings: &Arg) -> Option<(String, Vec<Arg>)>
         return None;
     }
     let resume = resumed().find(|(a, _)| a.id == app)?.1.resume?;
-    Some(resume(id, settings))
+    let (bin, args) = resume(id, settings.as_str());
+    Some((bin, args.into_iter().map(Arg::text).collect()))
 }
 
 /// The command for a copy of a Claude Code session that a process holds:
@@ -124,6 +125,7 @@ mod tests {
 
     #[test]
     fn only_a_sessions_own_id_resumes() {
+        xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         assert_eq!(resume_command(&Arg::text(format!("codex:{id}")), &Arg::Null).unwrap().1.len(), 4);
         assert_eq!(resume_command(&Arg::text(format!("claude:{id}")), &Arg::text("/s")).unwrap().1.len(), 5);
@@ -147,6 +149,7 @@ mod tests {
 
     #[test]
     fn a_copy_forks_only_from_a_claude_code_session() {
+        xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         let (cmd, args) = fork_command(&Arg::text(format!("claude:{id}")), &Arg::text("/s/listen.json")).unwrap();
         assert_eq!(
@@ -159,6 +162,7 @@ mod tests {
 
     #[test]
     fn a_resumed_or_forked_claude_code_turn_asks_its_prompts_of_you() {
+        xenonet_platforms::install();
         let args = |v: Vec<Arg>| v.iter().map(js_text).collect::<Vec<_>>();
         let (_, fork) = fork_command(&Arg::text("claude:0190d3e0-0000-7000-8000-00000000ab01"), &Arg::Null).unwrap();
         let asked = args(with_permission_tool("claude", fork, "xenonet-dev"));
