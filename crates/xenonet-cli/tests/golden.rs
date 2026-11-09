@@ -83,11 +83,14 @@ fn fill(text: &str, home: &str, now: f64) -> String {
     out
 }
 
+// The fixture keeps `.claude` as `%2Eclaude`, since the repo's .gitignore
+// leaves out every `.claude/`; the copy has the real name.
 fn copy_into(from: &Path, to: &Path, rel: &str, found: &mut Vec<(PathBuf, String)>) {
     let mut names: Vec<_> = std::fs::read_dir(from).unwrap().map(|e| e.unwrap()).collect();
     names.sort_by_key(std::fs::DirEntry::file_name);
     for e in names {
-        let name = e.file_name().into_string().unwrap();
+        let stored = e.file_name().into_string().unwrap();
+        let name = stored.strip_prefix("%2E").map_or_else(|| stored.clone(), |rest| format!(".{rest}"));
         let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
         let target = to.join(&name);
         if e.file_type().unwrap().is_dir() {
