@@ -1,20 +1,20 @@
 // The service Desktop runs (electron/service-runtime.js): the Rust binary,
 // which one that is, and what Desktop says when there's none; and, in a
-// packaged XenoNet, the Service and Tools it gets ready first, from its
-// bundle or the latest release, including over an install 0.3.0 left,
-// whose packages were a node and XenoNet's JS. Installs and packages are
-// made up (test/harness/components.js) and the service is a fake that
-// answers status and stop.
+// packaged XenoNet, the Service and Tools the xenonet binary gets ready
+// first (xenonet components). The packages are made up
+// (test/harness/components.js), with a shell script that answers the
+// startup check as their binary, and the installer is this checkout's
+// build, in a runtime folder of the test's own.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
-import { rustBinary, missingBinary, serviceCommand, readyComponents, earlierNotice } from "../electron/service-runtime.js";
-import { installedRuntime } from "../electron/lib/components/install.js";
-import { currentComponent } from "../electron/lib/components/packages.js";
-import { BIN, NODE, posixOnly, pack, bundle, fakeService, earlierInstall } from "./harness/components.js";
+import { rustBinary, missingBinary, serviceCommand, readyComponents, installedRuntime, earlierNotice } from "../electron/service-runtime.js";
+import { componentsBin, components } from "../electron/lib/components/run.js";
+import { posixOnly, pack, bundle } from "./harness/components.js";
+import { currentComponent } from "./harness/component-fixture.js";
+import { builtBinary } from "../scripts/xenonet.mjs";
 
 // Each file that exists, with when it was written.
 const have = (files) => (f) => {
@@ -57,124 +57,81 @@ test("how the service starts: the installed binary serving, a checkout's with --
   assert.equal(serviceCommand({ env: { XENONET_SERVICE_BIN: "/x/xenonet" }, installed: earlier, platform: "darwin", stat: have({ "/x/xenonet": 1 }) }).exec, "/x/xenonet", "a binary named still wins");
 });
 
+// The installer: this checkout's build, which `npm run rust:bin` makes.
+const xenonet = builtBinary();
+const real = posixOnly.skip ? posixOnly : { skip: !xenonet && "no xenonet binary: npm run rust:bin" };
+
 function workspace(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-desktop-start-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  return { dir, env: { XENONET_RUNTIME_DIR: path.join(dir, "runtime") } };
+  // Nothing of the machine's own: its runtime folder, port and PATH.
+  const env = { ...process.env, XENONET_RUNTIME_DIR: path.join(dir, "runtime"), XENONET_PORT: "47979", PATH: "/usr/bin:/bin" };
+  delete env.XENONET_LAUNCHER_BIN;
+  delete env.XENONET_LAUNCHER_ROOT;
+  return { dir, env };
 }
 
-// The latest release, as componentUpdates and downloadComponent fetch it:
-// its components.json and the packages it lists, from `packages`. `asked`
-// counts the requests; `offline` fails them all.
-async function release(dir, packages, { offline = false } = {}) {
+// A bundle as the installer ships it, with the binary that installs it.
+async function shipped(dir, packages) {
+  const out = await bundle(dir, "bundle", packages);
+  fs.copyFileSync(xenonet, path.join(out, path.basename(xenonet)));
+  return out;
+}
+
+test("the installer is the bundle's own binary, else the launcher's", () => {
+  const launcher = path.join("/rt", "launcher", "xenonet");
+  const env = { XENONET_RUNTIME_DIR: "/rt" };
+  assert.equal(componentsBin({ env, bundle: "/b", platform: "darwin", exists: (f) => [path.join("/b", "xenonet"), launcher].includes(f) }), path.join("/b", "xenonet"));
+  assert.equal(componentsBin({ env, bundle: null, platform: "darwin", exists: (f) => f === launcher }), launcher, "a Desktop-only update has no bundle");
+  assert.equal(componentsBin({ env, bundle: "/b", platform: "darwin", exists: () => false }), null);
+});
+
+test("with no installer, Desktop says to install the bundle", async () => {
+  await assert.rejects(components(null, ["ready"]), /Install the XenoNet bundle/);
+});
+
+test("Desktop's first start: the bundle's Service and Tools are installed, and the service runs from the installed Service", real, async (t) => {
+  const { dir, env } = workspace(t);
+  const b = await shipped(dir, [["service", "9.9.1"], ["tools", "9.9.1"]]);
+  assert.deepEqual(await readyComponents({ env, bundle: b, test: true }), { earlier: [], waiting: false, problems: [] });
+  for (const c of ["service", "tools"]) assert.equal(currentComponent(xenonet, c, env).version, "9.9.1", c);
+  const runtime = await installedRuntime({ env, bundle: b });
+  // From the Service's stable path, which an update points at the new one.
+  assert.equal(runtime.exec, path.join(env.XENONET_RUNTIME_DIR, "components", "service", "active", "bin", "xenonet"));
+  assert.ok(fs.existsSync(runtime.exec));
+  assert.deepEqual(runtime.args, ["serve"]);
+  // Started again, nothing changes: a bundle never reinstalls what's there.
+  assert.deepEqual(await readyComponents({ env, bundle: b, test: true }), { earlier: [], waiting: false, problems: [] });
+});
+
+test("a newer Tools from a release switches at once", real, async (t) => {
+  const { dir, env } = workspace(t);
+  const b = await shipped(dir, [["service", "9.9.1"], ["tools", "9.9.1"]]);
+  await readyComponents({ env, bundle: b, test: true });
   const out = path.join(dir, "release");
   fs.mkdirSync(out);
-  const items = [];
-  for (const [component, version] of packages) items.push((await pack(out, component, version)).item);
-  const r = { asked: 0 };
-  r.fetcher = async (url) => {
-    r.asked++;
-    if (offline) throw new TypeError("fetch failed");
-    const name = url.split("/").pop();
-    if (name === "components.json") return { ok: true, status: 200, json: async () => ({ format: 1, packages: items }) };
-    return { ok: true, status: 200, body: Readable.from([fs.readFileSync(path.join(out, name))]) };
-  };
-  return r;
-}
-
-const selected = (env) => ["service", "tools"].map((c) => currentComponent(c, env)?.version ?? null);
-
-test("Desktop with a bundle over 0.3.0: the bundle's Service and Tools replace it, the old service stops, and the new one starts", posixOnly, async (t) => {
-  const { dir, env } = workspace(t);
-  earlierInstall(env);
-  const svc = fakeService(env, { version: "0.3.0", terminals: [] });
-  const latest = await release(dir, [["service", "0.4.0"], ["tools", "0.4.0"]]);
-  const ready = await readyComponents({ env, bundle: await bundle(dir, "bundle", [["service", "0.4.0"], ["tools", "0.4.0"]]), test: true, operations: svc.operations, fetcher: latest.fetcher });
-  assert.deepEqual(ready, { earlier: [], waiting: false, problems: [] });
-  assert.equal(earlierNotice(ready), null);
-  assert.deepEqual(selected(env), ["0.4.0", "0.4.0"]);
-  assert.deepEqual([svc.stops, svc.starts, svc.state.version], [1, ["0.4.0"], "0.4.0"]);
-  assert.equal(latest.asked, 0, "nothing downloaded: the bundle brought both");
-  const installed = installedRuntime(env);
-  const active = path.join(env.XENONET_RUNTIME_DIR, "components", "service", "active");
-  assert.deepEqual([installed.root, installed.exec], [active, path.join(active, BIN)], "the copy that keeps its path across updates");
-  assert.deepEqual(serviceCommand({ env: {}, installed }), { root: installed.root, exec: installed.exec, args: ["serve"] }, "and Desktop has a binary to run, not 'binary is missing'");
+  const next = await pack(out, "tools", "9.9.2");
+  const result = await components(xenonet, ["activate", next.file, JSON.stringify(next.item)], { env });
+  assert.equal(result.status, "updated");
+  assert.equal(currentComponent(xenonet, "tools", env).version, "9.9.2");
 });
 
-test("Desktop with a bundle over a 0.3.0 service with a terminal open: it keeps that service until the terminal closes, and says so", posixOnly, async (t) => {
+test("a test instance never downloads: a bundle missing a component stops Desktop, with its reason", real, async (t) => {
   const { dir, env } = workspace(t);
-  const earlier = earlierInstall(env);
-  const svc = fakeService(env, { version: "0.3.0", terminals: [{ id: 1, exited: false }] });
-  const latest = await release(dir, [["service", "0.4.0"], ["tools", "0.4.0"]]);
-  const b = await bundle(dir, "bundle", [["service", "0.4.0"], ["tools", "0.4.0"]]);
-  const ready = await readyComponents({ env, bundle: b, test: true, operations: svc.operations, fetcher: latest.fetcher });
-  assert.deepEqual(ready, { earlier: ["service"], waiting: true, problems: [] });
-  assert.match(earlierNotice(ready).body, /Close them, then quit and reopen XenoNet/);
-  assert.deepEqual(selected(env), ["0.3.0", "0.4.0"]);
-  assert.deepEqual([svc.stops, latest.asked], [0, 0]);
-  const command = serviceCommand({ env: {}, installed: installedRuntime(env) });
-  assert.deepEqual(command, { root: earlier.service.root, exec: path.join(earlier.service.root, NODE), args: [path.join(earlier.service.root, "server", "index.js")] }, "the service it had, if it has to start it again");
-
-  // Reopened once the terminal is closed.
-  svc.state.terminals[0].exited = true;
-  assert.deepEqual(await readyComponents({ env, bundle: b, test: true, operations: svc.operations }), { earlier: [], waiting: false, problems: [] });
-  assert.deepEqual([selected(env), svc.stops, svc.starts], [["0.4.0", "0.4.0"], 1, ["0.4.0"]]);
+  const b = await shipped(dir, [["tools", "9.9.1"]]);
+  await assert.rejects(readyComponents({ env, bundle: b, test: true }), /The test bundle is missing its components/);
 });
 
-test("Desktop with a bundle whose service doesn't start: the 0.3.0 one is back and running, Desktop starts with it and says why", posixOnly, async (t) => {
+test("a bundle whose binary doesn't start fails Desktop's first start, and says why", real, async (t) => {
   const { dir, env } = workspace(t);
-  earlierInstall(env);
-  const svc = fakeService(env, { version: "0.3.0", terminals: [] }, { failing: "0.4.0" });
-  const latest = await release(dir, [["service", "0.4.0"], ["tools", "0.4.0"]]);
-  const ready = await readyComponents({ env, bundle: await bundle(dir, "bundle", [["service", "0.4.0"], ["tools", "0.4.0"]]), test: true, operations: svc.operations, fetcher: latest.fetcher });
-  assert.deepEqual([ready.earlier, ready.waiting], [["service"], false]);
-  assert.match(ready.problems[0], /previous version was restored/);
-  assert.match(earlierNotice(ready).body, /The Service you had keeps running/);
-  assert.deepEqual([svc.state.version, latest.asked], ["0.3.0", 0]);
+  const b = await shipped(dir, [["service", "9.9.1", { fail: "runtime" }], ["tools", "9.9.1"]]);
+  await assert.rejects(readyComponents({ env, bundle: b, test: true }));
+  assert.equal(currentComponent(xenonet, "service", env), null);
 });
 
-test("Desktop-only update over 0.3.0: the Service and Tools come from the latest release, Tools first, and the old service stops for the new one", posixOnly, async (t) => {
-  const { dir, env } = workspace(t);
-  earlierInstall(env);
-  const svc = fakeService(env, { version: "0.3.0", terminals: [] });
-  const latest = await release(dir, [["service", "0.4.0"], ["tools", "0.4.0"]]);
-  assert.deepEqual(await readyComponents({ env, operations: svc.operations, fetcher: latest.fetcher }), { earlier: [], waiting: false, problems: [] });
-  assert.deepEqual(selected(env), ["0.4.0", "0.4.0"]);
-  assert.deepEqual([svc.stops, svc.starts], [1, ["0.4.0"]]);
-  assert.ok(svc.runtimes[0].env.XENONET_LAUNCHER_BIN, "the Tools were in place when the service started");
-
-  // A second start has nothing to fetch.
-  const asked = latest.asked;
-  await readyComponents({ env, operations: svc.operations, fetcher: latest.fetcher });
-  assert.equal(latest.asked, asked);
-});
-
-test("Desktop-only update over 0.3.0 with a terminal open: the Tools update, the service waits", posixOnly, async (t) => {
-  const { dir, env } = workspace(t);
-  earlierInstall(env);
-  const svc = fakeService(env, { version: "0.3.0", terminals: [{ id: 1, exited: false }] });
-  const latest = await release(dir, [["service", "0.4.0"], ["tools", "0.4.0"]]);
-  assert.deepEqual(await readyComponents({ env, operations: svc.operations, fetcher: latest.fetcher }), { earlier: ["service"], waiting: true, problems: [] });
-  assert.deepEqual([selected(env), svc.stops], [["0.3.0", "0.4.0"], 0]);
-});
-
-test("Desktop-only update over 0.3.0 while offline: Desktop starts with what it had and says so; with nothing installed it stops", posixOnly, async (t) => {
-  const { dir, env } = workspace(t);
-  earlierInstall(env);
-  const offline = await release(dir, [], { offline: true });
-  const ready = await readyComponents({ env, operations: fakeService(env, null).operations, fetcher: offline.fetcher });
-  assert.deepEqual([ready.earlier, ready.waiting], [["service", "tools"], false]);
-  assert.match(earlierNotice(ready).body, /The Service and Tools you had keep running\. Quit and reopen XenoNet to try again\./);
-  assert.deepEqual(selected(env), ["0.3.0", "0.3.0"]);
-
-  const fresh = { XENONET_RUNTIME_DIR: path.join(dir, "fresh") };
-  await assert.rejects(readyComponents({ env: fresh, operations: fakeService(fresh, null).operations, fetcher: offline.fetcher }), /fetch failed/);
-});
-
-test("a packaged test instance never downloads, and a bundle that fails a first install still stops Desktop, with its reason", posixOnly, async (t) => {
-  const { dir, env } = workspace(t);
-  await assert.rejects(readyComponents({ env, bundle: await bundle(dir, "tools-only", [["tools", "0.4.0"]]), test: true }), /test bundle is missing its components/);
-  const other = { XENONET_RUNTIME_DIR: path.join(dir, "other") };
-  const offline = await release(dir, [], { offline: true });
-  await assert.rejects(readyComponents({ env: other, bundle: await bundle(dir, "broken", [["service", "0.4.0", { fail: "runtime" }], ["tools", "0.4.0"]]), fetcher: offline.fetcher }), /runtime did not pass its startup check/);
+test("what Desktop says while a Service or Tools from before 0.4.0 still runs", () => {
+  assert.equal(earlierNotice({ earlier: [], waiting: false, problems: [] }), null);
+  assert.match(earlierNotice({ earlier: ["service"], waiting: true, problems: [] }).title, /Close your terminals/);
+  const failed = earlierNotice({ earlier: ["service", "tools"], waiting: false, problems: ["The download failed"] });
+  assert.match(failed.body, /^The download failed\. The Service and Tools you had keep running/);
 });

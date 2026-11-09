@@ -393,13 +393,13 @@ service runs a local build.
    cases over a made-up home (`crates/xenonet-cli/tests/golden/`), the map's
    golden world (`crates/xenonet-wire-map/tests/golden/`), and the network's
    known answers (`test/fixtures/net/`). The modules the page and Desktop
-   import moved to `src/shared/` and `electron/lib/`. Left for later, and
-   not blocking phase 2: Electron still installs and updates components
-   with its own JS (`electron/lib/components/`, with `launcher.cjs`) rather
-   than `crates/xenonet-components`; `state.json` in the golden world isn't
-   replayed until the map's driver takes a clock; and the routes and help
-   texts where the JS and the Rust already differed weren't frozen (the
-   commit that froze them lists them).
+   import moved to `src/shared/` and `electron/lib/`. Desktop installs and
+   updates its components through the binary (`xenonet components`, over
+   `crates/xenonet-components`), and `launcher.cjs` lives in that crate.
+   Left for later, and not blocking phase 2: `state.json` in the golden
+   world isn't replayed until the map's driver takes a clock, and the
+   routes and help texts where the JS and the Rust already differed
+   weren't frozen (the commit that froze them lists them).
 2. **A typed core, no more string dispatch.** Add `xenonet-model` and
    `xenonet-adapter`. Delete `Calls`, `Arg`, `peer.rs`, `world.rs`, the
    JS emulation and the runtime schema checker. Dissolve the three

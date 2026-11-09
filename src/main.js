@@ -804,7 +804,7 @@ const themesUi = createThemes({ post, sfx, toast: (m, b) => hud.toast(m, b), not
 const environmentsUi = createEnvironments({ modals, post, sfx, note, toast: (m, b) => hud.toast(m, b), onCommands: (list) => setCommands("environment-", list) });
 document.getElementById("environment-open").onclick = () => environmentsUi.open();
 
-// The xenonet command for terminals (electron/lib/command.js), run by this app.
+// The xenonet command for terminals, which the service installs on your PATH.
 async function installCommand() {
   const res = await fetch("/api/command", { method: "POST" });
   const st = await res.json().catch(() => ({}));

@@ -8,10 +8,10 @@ import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { installedConsole } from "../../electron/lib/components/console.js";
 import { consoleMcp } from "../harness/console-mcp.js";
-import { installLauncher, installBundle, activatePackage } from "../../electron/lib/components/install.js";
 import { connectService } from "../../electron/lib/components/runtime.js";
-import { currentComponent } from "../../electron/lib/components/packages.js";
-import { nextComponent } from "../harness/component-fixture.js";
+import { components } from "../../electron/lib/components/run.js";
+import { currentComponent, nextComponent, testBundle } from "../harness/component-fixture.js";
+import { builtBinary } from "../../scripts/xenonet.mjs";
 import { limit } from "../harness/software.js";
 
 const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => r(port)); }); });
@@ -33,7 +33,13 @@ test("production Desktop restarts without losing its service, console connection
   const port = await freePort();
   const env = { ...process.env, XENONET_INSTANCE: "test", XENONET_DEMO: "1", XENONET_STANDALONE: "1", XENONET_RUNTIME_DIR: dir, XENONET_RUNTIME_EXEC: process.execPath, XENONET_PORT: String(port), XENONET_DESKTOP_PORT: String(await freePort()), XENONET_SHOW: process.env.XENONET_E2E_SHOW ?? "hidden" };
   delete env.ELECTRON_RUN_AS_NODE;
-  if (process.env.XENONET_TEST_COMPONENT_BUNDLE) await installBundle(process.env.XENONET_TEST_COMPONENT_BUNDLE, { env, command: false });
+  // The components are installed and updated by the xenonet binary
+  // (xenonet components), from a bundle: XENONET_TEST_COMPONENT_BUNDLE's,
+  // or one made here from this checkout's build.
+  const xenonet = builtBinary();
+  const shipped = process.env.XENONET_TEST_COMPONENT_BUNDLE || (await testBundle(xenonet, dir));
+  const installer = path.join(shipped, path.basename(xenonet));
+  await components(installer, ["bundle", shipped, "--no-command"], { env });
   const electron = process.env.XENONET_TEST_PACKAGED_EXE || createRequire(import.meta.url)("electron");
   const out = fs.openSync(path.join(dir, "desktop.log"), "a");
   const child = spawn(electron, process.env.XENONET_TEST_PACKAGED_EXE ? [] : [process.cwd(), "--prod"], { env, stdio: ["ignore", out, out], windowsHide: true });
@@ -44,7 +50,7 @@ test("production Desktop restarts without losing its service, console connection
   try {
     await s.ready({ timeout: 90000 });
     service = await connectService({ env });
-    const launcher = installLauncher(env);
+    const launcher = await components(installer, ["launcher"], { env });
     mcp = await consoleMcp({ bin: launcher?.bin, env });
     if (launcher) {
       const names = (await mcp.list()).result.tools.map((tool) => tool.name);
@@ -93,21 +99,22 @@ test("production Desktop restarts without losing its service, console connection
     // Desktop passes on its page's requests alone; other programs go to the
     // service, which sees who they are.
     assert.equal((await fetch(`http://127.0.0.1:${env.XENONET_DESKTOP_PORT}/api/summary`)).status, 403);
-    if (process.env.XENONET_TEST_COMPONENT_BUNDLE) {
-      const tools = await nextComponent("tools", env);
-      const serviceUpdate = await nextComponent("service", env);
-      assert.equal((await activatePackage(tools.file, tools.item, { env })).status, "updated");
+    {
+      const activate = (u) => components(installer, ["activate", u.file, JSON.stringify(u.item)], { env });
+      const tools = await nextComponent(installer, "tools", env);
+      const serviceUpdate = await nextComponent(installer, "service", env);
+      assert.equal((await activate(tools)).status, "updated");
       assert.equal(mcp.proc.exitCode, null);
       assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, undefined);
       // The new Tools' binary, which the launcher is a copy of, says their version.
-      const version = JSON.parse(execFileSync(path.join(currentComponent("tools", env).root, "bin", path.basename(launcher.bin)), ["--version", "--json"], { env, encoding: "utf8", windowsHide: true }));
+      const version = JSON.parse(execFileSync(path.join(currentComponent(installer, "tools", env).root, "bin", path.basename(launcher.bin)), ["--version", "--json"], { env, encoding: "utf8", windowsHide: true }));
       assert.equal(version.version, tools.item.version);
       assert.ok(fs.existsSync(tools.previous.root));
-      assert.equal((await activatePackage(serviceUpdate.file, serviceUpdate.item, { env })).status, "staged");
+      assert.equal((await activate(serviceUpdate)).status, "staged");
       assert.equal((await service.request("status")).pid, before.pid);
       await s.driver("terminal", "close", { id });
       service.close(); service = null;
-      assert.equal((await activatePackage(serviceUpdate.file, serviceUpdate.item, { env })).status, "updated");
+      assert.equal((await activate(serviceUpdate)).status, "updated");
       await s.ready();
       service = await connectService({ env });
       assert.notEqual((await service.request("status")).pid, before.pid);

@@ -299,7 +299,7 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 | Files | What they cover |
 | --- | --- |
 | `main.js` | The window, and starting or connecting to the service |
-| `service-runtime.js`, `service-client.js`, `service-pty.js` | Which `xenonet` binary runs the service, Desktop's connection to it, and the terminal drawer's shells, which live in the service |
+| `service-runtime.js`, `service-client.js`, `service-pty.js` | Which `xenonet` binary runs the service, getting the components ready through it, Desktop's connection to the service, and the terminal drawer's shells, which live in the service |
 | `tray.js`, `icons.js`, `preload.cjs` | The tray, the icons and the preload bridge |
 | `trust.js` | The only page the app answers |
 | `login.js` | Opening Desktop at login |
@@ -310,7 +310,7 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 | `control.js`, `keys.js` | XenoNet Dev's control channel |
 | `recorder.js` | Recording the window to an MP4 |
 | `desktop-server.js` | XenoNet Dev's frontend server, with Vite for hot reload |
-| `lib/` | The Node modules Desktop runs itself: its folders and paths (`dirs.js`, `paths.js`), its log, XenoNet Dev's instances, actor tokens and token files, the `xenonet` command on your PATH, the page's static files, and the components: installing, updating and connecting to the service (`lib/components/`, with the launcher script `launcher.cjs`, which the binary carries too) |
+| `lib/` | The Node modules Desktop runs itself: its folders and paths (`dirs.js`, `paths.js`), its log, XenoNet Dev's instances, actor tokens and token files, the page's static files, and the component service's client (`lib/components/`). Installing and updating the components is the binary's: `lib/components/run.js` runs `xenonet components` (`ready`, `runtime`, `updates`, `update`), with the binary a bundle carries beside its packages, or the launcher's |
 
 ### `scripts/`
 

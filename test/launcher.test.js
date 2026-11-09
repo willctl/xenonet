@@ -1,8 +1,7 @@
-// XenoNet's stable launcher (electron/lib/components/launcher.cjs), which hooks, MCP
+// XenoNet's stable launcher (crates/xenonet-components/src/launcher.cjs), which hooks, MCP
 // servers and the xenonet command run from a path that never moves: a hook
 // goes to XenoNet by itself, quickly, and never fails its agent; it says what
-// it is; without Tools it says so in a line; and XenoNet writes a newer one
-// over an older one, never the other way.
+// it is; and without Tools it says so in a line.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,14 +9,18 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { writeLauncher, launcherVersion, LAUNCHER_SOURCE } from "../electron/lib/components/install.js";
 
-const SOURCE = fs.readFileSync(LAUNCHER_SOURCE, "utf8");
+// The script the binary writes as the launcher (LAUNCHER_SCRIPT in
+// crates/xenonet-components/src/install.rs, whose tests cover writing it).
+const SOURCE = fs.readFileSync(new URL("../crates/xenonet-components/src/launcher.cjs", import.meta.url), "utf8");
+// The version its first line says (// xenonet-launcher <n>).
+const VERSION = Number(/^\/\/ xenonet-launcher (\d+)/.exec(SOURCE)[1]);
 
 function runtime() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xenonet-launcher-"));
   const entry = path.join(dir, "launcher", "cli", "xenonet.js");
-  writeLauncher(entry);
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(entry, SOURCE);
   return { dir, entry, done: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }) };
 }
 
@@ -83,31 +86,11 @@ test("it says what it is, and without Tools any other command says so in a line"
   try {
     const probe = await run(r.entry, ["--launcher"]);
     const said = JSON.parse(probe.stdout);
-    assert.deepEqual([said.launcher, said.protocol, said.tools], [launcherVersion(SOURCE), 1, null]);
+    assert.deepEqual([said.launcher, said.protocol, said.tools], [VERSION, 1, null]);
     const mcp = await run(r.entry, ["mcp"]);
     assert.equal(mcp.code, 1);
     assert.match(mcp.stderr, /^XenoNet's Tools aren't installed here/);
     assert.equal(mcp.stderr.trim().split("\n").length, 1, "a line, not a stack trace");
-  } finally {
-    r.done();
-  }
-});
-
-test("XenoNet writes a newer launcher over an older one, never an older over a newer", () => {
-  const r = runtime();
-  try {
-    assert.equal(launcherVersion(SOURCE) >= 2, true);
-    assert.equal(launcherVersion("// XenoNet's stable command launcher. Component files stay versioned.\n"), 1, "the first, which said no version");
-    assert.equal(launcherVersion(""), 0);
-    fs.writeFileSync(r.entry, "// XenoNet's stable command launcher. Component files stay versioned.\nold();\n");
-    assert.equal(writeLauncher(r.entry), true, "the old one is replaced");
-    assert.equal(fs.readFileSync(r.entry, "utf8"), SOURCE);
-    assert.equal(writeLauncher(r.entry), false, "the same one stays");
-    const newer = SOURCE.replace(/^\/\/ xenonet-launcher \d+/, "// xenonet-launcher 99");
-    fs.writeFileSync(r.entry, newer);
-    assert.equal(writeLauncher(r.entry), false, "a newer one, from a newer XenoNet, stays");
-    assert.equal(fs.readFileSync(r.entry, "utf8"), newer);
-    assert.deepEqual(fs.readdirSync(path.dirname(r.entry)), ["xenonet.js"], "no temporary file left");
   } finally {
     r.done();
   }

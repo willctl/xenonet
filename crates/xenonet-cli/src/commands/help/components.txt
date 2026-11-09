@@ -1,0 +1,24 @@
+Install, update and look at XenoNet's components (Service, Tools and the
+Mac's tray), for XenoNet Desktop. Each prints JSON.
+
+  xenonet components ready [<bundle>] [--test]
+                                what Desktop does when it starts: installs
+                                what the bundle brings, fetches any component
+                                still missing, and says which are from
+                                before 0.4.0 and whether an update waits
+  xenonet components bundle <bundle> [--no-command]
+                                install what a bundle brings that isn't installed
+  xenonet components runtime    finish a service update that was cut short,
+                                then how to start the installed service
+  xenonet components updates    the published Service and Tools, beside these
+  xenonet components update <service|tools>
+                                download and switch to the published one
+  xenonet components activate <package> <item>
+                                switch to a downloaded package (<item> is its
+                                release entry, as JSON)
+  xenonet components current <component>
+                                the installed one, and whether it has the binary
+  xenonet components launcher   write the launcher hooks and MCP entries run
+
+A <bundle> is a folder with components.json and the packages it lists.
+--test (ready) installs no xenonet command on PATH and fetches nothing.

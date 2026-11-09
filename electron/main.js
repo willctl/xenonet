@@ -10,8 +10,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerServicePty } from "./service-pty.js";
 import { connectService, ensureService, launcherBin, runtimeDir, xenonetBin } from "./lib/components/runtime.js";
-import { installedRuntime, recoverServiceUpdate } from "./lib/components/install.js";
-import { componentUpdates, updateComponent } from "./lib/components/updates.js";
 import { desktopClient } from "./service-client.js";
 import { desktopServer, pageHeaders } from "./desktop-server.js";
 import { createUpdates } from "./updates.js";
@@ -21,7 +19,7 @@ import { launchedAtLogin } from "./login.js";
 import { createBackground } from "./background.js";
 import { loadShellEnv } from "./shellenv.js";
 import { prefs } from "./prefs.js";
-import { serviceCommand, missingBinary, readyComponents, earlierNotice } from "./service-runtime.js";
+import { serviceCommand, missingBinary, readyComponents, earlierNotice, installedRuntime, componentUpdates, updateComponent } from "./service-runtime.js";
 import { installMenu, offerMove, askAboutLogin, uninstall } from "./mac.js";
 import { themeMenuOf } from "./theme-menu.js";
 import { instanceFrom } from "./lib/instances.js";
@@ -283,6 +281,14 @@ function tellEarlier(ready) {
   note.show();
 }
 
+// The components a packaged Desktop carries (the Mac's disk image,
+// Windows' XenoNet Setup), with the binary that installs them, or null for
+// a Desktop-only update, which has none.
+function bundleDir() {
+  const bundle = path.join(process.resourcesPath, "components");
+  return fs.existsSync(path.join(bundle, "components.json")) ? bundle : null;
+}
+
 // Starts the service, or finds it running, and connects to it. The service
 // is the xenonet binary (service-runtime.js): the installed Service's in a
 // packaged XenoNet, the checkout's own build in XenoNet Dev; for a while
@@ -292,11 +298,10 @@ async function startServer() {
   env.XENONET_RUNTIME_DIR = process.env.XENONET_RUNTIME_DIR || runtimeDir();
   let installed = null;
   if (app.isPackaged) {
-    const bundle = path.join(process.resourcesPath, "components");
-    const ready = await readyComponents({ env, bundle: fs.existsSync(path.join(bundle, "components.json")) ? bundle : null, test: packagedTest });
+    const bundle = bundleDir();
+    const ready = await readyComponents({ env, bundle, test: packagedTest });
     tellEarlier(ready);
-    await recoverServiceUpdate({ env });
-    installed = installedRuntime(env);
+    installed = await installedRuntime({ env, bundle });
     Object.assign(env, installed.env);
   }
   const command = serviceCommand({ root: fromSource ? root : null, serviceRoot: process.env.XENONET_SERVICE_ROOT || root, installed, dev });
@@ -621,12 +626,10 @@ function wireDownloads() {
 function wireIpc() {
   ipcMain.handle("app:updates", async (e, action, value) => {
     if (!ownPage(e)) return null;
-    if (action === "components") return app.isPackaged && !packagedTest ? componentUpdates() : [];
+    if (action === "components") return app.isPackaged && !packagedTest ? componentUpdates({ env: serviceEnv ?? process.env, bundle: bundleDir() }) : [];
     if (action === "component-update") {
       if (!app.isPackaged || packagedTest || !["service", "tools"].includes(value)) return null;
-      const item = (await componentUpdates()).find((x) => x.component === value);
-      if (!item) throw new Error("This component has no published update.");
-      return updateComponent(item);
+      return updateComponent(value, { env: serviceEnv ?? process.env, bundle: bundleDir() });
     }
     return updates?.act(action, value);
   });
@@ -905,7 +908,7 @@ if (iconsArg >= 0) {
       updater: updaterModule.autoUpdater,
       enabled: app.isPackaged && !packagedTest && ["win32", "darwin"].includes(process.platform),
       automaticInstall: !isMac || metadata.xenonetMacAutoUpdate === true,
-      checkComponents: app.isPackaged && !packagedTest ? () => componentUpdates() : null,
+      checkComponents: app.isPackaged && !packagedTest ? () => componentUpdates({ env: serviceEnv ?? process.env, bundle: bundleDir() }) : null,
       version: app.getVersion(), preferences: prefs(),
       changed: (state) => win?.webContents.send("app:update-state", state),
       available: ({ version }) => {

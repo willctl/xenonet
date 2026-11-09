@@ -9,6 +9,7 @@ pub mod actor;
 pub mod agents;
 pub mod assistant;
 pub mod completion;
+pub mod components;
 pub mod connect;
 pub mod console;
 pub mod decide;
@@ -114,6 +115,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("completion", "Tab completion for zsh or bash", Some("<zsh|bash>")),
     Command { name: "mcp", about: "Run the xenonet MCP server ({apps connect} start it)", args: None, hidden: true },
     Command { name: "hook", about: "Pass a {apps connect or} hook to XenoNet (their settings run it)", args: Some("<{ids connect|}>"), hidden: true },
+    Command {
+        name: "components",
+        about: "Install and update XenoNet's components, for Desktop (JSON)",
+        args: Some("[ready|bundle|runtime|updates|update|activate|current|launcher]"),
+        hidden: true,
+    },
     Command { name: "relay", about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", args: None, hidden: true },
 ];
 
@@ -166,6 +173,7 @@ fn text(name: &str) -> &'static str {
         "service" => service::HELP,
         "session" => session::HELP,
         "setup" => setup::HELP,
+        "components" => components::HELP,
         "spend" => spend::HELP,
         "status" => status::HELP,
         "svc" => svc::HELP,
@@ -211,6 +219,7 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "service" => service::run(args, flags),
         "session" => session::run(args, flags),
         "setup" => setup::run(args, flags),
+        "components" => components::run(args, flags),
         "spend" => spend::run(args, flags),
         "status" => status::run(args, flags),
         "svc" => svc::run(args, flags),

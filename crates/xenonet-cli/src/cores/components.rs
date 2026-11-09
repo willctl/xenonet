@@ -317,6 +317,28 @@ pub fn activate_package(file: &str, item: &Value) -> Result<Value, Fail> {
     block_on(async { drive(task, &mut ops).await }).map_err(Fail::error)?.map_err(failed)
 }
 
+/// installBundle(bundle, { command }): what a bundle brings that isn't
+/// installed yet, with the launcher and, when `command`, the xenonet
+/// command on PATH; the runtime to start the service with.
+pub fn install_bundle(bundle: &str, command: bool) -> Result<Value, Fail> {
+    let (bundle, env, ctx) = (bundle.to_string(), super::env_map(), ctx());
+    let mut ops = Lifecycle::new(env.clone());
+    let task = Task::new(move |io| async move { install::install_bundle(&io, &bundle, &env, command, &ctx, &Life { stop_timeout: STOP_MS }).await });
+    block_on(async { drive(task, &mut ops).await }).map_err(Fail::error)?.map_err(failed)
+}
+
+/// currentComponent(component): the installed one, or None; and whether
+/// it has the xenonet binary (a Service or Tools from before 0.4.0 has a
+/// node and XenoNet's JS instead).
+pub fn current_component(component: &str) -> Result<Option<(Value, bool)>, Fail> {
+    let m = machine();
+    let current = xenonet_components::packages::current_component(component, &super::env_map(), &m).map_err(super::fs_fail)?;
+    Ok(current.map(|c| {
+        let binary = install::has_binary(&c, &m.platform);
+        (c, binary)
+    }))
+}
+
 /// installLauncher(): the launcher installed, if one was.
 pub fn install_launcher() -> Result<Option<Value>, Fail> {
     install::install_launcher(&super::env_map(), &ctx()).map_err(task_fail)

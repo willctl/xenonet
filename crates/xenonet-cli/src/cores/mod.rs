@@ -48,7 +48,8 @@ mod tar;
 mod tasks;
 
 pub use components::{
-    activate_package, component_updates, ensure_service, install_launcher, installed_runtime, recover_service_update, service_request, stop_file, update_component,
+    activate_package, component_updates, current_component, ensure_service, install_bundle, install_launcher, installed_runtime, machine, recover_service_update, service_request,
+    stop_file, update_component,
 };
 pub use control::{control_driver, control_launch, control_quit, control_record, run_module, run_script, ConsoleControl};
 pub use relay::run_relay;
@@ -96,7 +97,7 @@ pub(crate) fn env_map() -> serde_json::Map<String, Value> {
 /// this binary.
 pub fn xenonet_bin() -> String {
     let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-    xenonet_components::runtime::xenonet_bin(&env_map(), &components::machine(), &this)
+    xenonet_components::runtime::xenonet_bin(&env_map(), &machine(), &this)
 }
 
 // ---------- the demo ----------
@@ -362,7 +363,7 @@ pub fn delete_credential(dir: &str, grant: &str) -> Res<()> {
 
 /// runtimeDir()
 pub fn runtime_dir() -> Res<String> {
-    Ok(xenonet_components::runtime::runtime_dir(&env_map(), &components::machine()))
+    Ok(xenonet_components::runtime::runtime_dir(&env_map(), &machine()))
 }
 
 /// tar.c({ file, cwd, portable: true, gzip: true }, entries)

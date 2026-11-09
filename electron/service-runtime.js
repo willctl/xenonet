@@ -5,9 +5,7 @@
 // service's socket, as it does to an installed service.
 import fs from "node:fs";
 import path from "node:path";
-import { installBundle, hasBinary } from "./lib/components/install.js";
-import { currentComponent } from "./lib/components/packages.js";
-import { componentUpdates, updateComponent } from "./lib/components/updates.js";
+import { components, componentsBin } from "./lib/components/run.js";
 
 const found = (f, stat) => {
   try {
@@ -49,55 +47,37 @@ export function missingBinary({ fromSource }) {
     : "XenoNet Service's xenonet binary is missing. Reinstall XenoNet with the bundle installer.";
 }
 
-// The Service and Tools a packaged Desktop starts with. A bundle (the Mac
-// disk image, Windows' XenoNet Setup) brings its own for any that's missing
-// or from before 0.4.0, a node and XenoNet's JS with no xenonet binary
-// (electron/lib/components/install.js). Any it doesn't bring comes from the latest
-// release, as it does for a Desktop-only update, Tools first so the service
-// names their launcher.
-//
-// One from before 0.4.0 that can't be replaced now runs on as it was,
-// until Desktop starts again: a service with a terminal open, whose update
-// waits for it to close as any service update does, or one whose update
-// failed and was rolled back. Only a missing component, or a failure with
-// nothing from before 0.4.0 to explain it, stops Desktop.
+// The Service and Tools a packaged Desktop starts with, put in place by
+// the xenonet binary (`xenonet components ready`, crates/xenonet-cli): a
+// bundle brings its own for any that's missing or from before 0.4.0, and
+// any it doesn't bring comes from the latest release, Tools first, so the
+// service names their launcher. One from before 0.4.0 that can't be
+// replaced now (a service with a terminal open, or an update that failed
+// and was rolled back) runs on until Desktop starts again; only a missing
+// component, or a failure with nothing from before 0.4.0 to explain it,
+// stops Desktop. A test instance installs no xenonet command and fetches
+// nothing.
 //
 // Says which components are still from before 0.4.0, whether the service's
 // update waits on its terminals, and what went wrong.
-export async function readyComponents({ env, bundle = null, test = false, operations, fetcher } = {}) {
-  const state = (component) => {
-    const selected = currentComponent(component, env);
-    return !selected ? "missing" : hasBinary(selected) ? "current" : "earlier";
-  };
-  const problems = [];
-  let carried = [];
-  let waiting = false;
-  if (bundle) {
-    carried = JSON.parse(fs.readFileSync(path.join(bundle, "components.json"), "utf8")).packages.filter((p) => p.platform === process.platform && p.arch === process.arch).map((p) => p.component);
-    try {
-      await installBundle(bundle, { env, command: !test, operations });
-      waiting = carried.includes("service") && state("service") === "earlier";
-    } catch (err) {
-      problems.push(err.message);
-    }
-  }
-  const wanted = ["tools", "service"].filter((c) => state(c) === "missing" || (state(c) === "earlier" && !carried.includes(c)));
-  if (wanted.length && test) throw new Error("The test bundle is missing its components.");
-  let available = null;
-  for (const component of wanted) {
-    try {
-      available ??= await componentUpdates({ env, fetcher });
-      const item = available.find((p) => p.component === component);
-      if (!item) throw new Error("Install the XenoNet bundle to add its background service and tools.");
-      const result = await updateComponent(item, { env, fetcher, operations });
-      if (result.status === "staged") waiting = true;
-    } catch (err) {
-      problems.push(err.message);
-    }
-  }
-  const earlier = ["service", "tools"].filter((c) => state(c) === "earlier");
-  if (["service", "tools"].some((c) => state(c) === "missing") || (problems.length && !earlier.length)) throw new Error(problems[0] ?? "Install the XenoNet bundle to add its background service and tools.");
-  return { earlier, waiting, problems };
+export function readyComponents({ env, bundle = null, test = false, bin = componentsBin({ env, bundle }) } = {}) {
+  return components(bin, ["ready", ...(bundle ? [bundle] : []), ...(test ? ["--test"] : [])], { env });
+}
+
+// How to start the installed Service, once a service update that was cut
+// short is finished or undone: { root, exec, args, env }.
+export function installedRuntime({ env, bundle = null, bin = componentsBin({ env, bundle }) } = {}) {
+  return components(bin, ["runtime"], { env });
+}
+
+// The published Service and Tools beside the installed ones, and switching
+// to one: what the Updates panel shows and does.
+export function componentUpdates({ env = process.env, bundle = null } = {}) {
+  return components(componentsBin({ env, bundle }), ["updates"], { env });
+}
+
+export function updateComponent(component, { env = process.env, bundle = null } = {}) {
+  return components(componentsBin({ env, bundle }), ["update", component], { env });
 }
 
 // What Desktop tells you when a Service or Tools from before 0.4.0 is

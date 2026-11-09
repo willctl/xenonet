@@ -11,7 +11,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import * as tar from "tar";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { SERVICE_API, CONSOLE_API } from "../electron/lib/components/protocol.js";
 import { buildBinary, binaryName } from "./rust-release.mjs";
 
@@ -42,9 +42,11 @@ export async function buildComponents({ app = root, platform, arch, output = pat
     // reports is the component's, and xenonetComponent says which it is.
     fs.writeFileSync(path.join(staging, "package.json"), JSON.stringify({ name: `xenonet-${component}`, productName: "XenoNet", version: versions[component], xenonetComponent: component }, null, 2) + "\n");
     fs.copyFileSync(path.join(root, "LICENSE"), path.join(staging, "LICENSE"));
+    // The startup check an install runs: the binary says the package's
+    // version. Only where the package runs.
     if (platform === process.platform && arch === process.arch) {
-      const { checkRuntime } = await import("../electron/lib/components/install.js");
-      checkRuntime({ root: staging, version: manifest.version });
+      const said = JSON.parse(execFileSync(path.join(staging, "bin", binaryName(platform)), ["--version", "--json"], { encoding: "utf8", windowsHide: true })).version;
+      if (said !== manifest.version) throw new Error(`the ${component} package's binary says ${said}, not ${manifest.version}`);
     }
     const file = `XenoNet-${component}-${manifest.version}-${platform}-${arch}.tar.gz`;
     const full = path.join(output, file);
@@ -66,6 +68,10 @@ export async function buildComponents({ app = root, platform, arch, output = pat
   }
   const manifest = { format: 1, packages };
   fs.writeFileSync(path.join(bundle, "components.json"), JSON.stringify(manifest, null, 2));
+  // The binary that installs them (xenonet components ready), which a first
+  // start has nothing else to run.
+  fs.copyFileSync(xenonet, path.join(bundle, binaryName(platform)));
+  if (platform !== "win32") fs.chmodSync(path.join(bundle, binaryName(platform)), 0o755);
   return manifest;
 }
 
