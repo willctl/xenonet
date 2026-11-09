@@ -1,6 +1,6 @@
-//! Grok Bot's observer (core/actors/grok-bot.js;
-//! docs/design/actors/grok-bot.md): presence and process ancestry, nothing
-//! more. Its desktop app is the Bots' only way onto this Mac, so:
+//! Grok Bot's observer (docs/design/actors/grok-bot.md): presence and
+//! process ancestry, nothing more. Its desktop app is the Bots' only way
+//! onto this Mac, so:
 //!
 //!   working   a command its app runs is running, or ran in the last 30 s
 //!   idle      its app runs
@@ -17,21 +17,14 @@
 //! It reads the process table, where its commands work, and of its files
 //! only whether the app is there, and two keys of its Info.plist. While the
 //! app runs, what it runs is looked at every 3 seconds with pgrep.
-//!
-//! The look and the poll call the observer's own fields and methods:
-//! "actors", "app", "procs", "spawns" (its Spawns, whose state is shared
-//! here), keep, say, gather, touch, happened, alive, and __census.
 
-use crate::attribution::{self, Candidate, Census, Paths, SpawnsState};
-use crate::muse::{census, known};
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use xenonet_base::log::js_slice;
-use xenonet_base::paths::path_key;
+use std::sync::Mutex;
+use xenonet_adapter::observe::attribution::{self, census, spawned, Candidate, Census, Pending, SpawnsState};
+use xenonet_adapter::observe::{known, AppBundle, Core, Gather, Keep, Observer, ObserverHost, Result, Say};
+use xenonet_adapter::products::Product;
 use xenonet_base::sync::Locked;
-use xenonet_engine::peer::{list, Calls, Result};
-use xenonet_engine::procs::{agent_of, wants_args};
-use xenonet_engine::sql::Arg;
+use xenonet_base::text::{js_string, truthy};
 
 pub const ID: &str = "actor:grok-bot";
 pub const POLL_MS: f64 = 3000.0;
@@ -46,7 +39,7 @@ const CAPABILITIES: [&str; 5] = ["run-commands", "browse", "message-people", "me
 fn in_bundle(program: &Value) -> bool {
     let p = match program {
         Value::Null => String::new(),
-        v => xenonet_engine::js::template(Some(v)),
+        v => js_string(v),
     };
     p.contains("/Grok Bot.app/")
 }
@@ -147,17 +140,26 @@ impl State {
 }
 
 pub struct GrokBot {
+    core: Core,
+    app: AppBundle,
     state: Mutex<State>,
-    spawns: Arc<SpawnsState>,
+    spawns: SpawnsState,
 }
 
-fn paths() -> Paths {
-    Paths { store: "spawns.store".into(), map: "spawns.map".into(), procs: "spawns.procs".into() }
+impl Default for GrokBot {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GrokBot {
-    pub fn new(spawns: Arc<SpawnsState>) -> Self {
-        GrokBot { state: Mutex::new(State::default()), spawns }
+    pub fn new() -> Self {
+        GrokBot {
+            core: Core::new(crate::product()),
+            app: AppBundle::new("Grok Bot.app", r"^com\.anysphere\.sand(\.|$)"),
+            state: Mutex::new(State::default()),
+            spawns: SpawnsState::default(),
+        }
     }
 
     fn s(&self) -> std::sync::MutexGuard<'_, State> {
@@ -167,19 +169,17 @@ impl GrokBot {
     // The new commands' places (one lsof for them all), each counted as ran
     // in its minute; and the sessions among `candidates`, each handed to
     // attribution once.
-    fn taken(&self, c: &mut dyn Calls, fresh: &[f64], at: f64, candidates: &[f64]) -> Result<()> {
+    fn taken(&self, h: &dyn ObserverHost, fresh: &[f64], at: f64, candidates: &[f64]) {
+        let actors = h.actors();
         let commands: Vec<f64> = fresh.iter().copied().filter(|p| self.s().get(*p).is_some_and(|e| e.command)).collect();
         if !commands.is_empty() {
-            let cwds = list(c.call("procs", "cwds", vec![Arg::List(commands.iter().map(|p| Arg::Num(*p)).collect())])?);
+            let cwds = h.procs().cwds(&commands);
             for pid in commands {
-                let cwd = cwds
-                    .iter()
-                    .rev()
-                    .find(|p| list((*p).clone()).first().and_then(Arg::as_f64) == Some(pid))
-                    .and_then(|p| list(p.clone()).get(1).cloned())
-                    .filter(|v| !v.is_nullish())
-                    .map_or(Value::Null, |v| v.to_json());
-                let place = if xenonet_engine::js::truthy(Some(&cwd)) { c.call("actors", "placeOf", vec![crate::registry::value_arg(&cwd)])?.to_json() } else { Value::Null };
+                let cwd = cwds.iter().rev().find(|(p, _)| *p == pid).map_or(Value::Null, |(_, c)| Value::String(c.clone()));
+                let place = match cwd.as_str().filter(|c| !c.is_empty()) {
+                    Some(c) => actors.place_of(c),
+                    None => Value::Null,
+                };
                 let started_at = {
                     let mut s = self.s();
                     s.busy_at = Some(s.busy_at.unwrap_or(0.0).max(at));
@@ -188,15 +188,8 @@ impl GrokBot {
                     e.cwd = Some(cwd);
                     e.started_at
                 };
-                if c.call("actors", "has", vec![Arg::text(ID)])?.truthy() {
-                    c.call(
-                        "",
-                        "gather",
-                        vec![
-                            Arg::text(ID),
-                            Arg::Obj(vec![("kind".into(), Arg::text("ran")), ("target".into(), crate::registry::value_arg(&place)), ("at".into(), Arg::Num(started_at))]),
-                        ],
-                    )?;
+                if actors.has(ID) {
+                    self.core.gather(ID, &Gather::new("ran", place, started_at));
                 }
             }
         }
@@ -204,8 +197,8 @@ impl GrokBot {
             let s = self.s();
             candidates.iter().filter_map(|p| s.get(*p).map(|e| (*p, e.clone()))).filter(|(_, e)| e.agent.name().is_some() && !e.handed && s.above(e) == "clear").collect()
         };
-        if sessions.is_empty() || !c.call("actors", "has", vec![Arg::text(ID)])?.truthy() {
-            return Ok(());
+        if sessions.is_empty() || !actors.has(ID) {
+            return;
         }
         {
             let mut s = self.s();
@@ -217,16 +210,85 @@ impl GrokBot {
         }
         let list: Vec<Candidate> =
             sessions.iter().filter_map(|(pid, e)| Some(Candidate { pid: *pid, start: e.start, agent: e.agent.name()?.into(), cwd: e.cwd.clone() })).collect();
-        attribution::saw(&self.spawns, c, &paths(), ID, &list, at)
+        attribution::saw(&self.spawns, h, ID, &list, at);
     }
 
-    pub fn look(&self, c: &mut dyn Calls, at: f64) -> Result<()> {
-        let known = known(c, ID)?;
+    // What it does now, in XenoNet's words, from what the app runs.
+    fn say(&self, h: &dyn ObserverHost, at: f64, census: &Census) -> Result<()> {
+        let (app_runs, latest, busy_at) = {
+            let mut s = self.s();
+            let app_runs = !s.app_pids.is_empty();
+            let mut live: Vec<Entry> = s.tracked.iter().filter(|(_, e)| e.command).map(|(_, e)| e.clone()).collect();
+            if !live.is_empty() {
+                s.busy_at = Some(s.busy_at.unwrap_or(0.0).max(at));
+            }
+            xenonet_base::sort::sort_by(&mut live, |a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
+            (app_runs, live.into_iter().next(), s.busy_at)
+        };
+        let (presence, status) = if app_runs && busy_at.is_some_and(|b| at - b < LINGER_MS) {
+            let place = latest.as_ref().map_or(Value::Null, |e| e.place.clone());
+            let name = h.actors().where_of(&place).get("name").cloned().unwrap_or(Value::Null);
+            let status = if truthy(Some(&name)) { format!("Running commands in {}", js_string(&name)) } else { "Running commands".into() };
+            if truthy(Some(&place)) {
+                self.core.touch(h, ID, &place, "works-on", at)?;
+            }
+            ("working", status)
+        } else if app_runs {
+            ("idle", "Its app is open on this Mac".to_string())
+        } else {
+            ("unknown", "Its app on this Mac is closed".to_string())
+        };
+        self.core.say(h, ID, &Say { presence, status: Some(status), usage: None, at })?;
+        // One the table doesn't hold may have started since it was read:
+        // the system says whether it runs.
+        let mut alive = |p: &Pending| match census.get(p.pid) {
+            Some(row) => row.start == p.start,
+            None => h.procs().alive(p.pid),
+        };
+        for s in attribution::settle(&self.spawns, h, at, Some(&mut alive))? {
+            spawned(h, &self.core, ID, &s)?;
+        }
+        Ok(())
+    }
+
+    /// The processes tracked, as [pid, what's known of it], and the app's
+    /// own, for the tests that look in.
+    pub fn tracked(&self) -> (Vec<Value>, Vec<f64>) {
+        let s = self.s();
+        let agent = |a: &Agent| match a {
+            Agent::Unknown | Agent::None => Value::Null,
+            Agent::Is(x) => json!(x),
+        };
+        let num = xenonet_base::json::number;
+        let items = s
+            .tracked
+            .iter()
+            .map(|(pid, e)| json!([num(*pid), { "start": num(e.start), "ppid": num(e.ppid), "command": e.command, "agent": agent(&e.agent), "handed": e.handed, "place": e.place, "startedAt": num(e.started_at) }]))
+            .collect();
+        (items, s.app_pids.clone())
+    }
+}
+
+impl Observer for GrokBot {
+    fn name(&self) -> &'static str {
+        "grok-bot-observer"
+    }
+
+    fn product(&self) -> &'static Product {
+        self.core.product()
+    }
+
+    fn core(&self) -> &Core {
+        &self.core
+    }
+
+    fn look(&self, h: &dyn ObserverHost, at: f64) -> Result<()> {
+        let known = known(h, ID);
         // Whether the app where apps go is Cursor's, from its Info.plist.
-        c.call("app", "read", vec![])?;
+        self.app.read(h);
         // Not installed where apps go and not seen before: the process
         // table is read only once a minute.
-        if !known && !c.call("app", "installed", vec![])?.truthy() {
+        if !known && !self.app.installed(h) {
             let mut s = self.s();
             if at - s.looked_at.unwrap_or(f64::NEG_INFINITY) < STRAY_MS {
                 return Ok(());
@@ -234,31 +296,22 @@ impl GrokBot {
             s.looked_at = Some(at);
         }
         let mut table_state = None;
-        let census = census(c, &mut table_state);
+        let census = census(h, &mut table_state);
         self.s().table_status = table_state;
         let census: Census = census?;
-        let is_app =
-            |i: usize| census.products[i].get("product").and_then(Value::as_str) == Some("grok-bot") && census.products[i].get("role").and_then(Value::as_str) == Some("app");
+        let is_app = |i: usize| census.product_role(i) == (Some("grok-bot"), Some("app"));
         let apps: Vec<usize> = (0..census.table.len()).filter(|&i| is_app(i)).collect();
-        let installed = !apps.is_empty() || c.call("app", "installed", vec![])?.truthy();
+        let installed = !apps.is_empty() || self.app.installed(h);
         self.s().was_installed = installed;
         if !installed && !known {
             return Ok(());
         }
         // The actor first, so the commands of its first look count.
-        let version = if c.call("app", "ours", vec![])?.truthy() { c.get("app.plist")?.field("version") } else { Arg::Null };
-        let version = if version.is_nullish() { Arg::Null } else { version };
-        let keep = Arg::Obj(vec![
-            ("name".into(), Arg::text("Grok Bot")),
-            ("version".into(), version),
-            ("via".into(), Arg::List(vec![Arg::text("observed"), Arg::text("attributed")])),
-            ("heartbeatMs".into(), Arg::Null),
-            ("capabilities".into(), Arg::List(CAPABILITIES.iter().map(|c| Arg::text(*c)).collect())),
-            ("installed".into(), Arg::Bool(installed)),
-            ("at".into(), Arg::Num(at)),
-        ]);
-        c.call("", "keep", vec![Arg::text(ID), keep])?;
-        if !c.call("actors", "enabled", vec![Arg::text(ID)])?.truthy() {
+        let version = if self.app.ours() { self.app.plist().and_then(|p| p.version) } else { None };
+        let keep =
+            Keep { name: "Grok Bot".into(), version, via: vec!["observed", "attributed"], heartbeat_ms: None, capabilities: CAPABILITIES.to_vec(), installed: Some(installed), at };
+        self.core.keep(h, ID, &keep)?;
+        if !h.actors().enabled(ID) {
             return Ok(());
         }
         // The app's processes, and everything below them, from the table.
@@ -312,7 +365,7 @@ impl GrokBot {
             if row.is_some_and(|r| r.start == start) {
                 continue;
             }
-            if row.is_none_or(|r| r.start < start) && c.call("", "alive", vec![Arg::Num(pid)])?.truthy() {
+            if row.is_none_or(|r| r.start < start) && h.procs().alive(pid) {
                 continue;
             }
             self.s().tracked.retain(|(p, _)| *p != pid);
@@ -325,87 +378,47 @@ impl GrokBot {
                 s.tracked = keep;
             }
         }
-        self.taken(c, &fresh, at, &candidates)?;
-        self.say(c, at, &census)
+        self.taken(h, &fresh, at, &candidates);
+        self.say(h, at, &census)
     }
 
-    // What it does now, in XenoNet's words, from what the app runs.
-    fn say(&self, c: &mut dyn Calls, at: f64, census: &Census) -> Result<()> {
-        let (app_runs, latest, busy_at) = {
-            let mut s = self.s();
-            let app_runs = !s.app_pids.is_empty();
-            let mut live: Vec<Entry> = s.tracked.iter().filter(|(_, e)| e.command).map(|(_, e)| e.clone()).collect();
-            if !live.is_empty() {
-                s.busy_at = Some(s.busy_at.unwrap_or(0.0).max(at));
-            }
-            xenonet_base::sort::sort_by(&mut live, |a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
-            (app_runs, live.into_iter().next(), s.busy_at)
+    /// What the doctor shows: whether the app is installed, and what this
+    /// observer reads.
+    fn status(&self, h: &dyn ObserverHost) -> Result<Value> {
+        let (was, table) = {
+            let s = self.s();
+            (s.was_installed, s.table_status.clone().unwrap_or_else(|| "ok".into()))
         };
-        let (presence, status) = if app_runs && busy_at.is_some_and(|b| at - b < LINGER_MS) {
-            let place = latest.as_ref().map_or(Value::Null, |e| e.place.clone());
-            let name = c.call("actors", "where", vec![crate::registry::value_arg(&place)])?.field("name");
-            let status = if name.truthy() { format!("Running commands in {}", xenonet_engine::store::js_text(&name)) } else { "Running commands".into() };
-            if xenonet_engine::js::truthy(Some(&place)) {
-                c.call("", "touch", vec![Arg::text(ID), crate::registry::value_arg(&place), Arg::text("works-on"), Arg::Num(at)])?;
-            }
-            ("working", status)
-        } else if app_runs {
-            ("idle", "Its app is open on this Mac".to_string())
-        } else {
-            ("unknown", "Its app on this Mac is closed".to_string())
-        };
-        c.call("", "say", vec![Arg::text(ID), Arg::Obj(vec![("presence".into(), Arg::text(presence)), ("status".into(), Arg::text(status)), ("at".into(), Arg::Num(at))])])?;
-        // One the table doesn't hold may have started since it was read:
-        // the system says whether it runs.
-        let mut alive = |c: &mut dyn Calls, p: &attribution::Pending| -> Result<bool> {
-            match census.get(p.pid) {
-                Some(row) => Ok(row.start == p.start),
-                None => Ok(c.call("", "alive", vec![Arg::Num(p.pid)])?.truthy()),
-            }
-        };
-        for s in attribution::settle(&self.spawns, c, &paths(), at, Some(&mut alive))? {
-            spawned(c, ID, &s)?;
-        }
-        Ok(())
+        let installed = self.app.installed(h) || was;
+        let mut sources = vec![json!({ "name": "processes", "file": null, "state": table })];
+        sources.extend(self.app.sources(h));
+        Ok(json!({ "product": "grok-bot", "name": "Grok Bot", "installed": installed, "sources": sources, "recognized": null }))
     }
 
-    /// The processes tracked, as [pid, what's known of it], and the app's
-    /// own, for the tests that look in.
-    pub fn tracked(&self) -> (Vec<Value>, Vec<f64>) {
-        let s = self.s();
-        let agent = |a: &Agent| match a {
-            Agent::Unknown => Value::Null,
-            Agent::None => Value::Null,
-            Agent::Is(x) => json!(x),
-        };
-        let num = xenonet_base::json::number;
-        let items = s
-            .tracked
-            .iter()
-            .map(|(pid, e)| json!([num(*pid), { "start": num(e.start), "ppid": num(e.ppid), "command": e.command, "agent": agent(&e.agent), "handed": e.handed, "place": e.place, "startedAt": num(e.started_at) }]))
-            .collect();
-        (items, s.app_pids.clone())
+    fn poll_ms(&self) -> Option<f64> {
+        Some(POLL_MS)
     }
 
     /// Whether to poll: its observer on, and its app running.
-    pub fn may_poll(&self, c: &mut dyn Calls) -> Result<bool> {
-        Ok(c.call("", "observing", vec![])?.truthy() && !self.s().app_pids.is_empty())
+    fn may_poll(&self, h: &dyn ObserverHost) -> bool {
+        h.observing() && !self.s().app_pids.is_empty()
     }
 
     /// Every 3 seconds while the app runs: its new children and theirs, by
     /// pgrep, described and placed only when new.
-    pub fn poll(&self, c: &mut dyn Calls, at: f64) -> Result<()> {
+    fn poll(&self, h: &dyn ObserverHost, at: f64) -> Result<()> {
+        let procs = h.procs();
         let tracked: Vec<f64> = self.s().tracked.iter().map(|(p, _)| *p).collect();
         for pid in tracked {
-            if !c.call("", "alive", vec![Arg::Num(pid)])?.truthy() {
+            if !procs.alive(pid) {
                 self.s().tracked.retain(|(p, _)| *p != pid);
             }
         }
-        let parents: Vec<Arg> = {
+        let parents: Vec<f64> = {
             let s = self.s();
-            s.app_pids.iter().chain(s.tracked.iter().map(|(p, _)| p)).map(|p| Arg::Num(*p)).collect()
+            s.app_pids.iter().chain(s.tracked.iter().map(|(p, _)| p)).copied().collect()
         };
-        let kids: Vec<f64> = list(c.call("procs", "children", vec![Arg::List(parents)])?).iter().filter_map(Arg::as_f64).collect();
+        let kids = procs.children(&parents);
         let children: Vec<f64> = {
             let s = self.s();
             kids.into_iter().filter(|p| !s.is_app(*p) && s.get(*p).is_none()).collect()
@@ -413,11 +426,7 @@ impl GrokBot {
         if children.is_empty() {
             return Ok(());
         }
-        let described: Vec<Value> = list(c.call("procs", "describe", vec![Arg::List(children.iter().map(|p| Arg::Num(*p)).collect())])?)
-            .iter()
-            .map(|pair| list(pair.clone()).get(1).cloned().unwrap_or(Arg::Undef).to_json())
-            .collect();
-        let mut rows: Vec<Value> = described;
+        let mut rows: Vec<Value> = procs.describe(&children);
         let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
         // Parents before children, so a command's own children know it.
         xenonet_base::sort::sort_by(&mut rows, |a, b| {
@@ -447,10 +456,10 @@ impl GrokBot {
                 // Node and Bun run Claude Code and Codex too, which only
                 // their arguments say: until the look's census reads those,
                 // such a process's agent isn't known.
-                let program = if program.is_null() { String::new() } else { xenonet_engine::js::template(Some(&program)) };
-                let agent = match agent_of(&program, "") {
-                    Some(a) => Agent::Is(a.into()),
-                    None if wants_args(&program) => Agent::Unknown,
+                let program = if program.is_null() { String::new() } else { js_string(&program) };
+                let agent = match procs.agent_of(&program) {
+                    Some(a) => Agent::Is(a),
+                    None if procs.wants_args(&program) => Agent::Unknown,
                     None => Agent::None,
                 };
                 if s.track(pid, start, ppid, agent, at) {
@@ -458,49 +467,7 @@ impl GrokBot {
                 }
             }
         }
-        self.taken(c, &fresh, at, &fresh)
+        self.taken(h, &fresh, at, &fresh);
+        Ok(())
     }
-
-    /// What the doctor shows: whether the app is installed, and what this
-    /// observer reads.
-    pub fn status(&self, c: &mut dyn Calls, home: &str) -> Result<Value> {
-        let (was, table) = {
-            let s = self.s();
-            (s.was_installed, s.table_status.clone().unwrap_or_else(|| "ok".into()))
-        };
-        let installed = c.call("app", "installed", vec![])?.truthy() || was;
-        let mut sources = vec![json!({ "name": "processes", "file": null, "state": table })];
-        sources.extend(list(c.call("app", "sources", vec![Arg::text(home)])?).iter().map(Arg::to_json));
-        Ok(json!({ "product": "grok-bot", "name": "Grok Bot", "installed": installed, "sources": sources, "recognized": null }))
-    }
-}
-
-/// A process the attribution settled, recorded as the session it started
-/// (or the place, when its session never showed).
-pub fn spawned(c: &mut dyn Calls, actor: &str, s: &attribution::Settled) -> Result<()> {
-    let o = match &s.session {
-        Some(session) => Arg::Obj(vec![
-            ("ref".into(), Arg::text(format!("spawned:{session}"))),
-            ("kind".into(), Arg::text("spawned")),
-            ("target".into(), Arg::text(session)),
-            ("app".into(), Arg::text(&s.agent)),
-            ("via".into(), Arg::text("attributed")),
-            ("at".into(), Arg::Num(s.start)),
-        ]),
-        None => {
-            let key = s.cwd.as_str().and_then(path_key).unwrap_or_default();
-            let r = format!("spawned:{}:{}:{key}", s.agent, xenonet_base::json::number_string(s.start));
-            let target = if xenonet_engine::js::truthy(Some(&s.cwd)) { c.call("actors", "placeOf", vec![crate::registry::value_arg(&s.cwd)])? } else { Arg::Null };
-            Arg::Obj(vec![
-                ("ref".into(), Arg::text(js_slice(&r, 200))),
-                ("kind".into(), Arg::text("spawned")),
-                ("target".into(), target),
-                ("app".into(), Arg::text(&s.agent)),
-                ("via".into(), Arg::text("attributed")),
-                ("at".into(), Arg::Num(s.start)),
-            ])
-        }
-    };
-    c.call("", "happened", vec![Arg::text(actor), o])?;
-    Ok(())
 }

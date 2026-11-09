@@ -2,8 +2,9 @@
 //! readers share them: one lenient reader for each vendor source, which
 //! records what differs from XenoNet's schemas in the service's one drift
 //! log (core/drift.js), and the normalizers every transcript line goes
-//! through (claude-lines, codex-lines, grok-lines), with the transcript
-//! hooks that sample each file's lines. The readers are the service's one set
+//! through (claude-lines, codex-lines, grok-lines: one for each tailed app
+//! the adapters bring), with the transcript hooks that sample each file's
+//! lines as its app's reader says. The readers are the service's one set
 //! (WireEnv's), which the actors' observers read through too, so the drift
 //! report reads what all of them have read.
 
@@ -12,67 +13,27 @@ use crate::util::{lock, now_ms};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use xenonet_adapter::reader::{Tailed, VendorCheck};
 use xenonet_blocks::normalizer::{Hooks, Normalizer};
 use xenonet_schema::drift::{DriftLog, Piece};
 use xenonet_schema::vendor::{Checked, Readers, Sampling, VendorReader};
 
 pub const CLAUDE_LINES: &str = "anthropic/claude-code/transcript-line";
 pub const CODEX_LINES: &str = "openai/codex/rollout-line";
-pub const GROK_LINES: &str = "spacexai/grok-build/update-line";
 
-/// The tailed app whose transcript a line is, as the normalizers tell them
-/// apart (lines.js's linesOf): any app that isn't tailed reads as Claude
-/// Code's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tailed {
-    Claude,
-    Codex,
-    Grok,
-}
-
-impl Tailed {
-    pub fn of(app: &str) -> Tailed {
-        match xenonet_adapter::apps::tailed_app(app, "claude") {
-            "codex" => Tailed::Codex,
-            "grok" => Tailed::Grok,
-            _ => Tailed::Claude,
-        }
-    }
-
-    /// Its id in the app registry.
-    pub fn id(self) -> &'static str {
-        match self {
-            Tailed::Claude => "claude",
-            Tailed::Codex => "codex",
-            Tailed::Grok => "grok",
-        }
-    }
-
-    fn source(self) -> &'static str {
-        match self {
-            Tailed::Claude => CLAUDE_LINES,
-            Tailed::Codex => CODEX_LINES,
-            Tailed::Grok => GROK_LINES,
-        }
-    }
-
-    fn lines(self) -> &'static str {
-        match self {
-            Tailed::Claude => "claude-lines",
-            Tailed::Codex => "codex-lines",
-            Tailed::Grok => "grok-lines",
-        }
-    }
+/// A tailed app's lines: the adapter's reader of them (which says how a
+/// line is sampled) and their normalizer.
+struct Lines {
+    tailed: Box<dyn Tailed>,
+    normalizer: Mutex<Normalizer>,
 }
 
 /// Every reader, by its source, the log they record in, and the
-/// transcripts' normalizers.
+/// transcripts' normalizers, one for each tailed app the adapters bring.
 pub struct Vendor {
     readers: Arc<Readers>,
     pub drift: Arc<Mutex<DriftLog>>,
-    claude: Mutex<Normalizer>,
-    codex: Mutex<Normalizer>,
-    grok: Mutex<Normalizer>,
+    apps: Vec<Lines>,
 }
 
 /// What a check made of a record: the record to use, or None to drop it.
@@ -93,21 +54,19 @@ impl Vendor {
     /// The map's vendor over the service's readers.
     pub fn with_readers(readers: Arc<Readers>) -> Arc<Vendor> {
         let now = now_ms();
-        Arc::new(Vendor {
-            drift: readers.drift().clone(),
-            readers,
-            claude: Mutex::new(Normalizer::new("claude-lines", Some(CLAUDE_LINES), now)),
-            codex: Mutex::new(Normalizer::new("codex-lines", Some(CODEX_LINES), now)),
-            grok: Mutex::new(Normalizer::new("grok-lines", Some(GROK_LINES), now)),
-        })
+        let apps = xenonet_adapter::platforms()
+            .tailed()
+            .into_iter()
+            .map(|tailed| Lines { normalizer: Mutex::new(Normalizer::new(tailed.block(), Some(tailed.source()), now)), tailed })
+            .collect();
+        Arc::new(Vendor { drift: readers.drift().clone(), readers, apps })
     }
 
-    fn normalizer(&self, app: Tailed) -> std::sync::MutexGuard<'_, Normalizer> {
-        match app {
-            Tailed::Claude => lock(&self.claude),
-            Tailed::Codex => lock(&self.codex),
-            Tailed::Grok => lock(&self.grok),
-        }
+    /// The lines of the tailed app `app` names (lines.js's linesOf): any
+    /// app that isn't tailed reads as Claude Code's.
+    fn app(&self, app: &str) -> Option<&Lines> {
+        let id = xenonet_adapter::apps::tailed_app(app, "claude");
+        self.apps.iter().find(|l| l.tailed.id() == id)
     }
 
     pub fn dir(&self) -> &std::path::Path {
@@ -173,24 +132,37 @@ impl Vendor {
     /// A transcript line through its app's normalizer (lines.js's
     /// linesOf(app).line(text, where)): the record to read, or None for a
     /// line that isn't JSON, is dropped, or breaks a hook. `sampling` is the
-    /// file's: which of its lines are checked whole.
-    pub fn line(&self, app: Tailed, text: &str, sampling: &mut Sampling) -> Option<Value> {
-        let mut hooks = Transcript { vendor: self, app, sampling };
-        let mut n = self.normalizer(app);
+    /// file's: which of its lines are checked whole. `app` is the
+    /// transcript's: any app that isn't tailed is read as Claude Code's.
+    pub fn line(&self, app: &str, text: &str, sampling: &mut Sampling) -> Option<Value> {
+        let l = self.app(app)?;
+        let mut hooks = Transcript { vendor: self, app: &*l.tailed, sampling };
+        let mut n = lock(&l.normalizer);
         n.line(text, &(), &mut hooks, now_ms)
     }
 
     /// A record already parsed, through the normalizer (lines.js's
     /// `record`), as the last line of a file without a newline is read.
-    pub fn record(&self, app: Tailed, raw: Value, sampling: &mut Sampling) -> Option<Value> {
-        let mut hooks = Transcript { vendor: self, app, sampling };
-        let mut n = self.normalizer(app);
+    pub fn record(&self, app: &str, raw: Value, sampling: &mut Sampling) -> Option<Value> {
+        let l = self.app(app)?;
+        let mut hooks = Transcript { vendor: self, app: &*l.tailed, sampling };
+        let mut n = lock(&l.normalizer);
         n.record(raw, &(), &mut hooks, now_ms)
     }
 
     /// The normalizers, as blocks.
-    pub fn blocks(self: &Arc<Self>) -> [Arc<dyn Block>; 3] {
-        [Tailed::Claude, Tailed::Codex, Tailed::Grok].map(|app| -> Arc<dyn Block> { Arc::new(Lines { vendor: self.clone(), app }) })
+    pub fn blocks(self: &Arc<Self>) -> Vec<Arc<dyn Block>> {
+        (0..self.apps.len()).map(|k| -> Arc<dyn Block> { Arc::new(LinesBlock { vendor: self.clone(), k }) }).collect()
+    }
+}
+
+/// The map's vendor, as a reader checks records through it.
+impl VendorCheck for Vendor {
+    fn check(&self, source: &str, record: Value, version: Option<&str>, kind: Option<&str>) -> Option<Value> {
+        Vendor::check(self, source, record, version, kind)
+    }
+    fn sample(&self, source: &str, record: Value, version: Option<&str>, kind: Option<&str>, every: u64) -> Option<Value> {
+        Vendor::sample(self, source, record, version, kind, every)
     }
 }
 
@@ -200,18 +172,8 @@ impl Vendor {
 // guarded.
 struct Transcript<'a> {
     vendor: &'a Vendor,
-    app: Tailed,
+    app: &'a dyn Tailed,
     sampling: &'a mut Sampling,
-}
-
-impl Transcript<'_> {
-    fn source(&self) -> &'static str {
-        self.app.source()
-    }
-}
-
-fn field<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
-    v.as_object().and_then(|m| m.get(k))
 }
 
 impl Hooks<Value, Value, ()> for Transcript<'_> {
@@ -220,7 +182,7 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
     }
 
     fn inspect(&mut self, raw: Value, (): &()) -> Result<Option<Value>, String> {
-        let source = self.source();
+        let source = self.app.source();
         let app = self.app;
         let sampling = &mut *self.sampling;
         let c = self.vendor.reader(source, |r, log| {
@@ -229,30 +191,12 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
             if !raw.is_object() {
                 return r.inspect(&raw, sampling.version.as_deref(), None, log, now);
             }
-            // Grok Build's lines say no version.
-            let version = match app {
-                Tailed::Codex => {
-                    xenonet_sources::lines::codex_version_of(field(&raw, "type"), field(&raw, "payload").and_then(|p| field(p, "cli_version")), sampling.version.clone())
-                }
-                Tailed::Claude => xenonet_sources::lines::claude_version_of(field(&raw, "version"), sampling.version.clone()),
-                Tailed::Grok => sampling.version.clone(),
-            };
+            let version = app.version_of(&raw, sampling.version.clone());
             if version != sampling.version {
                 sampling.version.clone_from(&version);
                 r.pick(version.as_deref(), log, now);
             }
-            let kind = match app {
-                Tailed::Codex => {
-                    let payload = field(&raw, "payload");
-                    xenonet_sources::lines::codex_kind_of(
-                        field(&raw, "type"),
-                        payload.and_then(|p| field(p, "type")),
-                        payload.and_then(|p| field(p, "item")).and_then(|i| field(i, "type")),
-                    )
-                }
-                Tailed::Claude => xenonet_sources::lines::claude_kind_of(field(&raw, "type")),
-                Tailed::Grok => xenonet_sources::lines::grok_kind_of(Some(&raw)),
-            };
+            let kind = app.kind_of(&raw);
             if sampling.whole(&kind) {
                 return r.inspect(&raw, version.as_deref(), Some(kind), log, now);
             }
@@ -266,7 +210,7 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
     }
 
     fn unparsable(&mut self, _text: &str, (): &(), _why: &str) {
-        let source = self.source();
+        let source = self.app.source();
         let version = self.sampling.version.clone();
         self.vendor.reader(source, |r, _| r.stats.records += 1);
         self.vendor.unparsable(source, version.as_deref());
@@ -277,17 +221,17 @@ impl Hooks<Value, Value, ()> for Transcript<'_> {
     }
 }
 
-struct Lines {
+struct LinesBlock {
     vendor: Arc<Vendor>,
-    app: Tailed,
+    k: usize,
 }
 
-impl Block for Lines {
+impl Block for LinesBlock {
     fn name(&self) -> String {
-        self.app.lines().into()
+        self.vendor.apps[self.k].tailed.block().into()
     }
     fn health(&self) -> Value {
-        let mut n = self.vendor.normalizer(self.app);
+        let mut n = lock(&self.vendor.apps[self.k].normalizer);
         n.look(now_ms());
         health_of(&self.name(), "normalizer", &n.life, &[], Value::Null)
     }
@@ -313,15 +257,17 @@ mod tests {
 
     #[test]
     fn lines_are_read_counted_and_sampled() {
+        xenonet_platforms::install();
         let v = Vendor::new(checkout_schemas(), Arc::new(Mutex::new(DriftLog::default())));
         let mut s = Sampling::default();
         let line = r#"{"type":"user","version":"2.0.1","timestamp":"2026-10-17T10:00:00.000Z","message":{"role":"user","content":"hi"}}"#;
-        assert_eq!(v.line(Tailed::Claude, line, &mut s).unwrap()["type"], "user");
-        assert!(v.line(Tailed::Claude, "{ not json", &mut s).is_none());
+        assert_eq!(v.line("claude", line, &mut s).unwrap()["type"], "user");
+        assert!(v.line("claude", "{ not json", &mut s).is_none());
         let read = v.read_of(CLAUDE_LINES).unwrap();
         assert_eq!((read["records"].as_u64(), read["checked"].as_u64()), (Some(2), Some(1)));
         assert_eq!(read["versions"], serde_json::json!(["2.0.1"]));
         assert!(v.read_of(CODEX_LINES).is_none());
+        assert_eq!(v.blocks().len(), 3);
         let drift = lock(&v.drift).list();
         assert!(drift.iter().any(|r| r["kind"] == "unparsable"));
         let h = v.blocks()[0].health();

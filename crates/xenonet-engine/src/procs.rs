@@ -13,27 +13,31 @@
 //! id and what a Node or Python process runs are looked up once.
 //!
 //! The program ps names is `argv[0]`, which a process sets itself (exec -a).
-//! Where a check rests on a path (Hermes's hosts, XenoNet's own bundle), the
-//! executable's real path decides instead (chain's `exe`).
+//! Where a check rests on a path (a product's agent hosts, XenoNet's own
+//! bundle), the executable's real path decides instead (chain's `exe`).
 //!
-//! The commands run through `Io`: the system in the binary, and the twin's
-//! `exec` behind core/procs.js. A command asked for while the same one is
-//! already running (`Call::share`) waits for that one's answer, as JS's
-//! shared promises do.
+//! The commands run through `Io`: the system in the binary, a made-up
+//! machine in a test. A command asked for while the same one is already
+//! running (`Call::share`) waits for that one's answer.
+//!
+//! What's known of each agent app comes from the registry and its adapter
+//! (`processes`), and of each actor product from
+//! `xenonet_adapter::products`: no app or product is named here.
 
-use crate::js::{is_integer, template, truthy};
+use crate::js::{template, truthy};
 use crate::re;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
+use xenonet_adapter::products;
 use xenonet_base::json::number_string;
 use xenonet_base::nodepath::Style;
 use xenonet_base::paths::normalize_posix;
 use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_number, js_string, js_trim};
+use xenonet_base::text::{js_number, js_trim};
 
 const TABLE_MS: f64 = 1500.0;
-// New Hermes.app bundles a census reads the ids of, at most.
+// New vouched app bundles a census reads the ids of, at most.
 const BUNDLES_AT_ONCE: usize = 16;
 
 /// The developer team that signs each agent app (codesign's
@@ -41,18 +45,6 @@ const BUNDLES_AT_ONCE: usize = 16;
 /// Code, OpenAI's for Codex.
 pub fn team_of_agent(agent: &str) -> Option<&'static str> {
     xenonet_adapter::apps::team(agent)
-}
-
-/// The teams that sign the actor apps whose makers sign them, by product:
-/// Grok Bot is Cursor's (Anysphere), Muse is Meta's. Their actors register
-/// and report only from under the app as its maker built it (verify).
-/// Hermes's Python is signed ad hoc, so it has none.
-pub fn team_of_product(product: &str) -> Option<&'static str> {
-    match product {
-        "grok-bot" => Some("DCNK4UB866"),
-        "muse" => Some("V9WTTPBFK9"),
-        _ => None,
-    }
 }
 
 /// A command to run, and the key under which a run of it already under way
@@ -110,15 +102,53 @@ pub struct Product {
     pub role: &'static str,
 }
 
+impl Product {
+    /// `{ product, role }`.
+    pub fn json(self) -> Value {
+        let mut o = serde_json::Map::new();
+        o.insert("product".into(), Value::String(self.product.into()));
+        o.insert("role".into(), Value::String(self.role.into()));
+        Value::Object(o)
+    }
+}
+
+impl Row {
+    /// `{ pid, ppid, start, program }`, the numbers written whole where
+    /// they are.
+    pub fn json(&self) -> serde_json::Map<String, Value> {
+        let mut o = serde_json::Map::new();
+        o.insert("pid".into(), xenonet_base::json::number(self.pid));
+        o.insert("ppid".into(), xenonet_base::json::number(self.ppid));
+        o.insert("start".into(), xenonet_base::json::number(self.start));
+        o.insert("program".into(), Value::String(self.program.clone()));
+        o
+    }
+}
+
 /// A process of a chain: its row, its executable's real path when asked
 /// for (`exe`: None when not asked, Some(None) when it couldn't be read),
 /// and what it is.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Link {
     pub row: Row,
     pub exe: Option<Option<String>>,
     pub agent: Option<&'static str>,
     pub product: Option<Product>,
+}
+
+impl Link {
+    /// The process as a verdict's chain carries it: its row, `exe` only
+    /// when it was asked for (null when it couldn't be read), and `agent`
+    /// and `product` (null for none).
+    pub fn json(&self) -> Value {
+        let mut o = self.row.json();
+        if let Some(exe) = &self.exe {
+            o.insert("exe".into(), exe.clone().map_or(Value::Null, Value::String));
+        }
+        o.insert("agent".into(), self.agent.map_or(Value::Null, |a| Value::String(a.into())));
+        o.insert("product".into(), self.product.map_or(Value::Null, Product::json));
+        Value::Object(o)
+    }
 }
 
 /// A map by pid, in the order its pids were first set, as a JS Map keyed
@@ -194,19 +224,6 @@ pub(crate) fn slashes(p: &str) -> String {
 /// Bun are told by their arguments, when given.
 pub use crate::processes::agent_of;
 
-/// The apps of actors whose own processes could be relaying for a cloud,
-/// by their bundle's name: Hermes.app (the desktop app, and its setup
-/// app), Grok Bot, Muse, and the ChatGPT app, where OpenAI's dots run.
-fn actor_app(bundle: &str) -> Option<&'static str> {
-    match bundle {
-        "Hermes" => Some("hermes-agent"),
-        "Grok Bot" => Some("grok-bot"),
-        "Muse" => Some("muse"),
-        "ChatGPT" => Some("dots"),
-        _ => None,
-    }
-}
-
 /// Whether a program's file name is Node's or Bun's (node.exe and bun.exe
 /// on Windows).
 pub fn is_node(base: &str) -> bool {
@@ -217,87 +234,56 @@ fn is_python(base: &str) -> bool {
     re!(r"^python(\d+(\.\d+)*)?$", i).is_match(base)
 }
 
-// Where Hermes keeps the Pythons that run it: its own folder (the managed
-// Python, its venv) or the inside of Hermes.app.
-fn hermes_path(p: &str) -> bool {
-    p.contains("/.hermes/") || p.contains("/Hermes.app/")
-}
-
 /// Whether a program needs its arguments read to say what it is: Node and
-/// Bun (which agent, or Hermes's terminal UI), and the Pythons Hermes runs.
+/// Bun (which agent, or a product's terminal UI), and the Pythons a product
+/// runs its agent with.
 pub fn wants_args(program: &str) -> bool {
     let p = slashes(program);
     let base = &Style::Posix.basename(&p, None);
-    is_node(base) || (is_python(base) && hermes_path(&p))
+    is_node(base) || (is_python(base) && products::hosts_python(&p))
 }
 
 /// The actor product a program belongs to, from its path and, for Node and
 /// Python, its arguments. Roles:
 ///
-///   host  runs the agent, so what runs under it is the product's: Hermes's
-///         managed Python (or its venv's, or one inside Hermes.app) running
-///         its CLI, its terminal UI's backend or its agent
-///   tui   Hermes's terminal UI, whose child is the host
+///   host  runs the agent, so what runs under it is the product's: a
+///         Python the product manages running its CLI, its terminal UI's
+///         backend or its agent
+///   tui   the product's terminal UI, whose child is the host
 ///   app   an actor app's own process, its main one or a helper
 ///
-/// No code signature vouches for Hermes's processes (its Python is signed
-/// ad hoc), so this rests on paths and arguments, and on Hermes.app's
-/// bundle id where a path lies in one (`Procs` checks it). An agent's own
-/// program (Claude Code or Codex inside the ChatGPT app) is an agent, not
-/// this.
+/// No code signature vouches for an agent host (its Python is signed ad
+/// hoc), so this rests on paths and arguments, and on the app bundle's id
+/// where a path lies in one (`Procs` checks it). An agent's own program
+/// (Claude Code or Codex inside an actor's app) is an agent, not this.
 pub fn product_of(program: &str, args: &str) -> Option<Product> {
     let p = slashes(program);
     let base = &Style::Posix.basename(&p, None);
-    if is_python(base) && hermes_path(&p) && re!(r"\b(hermes_cli|tui_gateway|run_agent)\b").is_match(args) {
-        return Some(Product { product: "hermes-agent", role: "host" });
+    if is_python(base) {
+        if let Some(product) = products::python_host(&p, args) {
+            return Some(Product { product, role: "host" });
+        }
     }
-    if is_node(base) && re!(r"\/(ui-tui\/dist|hermes_cli\/tui_dist)\/entry\.js\b").is_match(args) {
-        return Some(Product { product: "hermes-agent", role: "tui" });
+    if is_node(base) {
+        if let Some(product) = products::node_tui(args) {
+            return Some(Product { product, role: "tui" });
+        }
     }
     let bundle = re!(r"\/([^/]+)\.app\/").captures(&p).and_then(|c| c.get(1)).map(|m| m.as_str());
-    bundle.and_then(actor_app).map(|product| Product { product, role: "app" })
+    bundle.and_then(products::app_of_bundle).map(|product| Product { product, role: "app" })
 }
 
-// A Hermes.app is Hermes's, a Grok Bot.app Grok Bot's and a Muse.app
-// Meta's Muse, only when its Info.plist says so: other makers' apps can
-// have the same names (there are other Mac apps called Muse), and anyone
-// can name a bundle Grok Bot.app. For each, the outermost bundle of that
-// name a path lies in, and the bundle ids that are the product's.
-fn vouched_bundle_of(product: &str, program: &str) -> Option<String> {
-    let r = match product {
-        "hermes-agent" => re!(r"^(.*?\/Hermes\.app)\/"),
-        "grok-bot" => re!(r"^(.*?\/Grok Bot\.app)\/"),
-        "muse" => re!(r"^(.*?\/Muse\.app)\/"),
-        _ => return None,
-    };
-    r.captures(program).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
-}
-
-fn vouched_id(product: &str, id: &str) -> bool {
-    match product {
-        "hermes-agent" => re!(r"^com\.nousresearch\.hermes(\.|$)").is_match(id),
-        "grok-bot" => re!(r"^com\.anysphere\.sand(\.|$)").is_match(id),
-        "muse" => re!(r"^com\.meta\.endo(\.|$)").is_match(id),
-        _ => false,
-    }
-}
-
-const VOUCHED: [&str; 3] = ["hermes-agent", "grok-bot", "muse"];
-
-/// The bundle of a vouched product's name a program lies in, or None.
-pub fn vouched_bundle(program: &str) -> Option<String> {
-    VOUCHED.iter().find_map(|v| vouched_bundle_of(v, program))
-}
-
+// The vouched bundle a product's process lies in, if any: the outermost
+// bundle of the product's name on its path.
 fn bundle_for(product: Option<Product>, program: &str) -> Option<String> {
-    product.and_then(|p| vouched_bundle_of(p.product, program))
+    product.and_then(|p| products::bundle_of(p.product, program))
 }
 
 /// A product a process was taken for, once the vouched app its path lies
 /// in (if any) has been asked: kept when that bundle is the product's,
 /// and dropped when it's another maker's. One whose id can't be read stays
 /// the product's for an app's process, which only ever counts against it,
-/// but not for an agent host, which Hermes's token may use.
+/// but not for an agent host, which the product's token may use.
 fn vouch(product: Option<Product>, program: &str, id: Option<&str>) -> Option<Product> {
     let p = product?;
     if bundle_for(product, program).is_none() {
@@ -305,7 +291,7 @@ fn vouch(product: Option<Product>, program: &str, id: Option<&str>) -> Option<Pr
     }
     match id {
         None => (p.role != "host").then_some(p),
-        Some(id) => vouched_id(p.product, id).then_some(p),
+        Some(id) => products::vouched_id(p.product, id).then_some(p),
     }
 }
 
@@ -519,16 +505,13 @@ fn pids_list(pids: &[f64]) -> String {
     pids.iter().map(|p| number_string(*p)).collect::<Vec<_>>().join(",")
 }
 
-// The integers above `min` among these, each once, in order: a JS Set of
-// them, filtered.
-fn listed(pids: &[Value], min: f64) -> Vec<f64> {
+// The whole numbers above `min` among these, each once, in order.
+fn listed(pids: &[f64], min: f64) -> Vec<f64> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
-    for v in pids {
-        if let Some(n) = is_integer(Some(v)) {
-            if n > min && seen.insert(bits(n)) {
-                out.push(n);
-            }
+    for &n in pids {
+        if n.is_finite() && n.trunc() == n && n > min && seen.insert(bits(n)) {
+            out.push(n);
         }
     }
     out
@@ -547,14 +530,14 @@ struct State {
     table_at: f64,
     // A signature's verdict by process and team; None while codesign runs.
     signatures: HashMap<String, Option<bool>>,
-    // What each process of Node, Bun or Hermes's Pythons is, by pid, start
-    // time and program, so its arguments are read once: only the verdict
-    // is kept, never the arguments.
+    // What each process of Node, Bun or a product's Pythons is, by pid,
+    // start time and program, so its arguments are read once: only the
+    // verdict is kept, never the arguments.
     verdicts: HashMap<String, (Option<&'static str>, Option<Product>)>,
     // Each process's executable, by pid, start time and program.
     executables: HashMap<String, String>,
-    // The bundle id of each Hermes.app, Grok Bot.app and Muse.app, by its
-    // folder: asked, and settled.
+    // The bundle id of each vouched app, by its folder: asked, and
+    // settled.
     bundle_reads: HashMap<String, BundleRead>,
     bundle_ids: HashMap<String, Option<String>>,
     // Where the table is read natively (Linux, Windows), each process's
@@ -657,7 +640,7 @@ impl Procs {
 
     /// A process and the ones above it, nearest first, up to launchd, each
     /// with the agent app it is or the actor product it belongs to. A
-    /// process of Node, Bun or one of Hermes's Pythons is asked for its
+    /// process of Node, Bun or one of a product's Pythons is asked for its
     /// arguments, to tell what it runs.
     ///
     /// A process started after the shared table was read isn't in it, so a
@@ -830,7 +813,7 @@ impl Procs {
         while p > 1.0 && out.len() < 64 {
             let described = match &fresh {
                 Some(f) => f.get(p).map(|r| PidMap::from_row(r.clone())).unwrap_or_default(),
-                None => self.describe(io, &[Value::from(p)]),
+                None => self.describe(io, &[p]),
             };
             let Some(row) = described.get(p) else { break };
             if t.get(p).is_some_and(|k| k.start == row.start && k.program == row.program) {
@@ -843,32 +826,29 @@ impl Procs {
         out
     }
 
-    /// The folder a process works in, or None when it can't be told.
-    pub fn cwd(&self, io: &mut dyn Io, pid: Option<&Value>) -> Option<String> {
-        let pid = is_integer(pid).filter(|p| *p >= 1.0)?;
-        if !self.supported {
+    /// The folder a process works in, or None when it can't be told (a pid
+    /// that's no whole number from 1 up included).
+    pub fn cwd(&self, io: &mut dyn Io, pid: f64) -> Option<String> {
+        if !(self.supported && pid.is_finite() && pid.trunc() == pid && pid >= 1.0) {
             return None;
         }
         let text = io.exec(Call::new("lsof", &["-a", "-p", &number_string(pid), "-d", "cwd", "-Fn"])).unwrap_or_default();
         parse_cwd(&text)
     }
 
-    /// Whether a process is still the one that was seen (pids are reused).
-    pub fn alive(&self, io: &mut dyn Io, pid: Option<&Value>, start: Option<&Value>) -> Result<bool, String> {
+    /// Whether a process is still the one that was seen (pids are reused):
+    /// the table has `pid`, started at `start`.
+    pub fn alive(&self, io: &mut dyn Io, pid: f64, start: f64) -> Result<bool, String> {
         let t = self.snapshot(io)?;
-        let row = pid.and_then(Value::as_f64).and_then(|p| t.get(p));
-        Ok(match (row, start.and_then(Value::as_f64)) {
-            (Some(r), Some(s)) => r.start == s,
-            _ => false,
-        })
+        Ok(t.get(pid).is_some_and(|r| r.start == start))
     }
 
     /// Every process on this machine with what it is, for the observers of
     /// actor products: the table, and `of` to say what each is. The
-    /// arguments of the new processes of Node, Bun and Hermes's Pythons are
-    /// read in one ps and matched there; the rest are told by their program
-    /// alone, and a Hermes.app, Grok Bot.app or Muse.app by its bundle id.
-    /// None where XenoNet can't look.
+    /// arguments of the new processes of Node, Bun and a product's Pythons
+    /// are read in one ps and matched there; the rest are told by their
+    /// program alone, and a vouched app's bundle by its id. None where
+    /// XenoNet can't look.
     pub fn census(&self, io: &mut dyn Io) -> Result<Option<Arc<Table>>, String> {
         if !self.supported {
             return Ok(None);
@@ -880,7 +860,7 @@ impl Procs {
         let mut bundles: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
         for p in t.values() {
-            if let Some(b) = vouched_bundle(&p.program) {
+            if let Some(b) = products::vouched_bundle(&p.program) {
                 if seen.insert(b.clone()) {
                     bundles.push(b);
                 }
@@ -938,26 +918,20 @@ impl Procs {
     }
 
     /// What the census says a process is: its agent, or the product it's
-    /// part of, from the verdicts and bundle ids read so far. `pid`,
-    /// `start` and `program` as the row has them.
-    pub fn of(&self, pid: Option<&Value>, start: Option<&Value>, program: Option<&Value>) -> Verdict {
-        let k = format!("{}:{}:{}", template(pid), template(start), template(program));
-        let program = match program {
-            None | Some(Value::Null) => String::new(),
-            Some(v) => js_string(v),
-        };
+    /// part of, from the verdicts and bundle ids read so far.
+    pub fn of(&self, row: &Row) -> Verdict {
         let s = self.s();
-        if let Some((agent, product)) = s.verdicts.get(&k) {
-            return (*agent, Self::settled(&s, *product, &program));
+        if let Some((agent, product)) = s.verdicts.get(&key(row)) {
+            return (*agent, Self::settled(&s, *product, &row.program));
         }
-        let agent = agent_of(&program, "");
-        (agent, if agent.is_some() { None } else { Self::settled(&s, product_of(&program, ""), &program) })
+        let agent = agent_of(&row.program, "");
+        (agent, if agent.is_some() { None } else { Self::settled(&s, product_of(&row.program, ""), &row.program) })
     }
 
     /// The children of these processes, as pids. pgrep costs a few
     /// milliseconds of CPU where ps costs tens, so an observer can look at
     /// what an app runs about once a second.
-    pub fn children(&self, io: &mut dyn Io, pids: &[Value]) -> Vec<f64> {
+    pub fn children(&self, io: &mut dyn Io, pids: &[f64]) -> Vec<f64> {
         let list = listed(pids, 1.0);
         if !self.supported || list.is_empty() {
             return Vec::new();
@@ -969,7 +943,7 @@ impl Procs {
 
     /// These processes, as the table has them, without reading the whole
     /// table; the ones that are gone are left out.
-    pub fn describe(&self, io: &mut dyn Io, pids: &[Value]) -> Table {
+    pub fn describe(&self, io: &mut dyn Io, pids: &[f64]) -> Table {
         let list = listed(pids, 0.0);
         if !self.supported || list.is_empty() {
             return PidMap::default();
@@ -978,7 +952,7 @@ impl Procs {
     }
 
     /// The folders these processes work in, by pid, in one lsof.
-    pub fn cwds(&self, io: &mut dyn Io, pids: &[Value]) -> PidMap<String> {
+    pub fn cwds(&self, io: &mut dyn Io, pids: &[f64]) -> PidMap<String> {
         let list = listed(pids, 0.0);
         if !self.supported || list.is_empty() {
             return PidMap::default();
@@ -987,17 +961,18 @@ impl Procs {
     }
 
     /// Whether a process from a chain runs its agent app's own code, or its
-    /// actor app's (an app process of Grok Bot or Muse), signed by the
-    /// app's maker. codesign asks about the running process, not a file, so
-    /// another program named claude fails, and so does an agent built from
-    /// source or run by Node, or a bundle that only calls itself Grok
-    /// Bot.app. `pid`, `start` and `program` as the process has them.
-    pub fn signed(&self, io: &mut dyn Io, pid: Option<&Value>, start: Option<&Value>, program: Option<&Value>, agent: Option<&str>, product: Option<(&str, &str)>) -> bool {
-        let team = agent.and_then(team_of_agent).or_else(|| product.filter(|(_, role)| *role == "app").and_then(|(p, _)| team_of_product(p)));
+    /// actor app's (an app process of a product whose maker signs it),
+    /// signed by the app's maker. codesign asks about the running process,
+    /// not a file, so another program named claude fails, and so does an
+    /// agent built from source or run by Node, or a bundle that only calls
+    /// itself by the app's name. `pid`, `start` and `program` as the
+    /// process has them.
+    pub fn signed(&self, io: &mut dyn Io, pid: f64, start: f64, program: &str, agent: Option<&str>, product: Option<(&str, &str)>) -> bool {
+        let team = agent.and_then(team_of_agent).or_else(|| product.filter(|(_, role)| *role == "app").and_then(|(p, _)| products::team(p)));
         let Some(team) = team.filter(|_| self.supported) else {
             return false;
         };
-        let k = format!("{}:{}:{}:{team}", template(pid), template(start), template(program));
+        let k = format!("{}:{}:{program}:{team}", number_string(pid), number_string(start));
         {
             let mut s = self.s();
             match s.signatures.get(&k) {
@@ -1012,7 +987,7 @@ impl Procs {
             }
         }
         let requirement = format!("-R=anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
-        let ok = io.exec(Call { file: "codesign".into(), args: vec!["--verify".into(), requirement, template(pid)], share: Some(format!("codesign {k}")) }).is_ok();
+        let ok = io.exec(Call { file: "codesign".into(), args: vec!["--verify".into(), requirement, number_string(pid)], share: Some(format!("codesign {k}")) }).is_ok();
         if let Some(slot) = self.s().signatures.get_mut(&k) {
             *slot = Some(ok);
         }
@@ -1188,11 +1163,8 @@ mod tests {
         xenonet_platforms::install();
         let p = Procs::new("darwin");
         let mut io = Codesign { good: vec!["10", "30"], asked: vec![] };
-        let n = |x: f64| Value::from(x);
-        let program = Value::String("/Users/me/.local/bin/claude".into());
-        let signed = |io: &mut Codesign, pid: f64, start: f64, agent: Option<&str>, product: Option<(&str, &str)>| {
-            p.signed(io, Some(&n(pid)), Some(&n(start)), Some(&program), agent, product)
-        };
+        let program = "/Users/me/.local/bin/claude";
+        let signed = |io: &mut Codesign, pid: f64, start: f64, agent: Option<&str>, product: Option<(&str, &str)>| p.signed(io, pid, start, program, agent, product);
         // Each app by its maker's team: Anthropic, OpenAI, Cursor, Meta.
         assert!(signed(&mut io, 10.0, 1.0, Some("claude"), None));
         assert!(!signed(&mut io, 20.0, 1.0, Some("codex"), None), "codesign says it isn't");
@@ -1223,6 +1195,6 @@ mod tests {
         assert!(!signed(&mut io, 10.0, 2.0, Some("claude"), None), "the pid, reused by another process");
         // And nothing at all where XenoNet can't look.
         let elsewhere = Procs::new("linux");
-        assert!(!elsewhere.signed(&mut io, Some(&n(10.0)), Some(&n(1.0)), Some(&program), Some("claude"), None));
+        assert!(!elsewhere.signed(&mut io, 10.0, 1.0, program, Some("claude"), None));
     }
 }

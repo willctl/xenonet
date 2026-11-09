@@ -53,7 +53,7 @@ use xenonet_state::projects::{FactsCache, Scan, SCAN_DEPTH, SCAN_MAX_DIRS, SCAN_
 use xenonet_wire_map::search::TranscriptSearch;
 use xenonet_wire_map::stats::Stats;
 use xenonet_wire_map::util::{fields, num};
-use xenonet_wire_map::vendor::{Tailed, Vendor};
+use xenonet_wire_map::vendor::Vendor;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/golden-world");
 const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden");
@@ -290,7 +290,7 @@ fn stat(file: &str) -> Option<(f64, u64)> {
 
 // A file the tailer follows: what classify said of it.
 struct Followed {
-    app: Tailed,
+    app: &'static str,
     session_id: String,
     agent_id: Value,
     sampling: Sampling,
@@ -362,30 +362,11 @@ impl Live {
         self.lines += 1;
         let at = Where { session_id: f.session_id.clone(), agent_id: f.agent_id.clone(), file: Value::String(file.into()) };
         let mut out = Vec::new();
-        let r = self.telemetry.line(f.app.id(), &at, raw, !prime, now, &mut out);
+        let r = self.telemetry.line(f.app, &*self.vendor, &at, raw, !prime, now, &mut out);
         self.tell(out);
         if r.is_err() {
             self.errors += 1;
         }
-        if f.app == Tailed::Grok {
-            self.grok_usage(file, &f.session_id, prime);
-        }
-    }
-
-    // src/live.rs's grok_usage.
-    fn grok_usage(&mut self, file: &str, session_id: &str, prime: bool) {
-        let Some(dir) = Path::new(file).parent() else { return };
-        let Ok(m) = std::fs::metadata(dir.join("usage.json")) else { return };
-        let stamp = format!("{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN));
-        if !self.telemetry.grok_usage_due(session_id, &stamp) {
-            return;
-        }
-        let json = |name: &str| std::fs::read_to_string(dir.join(name)).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
-        let usage = json("usage.json").and_then(|raw| self.vendor.sample("spacexai/grok-build/usage", raw, None, None, 16));
-        let summary = json("summary.json");
-        let mut out = Vec::new();
-        self.telemetry.grok_usage(session_id, usage.as_ref(), summary.as_ref(), !prime, &mut out);
-        self.tell(out);
     }
 
     // What's new in a file, up to `until`.
@@ -409,7 +390,7 @@ impl Live {
         if !self.tailer.files.contains(file) {
             let Some(kind) = self.telemetry.classify(file) else { return };
             let f = Followed {
-                app: Tailed::of(kind.get("app").and_then(Value::as_str).unwrap_or_default()),
+                app: xenonet_adapter::apps::tailed_app(kind.get("app").and_then(Value::as_str).unwrap_or_default(), "claude"),
                 session_id: kind.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_string(),
                 agent_id: kind.get("agentId").cloned().unwrap_or(Value::Null),
                 sampling: Sampling::default(),
@@ -450,11 +431,11 @@ impl Live {
             let checked = self.vendor.check("anthropic/claude-desktop/plan-usage", raw.clone(), version.as_deref(), None);
             if let Ok(samples) = claude_usage::desktop_samples(Some(&raw), checked.as_ref()) {
                 if xenonet_base::text::truthy(Some(&samples)) {
-                    self.telemetry.desktop_read(&samples);
+                    self.telemetry.usage_samples("claude", &samples);
                 }
             }
         }
-        self.telemetry.settle_claude();
+        self.telemetry.settle_usage("claude");
     }
 
     fn status(&self) -> Value {
@@ -824,6 +805,8 @@ fn projects(w: &World, c: &mut Check) {
 async fn the_golden_world_reads_as_the_js_read_it() {
     // golden.test.js ran with TZ=UTC: the day a token counts for is local.
     std::env::set_var("TZ", "UTC");
+    // The telemetry and the vendor take the adapters' readers.
+    xenonet_platforms::install();
     let w = World::new();
     w.lay("start", "world");
     let mut c = Check::new(&w.root);

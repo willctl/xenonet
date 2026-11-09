@@ -13,11 +13,13 @@ pub use xenonet_model::doctor::Status;
 /// Where an adapter's rows go in the doctor's list, which keeps one order
 /// for everyone: the app's own checks (installed, signed in, readable)
 /// after XenoNet's own, and the sessions' checks (connected) after the
-/// machine's.
+/// machine's; and the actors' checks (a product's plugin) among the
+/// actors', after XenoNet's own check of its observers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
     App,
     Sessions,
+    Actors,
 }
 
 /// A check's place in the doctor's list.

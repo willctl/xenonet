@@ -18,7 +18,6 @@ unicode-normalization.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
 xenonet-engine.workspace = true
-xenonet-schema.workspace = true
 
 [lints]
 workspace = true

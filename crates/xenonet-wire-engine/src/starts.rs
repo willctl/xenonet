@@ -177,14 +177,14 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     let session = (r.app != "codex").then(|| format!("{}:{id}", r.app));
     let key = session.clone().unwrap_or_else(|| format!("start:{id}"));
     let runs = std::path::Path::new(&w.setup.state_dir).join("runs");
-    // Grok Build reads its prompt from a file only its owner can read,
-    // taken away when the run ends.
     // Under a standing delegation, a session or actor asking is told it was
     // your user's delegation, set where and when, as this machine keeps it.
     let delegation = (settings.start == Start::Delegate && sender.kind != Kind::You).then(|| reach.delegated.clone()).flatten();
     let on = delegation.as_ref().map(|(_, at)| xenonet_base::time::iso(*at as f64).chars().take(10).collect::<String>());
     let text = starts::framed(by, from, &r.prompt, delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()));
-    let prompt_file = if r.app == "grok" {
+    // An app that reads its prompt from a file (Grok Build) gets one only
+    // its owner can read, taken away when the run ends.
+    let prompt_file = if starts::prompt_in_file(&r.app) {
         let f = runs.join(format!("{id}.prompt"));
         write_private(&f, &text).map_err(|e| format!("the prompt couldn't be written for Grok Build: {e}"))?;
         Some(f.to_string_lossy().into_owned())
@@ -192,7 +192,16 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
         None
     };
     let server = xenonet_engine::delivery::setup::server_name(&Arg::Num(f64::from(w.setup.port)));
-    let (app, args) = starts::command(r, &id, &cwd, resumes.settings.as_deref(), &server, prompt_file.as_deref());
+    let command = starts::command(r, &id, &cwd, resumes.settings.as_deref(), &server, prompt_file.as_deref());
+    let (app, args) = match command {
+        Ok(c) => c,
+        Err(why) => {
+            if let Some(f) = &prompt_file {
+                let _ = std::fs::remove_file(f);
+            }
+            return Err(why);
+        }
+    };
     let mut env: Vec<(String, String)> =
         xenonet_engine::delivery::resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, crate::js::text(&v))).collect();
     if app == "claude" {

@@ -368,13 +368,13 @@ impl CodexClient {
         let t = xenonet_sources::lines::take(chunk);
         let mut sampling = xenonet_schema::vendor::Sampling::default();
         for l in &t.lines {
-            if let Some(raw) = self.vendor.line(crate::vendor::Tailed::Codex, l, &mut sampling) {
+            if let Some(raw) = self.vendor.line("codex", l, &mut sampling) {
                 let _ = entries.add(raw);
             }
         }
         match t.last {
             Some(last) => {
-                if let Some(raw) = self.vendor.record(crate::vendor::Tailed::Codex, last, &mut sampling) {
+                if let Some(raw) = self.vendor.record("codex", last, &mut sampling) {
                     let _ = entries.add(raw);
                 }
                 Vec::new()
@@ -462,6 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_app_server_that_isnt_there_fails_the_block() {
+        xenonet_platforms::install();
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
         let c = CodexClient::new("/nowhere/codex".into(), "0.0.0".into(), vendor.clone());
         assert!(c.threads().await.is_err());
@@ -471,6 +472,7 @@ mod tests {
 
     #[test]
     fn a_rollout_read_a_page_at_a_time() {
+        xenonet_platforms::install();
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
         let dir = std::env::temp_dir().join(format!("xenonet-wire-rollout-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("a folder");
@@ -537,6 +539,7 @@ done
         let bin = dir.join("codex");
         std::fs::write(&bin, FAKE).expect("the stand-in");
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("runnable");
+        xenonet_platforms::install();
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
         let c = CodexClient::new(bin.to_string_lossy().into_owned(), "0.3.0".into(), vendor);
         let threads = c.threads().await.expect("the threads");

@@ -122,18 +122,6 @@ pub fn now() -> f64 {
     xenonet_app::task::now_ms()
 }
 
-/// A JSON value as an argument to a core.
-pub fn arg_of(v: &Value) -> Arg {
-    match v {
-        Value::Null => Arg::Null,
-        Value::Bool(b) => Arg::Bool(*b),
-        Value::Number(n) => Arg::Num(n.as_f64().unwrap_or(f64::NAN)),
-        Value::String(s) => Arg::Text(s.clone()),
-        Value::Array(a) => Arg::List(a.iter().map(arg_of).collect()),
-        Value::Object(m) => Arg::Obj(m.iter().map(|(k, v)| (k.clone(), arg_of(v))).collect()),
-    }
-}
-
 /// An argument's text, as String(v) has it.
 pub fn text(a: &Arg) -> String {
     xenonet_engine::store::js_text(a)

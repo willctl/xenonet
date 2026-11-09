@@ -3,9 +3,9 @@
 //! channel holds a long poll here; a message for that session answers the
 //! poll, and the server pushes it into the live session. What's kept (when
 //! each session last polled, what waits for a poll) and every decision are
-//! here; the polls themselves, promises with their timers, are the twin's.
+//! here; the polls themselves, with their timers, are the binary's.
 
-use crate::sql::Arg;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// A poll that ended this recently still counts: the next one is on its way.
@@ -14,11 +14,11 @@ pub const LIVE_MS: f64 = 5000.0;
 #[derive(Default)]
 pub struct Channels {
     last_poll: HashMap<String, f64>,
-    queue: Vec<(String, Vec<Arg>)>,
+    queue: Vec<(String, Vec<Value>)>,
 }
 
 /// Where a pushed item went.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Push {
     /// No channel is live.
     NotLive,
@@ -36,7 +36,7 @@ impl Channels {
     }
 
     /// A poll begins: what waited for it, taken, or None to wait.
-    pub fn poll(&mut self, agent: &str, now: f64) -> Option<Vec<Arg>> {
+    pub fn poll(&mut self, agent: &str, now: f64) -> Option<Vec<Value>> {
         self.last_poll.insert(agent.to_string(), now);
         let i = self.queue.iter().position(|(k, items)| k == agent && !items.is_empty())?;
         Some(self.queue.remove(i).1)
@@ -56,7 +56,7 @@ impl Channels {
     }
 
     /// Hands an item to the session's poll, or keeps it for the next one.
-    pub fn push(&mut self, agent: &str, item: Arg, waiting: bool, now: &mut dyn FnMut() -> f64) -> Push {
+    pub fn push(&mut self, agent: &str, item: Value, waiting: bool, now: &mut dyn FnMut() -> f64) -> Push {
         if !self.live(agent, waiting, now) {
             return Push::NotLive;
         }
@@ -74,15 +74,16 @@ impl Channels {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_push_waits_for_the_next_poll_while_the_channel_is_live() {
         let mut c = Channels::default();
-        assert_eq!(c.push("claude:a", Arg::num(1.0), false, &mut || 0.0), Push::NotLive);
+        assert_eq!(c.push("claude:a", json!(1), false, &mut || 0.0), Push::NotLive);
         assert_eq!(c.poll("claude:a", 0.0), None);
         c.polled("claude:a", 100.0);
-        assert_eq!(c.push("claude:a", Arg::num(1.0), false, &mut || 200.0), Push::Queued);
-        assert_eq!(c.poll("claude:a", 300.0), Some(vec![Arg::num(1.0)]));
-        assert_eq!(c.push("claude:a", Arg::num(2.0), false, &mut || 9000.0), Push::NotLive);
+        assert_eq!(c.push("claude:a", json!(1), false, &mut || 200.0), Push::Queued);
+        assert_eq!(c.poll("claude:a", 300.0), Some(vec![json!(1)]));
+        assert_eq!(c.push("claude:a", json!(2), false, &mut || 9000.0), Push::NotLive);
     }
 }

@@ -6,7 +6,7 @@
 //! stay as they were.
 
 use crate::util::{blocking, lock, now_ms, wiki_out};
-use crate::vendor::{Tailed, Vendor};
+use crate::vendor::Vendor;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,7 @@ use xenonet_state::stats::{self, File, Kept, Transcripts};
 /// A whole transcript's records, through its app's normalizer (lines.js's
 /// readLines): a last line without a newline too, and a compressed
 /// archive (.jsonl.zst) decompressed.
-pub fn read_lines(vendor: &Vendor, file: &str, app: Tailed) -> std::io::Result<Vec<Value>> {
+pub fn read_lines(vendor: &Vendor, file: &str, app: &str) -> std::io::Result<Vec<Value>> {
     let data = crate::archive::read(file)?;
     let t = xenonet_sources::lines::take(&data);
     let mut sampling = Sampling::default();
@@ -74,7 +74,7 @@ impl Stats {
         }
         // An app XenoNet doesn't tail is refused, not read as Claude Code.
         let app = session_id.split(':').next().unwrap_or_default();
-        let Some(app) = xenonet_adapter::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Err(xenonet_adapter::apps::untailed(app)) };
+        let Some(app) = xenonet_adapter::apps::tailed_or_text(Some(app), None) else { return Err(xenonet_adapter::apps::untailed(app)) };
         let read: Vec<File> = files
             .iter()
             .map(|(f, agent)| File { agent: Some(agent.clone().map_or(Value::Null, Value::String)), lines: read_lines(&self.vendor, f, app).unwrap_or_default() })

@@ -18,7 +18,10 @@ serde_json.workspace = true
 sha2.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
-xenonet-schema.workspace = true
+
+# The telemetry's tests read lines through the adapters' readers.
+[dev-dependencies]
+xenonet-platforms.workspace = true
 
 [lints]
 workspace = true

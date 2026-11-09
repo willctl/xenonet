@@ -14,7 +14,7 @@
 use crate::blocks::{health_of, Block};
 use crate::gatherer::{Gather, Options};
 use crate::util::{fields, lock, now_ms, num, obj};
-use crate::vendor::{Tailed, Vendor};
+use crate::vendor::Vendor;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -68,7 +68,7 @@ pub struct TailStatus {
 // What a file the tailer follows is: what classify said, and how its
 // lines are sampled for the drift check.
 struct Entry {
-    app: Tailed,
+    app: &'static str,
     session_id: String,
     agent_id: Value,
     sampling: Sampling,
@@ -182,34 +182,11 @@ impl Live {
         lock(&self.status).lines += 1;
         let f = Where { session_id: e.session_id.clone(), agent_id: e.agent_id.clone(), file: Value::String(file.into()) };
         let mut emitted = Vec::new();
-        let r = lock(&self.telemetry).line(e.app.id(), &f, raw, !prime, now_ms(), &mut emitted);
+        let r = lock(&self.telemetry).line(e.app, &*self.vendor, &f, raw, !prime, now_ms(), &mut emitted);
         out.extend(emits(emitted));
         if r.is_err() {
             lock(&self.status).errors += 1;
         }
-        if e.app == Tailed::Grok {
-            self.grok_usage(file, &e.session_id, prime, out);
-        }
-    }
-
-    // A Grok Build session's tokens and cost, from the usage.json beside its
-    // updates, read again when it was written since: its own schema reads it
-    // leniently, so a change in Grok's format shows as drift (live.js's
-    // #grokUsage).
-    fn grok_usage(&self, file: &str, session_id: &str, prime: bool, out: &mut Vec<Event>) {
-        let Some(dir) = std::path::Path::new(file).parent() else { return };
-        let usage_file = dir.join("usage.json");
-        let Ok(m) = std::fs::metadata(&usage_file) else { return };
-        let stamp = format!("{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN));
-        if !lock(&self.telemetry).grok_usage_due(session_id, &stamp) {
-            return;
-        }
-        let json = |name: &str| std::fs::read_to_string(dir.join(name)).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
-        let usage = json("usage.json").and_then(|raw| self.vendor.sample("spacexai/grok-build/usage", raw, None, None, 16));
-        let summary = json("summary.json");
-        let mut emitted = Vec::new();
-        lock(&self.telemetry).grok_usage(session_id, usage.as_ref(), summary.as_ref(), !prime, &mut emitted);
-        out.extend(emits(emitted));
     }
 
     // Reads what's new in a file, up to `until`, as history (`prime`) or
@@ -261,7 +238,7 @@ impl Live {
             let Some(kind) = lock(&self.telemetry).classify(file) else { return Ok(()) };
             let entry = Entry {
                 // Any app that isn't tailed is read as Claude Code.
-                app: Tailed::of(kind.get("app").and_then(Value::as_str).unwrap_or_default()),
+                app: xenonet_adapter::apps::tailed_app(kind.get("app").and_then(Value::as_str).unwrap_or_default(), "claude"),
                 session_id: kind.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_string(),
                 agent_id: kind.get("agentId").cloned().unwrap_or(Value::Null),
                 sampling: Sampling::default(),
@@ -487,7 +464,7 @@ impl Live {
                 a.value()
             };
             if a.last().map(|l| l.at) != before {
-                let _ = lock(&self.telemetry).claude_asked(Some(&r), now);
+                let _ = lock(&self.telemetry).usage_reading("claude", Some(&r), now);
             }
         }
         if let Some((d, dir)) = &self.desktop {
@@ -495,10 +472,10 @@ impl Live {
             let vendor = self.vendor.clone();
             let samples = d.get(false, None, move || desktop_samples(&vendor, &file));
             if xenonet_base::text::truthy(Some(&samples)) {
-                lock(&self.telemetry).desktop_read(&samples);
+                lock(&self.telemetry).usage_samples("claude", &samples);
             }
         }
-        lock(&self.telemetry).settle_claude();
+        lock(&self.telemetry).settle_usage("claude");
     }
 
     // ---------- what the state reads ----------
@@ -710,6 +687,7 @@ mod tests {
     use xenonet_schema::drift::DriftLog;
 
     fn vendor() -> Arc<Vendor> {
+        xenonet_platforms::install();
         Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())))
     }
 

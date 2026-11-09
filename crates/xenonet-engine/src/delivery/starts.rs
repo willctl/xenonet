@@ -2,22 +2,17 @@
 //! actor asks a machine for a new session of Claude Code, Codex or Grok
 //! Build, in a folder there, with a first prompt. Whether the machine
 //! takes it is `reach`'s (its start setting); what a request may say, how
-//! its first prompt is framed, the command that starts it, the limits and
-//! what the answers say are here. Running it is the shared runner's
-//! (`runs`), and carrying it to another machine the network's: a message
-//! frame to `TARGET`, answered by receipts keyed by its id.
+//! its first prompt is framed, the limits and what the answers say are
+//! here. The command that starts each app is its adapter's (`apps`, the
+//! `start` way in). Running it is the shared runner's (`runs`), and
+//! carrying it to another machine the network's: a message frame to
+//! `TARGET`, answered by receipts keyed by its id.
 //!
-//! ```text
-//! claude -p --session-id <id> --output-format stream-json --verbose [--settings <listen file>]
-//!        [--permission-mode <m>] --permission-prompt-tool mcp__<server>__permission
-//! codex exec --json -C <folder> -
-//! grok --prompt-file <file> -s <id> --output-format json [--permission-mode <m>]
-//! ```
-//!
-//! The prompt goes on standard input (Grok Build reads it from a file of
-//! XenoNet's), never as an argument. A session never starts bypassing its
-//! permission checks.
+//! The prompt goes on standard input (or in a file of XenoNet's, for an
+//! app that reads it from one), never as an argument. A session never
+//! starts bypassing its permission checks.
 
+use super::apps::{self, Start};
 use serde_json::{json, Value};
 
 /// The reserved target a start request goes to on another machine.
@@ -142,44 +137,23 @@ pub fn framed(by: &Value, from: Option<&str>, prompt: &str, delegation: Option<(
     format!("{line}\n\n{rules}{prompt}")
 }
 
-/// Grok Build's word for a mode.
-fn grok_mode(m: &str) -> &str {
-    if m == "manual" {
-        "default"
-    } else {
-        m
-    }
+/// Whether the app reads a turn's prompt from a file XenoNet writes, as its
+/// adapter says, rather than from standard input.
+pub fn prompt_in_file(app: &str) -> bool {
+    apps::of(app).is_some_and(|w| w.prompt_file)
 }
 
 /// The app and arguments that start a new session `id` (a UUID XenoNet
-/// picks, so the answer can name it at once), in `cwd`. `settings` is the
-/// listen file a Claude Code session waits for messages with after each
-/// turn; `server` the xenonet MCP server's name in its settings, whose
-/// permission tool answers its prompts; `prompt_file` where Grok Build
-/// reads its prompt.
-pub fn command(r: &Request, id: &str, cwd: &str, settings: Option<&str>, server: &str, prompt_file: Option<&str>) -> (String, Vec<String>) {
-    let s = |x: &str| x.to_string();
-    let mut args = Vec::new();
-    match r.app.as_str() {
-        "codex" => args.extend([s("exec"), s("--json"), s("-C"), s(cwd), s("-")]),
-        "grok" => {
-            args.extend([s("--prompt-file"), s(prompt_file.unwrap_or("")), s("-s"), s(id), s("--output-format"), s("json")]);
-            if let Some(m) = &r.mode {
-                args.extend([s("--permission-mode"), s(grok_mode(m))]);
-            }
-        }
-        _ => {
-            args.extend([s("-p"), s("--session-id"), s(id), s("--output-format"), s("stream-json"), s("--verbose")]);
-            if let Some(f) = settings {
-                args.extend([s("--settings"), s(f)]);
-            }
-            if let Some(m) = &r.mode {
-                args.extend([s("--permission-mode"), s(m)]);
-            }
-            args.extend([s("--permission-prompt-tool"), format!("mcp__{server}__permission")]);
-        }
-    }
-    (r.app.clone(), args)
+/// picks, so the answer can name it at once), in `cwd`, as the app's
+/// adapter gives them. `settings` is the listen file a session waits for
+/// messages with after each turn; `server` the xenonet MCP server's name
+/// in its settings, whose permission tool answers its prompts;
+/// `prompt_file` where the prompt was written for an app that reads it
+/// from a file. Or why there's no such command: the app's adapter has no
+/// start.
+pub fn command(r: &Request, id: &str, cwd: &str, settings: Option<&str>, server: &str, prompt_file: Option<&str>) -> Result<(String, Vec<String>), String> {
+    let start = apps::of(&r.app).and_then(|w| w.start).ok_or_else(|| format!("XenoNet has no way to start a {} session here", r.app))?;
+    Ok(start(&Start { id, cwd, mode: r.mode.as_deref(), settings, server, prompt_file }))
 }
 
 /// Who asked a start here, in the starts' history: one asker on this
@@ -506,9 +480,10 @@ mod tests {
 
     #[test]
     fn each_app_starts_its_own_way_and_the_prompt_never_goes_as_an_argument() {
+        xenonet_platforms::install();
         let id = "0190d3e0-0000-7000-8000-00000000ab01";
         let r = |app: &str, mode: Option<&str>| Request { folder: "~".into(), app: app.into(), mode: mode.map(str::to_string), prompt: "-rm -rf".into(), delegate: false };
-        let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None);
+        let (app, args) = command(&r("claude", Some("plan")), id, "/w/atlas", Some("/s/listen.json"), "xenonet", None).unwrap();
         assert_eq!(app, "claude");
         assert_eq!(
             args,
@@ -528,17 +503,19 @@ mod tests {
             ]
         );
         assert_eq!(
-            command(&r("claude", None), id, "/w", None, "xenonet-dev", None).1,
+            command(&r("claude", None), id, "/w", None, "xenonet-dev", None).unwrap().1,
             ["-p", "--session-id", id, "--output-format", "stream-json", "--verbose", "--permission-prompt-tool", "mcp__xenonet-dev__permission"]
         );
-        assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None).1, ["exec", "--json", "-C", "/w/atlas", "-"]);
+        assert_eq!(command(&r("codex", None), id, "/w/atlas", None, "xenonet", None).unwrap().1, ["exec", "--json", "-C", "/w/atlas", "-"]);
         assert_eq!(
-            command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).1,
+            command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).unwrap().1,
             ["--prompt-file", "/s/runs/p.txt", "-s", id, "--output-format", "json", "--permission-mode", "default"]
         );
         for app in APPS {
-            assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p")).1.iter().any(|a| a.contains("rm -rf")), "{app}");
+            assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p")).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
         }
+        assert!(prompt_in_file("grok") && !prompt_in_file("claude") && !prompt_in_file("codex"));
+        assert!(command(&r("opencode", None), id, "/w", None, "xenonet", None).is_err(), "no start in its adapter");
     }
 
     #[test]

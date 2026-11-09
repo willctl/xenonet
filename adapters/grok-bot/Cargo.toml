@@ -1,0 +1,18 @@
+[package]
+name = "xenonet-grok-bot"
+description = "Grok Bot's adapter: how XenoNet observes Grok Bot's app and the commands it runs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+xenonet-adapter.workspace = true
+xenonet-base.workspace = true
+
+[lints]
+workspace = true

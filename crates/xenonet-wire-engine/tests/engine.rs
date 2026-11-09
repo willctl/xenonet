@@ -267,17 +267,17 @@ async fn a_channel_poll_waits_for_its_session_and_ends_empty_at_its_time() {
     let (w, dir) = world("channel");
     let channels = xenonet_wire_engine::delivery::ChannelsDriver(w.clone());
     // No poll yet: nothing to hand over to.
-    assert!(!w.channels.push(A, xenonet_engine::sql::Arg::text("early")));
+    assert!(!w.channels.push(A, json!("early")));
     let polling = {
         let w = w.clone();
         tokio::spawn(async move { xenonet_wire_engine::delivery::ChannelsDriver(w).poll(A, Duration::from_secs(10)).await })
     };
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(w.channels.live(A));
-    assert!(w.channels.push(A, xenonet_engine::sql::Arg::text("hello")));
+    assert!(w.channels.push(A, json!("hello")));
     assert_eq!(polling.await.unwrap().unwrap(), json!(["hello"]));
     // Just polled, so still live: a push waits for the next poll.
-    assert!(w.channels.push(A, xenonet_engine::sql::Arg::text("next")));
+    assert!(w.channels.push(A, json!("next")));
     assert_eq!(channels.poll(A, Duration::from_secs(1)).await.unwrap(), json!(["next"]));
     let started = Instant::now();
     assert_eq!(channels.poll(A, Duration::from_millis(200)).await.unwrap(), json!([]));

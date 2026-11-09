@@ -15,6 +15,8 @@ async-trait.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# A short, stable tag for a place in an observer's event refs.
+sha2.workspace = true
 xenonet-base.workspace = true
 xenonet-model.workspace = true
 # Where a settings file that isn't JSON goes wrong, for connect's message.

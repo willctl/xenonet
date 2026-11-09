@@ -14,17 +14,14 @@
 //! decides what this machine lets the sender do (your consent); a message
 //! that may not wake anything still waits for the next turn.
 //!
-//! The records are Rust's; the twin keeps a JS object for each, which it's
-//! told of ("listed", "unlisted", "sync", "release"), and the events and
-//! timers ("emit", "arm", "clear"). "router" is the twin itself, whose
-//! engine, policy, channels, opencode, tmux, resume, notify, usage and now
-//! are called as the JS called them.
+//! The records are the router's; what it asks of the machine and the other
+//! cores (the clock, the engine's views and store, the policy, the
+//! channels, the ways in, the ack timers and the events) is `Host`'s.
 
-use super::policy::{framed, hash_text, is_you};
+use super::policy::{framed, hash_text, is_you, WakeAllowed};
 use super::reach::{self, Action, Consent, Decision, Kind, Settings, Wake};
-use crate::peer::{list, opt_call, Calls, Result};
-use crate::sql::Arg;
-use crate::store::js_text;
+use super::{template, text_of, truthy, Delivered, Result};
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_base::sync::Locked;
@@ -32,29 +29,121 @@ use xenonet_base::sync::Locked;
 pub const ACK_MS: f64 = 60e3;
 const KEEP: usize = 500;
 
+/// The router's collaborators.
+pub trait Host {
+    /// The time, in epoch ms.
+    fn now(&mut self) -> f64;
+    /// How much of its plan an app's provider has used, 0 to 1 (`usage`);
+    /// None without a fresh reading.
+    fn usage(&mut self, app: &str) -> Option<f64>;
+    /// This machine's wake setting (Settings → Network).
+    fn wake_setting(&mut self) -> Wake;
+    /// You're told a push nothing acknowledged: { message, agent, title,
+    /// from }.
+    fn notify(&mut self, notice: Value);
+    /// A record changed: the delivery event, with the record.
+    fn emit(&mut self, record: Value);
+    /// The record's ack timer, set for `ms` from now: `expire` is called
+    /// for the key when it fires.
+    fn arm(&mut self, key: &str, ms: f64);
+    fn clear(&mut self, key: &str);
+
+    // The engine.
+
+    /// A session's or actor's view, None when there's none.
+    fn view(&mut self, id: &str) -> Option<Value>;
+    /// Whether the session's Stop hook is listening for messages now.
+    fn listening(&mut self, id: &str) -> bool;
+    /// The process the session last made contact from, when known.
+    fn contact_pid(&mut self, agent: &str) -> Option<f64>;
+    fn mark_seen(&mut self, agent: &str, ids: &[Value], now: f64) -> Result<()>;
+    fn mark_unseen(&mut self, agent: &str, ids: &[Value]) -> Result<()>;
+
+    // The policy.
+
+    /// Whether you allowed the session to be woken, from here or (`remote`)
+    /// by actors too.
+    fn consented(&mut self, session: &str, remote: bool) -> bool;
+    /// The sessions with an allowance, live or not.
+    fn consent_sessions(&mut self) -> Vec<String>;
+    fn wake_allowed(&mut self, sender: &str, target: &str, usage: Option<f64>) -> WakeAllowed;
+    fn spend_wake(&mut self, sender: &str, target: &str);
+    fn audit(&mut self, entry: Value) -> Result<()>;
+
+    // The ways in.
+
+    /// Whether a Claude Code channel is live for the session.
+    fn channel_live(&mut self, agent: &str) -> bool;
+    /// An item handed to the session's channel; false when none is live.
+    fn channel_push(&mut self, agent: &str, item: Value) -> bool;
+    /// What the session's own OpenCode says of it, None when none knows it.
+    fn opencode_info(&mut self, id: &str) -> Option<Value>;
+    fn opencode_deliver(&mut self, id: &str, text: &str) -> Delivered;
+    fn tmux_deliver(&mut self, pid: f64, text: &str) -> Delivered;
+    /// Whether a headless resume is set up here (never in the demo).
+    fn resumes(&mut self) -> bool;
+    /// A turn resumed for the session (or, `fork`, a copy of it) with the
+    /// message as its prompt.
+    fn resume_deliver(&mut self, agent: &str, cwd: Option<&str>, text: &str, fork: bool) -> Delivered;
+}
+
+/// What the engine asks of live delivery.
+pub trait Delivery {
+    /// The OpenCode sessions you allowed XenoNet to wake.
+    fn known(&self) -> Vec<String>;
+    /// Whether a session can be reached without hooks.
+    fn reaches(&self, id: &str) -> bool;
+    /// Whether a session that ended can still be messaged.
+    fn resumable(&self, view: &Value) -> bool;
+    /// A wake for a session's listening Stop hook, spent when allowed.
+    fn wake(&self, from: &str, agent: &str) -> WakeAllowed;
+    /// How a message from `me` would reach `recipient` if sent now: None
+    /// when it waits for the hooks.
+    fn way(&self, me: &str, recipient: &Value) -> Option<&'static str>;
+    /// What its own OpenCode says of an OpenCode session.
+    fn describe(&self, id: &str) -> Option<Value>;
+}
+
+/// A delivery: one message to one session, and how it went.
+#[derive(Clone, Debug)]
 struct Rec {
-    /// The record's fields, as the JS object has them.
-    fields: Vec<(String, Arg)>,
-    /// The message's id and sender, for its timer.
-    message: Arg,
-    from: Arg,
+    /// The message's id.
+    message: Value,
+    agent: String,
+    from: String,
+    /// queued, live, next-turn or notified.
+    state: &'static str,
+    /// listen, channel, opencode, tmux, resume, fork or hooks.
+    how: Option<&'static str>,
+    at: f64,
+    acked_at: Option<f64>,
+    why: Option<String>,
+    from_name: Option<String>,
+    /// Where a live delivery went: a pane, a server, a pid.
+    location: Option<String>,
     /// An attempt under way, and a timer set.
     attempting: bool,
     timer: bool,
 }
 
 impl Rec {
-    fn get(&self, k: &str) -> Arg {
-        self.fields.iter().find(|(n, _)| n == k).map_or(Arg::Undef, |(_, v)| v.clone())
-    }
-    fn set(&mut self, k: &str, v: Arg) {
-        match self.fields.iter_mut().find(|(n, _)| n == k) {
-            Some(e) => e.1 = v,
-            None => self.fields.push((k.to_string(), v)),
+    fn to_json(&self) -> Value {
+        let mut m = Map::new();
+        m.insert("message".into(), self.message.clone());
+        m.insert("agent".into(), Value::String(self.agent.clone()));
+        m.insert("from".into(), Value::String(self.from.clone()));
+        m.insert("state".into(), Value::String(self.state.into()));
+        m.insert("how".into(), self.how.map_or(Value::Null, |h| Value::String(h.into())));
+        m.insert("at".into(), xenonet_base::json::number(self.at));
+        m.insert("ackedAt".into(), self.acked_at.map_or(Value::Null, xenonet_base::json::number));
+        m.insert("why".into(), self.why.clone().map_or(Value::Null, Value::String));
+        if let Some(n) = &self.from_name {
+            m.insert("fromName".into(), Value::String(n.clone()));
         }
-    }
-    fn arg(&self) -> Arg {
-        Arg::Obj(self.fields.clone())
+        if let Some(w) = &self.location {
+            m.insert("where".into(), Value::String(w.clone()));
+        }
+        Value::Object(m)
     }
 }
 
@@ -70,255 +159,186 @@ pub struct Router {
     inner: Mutex<Inner>,
 }
 
-fn starts(a: &Arg, prefix: &str) -> bool {
-    js_text(a).starts_with(prefix)
-}
-
-fn obj(fields: Vec<(&str, Arg)>) -> Arg {
-    Arg::Obj(fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
-}
-
-/// `x.catch((err) => ({ ok: false, why: err.message }))`.
-fn caught(r: Result<Arg>) -> Arg {
-    r.unwrap_or_else(|t| obj(vec![("ok", Arg::Bool(false)), ("why", Arg::text(t.message))]))
-}
-
-fn truthy_at(c: &mut dyn Calls, path: &str) -> Result<bool> {
-    Ok(match c.kind(path)?.as_str() {
-        "undefined" | "null" => false,
-        "function" | "object" | "symbol" => true,
-        _ => c.get(path)?.truthy(),
-    })
+fn s(v: Option<&Value>) -> Option<String> {
+    v.and_then(Value::as_str).map(str::to_string)
 }
 
 impl Router {
-    fn now(c: &mut dyn Calls) -> Result<f64> {
-        let t = c.call("router", "now", vec![])?;
-        Ok(match t {
-            Arg::Num(n) => n,
-            other => xenonet_base::text::js_number(Some(&other.to_json())),
-        })
-    }
-
     fn with<T>(&self, key: &str, f: impl FnOnce(&mut Rec) -> T) -> Option<T> {
         self.inner.locked().recs.get_mut(key).map(f)
     }
 
-    fn field(&self, key: &str, k: &str) -> Arg {
-        self.with(key, |r| r.get(k)).unwrap_or(Arg::Undef)
+    fn acked(&self, key: &str) -> bool {
+        self.with(key, |r| r.acked_at.is_some()).unwrap_or(false)
     }
 
-    /// Fields set on a record, and the twin's object told.
-    fn assign(&self, c: &mut dyn Calls, key: &str, fields: Vec<(&str, Arg)>) -> Result<()> {
-        let rec = self.with(key, |r| {
-            for (k, v) in fields {
-                r.set(k, v);
-            }
-            r.arg()
-        });
-        if let Some(rec) = rec {
-            c.call("", "sync", vec![Arg::text(key), rec])?;
+    /// The record as it is, for the delivery event.
+    fn emit(&self, h: &mut dyn Host, key: &str) {
+        if let Some(rec) = self.with(key, |r| r.to_json()) {
+            h.emit(rec);
         }
-        Ok(())
-    }
-
-    fn emit(c: &mut dyn Calls, key: &str) -> Result<()> {
-        c.call("", "emit", vec![Arg::text(key)])?;
-        Ok(())
     }
 
     /// A record let go once it's no longer listed and nothing waits on it.
-    fn settle(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
-        let gone = {
-            let mut i = self.inner.locked();
-            let listed = i.order.iter().any(|k| k == key);
-            let free = i.recs.get(key).is_some_and(|r| !r.attempting && !r.timer && !listed);
-            if free {
-                i.recs.remove(key);
-            }
-            free
-        };
-        if gone {
-            c.call("", "release", vec![Arg::text(key)])?;
+    fn settle(&self, key: &str) {
+        let mut i = self.inner.locked();
+        let listed = i.order.iter().any(|k| k == key);
+        if i.recs.get(key).is_some_and(|r| !r.attempting && !r.timer && !listed) {
+            i.recs.remove(key);
         }
-        Ok(())
     }
 
-    fn usage(c: &mut dyn Calls, app: &str) -> Result<Arg> {
-        c.call("router", "usage", vec![Arg::text(app)])
-    }
-
-    fn consented(c: &mut dyn Calls, id: &Arg, remote: bool) -> Result<bool> {
-        Ok(c.call("router.policy", "consented", vec![id.clone(), obj(vec![("remote", Arg::Bool(remote))])])?.truthy())
-    }
-
-    /// This machine's wake setting (`router.reach()`'s wake): network lets
-    /// any sender wake a session within the budgets.
-    fn wake_network(c: &mut dyn Calls) -> Result<bool> {
-        Ok(opt_call(c, "router", "reach", vec![])?.field("wake").as_str() == Some("network"))
+    /// The latest `n` deliveries, oldest first.
+    pub fn list(&self, n: usize) -> Vec<Value> {
+        let i = self.inner.locked();
+        let from = i.order.len().saturating_sub(n);
+        i.order[from..].iter().filter_map(|k| i.recs.get(k).map(Rec::to_json)).collect()
     }
 
     /// Whether this machine lets `from` wake `agent` (`reach`): its wake
     /// setting, else your allowance for the session, here and for actors.
     /// `granted`: the message is a start's end, told to the session that
     /// asked for the start, whose ask is its consent to this wake.
-    fn may_wake_for(c: &mut dyn Calls, from: &Arg, agent: &Arg, granted: bool) -> Result<Decision> {
+    fn may_wake_for(h: &mut dyn Host, from: &str, agent: &str, granted: bool) -> Decision {
         if granted {
-            return Ok(Decision::Allow);
+            return Decision::Allow;
         }
-        Self::may_wake(c, from, agent)
+        Self::may_wake(h, from, agent)
     }
 
-    fn may_wake(c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Decision> {
-        let consent = Consent { here: Self::consented(c, agent, false)?, remote: Self::consented(c, agent, true)? };
-        let wake = if Self::wake_network(c)? { Wake::Network } else { Wake::Consent };
-        Ok(reach::decide(Action::Wake, &reach::sender_of(from), &js_text(agent), &Settings { consent, wake, ..Settings::default() }))
+    fn may_wake(h: &mut dyn Host, from: &str, agent: &str) -> Decision {
+        let consent = Consent { here: h.consented(agent, false), remote: h.consented(agent, true) };
+        let wake = h.wake_setting();
+        reach::decide(Action::Wake, &reach::Sender::from_id(from), agent, &Settings { consent, wake, ..Settings::default() })
+    }
+
+    fn wake_network(h: &mut dyn Host) -> bool {
+        h.wake_setting() == Wake::Network
     }
 
     /// Whether a message to a Claude Code session that a process holds (its
     /// app, its terminal, or a run XenoNet resumed) and that isn't at work
     /// goes to a copy of it, forked with its whole context: under wake
     /// network only, since the session itself can't take it now.
-    pub fn forkable(&self, c: &mut dyn Calls, view: &Arg) -> Result<bool> {
-        Self::forkable_for(c, view, false)
+    pub fn forkable(&self, h: &mut dyn Host, view: Option<&Value>) -> bool {
+        Self::forkable_for(h, view, false)
     }
 
     /// `forkable`, and also without wake network when `granted` (a start's
     /// end for the session that asked for the start).
-    fn forkable_for(c: &mut dyn Calls, view: &Arg, granted: bool) -> Result<bool> {
-        if !view.truthy() || view.field("ended").truthy() || view.field("status").as_str() == Some("working") {
-            return Ok(false);
+    fn forkable_for(h: &mut dyn Host, view: Option<&Value>, granted: bool) -> bool {
+        let Some(view) = view.filter(|v| truthy(Some(v))) else { return false };
+        if truthy(view.get("ended")) || view.get("status").and_then(Value::as_str) == Some("working") {
+            return false;
         }
-        let id = view.field("id");
-        if !js_text(&id).starts_with("claude:") || !truthy_at(c, "router.resume.fork")? || !c.call("router.resume", "can", vec![id])?.truthy() {
-            return Ok(false);
+        let id = text_of(view.get("id"));
+        if !id.starts_with("claude:") || !h.resumes() || super::resume::resume_command(&id, None).is_none() {
+            return false;
         }
-        Ok(granted || Self::wake_network(c)?)
+        granted || Self::wake_network(h)
     }
 
     /// Whether a session can be reached without hooks (an OpenCode run
     /// XenoNet has a way into).
-    pub fn reaches(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        if !super::apps::served(&js_text(id)) || !truthy_at(c, "router.opencode")? {
-            return Ok(Arg::Bool(false));
-        }
-        c.call("router.policy", "consented", vec![id.clone()])
+    pub fn reaches(&self, h: &mut dyn Host, id: &str) -> bool {
+        super::apps::served(id) && h.consented(id, false)
     }
 
     /// The OpenCode sessions you allowed XenoNet to wake.
-    pub fn known(&self, c: &mut dyn Calls) -> Result<Vec<Arg>> {
-        if !truthy_at(c, "router.opencode")? {
-            return Ok(Vec::new());
-        }
-        let consent = match c.kind("router.policy.data")?.as_str() {
-            "undefined" | "null" => Arg::Undef,
-            _ => c.get("router.policy.data.consent")?,
-        };
-        let ids: Vec<String> = match consent {
-            Arg::Obj(f) => f.into_iter().map(|(k, _)| k).collect(),
-            _ => Vec::new(),
-        };
-        let mut out = Vec::new();
-        for id in ids {
-            if super::apps::served(&id) && c.call("router.policy", "consented", vec![Arg::text(id.clone())])?.truthy() {
-                out.push(Arg::text(id));
-            }
-        }
-        Ok(out)
+    pub fn known(&self, h: &mut dyn Host) -> Vec<String> {
+        h.consent_sessions().into_iter().filter(|id| super::apps::served(id) && h.consented(id, false)).collect()
     }
 
     /// Whether a session that ended can still be messaged: you allowed it
     /// (or wake is network), and a headless resume would start it for the
     /// message.
-    pub fn resumable(&self, c: &mut dyn Calls, view: &Arg) -> Result<Arg> {
-        if !truthy_at(c, "router.resume")? || !view.field("ended").truthy() || !c.call("router.resume", "can", vec![view.field("id")])?.truthy() {
-            return Ok(Arg::Bool(false));
+    pub fn resumable(&self, h: &mut dyn Host, view: &Value) -> bool {
+        let id = text_of(view.get("id"));
+        if !h.resumes() || !truthy(view.get("ended")) || super::resume::resume_command(&id, None).is_none() {
+            return false;
         }
-        if Self::wake_network(c)? {
-            return Ok(Arg::Bool(true));
-        }
-        c.call("router.policy", "consented", vec![view.field("id")])
+        Self::wake_network(h) || h.consented(&id, false)
     }
 
     /// A wake for a session's listening Stop hook to hand a message over:
     /// the same budget as any other wake, spent when allowed.
-    pub fn wake(&self, c: &mut dyn Calls, from: &Arg, agent: &Arg) -> Result<Arg> {
-        let app = js_text(agent).split(':').next().unwrap_or("").to_string();
-        let usage = Self::usage(c, &app)?;
-        let w = c.call("router.policy", "wakeAllowed", vec![from.clone(), agent.clone(), obj(vec![("usage", usage)])])?;
-        if w.field("ok").truthy() {
-            c.call("router.policy", "spendWake", vec![from.clone(), agent.clone()])?;
+    pub fn wake(&self, h: &mut dyn Host, from: &str, agent: &str) -> WakeAllowed {
+        let app = agent.split(':').next().unwrap_or("").to_string();
+        let usage = h.usage(&app);
+        let w = h.wake_allowed(from, agent, usage);
+        if w.ok() {
+            h.spend_wake(from, agent);
         }
-        Ok(w)
+        w
     }
 
     /// How a message from `from` would reach `a` if sent now: None when it
     /// waits for the hooks.
-    pub fn way(&self, c: &mut dyn Calls, from: &Arg, a: &Arg) -> Result<Option<&'static str>> {
-        let status = a.field("status");
-        let idle = matches!(status.as_str(), Some("idle" | "ended"));
-        let id = a.field("id");
+    pub fn way(&self, h: &mut dyn Host, from: &str, a: &Value) -> Option<&'static str> {
+        let status = a.get("status").and_then(Value::as_str);
+        let idle = matches!(status, Some("idle" | "ended"));
+        let id = text_of(a.get("id"));
         if idle {
-            let usage = c.call("router", "usage", vec![a.field("app")])?;
-            if !c.call("router.policy", "wakeAllowed", vec![from.clone(), id.clone(), obj(vec![("usage", usage)])])?.field("ok").truthy() {
-                return Ok(None);
+            let usage = h.usage(&text_of(a.get("app")));
+            if !h.wake_allowed(from, &id, usage).ok() {
+                return None;
             }
         }
-        if opt_call(c, "router.engine.listening", "has", vec![id.clone()])?.truthy() {
-            return Ok(Some("right away: it's listening for messages"));
+        if h.listening(&id) {
+            return Some("right away: it's listening for messages");
         }
-        let app = a.field("app");
-        let ways = app.as_str().and_then(super::apps::of);
-        if ways.is_some_and(|w| w.channel) && status.as_str() == Some("idle") && opt_call(c, "router.channels", "live", vec![id.clone()])?.truthy() {
-            return Ok(Some("right away, through its channel"));
+        let ways = a.get("app").and_then(Value::as_str).and_then(super::apps::of);
+        if ways.is_some_and(|w| w.channel) && status == Some("idle") && h.channel_live(&id) {
+            return Some("right away, through its channel");
         }
-        if status.as_str() == Some("ended") && self.resumable(c, a)?.truthy() && Self::may_wake(c, from, &id)?.allowed() {
-            return Ok(Some("right away, in a turn XenoNet resumes it for"));
+        if status == Some("ended") && self.resumable(h, a) && Self::may_wake(h, from, &id).allowed() {
+            return Some("right away, in a turn XenoNet resumes it for");
         }
-        if self.forkable(c, a)? && Self::may_wake(c, from, &id)?.allowed() {
-            return Ok(Some("right away, in a copy XenoNet forks from it, since it's open elsewhere"));
+        if self.forkable(h, Some(a)) && Self::may_wake(h, from, &id).allowed() {
+            return Some("right away, in a copy XenoNet forks from it, since it's open elsewhere");
         }
-        if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? && Self::may_wake(c, from, &id)?.allowed() {
-            return Ok(Some("right away, through its OpenCode server"));
+        if ways.is_some_and(|w| w.server) && Self::may_wake(h, from, &id).allowed() {
+            return Some("right away, through its OpenCode server");
         }
-        Ok(None)
+        None
     }
 
     /// What its own OpenCode says of an OpenCode session.
-    pub fn describe(&self, c: &mut dyn Calls, id: &Arg) -> Result<Arg> {
-        if !super::apps::served(&js_text(id)) || !truthy_at(c, "router.opencode.info")? {
-            return Ok(Arg::Null);
+    pub fn describe(&self, h: &mut dyn Host, id: &str) -> Option<Value> {
+        if !super::apps::served(id) {
+            return None;
         }
-        Ok(c.call("router.opencode", "info", vec![id.clone()]).unwrap_or(Arg::Null))
+        h.opencode_info(id)
     }
 
     /// A message routed: a record for each session it's for, its way in
-    /// tried, and its ack time set. The records' keys.
-    pub fn route(&self, c: &mut dyn Calls, m: &Arg) -> Result<Vec<String>> {
+    /// tried, and its ack time set. The records' keys. `m` is the message
+    /// as the engine tells it: { id, from, to[], text, verified?, quiet?,
+    /// startEnd?, fromName? }.
+    pub fn route(&self, h: &mut dyn Host, m: &Value) -> Result<Vec<String>> {
         let mut out = Vec::new();
-        for agent in list(m.field("to")) {
-            if starts(&agent, "actor:") || agent.as_str() == Some("you") {
+        let to: Vec<String> = m.get("to").and_then(Value::as_array).map(|l| l.iter().map(template).collect()).unwrap_or_default();
+        for agent in to {
+            if agent.starts_with("actor:") || agent == "you" {
                 continue;
             }
-            let at = Self::now(c)?;
-            let key = format!("{}|{}", js_text(&m.field("id")), js_text(&agent));
+            let at = h.now();
+            let message = m.get("id").cloned().unwrap_or(Value::Null);
+            let key = format!("{}|{agent}", text_of(m.get("id")));
             let rec = Rec {
-                fields: vec![
-                    ("message".into(), m.field("id")),
-                    ("agent".into(), agent.clone()),
-                    ("from".into(), m.field("from")),
-                    ("state".into(), Arg::text("queued")),
-                    ("how".into(), Arg::Null),
-                    ("at".into(), Arg::num(at)),
-                    ("ackedAt".into(), Arg::Null),
-                    ("why".into(), Arg::Null),
-                ],
-                message: m.field("id"),
-                from: m.field("from"),
+                message,
+                agent: agent.clone(),
+                from: text_of(m.get("from")),
+                state: "queued",
+                how: None,
+                at,
+                acked_at: None,
+                why: None,
+                from_name: None,
+                location: None,
                 attempting: true,
                 timer: false,
             };
-            let first = rec.arg();
             let trimmed = {
                 let mut i = self.inner.locked();
                 if !i.order.contains(&key) {
@@ -331,234 +351,206 @@ impl Router {
                 }
                 gone
             };
-            c.call("", "listed", vec![Arg::text(key.clone()), first])?;
             for k in trimmed {
-                c.call("", "unlisted", vec![Arg::text(k.clone())])?;
-                self.settle(c, &k)?;
+                self.settle(&k);
             }
-            let tried = self.attempt(c, &key, m);
+            let tried = self.attempt(h, &key, m);
             // A quiet note isn't one you're told about if no turn takes it.
-            if tried.is_ok() && !m.field("quiet").truthy() {
-                self.arm(c, &key)?;
+            if tried.is_ok() && !truthy(m.get("quiet")) {
+                self.arm(h, &key);
             }
             self.with(&key, |r| r.attempting = false);
-            self.settle(c, &key)?;
+            self.settle(&key);
             tried?;
             out.push(key);
         }
         Ok(out)
     }
 
-    fn attempt(&self, c: &mut dyn Calls, key: &str, m: &Arg) -> Result<bool> {
+    fn set_state(&self, h: &mut dyn Host, key: &str, state: &'static str, how: Option<&'static str>, why: Option<String>) {
+        self.with(key, |r| {
+            r.state = state;
+            r.how = how;
+            r.why = why;
+        });
+        self.emit(h, key);
+    }
+
+    fn attempt(&self, h: &mut dyn Host, key: &str, m: &Value) -> Result<bool> {
         // XenoNet's own word to whoever asked it something (a start's
         // answer): it waits for the next turn, and never wakes a session.
-        if m.field("quiet").truthy() {
-            self.assign(c, key, vec![("state", Arg::text("next-turn")), ("how", Arg::text("hooks")), ("why", Arg::text("a note from XenoNet: it waits for the next turn"))])?;
-            Self::emit(c, key)?;
+        if truthy(m.get("quiet")) {
+            self.set_state(h, key, "next-turn", Some("hooks"), Some("a note from XenoNet: it waits for the next turn".into()));
             return Ok(false);
         }
-        let agent = self.field(key, "agent");
-        let view = c.call("router.engine", "view", vec![agent.clone()]).unwrap_or(Arg::Null);
-        let app = js_text(&agent).split(':').next().unwrap_or("").to_string();
-        let status = view.field("status");
-        let idle = !view.truthy() || matches!(status.as_str(), Some("idle" | "ended"));
-        let from = m.field("from");
+        let agent = self.with(key, |r| r.agent.clone()).unwrap_or_default();
+        let view = h.view(&agent).filter(|v| truthy(Some(v)));
+        let app = agent.split(':').next().unwrap_or("").to_string();
+        let status = view.as_ref().and_then(|v| v.get("status")).and_then(Value::as_str);
+        let idle = view.is_none() || matches!(status, Some("idle" | "ended"));
+        let from = text_of(m.get("from"));
         // A start's end, told to the session that asked for the start.
-        let granted = m.field("startEnd").truthy();
-        let from_name = match m.field("fromName") {
-            n if !n.is_nullish() => n,
-            _ => {
-                let title = if is_you(&from) { Arg::text("your user") } else { c.call("router.engine", "view", vec![from.clone()]).unwrap_or(Arg::Null).field("title") };
-                title.or(from.clone())
+        let granted = truthy(m.get("startEnd"));
+        let from_name = match m.get("fromName").filter(|n| !n.is_null()) {
+            Some(n) => template(n),
+            None => {
+                let title = if is_you(&from) { Some("your user".to_string()) } else { h.view(&from).and_then(|v| v.get("title").filter(|t| !t.is_null()).map(template)) };
+                title.unwrap_or_else(|| from.clone())
             }
         };
-        let text = Arg::text(framed(&m.field("id"), &from_name, &m.field("verified"), &m.field("text"), is_you(&from)));
-        self.assign(c, key, vec![("fromName", from_name.clone())])?;
+        let verified = m.get("verified").filter(|v| truthy(Some(v))).map(template);
+        let text = framed(&text_of(m.get("id")), &from_name, verified.as_deref(), &text_of(m.get("text")), is_you(&from));
+        self.with(key, |r| r.from_name = Some(from_name.clone()));
         let mut tried: Vec<String> = Vec::new();
         let wake = if idle {
-            let usage = Self::usage(c, &app)?;
-            c.call("router.policy", "wakeAllowed", vec![from.clone(), agent.clone(), obj(vec![("usage", usage)])])?
+            let usage = h.usage(&app);
+            h.wake_allowed(&from, &agent, usage)
         } else {
-            obj(vec![("ok", Arg::Bool(true))])
+            WakeAllowed::Yes
         };
-        let hash = Arg::text(hash_text(&js_text(&m.field("text"))));
-        let success = |me: &Self, c: &mut dyn Calls, how: &str, extra: Vec<(&str, Arg)>| -> Result<bool> {
-            let mut fields = vec![("state", Arg::text("live")), ("how", Arg::text(how))];
-            fields.extend(extra);
-            me.assign(c, key, fields)?;
+        let hash = hash_text(&text_of(m.get("text")));
+        let message = m.get("id").cloned().unwrap_or(Value::Null);
+        let success = |me: &Self, h: &mut dyn Host, how: &'static str, acked_at: Option<f64>, location: Option<String>| -> Result<bool> {
+            me.with(key, |r| {
+                r.state = "live";
+                r.how = Some(how);
+                if acked_at.is_some() {
+                    r.acked_at = acked_at;
+                }
+                if location.is_some() {
+                    r.location = location;
+                }
+            });
             if idle {
-                c.call("router.policy", "spendWake", vec![from.clone(), agent.clone()])?;
+                h.spend_wake(&from, &agent);
             }
-            let t = Self::now(c)?;
-            c.call("router.engine.store", "markSeen", vec![agent.clone(), Arg::List(vec![m.field("id")]), Arg::num(t)])?;
-            c.call(
-                "router.policy",
-                "audit",
-                vec![obj(vec![
-                    ("kind", Arg::text("delivered")),
-                    ("message", m.field("id")),
-                    ("from", from.clone()),
-                    ("to", agent.clone()),
-                    ("how", Arg::text(how)),
-                    ("text", hash.clone()),
-                ])],
-            )?;
-            Self::emit(c, key)?;
+            let t = h.now();
+            h.mark_seen(&agent, std::slice::from_ref(&message), t)?;
+            h.audit(json!({ "kind": "delivered", "message": message, "from": from, "to": agent, "how": how, "text": hash }))?;
+            me.emit(h, key);
             Ok(true)
         };
         // 0. Its Stop hook, listening after a turn: the hook hands the
         // message over itself, and checks the wake then.
-        if opt_call(c, "router.engine.listening", "has", vec![agent.clone()])?.truthy() {
-            self.assign(c, key, vec![("state", Arg::text("live")), ("how", Arg::text("listen"))])?;
-            Self::emit(c, key)?;
+        if h.listening(&agent) {
+            self.set_state(h, key, "live", Some("listen"), None);
             return Ok(true);
         }
-        if !wake.field("ok").truthy() {
-            tried.push(format!("no wake: {}", js_text(&wake.field("why"))));
-        } else {
-            // 1. A Claude Code channel, only to wake an idle session.
-            let ways = super::apps::of(&app);
-            if ways.is_some_and(|w| w.channel) && idle && opt_call(c, "router.channels", "live", vec![agent.clone()])?.truthy() {
-                let item = obj(vec![("id", m.field("id")), ("from", from_name), ("text", text.clone())]);
-                if c.call("router.channels", "push", vec![agent.clone(), item])?.truthy() {
-                    return success(self, c, "channel", vec![]);
-                }
-                tried.push("channel closed".into());
-            }
-            // 2. OpenCode's own server, with your consent for that session.
-            if ways.is_some_and(|w| w.server) && truthy_at(c, "router.opencode")? {
-                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
-                    tried.push(format!("opencode: {why}"));
-                } else {
-                    let r = caught(c.call("router.opencode", "deliver", vec![agent.clone(), text.clone()]));
-                    if r.field("ok").truthy() {
-                        let t = Self::now(c)?;
-                        return success(self, c, "opencode", vec![("ackedAt", Arg::num(t)), ("where", r.field("where"))]);
+        match wake {
+            WakeAllowed::No(why) => tried.push(format!("no wake: {why}")),
+            WakeAllowed::Yes => {
+                let ways = super::apps::of(&app);
+                let ended = view.as_ref().is_some_and(|v| truthy(v.get("ended")));
+                let cwd = view.as_ref().and_then(|v| s(v.get("cwd")));
+                // 1. A Claude Code channel, only to wake an idle session.
+                if ways.is_some_and(|w| w.channel) && idle && h.channel_live(&agent) {
+                    let item = json!({ "id": message, "from": from_name, "text": text });
+                    if h.channel_push(&agent, item) {
+                        return success(self, h, "channel", None, None);
                     }
-                    tried.push(format!("opencode: {}", js_text(&r.field("why"))));
+                    tried.push("channel closed".into());
                 }
-            }
-            // 3. Typing into its tmux pane: consent, a sender XenoNet
-            // verified with a token or you, and an idle session that isn't
-            // waiting on its user.
-            if truthy_at(c, "router.tmux")? && idle && !view.field("ended").truthy() && !view.field("needsYou").truthy() {
-                // Only you, or an actor this machine checked by its token.
-                let who = reach::sender_of(&from);
-                let sender = who.kind == Kind::You || (who.kind == Kind::Actor && who.host.is_none());
-                let pid = opt_call(c, "router.engine.store", "contact", vec![agent.clone()])?.field("pid").or(Arg::Null);
-                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
-                    tried.push(format!("tmux: {why}"));
-                } else if !sender {
-                    tried.push("tmux: only you or an actor with a token may type".into());
-                } else if !pid.truthy() {
-                    tried.push("tmux: no process known".into());
-                } else {
-                    let r = caught(c.call("router.tmux", "deliver", vec![obj(vec![("pid", pid), ("text", text.clone())])]));
-                    c.call(
-                        "router.policy",
-                        "audit",
-                        vec![obj(vec![
-                            ("kind", Arg::text("typed")),
-                            ("message", m.field("id")),
-                            ("from", from.clone()),
-                            ("to", agent.clone()),
-                            ("pane", r.field("where").or(Arg::Null)),
-                            ("ok", r.field("ok")),
-                            ("why", r.field("why").or(Arg::Null)),
-                            ("text", hash.clone()),
-                        ])],
-                    )?;
-                    if r.field("ok").truthy() {
-                        return success(self, c, "tmux", vec![("where", r.field("where"))]);
+                // 2. OpenCode's own server, with your consent for that session.
+                if ways.is_some_and(|w| w.server) {
+                    if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
+                        tried.push(format!("opencode: {why}"));
+                    } else {
+                        match h.opencode_deliver(&agent, &text) {
+                            Ok(location) => {
+                                let t = h.now();
+                                return success(self, h, "opencode", Some(t), Some(location));
+                            }
+                            Err(why) => tried.push(format!("opencode: {why}")),
+                        }
                     }
-                    tried.push(format!("tmux: {}", js_text(&r.field("why"))));
                 }
-            }
-            // 4. A headless resume, for a Claude Code or Codex session whose
-            // process has gone, with your consent: never while it runs.
-            if truthy_at(c, "router.resume")? && view.field("ended").truthy() && c.call("router.resume", "can", vec![agent.clone()])?.truthy() {
-                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
-                    tried.push(format!("resume: {why}"));
-                } else {
-                    let r = caught(c.call("router.resume", "deliver", vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text)])]));
-                    c.call(
-                        "router.policy",
-                        "audit",
-                        vec![obj(vec![
-                            ("kind", Arg::text("resumed")),
-                            ("message", m.field("id")),
-                            ("from", from.clone()),
-                            ("to", agent.clone()),
-                            ("ok", r.field("ok")),
-                            ("why", r.field("why").or(Arg::Null)),
-                            ("text", hash.clone()),
-                        ])],
-                    )?;
-                    if r.field("ok").truthy() {
-                        return success(self, c, "resume", vec![("where", r.field("where"))]);
+                // 3. Typing into its tmux pane: consent, a sender XenoNet
+                // verified with a token or you, and an idle session that isn't
+                // waiting on its user.
+                if idle && !ended && !view.as_ref().is_some_and(|v| truthy(v.get("needsYou"))) {
+                    // Only you, or an actor this machine checked by its token.
+                    let who = reach::Sender::from_id(&from);
+                    let sender = who.kind == Kind::You || (who.kind == Kind::Actor && who.host.is_none());
+                    let pid = h.contact_pid(&agent).filter(|p| *p != 0.0 && !p.is_nan());
+                    if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
+                        tried.push(format!("tmux: {why}"));
+                    } else if !sender {
+                        tried.push("tmux: only you or an actor with a token may type".into());
+                    } else if let Some(pid) = pid {
+                        let r = h.tmux_deliver(pid, &text);
+                        h.audit(json!({
+                            "kind": "typed",
+                            "message": message,
+                            "from": from,
+                            "to": agent,
+                            "pane": r.as_ref().ok(),
+                            "ok": r.is_ok(),
+                            "why": r.as_ref().err(),
+                            "text": hash,
+                        }))?;
+                        match r {
+                            Ok(location) => return success(self, h, "tmux", None, Some(location)),
+                            Err(why) => tried.push(format!("tmux: {why}")),
+                        }
+                    } else {
+                        tried.push("tmux: no process known".into());
                     }
-                    tried.push(format!("resume: {}", js_text(&r.field("why"))));
                 }
-            } else if Self::forkable_for(c, &view, granted)? {
-                // 5. A copy of a Claude Code session a process holds, under
-                // wake network: it answers with the whole context, now.
-                if let Decision::Refuse(why) = Self::may_wake_for(c, &from, &agent, granted)? {
-                    tried.push(format!("fork: {why}"));
-                } else {
-                    let r = caught(c.call(
-                        "router.resume",
-                        "deliver",
-                        vec![obj(vec![("agent", agent.clone()), ("cwd", view.field("cwd")), ("text", text), ("fork", Arg::Bool(true))])],
-                    ));
-                    c.call(
-                        "router.policy",
-                        "audit",
-                        vec![obj(vec![
-                            ("kind", Arg::text("forked")),
-                            ("message", m.field("id")),
-                            ("from", from.clone()),
-                            ("to", agent.clone()),
-                            ("ok", r.field("ok")),
-                            ("why", r.field("why").or(Arg::Null)),
-                            ("text", hash.clone()),
-                        ])],
-                    )?;
-                    if r.field("ok").truthy() {
-                        return success(self, c, "fork", vec![("where", r.field("where"))]);
+                // 4. A headless resume, for a Claude Code or Codex session whose
+                // process has gone, with your consent: never while it runs.
+                if h.resumes() && ended && super::resume::resume_command(&agent, None).is_some() {
+                    if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
+                        tried.push(format!("resume: {why}"));
+                    } else {
+                        let r = h.resume_deliver(&agent, cwd.as_deref(), &text, false);
+                        h.audit(json!({ "kind": "resumed", "message": message, "from": from, "to": agent, "ok": r.is_ok(), "why": r.as_ref().err(), "text": hash }))?;
+                        match r {
+                            Ok(location) => return success(self, h, "resume", None, Some(location)),
+                            Err(why) => tried.push(format!("resume: {why}")),
+                        }
                     }
-                    tried.push(format!("fork: {}", js_text(&r.field("why"))));
+                } else if Self::forkable_for(h, view.as_ref(), granted) {
+                    // 5. A copy of a Claude Code session a process holds, under
+                    // wake network: it answers with the whole context, now.
+                    if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
+                        tried.push(format!("fork: {why}"));
+                    } else {
+                        let r = h.resume_deliver(&agent, cwd.as_deref(), &text, true);
+                        h.audit(json!({ "kind": "forked", "message": message, "from": from, "to": agent, "ok": r.is_ok(), "why": r.as_ref().err(), "text": hash }))?;
+                        match r {
+                            Ok(location) => return success(self, h, "fork", None, Some(location)),
+                            Err(why) => tried.push(format!("fork: {why}")),
+                        }
+                    }
                 }
             }
         }
-        let why = if tried.is_empty() { Arg::Null } else { Arg::text(tried.join("; ")) };
-        self.assign(c, key, vec![("state", Arg::text("next-turn")), ("how", Arg::text("hooks")), ("why", why)])?;
-        Self::emit(c, key)?;
+        let why = if tried.is_empty() { None } else { Some(tried.join("; ")) };
+        self.set_state(h, key, "next-turn", Some("hooks"), why);
         Ok(false)
     }
 
     /// The ack time set, unless it's acked already.
-    fn arm(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
-        if self.field(key, "ackedAt").truthy() {
-            return Ok(());
+    fn arm(&self, h: &mut dyn Host, key: &str) {
+        if self.acked(key) {
+            return;
         }
-        let ms = c.get("router.ackMs")?;
         self.with(key, |r| r.timer = true);
-        c.call("", "arm", vec![Arg::text(key), ms])?;
-        Ok(())
+        h.arm(key, ACK_MS);
     }
 
     /// Its ack time came: a push nothing acked goes back to the hooks, and
     /// you're told.
-    pub fn expire(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
+    pub fn expire(&self, h: &mut dyn Host, key: &str) -> Result<()> {
         self.with(key, |r| r.timer = false);
-        let r = self.expire_inner(c, key);
-        self.settle(c, key)?;
+        let r = self.expire_inner(h, key);
+        self.settle(key);
         r
     }
 
-    fn expire_inner(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
+    fn expire_inner(&self, h: &mut dyn Host, key: &str) -> Result<()> {
         let Some((acked, how, agent, message, from, from_name)) =
-            self.with(key, |r| (r.get("ackedAt").truthy(), r.get("how"), r.get("agent"), r.message.clone(), r.from.clone(), r.get("fromName")))
+            self.with(key, |r| (r.acked_at.is_some(), r.how, r.agent.clone(), r.message.clone(), r.from.clone(), r.from_name.clone()))
         else {
             return Ok(());
         };
@@ -568,52 +560,47 @@ impl Router {
         // Claude Code drops a push on a channel it didn't register without a
         // word, a typed line can be lost, and a resumed turn can fail to
         // start: with no hook since, the message waits for the hooks again.
-        if matches!(how.as_str(), Some("channel" | "tmux" | "resume")) {
-            c.call("router.engine.store", "markUnseen", vec![agent.clone(), Arg::List(vec![message.clone()])])?;
+        if matches!(how, Some("channel" | "tmux" | "resume")) {
+            h.mark_unseen(&agent, std::slice::from_ref(&message))?;
         }
-        self.assign(c, key, vec![("state", Arg::text("notified"))])?;
-        c.call("router.policy", "audit", vec![obj(vec![("kind", Arg::text("notified")), ("message", message.clone()), ("to", agent.clone())])])?;
-        Self::emit(c, key)?;
-        let view = c.call("router.engine", "view", vec![agent.clone()]).unwrap_or(Arg::Null);
-        let title = view.field("title").or(agent.clone());
-        c.call("router", "notify", vec![obj(vec![("message", message), ("agent", agent), ("title", title), ("from", from_name.or(from))])])?;
+        self.with(key, |r| r.state = "notified");
+        h.audit(json!({ "kind": "notified", "message": message, "to": agent }))?;
+        self.emit(h, key);
+        let title = h.view(&agent).and_then(|v| v.get("title").filter(|t| !t.is_null()).map(template)).unwrap_or_else(|| agent.clone());
+        h.notify(json!({ "message": message, "agent": agent, "title": title, "from": from_name.unwrap_or(from) }));
         Ok(())
     }
 
-    fn ack(&self, c: &mut dyn Calls, key: &str) -> Result<()> {
-        if self.field(key, "ackedAt").truthy() {
-            return Ok(());
+    fn ack(&self, h: &mut dyn Host, key: &str) {
+        if self.acked(key) {
+            return;
         }
-        let t = Self::now(c)?;
-        self.assign(c, key, vec![("ackedAt", Arg::num(t))])?;
-        c.call("", "clear", vec![Arg::text(key)])?;
+        let t = h.now();
+        self.with(key, |r| r.acked_at = Some(t));
+        h.clear(key);
         self.with(key, |r| r.timer = false);
-        Self::emit(c, key)
+        self.emit(h, key);
     }
 
     /// Messages the engine says a session has seen: their records acked.
-    pub fn seen(&self, c: &mut dyn Calls, agent: &Arg, ids: &[Arg]) -> Result<()> {
+    pub fn seen(&self, h: &mut dyn Host, agent: &str, ids: &[Value]) {
         for id in ids {
-            let key = format!("{}|{}", js_text(id), js_text(agent));
+            let key = format!("{}|{agent}", template(id));
             let listed = self.inner.locked().order.contains(&key);
             if listed {
-                self.ack(c, &key)?;
+                self.ack(h, &key);
             }
         }
-        Ok(())
     }
 
     /// A hook from the session after a push acks it.
-    pub fn contact(&self, c: &mut dyn Calls, agent: &Arg) -> Result<()> {
+    pub fn contact(&self, h: &mut dyn Host, agent: &str) {
         let keys: Vec<String> = self.inner.locked().order.clone();
         for key in keys {
-            let due = self
-                .with(&key, |r| r.get("agent") == *agent && r.get("state").as_str() == Some("live") && r.get("how").as_str() != Some("listen") && !r.get("ackedAt").truthy())
-                .unwrap_or(false);
+            let due = self.with(&key, |r| r.agent == agent && r.state == "live" && r.how != Some("listen") && r.acked_at.is_none()).unwrap_or(false);
             if due {
-                self.ack(c, &key)?;
+                self.ack(h, &key);
             }
         }
-        Ok(())
     }
 }

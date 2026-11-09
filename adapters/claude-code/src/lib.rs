@@ -4,8 +4,9 @@
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
-use xenonet_adapter::delivery::Ways;
+use xenonet_adapter::delivery::{Start, Ways};
 use xenonet_adapter::processes::Rules;
+use xenonet_adapter::reader::Tailed;
 use xenonet_adapter::{Check, Platform};
 
 /// A pattern compiled once.
@@ -46,8 +47,30 @@ fn resume(id: &str, settings: Option<&str>) -> (String, Vec<String>) {
     ("claude".into(), args)
 }
 
+// claude -p --session-id <id> --output-format stream-json --verbose
+//        [--settings <listen file>] [--permission-mode <m>]
+//        --permission-prompt-tool mcp__<server>__permission
+// The prompt goes on standard input.
+fn start(s: &Start<'_>) -> (String, Vec<String>) {
+    let mut args: Vec<String> = ["-p", "--session-id", s.id, "--output-format", "stream-json", "--verbose"].into_iter().map(str::to_string).collect();
+    if let Some(f) = s.settings {
+        args.extend(["--settings".to_string(), f.to_string()]);
+    }
+    if let Some(m) = s.mode {
+        args.extend(["--permission-mode".to_string(), m.to_string()]);
+    }
+    args.extend(["--permission-prompt-tool".to_string(), format!("mcp__{}__permission", s.server)]);
+    ("claude".into(), args)
+}
+
+// claude --version (or -v) only says which Claude Code is installed.
+fn probe(args: &[String]) -> bool {
+    matches!(args.first().map(String::as_str), Some("--version" | "-v"))
+}
+
 pub mod checks;
 pub mod connect;
+pub mod reader;
 
 /// The adapter.
 pub struct Adapter(&'static App);
@@ -73,10 +96,14 @@ impl Platform for Adapter {
     }
 
     fn delivery(&self) -> Option<Ways> {
-        Some(Ways { resume: Some(resume), marks: Some("CLAUDE"), channel: true, server: false })
+        Some(Ways { resume: Some(resume), start: Some(start), probe: Some(probe), marks: Some("CLAUDE"), channel: true, ..Ways::default() })
     }
 
     fn connect(&self, app: &App, shared: &Shared) -> Option<Box<dyn Format>> {
         Some(connect::format(app, shared))
+    }
+
+    fn tailed(&self) -> Option<Box<dyn Tailed>> {
+        Some(Box::new(reader::Reader::new()))
     }
 }

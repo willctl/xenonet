@@ -4,34 +4,70 @@
 //! sessions it has, and posts the message to the session with
 //! prompt_async, which starts a turn in the live TUI.
 //!
-//! Commands, files and HTTP are the twin's, called as the JS called them:
-//! "ps"/"exec" (a command's output, or "" when it failed), "readFile",
-//! "readdir" and "readlink" (node:fs's), and for a server "get" (a GET's
-//! { ok, status, json }) and "post" (prompt_async's { ok, status }), with
-//! "processes", "ports" and "now".
+//! The commands and files that find the servers are `System`'s; the clock,
+//! the servers' processes and ports, and HTTP to them are `Host`'s.
 
-use crate::peer::{list, Calls, Result, Thrown};
+use super::{number_text, template, truthy, Delivered, Result};
 use crate::sql::Arg;
 use crate::store::js_text;
+use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::sync::Mutex;
 use xenonet_base::sync::Locked;
 
-/// OpenCode's own id for XenoNet's (xenonet_base::opencode, as its reader
-/// wrote it).
-pub fn open_code_id(id: &Arg) -> String {
-    xenonet_base::opencode::open_code_id(&js_text(id))
+/// Commands and files, as finding OpenCode's servers reads them.
+pub trait System {
+    /// A command's output, or "" when it failed.
+    fn run(&mut self, cmd: &str, args: &[&str]) -> String;
+    /// A file's text, or None when it can't be read.
+    fn read_file(&mut self, path: &str) -> Option<String>;
+    /// A folder's entries' names, or None when it can't be read.
+    fn readdir(&mut self, path: &str) -> Option<Vec<String>>;
+    /// Where a link points, or None when it can't be read.
+    fn readlink(&mut self, path: &str) -> Option<String>;
 }
 
-/// And back: XenoNet's id for a session named the way OpenCode shows it
-/// (ses_…, or opencode:ses_…). Any other id comes back as it was.
-pub fn from_open_code_id(id: &Arg) -> String {
-    let s = if id.is_nullish() { String::new() } else { js_text(id) };
-    let s = xenonet_base::text::js_trim(&s);
+/// What a POST to prompt_async answered.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Posted {
+    pub ok: bool,
+    pub status: f64,
+}
+
+/// The clock, the opencode processes and their ports, and HTTP to a
+/// server.
+pub trait Host {
+    fn now(&mut self) -> f64;
+    /// The opencode processes running (`open_code_processes`).
+    fn processes(&mut self) -> Vec<Proc>;
+    /// The TCP ports a process listens on (`listening_ports`).
+    fn ports(&mut self, pid: f64) -> Vec<f64>;
+    /// A GET's JSON, when it answered ok within `ms`; None otherwise.
+    fn get(&mut self, url: &str, ms: f64) -> Option<Value>;
+    /// A POST of JSON: what it answered, or why it couldn't be made.
+    fn post(&mut self, url: &str, body: &str) -> std::result::Result<Posted, String>;
+}
+
+/// OpenCode's own id for XenoNet's (xenonet_base::opencode, as its reader
+/// wrote it).
+pub fn open_code_id(id: &str) -> String {
+    xenonet_base::opencode::open_code_id(id)
+}
+
+/// XenoNet's id for a session named the way OpenCode shows it (ses_…, or
+/// opencode:ses_…). Any other id comes back as it was.
+pub fn xenonet_id(id: &str) -> String {
+    let s = xenonet_base::text::js_trim(id);
     match crate::re!(r"^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$").captures(s) {
         Some(m) => format!("opencode:{}", xenonet_base::opencode::local_id(&m[1])),
         None => s.to_string(),
     }
+}
+
+/// `xenonet_id`, for the service's delivery routes, which still hand the
+/// id over as an Arg: goes when they're typed.
+pub fn from_open_code_id(id: &Arg) -> String {
+    xenonet_id(&if id.is_nullish() { String::new() } else { js_text(id) })
 }
 
 /// A process: its pid and command line.
@@ -41,51 +77,25 @@ pub struct Proc {
     pub args: String,
 }
 
-impl Proc {
-    pub fn to_arg(&self) -> Arg {
-        Arg::Obj(vec![("pid".into(), Arg::num(self.pid)), ("args".into(), Arg::text(self.args.clone()))])
-    }
-    pub fn of(a: &Arg) -> Proc {
-        Proc {
-            pid: match a.field("pid") {
-                Arg::Num(n) => n,
-                _ => f64::NAN,
-            },
-            args: js_text(&a.field("args")),
-        }
-    }
-}
-
 pub fn parse_ps(out: &str) -> Vec<Proc> {
-    out.split('\n')
-        .filter_map(|l| crate::re!(r"^\s*(\d+)\s+(.*)$").captures(l))
-        .map(|m| Proc { pid: xenonet_base::text::js_number(Some(&serde_json::Value::String(m[1].to_string()))), args: m[2].to_string() })
-        .collect()
+    out.split('\n').filter_map(|l| crate::re!(r"^\s*(\d+)\s+(.*)$").captures(l)).map(|m| Proc { pid: number(&m[1]), args: m[2].to_string() }).collect()
 }
 
 /// opencode processes: the command itself, not a shell or tmux that names
 /// it in its arguments.
-pub fn open_code_processes(c: &mut dyn Calls, windows: bool) -> Result<Vec<Proc>> {
+pub fn open_code_processes(sys: &mut dyn System, windows: bool) -> Vec<Proc> {
     if windows {
-        let out = c.call(
-            "",
-            "ps",
-            vec![
-                Arg::text("powershell.exe"),
-                Arg::List(vec![
-                    Arg::text("-NoProfile"),
-                    Arg::text("-Command"),
-                    Arg::text("Get-CimInstance Win32_Process -Filter \"Name like 'opencode%'\" | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"),
-                ]),
-            ],
-        )?;
-        return Ok(parse_ps(&js_text(&out)));
+        let out = sys.run(
+            "powershell.exe",
+            &["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"Name like 'opencode%'\" | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"],
+        );
+        return parse_ps(&out);
     }
-    let out = c.call("", "ps", vec![Arg::text("ps"), Arg::List(vec![Arg::text("-axo"), Arg::text("pid=,args=")])])?;
-    Ok(parse_ps(&js_text(&out))
+    let out = sys.run("ps", &["-axo", "pid=,args="]);
+    parse_ps(&out)
         .into_iter()
         .filter(|p| crate::re!(r"^(\S*[/\\])?opencode(\.exe)?(\s|$)").is_match(&p.args) || crate::re!(r"^\S*node\S*\s+\S*opencode-ai").is_match(&p.args))
-        .collect())
+        .collect()
 }
 
 fn unique(v: Vec<f64>) -> Vec<f64> {
@@ -103,7 +113,7 @@ fn words(s: &str) -> Vec<&str> {
 }
 
 fn number(s: &str) -> f64 {
-    xenonet_base::text::js_number(Some(&serde_json::Value::String(s.to_string())))
+    xenonet_base::text::js_number(Some(&Value::String(s.to_string())))
 }
 
 /// parseInt(s, 16).
@@ -118,10 +128,11 @@ fn parse_hex(s: &str) -> f64 {
 }
 
 /// The TCP ports a process listens on, on loopback or any address.
-pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Vec<f64>> {
-    let pid_text = js_text(&Arg::num(pid));
+/// `platform` is the system as Node names it (darwin, linux, win32).
+pub fn listening_ports(sys: &mut dyn System, pid: f64, platform: &str) -> Vec<f64> {
+    let pid_text = number_text(pid);
     if platform == "win32" {
-        let out = js_text(&c.call("", "exec", vec![Arg::text("netstat"), Arg::List(vec![Arg::text("-ano"), Arg::text("-p"), Arg::text("tcp")])])?);
+        let out = sys.run("netstat", &["-ano", "-p", "tcp"]);
         let mut ports = Vec::new();
         for l in out.split('\n') {
             let cols = words(l);
@@ -129,21 +140,21 @@ pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Ve
                 ports.push(number(cols[1].rsplit(':').next().unwrap_or("")));
             }
         }
-        return Ok(unique(ports));
+        return unique(ports);
     }
     if platform == "linux" {
-        if let Ok(fds) = c.call("", "readdir", vec![Arg::text(format!("/proc/{pid_text}/fd"))]) {
+        if let Some(fds) = sys.readdir(&format!("/proc/{pid_text}/fd")) {
             let mut inodes: Vec<String> = Vec::new();
-            for fd in list(fds) {
-                if let Ok(link) = c.call("", "readlink", vec![Arg::text(format!("/proc/{pid_text}/fd/{}", js_text(&fd)))]) {
-                    if let Some(m) = crate::re!(r"^socket:\[(\d+)\]$").captures(&js_text(&link)) {
+            for fd in fds {
+                if let Some(link) = sys.readlink(&format!("/proc/{pid_text}/fd/{fd}")) {
+                    if let Some(m) = crate::re!(r"^socket:\[(\d+)\]$").captures(&link) {
                         inodes.push(m[1].to_string());
                     }
                 }
             }
             let mut ports = Vec::new();
             for f in ["/proc/net/tcp", "/proc/net/tcp6"] {
-                let text = c.call("", "readFile", vec![Arg::text(f), Arg::text("utf8")]).map(|t| js_text(&t)).unwrap_or_default();
+                let text = sys.read_file(f).unwrap_or_default();
                 for line in text.split('\n').skip(1) {
                     let cols = words(line);
                     if cols.get(3) == Some(&"0A") && cols.get(9).is_some_and(|i| inodes.iter().any(|n| n == i)) {
@@ -152,14 +163,12 @@ pub fn listening_ports(c: &mut dyn Calls, pid: f64, platform: &str) -> Result<Ve
                 }
             }
             if !ports.is_empty() {
-                return Ok(unique(ports));
+                return unique(ports);
             }
         }
     }
-    let out =
-        js_text(&c.call("", "exec", vec![Arg::text("lsof"), Arg::List(["-nP", "-a", "-p", &pid_text, "-iTCP", "-sTCP:LISTEN", "-Fn"].iter().map(|a| Arg::text(*a)).collect())])?);
-    let ports = regex_lsof().captures_iter(&out).map(|m| number(&m[1])).collect();
-    Ok(unique(ports))
+    let out = sys.run("lsof", &["-nP", "-a", "-p", &pid_text, "-iTCP", "-sTCP:LISTEN", "-Fn"]);
+    unique(regex_lsof().captures_iter(&out).map(|m| number(&m[1])).collect())
 }
 
 /// /^n.*:(\d+)$/gm, with \r a line's end as JS's m flag has it.
@@ -170,10 +179,9 @@ fn regex_lsof() -> &'static regex::Regex {
 
 /// One folder, as OpenCode spells it in two places: the same once a
 /// trailing slash goes, and on Windows whatever the case or the slashes.
-pub fn same_path(a: &Arg, b: &Arg, windows: bool) -> bool {
-    let norm = |p: &Arg| {
-        let s = js_text(p);
-        let s = s.trim_end_matches(['\\', '/']).to_string();
+pub fn same_path(a: &str, b: &str, windows: bool) -> bool {
+    let norm = |p: &str| {
+        let s = p.trim_end_matches(['\\', '/']).to_string();
         if windows {
             s.replace('\\', "/").to_lowercase()
         } else {
@@ -203,15 +211,9 @@ pub fn encode_uri_component(s: &str) -> String {
 /// in, as it says.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Server {
-    pub pid: Arg,
+    pub pid: f64,
     pub base: String,
-    pub dir: Arg,
-}
-
-impl Server {
-    pub fn to_arg(&self) -> Arg {
-        Arg::Obj(vec![("pid".into(), self.pid.clone()), ("base".into(), Arg::text(self.base.clone())), ("dir".into(), self.dir.clone())])
-    }
+    pub dir: Option<String>,
 }
 
 #[derive(Default)]
@@ -219,7 +221,7 @@ struct Inner {
     cache_at: f64,
     servers: Vec<Server>,
     /// ses_… → (when, what OpenCode said), the oldest first.
-    infos: Vec<(String, f64, Arg)>,
+    infos: Vec<(String, f64, Option<Value>)>,
 }
 
 pub struct OpenCode {
@@ -232,148 +234,118 @@ impl OpenCode {
         OpenCode { cache_ms, inner: Mutex::new(Inner { cache_at: f64::NEG_INFINITY, ..Inner::default() }) }
     }
 
-    fn now(c: &mut dyn Calls) -> Result<f64> {
-        let t = c.call("", "now", vec![])?;
-        Ok(match t {
-            Arg::Num(n) => n,
-            other => xenonet_base::text::js_number(Some(&other.to_json())),
-        })
-    }
-
-    /// A GET's JSON, or what it threw (an answer that isn't ok: route and
-    /// status).
-    fn get(c: &mut dyn Calls, base: &str, route: &str, ms: f64) -> Result<Arg> {
-        let r = c.call("", "get", vec![Arg::text(format!("{base}{route}")), Arg::num(ms)])?;
-        if !r.field("ok").truthy() {
-            return Err(Thrown { message: format!("{route}: {}", js_text(&r.field("status"))), code: None, handle: None, stdout: None });
-        }
-        Ok(r.field("json"))
-    }
-
     /// The OpenCode servers running now.
-    pub fn servers(&self, c: &mut dyn Calls) -> Result<Vec<Server>> {
-        let t = Self::now(c)?;
+    pub fn servers(&self, h: &mut dyn Host) -> Vec<Server> {
+        let t = h.now();
         {
             let i = self.inner.locked();
             if t - i.cache_at < self.cache_ms {
-                return Ok(i.servers.clone());
+                return i.servers.clone();
             }
         }
         let mut found: Vec<Server> = Vec::new();
-        for p in list(c.call("", "processes", vec![])?) {
-            let args = js_text(&p.field("args"));
-            let ports = match crate::re!(r"--port[= ](\d+)").captures(&args) {
-                Some(m) => vec![Arg::num(number(&m[1]))],
-                None => list(c.call("", "ports", vec![p.field("pid")])?),
+        for p in h.processes() {
+            let ports = match crate::re!(r"--port[= ](\d+)").captures(&p.args) {
+                Some(m) => vec![number(&m[1])],
+                None => h.ports(p.pid),
             };
             for port in ports {
-                let base = format!("http://127.0.0.1:{}", js_text(&port));
+                let base = format!("http://127.0.0.1:{}", number_text(port));
                 if found.iter().any(|f| f.base == base) {
                     continue;
                 }
-                let Ok(h) = Self::get(c, &base, "/global/health", 800.0) else { continue };
-                if !h.field("healthy").truthy() {
+                let Some(health) = h.get(&format!("{base}/global/health"), 800.0) else { continue };
+                if !truthy(health.get("healthy")) {
                     continue;
                 }
-                let dir = match Self::get(c, &base, "/path", 800.0) {
-                    Ok(x) => x.field("directory").or(Arg::Null),
-                    Err(_) => Arg::Null,
-                };
-                found.push(Server { pid: p.field("pid"), base, dir });
+                let dir = h.get(&format!("{base}/path"), 800.0).and_then(|x| x.get("directory").and_then(Value::as_str).map(str::to_string));
+                found.push(Server { pid: p.pid, base, dir });
             }
         }
-        let at = Self::now(c)?;
+        let at = h.now();
         let mut i = self.inner.locked();
         i.cache_at = at;
         i.servers.clone_from(&found);
-        Ok(found)
+        found
     }
 
     /// The server whose TUI has the session in hand: the one that reports
     /// a status for it, else one started in the session's folder, else any
     /// that knows it.
-    pub fn server_for(&self, c: &mut dyn Calls, id: &Arg, windows: bool) -> Result<Option<Server>> {
+    pub fn server_for(&self, h: &mut dyn Host, id: &str, windows: bool) -> Option<Server> {
         let ses = open_code_id(id);
         let (mut here, mut known) = (None, None);
-        for s in self.servers(c)? {
-            let Ok(status) = Self::get(c, &s.base, "/session/status", 1500.0) else { continue };
+        for s in self.servers(h) {
+            let Some(status) = h.get(&format!("{}/session/status", s.base), 1500.0) else { continue };
             let has = match &status {
-                Arg::Obj(f) => f.iter().any(|(k, _)| *k == ses),
-                Arg::List(l) => ses.parse::<usize>().is_ok_and(|i| i < l.len() && i.to_string() == ses),
+                Value::Object(f) => f.contains_key(&ses),
+                Value::Array(l) => ses.parse::<usize>().is_ok_and(|i| i < l.len() && i.to_string() == ses),
                 _ => false,
             };
-            if status.truthy() && has {
-                return Ok(Some(s));
+            if truthy(Some(&status)) && has {
+                return Some(s);
             }
             if here.is_none() {
-                let Ok(info) = Self::get(c, &s.base, &format!("/session/{}", encode_uri_component(&ses)), 1500.0) else { continue };
+                let Some(info) = h.get(&format!("{}/session/{}", s.base, encode_uri_component(&ses)), 1500.0) else { continue };
                 if known.is_none() {
                     known = Some(s.clone());
                 }
-                let dir = info.field("directory");
-                if dir.truthy() && s.dir.truthy() && same_path(&dir, &s.dir, windows) {
-                    here = Some(s);
+                let dir = info.get("directory").filter(|d| truthy(Some(d))).map(template);
+                if let (Some(dir), Some(sdir)) = (dir, s.dir.as_deref().filter(|d| !d.is_empty())) {
+                    if same_path(&dir, sdir, windows) {
+                        here = Some(s);
+                    }
                 }
             }
         }
-        Ok(here.or(known))
+        here.or(known)
     }
 
     /// What OpenCode says of a session: its title, its folder, when it last
-    /// changed, and whether a turn is under way; null when no running
+    /// changed, and whether a turn is under way; None when no running
     /// OpenCode knows it. Each answer is kept for the cache's while.
-    pub fn info(&self, c: &mut dyn Calls, id: &Arg, windows: bool) -> Result<Arg> {
+    pub fn info(&self, h: &mut dyn Host, id: &str, windows: bool) -> Option<Value> {
         let ses = open_code_id(id);
         let hit = self.inner.locked().infos.iter().find(|(k, _, _)| *k == ses).map(|(_, at, v)| (*at, v.clone()));
         if let Some((at, v)) = hit {
-            if Self::now(c)? - at < self.cache_ms {
-                return Ok(v);
+            if h.now() - at < self.cache_ms {
+                return v;
             }
         }
-        let mut value = Arg::Null;
-        if let Ok(Some(s)) = self.server_for(c, id, windows) {
-            let path = format!("/session/{}", encode_uri_component(&ses));
-            let both = c.call_all(vec![
-                ("", "get", vec![Arg::text(format!("{}{path}", s.base)), Arg::num(1500.0)]),
-                ("", "get", vec![Arg::text(format!("{}/session/status", s.base)), Arg::num(1500.0)]),
-            ]);
-            let mut got = Vec::new();
-            for (r, route) in both.into_iter().zip([path.as_str(), "/session/status"]) {
-                match r {
-                    Ok(r) if r.field("ok").truthy() => got.push(Some(r.field("json"))),
-                    Ok(r) => {
-                        let _ = route;
-                        let _ = r;
-                        got.push(None);
+        let mut value = None;
+        if let Some(s) = self.server_for(h, id, windows) {
+            let session = h.get(&format!("{}/session/{}", s.base, encode_uri_component(&ses)), 1500.0);
+            let status = h.get(&format!("{}/session/status", s.base), 1500.0);
+            if let (Some(session), Some(status)) = (session, status) {
+                let st = status.get(&ses).and_then(|s| s.get("type"));
+                let updated = session.get("time").and_then(|t| t.get("updated"));
+                let updated = match updated {
+                    None => Value::Null,
+                    Some(u) => {
+                        let n = xenonet_base::text::js_number(Some(u));
+                        if n == 0.0 || n.is_nan() {
+                            Value::Null
+                        } else {
+                            xenonet_base::json::number(n)
+                        }
                     }
-                    Err(_) => got.push(None),
-                }
-            }
-            if let [Some(session), Some(status)] = &got[..] {
-                let st = status.field(&ses).field("type");
-                let title = session.field("title");
-                let updated = xenonet_base::text::js_number(Some(&session.field("time").field("updated").to_json()));
-                let updated = match session.field("time").field("updated") {
-                    Arg::Undef => Arg::Null,
-                    _ if updated == 0.0 || updated.is_nan() => Arg::Null,
-                    _ => Arg::num(updated),
                 };
-                value = Arg::Obj(vec![
-                    ("title".into(), if matches!(title, Arg::Text(_)) { title } else { Arg::Null }),
-                    ("directory".into(), session.field("directory").or(Arg::Null)),
-                    ("updated".into(), updated),
-                    ("busy".into(), Arg::Bool(st.truthy() && st.as_str() != Some("idle"))),
-                ]);
+                value = Some(json!({
+                    "title": session.get("title").filter(|t| t.is_string()).cloned().unwrap_or(Value::Null),
+                    "directory": session.get("directory").cloned().unwrap_or(Value::Null),
+                    "updated": updated,
+                    "busy": truthy(st) && st.and_then(Value::as_str) != Some("idle"),
+                }));
             }
         }
-        let at = Self::now(c)?;
+        let at = h.now();
         let mut i = self.inner.locked();
         i.infos.retain(|(k, _, _)| *k != ses);
         i.infos.push((ses, at, value.clone()));
         if i.infos.len() > 256 {
             i.infos.remove(0);
         }
-        Ok(value)
+        value
     }
 
     pub fn forget(&self) {
@@ -383,23 +355,18 @@ impl OpenCode {
         i.infos.clear();
     }
 
-    pub fn deliver(&self, c: &mut dyn Calls, id: &Arg, text: &Arg, windows: bool) -> Result<Arg> {
-        let Some(s) = self.server_for(c, id, windows)? else {
-            return Ok(Arg::Obj(vec![("ok".into(), Arg::Bool(false)), ("why".into(), Arg::text("no running OpenCode has this session"))]));
+    /// The message posted to the session's server: where, or why not.
+    pub fn deliver(&self, h: &mut dyn Host, id: &str, text: &str, windows: bool) -> Result<Delivered> {
+        let Some(s) = self.server_for(h, id, windows) else {
+            return Ok(Err("no running OpenCode has this session".into()));
         };
         let url = format!("{}/session/{}/prompt_async", s.base, encode_uri_component(&open_code_id(id)));
-        let mut part = vec![("type".to_string(), Arg::text("text"))];
-        if !matches!(text, Arg::Undef) {
-            part.push(("text".into(), text.clone()));
+        let body = xenonet_base::json::stringify(&json!({ "parts": [{ "type": "text", "text": text }] }), 0);
+        let r = h.post(&url, &body)?;
+        if r.status == 204.0 || r.ok {
+            return Ok(Ok(s.base));
         }
-        let body = Arg::Obj(vec![("parts".into(), Arg::List(vec![Arg::Obj(part)]))]);
-        let body = xenonet_base::json::stringify(&body.to_json(), 0);
-        let r = c.call("", "post", vec![Arg::text(url), Arg::text(body)])?;
-        let status = r.field("status");
-        if status == Arg::num(204.0) || r.field("ok").truthy() {
-            return Ok(Arg::Obj(vec![("ok".into(), Arg::Bool(true)), ("where".into(), Arg::text(s.base))]));
-        }
-        Ok(Arg::Obj(vec![("ok".into(), Arg::Bool(false)), ("why".into(), Arg::text(format!("OpenCode answered {}", js_text(&status))))]))
+        Ok(Err(format!("OpenCode answered {}", number_text(r.status))))
     }
 }
 
@@ -409,9 +376,10 @@ mod tests {
 
     #[test]
     fn ids_go_both_ways() {
-        assert_eq!(open_code_id(&Arg::text("opencode:ses-abc123")), "ses_abc123");
-        assert_eq!(from_open_code_id(&Arg::text(" ses_abc123 ")), "opencode:ses-abc123");
-        assert_eq!(from_open_code_id(&Arg::text("claude:x")), "claude:x");
+        assert_eq!(open_code_id("opencode:ses-abc123"), "ses_abc123");
+        assert_eq!(xenonet_id(" ses_abc123 "), "opencode:ses-abc123");
+        assert_eq!(xenonet_id("claude:x"), "claude:x");
+        assert_eq!(from_open_code_id(&Arg::Null), "");
     }
 
     #[test]
@@ -421,7 +389,7 @@ mod tests {
         let ports: Vec<f64> = regex_lsof().captures_iter("p10\nn127.0.0.1:4096\r\nn*:5000\n").map(|m| number(&m[1])).collect();
         assert_eq!(ports, vec![4096.0, 5000.0]);
         assert_eq!(parse_hex("1F90"), 8080.0);
-        assert!(same_path(&Arg::text("C:\\X\\"), &Arg::text("c:/x"), true));
+        assert!(same_path("C:\\X\\", "c:/x", true));
         assert_eq!(encode_uri_component("ses_a b/é"), "ses_a%20b%2F%C3%A9");
     }
 }

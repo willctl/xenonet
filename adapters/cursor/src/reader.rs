@@ -3,12 +3,6 @@
 //! a session on the map, "`cursor:<conversation id>`", with Cursor's
 //! afterFileEdit files as its edits, ended at its sessionEnd.
 
-use super::files::Files;
-use super::{
-    by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
-    VENDOR_FAILED,
-};
-use crate::session::{RunSession, Via};
 use serde_json::Value;
 use xenonet_base::fs::FsError;
 use xenonet_base::json::{self, number_string};
@@ -17,6 +11,12 @@ use xenonet_base::ordered::OrderedMap;
 use xenonet_base::paths::path_style;
 use xenonet_base::text::{is_blank, js_string};
 use xenonet_schema::drift::clean_version;
+use xenonet_sources::native::files::Files;
+use xenonet_sources::native::{
+    by_num, edits_out, fits_id, js_max, js_min, older, prune_edits, push_edit, str_of, titled, Check, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, SESSIONS_MAX,
+    VENDOR_FAILED,
+};
+use xenonet_sources::session::{RunSession, Via};
 
 pub const SOURCE: &str = "anysphere/cursor/hook-input";
 const READ_MAX: f64 = (4u64 << 20) as f64;
@@ -272,11 +272,38 @@ impl NativeReader for Cursor {
     }
 }
 
+/// The reader's row on the map: the file XenoNet's Cursor hook writes,
+/// XENONET_CURSOR_EVENTS when that names one, else the one in XenoNet's
+/// state folder.
+pub struct Row;
+
+impl xenonet_adapter::reader::Native for Row {
+    fn source(&self) -> &'static str {
+        "cursor"
+    }
+    fn block(&self) -> &'static str {
+        "cursor-sessions"
+    }
+    fn what(&self) -> &'static str {
+        "the Cursor hook's file"
+    }
+    fn schema(&self) -> &'static str {
+        SOURCE
+    }
+    fn at(&self, paths: &xenonet_adapter::reader::Paths<'_>) -> String {
+        let named = paths.var("XENONET_CURSOR_EVENTS");
+        cursor_events_file(named.as_deref(), if named.is_some() { "" } else { paths.state_dir })
+    }
+    fn make(&self) -> Box<dyn NativeReader> {
+        Box::new(Cursor::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::native::files::StdFiles;
-    use crate::native::no_check;
+    use xenonet_sources::native::files::StdFiles;
+    use xenonet_sources::native::no_check;
 
     #[test]
     fn a_conversation_is_a_session_until_it_goes_stale() {

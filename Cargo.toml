@@ -44,6 +44,12 @@ xenonet-claude-code = { path = "adapters/claude-code" }
 xenonet-codex = { path = "adapters/codex" }
 xenonet-grok-build = { path = "adapters/grok-build" }
 xenonet-opencode = { path = "adapters/opencode" }
+xenonet-cursor = { path = "adapters/cursor" }
+xenonet-gemini-cli = { path = "adapters/gemini-cli" }
+xenonet-copilot = { path = "adapters/copilot" }
+xenonet-hermes = { path = "adapters/hermes" }
+xenonet-grok-bot = { path = "adapters/grok-bot" }
+xenonet-muse = { path = "adapters/muse" }
 xenonet-platforms = { path = "adapters/all" }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.

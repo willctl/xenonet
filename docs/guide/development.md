@@ -251,7 +251,7 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 
 ### `crates/` and `adapters/`
 
-`crates/` is the Rust core, a crate per layer ([Rust core](../design/rust-core.md)), and builds the `xenonet` binary. `adapters/` holds one crate per platform (Claude Code, Codex, Grok Build, OpenCode), each implementing `xenonet_adapter::Platform`: how its processes are told apart, how live delivery reaches its sessions, how it's connected and its doctor checks. `adapters/all` is every adapter, which the binary installs at start; the core asks `xenonet_adapter::platforms()` and never names a platform itself (`node scripts/rust-layers.mjs --report` lists where it still does). Its contract with the outside is held by golden files, recorded from the JS implementation XenoNet had before the Rust and replayed by the Rust tests:
+`crates/` is the Rust core, a crate per layer ([Rust core](../design/rust-core.md)), and builds the `xenonet` binary. `adapters/` holds one crate per platform (Claude Code, Codex, Grok Build, OpenCode, and the actor products Hermes Agent, Grok Bot and Muse), each implementing `xenonet_adapter::Platform`: how its processes are told apart, how live delivery reaches its sessions, how it's connected, its doctor checks, and for an actor product its observer (`xenonet_adapter::observe`). `adapters/all` is every adapter, which the binary installs at start; the core asks `xenonet_adapter::platforms()` and never names a platform itself (`node scripts/rust-layers.mjs --report` lists where it still does). Its contract with the outside is held by golden files, recorded from the JS implementation XenoNet had before the Rust and replayed by the Rust tests:
 
 | Golden files | What they pin | Test |
 | --- | --- | --- |

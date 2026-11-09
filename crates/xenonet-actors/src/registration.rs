@@ -53,7 +53,7 @@ const SWEEP_MS: f64 = 60e3;
 const HEARTBEAT_MIN: f64 = 5000.0;
 const HEARTBEAT_MAX: f64 = 3600e3;
 const HEARTBEAT_FALLBACK: f64 = 60e3;
-pub const CAPABILITIES: [&str; 8] = ["spawn-sessions", "edit-repos", "run-commands", "message-people", "message-agents", "schedule", "browse", "use-computer"];
+pub use xenonet_adapter::observe::CAPABILITIES;
 
 /// What a 401 revoked says, by its reason.
 pub fn revoked_words(reason: &str) -> Option<&'static str> {

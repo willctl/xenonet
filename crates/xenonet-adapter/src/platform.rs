@@ -3,15 +3,18 @@
 //! runs with. The core asks the registry; it never matches on an id.
 //!
 //! An adapter says what it is (`app`), decodes the hooks its app sends
-//! (`decode_hook`), brings its doctor rows (`checks`), and, as its code
-//! moves out of the core, watches and reconciles its sessions and offers
-//! ways to deliver to, start and connect its app.
+//! (`decode_hook`), brings its doctor rows (`checks`), observes its actor
+//! product (`observer`), and, as its code moves out of the core, watches
+//! and reconciles its sessions and offers ways to deliver to, start and
+//! connect its app.
 
 use crate::apps::App;
 use crate::check::{Check, CheckRow};
 use crate::connect::{Format, Shared};
 use crate::delivery::Ways;
+use crate::observe::Observer;
 use crate::processes::Rules;
+use crate::reader::{Native, Tailed};
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_model::actions::HookEvent;
@@ -79,6 +82,25 @@ pub trait Platform: Send + Sync {
     fn connect(&self, _app: &App, _shared: &Shared) -> Option<Box<dyn Format>> {
         None
     }
+
+    /// The observer of its actor product, for an adapter whose product
+    /// XenoNet observes (the products table's `observed`).
+    fn observer(&self) -> Option<Box<dyn Observer>> {
+        None
+    }
+
+    /// A reader of its transcripts for the live tailer, new for each
+    /// telemetry, for an app whose lines XenoNet tails (the registry's
+    /// `lines`).
+    fn tailed(&self) -> Option<Box<dyn Tailed>> {
+        None
+    }
+
+    /// Its reader of its own records, for an app with one (the registry's
+    /// `native`).
+    fn native(&self) -> Option<Box<dyn Native>> {
+        None
+    }
 }
 
 /// A hook in Claude Code's shape (`session_id`, `cwd`, `tool_name`,
@@ -144,6 +166,22 @@ impl Registry {
     /// The adapters whose apps live delivery reaches, with their ways in.
     pub fn delivery(&self) -> Vec<(&App, Ways)> {
         self.platforms.iter().filter_map(|p| Some((p.app(), p.delivery()?))).collect()
+    }
+
+    /// The observers of the actor products the adapters bring, in order.
+    pub fn observers(&self) -> Vec<Box<dyn Observer>> {
+        self.platforms.iter().filter_map(|p| p.observer()).collect()
+    }
+
+    /// New readers of the tailed apps' transcripts, in order.
+    pub fn tailed(&self) -> Vec<Box<dyn Tailed>> {
+        self.platforms.iter().filter_map(|p| p.tailed()).collect()
+    }
+
+    /// The adapters whose apps have a reader of their own records, with
+    /// the reader's row, in order.
+    pub fn native(&self) -> Vec<(&App, Box<dyn Native>)> {
+        self.platforms.iter().filter_map(|p| Some((p.app(), p.native()?))).collect()
     }
 }
 

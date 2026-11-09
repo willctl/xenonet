@@ -5,9 +5,6 @@
 //! edits out: a part's other fields never leave the database, apart from
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
-use super::files::Files;
-use super::{edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED};
-use crate::session::{RunSession, Via};
 use serde_json::{json, Map, Value};
 use xenonet_base::json;
 use xenonet_base::nodepath::Style;
@@ -16,6 +13,11 @@ use xenonet_base::patch;
 use xenonet_base::paths::path_style;
 use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_schema::drift::clean_version;
+use xenonet_sources::native::files::Files;
+use xenonet_sources::native::{
+    edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
+};
+use xenonet_sources::session::{RunSession, Via};
 
 pub const SOURCE: &str = "anomaly/opencode/db";
 /// The tools whose calls are edits, as the app registry has them.
@@ -559,6 +561,32 @@ impl NativeReader for OpenCode {
                 ])
             })
             .collect()
+    }
+}
+
+/// The reader's row on the map: OpenCode's database, at OPENCODE_DB when
+/// that names one, else where OpenCode keeps it.
+pub struct Row;
+
+impl xenonet_adapter::reader::Native for Row {
+    fn source(&self) -> &'static str {
+        "opencode"
+    }
+    fn block(&self) -> &'static str {
+        "opencode-sessions"
+    }
+    fn what(&self) -> &'static str {
+        "OpenCode's database"
+    }
+    fn schema(&self) -> &'static str {
+        SOURCE
+    }
+    fn at(&self, paths: &xenonet_adapter::reader::Paths<'_>) -> String {
+        let named = paths.var("OPENCODE_DB").filter(|n| n != ":memory:");
+        opencode_db_path(paths.home_dir, paths.var("XDG_DATA_HOME").as_deref(), named.as_deref())
+    }
+    fn make(&self) -> Box<dyn NativeReader> {
+        Box::new(OpenCode::new())
     }
 }
 

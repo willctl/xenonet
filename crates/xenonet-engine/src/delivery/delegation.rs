@@ -10,9 +10,10 @@
 //!
 //! - reading files (not ones that look like secrets), searching, listing;
 //! - creating and editing files under the session's folder;
-//! - routine commands: listing, printing and searching, read-only git, and
+//! - routine commands: listing, printing and searching, read-only git,
 //!   XenoNet's own `--version`, `doctor`, `status`, `logs`, `update` and
-//!   `service`; one after another with `;`, `&&`, `||` or `|`;
+//!   `service`, and an app's version probe as its adapter gives it
+//!   (`apps`); one after another with `;`, `&&`, `||` or `|`;
 //! - the xenonet tools that report back: send, inbox, peers, who_has,
 //!   whoami, doctor, focus, claim and release.
 //!
@@ -218,9 +219,10 @@ fn command(line: &str) -> Verdict {
         }
         let ok = match name {
             "git" => git_command(&args),
-            "claude" => matches!(args.first().map(String::as_str), Some("--version" | "-v")),
             "xenonet" => xenonet_command(&args),
-            _ => false,
+            // An app's CLI, by the name its adapter registers it under: only
+            // the probe the adapter gives, if any.
+            app => super::apps::of(app).and_then(|w| w.probe).is_some_and(|probe| probe(&args)),
         };
         if !ok {
             return ask(format!("{name} isn't one of the routine commands a delegation covers"));
@@ -312,6 +314,7 @@ mod tests {
 
     #[test]
     fn routine_commands_are_covered_one_after_another() {
+        xenonet_platforms::install();
         for c in [
             "ls -la",
             "pwd",
@@ -341,6 +344,7 @@ mod tests {
 
     #[test]
     fn what_deletes_hands_out_secrets_reaches_out_or_isnt_listed_is_a_question() {
+        xenonet_platforms::install();
         for c in [
             "rm -rf x",
             "del /s x",
@@ -353,6 +357,7 @@ mod tests {
             "cat ~/.ssh/id_rsa",
             "echo $TOKEN",
             "claude setup-token",
+            "codex --version",
             "xenonet runs sign-in",
             "xenonet net set --on a --start network",
             "xenonet start --on a hi",

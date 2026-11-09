@@ -1,9 +1,9 @@
 //! The runs XenoNet observes without a reader of its own (state.js's
-//! `observed`): the experimental native readers of other harnesses' own
-//! records (core/native/), one for each app the registry gives `native`
-//! that XENONET_READERS names, and numbat's records (core/numbat.js, when
-//! XENONET_NUMBAT_FILE names them). Each reads with xenonet-sources' reader,
-//! through its NativeReader, on every refresh, and is a block of its own;
+//! `observed`): the native readers of other harnesses' own records, which
+//! the adapters bring (`Platform::native`), one for each app the registry
+//! gives `native` that XENONET_READERS names, and numbat's records
+//! (core/numbat.js, when XENONET_NUMBAT_FILE names them). Each reads
+//! through its NativeReader on every refresh, and is a block of its own;
 //! the runs actors report come with them in the state.
 
 use crate::blocks::{health_of, Block};
@@ -13,9 +13,11 @@ use crate::vendor::Vendor;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_adapter::apps::App;
+use xenonet_adapter::reader::native::{Checked, NativeReader, Threw};
+use xenonet_adapter::reader::{Native, Paths};
 use xenonet_blocks::lifecycle::Lifecycle;
 use xenonet_sources::native::files::StdFiles;
-use xenonet_sources::native::{self, copilot_cli, cursor, gemini_cli, opencode, Checked, NativeReader, Threw};
+use xenonet_sources::native::{self};
 use xenonet_sources::numbat::Numbat;
 
 /// What a reader is: its name as a source of the map, its block's, what
@@ -31,61 +33,14 @@ struct Kind {
     observed: bool,
 }
 
-/// A native reader the map can make (core/native/index.js's row): the app
-/// it reads, by its id in the registry; what it is; the file or folder it
-/// reads, from the map's settings; and a new reader.
-struct Row {
-    app: &'static str,
-    kind: Kind,
-    at: fn(&MapConfig) -> String,
-    make: fn() -> Box<dyn NativeReader>,
+impl Kind {
+    /// A native reader's, from its adapter's row.
+    fn of(row: &dyn Native) -> Kind {
+        Kind { source: row.source(), block: row.block(), what: row.what(), schema: row.schema(), observed: false }
+    }
 }
-
-/// The native readers, a row for each app the registry gives `native`, in
-/// the order the state lists them.
-const NATIVE: [Row; 4] = [
-    Row {
-        app: "opencode",
-        kind: Kind { source: "opencode", block: "opencode-sessions", what: "OpenCode's database", schema: opencode::SOURCE, observed: false },
-        at: opencode_db,
-        make: || Box::new(opencode::OpenCode::new()),
-    },
-    Row {
-        app: "gemini-cli",
-        kind: Kind { source: "gemini-cli", block: "gemini-cli-sessions", what: "Gemini CLI's folder", schema: gemini_cli::SOURCE, observed: false },
-        at: |cfg| gemini_cli::gemini_root(var(cfg, "GEMINI_CLI_HOME").as_deref(), &cfg.home_dir),
-        make: || Box::new(gemini_cli::GeminiCli::new()),
-    },
-    Row {
-        app: "copilot",
-        kind: Kind { source: "copilot", block: "copilot-sessions", what: "Copilot CLI's folder", schema: copilot_cli::SOURCE, observed: false },
-        at: |cfg| copilot_cli::copilot_root(&cfg.home_dir),
-        make: || Box::new(copilot_cli::CopilotCli::new()),
-    },
-    Row {
-        app: "cursor",
-        kind: Kind { source: "cursor", block: "cursor-sessions", what: "the Cursor hook's file", schema: cursor::SOURCE, observed: false },
-        at: cursor_events,
-        make: || Box::new(cursor::Cursor::new()),
-    },
-];
 
 const NUMBAT: Kind = Kind { source: "numbat", block: "numbat-sessions", what: "numbat's file", schema: "", observed: true };
-
-// A variable of the service's environment, when it's set.
-fn var(cfg: &MapConfig, k: &str) -> Option<String> {
-    cfg.env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string)
-}
-
-fn opencode_db(cfg: &MapConfig) -> String {
-    let named = var(cfg, "OPENCODE_DB").filter(|n| n != ":memory:");
-    opencode::opencode_db_path(&cfg.home_dir, var(cfg, "XDG_DATA_HOME").as_deref(), named.as_deref())
-}
-
-fn cursor_events(cfg: &MapConfig) -> String {
-    let named = var(cfg, "XENONET_CURSOR_EVENTS");
-    cursor::cursor_events_file(named.as_deref(), if named.is_some() { "" } else { &cfg.state_dir })
-}
 
 pub struct Observed {
     kind: Kind,
@@ -128,23 +83,26 @@ impl Observed {
         Arc::new(Observed { kind, source: kind.source, path, vendor, inner: Mutex::new((reader, Lifecycle::new(now_ms()))) })
     }
 
-    /// The native readers that are on, and numbat's when its file is named,
-    /// in the order the state lists them: the native readers first, so a
-    /// run they read wins over numbat's.
+    /// The native readers that are on, in the registry's order, and
+    /// numbat's when its file is named, in the order the state lists them:
+    /// the native readers first, so a run they read wins over numbat's.
     pub fn all(cfg: &MapConfig, vendor: &Arc<Vendor>) -> Vec<Arc<Observed>> {
-        let mut out = Self::native(cfg, vendor, xenonet_adapter::apps::apps(), &NATIVE);
+        let mut out = Self::native(cfg, vendor, xenonet_adapter::platforms().native());
         if let Some(file) = cfg.numbat_file.clone() {
             out.push(Observed::make(NUMBAT, file, Box::new(Numbat::new()), vendor.clone()));
         }
         out
     }
 
-    /// The native readers that are on, made now: for each app `apps` (the
-    /// registry, or a test's) gives `native` that XENONET_READERS names, its
-    /// row's reader, in the table's order.
-    fn native(cfg: &MapConfig, vendor: &Arc<Vendor>, apps: &[App], table: &[Row]) -> Vec<Arc<Observed>> {
-        let native = |id: &str| apps.iter().any(|a| a.id == id && a.has("native"));
-        table.iter().filter(|row| native(row.app) && cfg.readers.contains(row.app)).map(|row| Observed::make(row.kind, (row.at)(cfg), (row.make)(), vendor.clone())).collect()
+    /// The native readers that are on, made now: for each app of `rows`
+    /// (the adapters', or a test's) that the registry gives `native` and
+    /// XENONET_READERS names, its row's reader, in the rows' order.
+    fn native(cfg: &MapConfig, vendor: &Arc<Vendor>, rows: Vec<(&App, Box<dyn Native>)>) -> Vec<Arc<Observed>> {
+        let paths = Paths { home_dir: &cfg.home_dir, state_dir: &cfg.state_dir, env: &cfg.env };
+        rows.into_iter()
+            .filter(|(app, _)| app.has("native") && cfg.readers.contains(&app.id))
+            .map(|(_, row)| Observed::make(Kind::of(&*row), row.at(&paths), row.make(), vendor.clone()))
+            .collect()
     }
 
     /// Reads what's new; a problem is the block's to say, never thrown.
@@ -214,6 +172,7 @@ mod tests {
     use xenonet_sources::session::{RunSession, Via};
 
     fn vendor() -> Arc<Vendor> {
+        xenonet_platforms::install();
         Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())))
     }
 
@@ -246,29 +205,33 @@ mod tests {
 
     #[test]
     fn a_reader_for_each_app_the_registry_gives_one_that_xenonet_readers_names() {
-        let mut apps: Vec<&str> = NATIVE.iter().map(|r| r.app).collect();
+        xenonet_platforms::install();
+        let rows = xenonet_adapter::platforms().native();
+        let mut apps: Vec<&str> = rows.iter().map(|(a, _)| a.id.as_str()).collect();
         let mut native: Vec<&str> = xenonet_adapter::apps::with("native").map(|a| a.id.as_str()).collect();
         apps.sort_unstable();
         native.sort_unstable();
         assert_eq!(apps, native, "a row for each app with `native`, and none else");
-        for r in &NATIVE {
-            assert_eq!((r.kind.source, r.kind.observed), (r.app, false));
+        for (app, row) in &rows {
+            assert_eq!(row.source(), app.id);
         }
         let on =
             |readers: &str| Observed::all(&config(readers), &vendor()).iter().map(|o| (o.source, o.health()["name"].as_str().unwrap_or_default().to_string())).collect::<Vec<_>>();
+        // In the registry's order.
         assert_eq!(
             on("cursor, copilot,gemini-cli,opencode"),
             [
-                ("opencode", "opencode-sessions".to_string()),
-                ("gemini-cli", "gemini-cli-sessions".into()),
+                ("gemini-cli", "gemini-cli-sessions".to_string()),
+                ("cursor", "cursor-sessions".into()),
                 ("copilot", "copilot-sessions".into()),
-                ("cursor", "cursor-sessions".into())
+                ("opencode", "opencode-sessions".into())
             ]
         );
         assert_eq!(on("vscode,claude,nope"), [], "only apps with a native reader");
         // An app the registry doesn't give `native` has no reader, even with a row.
-        let apps: Vec<App> = xenonet_adapter::apps::apps().iter().map(|a| if a.id == "cursor" { App { has: Vec::new(), ..a.clone() } } else { a.clone() }).collect();
-        let made = Observed::native(&config("cursor,opencode"), &vendor(), &apps, &NATIVE);
+        let cursor = App { has: Vec::new(), ..xenonet_adapter::apps::app("cursor").unwrap().clone() };
+        let rows: Vec<(&App, Box<dyn Native>)> = xenonet_adapter::platforms().native().into_iter().map(|(a, r)| (if a.id == "cursor" { &cursor } else { a }, r)).collect();
+        let made = Observed::native(&config("cursor,opencode"), &vendor(), rows);
         assert_eq!(made.iter().map(|o| o.source).collect::<Vec<_>>(), ["opencode"]);
     }
 
@@ -327,18 +290,35 @@ mod tests {
         }
     }
 
+    /// Kite's row: its log in the state folder, or nowhere (`at` empty).
+    struct KiteRow(fn(&Paths<'_>) -> String);
+
+    impl Native for KiteRow {
+        fn source(&self) -> &'static str {
+            "kite"
+        }
+        fn block(&self) -> &'static str {
+            "kite-sessions"
+        }
+        fn what(&self) -> &'static str {
+            "Kite's log"
+        }
+        fn schema(&self) -> &'static str {
+            ""
+        }
+        fn at(&self, paths: &Paths<'_>) -> String {
+            (self.0)(paths)
+        }
+        fn make(&self) -> Box<dyn NativeReader> {
+            Box::<Kite>::default()
+        }
+    }
+
     #[test]
     fn a_made_up_reader_for_a_made_up_app_is_on_the_map() {
-        let mut apps = xenonet_adapter::apps::apps().to_vec();
-        apps.push(App { id: "kite".into(), name: "Kite".into(), numbat: vec!["kite".into()], has: vec!["native".into()], ..App::default() });
-        let kite = |at: fn(&MapConfig) -> String| Row {
-            app: "kite",
-            kind: Kind { source: "kite", block: "kite-sessions", what: "Kite's log", schema: "", observed: false },
-            at,
-            make: || Box::<Kite>::default(),
-        };
-        let table = [kite(|cfg| format!("{}/kite.log", cfg.state_dir))];
-        let made = Observed::native(&config("kite"), &vendor(), &apps, &table);
+        let kite = App { id: "kite".into(), name: "Kite".into(), numbat: vec!["kite".into()], has: vec!["native".into()], ..App::default() };
+        let rows = |at: fn(&Paths<'_>) -> String| -> Vec<(&App, Box<dyn Native>)> { vec![(&kite, Box::new(KiteRow(at)))] };
+        let made = Observed::native(&config("kite"), &vendor(), rows(|p| format!("{}/kite.log", p.state_dir)));
         assert_eq!(made.len(), 1);
         let o = &made[0];
         assert_eq!((o.source, o.health()["name"].as_str()), ("kite", Some("kite-sessions")));
@@ -353,10 +333,12 @@ mod tests {
         assert_eq!(o.live("kite:other"), None);
         // Off unless XENONET_READERS names it, and off for an app the
         // registry doesn't give `native`.
-        assert!(Observed::native(&config("opencode"), &vendor(), &apps, &table).is_empty());
-        assert!(Observed::native(&config("kite"), &vendor(), xenonet_adapter::apps::apps(), &table).is_empty());
+        assert!(Observed::native(&config("opencode"), &vendor(), rows(|p| format!("{}/kite.log", p.state_dir))).is_empty());
+        let plain = App { has: Vec::new(), ..kite.clone() };
+        let unlisted: Vec<(&App, Box<dyn Native>)> = vec![(&plain, Box::new(KiteRow(|p| format!("{}/kite.log", p.state_dir))))];
+        assert!(Observed::native(&config("kite"), &vendor(), unlisted).is_empty());
         // A read that fails is its block's problem.
-        let broken = Observed::native(&config("kite"), &vendor(), &apps, &[kite(|_| String::new())]);
+        let broken = Observed::native(&config("kite"), &vendor(), rows(|_| String::new()));
         broken[0].read();
         assert_eq!(broken[0].status(), json!({ "name": "kite", "ok": false, "count": 0, "error": "Kite's log is missing" }));
         assert_eq!(broken[0].health()["state"], "degraded");

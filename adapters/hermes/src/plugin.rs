@@ -1,7 +1,7 @@
-//! XenoNet's plugin for Hermes Agent (core/actors/hermes-plugin.js,
-//! plugins/hermes/xenonet): putting it in $HERMES_HOME/plugins/xenonet,
-//! taking it out, and saying whether it's installed, turned on and
-//! reporting. `xenonet connect hermes` and the doctor use this.
+//! XenoNet's plugin for Hermes Agent (plugins/hermes/xenonet): putting it
+//! in $HERMES_HOME/plugins/xenonet, taking it out, and saying whether it's
+//! installed, turned on and reporting. `xenonet connect hermes` and the
+//! doctor use this.
 //!
 //! XenoNet only copies the plugin's two files. It never edits Hermes's
 //! config.yaml (plugins are off until their name is in plugins.enabled,

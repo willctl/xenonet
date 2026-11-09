@@ -15,8 +15,7 @@ use xenonet_base::time::parse_iso;
 use xenonet_base::usage::{Figure, Speed, TokenUsage};
 
 /// What JS would throw reading a record.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TypeError(pub String);
+pub use xenonet_adapter::reader::TypeError;
 
 /// A value as JS would see it: missing (undefined), or there.
 pub type Js<'a> = Option<&'a Value>;

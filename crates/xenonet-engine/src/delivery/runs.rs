@@ -3,7 +3,7 @@
 //! starts: core/delivery/runs.js. How a program is started on each
 //! platform, whether a run may start now, and which records and logs are
 //! kept are here; starting the process, writing its log and watching it
-//! are the runner's (the binary's, or the twin's).
+//! are the runner's (xenonet-wire-engine's `runs`).
 //!
 //! At most `CAP` runs go at once on a machine, one per session, and a turn
 //! runs `TURN_MS` at most. Each run's output goes to `runs/<id>.log` in
@@ -12,8 +12,6 @@
 //! delivery-runs.json beside it, so a restart keeps counting the runs
 //! still under way.
 
-use crate::sql::Arg;
-use crate::store::js_text;
 use serde_json::{json, Value};
 
 /// Runs at once on one machine.
@@ -35,16 +33,6 @@ pub struct Launch {
     pub program: String,
     pub args: Vec<String>,
     pub verbatim: bool,
-}
-
-impl Launch {
-    pub fn to_arg(&self) -> Arg {
-        Arg::Obj(vec![
-            ("program".into(), Arg::text(self.program.clone())),
-            ("args".into(), Arg::List(self.args.iter().map(|a| Arg::text(a.clone())).collect())),
-            ("verbatim".into(), Arg::Bool(self.verbatim)),
-        ])
-    }
 }
 
 /// cmd.exe by its full path, never by its name, which Windows looks for in
@@ -117,8 +105,8 @@ impl Run {
         v
     }
 
-    /// A record as the file or the JS has it; None for one without its id,
-    /// key or start.
+    /// A record as the file has it; None for one without its id, key or
+    /// start.
     pub fn of(v: &Value) -> Option<Run> {
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
         let n = |k: &str| v.get(k).and_then(Value::as_f64);
@@ -186,16 +174,6 @@ pub fn kept(runs: &[Run], now: f64) -> Vec<Run> {
 /// last written a week ago or more.
 pub fn stale_logs(files: &[(String, f64)], now: f64) -> Vec<String> {
     files.iter().filter(|(name, mtime)| name.rsplit_once('.').is_some_and(|(_, ext)| ext == "log") && now - mtime >= KEEP_MS).map(|(name, _)| name.clone()).collect()
-}
-
-/// A record as the JS passed it.
-pub fn run_of(a: &Arg) -> Option<Run> {
-    Run::of(&a.to_json())
-}
-
-/// What a file's name is, as the JS passed it: { name, mtime }.
-pub fn file_of(a: &Arg) -> (String, f64) {
-    (js_text(&a.field("name")), a.field("mtime").as_f64().unwrap_or(f64::NAN))
 }
 
 #[cfg(test)]

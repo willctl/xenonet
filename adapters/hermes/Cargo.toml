@@ -1,0 +1,26 @@
+[package]
+name = "xenonet-hermes"
+description = "Hermes Agent's adapter: how XenoNet observes Hermes, its plugin for Hermes, and the doctor check on it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The doctor's check waits on the machine (exists, now).
+async-trait.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+xenonet-adapter.workspace = true
+# The actor a profile is named for (names::hermes_slug), which a Hermes
+# plugin registering later takes too.
+xenonet-actors.workspace = true
+xenonet-base.workspace = true
+# Hermes's versions as the drift report cleans them.
+xenonet-schema.workspace = true
+
+[lints]
+workspace = true

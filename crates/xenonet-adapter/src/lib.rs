@@ -7,6 +7,10 @@
 //! - `products`: the actor products (Hermes Agent, Grok Bot, Muse, dots).
 //! - `platform`: the `Platform` trait an adapter implements, and the
 //!   `Registry` the service builds from the adapters it was given.
+//! - `observe`: the observer an adapter brings for an actor product, and
+//!   what every observer shares (keeping actors, attribution, an app).
+//! - `reader`: what an adapter brings to the map: a reader of its
+//!   transcripts for the live tailer, or of its own records.
 //! - `check`: a doctor row an adapter brings; `processes`, `delivery` and
 //!   `connect`: what an adapter gives for its app's processes, its ways
 //!   in, and its config format.
@@ -18,9 +22,11 @@ pub mod apps;
 pub mod check;
 pub mod connect;
 pub mod delivery;
+pub mod observe;
 pub mod platform;
 pub mod processes;
 pub mod products;
+pub mod reader;
 
 pub use check::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 pub use platform::{install, platforms, Hook, Platform, Registry};

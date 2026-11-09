@@ -2,10 +2,12 @@
 //! lines, and what's made of it (the snapshot, the signals the UI acts on,
 //! forecasts, costs, collisions, the history).
 //!
-//! Reading the files is the tailer's (xenonet-blocks), and the events go
-//! out through whoever runs this: each line goes in, and the events it
-//! makes come back, in order (`Emit`). Time is an argument (`now`) wherever
-//! live.js asked Date.now().
+//! Reading the files is the tailer's (xenonet-blocks); what each app's
+//! lines mean is its adapter's (`Tailed`, from the registry), which works
+//! on a session through the `Tail` operations this implements; and the
+//! events go out through whoever runs this: each line goes in, and the
+//! events it makes come back, in order (`Emit`). Time is an argument
+//! (`now`) wherever live.js asked Date.now().
 //!
 //! Records are read as JS read them: a field JS would read as undefined is
 //! missing, a Map's keys are told apart as SameValueZero tells them
@@ -14,22 +16,19 @@
 //! threw. Arithmetic on a record's counts is a number's (Number() of what
 //! the record says), where JS's `+` would have joined strings.
 
+use super::js::{ev, field, index0, is_str, js_max, js_round, key_tag, nn, num_of, nv, obj, obj_opt, or0, put, sort_by_num, str_tag, strict_eq, sv, tpl};
 use super::names::ServerNames;
-use super::{
-    categorize, claude_edits, clip, clip_value, codex_edits, command_text, day_key, file_key, files_of, looks_like_question, mcp_server_of, mcp_tool_of, median, patch_files,
-    slope, string_of, tail, tool_detail, tool_key, wiki_pages_of,
-};
-use crate::line_events::{self, broken_at, usage_of, user_text, End, Field, Kind, LineEvent, LineFile, OpenRun};
-use crate::lines::{opt_prop, prop, ClaudeLine, CodexLine, GrokLine, TypeError};
+use super::{categorize, clip, clip_value, day_key, file_key, looks_like_question, mcp_server_of, median, slope, string_of, tail, tool_key};
+use crate::line_events::{self, Kind, LineEvent};
+use crate::lines::{opt_prop, prop};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use xenonet_adapter::apps;
+pub use xenonet_adapter::reader::{Call, Classified, Emit, Fields, Run, Tail, Tailed, ToolCall, ToolRecord, TypeError, VendorCheck, Where};
 use xenonet_base::json::{number, number_string};
 use xenonet_base::ordered::OrderedMap;
-use xenonet_base::text::{join, js_number, js_string, js_trim, truthy};
-use xenonet_base::usage::{Speed, TokenUsage};
+use xenonet_base::text::{js_number, js_string, js_trim, truthy};
 use xenonet_base::{jsstr, paths, pricing};
 
 pub const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
@@ -43,219 +42,11 @@ const QUESTION_TTL_MS: f64 = 12.0 * 3600e3;
 const REVIEW_TTL_MS: f64 = 45.0 * 60e3;
 const HOOK_NEED_MS: f64 = 30.0 * 60e3;
 pub const HISTORY_MAX: usize = 20000;
-// Claude plan usage is asked of Anthropic every 5 minutes (claude_usage);
-// a reading this old says nothing about the windows now.
-const CLAUDE_LIMITS_FRESH_MS: f64 = 45.0 * 60e3;
 // An app whose lines don't say when a turn ends (Grok Build's): its hooks
 // do, and without them a turn this quiet, with no tool call in flight, has
 // ended. A session whose hooks spoke this lately waits for them.
 const QUIET_TURN_MS: f64 = 60e3;
 const HOOKS_HEARD_MS: f64 = 3600e3;
-
-// ---------- JS's ways ----------
-
-/// An object's fields as JS has them, in order: a field that's there with
-/// an undefined value is None (an event's `agentId` from Codex, say).
-pub type Fields = Vec<(String, Option<Value>)>;
-
-static OBJECT_KEYS: AtomicU64 = AtomicU64::new(0);
-
-/// A JS Map's key, as SameValueZero tells keys apart: by value for what
-/// isn't an object, and an object only as itself, so one read from a line
-/// matches no other.
-pub fn key_tag(k: Option<&Value>) -> String {
-    match k {
-        None => "u".into(),
-        Some(Value::Null) => "z".into(),
-        Some(Value::Bool(true)) => "t".into(),
-        Some(Value::Bool(false)) => "f".into(),
-        Some(Value::Number(n)) => {
-            let f = n.as_f64().unwrap_or(f64::NAN);
-            format!("n{}", number_string(if f == 0.0 { 0.0 } else { f }))
-        }
-        Some(Value::String(s)) => format!("s{s}"),
-        Some(_) => format!("o{}", OBJECT_KEYS.fetch_add(1, AtomicOrdering::Relaxed)),
-    }
-}
-
-fn str_tag(s: &str) -> String {
-    format!("s{s}")
-}
-
-/// `Math.max(a, b)`: NaN when either is.
-fn js_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        f64::NAN
-    } else {
-        a.max(b)
-    }
-}
-
-/// `Math.round`.
-fn js_round(x: f64) -> f64 {
-    (x + 0.5).floor()
-}
-
-/// `v ?? fallback`: the value unless it's null or undefined.
-fn nn(v: Option<&Value>) -> Option<&Value> {
-    v.filter(|x| !x.is_null())
-}
-
-/// A value in a template literal: `${v}`.
-fn tpl(v: Option<&Value>) -> String {
-    match v {
-        None => "undefined".into(),
-        Some(v) => js_string(v),
-    }
-}
-
-fn is_str(v: Option<&Value>, s: &str) -> bool {
-    v.and_then(Value::as_str) == Some(s)
-}
-
-/// `a === b`, for what a record holds: an object or a list is only itself,
-/// which two values read apart never are.
-fn strict_eq(a: Option<&Value>, b: Option<&Value>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(Value::Null), Some(Value::Null)) => true,
-        (Some(Value::Bool(x)), Some(Value::Bool(y))) => x == y,
-        (Some(Value::Number(x)), Some(Value::Number(y))) => x.as_f64() == y.as_f64(),
-        (Some(Value::String(x)), Some(Value::String(y))) => x == y,
-        _ => false,
-    }
-}
-
-/// `x?.[0]`: a list's first item, a string's first unit, an object's "0".
-fn index0(v: Option<&Value>) -> Option<Value> {
-    match v {
-        Some(Value::Array(a)) => a.first().cloned(),
-        Some(Value::String(s)) => s.encode_utf16().next().map(|u| Value::String(String::from_utf16_lossy(&[u]))),
-        Some(Value::Object(m)) => m.get("0").cloned(),
-        _ => None,
-    }
-}
-
-/// `Object.keys(v ?? {})`.
-fn object_keys(v: Option<&Value>) -> Vec<String> {
-    match v {
-        Some(Value::Object(m)) => jsstr::js_key_order(m.clone()).keys().cloned().collect(),
-        Some(Value::Array(a)) => (0..a.len()).map(|i| i.to_string()).collect(),
-        Some(Value::String(s)) => (0..jsstr::len(s)).map(|i| i.to_string()).collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn obj(fields: Vec<(&str, Value)>) -> Value {
-    let mut m = Map::new();
-    for (k, v) in fields {
-        m.insert(k.into(), v);
-    }
-    Value::Object(m)
-}
-
-/// A JS object built in order, with `Some` for each field that's there.
-fn obj_opt(fields: Vec<(&str, Option<Value>)>) -> Value {
-    Value::Object(map_opt(fields))
-}
-
-/// obj_opt's fields, as a map.
-fn map_opt(fields: Vec<(&str, Option<Value>)>) -> Map<String, Value> {
-    let mut m = Map::new();
-    for (k, v) in fields {
-        if let Some(v) = v {
-            m.insert(k.into(), v);
-        }
-    }
-    m
-}
-
-fn field<'a>(f: &'a Fields, key: &str) -> Option<&'a Value> {
-    f.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_ref())
-}
-
-/// A field set as an object literal sets it: in its place when it's
-/// there, else last.
-fn put(f: &mut Fields, key: &str, v: Option<Value>) {
-    match f.iter_mut().find(|(k, _)| k == key) {
-        Some(slot) => slot.1 = v,
-        None => f.push((key.to_string(), v)),
-    }
-}
-
-/// `pages ? { pages } : undefined`.
-fn pages_extra(pages: Option<Vec<String>>) -> Option<Map<String, Value>> {
-    pages.map(|p| {
-        let mut m = Map::new();
-        m.insert("pages".into(), Value::Array(p.into_iter().map(Value::String).collect()));
-        m
-    })
-}
-
-fn ev(fields: Vec<(&str, Option<Value>)>) -> Fields {
-    fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
-}
-
-#[expect(clippy::unnecessary_wraps, reason = "a field of obj_opt or ev, which takes each as an Option, that's always there")]
-fn sv(v: &str) -> Option<Value> {
-    Some(Value::String(v.into()))
-}
-
-#[expect(clippy::unnecessary_wraps, reason = "a field of obj_opt or ev, which takes each as an Option, that's always there")]
-fn nv(v: f64) -> Option<Value> {
-    Some(number(v))
-}
-
-/// A stable sort by a comparator that gives a number, as JS's sort takes
-/// one: negative puts `a` first, and NaN counts as 0. (Rust's own sort may
-/// panic on an order that isn't total.) The items move once, at the end:
-/// the merges work on their places, as the history holds a hundred
-/// thousand events with maps in them at start.
-fn sort_by_num<T>(v: &mut Vec<T>, cmp: impl Fn(&T, &T) -> f64) {
-    let n = v.len();
-    if n < 2 {
-        return;
-    }
-    let mut order: Vec<usize> = (0..n).collect();
-    let mut spare = vec![0usize; n];
-    let mut width = 1;
-    while width < n {
-        let mut start = 0;
-        while start < n {
-            let mid = (start + width).min(n);
-            let end = (start + 2 * width).min(n);
-            let (mut i, mut j, mut k) = (start, mid, start);
-            while i < mid && j < end {
-                // The right one goes first only when it's strictly before.
-                if cmp(&v[order[i]], &v[order[j]]) > 0.0 {
-                    spare[k] = order[j];
-                    j += 1;
-                } else {
-                    spare[k] = order[i];
-                    i += 1;
-                }
-                k += 1;
-            }
-            spare[k..k + (mid - i)].copy_from_slice(&order[i..mid]);
-            k += mid - i;
-            spare[k..k + (end - j)].copy_from_slice(&order[j..end]);
-            start = end;
-        }
-        std::mem::swap(&mut order, &mut spare);
-        width *= 2;
-    }
-    let mut taken: Vec<Option<T>> = std::mem::take(v).into_iter().map(Some).collect();
-    v.extend(order.into_iter().map(|i| taken[i].take().expect("each place once")));
-}
-
-fn num_of(v: Option<&Value>, key: &str) -> f64 {
-    js_number(opt_prop(v, key))
-}
-
-/// `(v ?? 0)` as a number.
-fn or0(v: Option<&Value>) -> f64 {
-    nn(v).map_or(0.0, |v| js_number(Some(v)))
-}
 
 // ---------- a session's state ----------
 
@@ -290,17 +81,6 @@ struct Spend {
     priced: bool,
 }
 
-/// What a Grok Build turn's call counted so far (tokens by kind, and cost),
-/// so a turn written again adds only what's new.
-#[derive(Clone, Copy, Debug, Default)]
-struct Counted {
-    input: f64,
-    cache_read: f64,
-    cache_write: f64,
-    output: f64,
-    cost: f64,
-}
-
 /// A call in flight: its fields (name, ts) and the tool record of it the
 /// stall check keeps, when there is one (`None`: no `tool` field; `Some(None)`:
 /// null), with a copy of that record for when it's no longer among the
@@ -331,41 +111,11 @@ struct Message {
     ts: Value,
 }
 
-/// What the open run of chunks (Grok Build's) began, which its later
-/// chunks carry on: the last prompt, or the last message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RunEntry {
-    Prompt,
-    Message,
-}
-
 /// A recent tool call, for the stall check: { key, label, loopable, ok, ts }.
 #[derive(Clone, Debug)]
 struct ToolRec {
     uid: u64,
     rec: Map<String, Value>,
-}
-
-/// A call's tokens and how it ran, for its price.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Call {
-    pub tokens: TokenUsage,
-}
-
-/// A tool call, as noteTool takes it. `agent` is None where JS passed no
-/// agentId (undefined), else the agent's id or null.
-#[derive(Clone, Debug, Default)]
-pub struct ToolCall {
-    pub name: Option<Value>,
-    pub detail: String,
-    pub full: Option<Value>,
-    pub files: Vec<String>,
-    pub ts: f64,
-    pub agent: Option<Value>,
-    pub server: Option<Value>,
-    /// Fields the event takes on (`...extra`): the pages a wiki write names.
-    pub extra: Option<Map<String, Value>>,
-    pub ok: Value,
 }
 
 /// One session's state, as the tailer has seen it.
@@ -401,20 +151,13 @@ pub struct Session {
     last_prompt_at: f64,
     last_turn_end_at: f64,
     interrupted_at: f64,
-    codex_items: bool,
-    event_prompt: Option<(Prompt, f64)>,
     turn_marks: f64,
     question: Value,
     hook_need: Value,
-    // When its hooks last spoke, and what its mapper keeps of its file
-    // (line_events.rs), for an app whose lines don't say when a turn ends.
+    // When its hooks last spoke, for an app whose lines don't say when a
+    // turn ends.
     hook_at: f64,
-    line_run: Option<OpenRun>,
-    run_entry: Option<RunEntry>,
-    // Grok Build's usage.json as last read (its stamp), and what each of
-    // its turns' calls counted so far, by turn and model.
-    usage_stamp: Option<String>,
-    usage_counted: HashMap<String, Counted>,
+    run_entry: Option<Run>,
     // How it asks before it acts (plan, bypassPermissions…), as its hooks
     // last said.
     permission_mode: Option<String>,
@@ -464,16 +207,11 @@ impl Session {
             last_prompt_at: 0.0,
             last_turn_end_at: 0.0,
             interrupted_at: 0.0,
-            codex_items: false,
-            event_prompt: None,
             turn_marks: 0.0,
             question: Value::Null,
             hook_need: Value::Null,
             hook_at: 0.0,
-            line_run: None,
             run_entry: None,
-            usage_stamp: None,
-            usage_counted: HashMap::new(),
             permission_mode: None,
             recent_tools: Vec::new(),
             error_streak: 0.0,
@@ -887,17 +625,6 @@ impl Session {
 
 // ---------- what it emits ----------
 
-/// An event for the twin to emit, in the order they happened.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Emit {
-    /// "activity": what a session did.
-    Activity(Fields),
-    /// "tokens": { sessionId, app, n, ts }.
-    Tokens(Value),
-    /// "refusal": a provider's refusal, as its line marks it.
-    Refusal(Value),
-}
-
 /// An event in the history, with its time.
 #[derive(Clone, Debug)]
 pub struct Event {
@@ -905,18 +632,8 @@ pub struct Event {
     pub fields: Fields,
 }
 
-/// Where a line was read: its session, its subagent (null for none) and
-/// its file.
-#[derive(Clone, Debug)]
-pub struct Where {
-    pub session_id: String,
-    pub agent_id: Value,
-    pub file: Value,
-}
-
 // ---------- the telemetry ----------
 
-#[derive(Debug)]
 pub struct Telemetry {
     pub home: Option<String>,
     /// The MCP server the config names for the shared context
@@ -926,17 +643,13 @@ pub struct Telemetry {
     roots: Vec<(String, String)>,
     sessions: Vec<Session>,
     index: HashMap<String, usize>,
-    limits_codex: Value,
-    limits_claude: Value,
-    samples_codex: Vec<Value>,
-    samples_claude: Vec<Value>,
-    claude_reason: Value,
-    anthropic_samples: Vec<Value>,
-    desktop_samples: Vec<Value>,
     history: Vec<Event>,
     pending_label: Option<(String, Value, f64)>,
     // What each uuid-named MCP server says it is (names.rs).
     server_names: ServerNames,
+    // The tailed apps' readers, from the adapters in place, in the
+    // registry's order; one is out of its place while it reads a line.
+    apps: Vec<Option<Box<dyn Tailed>>>,
 }
 
 impl Telemetry {
@@ -948,16 +661,50 @@ impl Telemetry {
             roots,
             sessions: Vec::new(),
             index: HashMap::new(),
-            limits_codex: Value::Null,
-            limits_claude: Value::Null,
-            samples_codex: Vec::new(),
-            samples_claude: Vec::new(),
-            claude_reason: Value::Null,
-            anthropic_samples: Vec::new(),
-            desktop_samples: Vec::new(),
             history: Vec::new(),
             pending_label: None,
             server_names: ServerNames::new(),
+            apps: xenonet_adapter::platforms().tailed().into_iter().map(Some).collect(),
+        }
+    }
+
+    // ----- the apps -----
+
+    // The reader of `app`'s transcripts: any app that isn't tailed is read
+    // as Claude Code.
+    fn app_index(&self, app: &str) -> Option<usize> {
+        let id = apps::tailed_app(app, "claude");
+        self.apps.iter().position(|a| a.as_ref().is_some_and(|a| a.id() == id))
+    }
+
+    fn app_mut(&mut self, app: &str) -> Option<&mut Box<dyn Tailed>> {
+        let k = self.app_index(app)?;
+        self.apps[k].as_mut()
+    }
+
+    fn apps(&self) -> impl Iterator<Item = &dyn Tailed> {
+        self.apps.iter().filter_map(|a| a.as_deref())
+    }
+
+    /// An app's provider was asked for plan usage and answered `r`.
+    pub fn usage_reading(&mut self, app: &str, r: Option<&Value>, now: f64) -> Result<(), TypeError> {
+        match self.app_mut(app) {
+            Some(a) => a.usage_reading(r, now),
+            None => Ok(()),
+        }
+    }
+
+    /// Samples another source keeps of an app's plan usage.
+    pub fn usage_samples(&mut self, app: &str, samples: &Value) {
+        if let Some(a) = self.app_mut(app) {
+            a.usage_samples(samples);
+        }
+    }
+
+    /// An app's plan usage readings settled.
+    pub fn settle_usage(&mut self, app: &str) {
+        if let Some(a) = self.app_mut(app) {
+            a.settle_usage();
         }
     }
 
@@ -991,160 +738,46 @@ impl Telemetry {
 
     // ----- discovery -----
 
-    /// What a transcript is: { app, sessionId } (with agentId for a Claude
-    /// Code subagent's), or None to leave it alone.
+    /// What a transcript is: { app, sessionId } (with agentId for a
+    /// subagent's), or None to leave it alone. The app whose folder holds
+    /// the file answers for it; elsewhere, the first app that knows the
+    /// file by its name.
     #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
     pub fn classify(&self, file: &str) -> Option<Value> {
         let norm = file.replace('\\', "/");
         if !norm.ends_with(".jsonl") {
             return None;
         }
-        // A Grok Build session's updates, in the session's folder, which is
-        // named for it: <root>/<encoded cwd>/<session id>/updates.jsonl. Its
-        // other files (chat history, rewind points) aren't read.
-        if let Some((dir, _)) = self.roots.iter().find(|(dir, app)| app == "grok" && norm.starts_with(&format!("{}/", dir.replace('\\', "/")))) {
-            let rest = &norm[dir.replace('\\', "/").len()..];
-            let parts: Vec<&str> = rest.split('/').collect();
-            return (parts.len() == 4 && parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() && parts[3] == "updates.jsonl")
-                .then(|| obj(vec![("app", "grok".into()), ("sessionId", Value::String(format!("grok:{}", parts[2])))]));
+        let found = |app: &dyn Tailed, c: Classified| {
+            obj_opt(vec![("app", sv(app.id())), ("sessionId", Some(Value::String(format!("{}:{}", app.id(), c.id)))), ("agentId", c.agent.map(Value::String))])
+        };
+        for (dir, app) in &self.roots {
+            let dir = dir.replace('\\', "/");
+            if !norm.starts_with(&format!("{dir}/")) {
+                continue;
+            }
+            let reader = self.app_index(app).and_then(|k| self.apps[k].as_deref())?;
+            return reader.classify(&norm, Some(&dir)).map(|c| found(reader, c));
         }
-        let codex_root = self.roots.iter().any(|(dir, app)| app == "codex" && norm.starts_with(&dir.replace('\\', "/")));
-        if norm.contains("/.codex/") || codex_root {
-            let id = uuid_before(&norm)?;
-            return norm.contains("rollout-").then(|| obj(vec![("app", "codex".into()), ("sessionId", Value::String(format!("codex:{id}")))]));
-        }
-        if let Some((session, agent)) = subagent_file(&norm) {
-            return Some(obj(vec![("app", "claude".into()), ("sessionId", Value::String(format!("claude:{session}"))), ("agentId", Value::String(agent))]));
-        }
-        let rest = norm.strip_suffix(".jsonl")?;
-        let slash = rest.rfind('/')?;
-        let id = &rest[slash + 1..];
-        (id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'))
-            .then(|| obj(vec![("app", "claude".into()), ("sessionId", Value::String(format!("claude:{id}")))]))
+        self.apps().find_map(|a| a.classify(&norm, None).map(|c| found(a, c)))
     }
 
     // ----- a line -----
 
     /// A line the tailer read, through its app's normalizer, as its events
-    /// (line_events.rs): its refusal (kept whether read as history or live,
-    /// told to you only when live) and what it says. What it emitted before
-    /// an error is in `out`.
-    /// `app` is the transcript's: any app that isn't tailed is read as
-    /// Claude Code, and an app's events other than Codex's have Claude
-    /// Code's shapes.
-    pub fn line(&mut self, app: &str, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        match apps::tailed_app(app, "claude") {
-            "codex" => {
-                let o = CodexLine { raw };
-                let file = self.codex_file(self.find(&f.session_id));
-                let events = line_events::codex(&o, &file);
-                self.refusal(app, f, &o.raw, &events, live, out);
-                self.codex_line(f, &o, &events, live, now, out)
-            }
-            "grok" => {
-                // What the mapper keeps of the session's file, as the lines
-                // come (its runs of chunks).
-                let i = self.session(&f.session_id, "grok");
-                self.server_names.observe(&raw, mcp_server_of);
-                let o = GrokLine::new(raw);
-                let file = LineFile { run: std::cell::RefCell::new(self.sessions[i].line_run.take()), ..LineFile::new(Some(f.agent_id.clone())) };
-                let events = line_events::grok(&o, &file);
-                self.sessions[i].line_run = file.run.into_inner();
-                self.refusal(app, f, &o.raw, &events, live, out);
-                self.claude_line(f, "grok", o.ts(), &events, live, now, out)
-            }
-            _ => {
-                self.server_names.observe(&raw, mcp_server_of);
-                let o = ClaudeLine { raw };
-                let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
-                self.refusal(app, f, &o.raw, &events, live, out);
-                self.claude_line(f, "claude", o.ts(), &events, live, now, out)
-            }
-        }
-    }
-
-    // A provider's refusal, as its line marks it, read first.
-    fn refusal(&self, app: &str, f: &Where, raw: &Value, events: &[LineEvent<'_>], live: bool, out: &mut Vec<Emit>) {
-        for e in events {
-            let Kind::Refusal(signal) = &e.kind else { continue };
-            let model = self.find(&f.session_id).map_or(Value::Null, |i| self.sessions[i].model.clone());
-            let cwd = opt_prop(Some(raw), "cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
-            out.push(Emit::Refusal(obj(vec![
-                ("signal", signal.clone()),
-                ("sessionId", Value::String(f.session_id.clone())),
-                ("app", app.into()),
-                ("agentId", f.agent_id.clone()),
-                ("file", f.file.clone()),
-                ("cwd", cwd),
-                ("model", model),
-                ("live", Value::Bool(live)),
-            ])));
-        }
-    }
-
-    /// Whether a Grok Build session's usage.json was written since it was
-    /// last read (`stamp`, its size and time, as the reader makes it),
-    /// noting that it's read now. Grok writes it as each turn ends, before
-    /// the update that ends the turn, so whoever reads the lines asks after
-    /// each of a session's lines.
-    pub fn grok_usage_due(&mut self, id: &str, stamp: &str) -> bool {
-        let Some(i) = self.find(id) else { return false };
-        let s = &mut self.sessions[i];
-        if s.usage_stamp.as_deref() == Some(stamp) {
-            return false;
-        }
-        s.usage_stamp = Some(stamp.to_string());
-        true
-    }
-
-    /// A Grok Build session's usage.json and summary.json, as read (live.js's
-    /// applyGrokUsage): each of its turns' calls counted once, when the turn
-    /// ended, as Claude Code's calls are, at what Grok said it cost, or
-    /// without a price when it didn't say; and what a turn written again
-    /// adds (Grok folds what you send during a turn into it). A subagent's
-    /// are its parent's, whose turns count them, and a fork's turns from
-    /// before it are the session's it came from (grok.rs's usage_turns).
-    pub fn grok_usage(&mut self, id: &str, usage: Option<&Value>, summary: Option<&Value>, live: bool, out: &mut Vec<Emit>) {
-        let Some(i) = self.find(id) else { return };
-        if crate::grok::usage_subagent(summary) {
-            return;
-        }
-        for c in crate::grok::usage_turns(usage, summary) {
-            let s = &mut self.sessions[i];
-            let was = s.usage_counted.get(&c.key).copied().unwrap_or_default();
-            s.usage_counted.insert(c.key.clone(), Counted { input: c.input, cache_read: c.cache_read, cache_write: c.cache_write, output: c.output, cost: c.cost.unwrap_or(0.0) });
-            let (input, cache_read, cache_write, output) =
-                ((c.input - was.input).max(0.0), (c.cache_read - was.cache_read).max(0.0), (c.cache_write - was.cache_write).max(0.0), (c.output - was.output).max(0.0));
-            let n = input + cache_read + cache_write + output;
-            if n.is_nan() || n <= 0.0 {
-                continue;
-            }
-            let model = Value::String(c.model.clone());
-            s.model = model.clone();
-            s.tokens_output += output;
-            s.add_tokens(n, c.t, live);
-            let call = Call {
-                tokens: TokenUsage {
-                    input: Some(input),
-                    cache_read: Some(cache_read),
-                    cache_write_5m: Some(cache_write),
-                    cache_write_1h: Some(0.0),
-                    output: Some(output),
-                    speed: Speed::default(),
-                },
-            };
-            s.add_reported(&model, &call, c.t, c.cost.map(|cost| (cost - was.cost).max(0.0)));
-            if live {
-                out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "grok".into()), ("n", number(n)), ("ts", number(c.t))])));
-            }
-        }
-    }
-
-    /// What the mapper is told of a Codex session's rollout: whether its
-    /// prompts are its completed user messages yet, which the tailer finds
-    /// out as the lines come.
-    fn codex_file(&self, i: Option<usize>) -> LineFile {
-        LineFile { items: i.is_some_and(|i| self.sessions[i].codex_items), follow: true, ..LineFile::default() }
+    /// (the app's reader says what it means): its refusal (kept whether
+    /// read as history or live, told to you only when live) and what it
+    /// says. What it emitted before an error is in `out`. `app` is the
+    /// transcript's: any app that isn't tailed is read as Claude Code.
+    #[expect(clippy::too_many_arguments, reason = "a line, where it was read, and how, as the readers take them")]
+    pub fn line(&mut self, app: &str, vendor: &dyn VendorCheck, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        let Some(mut reader) = self.app_index(app).and_then(|k| self.apps[k].take()) else {
+            return Err(TypeError(format!("XenoNet has no reader for {app}'s transcripts")));
+        };
+        let read = reader.line(self, vendor, f, raw, live, now, out);
+        let k = self.apps.iter().position(Option::is_none).expect("the reader's place is empty while it reads");
+        self.apps[k] = Some(reader);
+        read
     }
 
     fn activity(&mut self, i: usize, ev: Fields, live: bool, now: f64, out: &mut Vec<Emit>) {
@@ -1348,214 +981,6 @@ impl Telemetry {
         }
     }
 
-    // ----- Claude Code transcript lines -----
-
-    /// A Claude Code transcript's line, as the transcript has it.
-    pub fn apply_claude(&mut self, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let o = ClaudeLine { raw };
-        let events = line_events::claude(&o, &LineFile::new(Some(f.agent_id.clone())));
-        self.claude_line(f, "claude", o.ts(), &events, live, now, out)
-    }
-
-    // A Claude Code line's events, or another app's with their shapes
-    // (`app`'s), with when the line was written.
-    #[expect(clippy::too_many_arguments, reason = "a line's events and its time, handed down as the JS's closures saw them")]
-    fn claude_line(&mut self, f: &Where, app: &str, ts: Result<f64, TypeError>, events: &[LineEvent<'_>], live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let i = self.session(&f.session_id, app);
-        // A line that doesn't say when it was written was written when it's
-        // read.
-        let t = ts?;
-        let ts = if t != 0.0 && !t.is_nan() { t } else { now };
-        let agent = f.agent_id.clone();
-        let mut sub = None;
-        if truthy(Some(&agent)) {
-            let tag = key_tag(Some(&agent));
-            let s = &mut self.sessions[i];
-            let a = &mut s
-                .subagents
-                .get_or_insert_with(&tag, || {
-                    let m: Map<String, Value> = [
-                        ("id", agent.clone()),
-                        ("label", "subagent".into()),
-                        ("startedAt", number(ts)),
-                        ("lastAt", number(ts)),
-                        ("tools", number(0.0)),
-                        ("done", Value::Bool(false)),
-                        ("announced", Value::Bool(false)),
-                    ]
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect();
-                    (Some(agent.clone()), m)
-                })
-                .1;
-            let last = js_max(js_number(a.get("lastAt")), ts);
-            a.insert("lastAt".into(), number(last));
-            sub = Some(tag);
-        }
-        // The context's fill, where a line says it (Grok Build's usage
-        // updates).
-        let context = events.iter().find_map(|e| match &e.kind {
-            Kind::Context { used, window } => Some((*used, *window)),
-            _ => None,
-        });
-        if let (Some((used, window)), false) = (context, truthy(Some(&agent))) {
-            let s = &mut self.sessions[i];
-            if let Some(u @ Value::Number(_)) = used {
-                s.context_used = u.clone();
-            }
-            if let Some(w @ Value::Number(n)) = window {
-                if n.as_f64().is_some_and(|n| n > 0.0) {
-                    s.context_window = w.clone();
-                }
-            }
-        }
-        // A chunk that carries on what its run began (Grok Build's).
-        if let Some((of, whole, meta)) = events.iter().find_map(|e| match &e.kind {
-            Kind::More { of, whole, meta, .. } => Some((*of, whole.as_str(), *meta)),
-            _ => None,
-        }) {
-            if !truthy(Some(&agent)) {
-                self.more(i, of, whole, meta, ts, live, now, out)?;
-            }
-            return Ok(());
-        }
-        // What the line is: a reply, or what you (or a tool) said.
-        let kind = events.iter().find(|e| !matches!(e.kind, Kind::Refusal(_))).map(|e| &*e.origin);
-        if kind == Some("assistant") {
-            self.claude_assistant(i, sub.as_deref(), &agent, events, ts, live, now, out)?;
-        } else if kind == Some("user") {
-            self.claude_user(i, sub.as_deref(), &agent, events, ts, live, now, out)?;
-        }
-        // Announce a subagent once its first line has given it a label.
-        if let Some(tag) = sub {
-            let a = &mut self.sessions[i].subagents.get_mut(&tag).expect("a subagent is added when the first line that names it is read").1;
-            if !truthy(a.get("announced")) {
-                a.insert("announced".into(), Value::Bool(true));
-                let label = a.get("label").cloned();
-                self.activity(i, ev(vec![("kind", sv("subagent-start")), ("agentId", Some(agent)), ("label", label), ("ts", nv(ts))]), live, now, out);
-            }
-        }
-        Ok(())
-    }
-
-    // A reply: its tokens and context fill, its tool calls and text, and
-    // the end of a turn (or of a subagent's work).
-    #[expect(clippy::too_many_arguments, reason = "a line's events and what claude_line worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
-    fn claude_assistant(
-        &mut self,
-        i: usize,
-        sub: Option<&str>,
-        agent: &Value,
-        events: &[LineEvent<'_>],
-        ts: f64,
-        live: bool,
-        now: f64,
-        out: &mut Vec<Emit>,
-    ) -> Result<(), TypeError> {
-        let has_agent = truthy(Some(agent));
-        let Some(c) = events.iter().find_map(|e| match &e.kind {
-            Kind::Call(c) => Some(c),
-            _ => None,
-        }) else {
-            return Ok(());
-        };
-        let model = c.model.cloned();
-        if !has_agent {
-            if let Some(m) = model.as_ref().filter(|m| truthy(Some(m))) {
-                self.sessions[i].model = m.clone();
-            }
-        }
-        // Each of a message's lines repeats its usage: counted once.
-        let id = c.message_id.cloned();
-        let seen = truthy(id.as_ref()) && self.sessions[i].seen_messages.contains(&key_tag(id.as_ref()));
-        let u = if truthy(id.as_ref()) && !seen { usage_of(events, c)? } else { None };
-        if let Some(u) = u {
-            let s = &mut self.sessions[i];
-            kset(&mut s.seen_messages, id.as_ref(), ());
-            if s.seen_messages.len() > 400 {
-                drop_first(&mut s.seen_messages);
-            }
-            let t = &u.tokens;
-            let ctx = t.input.number() + t.cache_read.number() + js_number(Some(&u.cache_write));
-            let output = t.output.number();
-            s.tokens_output += output;
-            s.add_tokens(ctx + output, ts, live);
-            let call = Call { tokens: u.tokens.map(|f| f.priced()) };
-            let call_model = nn(model.as_ref()).cloned().or_else(|| nn(Some(&s.model)).cloned()).unwrap_or_else(|| "unknown".into());
-            s.add_call(&call_model, &call, ts);
-            if !has_agent {
-                s.context_used = number(ctx + output);
-                let one_m = string_of(model.as_ref()).to_ascii_lowercase().contains("[1m]");
-                if ctx + output > 200000.0 || one_m {
-                    s.context_window = number(1_000_000.0);
-                }
-            }
-            if live {
-                out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "claude".into()), ("n", number(ctx + output)), ("ts", number(ts))])));
-            }
-        }
-        // Its blocks in order: what it said, and its tool calls.
-        let blocks = events.iter().find_map(|e| match &e.kind {
-            Kind::Said { parts, .. } => *parts,
-            _ => None,
-        });
-        let list: &[Value] = match blocks {
-            Some(Value::Array(a)) => a,
-            // A string's characters have no type.
-            Some(Value::String(_)) => &[],
-            _ => return Err(TypeError("o.blocks is not iterable".into())),
-        };
-        if !has_agent {
-            self.sessions[i].run_entry = None;
-        }
-        for b in list {
-            let t = prop(Some(b), "type")?;
-            if is_str(t, "tool_use") {
-                self.claude_tool_use(i, sub, agent, b, ts, live, now, out)?;
-            } else if is_str(t, "text") {
-                let text = prop(Some(b), "text")?;
-                let said = match text {
-                    None | Some(Value::Null) => false,
-                    Some(Value::String(x)) => !js_trim(x).is_empty(),
-                    Some(_) => return Err(TypeError("b.text?.trim is not a function".into())),
-                };
-                if said && !has_agent {
-                    self.sessions[i].add_message(text, ts)?;
-                    self.sessions[i].run_entry = Some(RunEntry::Message);
-                    self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip_value(text, 72)))), ("ts", nv(ts))]), live, now, out);
-                }
-            }
-        }
-        // A refusal ends the turn too: the provider said no, and nothing more
-        // comes until you write again.
-        let Some(end) = events.iter().find_map(|e| match &e.kind {
-            Kind::TurnEnd(end @ (End::EndTurn | End::Refusal { .. })) => Some(end),
-            _ => None,
-        }) else {
-            return Ok(());
-        };
-        if let (End::Refusal { details }, false) = (end, has_agent) {
-            let why = nn(opt_prop(*details, "explanation")).or(nn(opt_prop(*details, "category"))).cloned().unwrap_or_else(|| "the provider refused".into());
-            self.activity(i, ev(vec![("kind", sv("refusal")), ("detail", Some(Value::String(clip_value(Some(&why), 160)))), ("ts", nv(ts))]), live, now, out);
-        }
-        if let Some(tag) = sub {
-            let a = &mut self.sessions[i].subagents.get_mut(tag).expect("a subagent is added when the first line that names it is read").1;
-            a.insert("done".into(), Value::Bool(true));
-            let label = a.get("label").cloned();
-            self.activity(i, ev(vec![("kind", sv("subagent-stop")), ("agentId", Some(agent.clone())), ("label", label), ("ts", nv(ts))]), live, now, out);
-        } else if self.sessions[i].turn_active {
-            // A turn that began with a line read as written when it was read
-            // can seem to end before it began: how long it took isn't known
-            // then.
-            let duration = self.duration(i, ts);
-            self.sessions[i].end_turn(ts, false);
-            self.activity(i, ev(vec![("kind", sv("turn-end")), ("duration", Some(duration)), ("ts", nv(ts))]), live, now, out);
-            self.ask_if_question(i, ts, live, now, out);
-        }
-        Ok(())
-    }
-
     fn duration(&self, i: usize, ts: f64) -> Value {
         match self.sessions[i].turn_started_at {
             Some(at) if at != 0.0 && !at.is_nan() && ts >= at => number(ts - at),
@@ -1572,163 +997,13 @@ impl Telemetry {
         }
     }
 
-    #[expect(clippy::too_many_arguments, reason = "a line and what claude_lines worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
-    fn claude_tool_use(&mut self, i: usize, sub: Option<&str>, agent: &Value, b: &Value, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let bid = opt_prop(Some(b), "id").cloned();
-        let name = opt_prop(Some(b), "name").cloned();
-        let input = opt_prop(Some(b), "input").cloned();
-        let s = &mut self.sessions[i];
-        let mut fields = Map::new();
-        if let Some(n) = &name {
-            fields.insert("name".into(), n.clone());
-        }
-        fields.insert("ts".into(), number(ts));
-        let itag = kset(&mut s.inflight, bid.as_ref(), Inflight { fields, tool: None });
-        if let Some(tag) = sub {
-            let a = &mut s.subagents.get_mut(tag).expect("a subagent is added when the first line that names it is read").1;
-            let tools = js_number(a.get("tools")) + 1.0;
-            a.insert("tools".into(), number(tools));
-        }
-        let name_s = string_of(name.as_ref());
-        let server = mcp_server_of(&name_s);
-        let pages = wiki_pages_of(server.as_deref(), mcp_tool_of(&name_s), self.context_server.as_deref(), input.as_ref());
-        let full = match opt_prop(input.as_ref(), "command") {
-            Some(c @ Value::String(_)) => c.clone(),
-            _ => nn(input.as_ref()).cloned().unwrap_or_else(|| Value::Object(Map::new())),
-        };
-        let call = ToolCall {
-            name: name.clone(),
-            detail: tool_detail(input.as_ref(), self.home.as_deref()),
-            full: Some(full),
-            files: files_of(input.as_ref()),
-            ts,
-            agent: Some(agent.clone()),
-            server: None,
-            extra: pages_extra(pages),
-            ok: Value::Null,
-        };
-        let tool = self.note_tool(i, call, live, now, out);
-        let s = &mut self.sessions[i];
-        if let Some((_, e)) = s.inflight.get_mut(&itag) {
-            e.tool = Some(tool);
-        }
-        let edit_name = name.as_ref().and_then(Value::as_str).unwrap_or_default();
-        let edits = claude_edits(edit_name, input.as_ref(), &s.app)?;
-        if !edits.is_empty() {
-            s.add_edits(&edits, ts)?;
-        }
-        let description = opt_prop(input.as_ref(), "description");
-        if categorize(&name_s) == "agent" && truthy(description) {
-            self.pending_label = Some((s.id.clone(), Value::String(clip_value(description, 40)), ts));
-        }
-        let asks = name.as_ref().and_then(Value::as_str).filter(|n| *n == "AskUserQuestion" || *n == "ExitPlanMode");
-        if !truthy(Some(agent)) && asks.is_some() {
-            let q = if asks == Some("ExitPlanMode") {
-                Value::String("Plan ready for your approval".into())
-            } else {
-                let first = index0(opt_prop(input.as_ref(), "questions"));
-                nn(opt_prop(first.as_ref(), "question")).or(nn(opt_prop(input.as_ref(), "question"))).cloned().unwrap_or_else(|| "Claude asked a question".into())
-            };
-            s.question = obj_opt(vec![("callId", bid), ("text", Some(Value::String(clip_value(Some(&q), 300)))), ("ts", nv(ts))]);
-            self.activity(i, ev(vec![("kind", sv("needs-you")), ("detail", Some(Value::String(clip_value(Some(&q), 120)))), ("ts", nv(ts))]), live, now, out);
-        }
-        Ok(())
-    }
-
-    // Tool results, a prompt (in a subagent's file, its task), or your
-    // interruption.
-    #[expect(clippy::too_many_arguments, reason = "a line's events and what claude_line worked out about it (session, subagent, time), handed down as the JS's closures saw them")]
-    fn claude_user(&mut self, i: usize, sub: Option<&str>, agent: &Value, events: &[LineEvent<'_>], ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let has_agent = truthy(Some(agent));
-        if let Some(b) = broken_at(events, Field::Content) {
-            return Err(b.error());
-        }
-        let results: Vec<(Option<&Value>, bool)> = events
-            .iter()
-            .filter_map(|e| match &e.kind {
-                Kind::Result { id, error, .. } => Some((*id, error.unwrap_or(false))),
-                _ => None,
-            })
-            .collect();
-        if !results.is_empty() {
-            for (id, error) in &results {
-                let s = &mut self.sessions[i];
-                let tag = key_tag(*id);
-                let tool = s.inflight.remove(&tag).and_then(|(_, e)| e.tool).flatten();
-                if !has_agent {
-                    s.note_tool_result(!error, ts, tool.as_ref());
-                }
-                if *error {
-                    self.activity(i, ev(vec![("kind", sv("tool-error")), ("ts", nv(ts)), ("agentId", Some(agent.clone()))]), live, now, out);
-                }
-            }
-            let s = &mut self.sessions[i];
-            s.last_event_at = js_max(s.last_event_at, ts);
-        }
-        // The line's flags, from what it holds besides its results: its
-        // prompt, your interruption, or the text that couldn't be read.
-        let prompt = events.iter().find_map(|e| match &e.kind {
-            Kind::Prompt(p) => Some(p),
-            _ => None,
-        });
-        let interrupted = events.iter().find_map(|e| match &e.kind {
-            Kind::TurnEnd(End::Interrupted { gate }) => Some(*gate),
-            _ => None,
-        });
-        let unread = broken_at(events, Field::Text);
-        if prompt.is_some() && !has_agent {
-            self.sessions[i].run_entry = None;
-        }
-        let gate = prompt.and_then(|p| p.claude.as_ref().map(|c| (c.meta, c.sidechain))).or(interrupted.flatten()).or(unread.map(|b| (b.meta, b.sidechain)));
-        let Some((meta, sidechain)) = gate else { return Ok(()) };
-        if truthy(meta) || truthy(sidechain) != has_agent {
-            return Ok(());
-        }
-        if let Some(b) = unread {
-            return Err(b.error());
-        }
-        // A compacted summary and an interruption aren't prompts; an
-        // interruption ends the turn you stopped.
-        if interrupted.is_some() {
-            if !has_agent {
-                self.interrupted(i, ts, live, now, out);
-            }
-            return Ok(());
-        }
-        let Some(p) = prompt else { return Ok(()) };
-        if !results.is_empty() || p.claude.as_ref().is_some_and(|c| truthy(c.compact_summary)) {
-            return Ok(());
-        }
-        let text = &p.text;
-        if js_trim(text).is_empty() || text.starts_with('<') {
-            return Ok(());
-        }
-        if let Some(tag) = sub {
-            // A subagent's first prompt is its task; the Agent tool's
-            // description is a better label.
-            let id = self.sessions[i].id.clone();
-            let pending = self.pending_label.clone();
-            let a = &mut self.sessions[i].subagents.get_mut(tag).expect("a subagent is added when the first line that names it is read").1;
-            if is_str(a.get("label"), "subagent") {
-                let label = match pending {
-                    Some((session, label, at)) if session == id && (ts - at).abs() < 60000.0 => label,
-                    _ => Value::String(clip(text, 40)),
-                };
-                a.insert("label".into(), label);
-            }
-            return Ok(());
-        }
-        self.prompted(i, text, ts, live, now, out);
-        Ok(())
-    }
-
     // What you asked: a turn begins.
     fn prompted(&mut self, i: usize, text: &str, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
         let s = &mut self.sessions[i];
         s.turn_active = true;
         s.turn_started_at = Some(ts);
         s.add_prompt(text, ts);
-        s.run_entry = Some(RunEntry::Prompt);
+        s.run_entry = Some(Run::Prompt);
         self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
     }
 
@@ -1743,7 +1018,7 @@ impl Telemetry {
         s.last_event_at = js_max(s.last_event_at, ts);
         match of {
             "text" => {
-                if s.run_entry == Some(RunEntry::Message) {
+                if s.run_entry == Some(Run::Message) {
                     s.extend_message(whole);
                     return Ok(());
                 }
@@ -1752,11 +1027,11 @@ impl Telemetry {
                 }
                 let text = Value::String(whole.to_string());
                 s.add_message(Some(&text), ts)?;
-                s.run_entry = Some(RunEntry::Message);
+                s.run_entry = Some(Run::Message);
                 self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip_value(Some(&text), 72)))), ("ts", nv(ts))]), live, now, out);
             }
             "prompt" => {
-                if s.run_entry == Some(RunEntry::Prompt) {
+                if s.run_entry == Some(Run::Prompt) {
                     s.extend_prompt(whole);
                     return Ok(());
                 }
@@ -1779,498 +1054,6 @@ impl Telemetry {
         let duration = self.duration(i, ts);
         self.sessions[i].end_turn(ts, true);
         self.activity(i, ev(vec![("kind", sv("turn-end")), ("duration", Some(duration)), ("interrupted", Some(Value::Bool(true))), ("ts", nv(ts))]), live, now, out);
-    }
-
-    // ----- Codex rollout lines -----
-
-    /// A Codex rollout's line, as the rollout has it.
-    pub fn apply_codex(&mut self, f: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let o = CodexLine { raw };
-        let i = self.session(&f.session_id, "codex");
-        let events = line_events::codex(&o, &self.codex_file(Some(i)));
-        self.codex_line(f, &o, &events, live, now, out)
-    }
-
-    // A Codex line's events.
-    fn codex_line(&mut self, f: &Where, o: &CodexLine, events: &[LineEvent<'_>], live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let i = self.session(&f.session_id, "codex");
-        let t = o.ts()?;
-        let ts = if t != 0.0 && !t.is_nan() { t } else { now };
-        self.codex_events(i, events, ts, live, now, out)
-    }
-
-    fn codex_events(&mut self, i: usize, events: &[LineEvent<'_>], ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        for e in events {
-            match &e.kind {
-                Kind::TurnStart { window } => {
-                    let s = &mut self.sessions[i];
-                    s.reset_stall();
-                    s.turn_marks += 1.0;
-                    s.turn_active = true;
-                    s.turn_started_at = Some(ts);
-                    if let Some(w) = window.filter(|w| truthy(Some(w))) {
-                        s.context_window = w.clone();
-                    }
-                    self.activity(i, ev(vec![("kind", sv("turn-start")), ("ts", nv(ts))]), live, now, out);
-                }
-                // What it said last, with the turn's end (a completed
-                // message is read with its item).
-                Kind::Said { parts, .. } if &*e.origin == "event_msg:task_complete" => self.sessions[i].add_message(*parts, ts)?,
-                Kind::TurnEnd(End::TaskComplete { duration }) => {
-                    self.sessions[i].end_turn(ts, false);
-                    let duration = nn(*duration).cloned().unwrap_or(Value::Null);
-                    self.activity(i, ev(vec![("kind", sv("turn-end")), ("duration", Some(duration)), ("ts", nv(ts))]), live, now, out);
-                    self.ask_if_question(i, ts, live, now, out);
-                }
-                // You stopped the turn (Esc, or Ctrl-C): Codex writes no
-                // task_complete for it.
-                Kind::TurnEnd(End::Interrupted { .. }) => self.interrupted(i, ts, live, now, out),
-                // A policy refusal: the turn ends with it.
-                Kind::TurnEnd(End::Refused(sig)) => {
-                    let g = |k: &str| nn(sig.get(k));
-                    let why = g("explanation").or(g("text")).or(sig.get("category")).cloned();
-                    self.activity(i, ev(vec![("kind", sv("refusal")), ("detail", Some(Value::String(clip_value(why.as_ref(), 160)))), ("ts", nv(ts))]), live, now, out);
-                    if self.sessions[i].turn_active {
-                        self.sessions[i].end_turn(ts, false);
-                    }
-                }
-                Kind::Call(c) => {
-                    if let Some(total) = c.total {
-                        self.codex_tokens(i, total, c.last, ts, live, out);
-                    }
-                }
-                // The context from the last call.
-                Kind::Context { used, window } => {
-                    let s = &mut self.sessions[i];
-                    if let Some(v) = nn(*used) {
-                        s.context_used = v.clone();
-                    }
-                    if let Some(w) = window.filter(|w| truthy(Some(w))) {
-                        s.context_window = w.clone();
-                    }
-                    s.last_event_at = js_max(s.last_event_at, ts);
-                }
-                Kind::Limits(rl) => self.note_codex_limits(rl, ts),
-                Kind::Item(it) => self.codex_item_of(i, it, events, ts, live, now, out)?,
-                // A completed user message is read with its item.
-                Kind::Prompt(p) if &*e.origin == "event_msg:user_message" => self.codex_user_event(i, &p.text, ts, live, now, out),
-                Kind::Settings { model, tier, provider, .. } => {
-                    let s = &mut self.sessions[i];
-                    if &*e.origin == "turn_context" {
-                        if let Some(m) = model.filter(|m| truthy(Some(m))) {
-                            s.model = m.clone();
-                        }
-                    }
-                    // What prices its calls: the provider, and the tier, said
-                    // with a turn in older rollouts and in the thread's
-                    // settings in newer ones, where a tier not said is the
-                    // default.
-                    if &*e.origin == "session_meta" {
-                        if let Some(v) = nn(*provider) {
-                            s.provider = v.clone();
-                        }
-                    }
-                    if let Some(tier) = tier {
-                        s.priority = pricing::priority_tier(&string_of(*tier));
-                    }
-                }
-                // A call (a response item, whose type live reads as written)
-                // starts a tool in flight.
-                Kind::Tool { id, name, input, call } if call.is_some_and(Value::is_string) => {
-                    let s = &mut self.sessions[i];
-                    let mut fields = Map::new();
-                    if let Some(n) = name {
-                        fields.insert("name".into(), (*n).clone());
-                    }
-                    fields.insert("ts".into(), number(ts));
-                    kset(&mut s.inflight, *id, Inflight { fields, tool: None });
-                    s.last_event_at = js_max(s.last_event_at, ts);
-                    if is_str(*name, "apply_patch") {
-                        let files = patch_files(*input);
-                        self.note_tool(i, ToolCall { name: sv("apply_patch"), files, ts, ..ToolCall::default() }, live, now, out);
-                    }
-                }
-                // Its output ends a call, a shell call's too, matched as
-                // stats match them: by call_id, else id.
-                Kind::Result { id, call, .. } if call.is_some_and(Value::is_string) => {
-                    let s = &mut self.sessions[i];
-                    s.inflight.remove(&key_tag(*id));
-                    s.last_event_at = js_max(s.last_event_at, ts);
-                }
-                Kind::Broken(b) if b.at == Field::Line => return Err(b.error()),
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
-    // A call's tokens: the growth of the total is what's new, and the
-    // call's own tokens, as stats read them, from the last one's. The
-    // output is output_tokens alone: OpenAI counts reasoning inside it, as
-    // pricing prices it.
-    fn codex_tokens(&mut self, i: usize, total_usage: Option<&Value>, last: Option<&Value>, ts: f64, live: bool, out: &mut Vec<Emit>) {
-        let s = &mut self.sessions[i];
-        if truthy(total_usage) {
-            let total = or0(opt_prop(total_usage, "total_tokens"));
-            let delta = total - s.tokens_processed;
-            if delta > 0.0 {
-                s.add_tokens(delta, ts, live);
-                // The call's own tokens, as stats read them: cached input
-                // and cache writes are part of input_tokens.
-                let empty = Value::Object(Map::new());
-                let last = Some(nn(last).unwrap_or(&empty));
-                let input = match nn(opt_prop(last, "input_tokens")) {
-                    Some(v) => js_number(Some(v)),
-                    None => js_max(0.0, or0(opt_prop(last, "total_tokens")) - or0(opt_prop(last, "output_tokens"))),
-                };
-                let cached = or0(opt_prop(last, "cached_input_tokens"));
-                let write = or0(opt_prop(last, "cache_write_input_tokens"));
-                let model = nn(Some(&s.model)).cloned().unwrap_or_else(|| "unknown".into());
-                let call_model = if truthy(Some(&s.provider)) && !is_str(Some(&s.provider), "openai") {
-                    Value::String(format!("{}/{}", js_string(&s.provider), js_string(&model)))
-                } else {
-                    model
-                };
-                let call = Call {
-                    tokens: TokenUsage {
-                        input: Some(js_max(0.0, input - cached - write)),
-                        cache_read: Some(cached),
-                        cache_write_5m: Some(write),
-                        cache_write_1h: Some(0.0),
-                        output: Some(or0(opt_prop(last, "output_tokens"))),
-                        speed: Speed { fast: false, priority: s.priority },
-                    },
-                };
-                s.add_call(&call_model, &call, ts);
-                if live {
-                    out.push(Emit::Tokens(obj(vec![("sessionId", Value::String(s.id.clone())), ("app", "codex".into()), ("n", number(delta)), ("ts", number(ts))])));
-                }
-            }
-            s.tokens_output = or0(opt_prop(total_usage, "output_tokens"));
-        }
-    }
-
-    // A user_message event: a prompt while the rollout has no completed
-    // user message (`codex exec` writes none, nor did Codex before 0.130),
-    // passed by once it has (the mapper says which).
-    fn codex_user_event(&mut self, i: usize, text: &str, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
-        let s = &mut self.sessions[i];
-        s.add_prompt(text, ts);
-        s.event_prompt = Some((s.prompts.last().expect("add_prompt just added one").clone(), s.turn_marks));
-        self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
-    }
-
-    /// Codex's rate limits in XenoNet's own shape (the snapshot's
-    /// limits.codex): each window's use in percent, its length and when it
-    /// resets, in ms.
-    pub fn note_codex_limits(&mut self, rl: &Value, ts: f64) {
-        let window = |w: Option<&Value>| -> Value {
-            if !(truthy(w) && matches!(w, Some(Value::Object(_) | Value::Array(_)))) {
-                return Value::Null;
-            }
-            let numeric = |k: &str| opt_prop(w, k).filter(|v| v.is_number()).cloned().unwrap_or(Value::Null);
-            let resets = opt_prop(w, "resets_at").and_then(Value::as_f64).filter(|r| *r > 0.0).map_or(Value::Null, |r| number(r * 1000.0));
-            obj(vec![("pct", numeric("used_percent")), ("windowMinutes", numeric("window_minutes")), ("resetsAt", resets)])
-        };
-        let primary = window(opt_prop(Some(rl), "primary"));
-        let secondary = window(opt_prop(Some(rl), "secondary"));
-        let pick = |w: &Value, k: &str| nn(opt_prop(Some(w), k)).cloned().unwrap_or(Value::Null);
-        let sample = obj(vec![("ts", number(ts)), ("primary", pick(&primary, "pct")), ("secondary", pick(&secondary, "pct")), ("resets", pick(&primary, "resetsAt"))]);
-        self.limits_codex = obj(vec![("primary", primary), ("secondary", secondary), ("observedAt", number(ts))]);
-        if let Some(last) = self.samples_codex.last().filter(|l| truthy(Some(l))) {
-            let same = strict_eq(opt_prop(Some(last), "primary"), sample.get("primary")) && strict_eq(opt_prop(Some(last), "secondary"), sample.get("secondary"));
-            if same && ts - num_of(Some(last), "ts") < 10.0 * 60e3 {
-                return;
-            }
-        }
-        self.samples_codex.push(sample);
-        if self.samples_codex.len() > 2000 {
-            self.samples_codex.remove(0);
-        }
-    }
-
-    /// A completed item of a Codex rollout, as its events say it.
-    pub fn codex_item(&mut self, i: usize, it: &Value, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let events = line_events::codex_item(it, ts, &self.codex_file(Some(i)));
-        self.codex_events(i, &events, ts, live, now, out)
-    }
-
-    #[expect(clippy::too_many_arguments, reason = "an item, its line's events and what codex_line worked out about it (session, time), handed down as the JS's closures saw them")]
-    fn codex_item_of(&mut self, i: usize, it: &Value, events: &[LineEvent<'_>], ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let item = Some(it);
-        let get = |k: &str| opt_prop(item, k);
-        match get("type").and_then(Value::as_str) {
-            Some("UserMessage") => {
-                // What it says, as live reads it: one that can't be read
-                // fails here.
-                if let Some(b) = broken_at(events, Field::Text) {
-                    user_text(it)?;
-                    return Err(b.error());
-                }
-                // The rollout's first: from here on its prompts are these.
-                // Codex may have written it as a user_message event just
-                // before, in the same turn, which was taken for this prompt.
-                let s = &mut self.sessions[i];
-                let event = if s.codex_items { None } else { s.event_prompt.clone() };
-                s.codex_items = true;
-                s.event_prompt = None;
-                if let Some((p, marks)) = event {
-                    if s.prompts.last().is_some_and(|l| l.seq == p.seq) && marks == s.turn_marks {
-                        return Ok(());
-                    }
-                }
-                // A blank one (an image alone), or one that starts with "<",
-                // isn't a prompt, as in stats and search: the mapper makes no
-                // prompt of it.
-                let Some(text) = events.iter().find_map(|e| match &e.kind {
-                    Kind::Prompt(p) => Some(&p.text),
-                    _ => None,
-                }) else {
-                    return Ok(());
-                };
-                s.add_prompt(text, ts);
-                self.activity(i, ev(vec![("kind", sv("prompt")), ("detail", Some(Value::String(clip(text, 90)))), ("ts", nv(ts))]), live, now, out);
-            }
-            Some("AgentMessage") => {
-                let content = nn(get("content"));
-                let list: &[Value] = match content {
-                    None => &[],
-                    Some(Value::Array(a)) => a,
-                    Some(_) => return Err(TypeError("(it.content ?? []).map is not a function".into())),
-                };
-                let mut parts = Vec::new();
-                for c in list {
-                    parts.push(prop(Some(c), "text")?);
-                }
-                let text = join(parts.into_iter(), " ");
-                if !js_trim(&text).is_empty() {
-                    self.sessions[i].add_message(Some(&Value::String(text.clone())), ts)?;
-                    self.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip(&text, 72)))), ("ts", nv(ts))]), live, now, out);
-                }
-            }
-            Some("CommandExecution") => {
-                let code = get("exit_code");
-                let ok = nn(code).is_none() || js_number(code) == 0.0;
-                let done = ok && !is_str(get("status"), "failed");
-                self.sessions[i].note_tool_result(done, ts, None);
-                let cmd = command_text(get("command"));
-                let detail = clip(&paths::tilde(&cmd, self.home.as_deref().unwrap_or("")), 72);
-                self.note_tool(i, ToolCall { name: sv("shell"), detail, full: Some(Value::String(cmd)), ok: Value::Bool(done), ts, ..ToolCall::default() }, live, now, out);
-                if !ok {
-                    self.activity(i, ev(vec![("kind", sv("tool-error")), ("ts", nv(ts))]), live, now, out);
-                }
-            }
-            Some("McpToolCall") => {
-                let ok = is_str(get("status"), "completed") && !truthy(get("error"));
-                self.sessions[i].note_tool_result(ok, ts, None);
-                let (server, tool) = (get("server"), get("tool"));
-                let pages = wiki_pages_of(server.and_then(Value::as_str), tool.and_then(Value::as_str), self.context_server.as_deref(), get("arguments"));
-                let call = ToolCall {
-                    name: Some(Value::String(format!("mcp__{}__{}", tpl(server), tpl(tool)))),
-                    server: server.cloned(),
-                    detail: format!("{}.{}", tpl(server), tpl(tool)),
-                    full: Some(nn(get("arguments")).cloned().unwrap_or_else(|| Value::Object(Map::new()))),
-                    ok: Value::Bool(ok),
-                    ts,
-                    extra: pages_extra(pages),
-                    ..ToolCall::default()
-                };
-                self.note_tool(i, call, live, now, out);
-                if !ok {
-                    self.activity(i, ev(vec![("kind", sv("tool-error")), ("ts", nv(ts))]), live, now, out);
-                }
-            }
-            Some("FileChange") => {
-                let changes = get("changes");
-                let files = object_keys(nn(changes));
-                self.sessions[i].add_edits(&codex_edits(changes), ts)?;
-                let done = !is_str(get("status"), "failed");
-                self.sessions[i].note_tool_result(done, ts, None);
-                let detail = files.iter().map(|f| paths::base_name(f)).collect::<Vec<_>>().join(", ");
-                self.note_tool(i, ToolCall { name: sv("apply_patch"), detail, files, ok: Value::Bool(done), ts, ..ToolCall::default() }, live, now, out);
-            }
-            // An empty query is no query: the action's says what was
-            // searched, as a thread shown from its rollout reads it. An
-            // extension's web search is a web search; its other kinds (an
-            // image made, a pause) aren't read.
-            Some(kind @ ("WebSearch" | "Extension")) if kind == "WebSearch" || is_str(get("kind"), "web.search") => {
-                let q = [get("query"), opt_prop(get("action"), "query")].into_iter().find(|v| truthy(*v)).flatten();
-                self.note_tool(i, ToolCall { name: sv("web_search"), detail: clip_value(q, 72), ts, ..ToolCall::default() }, live, now, out);
-            }
-            Some("ImageView") => {
-                let detail = paths::base_name(&string_of(get("path")));
-                self.note_tool(i, ToolCall { name: sv("view_image"), detail, ts, ..ToolCall::default() }, live, now, out);
-            }
-            Some(kind @ ("CollabAgentToolCall" | "SubAgentActivity")) => {
-                // Rollouts name these fields in snake_case (the app-server's
-                // API says them in camelCase, which is read too).
-                let id = [get("agent_thread_id").cloned(), get("agentThreadId").cloned(), index0(get("receiver_thread_ids")), index0(get("receiverThreadIds")), get("id").cloned()]
-                    .into_iter()
-                    .find(|v| v.as_ref().is_some_and(|x| !x.is_null()))
-                    .flatten();
-                let tag = key_tag(id.as_ref());
-                let s = &mut self.sessions[i];
-                if !s.subagents.contains(&tag) {
-                    let label = nn(get("prompt")).or(nn(get("agent_path"))).or(nn(get("agentPath"))).cloned().unwrap_or_else(|| "subagent".into());
-                    let label = Value::String(clip_value(Some(&label), 40));
-                    let m = map_opt(vec![
-                        ("id", id.clone()),
-                        ("label", Some(label.clone())),
-                        ("startedAt", nv(ts)),
-                        ("lastAt", nv(ts)),
-                        ("tools", nv(0.0)),
-                        ("done", Some(Value::Bool(false))),
-                        ("announced", Some(Value::Bool(true))),
-                    ]);
-                    s.subagents.insert(&tag, (id.clone(), m));
-                    self.activity(i, ev(vec![("kind", sv("subagent-start")), ("agentId", id.clone()), ("label", Some(label)), ("ts", nv(ts))]), live, now, out);
-                }
-                let a = &mut self.sessions[i].subagents.get_mut(&tag).expect("added above when missing").1;
-                a.insert("lastAt".into(), number(ts));
-                // A subagent's activity says what happened to it: started,
-                // interacted (given more to do), interrupted or completed.
-                // It's done once it completes or is stopped, until it's
-                // given more.
-                if kind != "SubAgentActivity" {
-                    return Ok(());
-                }
-                let what = get("kind");
-                if is_str(what, "completed") || is_str(what, "interrupted") {
-                    let was_done = truthy(a.get("done"));
-                    a.insert("done".into(), Value::Bool(true));
-                    let label = a.get("label").cloned();
-                    if !was_done {
-                        self.activity(i, ev(vec![("kind", sv("subagent-stop")), ("agentId", id), ("label", label), ("ts", nv(ts))]), live, now, out);
-                    }
-                } else if is_str(what, "started") || is_str(what, "interacted") {
-                    a.insert("done".into(), Value::Bool(false));
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    // ----- Claude plan usage -----
-
-    /// Anthropic was asked, and answered `r` ({ usage } or { reason }): a
-    /// reading joins the samples (8 days are kept), or the reason there's
-    /// none is kept.
-    pub fn claude_asked(&mut self, r: Option<&Value>, now: f64) -> Result<(), TypeError> {
-        let usage = prop(r, "usage")?;
-        if truthy(usage) {
-            self.claude_reason = Value::Null;
-            self.anthropic_samples.retain(|x| now - num_of(Some(x), "ts") < 8.0 * 86400e3);
-            let u = |k: &str| opt_prop(usage, k).cloned();
-            self.anthropic_samples.push(obj_opt(vec![
-                ("ts", u("observedAt")),
-                ("fiveHour", u("fiveHour")),
-                ("sevenDay", u("sevenDay")),
-                ("resets", u("resets")),
-                ("source", sv("anthropic")),
-            ]));
-        } else {
-            self.claude_reason = nn(prop(r, "reason")?).cloned().unwrap_or(Value::Null);
-        }
-        Ok(())
-    }
-
-    /// Claude desktop's samples, as its file has them now.
-    pub fn desktop_read(&mut self, samples: &Value) {
-        if let Value::Array(a) = samples {
-            self.desktop_samples.clone_from(a);
-        }
-    }
-
-    /// Both sources' samples, in time order; the newer reading wins.
-    pub fn settle_claude(&mut self) {
-        let mut samples: Vec<Value> = self.anthropic_samples.iter().chain(&self.desktop_samples).cloned().collect();
-        sort_by_num(&mut samples, |a, b| num_of(Some(a), "ts") - num_of(Some(b), "ts"));
-        if let Some(last) = samples.last().filter(|l| truthy(Some(l))) {
-            let l = |k: &str| opt_prop(Some(last), k).cloned();
-            let resets = nn(opt_prop(Some(last), "resets")).cloned().unwrap_or_else(|| obj(vec![("fiveHour", Value::Null), ("sevenDay", Value::Null)]));
-            self.limits_claude =
-                obj_opt(vec![("fiveHour", l("fiveHour")), ("sevenDay", l("sevenDay")), ("resets", Some(resets)), ("observedAt", l("ts")), ("source", l("source"))]);
-        }
-        self.samples_claude = samples;
-    }
-
-    /// An old Claude reading says nothing about the windows now, so it's
-    /// reported as missing, with when it was taken and why there's no newer
-    /// one.
-    pub fn claude_limits(&self, now: f64) -> Value {
-        let c = &self.limits_claude;
-        if truthy(Some(c)) && now - num_of(Some(c), "observedAt") < CLAUDE_LIMITS_FRESH_MS {
-            return c.clone();
-        }
-        if !truthy(Some(c)) && !truthy(Some(&self.claude_reason)) {
-            return Value::Null;
-        }
-        let observed = nn(opt_prop(Some(c), "observedAt")).cloned().unwrap_or(Value::Null);
-        obj(vec![("fiveHour", Value::Null), ("sevenDay", Value::Null), ("observedAt", observed), ("stale", Value::Bool(true)), ("reason", self.claude_reason.clone())])
-    }
-
-    /// Straight-line projection of usage over the recent samples.
-    pub fn limit_forecast(&self, now: f64) -> Value {
-        // `horizon` stands in for an unknown reset time: the window's length.
-        let project = |points: Vec<(f64, f64)>, pct: Option<&Value>, resets_at: Option<Value>, horizon: f64| -> Value {
-            let per_hour = slope(&points.iter().map(|(t, v)| (t / 3600e3, *v)).collect::<Vec<_>>());
-            if nn(pct).is_none() {
-                return Value::Null;
-            }
-            let p = js_number(pct);
-            let eta = (per_hour > 0.05).then(|| now + ((100.0 - p) / per_hour) * 3600e3);
-            let limit = match nn(resets_at.as_ref()) {
-                Some(r) => js_number(Some(r)),
-                None => now + horizon,
-            };
-            obj_opt(vec![
-                ("pct", pct.cloned()),
-                ("perHour", nv(per_hour)),
-                ("eta", Some(eta.map_or(Value::Null, number))),
-                ("resetsAt", resets_at),
-                ("hitsBeforeReset", Some(Value::Bool(eta.is_some_and(|e| e < limit)))),
-            ])
-        };
-        let mut out = Map::new();
-        let primary = opt_prop(Some(&self.limits_codex), "primary");
-        if truthy(primary) {
-            let (pct, minutes, resets_at) = (opt_prop(primary, "pct"), opt_prop(primary, "windowMinutes"), opt_prop(primary, "resetsAt"));
-            let points = self
-                .samples_codex
-                .iter()
-                .filter(|x| nn(opt_prop(Some(x), "primary")).is_some() && strict_eq(opt_prop(Some(x), "resets"), resets_at) && now - num_of(Some(x), "ts") < 24.0 * 3600e3)
-                .map(|x| (num_of(Some(x), "ts"), num_of(Some(x), "primary")))
-                .collect();
-            let horizon = nn(minutes).map_or(300.0, |m| js_number(Some(m))) * 60e3;
-            let mut m = match project(points, pct, resets_at.cloned(), horizon) {
-                Value::Object(m) => m,
-                _ => Map::new(),
-            };
-            if let Some(w) = minutes {
-                m.insert("windowMinutes".into(), w.clone());
-            }
-            out.insert("codex".into(), Value::Object(m));
-        }
-        let c = self.claude_limits(now);
-        if truthy(Some(&c)) && !truthy(c.get("stale")) {
-            let resets = c.get("resets");
-            // Only samples from the current window, when its reset is known.
-            let since = |resets_at: Option<&Value>, span: f64, lookback: f64| js_max(now - lookback, if truthy(resets_at) { js_number(resets_at) - span } else { 0.0 });
-            let points = |key: &str, from: f64| -> Vec<(f64, f64)> {
-                self.samples_claude
-                    .iter()
-                    .filter(|x| nn(opt_prop(Some(x), key)).is_some() && num_of(Some(x), "ts") >= from)
-                    .map(|x| (num_of(Some(x), "ts"), num_of(Some(x), key)))
-                    .collect()
-            };
-            for (name, key, span, lookback) in [("claudeFiveHour", "fiveHour", 5.0 * 3600e3, 3.0 * 3600e3), ("claudeSevenDay", "sevenDay", 7.0 * 86400e3, 48.0 * 3600e3)] {
-                let resets_at = opt_prop(resets, key);
-                let pts = points(key, since(resets_at, span, lookback));
-                out.insert(name.into(), project(pts, c.get(key), Some(nn(resets_at).cloned().unwrap_or(Value::Null)), span));
-            }
-        }
-        Value::Object(out)
     }
 
     // ----- outputs -----
@@ -2483,7 +1266,6 @@ impl Telemetry {
                 .collect(),
         )
     }
-
     /// Everything the UI shows, at `now`: the sessions of the last day, the
     /// token rate's last five minutes by app, plan limits and their
     /// forecast, costs, the sessions on the same files, the MCP servers in
@@ -2526,8 +1308,9 @@ impl Telemetry {
         let total = sessions.iter().fold(0.0, |a, s| a + num_of(s.get("tokens"), "processed"));
         let series_value = Value::Object(tailed.iter().zip(&series).map(|(app, xs)| ((*app).to_string(), Value::Array(xs.iter().map(|x| number(*x)).collect()))).collect());
         let (tpm, today) = (sum("tpm"), sum("tokensToday"));
-        let limits = obj(vec![("codex", self.limits_codex.clone()), ("claude", self.claude_limits(now))]);
-        let forecast = self.limit_forecast(now);
+        // The apps' plan limits, and their forecasts, from their readers.
+        let limits = obj(self.apps().filter_map(|a| a.limits(now).map(|v| (a.id(), v))).collect());
+        let forecast = Value::Object(self.apps().flat_map(|a| a.forecast(now)).collect());
         let costs = self.costs(now, &sessions);
         let collab = Self::collab(&sessions);
         let collisions = self.collisions(now);
@@ -2560,87 +1343,233 @@ impl Telemetry {
             ("resources", resources),
         ])
     }
+}
 
-    // ----- what the twin reads and sets -----
+/// The telemetry's operations on a session, as an app's reader works on
+/// one.
+impl Tail for Telemetry {
+    fn session(&mut self, id: &str, app: &str) -> usize {
+        Telemetry::session(self, id, app)
+    }
+    fn find(&self, id: &str) -> Option<usize> {
+        Telemetry::find(self, id)
+    }
+    fn session_id(&self, i: usize) -> &str {
+        &self.sessions[i].id
+    }
+    fn session_app(&self, i: usize) -> &str {
+        &self.sessions[i].app
+    }
+    fn home(&self) -> Option<&str> {
+        self.home.as_deref()
+    }
+    fn context_server(&self) -> Option<&str> {
+        self.context_server.as_deref()
+    }
+    fn observe_servers(&mut self, raw: &Value) {
+        self.server_names.observe(raw, mcp_server_of);
+    }
 
-    pub fn limits(&self, which: &str) -> Value {
-        match which {
-            "codex" => self.limits_codex.clone(),
-            _ => self.limits_claude.clone(),
+    fn activity(&mut self, i: usize, ev: Fields, live: bool, now: f64, out: &mut Vec<Emit>) {
+        Telemetry::activity(self, i, ev, live, now, out);
+    }
+    fn note_tool(&mut self, i: usize, t: ToolCall, live: bool, now: f64, out: &mut Vec<Emit>) -> Option<ToolRecord> {
+        Telemetry::note_tool(self, i, t, live, now, out)
+    }
+    fn refusal(&self, app: &str, at: &Where, raw: &Value, signal: &Value, live: bool, out: &mut Vec<Emit>) {
+        let model = self.find(&at.session_id).map_or(Value::Null, |i| self.sessions[i].model.clone());
+        let cwd = opt_prop(Some(raw), "cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
+        out.push(Emit::Refusal(obj(vec![
+            ("signal", signal.clone()),
+            ("sessionId", Value::String(at.session_id.clone())),
+            ("app", app.into()),
+            ("agentId", at.agent_id.clone()),
+            ("file", at.file.clone()),
+            ("cwd", cwd),
+            ("model", model),
+            ("live", Value::Bool(live)),
+        ])));
+    }
+    fn prompted(&mut self, i: usize, text: &str, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
+        Telemetry::prompted(self, i, text, ts, live, now, out);
+    }
+    fn more(&mut self, i: usize, of: &str, whole: &str, meta: bool, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
+        Telemetry::more(self, i, of, whole, meta, ts, live, now, out)
+    }
+    fn interrupted(&mut self, i: usize, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
+        Telemetry::interrupted(self, i, ts, live, now, out);
+    }
+    fn duration(&self, i: usize, ts: f64) -> Value {
+        Telemetry::duration(self, i, ts)
+    }
+    fn ask_if_question(&mut self, i: usize, ts: f64, live: bool, now: f64, out: &mut Vec<Emit>) {
+        Telemetry::ask_if_question(self, i, ts, live, now, out);
+    }
+
+    fn turn_active(&self, i: usize) -> bool {
+        self.sessions[i].turn_active
+    }
+    fn begin_turn(&mut self, i: usize, ts: f64) {
+        let s = &mut self.sessions[i];
+        s.turn_active = true;
+        s.turn_started_at = Some(ts);
+    }
+    fn end_turn(&mut self, i: usize, ts: f64, interrupted: bool) {
+        self.sessions[i].end_turn(ts, interrupted);
+    }
+    fn turn_marks(&self, i: usize) -> f64 {
+        self.sessions[i].turn_marks
+    }
+    fn add_turn_mark(&mut self, i: usize) {
+        self.sessions[i].turn_marks += 1.0;
+    }
+    fn reset_stall(&mut self, i: usize) {
+        self.sessions[i].reset_stall();
+    }
+    fn touch(&mut self, i: usize, ts: f64) {
+        let s = &mut self.sessions[i];
+        s.last_event_at = js_max(s.last_event_at, ts);
+    }
+    fn set_run(&mut self, i: usize, run: Option<Run>) {
+        self.sessions[i].run_entry = run;
+    }
+
+    fn model(&self, i: usize) -> Value {
+        self.sessions[i].model.clone()
+    }
+    fn set_model(&mut self, i: usize, model: Value) {
+        self.sessions[i].model = model;
+    }
+    fn set_context_used(&mut self, i: usize, used: Value) {
+        self.sessions[i].context_used = used;
+    }
+    fn set_context_window(&mut self, i: usize, window: Value) {
+        self.sessions[i].context_window = window;
+    }
+    fn tokens_processed(&self, i: usize) -> f64 {
+        self.sessions[i].tokens_processed
+    }
+    fn add_output_tokens(&mut self, i: usize, n: f64) {
+        self.sessions[i].tokens_output += n;
+    }
+    fn set_output_tokens(&mut self, i: usize, n: f64) {
+        self.sessions[i].tokens_output = n;
+    }
+    fn add_tokens(&mut self, i: usize, n: f64, ts: f64, live: bool) {
+        self.sessions[i].add_tokens(n, ts, live);
+    }
+    fn add_call(&mut self, i: usize, model: &Value, call: &Call, ts: f64) {
+        self.sessions[i].add_call(model, call, ts);
+    }
+    fn add_reported(&mut self, i: usize, model: &Value, call: &Call, ts: f64, cost: Option<f64>) {
+        self.sessions[i].add_reported(model, call, ts, cost);
+    }
+    fn provider(&self, i: usize) -> Value {
+        self.sessions[i].provider.clone()
+    }
+    fn set_provider(&mut self, i: usize, provider: Value) {
+        self.sessions[i].provider = provider;
+    }
+    fn priority(&self, i: usize) -> bool {
+        self.sessions[i].priority
+    }
+    fn set_priority(&mut self, i: usize, priority: bool) {
+        self.sessions[i].priority = priority;
+    }
+
+    fn add_prompt(&mut self, i: usize, text: &str, ts: f64) {
+        self.sessions[i].add_prompt(text, ts);
+    }
+    fn last_prompt_seq(&self, i: usize) -> Option<u64> {
+        self.sessions[i].prompts.last().map(|p| p.seq)
+    }
+    fn add_message(&mut self, i: usize, text: Option<&Value>, ts: f64) -> Result<(), TypeError> {
+        self.sessions[i].add_message(text, ts)
+    }
+    fn add_edits(&mut self, i: usize, edits: &[Value], ts: f64) -> Result<(), TypeError> {
+        self.sessions[i].add_edits(edits, ts)
+    }
+    fn note_tool_result(&mut self, i: usize, ok: bool, ts: f64, tool: Option<&ToolRecord>) {
+        self.sessions[i].note_tool_result(ok, ts, tool);
+    }
+    fn set_question(&mut self, i: usize, question: Value) {
+        self.sessions[i].question = question;
+    }
+    fn needs_you(&self, i: usize, now: f64) -> Value {
+        self.sessions[i].needs_you(now)
+    }
+
+    fn subagent(&mut self, i: usize, agent: Option<&Value>) -> Option<&mut Map<String, Value>> {
+        self.sessions[i].subagents.get_mut(&key_tag(agent)).map(|(_, a)| a)
+    }
+    fn add_subagent(&mut self, i: usize, agent: Option<&Value>, record: Map<String, Value>) {
+        kset(&mut self.sessions[i].subagents, agent, record);
+    }
+    fn inflight_add(&mut self, i: usize, id: Option<&Value>, name: Option<&Value>, ts: f64) -> String {
+        let mut fields = Map::new();
+        if let Some(n) = name {
+            fields.insert("name".into(), n.clone());
+        }
+        fields.insert("ts".into(), number(ts));
+        kset(&mut self.sessions[i].inflight, id, Inflight { fields, tool: None })
+    }
+    fn inflight_set_tool(&mut self, i: usize, tag: &str, tool: Option<ToolRecord>) {
+        if let Some((_, e)) = self.sessions[i].inflight.get_mut(tag) {
+            e.tool = Some(tool);
         }
     }
-
-    pub fn set_limits(&mut self, which: &str, v: Value) {
-        match which {
-            "codex" => self.limits_codex = v,
-            _ => self.limits_claude = v,
+    fn inflight_remove(&mut self, i: usize, id: Option<&Value>) -> Option<ToolRecord> {
+        self.sessions[i].inflight.remove(&key_tag(id)).and_then(|(_, e)| e.tool).flatten()
+    }
+    fn was_seen(&self, i: usize, message_id: Option<&Value>) -> bool {
+        self.sessions[i].seen_messages.contains(&key_tag(message_id))
+    }
+    fn mark_seen(&mut self, i: usize, message_id: Option<&Value>) {
+        let s = &mut self.sessions[i];
+        kset(&mut s.seen_messages, message_id, ());
+        if s.seen_messages.len() > 400 {
+            drop_first(&mut s.seen_messages);
         }
     }
-
-    pub fn limit_samples(&self, which: &str) -> Value {
-        Value::Array(match which {
-            "codex" => self.samples_codex.clone(),
-            _ => self.samples_claude.clone(),
-        })
+    fn pending_label(&self) -> Option<&(String, Value, f64)> {
+        self.pending_label.as_ref()
     }
-
-    /// Samples set from outside: a list, as JS keeps whatever it's given
-    /// (anything else is kept as no samples).
-    pub fn set_limit_samples(&mut self, which: &str, v: Value) {
-        let list = match v {
-            Value::Array(a) => a,
-            _ => Vec::new(),
-        };
-        match which {
-            "codex" => self.samples_codex = list,
-            _ => self.samples_claude = list,
-        }
-    }
-
-    pub fn claude_reason(&self) -> Value {
-        self.claude_reason.clone()
-    }
-
-    pub fn set_claude_reason(&mut self, v: Value) {
-        self.claude_reason = v;
-    }
-
-    pub fn claude_samples(&self) -> Value {
-        obj(vec![("anthropic", Value::Array(self.anthropic_samples.clone())), ("desktop", Value::Array(self.desktop_samples.clone()))])
-    }
-
-    pub fn pending_label(&self) -> Value {
-        match &self.pending_label {
-            None => Value::Null,
-            Some((session, label, ts)) => obj(vec![("session", Value::String(session.clone())), ("label", label.clone()), ("ts", number(*ts))]),
-        }
+    fn set_pending_label(&mut self, session: String, label: Value, ts: f64) {
+        self.pending_label = Some((session, label, ts));
     }
 }
 
-/// The session id a Codex rollout's name ends with: the uuid before
-/// ".jsonl" (/([0-9a-f]{8}-…-[0-9a-f]{12})\.jsonl$/i).
-fn uuid_before(norm: &str) -> Option<String> {
-    let rest = norm.strip_suffix(".jsonl")?;
-    if rest.len() < 36 || !rest.is_char_boundary(rest.len() - 36) {
-        return None;
+/// A provider's refusals, as a line's events mark them, read first.
+pub fn refusals(t: &dyn Tail, app: &str, at: &Where, raw: &Value, events: &[LineEvent<'_>], live: bool, out: &mut Vec<Emit>) {
+    for e in events {
+        let Kind::Refusal(signal) = &e.kind else { continue };
+        t.refusal(app, at, raw, signal, live, out);
     }
-    let id = &rest[rest.len() - 36..];
-    let ok = id.bytes().enumerate().all(|(i, b)| if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() });
-    ok.then(|| id.to_string())
 }
 
-/// A Claude Code subagent's transcript
-/// (/\/([0-9a-f-]{36})\/subagents\/agent-([^/]+)\.jsonl$/i): its session
-/// and its agent.
-fn subagent_file(norm: &str) -> Option<(String, String)> {
-    let rest = norm.strip_suffix(".jsonl")?;
-    let slash = rest.rfind('/')?;
-    let name = &rest[slash + 1..];
-    let agent = name.strip_prefix("agent-").filter(|a| !a.is_empty())?;
-    let dir = rest[..slash].strip_suffix("/subagents")?;
-    let at = dir.rfind('/')?;
-    let session = &dir[at + 1..];
-    (session.len() == 36 && session.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| (session.to_string(), agent.to_string()))
+/// Straight-line projection of a plan window's use at `now`, over
+/// `points` (when, percent): the percent an hour, when it's used up
+/// (`eta`, when the use grows), and whether that comes before the reset
+/// (`resets_at`, or `horizon` on from now when the reset isn't known: the
+/// window's length).
+pub fn project_limit(now: f64, points: &[(f64, f64)], pct: Option<&Value>, resets_at: Option<Value>, horizon: f64) -> Value {
+    let per_hour = slope(&points.iter().map(|(t, v)| (t / 3600e3, *v)).collect::<Vec<_>>());
+    if nn(pct).is_none() {
+        return Value::Null;
+    }
+    let p = js_number(pct);
+    let eta = (per_hour > 0.05).then(|| now + ((100.0 - p) / per_hour) * 3600e3);
+    let limit = match nn(resets_at.as_ref()) {
+        Some(r) => js_number(Some(r)),
+        None => now + horizon,
+    };
+    obj_opt(vec![
+        ("pct", pct.cloned()),
+        ("perHour", nv(per_hour)),
+        ("eta", Some(eta.map_or(Value::Null, number))),
+        ("resetsAt", resets_at),
+        ("hitsBeforeReset", Some(Value::Bool(eta.is_some_and(|e| e < limit)))),
+    ])
 }
 
 // ---------- the faces the twin gives JS ----------
@@ -2670,8 +1599,6 @@ impl Session {
             "lastPromptAt" => f(self.last_prompt_at),
             "lastTurnEndAt" => f(self.last_turn_end_at),
             "interruptedAt" => f(self.interrupted_at),
-            "codexItems" => Some(Value::Bool(self.codex_items)),
-            "eventPrompt" => Some(self.event_prompt.as_ref().map_or(Value::Null, |(p, marks)| obj(vec![("prompt", p.value()), ("marks", number(*marks))]))),
             "turnMarks" => f(self.turn_marks),
             "question" => Some(self.question.clone()),
             "hookNeed" => Some(self.hook_need.clone()),
@@ -2730,15 +1657,6 @@ impl Session {
             "lastPromptAt" => self.last_prompt_at = num(&v),
             "lastTurnEndAt" => self.last_turn_end_at = num(&v),
             "interruptedAt" => self.interrupted_at = num(&v),
-            "codexItems" => self.codex_items = truthy(v.as_ref()),
-            "eventPrompt" => {
-                self.event_prompt = v.filter(|x| truthy(Some(x))).map(|e| {
-                    let p = opt_prop(Some(&e), "prompt").cloned().unwrap_or(Value::Null);
-                    // The prompt it names, when it's one of the prompts.
-                    let same = self.prompts.iter().find(|q| q.value() == p).cloned();
-                    (same.unwrap_or_else(|| self.prompt_of(&p)), num_of(Some(&e), "marks"))
-                });
-            }
             "turnMarks" => self.turn_marks = num(&v),
             "question" => self.question = or_null(v),
             "hookNeed" => self.hook_need = or_null(v),
@@ -2901,6 +1819,7 @@ impl Session {
 mod tests {
     use super::*;
     use serde_json::json;
+    use xenonet_adapter::reader::Unchecked;
 
     const NOW: f64 = 1_791_000_000_000.0;
 
@@ -2908,18 +1827,25 @@ mod tests {
         Value::String(xenonet_base::time::iso(ms))
     }
 
-    fn claude(t: &mut Telemetry, raw: Value) -> Vec<Emit> {
+    // A telemetry with the adapters' readers in place.
+    fn telemetry(roots: Vec<(String, String)>) -> Telemetry {
+        xenonet_platforms::install();
+        Telemetry::new(None, roots)
+    }
+
+    fn read(t: &mut Telemetry, app: &str, raw: Value) -> Result<Vec<Emit>, TypeError> {
         let mut out = Vec::new();
-        let f = Where { session_id: "claude:a".into(), agent_id: Value::Null, file: Value::Null };
-        t.apply_claude(&f, raw, true, NOW, &mut out).unwrap();
-        out
+        let f = Where { session_id: format!("{app}:{}", if app == "claude" { "a" } else { "b" }), agent_id: Value::Null, file: Value::Null };
+        t.line(app, &Unchecked, &f, raw, true, NOW, &mut out)?;
+        Ok(out)
+    }
+
+    fn claude(t: &mut Telemetry, raw: Value) -> Vec<Emit> {
+        read(t, "claude", raw).unwrap()
     }
 
     fn codex(t: &mut Telemetry, raw: Value) -> Vec<Emit> {
-        let mut out = Vec::new();
-        let f = Where { session_id: "codex:b".into(), agent_id: Value::Null, file: Value::Null };
-        t.apply_codex(&f, raw, true, NOW, &mut out).unwrap();
-        out
+        read(t, "codex", raw).unwrap()
     }
 
     fn kinds(out: &[Emit]) -> Vec<String> {
@@ -2933,20 +1859,22 @@ mod tests {
 
     #[test]
     fn files_say_what_they_are() {
-        let t = Telemetry::new(None, vec![("/x/.codex/sessions".into(), "codex".into())]);
+        let t = telemetry(vec![("/x/.codex/sessions".into(), "codex".into()), ("/g/.grok/sessions".into(), "grok".into())]);
         let id = "11111111-2222-3333-4444-555555555555";
         assert_eq!(t.classify(&format!("/h/.claude/projects/p/{id}.jsonl")).unwrap()["sessionId"], format!("claude:{id}"));
         let sub = t.classify(&format!("/h/.claude/projects/p/{id}/subagents/agent-abc.jsonl")).unwrap();
         assert_eq!((sub["sessionId"].as_str(), sub["agentId"].as_str()), (Some(format!("claude:{id}").as_str()), Some("abc")));
         assert_eq!(t.classify(&format!("/x/.codex/sessions/2026/rollout-2026-T-{id}.jsonl")).unwrap()["sessionId"], format!("codex:{id}"));
         assert_eq!(t.classify(&format!("/x/.codex/sessions/2026/other-{id}.jsonl")), None);
+        assert_eq!(t.classify("/g/.grok/sessions/%2Fw/s-1234567/updates.jsonl").unwrap()["sessionId"], "grok:s-1234567");
+        assert_eq!(t.classify("/g/.grok/sessions/%2Fw/s-1234567/history.jsonl"), None);
         assert_eq!(t.classify("/h/notes.txt"), None);
         assert_eq!(t.classify("C:\\h\\.claude\\projects\\p\\11111111-2222-3333-4444-55555555555A.jsonl").unwrap()["app"], "claude");
     }
 
     #[test]
     fn a_claude_turn() {
-        let mut t = Telemetry::new(None, Vec::new());
+        let mut t = telemetry(Vec::new());
         assert_eq!(kinds(&claude(&mut t, json!({ "type": "user", "timestamp": at(NOW - 5000.0), "message": { "content": "fix it" } }))), ["prompt"]);
         let out = claude(
             &mut t,
@@ -2970,14 +1898,12 @@ mod tests {
         assert_eq!(snap["context"]["used"], 1015);
         assert_eq!(t.history_since(0.0).len(), 6);
         // A line JS would throw on: its text is a number.
-        let mut out = Vec::new();
-        let f = Where { session_id: "claude:a".into(), agent_id: Value::Null, file: Value::Null };
-        assert!(t.apply_claude(&f, json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": 5 }] } }), true, NOW, &mut out).is_err());
+        assert!(read(&mut t, "claude", json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": 5 }] } })).is_err());
     }
 
     #[test]
     fn a_codex_turn_and_its_limits() {
-        let mut t = Telemetry::new(None, Vec::new());
+        let mut t = telemetry(Vec::new());
         codex(&mut t, json!({ "type": "event_msg", "timestamp": at(NOW - 9000.0), "payload": { "type": "task_started" } }));
         codex(
             &mut t,
@@ -2986,7 +1912,7 @@ mod tests {
         let i = t.find("codex:b").unwrap();
         let snap = t.at_mut(i).snapshot(NOW);
         assert_eq!((snap["tokens"]["processed"].as_f64(), snap["context"]["used"].as_f64()), (Some(5000.0), Some(4000.0)));
-        assert_eq!(t.limits("codex")["primary"], json!({ "pct": 12, "windowMinutes": 300, "resetsAt": null }));
+        assert_eq!(t.snapshot(NOW)["limits"]["codex"]["primary"], json!({ "pct": 12, "windowMinutes": 300, "resetsAt": null }));
         for k in 0..3 {
             codex(
                 &mut t,
@@ -2999,11 +1925,12 @@ mod tests {
         let full = t.snapshot(NOW);
         assert_eq!(full.as_object().unwrap().keys().take(2).collect::<Vec<_>>(), ["at", "sessions"]);
         assert_eq!(full["resources"][0]["server"], "s");
+        assert_eq!(full["limitForecast"]["codex"]["pct"], 12);
     }
 
     #[test]
     fn a_codex_extensions_web_search_is_a_web_search() {
-        let mut t = Telemetry::new(None, Vec::new());
+        let mut t = telemetry(Vec::new());
         let done = |k: f64, item: Value| json!({ "type": "event_msg", "timestamp": at(NOW - 5000.0 + k), "payload": { "type": "item_completed", "item": item } });
         let search = codex(&mut t, done(0.0, json!({ "type": "Extension", "kind": "web.search", "query": "", "action": { "type": "search", "query": "zod v4 coerce" } })));
         assert_eq!(kinds(&search), ["tool"]);
@@ -3016,7 +1943,7 @@ mod tests {
 
     #[test]
     fn collisions_and_costs() {
-        let mut t = Telemetry::new(None, Vec::new());
+        let mut t = telemetry(Vec::new());
         claude(
             &mut t,
             json!({ "type": "assistant", "timestamp": at(NOW - 60e3), "message": { "id": "e1", "model": "claude-made-up", "usage": { "input_tokens": 1, "output_tokens": 1 }, "content": [{ "type": "tool_use", "id": "x", "name": "Edit", "input": { "file_path": "C:\\repo\\app.js", "old_string": "a", "new_string": "b" } }] } }),
@@ -3033,7 +1960,7 @@ mod tests {
 
     #[test]
     fn history_in_order() {
-        let mut t = Telemetry::new(None, Vec::new());
+        let mut t = telemetry(Vec::new());
         let i = t.session("claude:a", "claude");
         let mut out = Vec::new();
         for ago in [5.0, 4.0, 40.0, 3.0] {
@@ -3041,21 +1968,6 @@ mod tests {
         }
         assert_eq!(t.history_since(NOW - 10e3).len(), 3);
         assert_eq!(t.history_since(0.0)[0].ts, NOW - 40e3);
-    }
-
-    #[test]
-    fn claude_limits_go_stale() {
-        let mut t = Telemetry::new(None, Vec::new());
-        t.set_limits("claude", json!({ "fiveHour": 9, "sevenDay": 19, "observedAt": NOW - 10.0 * 60e3 }));
-        t.set_limit_samples("claude", json!([{ "ts": NOW - 40.0 * 60e3, "fiveHour": 4, "sevenDay": 18 }, { "ts": NOW - 10.0 * 60e3, "fiveHour": 9, "sevenDay": 19 }]));
-        assert_eq!(t.claude_limits(NOW)["fiveHour"], 9);
-        assert_eq!(t.limit_forecast(NOW)["claudeFiveHour"]["pct"], 9);
-        t.set_limits("claude", json!({ "fiveHour": 0, "sevenDay": 0, "observedAt": NOW - 2.0 * 86400e3 }));
-        assert_eq!(t.claude_limits(NOW)["stale"], true);
-        assert_eq!(t.limit_forecast(NOW).get("claudeFiveHour"), None);
-        assert!(t.claude_asked(None, NOW).is_err());
-        t.claude_asked(Some(&json!({ "reason": "no sign-in" })), NOW).unwrap();
-        assert_eq!(t.claude_limits(NOW)["reason"], "no sign-in");
     }
 
     #[test]

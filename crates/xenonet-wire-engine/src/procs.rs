@@ -1,13 +1,17 @@
-//! The process lookups (core/procs.js over crates/xenonet-engine/src/procs.rs)
-//! on this machine: the commands Rust asks for (ps, netstat, lsof,
-//! codesign, plutil, pgrep) run here, with start times in English and UTC
-//! and text as UTF-8 whatever XenoNet's own environment says, five seconds
-//! each at most. A command asked for while the same one runs waits for
-//! that one's answer, as the JS's shared promises did.
+//! The process lookups (crates/xenonet-engine/src/procs.rs) on this
+//! machine: the commands Rust asks for (ps, netstat, lsof, codesign,
+//! plutil, pgrep) run here, with start times in English and UTC and text
+//! as UTF-8 whatever XenoNet's own environment says, five seconds each at
+//! most. A command asked for while the same one runs waits for that one's
+//! answer.
+//!
+//! `call`, `get` and `kind` answer the observers and the reports' matcher,
+//! which still reach procs by method name with `Arg` values; they go when
+//! those are typed.
 
 use crate::exec::{self, Spec};
-use crate::js::{alive, at, no_method, now_ms, number, obj, Locked};
-use serde_json::{json, Map, Value};
+use crate::js::{at, no_method, now_ms, number, obj, Locked};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 use xenonet_engine::peer::{Result, Thrown};
@@ -116,56 +120,74 @@ impl Io for SystemIo<'_> {
     }
 }
 
-pub fn row_json(r: &Row) -> Map<String, Value> {
-    let mut o = Map::new();
-    o.insert("pid".into(), number(r.pid));
-    o.insert("ppid".into(), number(r.ppid));
-    o.insert("start".into(), number(r.start));
-    o.insert("program".into(), Value::String(r.program.clone()));
-    o
-}
-
-pub fn product_json(p: Option<Product>) -> Value {
-    p.map_or(Value::Null, |p| json!({ "product": p.product, "role": p.role }))
-}
-
-/// A process of a chain, as core/procs.js's chain() gives it.
-pub fn link_json(l: &Link) -> Value {
-    let mut o = row_json(&l.row);
-    if let Some(exe) = &l.exe {
-        o.insert("exe".into(), exe.clone().map_or(Value::Null, Value::String));
-    }
-    o.insert("agent".into(), l.agent.map_or(Value::Null, |a| Value::String(a.into())));
-    o.insert("product".into(), product_json(l.product));
-    Value::Object(o)
+fn product_json(p: Option<Product>) -> Value {
+    p.map_or(Value::Null, Product::json)
 }
 
 /// A table as a Map's [pid, row] pairs.
 pub fn table_json(t: &PidMap<Row>) -> Value {
-    Value::Array(t.iter().map(|(pid, r)| json!([number(*pid), Value::Object(row_json(r))])).collect())
+    Value::Array(t.iter().map(|(pid, r)| json!([number(*pid), Value::Object(r.json())])).collect())
 }
 
 fn strings_json(t: &PidMap<String>) -> Value {
     Value::Array(t.iter().map(|(pid, s)| json!([number(*pid), s])).collect())
 }
 
-fn values(a: Arg) -> Vec<Value> {
-    crate::js::list(a).iter().map(Arg::to_json).collect()
+/// The numbers among a list's items.
+fn numbers(a: Arg) -> Vec<f64> {
+    crate::js::list(a).iter().filter_map(Arg::as_f64).collect()
+}
+
+/// A number a field holds, or none (NaN), which names no process.
+fn num_of(o: &Value, k: &str) -> f64 {
+    o.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN)
+}
+
+fn text_of(o: &Value, k: &str) -> String {
+    match o.get(k) {
+        None | Some(Value::Null) => String::new(),
+        Some(v) => xenonet_base::text::js_string(v),
+    }
+}
+
+/// A row as a call gives it: `{ pid, start, program }`, and `ppid` when it
+/// has one.
+fn row_of(o: &Value) -> Row {
+    Row { pid: num_of(o, "pid"), ppid: num_of(o, "ppid"), start: num_of(o, "start"), program: text_of(o, "program") }
+}
+
+/// A process of a chain as a verdict's JSON gives it, read back: its row,
+/// `exe` as given (absent, null or a path), and the agent or product it
+/// was taken for, among the ones XenoNet knows.
+pub fn link_of(o: &Value) -> Link {
+    let exe = o.get("exe").map(|e| e.as_str().map(str::to_string));
+    let agent = o.get("agent").and_then(Value::as_str).and_then(|a| xenonet_engine::processes::agent(a)).map(|a| a.id);
+    let product = o.get("product").filter(|p| p.is_object()).and_then(|p| {
+        let id = xenonet_adapter::products::product_of(p.get("product")?.as_str()?)?.id;
+        let role = match p.get("role")?.as_str()? {
+            "host" => "host",
+            "tui" => "tui",
+            "app" => "app",
+            _ => return None,
+        };
+        Some(Product { product: id, role })
+    });
+    Link { row: row_of(o), exe, agent, product }
 }
 
 fn failed(m: String) -> Thrown {
     Thrown::new(m)
 }
 
-/// What a census reads, as readCensus gives it to an observer: the
-/// table's [pid, row] pairs and what each process is.
+/// What a census reads, as an observer gets it: the table's [pid, row]
+/// pairs and what each process is.
 pub fn census(sys: &System) -> Result<Value> {
     let t = sys.procs.census(&mut sys.io()).map_err(failed)?;
     let Some(t) = t else { return Ok(json!({ "table": [], "of": [] })) };
     let of: Vec<Value> = t
         .iter()
         .map(|(_, r)| {
-            let (agent, product) = sys.procs.of(Some(&number(r.pid)), Some(&number(r.start)), Some(&Value::String(r.program.clone())));
+            let (agent, product) = sys.procs.of(r);
             json!({ "agent": agent, "product": product_json(product) })
         })
         .collect();
@@ -190,7 +212,8 @@ pub fn peer_of(sys: &System, conn: u64, local_port: u16, remote_port: u16) -> Va
     pid
 }
 
-/// `procs.<method>(...args)`, as createProcs's object answers it.
+/// `procs.<method>(...args)`, for the observers and the reports' matcher,
+/// onto the typed lookups.
 pub fn call(sys: &System, method: &str, args: &[Arg]) -> Result<Arg> {
     let p = &sys.procs;
     let io = &mut sys.io();
@@ -206,27 +229,26 @@ pub fn call(sys: &System, method: &str, args: &[Arg]) -> Result<Arg> {
             };
             let exe = o.field("exe").truthy();
             let pid = at(args, 0).as_f64();
-            Value::Array(p.chain(io, pid, again, exe).map_err(failed)?.iter().map(link_json).collect())
+            Value::Array(p.chain(io, pid, again, exe).map_err(failed)?.iter().map(Link::json).collect())
         }
         "alive" => {
-            let o = at(args, 0);
-            Value::Bool(p.alive(io, Some(&v(o.field("pid"))), Some(&v(o.field("start")))).map_err(failed)?)
+            let o = v(at(args, 0));
+            Value::Bool(p.alive(io, num_of(&o, "pid"), num_of(&o, "start")).map_err(failed)?)
         }
         "signed" => {
             let o = v(at(args, 0));
             let agent = o.get("agent").and_then(Value::as_str);
             let product =
                 o.get("product").filter(|x| x.is_object()).map(|x| (x.get("product").and_then(Value::as_str).unwrap_or(""), x.get("role").and_then(Value::as_str).unwrap_or("")));
-            Value::Bool(p.signed(io, o.get("pid"), o.get("start"), o.get("program"), agent, product))
+            Value::Bool(p.signed(io, num_of(&o, "pid"), num_of(&o, "start"), &text_of(&o, "program"), agent, product))
         }
-        "cwd" => p.cwd(io, Some(&v(at(args, 0)))).map_or(Value::Null, Value::String),
+        "cwd" => p.cwd(io, at(args, 0).as_f64().unwrap_or(f64::NAN)).map_or(Value::Null, Value::String),
         "census" => census(sys)?,
-        "children" => Value::Array(p.children(io, &values(at(args, 0))).into_iter().map(number).collect()),
-        "describe" => table_json(&p.describe(io, &values(at(args, 0)))),
-        "cwds" => strings_json(&p.cwds(io, &values(at(args, 0)))),
+        "children" => Value::Array(p.children(io, &numbers(at(args, 0))).into_iter().map(number).collect()),
+        "describe" => table_json(&p.describe(io, &numbers(at(args, 0)))),
+        "cwds" => strings_json(&p.cwds(io, &numbers(at(args, 0)))),
         "of" => {
-            let r = v(at(args, 0));
-            let (agent, product) = p.of(r.get("pid"), r.get("start"), r.get("program"));
+            let (agent, product) = p.of(&row_of(&v(at(args, 0))));
             json!({ "agent": agent, "product": product_json(product) })
         }
         _ => return Err(no_method("procs", method)),
@@ -251,11 +273,6 @@ pub fn kind(field: &str) -> &'static str {
         "snapshot" | "chain" | "alive" | "signed" | "cwd" | "census" | "children" | "describe" | "cwds" | "of" | "peer" => "function",
         _ => "undefined",
     }
-}
-
-/// Whether a process runs, as the twins' `alive` asks.
-pub fn running(pid: &Arg) -> bool {
-    pid.as_f64().is_some_and(alive)
 }
 
 #[cfg(test)]

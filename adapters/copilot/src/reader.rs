@@ -3,12 +3,6 @@
 //! `<id>.jsonl` before 1.0.11) is a session on the map, "`copilot:<id>`", with
 //! its edit tools' files and its shutdown's changed files as its edits.
 
-use super::files::Files;
-use super::{
-    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
-    EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
-};
-use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use xenonet_base::json::{self, number_string};
@@ -17,6 +11,12 @@ use xenonet_base::nodepath::NATIVE;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::patch;
 use xenonet_base::text::{is_blank, truthy};
+use xenonet_sources::native::files::Files;
+use xenonet_sources::native::{
+    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
+    EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
+};
+use xenonet_sources::session::{RunSession, Via};
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
 /// Copilot CLI's built-in file tools, as the app registry has them;
@@ -383,11 +383,36 @@ pub fn log_out(l: &Log) -> Out {
     ])
 }
 
+/// The reader's row on the map: Copilot CLI's folder under the home
+/// folder.
+pub struct Row;
+
+impl xenonet_adapter::reader::Native for Row {
+    fn source(&self) -> &'static str {
+        "copilot"
+    }
+    fn block(&self) -> &'static str {
+        "copilot-sessions"
+    }
+    fn what(&self) -> &'static str {
+        "Copilot CLI's folder"
+    }
+    fn schema(&self) -> &'static str {
+        SOURCE
+    }
+    fn at(&self, paths: &xenonet_adapter::reader::Paths<'_>) -> String {
+        copilot_root(paths.home_dir)
+    }
+    fn make(&self) -> Box<dyn NativeReader> {
+        Box::new(CopilotCli::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::native::files::StdFiles;
-    use crate::native::no_check;
+    use xenonet_sources::native::files::StdFiles;
+    use xenonet_sources::native::no_check;
 
     fn lines(rs: &[Value]) -> String {
         rs.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n") + "\n"

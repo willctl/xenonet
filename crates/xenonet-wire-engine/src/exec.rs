@@ -8,7 +8,6 @@ use serde_json::Value;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use xenonet_engine::peer::Thrown;
 
 /// How a command is run.
 #[derive(Clone, Debug)]
@@ -41,12 +40,6 @@ pub struct Failed {
     pub killed: bool,
     pub stdout: String,
     pub stderr: String,
-}
-
-impl Failed {
-    pub fn thrown(&self) -> Thrown {
-        Thrown { message: self.message.clone(), code: self.code.clone().map(Box::new), handle: None, stdout: Some(self.stdout.clone()) }
-    }
 }
 
 fn reader(r: Option<impl Read + Send + 'static>, max: usize) -> std::thread::JoinHandle<Vec<u8>> {

@@ -1094,8 +1094,8 @@
     "total24h": 230160,
     "today": 230160,
     "limits": {
-      "codex": null,
-      "claude": null
+      "claude": null,
+      "codex": null
     },
     "limitForecast": {},
     "costs": {

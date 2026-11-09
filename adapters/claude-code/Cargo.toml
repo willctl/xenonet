@@ -16,6 +16,7 @@ regex.workspace = true
 serde_json.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
+xenonet-sources.workspace = true
 
 [dev-dependencies]
 xenonet-adapter = { workspace = true, features = ["testing"] }

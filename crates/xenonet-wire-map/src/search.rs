@@ -8,7 +8,7 @@
 //! time they change.
 
 use crate::util::{blocking, lock, now_ms, num, wiki_out};
-use crate::vendor::{Tailed, Vendor};
+use crate::vendor::Vendor;
 use serde_json::{json, Value};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
@@ -85,7 +85,7 @@ impl TranscriptSearch {
     // Indexes a file's new lines; how many documents went in.
     fn index_file(&self, file: &str, app: &str) -> Result<f64, String> {
         // Nothing of an app XenoNet doesn't tail is indexed.
-        let Some(tailed) = xenonet_adapter::apps::tailed_or_text(Some(app), None).map(Tailed::of) else { return Ok(0.0) };
+        let Some(tailed) = xenonet_adapter::apps::tailed_or_text(Some(app), None) else { return Ok(0.0) };
         let core = lock(&self.core);
         let Some(mut plan): Option<Plan> = core.plan(file, app).map_err(message)? else { return Ok(0.0) };
         // What isn't compressed and isn't a Codex rollout is read a piece at
@@ -127,7 +127,7 @@ impl TranscriptSearch {
 
     // The same, a piece of the file at a time (Search::begin_pieces): each
     // piece's complete lines, the rest carried to the next read.
-    fn index_pieces(core: &Search, tailed: Tailed, mut plan: Plan, vendor: &Vendor, piece: usize) -> Result<f64, String> {
+    fn index_pieces(core: &Search, tailed: &str, mut plan: Plan, vendor: &Vendor, piece: usize) -> Result<f64, String> {
         let from = if plan.whole { 0.0 } else { plan.offset };
         let mut f = std::fs::File::open(&plan.file).map_err(|e| e.to_string())?;
         f.seek(SeekFrom::Start(from as u64)).map_err(|e| e.to_string())?;

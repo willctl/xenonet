@@ -41,22 +41,23 @@ const MACHINE: [Row; 6] = [
     ("xenonet.launcher", "XenoNet", "Hooks and MCP servers reach XenoNet through its launcher"),
 ];
 
-/// The sessions' and the actors', after the apps' sessions checks.
-const ACTORS: [Row; 8] = [
+/// The sessions' and the actors', after the apps' sessions checks; the
+/// adapters' actors checks (a product's plugin) come after the observers'.
+const ACTORS: [Row; 6] = [
     ("agents.checked", "Sessions", "Sessions can't pass for each other"),
     ("actors.repos", "Actors", "No actor's token is in a repo"),
     ("actors.expired", "Actors", "Registered actors' tokens are current"),
     ("actors.gateway", "Actors", "The actor gateway reaches the internet"),
     ("actors.wakes", "Actors", "Actors with a webhook can be woken"),
     ("actors.observers", "Actors", "XenoNet can read what its observers look at"),
-    ("actors.hermes-plugin", "Actors", "XenoNet's plugin for Hermes reports"),
-    ("actors.checked", "Actors", "Actors' tokens are held to their processes"),
 ];
+const ACTORS_CHECKED: [Row; 1] = [("actors.checked", "Actors", "Actors' tokens are held to their processes")];
 
 /// Every check, in the order they run and show: XenoNet's own, the
 /// installed adapters' app checks, this computer's, the adapters' sessions
-/// checks, the sessions' and actors', the service started at login's
-/// (login.rs), then the gateway's firewall's (firewall.rs).
+/// checks, the sessions' and actors' (with the adapters' actors checks
+/// after the observers'), the service started at login's (login.rs), then
+/// the gateway's firewall's (firewall.rs).
 pub fn all() -> Vec<Row> {
     all_with(&xenonet_adapter::platforms().check_rows())
 }
@@ -64,7 +65,17 @@ pub fn all() -> Vec<Row> {
 /// The list with these adapter rows in their slots.
 pub fn all_with(adapters: &[CheckRow]) -> Vec<Row> {
     let slot = |s: Slot| adapters.iter().filter(move |r| r.slot == s).map(|r| (r.id, r.group, r.title));
-    XENONET.into_iter().chain(slot(Slot::App)).chain(MACHINE).chain(slot(Slot::Sessions)).chain(ACTORS).chain(crate::login::CHECKS).chain(crate::firewall::CHECKS).collect()
+    XENONET
+        .into_iter()
+        .chain(slot(Slot::App))
+        .chain(MACHINE)
+        .chain(slot(Slot::Sessions))
+        .chain(ACTORS)
+        .chain(slot(Slot::Actors))
+        .chain(ACTORS_CHECKED)
+        .chain(crate::login::CHECKS)
+        .chain(crate::firewall::CHECKS)
+        .collect()
 }
 
 fn verdict(status: &str, detail: impl Into<String>, fix: Option<String>) -> Value {
@@ -554,7 +565,6 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             Ok(ok(format!("{} woken by a webhook, the last wake of each answered", plural(hooks.len() as f64, "actor", None))))
         }
         "actors.observers" => observers(&c).await,
-        "actors.hermes-plugin" => hermes_plugin(&c).await,
         "actors.checked" => {
             if f.actors() == "off" {
                 return Ok(skip("actors are off here (XENONET_ACTORS=off)"));
@@ -907,44 +917,6 @@ async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
         })
         .collect::<Vec<_>>()
         .join("; ")))
-}
-
-/// XenoNet's plugin for Hermes: installed, turned on, with its token, and
-/// heard from lately (xenonet_base::hermes_plugin). It reads files, not
-/// XenoNet, so it answers with actors off too.
-async fn hermes_plugin(c: &Ctx<'_>) -> Result<Value, Failure> {
-    use xenonet_base::hermes_plugin as hp;
-    let f = c.f;
-    let (home, given) = (f.home(), f.get("hermesHome").map(js_string));
-    if !c.exists(&hp::root(&home, given.as_deref()).display().to_string()).await? {
-        return Ok(ok("Hermes Agent isn't on this computer, so its plugin has nothing to do"));
-    }
-    let now = c.now().await?;
-    let st = hp::inspect(&home, given.as_deref(), now);
-    let shown = |p: &std::path::Path| xenonet_base::paths::tilde(&p.display().to_string(), &home);
-    if !st.installed {
-        return Ok(info("XenoNet's plugin for Hermes isn't installed, so Hermes is only observed", Some("xenonet connect hermes adds it. It's optional.")));
-    }
-    if !st.current {
-        return Ok(warn("the plugin in Hermes's plugins folder isn't the one this XenoNet ships", Some("xenonet connect hermes updates it.")));
-    }
-    if st.token == "loose" {
-        return Ok(warn("the plugin's token file can be read by other users, so the plugin ignores it", Some(&format!("chmod 600 {}", shown(&st.dir.join("token"))))));
-    }
-    let todo = hp::owner_steps(&st, &shown);
-    if !todo.is_empty() {
-        let lacks: Vec<&str> = [(st.token != "ok").then_some("has no token"), (!st.enabled).then_some("isn't turned on")].into_iter().flatten().collect();
-        return Ok(info(format!("the plugin is installed but {}", lacks.join(" and ")), Some(&todo.join(" "))));
-    }
-    match st.reported {
-        None => Ok(info("the plugin is installed, turned on and has its token, but hasn't reported yet", Some("It starts with Hermes's next session."))),
-        Some((false, _)) => Ok(warn(
-            "the plugin can't reach XenoNet or isn't accepted: its last heartbeat failed",
-            Some("Check the token in XenoNet's Actors panel (New token), and that XenoNet is running."),
-        )),
-        Some((true, age)) if age > hp::STALE_MS => Ok(info(format!("the plugin last reported {} ago, so no Hermes process is running it now", duration(Some(age))), None)),
-        Some((true, age)) => Ok(ok(format!("the plugin is installed, turned on and reporting (last heartbeat {} ago)", duration(Some(age))))),
-    }
 }
 
 #[cfg(test)]

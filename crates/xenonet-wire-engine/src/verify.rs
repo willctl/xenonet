@@ -1,55 +1,53 @@
-//! The process checks (core/engine/verify.js over
-//! crates/xenonet-engine/src/verify.rs): the process at the other end of a
-//! request's TCP connection, found by its ports as verify.js finds it, and
-//! the ones above it, checked against what the request says it is. The
-//! lookups block on commands, so each check runs on a blocking thread.
+//! The process checks (crates/xenonet-engine/src/verify.rs) on this
+//! machine: the process at the other end of a request's TCP connection,
+//! found by its ports, and the ones above it, checked against what the
+//! request says it is. The lookups block on commands, so each check runs
+//! on a blocking thread.
 
-use crate::js::{json, no_method, now_ms, number, text};
+use crate::js::{now_ms, number};
 use crate::procs::{self, System};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_engine::peer::{Calls, Result};
+use xenonet_engine::procs::Link;
 use xenonet_engine::sql::Arg;
 use xenonet_engine::store::Shared;
-use xenonet_engine::verify::Verifier;
+use xenonet_engine::verify::{Fail, Host, Verdict, Verifier};
 use xenonet_service::cores::Verify;
 use xenonet_service::http::Peer;
 
 /// What a check reads: procs, the clock, and the process on the other end
 /// of this request's socket.
-pub struct VerifyCalls<'a> {
+pub struct Lookups<'a> {
     pub sys: &'a System,
     pub peer: Option<Peer>,
 }
 
-impl Calls for VerifyCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        match (path, method) {
-            ("procs", m) => procs::call(self.sys, m, &args),
-            ("", "now") => Ok(Arg::Num(now_ms())),
-            ("", "peerOf") => Ok(match self.peer {
-                Some(p) => crate::js::arg(&procs::peer_of(self.sys, p.conn, p.local.port(), p.remote.port())),
-                None => Arg::Null,
-            }),
-            _ => Err(no_method(path, method)),
-        }
-    }
-    fn get(&mut self, path: &str) -> Result<Arg> {
-        Ok(match path.strip_prefix("procs") {
-            Some(rest) => procs::get(self.sys, rest.trim_start_matches('.')),
-            None => Arg::Undef,
-        })
-    }
-    fn kind(&mut self, path: &str) -> Result<String> {
-        Ok(match path.strip_prefix("procs") {
-            Some(rest) => procs::kind(rest.trim_start_matches('.')).into(),
-            None if matches!(path, "now" | "peerOf") => "function".into(),
-            None => "undefined".into(),
-        })
-    }
+impl Host for Lookups<'_> {
     fn now(&mut self) -> f64 {
         now_ms()
+    }
+    fn supported(&mut self) -> bool {
+        self.sys.procs.supported
+    }
+    fn chains(&mut self) -> bool {
+        self.sys.procs.chains
+    }
+    fn peer(&mut self) -> Option<f64> {
+        self.peer.and_then(|p| procs::peer_of(self.sys, p.conn, p.local.port(), p.remote.port()).as_f64())
+    }
+    fn chain(&mut self, pid: f64, again: bool, exe: bool) -> Vec<Link> {
+        // A table that couldn't be read is a process that can't be seen.
+        self.sys.procs.chain(&mut self.sys.io(), Some(pid), again, exe).unwrap_or_default()
+    }
+    fn alive(&mut self, pid: f64, start: f64) -> Result<bool, Fail> {
+        self.sys.procs.alive(&mut self.sys.io(), pid, start).map_err(Fail::Procs)
+    }
+    fn signed(&mut self, p: &Link) -> bool {
+        self.sys.procs.signed(&mut self.sys.io(), p.row.pid, p.row.start, &p.row.program, p.agent, p.product.map(|pr| (pr.product, pr.role)))
+    }
+    fn cwd(&mut self, pid: f64) -> Option<String> {
+        self.sys.procs.cwd(&mut self.sys.io(), pid)
     }
 }
 
@@ -77,6 +75,31 @@ pub fn tray_apps(home: &str) -> Vec<String> {
     out
 }
 
+/// A product id as a route gives it: a string, or nothing.
+fn product_of(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_string)
+}
+
+/// The pid a route names: a number, nothing for null, and for anything
+/// else a pid no process has, so the check refuses it as naming one that
+/// isn't the caller's.
+fn pid_of(v: &Value) -> Option<f64> {
+    match v {
+        Value::Null => None,
+        Value::Number(n) => Some(n.as_f64().unwrap_or(f64::NAN)),
+        _ => Some(f64::NAN),
+    }
+}
+
+/// The processes an actor's request may call its own, nearest first, for
+/// a chain as a verdict's JSON gives it (`Arg` values). Goes when the
+/// reports' matcher is typed and reads `Link`s.
+pub fn own_of(chain: &[Arg]) -> &[Arg] {
+    let links: Vec<Link> = chain.iter().map(|a| procs::link_of(&a.to_json())).collect();
+    let n = xenonet_engine::verify::own_of(&links).len();
+    &chain[..n]
+}
+
 /// The checks, as the routes call them.
 pub struct Checks {
     pub verifier: Arc<Verifier>,
@@ -87,67 +110,72 @@ impl Checks {
     pub fn new(store: Shared, sys: Arc<System>) -> Checks {
         // The service is its own process, so no app is its parent: the
         // Desktop that connects says which process is home.
-        Checks { verifier: Arc::new(Verifier::new(store, Arg::Null)), sys }
+        Checks { verifier: Arc::new(Verifier::new(store, None)), sys }
     }
 
-    async fn run(&self, peer: Option<Peer>, f: impl FnOnce(&Verifier, &mut VerifyCalls<'_>) -> Result<Arg> + Send + 'static) -> Value {
+    async fn run(&self, peer: Option<Peer>, f: impl FnOnce(&Verifier, &mut dyn Host) -> Result<Verdict, Fail> + Send + 'static) -> Value {
         let (v, sys) = (self.verifier.clone(), self.sys.clone());
         let out = tokio::task::spawn_blocking(move || {
-            let mut c = VerifyCalls { sys: &sys, peer };
-            f(&v, &mut c)
+            let mut h = Lookups { sys: &sys, peer };
+            f(&v, &mut h)
         })
         .await;
         match out {
-            Ok(Ok(a)) => json(&a),
+            Ok(Ok(verdict)) => verdict.json(),
             // A check that couldn't run refuses, never lets through.
-            Ok(Err(t)) => json!({ "ok": false, "checked": true, "reason": t.message }),
+            Ok(Err(f)) => json!({ "ok": false, "checked": true, "reason": f.to_string() }),
             Err(e) => json!({ "ok": false, "checked": true, "reason": e.to_string() }),
         }
     }
 
-    /// `verify.lineage(pid)`: a process and the ones above it, as pids.
+    /// `verify.lineage(pid)`: a process and the ones above it, as pids;
+    /// null where XenoNet can't look. For the reports' matcher, which
+    /// still reads it as an `Arg`; goes when that's typed.
     pub fn lineage(&self, pid: &Arg) -> Arg {
-        let mut c = VerifyCalls { sys: &self.sys, peer: None };
-        self.verifier.lineage(&mut c, pid).unwrap_or(Arg::Null)
+        let mut h = Lookups { sys: &self.sys, peer: None };
+        match self.verifier.lineage(&mut h, pid.as_f64()) {
+            Some(pids) => Arg::List(pids.into_iter().map(Arg::Num).collect()),
+            None => Arg::Null,
+        }
     }
 }
 
 #[async_trait]
 impl Verify for Checks {
     async fn check(&self, peer: Peer, id: &str, hook: bool) -> Value {
-        let id = Arg::text(id);
-        self.run(Some(peer), move |v, c| v.check(c, &id, hook)).await
+        let id = id.to_string();
+        self.run(Some(peer), move |v, h| v.check(h, &id, hook)).await
     }
     async fn person(&self, peer: Peer) -> Value {
-        self.run(Some(peer), |v, c| v.person(c)).await
+        self.run(Some(peer), |v, h| Ok(v.person(h))).await
     }
     async fn window(&self, peer: Peer) -> Value {
-        self.run(Some(peer), |v, c| v.window(c)).await
+        self.run(Some(peer), |v, h| Ok(v.window(h))).await
     }
     async fn desktop(&self, peer: Option<Peer>) -> Value {
         let connected = peer.is_some();
-        self.run(peer, move |v, c| v.desktop(c, connected)).await
+        self.run(peer, move |v, h| Ok(v.desktop(h, connected))).await
     }
     async fn tray(&self, peer: Peer, home: &str) -> Value {
         let apps = tray_apps(home);
-        self.run(Some(peer), move |v, c| v.tray(c, &apps)).await
+        self.run(Some(peer), move |v, h| Ok(v.tray(h, &apps))).await
     }
     async fn actor(&self, peer: Peer, slug: &str, product: Value, pid: Value) -> Value {
-        let who = crate::js::obj(vec![("slug", Arg::text(slug)), ("product", crate::js::arg(&product))]);
-        let pid = crate::js::arg(&pid);
-        self.run(Some(peer), move |v, c| v.actor(c, &who, &pid)).await
+        let (slug, product, pid) = (slug.to_string(), product_of(&product), pid_of(&pid));
+        self.run(Some(peer), move |v, h| Ok(v.actor(h, &slug, product.as_deref(), pid))).await
     }
     async fn register(&self, peer: Peer, product: Value, pid: Value) -> Value {
-        let (product, pid) = (crate::js::arg(&product), crate::js::arg(&pid));
-        self.run(Some(peer), move |v, c| v.register(c, &product, &pid)).await
+        let (product, pid) = (product_of(&product), pid_of(&pid));
+        self.run(Some(peer), move |v, h| Ok(v.register(h, product.as_deref(), pid))).await
     }
     async fn asker(&self, peer: Peer) -> Value {
-        self.run(Some(peer), |v, c| v.asker(c)).await
+        self.run(Some(peer), |v, h| Ok(v.asker(h))).await
     }
     async fn peer(&self, peer: Peer) -> String {
-        let pid = self.run(Some(peer), |v, c| v.peer(c)).await;
+        let (v, sys) = (self.verifier.clone(), self.sys.clone());
+        let pid = tokio::task::spawn_blocking(move || v.peer(&mut Lookups { sys: &sys, peer: Some(peer) })).await;
         match pid {
-            Value::Number(_) => text(&crate::js::arg(&pid)),
+            Ok(Some(pid)) => xenonet_base::json::number_string(pid),
             _ => "?".into(),
         }
     }
@@ -158,7 +186,7 @@ impl Verify for Checks {
             "refused": number(c.refused),
             "unchecked": number(c.unchecked),
             "unseen": number(c.unseen),
-            "lastRefusal": c.last_refusal.as_ref().map_or(Value::Null, json),
+            "lastRefusal": c.last_refusal.as_ref().map_or(Value::Null, |r| json!({ "agent": r.agent, "reason": r.reason, "at": number(r.at) })),
         })
     }
 }
@@ -178,7 +206,7 @@ mod tests {
         // A loopback address with no connection behind it: nothing owns it.
         let peer = Peer::new("127.0.0.1:9".parse().unwrap(), "127.0.0.1:1".parse().unwrap());
         let v = c.check(peer, "claude:0190d3e0-0000-7000-8000-000000000001", false).await;
-        // No process on the other end: let through unchecked, as the JS did.
+        // No process on the other end: let through unchecked.
         assert_eq!(v["ok"], true, "{v}");
         let you = c.person(peer).await;
         if c.sys.procs.chains {
@@ -195,6 +223,8 @@ mod tests {
             "requests in gemini-cli:x's name are refused: XenoNet can't tell Gemini CLI's processes apart, so it can't check that the request comes from that session"
         );
         assert_eq!(c.state()["unchecked"], json!(if c.sys.procs.chains { 1 } else { 2 }));
+        let last = &c.state()["lastRefusal"];
+        assert_eq!((last["agent"].clone(), last["reason"].clone()), (json!("gemini-cli:x"), other["reason"].clone()));
     }
 
     // A made-up Mac, answering the commands procs asks for: the Claude app
@@ -299,5 +329,13 @@ mod tests {
         assert_eq!(c.peer(from(51001)).await, "400");
         assert_eq!(c.state()["refused"], json!(3));
         assert_eq!(c.lineage(&Arg::Num(220.0)), Arg::List(vec![Arg::Num(220.0), Arg::Num(200.0), Arg::Num(100.0)]));
+        // An actor's own script from the plain terminal, and the chain its
+        // verdict shows; a pid that's no number names no process of its.
+        let own = c.actor(from(51001), "wren", Value::Null, Value::Null).await;
+        assert_eq!((own["ok"].clone(), own["root"]["pid"].clone(), own["chain"].as_array().map(Vec::len)), (json!(true), json!(400), Some(1)), "{own}");
+        let chain: Vec<Arg> = own["chain"].as_array().unwrap().iter().map(crate::js::arg).collect();
+        assert_eq!(own_of(&chain).len(), 1, "no app above the shell");
+        let named = c.actor(from(51001), "wren", Value::Null, json!("400")).await;
+        assert_eq!(named["reason"], "the pid it names has to be the calling process or one of its parents", "{named}");
     }
 }

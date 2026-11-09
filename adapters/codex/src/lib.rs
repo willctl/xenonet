@@ -4,8 +4,9 @@
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
-use xenonet_adapter::delivery::Ways;
+use xenonet_adapter::delivery::{Start, Ways};
 use xenonet_adapter::processes::Rules;
+use xenonet_adapter::reader::Tailed;
 use xenonet_adapter::{Check, Platform};
 
 /// A pattern compiled once.
@@ -31,8 +32,15 @@ fn resume(id: &str, _: Option<&str>) -> (String, Vec<String>) {
     ("codex".into(), vec!["exec".into(), "resume".into(), id.to_string(), "-".into()])
 }
 
+// codex exec --json -C <folder> -: the prompt goes on standard input, and
+// Codex names the new thread in its first event.
+fn start(s: &Start<'_>) -> (String, Vec<String>) {
+    ("codex".into(), ["exec", "--json", "-C", s.cwd, "-"].into_iter().map(str::to_string).collect())
+}
+
 pub mod checks;
 pub mod connect;
+pub mod reader;
 
 /// The adapter.
 pub struct Adapter(&'static App);
@@ -58,10 +66,14 @@ impl Platform for Adapter {
     }
 
     fn delivery(&self) -> Option<Ways> {
-        Some(Ways { resume: Some(resume), marks: Some("CODEX_"), ..Ways::default() })
+        Some(Ways { resume: Some(resume), start: Some(start), marks: Some("CODEX_"), ..Ways::default() })
     }
 
     fn connect(&self, app: &App, shared: &Shared) -> Option<Box<dyn Format>> {
         Some(connect::format(app, shared))
+    }
+
+    fn tailed(&self) -> Option<Box<dyn Tailed>> {
+        Some(Box::new(reader::Reader::new()))
     }
 }

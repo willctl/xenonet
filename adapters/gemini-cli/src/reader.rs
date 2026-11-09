@@ -4,18 +4,18 @@
 //! (`chats/<parent>/<id>.jsonl`) under the session that started it, and its
 //! write_file and replace calls' files as its edits.
 
-use super::files::Files;
-use super::{
-    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
-    EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
-};
-use crate::session::{RunSession, Via};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use xenonet_base::json;
 use xenonet_base::nodepath::NATIVE;
 use xenonet_base::ordered::OrderedMap;
 use xenonet_base::text::{is_blank, js_trim, js_trim_start, truthy};
+use xenonet_sources::native::files::Files;
+use xenonet_sources::native::{
+    by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
+    EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
+};
+use xenonet_sources::session::{RunSession, Via};
 
 pub const SOURCE: &str = "google/gemini-cli/chat-record";
 /// The tools whose calls are edits, as the app registry has them.
@@ -359,6 +359,31 @@ pub fn chat_out(c: &Chat) -> Out {
         ("updatedAt", Out::opt_num(c.updated_at)),
         ("edits", Out::Arr(c.edits.iter().map(|e| Out::Obj(vec![("path", Out::str(&e.path)), ("at", Out::opt_num(e.at))])).collect())),
     ])
+}
+
+/// The reader's row on the map: Gemini CLI's folder (GEMINI_CLI_HOME, else
+/// under the home folder).
+pub struct Row;
+
+impl xenonet_adapter::reader::Native for Row {
+    fn source(&self) -> &'static str {
+        "gemini-cli"
+    }
+    fn block(&self) -> &'static str {
+        "gemini-cli-sessions"
+    }
+    fn what(&self) -> &'static str {
+        "Gemini CLI's folder"
+    }
+    fn schema(&self) -> &'static str {
+        SOURCE
+    }
+    fn at(&self, paths: &xenonet_adapter::reader::Paths<'_>) -> String {
+        gemini_root(paths.var("GEMINI_CLI_HOME").as_deref(), paths.home_dir)
+    }
+    fn make(&self) -> Box<dyn NativeReader> {
+        Box::new(GeminiCli::new())
+    }
 }
 
 #[cfg(test)]

@@ -207,7 +207,7 @@ impl Reports for ReportsDriver {
     }
     fn own_of(&self, chain: &Value) -> Vec<u32> {
         let chain = crate::js::list(arg(chain));
-        xenonet_engine::verify::own_of(&chain).iter().filter_map(|p| p.field("pid").as_f64()).filter(|p| p.is_finite() && *p >= 0.0).map(|p| p as u32).collect()
+        crate::verify::own_of(&chain).iter().filter_map(|p| p.field("pid").as_f64()).filter(|p| p.is_finite() && *p >= 0.0).map(|p| p as u32).collect()
     }
 }
 

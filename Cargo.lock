@@ -2222,7 +2222,6 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-base",
  "xenonet-engine",
- "xenonet-schema",
 ]
 
 [[package]]
@@ -2233,6 +2232,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "xenonet-base",
  "xenonet-model",
  "xenonet-schema",
@@ -2293,6 +2293,7 @@ dependencies = [
  "serde_json",
  "xenonet-adapter",
  "xenonet-base",
+ "xenonet-sources",
 ]
 
 [[package]]
@@ -2314,6 +2315,7 @@ dependencies = [
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
+ "xenonet-hermes",
  "xenonet-hosts",
  "xenonet-mcp",
  "xenonet-platforms",
@@ -2335,6 +2337,7 @@ dependencies = [
  "serde_json",
  "xenonet-adapter",
  "xenonet-base",
+ "xenonet-sources",
 ]
 
 [[package]]
@@ -2349,6 +2352,27 @@ dependencies = [
  "sha2 0.10.9",
  "xenonet-app",
  "xenonet-base",
+]
+
+[[package]]
+name = "xenonet-copilot"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
+ "xenonet-sources",
+]
+
+[[package]]
+name = "xenonet-cursor"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
+ "xenonet-schema",
+ "xenonet-sources",
 ]
 
 [[package]]
@@ -2380,6 +2404,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-gemini-cli"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
+ "xenonet-sources",
+]
+
+[[package]]
+name = "xenonet-grok-bot"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
+]
+
+[[package]]
 name = "xenonet-grok-build"
 version = "0.2.0"
 dependencies = [
@@ -2388,6 +2431,21 @@ dependencies = [
  "serde_json",
  "xenonet-adapter",
  "xenonet-base",
+ "xenonet-claude-code",
+ "xenonet-sources",
+]
+
+[[package]]
+name = "xenonet-hermes"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "serde_json",
+ "xenonet-actors",
+ "xenonet-adapter",
+ "xenonet-base",
+ "xenonet-schema",
 ]
 
 [[package]]
@@ -2449,6 +2507,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-muse"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-adapter",
+ "xenonet-base",
+]
+
+[[package]]
 name = "xenonet-net"
 version = "0.2.0"
 dependencies = [
@@ -2468,19 +2535,33 @@ dependencies = [
 name = "xenonet-opencode"
 version = "0.2.0"
 dependencies = [
+ "rusqlite",
+ "serde_json",
  "xenonet-adapter",
+ "xenonet-base",
+ "xenonet-schema",
+ "xenonet-sources",
 ]
 
 [[package]]
 name = "xenonet-platforms"
 version = "0.2.0"
 dependencies = [
+ "rusqlite",
  "serde_json",
  "xenonet-adapter",
+ "xenonet-base",
  "xenonet-claude-code",
  "xenonet-codex",
+ "xenonet-copilot",
+ "xenonet-cursor",
+ "xenonet-gemini-cli",
+ "xenonet-grok-bot",
  "xenonet-grok-build",
+ "xenonet-hermes",
+ "xenonet-muse",
  "xenonet-opencode",
+ "xenonet-sources",
 ]
 
 [[package]]
@@ -2532,7 +2613,7 @@ dependencies = [
  "sha2 0.10.9",
  "xenonet-adapter",
  "xenonet-base",
- "xenonet-schema",
+ "xenonet-platforms",
 ]
 
 [[package]]
@@ -2615,6 +2696,7 @@ dependencies = [
  "xenonet-app",
  "xenonet-base",
  "xenonet-blocks",
+ "xenonet-platforms",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",

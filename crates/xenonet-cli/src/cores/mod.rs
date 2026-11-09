@@ -59,15 +59,9 @@ use crate::sys;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use xenonet_engine::peer::Thrown;
 use xenonet_sources::refusals::store::{Refusals, StoreError};
 
 type Res<T> = Result<T, Fail>;
-
-/// What a core threw, as the command says it (`xenonet: <message>`).
-pub(crate) fn thrown(t: Thrown) -> Fail {
-    Fail::error(t.message)
-}
 
 fn fs_fail(e: xenonet_base::fs::FsError) -> Fail {
     Fail::error(e.message)

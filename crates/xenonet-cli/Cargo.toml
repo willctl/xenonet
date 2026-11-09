@@ -28,6 +28,8 @@ xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 xenonet-base.workspace = true
+# XenoNet's plugin for Hermes, which xenonet connect hermes puts in place.
+xenonet-hermes.workspace = true
 # The doctor's groups of checks, which xenonet doctor --help lists.
 xenonet-doctor.workspace = true
 xenonet-mcp.workspace = true

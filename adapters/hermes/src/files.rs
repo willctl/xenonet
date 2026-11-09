@@ -1,10 +1,10 @@
 //! Hermes Agent's state on this machine, read for metadata only
-//! (core/actors/hermes-files.js; docs/design/actors/hermes.md, sections 2
-//! and 5): its build stamp, its spawn ledger, and for each profile its
-//! gateway's state, its scheduler's ticker, its background processes, its
-//! scheduled jobs and its session database. Each source is read against
-//! its vendor schema through the lenient readers, so a change in Hermes's
-//! formats shows as drift rather than as a quiet observer.
+//! (docs/design/actors/hermes.md, sections 2 and 5): its build stamp, its
+//! spawn ledger, and for each profile its gateway's state, its
+//! scheduler's ticker, its background processes, its scheduled jobs and
+//! its session database. Each source is read against its vendor schema
+//! through the lenient readers, so a change in Hermes's formats shows as
+//! drift rather than as a quiet observer.
 //!
 //! What's never read: .env, auth.json, pairing/, mcp-tokens/, the desktop
 //! app's connection and token files, logs, memories, cron output, and in
@@ -14,15 +14,21 @@
 //! file it wrote, which SQLite takes out (json_extract).
 //!
 //! Every reader answers { state, ... }: ok, missing, denied or unreadable.
-//! The files, the folders, the vendor readers and the database are the
-//! twin's ("files", "dirs", "vendor", and open/all/get/close).
 
-use crate::registry::value_arg;
 use serde_json::{json, Map, Value};
-use xenonet_engine::jsre::js;
-use xenonet_engine::peer::{list, Calls, Result, Thrown};
-use xenonet_engine::sql::Arg;
+use xenonet_adapter::observe::{Fail, ObserverHost, Result};
+use xenonet_base::json::number;
+use xenonet_base::text::{js_string, js_trim, JS_SPACE};
 use xenonet_schema::drift::clean_version;
+
+/// A pattern compiled once.
+macro_rules! re {
+    ($p:expr) => {{
+        static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        R.get_or_init(|| regex::Regex::new(&$p).expect("a pattern that compiles"))
+    }};
+}
+pub(crate) use re;
 
 pub const SOURCE: [(&str, &str); 7] = [
     ("stamp", "nous/hermes-agent/install-stamp"),
@@ -41,47 +47,42 @@ fn source(k: &str) -> &'static str {
 /// The tool names whose `path` argument is a file Hermes changed.
 pub const EDIT_TOOLS: [&str; 2] = ["write_file", "patch"];
 
-fn code_of(t: &Thrown) -> Option<&str> {
-    t.code.as_deref().and_then(Value::as_str)
-}
-
 // What a failed read says, by the error's code.
-fn state_of(t: &Thrown) -> &'static str {
-    match code_of(t) {
+fn state_of(f: &Fail) -> &'static str {
+    match f.code.as_deref() {
         Some("ENOENT" | "ENOTDIR") => "missing",
         Some("EACCES" | "EPERM") => "denied",
         _ => "unreadable",
     }
 }
 
+fn code_value(f: &Fail) -> Value {
+    f.code.clone().map_or(Value::Null, Value::String)
+}
+
 /// Hermes's times, epoch seconds (floats) or ISO 8601, as epoch
-/// milliseconds; None for anything else. A text is read as Date.parse
-/// reads it (`date_parse`: the twin's, since a time without an offset is
-/// the system zone's).
-pub fn ms_of(v: &Value, date_parse: &mut dyn FnMut(&str) -> Option<f64>) -> Option<f64> {
+/// milliseconds; None for anything else.
+pub fn ms_of(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => {
             let f = n.as_f64()?;
             (f.is_finite() && f > 0.0).then(|| if f > 1e11 { xenonet_base::units::js_round(f) } else { xenonet_base::units::js_round(f * 1000.0) })
         }
-        Value::String(s) if !s.is_empty() => date_parse(s).filter(|t| t.is_finite()),
+        Value::String(s) if !s.is_empty() => xenonet_base::time::parse_iso(s).filter(|t| t.is_finite()),
         _ => None,
     }
-}
-
-/// Date.parse, through the twin ("dateParse").
-pub fn parse_date(c: &mut dyn Calls) -> impl FnMut(&str) -> Option<f64> + '_ {
-    move |s: &str| c.call("", "dateParse", vec![Arg::text(s)]).ok().and_then(|v| v.as_f64())
 }
 
 /// Whether a process start Hermes recorded is the one the process table
 /// says (to the second): psutil's epoch seconds in the ledger, centiseconds
 /// of the epoch in the gateway's and the background processes' records on
 /// macOS.
-pub fn same_start(recorded: &Value, table_start: &Value, slack: f64) -> bool {
+pub fn same_start(recorded: &Value, table_start: f64, slack: f64) -> bool {
     let Some(r) = recorded.as_f64().filter(|r| r.is_finite()) else { return false };
-    let Some(t) = table_start.as_f64().filter(|t| *t != 0.0 && !t.is_nan()) else { return false };
-    [r * 1000.0, r * 10.0, r].iter().any(|ms| (ms - t).abs() <= slack)
+    if table_start == 0.0 || table_start.is_nan() {
+        return false;
+    }
+    [r * 1000.0, r * 10.0, r].iter().any(|ms| (ms - table_start).abs() <= slack)
 }
 
 enum Read {
@@ -89,19 +90,11 @@ enum Read {
     Failed(&'static str, Value),
 }
 
-fn read_text(c: &mut dyn Calls, file: &str) -> Read {
-    match c.call("files", "readFileSync", vec![Arg::text(file), Arg::text("utf8")]) {
-        Ok(v) => Read::Ok(xenonet_engine::store::js_text(&v)),
-        Err(t) => Read::Failed(state_of(&t), t.code.as_deref().cloned().unwrap_or(Value::Null)),
+fn read_text(h: &dyn ObserverHost, file: &str) -> Read {
+    match h.files().read_text(file) {
+        Ok(t) => Read::Ok(t),
+        Err(f) => Read::Failed(state_of(&f), code_value(&f)),
     }
-}
-
-fn vendor(c: &mut dyn Calls, op: &str, args: Vec<Arg>) -> Result<Arg> {
-    c.call("vendor", op, args)
-}
-
-fn version_arg(v: Option<&str>) -> Arg {
-    v.map_or(Arg::Null, Arg::text)
 }
 
 // A JSON file's value, or why it can't be had: (state, code).
@@ -112,22 +105,26 @@ type VersionOf<'a> = &'a dyn Fn(&Value) -> Option<String>;
 
 // A JSON file read against its source's schema: Ok(value) or Err((state,
 // code)).
-fn read_json(c: &mut dyn Calls, file: &str, src: &str, version: Option<String>, version_of: Option<VersionOf<'_>>) -> Result<Checked> {
-    let text = match read_text(c, file) {
+fn read_json(h: &dyn ObserverHost, file: &str, src: &str, version: Option<&str>, version_of: Option<VersionOf<'_>>) -> Checked {
+    let text = match read_text(h, file) {
         Read::Ok(t) => t,
-        Read::Failed(state, code) => return Ok(Err((state, code))),
+        Read::Failed(state, code) => return Err((state, code)),
     };
     // Hermes reads its files as utf-8-sig, so one may start with a BOM.
     let Ok(value) = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)) else {
-        vendor(c, "unparsable", vec![Arg::text(src), version_arg(version.as_deref())])?;
-        return Ok(Err(("unreadable", json!("not JSON"))));
+        h.vendor().unparsable(src, version);
+        return Err(("unreadable", json!("not JSON")));
     };
     let v = match version_of {
         Some(f) => f(&value),
-        None => version,
+        None => version.map(str::to_string),
     };
-    let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&value), version_arg(v.as_deref())])?;
-    Ok(if checked.is_nullish() { Err(("unreadable", json!("not what XenoNet reads"))) } else { Ok(checked.to_json()) })
+    let checked = h.vendor().check(src, &value, v.as_deref());
+    if checked.is_null() {
+        Err(("unreadable", json!("not what XenoNet reads")))
+    } else {
+        Ok(checked)
+    }
 }
 
 fn num(v: Option<&Value>) -> Value {
@@ -138,28 +135,24 @@ fn text(v: Option<&Value>) -> Value {
     v.filter(|x| x.as_str().is_some_and(|s| !s.is_empty())).cloned().unwrap_or(Value::Null)
 }
 
-fn ms(c: &mut dyn Calls, v: Option<&Value>) -> Value {
-    let mut p = parse_date(c);
-    v.and_then(|v| ms_of(v, &mut p)).map_or(Value::Null, xenonet_base::json::number)
+fn ms(v: Option<&Value>) -> Value {
+    v.and_then(ms_of).map_or(Value::Null, number)
 }
 
 // ---------- the install ----------
 
 /// The profiles, by name, with their folders: the default one is the root.
-pub fn list_profiles(c: &mut dyn Calls, root: &str) -> Result<Value> {
+pub fn list_profiles(h: &dyn ObserverHost, root: &str) -> Value {
     let mut out = vec![json!({ "name": "default", "home": root })];
     let profiles = join(root, "profiles");
-    let mut names: Vec<String> = match c.call("", "dirs", vec![Arg::text(&profiles)]) {
-        Ok(l) => list(l).iter().map(xenonet_engine::store::js_text).collect(),
-        Err(_) => Vec::new(),
-    };
-    names.sort_by(|a, b| xenonet_engine::js::utf16_cmp(a, b));
+    let mut names: Vec<String> = h.files().dirs(&profiles).unwrap_or_default();
+    names.sort_by(|a, b| xenonet_base::jsstr::cmp_units(a, b));
     for name in names {
         if name != "default" && !name.starts_with('.') {
             out.push(json!({ "name": name, "home": join(&profiles, &name) }));
         }
     }
-    Ok(Value::Array(out))
+    Value::Array(out)
 }
 
 fn join(a: &str, b: &str) -> String {
@@ -168,31 +161,24 @@ fn join(a: &str, b: &str) -> String {
 
 /// Whether Hermes is installed here: its root, with its checkout or its
 /// session database in it.
-pub fn installed(c: &mut dyn Calls, root: &str) -> Result<bool> {
-    for f in ["hermes-agent", "state.db"] {
-        if c.call("files", "existsSync", vec![Arg::text(join(root, f))])?.truthy() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+pub fn installed(h: &dyn ObserverHost, root: &str) -> bool {
+    ["hermes-agent", "state.db"].iter().any(|f| h.files().exists(&join(root, f)))
 }
 
 /// The build stamp: the release this build is of (baseVersion).
-pub fn read_stamp(c: &mut dyn Calls, root: &str) -> Result<Value> {
+pub fn read_stamp(h: &dyn ObserverHost, root: &str) -> Value {
     let file = join(&join(root, "hermes-agent"), "install-stamp.json");
-    let of = |v: &Value| {
-        v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&xenonet_engine::js::template(Some(s))).map(str::to_string))
-    };
-    Ok(match read_json(c, &file, source("stamp"), None, Some(&of))? {
+    let of = |v: &Value| v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&js_string(s)).map(str::to_string));
+    match read_json(h, &file, source("stamp"), None, Some(&of)) {
         Ok(v) => json!({ "state": "ok", "version": v.get("baseVersion").and_then(Value::as_str).filter(|s| !s.is_empty()).and_then(clean_version) }),
         Err((state, _)) => json!({ "state": state, "version": null }),
-    })
+    }
 }
 
 /// Hermes's long-lived processes as it keeps them: { pid, createTime,
 /// purpose, port, profile, spawnerPid }. Never argv.
-pub fn read_ledger(c: &mut dyn Calls, root: &str, version: Option<String>) -> Result<Value> {
-    Ok(match read_json(c, &join(root, "spawn-ledger.json"), source("ledger"), version, None)? {
+pub fn read_ledger(h: &dyn ObserverHost, root: &str, version: Option<&str>) -> Value {
+    match read_json(h, &join(root, "spawn-ledger.json"), source("ledger"), version, None) {
         Err((state, _)) => json!({ "state": state, "entries": [] }),
         Ok(v) => {
             let entries: Vec<Value> = v
@@ -205,12 +191,12 @@ pub fn read_ledger(c: &mut dyn Calls, root: &str, version: Option<String>) -> Re
                 .collect();
             json!({ "state": "ok", "entries": entries })
         }
-    })
+    }
 }
 
 /// The gateway as its state file says, or null with no file.
-pub fn read_gateway(c: &mut dyn Calls, home: &str, version: Option<String>) -> Result<Value> {
-    Ok(match read_json(c, &join(home, "gateway_state.json"), source("gateway"), version, None)? {
+pub fn read_gateway(h: &dyn ObserverHost, home: &str, version: Option<&str>) -> Value {
+    match read_json(h, &join(home, "gateway_state.json"), source("gateway"), version, None) {
         Err((state, _)) => json!({ "state": state, "gateway": null }),
         Ok(g) => {
             let platforms: Vec<Value> = match g.get("platforms") {
@@ -220,64 +206,62 @@ pub fn read_gateway(c: &mut dyn Calls, home: &str, version: Option<String>) -> R
             let active = num(g.get("active_agents"));
             json!({
                 "state": "ok",
-                "gateway": { "state": text(g.get("gateway_state")), "pid": num(g.get("pid")), "startTime": num(g.get("start_time")), "updatedAt": ms(c, g.get("updated_at")), "activeAgents": if active.is_null() { json!(0) } else { active }, "exitReason": text(g.get("exit_reason")), "platforms": platforms },
+                "gateway": { "state": text(g.get("gateway_state")), "pid": num(g.get("pid")), "startTime": num(g.get("start_time")), "updatedAt": ms(g.get("updated_at")), "activeAgents": if active.is_null() { json!(0) } else { active }, "exitReason": text(g.get("exit_reason")), "platforms": platforms },
             })
         }
-    })
+    }
 }
 
 /// The scheduler's ticker: { at, pid, lastSuccess }, or null.
-pub fn read_ticker(c: &mut dyn Calls, home: &str, version: Option<String>) -> Result<Value> {
+pub fn read_ticker(h: &dyn ObserverHost, home: &str, version: Option<&str>) -> Value {
     let cron = join(home, "cron");
-    let beat = read_text(c, &join(&cron, "ticker_heartbeat"));
-    let success = read_text(c, &join(&cron, "ticker_last_success"));
+    let beat = read_text(h, &join(&cron, "ticker_heartbeat"));
+    let success = read_text(h, &join(&cron, "ticker_last_success"));
     let state = |r: &Read| match r {
         Read::Ok(_) => "ok",
         Read::Failed(s, _) => s,
     };
     if let Some(f) = [&beat, &success].into_iter().find(|r| !matches!(state(r), "ok" | "missing")) {
-        return Ok(json!({ "state": state(f), "ticker": null }));
+        return json!({ "state": state(f), "ticker": null });
     }
     if state(&beat) == "missing" && state(&success) == "missing" {
-        return Ok(json!({ "state": "missing", "ticker": null }));
+        return json!({ "state": "missing", "ticker": null });
     }
     // "<epoch seconds> <pid>" and "<epoch seconds>".
     let words = |r: &Read| -> Vec<String> {
         match r {
-            Read::Ok(t) => js(r"\s+", false).split(xenonet_base::text::js_trim(t)).map(str::to_string).collect(),
+            Read::Ok(t) => re!(format!("[{JS_SPACE}]+")).split(js_trim(t)).map(str::to_string).collect(),
             Read::Failed(..) => Vec::new(),
         }
     };
-    let number = |w: Option<&String>| -> Option<f64> { w.filter(|w| js(r"^\d+(\.\d+)?$", false).is_match(w)).map(|w| w.parse::<f64>().unwrap_or(f64::NAN)) };
+    let number_of = |w: Option<&String>| -> Option<f64> { w.filter(|w| re!(r"^[0-9]+(\.[0-9]+)?$").is_match(w)).map(|w| w.parse::<f64>().unwrap_or(f64::NAN)) };
     let (b, s) = (words(&beat), words(&success));
     let (at, pid, last) = (b.first(), b.get(1), s.first());
-    if (state(&beat) == "ok" && number(at).is_none()) || (state(&success) == "ok" && number(last).is_none()) {
-        vendor(c, "unparsable", vec![Arg::text(source("ticker")), version_arg(version.as_deref())])?;
-        return Ok(json!({ "state": "unreadable", "ticker": null }));
+    if (state(&beat) == "ok" && number_of(at).is_none()) || (state(&success) == "ok" && number_of(last).is_none()) {
+        h.vendor().unparsable(source("ticker"), version);
+        return json!({ "state": "unreadable", "ticker": null });
     }
-    let n = |x: Option<f64>| x.map_or(Value::Null, xenonet_base::json::number);
+    let n = |x: Option<f64>| x.map_or(Value::Null, number);
     let heartbeat = if state(&beat) == "ok" {
-        let mut h = json!({ "at": n(number(at)) });
+        let mut hb = json!({ "at": n(number_of(at)) });
         if let Some(p) = pid {
-            h["pid"] = number(Some(p)).map_or(json!(p), xenonet_base::json::number);
+            hb["pid"] = number_of(Some(p)).map_or(json!(p), number);
         }
-        h
+        hb
     } else {
         Value::Null
     };
-    let record = json!({ "heartbeat": heartbeat, "last_success": if state(&success) == "ok" { json!({ "at": n(number(last)) }) } else { Value::Null } });
-    let checked = vendor(c, "check", vec![Arg::text(source("ticker")), value_arg(&record), version_arg(version.as_deref())])?.to_json();
+    let record = json!({ "heartbeat": heartbeat, "last_success": if state(&success) == "ok" { json!({ "at": n(number_of(last)) }) } else { Value::Null } });
+    let checked = h.vendor().check(source("ticker"), &record, version);
     let checked = if checked.is_null() { json!({}) } else { checked };
     let hb = checked.get("heartbeat");
-    Ok(
-        json!({ "state": "ok", "ticker": { "at": ms(c, hb.and_then(|h| h.get("at"))), "pid": num(hb.and_then(|h| h.get("pid"))), "lastSuccess": ms(c, checked.get("last_success").and_then(|l| l.get("at"))) } }),
-    )
+    json!({ "state": "ok", "ticker": { "at": ms(hb.and_then(|h| h.get("at"))), "pid": num(hb.and_then(|h| h.get("pid"))), "lastSuccess": ms(checked.get("last_success").and_then(|l| l.get("at"))) } })
 }
 
 /// The background processes Hermes's terminal tool runs. Never their
 /// commands.
-pub fn read_processes(c: &mut dyn Calls, home: &str, version: Option<String>) -> Result<Value> {
-    Ok(match read_json(c, &join(home, "processes.json"), source("processes"), version, None)? {
+pub fn read_processes(h: &dyn ObserverHost, home: &str, version: Option<&str>) -> Value {
+    match read_json(h, &join(home, "processes.json"), source("processes"), version, None) {
         Err((state, _)) => json!({ "state": state, "entries": [] }),
         Ok(v) => {
             let entries: Vec<Value> = v
@@ -286,16 +270,16 @@ pub fn read_processes(c: &mut dyn Calls, home: &str, version: Option<String>) ->
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|e| e.is_object() && num(e.get("pid")).as_f64().is_some_and(|p| p != 0.0) && e.get("pid_scope").is_none_or(|s| s.is_null() || s.as_str() == Some("host")))
-                .map(|e| json!({ "pid": e["pid"], "startTime": num(e.get("host_start_time")), "cwd": text(e.get("cwd")), "startedAt": ms(c, e.get("started_at")), "session": text(e.get("parent_session_id")) }))
+                .map(|e| json!({ "pid": e["pid"], "startTime": num(e.get("host_start_time")), "cwd": text(e.get("cwd")), "startedAt": ms(e.get("started_at")), "session": text(e.get("parent_session_id")) }))
                 .collect();
             json!({ "state": "ok", "entries": entries })
         }
-    })
+    }
 }
 
 /// Scheduled jobs. Never names, prompts or destinations.
-pub fn read_jobs(c: &mut dyn Calls, home: &str, version: Option<String>) -> Result<Value> {
-    Ok(match read_json(c, &join(&join(home, "cron"), "jobs.json"), source("jobs"), version, None)? {
+pub fn read_jobs(h: &dyn ObserverHost, home: &str, version: Option<&str>) -> Value {
+    match read_json(h, &join(&join(home, "cron"), "jobs.json"), source("jobs"), version, None) {
         Err((state, _)) => json!({ "state": state, "jobs": [] }),
         Ok(v) => {
             let jobs: Vec<Value> = v
@@ -305,11 +289,11 @@ pub fn read_jobs(c: &mut dyn Calls, home: &str, version: Option<String>) -> Resu
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|j| j.is_object() && !text(j.get("id")).is_null())
-                .map(|j| json!({ "id": j["id"], "status": text(j.get("last_status")), "state": text(j.get("state")), "enabled": j.get("enabled") != Some(&Value::Bool(false)), "workdir": text(j.get("workdir")), "lastRunAt": ms(c, j.get("last_run_at")), "nextRunAt": ms(c, j.get("next_run_at")) }))
+                .map(|j| json!({ "id": j["id"], "status": text(j.get("last_status")), "state": text(j.get("state")), "enabled": j.get("enabled") != Some(&Value::Bool(false)), "workdir": text(j.get("workdir")), "lastRunAt": ms(j.get("last_run_at")), "nextRunAt": ms(j.get("next_run_at")) }))
                 .collect();
             json!({ "state": "ok", "jobs": jobs })
         }
-    })
+    }
 }
 
 // ---------- a profile's state.db ----------
@@ -417,14 +401,6 @@ fn tool_paths_sql(with_time: bool) -> String {
     )
 }
 
-fn rows(c: &mut dyn Calls, sql: &str, args: Vec<Arg>) -> Result<Vec<Value>> {
-    Ok(list(c.call("db", "all", vec![Arg::text(sql), Arg::List(args)])?).iter().map(Arg::to_json).collect())
-}
-
-fn row(c: &mut dyn Calls, sql: &str, args: Vec<Arg>) -> Result<Value> {
-    Ok(c.call("db", "get", vec![Arg::text(sql), Arg::List(args)])?.to_json())
-}
-
 fn empty(after_id: &Value) -> Value {
     json!({ "version": null, "sessions": [], "messages": [], "toolPaths": [], "heartbeats": [], "modelUsage": [], "lastId": after_id })
 }
@@ -443,40 +419,42 @@ fn with_state(state: &str, code: Option<Value>, rest: Value) -> Value {
     Value::Object(o)
 }
 
-/// What's new in a profile's session database since the last read.
-/// Through the twin's "db": open(file) opens the file read only,
-/// all/get(sql, args) query it, close() closes it.
-pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: &Value, session_ids: &[Value]) -> Result<Value> {
-    if !c.call("files", "existsSync", vec![Arg::text(file)])?.truthy() {
-        return Ok(with_state("missing", None, empty(after_id)));
+/// What's new in a profile's session database since the last read. The
+/// database is opened read only, queried, and closed.
+pub fn read_state_db(h: &dyn ObserverHost, file: &str, after_id: &Value, since_ms: f64, session_ids: &[Value]) -> Value {
+    if !h.files().exists(file) {
+        return with_state("missing", None, empty(after_id));
     }
-    if let Err(t) = c.call("db", "open", vec![Arg::text(file)]) {
-        let denied = js(r"permission|EACCES|EPERM|authoriz", true).is_match(&t.message);
-        return Ok(with_state(if denied { "denied" } else { "unreadable" }, Some(t.code.as_deref().cloned().unwrap_or(Value::Null)), empty(after_id)));
+    let db = h.db();
+    if let Err(f) = db.open(file) {
+        let denied = re!(r"(?i)permission|EACCES|EPERM|authoriz").is_match(&f.message);
+        return with_state(if denied { "denied" } else { "unreadable" }, Some(code_value(&f)), empty(after_id));
     }
+    let rows = |sql: &str, args: Vec<Value>| db.all(sql, &args);
+    let row = |sql: &str, args: Vec<Value>| db.get(sql, &args);
     let out = (|| -> Result<Value> {
         let src = source("stateDb");
         let mut has: Vec<(&str, Vec<String>)> = Vec::new();
         for table in ["sessions", "messages", "gateway_heartbeats", "schema_version", "session_model_usage"] {
-            let cols = rows(c, &format!("PRAGMA table_info({table})"), vec![])?.iter().filter_map(|r| r.get("name").and_then(Value::as_str).map(str::to_string)).collect();
+            let cols = rows(&format!("PRAGMA table_info({table})"), vec![])?.iter().filter_map(|r| r.get("name").and_then(Value::as_str).map(str::to_string)).collect();
             has.push((table, cols));
         }
         let cols = |t: &str| has.iter().find(|(n, _)| *n == t).map(|(_, c)| c.clone()).unwrap_or_default();
         let has_col = |t: &str, col: &str| cols(t).iter().any(|c| c == col);
         let version = if has_col("schema_version", "version") {
-            let v = row(c, "SELECT max(version) AS v FROM schema_version", vec![])?;
-            let v = v.get("v").filter(|v| !v.is_null()).map(|v| xenonet_engine::js::template(Some(v))).unwrap_or_default();
+            let v = row("SELECT max(version) AS v FROM schema_version", vec![])?;
+            let v = v.get("v").filter(|v| !v.is_null()).map(js_string).unwrap_or_default();
             clean_version(&v).map(str::to_string)
         } else {
             None
         };
         for (table, needed) in NEEDED {
             if cols(table).is_empty() {
-                vendor(c, "missing", vec![Arg::text(src), Arg::text(table), version_arg(version.as_deref())])?;
+                h.vendor().missing(src, table, version.as_deref());
             } else {
                 for col in needed {
                     if !has_col(table, col) {
-                        vendor(c, "missing", vec![Arg::text(src), Arg::text(format!("{table}[].{col}")), version_arg(version.as_deref())])?;
+                        h.vendor().missing(src, &format!("{table}[].{col}"), version.as_deref());
                     }
                 }
             }
@@ -486,12 +464,12 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
             v["version"] = version.clone().map_or(Value::Null, Value::String);
             return Ok(v);
         }
-        let since = since_ms.as_f64().unwrap_or(0.0) / 1000.0;
+        let since = since_ms / 1000.0;
         let pick = |wanted: &[&str], table: &str| -> Vec<String> { wanted.iter().filter(|c| has_col(table, c)).map(ToString::to_string).collect() };
         // The messages since the last read: from the last one read, or on
         // a first read (or after the file was made again) the recent ones
         // among the last few thousand.
-        let max_id = row(c, "SELECT max(id) AS n FROM messages", vec![])?.get("n").and_then(Value::as_f64).unwrap_or(0.0);
+        let max_id = row("SELECT max(id) AS n FROM messages", vec![])?.get("n").and_then(Value::as_f64).unwrap_or(0.0);
         let from = match after_id.as_f64() {
             Some(a) if a <= max_id => a,
             _ => (max_id - FIRST_ROWS).max(0.0),
@@ -502,21 +480,21 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         }
         let timed = has_col("messages", "timestamp");
         let time = if timed { " AND timestamp > ?" } else { "" };
-        let mut args = vec![Arg::Num(from)];
+        let mut args = vec![number(from)];
         if timed {
-            args.push(Arg::Num(since));
+            args.push(number(since));
         }
-        let messages = rows(c, &format!("SELECT {} FROM messages WHERE id > ?{time} ORDER BY id LIMIT {MESSAGES_MAX}", msg_cols.join(", ")), args)?;
+        let messages = rows(&format!("SELECT {} FROM messages WHERE id > ?{time} ORDER BY id LIMIT {MESSAGES_MAX}", msg_cols.join(", ")), args)?;
         let last_id = match messages.last() {
             Some(m) if messages.len() == MESSAGES_MAX => m["id"].clone(),
-            _ => xenonet_base::json::number(max_id),
+            _ => number(max_id),
         };
         let tool_paths = if has_col("messages", "tool_calls") && has_col("messages", "role") {
-            let mut args = vec![Arg::Num(from), value_arg(&last_id)];
+            let mut args = vec![number(from), last_id.clone()];
             if timed {
-                args.push(Arg::Num(since));
+                args.push(number(since));
             }
-            rows(c, &tool_paths_sql(timed), args)?
+            rows(&tool_paths_sql(timed), args)?
         } else {
             Vec::new()
         };
@@ -542,21 +520,21 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
         } else {
             wheres.push(format!("{active} > ?"));
         }
-        let mut args = vec![Arg::text(xenonet_base::json::stringify(&Value::Array(ids), 0)), Arg::Num(since)];
+        let mut args = vec![json!(xenonet_base::json::stringify(&Value::Array(ids), 0)), number(since)];
         if ended {
-            args.push(Arg::Num(since));
+            args.push(number(since));
         }
         let sessions =
-            rows(c, &format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
+            rows(&format!("SELECT {} FROM sessions WHERE {} ORDER BY started_at DESC LIMIT 500", pick(&SESSION_COLUMNS, "sessions").join(", "), wheres.join(" OR ")), args)?;
         // Each of those sessions' use by model and provider, summed over its tasks.
         let model_usage = if !sessions.is_empty() && has_col("session_model_usage", "session_id") && has_col("session_model_usage", "model") {
             let ids: Vec<Value> = sessions.iter().map(|s| s.get("id").cloned().unwrap_or(Value::Null)).collect();
-            rows(c, &model_usage_sql(&cols("session_model_usage")), vec![Arg::text(xenonet_base::json::stringify(&Value::Array(ids), 0))])?
+            rows(&model_usage_sql(&cols("session_model_usage")), vec![json!(xenonet_base::json::stringify(&Value::Array(ids), 0))])?
         } else {
             Vec::new()
         };
         let heartbeats = if has_col("gateway_heartbeats", "pid") {
-            rows(c, &format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])?
+            rows(&format!("SELECT {} FROM gateway_heartbeats", pick(&HEARTBEAT_COLUMNS, "gateway_heartbeats").join(", ")), vec![])?
         } else {
             Vec::new()
         };
@@ -565,7 +543,7 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
             None => json!([]),
         };
         let record = json!({ "schema_version": schema_version, "sessions": sessions, "messages": messages, "tool_paths": tool_paths, "gateway_heartbeats": heartbeats, "session_model_usage": model_usage });
-        let checked = vendor(c, "check", vec![Arg::text(src), value_arg(&record), version_arg(version.as_deref())])?.to_json();
+        let checked = h.vendor().check(src, &record, version.as_deref());
         let checked = if checked.is_null() { json!({}) } else { checked };
         let arr = |k: &str| checked.get(k).filter(|v| !v.is_null()).cloned().unwrap_or(json!([]));
         // Archived compaction generations are history, not new work.
@@ -574,12 +552,12 @@ pub fn read_state_db(c: &mut dyn Calls, file: &str, after_id: &Value, since_ms: 
             json!({ "state": "ok", "version": version, "sessions": arr("sessions"), "messages": messages, "toolPaths": arr("tool_paths"), "heartbeats": arr("gateway_heartbeats"), "modelUsage": arr("session_model_usage"), "lastId": last_id }),
         )
     })();
-    let _ = c.call("db", "close", vec![]);
+    db.close();
     match out {
-        Ok(v) => Ok(v),
-        Err(t) => {
-            let busy = js(r"SQLITE_BUSY|locked", true).is_match(&t.message);
-            Ok(with_state(if busy { "busy" } else { "unreadable" }, Some(t.code.as_deref().cloned().unwrap_or(Value::Null)), empty(after_id)))
+        Ok(v) => v,
+        Err(f) => {
+            let busy = re!(r"(?i)SQLITE_BUSY|locked").is_match(&f.message);
+            with_state(if busy { "busy" } else { "unreadable" }, Some(code_value(&f)), empty(after_id))
         }
     }
 }

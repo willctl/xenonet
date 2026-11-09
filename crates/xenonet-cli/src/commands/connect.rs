@@ -140,9 +140,9 @@ pub fn connected() -> Vec<&'static str> {
 
 /// XenoNet's plugin for Hermes Agent: copied into Hermes's plugins folder,
 /// and off until the owner turns it on and gives it a token
-/// (xenonet_base::hermes_plugin).
+/// (xenonet_hermes::plugin).
 fn hermes(flags: &Flags) -> Done {
-    use xenonet_base::hermes_plugin as hp;
+    use xenonet_hermes::plugin as hp;
     let home = crate::sys::home();
     let hh = std::env::var("HERMES_HOME").ok();
     let before = hp::inspect(&home, hh.as_deref(), crate::out::now());

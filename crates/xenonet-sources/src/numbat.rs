@@ -43,11 +43,11 @@ pub fn run_id(sid: &str) -> String {
 }
 
 /// A run's session id. OpenCode's runs take the id its own reader gives
-/// them (ses_… as ses-…, native/opencode.rs) when that fits, so a run both
+/// them (ses_… as ses-…, xenonet_base::opencode) when that fits, so a run both
 /// read is one session, and delivery finds it.
 pub fn session_id_of(app: &str, sid: &str) -> String {
     if app == "opencode" {
-        let own = crate::native::opencode::local_id(sid);
+        let own = xenonet_base::opencode::local_id(sid);
         if fits_id(&own, 128) {
             return format!("opencode:{own}");
         }
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn an_opencode_run_has_the_id_its_reader_gives_it() {
         for sid in ["ses_eb95b1836ffexD4vYDGuLeJDCy", "ses_ab_cd", "ses_ab-cd", "ses-abcdef"] {
-            assert_eq!(session_id_of("opencode", sid), crate::native::opencode::session_id_of(sid), "{sid}");
+            assert_eq!(session_id_of("opencode", sid), format!("opencode:{}", xenonet_base::opencode::local_id(sid)), "{sid}");
         }
         assert_eq!(session_id_of("opencode", "ses_eb95b1836ffexD4vYDGuLeJDCy"), "opencode:ses-eb95b1836ffexD4vYDGuLeJDCy");
         assert_eq!(session_id_of("opencode", "abcdefg"), "opencode:abcdefg");

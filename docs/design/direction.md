@@ -328,8 +328,11 @@ from files, sockets and hooks; the core never polls a vendor),
 applies them after the person agrees. The doctor's rows, `connect` and the
 capability list derive from the registry entry plus the adapter. What
 moves out of the core: `connect.rs`, `toml.rs`, the delivery ways,
-the vendor branches of `procs.rs` and `verify.rs`, hook decoding, the
-readers, and the Hermes, Grok Bot and Muse observers.
+the vendor branches of `procs.rs` and `verify.rs`, hook decoding and the
+readers. The Hermes, Grok Bot and Muse observers are out already
+(`adapters/hermes`, `adapters/grok-bot`, `adapters/muse`, each an
+`Observer` over `xenonet_adapter::observe`'s typed host; the engine runs
+their looks and answers their host).
 
 Surfaces import `xenonet-api` only: a typed request and response protocol
 with a pushed event stream over a Unix socket or named pipe, every

@@ -1,11 +1,14 @@
 //! OpenCode's adapter (docs/design/direction.md, "Adapters and
-//! surfaces"): its processes, and its sessions reached through its own
-//! server.
+//! surfaces"): its processes, its sessions reached through its own
+//! server, and the reader of its database.
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::delivery::Ways;
 use xenonet_adapter::processes::Rules;
+use xenonet_adapter::reader::Native;
 use xenonet_adapter::Platform;
+
+pub mod reader;
 
 // OpenCode: its one binary, however it was installed. Every OpenCode reads
 // the same database and can open any session.
@@ -34,5 +37,9 @@ impl Platform for Adapter {
 
     fn delivery(&self) -> Option<Ways> {
         Some(Ways { server: true, ..Ways::default() })
+    }
+
+    fn native(&self) -> Option<Box<dyn Native>> {
+        Some(Box::new(reader::Row))
     }
 }

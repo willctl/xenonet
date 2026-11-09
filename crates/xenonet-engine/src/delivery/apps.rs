@@ -4,7 +4,7 @@
 
 use xenonet_adapter::apps::App;
 
-pub use xenonet_adapter::delivery::{Resume, Ways};
+pub use xenonet_adapter::delivery::{Probe, Resume, Start, Starter, Ways};
 
 /// The apps live delivery reaches, in the registry's order, each with its
 /// ways in. A test can give its own registry and ways.
@@ -44,6 +44,11 @@ mod tests {
         assert_eq!(ids, ["claude", "codex", "grok", "opencode"]);
         assert!(of("claude").unwrap().channel && !of("codex").unwrap().channel);
         assert!(of("opencode").unwrap().server && of("opencode").unwrap().resume.is_none());
+        // What a start needs of each app, as its adapter says it.
+        assert!(of("claude").unwrap().start.is_some() && of("codex").unwrap().start.is_some() && of("grok").unwrap().start.is_some());
+        assert!(of("opencode").unwrap().start.is_none() && of("opencode").unwrap().probe.is_none());
+        assert!(of("grok").unwrap().prompt_file && !of("claude").unwrap().prompt_file);
+        assert!(of("claude").unwrap().probe.is_some() && of("codex").unwrap().probe.is_none());
         assert!(of("gemini-cli").is_none());
         assert!(served("opencode:ses-1") && !served("opencode") && !served("opencodes:x") && !served("claude:x"));
     }

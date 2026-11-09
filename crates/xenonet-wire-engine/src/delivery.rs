@@ -2,8 +2,9 @@
 //! with its audit log beside it), the router that puts messages into live
 //! sessions (router.js, with its ways in: a listening Stop hook, a Claude
 //! Code channel, OpenCode's server, tmux, a headless resume) and Claude
-//! Code's channels (channel.js). The decisions are the Rust cores'; the
-//! files, commands, HTTP, timers and the records' objects are here.
+//! Code's channels (channel.js). The decisions are the engine's cores'; the
+//! files, commands, HTTP, timers and events are here, behind the cores'
+//! host traits.
 
 use crate::engine::EngineCalls;
 use crate::exec::{self, Spec};
@@ -17,53 +18,56 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use xenonet_engine::delivery::channel::{Channels as ChannelCore, Push};
-use xenonet_engine::delivery::opencode::{self as oc, OpenCode};
-use xenonet_engine::delivery::policy::{self, Fail, Policy as PolicyCore};
+use xenonet_engine::delivery::opencode::{self as oc, OpenCode, Posted};
+use xenonet_engine::delivery::policy::{self, Fail, Policy as PolicyCore, WakeAllowed};
+use xenonet_engine::delivery::reach::Wake;
 use xenonet_engine::delivery::resume;
-use xenonet_engine::delivery::router::{Router as RouterCore, ACK_MS};
+use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
 use xenonet_engine::delivery::usage::plan_usage;
-use xenonet_engine::peer::{Calls, Result, Thrown};
+use xenonet_engine::delivery::{Delivered, Error, Files};
+use xenonet_engine::peer::{Result, Thrown};
 use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{Channels, CoreError, Policy, Router, R};
 use xenonet_service::glue::From;
 
+// ---------- files ----------
+
+/// The disk, with errors worded as Node words them.
+struct Fs;
+
+fn fs(r: Result<Arg>) -> std::result::Result<(), String> {
+    r.map(|_| ()).map_err(|t| t.message)
+}
+
+impl Files for Fs {
+    fn read_file(&mut self, path: &str) -> std::result::Result<String, String> {
+        crate::fsx::call("readFileSync", &[Arg::text(path), Arg::text("utf8")]).map(|a| text(&a)).map_err(|t| t.message)
+    }
+    fn mkdir_all(&mut self, dir: &str) -> std::result::Result<(), String> {
+        fs(crate::fsx::call("mkdirSync", &[Arg::text(dir), obj(vec![("recursive", Arg::Bool(true))])]))
+    }
+    fn write_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> std::result::Result<(), String> {
+        fs(crate::fsx::call("writeFileSync", &[Arg::text(path), Arg::text(body), mode.map_or(Arg::Undef, |m| obj(vec![("mode", Arg::Num(f64::from(m)))]))]))
+    }
+    fn append_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> std::result::Result<(), String> {
+        fs(crate::fsx::call("appendFileSync", &[Arg::text(path), Arg::text(body), mode.map_or(Arg::Undef, |m| obj(vec![("mode", Arg::Num(f64::from(m)))]))]))
+    }
+    fn rename(&mut self, from: &str, to: &str) -> std::result::Result<(), String> {
+        fs(crate::fsx::call("renameSync", &[Arg::text(from), Arg::text(to)]))
+    }
+}
+
 // ---------- the policy ----------
+
+impl policy::Host for Fs {
+    fn now(&mut self) -> f64 {
+        now_ms()
+    }
+}
 
 pub struct PolicySide {
     core: Mutex<PolicyCore>,
-    file: Option<String>,
-    audit_file: Option<String>,
-    limits: Value,
-}
-
-/// The policy's own collaborators: its clock, limits and files, and fs.
-struct PolicyCalls<'a> {
-    side: &'a PolicySide,
-}
-
-impl Calls for PolicyCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        match (path, method) {
-            ("policy", "now") => Ok(Arg::Num(now_ms())),
-            ("fs", m) => crate::fsx::call(m, &args),
-            _ => Err(no_method(path, method)),
-        }
-    }
-    fn get(&mut self, path: &str) -> Result<Arg> {
-        Ok(match path {
-            "policy.file" => self.side.file.clone().map_or(Arg::Null, Arg::Text),
-            "policy.auditFile" => self.side.audit_file.clone().map_or(Arg::Null, Arg::Text),
-            p => match p.strip_prefix("policy.limits.") {
-                Some(k) => self.side.limits.get(k).map_or(Arg::Undef, arg),
-                None => Arg::Undef,
-            },
-        })
-    }
-    fn kind(&mut self, path: &str) -> Result<String> {
-        let v = self.get(path)?;
-        Ok(crate::js::type_of(&v).into())
-    }
 }
 
 /// A policy refusal or error, as the JS threw it: a refusal has its code
@@ -72,87 +76,13 @@ pub fn policy_thrown(f: Fail) -> (Thrown, Option<u16>) {
     match f {
         Fail::Refused { why, code } => (Thrown::coded(why, code), Some(429)),
         Fail::Error(m) => (Thrown::new(m), None),
-        Fail::Thrown(t) => (t, None),
     }
 }
 
-fn opt(a: Arg) -> Option<Arg> {
-    (!matches!(a, Arg::Undef)).then_some(a)
-}
-
-fn by(a: Arg) -> Arg {
-    match a {
-        Arg::Undef => Arg::text("you"),
-        a => a,
-    }
-}
-
-impl PolicySide {
-    pub fn new(file: Option<String>, audit_file: Option<String>) -> PolicySide {
-        let mut side = PolicySide { core: Mutex::new(PolicyCore::default()), file, audit_file, limits: policy::limits() };
-        let loaded = PolicyCore::load(&mut PolicyCalls { side: &side });
-        if let Ok(p) = loaded {
-            side.core = Mutex::new(p);
-        }
-        side
-    }
-
-    /// `policy.<method>(...args)`, as the DeliveryPolicy object answers.
-    pub fn call(&self, method: &str, args: &[Arg]) -> std::result::Result<Arg, Fail> {
-        let c = &mut PolicyCalls { side: self };
-        let mut p = self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let x = |i| at(args, i);
-        match method {
-            "paused" => Ok(Arg::Bool(p.paused())),
-            "setPaused" => p.set_paused(c, x(0).truthy(), &by(x(1))),
-            "grant" => {
-                let o = x(2);
-                p.grant(c, &x(0), &x(1), opt(o.field("ttlMs")).as_ref(), &by(o.field("by")))
-            }
-            "revoke" => p.revoke(c, &x(0), &by(x(1))),
-            "grants" => p.grants(c),
-            "scopeOf" => p.scope_of(c, &x(0)).map(|s| s.to_arg()),
-            "visible" => p.visible(c, &x(0), &x(1)).map(Arg::Bool),
-            "checkSend" => {
-                let o = x(0);
-                let depth = match o.field("depth") {
-                    Arg::Undef => 0.0,
-                    d => crate::js::num(&d),
-                };
-                p.check_send(c, &o.field("sender"), &list(o.field("recipients")), &o.field("text"), depth).map(|()| Arg::Undef)
-            }
-            "textFor" => {
-                let o = x(0);
-                let (t, n) = policy::text_for(&o.field("text"), &o.field("sender"), &o.field("senderFacts"), &o.field("recipientFacts"));
-                Ok(obj(vec![("text", t), ("redacted", Arg::Num(n as f64))]))
-            }
-            "allow" => {
-                let o = x(1);
-                p.allow(c, &x(0), o.field("remote").truthy(), opt(o.field("ttlMs")).as_ref(), &by(o.field("by")))
-            }
-            "disallow" => p.disallow(c, &x(0), &by(x(1))).map(|()| Arg::Undef),
-            "consented" => p.consented(c, &x(0), x(1).field("remote").truthy()),
-            "wakeAllowed" => p.wake_allowed(c, &x(0), &x(1), &x(2).field("usage").or(Arg::Null)),
-            "spendWake" => p.spend_wake(c, &x(0), &x(1)).map(|()| Arg::Undef),
-            "audit" => p.audit(c, x(0)),
-            "readAudit" => p.read_audit(
-                c,
-                match x(0) {
-                    Arg::Undef => 100.0,
-                    l => crate::js::num(&l),
-                },
-            ),
-            _ => Err(Fail::Thrown(no_method("policy", method))),
-        }
-    }
-
-    pub fn data(&self) -> Arg {
-        self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner).data_arg()
-    }
-
-    /// A policy call as a collaborator's, its refusals coded.
-    pub fn as_call(&self, method: &str, args: &[Arg]) -> Result<Arg> {
-        self.call(method, args).map_err(|f| policy_thrown(f).0)
+/// A refusal's or error's words.
+fn fail_message(f: Fail) -> String {
+    match f {
+        Fail::Refused { why, .. } | Fail::Error(why) => why,
     }
 }
 
@@ -160,7 +90,104 @@ fn core_error(f: Fail) -> CoreError {
     match f {
         Fail::Refused { why, code } => CoreError::of(xenonet_service::cores::Kind::Error, 429, code, why),
         Fail::Error(m) => CoreError::new(m),
-        Fail::Thrown(t) => CoreError::new(t.message),
+    }
+}
+
+impl PolicySide {
+    pub fn new(file: Option<String>, audit_file: Option<String>) -> PolicySide {
+        PolicySide { core: Mutex::new(PolicyCore::load(&mut Fs, file, audit_file)) }
+    }
+
+    /// The policy, with its host, under its lock.
+    pub fn with<T>(&self, f: impl FnOnce(&mut PolicyCore, &mut dyn policy::Host) -> T) -> T {
+        let mut p = self.core.locked();
+        f(&mut p, &mut Fs)
+    }
+
+    /// `policy.data.consent`.
+    pub fn consent(&self) -> Value {
+        self.with(|p, _| p.consent())
+    }
+
+    /// `policy.<method>(...args)`, as the engine's string calls and the
+    /// starts still make them: goes when they're typed.
+    pub fn call(&self, method: &str, args: &[Arg]) -> std::result::Result<Arg, Fail> {
+        let x = |i| at(args, i);
+        let by = |a: Arg| match a {
+            Arg::Undef => "you".to_string(),
+            a => text(&a),
+        };
+        let ttl = |a: Arg| match a {
+            Arg::Undef => None,
+            a => Some(crate::js::num(&a)),
+        };
+        self.with(|p, h| match method {
+            "paused" => Ok(Arg::Bool(p.paused())),
+            "setPaused" => p.set_paused(h, x(0).truthy(), &by(x(1))).map(|v| arg(&v)),
+            "grant" => {
+                let o = x(2);
+                p.grant(h, &text(&x(0)), &text(&x(1)), ttl(o.field("ttlMs")), &by(o.field("by"))).map(|v| arg(&v))
+            }
+            "revoke" => p.revoke(h, &text(&x(0)), &by(x(1))).map(|v| arg(&v)),
+            "grants" => Ok(Arg::List(p.grants(h).iter().map(arg).collect())),
+            "scopeOf" => Ok(arg(&p.scope_of(h, &text(&x(0))).to_json())),
+            "visible" => Ok(Arg::Bool(p.visible(h, &text(&x(0)), &json(&x(1))))),
+            "checkSend" => {
+                let o = x(0);
+                let depth = match o.field("depth") {
+                    Arg::Undef => 0.0,
+                    d => crate::js::num(&d),
+                };
+                let recipients: Vec<Value> = list(o.field("recipients")).iter().map(json).collect();
+                p.check_send(h, &text(&o.field("sender")), &recipients, &text(&o.field("text")), depth).map(|()| Arg::Undef)
+            }
+            "textFor" => {
+                let o = x(0);
+                let (t, n) = policy::text_for(&text(&o.field("text")), &text(&o.field("sender")), &json(&o.field("senderFacts")), &json(&o.field("recipientFacts")));
+                Ok(obj(vec![("text", Arg::text(t)), ("redacted", Arg::Num(n as f64))]))
+            }
+            "allow" => {
+                let o = x(1);
+                p.allow(h, &text(&x(0)), o.field("remote").truthy(), ttl(o.field("ttlMs")), &by(o.field("by"))).map(|v| arg(&v))
+            }
+            "disallow" => p.disallow(h, &text(&x(0)), &by(x(1))).map(|()| Arg::Undef),
+            "consented" => Ok(Arg::Bool(p.consented(h, &text(&x(0)), x(1).field("remote").truthy()))),
+            "wakeAllowed" => {
+                let usage = match x(2).field("usage") {
+                    Arg::Undef | Arg::Null => None,
+                    u => Some(crate::js::num(&u)),
+                };
+                Ok(arg(&p.wake_allowed(h, &text(&x(0)), &text(&x(1)), usage).to_json()))
+            }
+            "spendWake" => {
+                p.spend_wake(h, &text(&x(0)), &text(&x(1)));
+                Ok(Arg::Undef)
+            }
+            "audit" => p.audit(h, json(&x(0))).map(|v| arg(&v)),
+            "readAudit" => {
+                let limit = match x(0) {
+                    Arg::Undef => 100.0,
+                    l => crate::js::num(&l),
+                };
+                Ok(Arg::List(p.read_audit(h, limit).iter().map(arg).collect()))
+            }
+            _ => Err(Fail::Error(no_method("policy", method).message)),
+        })
+    }
+}
+
+impl policy::Guard for PolicySide {
+    fn visible(&self, caller: &str, facts: &Value) -> policy::Result<bool> {
+        Ok(self.with(|p, h| p.visible(h, caller, facts)))
+    }
+    fn check_send(&self, sender: &str, recipients: &[Value], body: &str, depth: f64) -> policy::Result<()> {
+        self.with(|p, h| p.check_send(h, sender, recipients, body, depth))
+    }
+    fn text_for(&self, body: &str, sender: &str, sender_facts: &Value, recipient_facts: &Value) -> (String, usize) {
+        policy::text_for(body, sender, sender_facts, recipient_facts)
+    }
+    fn audit(&self, entry: Value) -> policy::Result<Value> {
+        self.with(|p, h| p.audit(h, entry))
     }
 }
 
@@ -168,38 +195,38 @@ pub struct PolicyDriver(pub std::sync::Arc<World>);
 
 impl Policy for PolicyDriver {
     fn paused(&self) -> R<bool> {
-        Ok(self.0.policy.call("paused", &[]).map_err(core_error)?.truthy())
+        Ok(self.0.policy.with(|p, _| p.paused()))
     }
     fn grants(&self) -> R<Value> {
-        self.0.policy.call("grants", &[]).map(|a| json(&a)).map_err(core_error)
+        Ok(Value::Array(self.0.policy.with(|p, h| p.grants(h))))
     }
     fn consent(&self) -> R<Value> {
-        Ok(json(&self.0.policy.data().field("consent")))
+        Ok(self.0.policy.consent())
     }
     fn read_audit(&self, n: f64) -> R<Value> {
-        self.0.policy.call("readAudit", &[Arg::Num(n)]).map(|a| json(&a)).map_err(core_error)
+        Ok(Value::Array(self.0.policy.with(|p, h| p.read_audit(h, n))))
     }
     fn set_paused(&self, paused: bool) -> R<Value> {
-        self.0.policy.call("setPaused", &[Arg::Bool(paused)]).map(|a| json(&a)).map_err(core_error)
+        self.0.policy.with(|p, h| p.set_paused(h, paused, "you")).map_err(core_error)
     }
     fn grant(&self, actor: &str, scope: &str, ttl_ms: f64) -> R<Value> {
-        self.0.policy.call("grant", &[Arg::text(actor), Arg::text(scope), obj(vec![("ttlMs", Arg::Num(ttl_ms))])]).map(|a| json(&a)).map_err(core_error)
+        self.0.policy.with(|p, h| p.grant(h, actor, scope, Some(ttl_ms), "you")).map_err(core_error)
     }
     fn revoke(&self, actor: &str) -> R<Value> {
-        self.0.policy.call("revoke", &[Arg::text(actor)]).map(|a| json(&a)).map_err(core_error)
+        self.0.policy.with(|p, h| p.revoke(h, actor, "you")).map_err(core_error)
     }
     fn allow(&self, session: &str, remote: bool, ttl_ms: f64) -> R<Value> {
-        self.0.policy.call("allow", &[Arg::text(session), obj(vec![("remote", Arg::Bool(remote)), ("ttlMs", Arg::Num(ttl_ms))])]).map(|a| json(&a)).map_err(core_error)
+        self.0.policy.with(|p, h| p.allow(h, session, remote, Some(ttl_ms), "you")).map_err(core_error)
     }
     fn disallow(&self, session: &str) -> R<()> {
-        self.0.policy.call("disallow", &[Arg::text(session)]).map(|_| ()).map_err(core_error)
+        self.0.policy.with(|p, h| p.disallow(h, session, "you")).map_err(core_error)
     }
 }
 
 // ---------- Claude Code's channels ----------
 
 /// The poll waiting for each session: its number, and where its items go.
-type Polls = HashMap<String, (u64, tokio::sync::oneshot::Sender<Vec<Arg>>)>;
+type Polls = HashMap<String, (u64, tokio::sync::oneshot::Sender<Vec<Value>>)>;
 
 #[derive(Default)]
 pub struct ChannelSide {
@@ -215,7 +242,7 @@ impl ChannelSide {
     }
 
     /// Hands an item to the session's poll; false when no channel is live.
-    pub fn push(&self, agent: &str, item: Arg) -> bool {
+    pub fn push(&self, agent: &str, item: Value) -> bool {
         let mut waiting = self.waiting.locked();
         let went = self.core.locked().push(agent, item.clone(), waiting.contains_key(agent), &mut now_ms);
         if went == Push::Waiter {
@@ -228,7 +255,7 @@ impl ChannelSide {
     }
 
     /// Waits up to `wait` for items for `agent`; none on time out.
-    pub async fn poll(&self, agent: &str, wait: Duration) -> Vec<Arg> {
+    pub async fn poll(&self, agent: &str, wait: Duration) -> Vec<Value> {
         if let Some(queued) = self.core.locked().poll(agent, now_ms()) {
             return queued;
         }
@@ -260,7 +287,7 @@ pub struct ChannelsDriver(pub std::sync::Arc<World>);
 #[async_trait]
 impl Channels for ChannelsDriver {
     async fn poll(&self, me: &str, wait: Duration) -> R<Value> {
-        Ok(Value::Array(self.0.channels.poll(me, wait).await.iter().map(json).collect()))
+        Ok(Value::Array(self.0.channels.poll(me, wait).await))
     }
 }
 
@@ -273,17 +300,8 @@ pub struct Resumes {
     pub settings: Option<String>,
 }
 
-/// The router's records as JS objects, which route() and list() give and
-/// the delivery events copy: those listed, in the order they were.
-#[derive(Default)]
-struct Objs {
-    objs: HashMap<String, Arg>,
-    records: Vec<String>,
-}
-
 pub struct RouterSide {
     pub core: RouterCore,
-    objs: Mutex<Objs>,
     timers: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     opencode: OpenCode,
     tmux: Tmux,
@@ -295,7 +313,6 @@ impl RouterSide {
     pub fn new(demo: bool, listen_file: Option<String>, state_dir: &std::path::Path) -> RouterSide {
         RouterSide {
             core: RouterCore::default(),
-            objs: Mutex::new(Objs::default()),
             timers: Mutex::new(HashMap::new()),
             opencode: OpenCode::new(10e3),
             tmux: Tmux { off: cfg!(windows) },
@@ -304,27 +321,26 @@ impl RouterSide {
         }
     }
 
-    /// The latest deliveries.
+    /// The latest deliveries, as the network's receipts still read them:
+    /// goes when the network is typed (`core.list` has them as JSON).
     pub fn list(&self, n: usize) -> Vec<Arg> {
-        let o = self.objs.locked();
-        let from = o.records.len().saturating_sub(n);
-        o.records[from..].iter().filter_map(|k| o.objs.get(k).cloned()).collect()
+        self.core.list(n).iter().map(arg).collect()
     }
 }
 
-/// The router's collaborators: the twin's own (now, usage, notify, ackMs,
-/// the records' objects and timers), the engine, the policy, the channels
-/// and the ways in.
-pub struct RouterCalls<'a> {
+/// The router's collaborators: the clock, the plan readings, the network's
+/// reach, the events and timers, the engine, the policy, the channels and
+/// the ways in.
+pub struct RouterHost<'a> {
     pub w: &'a World,
     /// Who was listening when the message was sent, for a route that runs
     /// after it (route()); None asks the engine now.
     pub listening: Option<&'a [String]>,
 }
 
-impl<'a> RouterCalls<'a> {
+impl<'a> RouterHost<'a> {
     pub fn of(w: &'a World) -> Self {
-        RouterCalls { w, listening: None }
+        RouterHost { w, listening: None }
     }
 }
 
@@ -332,216 +348,256 @@ fn windows() -> bool {
     cfg!(windows)
 }
 
-impl RouterCalls<'_> {
-    fn usage(&self, app: &Arg) -> Arg {
-        let limits = match self.w.state().live_snapshot() {
-            Ok(s) => s.get("limits").map_or(Arg::Null, arg),
-            Err(_) => Arg::Null,
-        };
-        plan_usage(&limits, app, now_ms()).map_or(Arg::Null, Arg::Num)
-    }
+/// A provider's plan as the wake budget reads it, from the live snapshot's
+/// limits.
+fn usage(w: &World, app: &str) -> Option<f64> {
+    let limits = match w.state().live_snapshot() {
+        Ok(s) => s.get("limits").cloned().unwrap_or(Value::Null),
+        Err(_) => Value::Null,
+    };
+    plan_usage(&limits, app, now_ms())
+}
 
-    fn engine(&mut self) -> EngineCalls<'_> {
-        EngineCalls::new(self.w, None)
-    }
+fn store_error(e: xenonet_engine::sql::SqlError) -> Error {
+    Error(e.message().to_string())
+}
 
-    fn resume_deliver(&self, o: &Arg) -> Arg {
-        let no = |why: String| obj(vec![("ok", Arg::Bool(false)), ("why", Arg::text(why))]);
-        let Some(r) = &self.w.router.resume else { return no("there's no resume here".into()) };
-        let agent = o.field("agent");
-        let cwd = o.field("cwd");
-        let settings = r.settings.clone().map_or(Arg::Null, Arg::Text);
-        let mut pc = ResumePlanCalls { r };
-        // A copy of a Claude Code session a process holds, or a turn of
-        // one whose process has gone.
-        let fork = o.field("fork").truthy();
-        let plan = if fork { resume::plan_fork(&mut pc, &agent, &settings, &cwd) } else { resume::plan(&mut pc, &agent, &settings, &cwd) };
-        let plan = match plan {
-            Ok(p) => p,
-            Err(t) => return no(t.message),
-        };
-        let (app, args) = match plan {
-            Err(why) => return no(why.into()),
-            Ok(c) => c,
-        };
-        let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, text(&v))).collect();
-        // Claude Code signs in with the token you gave XenoNet's runs, and
-        // asks its permission prompts of you through this XenoNet's server,
-        // waiting a minute past the hold for your answer, as a start does.
-        if app == "claude" {
-            crate::starts::signed_env(self.w, &mut env);
-            env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
-            env.push(("MCP_TOOL_TIMEOUT".into(), crate::starts::mcp_tool_timeout_ms(self.w).to_string()));
+/// A turn resumed for a session (or, `fork`, a copy of it) with the
+/// message as its prompt: where it runs, or why it couldn't.
+fn resume_deliver(w: &World, agent: &str, cwd: Option<&str>, input: &str, fork: bool) -> Delivered {
+    let Some(r) = &w.router.resume else { return Err("there's no resume here".into()) };
+    let settings = r.settings.as_deref();
+    let mut plans = ResumePlan { r };
+    // A copy of a Claude Code session a process holds, or a turn of one
+    // whose process has gone.
+    let plan = if fork { resume::plan_fork(&mut plans, agent, settings, cwd) } else { resume::plan(&mut plans, agent, settings, cwd) };
+    let (app, args) = plan.map_err(str::to_string)?;
+    let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().collect());
+    // Claude Code signs in with the token you gave XenoNet's runs, and
+    // asks its permission prompts of you through this XenoNet's server,
+    // waiting a minute past the hold for your answer, as a start does.
+    if app == "claude" {
+        crate::starts::signed_env(w, &mut env);
+        env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
+        env.push(("MCP_TOOL_TIMEOUT".into(), crate::starts::mcp_tool_timeout_ms(w).to_string()));
+    }
+    let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
+    let mut args = resume::with_permission_tool(&app, args, &server);
+    let key = if fork { format!("fork:{agent}") } else { agent.to_string() };
+    let cwd = cwd.unwrap_or_default();
+    let mut input = input.to_string();
+    // Grok Build reads its prompt from a file of XenoNet's.
+    let prompt_file = if args.last().map(String::as_str) == Some("--prompt-file") {
+        let f = crate::starts::prompt_file(w, &input)?;
+        args.push(f.clone());
+        input.clear();
+        Some(f)
+    } else {
+        None
+    };
+    let turn = Turn { key: &key, app: &app, args: &args, cwd, env: &env, text: input };
+    match crate::starts::run_turn(w, &r.runner, turn) {
+        Ok(pid) => {
+            crate::starts::after_resume(w, &r.runner, &app, &key, pid, fork.then_some(agent), prompt_file);
+            Ok(if fork { format!("pid {pid}, a copy of the session") } else { format!("pid {pid}") })
         }
-        let server = xenonet_engine::delivery::setup::server_name(&Arg::Num(f64::from(self.w.setup.port)));
-        let args = resume::with_permission_tool(&app, args, &server);
-        let parent = text(&agent);
-        let key = if fork { format!("fork:{parent}") } else { parent.clone() };
-        let cwd = text(&cwd);
-        let mut args: Vec<String> = args.iter().map(text).collect();
-        let mut input = text(&o.field("text"));
-        // Grok Build reads its prompt from a file of XenoNet's.
-        let prompt_file = if args.last().map(String::as_str) == Some("--prompt-file") {
-            match crate::starts::prompt_file(self.w, &input) {
-                Ok(f) => {
-                    args.push(f.clone());
-                    input.clear();
-                    Some(f)
-                }
-                Err(why) => return no(why),
+        Err(why) => {
+            if let Some(f) = prompt_file {
+                let _ = std::fs::remove_file(f);
             }
-        } else {
-            None
-        };
-        let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: input };
-        match crate::starts::run_turn(self.w, &r.runner, turn) {
-            Ok(pid) => {
-                crate::starts::after_resume(self.w, &r.runner, &app, &key, pid, fork.then_some(parent.as_str()), prompt_file);
-                obj(vec![("ok", Arg::Bool(true)), ("where", Arg::text(if fork { format!("pid {pid}, a copy of the session") } else { format!("pid {pid}") }))])
-            }
-            Err(why) => {
-                if let Some(f) = prompt_file {
-                    let _ = std::fs::remove_file(f);
-                }
-                no(why)
-            }
+            Err(why)
         }
     }
 }
 
-struct ResumePlanCalls<'a> {
+/// What a resume's plan asks: the runner, and the disk.
+struct ResumePlan<'a> {
     r: &'a Resumes,
 }
 
-impl Calls for ResumePlanCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        match (path, method) {
-            ("", "running") => Ok(Arg::Bool(self.r.runner.running(&text(&at(&args, 0))))),
-            ("", "exists") => Ok(Arg::Bool(std::path::Path::new(&text(&at(&args, 0))).exists())),
-            _ => Err(no_method(path, method)),
-        }
+impl resume::Host for ResumePlan<'_> {
+    fn running(&mut self, key: &str) -> bool {
+        self.r.runner.running(key)
     }
-    fn get(&mut self, _: &str) -> Result<Arg> {
-        Ok(Arg::Undef)
-    }
-    fn kind(&mut self, _: &str) -> Result<String> {
-        Ok("function".into())
+    fn exists(&mut self, path: &str) -> bool {
+        std::path::Path::new(path).exists()
     }
 }
 
-/// A command for the ways in: its output and whether it ran, or "" when it
-/// failed, as each of them ran it.
-fn run_quiet(cmd: &Arg, args: &Arg, ms: u64, max: usize) -> std::result::Result<String, String> {
-    let mut s = Spec::new(&text(cmd), &list(args.clone()).iter().map(text).collect::<Vec<_>>(), ms);
+/// A command for the ways in: its output, or Err when it failed to run or
+/// failed.
+fn run_quiet(cmd: &str, args: &[&str], ms: u64, max: usize) -> std::result::Result<String, String> {
+    let mut s = Spec::new(cmd, &args.iter().map(|a| (*a).to_string()).collect::<Vec<_>>(), ms);
     s.max = max;
     exec::run(&s).map_err(|f| f.message)
 }
 
-/// OpenCode's servers, found and asked: commands, files and HTTP.
-struct OpenCodeCalls<'a> {
+/// ps and the files of /proc, as finding OpenCode's servers reads them.
+struct Ps;
+
+impl oc::System for Ps {
+    fn run(&mut self, cmd: &str, args: &[&str]) -> String {
+        run_quiet(cmd, args, 3000, 4 << 20).unwrap_or_default()
+    }
+    fn read_file(&mut self, path: &str) -> Option<String> {
+        std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    }
+    fn readdir(&mut self, path: &str) -> Option<Vec<String>> {
+        xenonet_base::paths::read_dir_sorted(std::path::Path::new(path)).ok().map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+    }
+    fn readlink(&mut self, path: &str) -> Option<String> {
+        std::fs::read_link(path).ok().map(|t| t.to_string_lossy().into_owned())
+    }
+}
+
+/// OpenCode's servers, found and asked: the clock, the processes, and HTTP.
+struct OpenCodeHost<'a> {
     w: &'a World,
 }
 
-impl OpenCodeCalls<'_> {
-    fn fetch(&self, method: &str, url: &str, body: Option<String>, ms: f64) -> std::result::Result<xenonet_service::net::Fetched, Thrown> {
+impl OpenCodeHost<'_> {
+    fn fetch(&self, method: &str, url: &str, body: Option<String>, ms: f64) -> std::result::Result<xenonet_service::net::Fetched, String> {
         let headers = if body.is_some() { vec![("content-type".to_string(), "application/json".to_string())] } else { Vec::new() };
         let timeout = Duration::from_secs_f64(ms.max(0.0) / 1000.0);
-        self.w.block_on(xenonet_service::net::fetch(method, url, &headers, body.map(String::into_bytes), timeout)).map_err(Thrown::new)
+        self.w.block_on(xenonet_service::net::fetch(method, url, &headers, body.map(String::into_bytes), timeout))
     }
 }
 
-impl Calls for OpenCodeCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        let x = |i| at(&args, i);
-        match (path, method) {
-            ("", "now") => Ok(Arg::Num(now_ms())),
-            ("", "processes") => {
-                let ps = oc::open_code_processes(&mut PsCalls, windows())?;
-                Ok(Arg::List(ps.iter().map(xenonet_engine::delivery::opencode::Proc::to_arg).collect()))
-            }
-            ("", "ports") => {
-                let ports = oc::listening_ports(&mut PsCalls, crate::js::num(&x(0)), crate::js::platform())?;
-                Ok(Arg::List(ports.into_iter().map(Arg::Num).collect()))
-            }
-            ("", "get") => {
-                let r = self.fetch("GET", &text(&x(0)), None, crate::js::num(&x(1)))?;
-                if !r.ok() {
-                    return Ok(obj(vec![("ok", Arg::Bool(false)), ("status", Arg::Num(f64::from(r.status)))]));
-                }
-                let v = xenonet_base::json::parse(&r.text()).map_err(|e| Thrown::new(e.to_string()))?;
-                Ok(obj(vec![("ok", Arg::Bool(true)), ("status", Arg::Num(f64::from(r.status))), ("json", arg(&v))]))
-            }
-            ("", "post") => {
-                let r = self.fetch("POST", &text(&x(0)), Some(text(&x(1))), 3000.0)?;
-                Ok(obj(vec![("ok", Arg::Bool(r.ok())), ("status", Arg::Num(f64::from(r.status)))]))
-            }
-            _ => Err(no_method(path, method)),
+impl oc::Host for OpenCodeHost<'_> {
+    fn now(&mut self) -> f64 {
+        now_ms()
+    }
+    fn processes(&mut self) -> Vec<oc::Proc> {
+        oc::open_code_processes(&mut Ps, windows())
+    }
+    fn ports(&mut self, pid: f64) -> Vec<f64> {
+        oc::listening_ports(&mut Ps, pid, crate::js::platform())
+    }
+    fn get(&mut self, url: &str, ms: f64) -> Option<Value> {
+        let r = self.fetch("GET", url, None, ms).ok().filter(xenonet_service::net::Fetched::ok)?;
+        xenonet_base::json::parse(&r.text()).ok()
+    }
+    fn post(&mut self, url: &str, body: &str) -> std::result::Result<Posted, String> {
+        let r = self.fetch("POST", url, Some(body.to_string()), 3000.0)?;
+        Ok(Posted { ok: r.ok(), status: f64::from(r.status) })
+    }
+}
+
+/// tmux and ps.
+struct TmuxShell;
+
+impl xenonet_engine::delivery::tmux::Shell for TmuxShell {
+    fn exec(&mut self, cmd: &str, args: &[&str]) -> Option<String> {
+        run_quiet(cmd, args, 3000, 1 << 20).ok()
+    }
+}
+
+impl router::Host for RouterHost<'_> {
+    fn now(&mut self) -> f64 {
+        now_ms()
+    }
+    fn usage(&mut self, app: &str) -> Option<f64> {
+        usage(self.w, app)
+    }
+    fn wake_setting(&mut self) -> Wake {
+        Wake::parse(&crate::network::net(self.w).reach().wake)
+    }
+    fn notify(&mut self, notice: Value) {
+        self.w.emit(From::Delivery, "notify", notice);
+    }
+    fn emit(&mut self, record: Value) {
+        self.w.emit(From::Delivery, "delivery", record);
+    }
+    fn arm(&mut self, key: &str, ms: f64) {
+        let w = self.w;
+        let k = key.to_string();
+        let t = w.after(ms, move |w| {
+            w.router.timers.locked().remove(&k);
+            let _ = w.router.core.expire(&mut RouterHost::of(w), &k);
+        });
+        if let Some(old) = w.router.timers.locked().insert(key.to_string(), t) {
+            old.abort();
         }
     }
-    fn get(&mut self, _: &str) -> Result<Arg> {
-        Ok(Arg::Undef)
-    }
-    fn kind(&mut self, _: &str) -> Result<String> {
-        Ok("function".into())
-    }
-}
-
-/// ps and the files of /proc, as openCodeProcesses and listeningPorts read
-/// them: "" for a command that failed.
-struct PsCalls;
-
-impl Calls for PsCalls {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        let x = |i| at(&args, i);
-        match (path, method) {
-            ("", "ps" | "exec") => Ok(Arg::Text(run_quiet(&x(0), &x(1), 3000, 4 << 20).unwrap_or_default())),
-            ("", "readFile") => crate::fsx::call("readFileSync", &args),
-            ("", "readdir") => crate::fsx::call("readdirSync", &[x(0)]),
-            ("", "readlink") => crate::fsx::call("readlinkSync", &[x(0)]),
-            _ => Err(no_method(path, method)),
+    fn clear(&mut self, key: &str) {
+        if let Some(t) = self.w.router.timers.locked().remove(key) {
+            t.abort();
         }
     }
-    fn get(&mut self, _: &str) -> Result<Arg> {
-        Ok(Arg::Undef)
-    }
-    fn kind(&mut self, _: &str) -> Result<String> {
-        Ok("function".into())
-    }
-}
 
-/// tmux and ps, as { ok, out }.
-struct TmuxCalls;
+    fn view(&mut self, id: &str) -> Option<Value> {
+        EngineCalls::new(self.w, None).view(&Arg::text(id)).ok().map(|v| json(&v))
+    }
+    fn listening(&mut self, id: &str) -> bool {
+        self.listening.map_or_else(|| self.w.mail.listening_has(id), |l| l.iter().any(|x| x == id))
+    }
+    fn contact_pid(&mut self, agent: &str) -> Option<f64> {
+        self.w.store.with(|s| s.contact(Arg::text(agent))).ok().flatten().and_then(|r| r.num("pid"))
+    }
+    fn mark_seen(&mut self, agent: &str, ids: &[Value], now: f64) -> xenonet_engine::delivery::Result<()> {
+        self.w.store.with(|s| s.mark_seen(Arg::text(agent), &Arg::List(ids.iter().map(arg).collect()), Arg::Num(now))).map_err(store_error)
+    }
+    fn mark_unseen(&mut self, agent: &str, ids: &[Value]) -> xenonet_engine::delivery::Result<()> {
+        self.w.store.with(|s| s.mark_unseen(Arg::text(agent), &Arg::List(ids.iter().map(arg).collect()))).map_err(store_error)
+    }
 
-impl Calls for TmuxCalls {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        match (path, method) {
-            ("", "exec") => Ok(match run_quiet(&at(&args, 0), &at(&args, 1), 3000, 1 << 20) {
-                Ok(out) => obj(vec![("ok", Arg::Bool(true)), ("out", Arg::Text(out))]),
-                Err(_) => obj(vec![("ok", Arg::Bool(false)), ("out", Arg::text(""))]),
-            }),
-            _ => Err(no_method(path, method)),
+    fn consented(&mut self, session: &str, remote: bool) -> bool {
+        self.w.policy.with(|p, h| p.consented(h, session, remote))
+    }
+    fn consent_sessions(&mut self) -> Vec<String> {
+        match self.w.policy.consent() {
+            Value::Object(m) => m.keys().cloned().collect(),
+            _ => Vec::new(),
         }
     }
-    fn get(&mut self, _: &str) -> Result<Arg> {
-        Ok(Arg::Undef)
+    fn wake_allowed(&mut self, sender: &str, target: &str, usage: Option<f64>) -> WakeAllowed {
+        self.w.policy.with(|p, h| p.wake_allowed(h, sender, target, usage))
     }
-    fn kind(&mut self, _: &str) -> Result<String> {
-        Ok("function".into())
+    fn spend_wake(&mut self, sender: &str, target: &str) {
+        self.w.policy.with(|p, h| p.spend_wake(h, sender, target));
+    }
+    fn audit(&mut self, entry: Value) -> xenonet_engine::delivery::Result<()> {
+        self.w.policy.with(|p, h| p.audit(h, entry)).map(|_| ()).map_err(|f| Error(fail_message(f)))
+    }
+
+    fn channel_live(&mut self, agent: &str) -> bool {
+        self.w.channels.live(agent)
+    }
+    fn channel_push(&mut self, agent: &str, item: Value) -> bool {
+        self.w.channels.push(agent, item)
+    }
+    fn opencode_info(&mut self, id: &str) -> Option<Value> {
+        self.w.router.opencode.info(&mut OpenCodeHost { w: self.w }, id, windows())
+    }
+    fn opencode_deliver(&mut self, id: &str, body: &str) -> Delivered {
+        self.w.router.opencode.deliver(&mut OpenCodeHost { w: self.w }, id, body, windows()).unwrap_or_else(|e| Err(e.0))
+    }
+    fn tmux_deliver(&mut self, pid: f64, body: &str) -> Delivered {
+        self.w.router.tmux.deliver(&mut TmuxShell, pid, body).unwrap_or_else(|e| Err(e.0))
+    }
+    fn resumes(&mut self) -> bool {
+        self.w.router.resume.is_some()
+    }
+    fn resume_deliver(&mut self, agent: &str, cwd: Option<&str>, body: &str, fork: bool) -> Delivered {
+        resume_deliver(self.w, agent, cwd, body, fork)
     }
 }
 
-/// The router's own methods, as the engine and the hooks call them.
+// The engine (engine.rs) still reaches the router by string, as
+// "engine.delivery": these go when it's typed.
+
+/// The router's own methods, as the engine calls them.
 pub fn router_call(w: &World, method: &str, args: &[Arg]) -> Result<Arg> {
-    let c = &mut RouterCalls::of(w);
+    let h = &mut RouterHost::of(w);
     let r = &w.router.core;
     let x = |i| at(args, i);
     match method {
-        "reaches" => r.reaches(c, &x(0)),
-        "known" => r.known(c).map(Arg::List),
-        "describe" => r.describe(c, &x(0)),
-        "resumable" => r.resumable(c, &x(0).or(Arg::Null)),
-        "wake" => r.wake(c, &x(0), &x(1)),
-        "way" => r.way(c, &x(0), &x(1)).map(|w| w.map_or(Arg::Null, Arg::text)),
+        "reaches" => Ok(Arg::Bool(r.reaches(h, &text(&x(0))))),
+        "known" => Ok(Arg::List(r.known(h).into_iter().map(Arg::Text).collect())),
+        "describe" => Ok(r.describe(h, &text(&x(0))).map_or(Arg::Null, |v| arg(&v))),
+        "resumable" => Ok(Arg::Bool(r.resumable(h, &json(&x(0))))),
+        "wake" => Ok(arg(&r.wake(h, &text(&x(0)), &text(&x(1))).to_json())),
+        "way" => Ok(r.way(h, &text(&x(0)), &json(&x(1))).map_or(Arg::Null, Arg::text)),
         "list" => Ok(Arg::List(w.router.list(match x(0) {
             Arg::Undef => 100,
             n => crate::js::num(&n).max(0.0) as usize,
@@ -560,194 +616,60 @@ pub fn router_kind(method: &str) -> &'static str {
 
 /// A message routed: each of its sessions' way in tried. What failed goes
 /// out as the router's error event. `listening` is who was listening when it
-/// was sent: the JS router routed in the same turn as the send, and here a
-/// listening hook can take the message and go before the route runs.
+/// was sent: a listening hook can take the message and go before the route
+/// runs.
 pub fn route(w: &World, m: &Arg, listening: &[String]) {
-    let mut c = RouterCalls { w, listening: Some(listening) };
-    if let Err(t) = w.router.core.route(&mut c, m) {
-        w.emit(From::Delivery, "error", serde_json::json!({ "message": t.message }));
+    let mut h = RouterHost { w, listening: Some(listening) };
+    if let Err(e) = w.router.core.route(&mut h, &json(m)) {
+        w.emit(From::Delivery, "error", serde_json::json!({ "message": e.0 }));
     }
 }
 
 /// Messages the engine says a session has seen.
 pub fn seen(w: &World, agent: &Arg, ids: &[Arg]) {
-    let _ = w.router.core.seen(&mut RouterCalls::of(w), agent, ids);
+    let ids: Vec<Value> = ids.iter().map(json).collect();
+    w.router.core.seen(&mut RouterHost::of(w), &text(agent), &ids);
 }
 
 /// A hook from the session.
 pub fn contact(w: &World, agent: &Arg) {
-    let _ = w.router.core.contact(&mut RouterCalls::of(w), agent);
-}
-
-impl Calls for RouterCalls<'_> {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        let w = self.w;
-        let x = |i| at(&args, i);
-        match (path, method) {
-            ("router", "now") => Ok(Arg::Num(now_ms())),
-            ("router", "usage") => Ok(self.usage(&x(0))),
-            // Who may start and wake sessions here (Settings → Network).
-            ("router", "reach") => {
-                let r = crate::network::net(w).reach();
-                Ok(obj(vec![("start", Arg::text(r.start)), ("wake", Arg::text(r.wake))]))
-            }
-            ("router", "notify") => {
-                w.emit(From::Delivery, "notify", json(&x(0)));
-                Ok(Arg::Undef)
-            }
-            ("router.policy", m) => w.policy.as_call(m, &args),
-            ("router.engine", "view") => self.engine().view(&x(0)),
-            ("router.engine.listening", "has") => {
-                let id = text(&x(0));
-                Ok(Arg::Bool(self.listening.map_or_else(|| w.mail.listening_has(&id), |l| l.contains(&id))))
-            }
-            ("router.engine.store", m) => crate::store::call(&w.store, m, &args),
-            ("router.channels", "live") => Ok(Arg::Bool(w.channels.live(&text(&x(0))))),
-            ("router.channels", "push") => Ok(Arg::Bool(w.channels.push(&text(&x(0)), x(1)))),
-            ("router.opencode", "info") => w.router.opencode.info(&mut OpenCodeCalls { w }, &x(0), windows()),
-            ("router.opencode", "deliver") => w.router.opencode.deliver(&mut OpenCodeCalls { w }, &x(0), &x(1), windows()),
-            ("router.tmux", "deliver") => {
-                let o = x(0);
-                w.router.tmux.deliver(&mut TmuxCalls, &o.field("pid"), &o.field("text"))
-            }
-            ("router.resume", "can") => Ok(Arg::Bool(resume::resume_command(&x(0), &Arg::Null).is_some())),
-            ("router.resume", "deliver") => Ok(self.resume_deliver(&x(0))),
-            ("", "listed") => {
-                let key = text(&x(0));
-                let mut o = w.router.objs.locked();
-                o.objs.insert(key.clone(), x(1));
-                if !o.records.contains(&key) {
-                    o.records.push(key);
-                }
-                Ok(Arg::Undef)
-            }
-            ("", "unlisted") => {
-                let key = text(&x(0));
-                w.router.objs.locked().records.retain(|k| *k != key);
-                Ok(Arg::Undef)
-            }
-            ("", "release") => {
-                w.router.objs.locked().objs.remove(&text(&x(0)));
-                Ok(Arg::Undef)
-            }
-            ("", "sync") => {
-                let key = text(&x(0));
-                let mut o = w.router.objs.locked();
-                if let (Some(Arg::Obj(have)), Arg::Obj(rec)) = (o.objs.get_mut(&key), x(1)) {
-                    for (k, v) in rec {
-                        match have.iter_mut().find(|(n, _)| *n == k) {
-                            Some(e) => e.1 = v,
-                            None => have.push((k, v)),
-                        }
-                    }
-                }
-                Ok(Arg::Undef)
-            }
-            ("", "emit") => {
-                let rec = w.router.objs.locked().objs.get(&text(&x(0))).cloned().unwrap_or(Arg::Undef);
-                w.emit(From::Delivery, "delivery", json(&rec));
-                Ok(Arg::Undef)
-            }
-            ("", "arm") => {
-                let key = text(&x(0));
-                let k = key.clone();
-                let t = w.after(crate::js::num(&x(1)), move |w| {
-                    w.router.timers.locked().remove(&k);
-                    let _ = w.router.core.expire(&mut RouterCalls::of(w), &k);
-                });
-                if let Some(old) = w.router.timers.locked().insert(key, t) {
-                    old.abort();
-                }
-                Ok(Arg::Undef)
-            }
-            ("", "clear") => {
-                if let Some(t) = w.router.timers.locked().remove(&text(&x(0))) {
-                    t.abort();
-                }
-                Ok(Arg::Undef)
-            }
-            _ => Err(no_method(path, method)),
-        }
-    }
-    fn get(&mut self, path: &str) -> Result<Arg> {
-        Ok(match path {
-            "router.ackMs" => Arg::Num(ACK_MS),
-            "router.policy.data.consent" => self.w.policy.data().field("consent"),
-            "router.policy.data" => self.w.policy.data(),
-            // A resume here can fork a copy of a Claude Code session too.
-            "router.resume.fork" => Arg::Bool(self.w.router.resume.is_some()),
-            _ => Arg::Undef,
-        })
-    }
-    fn kind(&mut self, path: &str) -> Result<String> {
-        Ok(match path {
-            "router"
-            | "router.opencode"
-            | "router.tmux"
-            | "router.channels"
-            | "router.policy"
-            | "router.policy.data"
-            | "router.engine"
-            | "router.engine.listening"
-            | "router.engine.store" => "object",
-            "router.resume" => {
-                if self.w.router.resume.is_some() {
-                    "object"
-                } else {
-                    "null"
-                }
-            }
-            "router.opencode.info"
-            | "router.opencode.deliver"
-            | "router.tmux.deliver"
-            | "router.resume.can"
-            | "router.resume.deliver"
-            | "router.channels.live"
-            | "router.channels.push"
-            | "router.engine.listening.has" => "function",
-            "router.ackMs" => "number",
-            "router.reach" => "function",
-            "router.resume.fork" if self.w.router.resume.is_some() => "boolean",
-            _ => "undefined",
-        }
-        .into())
-    }
-    fn now(&mut self) -> f64 {
-        now_ms()
-    }
+    w.router.core.contact(&mut RouterHost::of(w), &text(agent));
 }
 
 pub struct RouterDriver(pub std::sync::Arc<World>);
 
 impl Router for RouterDriver {
     fn usage(&self, app: &str) -> R<Value> {
-        Ok(json(&RouterCalls::of(&self.0).usage(&Arg::text(app))))
+        Ok(usage(&self.0, app).map_or(Value::Null, xenonet_base::json::number))
     }
     fn list(&self, n: usize) -> R<Value> {
-        Ok(Value::Array(self.0.router.list(n).iter().map(json).collect()))
+        Ok(Value::Array(self.0.router.core.list(n)))
     }
 }
 
-/// node:fs, for the listen settings.
-struct FsCalls;
-
-impl Calls for FsCalls {
-    fn call(&mut self, path: &str, method: &str, args: Vec<Arg>) -> Result<Arg> {
-        match path {
-            "fs" => crate::fsx::call(method, &args),
-            _ => Err(no_method(path, method)),
-        }
+impl Delivery for RouterDriver {
+    fn known(&self) -> Vec<String> {
+        self.0.router.core.known(&mut RouterHost::of(&self.0))
     }
-    fn get(&mut self, _: &str) -> Result<Arg> {
-        Ok(Arg::Undef)
+    fn reaches(&self, id: &str) -> bool {
+        self.0.router.core.reaches(&mut RouterHost::of(&self.0), id)
     }
-    fn kind(&mut self, _: &str) -> Result<String> {
-        Ok("object".into())
+    fn resumable(&self, view: &Value) -> bool {
+        self.0.router.core.resumable(&mut RouterHost::of(&self.0), view)
+    }
+    fn wake(&self, from: &str, agent: &str) -> WakeAllowed {
+        self.0.router.core.wake(&mut RouterHost::of(&self.0), from, agent)
+    }
+    fn way(&self, me: &str, recipient: &Value) -> Option<&'static str> {
+        self.0.router.core.way(&mut RouterHost::of(&self.0), me, recipient)
+    }
+    fn describe(&self, id: &str) -> Option<Value> {
+        self.0.router.core.describe(&mut RouterHost::of(&self.0), id)
     }
 }
 
 /// The settings a Claude Code session starts with to listen after its
 /// turns (writeListenSettings), written to the state folder: their file.
 pub fn listen_settings(dir: &str, port: u16) -> std::result::Result<String, String> {
-    xenonet_engine::delivery::setup::write_listen_settings(&mut FsCalls, dir, &Arg::Num(f64::from(port)), &Arg::Num(300.0)).map_err(|t| t.message)
+    xenonet_engine::delivery::setup::write_listen_settings(&mut Fs, dir, f64::from(port), 300.0).map_err(|e| e.0)
 }

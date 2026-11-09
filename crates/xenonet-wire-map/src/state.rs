@@ -870,7 +870,7 @@ impl MapState {
                     let (home, vendor, cursor) = (self.cfg.grok_home.clone(), self.vendor.clone(), cursor.map(str::to_string));
                     crate::util::blocking(move || {
                         let dir = xenonet_sources::grok::folder(&home, &raw).ok_or("XenoNet can't find this Grok Build session's folder")?;
-                        let lines = crate::stats::read_lines(&vendor, &dir.join("updates.jsonl").to_string_lossy(), crate::vendor::Tailed::Grok).map_err(|e| e.to_string())?;
+                        let lines = crate::stats::read_lines(&vendor, &dir.join("updates.jsonl").to_string_lossy(), "grok").map_err(|e| e.to_string())?;
                         let lines: Vec<_> = lines.into_iter().map(xenonet_sources::lines::GrokLine::new).collect();
                         Ok(xenonet_sources::grok::page(xenonet_sources::grok::entries(&lines), cursor.as_deref(), limit as usize))
                     })
