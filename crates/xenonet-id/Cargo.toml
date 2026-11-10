@@ -1,0 +1,23 @@
+[package]
+name = "xenonet-id"
+description = "Who signed what: Ed25519 keys and key ids, signatures bound to their purpose, the signers that hold a key, key stores, presence blocks that prove a person was there, and did:key names. Usable alone."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+# Ed25519 to sign and verify, ECDSA P-256 to verify a hardware key's
+# signatures, SHA-256 and the system's random numbers.
+ring.workspace = true
+serde_json.workspace = true
+x25519-dalek.workspace = true
+# Owner-only files on Windows (the key files).
+xenonet-os.workspace = true
+
+[lints]
+workspace = true

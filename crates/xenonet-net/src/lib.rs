@@ -3,7 +3,7 @@
 //! the gateway over plain HTTP(S).
 //!
 //! - `keys`: a host's two keys, Ed25519 to sign and X25519 to be sealed
-//!   to, in one owner-only file, and its key id.
+//!   to, in one owner-only file, and its key id (from `xenonet-id`).
 //! - `frame`: a frame on the wire (`network/frame/v1`), its head, its
 //!   signature and the sealing of its body.
 //! - `roster`: the signed chain of hosts, and who may sign what.
@@ -78,6 +78,15 @@ pub type R<T> = Result<T, NetError>;
 impl From<rusqlite::Error> for NetError {
     fn from(e: rusqlite::Error) -> Self {
         NetError::internal(format!("the network's database: {e}"))
+    }
+}
+
+impl From<xenonet_id::IdError> for NetError {
+    fn from(e: xenonet_id::IdError) -> Self {
+        match e.code {
+            "refused" => NetError::new(403, "refused", e.message),
+            _ => NetError::internal(e.message),
+        }
     }
 }
 

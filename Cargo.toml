@@ -121,6 +121,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # One network across machines (docs/design/network.md): a host's keys, its
 # signed and sealed frames, the roster, the gateway's routes and the link.
 xenonet-net = { path = "crates/xenonet-net" }
+xenonet-id = { path = "crates/xenonet-id" }
 # The network's Ed25519 signatures, HKDF-SHA256, ChaCha20-Poly1305, HMAC
 # and SHA-256: ring, which rustls already builds on.
 ring = "0.17"
