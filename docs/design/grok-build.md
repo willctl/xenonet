@@ -232,7 +232,7 @@ called `agent` too.
 
 An MCP server's panel lists the Grok Build settings that name it: the
 user's `config.toml`, and `.grok/config.toml` in the folder of each Grok
-session that called it (`core/mcp-info.js`, `xenonet-app`'s `mcp_info.rs`).
+session that called it (`core/mcp-info.js`, `xenonet-integrations`' `mcp_info.rs`).
 XenoNet reads servers written as tables of their own
 (`[mcp_servers.<name>]`, the form `grok mcp add` writes), with their
 command, args, url, `enabled` and the names of their `env` keys, never

@@ -1,11 +1,13 @@
-//! core/components/runtime.js: where the service's runtime files are, the
+//! Where the service's runtime files are, the
 //! descriptor that says how to reach it (its port and token), and starting
 //! it when it isn't running.
 
+use crate::host::{Spawn, Starter};
 use serde_json::{json, Map, Value};
-use xenonet_app::fsx::{self, FsError};
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{now_ms, Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::files::{self, FsError};
+use xenonet_os::nodepath::NATIVE;
+use xenonet_text::time::now_ms;
 
 /// The variables of the environment a call was given.
 pub type Env = Map<String, Value>;
@@ -64,7 +66,7 @@ pub fn xenonet_bin(env: &Env, m: &Machine, this: &str) -> String {
         return b.into();
     }
     if let Some(root) = set(env, "XENONET_LAUNCHER_ROOT") {
-        return xenonet_app::nodepath::Style::of(&m.platform).join(&[root, bin_name(&m.platform)]);
+        return xenonet_os::nodepath::Style::of(&m.platform).join(&[root, bin_name(&m.platform)]);
     }
     this.into()
 }
@@ -88,13 +90,13 @@ pub fn stop_file(env: &Env, m: &Machine) -> String {
 /// The service's descriptor: its port and the token its hello wants.
 pub fn read_descriptor(env: &Env, m: &Machine) -> Result<(f64, String), FsError> {
     let file = descriptor_file(env, m);
-    let text = fsx::read_text(&file)?;
-    let d = xenonet_text::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
+    let text = files::read_text(&file)?;
+    let d = xenonet_text::json::parse(&text).map_err(|e| files::said(e.to_string()))?;
     let port = d.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p));
     let token = d.get("token").map(xenonet_text::text::display).filter(|t| crate::packages::sha_re().is_match(t));
     match (port, token) {
         (Some(p), Some(t)) => Ok((p, t)),
-        _ => Err(fsx::said("Invalid XenoNet service connection file.")),
+        _ => Err(files::said("Invalid XenoNet service connection file.")),
     }
 }
 
@@ -116,33 +118,27 @@ pub fn service_args(args: Option<&Value>) -> Vec<String> {
 /// the one started answers. It runs detached, as a standalone service, its
 /// output in the runtime folder's service log: `exec` (the xenonet binary)
 /// with `args`, in `root`.
-///
-/// Asks: { op: "connect" } (connect and close again), { op: "spawn", … }
-/// and { op: "failure" } (throws what the child's exit or error was).
-pub async fn ensure_service(io: &Io, root: &str, exec: &str, args: &[String], env: &Env, timeout: f64, m: &Machine) -> Result<Value, Failure> {
-    match io.ask(json!({ "op": "connect", "env": env })).await {
-        Ok(_) => return Ok(json!("reused")),
-        Err(e) => {
-            if e.get("message").and_then(Value::as_str).unwrap_or("").contains("incompatible") {
-                return Err(Failure::Rethrow);
-            }
-        }
+pub async fn ensure_service(host: &dyn Starter, root: &str, exec: &str, args: &[String], env: &Env, timeout: f64, m: &Machine) -> Result<Value, Failure> {
+    match host.reach(env).await {
+        Ok(()) => return Ok(json!("reused")),
+        Err(e) if e.message.contains("incompatible") => return Err(e),
+        Err(_) => {}
     }
     let dir = runtime_dir(env, m);
-    fsx::mkdir_p(&dir, Some(0o700))?;
+    files::mkdir_p(&dir, Some(0o700))?;
     let log = NATIVE.join(&[&dir, &format!("service-{}.log", port_of(env))]);
     let mut child_env = env.clone();
     child_env.insert("XENONET_STANDALONE".into(), json!("1"));
     child_env.shift_remove("ELECTRON_RUN_AS_NODE");
     child_env.shift_remove("XENONET_EXEC");
-    io.ask(json!({ "op": "spawn", "command": exec, "args": args, "cwd": root, "env": child_env, "log": log })).await.map_err(|_| Failure::Rethrow)?;
+    host.spawn(&Spawn { command: exec.into(), args: args.to_vec(), cwd: Some(root.into()), env: child_env, log: Some(log) }).await?;
     let until = now_ms() + timeout;
     while now_ms() < until {
-        if io.ask(json!({ "op": "connect", "env": env })).await.is_ok() {
+        if host.reach(env).await.is_ok() {
             return Ok(json!("started"));
         }
-        io.ask(json!({ "op": "failure" })).await.map_err(|_| Failure::Rethrow)?;
-        io.sleep(200.0).await;
+        host.failed().await?;
+        host.sleep(200.0).await;
     }
     Err(Failure::msg("XenoNet Service did not start. See its service log."))
 }

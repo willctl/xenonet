@@ -7,7 +7,6 @@
 
 use crate::crypto::{b64url, b64url_decode, hmac_sha256, random_bytes, same, sha256};
 use serde_json::{Map, Value};
-use xenonet_app::jsv::strict_eq;
 
 pub const CURSOR_MS: f64 = 5.0 * 60e3;
 
@@ -80,12 +79,16 @@ impl Cursors {
         };
         let one = Value::from(1);
         let filters = Value::String(digest(f.filters));
-        if !strict_eq(field("v"), Some(&one)) || !strict_eq(field("g"), f.grant) || !strict_eq(field("o"), f.op) || !strict_eq(field("f"), Some(&filters)) {
+        if !xenonet_text::value::same(field("v"), Some(&one))
+            || !xenonet_text::value::same(field("g"), f.grant)
+            || !xenonet_text::value::same(field("o"), f.op)
+            || !xenonet_text::value::same(field("f"), Some(&filters))
+        {
             return bad;
         }
         let t = field("t").and_then(Value::as_f64).filter(|t| t.is_finite());
         match t {
-            Some(t) if now - t <= CURSOR_MS && t <= now + 1000.0 && strict_eq(field("r"), f.revision) => Ok(field("a").cloned()),
+            Some(t) if now - t <= CURSOR_MS && t <= now + 1000.0 && xenonet_text::value::same(field("r"), f.revision) => Ok(field("a").cloned()),
             _ => Err("CURSOR_EXPIRED"),
         }
     }

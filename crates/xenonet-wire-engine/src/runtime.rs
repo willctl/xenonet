@@ -42,6 +42,8 @@ pub struct Setup {
     pub permission_hold_ms: Option<f64>,
     /// XENONET_LAUNCHER_EXEC: installed XenoNet's launcher started it.
     pub launcher_exec: Option<String>,
+    /// The demo's world as the actors' requests name it.
+    pub made_up: crate::actors::MadeUp,
 }
 
 pub struct Runtime {

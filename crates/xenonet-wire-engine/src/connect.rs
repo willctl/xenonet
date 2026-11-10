@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect as Core, Instance, Machine, Options, Problem};
 use xenonet_api::cores::{Connect, CoreError, R};
-use xenonet_app::instances::INSTANCES;
+use xenonet_components::instances::INSTANCES;
 use xenonet_os::fs::FsError;
 
 /// This machine: its files, and the agents' CLIs on PATH.

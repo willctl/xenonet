@@ -11,6 +11,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+xenonet-components.workspace = true
+xenonet-demo.workspace = true
 async-trait.workspace = true
 getrandom.workspace = true
 serde_json.workspace = true
@@ -26,7 +28,6 @@ xenonet-schema.workspace = true
 xenonet-model.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
-xenonet-app.workspace = true
 
 # tests/golden.rs reads the search index's documents back, the tests read
 # transcripts through the adapters' readers, and one archives a rollout.

@@ -6,8 +6,8 @@
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
-use xenonet_app::fsx;
-use xenonet_app::nodepath::NATIVE;
+use xenonet_os::files;
+use xenonet_os::nodepath::NATIVE;
 
 pub const CACHE_FOLDER: &str = "hosts";
 
@@ -28,7 +28,7 @@ pub fn read_cache(dir: Option<&str>, key: &str) -> Option<Value> {
     if !host_key().is_match(key) {
         return None;
     }
-    let data = xenonet_text::json::parse(&fsx::read_text(&file_of(dir, key)).ok()?).ok()?;
+    let data = xenonet_text::json::parse(&files::read_text(&file_of(dir, key)).ok()?).ok()?;
     let ok = data.get("key").and_then(Value::as_str) == Some(key)
         && data.get("savedAt").and_then(Value::as_f64).is_some()
         && data.get("graph").and_then(|g| g.get("nodes")).is_some_and(Value::is_array)
@@ -40,7 +40,7 @@ pub fn read_cache(dir: Option<&str>, key: &str) -> Option<Value> {
 #[expect(clippy::too_many_arguments, reason = "the fields of the snapshot the JS's writeCache takes, which xenonet-node passes one by one")]
 pub fn write_cache(dir: Option<&str>, key: &str, id: &Value, saved_at: &Value, hello: &Value, graph: Option<&Value>, live: Option<&Value>, engine: &Value) -> bool {
     let (Some(dir), Some(graph), Some(live)) =
-        (dir.filter(|d| !d.is_empty()), graph.filter(|g| xenonet_app::jsv::truthy(Some(g))), live.filter(|l| xenonet_app::jsv::truthy(Some(l))))
+        (dir.filter(|d| !d.is_empty()), graph.filter(|g| xenonet_text::text::truthy(Some(g))), live.filter(|l| xenonet_text::text::truthy(Some(l))))
     else {
         return false;
     };
@@ -50,16 +50,16 @@ pub fn write_cache(dir: Option<&str>, key: &str, id: &Value, saved_at: &Value, h
     let file = file_of(dir, key);
     let tmp = format!("{file}.tmp");
     let doc = json!({ "key": key, "id": id, "savedAt": saved_at, "hello": hello, "graph": graph, "live": live, "engine": engine });
-    fsx::mkdir_p(&NATIVE.dirname(&file), Some(0o700))
-        .and_then(|()| fsx::write_file(&tmp, xenonet_text::json::stringify(&doc, 0).as_bytes(), Some(0o600)))
-        .and_then(|()| fsx::rename(&tmp, &file))
+    files::mkdir_p(&NATIVE.dirname(&file), Some(0o700))
+        .and_then(|()| files::write_file(&tmp, xenonet_text::json::stringify(&doc, 0).as_bytes(), Some(0o600)))
+        .and_then(|()| files::rename(&tmp, &file))
         .is_ok()
 }
 
-pub fn remove_cache(dir: Option<&str>, key: &str) -> Result<(), fsx::FsError> {
+pub fn remove_cache(dir: Option<&str>, key: &str) -> Result<(), files::FsError> {
     let Some(dir) = dir.filter(|d| !d.is_empty()) else { return Ok(()) };
     if !host_key().is_match(key) {
         return Ok(());
     }
-    fsx::rm_rf(&file_of(dir, key))
+    files::rm_rf(&file_of(dir, key))
 }

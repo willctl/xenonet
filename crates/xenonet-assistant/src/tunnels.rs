@@ -13,9 +13,9 @@
 use crate::tunnel_client::{is_runtime_key, is_tunnel_id, log_line, mask_keys};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use xenonet_app::jsv::truthy;
 use xenonet_text::json::number as num;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 pub const TUNNEL_TRANSPORT: &str = "openai-secure-mcp-tunnel";
 pub const GUIDE: &str = "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels";

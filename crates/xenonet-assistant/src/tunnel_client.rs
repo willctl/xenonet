@@ -10,9 +10,9 @@
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::Style;
+use xenonet_os::nodepath::Style;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 pub const RELEASES: &str = "https://github.com/openai/tunnel-client/releases";
 pub const TUNNELS_PAGE: &str = "https://platform.openai.com/settings/organization/tunnels";
@@ -165,7 +165,7 @@ pub fn find_profiles(dirs: &[String], fs: &mut dyn Files) -> Vec<Value> {
     for dir in dirs {
         let Ok(names) = fs.list(dir) else { continue };
         for n in names.iter().filter(|n| yaml_name(n).is_some()) {
-            let file = xenonet_app::nodepath::NATIVE.join(&[dir, n]);
+            let file = xenonet_os::nodepath::NATIVE.join(&[dir, n]);
             let Ok(text) = fs.read(&file) else { continue };
             let p = read_profile(&text);
             if p["xenonet"] != json!(true) {
@@ -207,7 +207,7 @@ pub fn adapter_argv(bin: &Value, grant: &Value, port: &Value) -> Result<Vec<Valu
         return Err("not a grant id".into());
     }
     let mut argv = vec![bin.clone(), json!("mcp"), json!("assistant"), json!("--grant"), grant.clone()];
-    if !xenonet_app::jsv::strict_eq(Some(port), Some(&json!(47840))) {
+    if !xenonet_text::value::same(Some(port), Some(&json!(47840))) {
         argv.push(json!("--port"));
         argv.push(json!(display(port)));
     }
@@ -263,11 +263,11 @@ pub fn log_line(line: &str) -> Option<Value> {
     let pick = |a: &str, b: &str| e.get(a).filter(|v| !v.is_null()).or_else(|| e.get(b).filter(|v| !v.is_null())).cloned();
     let msg = pick("msg", "message").map_or_else(String::new, |m| display(&m));
     let msg: String = mask_keys(&msg).chars().map(|c| if (c as u32) < 0x20 { ' ' } else { c }).collect();
-    let msg = xenonet_app::jstext::slice16(&msg, 300);
+    let msg = xenonet_text::utf16::head(&msg, 300);
     let level = e.get("level").filter(|v| !v.is_null()).map_or_else(|| "info".to_string(), display).to_lowercase();
     let err = pick("error", "err");
     let msg = match err.filter(|x| truthy(Some(x))) {
-        Some(x) => format!("{msg}: {}", xenonet_app::jstext::slice16(&mask_keys(&display(&x)), 200)),
+        Some(x) => format!("{msg}: {}", xenonet_text::utf16::head(&mask_keys(&display(&x)), 200)),
         None => msg,
     };
     Some(json!({ "level": level, "msg": msg }))

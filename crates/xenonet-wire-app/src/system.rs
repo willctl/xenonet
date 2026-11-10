@@ -1,5 +1,5 @@
 //! What the computer running XenoNet is doing, for the console's system
-//! panel (core/system-stats.js, crates/xenonet-app/src/system_stats.rs).
+//! panel (core/system-stats.js, crates/xenonet-os/src/stats.rs).
 //! The parsers, the CPU arithmetic, the history and each GPU reader's state
 //! are the Rust's; this reads what Node's os module read (the cores'
 //! times, memory, uptime), starts and stops the programs the GPU readers
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use xenonet_api::cores::{SystemStats, R};
-use xenonet_app::system_stats::{self as stats, Times};
+use xenonet_os::stats::{self as stats, Times};
 
 /// os.cpus(), os.totalmem(), os.freemem(), os.uptime(), as Node reads them
 /// on macOS, Linux and Windows.

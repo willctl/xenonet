@@ -9,8 +9,8 @@
 //! twin's.
 
 use serde_json::{json, Map, Value};
-use xenonet_app::jsv::truthy;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 pub const GRAPH_EVERY_MS: f64 = 1000.0;
 pub const LIVE_EVERY_MS: f64 = 500.0;
@@ -113,7 +113,7 @@ pub fn doctor_of(data: &Value) -> Value {
         }
         _ => Value::Null,
     };
-    let text = |p: &Value, k: &str, max: usize| xenonet_app::jstext::slice16(&p.get(k).filter(|v| !v.is_null()).map_or_else(String::new, display), max);
+    let text = |p: &Value, k: &str, max: usize| xenonet_text::utf16::head(&p.get(k).filter(|v| !v.is_null()).map_or_else(String::new, display), max);
     let problems: Vec<Value> = data
         .get("problems")
         .and_then(Value::as_array)

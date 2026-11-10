@@ -286,6 +286,7 @@ impl Host {
             runs_bin: config.runs_bin.clone(),
             permission_hold_ms: config.permission_hold_ms,
             launcher_exec: config.launcher_exec.clone(),
+            made_up: xenonet_wire_engine::actors::MadeUp::none(),
         };
         let world = xenonet_wire_engine::wire(&mut cores, setup, &env).expect("the engine's parts");
         // As the binary's serve closure plugs it.

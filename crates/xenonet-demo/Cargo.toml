@@ -1,0 +1,18 @@
+[package]
+name = "xenonet-demo"
+description = "XenoNet's demo: a made-up workspace of projects, sessions and shared context, written to a temporary folder and kept busy, which runs through XenoNet's real pipeline in place of your own."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
+
+[lints]
+workspace = true

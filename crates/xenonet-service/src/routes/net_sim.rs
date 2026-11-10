@@ -599,7 +599,7 @@ pub fn made_up_reading(host: &str, at: f64) -> Option<Value> {
         "gpus": gpus,
         "gpu": if b.platform == "darwin" { "ioreg" } else { "nvidia-smi" },
     });
-    r["hardware"] = xenonet_app::system_stats::hardware_of(&r);
+    r["hardware"] = xenonet_os::stats::hardware_of(&r);
     Some(r)
 }
 

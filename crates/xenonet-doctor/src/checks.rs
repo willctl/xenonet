@@ -9,10 +9,10 @@ use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use xenonet_adapter::check::{self, CheckRow, Slot, Status, Stop, Verdict};
 use xenonet_adapter::Check;
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::{Style, NATIVE};
-use xenonet_app::task::{Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::nodepath::{Style, NATIVE};
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 use xenonet_text::units::{duration, plural};
 
 pub const STATUSES: [&str; 5] = ["ok", "info", "warn", "fail", "skip"];
@@ -113,23 +113,7 @@ fn value(v: Verdict) -> Value {
     verdict(status, v.detail, v.fix)
 }
 
-/// A failure as an adapter's check sees it, and back: the message and the
-/// error's code travel, a TypeError's kind doesn't.
-fn stop(f: Failure) -> Stop {
-    match f {
-        Failure::Error { message, fields, .. } => Stop::Error { message, code: fields.get("code").filter(|v| !v.is_null()).map(display) },
-        Failure::Rethrow => Stop::Rethrow,
-    }
-}
-fn failure(s: Stop) -> Failure {
-    match s {
-        Stop::Error { message, code: Some(code) } => Failure::coded(message, &code),
-        Stop::Error { message, code: None } => Failure::msg(message),
-        Stop::Rethrow => Failure::Rethrow,
-    }
-}
-
-/// What the checks read of `ctx` as data: XenoNet's own state when it's
+/// What the checks read as data, gathered before they run: XenoNet's own state when it's
 /// running, the folders, and the runtime.
 pub struct Facts {
     pub data: Value,
@@ -154,47 +138,122 @@ impl Facts {
     }
 }
 
-/// How a check asks the machine: ctx[fn](...args), or None when ctx has no
-/// such function (as `?.()` reads it).
+/// What the doctor's checks read of the machine they run on, and of the
+/// XenoNet running there. The lookups that end in a default are what only
+/// a running XenoNet has (its actors, its network, its process checks): a
+/// host without one answers None, and the check says what it needs.
+#[async_trait(?Send)]
+pub trait DoctorHost {
+    /// The time now, in ms.
+    async fn now(&self) -> f64;
+    /// A time in ms, written in the machine's local time.
+    async fn local_time(&self, ms: f64) -> String;
+    /// A command on PATH.
+    async fn which(&self, cmd: &str) -> Option<String>;
+    async fn exists(&self, path: &str) -> bool;
+    /// A program run with these arguments, for at most `ms`: `{ code,
+    /// stdout, stderr, timedOut }`, whatever it came to.
+    async fn run(&self, file: &str, args: &[&str], ms: f64) -> Value;
+    /// A small file's text, or None when it can't be read.
+    async fn read_text(&self, path: &str) -> Option<String>;
+    /// A folder's entries, in order.
+    async fn readdir(&self, path: &str) -> Result<Vec<String>, Failure>;
+    /// Whether a folder can be written to.
+    async fn writable(&self, dir: &str) -> bool;
+    /// The file system's numbers where a folder is (`bavail`, `bsize`…),
+    /// or None when they can't be read.
+    async fn statfs(&self, dir: &str) -> Option<Value>;
+    /// state.json in a folder: its version, whether it fits its schema,
+    /// and the files moved aside.
+    async fn state_file(&self, dir: &str) -> Value;
+    /// The xenonet command on PATH: its file, whether it's installed and
+    /// ours, what it runs, and whether that's gone.
+    async fn command(&self) -> Value;
+    /// The folders of the user's saved Path on Windows, or null elsewhere.
+    async fn saved_path(&self) -> Value;
+    /// The process lookups' self-test: whether a request's process, the
+    /// processes above it and its program can be seen.
+    async fn procs(&self) -> Value;
+    /// Whether git runs here.
+    async fn git_available(&self) -> bool;
+    /// The launcher hooks and MCP servers run, or null when there's none.
+    async fn launcher(&self) -> Result<Value, Failure>;
+    /// The last day's errors in XenoNet's log, or null with no state folder.
+    async fn errors(&self) -> Value;
+    /// The drift log's records, or null with no cache folder.
+    async fn drift(&self) -> Value;
+    /// How the service started at login stands.
+    async fn login(&self) -> Option<Value> {
+        None
+    }
+    /// This machine's standing in its network (null when it's in none).
+    async fn network(&self) -> Option<Value> {
+        None
+    }
+    /// The program the service runs from after a restart.
+    async fn restart_exe(&self) -> Option<Value> {
+        None
+    }
+    /// A path with its links followed (null when it can't be).
+    async fn realpath(&self, _path: &str) -> Option<Value> {
+        None
+    }
+    /// The process checks' counts since the service started.
+    async fn verify(&self) -> Option<Value> {
+        None
+    }
+    /// The actors whose tokens expired.
+    async fn actors_expired(&self) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// What the actors' observers look at, and what they found.
+    async fn actors_observers(&self) -> Option<Value> {
+        None
+    }
+    /// The files in repos that hold an actor's token, looked for afresh
+    /// when `fresh`.
+    async fn actors_token_files(&self, _fresh: bool) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// The repos to look in for actors' tokens.
+    async fn actors_repos(&self) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// The actor gateway's state.
+    async fn actors_gateway(&self) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// The actors' wakes.
+    async fn actors_wakes(&self) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// The token files in these repos, looked for here.
+    async fn find_token_files(&self, _repos: &[Value]) -> Result<Value, Failure> {
+        Ok(json!({ "checked": 0, "files": [] }))
+    }
+}
+
+/// A check's view of the machine: its host, and the facts.
 pub(crate) struct Ctx<'a> {
-    pub(crate) io: &'a Io,
+    pub(crate) host: &'a dyn DoctorHost,
     pub(crate) f: &'a Facts,
 }
 
 impl Ctx<'_> {
-    pub(crate) async fn call(&self, f: &str, args: Value) -> Result<Option<Value>, Value> {
-        let r = self.io.ask(json!({ "op": "call", "fn": f, "args": args })).await?;
-        Ok(if r.get("missing") == Some(&json!(true)) { None } else { Some(r.get("value").cloned().unwrap_or(Value::Null)) })
+    pub(crate) async fn which(&self, cmd: &str) -> Option<String> {
+        self.host.which(cmd).await
     }
-    // A call whose throw ends the check, as the JS let it.
-    async fn must(&self, f: &str, args: Value) -> Result<Value, Failure> {
-        match self.call(f, args).await {
-            Ok(Some(v)) => Ok(v),
-            Ok(None) => Err(Failure::type_error(format!("ctx.{f} is not a function"))),
-            Err(_) => Err(Failure::Rethrow),
-        }
+    pub(crate) async fn exists(&self, p: &str) -> bool {
+        self.host.exists(p).await
     }
-    async fn which(&self, cmd: &str) -> Result<Option<String>, Failure> {
-        Ok(Some(self.must("which", json!([cmd])).await?).filter(|v| truthy(Some(v))).map(|v| display(&v)))
-    }
-    async fn exists(&self, p: &str) -> Result<bool, Failure> {
-        Ok(truthy(Some(&self.must("exists", json!([p])).await?)))
-    }
-    pub(crate) async fn run(&self, file: &str, args: &[&str], ms: f64) -> Result<Value, Failure> {
-        self.must("run", json!([file, args, ms])).await
-    }
-    // ctx.readText?.(p) ?? "": a small settings file's text.
-    async fn read_text(&self, p: &str) -> String {
-        match self.call("readText", json!([p])).await {
-            Ok(Some(v)) if !v.is_null() => display(&v),
-            _ => String::new(),
-        }
+    pub(crate) async fn run(&self, file: &str, args: &[&str], ms: f64) -> Value {
+        self.host.run(file, args, ms).await
     }
     pub(crate) fn tilde(&self, p: &str) -> String {
         xenonet_os::paths::tilde(p, &self.f.home())
     }
-    async fn now(&self) -> Result<f64, Failure> {
-        self.io.ask(json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v))).map_err(|_| Failure::Rethrow)
+    async fn now(&self) -> f64 {
+        self.host.now().await
     }
 }
 
@@ -205,31 +264,25 @@ impl check::CheckCtx for Ctx<'_> {
         &self.f.data
     }
     async fn which(&self, cmd: &str) -> Result<Option<String>, Stop> {
-        Ctx::which(self, cmd).await.map_err(stop)
+        Ok(Ctx::which(self, cmd).await)
     }
     async fn exists(&self, path: &str) -> Result<bool, Stop> {
-        Ctx::exists(self, path).await.map_err(stop)
+        Ok(Ctx::exists(self, path).await)
     }
     async fn run(&self, file: &str, args: &[&str], ms: f64) -> Result<Value, Stop> {
-        Ctx::run(self, file, args, ms).await.map_err(stop)
+        Ok(Ctx::run(self, file, args, ms).await)
     }
     async fn read_text(&self, path: &str) -> String {
-        Ctx::read_text(self, path).await
+        self.host.read_text(path).await.unwrap_or_default()
     }
     async fn readdir(&self, path: &str) -> Result<Option<Vec<String>>, Option<String>> {
-        match self.call("readdir", json!([path])).await {
-            Ok(Some(Value::Array(entries))) => Ok(Some(entries.iter().map(display).collect())),
-            Ok(Some(Value::Object(m))) => Ok(Some(m.keys().cloned().collect())),
-            Ok(Some(_)) => Ok(Some(Vec::new())),
-            Ok(None) => Ok(None),
-            Err(e) => Err(e.get("code").filter(|v| !v.is_null()).map(display)),
-        }
+        self.host.readdir(path).await.map(Some).map_err(|e| e.field("code").map(display))
     }
     async fn now(&self) -> Result<f64, Stop> {
-        Ctx::now(self).await.map_err(stop)
+        Ok(Ctx::now(self).await)
     }
     async fn local_time(&self, ms: &Value) -> Result<String, Stop> {
-        self.io.ask(json!({ "op": "localTime", "ms": ms })).await.map(|v| display(&v)).map_err(|_| Stop::Rethrow)
+        Ok(self.host.local_time(ms.as_f64().unwrap_or(f64::NAN)).await)
     }
     fn tilde(&self, path: &str) -> String {
         Ctx::tilde(self, path)
@@ -265,32 +318,36 @@ fn failed_sources(health: Option<&Value>, absent: &[&str]) -> Vec<Value> {
 /// Codex's command: the ChatGPT app's codex (`codexBin`, when it's there)
 /// or a codex on PATH, or None when there's neither. That's Codex not
 /// installed, which is no problem: XenoNet shows its threads once it is.
-async fn codex_bin(c: &Ctx<'_>) -> Result<Option<String>, Failure> {
+async fn codex_bin(c: &Ctx<'_>) -> Option<String> {
     let mut bins: Vec<String> = Vec::new();
     if let Some(b) = c.f.get("codexBin").filter(|v| truthy(Some(v))) {
         bins.push(display(b));
     }
-    if let Some(b) = c.which("codex").await? {
+    if let Some(b) = c.which("codex").await {
         bins.push(b);
     }
     let mut bin = None;
     for b in &bins {
-        if NATIVE.is_absolute(b) && c.exists(b).await? {
+        if NATIVE.is_absolute(b) && c.exists(b).await {
             bin = Some(b.clone());
             break;
         }
     }
-    Ok(match bin.or_else(|| bins.first().cloned()) {
-        Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await?.then_some(b),
-        Some(b) => c.which(&b).await?.is_some().then_some(b),
+    match bin.or_else(|| bins.first().cloned()) {
+        Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await.then_some(b),
+        Some(b) => c.which(&b).await.is_some().then_some(b),
         None => None,
-    })
+    }
 }
 
 /// The map's sources for apps that aren't installed: what they can't read
 /// isn't a failure. Only Codex's runs a program of the app's own.
-async fn absent_sources(c: &Ctx<'_>) -> Result<Vec<&'static str>, Failure> {
-    Ok(if codex_bin(c).await?.is_some() { Vec::new() } else { vec!["codex"] })
+async fn absent_sources(c: &Ctx<'_>) -> Vec<&'static str> {
+    if codex_bin(c).await.is_some() {
+        Vec::new()
+    } else {
+        vec!["codex"]
+    }
 }
 
 fn n(v: Option<&Value>) -> f64 {
@@ -302,13 +359,13 @@ fn s(v: Option<&Value>) -> String {
 }
 
 /// One check's verdict: XenoNet's own here, an app's through its adapter.
-pub async fn run(io: Io, id: String, facts: Facts) -> Result<Value, Failure> {
-    run_with(io, id, facts, xenonet_adapter::platforms().checks()).await
+pub async fn run(host: &dyn DoctorHost, id: String, facts: Facts) -> Result<Value, Failure> {
+    run_with(host, id, facts, xenonet_adapter::platforms().checks()).await
 }
 
 /// One check's verdict, with these adapter checks to hand an app's id to.
-pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Check>>) -> Result<Value, Failure> {
-    let c = Ctx { io: &io, f: &facts };
+pub async fn run_with(host: &dyn DoctorHost, id: String, facts: Facts, adapters: Vec<Box<dyn Check>>) -> Result<Value, Failure> {
+    let c = Ctx { host, f: &facts };
     let f = &facts;
     match id.as_str() {
         "xenonet.server" => {
@@ -325,7 +382,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
         }
         "xenonet.sources" => {
             let Some(health) = f.get("health").filter(|v| truthy(Some(v))) else { return Ok(skip("needs XenoNet running")) };
-            let absent = absent_sources(&c).await?;
+            let absent = absent_sources(&c).await;
             let bad = failed_sources(Some(health), &absent);
             if !bad.is_empty() {
                 let said: Vec<String> =
@@ -348,10 +405,10 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             let blocks = list(Some(blocks));
             // One that reads for an app that isn't installed has nothing to
             // read.
-            let absent = absent_sources(&c).await?;
+            let absent = absent_sources(&c).await;
             let gone = |b: &Value| b.get("source").and_then(Value::as_str).is_some_and(|src| absent.contains(&src));
             let reported: Vec<Value> = failed_sources(Some(health), &absent).iter().map(|x| x.get("name").cloned().unwrap_or(Value::Null)).collect();
-            let has = |b: &Value| b.get("source").is_some_and(|src| reported.iter().any(|r| xenonet_app::jsv::strict_eq(Some(r), Some(src))));
+            let has = |b: &Value| b.get("source").is_some_and(|src| reported.iter().any(|r| xenonet_text::value::same(Some(r), Some(src))));
             let wrong: Vec<&Value> = blocks.iter().filter(|b| matches!(b.get("state").and_then(Value::as_str), Some("failed" | "degraded"))).collect();
             let mut bad: Vec<&Value> = wrong.iter().copied().filter(|b| !has(b) && !gone(b)).collect();
             bad.sort_by_key(|b| u8::from(b.get("state").and_then(Value::as_str) != Some("failed")));
@@ -383,7 +440,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                     .collect::<Vec<_>>()
                     .join("; ")
             };
-            let now = c.now().await?;
+            let now = c.now().await;
             let lasting: Vec<&Value> = bad.iter().copied().filter(|b| now - n(b.get("since")) >= BLOCK_GRACE_MS).collect();
             if lasting.is_empty() {
                 return Ok(info(format!("{}, a moment ago; XenoNet tries again by itself", say(&bad)), None));
@@ -392,8 +449,8 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
         }
         "xenonet.state" => state(&c).await,
         "contracts.drift" => {
-            let d = c.call("drift", json!([])).await.map_err(|_| Failure::Rethrow)?;
-            let Some(d) = d.filter(|d| truthy(Some(d))) else { return Ok(skip("no cache folder configured")) };
+            let d = c.host.drift().await;
+            let Some(d) = Some(d).filter(|d| truthy(Some(d))) else { return Ok(skip("no cache folder configured")) };
             let records = list(d.get("records"));
             let looked = d.get("lookedAt").filter(|v| !v.is_null()).map_or(f64::NEG_INFINITY, |v| n(Some(v)));
             let fresh: Vec<&Value> = records.iter().filter(|r| n(r.get("firstSeen")) > looked).collect();
@@ -421,7 +478,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
         "system.projects" => {
             let dir = f.path("projectsDir");
             let shown = c.tilde(&dir.clone().unwrap_or_else(|| "undefined".into()));
-            Ok(match check::folder(&c, dir.as_deref()).await.map_err(failure)? {
+            Ok(match check::folder(&c, dir.as_deref()).await? {
                 check::Folder::Missing => fail(
                     format!("{shown} doesn't exist"),
                     Some(if truthy(f.data.get("projectsDirSet")) {
@@ -435,19 +492,17 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             })
         }
         "system.git" => {
-            if let Some(avail) = c.call("gitAvailable", json!([])).await.map_err(|_| Failure::Rethrow)? {
-                if !truthy(Some(&avail)) {
-                    return Ok(warn(
-                        "git isn't installed, so repo status (uncommitted work, branches) is off",
-                        Some(if f.platform() == "darwin" {
-                            "Run xcode-select --install, or install git with Homebrew, then restart XenoNet."
-                        } else {
-                            "Install git, then restart XenoNet."
-                        }),
-                    ));
-                }
+            if !c.host.git_available().await {
+                return Ok(warn(
+                    "git isn't installed, so repo status (uncommitted work, branches) is off",
+                    Some(if f.platform() == "darwin" {
+                        "Run xcode-select --install, or install git with Homebrew, then restart XenoNet."
+                    } else {
+                        "Install git, then restart XenoNet."
+                    }),
+                ));
             }
-            Ok(match c.which("git").await? {
+            Ok(match c.which("git").await {
                 Some(b) => ok(c.tilde(&b)),
                 None => warn("git isn't on your PATH", None),
             })
@@ -466,8 +521,8 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             Ok(ok(format!("Node {node}")))
         }
         "xenonet.errors" => {
-            let entries = c.call("errors", json!([])).await.map_err(|_| Failure::Rethrow)?;
-            let Some(entries) = entries.filter(|e| truthy(Some(e))) else { return Ok(skip("needs XenoNet's state folder")) };
+            let entries = c.host.errors().await;
+            let Some(entries) = Some(entries).filter(|e| truthy(Some(e))) else { return Ok(skip("needs XenoNet's state folder")) };
             let kept: Vec<Value> = list(Some(&entries)).into_iter().filter(|e| !s(e.get("code")).starts_with("doctor.")).collect();
             let rows = xenonet_os::log::summarize(&kept);
             if rows.is_empty() {
@@ -483,9 +538,9 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             ))
         }
         "xenonet.launcher" => {
-            let l = c.call("launcher", json!([])).await.map_err(|_| Failure::Rethrow)?;
-            let Some(l) = l.filter(|v| truthy(Some(v))) else { return Ok(skip("no launcher here: XenoNet runs from a checkout")) };
-            if xenonet_app::jsv::less(l.get("version"), l.get("ships")) {
+            let l = c.host.launcher().await?;
+            let Some(l) = Some(l).filter(|v| truthy(Some(v))) else { return Ok(skip("no launcher here: XenoNet runs from a checkout")) };
+            if xenonet_text::value::less(l.get("version"), l.get("ships")) {
                 return Ok(warn(format!("launcher {}; this XenoNet ships {}", s(l.get("version")), s(l.get("ships"))), Some("XenoNet replaces it the next time it starts.")));
             }
             let Some(said) = l.get("said").filter(|v| truthy(Some(v))) else {
@@ -505,7 +560,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             if f.platform() != "darwin" {
                 return Ok(info("XenoNet doesn't check on this system yet that a request in a session's name comes from that session's process, so it takes each session at its word; what's yours to do is still refused from under an agent", None));
             }
-            let t = c.must("procs", json!([])).await?;
+            let t = c.host.procs().await;
             if !truthy(t.get("peer")) {
                 return Ok(warn("netstat doesn't say which process sends a request, so XenoNet takes each session at its word", Some(&unreadable("netstat"))));
             }
@@ -515,7 +570,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                     Some(&unreadable("ps")),
                 ));
             }
-            if !c.exists("/usr/bin/codesign").await? {
+            if !c.exists("/usr/bin/codesign").await {
                 return Ok(warn("codesign is missing, so Claude Code's own hooks can't settle which process holds a session", None));
             }
             Ok(ok("XenoNet checks each request in a session's name against the process that sent it"))
@@ -525,7 +580,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             if let Some(off) = no_actors(f) {
                 return Ok(off);
             }
-            let expired = list(c.call("actors.expired", json!([])).await.map_err(|_| Failure::Rethrow)?.as_ref());
+            let expired = list(c.host.actors_expired().await?.as_ref());
             if expired.is_empty() {
                 return Ok(ok("no actor's token has expired"));
             }
@@ -546,7 +601,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             if let Some(off) = no_actors(f) {
                 return Ok(off);
             }
-            let wakes = c.call("actors.wakes", json!([])).await.map_err(|_| Failure::Rethrow)?;
+            let wakes = c.host.actors_wakes().await?;
             let Some(wakes) = wakes.filter(|v| truthy(Some(v))) else { return Ok(skip("waking actors isn't in this XenoNet")) };
             let hooks: Vec<Value> = list(Some(&wakes)).into_iter().filter(|w| w.get("kind").and_then(Value::as_str) == Some("webhook")).collect();
             if hooks.is_empty() {
@@ -572,7 +627,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             if f.platform() != "darwin" {
                 return Ok(info("XenoNet doesn't hold actors' tokens to their processes on this system yet, so an actor's token alone decides", None));
             }
-            let t = c.must("procs", json!([])).await?;
+            let t = c.host.procs().await;
             let blind = if !truthy(t.get("peer")) {
                 Some(("netstat doesn't say which process sends a request", "netstat"))
             } else if !truthy(t.get("chain")) {
@@ -592,7 +647,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                     Some(&unreadable("lsof")),
                 ));
             }
-            let observed = if f.actors() == "on" { c.call("actors.observers", json!([])).await.map_err(|_| Failure::Rethrow)? } else { None };
+            let observed = if f.actors() == "on" { c.host.actors_observers().await } else { None };
             let unknown: Vec<String> = list(observed.as_ref())
                 .iter()
                 .filter(|o| truthy(o.get("on")) && o.get("recognized").is_some_and(|r| truthy(Some(r)) && n(r.get("found")) < n(r.get("expected"))))
@@ -609,7 +664,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                 return Ok(warn(unknown.join("; "), Some("The product may have moved where it keeps its programs; update XenoNet, or report it.")));
             }
             let said = "an actor's token never works from under a session or an actor app's own process, and a product's only from under that product";
-            let verify = c.call("verify", json!([])).await.map_err(|_| Failure::Rethrow)?;
+            let verify = c.host.verify().await;
             let unseen = verify.as_ref().and_then(|v| v.get("unseen")).filter(|v| !v.is_null()).map_or(0.0, |v| n(Some(v)));
             if unseen != 0.0 && !unseen.is_nan() {
                 let them = if unseen == 1.0 { "it" } else { "them" };
@@ -620,7 +675,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
         id if crate::login::CHECKS.iter().any(|(c, ..)| *c == id) => crate::login::run(&c, id).await,
         id if crate::firewall::CHECKS.iter().any(|(c, ..)| *c == id) => crate::firewall::run(&c, id).await,
         id => match adapters.iter().find(|k| k.row().id == id) {
-            Some(k) => k.run(&c).await.map(value).map_err(failure),
+            Some(k) => k.run(&c).await.map(value),
             None => Err(Failure::msg(format!("no such check: {id}"))),
         },
     }
@@ -630,15 +685,15 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     let f = c.f;
     let Some(dir) = f.path("stateDir") else { return Ok(skip("no state folder configured")) };
     let shown = c.tilde(&dir);
-    if !c.exists(&dir).await? {
+    if !c.exists(&dir).await {
         return Ok(info(format!("{shown} doesn't exist yet; XenoNet makes it on first save"), None));
     }
-    if !matches!(c.call("access", json!([dir, "W_OK"])).await, Ok(Some(_))) {
+    if !c.host.writable(&dir).await {
         return Ok(fail(format!("can't write to {shown}"), Some("Fix the folder's permissions, or set XENONET_STATE_DIR to a folder you own.")));
     }
     // The file itself: one moved aside, one it can't read now, one from a
     // newer XenoNet, one it isn't saving to, or parts that don't fit.
-    let file = c.call("stateFile", json!([dir])).await.ok().flatten().filter(|v| truthy(Some(v)));
+    let file = Some(c.host.state_file(&dir).await).filter(|v| truthy(Some(v)));
     let loaded = f.get("stateLoad");
     let file_get = |k: &str| file.as_ref().and_then(|x| x.get(k)).filter(|v| !v.is_null());
     let broken = list(file_get("broken"));
@@ -651,7 +706,7 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     if let Some(u) = file_get("unreadable").filter(|v| truthy(Some(v))) {
         return Ok(warn(format!("state.json {}, so XenoNet will move it aside and start afresh", display(u)), Some("To keep what's in it, fix it before XenoNet next starts.")));
     }
-    if file.is_some() && xenonet_app::jsv::less(file_get("known"), file_get("version")) && file_get("version").is_some() && file_get("known").is_some() {
+    if file.is_some() && xenonet_text::value::less(file_get("known"), file_get("version")) && file_get("version").is_some() && file_get("known").is_some() {
         return Ok(warn(
             format!("state.json is from a newer XenoNet (version {}), so this one reads it but doesn't save changes to it", s(file_get("version"))),
             Some("Use the newer XenoNet, or update this one."),
@@ -674,7 +729,7 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
             Some("Fix that part, or move state.json aside while XenoNet is closed to start afresh."),
         ));
     }
-    if let Ok(Some(st)) = c.call("statfs", json!([dir])).await {
+    if let Some(st) = c.host.statfs(&dir).await {
         let free = n(st.get("bavail")) * n(st.get("bsize"));
         if free < 1e9 {
             return Ok(warn(
@@ -688,7 +743,7 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
 
 async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
     let f = c.f;
-    let st = c.must("command", json!([])).await?;
+    let st = c.host.command().await;
     let Some(file) = st.get("file").filter(|v| truthy(Some(v))).map(display) else { return Ok(skip("not on Windows yet")) };
     let place = c.tilde(&file);
     if !truthy(st.get("installed")) {
@@ -707,9 +762,9 @@ async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
     let dir = c.tilde(&NATIVE.dirname(&file));
     let win = f.platform() == "win32";
     if !truthy(st.get("onPath")) && win {
-        let saved = c.call("savedPath", json!([])).await.map_err(|_| Failure::Rethrow)?;
+        let saved = Some(c.host.saved_path().await);
         let target = Style::Win32.dirname(&file);
-        if list(saved.as_ref()).iter().any(|d| xenonet_app::command::same_place(&display(d), &target, "win32")) {
+        if list(saved.as_ref()).iter().any(|d| xenonet_components::command::same_place(&display(d), &target, "win32")) {
             return Ok(ok(format!("{place}, on your Path for new terminals")));
         }
     }
@@ -728,20 +783,16 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
     if let Some(off) = no_actors(c.f) {
         return Ok(off);
     }
-    let started = c.now().await?;
+    let started = c.now().await;
     let by_hand = c.f.data.get("byHand") == Some(&json!(true));
-    let found = match c.call("actors.tokenFiles", json!([{ "fresh": by_hand }])).await.map_err(|_| Failure::Rethrow)? {
+    let found = match c.host.actors_token_files(by_hand).await? {
         Some(v) => v,
         None => {
-            let repos = list(c.call("actors.repos", json!([])).await.map_err(|_| Failure::Rethrow)?.as_ref());
+            let repos = list(c.host.actors_repos().await?.as_ref());
             let mut m = Map::new();
             m.insert("at".into(), Value::Null);
             m.insert("repos".into(), json!(repos.len()));
-            let more = if repos.is_empty() {
-                json!({ "checked": 0, "files": [] })
-            } else {
-                c.io.ask(json!({ "op": "findTokenFiles", "repos": repos })).await.map_err(|_| Failure::Rethrow)?
-            };
+            let more = if repos.is_empty() { json!({ "checked": 0, "files": [] }) } else { c.host.find_token_files(&repos).await? };
             for (k, v) in more.as_object().into_iter().flatten() {
                 m.insert(k.clone(), v.clone());
             }
@@ -786,7 +837,7 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
     if let Some(off) = no_actors(c.f) {
         return Ok(off);
     }
-    let st = c.call("actors.gateway", json!([])).await.map_err(|_| Failure::Rethrow)?;
+    let st = c.host.actors_gateway().await?;
     let Some(st) = st.filter(|v| truthy(Some(v))) else { return Ok(skip("the actor gateway isn't in this XenoNet")) };
     if !truthy(st.get("on")) {
         return Ok(ok("it's off, so nothing outside this computer reaches XenoNet through it"));
@@ -854,7 +905,7 @@ async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
     if let Some(off) = no_actors(f) {
         return Ok(off);
     }
-    let all = list(c.call("actors.observers", json!([])).await.map_err(|_| Failure::Rethrow)?.as_ref());
+    let all = list(c.host.actors_observers().await.as_ref());
     let names = |os: &[&Value]| -> String {
         match os.len() {
             0 => String::new(),
@@ -922,7 +973,7 @@ async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xenonet_app::task::{Outcome, Task};
+    use crate::fake::{ready, Fake};
 
     fn row(id: &'static str, group: &'static str, slot: Slot) -> CheckRow {
         CheckRow { id, group, title: "", slot }
@@ -972,29 +1023,8 @@ mod tests {
     }
 
     fn drive(facts: Value) -> Result<Value, Failure> {
-        let mut task = Task::new(move |io| async move { run_with(io, "ask.everything".into(), Facts { data: facts }, vec![Box::new(Asks)]).await });
-        let mut reply = None;
-        loop {
-            match task.step(reply.take()) {
-                Outcome::Ask(q) => {
-                    let args = q.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
-                    let a0 = args.first().and_then(Value::as_str).unwrap_or("");
-                    reply = Some(match (q["op"].as_str(), q["fn"].as_str()) {
-                        (Some("now"), _) => Ok(json!(42)),
-                        (Some("localTime"), _) => Ok(json!(format!("at {}", q["ms"]))),
-                        (_, Some("which")) => Ok(json!({ "value": "/x/tool" })),
-                        (_, Some("exists")) => Ok(json!({ "value": a0 == "/x/here" })),
-                        (_, Some("run")) => Ok(json!({ "value": { "stdout": format!("ran {} {}", a0, args[1][0].as_str().unwrap_or("")), "code": 0 } })),
-                        (_, Some("readdir")) if a0 == "/x/dir" => Ok(json!({ "value": ["a", "b"] })),
-                        (_, Some("readdir")) => Err(json!({ "message": "EACCES", "code": "EACCES" })),
-                        (_, Some("readText")) => Ok(json!({ "value": "hi" })),
-                        _ => panic!("{q}"),
-                    });
-                }
-                Outcome::Done(v) => return Ok(v),
-                Outcome::Failed(f) => return Err(f),
-            }
-        }
+        let host = Fake::default();
+        ready(run_with(&host, "ask.everything".into(), Facts { data: facts }, vec![Box::new(Asks)]))
     }
 
     #[test]
@@ -1004,10 +1034,7 @@ mod tests {
         assert_eq!(v["detail"], json!("Some(\"/x/tool\") true ran /x/tool --v (Ok(Some([\"a\", \"b\"])), Err(Some(\"EACCES\"))) hi at 1.0 42 ~/x"));
         assert_eq!(v["fix"], json!("do nothing"));
         assert_eq!(drive(json!({ "stop": true })), Err(Failure::msg("stopped on purpose")));
-        let task = Task::new(|io| async move { run_with(io, "no.such".into(), Facts { data: json!({}) }, Vec::new()).await });
-        assert_eq!(xenonet_app::task::run_with(task, |_| Ok(Value::Null)), Err(Failure::msg("no such check: no.such")));
-        assert_eq!(stop(Failure::coded("gone", "ENOENT")), Stop::Error { message: "gone".into(), code: Some("ENOENT".into()) });
-        assert_eq!(failure(stop(Failure::coded("gone", "ENOENT"))), Failure::coded("gone", "ENOENT"));
-        assert_eq!(failure(Stop::Rethrow), Failure::Rethrow);
+        let host = Fake::default();
+        assert_eq!(ready(run_with(&host, "no.such".into(), Facts { data: json!({}) }, Vec::new())), Err(Failure::msg("no such check: no.such")));
     }
 }

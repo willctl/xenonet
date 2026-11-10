@@ -840,45 +840,81 @@ impl Connect {
 #[cfg(any(test, feature = "testing"))]
 #[derive(Default)]
 pub struct FakeMachine {
-    pub files: std::collections::BTreeMap<String, String>,
+    pub files: Files,
     pub clis: Vec<String>,
     pub asked: Vec<String>,
 }
 
-/// A path as the fake keeps it: with / for \\, so a test's keys are the
-/// same on every system, though the code joins paths as the machine does.
+/// The fake's files, by path. A path is kept with / for \\, so a test's
+/// keys are the same on every system, though the code joins paths with \\
+/// on Windows.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Default)]
+pub struct Files(std::collections::BTreeMap<String, String>);
+
 #[cfg(any(test, feature = "testing"))]
 fn key(path: &str) -> String {
     path.replace('\\', "/")
 }
 
 #[cfg(any(test, feature = "testing"))]
+impl Files {
+    pub fn insert(&mut self, path: String, text: String) -> Option<String> {
+        self.0.insert(key(&path), text)
+    }
+    pub fn get(&self, path: impl AsRef<str>) -> Option<&String> {
+        self.0.get(&key(path.as_ref()))
+    }
+    pub fn contains_key(&self, path: impl AsRef<str>) -> bool {
+        self.0.contains_key(&key(path.as_ref()))
+    }
+    pub fn remove(&mut self, path: impl AsRef<str>) -> Option<String> {
+        self.0.remove(&key(path.as_ref()))
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl FromIterator<(String, String)> for Files {
+    fn from_iter<I: IntoIterator<Item = (String, String)>>(files: I) -> Self {
+        Files(files.into_iter().map(|(path, text)| (key(&path), text)).collect())
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T: AsRef<str>> std::ops::Index<T> for Files {
+    type Output = String;
+    fn index(&self, path: T) -> &String {
+        self.get(path.as_ref()).unwrap_or_else(|| unreachable!("no file {}", path.as_ref()))
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
 impl Machine for FakeMachine {
     fn read_text(&mut self, file: &str) -> Result<String> {
-        self.files.get(&key(file)).cloned().ok_or_else(|| Problem::coded("no such file", "ENOENT"))
+        self.files.get(file).cloned().ok_or_else(|| Problem::coded("no such file", "ENOENT"))
     }
     fn write_text(&mut self, file: &str, text: &str) -> Result<()> {
-        self.files.insert(key(file), text.into());
+        self.files.insert(file.into(), text.into());
         Ok(())
     }
     fn exists(&mut self, path: &str) -> bool {
-        self.files.contains_key(&key(path))
+        self.files.contains_key(path)
     }
     fn make_dir(&mut self, _dir: &str) -> Result<()> {
         Ok(())
     }
     fn copy(&mut self, from: &str, to: &str) -> Result<()> {
-        let text = self.files.get(&key(from)).cloned().unwrap_or_default();
-        self.files.insert(key(to), text);
+        let text = self.files.get(from).cloned().unwrap_or_default();
+        self.files.insert(to.into(), text);
         Ok(())
     }
     fn rename(&mut self, from: &str, to: &str) -> Result<()> {
-        let text = self.files.remove(&key(from)).unwrap_or_default();
-        self.files.insert(key(to), text);
+        let text = self.files.remove(from).unwrap_or_default();
+        self.files.insert(to.into(), text);
         Ok(())
     }
     fn remove(&mut self, file: &str) -> Result<()> {
-        self.files.remove(&key(file));
+        self.files.remove(file);
         Ok(())
     }
     fn cli(&mut self, name: &str) -> Option<String> {

@@ -1,10 +1,12 @@
 //! Claude Code's adapter (docs/design/direction.md, "Adapters and
-//! surfaces"): its processes, its ways in for live delivery, and its
-//! connect through Claude Code's settings.
+//! surfaces"): its processes, its ways in for live delivery, its connect
+//! through Claude Code's settings, and what opens its sessions in Claude
+//! desktop.
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
 use xenonet_adapter::delivery::{Start, Ways};
+use xenonet_adapter::open::Opener;
 use xenonet_adapter::processes::Rules;
 use xenonet_adapter::reader::{Lister, ListerEnv, Tailed};
 use xenonet_adapter::{Check, Platform};
@@ -70,6 +72,7 @@ fn probe(args: &[String]) -> bool {
 
 pub mod checks;
 pub mod connect;
+mod open;
 pub mod reader;
 
 /// The adapter.
@@ -93,6 +96,10 @@ impl Platform for Adapter {
 
     fn processes(&self) -> Option<Rules> {
         Some(Rules { program, script: Some(script), pins_by_hook: true, ..Rules::NONE })
+    }
+
+    fn opener(&self) -> Option<Opener> {
+        Some(open::opener())
     }
 
     fn delivery(&self) -> Option<Ways> {

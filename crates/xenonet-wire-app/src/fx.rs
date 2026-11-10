@@ -1,22 +1,20 @@
-//! The plumbing the twins' JS does around the Rust cores, natively: child
-//! processes as execFile and spawn run them, the PATH as core/paths.js's
-//! onPath reads it, fetch, and tasks (crates/xenonet-app/src/task.rs) run
-//! with tokio doing the asking.
+//! The plumbing around the cores, natively: child processes run and
+//! started, the PATH as a shell reads it, the environment, and a thread
+//! for the work whose futures aren't Send (the doctor's checks, the
+//! assistant's answers, the sandboxes' actions), which waits on the
+//! service's runtime for what it asks.
 //!
-//! A task is async Rust that isn't Send (its asking is shared between the
-//! future and whoever steps it), so the tasks run on a thread of their own,
-//! one current-thread runtime with a LocalSet; what each one asks for runs
-//! on the service's own runtime, which the task awaits.
+//! That work is async Rust over a host that isn't Send, so it runs on a
+//! thread of its own, one current-thread runtime with a LocalSet.
 
 use serde_json::{json, Map, Value};
 use std::future::Future;
 use std::pin::Pin;
 use std::process::Stdio;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
-use xenonet_app::task::{Done, Failure, Io, Outcome, Reply, Task};
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
@@ -32,20 +30,16 @@ impl<T> Locked<T> for std::sync::Mutex<T> {
     }
 }
 
-/// What answers a task's requests ({ op, … }): its reply, or what it threw
-/// (`{ message, code?, … }`, as task.js's describe() has it).
-pub type Perform = Arc<dyn Fn(Value) -> BoxFuture<Reply> + Send + Sync>;
-
 /// process.platform.
 pub fn platform() -> &'static str {
     xenonet_os::platform()
 }
 
 pub fn now_ms() -> f64 {
-    xenonet_app::task::now_ms()
+    xenonet_text::time::now_ms()
 }
 
-/// An error as a task reads it: its message, and its code when it has one.
+/// An error as a JSON object: its message, and its code when it has one.
 pub fn error(message: impl Into<String>, code: Option<&str>) -> Value {
     let mut m = Map::new();
     m.insert("message".into(), Value::String(message.into()));
@@ -55,43 +49,15 @@ pub fn error(message: impl Into<String>, code: Option<&str>) -> Value {
     Value::Object(m)
 }
 
-/// A task's failure, as the JS would have thrown it: its message and other
-/// fields; Rethrow is the error the last request threw.
-pub fn failure_value(f: Failure, last: Option<Value>) -> Value {
-    match f {
-        Failure::Rethrow => last.unwrap_or_else(|| error("a task threw on an error it didn't have", None)),
-        Failure::Error { message, fields, kind } => {
-            let mut m = Map::new();
-            m.insert("message".into(), Value::String(message));
-            if kind != "Error" {
-                m.insert("name".into(), json!(kind));
-            }
-            for (k, v) in fields {
-                m.insert(k, v);
-            }
-            Value::Object(m)
-        }
-    }
-}
-
-/// The message of an error value (`err.message`).
-pub fn message_of(e: &Value) -> String {
-    match e.get("message") {
-        Some(Value::String(s)) => s.clone(),
-        Some(v) => xenonet_text::text::display(v),
-        None => xenonet_text::text::display(e),
-    }
-}
-
 type Job = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()>>> + Send>;
 
-// The thread the tasks run on, started the first time one is.
+// The thread that work runs on, started the first time it's asked for.
 fn jobs() -> &'static mpsc::UnboundedSender<Job> {
     static JOBS: OnceLock<mpsc::UnboundedSender<Job>> = OnceLock::new();
     JOBS.get_or_init(|| {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
         std::thread::Builder::new()
-            .name("xenonet-tasks".into())
+            .name("xenonet-local".into())
             .spawn(move || {
                 let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
                 let local = tokio::task::LocalSet::new();
@@ -101,54 +67,27 @@ fn jobs() -> &'static mpsc::UnboundedSender<Job> {
                     }
                 });
             })
-            .expect("a thread for the tasks");
+            .expect("a thread for the work that isn't Send");
         tx
     })
 }
 
-/// Runs a task to its end: each request is answered by `perform` on the
-/// service's runtime, a sleep here. Its value, or what it threw.
-pub async fn drive<F, Fut>(make: F, perform: Perform) -> Result<Value, Value>
+/// Runs a future that isn't Send to its end, on the thread kept for them,
+/// and waits for it here: None when it stopped before it was done.
+pub async fn local<F, Fut, T>(make: F) -> Option<T>
 where
-    F: FnOnce(Io) -> Fut + Send + 'static,
-    Fut: Future<Output = Done> + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = T> + 'static,
+    T: Send + 'static,
 {
-    let handle = tokio::runtime::Handle::current();
     let (tx, rx) = oneshot::channel();
     let job: Job = Box::new(move || {
         Box::pin(async move {
-            let mut task = Task::new(make);
-            let mut reply: Option<Reply> = None;
-            let mut last: Option<Value> = None;
-            let out = loop {
-                match task.step(reply.take()) {
-                    Outcome::Ask(q) => {
-                        let r = if q.get("op").and_then(Value::as_str) == Some("sleep") {
-                            let ms = q.get("ms").and_then(Value::as_f64).unwrap_or(0.0).max(0.0);
-                            tokio::time::sleep(Duration::from_millis(ms as u64)).await;
-                            Ok(Value::Null)
-                        } else {
-                            match handle.spawn(perform(q)).await {
-                                Ok(r) => r,
-                                Err(e) => Err(error(format!("a request failed: {e}"), None)),
-                            }
-                        };
-                        if let Err(e) = &r {
-                            last = Some(e.clone());
-                        }
-                        reply = Some(r);
-                    }
-                    Outcome::Done(v) => break Ok(v),
-                    Outcome::Failed(f) => break Err(failure_value(f, last.take())),
-                }
-            };
-            let _ = tx.send(out);
+            let _ = tx.send(make().await);
         })
     });
-    if jobs().send(job).is_err() {
-        return Err(error("XenoNet couldn't run a task", None));
-    }
-    rx.await.unwrap_or_else(|_| Err(error("a task stopped before it was done", None)))
+    jobs().send(job).ok()?;
+    rx.await.ok()
 }
 
 /// What a child process came to, as execFile's callback has it: `code` 0,
@@ -304,46 +243,6 @@ pub fn env_set(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
-/// A fetch as the tasks ask for it ({ url, method, headers, body,
-/// timeoutMs, read }), answered as task.js's fetchAsked() answers it.
-pub async fn fetch_asked(q: &Value) -> Reply {
-    let url = q.get("url").and_then(Value::as_str).unwrap_or("");
-    let method = q.get("method").and_then(Value::as_str).unwrap_or("GET");
-    let headers: Vec<(String, String)> =
-        q.get("headers").and_then(Value::as_object).map(|h| h.iter().map(|(k, v)| (k.clone(), xenonet_text::text::display(v))).collect()).unwrap_or_default();
-    let body = q.get("body").filter(|b| !b.is_null()).map(|b| match b {
-        Value::String(s) => s.clone().into_bytes(),
-        other => xenonet_text::json::stringify(other, 0).into_bytes(),
-    });
-    let timeout = q.get("timeoutMs").and_then(Value::as_f64).filter(|t| *t > 0.0).unwrap_or(300e3);
-    let res = xenonet_os::net::fetch(method, url, &headers, body, Duration::from_millis(timeout as u64)).await.map_err(|m| fetch_error(&m))?;
-    let mut out = json!({ "ok": res.ok(), "status": res.status, "statusText": "" });
-    match q.get("read").and_then(Value::as_str) {
-        Some("json") => match xenonet_text::json::parse(&res.text()) {
-            Ok(v) => out["body"] = v,
-            Err(_) => out["bodyError"] = json!(true),
-        },
-        Some("json!") => match xenonet_text::json::parse(&res.text()) {
-            Ok(v) => out["body"] = v,
-            Err(e) => return Err(error(format!("Unexpected token in JSON: {e:?}"), None)),
-        },
-        _ => {}
-    }
-    Ok(out)
-}
-
-/// What fetch threw, as describe() has it: a timeout is a TimeoutError.
-pub fn fetch_error(message: &str) -> Value {
-    let mut e = error(message, None);
-    if message.contains("aborted due to timeout") {
-        e["name"] = json!("TimeoutError");
-        e["code"] = json!(23);
-    } else {
-        e["name"] = json!("TypeError");
-    }
-    e
-}
-
 /// Child process environment for a spawn: the service's, with these on
 /// top (a JSON object of strings), as `{ ...process.env, ...env }`.
 pub fn env_pairs(env: &Map<String, Value>) -> Vec<(String, String)> {
@@ -355,35 +254,17 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn tasks_ask_and_the_service_answers() {
-        let perform: Perform = Arc::new(|q: Value| {
-            Box::pin(async move {
-                if q["op"] == "twice" {
-                    Ok(json!(q["n"].as_i64().unwrap() * 2))
-                } else {
-                    Err(error("no", Some("ENO")))
-                }
-            })
-        });
-        let out = drive(
-            |io| async move {
-                io.sleep(1.0).await;
-                let a = io.ask(json!({ "op": "twice", "n": 3 })).await.map_err(|_| Failure::Rethrow)?;
-                Ok(json!({ "a": a }))
-            },
-            perform.clone(),
-        )
-        .await;
-        assert_eq!(out, Ok(json!({ "a": 6 })));
-        let out = drive(
-            |io| async move {
-                io.ask(json!({ "op": "other" })).await.map_err(|_| Failure::Rethrow)?;
-                Ok(Value::Null)
-            },
-            perform,
-        )
-        .await;
-        assert_eq!(out, Err(json!({ "message": "no", "code": "ENO" })));
+    async fn what_isnt_send_runs_on_its_own_thread() {
+        let here = std::thread::current().id();
+        let (there, v) = local(|| async {
+            let held = std::rc::Rc::new(7);
+            tokio::task::yield_now().await;
+            (std::thread::current().id(), *held)
+        })
+        .await
+        .expect("its answer");
+        assert_ne!(there, here);
+        assert_eq!(v, 7);
     }
 
     #[cfg(unix)]

@@ -30,7 +30,6 @@ rusqlite.workspace = true
 xenonet-schema.workspace = true
 xenonet-model.workspace = true
 # The demo's sessions by title, for its made-up actors' scripts.
-xenonet-app.workspace = true
 xenonet-components.workspace = true
 # A webhook wake follows no redirect; the service's fetch does.
 reqwest.workspace = true
@@ -41,6 +40,10 @@ regex.workspace = true
 # The relay's scrubber, for the detail presence carries to other machines:
 # the home folder as ~, as the relay writes it.
 xenonet-hosts.workspace = true
+
+[dev-dependencies]
+# The demo's world, which tests/actors.rs names its nodes from.
+xenonet-demo.workspace = true
 
 [lints]
 workspace = true

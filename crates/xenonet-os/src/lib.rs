@@ -1,28 +1,39 @@
 //! The machine XenoNet runs on, and the system's own I/O every crate
 //! shares:
 //!
-//! - `fs`: files as Node's fs reads and writes them; `private_file`: a
+//! - `fs`: files as Node's fs reads and writes them; `files`: the file
+//!   calls with their errors worded as Node words them; `private_file`: a
 //!   file only its owner may read, on every system;
+//! - `error`: why something didn't give its value, as its callers read it;
 //! - `paths`: paths as XenoNet compares and shows them, and `nodepath`, as
 //!   Node's `path` builds them;
 //! - `process`: whether a process runs, and programs started in the
 //!   background with no window;
 //! - `sync`: locks that outlive a panic;
 //! - `log`: the error log;
-//! - `dirs`: XenoNet's own folders (state, cache);
+//! - `dirs`: XenoNet's own folders (state, cache); `clock`: a time in the
+//!   machine's own time zone;
 //! - `net`: fetch() over HTTPS; `lines`: lines of another program's output;
+//! - `open`: the programs that open a URL, a file or a folder;
+//! - `stats`: what the computer is doing (CPU, memory, GPU), for the
+//!   console's system panel;
 //! - and, as Node's built-ins give them, the home folder, the platform and
 //!   random ids (below).
 
+pub mod clock;
 pub mod dirs;
+pub mod error;
+pub mod files;
 pub mod fs;
 pub mod lines;
 pub mod log;
 pub mod net;
 pub mod nodepath;
+pub mod open;
 pub mod paths;
 pub mod private_file;
 pub mod process;
+pub mod stats;
 pub mod sync;
 
 /// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.

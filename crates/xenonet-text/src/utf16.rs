@@ -207,6 +207,20 @@ pub fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// base64url without padding.
+pub fn base64url(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        let k = c.len() + 1;
+        for i in 0..k {
+            out.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
 /// `Buffer.from(text, "utf16le")`.
 pub fn utf16le(s: &str) -> Vec<u8> {
     s.encode_utf16().flat_map(u16::to_le_bytes).collect()

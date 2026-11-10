@@ -283,7 +283,7 @@ impl Relay {
             return;
         }
         let text = encode(frame);
-        if xenonet_app::jstext::utf16_len(&text) > MAX_FRAME {
+        if xenonet_text::utf16::len(&text) > MAX_FRAME {
             let t = frame.get("t").map(xenonet_text::text::display).unwrap_or_default();
             return log(&format!("left out a {t} too big to send ({} MB)", (text.len() as f64 / 1e6).round()));
         }

@@ -12,8 +12,8 @@ use crate::cache::host_key;
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
-use xenonet_app::jsv::truthy;
 use xenonet_model::ids::is_host_id;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, to_number, trim, SPACE};
 
 pub const HOSTS_FILE: &str = "hosts.json";
@@ -73,7 +73,7 @@ pub fn since_ok(s: &str) -> bool {
 pub fn ssh_file_ok(s: &str) -> bool {
     let rest = s.strip_prefix('/').or_else(|| s.strip_prefix("~/"));
     let Some(rest) = rest else { return false };
-    let n = xenonet_app::jstext::utf16_len(rest);
+    let n = xenonet_text::utf16::len(rest);
     (1..=1022).contains(&n) && !rest.chars().any(|c| matches!(c, '"' | '\\' | '%' | '\u{0}'..='\u{1f}' | '\u{7f}'))
 }
 

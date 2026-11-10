@@ -3,14 +3,14 @@
 //! registration is what `xenonet service install` writes now, whether
 //! launchd, systemd or Task Scheduler has it, and on Linux whether
 //! lingering starts it at boot, which a host with no graphical session
-//! needs. They read `ctx.login()`, the registration as xenonet-components'
+//! needs. They read the host's `login`, the registration as xenonet-components'
 //! supervisor::review sees it.
 
 use crate::checks::{fail, info, ok, skip, warn, Ctx};
 use serde_json::{json, Value};
-use xenonet_app::jsv::truthy;
-use xenonet_app::task::Failure;
+use xenonet_os::error::Failure;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 /// The checks, in order: id, group and title.
 pub const CHECKS: [(&str, &str, &str); 4] = [
@@ -23,16 +23,16 @@ pub const CHECKS: [(&str, &str, &str); 4] = [
 const NOT_REGISTERED: &str = "the service doesn't start at login";
 
 // The registration, or why there's none to read.
-async fn registration(c: &Ctx<'_>) -> Result<Result<Value, &'static str>, Failure> {
-    let l = c.call("login", json!([])).await.map_err(|_| Failure::Rethrow)?;
-    let Some(l) = l.filter(|v| truthy(Some(v))) else { return Ok(Err("XenoNet can't look at how its service starts from here")) };
+async fn registration(c: &Ctx<'_>) -> Result<Value, &'static str> {
+    let l = c.host.login().await;
+    let Some(l) = l.filter(|v| truthy(Some(v))) else { return Err("XenoNet can't look at how its service starts from here") };
     if !truthy(l.get("supported")) {
-        return Ok(Err("this system has no supervisor XenoNet registers with"));
+        return Err("this system has no supervisor XenoNet registers with");
     }
     if !truthy(l.get("registered")) {
-        return Ok(Err(NOT_REGISTERED));
+        return Err(NOT_REGISTERED);
     }
-    Ok(Ok(l))
+    Ok(l)
 }
 
 fn text(l: &Value, k: &str) -> String {
@@ -64,7 +64,7 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     if id == "service.boot" && f.platform() != "linux" {
         return Ok(skip("for Linux, where lingering starts a user's services at boot"));
     }
-    let l = match registration(c).await? {
+    let l = match registration(c).await {
         Ok(l) => l,
         Err(why) if id == "service.login" && why == NOT_REGISTERED => {
             return Ok(info(
@@ -160,25 +160,14 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
 mod tests {
     use super::*;
     use crate::checks::{self, Facts};
-    use xenonet_app::task::{Outcome, Task};
+    use crate::fake::{ready, Fake};
 
-    // One check's verdict on `platform`, with `login` as ctx.login()
-    // answers (None: a ctx without it).
+    // One check's verdict on `platform`, with `login` as the host's login
+    // answers (None: a host without it).
     fn verdict(id: &str, platform: &str, login: Option<Value>) -> Value {
         let facts = Facts { data: json!({ "platform": platform, "home": "/Users/ada", "self": { "port": 47840 } }) };
-        let owned = id.to_string();
-        let mut task = Task::new(move |io| async move { checks::run(io, owned, facts).await });
-        let mut reply = None;
-        loop {
-            match task.step(reply.take()) {
-                Outcome::Ask(q) => {
-                    assert_eq!(q["fn"], json!("login"), "{q}");
-                    reply = Some(Ok(login.as_ref().map_or_else(|| json!({ "missing": true }), |l| json!({ "value": l }))));
-                }
-                Outcome::Done(v) => return v,
-                Outcome::Failed(f) => panic!("{id}: {}", f.message()),
-            }
-        }
+        let host = Fake { login, ..Fake::default() };
+        ready(checks::run(&host, id.to_string(), facts)).unwrap_or_else(|f| panic!("{id}: {}", f.message()))
     }
 
     fn on(over: Value) -> Value {

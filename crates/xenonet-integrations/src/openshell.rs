@@ -1,19 +1,21 @@
-//! core/integrations/openshell.js: agents in OpenShell sandboxes. Every
-//! command is argv, never shell code built from input: the task stays a
-//! literal argument, a project goes up only when you confirm it, and a
-//! sandbox is never retried or deleted behind your back. The commands run
-//! through the twin, and so do the records and the reviews.
+//! Agents in OpenShell sandboxes. Every command is argv, never shell code
+//! built from input: the task stays a literal argument, a project goes up
+//! only when you confirm it, and a sandbox is never retried or deleted
+//! behind your back. The commands and the records are the host's
+//! (`ShellHost`).
 
 use crate::b64;
 use crate::common::{clean, fail, failed, has_credential, sandbox_gone, text, Fail, Tickets};
+use crate::reviews::{self, ReviewHost};
+use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
-use xenonet_app::fsx;
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::files;
+use xenonet_os::nodepath::NATIVE;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 fn word(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
@@ -71,8 +73,8 @@ fn root_of(dir: &str) -> bool {
 
 /// A project folder, resolved: a directory, and not a filesystem's root.
 pub fn source_dir(value: Option<&Value>) -> Result<String, Fail> {
-    let dir = fsx::realpath(&text(value, "Project folder", 1024)?)?;
-    let is_dir = std::fs::metadata(&dir).map_err(|e| fsx::FsError::of(e, "stat", &dir))?.is_dir();
+    let dir = files::realpath(&text(value, "Project folder", 1024)?)?;
+    let is_dir = std::fs::metadata(&dir).map_err(|e| files::FsError::of(e, "stat", &dir))?.is_dir();
     if !is_dir || root_of(&dir) {
         return fail("Choose a project directory, not a filesystem root.");
     }
@@ -84,12 +86,12 @@ pub fn policy_file(value: Option<&Value>) -> Result<Value, Fail> {
     if !truthy(value) {
         return Ok(Value::Null);
     }
-    let file = fsx::realpath(&text(value, "Policy file", 1024)?)?;
-    let st = std::fs::metadata(&file).map_err(|e| fsx::FsError::of(e, "stat", &file))?;
+    let file = files::realpath(&text(value, "Policy file", 1024)?)?;
+    let st = std::fs::metadata(&file).map_err(|e| files::FsError::of(e, "stat", &file))?;
     if !st.is_file() || st.len() > 256 * 1024 {
         return fail("Choose a policy file under 256 KiB.");
     }
-    let content = fsx::read_text(&file)?;
+    let content = files::read_text(&file)?;
     let hash = b64::sha256_hex(content.as_bytes());
     Ok(json!({ "file": file, "content": content, "hash": hash }))
 }
@@ -120,54 +122,67 @@ fn failure(f: Fail) -> Failure {
     Failure::with(f.message, m)
 }
 
-async fn ask(io: &Io, q: Value) -> Result<Value, Failure> {
-    io.ask(q).await.map_err(|_| Failure::Rethrow)
+/// What the sandbox jobs wait on: OpenShell's commands, the jobs'
+/// records, and the text reviews (whose git, snapshots and time are the
+/// `ReviewHost`'s).
+#[async_trait(?Send)]
+pub trait ShellHost: ReviewHost {
+    /// A command run for at most `timeout_ms`: `{ stdout, stderr }`, or
+    /// why it failed (its `code`, `stderr` and `stdout` with it).
+    async fn run(&self, file: &str, args: &[String], timeout_ms: f64) -> Result<Value, Failure>;
+    async fn records_list(&self) -> Result<Value, Failure>;
+    async fn records_add(&self, value: &Value) -> Result<Value, Failure>;
+    async fn records_update(&self, id: &Value, fields: &Value) -> Result<Value, Failure>;
+    /// The text reviews the jobs share.
+    fn reviews(&self) -> reviews::Shared;
+    /// XenoNet's environment, which the reviews' git starts from.
+    fn env(&self) -> Map<String, Value>;
 }
 
-async fn now(io: &Io) -> Result<f64, Failure> {
-    ask(io, json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v)))
-}
-
-/// Why a command didn't answer: what the twin's run threw (its message,
-/// code and stderr), or a refusal of XenoNet's own.
+/// Why a command didn't answer: what it failed with (its message, code and
+/// stderr), or a refusal of XenoNet's own.
 enum CallErr {
-    Thrown(Value),
+    Thrown(Failure),
     Own(Fail),
 }
 
 impl CallErr {
     fn code(&self) -> String {
         match self {
-            CallErr::Thrown(e) => e.get("code").and_then(Value::as_str).unwrap_or("").to_string(),
+            CallErr::Thrown(e) => e.code().unwrap_or("").to_string(),
             CallErr::Own(f) => f.code.clone(),
         }
     }
     fn stderr(&self) -> String {
         match self {
-            CallErr::Thrown(e) => e.get("stderr").filter(|v| !v.is_null()).map_or_else(String::new, display),
+            CallErr::Thrown(e) => e.field("stderr").map_or_else(String::new, display),
             CallErr::Own(_) => String::new(),
         }
     }
-    // Thrown on as the JS let it through.
     fn thrown(self) -> Failure {
         match self {
-            CallErr::Thrown(_) => Failure::Rethrow,
+            CallErr::Thrown(e) => e,
             CallErr::Own(f) => failure(f),
         }
     }
 }
 
-async fn call(io: &Io, s: &Shared, profile: &Value, args: &[Value], options: Value) -> Result<Value, CallErr> {
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array().into_iter().flatten().map(display).collect()
+}
+
+// A command's time limit, from its options: 15 seconds unless they say.
+fn timeout_of(options: &Value) -> f64 {
+    options["timeout"].as_f64().unwrap_or(15000.0)
+}
+
+async fn call(host: &dyn ShellHost, s: &Shared, profile: &Value, args: &[Value], options: Value) -> Result<Value, CallErr> {
     let c = {
         let o = s.borrow();
         command(profile, args, &o.platform, o.system_root.as_deref())
     };
     let c = c.map_err(CallErr::Own)?;
-    io.ask(json!({ "op": "run", "file": c["file"], "args": c["args"], "options": options })).await.map_err(CallErr::Thrown)
-}
-
-async fn asked(io: &Io, q: Value) -> Result<Value, CallErr> {
-    io.ask(q).await.map_err(CallErr::Thrown)
+    host.run(&display(&c["file"]), &strings(&c["args"]), timeout_of(&options)).await.map_err(CallErr::Thrown)
 }
 
 fn parsed(text: &str) -> Result<Value, CallErr> {
@@ -178,7 +193,7 @@ fn strs(v: &[&str]) -> Vec<Value> {
     v.iter().map(|s| json!(s)).collect()
 }
 
-async fn linux_path(io: &Io, s: &Shared, profile: &Value, file: &str) -> Result<String, Failure> {
+async fn linux_path(host: &dyn ShellHost, s: &Shared, profile: &Value, file: &str) -> Result<String, Failure> {
     if profile.get("backend").and_then(Value::as_str) != Some("wsl") {
         return Ok(file.to_string());
     }
@@ -190,7 +205,7 @@ async fn linux_path(io: &Io, s: &Shared, profile: &Value, file: &str) -> Result<
     args.pop();
     args.extend(strs(&["wslpath", "-a"]));
     args.push(json!(file));
-    let out = ask(io, json!({ "op": "run", "file": c["file"], "args": args })).await?;
+    let out = host.run(&display(&c["file"]), &strings(&Value::Array(args)), 15000.0).await?;
     let translated = xenonet_text::text::trim(&display(&out["stdout"])).to_string();
     if !translated.starts_with('/') || translated.contains(['\r', '\n', '\0', ':']) {
         return Err(failure(Fail { status: 400, code: "bad-request".into(), message: "WSL could not translate this project path.".into() }));
@@ -198,27 +213,27 @@ async fn linux_path(io: &Io, s: &Shared, profile: &Value, file: &str) -> Result<
     Ok(translated)
 }
 
-async fn job(io: &Io, id: &Value) -> Result<Value, Failure> {
-    let list = ask(io, json!({ "op": "records.list" })).await?;
+async fn job(host: &dyn ShellHost, id: &Value) -> Result<Value, Failure> {
+    let list = host.records_list().await?;
     list.as_array()
         .into_iter()
         .flatten()
-        .find(|r| xenonet_app::jsv::strict_eq(r.get("id"), Some(id)) && r.get("kind").and_then(Value::as_str) == Some("sandbox"))
+        .find(|r| xenonet_text::value::same(r.get("id"), Some(id)) && r.get("kind").and_then(Value::as_str) == Some("sandbox"))
         .cloned()
         .ok_or_else(|| failure(Fail { status: 404, code: "missing".into(), message: "No such sandbox job.".into() }))
 }
 
-async fn update(io: &Io, id: &Value, fields: Value) -> Result<Value, Failure> {
-    ask(io, json!({ "op": "records.update", "id": id, "fields": fields })).await
+async fn update(host: &dyn ShellHost, id: &Value, fields: Value) -> Result<Value, Failure> {
+    host.records_update(id, &fields).await
 }
 
 /// status(profile): whether OpenShell and its gateway answer.
-pub async fn status(io: Io, s: Shared, profile: Value) -> Result<Value, Failure> {
+pub async fn status(host: &dyn ShellHost, s: &Shared, profile: &Value) -> Result<Value, Failure> {
     let backend = profile.get("backend").cloned().unwrap_or(Value::Null);
     let experimental = backend.as_str() == Some("wsl");
-    let version = call(&io, &s, &profile, &strs(&["--version"]), Value::Null).await;
+    let version = call(host, s, profile, &strs(&["--version"]), Value::Null).await;
     let listed = match &version {
-        Ok(_) => call(&io, &s, &profile, &strs(&["sandbox", "list", "-o", "json"]), Value::Null).await.is_ok(),
+        Ok(_) => call(host, s, profile, &strs(&["sandbox", "list", "-o", "json"]), Value::Null).await.is_ok(),
         Err(_) => false,
     };
     Ok(match (version, listed) {
@@ -230,8 +245,8 @@ pub async fn status(io: Io, s: Shared, profile: Value) -> Result<Value, Failure>
 }
 
 /// preview(body): what a launch would run, step by step, and its ticket.
-pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
-    let t = now(&io).await?;
+pub async fn preview(host: &dyn ShellHost, s: &Shared, body: &Value) -> Result<Value, Failure> {
+    let t = host.now().await;
     s.borrow_mut().tickets.check(t).map_err(failure)?;
     let platform = s.borrow().platform.clone();
     let profile = json!({
@@ -267,7 +282,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         return Err(f("Choose a Git project for text change review."));
     }
     let policy = policy_file(body.get("policy")).map_err(failure)?;
-    let baseline = if review { Some(ask(&io, json!({ "op": "reviews.prepare", "source": source })).await?) } else { None };
+    let baseline = if review { Some(reviews::prepare(host, &host.reviews(), &json!(source), &host.env()).await?) } else { None };
     // OpenShell 0.1.4 limits sandbox names to 19 characters.
     let name = format!("xeno-{}", &b64::uuid().replace('-', "")[..14]);
     let mut args: Vec<Value> = strs(&["sandbox", "create", "--name", &name, "--from", &image, "--label", &format!("xenonet-job={name}"), "--detach"]);
@@ -275,7 +290,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         args.extend(strs(&["--provider", &provider]));
     }
     if !policy.is_null() {
-        let p = linux_path(&io, &s, &profile, &display(&policy["file"])).await?;
+        let p = linux_path(host, s, &profile, &display(&policy["file"])).await?;
         args.extend(strs(&["--policy", &p]));
     }
     let mut agent_args = vec![json!(agent)];
@@ -304,7 +319,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
             rest.push(strs(&["sandbox", "exec", &name, "--no-login-shell", "--", "/usr/local/bin/node", "--version"]));
         }
         let from = baseline.as_ref().map_or_else(|| source.clone(), |b| display(&b["upload"]));
-        let up = linux_path(&io, &s, &profile, &from).await?;
+        let up = linux_path(host, s, &profile, &from).await?;
         let mut upload = strs(&["sandbox", "upload"]);
         if baseline.is_some() {
             upload.push(json!("--no-git-ignore"));
@@ -333,7 +348,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         m.shift_remove("upload");
         Value::Object(m)
     });
-    let t = now(&io).await?;
+    let t = host.now().await;
     // Issued before the match, so the borrow ends before forgetting the
     // review awaits.
     let issued = s.borrow_mut().tickets.issue(value, t);
@@ -341,7 +356,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         Ok(i) => i,
         Err(e) => {
             if baseline.is_some() {
-                let _ = ask(&io, json!({ "op": "reviews.forget", "id": review_id })).await;
+                let _ = host.reviews().borrow_mut().forget(&review_id);
             }
             return Err(failure(e));
         }
@@ -362,31 +377,31 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
 }
 
 /// launch(ticket): the previewed steps, in order, with the job recorded.
-pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> {
-    let list = ask(&io, json!({ "op": "records.list" })).await?;
+pub async fn launch(host: &dyn ShellHost, s: &Shared, ticket: &Value) -> Result<Value, Failure> {
+    let list = host.records_list().await?;
     let live = list.as_array().into_iter().flatten().filter(|r| r.get("kind").and_then(Value::as_str) == Some("sandbox") && !sandbox_gone(r)).count();
     if live >= 64 {
         return Err(failure(Fail { status: 409, code: "busy".into(), message: "Delete or reconcile an old sandbox before launching another (64 maximum).".into() }));
     }
-    let t = now(&io).await?;
-    let value = s.borrow_mut().tickets.take(&display(&ticket), t).map_err(failure)?;
+    let t = host.now().await;
+    let value = s.borrow_mut().tickets.take(&display(ticket), t).map_err(failure)?;
     let changed = |m: &str| failure(Fail { status: 409, code: "changed".into(), message: m.into() });
     if truthy(value.get("source")) && source_dir(value.get("source")).map_err(failure)? != display(&value["source"]) {
         return Err(changed("The project folder changed. Preview again."));
     }
     if truthy(value.get("policy")) {
         let now_policy = policy_file(value["policy"].get("file")).map_err(failure)?;
-        if !xenonet_app::jsv::strict_eq(now_policy.get("hash"), value["policy"].get("hash")) {
+        if !xenonet_text::value::same(now_policy.get("hash"), value["policy"].get("hash")) {
             return Err(changed("The policy changed. Preview again."));
         }
     }
     if truthy(value.get("reviewId")) {
-        ask(&io, json!({ "op": "reviews.launch", "id": value["reviewId"] })).await?;
+        reviews::launch(host, &host.reviews(), &value["reviewId"]).await?;
     }
     let steps: Vec<Value> = value["steps"].as_array().cloned().unwrap_or_default();
     let provider = value.get("provider").filter(|p| truthy(Some(p))).cloned().unwrap_or(Value::Null);
     let policy_hash = value.get("policy").and_then(|p| p.get("hash")).filter(|h| !h.is_null()).cloned().unwrap_or(Value::Null);
-    let record = ask(&io, json!({ "op": "records.add", "value": { "kind": "sandbox", "status": "creating", "name": value["name"], "profile": value["profile"], "image": value["image"], "agent": value["agent"], "provider": provider, "source": value["source"], "policyHash": policy_hash, "taskHash": value["taskHash"], "reviewId": value["reviewId"], "execution": "unknown", "launchSteps": steps.len(), "completedSteps": 0 } })).await?;
+    let record = host.records_add(&json!({ "kind": "sandbox", "status": "creating", "name": value["name"], "profile": value["profile"], "image": value["image"], "agent": value["agent"], "provider": provider, "source": value["source"], "policyHash": policy_hash, "taskHash": value["taskHash"], "reviewId": value["reviewId"], "execution": "unknown", "launchSteps": steps.len(), "completedSteps": 0 })).await?;
     let collect = s.borrow().collect_text.clone();
     let mut completed = 0;
     let run = async {
@@ -394,15 +409,15 @@ pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> 
             let args = step.as_array().cloned().unwrap_or_default();
             let collecting = args.iter().any(|a| a.as_str() == Some(collect.as_str()));
             let options = if collecting { json!({ "timeout": 120000, "maxBuffer": 8 * 1024 * 1024 }) } else { json!({ "timeout": 120000 }) };
-            let response = call(&io, &s, &value["profile"], &args, options).await?;
+            let response = call(host, s, &value["profile"], &args, options).await?;
             if truthy(value.get("reviewId")) && collecting {
                 let got = parsed(&display(&response["stdout"]))?;
-                asked(&io, json!({ "op": "reviews.verifyUploaded", "id": value["reviewId"], "value": got })).await?;
+                host.reviews().borrow_mut().verify_uploaded(&value["reviewId"], &got).map_err(|f| CallErr::Thrown(failure(f)))?;
             }
             completed = i + 1;
-            asked(&io, json!({ "op": "records.update", "id": record["id"], "fields": { "completedSteps": completed } })).await?;
+            host.records_update(&record["id"], &json!({ "completedSteps": completed })).await.map_err(CallErr::Thrown)?;
         }
-        asked(&io, json!({ "op": "records.update", "id": record["id"], "fields": { "status": "created", "eventKind": "sandbox-created" } })).await
+        host.records_update(&record["id"], &json!({ "status": "created", "eventKind": "sandbox-created" })).await.map_err(CallErr::Thrown)
     };
     match run.await {
         Ok(r) => Ok(r),
@@ -410,7 +425,7 @@ pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> 
             // The command itself wasn't found, so nothing reached a gateway
             // and there's no sandbox to reconcile or delete.
             if err.code() == "ENOENT" && completed == 0 {
-                return update(&io, &record["id"], json!({ "status": "not-created", "eventKind": "runtime-unavailable", "reason": "XenoNet couldn't find the openshell command, so no sandbox was made. Install OpenShell where XenoNet's service can run it, then check the gateway." })).await;
+                return update(host, &record["id"], json!({ "status": "not-created", "eventKind": "runtime-unavailable", "reason": "XenoNet couldn't find the openshell command, so no sandbox was made. Install OpenShell where XenoNet's service can run it, then check the gateway." })).await;
             }
             let stderr = err.stderr();
             let denied = stderr.match_indices("policy_denied").any(|(i, _)| {
@@ -426,14 +441,14 @@ pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> 
             } else {
                 ("runtime-unavailable", "Creation did not complete locally. Inspect the gateway before retrying; the sandbox may exist.")
             };
-            update(&io, &record["id"], json!({ "status": "creation-unknown", "eventKind": kind, "reason": reason })).await
+            update(host, &record["id"], json!({ "status": "creation-unknown", "eventKind": kind, "reason": reason })).await
         }
     }
 }
 
 /// inspect(id): the sandbox, its policy and recent logs, read now.
-pub async fn inspect(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
-    let value = job(&io, &id).await?;
+pub async fn inspect(host: &dyn ShellHost, s: &Shared, id: &Value) -> Result<Value, Failure> {
+    let value = job(host, id).await?;
     match value.get("status").and_then(Value::as_str) {
         Some("deleted") => return Err(failure(Fail { status: 404, code: "missing".into(), message: "This sandbox was deleted.".into() })),
         Some("not-created") => return Err(failure(Fail { status: 404, code: "missing".into(), message: "No sandbox was made for this job.".into() })),
@@ -441,14 +456,14 @@ pub async fn inspect(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     }
     let name = display(&value["name"]);
     let profile = &value["profile"];
-    let got = call(&io, &s, profile, &strs(&["sandbox", "get", &name, "--output", "json"]), Value::Null).await.map_err(CallErr::thrown)?;
+    let got = call(host, s, profile, &strs(&["sandbox", "get", &name, "--output", "json"]), Value::Null).await.map_err(CallErr::thrown)?;
     let sandbox = xenonet_text::json::parse(&display(&got["stdout"])).map_err(|e| Failure::with(e.message, Map::new()))?;
-    let policy = call(&io, &s, profile, &strs(&["policy", "get", &name, "--full"]), Value::Null).await.map_err(CallErr::thrown)?;
-    let logs = call(&io, &s, profile, &strs(&["logs", &name, "--since", "10m", "--source", "sandbox"]), Value::Null).await.map_err(CallErr::thrown)?;
+    let policy = call(host, s, profile, &strs(&["policy", "get", &name, "--full"]), Value::Null).await.map_err(CallErr::thrown)?;
+    let logs = call(host, s, profile, &strs(&["logs", &name, "--since", "10m", "--source", "sandbox"]), Value::Null).await.map_err(CallErr::thrown)?;
     // A deletion still pending stays pending: seeing the sandbox doesn't undo the request.
     let status = if value.get("status").and_then(Value::as_str) == Some("deletion-requested") { value["status"].clone() } else { json!("observed") };
-    let t = now(&io).await?;
-    update(&io, &id, json!({ "status": status, "checkedAt": xenonet_text::json::number(t) })).await?;
+    let t = host.now().await;
+    update(host, id, json!({ "status": status, "checkedAt": xenonet_text::json::number(t) })).await?;
     let phase = [sandbox.get("phase"), sandbox.get("sandbox").and_then(|x| x.get("phase")), sandbox.get("status").and_then(|x| x.get("phase"))]
         .into_iter()
         .flatten()
@@ -462,12 +477,13 @@ pub async fn inspect(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
 }
 
 /// review(id): the job's local review, if it has one.
-pub async fn review(io: Io, id: Value) -> Result<Value, Failure> {
-    let value = job(&io, &id).await?;
+pub async fn review(host: &dyn ShellHost, id: &Value) -> Result<Value, Failure> {
+    let value = job(host, id).await?;
     if !truthy(value.get("reviewId")) {
         return Ok(json!({ "available": false, "reason": "This job has no frozen text baseline. It supports inspection and deletion." }));
     }
-    match io.ask(json!({ "op": "reviews.view", "id": value["reviewId"] })).await {
+    let viewed = host.reviews().borrow_mut().view(&value["reviewId"]).map_err(failure);
+    match viewed {
         Ok(v) => {
             let mut m = Map::new();
             m.insert("available".into(), json!(true));
@@ -476,35 +492,35 @@ pub async fn review(io: Io, id: Value) -> Result<Value, Failure> {
             }
             Ok(Value::Object(m))
         }
-        Err(e) if e.get("code").and_then(Value::as_str) == Some("missing") => Ok(json!({ "available": false, "reason": "The local review was forgotten or is unavailable." })),
-        Err(_) => Err(Failure::Rethrow),
+        Err(e) if e.code() == Some("missing") => Ok(json!({ "available": false, "reason": "The local review was forgotten or is unavailable." })),
+        Err(e) => Err(e),
     }
 }
 
 /// retrieve(id): the text the sandbox has now, reviewed against the
 /// baseline.
-pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
-    let value = job(&io, &id).await?;
+pub async fn retrieve(host: &dyn ShellHost, s: &Shared, id: &Value) -> Result<Value, Failure> {
+    let value = job(host, id).await?;
     if !truthy(value.get("reviewId")) || sandbox_gone(&value) {
         return Err(failure(Fail { status: 409, code: "unavailable".into(), message: "This job has no retrievable text baseline.".into() }));
     }
-    ask(&io, json!({ "op": "reviews.view", "id": value["reviewId"] })).await?;
+    host.reviews().borrow_mut().view(&value["reviewId"]).map_err(failure)?;
     let collect = s.borrow().collect_text.clone();
     let name = display(&value["name"]);
     let got = async {
         let out = call(
-            &io,
-            &s,
+            host,
+            s,
             &value["profile"],
             &strs(&["sandbox", "exec", &name, "--no-login-shell", "--timeout", "30", "--", "/usr/local/bin/node", "-e", &collect]),
             json!({ "timeout": 45000, "maxBuffer": 8 * 1024 * 1024 }),
         )
         .await?;
         let got = parsed(&display(&out["stdout"]))?;
-        let result = asked(&io, json!({ "op": "reviews.accept", "id": value["reviewId"], "value": got })).await?;
-        let t = asked(&io, json!({ "op": "now" })).await?;
+        let result = reviews::accept(host, &host.reviews(), &value["reviewId"], &got, &host.env()).await.map_err(CallErr::Thrown)?;
+        let t = xenonet_text::json::number(host.now().await);
         let complete = truthy(result.get("result").and_then(|r| r.get("complete")));
-        asked(&io, json!({ "op": "records.update", "id": id, "fields": { "retrieval": if complete { "retrieved" } else { "incomplete" }, "retrievedAt": t } })).await?;
+        host.records_update(id, &json!({ "retrieval": if complete { "retrieved" } else { "incomplete" }, "retrievedAt": t })).await.map_err(CallErr::Thrown)?;
         Ok::<Value, CallErr>(result)
     };
     match got.await {
@@ -517,8 +533,8 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
             Ok(Value::Object(m))
         }
         Err(err) => {
-            let t = now(&io).await?;
-            update(&io, &id, json!({ "retrieval": "unavailable", "retrievalCheckedAt": xenonet_text::json::number(t) })).await?;
+            let t = host.now().await;
+            update(host, id, json!({ "retrieval": "unavailable", "retrievalCheckedAt": xenonet_text::json::number(t) })).await?;
             if ["retrieval-invalid", "review-too-large", "review-capacity"].contains(&err.code().as_str()) {
                 return Err(err.thrown());
             }
@@ -534,41 +550,41 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
 }
 
 /// The job's review id, or "This job has no local review."
-pub async fn review_of(io: &Io, id: &Value) -> Result<Value, Failure> {
-    let value = job(io, id).await?;
+pub async fn review_of(host: &dyn ShellHost, id: &Value) -> Result<Value, Failure> {
+    let value = job(host, id).await?;
     if !truthy(value.get("reviewId")) {
         return Err(failure(Fail { status: 400, code: "bad-request".into(), message: "This job has no local review.".into() }));
     }
     Ok(value["reviewId"].clone())
 }
 
-pub async fn export_review(io: Io, id: Value, revision: Value) -> Result<Value, Failure> {
-    let review = review_of(&io, &id).await?;
-    ask(&io, json!({ "op": "reviews.export", "id": review, "revision": revision })).await
+pub async fn export_review(host: &dyn ShellHost, id: &Value, revision: &Value) -> Result<Value, Failure> {
+    let review = review_of(host, id).await?;
+    host.reviews().borrow_mut().export(&review, revision).map_err(failure)
 }
 
-pub async fn forget_review(io: Io, id: Value) -> Result<Value, Failure> {
-    let review = review_of(&io, &id).await?;
-    let result = ask(&io, json!({ "op": "reviews.forget", "id": review })).await?;
-    update(&io, &id, json!({ "reviewId": null, "retrieval": "forgotten" })).await?;
+pub async fn forget_review(host: &dyn ShellHost, id: &Value) -> Result<Value, Failure> {
+    let review = review_of(host, id).await?;
+    let result = host.reviews().borrow_mut().forget(&review).map_err(failure)?;
+    update(host, id, json!({ "reviewId": null, "retrieval": "forgotten" })).await?;
     Ok(result)
 }
 
 /// remove(id): asks for the sandbox's deletion, and records it deleted
 /// only once the listing says it's gone.
-pub async fn remove(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
-    let value = job(&io, &id).await?;
+pub async fn remove(host: &dyn ShellHost, s: &Shared, id: &Value) -> Result<Value, Failure> {
+    let value = job(host, id).await?;
     if sandbox_gone(&value) {
         return Ok(value);
     }
     let name = display(&value["name"]);
-    let _ = call(&io, &s, &value["profile"], &strs(&["sandbox", "delete", &name]), json!({ "timeout": 60000 })).await;
-    let listed = call(&io, &s, &value["profile"], &strs(&["sandbox", "list", "--selector", &format!("xenonet-job={name}"), "-o", "json"]), Value::Null).await;
+    let _ = call(host, s, &value["profile"], &strs(&["sandbox", "delete", &name]), json!({ "timeout": 60000 })).await;
+    let listed = call(host, s, &value["profile"], &strs(&["sandbox", "list", "--selector", &format!("xenonet-job={name}"), "-o", "json"]), Value::Null).await;
     let gone = listed
         .ok()
         .and_then(|l| xenonet_text::json::parse(&display(&l["stdout"])).ok())
         .is_some_and(|l| l.get("sandboxes").and_then(Value::as_array).is_some_and(Vec::is_empty) && !truthy(l.get("next_page_token")));
-    update(&io, &id, json!({ "status": if gone { "deleted" } else { "deletion-requested" }, "eventKind": if gone { "sandbox-deleted" } else { "sandbox-deletion-requested" } }))
+    update(host, id, json!({ "status": if gone { "deleted" } else { "deletion-requested" }, "eventKind": if gone { "sandbox-deleted" } else { "sandbox-deletion-requested" } }))
         .await
 }
 
@@ -607,7 +623,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("project")).unwrap();
         let at = |p: &str| json!(dir.join(p).to_string_lossy());
-        assert_eq!(source_dir(Some(&at("project"))).unwrap(), fsx::realpath(&dir.join("project").to_string_lossy()).unwrap());
+        assert_eq!(source_dir(Some(&at("project"))).unwrap(), files::realpath(&dir.join("project").to_string_lossy()).unwrap());
         let root = if cfg!(windows) { "C:\\" } else { "/" };
         assert_eq!(why(source_dir(Some(&json!(root)))), "Choose a project directory, not a filesystem root.");
         std::fs::write(dir.join("policy.yaml"), "version: 1\n").unwrap();

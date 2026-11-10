@@ -255,6 +255,7 @@ fn net3(name: &str) -> Net3 {
             runs_bin: None,
             permission_hold_ms: None,
             launcher_exec: None,
+            made_up: xenonet_wire_engine::actors::MadeUp::none(),
         };
         let mut cores = Cores::pending(false, false, false);
         cores.state = Arc::new(Fake { at, sessions, detail: detail.clone() });

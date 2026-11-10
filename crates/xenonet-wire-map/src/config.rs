@@ -1,4 +1,4 @@
-//! The settings the map reads (core/config.js's, through xenonet-app's
+//! The settings the map reads (core/config.js's, through xenonet-components'
 //! config): its folders, the projects scan's limits, the poll, the
 //! readers that are on, identities and the windows a session counts as
 //! active in. Worked out once, after the demo's world has moved the
@@ -6,7 +6,7 @@
 
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
-use xenonet_app::config::{config, Field, Finds};
+use xenonet_components::config::{config, Field, Finds};
 use xenonet_text::text::display;
 
 #[derive(Clone, Debug)]

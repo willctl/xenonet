@@ -1,25 +1,26 @@
-//! core/control.js and core/script.js for the command (xenonet console,
-//! script and film): an instance of XenoNet Dev started, driven through its
-//! control channel and quit (xenonet-app's control, each method a task),
-//! or installed XenoNet's console through the component service
-//! (xenonet-components' console); and steps run against either, one after
-//! another (xenonet-app's script). What a task waits on (the instance's
-//! server, the machine's processes, starting XenoNet Dev) is done here, as
-//! the twins' `system` and consoleOps did it.
+//! The console for the command (xenonet console, script and film): an
+//! instance of XenoNet Dev started, driven through its control channel
+//! and quit (xenonet-console's control), or installed XenoNet's console
+//! through the component service (xenonet-components' console); and steps
+//! run against either, one after another (xenonet-console's script). What
+//! they wait on (the instance's server, the machine's processes, starting
+//! XenoNet Dev, the service's connections) is done here.
 //!
 //! A script that's a JS module is the one thing that runs in Node: its
 //! default export is JS, given core/control.js's instance (run_module).
 
-use super::components::connect_service;
-use super::tasks::{block_on, coded, drive, error, fetch_asked, Failed, Perform};
+use super::components::Clients;
+use super::net::{block_on, fetch};
 use crate::out::Fail;
 use crate::sys;
+use async_trait::async_trait;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
-use xenonet_app::control::{self, Instance, Opts};
-use xenonet_app::script::{self, Answer, Arg, Then};
-use xenonet_app::task::{Reply, Task};
+use std::cell::RefCell;
 use xenonet_components::console::Console;
+use xenonet_components::host::{self, Connected, Spawn};
+use xenonet_console::control::{self, DevHost, Instance, Launch, Opts, Request, Response};
+use xenonet_console::script::{self, Answer, Arg, Then};
+use xenonet_os::error::Failure;
 use xenonet_os::process::Background as _;
 
 /// Who a command drives: an instance of XenoNet Dev from this checkout,
@@ -66,7 +67,7 @@ fn target(id: &str) -> Result<Target, Fail> {
     Instance::new(id, &o).map(Target::Dev).map_err(Fail::error)
 }
 
-// ---------- what an instance's tasks ask of this machine ----------
+// ---------- what driving an instance asks of this machine ----------
 
 #[cfg(unix)]
 fn signal_of(name: &str) -> libc::c_int {
@@ -138,47 +139,43 @@ fn processes() -> Value {
     control::parse_processes(&r.stdout)
 }
 
-/// electronCommand(): XenoNet Dev.app for this checkout, or the Electron
-/// npm installed (require("electron")), with its arguments.
-fn electron_command(root: &str) -> Result<Value, Value> {
+/// XenoNet Dev.app for this checkout, or the Electron npm installed, with
+/// its arguments.
+fn electron_command(root: &str) -> Result<Launch, Failure> {
     let (command, args) = control::electron_command(root, &sys::home(), sys::platform(), std::env::var("XENONET_SOFTWARE_RENDERING").is_ok_and(|v| v == "1"));
     let command = match command {
         Some(c) => c,
         None => {
             let dir = xenonet_os::paths::join_all(&[root, "node_modules", "electron"]);
             let path = std::fs::read_to_string(xenonet_os::paths::join(&dir, "path.txt"))
-                .map_err(|_| error("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually."))?;
+                .map_err(|_| Failure::msg("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually."))?;
             let dist = sys::var("ELECTRON_OVERRIDE_DIST_PATH").unwrap_or_else(|| xenonet_os::paths::join(&dir, "dist"));
             xenonet_os::paths::join(&dist, path.trim())
         }
     };
-    Ok(json!({ "command": command, "args": args }))
+    Ok(Launch { command, args })
 }
 
-/// The stdio a detached child is started with: its output to a log, or
-/// nowhere.
-fn spawn(q: &Value, log: Option<&str>) -> Result<std::process::Child, Value> {
-    let text = |k: &str| q.get(k).map(xenonet_text::text::display).unwrap_or_default();
-    let mut cmd = std::process::Command::new(text("command"));
-    cmd.args(q.get("args").and_then(Value::as_array).into_iter().flatten().map(xenonet_text::text::display)).stdin(std::process::Stdio::null());
+/// A program started detached, its output to a log, or nowhere.
+fn spawn(command: &str, args: &[String], cwd: Option<&str>, env: &Map<String, Value>, log: Option<&str>) -> Result<std::process::Child, Failure> {
+    let mut cmd = std::process::Command::new(command);
+    cmd.args(args).stdin(std::process::Stdio::null());
     match log {
         Some(file) => {
-            let out = std::fs::OpenOptions::new().create(true).append(true).open(file).map_err(|e| error(xenonet_os::fs::FsError::of(e, "open", file).message))?;
-            let err = out.try_clone().map_err(|e| error(e.to_string()))?;
+            let out = std::fs::OpenOptions::new().create(true).append(true).open(file).map_err(|e| Failure::msg(xenonet_os::fs::FsError::of(e, "open", file).message))?;
+            let err = out.try_clone().map_err(|e| Failure::msg(e.to_string()))?;
             cmd.stdout(out).stderr(err);
         }
         None => {
             cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         }
     }
-    if let Some(cwd) = q.get("cwd").and_then(Value::as_str) {
+    if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    if let Some(env) = q.get("env").and_then(Value::as_object) {
-        cmd.env_clear();
-        for (k, v) in env {
-            cmd.env(k, xenonet_text::text::display(v));
-        }
+    cmd.env_clear();
+    for (k, v) in env {
+        cmd.env(k, xenonet_text::text::display(v));
     }
     #[cfg(unix)]
     {
@@ -192,41 +189,58 @@ fn spawn(q: &Value, log: Option<&str>) -> Result<std::process::Child, Value> {
     }
     cmd.spawn().map_err(|e| {
         let code = xenonet_os::fs::code_of(&e).unwrap_or("ENOENT");
-        coded(format!("spawn {} {code}", text("command")), code)
+        Failure::coded(format!("spawn {command} {code}"), code)
     })
 }
 
-/// control.js's machine(system): fetch, the processes, the environment,
-/// Electron's command, starting XenoNet Dev and whether it has exited.
-struct Dev {
-    root: String,
-    child: Option<std::process::Child>,
+async fn pause(ms: f64) {
+    tokio::time::sleep(std::time::Duration::from_millis(if ms.is_finite() && ms > 0.0 { ms as u64 } else { 0 })).await;
 }
 
-impl Perform for Dev {
-    async fn ask(&mut self, q: &Value) -> Reply {
-        let pid = || q.get("pid").and_then(Value::as_f64).unwrap_or(0.0);
-        match q.get("op").and_then(Value::as_str) {
-            Some("fetch") => fetch_asked(q).await,
-            Some("alive") => Ok(json!(alive(pid()))),
-            Some("kill") => {
-                kill(pid(), q.get("signal").and_then(Value::as_str).unwrap_or("SIGTERM"));
-                Ok(Value::Null)
-            }
-            Some("processes") => Ok(processes()),
-            Some("env") => Ok(Value::Object(super::env_map())),
-            Some("command") => electron_command(&self.root),
-            Some("spawn") => {
-                let log = q.get("logFile").map(xenonet_text::text::display).unwrap_or_default();
-                self.child = Some(spawn(q, Some(&log))?);
-                Ok(Value::Null)
-            }
-            Some("exited") => Ok(match self.child.as_mut().map(std::process::Child::try_wait) {
-                Some(Ok(Some(st))) => st.code().map_or_else(|| exit_signal(st), Value::from),
-                _ => Value::Null,
-            }),
-            other => Err(error(format!("control asked for {}", other.unwrap_or("undefined")))),
+/// The instance's server, the processes, the environment, Electron's
+/// command, starting XenoNet Dev and whether it has exited.
+struct Dev {
+    root: String,
+    child: RefCell<Option<std::process::Child>>,
+}
+
+#[async_trait(?Send)]
+impl DevHost for Dev {
+    async fn fetch(&self, req: &Request) -> Result<Response, Failure> {
+        let (method, headers) = match &req.post {
+            Some(_) => ("POST", vec![("content-type".to_string(), "application/json".to_string())]),
+            None => ("GET", Vec::new()),
+        };
+        let res = fetch(method, &req.url, &headers, req.post.clone().map(String::into_bytes), req.timeout_ms).await?;
+        Ok(Response { status: res.status, status_text: res.status_text, body: res.body })
+    }
+    async fn alive(&self, pid: f64) -> bool {
+        alive(pid)
+    }
+    async fn kill(&self, pid: f64, signal: &str) {
+        kill(pid, signal);
+    }
+    async fn processes(&self) -> Value {
+        processes()
+    }
+    async fn env(&self) -> Map<String, Value> {
+        super::env_map()
+    }
+    async fn command(&self) -> Result<Launch, Failure> {
+        electron_command(&self.root)
+    }
+    async fn spawn(&self, launch: &Launch, cwd: &str, env: &Map<String, Value>, log_file: &str) -> Result<(), Failure> {
+        *self.child.borrow_mut() = Some(spawn(&launch.command, &launch.args, Some(cwd), env, Some(log_file))?);
+        Ok(())
+    }
+    async fn exited(&self) -> Value {
+        match self.child.borrow_mut().as_mut().map(std::process::Child::try_wait) {
+            Some(Ok(Some(st))) => st.code().map_or_else(|| exit_signal(st), Value::from),
+            _ => Value::Null,
         }
+    }
+    async fn sleep(&self, ms: f64) {
+        pause(ms).await;
     }
 }
 
@@ -249,58 +263,41 @@ fn exit_signal(_: std::process::ExitStatus) -> Value {
     Value::Null
 }
 
-/// consoleOps: the service's connections, starting Desktop as it
-/// registered itself, and the API's reads.
+/// Installed XenoNet's console: the service's connections, starting
+/// Desktop as it registered itself, and the API's reads.
 struct Installed {
     env: Map<String, Value>,
-    clients: HashMap<u64, super::components::Client>,
-    bodies: HashMap<u64, Vec<u8>>,
-    next: u64,
+    clients: Clients,
 }
 
-impl Perform for Installed {
-    async fn ask(&mut self, q: &Value) -> Reply {
-        let id = |k: &str| q.get(k).and_then(Value::as_u64).unwrap_or(0);
-        match q.get("op").and_then(Value::as_str) {
-            Some("connect") => {
-                let c = connect_service(&self.env, "tools").await?;
-                self.next += 1;
-                let info = c.info.clone();
-                self.clients.insert(self.next, c);
-                Ok(json!({ "client": self.next, "info": info }))
-            }
-            Some("request") => {
-                let Some(c) = self.clients.get(&id("client")) else { return Err(error("that connection is gone")) };
-                c.request(q.get("method").and_then(Value::as_str).unwrap_or(""), q.get("params").cloned().unwrap_or(Value::Null), 150000.0).await.map_err(error)
-            }
-            Some("close") => {
-                if let Some(c) = self.clients.remove(&id("client")) {
-                    c.close();
-                }
-                Ok(Value::Null)
-            }
-            Some("spawn") => spawn(q, None).map(|_| Value::Null),
-            Some("fetch") => {
-                let url = q.get("url").map(xenonet_text::text::display).unwrap_or_default();
-                let res = super::tasks::fetch("GET", &url, &[], None, None).await?;
-                self.next += 1;
-                self.bodies.insert(self.next, res.body);
-                Ok(json!({ "res": self.next }))
-            }
-            Some("json") => {
-                let body = self.bodies.get(&id("res")).cloned().unwrap_or_default();
-                xenonet_text::json::parse(&String::from_utf8_lossy(&body)).map_err(|e| json!({ "message": e.to_string(), "name": "SyntaxError" }))
-            }
-            other => Err(error(format!("the console asked for {}", other.unwrap_or("undefined")))),
-        }
+#[async_trait(?Send)]
+impl host::Service for Installed {
+    async fn connect(&self, _env: &Map<String, Value>) -> Result<Connected, Failure> {
+        self.clients.connect(&self.env).await
+    }
+    async fn request(&self, client: u64, method: &str, params: Value) -> Result<Value, Failure> {
+        self.clients.request(client, method, params).await
+    }
+    async fn close(&self, client: u64) {
+        self.clients.close(client);
+    }
+    async fn sleep(&self, ms: f64) {
+        pause(ms).await;
     }
 }
 
-impl Drop for Installed {
-    fn drop(&mut self) {
-        for c in self.clients.values() {
-            c.close();
-        }
+#[async_trait(?Send)]
+impl host::Desktop for Installed {
+    async fn spawn(&self, s: &Spawn) -> Result<(), Failure> {
+        spawn(&s.command, &s.args, s.cwd.as_deref(), &s.env, None).map(|_| ())
+    }
+    async fn get_json(&self, url: &str) -> Result<Value, Failure> {
+        let res = fetch("GET", url, &[], None, None).await?;
+        xenonet_text::json::parse(&String::from_utf8_lossy(&res.body)).map_err(|e| {
+            let mut m = Map::new();
+            m.insert("name".into(), json!("SyntaxError"));
+            Failure::with(e.to_string(), m)
+        })
     }
 }
 
@@ -312,73 +309,65 @@ fn num(a: &Value, k: &str, d: f64) -> f64 {
 
 /// One of the client's methods, `kind`, with its arguments, as the twin's
 /// run(kind, args) made it.
-async fn method(t: &Target, kind: &str, a: Value) -> Result<Value, Failed> {
+async fn method(t: &Target, kind: &str, a: Value) -> Result<Value, Failure> {
     match t {
         Target::Dev(i) => {
-            let (i, kind, root) = (i.clone(), kind.to_string(), i.root.clone());
-            let task = Task::new(move |io| async move {
-                let opts = a.get("opts");
-                match kind.as_str() {
-                    "health" => Ok(Value::Bool(i.health(&io).await)),
-                    "call" => i.call(&io, a.get("body").unwrap_or(&Value::Null), num(&a, "wait", 20000.0)).await,
-                    "ping" => i.ping(&io).await,
-                    "ready" => i.ready(&io, num(&a, "timeout", 60000.0)).await,
-                    "launch" => i.launch(&io, a.get("show"), a.get("restart") == Some(&Value::Bool(true)), num(&a, "timeout", 120000.0)).await,
-                    "quit" => i.quit(&io, num(&a, "timeout", 20000.0)).await,
-                    "driver" => i.driver(&io, a.get("method").unwrap_or(&Value::Null), a.get("args").and_then(Value::as_array).map_or(&[][..], Vec::as_slice)).await,
-                    "simulate" => i.simulate(&io, a.get("kind").unwrap_or(&Value::Null), a.get("a"), a.get("b")).await,
-                    "screenshot" | "input" | "window" | "record" | "logs" => i.call(&io, &Instance::body(&kind, None, opts), 20000.0).await,
-                    "eval" => i.call(&io, &Instance::body("eval", Some(("expression", a.get("expression").cloned().unwrap_or(Value::Null))), opts), 20000.0).await,
-                    "api" => i.api(&io, a.get("route").and_then(Value::as_str).unwrap_or("")).await,
-                    _ => Err(xenonet_app::task::Failure::msg(format!("no control task {kind}"))),
-                }
-            });
-            drive(task, &mut Dev { root, child: None }).await
+            let host = Dev { root: i.root.clone(), child: RefCell::new(None) };
+            let opts = a.get("opts");
+            match kind {
+                "health" => Ok(Value::Bool(i.health(&host).await)),
+                "call" => i.call(&host, a.get("body").unwrap_or(&Value::Null), num(&a, "wait", 20000.0)).await,
+                "ping" => Ok(i.ping(&host).await),
+                "ready" => i.ready(&host, num(&a, "timeout", 60000.0)).await,
+                "launch" => i.launch(&host, a.get("show"), a.get("restart") == Some(&Value::Bool(true)), num(&a, "timeout", 120000.0)).await,
+                "quit" => i.quit(&host, num(&a, "timeout", 20000.0)).await,
+                "driver" => i.driver(&host, a.get("method").unwrap_or(&Value::Null), a.get("args").and_then(Value::as_array).map_or(&[][..], Vec::as_slice)).await,
+                "simulate" => i.simulate(&host, a.get("kind").unwrap_or(&Value::Null), a.get("a"), a.get("b")).await,
+                "screenshot" | "input" | "window" | "record" | "logs" => i.call(&host, &Instance::body(kind, None, opts), 20000.0).await,
+                "eval" => i.call(&host, &Instance::body("eval", Some(("expression", a.get("expression").cloned().unwrap_or(Value::Null))), opts), 20000.0).await,
+                "api" => i.api(&host, a.get("route").and_then(Value::as_str).unwrap_or("")).await,
+                _ => Err(Failure::msg(format!("no control task {kind}"))),
+            }
         }
         Target::Installed(c) => {
             if matches!(kind, "eval" | "simulate") {
-                return Err(Failed { message: "This action is available only in development instances.".into(), fields: Map::new() });
+                return Err(Failure::msg("This action is available only in development instances."));
             }
-            let c = Console { env: c.env.clone(), machine: c.machine.clone() };
-            let env = c.env.clone();
+            let host = Installed { env: c.env.clone(), clients: Clients::default() };
             // health() is whether ping answers anything.
             let health = kind == "health";
-            let kind = if health { "ping".to_string() } else { kind.to_string() };
-            let task = Task::new(move |io| async move {
-                let opts = a.get("opts");
-                let with = |op: &str| {
-                    let mut b = Map::new();
-                    b.insert("op".into(), json!(op));
-                    for (k, v) in opts.and_then(Value::as_object).into_iter().flatten() {
-                        b.insert(k.clone(), v.clone());
-                    }
-                    Value::Object(b)
-                };
-                match kind.as_str() {
-                    "call" => c.call(&io, a.get("body").unwrap_or(&Value::Null)).await,
-                    "ping" => c.ping(&io).await,
-                    "ready" => c.ready(&io, num(&a, "timeout", 60000.0)).await,
-                    "quit" => c.quit(&io).await,
-                    "launch" => {
-                        let show = a.get("show").filter(|s| !s.is_null()).map_or_else(|| "inactive".to_string(), xenonet_text::text::display);
-                        c.launch(&io, &show, a.get("restart") == Some(&Value::Bool(true)), num(&a, "timeout", 60000.0)).await
-                    }
-                    "driver" => {
-                        c.call(&io, &json!({ "op": "driver", "method": a.get("method").cloned().unwrap_or(Value::Null), "args": a.get("args").cloned().unwrap_or(json!([])) }))
-                            .await
-                    }
-                    "screenshot" | "input" | "window" | "logs" | "record" => c.call(&io, &with(&kind)).await,
-                    "api" => c.api(&io, a.get("route").and_then(Value::as_str).unwrap_or("")).await,
-                    _ => Err(xenonet_app::task::Failure::msg(format!("no console task {kind}"))),
+            let kind = if health { "ping" } else { kind };
+            let opts = a.get("opts");
+            let with = |op: &str| {
+                let mut b = Map::new();
+                b.insert("op".into(), json!(op));
+                for (k, v) in opts.and_then(Value::as_object).into_iter().flatten() {
+                    b.insert(k.clone(), v.clone());
                 }
-            });
-            let out = drive(task, &mut Installed { env, clients: HashMap::new(), bodies: HashMap::new(), next: 0 }).await?;
+                Value::Object(b)
+            };
+            let out = match kind {
+                "call" => c.call(&host, a.get("body").unwrap_or(&Value::Null)).await,
+                "ping" => c.ping(&host).await,
+                "ready" => c.ready(&host, num(&a, "timeout", 60000.0)).await,
+                "quit" => c.quit(&host).await,
+                "launch" => {
+                    let show = a.get("show").filter(|s| !s.is_null()).map_or_else(|| "inactive".to_string(), xenonet_text::text::display);
+                    c.launch(&host, &show, a.get("restart") == Some(&Value::Bool(true)), num(&a, "timeout", 60000.0)).await
+                }
+                "driver" => {
+                    c.call(&host, &json!({ "op": "driver", "method": a.get("method").cloned().unwrap_or(Value::Null), "args": a.get("args").cloned().unwrap_or(json!([])) })).await
+                }
+                "screenshot" | "input" | "window" | "logs" | "record" => c.call(&host, &with(kind)).await,
+                "api" => c.api(&host, a.get("route").and_then(Value::as_str).unwrap_or("")).await,
+                _ => Err(Failure::msg(format!("no console task {kind}"))),
+            }?;
             Ok(if health { json!(xenonet_text::text::truthy(Some(&out))) } else { out })
         }
     }
 }
 
-fn fail(f: Failed) -> Fail {
+fn fail(f: Failure) -> Fail {
     Fail::error(f.message)
 }
 
@@ -437,7 +426,7 @@ fn value_of(a: Arg) -> Option<Value> {
 
 /// A step's call: the driver, or one of the client's own methods, with its
 /// arguments as the JS passed them.
-async fn step_call(t: &Target, target: &str, args: Vec<Arg>) -> Result<Value, Failed> {
+async fn step_call(t: &Target, target: &str, args: Vec<Arg>) -> Result<Value, Failure> {
     let mut args: Vec<Option<Value>> = args.into_iter().map(value_of).collect();
     let mut take = || if args.is_empty() { None } else { args.remove(0) };
     match target {
@@ -478,7 +467,7 @@ async fn step_call(t: &Target, target: &str, args: Vec<Arg>) -> Result<Value, Fa
 async fn run_step(t: &Target, step: &Value, say: &mut dyn FnMut(&Value)) -> Result<(), Fail> {
     let ctx = script::Context { name: t.name(), film_seconds: xenonet_state::frames::film_play_seconds(f64::NAN) };
     let (mut state, mut out) = script::begin(step, &ctx);
-    let mut thrown: Option<Failed> = None;
+    let mut thrown: Option<Failure> = None;
     loop {
         for x in out.say {
             say(&value_of(x).unwrap_or_else(|| json!("undefined")));

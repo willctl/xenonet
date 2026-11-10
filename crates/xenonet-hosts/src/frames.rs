@@ -85,7 +85,7 @@ pub fn parse_frame(line: &str, known: Option<&[&str]>) -> Result<Value, String> 
     let Some(t) = frame.as_object().and_then(|o| o.get("t")).and_then(Value::as_str) else { return Err("not a frame".into()) };
     if let Some(k) = known {
         if !k.contains(&t) {
-            return Err(format!("a kind of frame this XenoNet doesn't know ({})", xenonet_app::jstext::slice16(t, 32)));
+            return Err(format!("a kind of frame this XenoNet doesn't know ({})", xenonet_text::utf16::head(t, 32)));
         }
     }
     Ok(frame)

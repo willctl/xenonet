@@ -1,18 +1,15 @@
-//! core/components/console.js: the console an installed XenoNet offers
-//! the console tools, through the service. An MCP process outlives a
-//! Desktop restart, so each action finds the service again, and one that
-//! was interrupted is never sent twice.
-//!
-//! Asks { op: "connect" } (connectService: a client and its info),
-//! "request" and "close", { op: "spawn" } (Desktop, as it registered
-//! itself) and { op: "fetch" } / "json" for the API.
+//! The console an installed XenoNet offers the console tools, through the
+//! service. An MCP process outlives a Desktop restart, so each action finds
+//! the service again, and one that was interrupted is never sent twice.
 
+use crate::host::{Desktop, Spawn};
 use crate::protocol::{api_value, negotiate, CONSOLE_API};
 use crate::runtime::{runtime_dir, Env, Machine};
 use serde_json::{json, Value};
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{now_ms, Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::nodepath::NATIVE;
+use xenonet_text::text::truthy;
+use xenonet_text::time::now_ms;
 
 pub fn no_desktop() -> Value {
     json!({ "instance": "installed", "name": "XenoNet", "controlled": false, "service": true, "page": { "ready": false }, "error": "XenoNet Desktop is closed or restarting." })
@@ -32,106 +29,97 @@ impl Console {
         crate::runtime::port_of(&self.env)
     }
 
-    async fn connect(&self, io: &Io) -> Result<Value, Failure> {
-        io.ask(json!({ "op": "connect", "env": self.env })).await.map_err(|_| Failure::Rethrow)
-    }
-
-    async fn close(&self, io: &Io, client: &Value) -> Result<(), Failure> {
-        io.ask(json!({ "op": "close", "client": client["client"] })).await.map(|_| ()).map_err(|_| Failure::Rethrow)
-    }
-
     /// One console request, on a connection of its own.
-    pub async fn call(&self, io: &Io, body: &Value) -> Result<Value, Failure> {
-        let client = self.connect(io).await?;
-        let agreed = negotiate(Some(&api_value(CONSOLE_API)), client.get("info").and_then(|i| i.get("consoleApi")));
+    pub async fn call(&self, host: &dyn Desktop, body: &Value) -> Result<Value, Failure> {
+        let client = host.connect(&self.env).await?;
+        let agreed = negotiate(Some(&api_value(CONSOLE_API)), client.info.get("consoleApi"));
         let r = match agreed {
             Err(why) => Err(Failure::msg(why)),
-            Ok(_) => io.ask(json!({ "op": "request", "client": client["client"], "method": "console", "params": body })).await.map_err(|_| Failure::Rethrow),
+            Ok(_) => host.request(client.id, "console", body.clone()).await,
         };
-        self.close(io, &client).await?;
+        host.close(client.id).await;
         r
     }
 
     /// Desktop and its window, or no-desktop while it's closed, or null
     /// when there's no service.
-    pub async fn ping(&self, io: &Io) -> Result<Value, Failure> {
-        let client = match io.ask(json!({ "op": "connect", "env": self.env })).await {
+    pub async fn ping(&self, host: &dyn Desktop) -> Result<Value, Failure> {
+        let client = match host.connect(&self.env).await {
             Ok(c) => c,
-            Err(e) => return Self::ping_failed(&e),
+            Err(e) => return Self::ping_failed(e),
         };
-        let r = if !truthy(client.get("info").and_then(|i| i.get("desktop"))) {
+        let r = if !truthy(client.info.get("desktop")) {
             Ok(no_desktop())
         } else {
-            match io.ask(json!({ "op": "request", "client": client["client"], "method": "console", "params": { "op": "ping" } })).await {
+            match host.request(client.id, "console", json!({ "op": "ping" })).await {
                 Ok(v) => Ok(v),
-                Err(e) => Self::ping_failed(&e),
+                Err(e) => Self::ping_failed(e),
             }
         };
-        self.close(io, &client).await?;
+        host.close(client.id).await;
         r
     }
 
-    fn ping_failed(e: &Value) -> Result<Value, Failure> {
-        let message = e.get("message").and_then(Value::as_str).unwrap_or("");
+    fn ping_failed(e: Failure) -> Result<Value, Failure> {
         // Desktop may go between the hello's answer and this probe.
-        if message.starts_with("XenoNet Desktop is closed or restarting.") {
+        if e.message.starts_with("XenoNet Desktop is closed or restarting.") {
             return Ok(no_desktop());
         }
-        if e.get("code").and_then(Value::as_str) == Some("ENOENT") || message.contains("disconnect") {
+        if e.code() == Some("ENOENT") || e.message.contains("disconnect") {
             return Ok(Value::Null);
         }
-        Err(Failure::Rethrow)
+        Err(e)
     }
 
-    pub async fn ready(&self, io: &Io, timeout: f64) -> Result<Value, Failure> {
+    pub async fn ready(&self, host: &dyn Desktop, timeout: f64) -> Result<Value, Failure> {
         let until = now_ms() + timeout;
         while now_ms() < until {
             // A probe the service was too busy to answer in time counts as
             // not ready yet: a ping changes nothing, so asking twice is safe.
-            let state = match self.ping(io).await {
+            let state = match self.ping(host).await {
                 Ok(s) => s,
-                Err(Failure::Rethrow) if io.last_message().contains("did not answer") => Value::Null,
+                Err(e) if e.message.contains("did not answer") => Value::Null,
                 Err(f) => return Err(f),
             };
             if page_ready(&state) {
                 return Ok(state);
             }
-            io.sleep(200.0).await;
+            host.sleep(200.0).await;
         }
         Err(Failure::msg("XenoNet Desktop did not become ready."))
     }
 
-    pub async fn quit(&self, io: &Io) -> Result<Value, Failure> {
-        let state = self.ping(io).await?;
+    pub async fn quit(&self, host: &dyn Desktop) -> Result<Value, Failure> {
+        let state = self.ping(host).await?;
         if !truthy(state.get("page")) {
             return Ok(json!({ "quit": false }));
         }
         if state.get("controlled") == Some(&json!(false)) {
             return Ok(json!({ "quit": false, "service": true }));
         }
-        self.call(io, &json!({ "op": "quit" })).await?;
+        self.call(host, &json!({ "op": "quit" })).await?;
         let until = now_ms() + 20000.0;
         while now_ms() < until {
-            let p = self.ping(io).await?;
+            let p = self.ping(host).await?;
             if !truthy(Some(&p)) || p.get("controlled") == Some(&json!(false)) {
                 return Ok(json!({ "quit": true, "service": true }));
             }
-            io.sleep(100.0).await;
+            host.sleep(100.0).await;
         }
         Err(Failure::msg("XenoNet Desktop did not close. The service is still running."))
     }
 
-    pub async fn launch(&self, io: &Io, show: &str, restart: bool, timeout: f64) -> Result<Value, Failure> {
+    pub async fn launch(&self, host: &dyn Desktop, show: &str, restart: bool, timeout: f64) -> Result<Value, Failure> {
         if restart {
-            self.quit(io).await?;
+            self.quit(host).await?;
         }
-        if page_ready(&self.ping(io).await?) {
+        if page_ready(&self.ping(host).await?) {
             let body = if show == "hidden" { json!({ "op": "window" }) } else { json!({ "op": "window", "show": show }) };
-            self.call(io, &body).await?;
-            return self.ready(io, timeout).await;
+            self.call(host, &body).await?;
+            return self.ready(host, timeout).await;
         }
         let file = NATIVE.join(&[&runtime_dir(&self.env, &self.machine), "desktop.json"]);
-        let desktop = xenonet_app::fsx::read_text(&file)
+        let desktop = xenonet_os::files::read_text(&file)
             .ok()
             .and_then(|t| xenonet_text::json::parse(&t).ok())
             .ok_or_else(|| Failure::msg("Open XenoNet once to register Desktop, or install the XenoNet bundle."))?;
@@ -139,13 +127,19 @@ impl Console {
         env.insert("XENONET_SHOW".into(), json!(show));
         env.shift_remove("ELECTRON_RUN_AS_NODE");
         let field = |k: &str| desktop.get(k).cloned().unwrap_or(Value::Null);
-        io.ask(json!({ "op": "spawn", "command": field("command"), "args": field("args"), "cwd": field("cwd"), "env": env })).await.map_err(|_| Failure::Rethrow)?;
-        self.ready(io, timeout).await
+        let spawn = Spawn {
+            command: xenonet_text::text::display(&field("command")),
+            args: field("args").as_array().into_iter().flatten().map(xenonet_text::text::display).collect(),
+            cwd: field("cwd").as_str().map(str::to_string),
+            env,
+            log: None,
+        };
+        host.spawn(&spawn).await?;
+        self.ready(host, timeout).await
     }
 
     /// Any read-only API route of the installed XenoNet.
-    pub async fn api(&self, io: &Io, route: &str) -> Result<Value, Failure> {
-        let res = io.ask(json!({ "op": "fetch", "url": format!("http://127.0.0.1:{}{route}", self.port()) })).await.map_err(|_| Failure::Rethrow)?;
-        io.ask(json!({ "op": "json", "res": res["res"] })).await.map_err(|_| Failure::Rethrow)
+    pub async fn api(&self, host: &dyn Desktop, route: &str) -> Result<Value, Failure> {
+        host.get_json(&format!("http://127.0.0.1:{}{route}", self.port())).await
     }
 }

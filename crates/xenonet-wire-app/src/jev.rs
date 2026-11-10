@@ -39,7 +39,7 @@ fn stable(v: &Value) -> Value {
         Value::Array(a) => Value::Array(a.iter().map(stable).collect()),
         Value::Object(m) => {
             let mut keys: Vec<&String> = m.keys().collect();
-            keys.sort_by(|a, b| xenonet_app::jstext::locale_compare(a, b));
+            keys.sort_by(|a, b| xenonet_text::names::compare(a, b));
             Value::Object(keys.into_iter().map(|k| (k.clone(), stable(&m[k]))).collect())
         }
         other => other.clone(),
@@ -156,7 +156,7 @@ fn no_decision(mut b: Map<String, Value>, ordered: &[Value], actor: &[String], p
 pub fn route(candidates: &[Value], actor_permissions: &[String], raw: Result<Value, JevError>) -> Value {
     let policy = policy();
     let mut ordered = candidates.to_vec();
-    ordered.sort_by(|a, b| xenonet_app::jstext::locale_compare(&xenonet_text::text::display(&a["id"]), &xenonet_text::text::display(&b["id"])));
+    ordered.sort_by(|a, b| xenonet_text::names::compare(&xenonet_text::text::display(&a["id"]), &xenonet_text::text::display(&b["id"])));
     let mut b = base(&ordered, &policy);
     if ordered.is_empty() {
         b.insert("status".into(), json!("no_decision"));
@@ -185,7 +185,7 @@ pub fn route(candidates: &[Value], actor_permissions: &[String], raw: Result<Val
     let mut all: Vec<Value> =
         ordered.iter().map(|c| candidate_view(c, probs.get(&id_of(c)).and_then(Value::as_f64), Some(confidence), Some("single"), actor_permissions, &policy)).collect();
     let p = |c: &Value| c["jev_probability"].as_f64().unwrap_or(-1.0);
-    let by_rank = |a: &Value, b: &Value| p(b).total_cmp(&p(a)).then_with(|| xenonet_app::jstext::locale_compare(&id_of(a), &id_of(b)));
+    let by_rank = |a: &Value, b: &Value| p(b).total_cmp(&p(a)).then_with(|| xenonet_text::names::compare(&id_of(a), &id_of(b)));
     let mut ranked = all.clone();
     ranked.sort_by(by_rank);
     for c in &mut all {

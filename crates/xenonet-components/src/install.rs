@@ -16,15 +16,17 @@
 //! staged component's startup check), "now", "pause", and "alive" for the
 //! install lock.
 
+use crate::host::Lifecycle;
 use crate::packages::{current_component, lock, newer, select_component, stage_package, unlock};
 use crate::runtime::{bin_name, launcher_bin, runtime_dir, Env, Machine};
 use serde_json::{json, Value};
 use std::time::Duration;
-use xenonet_app::fsx::{self, FsError};
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::files::{self, FsError};
+use xenonet_os::nodepath::NATIVE;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
+use xenonet_text::time::now_ms;
 
 /// What installing needs to know of the machine besides an env: where the
 /// xenonet command goes.
@@ -80,12 +82,12 @@ pub fn write_launcher(entry: &str, source: &str) -> Result<bool, FsError> {
             return Ok(false);
         }
     }
-    fsx::mkdir_p(&NATIVE.dirname(entry), None)?;
+    files::mkdir_p(&NATIVE.dirname(entry), None)?;
     let tmp = format!("{entry}.{}.tmp", std::process::id());
-    match fsx::write_file(&tmp, source.as_bytes(), None).and_then(|()| fsx::rename(&tmp, entry)) {
+    match files::write_file(&tmp, source.as_bytes(), None).and_then(|()| files::rename(&tmp, entry)) {
         Ok(()) => Ok(true),
         Err(_) => {
-            let _ = fsx::rm_rf(&tmp);
+            let _ = files::rm_rf(&tmp);
             Ok(false)
         }
     }
@@ -109,7 +111,7 @@ pub fn replace_file(tmp: &str, to: &str, rename: &mut dyn FnMut(&str, &str) -> R
         Ok(()) => return Ok(()),
         Err(e) => e,
     };
-    if !fsx::exists(to) {
+    if !files::exists(to) {
         return Err(first);
     }
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
@@ -141,10 +143,10 @@ fn tmp_of(entry: &str, name: &str) -> Option<u32> {
 /// until a later start.
 pub fn sweep_aside(to: &str) {
     let (dir, name) = (NATIVE.dirname(to), NATIVE.basename(to, None));
-    for entry in fsx::read_dir_names(&dir).unwrap_or_default() {
+    for entry in files::read_dir_names(&dir).unwrap_or_default() {
         let stale = tmp_of(&entry, &name).is_some_and(|pid| !xenonet_os::process::running(pid, true));
         if is_aside(&entry, &name) || stale {
-            let _ = fsx::unlink(&NATIVE.join(&[&dir, &entry]));
+            let _ = files::unlink(&NATIVE.join(&[&dir, &entry]));
         }
     }
 }
@@ -158,12 +160,12 @@ pub fn sweep_aside(to: &str) {
 pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> Result<bool, String> {
     sweep_aside(to);
     let from = NATIVE.join(&[&display(&tools["root"]), "bin", bin_name(platform)]);
-    if !fsx::exists(&from) {
+    if !files::exists(&from) {
         return Ok(false);
     }
     let source = format!("{}-{}", display(&tools["version"]), display(&tools["sha256"]));
     let marker = format!("{to}.from");
-    if fsx::read_text(&marker).is_ok_and(|had| had == source) && fsx::exists(to) {
+    if files::read_text(&marker).is_ok_and(|had| had == source) && files::exists(to) {
         return Ok(false);
     }
     let tmp = format!("{to}.{}.tmp", std::process::id());
@@ -173,14 +175,14 @@ pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> Result<boo
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())
     });
-    let done = copied.and_then(|()| replace_file(&tmp, to, &mut fsx::rename).map_err(|e| e.message));
+    let done = copied.and_then(|()| replace_file(&tmp, to, &mut files::rename).map_err(|e| e.message));
     match done {
         Ok(()) => {
-            let _ = fsx::write_file(&marker, source.as_bytes(), None);
+            let _ = files::write_file(&marker, source.as_bytes(), None);
             Ok(true)
         }
         Err(why) => {
-            let _ = fsx::rm_rf(&tmp);
+            let _ = files::rm_rf(&tmp);
             Err(why)
         }
     }
@@ -198,13 +200,13 @@ pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> 
     let Some(tools) = current_component("tools", env, m)? else { return Ok(None) };
     let dir = NATIVE.join(&[&runtime_dir(env, m), "launcher"]);
     let bin = launcher_bin(env, m);
-    fsx::mkdir_p(&dir, None)?;
+    files::mkdir_p(&dir, None)?;
     let pending = write_launcher_bin(&tools, &bin, &m.platform).err().map(|why| format!("the launcher couldn't be replaced ({why}); {LAUNCHER_PENDING}"));
     let entry = NATIVE.join(&[&dir, "cli", "xenonet.js"]);
-    if fsx::exists(&NATIVE.join(&[&dir, earlier_node(&m.platform)])) && fsx::exists(&entry) {
+    if files::exists(&NATIVE.join(&[&dir, earlier_node(&m.platform)])) && files::exists(&entry) {
         write_launcher(&entry, LAUNCHER_SCRIPT)?;
     }
-    let bin = if fsx::exists(&bin) { json!(bin) } else { Value::Null };
+    let bin = if files::exists(&bin) { json!(bin) } else { Value::Null };
     Ok(Some(json!({ "bin": bin, "root": dir, "pending": pending })))
 }
 
@@ -305,10 +307,10 @@ fn active_mark(selected: &Value) -> String {
 pub fn service_root(service: &Value, env: &Env, m: &Machine) -> (String, Option<String>) {
     let own = display(&service["root"]);
     let active = NATIVE.join(&[&service_dir(env, m), ACTIVE]);
-    if !fsx::exists(&active) {
+    if !files::exists(&active) {
         return (own, None);
     }
-    let said = fsx::read_text(&NATIVE.join(&[&active, ".from"])).unwrap_or_default();
+    let said = files::read_text(&NATIVE.join(&[&active, ".from"])).unwrap_or_default();
     if said.is_empty() {
         return (own, Some(format!("{ACTIVE} doesn't say which version it's a copy of")));
     }
@@ -323,17 +325,17 @@ pub fn service_root(service: &Value, env: &Env, m: &Machine) -> (String, Option<
 
 // Renames a folder; on Windows, which can hold a program a moment after it
 // exits, tried again for up to 30 s, as stage_package's last rename is.
-async fn rename_dir(io: &Io, from: &str, to: &str) -> Result<(), FsError> {
-    let until = xenonet_app::task::now_ms() + 30000.0;
+async fn rename_dir(host: &dyn Lifecycle, from: &str, to: &str) -> Result<(), FsError> {
+    let until = now_ms() + 30000.0;
     loop {
         match std::fs::rename(from, to) {
             Ok(()) => return Ok(()),
             Err(e) => {
                 let code = xenonet_os::fs::code_of(&e);
-                if !cfg!(windows) || !matches!(code, Some("EPERM" | "EACCES" | "EBUSY")) || xenonet_app::task::now_ms() >= until {
+                if !cfg!(windows) || !matches!(code, Some("EPERM" | "EACCES" | "EBUSY")) || now_ms() >= until {
                     return Err(FsError::of(e, "rename", from));
                 }
-                io.sleep(250.0).await;
+                host.sleep(250.0).await;
             }
         }
     }
@@ -345,34 +347,34 @@ async fn rename_dir(io: &Io, from: &str, to: &str) -> Result<(), FsError> {
 /// `active` moves aside and `active.next` takes its place. An `active` of
 /// that version already stays as it is. A Service from before 0.4.0 runs
 /// from its own folder, so there's no `active`, nor with none selected.
-pub async fn activate_service(io: &Io, env: &Env, m: &Machine) -> Result<(), FsError> {
+pub async fn activate_service(host: &dyn Lifecycle, env: &Env, m: &Machine) -> Result<(), FsError> {
     let dir = service_dir(env, m);
     let at = |name: &str| NATIVE.join(&[&dir, name]);
     let (active, next, prev) = (at(ACTIVE), at("active.next"), at("active.prev"));
-    fsx::rm_rf(&next)?;
-    fsx::rm_rf(&prev)?;
+    files::rm_rf(&next)?;
+    files::rm_rf(&prev)?;
     let selected = current_component("service", env, m)?;
-    let Some(selected) = selected.filter(|s| has_binary(s, &m.platform)) else { return fsx::rm_rf(&active) };
+    let Some(selected) = selected.filter(|s| has_binary(s, &m.platform)) else { return files::rm_rf(&active) };
     if service_root(&selected, env, m).0 == active {
         return Ok(());
     }
     let from = display(&selected["root"]);
     crate::tray::copy_tree(std::path::Path::new(&from), std::path::Path::new(&next)).map_err(|e| FsError::of(e, "copy", &from))?;
-    fsx::write_file(&NATIVE.join(&[&next, ".from"]), active_mark(&selected).as_bytes(), None)?;
-    if fsx::exists(&active) {
-        rename_dir(io, &active, &prev).await?;
+    files::write_file(&NATIVE.join(&[&next, ".from"]), active_mark(&selected).as_bytes(), None)?;
+    if files::exists(&active) {
+        rename_dir(host, &active, &prev).await?;
     }
-    fsx::rename(&next, &active)?;
+    files::rename(&next, &active)?;
     // One that can't go now goes at the next activation.
-    let _ = fsx::rm_rf(&prev);
+    let _ = files::rm_rf(&prev);
     Ok(())
 }
 
 // activate_service, whose failure leaves the service to run from its
 // version's folder (service_root): it still starts, though a firewall may
 // ask about it again. So it's said, not thrown.
-async fn activate(io: &Io, env: &Env, m: &Machine) {
-    if let Err(e) = activate_service(io, env, m).await {
+async fn activate(host: &dyn Lifecycle, env: &Env, m: &Machine) {
+    if let Err(e) = activate_service(host, env, m).await {
         eprintln!("[xenonet] XenoNet Service runs from its version's folder this time: {}", e.message);
     }
 }
@@ -403,7 +405,7 @@ pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
     }
     let dir = NATIVE.join(&[&runtime_dir(env, m), "launcher"]);
     let node = NATIVE.join(&[&dir, earlier_node(&m.platform)]);
-    if fsx::exists(&node) && fsx::exists(&NATIVE.join(&[&dir, "cli", "xenonet.js"])) {
+    if files::exists(&node) && files::exists(&NATIVE.join(&[&dir, "cli", "xenonet.js"])) {
         run_env.insert("XENONET_LAUNCHER_EXEC".into(), json!(node));
         run_env.insert("XENONET_LAUNCHER_ROOT".into(), json!(dir));
     }
@@ -437,22 +439,22 @@ fn pointer(v: Option<&Value>) -> Value {
 fn write_journal(env: &Env, m: &Machine, previous: Option<&Value>, next: &Value) -> Result<(), FsError> {
     let file = journal_file(env, m);
     let tmp = format!("{file}.{}.tmp", std::process::id());
-    fsx::write_file(&tmp, xenonet_text::json::stringify(&json!({ "previous": pointer(previous), "next": pointer(Some(next)) }), 0).as_bytes(), Some(0o600))?;
-    fsx::rename(&tmp, &file)
+    files::write_file(&tmp, xenonet_text::json::stringify(&json!({ "previous": pointer(previous), "next": pointer(Some(next)) }), 0).as_bytes(), Some(0o600))?;
+    files::rename(&tmp, &file)
 }
 
 fn clear_journal(env: &Env, m: &Machine) -> Result<(), FsError> {
-    fsx::rm_rf(&journal_file(env, m))
+    files::rm_rf(&journal_file(env, m))
 }
 
 // Selects the previous service again, and runs it from `active`, with the
 // service stopped.
-async fn restore_selection(io: &Io, previous: Option<&Value>, env: &Env, m: &Machine) -> Result<(), FsError> {
+async fn restore_selection(host: &dyn Lifecycle, previous: Option<&Value>, env: &Env, m: &Machine) -> Result<(), FsError> {
     match previous.filter(|p| truthy(Some(p))) {
         Some(p) => select_component("service", p, env, m)?,
-        None => fsx::rm_rf(&NATIVE.join(&[&runtime_dir(env, m), "components/service/current.json"]))?,
+        None => files::rm_rf(&NATIVE.join(&[&runtime_dir(env, m), "components/service/current.json"]))?,
     }
-    activate(io, env, m).await;
+    activate(host, env, m).await;
     Ok(())
 }
 
@@ -461,68 +463,55 @@ pub struct Life {
     pub stop_timeout: f64,
 }
 
-fn incompatible(e: &Value) -> bool {
-    e.get("message").and_then(Value::as_str).unwrap_or("").contains("incompatible")
+fn incompatible(e: &Failure) -> bool {
+    e.message.contains("incompatible")
 }
 
 // The running service's status, or null; a service of an incompatible
 // interface is said so.
-async fn running(io: &Io, env: &Env) -> Result<Value, Failure> {
-    let client = match io.ask(json!({ "op": "connect", "env": env })).await {
+async fn running(host: &dyn Lifecycle, env: &Env) -> Result<Value, Failure> {
+    let client = match host.connect(env).await {
         Ok(c) => c,
-        Err(e) if incompatible(&e) => return Err(Failure::Rethrow),
+        Err(e) if incompatible(&e) => return Err(e),
         Err(_) => return Ok(Value::Null),
     };
-    if !truthy(client.get("client")) {
-        return Ok(Value::Null);
-    }
-    let r = io.ask(json!({ "op": "request", "client": client["client"], "method": "status" })).await;
-    let closed = io.ask(json!({ "op": "close", "client": client["client"] })).await;
-    if closed.is_err() {
-        return Err(Failure::Rethrow);
-    }
-    r.map_err(|_| Failure::Rethrow)
-}
-
-async fn now(io: &Io) -> Result<f64, Failure> {
-    let n = io.ask(json!({ "op": "now" })).await.map_err(|_| Failure::Rethrow)?;
-    Ok(xenonet_text::text::to_number(Some(&n)))
+    let r = host.request(client.id, "status", Value::Null).await;
+    host.close(client.id).await;
+    r
 }
 
 // The service answers `stop` and shuts down a moment later, so on a busy
 // machine its answer can be lost with the connection: the rpc's
 // "XenoNet disconnected; the action was not retried.".
-fn dropped(e: &Value) -> bool {
-    e.get("message").and_then(Value::as_str).is_some_and(|m| m.starts_with("XenoNet disconnected"))
+fn dropped(e: &Failure) -> bool {
+    e.message.starts_with("XenoNet disconnected")
 }
 
 // Stops the running service and waits until it has gone. A stop sent and
 // then cut off may have worked: whether the service has gone decides, as it
 // does for one that answered. An answer that says no is a failure.
-async fn stop_service(io: &Io, env: &Env, life: &Life) -> Result<(), Failure> {
-    let Ok(client) = io.ask(json!({ "op": "connect", "env": env })).await else { return Ok(()) };
-    if !truthy(client.get("client")) {
-        return Ok(());
+async fn stop_service(host: &dyn Lifecycle, env: &Env, life: &Life) -> Result<(), Failure> {
+    let Ok(client) = host.connect(env).await else { return Ok(()) };
+    let r = host.request(client.id, "stop", Value::Null).await;
+    host.close(client.id).await;
+    match r {
+        Err(e) if !dropped(&e) => return Err(e),
+        _ => {}
     }
-    let r = io.ask(json!({ "op": "request", "client": client["client"], "method": "stop" })).await;
-    let closed = io.ask(json!({ "op": "close", "client": client["client"] })).await;
-    if closed.is_err() || r.as_ref().is_err_and(|e| !dropped(e)) {
-        return Err(Failure::Rethrow);
-    }
-    let deadline = now(io).await? + life.stop_timeout;
-    while truthy(Some(&running(io, env).await?)) {
-        if now(io).await? >= deadline {
+    let deadline = host.now().await + life.stop_timeout;
+    while truthy(Some(&running(host, env).await?)) {
+        if host.now().await >= deadline {
             return Err(Failure::msg("The running service did not stop. Its selected version was left unchanged."));
         }
-        io.ask(json!({ "op": "pause", "ms": 100 })).await.map_err(|_| Failure::Rethrow)?;
+        host.sleep(100.0).await;
     }
     Ok(())
 }
 
-async fn start_version(io: &Io, version: &Value, env: &Env, ctx: &Ctx) -> Result<(), Failure> {
+async fn start_version(host: &dyn Lifecycle, version: &Value, env: &Env, ctx: &Ctx) -> Result<(), Failure> {
     let rt = installed_runtime(env, ctx)?;
-    io.ask(json!({ "op": "start", "runtime": rt })).await.map_err(|_| Failure::Rethrow)?;
-    let state = running(io, env).await?;
+    host.start(&rt).await?;
+    let state = running(host, env).await?;
     let is = state.get("version");
     if is != Some(version) {
         let said = is.filter(|v| !v.is_null()).map_or_else(|| "no service".to_string(), display);
@@ -540,9 +529,9 @@ fn open_terminals(state: &Value) -> Result<bool, Failure> {
 
 // The record kept while a service is switched, if there's one: finishes
 // the switch when the new version is running, else restores the previous.
-async fn recover(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
+async fn recover(host: &dyn Lifecycle, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
     let m = &ctx.machine;
-    let text = match fsx::read_text(&journal_file(env, m)) {
+    let text = match files::read_text(&journal_file(env, m)) {
         Ok(t) => t,
         Err(e) if e.is("ENOENT") => return Ok(Value::Null),
         Err(e) => return Err(e.into()),
@@ -555,7 +544,7 @@ async fn recover(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Fa
         _ => return Err(Failure::msg("Invalid service update recovery record.")),
     };
     let previous = previous.filter(|p| !p.is_null());
-    let state = running(io, env).await?;
+    let state = running(host, env).await?;
     if truthy(Some(&state)) && state.get("version") == next.get("version") {
         select_component("service", next, env, m)?;
         clear_journal(env, m)?;
@@ -565,24 +554,24 @@ async fn recover(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Fa
         if open_terminals(&state)? {
             return Err(Failure::msg("Close running terminals before recovering the interrupted service update."));
         }
-        stop_service(io, env, life).await?;
+        stop_service(host, env, life).await?;
     }
-    restore_selection(io, previous, env, m).await?;
+    restore_selection(host, previous, env, m).await?;
     if let Some(p) = previous {
-        start_version(io, &p["version"], env, ctx).await?;
+        start_version(host, &p["version"], env, ctx).await?;
     }
     clear_journal(env, m)?;
     Ok(json!("restored"))
 }
 
 /// Recovers an interrupted service update, if there's a record of one.
-pub async fn recover_service_update(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
+pub async fn recover_service_update(host: &dyn Lifecycle, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
     // Ordinary launches, including those during an update, take no lock.
-    if !fsx::exists(&journal_file(env, &ctx.machine)) {
+    if !files::exists(&journal_file(env, &ctx.machine)) {
         return Ok(Value::Null);
     }
-    let held = lock(io, env, &ctx.machine).await?;
-    let r = recover(io, env, ctx, life).await;
+    let held = lock(host, env, &ctx.machine).await?;
+    let r = recover(host, env, ctx, life).await;
     unlock(&held)?;
     r
 }
@@ -592,17 +581,17 @@ pub async fn recover_service_update(io: &Io, env: &Env, ctx: &Ctx, life: &Life) 
 /// asked, the xenonet command; says how to start the service. A bundle
 /// never silently restarts or upgrades a Service or Tools that has its
 /// binary. On a Mac, a newer tray than the one installed replaces it.
-pub async fn install_bundle(io: &Io, bundle: &str, env: &Env, command: bool, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
-    let held = lock(io, env, &ctx.machine).await?;
-    let r = install_bundle_locked(io, bundle, env, command, ctx, life).await;
+pub async fn install_bundle(host: &dyn Lifecycle, bundle: &str, env: &Env, command: bool, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
+    let held = lock(host, env, &ctx.machine).await?;
+    let r = install_bundle_locked(host, bundle, env, command, ctx, life).await;
     unlock(&held)?;
     r
 }
 
-async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
+async fn install_bundle_locked(host: &dyn Lifecycle, bundle: &str, env: &Env, command: bool, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
     let m = &ctx.machine;
-    recover(io, env, ctx, life).await?;
-    let text = fsx::read_text(&NATIVE.join(&[bundle, "components.json"]))?;
+    recover(host, env, ctx, life).await?;
+    let text = files::read_text(&NATIVE.join(&[bundle, "components.json"]))?;
     let manifest = xenonet_text::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))?;
     let Some(Value::Array(items)) = manifest.get("packages") else { return Err(Failure::type_error("manifest.packages is not iterable")) };
     let mut earlier = None;
@@ -622,7 +611,7 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
             };
             if wanted {
                 let file = NATIVE.join(&[bundle, &item.get("file").map(display).unwrap_or_default()]);
-                let staged = stage_package(io, &file, item, env, m).await?;
+                let staged = stage_package(host, &file, item, env, m).await?;
                 select_component(&component, &staged, env, m)?;
             }
             continue;
@@ -631,7 +620,7 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
             continue;
         }
         let file = NATIVE.join(&[bundle, &item.get("file").map(display).unwrap_or_default()]);
-        let staged = stage_package(io, &file, item, env, m).await?;
+        let staged = stage_package(host, &file, item, env, m).await?;
         check_runtime(&staged, &m.platform)?;
         // A service from before 0.4.0 may be running: it's switched as an
         // update switches it, once the Tools and the launcher it names are
@@ -642,18 +631,18 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
                 select_component(&component, &staged, env, m)?;
                 // A first Service: nothing of it runs yet.
                 if component == "service" {
-                    activate(io, env, m).await;
+                    activate(host, env, m).await;
                 }
             }
         }
     }
     let launcher = install_launcher(env, ctx)?;
     if let (true, Some(bin)) = (command, launcher.as_ref().and_then(|l| l["bin"].as_str())) {
-        let dir = xenonet_app::command::command_dir(&m.home, &m.platform, ctx.local_app_data.as_deref());
-        xenonet_app::command::install_command(&dir, bin, false, crate::runtime::var(env, "PATH"), &m.platform)?;
+        let dir = crate::command::command_dir(&m.home, &m.platform, ctx.local_app_data.as_deref());
+        crate::command::install_command(&dir, bin, false, crate::runtime::var(env, "PATH"), &m.platform)?;
     }
     if let Some((old, staged)) = earlier {
-        switch_service(io, env, ctx, life, Some(&old), &staged).await?;
+        switch_service(host, env, ctx, life, Some(&old), &staged).await?;
     }
     installed_runtime(env, ctx)
 }
@@ -662,16 +651,16 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
 /// Tools at once; a newer service only when no terminal is open in it,
 /// with a record of the switch until the new one answers, and the old one
 /// back if it doesn't.
-pub async fn activate_package(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
-    let held = lock(io, env, &ctx.machine).await?;
-    let r = activate_locked(io, file, item, env, ctx, life).await;
+pub async fn activate_package(host: &dyn Lifecycle, file: &str, item: &Value, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
+    let held = lock(host, env, &ctx.machine).await?;
+    let r = activate_locked(host, file, item, env, ctx, life).await;
     unlock(&held)?;
     r
 }
 
-async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
+async fn activate_locked(host: &dyn Lifecycle, file: &str, item: &Value, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
     let m = &ctx.machine;
-    recover(io, env, ctx, life).await?;
+    recover(host, env, ctx, life).await?;
     let component = item.get("component").map(display).unwrap_or_default();
     let old = current_component(&component, env, m)?;
     if let Some(o) = &old {
@@ -679,8 +668,8 @@ async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx
             return Ok(json!({ "component": component, "version": o["version"], "status": "current" }));
         }
     }
-    let staged = stage_package(io, file, item, env, m).await?;
-    io.ask(json!({ "op": "check", "staged": staged })).await.map_err(|_| Failure::Rethrow)?;
+    let staged = stage_package(host, file, item, env, m).await?;
+    host.check(&staged).await?;
     if component == "tools" {
         select_component("tools", &staged, env, m)?;
         let pending = install_launcher(env, ctx)?.and_then(|l| l["pending"].as_str().map(str::to_string));
@@ -690,61 +679,53 @@ async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx
         };
         return Ok(json!({ "component": "tools", "version": staged["version"], "status": "updated", "detail": detail }));
     }
-    switch_service(io, env, ctx, life, old.as_ref(), &staged).await
+    switch_service(host, env, ctx, life, old.as_ref(), &staged).await
 }
 
 /// Switches the selected service from `old` (or none) to `staged`, as an
 /// update does: never while a terminal is open in the running service,
 /// which leaves the new version staged; with a record of the switch until
 /// the new version answers; and back to the old one when it doesn't.
-async fn switch_service(io: &Io, env: &Env, ctx: &Ctx, life: &Life, old: Option<&Value>, staged: &Value) -> Result<Value, Failure> {
+async fn switch_service(host: &dyn Lifecycle, env: &Env, ctx: &Ctx, life: &Life, old: Option<&Value>, staged: &Value) -> Result<Value, Failure> {
     let m = &ctx.machine;
-    let state = running(io, env).await?;
+    let state = running(host, env).await?;
     if truthy(Some(&state)) && open_terminals(&state)? {
         return Ok(json!({ "component": "service", "version": staged["version"], "status": "staged", "detail": "Close running terminals, then update the service." }));
     }
     write_journal(env, m, old, staged)?;
     let switched: Result<(), Failure> = async {
         if truthy(Some(&state)) {
-            stop_service(io, env, life).await?;
+            stop_service(host, env, life).await?;
         }
         select_component("service", staged, env, m)?;
-        activate(io, env, m).await;
-        start_version(io, &staged["version"], env, ctx).await?;
+        activate(host, env, m).await;
+        start_version(host, &staged["version"], env, ctx).await?;
         clear_journal(env, m)?;
         Ok(())
     }
     .await;
     if let Err(err) = switched {
-        let why = message(io, &err);
+        let why = err.message.clone();
         let rolled: Result<(), Failure> = async {
             // Never finalize the new version when its startup check failed.
-            let live = running(io, env).await?;
+            let live = running(host, env).await?;
             if truthy(Some(&live)) && live.get("version") != old.and_then(|o| o.get("version")) {
-                stop_service(io, env, life).await?;
+                stop_service(host, env, life).await?;
             }
-            restore_selection(io, old, env, m).await?;
+            restore_selection(host, old, env, m).await?;
             if let Some(o) = old {
-                start_version(io, &o["version"], env, ctx).await?;
+                start_version(host, &o["version"], env, ctx).await?;
             }
             clear_journal(env, m)?;
             Ok(())
         }
         .await;
         if let Err(rollback) = rolled {
-            return Err(Failure::msg(format!("The service update failed: {why} Recovery is pending: {}", message(io, &rollback))));
+            return Err(Failure::msg(format!("The service update failed: {why} Recovery is pending: {}", rollback.message)));
         }
         return Err(Failure::msg(format!("The service update failed. {}{why}", if old.is_some() { "The previous version was restored. " } else { "" })));
     }
     Ok(json!({ "component": "service", "version": staged["version"], "status": "updated" }))
-}
-
-// err.message, for a failure of the Rust's own or one a request threw.
-fn message(io: &Io, f: &Failure) -> String {
-    match f {
-        Failure::Rethrow => io.last_message(),
-        other @ Failure::Error { .. } => other.message().to_string(),
-    }
 }
 
 #[cfg(test)]
@@ -769,14 +750,14 @@ mod tests {
         let mut calls = Vec::new();
         let mut windows = |from: &str, onto: &str| {
             calls.push(format!("{} -> {}", NATIVE.basename(from, None), NATIVE.basename(onto, None)));
-            if fsx::exists(onto) {
-                return Err(fsx::coded("EPERM", format!("EPERM: operation not permitted, rename '{from}' -> '{onto}'")));
+            if files::exists(onto) {
+                return Err(files::coded("EPERM", format!("EPERM: operation not permitted, rename '{from}' -> '{onto}'")));
             }
-            fsx::rename(from, onto)
+            files::rename(from, onto)
         };
         replace_file(&tmp, &to, &mut windows).unwrap();
         assert_eq!(std::fs::read_to_string(&to).unwrap(), "new");
-        let aside: Vec<String> = fsx::read_dir_names(&dir).unwrap().into_iter().filter(|n| is_aside(n, "xenonet")).collect();
+        let aside: Vec<String> = files::read_dir_names(&dir).unwrap().into_iter().filter(|n| is_aside(n, "xenonet")).collect();
         assert_eq!(aside.len(), 1);
         assert_eq!(std::fs::read_to_string(NATIVE.join(&[&dir, &aside[0]])).unwrap(), "old, running");
         assert_eq!(calls.len(), 3, "{calls:?}");
@@ -789,7 +770,7 @@ mod tests {
         let mine = format!("xenonet.{}.tmp", std::process::id());
         std::fs::write(NATIVE.join(&[&dir, &mine]), "copying").unwrap();
         sweep_aside(&to);
-        let mut left = fsx::read_dir_names(&dir).unwrap();
+        let mut left = files::read_dir_names(&dir).unwrap();
         left.sort();
         let mut want = vec!["other.old".to_string(), "xenonet".into(), "xenonet.from".into(), mine.clone()];
         want.sort();
@@ -798,7 +779,7 @@ mod tests {
 
         // One that can't be renamed either stays as it was, and says why.
         std::fs::write(&tmp, "newer").unwrap();
-        let mut locked = |from: &str, onto: &str| Err(fsx::coded("EBUSY", format!("EBUSY: resource busy or locked, rename '{from}' -> '{onto}'")));
+        let mut locked = |from: &str, onto: &str| Err(files::coded("EBUSY", format!("EBUSY: resource busy or locked, rename '{from}' -> '{onto}'")));
         assert!(replace_file(&tmp, &to, &mut locked).unwrap_err().message.contains("EBUSY"));
         assert_eq!(std::fs::read_to_string(&to).unwrap(), "new");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -844,7 +825,7 @@ mod tests {
         let tools_json = json!({ "root": tools, "version": "1.1.0", "sha256": "ab" });
         assert_eq!(write_launcher_bin(&tools_json, &to, "win32"), Ok(true));
         assert_eq!(std::fs::read_to_string(&to).unwrap(), "the new Tools' binary");
-        let aside = || fsx::read_dir_names(&launcher).unwrap().into_iter().filter(|n| is_aside(n, "xenonet.exe")).count();
+        let aside = || files::read_dir_names(&launcher).unwrap().into_iter().filter(|n| is_aside(n, "xenonet.exe")).count();
         assert_eq!(aside(), 1, "the running copy, put aside");
         sweep_aside(&to);
         assert_eq!(aside(), 1, "kept while it runs");
@@ -880,12 +861,13 @@ mod tests {
 #[cfg(unix)]
 mod from_earlier {
     use super::*;
+    use crate::host::{ready, Connected, Service as Link};
     use crate::packages::digest;
     use crate::tar::tests::archive;
+    use async_trait::async_trait;
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::rc::Rc;
-    use xenonet_app::task::{run_with, Done, Task};
 
     struct Place {
         dir: PathBuf,
@@ -973,38 +955,69 @@ mod from_earlier {
         starts: Vec<Value>,
     }
 
-    fn run(p: &Place, svc: &Rc<RefCell<Service>>, failing: &str, task: Task) -> Done {
-        let (env, m, svc, failing) = (p.env.clone(), p.ctx.machine.clone(), svc.clone(), failing.to_string());
-        run_with(task, move |q| {
-            let mut s = svc.borrow_mut();
-            match q["op"].as_str().unwrap_or("") {
-                "connect" if s.state.is_some() => Ok(json!({ "client": 1 })),
-                "connect" => Err(json!({ "message": "not running" })),
-                "request" if q["method"] == "status" => Ok(s.state.clone().unwrap_or(Value::Null)),
-                "request" => {
-                    s.stops += 1;
-                    s.state = None;
-                    Ok(json!({ "stopping": true }))
-                }
-                "start" => {
-                    s.starts.push(q["runtime"].clone());
-                    let version = current_component("service", &env, &m).unwrap().unwrap()["version"].clone();
-                    if version == failing {
-                        return Err(json!({ "message": "XenoNet Service exited (1). See its service log." }));
-                    }
-                    s.state = Some(json!({ "version": version, "terminals": [] }));
-                    Ok(json!("started"))
-                }
-                "now" => Ok(json!(0)),
-                "close" | "pause" | "check" | "sleep" => Ok(Value::Null),
-                op => Err(json!({ "message": format!("nothing here answers {op}") })),
-            }
-        })
+    /// The service as the install sees it, and what starts it.
+    struct Fake {
+        svc: Rc<RefCell<Service>>,
+        env: Env,
+        m: Machine,
+        failing: String,
     }
 
-    fn bundle_task(p: &Place, bundle: &str) -> Task {
-        let (bundle, env, ctx) = (bundle.to_string(), p.env.clone(), p.ctx.clone());
-        Task::new(move |io| async move { install_bundle(&io, &bundle, &env, false, &ctx, &Life { stop_timeout: 0.0 }).await })
+    #[async_trait(?Send)]
+    impl Link for Fake {
+        async fn connect(&self, _env: &Env) -> Result<Connected, Failure> {
+            if self.svc.borrow().state.is_some() {
+                Ok(Connected { id: 1, info: Value::Null })
+            } else {
+                Err(Failure::msg("not running"))
+            }
+        }
+        async fn request(&self, _client: u64, method: &str, _params: Value) -> Result<Value, Failure> {
+            let mut s = self.svc.borrow_mut();
+            if method == "status" {
+                return Ok(s.state.clone().unwrap_or(Value::Null));
+            }
+            s.stops += 1;
+            s.state = None;
+            Ok(json!({ "stopping": true }))
+        }
+        async fn close(&self, _client: u64) {}
+        async fn sleep(&self, _ms: f64) {}
+    }
+
+    #[async_trait(?Send)]
+    impl Lifecycle for Fake {
+        async fn start(&self, runtime: &Value) -> Result<Value, Failure> {
+            let mut s = self.svc.borrow_mut();
+            s.starts.push(runtime.clone());
+            let version = current_component("service", &self.env, &self.m).unwrap().unwrap()["version"].clone();
+            if version == self.failing.as_str() {
+                return Err(Failure::msg("XenoNet Service exited (1). See its service log."));
+            }
+            s.state = Some(json!({ "version": version, "terminals": [] }));
+            Ok(json!("started"))
+        }
+        async fn check(&self, _staged: &Value) -> Result<(), Failure> {
+            Ok(())
+        }
+        async fn alive(&self, _pid: f64) -> Result<(), Failure> {
+            Err(Failure::msg("nothing here answers alive"))
+        }
+        async fn now(&self) -> f64 {
+            0.0
+        }
+    }
+
+    fn fake(p: &Place, svc: &Rc<RefCell<Service>>, failing: &str) -> Fake {
+        Fake { svc: svc.clone(), env: p.env.clone(), m: p.ctx.machine.clone(), failing: failing.into() }
+    }
+
+    fn install(p: &Place, svc: &Rc<RefCell<Service>>, failing: &str, bundle: &str) -> Result<Value, Failure> {
+        ready(install_bundle(&fake(p, svc, failing), bundle, &p.env, false, &p.ctx, &Life { stop_timeout: 0.0 }))
+    }
+
+    fn activate_one(p: &Place, svc: &Rc<RefCell<Service>>, failing: &str, file: &str, item: &Value) -> Result<Value, Failure> {
+        ready(activate_package(&fake(p, svc, failing), file, item, &p.env, &p.ctx, &Life { stop_timeout: 0.0 }))
     }
 
     fn version(v: &Value) -> &str {
@@ -1018,7 +1031,7 @@ mod from_earlier {
         let old = p.selected("service");
         assert!(!has_binary(&old, "linux") && !has_binary(&p.selected("tools"), "linux"));
         let svc = Rc::new(RefCell::new(Service::default()));
-        let runtime = run(&p, &svc, "", bundle_task(&p, &p.bundle("0.4.0"))).unwrap();
+        let runtime = install(&p, &svc, "", &p.bundle("0.4.0")).unwrap();
         let (service, tools) = (p.selected("service"), p.selected("tools"));
         assert_eq!((version(&service), version(&tools)), ("0.4.0", "0.4.0"));
         assert!(has_binary(&service, "linux") && has_binary(&tools, "linux"));
@@ -1042,7 +1055,7 @@ mod from_earlier {
         let old = p.selected("service");
         let svc = Rc::new(RefCell::new(Service { state: Some(json!({ "version": "0.3.0", "terminals": [{ "id": 1, "exited": false }] })), ..Service::default() }));
         let bundle = p.bundle("0.4.0");
-        let runtime = run(&p, &svc, "", bundle_task(&p, &bundle)).unwrap();
+        let runtime = install(&p, &svc, "", &bundle).unwrap();
         assert_eq!((version(&p.selected("service")), version(&p.selected("tools"))), ("0.3.0", "0.4.0"), "the Tools switch; the service waits");
         assert_eq!((svc.borrow().stops, svc.borrow().starts.len()), (0, 0));
         let root = PathBuf::from(display(&old["root"]));
@@ -1053,7 +1066,7 @@ mod from_earlier {
         assert_eq!(runtime["env"]["XENONET_LAUNCHER_ROOT"], json!(launcher.to_string_lossy()));
 
         svc.borrow_mut().state = Some(json!({ "version": "0.3.0", "terminals": [{ "id": 1, "exited": true }] }));
-        run(&p, &svc, "", bundle_task(&p, &bundle)).unwrap();
+        install(&p, &svc, "", &bundle).unwrap();
         assert_eq!((svc.borrow().stops, svc.borrow().starts.len(), version(&p.selected("service"))), (1, 1, "0.4.0"));
     }
 
@@ -1064,9 +1077,7 @@ mod from_earlier {
         let old = p.selected("service");
         let svc = Rc::new(RefCell::new(Service { state: Some(json!({ "version": "0.3.0", "terminals": [] })), ..Service::default() }));
         let (file, item) = p.package("service", "0.4.0");
-        let (env, ctx) = (p.env.clone(), p.ctx.clone());
-        let task = Task::new(move |io| async move { activate_package(&io, &file, &item, &env, &ctx, &Life { stop_timeout: 0.0 }).await });
-        let err = run(&p, &svc, "0.4.0", task).unwrap_err();
+        let err = activate_one(&p, &svc, "0.4.0", &file, &item).unwrap_err();
         assert!(err.message().starts_with("The service update failed. The previous version was restored. XenoNet Service exited"), "{}", err.message());
         assert_eq!(version(&p.selected("service")), "0.3.0");
         let s = svc.borrow();
@@ -1084,14 +1095,13 @@ mod from_earlier {
     fn the_service_runs_from_one_folder_through_an_install_updates_and_a_rollback() {
         let p = Place::new("active");
         let svc = Rc::new(RefCell::new(Service::default()));
-        run(&p, &svc, "", bundle_task(&p, &p.bundle("0.4.0"))).unwrap();
+        install(&p, &svc, "", &p.bundle("0.4.0")).unwrap();
         let dir = p.runtime().join("components/service");
         let mark = || std::fs::read_to_string(dir.join("active/.from")).unwrap();
         assert_eq!(mark(), format!("0.4.0-{}", display(&p.selected("service")["sha256"])));
         let update = |version: &str, failing: &str| {
             let (file, item) = p.package("service", version);
-            let (env, ctx) = (p.env.clone(), p.ctx.clone());
-            run(&p, &svc, failing, Task::new(move |io| async move { activate_package(&io, &file, &item, &env, &ctx, &Life { stop_timeout: 0.0 }).await }))
+            activate_one(&p, &svc, failing, &file, &item)
         };
         update("0.5.0", "").unwrap();
         assert!(mark().starts_with("0.5.0-"));

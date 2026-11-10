@@ -1,5 +1,5 @@
-//! The binary's drivers for the app's parts (themes, open, command,
-//! Spotify, the decision model, system stats…), hosts, the assistant,
+//! The binary's drivers for the app's parts (open, command, the decision
+//! model, system stats…), hosts, the assistant,
 //! components, integrations and the doctor: their tasks' fetches, children
 //! and timers, natively, where the twins' JS answers the same Rust during
 //! the port.
@@ -25,9 +25,7 @@ pub mod open;
 pub mod paths;
 pub mod refusals;
 pub mod secrets;
-pub mod spotify;
 pub mod system;
-pub mod themes;
 
 use secrets::Secrets;
 use serde_json::Value;
@@ -67,8 +65,6 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
     let state_dir = config.state_dir.clone();
     let js = paths::js_config(config);
 
-    cores.themes = Arc::new(themes::ThemeFiles);
-    themes::watch(Path::new(&state_dir).join("themes").to_string_lossy().into_owned(), cores.store.clone(), env.emitter.clone());
     cores.opener = Arc::new(open::Open);
     cores.command = Arc::new(open::XenonetCommand::new());
     cores.refusals = Arc::new(refusals::RefusalStore::new(&state_dir, &config.home));
@@ -80,12 +76,6 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
     cores.decider = decisions.clone();
     cores.openrouter = if demo { Arc::new(decide::DemoSpent) } else { Arc::new(decide::Spent::new(decision_secrets, env.emitter.clone())) };
 
-    cores.spotify = if demo {
-        Arc::new(spotify::DemoSpotify::new())
-    } else {
-        let file = Path::new(&state_dir).join("spotify.json").to_string_lossy().into_owned();
-        Arc::new(spotify::SpotifyRemote::new(&file, config.port, Arc::new(Secrets::real()), env.emitter.clone()))
-    };
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(system::System::new())) };
     cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version, cores.state.clone()));
 

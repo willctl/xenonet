@@ -7,21 +7,21 @@
 //! with a page token for the rest), and the answer checked against the
 //! strict schema before it goes.
 //!
-//! The grant's standing, its rate and the schemas are other modules'
-//! (core/actors/connections.js and limits.js, core/schema/assistant.js);
-//! the twin asks them, and drives each answer as a task whose requests
-//! are the view, the actor, a session's stats, the attention ids' key, the
-//! schema's check and the time.
+//! The grant's standing, its rate and the schemas are other modules'; what
+//! an answer reads of them comes through its host (`ReadHost`): the view,
+//! the actor, a session's stats, the attention ids' key, the schema's check
+//! and the time.
 
 use crate::cursors::{Cursors, For};
 use crate::fixtures;
 use crate::projection::{self as p, Visible};
+use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::rc::Rc;
-use xenonet_app::jsv::{less, strict_eq, truthy};
-use xenonet_app::task::{Failure, Io};
+use xenonet_os::error::Failure;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
+use xenonet_text::value::less;
 
 pub struct Limits {
     pub input_bytes: usize,
@@ -183,15 +183,29 @@ fn iso(ms: f64) -> Result<Value, Failure> {
     }
 }
 
-async fn now(io: &Io) -> Result<f64, Failure> {
-    io.ask(json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v))).map_err(|_| Failure::Rethrow)
+/// What an answer reads of the rest of XenoNet.
+#[async_trait(?Send)]
+pub trait ReadHost {
+    async fn now(&self) -> f64;
+    /// The time the cursors are signed at.
+    async fn cursor_now(&self) -> f64;
+    /// The map, as the reads see it.
+    async fn view(&self) -> Result<Value, Failure>;
+    /// An actor, or null.
+    async fn actor(&self, id: &Value) -> Result<Value, Failure>;
+    /// A session's stats, or null when it has none.
+    async fn stats(&self, id: &str) -> Result<Value, Failure>;
+    /// The key the attention ids are made with.
+    async fn id_key(&self) -> Result<Vec<u8>, Failure>;
+    /// Whether an envelope fits its tool's result schema.
+    async fn check(&self, tool: &str, envelope: &Value) -> Result<bool, Failure>;
 }
 
 // cmp in page(): elementwise, by === and <.
 fn cmp(a: &[Value], b: &Value) -> i32 {
     for (i, x) in a.iter().enumerate() {
         let y = b.get(i);
-        if !strict_eq(Some(x), y) {
+        if !xenonet_text::value::same(Some(x), y) {
             return if less(Some(x), y) { -1 } else { 1 };
         }
     }
@@ -249,7 +263,7 @@ impl Ctx<'_> {
     }
 
     fn place_of(&self, project: &Value) -> Option<Value> {
-        p::pairs(self.policy.get("places")).into_iter().rev().find(|(k, _)| strict_eq(Some(k), Some(project))).map(|(_, v)| v)
+        p::pairs(self.policy.get("places")).into_iter().rev().find(|(k, _)| xenonet_text::value::same(Some(k), Some(project))).map(|(_, v)| v)
     }
 
     // A project id the grant names, or NOT_FOUND, as for one that doesn't exist.
@@ -283,7 +297,7 @@ fn status(c: &Ctx<'_>) -> Out {
         "mode": "read_only",
         "connection": "connected",
         "assistant_api": 1,
-        "service_version": xenonet_app::jstext::slice16(&c.cfg.version, 32),
+        "service_version": xenonet_text::utf16::head(&c.cfg.version, 32),
         "capabilities": c.cfg.operations.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
         "actor": { "actor_id": policy.get("actorId"), "product_id": or_null("productId"), "account_link_state": policy.get("accountLink"), "participation": "read_only", "messaging": "disabled" },
         "device": { "id": policy.get("deviceId"), "alias": or_null("deviceAlias") },
@@ -306,14 +320,16 @@ fn projects(c: &Ctx<'_>) -> Result<Out, Failure> {
     let projects: Vec<Value> = policy.get("projects").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut counts: Vec<(Value, Map<String, Value>)> = Vec::new();
     for pr in &projects {
-        match counts.iter_mut().find(|(k, _)| strict_eq(Some(k), Some(pr))) {
+        match counts.iter_mut().find(|(k, _)| xenonet_text::value::same(Some(k), Some(pr))) {
             Some(slot) => slot.1 = p::empty_counts(),
             None => counts.push((pr.clone(), p::empty_counts())),
         }
     }
     for v in p::visible_sessions(c.view, policy, c.t) {
         if v.updated >= window_start {
-            let Some((_, m)) = counts.iter_mut().find(|(k, _)| strict_eq(Some(k), Some(&v.project))) else { return Err(Failure::msg("Cannot read properties of undefined")) };
+            let Some((_, m)) = counts.iter_mut().find(|(k, _)| xenonet_text::value::same(Some(k), Some(&v.project))) else {
+                return Err(Failure::msg("Cannot read properties of undefined"));
+            };
             let n = m.get(v.status).and_then(Value::as_f64).unwrap_or(0.0);
             m.insert(v.status.into(), xenonet_text::json::number(n + 1.0));
         }
@@ -329,12 +345,14 @@ fn projects(c: &Ctx<'_>) -> Result<Out, Failure> {
         .map(|pr| {
             let label = if labels {
                 let place = c.place_of(&pr);
-                let name = place.and_then(|pl| places.iter().rev().find(|(k, _)| strict_eq(Some(k), Some(&pl))).map(|(_, v)| v.clone())).and_then(|v| v.get("name").cloned());
+                let name = place
+                    .and_then(|pl| places.iter().rev().find(|(k, _)| xenonet_text::value::same(Some(k), Some(&pl))).map(|(_, v)| v.clone()))
+                    .and_then(|v| v.get("name").cloned());
                 p::label_of(name.as_ref())
             } else {
                 Value::Null
             };
-            let sc = counts.iter().find(|(k, _)| strict_eq(Some(k), Some(&pr))).map(|(_, m)| Value::Object(m.clone()));
+            let sc = counts.iter().find(|(k, _)| xenonet_text::value::same(Some(k), Some(&pr))).map(|(_, m)| Value::Object(m.clone()));
             let mut m = Map::new();
             m.insert("project_id".into(), pr.clone());
             m.insert("label".into(), label);
@@ -383,7 +401,9 @@ fn sessions(c: &Ctx<'_>) -> Result<Out, Failure> {
     let mut list: Vec<Visible<'_>> = p::visible_sessions(c.view, policy, c.t)
         .into_iter()
         .filter(|v| {
-            (!truthy(Some(&project)) || strict_eq(Some(&v.project), Some(&project))) && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status)) && v.updated >= since
+            (!truthy(Some(&project)) || xenonet_text::value::same(Some(&v.project), Some(&project)))
+                && statuses.as_ref().is_none_or(|s| s.iter().any(|x| x == v.status))
+                && v.updated >= since
         })
         .collect();
     xenonet_text::sort::sort_by(&mut list, |a, b| {
@@ -433,7 +453,7 @@ fn attention(c: &Ctx<'_>, id_key: &[u8]) -> Result<Out, Failure> {
     let mut items: Vec<(Value, Vec<Value>)> = p::attention_items(c.view, c.policy, c.t, &id_of)
         .into_iter()
         .filter(|i| {
-            (!truthy(Some(&project)) || strict_eq(i.get("project_id"), Some(&project)))
+            (!truthy(Some(&project)) || xenonet_text::value::same(i.get("project_id"), Some(&project)))
                 && kinds.as_ref().is_none_or(|k| k.iter().any(|x| Some(x.as_str()) == i.get("kind").and_then(Value::as_str)))
         })
         .map(|i| {
@@ -446,7 +466,7 @@ fn attention(c: &Ctx<'_>, id_key: &[u8]) -> Result<Out, Failure> {
         if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
             return o;
         }
-        xenonet_app::jstext::locale_compare(&display(&x.1[1]), &display(&y.1[1]))
+        xenonet_text::names::compare(&display(&x.1[1]), &display(&y.1[1]))
     });
     let (shown, next) = page(items, after.as_ref(), c.limit);
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
@@ -461,7 +481,7 @@ fn actors(c: &Ctx<'_>) -> Result<Out, Failure> {
     let mut list: Vec<(Value, Vec<Value>)> = p::actor_summaries(c.view, c.policy, c.t, Some(&project).filter(|p| !p.is_null()))
         .into_iter()
         .map(|a| {
-            let k = vec![json!(i32::from(!strict_eq(a.get("actor_id"), me))), a.get("actor_id").cloned().unwrap_or(Value::Null)];
+            let k = vec![json!(i32::from(!xenonet_text::value::same(a.get("actor_id"), me))), a.get("actor_id").cloned().unwrap_or(Value::Null)];
             (a, k)
         })
         .collect();
@@ -470,26 +490,26 @@ fn actors(c: &Ctx<'_>) -> Result<Out, Failure> {
         if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
             return o;
         }
-        xenonet_app::jstext::locale_compare(&display(&x.1[1]), &display(&y.1[1]))
+        xenonet_text::names::compare(&display(&x.1[1]), &display(&y.1[1]))
     });
     let (shown, next) = page(list, after.as_ref(), c.limit);
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
     Ok(Out { freshness: f, data: json!({ "self_actor_id": me, "actors": shown, "next_cursor": c.next(next, "actors", &filters) }), targets: c.targets_of(&project) })
 }
 
-async fn session(io: &Io, c: &Ctx<'_>, fixture: bool) -> Result<Out, Failure> {
+async fn session(host: &dyn ReadHost, c: &Ctx<'_>, fixture: bool) -> Result<Out, Failure> {
     let id = c.args.get("session_id");
     let visible = p::visible_sessions(c.view, c.policy, c.t);
-    let Some(v) = visible.iter().find(|x| strict_eq(x.s.get("id"), id)) else { return Err(refuse("NOT_FOUND", "session-not-visible")) };
+    let Some(v) = visible.iter().find(|x| xenonet_text::value::same(x.s.get("id"), id)) else { return Err(refuse("NOT_FOUND", "session-not-visible")) };
     let app = v.s.get("app").map_or_else(|| "undefined".into(), display);
     let mut f = p::freshness_of(c.view, c.t, &[app]);
     let mut stats = Value::Null;
     if truthy(c.args.get("include_stats")) {
         let sid = v.s.get("id").map(display).unwrap_or_default();
-        let raw = if fixture { Ok(fixtures::fixture_stats(&sid)) } else { io.ask(json!({ "op": "stats", "id": sid })).await };
+        let raw = if fixture { Ok(fixtures::fixture_stats(&sid)) } else { host.stats(&sid).await };
         if let Ok(raw) = raw {
             if truthy(Some(&raw)) {
-                stats = p::stats_data(&raw, now(io).await?);
+                stats = p::stats_data(&raw, host.now().await);
             }
         }
         if stats.is_null() {
@@ -508,13 +528,13 @@ fn tail16(s: &str, n: usize) -> String {
 
 /// What a policy reads from: the map, or the made-up one, with the actor
 /// itself in it either way.
-async fn view_for(io: &Io, policy0: &Value) -> Result<(Value, Value), Failure> {
+async fn view_for(host: &dyn ReadHost, policy0: &Value) -> Result<(Value, Value), Failure> {
     let actor_id = policy0.get("actorId").cloned().unwrap_or(Value::Null);
     if policy0.get("dataMode").and_then(Value::as_str) != Some("fixture") {
-        let mut view = io.ask(json!({ "op": "view" })).await.map_err(|_| Failure::Rethrow)?;
-        let has = view.get("actors").and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| strict_eq(x.get("id"), Some(&actor_id))));
+        let mut view = host.view().await?;
+        let has = view.get("actors").and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| xenonet_text::value::same(x.get("id"), Some(&actor_id))));
         if !has {
-            let me = io.ask(json!({ "op": "actor", "id": actor_id })).await.map_err(|_| Failure::Rethrow)?;
+            let me = host.actor(&actor_id).await?;
             if truthy(Some(&me)) {
                 let mut list = vec![me];
                 list.extend(view.get("actors").and_then(Value::as_array).cloned().unwrap_or_default());
@@ -523,8 +543,8 @@ async fn view_for(io: &Io, policy0: &Value) -> Result<(Value, Value), Failure> {
         }
         return Ok((view, policy0.clone()));
     }
-    let mut view = fixtures::fixture_view(now(io).await?);
-    let me = io.ask(json!({ "op": "actor", "id": actor_id })).await.map_err(|_| Failure::Rethrow)?;
+    let mut view = fixtures::fixture_view(host.now().await);
+    let me = host.actor(&actor_id).await?;
     let mut me = if !me.is_null() {
         me
     } else {
@@ -543,29 +563,24 @@ async fn view_for(io: &Io, policy0: &Value) -> Result<(Value, Value), Failure> {
 
 /// One operation, within its limits, as an envelope, shortened until it
 /// fits: { envelope, bytes, targets, reach, projects }.
-#[expect(clippy::too_many_arguments, reason = "the JS's answer and its request, which xenonet-node passes one by one")]
-pub async fn answer(io: Io, cfg: Rc<Config>, cursors: Rc<Cursors>, op: String, tool: String, args: Value, policy0: Value, request_id: Value) -> Result<Value, Failure> {
-    let (view, policy) = view_for(&io, &policy0).await?;
+#[expect(clippy::too_many_arguments, reason = "an answer's settings and its request, each its own")]
+pub async fn answer(host: &dyn ReadHost, cfg: &Config, cursors: &Cursors, op: &str, tool: &str, args: &Value, policy0: &Value, request_id: &Value) -> Result<Value, Failure> {
+    let (view, policy) = view_for(host, policy0).await?;
     let fixture_view = truthy(view.get("fixture"));
     let given = args.get("limit").filter(|v| !v.is_null()).map_or(cfg.limits.page, |v| xenonet_text::text::to_number(Some(v)));
     let limit_of = given.min(cfg.limits.page_max);
     let mut limit = limit_of;
-    let id_key = if op == "attention" { io.ask(json!({ "op": "idKey" })).await.map_err(|_| Failure::Rethrow)? } else { Value::Null };
-    let id_key: Vec<u8> = match &id_key {
-        Value::String(s) => s.as_bytes().to_vec(),
-        Value::Array(a) => a.iter().map(|b| b.as_u64().unwrap_or(0) as u8).collect(),
-        _ => Vec::new(),
-    };
+    let id_key = if op == "attention" { host.id_key().await? } else { Vec::new() };
     loop {
-        let t = now(&io).await?;
-        let ct = io.ask(json!({ "op": "cursorNow" })).await.map(|v| xenonet_text::text::to_number(Some(&v))).map_err(|_| Failure::Rethrow)?;
-        let c = Ctx { cfg: &cfg, cursors: &cursors, view: &view, policy: &policy, t, ct, args: &args, limit };
-        let out = match op.as_str() {
+        let t = host.now().await;
+        let ct = host.cursor_now().await;
+        let c = Ctx { cfg, cursors, view: &view, policy: &policy, t, ct, args, limit };
+        let out = match op {
             "status" => status(&c),
             "projects" => projects(&c)?,
             "sessions" => sessions(&c)?,
             "attention" => attention(&c, &id_key)?,
-            "session" => session(&io, &c, policy.get("dataMode").and_then(Value::as_str) == Some("fixture")).await?,
+            "session" => session(host, &c, policy.get("dataMode").and_then(Value::as_str) == Some("fixture")).await?,
             "actors" => actors(&c)?,
             _ => return Err(refuse("INVALID_ARGUMENT", "bad-request")),
         };
@@ -577,7 +592,7 @@ pub async fn answer(io: Io, cfg: Rc<Config>, cursors: Rc<Cursors>, op: String, t
             warnings.push(json!({ "code": "PAGE_REDUCED" }));
         }
         warnings.truncate(16);
-        let served = iso(now(&io).await?)?;
+        let served = iso(host.now().await)?;
         let envelope = json!({
             "schema": cfg.result_schema,
             "request_id": request_id,
@@ -590,8 +605,7 @@ pub async fn answer(io: Io, cfg: Rc<Config>, cursors: Rc<Cursors>, op: String, t
             "warnings": warnings,
             "data": out.data,
         });
-        let fits = io.ask(json!({ "op": "check", "tool": tool, "envelope": envelope })).await.map_err(|_| Failure::Rethrow)?;
-        if !truthy(Some(&fits)) {
+        if !host.check(tool, &envelope).await? {
             return Err(refuse("INTERNAL_ERROR", "result-off-contract"));
         }
         let bytes = xenonet_text::json::stringify(&envelope, 0).len();

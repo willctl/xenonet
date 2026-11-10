@@ -117,17 +117,33 @@ impl registry::Store for Rows {
 
 /// The demo world's nodes, as resolveDemo finds them: its projects folder,
 /// and its sessions by title.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct DemoNames {
     projects_dir: String,
     sessions: Vec<(String, String)>,
+    claude_account: fn(Option<&str>) -> Value,
+}
+
+/// The demo's made-up world, as the actors' requests name its nodes: its
+/// sessions by title and id, and the Claude account a project is in. The
+/// composition root gives it, from the demo's world.
+#[derive(Clone, Debug)]
+pub struct MadeUp {
+    pub sessions: Vec<(String, String)>,
+    pub claude_account: fn(Option<&str>) -> Value,
+}
+
+impl MadeUp {
+    /// A world with no sessions and no accounts, for a runtime with no
+    /// demo to name.
+    pub fn none() -> MadeUp {
+        MadeUp { sessions: Vec::new(), claude_account: |_| Value::Null }
+    }
 }
 
 impl DemoNames {
-    pub fn new(projects_dir: &str) -> DemoNames {
-        let list = xenonet_app::demo::Demo::new("", "0", "1970-01-01").session_list();
-        let sessions = list.iter().filter_map(|s| Some((s.get("title")?.as_str()?.to_string(), s.get("id")?.as_str()?.to_string()))).collect();
-        DemoNames { projects_dir: projects_dir.to_string(), sessions }
+    pub fn new(projects_dir: &str, made_up: &MadeUp) -> DemoNames {
+        DemoNames { projects_dir: projects_dir.to_string(), sessions: made_up.sessions.clone(), claude_account: made_up.claude_account }
     }
 
     fn resolve(&self, kind: &str, what: &str) -> Value {
@@ -137,7 +153,7 @@ impl DemoNames {
             "session" => self.sessions.iter().find(|(t, _)| t == what).map_or(Value::Null, |(_, id)| json!(id)),
             "file" => json!(file()),
             "identity" => {
-                let a = xenonet_app::demo::demo_claude_account(Some(what));
+                let a = (self.claude_account)(Some(what));
                 json!(format!("claude:{}:{}", a["account"].as_str().unwrap_or(""), a["org"].as_str().unwrap_or("")))
             }
             _ => Value::Null,

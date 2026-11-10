@@ -16,6 +16,8 @@
 //!   in, and its config format.
 //! - `dirs`: where the desktop apps keep their folders and binaries, which
 //!   the adapters and the core both look up.
+//! - `open`: the actions a node offers and the URLs they open, through
+//!   each app's `Opener`.
 //! - `formats`: formats several crates read: Codex's apply_patch text
 //!   (`patch`) and OpenCode's ids (`opencode`).
 //!
@@ -29,6 +31,7 @@ pub mod delivery;
 pub mod dirs;
 pub mod formats;
 pub mod observe;
+pub mod open;
 pub mod platform;
 pub mod processes;
 pub mod products;

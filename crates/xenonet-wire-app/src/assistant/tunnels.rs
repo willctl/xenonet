@@ -297,11 +297,11 @@ impl Runner {
     }
 
     fn write_private(file: &str, text: &str) -> R<()> {
-        xenonet_app::fsx::write_file(file, text.as_bytes(), Some(0o600)).map_err(|e| CoreError::new(e.message))
+        xenonet_os::files::write_file(file, text.as_bytes(), Some(0o600)).map_err(|e| CoreError::new(e.message))
     }
 
     fn launch_run(self: &Arc<Self>, grant: &str, v: &Value, tunnel_id: &str, file: &str, key: &str) -> R<()> {
-        xenonet_app::fsx::mkdir_p(&self.tdir, Some(0o700)).map_err(|e| CoreError::new(e.message))?;
+        xenonet_os::files::mkdir_p(&self.tdir, Some(0o700)).map_err(|e| CoreError::new(e.message))?;
         let profile = self.file_of(grant, "yaml");
         let url_file = self.file_of(grant, "url");
         Self::write_private(&profile, &self.profile_text(grant, tunnel_id, &v["label"])?)?;
@@ -536,7 +536,7 @@ impl Tunnels for TunnelsCore {
             None => None,
         };
         let Some(key) = key else { return Err(fail(409, "no-key", "XenoNet has no runtime key for this tunnel yet")) };
-        xenonet_app::fsx::mkdir_p(&t.tdir, Some(0o700)).map_err(|e| CoreError::new(e.message))?;
+        xenonet_os::files::mkdir_p(&t.tdir, Some(0o700)).map_err(|e| CoreError::new(e.message))?;
         let profile = t.file_of(grant, "check.yaml");
         Runner::write_private(&profile, &t.profile_text(grant, &tunnel_id, &v["label"])?)?;
         let env = core::child_env(&fx::env_map(), &key, &json!(t.launch.port), false);

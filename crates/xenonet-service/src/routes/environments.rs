@@ -5,7 +5,7 @@ use crate::cores::CoreError;
 use crate::ctx::Ctx;
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
-use xenonet_app::environments::{environment_of, ENVIRONMENTS};
+use xenonet_console::environments::{environment_of, ENVIRONMENTS};
 
 pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     if req.path != "/api/environment" {

@@ -40,12 +40,12 @@ mod connect;
 mod control;
 mod demo;
 mod native;
+mod net;
 mod relay;
 mod secrets;
 mod setup;
 pub mod supervisor;
 mod tar;
-mod tasks;
 
 pub use components::{
     activate_package, component_updates, current_component, ensure_service, install_bundle, install_launcher, installed_runtime, machine, recover_service_update, service_request,
@@ -192,7 +192,7 @@ pub fn make_bundle(input: &Value) -> Res<Value> {
     let env = env_map();
     let (home, platform, arch, release) = (sys::home(), sys::platform(), arch(), release());
     let have = |k: &str| input.get(k).filter(|v| !v.is_null());
-    let g = xenonet_app::diagnostics::Gathered {
+    let g = xenonet_doctor::diagnostics::Gathered {
         xenonet: have("xenonet"),
         doctor: have("doctor"),
         errors: &errors,
@@ -207,45 +207,45 @@ pub fn make_bundle(input: &Value) -> Res<Value> {
         node: "none",
         electron: None,
     };
-    xenonet_app::diagnostics::make_bundle(&g).map_err(Fail::error)
+    xenonet_doctor::diagnostics::make_bundle(&g).map_err(Fail::error)
 }
 
 /// bundleMarkdown(bundle)
 pub fn bundle_markdown(bundle: &Value) -> Res<String> {
-    Ok(xenonet_app::diagnostics::bundle_markdown(bundle))
+    Ok(xenonet_doctor::diagnostics::bundle_markdown(bundle))
 }
 
 /// writeLook(stateDir, bundle, { sources }): the folder it wrote.
 pub fn write_look(state_dir: &str, bundle: &Value, sources: &[String]) -> Res<String> {
-    xenonet_app::diagnostics::write_look(state_dir, bundle, sources, native::now()).map_err(fs_fail)
+    xenonet_doctor::diagnostics::write_look(state_dir, bundle, sources, native::now()).map_err(fs_fail)
 }
 
 /// askCommand({ app, model, dir, sources }): { file, args, cwd }.
 pub fn ask_command(app: &str, model: Option<&str>, dir: &str, sources: &[String]) -> Res<Value> {
-    Ok(xenonet_app::diagnostics::ask_command(app, model, &json!(dir), sources))
+    Ok(xenonet_doctor::diagnostics::ask_command(app, model, &json!(dir), sources))
 }
 
 // ---------- the decision model ----------
 
 /// createDecider({ secrets: createSecretStore() }).status()
 pub fn decider_status() -> Res<Value> {
-    let (_, model) = xenonet_app::decide::settings(sys::var("XENONET_DECISIONS_URL").as_deref(), sys::var("XENONET_DECISION_MODEL").as_deref());
+    let (_, model) = xenonet_state::decide::settings(sys::var("XENONET_DECISIONS_URL").as_deref(), sys::var("XENONET_DECISION_MODEL").as_deref());
     let store = secrets::store();
-    let has = store.has(&mut secrets::Runner, xenonet_app::decide::KEY_TARGET).unwrap_or(false);
+    let has = store.has(&mut secrets::Runner, xenonet_state::decide::KEY_TARGET).unwrap_or(false);
     Ok(json!({ "model": model, "key": if has { "stored" } else { "missing" }, "store": store.kind() }))
 }
 
 /// …storeKey(key)
 pub fn decider_store_key(key: &str) -> Res<Value> {
-    let checked = xenonet_app::decide::check_key(key).map_err(|e| Fail::error(e.message))?;
+    let checked = xenonet_state::decide::check_key(key).map_err(|e| Fail::error(e.message))?;
     let store = secrets::store();
-    store.set(&mut secrets::Runner, xenonet_app::decide::KEY_TARGET, &checked, xenonet_app::decide::KEY_COMMENT).map_err(Fail::error)?;
+    store.set(&mut secrets::Runner, xenonet_state::decide::KEY_TARGET, &checked, xenonet_state::decide::KEY_COMMENT).map_err(Fail::error)?;
     Ok(json!({ "key": "stored", "store": store.kind() }))
 }
 
 /// …forgetKey()
 pub fn decider_forget_key() -> Res<()> {
-    let _ = secrets::store().remove(&mut secrets::Runner, xenonet_app::decide::KEY_TARGET);
+    let _ = secrets::store().remove(&mut secrets::Runner, xenonet_state::decide::KEY_TARGET);
     Ok(())
 }
 
@@ -374,7 +374,7 @@ pub fn digest(bytes: &[u8]) -> Res<String> {
 
 /// commandDir()
 pub fn command_dir() -> Res<String> {
-    Ok(xenonet_app::command::command_dir(&sys::home(), sys::platform(), std::env::var("LOCALAPPDATA").ok().as_deref()))
+    Ok(xenonet_components::command::command_dir(&sys::home(), sys::platform(), std::env::var("LOCALAPPDATA").ok().as_deref()))
 }
 
 /// installCommand({ dir, bin, force }): the command's state, its script

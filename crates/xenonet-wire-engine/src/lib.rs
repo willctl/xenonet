@@ -111,7 +111,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         delivery::listen_settings(&setup.state_dir, setup.port).map_err(|e| log_later(env, "warn", "delivery.listen", format!("listen settings: {e}"))).ok()
     };
     let actors = if setup.actors {
-        let names = actors::DemoNames::new(&setup.projects_dir);
+        let names = actors::DemoNames::new(&setup.projects_dir, &setup.made_up);
         match actors::ActorSide::new(store.clone(), setup.demo, &map, names) {
             Ok(a) => Some(a),
             Err(e) => {

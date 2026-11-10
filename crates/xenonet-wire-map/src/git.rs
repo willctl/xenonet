@@ -302,7 +302,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let d = dir.to_string_lossy().into_owned();
-        let git = |args: &[&str]| std::process::Command::new("git").args(xenonet_app::demo::GIT).args(args).current_dir(&dir).output().unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").args(xenonet_demo::GIT).args(args).current_dir(&dir).output().unwrap();
         git(&["init", "-q", "-b", "main"]);
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         git(&["add", "-A"]);
@@ -342,7 +342,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let d = dir.to_string_lossy().into_owned();
-        let git = |args: &[&str]| std::process::Command::new("git").args(xenonet_app::demo::GIT).args(args).current_dir(&dir).output().unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").args(xenonet_demo::GIT).args(args).current_dir(&dir).output().unwrap();
         git(&["init", "-q", "-b", "main"]);
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         git(&["add", "-A"]);

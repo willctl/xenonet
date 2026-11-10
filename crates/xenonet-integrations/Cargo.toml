@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-integrations"
-description = "XenoNet's integrations: routing suggestions through OpenRouter, OpenShell sandboxes with a frozen text baseline and the review of what comes back, and Pi sessions and exports read as metadata."
+description = "XenoNet's integrations: routing suggestions through OpenRouter, OpenShell sandboxes with a frozen text baseline and the review of what comes back, Pi sessions and exports read as metadata, and MCP servers' catalogs."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,14 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+url.workspace = true
+xenonet-os.workspace = true
 getrandom.workspace = true
 libc.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-xenonet-app.workspace = true
 xenonet-text.workspace = true
 
 [lints]

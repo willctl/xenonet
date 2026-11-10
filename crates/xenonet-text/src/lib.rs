@@ -10,12 +10,18 @@
 //! - `time`: ISO 8601 times, read as `Date.parse` reads them;
 //! - `units`: money, tokens, durations and shares as people read them;
 //! - `ordered`: a map that keeps its keys in the order they were added;
-//! - `sort`: a stable sort that takes whatever its comparator says.
+//! - `sort`: a stable sort that takes whatever its comparator says;
+//! - `names`: ids and names in a reader's order;
+//! - `url`: text percent-encoded as URLs carry it, and a URL's host;
+//! - `value`: JSON values read field by field, cut, counted and compared.
 
 pub mod json;
+pub mod names;
 pub mod ordered;
 pub mod sort;
 pub mod text;
 pub mod time;
 pub mod units;
+pub mod url;
 pub mod utf16;
+pub mod value;

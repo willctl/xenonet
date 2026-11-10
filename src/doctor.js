@@ -4,7 +4,7 @@
 //
 // Under the checks, what went wrong lately (XenoNet's error log, electron/lib/log.js)
 // by code, and two ways to get help: Copy diagnostics, a summary safe to
-// share (crates/xenonet-app/src/diagnostics.rs), and Ask Codex or Claude Code, which starts a
+// share (crates/xenonet-doctor/src/diagnostics.rs), and Ask Codex or Claude Code, which starts a
 // session of the one you pick on this computer, in a terminal here, to look
 // at it with you. That session never files anything; sending an issue stays
 // yours.

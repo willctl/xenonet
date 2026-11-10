@@ -727,7 +727,7 @@ mod tests {
                 "/api/engine/state" => (200, json!({ "agents": [] })),
                 "/api/session/claude:abc/transcript" => (200, json!({ "entries": [{ "role": "user", "text": "in /home/nova/atlas" }] })),
                 "/api/session/claude:abc/stats" => (200, json!({ "calls": 3 })),
-                "/api/system" => (200, xenonet_app::system_stats::demo_reading(now_ms())),
+                "/api/system" => (200, xenonet_os::stats::demo_reading(now_ms())),
                 _ => (404, json!({ "error": "not found" })),
             })
         }

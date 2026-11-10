@@ -4,9 +4,9 @@
 
 use crate::checks::STATUSES;
 use serde_json::{json, Map, Value};
-use xenonet_app::fsx;
-use xenonet_app::jsv::truthy;
+use xenonet_os::files;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 const SKEW_MS: f64 = 120e3;
 
@@ -106,7 +106,7 @@ pub fn new_problems(prev: &Value, next: &Value) -> Vec<Value> {
         .flatten()
         .map(|r| (r.get("id").cloned().unwrap_or(Value::Null), r.get("status").cloned().unwrap_or(Value::Null)))
         .collect();
-    let was = |id: Option<&Value>| before.iter().rev().find(|(k, _)| xenonet_app::jsv::strict_eq(Some(k), id)).and_then(|(_, s)| rank(s.as_str())).unwrap_or(0);
+    let was = |id: Option<&Value>| before.iter().rev().find(|(k, _)| xenonet_text::value::same(Some(k), id)).and_then(|(_, s)| rank(s.as_str())).unwrap_or(0);
     next.get("results")
         .and_then(Value::as_array)
         .into_iter()
@@ -118,7 +118,7 @@ pub fn new_problems(prev: &Value, next: &Value) -> Vec<Value> {
 
 /// The last run, from its file; None when there's none to read.
 pub fn read_run(file: Option<&str>) -> Option<Value> {
-    xenonet_text::json::parse(&fsx::read_text(file?).ok()?).ok()
+    xenonet_text::json::parse(&files::read_text(file?).ok()?).ok()
 }
 
 /// Keeps a run, saying what it is (contracts, section 1); quietly, as the
@@ -131,9 +131,9 @@ pub fn write_run(file: Option<&str>, result: &Value) {
         m.insert(k.clone(), v.clone());
     }
     let tmp = format!("{file}.tmp");
-    let _ = fsx::mkdir_p(&xenonet_app::nodepath::NATIVE.dirname(file), None)
-        .and_then(|()| fsx::write_file(&tmp, xenonet_text::json::stringify(&Value::Object(m), 0).as_bytes(), None))
-        .and_then(|()| fsx::rename(&tmp, file));
+    let _ = files::mkdir_p(&xenonet_os::nodepath::NATIVE.dirname(file), None)
+        .and_then(|()| files::write_file(&tmp, xenonet_text::json::stringify(&Value::Object(m), 0).as_bytes(), None))
+        .and_then(|()| files::rename(&tmp, file));
 }
 
 #[cfg(test)]

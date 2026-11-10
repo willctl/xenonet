@@ -5,12 +5,12 @@
 
 use crate::common::{clean, fail, query, Fail};
 use serde_json::{json, Map, Value};
-use xenonet_app::fsx;
-use xenonet_app::nodepath::NATIVE;
+use xenonet_os::files;
+use xenonet_os::nodepath::NATIVE;
 
 /// Whether settings.json says to read Pi's sessions.
 pub fn pi_on(settings_file: Option<&str>) -> bool {
-    settings_file.and_then(|f| fsx::read_text(f).ok()).and_then(|t| xenonet_text::json::parse(&t).ok()).is_some_and(|s| s.get("piOn") == Some(&json!(true)))
+    settings_file.and_then(|f| files::read_text(f).ok()).and_then(|t| xenonet_text::json::parse(&t).ok()).is_some_and(|s| s.get("piOn") == Some(&json!(true)))
 }
 
 /// Keeps whether to read Pi's sessions, readable by you alone.
@@ -18,8 +18,8 @@ pub fn set_pi(settings_file: Option<&str>, on: &Value) -> Result<Value, Fail> {
     let Some(on) = on.as_bool() else { return fail("Choose whether to read Pi sessions.") };
     if let Some(file) = settings_file {
         let tmp = format!("{file}.tmp");
-        fsx::write_file(&tmp, xenonet_text::json::stringify(&json!({ "piOn": on }), 0).as_bytes(), Some(0o600))?;
-        fsx::rename(&tmp, file)?;
+        files::write_file(&tmp, xenonet_text::json::stringify(&json!({ "piOn": on }), 0).as_bytes(), Some(0o600))?;
+        files::rename(&tmp, file)?;
     }
     Ok(json!({ "piOn": on }))
 }
@@ -53,7 +53,7 @@ pub fn pi(records: &[Value], scanned: &Value, enabled: bool, params: &Value) -> 
 pub fn import_plan(records: &[Value], value: &Value) -> Result<Value, Fail> {
     let mut fields: Map<String, Value> = crate::pi::export_metadata(value)?.as_object().cloned().unwrap_or_default();
     let source_id = fields.shift_remove("id").unwrap_or(Value::Null);
-    let existing = records.iter().find(|r| xenonet_app::jsv::strict_eq(r.get("sourceId"), Some(&source_id)));
+    let existing = records.iter().find(|r| xenonet_text::value::same(r.get("sourceId"), Some(&source_id)));
     Ok(match existing {
         Some(r) => json!({ "update": r["id"], "fields": fields }),
         None => {
@@ -111,7 +111,7 @@ pub fn demo_records() -> Value {
 pub fn demo_sandbox(name: &str, options: &Value, review_id: &Value) -> Value {
     let retrieval = if options.get("unavailable") == Some(&json!(true)) {
         "unavailable"
-    } else if options.get("problems").is_some_and(|p| xenonet_app::jsv::truthy(Some(p))) {
+    } else if options.get("problems").is_some_and(|p| xenonet_text::text::truthy(Some(p))) {
         "incomplete"
     } else {
         "retrieved"

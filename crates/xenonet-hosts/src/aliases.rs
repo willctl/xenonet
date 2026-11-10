@@ -2,7 +2,7 @@
 //! HostName github.com), read again when ~/.ssh/config changes. Only read,
 //! never written. The reading of the file's words is identities.js's.
 
-use xenonet_app::nodepath::NATIVE;
+use xenonet_os::nodepath::NATIVE;
 
 /// When to read ~/.ssh/config again: the stamp (its mtime) it had.
 pub struct AliasReader {

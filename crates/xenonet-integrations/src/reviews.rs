@@ -1,4 +1,4 @@
-//! core/integrations/reviews.js: text change review for OpenShell jobs. A
+//! Text change review for OpenShell jobs. A
 //! Git project's selected text is frozen before upload (its manifest is
 //! the owner's final check), what the sandbox hands back is validated as
 //! untrusted, and the difference is a patch you can export. Nothing a
@@ -13,16 +13,17 @@ pub const COLLECT_TEXT: &str = include_str!("collect_text.js");
 
 use crate::b64;
 use crate::common::{fail, failed, write_new, Fail};
+use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use xenonet_app::fsx;
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::files;
+use xenonet_os::nodepath::NATIVE;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, DOT};
 
 pub const FILES: usize = 512;
@@ -54,7 +55,7 @@ fn hash(s: &str) -> String {
 /// The files' digest: [path, content] pairs, sorted by path.
 pub fn digest(files: &[Value]) -> String {
     let mut pairs: Vec<(String, Value)> = files.iter().map(|f| (f.get("path").map(display).unwrap_or_default(), json!([f.get("path"), f.get("content")]))).collect();
-    pairs.sort_by(|a, b| xenonet_app::jstext::locale_compare(&a.0, &b.0));
+    pairs.sort_by(|a, b| xenonet_text::names::compare(&a.0, &b.0));
     hash(&xenonet_text::json::stringify(&Value::Array(pairs.into_iter().map(|(_, p)| p).collect()), 0))
 }
 
@@ -145,7 +146,7 @@ fn git_env(env: &Map<String, Value>) -> Map<String, Value> {
     env.iter().filter(|(k, _)| !k.starts_with("GIT_")).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-fn fs_fail(e: fsx::FsError) -> Failure {
+fn fs_fail(e: files::FsError) -> Failure {
     Failure::from(e)
 }
 
@@ -158,16 +159,56 @@ fn refused(f: Fail) -> Failure {
 }
 
 fn realpath(p: &str) -> Result<String, Failure> {
-    fsx::realpath(p).map_err(fs_fail)
+    files::realpath(p).map_err(fs_fail)
 }
 
 fn realpath_native(p: &str) -> Result<String, Failure> {
-    fsx::realpath_native(p).map_err(fs_fail)
+    files::realpath_native(p).map_err(fs_fail)
 }
 
-async fn git(io: &Io, args: Vec<String>, env: &Map<String, Value>, max_buffer: usize) -> Result<String, Failure> {
-    let out = io.ask(json!({ "op": "git", "args": args, "options": { "env": env, "timeout": 10000, "maxBuffer": max_buffer } })).await.map_err(|_| Failure::Rethrow)?;
-    Ok(out.get("stdout").map(display).unwrap_or_default())
+/// A git run as the reviews ask for it: its arguments, its whole
+/// environment, its time limit, and what goes on its standard input.
+/// `allow_exit` is an exit code that still answers (check-ignore's 1, for
+/// nothing ignored).
+pub struct Git {
+    pub args: Vec<String>,
+    pub env: Map<String, Value>,
+    pub timeout_ms: f64,
+    pub input: Option<String>,
+    pub allow_exit: Option<i64>,
+}
+
+impl Git {
+    fn plain(args: Vec<String>, env: &Map<String, Value>) -> Git {
+        Git { args, env: env.clone(), timeout_ms: 10000.0, input: None, allow_exit: None }
+    }
+
+    // A run Reviews::isolated_git made.
+    fn isolated(g: &Value) -> Git {
+        Git {
+            args: g["args"].as_array().into_iter().flatten().map(display).collect(),
+            env: g["options"]["env"].as_object().cloned().unwrap_or_default(),
+            timeout_ms: g["options"]["timeout"].as_f64().unwrap_or(10000.0),
+            input: None,
+            allow_exit: None,
+        }
+    }
+}
+
+/// What the reviews wait on: git, a project's text frozen, and the time.
+#[async_trait(?Send)]
+pub trait ReviewHost {
+    async fn now(&self) -> f64;
+    /// git's standard output, or why it failed (its `code`, `stderr` and
+    /// `stdout` with it).
+    async fn git(&self, run: &Git) -> Result<String, Failure>;
+    /// A Git project's selected text, frozen (`source_snapshot`, run as
+    /// the host runs it).
+    async fn snapshot(&self, source: &Value) -> Result<Value, Failure>;
+}
+
+async fn git(host: &dyn ReviewHost, args: Vec<String>, env: &Map<String, Value>) -> Result<String, Failure> {
+    host.git(&Git::plain(args, env)).await
 }
 
 fn open_nofollow(file: &str) -> std::io::Result<std::fs::File> {
@@ -183,17 +224,17 @@ fn open_nofollow(file: &str) -> std::io::Result<std::fs::File> {
 
 /// A Git project's selected text, frozen: { files, excluded, omittedPaths,
 /// bytes, digest }. `env` is XenoNet's, without git's own settings.
-pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) -> Result<Value, Failure> {
+pub async fn source_snapshot(host: &dyn ReviewHost, source: &str, env: &Map<String, Value>) -> Result<Value, Failure> {
     // Windows can spell one directory with either short or long names.
-    let source = realpath_native(&source)?;
-    let env = git_env(&env);
+    let source = realpath_native(source)?;
+    let env = git_env(env);
     let base: Vec<String> = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-C", &source].iter().map(ToString::to_string).collect();
     let with = |more: &[&str]| -> Vec<String> { base.iter().cloned().chain(more.iter().map(ToString::to_string)).collect() };
-    let root = git(&io, with(&["rev-parse", "--show-toplevel"]), &env, 4096).await?;
+    let root = git(host, with(&["rev-parse", "--show-toplevel"]), &env).await?;
     if realpath_native(xenonet_text::text::trim(&root))? != source {
         return Err(refused(Fail { status: 400, code: "bad-request".into(), message: "Change review needs the root of a Git working tree.".into() }));
     }
-    let listed = git(&io, with(&["ls-files", "--cached", "--others", "--exclude-standard", "-z"]), &env, 1024 * 1024).await?;
+    let listed = git(host, with(&["ls-files", "--cached", "--others", "--exclude-standard", "-z"]), &env).await?;
     let mut names: Vec<String> = Vec::new();
     for n in listed.split('\0').filter(|n| !n.is_empty()) {
         if !names.iter().any(|x| x == n) {
@@ -210,7 +251,7 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
         if excluded.len() >= FILES {
             return Err(f("Too many exclusions to review. Choose a smaller project."));
         }
-        excluded.push(json!({ "path": xenonet_app::jstext::slice16(name, 240), "reason": reason }));
+        excluded.push(json!({ "path": xenonet_text::utf16::head(name, 240), "reason": reason }));
         Ok(())
     };
     let changed = || refused(Fail { status: 409, code: "changed".into(), message: "The project changed while preparing its snapshot. Preview again.".into() });
@@ -230,7 +271,7 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
         let st = match std::fs::symlink_metadata(&file) {
             Ok(st) => st,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(fs_fail(fsx::FsError::of(e, "lstat", &file))),
+            Err(e) => return Err(fs_fail(files::FsError::of(e, "lstat", &file))),
         };
         let ignore_rule = NATIVE.basename(name, None) == ".gitignore";
         let regular = st.is_file() && !st.file_type().is_symlink() && realpath(&file)?.starts_with(&format!("{source}{sep}"));
@@ -252,7 +293,7 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
         let mut parent = NATIVE.dirname(&file);
         let mut safe = true;
         while parent != source {
-            let m = std::fs::symlink_metadata(&parent).map_err(|e| fs_fail(fsx::FsError::of(e, "lstat", &parent)))?;
+            let m = std::fs::symlink_metadata(&parent).map_err(|e| fs_fail(files::FsError::of(e, "lstat", &parent)))?;
             if m.file_type().is_symlink() {
                 safe = false;
                 break;
@@ -267,15 +308,15 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
             omit(&mut excluded, name, "A parent directory is a link")?;
             continue;
         }
-        let mut fd = open_nofollow(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "open", &file)))?;
+        let mut fd = open_nofollow(&file).map_err(|e| fs_fail(files::FsError::of(e, "open", &file)))?;
         let before = stamp(&st);
-        if stamp(&fd.metadata().map_err(|e| fs_fail(fsx::FsError::of(e, "fstat", &file)))?) != before {
+        if stamp(&fd.metadata().map_err(|e| fs_fail(files::FsError::of(e, "fstat", &file)))?) != before {
             return Err(changed());
         }
         let mut content = Vec::with_capacity(st.len() as usize);
         use std::io::Read;
-        (&mut fd).take(st.len()).read_to_end(&mut content).map_err(|e| fs_fail(fsx::FsError::of(e, "read", &file)))?;
-        if content.len() as u64 != st.len() || stamp(&fd.metadata().map_err(|e| fs_fail(fsx::FsError::of(e, "fstat", &file)))?) != before {
+        (&mut fd).take(st.len()).read_to_end(&mut content).map_err(|e| fs_fail(files::FsError::of(e, "read", &file)))?;
+        if content.len() as u64 != st.len() || stamp(&fd.metadata().map_err(|e| fs_fail(files::FsError::of(e, "fstat", &file)))?) != before {
             return Err(changed());
         }
         drop(fd);
@@ -299,9 +340,9 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
     if !portable_set(&paths) {
         return Err(f("The project has paths that collide on another platform. Rename them before preparing a review."));
     }
-    let ignored = git(&io, with(&["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory", "-z"]), &env, 128 * 1024).await?;
+    let ignored = git(host, with(&["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory", "-z"]), &env).await?;
     let omitted: Vec<String> = ignored.split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
-    if omitted.len() > FILES || omitted.iter().any(|n| xenonet_app::jstext::utf16_len(n) > 241) {
+    if omitted.len() > FILES || omitted.iter().any(|n| xenonet_text::utf16::len(n) > 241) {
         return Err(f("Too many existing ignored paths to freeze the review scope."));
     }
     let d = digest(&files);
@@ -362,8 +403,8 @@ pub fn validate_result(value: &Value) -> Result<Value, Fail> {
     }
     for entry in problems.iter().chain(omissions) {
         let ok = truthy(Some(entry))
-            && entry.get("path").and_then(Value::as_str).is_some_and(|p| xenonet_app::jstext::utf16_len(p) <= 240)
-            && entry.get("reason").and_then(Value::as_str).is_some_and(|r| xenonet_app::jstext::utf16_len(r) <= 160);
+            && entry.get("path").and_then(Value::as_str).is_some_and(|p| xenonet_text::utf16::len(p) <= 240)
+            && entry.get("reason").and_then(Value::as_str).is_some_and(|r| xenonet_text::utf16::len(r) <= 160);
         if !ok {
             return invalid("The gateway returned invalid retrieval diagnostics.");
         }
@@ -488,12 +529,12 @@ impl Reviews {
         let d = match &self.dir {
             Some(d) => d.clone(),
             None => {
-                let d = fsx::mkdtemp(&NATIVE.join(&[&std::env::temp_dir().to_string_lossy(), "xenonet-reviews-"]))?;
+                let d = files::mkdtemp(&NATIVE.join(&[&std::env::temp_dir().to_string_lossy(), "xenonet-reviews-"]))?;
                 self.dir = Some(d.clone());
                 d
             }
         };
-        fsx::mkdir_p(&d, Some(0o700))?;
+        files::mkdir_p(&d, Some(0o700))?;
         Ok(d)
     }
 
@@ -518,9 +559,9 @@ impl Reviews {
             None => self.root()?,
         };
         let mut total = 0u64;
-        for name in fsx::read_dir_names(&folder)? {
+        for name in files::read_dir_names(&folder)? {
             let file = NATIVE.join(&[&folder, &name]);
-            let m = std::fs::symlink_metadata(&file).map_err(|e| fsx::FsError::of(e, "lstat", &file))?;
+            let m = std::fs::symlink_metadata(&file).map_err(|e| files::FsError::of(e, "lstat", &file))?;
             if m.file_type().is_symlink() {
                 return failed("The review storage contains an unexpected link.", "storage-invalid", 409);
             }
@@ -537,7 +578,7 @@ impl Reviews {
     }
 
     fn count(&mut self) -> R<usize> {
-        Ok(fsx::read_dir_names(&self.root()?)?.iter().filter(|n| is_uuid(n)).count())
+        Ok(files::read_dir_names(&self.root()?)?.iter().filter(|n| is_uuid(n)).count())
     }
 
     pub fn save(&mut self, value: &Value) -> R<Value> {
@@ -551,23 +592,23 @@ impl Reviews {
             return failed("This diff is too large to retain safely. Retrieve a smaller text change; the previous local review is retained.", "review-too-large", 413);
         }
         let existing = NATIVE.join(&[&folder, "review.json"]);
-        let old = if fsx::exists(&existing) { std::fs::symlink_metadata(&existing).map_err(|e| fsx::FsError::of(e, "lstat", &existing))?.len() } else { 0 };
+        let old = if files::exists(&existing) { std::fs::symlink_metadata(&existing).map_err(|e| files::FsError::of(e, "lstat", &existing))?.len() } else { 0 };
         if old == 0 && self.count()? >= COUNT {
             return failed("Local review storage is full. Forget an old review before preparing another.", "review-capacity", 409);
         }
         if self.disk_bytes(None)? as f64 - old as f64 + bytes as f64 > STORE_BYTES as f64 {
             return failed("Local review storage is full. Forget an old review first; existing reviews are retained.", "review-capacity", 409);
         }
-        fsx::mkdir_p(&folder, Some(0o700))?;
+        files::mkdir_p(&folder, Some(0o700))?;
         let tmp = NATIVE.join(&[&folder, &format!("{}.tmp", b64::uuid())]);
-        let r = write_new(&tmp, serialized.as_bytes(), 0o600).and_then(|()| fsx::rename(&tmp, &existing));
+        let r = write_new(&tmp, serialized.as_bytes(), 0o600).and_then(|()| files::rename(&tmp, &existing));
         let _ = std::fs::remove_file(&tmp);
         r?;
         Ok(self.cache(value))
     }
 
     pub fn load(&mut self, id: &Value) -> R<Value> {
-        if let Some(v) = self.memory.iter().find(|v| xenonet_app::jsv::strict_eq(v.get("id"), Some(id))).cloned() {
+        if let Some(v) = self.memory.iter().find(|v| xenonet_text::value::same(v.get("id"), Some(id))).cloned() {
             return Ok(self.cache(v));
         }
         let file = NATIVE.join(&[&self.location(id)?, "review.json"]);
@@ -576,8 +617,8 @@ impl Reviews {
             if !st.is_file() || st.file_type().is_symlink() || st.len() > RECORD_BYTES as u64 {
                 return None;
             }
-            let v = xenonet_text::json::parse(&fsx::read_text(&file).ok()?).ok()?;
-            xenonet_app::jsv::strict_eq(v.get("id"), Some(id)).then_some(v)
+            let v = xenonet_text::json::parse(&files::read_text(&file).ok()?).ok()?;
+            xenonet_text::value::same(v.get("id"), Some(id)).then_some(v)
         };
         match read() {
             Some(v) => Ok(self.cache(v)),
@@ -597,8 +638,8 @@ impl Reviews {
     }
 
     pub fn forget(&mut self, id: &Value) -> R<Value> {
-        self.memory.retain(|v| !xenonet_app::jsv::strict_eq(v.get("id"), Some(id)));
-        fsx::rm_rf(&self.location(id)?)?;
+        self.memory.retain(|v| !xenonet_text::value::same(v.get("id"), Some(id)));
+        files::rm_rf(&self.location(id)?)?;
         Ok(json!({ "forgotten": true }))
     }
 
@@ -610,7 +651,7 @@ impl Reviews {
             Err(e) if !e.is("EEXIST") => return Err(e.into()),
             _ => {}
         }
-        let st = std::fs::symlink_metadata(&empty).map_err(|e| fsx::FsError::of(e, "lstat", &empty))?;
+        let st = std::fs::symlink_metadata(&empty).map_err(|e| files::FsError::of(e, "lstat", &empty))?;
         if !st.is_file() || st.file_type().is_symlink() || st.len() != 0 {
             return failed("The isolated Git configuration changed.", "storage-invalid", 409);
         }
@@ -672,7 +713,7 @@ impl Reviews {
     pub fn export(&mut self, id: &Value, revision: &Value) -> R<Value> {
         let v = self.load(id)?;
         let r = v.get("result").filter(|r| truthy(Some(r)));
-        let Some(r) = r.filter(|r| xenonet_app::jsv::strict_eq(r.get("revision"), Some(revision))) else {
+        let Some(r) = r.filter(|r| xenonet_text::value::same(r.get("revision"), Some(revision))) else {
             return failed("The reviewed result changed. Open it again before exporting.", "changed", 409);
         };
         if !truthy(r.get("complete")) {
@@ -704,16 +745,12 @@ fn fail_of(f: Fail) -> Failure {
 
 pub type Shared = Rc<RefCell<Reviews>>;
 
-async fn snapshot(io: &Io, source: &Value) -> Result<Value, Failure> {
-    io.ask(json!({ "op": "snapshot", "source": source })).await.map_err(|_| Failure::Rethrow)
-}
-
 /// prepare(source): the frozen baseline and its staged upload.
-pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) -> Result<Value, Failure> {
-    let now = now_of(&io).await?;
+pub async fn prepare(host: &dyn ReviewHost, r: &Shared, source: &Value, env: &Map<String, Value>) -> Result<Value, Failure> {
+    let now = host.now().await;
     // Abandoned launch previews must not keep source code indefinitely.
     let root = r.borrow_mut().root().map_err(fail_of)?;
-    for id in fsx::read_dir_names(&root).map_err(fs_fail)?.into_iter().filter(|n| is_uuid(n)) {
+    for id in files::read_dir_names(&root).map_err(fs_fail)?.into_iter().filter(|n| is_uuid(n)) {
         let mut rv = r.borrow_mut();
         if let Ok(v) = rv.load(&json!(id)) {
             if !truthy(v.get("launched")) && xenonet_text::text::to_number(v.get("at")) + PREVIEW_MS <= now {
@@ -724,12 +761,12 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
     if r.borrow_mut().count().map_err(fail_of)? >= COUNT {
         return Err(fail_of(Fail { status: 409, code: "review-capacity".into(), message: "Local review storage is full. Forget an old review before preparing another.".into() }));
     }
-    let selected = snapshot(&io, &source).await?;
+    let selected = host.snapshot(source).await?;
     let sel_bytes = xenonet_text::text::to_number(selected.get("bytes"));
     if (r.borrow_mut().disk_bytes(None).map_err(fail_of)? as f64) + sel_bytes * 3.0 > STORE_BYTES as f64 {
         return Err(fail_of(Fail { status: 409, code: "review-capacity".into(), message: "Local review storage is full. Forget an old review before preparing another.".into() }));
     }
-    let now = now_of(&io).await?;
+    let now = host.now().await;
     let mut m: Map<String, Value> = selected.as_object().cloned().unwrap_or_default();
     m.insert("id".into(), json!(b64::uuid()));
     m.insert("source".into(), source.clone());
@@ -739,16 +776,16 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
     let value = r.borrow_mut().save(&Value::Object(m)).map_err(fail_of)?;
     let folder = r.borrow_mut().location(&value["id"]).map_err(fail_of)?;
     let upload = NATIVE.join(&[&folder, "project"]);
-    fsx::mkdir(&upload, Some(0o700)).map_err(fs_fail)?;
+    files::mkdir(&upload, Some(0o700)).map_err(fs_fail)?;
     for f in value["files"].as_array().into_iter().flatten() {
         let p = display(&f["path"]);
         let mut parts: Vec<&str> = vec![&upload];
         parts.extend(p.split('/'));
         let target = NATIVE.join(&parts);
-        fsx::mkdir_p(&NATIVE.dirname(&target), Some(0o700)).map_err(fs_fail)?;
+        files::mkdir_p(&NATIVE.dirname(&target), Some(0o700)).map_err(fs_fail)?;
         write_new(&target, &b64::decode(&display(&f["content"])), 0o600).map_err(fs_fail)?;
     }
-    if let Err(e) = prepare_ignores(&io, &r, &value, &env).await {
+    if let Err(e) = prepare_ignores(host, r, &value, env).await {
         let _ = r.borrow_mut().forget(&value["id"]);
         return Err(e);
     }
@@ -757,42 +794,39 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
     Ok(Value::Object(out))
 }
 
-async fn now_of(io: &Io) -> Result<f64, Failure> {
-    io.ask(json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v))).map_err(|_| Failure::Rethrow)
-}
-
-async fn prepare_ignores(io: &Io, r: &Shared, v: &Value, env: &Map<String, Value>) -> Result<(), Failure> {
+async fn prepare_ignores(host: &dyn ReviewHost, r: &Shared, v: &Value, env: &Map<String, Value>) -> Result<(), Failure> {
     let folder = NATIVE.join(&[&r.borrow_mut().location(&v["id"]).map_err(fail_of)?, "ignore"]);
-    fsx::mkdir(&folder, Some(0o700)).map_err(fs_fail)?;
+    files::mkdir(&folder, Some(0o700)).map_err(fs_fail)?;
     for f in v["files"].as_array().into_iter().flatten() {
         let p = display(&f["path"]);
-        if xenonet_app::nodepath::Style::Posix.basename(&p, None) != ".gitignore" {
+        if xenonet_os::nodepath::Style::Posix.basename(&p, None) != ".gitignore" {
             continue;
         }
         let mut parts: Vec<&str> = vec![&folder];
         parts.extend(p.split('/'));
         let dest = NATIVE.join(&parts);
-        fsx::mkdir_p(&NATIVE.dirname(&dest), Some(0o700)).map_err(fs_fail)?;
-        fsx::write_file(&dest, &b64::decode(&display(&f["content"])), Some(0o600)).map_err(fs_fail)?;
+        files::mkdir_p(&NATIVE.dirname(&dest), Some(0o700)).map_err(fs_fail)?;
+        files::write_file(&dest, &b64::decode(&display(&f["content"])), Some(0o600)).map_err(fs_fail)?;
     }
     let g = r.borrow_mut().isolated_git(&folder, &["init", "--quiet", "--template="], env).map_err(fail_of)?;
-    io.ask(json!({ "op": "git", "args": g["args"], "options": g["options"] })).await.map_err(|_| Failure::Rethrow)?;
+    host.git(&Git::isolated(&g)).await?;
     Ok(())
 }
 
 /// launch(id): the frozen upload checked once more, then marked launched.
-pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
+pub async fn launch(host: &dyn ReviewHost, r: &Shared, id: &Value) -> Result<Value, Failure> {
+    let id = id.clone();
     let v = r.borrow_mut().load(&id).map_err(fail_of)?;
-    let now = now_of(&io).await?;
+    let now = host.now().await;
     let changed = |m: &str| fail_of(Fail { status: 409, code: "changed".into(), message: m.into() });
     if truthy(v.get("launched")) || now >= xenonet_text::text::to_number(v.get("at")) + PREVIEW_MS {
         return Err(fail_of(Fail { status: 409, code: "expired".into(), message: "The snapshot preview expired or was already launched.".into() }));
     }
-    let fresh = snapshot(&io, v.get("source").unwrap_or(&Value::Null)).await?;
-    if !xenonet_app::jsv::strict_eq(fresh.get("digest"), v.get("digest")) {
+    let fresh = host.snapshot(v.get("source").unwrap_or(&Value::Null)).await?;
+    if !xenonet_text::value::same(fresh.get("digest"), v.get("digest")) {
         return Err(changed("The project changed after preview. Preview the upload again."));
     }
-    if !xenonet_app::jsv::strict_eq(r.borrow_mut().load(&id).map_err(fail_of)?.get("generation"), v.get("generation")) {
+    if !xenonet_text::value::same(r.borrow_mut().load(&id).map_err(fail_of)?.get("generation"), v.get("generation")) {
         return Err(changed("This local review changed or was forgotten."));
     }
     // Check the staged bytes too: the live project is never uploaded here.
@@ -803,19 +837,20 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
         let mut parts: Vec<&str> = vec![&project];
         parts.extend(p.split('/'));
         let file = NATIVE.join(&parts);
-        let st = std::fs::symlink_metadata(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "lstat", &file)))?;
-        let same =
-            st.is_file() && !st.file_type().is_symlink() && b64::encode(&std::fs::read(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "open", &file)))?) == display(&f["content"]);
+        let st = std::fs::symlink_metadata(&file).map_err(|e| fs_fail(files::FsError::of(e, "lstat", &file)))?;
+        let same = st.is_file()
+            && !st.file_type().is_symlink()
+            && b64::encode(&std::fs::read(&file).map_err(|e| fs_fail(files::FsError::of(e, "open", &file)))?) == display(&f["content"]);
         if !same {
             return Err(changed("The frozen upload changed. Preview again."));
         }
     }
     fn walk(folder: &str, prefix: &str, files: &[Value], staged: &mut Vec<String>) -> Result<(), Failure> {
         let changed = |m: &str| fail_of(Fail { status: 409, code: "changed".into(), message: m.into() });
-        for name in fsx::read_dir_names(folder).map_err(fs_fail)? {
+        for name in files::read_dir_names(folder).map_err(fs_fail)? {
             let rel = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
             let full = NATIVE.join(&[folder, &name]);
-            let m = std::fs::symlink_metadata(&full).map_err(|e| fs_fail(fsx::FsError::of(e, "lstat", &full)))?;
+            let m = std::fs::symlink_metadata(&full).map_err(|e| fs_fail(files::FsError::of(e, "lstat", &full)))?;
             if m.file_type().is_symlink() || (!m.is_file() && !m.is_dir()) {
                 return Err(changed("The frozen upload contains an unexpected file or link. Preview again."));
             }
@@ -847,7 +882,7 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
 // What came back, kept to the frozen upload's scope: new paths that the
 // repository's own ignore rules, the omitted paths or the exclusions
 // cover are left out, and said so.
-async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<String, Value>) -> Result<Value, Failure> {
+async fn filter_scope(host: &dyn ReviewHost, r: &Shared, v: &Value, value: &Value, env: &Map<String, Value>) -> Result<Value, Failure> {
     let baseline: Vec<String> = v["files"].as_array().into_iter().flatten().map(|f| display(&f["path"])).collect();
     let mut candidates: Vec<String> = Vec::new();
     for p in value["files"].as_array().into_iter().flatten().chain(value["problems"].as_array().into_iter().flatten()).map(|f| display(&f["path"])) {
@@ -871,8 +906,8 @@ async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<S
         let g = r.borrow_mut().isolated_git(&folder, &["check-ignore", "--no-index", "--stdin", "-z"], env).map_err(fail_of)?;
         let input = format!("{}\0", candidates.join("\0"));
         // check-ignore exits 1 when nothing matches.
-        let out = io.ask(json!({ "op": "git", "args": g["args"], "options": g["options"], "input": input, "allowExit": 1 })).await.map_err(|_| Failure::Rethrow)?;
-        ignored = display(&out["stdout"]).split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
+        let out = host.git(&Git { input: Some(input), allow_exit: Some(1), ..Git::isolated(&g) }).await?;
+        ignored = out.split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
     }
     let blocked = |name: &str| !baseline.iter().any(|b| b == name) && (ignored.iter().any(|i| i == name) || omitted(name));
     let keep = |list: &Value| -> Vec<Value> { list.as_array().into_iter().flatten().filter(|f| !blocked(&display(&f["path"]))).cloned().collect() };
@@ -886,21 +921,21 @@ async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<S
 
 /// accept(id, input): what came back, validated and kept to scope, as the
 /// review's result.
-pub async fn accept(io: Io, r: Shared, id: Value, input: Value, env: Map<String, Value>) -> Result<Value, Failure> {
-    let valid = validate_result(&input).map_err(fail_of)?;
-    let v = r.borrow_mut().load(&id).map_err(fail_of)?;
-    let value = filter_scope(&io, &r, &v, &valid, &env).await?;
-    let state = match snapshot(&io, v.get("source").unwrap_or(&Value::Null)).await {
-        Ok(s) if xenonet_app::jsv::strict_eq(s.get("digest"), v.get("digest")) => "unchanged",
+pub async fn accept(host: &dyn ReviewHost, r: &Shared, id: &Value, input: &Value, env: &Map<String, Value>) -> Result<Value, Failure> {
+    let valid = validate_result(input).map_err(fail_of)?;
+    let v = r.borrow_mut().load(id).map_err(fail_of)?;
+    let value = filter_scope(host, r, &v, &valid, env).await?;
+    let state = match host.snapshot(v.get("source").unwrap_or(&Value::Null)).await {
+        Ok(s) if xenonet_text::value::same(s.get("digest"), v.get("digest")) => "unchanged",
         Ok(_) => "changed",
         Err(_) => "unknown",
     };
-    if !xenonet_app::jsv::strict_eq(r.borrow_mut().load(&id).map_err(fail_of)?.get("generation"), v.get("generation")) {
+    if !xenonet_text::value::same(r.borrow_mut().load(id).map_err(fail_of)?.get("generation"), v.get("generation")) {
         return Err(fail_of(Fail { status: 409, code: "changed".into(), message: "This local review changed or was forgotten.".into() }));
     }
     let comparison = text_patch(v["files"].as_array().map_or(&[][..], Vec::as_slice), value["files"].as_array().map_or(&[][..], Vec::as_slice));
     let complete = value["problems"].as_array().is_none_or(Vec::is_empty);
-    let now = now_of(&io).await?;
+    let now = host.now().await;
     let mut res = Map::new();
     res.insert("revision".into(), json!(b64::uuid()));
     res.insert("at".into(), xenonet_text::json::number(now));
@@ -1093,19 +1128,44 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A Git project's text frozen with git stood in for: `listed` is
-    /// what ls-files names, `top` what rev-parse says the root is.
+    /// git stood in for: `listed` is what ls-files names, `top` what
+    /// rev-parse says the root is, `ignored` what ls-files --ignored names.
+    struct Git3 {
+        top: String,
+        listed: String,
+        ignored: String,
+    }
+
+    #[async_trait(?Send)]
+    impl ReviewHost for Git3 {
+        async fn now(&self) -> f64 {
+            0.0
+        }
+        async fn git(&self, run: &Git) -> Result<String, Failure> {
+            let has = |a: &str| run.args.iter().any(|x| x == a);
+            Ok(if has("rev-parse") {
+                self.top.clone()
+            } else if has("--ignored") {
+                self.ignored.clone()
+            } else {
+                self.listed.clone()
+            })
+        }
+        async fn snapshot(&self, _source: &Value) -> Result<Value, Failure> {
+            Err(Failure::msg("no snapshots here"))
+        }
+    }
+
+    /// A Git project's text frozen with git stood in for.
     fn snapshot(source: &str, top: &str, listed: &[&str], ignored: &[String]) -> Result<Value, String> {
-        let (listed, ignored, top) = (listed.join("\0"), ignored.join("\0"), top.to_string());
-        let task = xenonet_app::task::Task::new({
-            let source = source.to_string();
-            move |io| async move { source_snapshot(io, source, Map::new()).await }
-        });
-        xenonet_app::task::run_with(task, |q| {
-            let args: Vec<&str> = q["args"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-            Ok(json!({ "stdout": if args.contains(&"rev-parse") { top.clone() } else if args.contains(&"--ignored") { ignored.clone() } else { listed.clone() } }))
-        })
-        .map_err(|f| f.message().to_string())
+        let host = Git3 { top: top.to_string(), listed: listed.join("\0"), ignored: ignored.join("\0") };
+        use std::future::Future as _;
+        let env = Map::new();
+        let mut f = std::pin::pin!(source_snapshot(&host, source, &env));
+        match f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+            std::task::Poll::Ready(r) => r.map_err(|f| f.message().to_string()),
+            std::task::Poll::Pending => panic!("a stand-in for git waited"),
+        }
     }
 
     fn project(name: &str) -> (std::path::PathBuf, String) {
@@ -1113,7 +1173,7 @@ mod tests {
         let source = dir.join("project");
         std::fs::create_dir_all(source.join("src")).unwrap();
         std::fs::write(source.join("src/a.txt"), "text\n").unwrap();
-        (dir, fsx::realpath_native(&source.to_string_lossy()).unwrap())
+        (dir, files::realpath_native(&source.to_string_lossy()).unwrap())
     }
 
     #[test]

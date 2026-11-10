@@ -102,7 +102,7 @@ export function createThemes({ post, sfx, toast, note, desktop = null, onCommand
   };
 
   // A copy of theme `from` (the one in use, unless it's another), as a file
-  // of your own to edit (crates/xenonet-app/src/themefiles.rs), which XenoNet then uses.
+  // of your own to edit (crates/xenonet-console/src/themefiles.rs), which XenoNet then uses.
   // Resolves to { id, file }, or null if it couldn't.
   async function copy(from = current ?? THEME.id) {
     const taken = list.map((t) => t.id);

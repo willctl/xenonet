@@ -1,10 +1,10 @@
 //! core/config.js's settings as the app's parts read them (the doctor's
-//! `paths`, the MCP catalog's files), through xenonet-app's config: worked
+//! `paths`, the MCP catalog's files), through xenonet-components' config: worked
 //! out once, after the demo's world has moved the folders.
 
 use crate::Settings;
 use serde_json::{json, Map, Value};
-use xenonet_app::config::{config, Field, Finds};
+use xenonet_components::config::{config, Field, Finds};
 
 struct Disk;
 

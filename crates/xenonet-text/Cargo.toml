@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-text"
-description = "The formats XenoNet writes and reads: JSON as XenoNet writes it, text and UTF-16 strings, times, units as people read them, and orderings. No IO."
+description = "The formats XenoNet writes and reads: JSON as XenoNet writes it, text and UTF-16 strings, times, units as people read them, orderings, URL encoding and JSON values read field by field. No IO."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

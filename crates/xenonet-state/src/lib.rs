@@ -1,9 +1,11 @@
 //! The map's data and what XenoNet remembers: state.json, its versions and
 //! its settings (`statefile`, `migrate`, `store`), the projects and the
 //! accounts sessions ran as, the map itself (`graph`, refreshed by `state`),
-//! and what the transcripts add up to (`stats`, `search`, `digest`).
+//! and what the transcripts add up to (`stats`, `search`, `digest`); and the
+//! decision model's requests and the checks of its answers (`decide`).
 
 pub mod classify;
+pub mod decide;
 pub mod digest;
 pub mod export_labels;
 pub mod frames;

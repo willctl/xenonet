@@ -115,7 +115,7 @@ pub fn on_path_existing(cmd: &str) -> Option<String> {
 
 /// Date.now().
 pub fn now() -> f64 {
-    xenonet_app::task::now_ms()
+    xenonet_text::time::now_ms()
 }
 
 /// A GET to a server on this machine, within `ms`: its status and body.

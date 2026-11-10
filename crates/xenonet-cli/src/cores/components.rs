@@ -1,23 +1,26 @@
-//! core/components/ for the command (xenonet setup, service and update):
+//! The components for the command (xenonet setup, service and update):
 //! installing and switching components, the service's lifecycle and the
-//! updates (xenonet-components' tasks), with what they wait on done here,
-//! as the twins' runtime.js, install.js and updates.js did it: the
+//! updates (xenonet-components), with what they wait on done here: the
 //! component service's socket (JSON lines, a hello with the descriptor's
 //! token), starting the service detached, a staged runtime's startup
 //! check, the install lock's look at a process, and the release's
 //! downloads.
 
-use super::tasks::{block_on, coded, drive, error, fetch, Failed, Perform};
+use super::net::{block_on, fetch};
 use crate::out::Fail;
 use crate::sys;
+use async_trait::async_trait;
 use serde_json::{json, Map, Value};
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use xenonet_app::task::{Reply, Task};
+use xenonet_components::host::{self, Connected, Got, Spawn};
 use xenonet_components::install::{self, Ctx, Life};
 use xenonet_components::runtime::{self, Env, Machine};
 use xenonet_components::{protocol, updates};
+use xenonet_os::error::Failure;
 use xenonet_service::rpc::{Handler, Rpc, MAX_LINE};
 
 /// How long a service gets to stop during an update (lifecycle.js's
@@ -44,12 +47,8 @@ fn env_with(given: &Value) -> Env {
     env
 }
 
-fn failed(f: Failed) -> Fail {
+fn failed(f: Failure) -> Fail {
     Fail::error(f.message)
-}
-
-fn task_fail(f: xenonet_app::task::Failure) -> Fail {
-    Fail::error(f.message().to_string())
 }
 
 // ---------- the component service's socket ----------
@@ -72,18 +71,11 @@ impl Client {
 /// connectService({ env, role }): the service the descriptor in the
 /// runtime folder names, its hello answered and its interface one this
 /// XenoNet speaks.
-pub async fn connect_service(env: &Env, role: &str) -> Result<Client, Value> {
-    let (port, token) = runtime::read_descriptor(env, &machine()).map_err(|e| {
-        let mut m = Map::new();
-        m.insert("message".into(), json!(e.message));
-        if let Some(c) = e.code {
-            m.insert("code".into(), json!(c));
-        }
-        Value::Object(m)
-    })?;
+pub async fn connect_service(env: &Env, role: &str) -> Result<Client, Failure> {
+    let (port, token) = runtime::read_descriptor(env, &machine())?;
     let socket = tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.map_err(|e| {
         let code = xenonet_os::fs::code_of(&e).unwrap_or("ECONNREFUSED");
-        coded(format!("connect {code} 127.0.0.1:{port}"), code)
+        Failure::coded(format!("connect {code} 127.0.0.1:{port}"), code)
     })?;
     // The service asks nothing of the command.
     let handle: Handler = Arc::new(|_, _| Box::pin(async { Err("unsupported request".to_string()) }));
@@ -92,48 +84,47 @@ pub async fn connect_service(env: &Env, role: &str) -> Result<Client, Value> {
         Ok(i) => i,
         Err(m) => {
             rpc.close();
-            return Err(error(m));
+            return Err(Failure::msg(m));
         }
     };
     if let Err(m) = protocol::negotiate(Some(&protocol::api_value(protocol::SERVICE_API)), info.get("api")) {
         rpc.close();
-        return Err(error(m));
+        return Err(Failure::msg(m));
     }
     Ok(Client { rpc, info })
 }
 
 // ---------- processes ----------
 
-/// process.kill(pid, 0): Ok when it's there, ESRCH (or EPERM) when not.
+/// Whether a process is there: Ok when it is, ESRCH (or EPERM) when not.
 #[cfg_attr(unix, expect(unsafe_code, reason = "kill(2) with signal 0, which std doesn't wrap"))]
-fn alive(pid: f64) -> Reply {
+fn alive(pid: f64) -> Result<(), Failure> {
     #[cfg(unix)]
     {
         // SAFETY: kill(2) with signal 0 sends nothing; it only checks the
         // process.
         if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
-            return Ok(json!(true));
+            return Ok(());
         }
         let e = std::io::Error::last_os_error();
         let code = if e.raw_os_error() == Some(libc::EPERM) { "EPERM" } else { "ESRCH" };
-        Err(coded(format!("kill {code}"), code))
+        Err(Failure::coded(format!("kill {code}"), code))
     }
     #[cfg(not(unix))]
     {
         let r = super::native::run("tasklist", &["/FI".into(), format!("PID eq {pid}"), "/NH".into()], 5000.0, None);
         if r.stdout.split_whitespace().any(|w| w == pid.to_string()) {
-            Ok(json!(true))
+            Ok(())
         } else {
-            Err(coded("kill ESRCH", "ESRCH"))
+            Err(Failure::coded("kill ESRCH", "ESRCH"))
         }
     }
 }
 
-/// Starts a program detached, its output appended to `log`, as the
+/// Starts a program detached, its output appended to its log, as the
 /// service is started: it goes on when the command ends.
-fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
-    let text = |k: &str| q.get(k).map(xenonet_text::text::display).unwrap_or_default();
-    let log = q.get("log").or_else(|| q.get("logFile")).map(xenonet_text::text::display).unwrap_or_default();
+fn spawn_detached(q: &Spawn) -> Result<std::process::Child, Failure> {
+    let log = q.log.clone().unwrap_or_default();
     let mut open = std::fs::OpenOptions::new();
     open.create(true).append(true);
     #[cfg(unix)]
@@ -141,18 +132,16 @@ fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
         use std::os::unix::fs::OpenOptionsExt;
         open.mode(0o600);
     }
-    let out = open.open(&log).map_err(|e| error(xenonet_os::fs::FsError::of(e, "open", &log).message))?;
-    let err = out.try_clone().map_err(|e| error(e.to_string()))?;
-    let mut cmd = std::process::Command::new(text("command"));
-    cmd.args(q.get("args").and_then(Value::as_array).into_iter().flatten().map(xenonet_text::text::display)).stdin(std::process::Stdio::null()).stdout(out).stderr(err);
-    if let Some(cwd) = q.get("cwd").and_then(Value::as_str) {
+    let out = open.open(&log).map_err(|e| Failure::msg(xenonet_os::fs::FsError::of(e, "open", &log).message))?;
+    let err = out.try_clone().map_err(|e| Failure::msg(e.to_string()))?;
+    let mut cmd = std::process::Command::new(&q.command);
+    cmd.args(&q.args).stdin(std::process::Stdio::null()).stdout(out).stderr(err);
+    if let Some(cwd) = &q.cwd {
         cmd.current_dir(cwd);
     }
-    if let Some(env) = q.get("env").and_then(Value::as_object) {
-        cmd.env_clear();
-        for (k, v) in env {
-            cmd.env(k, xenonet_text::text::display(v));
-        }
+    cmd.env_clear();
+    for (k, v) in &q.env {
+        cmd.env(k, xenonet_text::text::display(v));
     }
     #[cfg(unix)]
     {
@@ -168,142 +157,151 @@ fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
     }
     cmd.spawn().map_err(|e| {
         let code = xenonet_os::fs::code_of(&e).unwrap_or("ENOENT");
-        coded(format!("spawn {} {code}", text("command")), code)
+        Failure::coded(format!("spawn {} {code}", q.command), code)
     })
 }
 
-// ---------- the tasks' requests ----------
-
-/// ensureService's: connect (and close again), spawn (or the supervisor's
-/// start, for a service registered to start at login), and the failure of
-/// the child it started, if it failed.
-struct Ensure {
-    child: Option<std::process::Child>,
+async fn pause(ms: f64) {
+    tokio::time::sleep(Duration::from_millis(if ms.is_finite() && ms > 0.0 { ms as u64 } else { 0 })).await;
 }
 
-impl Perform for Ensure {
-    async fn ask(&mut self, q: &Value) -> Reply {
-        match q.get("op").and_then(Value::as_str) {
-            Some("connect") => {
-                let env: Env = q.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
-                connect_service(&env, "tools").await?.close();
-                Ok(Value::Null)
-            }
-            Some("spawn") => {
-                // A service registered to start at login is started by its
-                // supervisor, never beside the copy the supervisor keeps.
-                let port = q.get("env").and_then(|e| e.get("XENONET_PORT")).map(xenonet_text::text::display).filter(|p| !p.is_empty()).unwrap_or_else(|| "47840".into());
-                if let Some(place) = super::supervisor::registered_for(&port) {
-                    xenonet_components::supervisor::start(&place, &xenonet_components::supervisor::Disk, &mut xenonet_components::supervisor::System).map_err(error)?;
-                    return Ok(Value::Null);
-                }
-                self.child = Some(spawn_detached(q)?);
-                Ok(Value::Null)
-            }
-            Some("failure") => match self.child.as_mut().map(std::process::Child::try_wait) {
-                Some(Ok(Some(st))) => Err(error(format!("XenoNet Service exited ({}). See its service log.", st.code().map_or_else(|| "null".into(), |c| c.to_string())))),
-                Some(Err(e)) => Err(error(e.to_string())),
-                _ => Ok(Value::Null),
-            },
-            other => Err(error(format!("ensureService asked for {}", other.unwrap_or("undefined")))),
+// ---------- what the components wait on ----------
+
+/// ensureService's: whether a service answers, spawning one (or the
+/// supervisor's start, for a service registered to start at login), and
+/// the failure of the child it started, if it failed.
+#[derive(Default)]
+struct Ensure {
+    child: RefCell<Option<std::process::Child>>,
+}
+
+#[async_trait(?Send)]
+impl host::Starter for Ensure {
+    async fn reach(&self, env: &Env) -> Result<(), Failure> {
+        connect_service(env, "tools").await?.close();
+        Ok(())
+    }
+    async fn spawn(&self, spawn: &Spawn) -> Result<(), Failure> {
+        // A service registered to start at login is started by its
+        // supervisor, never beside the copy the supervisor keeps.
+        let port = spawn.env.get("XENONET_PORT").map(xenonet_text::text::display).filter(|p| !p.is_empty()).unwrap_or_else(|| "47840".into());
+        if let Some(place) = super::supervisor::registered_for(&port) {
+            xenonet_components::supervisor::start(&place, &xenonet_components::supervisor::Disk, &mut xenonet_components::supervisor::System).map_err(Failure::msg)?;
+            return Ok(());
         }
+        *self.child.borrow_mut() = Some(spawn_detached(spawn)?);
+        Ok(())
+    }
+    async fn failed(&self) -> Result<(), Failure> {
+        match self.child.borrow_mut().as_mut().map(std::process::Child::try_wait) {
+            Some(Ok(Some(st))) => Err(Failure::msg(format!("XenoNet Service exited ({}). See its service log.", st.code().map_or_else(|| "null".into(), |c| c.to_string())))),
+            Some(Err(e)) => Err(Failure::msg(e.to_string())),
+            _ => Ok(()),
+        }
+    }
+    async fn sleep(&self, ms: f64) {
+        pause(ms).await;
     }
 }
 
 /// ensureService(runtime): "reused" or "started".
-async fn ensure(runtime: &Value) -> Result<Value, Failed> {
+async fn ensure(runtime: &Value) -> Result<Value, Failure> {
     let root = runtime.get("root").map(xenonet_text::text::display).unwrap_or_default();
     let exec = runtime.get("exec").map(xenonet_text::text::display).unwrap_or_default();
     let args = runtime::service_args(runtime.get("args"));
     let env: Env = runtime.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
-    let m = machine();
-    let task = Task::new(move |io| async move { runtime::ensure_service(&io, &root, &exec, &args, &env, START_MS, &m).await });
-    drive(task, &mut Ensure { child: None }).await
+    runtime::ensure_service(&Ensure::default(), &root, &exec, &args, &env, START_MS, &machine()).await
 }
 
-/// lifecycle.js's operations, for a service update: the service's
-/// connections, starting a runtime, a staged one's startup check, the
-/// clock, a pause and the install lock's look at a process.
-struct Lifecycle {
-    env: Env,
-    clients: HashMap<u64, Client>,
-    next: u64,
+/// The service's connections, by the handle each was given.
+#[derive(Default)]
+pub struct Clients {
+    open: RefCell<HashMap<u64, Rc<Client>>>,
+    next: Cell<u64>,
 }
 
-impl Lifecycle {
-    fn new(env: Env) -> Self {
-        Lifecycle { env, clients: HashMap::new(), next: 0 }
+impl Clients {
+    pub async fn connect(&self, env: &Env) -> Result<Connected, Failure> {
+        let c = connect_service(env, "tools").await?;
+        let id = self.next.get() + 1;
+        self.next.set(id);
+        let info = c.info.clone();
+        self.open.borrow_mut().insert(id, Rc::new(c));
+        Ok(Connected { id, info })
     }
-}
-
-impl Perform for Lifecycle {
-    async fn ask(&mut self, q: &Value) -> Reply {
-        let client = || q.get("client").and_then(Value::as_u64).unwrap_or(0);
-        match q.get("op").and_then(Value::as_str) {
-            Some("connect") => {
-                let c = connect_service(&self.env, "tools").await?;
-                self.next += 1;
-                let info = c.info.clone();
-                self.clients.insert(self.next, c);
-                Ok(json!({ "client": self.next, "info": info }))
-            }
-            Some("request") => {
-                let Some(c) = self.clients.get(&client()) else { return Err(error("that connection is gone")) };
-                c.request(q.get("method").and_then(Value::as_str).unwrap_or(""), q.get("params").cloned().unwrap_or(Value::Null), 150000.0).await.map_err(error)
-            }
-            Some("close") => {
-                if let Some(c) = self.clients.remove(&client()) {
-                    c.close();
-                }
-                Ok(Value::Null)
-            }
-            Some("start") => ensure(q.get("runtime").unwrap_or(&Value::Null)).await.map_err(|f| {
-                let mut m = f.fields;
-                m.insert("message".into(), json!(f.message));
-                Value::Object(m)
-            }),
-            Some("check") => install::check_runtime(q.get("staged").unwrap_or(&Value::Null), sys::platform()).map(|()| Value::Null).map_err(|f| error(f.message())),
-            Some("now") => Ok(xenonet_text::json::number(super::native::now())),
-            Some("pause") => {
-                tokio::time::sleep(Duration::from_millis(q.get("ms").and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64)).await;
-                Ok(Value::Null)
-            }
-            Some("alive") => alive(q.get("pid").and_then(Value::as_f64).unwrap_or(0.0)),
-            other => Err(error(format!("a component update asked for {}", other.unwrap_or("undefined")))),
-        }
+    pub async fn request(&self, client: u64, method: &str, params: Value) -> Result<Value, Failure> {
+        let Some(c) = self.open.borrow().get(&client).cloned() else { return Err(Failure::msg("that connection is gone")) };
+        c.request(method, params, 150000.0).await.map_err(Failure::msg)
     }
-}
-
-impl Drop for Lifecycle {
-    fn drop(&mut self) {
-        for c in self.clients.values() {
+    pub fn close(&self, client: u64) {
+        if let Some(c) = self.open.borrow_mut().remove(&client) {
             c.close();
         }
     }
 }
 
-/// componentUpdates' fetch of the release's feed, and its body as JSON.
-struct Feed {
-    bodies: HashMap<u64, Vec<u8>>,
+impl Drop for Clients {
+    fn drop(&mut self) {
+        for c in self.open.borrow().values() {
+            c.close();
+        }
+    }
 }
 
-impl Perform for Feed {
-    async fn ask(&mut self, q: &Value) -> Reply {
-        match q.get("op").and_then(Value::as_str) {
-            Some("fetch") => {
-                let url = q.get("url").map(xenonet_text::text::display).unwrap_or_default();
-                let res = fetch("GET", &url, &[], None, q.get("timeoutMs").and_then(Value::as_f64)).await?;
-                let id = self.bodies.len() as u64 + 1;
-                let out = json!({ "ok": res.ok(), "status": res.status, "res": id });
-                self.bodies.insert(id, res.body);
-                Ok(out)
-            }
-            Some("json") => {
-                let body = self.bodies.get(&q.get("res").and_then(Value::as_u64).unwrap_or(0)).cloned().unwrap_or_default();
-                xenonet_text::json::parse(&String::from_utf8_lossy(&body)).map_err(|e| json!({ "message": e.to_string(), "name": "SyntaxError" }))
-            }
-            other => Err(error(format!("componentUpdates asked for {}", other.unwrap_or("undefined")))),
-        }
+/// What a service update waits on: the service's connections, starting a
+/// runtime, a staged one's startup check, the clock, a pause and the
+/// install lock's look at a process.
+struct Updater {
+    env: Env,
+    clients: Clients,
+}
+
+impl Updater {
+    fn new(env: Env) -> Self {
+        Updater { env, clients: Clients::default() }
+    }
+}
+
+#[async_trait(?Send)]
+impl host::Service for Updater {
+    async fn connect(&self, _env: &Env) -> Result<Connected, Failure> {
+        self.clients.connect(&self.env).await
+    }
+    async fn request(&self, client: u64, method: &str, params: Value) -> Result<Value, Failure> {
+        self.clients.request(client, method, params).await
+    }
+    async fn close(&self, client: u64) {
+        self.clients.close(client);
+    }
+    async fn sleep(&self, ms: f64) {
+        pause(ms).await;
+    }
+}
+
+#[async_trait(?Send)]
+impl host::Lifecycle for Updater {
+    async fn start(&self, runtime: &Value) -> Result<Value, Failure> {
+        ensure(runtime).await
+    }
+    async fn check(&self, staged: &Value) -> Result<(), Failure> {
+        install::check_runtime(staged, sys::platform())
+    }
+    async fn alive(&self, pid: f64) -> Result<(), Failure> {
+        alive(pid)
+    }
+    async fn now(&self) -> f64 {
+        super::native::now()
+    }
+}
+
+/// componentUpdates' fetch of the release's feed.
+struct Releases;
+
+#[async_trait(?Send)]
+impl host::Feed for Releases {
+    async fn get(&self, url: &str, timeout_ms: f64) -> Result<Got, Failure> {
+        let res = fetch("GET", url, &[], None, Some(timeout_ms)).await?;
+        Ok(Got { status: res.status, body: res.body })
     }
 }
 
@@ -311,20 +309,18 @@ impl Perform for Feed {
 
 /// activatePackage(file, item)
 pub fn activate_package(file: &str, item: &Value) -> Result<Value, Fail> {
-    let (file, item, env, ctx) = (file.to_string(), item.clone(), super::env_map(), ctx());
-    let mut ops = Lifecycle::new(env.clone());
-    let task = Task::new(move |io| async move { install::activate_package(&io, &file, &item, &env, &ctx, &Life { stop_timeout: STOP_MS }).await });
-    block_on(async { drive(task, &mut ops).await }).map_err(Fail::error)?.map_err(failed)
+    let (env, ctx) = (super::env_map(), ctx());
+    let host = Updater::new(env.clone());
+    block_on(install::activate_package(&host, file, item, &env, &ctx, &Life { stop_timeout: STOP_MS })).map_err(Fail::error)?.map_err(failed)
 }
 
 /// installBundle(bundle, { command }): what a bundle brings that isn't
 /// installed yet, with the launcher and, when `command`, the xenonet
 /// command on PATH; the runtime to start the service with.
 pub fn install_bundle(bundle: &str, command: bool) -> Result<Value, Fail> {
-    let (bundle, env, ctx) = (bundle.to_string(), super::env_map(), ctx());
-    let mut ops = Lifecycle::new(env.clone());
-    let task = Task::new(move |io| async move { install::install_bundle(&io, &bundle, &env, command, &ctx, &Life { stop_timeout: STOP_MS }).await });
-    block_on(async { drive(task, &mut ops).await }).map_err(Fail::error)?.map_err(failed)
+    let (env, ctx) = (super::env_map(), ctx());
+    let host = Updater::new(env.clone());
+    block_on(install::install_bundle(&host, bundle, &env, command, &ctx, &Life { stop_timeout: STOP_MS })).map_err(Fail::error)?.map_err(failed)
 }
 
 /// currentComponent(component): the installed one, or None; and whether
@@ -341,20 +337,19 @@ pub fn current_component(component: &str) -> Result<Option<(Value, bool)>, Fail>
 
 /// installLauncher(): the launcher installed, if one was.
 pub fn install_launcher() -> Result<Option<Value>, Fail> {
-    install::install_launcher(&super::env_map(), &ctx()).map_err(task_fail)
+    install::install_launcher(&super::env_map(), &ctx()).map_err(failed)
 }
 
 /// recoverServiceUpdate({ env })
 pub fn recover_service_update(env: &Value) -> Result<(), Fail> {
     let (env, ctx) = (env_with(env), ctx());
-    let mut ops = Lifecycle::new(env.clone());
-    let task = Task::new(move |io| async move { install::recover_service_update(&io, &env, &ctx, &Life { stop_timeout: STOP_MS }).await });
-    block_on(async { drive(task, &mut ops).await }).map_err(Fail::error)?.map(|_| ()).map_err(failed)
+    let host = Updater::new(env.clone());
+    block_on(install::recover_service_update(&host, &env, &ctx, &Life { stop_timeout: STOP_MS })).map_err(Fail::error)?.map(|_| ()).map_err(failed)
 }
 
 /// installedRuntime(env)
 pub fn installed_runtime(env: &Value) -> Result<Value, Fail> {
-    install::installed_runtime(&env_with(env), &ctx()).map_err(task_fail)
+    install::installed_runtime(&env_with(env), &ctx()).map_err(failed)
 }
 
 /// ensureService(runtime): the service's status.
@@ -372,7 +367,7 @@ pub fn stop_file(env: &Value) -> String {
 pub fn service_request(env: &Value, action: &str, body: &Value) -> Result<Value, Fail> {
     let env = env_with(env);
     block_on(async {
-        let c = connect_service(&env, "tools").await.map_err(|e| Fail::error(e.get("message").map(xenonet_text::text::display).unwrap_or_default()))?;
+        let c = connect_service(&env, "tools").await.map_err(failed)?;
         let r = c.request(action, body.clone(), 150000.0).await.map_err(Fail::error);
         c.close();
         r
@@ -383,8 +378,7 @@ pub fn service_request(env: &Value, action: &str, body: &Value) -> Result<Value,
 /// componentUpdates()
 pub fn component_updates() -> Result<Vec<Value>, Fail> {
     let (env, m) = (super::env_map(), machine());
-    let task = Task::new(move |io| async move { updates::component_updates(&io, &env, &m).await });
-    let list = block_on(async { drive(task, &mut Feed { bodies: HashMap::new() }).await }).map_err(Fail::error)?.map_err(failed)?;
+    let list = block_on(updates::component_updates(&Releases, &env, &m)).map_err(Fail::error)?.map_err(failed)?;
     Ok(list.as_array().cloned().unwrap_or_default())
 }
 

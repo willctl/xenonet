@@ -1,6 +1,6 @@
 //! core/command.js for the command: the xenonet command on your PATH, a
 //! small script XenoNet writes that runs the xenonet binary, told apart
-//! from another program's by its marker line (xenonet-app's command). One
+//! from another program's by its marker line (xenonet-components' command). One
 //! an earlier XenoNet wrote ran a node and cli/xenonet.js; it's XenoNet's
 //! too, so installing replaces it and uninstalling takes it out.
 
@@ -8,7 +8,7 @@ use super::fs_fail;
 use crate::out::Fail;
 use crate::sys;
 use serde_json::{json, Value};
-use xenonet_app::command::{self, State};
+use xenonet_components::command::{self, State};
 
 fn path_var() -> Option<String> {
     std::env::var("PATH").ok()

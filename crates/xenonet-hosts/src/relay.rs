@@ -22,9 +22,8 @@ use crate::aliases::{AliasReader, Look};
 use crate::merge::repo_key;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
-use xenonet_app::jstext::utf16_len;
-use xenonet_app::jsv::truthy;
 use xenonet_os::paths::path_key;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, to_number};
 
 pub const PING_MS: f64 = 15e3;
@@ -182,13 +181,13 @@ impl Scrubber {
         let h = home.unwrap_or("").trim_end_matches(['\\', '/']).to_string();
         let mut swaps = Vec::new();
         let mut lengths = Vec::new();
-        if utf16_len(&h) >= 2 {
+        if xenonet_text::utf16::len(&h) >= 2 {
             let mut forms = vec![h.clone(), h.replace('\\', "/")];
             if let Some(k) = path_key(&h) {
                 forms.push(k);
             }
             let forms = unique(forms);
-            lengths.extend(forms.iter().map(|f| utf16_len(f)));
+            lengths.extend(forms.iter().map(|f| xenonet_text::utf16::len(f)));
             swaps.push(Swap::Whole { forms, stops: stop_wdd });
             swaps.push(Swap::Whole { forms: vec![dashed(&h)], stops: stop_wd });
         }
@@ -200,14 +199,14 @@ impl Scrubber {
             let parents = unique(vec![parent.to_string(), parent.replace('\\', "/")]);
             swaps.push(Swap::Named { parents, seps: &['\\', '/'], name: name.to_string(), stops: stop_wdd });
             swaps.push(Swap::Named { parents: vec![format!("{}-", dashed(parent))], seps: &[], name: name.to_string(), stops: stop_wd });
-            lengths.push(utf16_len(f));
+            lengths.push(xenonet_text::utf16::len(f));
         }
         let shortest = if swaps.is_empty() { usize::MAX } else { lengths.into_iter().min().unwrap_or(usize::MAX) };
         Scrubber { swaps, shortest }
     }
 
     pub fn text(&self, s: &str) -> String {
-        if utf16_len(s) < self.shortest {
+        if xenonet_text::utf16::len(s) < self.shortest {
             return s.to_string();
         }
         self.swaps.iter().fold(s.to_string(), |t, sw| sw.replace(&t))
@@ -753,7 +752,7 @@ fn route_of(path: &str) -> Option<(Shape, QueryOk)> {
 /// backslashes or doubled slashes, nothing a URL parser would read
 /// differently.
 pub fn allowed(raw: Option<&Value>) -> Result<(Shape, String), String> {
-    let Some(raw) = raw.and_then(Value::as_str).filter(|r| !r.is_empty() && utf16_len(r) <= 2048) else { return Err("not a path".into()) };
+    let Some(raw) = raw.and_then(Value::as_str).filter(|r| !r.is_empty() && xenonet_text::utf16::len(r) <= 2048) else { return Err("not a path".into()) };
     let plain = "only plain paths can be read through the relay";
     if raw.bytes().any(|c| !(0x21..=0x7e).contains(&c)) || raw.contains(['%', '\\', '#']) || raw.contains("..") || raw.contains("//") {
         return Err(plain.into());
@@ -772,11 +771,11 @@ pub fn allowed(raw: Option<&Value>) -> Result<(Shape, String), String> {
         let (k, v) = part.split_once('=').unwrap_or((part, ""));
         let (k, v) = (k.replace('+', " "), v.replace('+', " "));
         if !takes(&k, &v) {
-            return Err(format!("{pathname} doesn't take {k}={}", xenonet_app::jstext::slice16(&v, 40)));
+            return Err(format!("{pathname} doesn't take {k}={}", xenonet_text::utf16::head(&v, 40)));
         }
         pairs.push((k, v));
     }
-    let query = xenonet_app::jstext::search_params(&pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+    let query = xenonet_text::url::form(&pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
     Ok((shape, if search.is_empty() { pathname.to_string() } else { format!("{pathname}?{query}") }))
 }
 
@@ -816,8 +815,8 @@ impl Outbox {
                     Some(slot) => slot.1 = text,
                     None => self.latest.push((c.to_string(), text)),
                 },
-                None if self.queued + utf16_len(&text) <= QUEUE_BYTES => {
-                    self.queued += utf16_len(&text);
+                None if self.queued + xenonet_text::utf16::len(&text) <= QUEUE_BYTES => {
+                    self.queued += xenonet_text::utf16::len(&text);
                     self.queue.push(text);
                 }
                 None => self.gap = true,
@@ -852,7 +851,7 @@ impl Outbox {
     /// What a drain couldn't write, back in the queue.
     pub fn left(&mut self, rest: Vec<String>) {
         for t in rest {
-            self.queued += utf16_len(&t);
+            self.queued += xenonet_text::utf16::len(&t);
             self.queue.push(t);
         }
     }

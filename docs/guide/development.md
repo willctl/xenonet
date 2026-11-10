@@ -135,7 +135,7 @@ On 2026-11-08 the tests ran this share of each crate's lines:
 | xenonet-wire-map | 6,465 | 82.0% |
 | All | 114,572 | 70.0% |
 
-The run came before xenonet-text, xenonet-os's files, paths, processes and log, and xenonet-api's client were their own crates: those lines, 91.0% run, count in All but have no row yet.
+The run came before xenonet-text, xenonet-os's files, paths, processes and log, and xenonet-api's client were their own crates: those lines, 91.0% run, count in All but have no row yet. The xenonet-app row is code that is now xenonet-console, xenonet-demo and parts of xenonet-components, xenonet-doctor, xenonet-integrations, xenonet-os and xenonet-state.
 
 The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-actors`, `xenonet-integrations`, `xenonet-doctor`, `xenonet-mcp` and `xenonet-assistant`.
 
@@ -248,7 +248,7 @@ Requests reach it as `POST /api/dev/control` on the instance's server, which rel
 
 XenoNet is one core with several ways in: the console, the desktop app, the HTTP API, the `xenonet` command and the MCP servers. The core, the service, the command, the hooks and the MCP servers are the `xenonet` binary, built from `crates/`. Desktop (`electron/`) and the console page (`src/`) are JS, and reach the core through the service: the HTTP API on 127.0.0.1 and the component service's socket.
 
-The console page and Desktop share the modules in `src/shared/`, which have no Node in them. The Rust's data that comes from them is written by scripts: `node scripts/apps.mjs` writes `crates/xenonet-adapter/src/apps.json` from `src/shared/apps.js`, and `node crates/xenonet-app/themes.mjs` writes `crates/xenonet-app/src/themes.json` from `src/shared/themes.js`. Each has a `--check`, which a test runs.
+The console page and Desktop share the modules in `src/shared/`, which have no Node in them. The Rust's data that comes from them is written by scripts: `node scripts/apps.mjs` writes `crates/xenonet-adapter/src/apps.json` from `src/shared/apps.js`, and `node crates/xenonet-console/themes.mjs` writes `crates/xenonet-console/src/themes.json` from `src/shared/themes.js`. Each has a `--check`, which a test runs.
 
 ### `crates/` and `adapters/`
 

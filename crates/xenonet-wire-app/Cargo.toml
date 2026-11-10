@@ -22,7 +22,6 @@ xenonet-os.workspace = true
 # Grok Build's config.toml, read for the MCP-info catalog.
 xenonet-grok-build.workspace = true
 xenonet-actors.workspace = true
-xenonet-app.workspace = true
 xenonet-assistant.workspace = true
 xenonet-components.workspace = true
 xenonet-doctor.workspace = true
@@ -53,6 +52,9 @@ regex.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+xenonet-platforms.workspace = true
 
 [lints]
 workspace = true

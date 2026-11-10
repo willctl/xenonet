@@ -7,8 +7,8 @@
 
 use crate::common::{clean, fail, failed, has_credential, text, Fail};
 use serde_json::{json, Map, Value};
-use xenonet_app::jsv::truthy;
 use xenonet_text::text::to_number;
+use xenonet_text::text::truthy;
 
 /// The agents a task could go to, from the sessions on the map.
 pub fn inventory(nodes: &[Value]) -> Value {
@@ -75,7 +75,7 @@ pub fn answer_ok(answers: &Value, candidates: &[Value]) -> bool {
     if prob(a.get("confidence")).is_none() {
         return false;
     }
-    if !candidates.iter().any(|c| xenonet_app::jsv::strict_eq(c.get("id"), a.get("choice"))) {
+    if !candidates.iter().any(|c| xenonet_text::value::same(c.get("id"), a.get("choice"))) {
         return false;
     }
     let Some(probs) = a.get("probabilities").and_then(Value::as_object).filter(|p| p.len() == candidates.len()) else { return false };

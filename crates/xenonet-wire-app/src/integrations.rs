@@ -1,20 +1,19 @@
-//! The integrations (core/integrations/: index.js, common.js, routing.js,
-//! openshell.js, reviews.js, pi.js; crates/xenonet-integrations): their
-//! settings, the history and Pi's records, the routing preview, and
-//! OpenShell's sandbox jobs with their text reviews. The decisions are the
-//! Rust's; sandbox and review actions are its tasks, whose commands, git
-//! runs and records are answered here. The demo's decider, OpenShell and
-//! records are made up.
+//! The integrations (crates/xenonet-integrations): their settings, the
+//! history and Pi's records, the routing preview, and OpenShell's sandbox
+//! jobs with their text reviews. The decisions are the integrations
+//! crate's; what its sandbox and review actions wait on (commands, git
+//! runs, records) is done here. The demo's decider, OpenShell and records
+//! are made up.
 //!
-//! OpenShell's and the reviews' state is shared between their tasks as the
-//! JS's objects were, so it lives on the tasks' own thread (fx.rs), one per
-//! integrations, and each request reaches it there.
+//! OpenShell's and the reviews' state is shared between their actions, so
+//! it lives on a thread of its own (fx::local), one per integrations, and
+//! each action runs there.
 //!
 //! A route goes through JevRouter's rules as jev.rs has them, where the JS
 //! had the npm library.
 
 use crate::decide::Decisions;
-use crate::fx::{self, now_ms, Locked, Perform, RunOptions};
+use crate::fx::{self, now_ms, Locked, RunOptions};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
@@ -24,9 +23,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::sync::OnceCell;
 use xenonet_api::cores::{CoreError, Decider, Integrations, Kind, State, R};
-use xenonet_app::task::Failure;
 use xenonet_integrations::common::{Fail, Records, Tickets};
+use xenonet_integrations::openshell::ShellHost;
+use xenonet_integrations::reviews::{Git, ReviewHost};
 use xenonet_integrations::{index, openshell, pi, reviews, routing};
+use xenonet_os::error::Failure;
 
 fn fail(f: Fail) -> CoreError {
     if f.status == 0 {
@@ -37,19 +38,33 @@ fn fail(f: Fail) -> CoreError {
     CoreError::of(Kind::Integration, f.status, &f.code, f.message)
 }
 
-// What a task threw: an integration's refusal, or a system error.
-fn thrown(e: Value) -> CoreError {
-    let message = fx::message_of(&e);
-    if e.get("integration") == Some(&json!(true)) {
-        let status = e.get("status").and_then(Value::as_u64).map_or(500, |s| s as u16);
-        return CoreError::of(Kind::Integration, status, e.get("code").and_then(Value::as_str).unwrap_or("failed"), message);
+// What an action failed with: an integration's refusal, or a system error.
+fn thrown(e: Failure) -> CoreError {
+    if e.fields.get("integration") == Some(&json!(true)) {
+        let status = e.fields.get("status").and_then(Value::as_u64).map_or(500, |s| s as u16);
+        let code = e.code().unwrap_or("failed").to_string();
+        return CoreError::of(Kind::Integration, status, &code, e.message);
     }
-    let mut c = CoreError::new(message);
-    c.code = e.get("code").map(xenonet_text::text::display);
+    let code = e.fields.get("code").map(xenonet_text::text::display);
+    let mut c = CoreError::new(e.message);
+    c.code = code;
     c
 }
 
-// Each integrations' OpenShell and reviews, on the tasks' thread.
+// A record's failure, as the shell reads it.
+fn record_failure(f: Fail) -> Failure {
+    let mut m = Map::new();
+    if !f.code.is_empty() {
+        m.insert("code".into(), json!(f.code));
+    }
+    if f.status != 0 {
+        m.insert("status".into(), json!(f.status));
+        m.insert("integration".into(), json!(true));
+    }
+    Failure::with(f.message, m)
+}
+
+// Each integrations' OpenShell and reviews, on their thread.
 struct Local {
     shell: openshell::Shared,
     reviews: reviews::Shared,
@@ -157,15 +172,13 @@ impl Integrated {
                     let (name, options) = (xenonet_text::text::display(&pair[0]), pair[1].clone());
                     let shared = me.shared(collect.clone());
                     let o = options.clone();
-                    let seed = fx::drive(
-                        move |_| async move {
-                            let (_, r) = shared();
-                            let seeded = r.borrow_mut().seed(&o, now_ms());
-                            seeded.map_err(|f| Failure::msg(f.message))
-                        },
-                        Arc::new(|_| Box::pin(async { Ok(Value::Null) })),
-                    )
+                    let seed = fx::local(move || async move {
+                        let (_, r) = shared();
+                        let seeded = r.borrow_mut().seed(&o, now_ms());
+                        seeded.map_err(|f| Failure::msg(f.message))
+                    })
                     .await
+                    .unwrap_or_else(|| Err(Failure::msg("the demo's sandboxes stopped before they were made")))
                     .map_err(thrown)?;
                     let sandbox = index::demo_sandbox(&name, &options, &seed);
                     me.records.locked().add(&sandbox, now_ms()).map_err(fail)?;
@@ -176,118 +189,27 @@ impl Integrated {
         Ok(())
     }
 
-    /// What the shell's and reviews' tasks ask for.
-    fn perform(self: &Arc<Self>, collect: String) -> Perform {
-        let me = self.clone();
-        Arc::new(move |q: Value| {
-            let (me, collect) = (me.clone(), collect.clone());
-            Box::pin(async move { me.answer(q, collect).await })
-        })
-    }
-
-    async fn answer(self: Arc<Self>, q: Value, collect: String) -> Result<Value, Value> {
-        let err = |f: Fail| {
-            let mut e = fx::error(f.message, (!f.code.is_empty()).then_some(f.code.as_str()));
-            if f.status != 0 {
-                e["status"] = json!(f.status);
-                e["integration"] = json!(true);
-            }
-            e
-        };
-        let op = q.get("op").and_then(Value::as_str).unwrap_or("").to_string();
-        let records = self.records.clone();
-        let env = fx::env_map();
-        match op.as_str() {
-            "now" => Ok(xenonet_text::json::number(now_ms())),
-            "records.list" => records.locked().list().map(Value::Array).map_err(err),
-            "records.add" => records.locked().add(&q["value"], now_ms()).map_err(err),
-            "records.update" => records.locked().update(&q["id"], &q["fields"]).map_err(err),
-            "run" => {
-                if self.parts.demo {
-                    let args = q["args"].as_array().cloned().unwrap_or_default();
-                    return index::demo_run(&args).map(|out| json!({ "stdout": out })).map_err(|m| fx::error(m, None));
-                }
-                let file = xenonet_text::text::display(&q["file"]);
-                let args: Vec<String> = q["args"].as_array().map(|a| a.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
-                let timeout = q["options"]["timeout"].as_f64().unwrap_or(15000.0);
-                let mut env: Vec<(String, String)> = std::env::vars().collect();
-                env.push(("NO_COLOR".into(), "1".into()));
-                let r = fx::exec_file(&file, &args, timeout as u64, RunOptions { env: Some(env), ..Default::default() }).await;
-                if r.ok() {
-                    Ok(json!({ "stdout": r.stdout, "stderr": r.stderr }))
-                } else {
-                    Err(
-                        json!({ "message": format!("Command failed: {file} {}\n{}", args.join(" "), r.stderr), "code": r.code, "stderr": r.stderr, "stdout": r.stdout, "killed": r.timed_out }),
-                    )
-                }
-            }
-            "git" => git(&q).await,
-            "snapshot" => {
-                let source = xenonet_text::text::display(&q["source"]);
-                let perform: Perform = Arc::new(|q: Value| {
-                    Box::pin(async move {
-                        if q["op"] == "git" {
-                            git(&q).await
-                        } else {
-                            Err(fx::error(format!("no such request: {}", xenonet_text::text::display(&q["op"])), None))
-                        }
-                    })
-                });
-                fx::drive(move |io| async move { reviews::source_snapshot(io, source, env).await }, perform).await
-            }
-            r if r.starts_with("reviews.") => {
-                let shared = self.shared(collect.clone());
-                let perform = self.perform(collect);
-                let (id, value, source, revision) = (q["id"].clone(), q["value"].clone(), q["source"].clone(), q["revision"].clone());
-                let which = r.to_string();
-                fx::drive(
-                    move |io| async move {
-                        let (_, rv) = shared();
-                        let sync = |f: Result<Value, Fail>| f.map_err(review_failure);
-                        match which.as_str() {
-                            "reviews.prepare" => reviews::prepare(io, rv, source, env).await,
-                            "reviews.launch" => reviews::launch(io, rv, id).await.map(|_| Value::Null),
-                            "reviews.accept" => reviews::accept(io, rv, id, value, env).await,
-                            "reviews.view" => sync(rv.borrow_mut().view(&id)),
-                            "reviews.verifyUploaded" => sync(rv.borrow_mut().verify_uploaded(&id, &value).map(|()| Value::Null)),
-                            "reviews.export" => sync(rv.borrow_mut().export(&id, &revision)),
-                            "reviews.forget" => sync(rv.borrow_mut().forget(&id)),
-                            other => Err(Failure::msg(format!("no such request: {other}"))),
-                        }
-                    },
-                    perform,
-                )
-                .await
-            }
-            other => Err(fx::error(format!("no such request: {other}"), None)),
-        }
-    }
-
     async fn shell(self: &Arc<Self>, method: &str, arg: Value, arg2: Value) -> R<Value> {
-        let collect = Self::collect_text();
-        let shared = self.shared(collect.clone());
-        let perform = self.perform(collect);
-        let method = method.to_string();
-        fx::drive(
-            move |io| async move {
-                let (sh, _) = shared();
-                match method.as_str() {
-                    "status" => openshell::status(io, sh, arg).await,
-                    "preview" => openshell::preview(io, sh, arg).await,
-                    "launch" => openshell::launch(io, sh, arg).await,
-                    "inspect" => openshell::inspect(io, sh, arg).await,
-                    "review" => openshell::review(io, arg).await,
-                    "retrieve" => openshell::retrieve(io, sh, arg).await,
-                    "exportReview" => openshell::export_review(io, arg, arg2).await,
-                    "forgetReview" => openshell::forget_review(io, arg).await,
-                    "remove" => openshell::remove(io, sh, arg).await,
-                    other => Err(Failure::msg(format!("integrations.shell.{other} is not a function"))),
-                }
-            },
-            perform,
-        )
-        .await
-        .map_err(thrown)
+        let shared = self.shared(Self::collect_text());
+        let (me, method, rt) = (self.clone(), method.to_string(), tokio::runtime::Handle::current());
+        let done = fx::local(move || async move {
+            let (sh, reviews) = shared();
+            let host = Here { me, reviews, rt };
+            match method.as_str() {
+                "status" => openshell::status(&host, &sh, &arg).await,
+                "preview" => openshell::preview(&host, &sh, &arg).await,
+                "launch" => openshell::launch(&host, &sh, &arg).await,
+                "inspect" => openshell::inspect(&host, &sh, &arg).await,
+                "review" => openshell::review(&host, &arg).await,
+                "retrieve" => openshell::retrieve(&host, &sh, &arg).await,
+                "exportReview" => openshell::export_review(&host, &arg, &arg2).await,
+                "forgetReview" => openshell::forget_review(&host, &arg).await,
+                "remove" => openshell::remove(&host, &sh, &arg).await,
+                other => Err(Failure::msg(format!("integrations.shell.{other} is not a function"))),
+            }
+        })
+        .await;
+        done.unwrap_or_else(|| Err(Failure::msg("an action stopped before it was done"))).map_err(thrown)
     }
 
     // A route: the preview's task to the decider, its answer checked and
@@ -333,35 +255,81 @@ impl Integrated {
     }
 }
 
-fn review_failure(f: Fail) -> Failure {
-    if f.status == 0 {
-        let mut m = Map::new();
-        if !f.code.is_empty() {
-            m.insert("code".into(), json!(f.code));
-        }
-        return Failure::with(f.message, m);
+// git as the reviews ask for it; `allow_exit` is an exit code that still
+// answers (check-ignore's 1, for nothing ignored).
+async fn git(args: Vec<String>, env: Vec<(String, String)>, timeout_ms: f64, input: Option<String>, allow_exit: Option<i64>) -> Result<String, Failure> {
+    let r = fx::exec_file("git", &args, timeout_ms as u64, RunOptions { env: Some(env), input, ..Default::default() }).await;
+    if r.ok() || allow_exit.is_some_and(|a| json!(a) == r.code) {
+        return Ok(r.stdout);
     }
-    let mut m = Map::new();
-    m.insert("status".into(), json!(f.status));
-    m.insert("code".into(), json!(f.code));
-    m.insert("integration".into(), json!(true));
-    Failure::with(f.message, m)
+    Err(Failure::from_value(&json!({ "message": format!("Command failed: git {}\n{}", args.join(" "), r.stderr), "code": r.code, "stderr": r.stderr, "stdout": r.stdout })))
 }
 
-// git as the reviews ask for it; `allowExit` is an exit code that still
-// answers (check-ignore's 1, for nothing ignored).
-async fn git(q: &Value) -> Result<Value, Value> {
-    let args: Vec<String> = q["args"].as_array().map(|a| a.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
-    let o = &q["options"];
-    let env = o["env"].as_object().map(fx::env_pairs);
-    let timeout = o["timeout"].as_f64().unwrap_or(10000.0);
-    let input = q.get("input").filter(|i| !i.is_null()).map(xenonet_text::text::display);
-    let cwd = o["cwd"].as_str().map(str::to_string);
-    let r = fx::exec_file("git", &args, timeout as u64, RunOptions { env, input, cwd, ..Default::default() }).await;
-    if r.ok() || (q.get("allowExit").is_some_and(|a| !a.is_null() && *a == r.code)) {
-        return Ok(json!({ "stdout": r.stdout }));
+/// What the shell's and the reviews' actions ask of the service, on their
+/// thread; commands and git run on the service's runtime.
+struct Here {
+    me: Arc<Integrated>,
+    reviews: reviews::Shared,
+    rt: tokio::runtime::Handle,
+}
+
+impl Here {
+    async fn on<T: Send + 'static>(&self, f: impl std::future::Future<Output = Result<T, Failure>> + Send + 'static) -> Result<T, Failure> {
+        self.rt.spawn(f).await.unwrap_or_else(|e| Err(Failure::msg(format!("a request failed: {e}"))))
     }
-    Err(json!({ "message": format!("Command failed: git {}\n{}", args.join(" "), r.stderr), "code": r.code, "stderr": r.stderr, "stdout": r.stdout }))
+}
+
+#[async_trait(?Send)]
+impl ReviewHost for Here {
+    async fn now(&self) -> f64 {
+        now_ms()
+    }
+    async fn git(&self, run: &Git) -> Result<String, Failure> {
+        let (args, env, timeout, input, allow) = (run.args.clone(), fx::env_pairs(&run.env), run.timeout_ms, run.input.clone(), run.allow_exit);
+        self.on(git(args, env, timeout, input, allow)).await
+    }
+    async fn snapshot(&self, source: &Value) -> Result<Value, Failure> {
+        reviews::source_snapshot(self, &xenonet_text::text::display(source), &fx::env_map()).await
+    }
+}
+
+#[async_trait(?Send)]
+impl ShellHost for Here {
+    async fn run(&self, file: &str, args: &[String], timeout_ms: f64) -> Result<Value, Failure> {
+        if self.me.parts.demo {
+            let args: Vec<Value> = args.iter().map(|a| json!(a)).collect();
+            return index::demo_run(&args).map(|out| json!({ "stdout": out })).map_err(Failure::msg);
+        }
+        let (file, args) = (file.to_string(), args.to_vec());
+        self.on(async move {
+            let mut env: Vec<(String, String)> = std::env::vars().collect();
+            env.push(("NO_COLOR".into(), "1".into()));
+            let r = fx::exec_file(&file, &args, timeout_ms as u64, RunOptions { env: Some(env), ..Default::default() }).await;
+            if r.ok() {
+                Ok(json!({ "stdout": r.stdout, "stderr": r.stderr }))
+            } else {
+                Err(Failure::from_value(
+                    &json!({ "message": format!("Command failed: {file} {}\n{}", args.join(" "), r.stderr), "code": r.code, "stderr": r.stderr, "stdout": r.stdout, "killed": r.timed_out }),
+                ))
+            }
+        })
+        .await
+    }
+    async fn records_list(&self) -> Result<Value, Failure> {
+        self.me.records.locked().list().map(Value::Array).map_err(record_failure)
+    }
+    async fn records_add(&self, value: &Value) -> Result<Value, Failure> {
+        self.me.records.locked().add(value, now_ms()).map_err(record_failure)
+    }
+    async fn records_update(&self, id: &Value, fields: &Value) -> Result<Value, Failure> {
+        self.me.records.locked().update(id, fields).map_err(record_failure)
+    }
+    fn reviews(&self) -> reviews::Shared {
+        self.reviews.clone()
+    }
+    fn env(&self) -> Map<String, Value> {
+        fx::env_map()
+    }
 }
 
 /// The Integrations trait: the method each route calls by its JS name.

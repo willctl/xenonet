@@ -17,6 +17,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+xenonet-console.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 getrandom.workspace = true
@@ -40,7 +41,6 @@ xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 # The places around the map (core/environments.js).
-xenonet-app.workspace = true
 xenonet-text.workspace = true
 # The engine's ids, selectors and envelopes, which the routes check with.
 xenonet-engine.workspace = true

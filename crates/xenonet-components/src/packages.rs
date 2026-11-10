@@ -5,16 +5,18 @@
 //! What's installed is a pointer to one version (current.json), switched
 //! with a rename.
 
+use crate::host::Lifecycle;
 use crate::runtime::{bin_name, runtime_dir, Env, Machine};
 use crate::tar::{unpack, Unpack};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
-use xenonet_app::fsx::{self, FsError};
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{now_ms, Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::files::{self, FsError};
+use xenonet_os::nodepath::NATIVE;
 use xenonet_text::text::display;
+use xenonet_text::time::now_ms;
 
 pub const COMPONENTS: [&str; 2] = ["service", "tools"];
 /// The macOS tray (XenoNet Tray.app) is a component too, though not one
@@ -102,20 +104,20 @@ pub fn components_dir(env: &Env, m: &Machine) -> String {
 /// there's none.
 pub fn current_component(component: &str, env: &Env, m: &Machine) -> Result<Option<Value>, FsError> {
     if !known(component) {
-        return Err(fsx::said("Choose service or tools."));
+        return Err(files::said("Choose service or tools."));
     }
     let dir = NATIVE.join(&[&components_dir(env, m), component]);
-    let text = match fsx::read_text(&NATIVE.join(&[&dir, "current.json"])) {
+    let text = match files::read_text(&NATIVE.join(&[&dir, "current.json"])) {
         Ok(t) => t,
         Err(e) if e.is("ENOENT") => return Ok(None),
         Err(e) => return Err(e),
     };
-    let current = xenonet_text::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
+    let current = xenonet_text::json::parse(&text).map_err(|e| files::said(e.to_string()))?;
     if current.is_null() {
-        return Err(fsx::said("Cannot read properties of null (reading 'sha256')"));
+        return Err(files::said("Cannot read properties of null (reading 'sha256')"));
     }
     if !is_sha(current.get("sha256")) || !is_semver(current.get("version")) {
-        return Err(fsx::said("Invalid installed component pointer."));
+        return Err(files::said("Invalid installed component pointer."));
     }
     let version = display(&current["version"]);
     let sha = display(&current["sha256"]);
@@ -140,7 +142,7 @@ fn random_uuid() -> String {
 /// file and renamed into place.
 pub fn select_component(component: &str, value: &Value, env: &Env, m: &Machine) -> Result<(), FsError> {
     let dir = NATIVE.join(&[&components_dir(env, m), component]);
-    fsx::mkdir_p(&dir, None)?;
+    files::mkdir_p(&dir, None)?;
     let file = NATIVE.join(&[&dir, "current.json"]);
     let tmp = format!("{file}.{}.tmp", random_uuid());
     let mut pointer = Map::new();
@@ -149,8 +151,8 @@ pub fn select_component(component: &str, value: &Value, env: &Env, m: &Machine) 
             pointer.insert(k.into(), v.clone());
         }
     }
-    fsx::write_file(&tmp, xenonet_text::json::stringify(&Value::Object(pointer), 0).as_bytes(), Some(0o600))?;
-    fsx::rename(&tmp, &file)
+    files::write_file(&tmp, xenonet_text::json::stringify(&Value::Object(pointer), 0).as_bytes(), Some(0o600))?;
+    files::rename(&tmp, &file)
 }
 
 fn with_root(manifest: Value, root: &str, sha256: &Value) -> Value {
@@ -164,7 +166,7 @@ fn with_root(manifest: Value, root: &str, sha256: &Value) -> Value {
 }
 
 fn read_json(file: &str) -> Result<Value, Failure> {
-    let text = fsx::read_text(file)?;
+    let text = files::read_text(file)?;
     xenonet_text::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))
 }
 
@@ -173,7 +175,7 @@ fn read_json(file: &str) -> Result<Value, Failure> {
 /// taken as it is. On Windows, where a scanner can hold a file it just saw
 /// for a moment, the last rename is tried again for up to 30 s; nothing is
 /// unpacked again or changed.
-pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: &Machine) -> Result<Value, Failure> {
+pub async fn stage_package(host: &dyn Lifecycle, file: &str, expected: &Value, env: &Env, m: &Machine) -> Result<Value, Failure> {
     let component = expected.get("component").and_then(Value::as_str).filter(|c| known(c));
     let (Some(component), true, true) = (component, is_semver(expected.get("version")), is_sha(expected.get("sha256"))) else {
         return Err(Failure::msg("Invalid component release manifest."));
@@ -186,7 +188,7 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
         return Err(Failure::msg("Component download failed its hash or size check."));
     }
     let parent = NATIVE.join(&[&components_dir(env, m), component]);
-    fsx::mkdir_p(&parent, Some(0o700))?;
+    files::mkdir_p(&parent, Some(0o700))?;
     let dest = NATIVE.join(&[&parent, &format!("{version}-{}", &sha[..16])]);
     let existing = current_component(component, env, m)?;
     if let Some(e) = &existing {
@@ -194,11 +196,11 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
             return Err(Failure::msg("A published component version cannot be replaced. Release a new version."));
         }
     }
-    if fsx::exists(&dest) {
+    if files::exists(&dest) {
         let manifest = package_info(Some(&read_json(&NATIVE.join(&[&dest, "component.json"]))?), &m.platform, &m.arch).map_err(Failure::msg)?;
         return Ok(with_root(manifest, &dest, &expected["sha256"]));
     }
-    let staging = fsx::mkdtemp(&NATIVE.join(&[&parent, ".stage-"]))?;
+    let staging = files::mkdtemp(&NATIVE.join(&[&parent, ".stage-"]))?;
     match unpack(&bytes, std::path::Path::new(&staging)) {
         Ok(()) => {}
         Err(Unpack::Refused) => return Err(Failure::msg("Unsafe or oversized component archive.")),
@@ -222,7 +224,7 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
         match std::fs::rename(&staging, &dest) {
             Ok(()) => break,
             Err(e) => {
-                if fsx::exists(&dest) {
+                if files::exists(&dest) {
                     break;
                 }
                 let code = xenonet_os::fs::code_of(&e);
@@ -233,7 +235,7 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
                 if !cfg!(windows) || !matches!(code, Some("EPERM" | "EACCES" | "EBUSY")) || now_ms() >= until {
                     return Err(err.into());
                 }
-                io.sleep(250.0).await;
+                host.sleep(250.0).await;
             }
         }
     }
@@ -242,30 +244,27 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
 
 /// The install lock: one updater at a time, shared by Desktop, the CLI
 /// and bundle setup. A lock left by a process that's gone is taken over.
-///
-/// Asks { op: "alive", pid } (process.kill(pid, 0)) when the lock is held.
-pub async fn lock(io: &Io, env: &Env, m: &Machine) -> Result<String, Failure> {
+pub async fn lock(host: &dyn Lifecycle, env: &Env, m: &Machine) -> Result<String, Failure> {
     let dir = runtime_dir(env, m);
-    fsx::mkdir_p(&dir, Some(0o700))?;
+    files::mkdir_p(&dir, Some(0o700))?;
     let file = NATIVE.join(&[&dir, "install.lock"]);
     if let Err(e) = create_lock(&file) {
         if !e.is("EEXIST") {
             return Err(e.into());
         }
-        let text = fsx::read_text(&file)?;
+        let text = files::read_text(&file)?;
         let pid = xenonet_text::text::to_number(Some(&Value::String(text)));
         if pid > 0.0 {
-            // process.kill(pid, 0): there, or not (ESRCH); anything else is
-            // passed on.
-            match io.ask(json!({ "op": "alive", "pid": pid })).await {
-                Ok(_) => return Err(Failure::msg("Another XenoNet update is in progress.")),
-                Err(e) if e.get("code").and_then(Value::as_str) == Some("ESRCH") => {}
-                Err(_) => return Err(Failure::Rethrow),
+            // There, or not (ESRCH); anything else is passed on.
+            match host.alive(pid).await {
+                Ok(()) => return Err(Failure::msg("Another XenoNet update is in progress.")),
+                Err(e) if e.code() == Some("ESRCH") => {}
+                Err(e) => return Err(e),
             }
         } else if !abandoned(&file) {
             return Err(Failure::msg("Another XenoNet update is starting."));
         }
-        fsx::unlink(&file)?;
+        files::unlink(&file)?;
         create_lock(&file)?;
     }
     Ok(file)
@@ -293,7 +292,7 @@ fn create_lock(file: &str) -> Result<(), FsError> {
 
 /// Lets the install lock go.
 pub fn unlock(file: &str) -> Result<(), FsError> {
-    fsx::unlink(file)
+    files::unlink(file)
 }
 
 #[cfg(test)]
@@ -314,9 +313,10 @@ mod tests {
         assert_eq!(digest(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 
+    use crate::host::ready;
     use crate::tar::tests::archive;
+    use async_trait::async_trait;
     use std::path::PathBuf;
-    use xenonet_app::task::{run_with, Done, Task};
 
     /// A runtime folder of a test's own, on a made-up linux-x64 machine.
     struct Place {
@@ -357,14 +357,44 @@ mod tests {
         json!({ "component": "tools", "version": version, "sha256": digest(bytes), "size": bytes.len() })
     }
 
-    fn stage(p: &Place, bytes: &[u8], expected: &Value) -> Done {
-        let file = p.dir.join(format!("{}.tar.gz", digest(bytes)));
-        std::fs::write(&file, bytes).unwrap();
-        let (file, expected, env, m) = (file.to_string_lossy().into_owned(), expected.clone(), p.env.clone(), p.m.clone());
-        run_with(Task::new(move |io| async move { stage_package(&io, &file, &expected, &env, &m).await }), |q| Err(json!({ "message": format!("nothing here answers {q}") })))
+    /// A process that's there (`Ok`), or the error a look at it gives.
+    struct Fake(Result<(), Failure>);
+
+    #[async_trait(?Send)]
+    impl crate::host::Service for Fake {
+        async fn connect(&self, _env: &Env) -> Result<crate::host::Connected, Failure> {
+            Err(Failure::msg("nothing here answers connect"))
+        }
+        async fn request(&self, _client: u64, _method: &str, _params: Value) -> Result<Value, Failure> {
+            Err(Failure::msg("nothing here answers request"))
+        }
+        async fn close(&self, _client: u64) {}
+        async fn sleep(&self, _ms: f64) {}
     }
 
-    fn refusal(d: Done) -> String {
+    #[async_trait(?Send)]
+    impl Lifecycle for Fake {
+        async fn start(&self, _runtime: &Value) -> Result<Value, Failure> {
+            Err(Failure::msg("nothing here answers start"))
+        }
+        async fn check(&self, _staged: &Value) -> Result<(), Failure> {
+            Err(Failure::msg("nothing here answers check"))
+        }
+        async fn alive(&self, _pid: f64) -> Result<(), Failure> {
+            self.0.clone()
+        }
+        async fn now(&self) -> f64 {
+            0.0
+        }
+    }
+
+    fn stage(p: &Place, bytes: &[u8], expected: &Value) -> Result<Value, Failure> {
+        let file = p.dir.join(format!("{}.tar.gz", digest(bytes)));
+        std::fs::write(&file, bytes).unwrap();
+        ready(stage_package(&Fake(Ok(())), &file.to_string_lossy(), expected, &p.env, &p.m))
+    }
+
+    fn refusal(d: Result<Value, Failure>) -> String {
         match d {
             Err(f) => f.message().to_string(),
             Ok(v) => panic!("staged: {v}"),
@@ -473,26 +503,23 @@ mod tests {
     #[test]
     fn one_updater_at_a_time() {
         let p = place("lock");
-        let take = |answer: Result<Value, Value>| {
-            let (env, m) = (p.env.clone(), p.m.clone());
-            run_with(Task::new(move |io| async move { lock(&io, &env, &m).await.map(Value::String) }), move |_| answer.clone())
-        };
-        let file = take(Ok(json!(null))).unwrap();
-        let file = file.as_str().unwrap();
+        let take = |answer: Result<(), Failure>| ready(lock(&Fake(answer), &p.env, &p.m));
+        let file = take(Ok(())).unwrap();
+        let file = file.as_str();
         assert_eq!(std::fs::read_to_string(file).unwrap(), std::process::id().to_string());
         // Held by a process that's there: refused; by one that's gone: taken.
-        assert_eq!(take(Ok(json!(null))).unwrap_err().message(), "Another XenoNet update is in progress.");
-        assert_eq!(take(Err(json!({ "code": "EPERM" }))), Err(Failure::Rethrow));
-        assert!(take(Err(json!({ "code": "ESRCH" }))).is_ok());
+        assert_eq!(take(Ok(())).unwrap_err().message(), "Another XenoNet update is in progress.");
+        assert_eq!(take(Err(Failure::coded("kill EPERM", "EPERM"))), Err(Failure::coded("kill EPERM", "EPERM")));
+        assert!(take(Err(Failure::coded("kill ESRCH", "ESRCH"))).is_ok());
         // A lock with no pid in it yet is one starting.
         std::fs::write(file, "").unwrap();
-        assert_eq!(take(Ok(json!(null))).unwrap_err().message(), "Another XenoNet update is starting.");
+        assert_eq!(take(Ok(())).unwrap_err().message(), "Another XenoNet update is starting.");
         // One that has stayed that way was left by a crash: taken.
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
         std::fs::File::options().write(true).open(file).unwrap().set_modified(old).unwrap();
-        assert!(take(Ok(json!(null))).is_ok(), "a lock a crash left empty is taken over");
+        assert!(take(Ok(())).is_ok(), "a lock a crash left empty is taken over");
         unlock(file).unwrap();
-        assert!(take(Ok(json!(null))).is_ok());
+        assert!(take(Ok(())).is_ok());
         std::fs::remove_dir_all(&p.dir).unwrap();
     }
 }

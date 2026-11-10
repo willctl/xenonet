@@ -1,0 +1,26 @@
+[package]
+name = "xenonet-console"
+description = "What only the console has: its themes (built in and your own), the environments around the map, the Spotify remote, the client of XenoNet Dev's control channel and the steps scripts run through it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+getrandom.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+xenonet-api.workspace = true
+xenonet-components.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
+xenonet-wire-app.workspace = true
+
+[lints]
+workspace = true

@@ -25,7 +25,7 @@ pub enum Unpack {
     /// The archive itself is broken (node-tar's code and words).
     Bad(String),
     /// Writing what it holds failed.
-    Write(xenonet_app::fsx::FsError),
+    Write(xenonet_os::files::FsError),
 }
 
 /// node-tar's name for a header's type flag.
@@ -260,7 +260,7 @@ pub fn unpack(bytes: &[u8], cwd: &Path) -> Result<(), Unpack> {
             continue;
         }
         let target = cwd.join(rel);
-        let fs_err = |err: std::io::Error, call: &str| Unpack::Write(xenonet_app::fsx::FsError::of(err, call, &target.to_string_lossy()));
+        let fs_err = |err: std::io::Error, call: &str| Unpack::Write(xenonet_os::files::FsError::of(err, call, &target.to_string_lossy()));
         if e.kind == "Directory" {
             make_dir(&target, e.mode.map_or(0o755, |m| m & 0o7777)).map_err(|err| fs_err(err, "mkdir"))?;
             continue;

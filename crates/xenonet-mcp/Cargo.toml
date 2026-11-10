@@ -17,6 +17,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+async-trait.workspace = true
 # The assistant's request ids (r_<uuid v4>) and its client's jitter.
 getrandom.workspace = true
 # The patterns the JS servers match with: the channel flags, tokens to
@@ -35,7 +36,6 @@ xenonet-text.workspace = true
 # The doctor's checks, run here when no XenoNet answers, and what they read
 # of this machine: the xenonet command, the launcher, state.json against its
 # schema, drift.json, git and the process lookups' self-test.
-xenonet-app.workspace = true
 xenonet-components.workspace = true
 xenonet-doctor.workspace = true
 xenonet-engine.workspace = true

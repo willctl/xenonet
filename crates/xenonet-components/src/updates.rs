@@ -1,22 +1,29 @@
-//! core/components/updates.js: the components this XenoNet could update
-//! to, from the latest release's components.json, and their downloads:
+//! The components this XenoNet could update to, from the latest release's components.json, and their downloads:
 //! only from the release's own address, written to a temporary file no
 //! bigger than the release says, and kept only when its SHA-256 is the
 //! release's.
 
+use crate::host::Feed;
 use crate::packages::{current_component, digest, is_sha, newer, package_info, MAX_PACKAGE};
 use crate::runtime::{runtime_dir, Env, Machine};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::sync::OnceLock;
-use xenonet_app::fsx::{self, FsError};
-use xenonet_app::nodepath::NATIVE;
-use xenonet_app::task::{Failure, Io};
+use xenonet_os::error::Failure;
+use xenonet_os::files::{self, FsError};
+use xenonet_os::nodepath::NATIVE;
 use xenonet_text::text::display;
 
 pub const FEED: &str = "https://github.com/willctl/xenonet/releases/latest/download/components.json";
 const DOWNLOADS: &str = "https://github.com/willctl/xenonet/releases/latest/download/";
+
+// A body that isn't JSON fails as a SyntaxError.
+fn syntax_error() -> serde_json::Map<String, Value> {
+    let mut m = serde_json::Map::new();
+    m.insert("name".into(), json!("SyntaxError"));
+    m
+}
 
 fn file_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
@@ -34,16 +41,16 @@ fn size_ok(v: Option<&Value>) -> bool {
 
 /// The packages of the latest release for this machine, each with the
 /// version installed now and whether it's newer. A release without the
-/// feed has none. Asks { op: "fetch" } and { op: "json" }.
-pub async fn component_updates(io: &Io, env: &Env, m: &Machine) -> Result<Value, Failure> {
-    let res = io.ask(json!({ "op": "fetch", "url": FEED, "timeoutMs": 20000 })).await.map_err(|_| Failure::Rethrow)?;
-    if res.get("status").and_then(Value::as_f64) == Some(404.0) {
+/// feed has none.
+pub async fn component_updates(feed: &dyn Feed, env: &Env, m: &Machine) -> Result<Value, Failure> {
+    let res = feed.get(FEED, 20000.0).await?;
+    if res.status == 404 {
         return Ok(json!([]));
     }
-    if res.get("ok") != Some(&json!(true)) {
+    if !res.ok() {
         return Err(Failure::msg("XenoNet could not check component updates. Try again later."));
     }
-    let manifest = io.ask(json!({ "op": "json", "res": res["res"] })).await.map_err(|_| Failure::Rethrow)?;
+    let manifest = xenonet_text::json::parse(&String::from_utf8_lossy(&res.body)).map_err(|e| Failure::with(e.to_string(), syntax_error()))?;
     let packages = match (manifest.get("format"), manifest.get("packages")) {
         (Some(f), Some(Value::Array(p))) if f == &json!(1) => p.clone(),
         _ => return Err(Failure::msg("Invalid component update manifest.")),
@@ -86,20 +93,20 @@ fn valid(file: &str, size: f64, sha: &str) -> Result<bool, FsError> {
 pub fn download_plan(item: &Value, env: &Env, m: &Machine) -> Result<(String, bool), FsError> {
     let url = item.get("url").map_or_else(|| "undefined".into(), display);
     if !url_re().is_match(&url) {
-        return Err(fsx::said("Unexpected component download address."));
+        return Err(files::said("Unexpected component download address."));
     }
     if !is_sha(item.get("sha256")) || !size_ok(item.get("size")) {
-        return Err(fsx::said("Invalid component download."));
+        return Err(files::said("Invalid component download."));
     }
     let sha = display(&item["sha256"]);
     let size = item["size"].as_f64().unwrap_or(0.0);
     let dir = NATIVE.join(&[&runtime_dir(env, m), "downloads"]);
-    fsx::mkdir_p(&dir, Some(0o700))?;
+    files::mkdir_p(&dir, Some(0o700))?;
     let file = NATIVE.join(&[&dir, &format!("{sha}.tar.gz")]);
-    if fsx::exists(&file) && !valid(&file, size, &sha)? {
-        fsx::unlink(&file)?;
+    if files::exists(&file) && !valid(&file, size, &sha)? {
+        files::unlink(&file)?;
     }
-    let have = fsx::exists(&file);
+    let have = files::exists(&file);
     Ok((file, have))
 }
 
@@ -134,10 +141,10 @@ impl Download {
     pub fn write(&mut self, chunk: &[u8]) -> Result<(), FsError> {
         self.got += chunk.len() as f64;
         if self.got > self.size {
-            return Err(fsx::said("Component download exceeds its expected size."));
+            return Err(files::said("Component download exceeds its expected size."));
         }
         let tmp = self.tmp.clone();
-        self.out.as_mut().ok_or_else(|| fsx::said("the download is over"))?.write_all(chunk).map_err(|e| FsError::of(e, "write", &tmp))
+        self.out.as_mut().ok_or_else(|| files::said("the download is over"))?.write_all(chunk).map_err(|e| FsError::of(e, "write", &tmp))
     }
 
     /// Checks what came and puts it in place.
@@ -146,16 +153,16 @@ impl Download {
             f.sync_all().ok();
         }
         if !valid(&self.tmp, self.size, &self.sha256)? {
-            return Err(fsx::said("Component download failed its hash or size check. Try again."));
+            return Err(files::said("Component download failed its hash or size check. Try again."));
         }
-        fsx::rename(&self.tmp, &self.file)?;
+        files::rename(&self.tmp, &self.file)?;
         Ok(self.file.clone())
     }
 
     /// Takes the temporary file away, whatever happened.
     pub fn discard(&mut self) {
         self.out.take();
-        let _ = fsx::rm_rf(&self.tmp);
+        let _ = files::rm_rf(&self.tmp);
     }
 }
 

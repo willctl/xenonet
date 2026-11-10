@@ -24,13 +24,15 @@ xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
-# The app, components, hosts, assistant, integrations and doctor slice.
-xenonet-app = { path = "crates/xenonet-app" }
+# The install, hosts, assistant, integrations and doctor.
 xenonet-components = { path = "crates/xenonet-components" }
 xenonet-hosts = { path = "crates/xenonet-hosts" }
 xenonet-assistant = { path = "crates/xenonet-assistant" }
 xenonet-integrations = { path = "crates/xenonet-integrations" }
 xenonet-doctor = { path = "crates/xenonet-doctor" }
+# The demo's made-up world, and what only the console has.
+xenonet-demo = { path = "crates/xenonet-demo" }
+xenonet-console = { path = "crates/xenonet-console" }
 # JS keeps an object's keys in the order they were added, and so do the
 # files and answers XenoNet writes: preserve_order keeps that order here.
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -108,9 +110,9 @@ rmcp = { version = "3.9", default-features = false, features = ["server", "trans
 # The service's cores are traits the routes call through, async where the
 # JS awaits (crates/xenonet-service/src/cores).
 async-trait = "0.1"
-# The binary's own drivers for the cores, which the twins' JS drives during
-# the port: the map and its readers; the engine, delivery and actors; the
-# app, hosts, assistant and doctor (each wires its cores into the service).
+# The binary's own drivers for the cores: the map and its readers; the
+# engine, delivery and actors; the app's parts, hosts, assistant and doctor
+# (each wires its cores into the service).
 xenonet-wire-map = { path = "crates/xenonet-wire-map" }
 xenonet-wire-engine = { path = "crates/xenonet-wire-engine" }
 xenonet-wire-app = { path = "crates/xenonet-wire-app" }

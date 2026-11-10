@@ -56,6 +56,7 @@ fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBu
         runs_bin: None,
         permission_hold_ms: None,
         launcher_exec: None,
+        made_up: xenonet_wire_engine::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
     };
     let empty = Arc::new(Empty::default());
     let mut cores = Cores::pending(true, false, false);

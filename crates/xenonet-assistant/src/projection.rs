@@ -18,8 +18,8 @@ use regex::{Captures, Regex};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use xenonet_app::jsv::truthy;
 use xenonet_text::json::number as num;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, SPACE};
 
 pub const LABEL_MAX: usize = 240;
@@ -464,18 +464,18 @@ pub fn actor_summaries(view: &Value, policy: &Value, now: f64, project_id: Optio
         if a.get("id").and_then(Value::as_str) == Some("actor:you") || a.get("kind").and_then(Value::as_str) == Some("human") {
             continue;
         }
-        let is_self = xenonet_app::jsv::strict_eq(a.get("id"), me);
+        let is_self = xenonet_text::value::same(a.get("id"), me);
         let mut relations: Vec<Value> = Vec::new();
         for t in a.get("targets").and_then(Value::as_array).into_iter().flatten() {
             let k = key(t.get("id"));
             let project = places.get(&k).or_else(|| sessions.get(&k)).filter(|p| !p.is_null());
             let Some(project) = project.filter(|p| truthy(Some(p))) else { continue };
-            if project_id.is_some_and(|p| truthy(Some(p)) && !xenonet_app::jsv::strict_eq(Some(project), Some(p))) {
+            if project_id.is_some_and(|p| truthy(Some(p)) && !xenonet_text::value::same(Some(project), Some(p))) {
                 continue;
             }
             let target = if places.contains_key(&k) { project.clone() } else { t.get("id").cloned().unwrap_or(Value::Null) };
             let relation = t.get("relation").cloned().unwrap_or(Value::Null);
-            if !relations.iter().any(|r| xenonet_app::jsv::strict_eq(r.get("target_id"), Some(&target)) && xenonet_app::jsv::strict_eq(r.get("relation"), Some(&relation))) {
+            if !relations.iter().any(|r| xenonet_text::value::same(r.get("target_id"), Some(&target)) && xenonet_text::value::same(r.get("relation"), Some(&relation))) {
                 relations.push(json!({ "target_id": target, "relation": relation }));
             }
         }

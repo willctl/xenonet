@@ -15,7 +15,7 @@ fn and(ids: &[String]) -> String {
 
 /// The hosts that count: answered with a key, and not simulated.
 pub fn keyed(hosts: &[Value]) -> Vec<Value> {
-    hosts.iter().filter(|h| xenonet_app::jsv::truthy(h.get("key")) && !xenonet_app::jsv::truthy(h.get("simulated"))).cloned().collect()
+    hosts.iter().filter(|h| xenonet_text::text::truthy(h.get("key")) && !xenonet_text::text::truthy(h.get("simulated"))).cloned().collect()
 }
 
 pub fn key_check(hosts: &[Value]) -> Value {

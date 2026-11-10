@@ -8,7 +8,7 @@ use crate::common::{clean, fail, Fail};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use xenonet_app::nodepath::NATIVE;
+use xenonet_os::nodepath::NATIVE;
 use xenonet_text::json::number as num;
 use xenonet_text::text::to_number;
 
@@ -44,7 +44,7 @@ fn count(v: Option<&Value>) -> usize {
 }
 
 pub fn export_metadata(value: &Value) -> Result<Value, Fail> {
-    let run = value.get("run").filter(|r| xenonet_app::jsv::truthy(Some(r)));
+    let run = value.get("run").filter(|r| xenonet_text::text::truthy(Some(r)));
     let ok = run.is_some_and(|r| r.get("id").and_then(Value::as_str).is_some_and(|i| !i.is_empty()) && r.get("status").is_some_and(Value::is_string));
     let Some(run) = run.filter(|_| ok) else { return fail("Choose a pi-harness JSON run export.") };
     let finished = run.get("finishedAt").filter(|v| !v.is_null()).or_else(|| run.get("startedAt"));
@@ -72,7 +72,7 @@ fn key(v: Option<&Value>) -> String {
 }
 
 fn truthy_or(a: Option<&Value>, b: String) -> Value {
-    match a.filter(|v| xenonet_app::jsv::truthy(Some(v))) {
+    match a.filter(|v| xenonet_text::text::truthy(Some(v))) {
         Some(v) => v.clone(),
         None => json!(b),
     }
@@ -100,7 +100,7 @@ pub fn session_metadata(content: &str, file: &str) -> Result<Value, Fail> {
     }
     let mut by_id: HashMap<String, usize> = HashMap::new();
     for (i, e) in entries.iter().enumerate() {
-        if xenonet_app::jsv::truthy(e.get("id")) {
+        if xenonet_text::text::truthy(e.get("id")) {
             by_id.insert(key(e.get("id")), i);
         }
     }
@@ -140,7 +140,7 @@ pub fn session_metadata(content: &str, file: &str) -> Result<Value, Fail> {
             tokens += number(m.get("usage").and_then(|u| u.get("totalTokens")));
             cost += number(m.get("usage").and_then(|u| u.get("cost")).and_then(|c| c.get("total")));
             for c in m.get("content").and_then(Value::as_array).into_iter().flatten() {
-                if c.get("type").and_then(Value::as_str) == Some("toolCall") && xenonet_app::jsv::truthy(c.get("id")) {
+                if c.get("type").and_then(Value::as_str) == Some("toolCall") && xenonet_text::text::truthy(c.get("id")) {
                     tools += 1.0;
                     let k = key(c.get("id"));
                     if !pending.contains(&k) {
@@ -203,7 +203,7 @@ pub fn scan(root: &str, max_files: usize, max_bytes: u64) -> Value {
             };
             let mut entries: Vec<(String, std::fs::FileType)> =
                 rd.filter_map(Result::ok).filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), e.file_type().ok()?))).collect();
-            entries.sort_by(|a, b| xenonet_app::jstext::locale_compare(&a.0, &b.0));
+            entries.sort_by(|a, b| xenonet_text::names::compare(&a.0, &b.0));
             for (name, kind) in entries {
                 self.visited += 1;
                 if self.visited > self.max_files * 4 {

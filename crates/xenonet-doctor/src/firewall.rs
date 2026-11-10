@@ -14,11 +14,11 @@
 
 use crate::checks::{info, ok, skip, unreadable, warn, Ctx};
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::OnceLock;
-use xenonet_app::jsv::truthy;
-use xenonet_app::task::Failure;
+use xenonet_os::error::Failure;
 use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 /// The checks, in order: id, group and title.
 pub const CHECKS: [(&str, &str, &str); 1] = [("network.firewall", "Network", "Other machines can reach this gateway")];
@@ -231,27 +231,27 @@ pub fn windows_verdict(seen: Option<&Value>, paths: &[String], shown: &str, afte
 // A program's standing in the list: Some(true) let in, Some(false)
 // blocked, None not listed. The firewall keeps the path it was given, so
 // one listed under another spelling of the same file counts too.
-async fn listing(c: &Ctx<'_>, apps: &[(String, bool)], path: &str) -> Result<Option<bool>, Failure> {
+async fn listing(c: &Ctx<'_>, apps: &[(String, bool)], path: &str) -> Option<bool> {
     if let Some((_, allow)) = apps.iter().find(|(p, _)| p == path) {
-        return Ok(Some(*allow));
+        return Some(*allow);
     }
     let name = path.rsplit('/').next().unwrap_or(path);
     for (p, allow) in apps.iter().filter(|(p, _)| p.rsplit('/').next() == Some(name)) {
-        let real = c.call("realpath", json!([p])).await.map_err(|_| Failure::Rethrow)?;
+        let real = c.host.realpath(p).await;
         if real.filter(|v| !v.is_null()).map(|v| display(&v)).as_deref() == Some(path) {
-            return Ok(Some(*allow));
+            return Some(*allow);
         }
     }
-    Ok(None)
+    None
 }
 
 // What a program said, when it said it: its output, or None.
-async fn said(c: &Ctx<'_>, args: &[&str]) -> Result<Option<String>, Failure> {
-    let r = c.run(SOCKETFILTERFW, args, 5000.0).await?;
+async fn said(c: &Ctx<'_>, args: &[&str]) -> Option<String> {
+    let r = c.run(SOCKETFILTERFW, args, 5000.0).await;
     if r.get("code").and_then(Value::as_f64) != Some(0.0) || truthy(r.get("timedOut")) {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(r.get("stdout").filter(|v| !v.is_null()).map(display).unwrap_or_default()))
+    Some(r.get("stdout").filter(|v| !v.is_null()).map(display).unwrap_or_default())
 }
 
 /// The check's verdict.
@@ -259,7 +259,7 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     if id != "network.firewall" {
         return Err(Failure::msg(format!("no such check: {id}")));
     }
-    let net = match c.call("network", json!([])).await.map_err(|_| Failure::Rethrow)? {
+    let net = match c.host.network().await {
         None => return Ok(skip("needs XenoNet running")),
         Some(v) if !truthy(Some(&v)) => return Ok(skip("this machine isn't in a network")),
         Some(v) => v,
@@ -279,35 +279,35 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     }
     let exe = c.f.data.get("self").and_then(|s| s.get("exe")).filter(|v| truthy(Some(v))).map(display);
     let Some(exe) = exe else { return Ok(info("XenoNet couldn't tell which program its service runs as", None)) };
-    let next = c.call("restartExe", json!([])).await.map_err(|_| Failure::Rethrow)?.filter(|v| truthy(Some(v))).map(|v| display(&v)).filter(|n| *n != exe);
+    let next = c.host.restart_exe().await.filter(|v| truthy(Some(v))).map(|v| display(&v)).filter(|n| *n != exe);
     if platform == "win32" {
         let mut paths = vec![exe.clone()];
         paths.extend(next.clone());
-        let r = c.run(POWERSHELL, &["-NoProfile", "-NonInteractive", "-Command", &windows_script(&paths)], 30000.0).await?;
+        let r = c.run(POWERSHELL, &["-NoProfile", "-NonInteractive", "-Command", &windows_script(&paths)], 30000.0).await;
         let read = r.get("code").and_then(Value::as_f64) == Some(0.0) && !truthy(r.get("timedOut"));
         let seen = if read { xenonet_text::json::parse(&r.get("stdout").filter(|v| !v.is_null()).map(display).unwrap_or_default()).ok() } else { None };
         let after = next.as_deref().map(|n| c.tilde(n));
         return Ok(windows_verdict(seen.as_ref(), &paths, &c.tilde(&exe), after.as_deref()));
     }
     let home = c.f.data.get("home").filter(|v| !v.is_null()).map(display).unwrap_or_default();
-    let Some(state) = said(c, &["--getglobalstate"]).await?.as_deref().and_then(global_state) else {
+    let Some(state) = said(c, &["--getglobalstate"]).await.as_deref().and_then(global_state) else {
         return Ok(info("XenoNet couldn't read whether the firewall is on", Some(&unreadable("socketfilterfw"))));
     };
     if state == 0.0 {
         return Ok(ok("the firewall is off"));
     }
-    if state == 2.0 || said(c, &["--getblockall"]).await?.as_deref().is_some_and(blocks_all) {
+    if state == 2.0 || said(c, &["--getblockall"]).await.as_deref().is_some_and(blocks_all) {
         return Ok(warn(
             "the firewall blocks every incoming connection, so no other machine can reach this gateway",
             Some("Turn off Block all incoming connections: System Settings › Network › Firewall › Options."),
         ));
     }
-    let Some(apps) = said(c, &["--listapps"]).await?.as_deref().and_then(listed) else {
+    let Some(apps) = said(c, &["--listapps"]).await.as_deref().and_then(listed) else {
         return Ok(info("the firewall is on, and XenoNet couldn't read which programs it lets in", Some(&allow_fix(&[exe], false, &home))));
     };
-    let now = listing(c, &apps, &exe).await?;
+    let now = listing(c, &apps, &exe).await;
     let later = match &next {
-        Some(n) => listing(c, &apps, n).await?,
+        Some(n) => listing(c, &apps, n).await,
         None => now,
     };
     let (shown, after) = (c.tilde(&exe), next.as_deref().map(|n| c.tilde(n)));
@@ -338,36 +338,23 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
 mod tests {
     use super::*;
     use crate::checks::{self, Facts};
-    use xenonet_app::task::{Outcome, Task};
+    use crate::fake::{ready, Fake};
+    use serde_json::json;
 
     const EXE: &str = "/Users/ada/Library/Application Support/XenoNet/runtime/components/service/active/bin/xenonet";
 
-    // The check's verdict on a Mac, with `network` as ctx.network()
+    // The check's verdict on a Mac, with `network` as the host's network
     // answers and `apps` as --listapps lists them.
     fn verdict(network: Value, apps: &str) -> Value {
         let facts = Facts { data: json!({ "platform": "darwin", "home": "/Users/ada", "self": { "port": 47840, "exe": EXE } }) };
-        let mut task = Task::new(|io| async move { checks::run(io, "network.firewall".into(), facts).await });
-        let mut reply = None;
-        loop {
-            match task.step(reply.take()) {
-                Outcome::Ask(q) => {
-                    let args = &q["args"];
-                    let value = match q["fn"].as_str().unwrap() {
-                        "network" => network.clone(),
-                        "restartExe" | "realpath" => Value::Null,
-                        "run" => match args[1][0].as_str().unwrap() {
-                            "--getglobalstate" => json!({ "code": 0, "stdout": "Firewall is enabled. (State = 1)\n" }),
-                            "--getblockall" => json!({ "code": 0, "stdout": "Firewall has block all state set to disabled.\n" }),
-                            _ => json!({ "code": 0, "stdout": apps }),
-                        },
-                        other => panic!("asked for {other}"),
-                    };
-                    reply = Some(Ok(json!({ "value": value })));
-                }
-                Outcome::Done(v) => return v,
-                Outcome::Failed(f) => panic!("{}", f.message()),
-            }
-        }
+        let apps = apps.to_string();
+        let run = Box::new(move |_: &str, args: &[&str]| match args[0] {
+            "--getglobalstate" => json!({ "code": 0, "stdout": "Firewall is enabled. (State = 1)\n" }),
+            "--getblockall" => json!({ "code": 0, "stdout": "Firewall has block all state set to disabled.\n" }),
+            _ => json!({ "code": 0, "stdout": apps }),
+        });
+        let host = Fake { run, network: Some(network), ..Fake::default() };
+        ready(checks::run(&host, "network.firewall".into(), facts)).unwrap_or_else(|f| panic!("{}", f.message()))
     }
 
     #[test]

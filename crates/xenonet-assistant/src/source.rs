@@ -10,7 +10,7 @@
 //! is registered).
 
 use serde_json::{json, Map, Value};
-use xenonet_app::jsv::truthy;
+use xenonet_text::text::truthy;
 
 pub const VIEW_MS: f64 = 1000.0;
 
@@ -82,7 +82,7 @@ pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors:
         if matches!(kind, Some("project" | "zone")) && !host {
             let id = n.get("id").cloned().unwrap_or(Value::Null);
             let entry = json!({ "name": or_null(n.get("name")), "kind": kind });
-            match places.iter_mut().find(|(k, _)| xenonet_app::jsv::strict_eq(Some(k), Some(&id))) {
+            match places.iter_mut().find(|(k, _)| xenonet_text::value::same(Some(k), Some(&id))) {
                 Some(slot) => slot.1 = entry,
                 None => places.push((id, entry)),
             }
@@ -150,7 +150,7 @@ pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors:
 fn files_of(f: Option<&Value>) -> Value {
     match f {
         Some(Value::Array(a)) => json!(a.len()),
-        Some(Value::String(s)) => json!(xenonet_app::jstext::utf16_len(s)),
+        Some(Value::String(s)) => json!(xenonet_text::utf16::len(s)),
         Some(Value::Object(o)) => o.get("length").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!(0)),
         _ => json!(0),
     }

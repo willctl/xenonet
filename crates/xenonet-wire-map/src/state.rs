@@ -510,7 +510,7 @@ impl MapState {
         let mut graph = xenonet_state::graph::build_graph(&input, &parent_of.into_iter().collect());
         if let Some(Value::Array(nodes)) = graph.get_mut("nodes") {
             for n in nodes.iter_mut() {
-                let acts = xenonet_app::open::actions_for(Some(n));
+                let acts = xenonet_adapter::open::actions_for(Some(n));
                 if let Some(m) = n.as_object_mut() {
                     m.insert("actions".into(), Value::Array(acts));
                 }
@@ -1204,7 +1204,7 @@ impl State for MapState {
     }
     async fn narrate(&self, kind: &str, since: f64) -> R<Value> {
         if self.cfg.demo {
-            return Ok(json!(xenonet_app::demo::NARRATION));
+            return Ok(json!(crate::demo::narration()));
         }
         let text = if kind == "day" { digest::summary_text(&self.day(), "Today so far") } else { digest::summary_text(&self.digest(since)?, "While the user was away") };
         crate::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None, &self.cfg.codex_home).await.map(Value::String).map_err(err)
@@ -1249,7 +1249,7 @@ impl State for MapState {
         }
         let started = now_ms();
         let picks = if self.cfg.demo {
-            xenonet_app::demo::demo_picks(&Value::Array(outline.clone()))
+            crate::demo::picks(&Value::Array(outline.clone()))
         } else if decider {
             match self.decider_picks(&outline).await {
                 Ok(p) => p,

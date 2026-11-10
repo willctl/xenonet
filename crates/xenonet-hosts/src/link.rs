@@ -25,9 +25,8 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use xenonet_app::jstext::{slice16, utf16_len};
-use xenonet_app::jsv::truthy;
 use xenonet_model::ids::is_host_id;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, DOT};
 
 pub const HELLO_MS: f64 = 20e3;
@@ -222,7 +221,7 @@ fn why_network(id: &str, e: &Ended<'_>) -> Why {
         return why("offline", "no-network", format!("this machine can't reach {id} over the network: {err}"), None);
     }
     let bye_code = e.bye.and_then(|b| b.get("code")).map(display).filter(|c| !c.is_empty());
-    let message = || e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(String::new, |m| slice16(&display(m), 200));
+    let message = || e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(String::new, |m| xenonet_text::utf16::head(&display(m), 200));
     match bye_code.as_deref() {
         Some("not-window") => {
             return why(
@@ -266,7 +265,7 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
         out
     };
     let lines: Vec<&str> = xenonet_text::text::trim(e.stderr).split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).filter(|l| !l.is_empty()).collect();
-    let said = named(&lines.last().map_or_else(String::new, |l| slice16(l, 200)));
+    let said = named(&lines.last().map_or_else(String::new, |l| xenonet_text::utf16::head(l, 200)));
     let try_it = trust_command(&id, ssh_config, tilde);
     if let Some(err) = e.spawn_error {
         let what = if ssh { "ssh" } else { "the runtime" };
@@ -291,7 +290,7 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
         Some("old-xenonet") => return why("error", "old-xenonet", format!("the XenoNet on {id} is too old to be a host"), Some(format!("Update XenoNet on {id}."))),
         Some(code) => {
             let m = e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(|| code.to_string(), display);
-            return why("offline", "relay", format!("the relay on {id} stopped: {}", named(&slice16(&m, 200))), None);
+            return why("offline", "relay", format!("the relay on {id} stopped: {}", named(&xenonet_text::utf16::head(&m, 200))), None);
         }
         None => {}
     }
@@ -625,7 +624,7 @@ impl Link {
     pub fn stderr(&mut self, run: u64, chunk: &str) {
         if let Some(r) = self.run.as_mut().filter(|r| r.id == run) {
             r.stderr.push_str(chunk);
-            let n = utf16_len(&r.stderr);
+            let n = xenonet_text::utf16::len(&r.stderr);
             if n > 4096 {
                 let units: Vec<u16> = r.stderr.encode_utf16().collect();
                 r.stderr = String::from_utf16_lossy(&units[n - 4096..]);
@@ -667,7 +666,7 @@ impl Link {
             "hello" => self.hello_frame(run, &frame, now, a),
             "snapshot" => self.snapshot(run, &frame, now),
             "event" => {
-                let name_ok = frame.get("name").and_then(Value::as_str).is_some_and(|n| utf16_len(n) <= 40);
+                let name_ok = frame.get("name").and_then(Value::as_str).is_some_and(|n| xenonet_text::utf16::len(n) <= 40);
                 if !name_ok || !frame.get("data").is_some_and(Value::is_object) {
                     self.drop_frame("an event that isn't one", now);
                 } else if self.run.as_ref().is_some_and(|r| r.snapshot) {
@@ -696,8 +695,8 @@ impl Link {
             "time" => self.timed(run, &frame, now),
             "ping" => self.heard(now),
             "bye" => {
-                let code = slice16(&frame.get("code").filter(|v| !v.is_null()).map_or_else(String::new, display), 40);
-                let message = slice16(&frame.get("message").filter(|v| !v.is_null()).map_or_else(String::new, display), 300);
+                let code = xenonet_text::utf16::head(&frame.get("code").filter(|v| !v.is_null()).map_or_else(String::new, display), 40);
+                let message = xenonet_text::utf16::head(&frame.get("message").filter(|v| !v.is_null()).map_or_else(String::new, display), 300);
                 if let Some(r) = self.run.as_mut() {
                     r.bye = Some(json!({ "code": code, "message": message }));
                 }
@@ -713,7 +712,7 @@ impl Link {
         }
         let id = self.id();
         if let Some(problem) = a.check_hello(f) {
-            let first = slice16(problem.split('\n').next().unwrap_or(""), 160);
+            let first = xenonet_text::utf16::head(problem.split('\n').next().unwrap_or(""), 160);
             return self.fail(
                 run,
                 why(
@@ -874,7 +873,7 @@ impl Link {
 
     fn drop_frame(&mut self, why: &str, now: f64) {
         self.dropped += 1.0;
-        self.last_drop = json!({ "at": xenonet_text::json::number(now), "why": slice16(why, 120) });
+        self.last_drop = json!({ "at": xenonet_text::json::number(now), "why": xenonet_text::utf16::head(why, 120) });
     }
 
     // Ends this connection for a reason found here (a bad hello, silence).

@@ -43,10 +43,10 @@ fuzz_target!(|data: &[u8]| {
         }
         _ => {
             for line in text.lines() {
-                let _ = xenonet_app::system_stats::parse_nvidia(line);
-                let _ = xenonet_app::system_stats::parse_windows_gpu(line, &[("luid_0x0000_0x1234".into(), 8e9)]);
+                let _ = xenonet_os::stats::parse_nvidia(line);
+                let _ = xenonet_os::stats::parse_windows_gpu(line, &[("luid_0x0000_0x1234".into(), 8e9)]);
             }
-            let _ = xenonet_app::system_stats::parse_ioreg(&text, Some(16e9));
+            let _ = xenonet_os::stats::parse_ioreg(&text, Some(16e9));
         }
     });
 });

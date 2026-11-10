@@ -1,5 +1,5 @@
 //! What an MCP server on the map is (core/mcp-info.js, mcp-discovery.js;
-//! crates/xenonet-app/src/mcp_info.rs and mcp_discovery.rs), without its
+//! crates/xenonet-integrations/src/mcp_info.rs and mcp_discovery.rs), without its
 //! configuration or credentials. Collecting a catalog is the Rust's state
 //! machine; this answers what it asks: Codex's word on the server, and the
 //! server's own, by starting the one already configured and listing what it
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncWriteExt, BufReader};
 use xenonet_api::cores::{McpInfo, State, R};
-use xenonet_app::{mcp_discovery as discovery, mcp_info as info};
+use xenonet_integrations::{mcp_discovery as discovery, mcp_info as info};
 
 pub struct Catalog {
     state: Arc<dyn State>,

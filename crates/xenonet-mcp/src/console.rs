@@ -3,7 +3,7 @@
 //! drive and see XenoNet. Installed Tools operate the installed app; a
 //! checkout also offers its development instances (core/instances.js).
 //! Every tool goes through core/control.js's client, which whoever serves
-//! this gives as a `Control`: the command's driver of xenonet-app's
+//! this gives as a `Control`: the command's driver of xenonet-console's
 //! control, which xenonet console, script and film use too.
 //!
 //! Tools act on one instance: demo (made-up data, the default in a
@@ -23,7 +23,7 @@ use std::borrow::Cow;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use xenonet_app::instances::INSTANCES;
+use xenonet_components::instances::INSTANCES;
 use xenonet_text::text::truthy;
 
 const NAME: &str = "xenonet-console";

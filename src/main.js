@@ -715,7 +715,7 @@ const commandList = [
   { id: "identities-all", label: "Show every identity's work", keywords: "identity account filter clear", run: () => identities.setSelected([]) },
   { id: "identities-rescan", label: "Detect identities again", keywords: "accounts sign in github gh git claude chatgpt", run: () => rescanIdentities() },
   { id: "mute", label: "Mute or unmute sound", key: "M", run: () => ambient.toggle() },
-  // The decision model's OpenRouter key (crates/xenonet-app/src/decide.rs): typed here once,
+  // The decision model's OpenRouter key (crates/xenonet-state/src/decide.rs): typed here once,
   // kept in your credential store, never shown again.
   {
     id: "system-panel",

@@ -17,8 +17,7 @@
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
-use xenonet_app::jstext::{locale_compare, slice16, utf16_len};
-use xenonet_app::jsv::truthy;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, to_number};
 
 pub const MAX_NODES: usize = 5000;
@@ -76,7 +75,7 @@ fn n(x: f64) -> Value {
 
 fn str_of(v: Option<&Value>, max: usize) -> Value {
     match v {
-        Some(Value::String(s)) => Value::String(slice16(s, max)),
+        Some(Value::String(s)) => Value::String(xenonet_text::utf16::head(s, max)),
         _ => Value::Null,
     }
 }
@@ -96,7 +95,7 @@ fn s(v: &Value, k: &str) -> Option<String> {
 /// host's own: not a string, too long, or already qualified.
 pub fn remote_id(host: &str, id: Option<&Value>) -> Option<String> {
     let id = id?.as_str()?;
-    if id.is_empty() || utf16_len(id) > MAX_ID || id.starts_with('@') {
+    if id.is_empty() || xenonet_text::utf16::len(id) > MAX_ID || id.starts_with('@') {
         return None;
     }
     xenonet_model::ids::qualify(id, Some(host), None).ok()
@@ -106,7 +105,7 @@ pub fn remote_id(host: &str, id: Option<&Value>) -> Option<String> {
 /// they are, except openai:api-key, which is that machine's own key.
 pub fn identity_id(host: &str, id: Option<&Value>) -> Option<String> {
     let id = id?.as_str()?;
-    if id.is_empty() || utf16_len(id) > 512 || id.starts_with('@') {
+    if id.is_empty() || xenonet_text::utf16::len(id) > 512 || id.starts_with('@') {
         return None;
     }
     if id == "openai:api-key" {
@@ -618,7 +617,7 @@ pub fn merge_identities(local: &[Value], remotes: &[(String, Vec<Value>)], names
         let d = to_number(b.get("sessions")) - to_number(a.get("sessions"));
         let d = if d == 0.0 || d.is_nan() { to_number(b.get("projects")) - to_number(a.get("projects")) } else { d };
         if d == 0.0 || d.is_nan() {
-            locale_compare(&a.get("id").map(display).unwrap_or_default(), &b.get("id").map(display).unwrap_or_default())
+            xenonet_text::names::compare(&a.get("id").map(display).unwrap_or_default(), &b.get("id").map(display).unwrap_or_default())
         } else if d < 0.0 {
             std::cmp::Ordering::Less
         } else {
@@ -1152,7 +1151,7 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
                 t => t,
             };
             Some(
-                json!({ "id": format!("@{h}:{}", slice16(&display(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }),
+                json!({ "id": format!("@{h}:{}", xenonet_text::utf16::head(&display(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }),
             )
         }
         // Its load: what system/v1 declares, without another machine's
@@ -1177,7 +1176,7 @@ pub fn event_note(name: &str, data: &Value, host: &Value) -> Option<String> {
     }
     let app = xenonet_text::json::stringify(data.get("app").unwrap_or(&Value::Null), 0);
     let id = s(host, "id").unwrap_or_else(|| "undefined".into());
-    Some(format!("{id} sent tokens for {}, an app this XenoNet doesn't tail, and they were left out", slice16(&app, 60)))
+    Some(format!("{id} sent tokens for {}, an app this XenoNet doesn't tail, and they were left out", xenonet_text::utf16::head(&app, 60)))
 }
 
 /// A host's engine under qualified ids: the agents and messages that fit
@@ -1207,7 +1206,7 @@ pub fn qualify_engine(engine: &Value, host: &Value, schemas: &mut dyn Schemas) -
             })
             .collect();
         let id = m.get("id").map_or_else(|| "undefined".to_string(), display);
-        kept.insert("id".into(), json!(format!("@{h}:{}", slice16(&id, 64))));
+        kept.insert("id".into(), json!(format!("@{h}:{}", xenonet_text::utf16::head(&id, 64))));
         kept.insert("from".into(), json!(from));
         kept.insert("to".into(), Value::Array(to));
         messages.push(Value::Object(kept));

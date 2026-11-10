@@ -7,9 +7,9 @@ use crate::b64::uuid;
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
-use xenonet_app::fsx;
-use xenonet_app::jsv::truthy;
-use xenonet_app::nodepath::NATIVE;
+use xenonet_os::files;
+use xenonet_os::nodepath::NATIVE;
+use xenonet_text::text::truthy;
 use xenonet_text::text::{display, SPACE};
 
 /// An error with its HTTP status and code (IntegrationError).
@@ -28,8 +28,8 @@ pub fn failed<T>(message: impl Into<String>, code: &str, status: u16) -> Result<
     Err(Fail { status, code: code.into(), message: message.into() })
 }
 
-impl From<fsx::FsError> for Fail {
-    fn from(e: fsx::FsError) -> Self {
+impl From<files::FsError> for Fail {
+    fn from(e: files::FsError) -> Self {
         // A system error the JS let through: its message, with its code.
         Fail { status: 0, code: e.code.unwrap_or_default(), message: e.message }
     }
@@ -58,15 +58,13 @@ pub fn clean(value: Option<&Value>, max: usize) -> String {
     let s = value.filter(|v| !v.is_null()).map_or_else(String::new, display);
     let s = secrets().replace_all(&s, "[redacted]");
     let s: String = s.chars().map(|c| if (c as u32) < 0x20 || c == '\u{7f}' { ' ' } else { c }).collect();
-    xenonet_app::jstext::slice16(&s, max)
+    xenonet_text::utf16::head(&s, max)
 }
 
 /// text(value, name, max): text, trimmed, of at most `max` units, or why not.
 pub fn text(value: Option<&Value>, name: &str, max: usize) -> Result<String, Fail> {
     match value {
-        Some(Value::String(s)) if !xenonet_text::text::trim(s).is_empty() && xenonet_app::jstext::utf16_len(s) <= max && !s.contains('\0') => {
-            Ok(xenonet_text::text::trim(s).to_string())
-        }
+        Some(Value::String(s)) if !xenonet_text::text::trim(s).is_empty() && xenonet_text::utf16::len(s) <= max && !s.contains('\0') => Ok(xenonet_text::text::trim(s).to_string()),
         _ => fail(format!("{name} must be text, at most {max} characters.")),
     }
 }
@@ -128,7 +126,7 @@ fn newest_first(a: &Value, b: &Value) -> std::cmp::Ordering {
     if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
         return o;
     }
-    xenonet_app::jstext::locale_compare(&display(&a["id"]), &display(&b["id"]))
+    xenonet_text::names::compare(&display(&a["id"]), &display(&b["id"]))
 }
 
 /// The records of decisions and sandbox jobs: a folder of one JSON file
@@ -142,7 +140,7 @@ pub struct Records {
 impl Records {
     pub fn new(dir: Option<String>, limit: usize) -> Result<Self, Fail> {
         if let Some(d) = &dir {
-            fsx::mkdir_p(d, Some(0o700))?;
+            files::mkdir_p(d, Some(0o700))?;
         }
         Ok(Records { dir, limit, memory: Vec::new() })
     }
@@ -154,13 +152,13 @@ impl Records {
             return Ok(all);
         };
         let mut out = Vec::new();
-        for name in fsx::read_dir_names(dir)?.into_iter().filter(|n| record_name(n)) {
+        for name in files::read_dir_names(dir)?.into_iter().filter(|n| record_name(n)) {
             let file = NATIVE.join(&[dir, &name]);
             let Ok(st) = std::fs::symlink_metadata(&file) else { continue };
             if !st.is_file() || st.len() > 64 * 1024 {
                 continue;
             }
-            let Ok(text) = fsx::read_text(&file) else { continue };
+            let Ok(text) = files::read_text(&file) else { continue };
             let Ok(r) = xenonet_text::json::parse(&text) else { continue };
             if r.get("id").and_then(Value::as_str) != Some(&name[..36]) || !r.get("at").and_then(Value::as_f64).is_some_and(f64::is_finite) {
                 continue;
@@ -176,7 +174,8 @@ impl Records {
         match &self.dir {
             Some(dir) => {
                 let tmp = NATIVE.join(&[dir, &format!("{id}.{}.tmp", uuid())]);
-                let r = write_new(&tmp, xenonet_text::json::stringify(&record, 0).as_bytes(), 0o600).and_then(|()| fsx::rename(&tmp, &NATIVE.join(&[dir, &format!("{id}.json")])));
+                let r =
+                    write_new(&tmp, xenonet_text::json::stringify(&record, 0).as_bytes(), 0o600).and_then(|()| files::rename(&tmp, &NATIVE.join(&[dir, &format!("{id}.json")])));
                 let _ = std::fs::remove_file(&tmp);
                 r?;
             }
@@ -200,7 +199,7 @@ impl Records {
         for old in completed.iter().skip(self.limit) {
             let id = display(&old["id"]);
             match &self.dir {
-                Some(dir) => fsx::unlink(&NATIVE.join(&[dir, &format!("{id}.json")]))?,
+                Some(dir) => files::unlink(&NATIVE.join(&[dir, &format!("{id}.json")]))?,
                 None => self.memory.retain(|r| r["id"] != old["id"]),
             }
         }
@@ -208,7 +207,7 @@ impl Records {
     }
 
     pub fn update(&mut self, id: &Value, fields: &Value) -> Result<Value, Fail> {
-        let Some(record) = self.list()?.into_iter().find(|r| xenonet_app::jsv::strict_eq(r.get("id"), Some(id))) else { return failed("No such record.", "missing", 404) };
+        let Some(record) = self.list()?.into_iter().find(|r| xenonet_text::value::same(r.get("id"), Some(id))) else { return failed("No such record.", "missing", 404) };
         let mut m: Map<String, Value> = record.as_object().cloned().unwrap_or_default();
         for (k, v) in fields.as_object().into_iter().flatten() {
             m.insert(k.clone(), v.clone());
@@ -220,7 +219,7 @@ impl Records {
 }
 
 // fs.writeFileSync(p, data, { flag: "wx", mode }).
-pub fn write_new(p: &str, data: &[u8], mode: u32) -> Result<(), fsx::FsError> {
+pub fn write_new(p: &str, data: &[u8], mode: u32) -> Result<(), files::FsError> {
     use std::io::Write;
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
@@ -231,8 +230,8 @@ pub fn write_new(p: &str, data: &[u8], mode: u32) -> Result<(), fsx::FsError> {
     }
     #[cfg(not(unix))]
     let _ = mode;
-    let mut f = o.open(p).map_err(|e| fsx::FsError::of(e, "open", p))?;
-    f.write_all(data).map_err(|e| fsx::FsError::of(e, "write", p))
+    let mut f = o.open(p).map_err(|e| files::FsError::of(e, "open", p))?;
+    f.write_all(data).map_err(|e| files::FsError::of(e, "write", p))
 }
 
 /// queryRecords: a page of fifty, by words, kind and status.
@@ -248,10 +247,10 @@ pub fn query(records: &[Value], q: &Value) -> Value {
         .collect();
     let kind = q.get("kind").filter(|v| truthy(Some(v)));
     let status = q.get("status").filter(|v| truthy(Some(v)));
-    let kept: Vec<&Value> = records.iter().filter(|r| kind.is_none_or(|k| xenonet_app::jsv::strict_eq(r.get("kind"), Some(k)))).collect();
+    let kept: Vec<&Value> = records.iter().filter(|r| kind.is_none_or(|k| xenonet_text::value::same(r.get("kind"), Some(k)))).collect();
     let mut found: Vec<Value> = kept
         .iter()
-        .filter(|r| status.is_none_or(|s| xenonet_app::jsv::strict_eq(r.get("status"), Some(s))))
+        .filter(|r| status.is_none_or(|s| xenonet_text::value::same(r.get("status"), Some(s))))
         .filter(|r| {
             let text = xenonet_text::json::stringify(r, 0).to_lowercase();
             words.iter().all(|w| text.contains(w.as_str()))
@@ -265,7 +264,7 @@ pub fn query(records: &[Value], q: &Value) -> Value {
             if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
                 return o;
             }
-            xenonet_app::jstext::locale_compare(&display(&a["id"]), &display(&b["id"]))
+            xenonet_text::names::compare(&display(&a["id"]), &display(&b["id"]))
         });
     } else {
         xenonet_text::sort::sort_by(&mut found, newest_first);

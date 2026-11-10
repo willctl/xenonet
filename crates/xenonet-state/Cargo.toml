@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-state"
-description = "The map's data and what XenoNet remembers: state.json and its versions, and, as the port goes on, the graph, search and stats."
+description = "The map's data and what XenoNet remembers: state.json and its versions, and, as the port goes on, the graph, search and stats; and the checks of what the decision model answers."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

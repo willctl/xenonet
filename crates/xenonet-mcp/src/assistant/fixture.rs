@@ -1,19 +1,18 @@
-//! `xenonet mcp assistant --fixture`'s backend (core/assistant/service.js's
-//! createFixtureService): the assistant's service in this process, over
-//! made-up data (core/assistant/fixtures.js), through the same checks a
+//! `xenonet mcp assistant --fixture`'s backend: the assistant's service in
+//! this process, over made-up data (xenonet-assistant's fixtures), through the same checks a
 //! real grant's reads go through: the request's shape, the rate and the
 //! four-at-a-time limit, the arguments' schema, and the answer's. No grant,
 //! no XenoNet and nothing of this computer's.
 
 use super::schema;
+use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::rc::Rc;
 use std::sync::Mutex;
 use xenonet_actors::limits::Buckets;
-use xenonet_app::task::{run_with, Failure, Task};
 use xenonet_assistant::cursors::Cursors;
 use xenonet_assistant::fixtures;
-use xenonet_assistant::service::{self, Config, Inflight, LIMITS};
+use xenonet_assistant::service::{self, Config, Inflight, ReadHost, LIMITS};
+use xenonet_os::error::Failure;
 
 /// The made-up session's grant, actor and connection.
 const GRANT: &str = "gr_000000000000000000000000";
@@ -92,33 +91,55 @@ impl Fixture {
         }
     }
 
-    // The arguments checked again, then the answer as a task, its
-    // requests answered here: the time, the made-up view and stats, the
-    // page tokens' clock and the check of the answer against its schema.
+    // The arguments checked again, then the answer, its reads answered
+    // here: the time, the made-up view and stats, the page tokens' clock and
+    // the check of the answer against its schema.
     fn answer(&self, cfg: Config, op: &str, tool: &str, args: &Value, request_id: &Value) -> Result<Value, String> {
         let parsed = schema::input(tool).parse(args).map_err(|_| "INVALID_ARGUMENT".to_string())?;
-        let cursors = Rc::new(Cursors::new(Some(self.key.clone())));
-        let (cfg, op, tool, policy, rid) = (Rc::new(cfg), op.to_string(), tool.to_string(), self.policy.clone(), request_id.clone());
-        let task = Task::new(move |io| async move { service::answer(io, cfg, cursors, op, tool, parsed, policy, rid).await });
-        let done = run_with(task, |q| match q.get("op").and_then(Value::as_str) {
-            Some("now" | "cursorNow") => Ok(xenonet_text::json::number(now())),
-            Some("view") => Ok(fixtures::fixture_view(now())),
-            Some("actor") => Ok(Value::Null),
-            Some("stats") => Ok(fixtures::fixture_stats(&q.get("id").map(xenonet_text::text::display).unwrap_or_default())),
-            Some("idKey") => Ok(json!("fixture".as_bytes())),
-            Some("check") => {
-                let tool = q.get("tool").and_then(Value::as_str).unwrap_or("");
-                Ok(json!(schema::result(tool).parse(q.get("envelope").unwrap_or(&Value::Null)).is_ok()))
-            }
-            other => Err(json!({ "message": format!("no such request: {}", other.unwrap_or("undefined")) })),
-        });
+        let cursors = Cursors::new(Some(self.key.clone()));
+        let done = ready(service::answer(&MadeUp, &cfg, &cursors, op, tool, &parsed, &self.policy, request_id));
         match done {
             Ok(out) => Ok(out.get("envelope").cloned().unwrap_or(Value::Null)),
-            Err(Failure::Error { fields, .. }) if fields.get("refused") == Some(&json!(true)) => {
-                Err(fields.get("code").and_then(Value::as_str).unwrap_or("INTERNAL_ERROR").to_string())
-            }
+            Err(f) if f.fields.get("refused") == Some(&json!(true)) => Err(f.code().unwrap_or("INTERNAL_ERROR").to_string()),
             Err(_) => Err("INTERNAL_ERROR".into()),
         }
+    }
+}
+
+/// The made-up world the fixture's reads see.
+struct MadeUp;
+
+#[async_trait(?Send)]
+impl ReadHost for MadeUp {
+    async fn now(&self) -> f64 {
+        now()
+    }
+    async fn cursor_now(&self) -> f64 {
+        now()
+    }
+    async fn view(&self) -> Result<Value, Failure> {
+        Ok(fixtures::fixture_view(now()))
+    }
+    async fn actor(&self, _id: &Value) -> Result<Value, Failure> {
+        Ok(Value::Null)
+    }
+    async fn stats(&self, id: &str) -> Result<Value, Failure> {
+        Ok(fixtures::fixture_stats(id))
+    }
+    async fn id_key(&self) -> Result<Vec<u8>, Failure> {
+        Ok(b"fixture".to_vec())
+    }
+    async fn check(&self, tool: &str, envelope: &Value) -> Result<bool, Failure> {
+        Ok(schema::result(tool).parse(envelope).is_ok())
+    }
+}
+
+/// Runs an answer to its end: nothing the made-up world does waits.
+fn ready<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    match f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(v) => v,
+        std::task::Poll::Pending => unreachable!("the made-up world never waits"),
     }
 }
 

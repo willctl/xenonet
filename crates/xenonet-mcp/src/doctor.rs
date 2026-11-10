@@ -1,20 +1,20 @@
-//! The doctor run on this machine, with no XenoNet to ask
-//! (core/doctor/checkup.js's fallback, which the doctor tool and `xenonet
-//! doctor` take when nothing answers): xenonet-doctor's checks, each a
-//! task, asking this machine for what they read as core/doctor/index.js's
-//! machine() answered them. The checks that need XenoNet running are
-//! skipped by the checks themselves.
+//! The doctor run on this machine, with no XenoNet to ask, which the
+//! doctor tool and `xenonet doctor` take when nothing answers:
+//! xenonet-doctor's checks, asking this machine for what they read. The
+//! checks that need XenoNet running are skipped by the checks themselves.
 //!
-//! Each check runs on a thread of its own and gets 8 seconds, as the JS
-//! ran them side by side, each raced against its time limit.
+//! Each check runs on a thread of its own and gets 8 seconds, side by side
+//! with the others.
 
+use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use xenonet_app::task::{Failure, Outcome, Reply, Task};
-use xenonet_doctor::{checks, run};
+use xenonet_doctor::checks::{self, DoctorHost};
+use xenonet_doctor::run;
+use xenonet_os::error::Failure;
 
 const CHECK_MS: u64 = 8000;
 const DAY_MS: f64 = 24.0 * 3600e3;
@@ -28,7 +28,7 @@ const STATE_VERSION: f64 = 2.0;
 pub type Paths = Value;
 
 fn now() -> f64 {
-    xenonet_app::task::now_ms()
+    xenonet_text::time::now_ms()
 }
 
 fn home() -> String {
@@ -330,151 +330,116 @@ fn statfs(_: &str) -> Option<Value> {
     None
 }
 
-/// What the machine() a check is run on knows.
+/// The machine a check runs on: this one, with the folders given. What
+/// only a running XenoNet has (its actors, its process checks, its hosts)
+/// isn't here, and the checks that need it say so.
 struct Machine {
     paths: Value,
     home: String,
-}
-
-fn text(v: Option<&Value>) -> String {
-    v.map(xenonet_text::text::display).unwrap_or_default()
 }
 
 impl Machine {
     fn path(&self, k: &str) -> Option<String> {
         self.paths.get(k).filter(|v| xenonet_text::text::truthy(Some(v))).map(xenonet_text::text::display)
     }
-
-    /// ctx[fn](...args): { value } or { missing } (a ctx without it), or
-    /// what it threw.
-    fn call(&self, f: &str, args: &[Value]) -> Reply {
-        let a = |i: usize| text(args.get(i));
-        let value = match f {
-            "exists" => json!(std::fs::metadata(a(0)).is_ok() && !a(0).is_empty()),
-            "readText" => std::fs::read_to_string(a(0)).map_or(Value::Null, Value::String),
-            "readdir" => {
-                let dir = a(0);
-                match xenonet_os::paths::read_dir_sorted(std::path::Path::new(&dir)) {
-                    Ok(v) => Value::Array(v.iter().map(|e| json!(e.file_name().to_string_lossy())).collect()),
-                    Err(e) => return Err(fs_error(xenonet_os::fs::FsError::of(e, "scandir", &dir))),
-                }
-            }
-            "access" => {
-                if !writable(&a(0)) {
-                    return Err(json!({ "message": format!("EACCES: permission denied, access '{}'", a(0)), "code": "EACCES" }));
-                }
-                Value::Null
-            }
-            "statfs" => match statfs(&a(0)) {
-                Some(v) => v,
-                None => return Err(json!({ "message": format!("ENOENT: no such file or directory, statfs '{}'", a(0)), "code": "ENOENT" })),
-            },
-            "which" => which(&a(0)).map_or(Value::Null, Value::String),
-            "run" => {
-                let argv: Vec<String> = args.get(1).and_then(Value::as_array).map(|l| l.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
-                let ms = args.get(2).and_then(Value::as_f64).unwrap_or(5000.0);
-                run_program(&a(0), &argv, ms, &[], &[])
-            }
-            "command" => {
-                let st = xenonet_app::command::command_state(
-                    Some(&xenonet_app::command::command_dir(&self.home, platform(), var("LOCALAPPDATA").as_deref())),
-                    std::env::var("PATH").ok().as_deref(),
-                    platform(),
-                );
-                json!({ "file": st.file, "installed": st.installed, "ours": st.ours, "runs": st.runs, "broken": st.broken, "onPath": st.on_path })
-            }
-            "savedPath" => {
-                if platform() != "win32" {
-                    Value::Null
-                } else {
-                    let env: Map<String, Value> = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
-                    let reg = xenonet_app::command::reg_exe(&env);
-                    let (mut read, mut dirs) = (false, Vec::new());
-                    for key in xenonet_app::command::PATH_KEYS {
-                        let r = run_program(&reg, &xenonet_app::command::reg_query(key), 5000.0, &[], &[]);
-                        if r["code"] != json!(0) {
-                            continue;
-                        }
-                        read = true;
-                        dirs.extend(xenonet_app::command::reg_path(r["stdout"].as_str().unwrap_or(""), &env));
-                    }
-                    if read {
-                        json!(dirs)
-                    } else {
-                        Value::Null
-                    }
-                }
-            }
-            "procs" => procs(),
-            "errors" => match self.path("stateDir") {
-                Some(dir) => Value::Array(xenonet_os::log::read_logs(std::path::Path::new(&xenonet_os::log::log_dir(&dir)), now() - DAY_MS, "error", None, None, 500)),
-                None => Value::Null,
-            },
-            "launcher" => launcher().map_err(|m| json!({ "message": m }))?.unwrap_or(Value::Null),
-            "stateFile" => inspect_state(&a(0)),
-            "drift" => self.path("cacheDir").map_or(Value::Null, |d| drift(&d)),
-            "gitAvailable" => json!(git_available()),
-            // How the service started at login stands (the supervisor's
-            // review).
-            "login" => xenonet_components::supervisor::review_here(),
-            // What only a running XenoNet has: its actors, its process
-            // checks and its hosts.
-            _ => return Ok(json!({ "missing": true })),
-        };
-        Ok(json!({ "value": value }))
-    }
-
-    fn answer(&self, q: &Value) -> Reply {
-        match q.get("op").and_then(Value::as_str) {
-            Some("now") => Ok(xenonet_text::json::number(now())),
-            Some("sleep") => {
-                std::thread::sleep(Duration::from_millis(q.get("ms").and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64));
-                Ok(Value::Null)
-            }
-            Some("call") => {
-                let f = q.get("fn").and_then(Value::as_str).unwrap_or("");
-                let args = q.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
-                self.call(f, &args)
-            }
-            other => Err(json!({ "message": format!("no such request here: {}", other.unwrap_or("undefined")) })),
-        }
-    }
 }
 
-fn fs_error(e: xenonet_os::fs::FsError) -> Value {
-    let mut m = Map::new();
-    m.insert("message".into(), json!(e.message));
-    if let Some(c) = e.code {
-        m.insert("code".into(), json!(c));
+#[async_trait(?Send)]
+impl DoctorHost for Machine {
+    async fn now(&self) -> f64 {
+        now()
     }
-    Value::Object(m)
+    async fn local_time(&self, ms: f64) -> String {
+        xenonet_os::clock::local_time(ms)
+    }
+    async fn which(&self, cmd: &str) -> Option<String> {
+        which(cmd)
+    }
+    async fn exists(&self, path: &str) -> bool {
+        std::fs::metadata(path).is_ok() && !path.is_empty()
+    }
+    async fn run(&self, file: &str, args: &[&str], ms: f64) -> Value {
+        let argv: Vec<String> = args.iter().map(ToString::to_string).collect();
+        run_program(file, &argv, ms, &[], &[])
+    }
+    async fn read_text(&self, path: &str) -> Option<String> {
+        std::fs::read_to_string(path).ok()
+    }
+    async fn readdir(&self, path: &str) -> Result<Vec<String>, Failure> {
+        xenonet_os::paths::read_dir_sorted(std::path::Path::new(path))
+            .map(|v| v.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .map_err(|e| xenonet_os::fs::FsError::of(e, "scandir", path).into())
+    }
+    async fn writable(&self, dir: &str) -> bool {
+        writable(dir)
+    }
+    async fn statfs(&self, dir: &str) -> Option<Value> {
+        statfs(dir)
+    }
+    async fn state_file(&self, dir: &str) -> Value {
+        inspect_state(dir)
+    }
+    async fn command(&self) -> Value {
+        let st = xenonet_components::command::command_state(
+            Some(&xenonet_components::command::command_dir(&self.home, platform(), var("LOCALAPPDATA").as_deref())),
+            std::env::var("PATH").ok().as_deref(),
+            platform(),
+        );
+        json!({ "file": st.file, "installed": st.installed, "ours": st.ours, "runs": st.runs, "broken": st.broken, "onPath": st.on_path })
+    }
+    async fn saved_path(&self) -> Value {
+        if platform() != "win32" {
+            return Value::Null;
+        }
+        let env: Map<String, Value> = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
+        let reg = xenonet_components::command::reg_exe(&env);
+        let (mut read, mut dirs) = (false, Vec::new());
+        for key in xenonet_components::command::PATH_KEYS {
+            let r = run_program(&reg, &xenonet_components::command::reg_query(key), 5000.0, &[], &[]);
+            if r["code"] != json!(0) {
+                continue;
+            }
+            read = true;
+            dirs.extend(xenonet_components::command::reg_path(r["stdout"].as_str().unwrap_or(""), &env));
+        }
+        if read {
+            json!(dirs)
+        } else {
+            Value::Null
+        }
+    }
+    async fn procs(&self) -> Value {
+        procs()
+    }
+    async fn git_available(&self) -> bool {
+        git_available()
+    }
+    async fn launcher(&self) -> Result<Value, Failure> {
+        Ok(launcher().map_err(Failure::msg)?.unwrap_or(Value::Null))
+    }
+    async fn errors(&self) -> Value {
+        match self.path("stateDir") {
+            Some(dir) => Value::Array(xenonet_os::log::read_logs(std::path::Path::new(&xenonet_os::log::log_dir(&dir)), now() - DAY_MS, "error", None, None, 500)),
+            None => Value::Null,
+        }
+    }
+    async fn drift(&self) -> Value {
+        self.path("cacheDir").map_or(Value::Null, |d| drift(&d))
+    }
+    // How the service started at login stands (the supervisor's review).
+    async fn login(&self) -> Option<Value> {
+        Some(xenonet_components::supervisor::review_here())
+    }
 }
 
 /// One check's verdict, on this thread.
 fn check(id: &str, facts: Value, m: &Machine) -> Value {
     let f = checks::Facts { data: facts };
-    let id_owned = id.to_string();
-    let mut task = Task::new(move |io| async move { checks::run(io, id_owned, f).await });
-    let mut reply = None;
-    let mut last: Option<Value> = None;
-    loop {
-        match task.step(reply.take()) {
-            Outcome::Ask(q) => {
-                let r = m.answer(&q);
-                if let Err(e) = &r {
-                    last = Some(e.clone());
-                }
-                reply = Some(r);
-            }
-            Outcome::Done(v) => return v,
-            Outcome::Failed(f) => {
-                let message = match f {
-                    Failure::Error { message, .. } => message,
-                    Failure::Rethrow => last.as_ref().and_then(|e| e.get("message")).map(xenonet_text::text::display).unwrap_or_default(),
-                };
-                return json!({ "status": "warn", "detail": format!("the check failed: {message}") });
-            }
-        }
+    let ran = tokio::runtime::Builder::new_current_thread().enable_all().build().map(|rt| rt.block_on(checks::run(m, id.to_string(), f)));
+    match ran {
+        Ok(Ok(v)) => v,
+        Ok(Err(f)) => json!({ "status": "warn", "detail": format!("the check failed: {}", f.message) }),
+        Err(e) => json!({ "status": "warn", "detail": format!("the check failed: {e}") }),
     }
 }
 
@@ -573,6 +538,10 @@ pub fn paths_for(name: Option<&str>) -> Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn text(v: Option<&Value>) -> String {
+        v.map(xenonet_text::text::display).unwrap_or_default()
+    }
 
     fn tmp(name: &str) -> String {
         let d = std::env::temp_dir().join(format!("xenonet-mcp-doctor-{name}-{}", std::process::id()));

@@ -176,9 +176,9 @@ struct Load {
 #[async_trait]
 impl cores::SystemStats for Load {
     async fn read(&self) -> R<Value> {
-        let mut r = xenonet_app::system_stats::demo_reading(now_ms());
+        let mut r = xenonet_os::stats::demo_reading(now_ms());
         r["cpu"]["threads"] = json!(self.threads);
-        r["hardware"] = xenonet_app::system_stats::hardware_of(&r);
+        r["hardware"] = xenonet_os::stats::hardware_of(&r);
         Ok(r)
     }
 }

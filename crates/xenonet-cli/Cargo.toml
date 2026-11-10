@@ -15,6 +15,9 @@ name = "xenonet"
 path = "src/main.rs"
 
 [dependencies]
+async-trait.workspace = true
+xenonet-console.workspace = true
+xenonet-demo.workspace = true
 # The refusals' gzipped context, and the package xenonet setup makes.
 flate2.workspace = true
 # The demo's ids and randomness, as crypto.randomUUID and Math.random.
@@ -39,7 +42,6 @@ xenonet-service.workspace = true
 xenonet-api.workspace = true
 xenonet-os.workspace = true
 # The cores the commands call, run natively (src/cores).
-xenonet-app.workspace = true
 xenonet-assistant.workspace = true
 xenonet-components.workspace = true
 xenonet-engine.workspace = true

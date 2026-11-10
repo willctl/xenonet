@@ -1,18 +1,15 @@
-//! What a remote actor reads and how (core/assistant/source.js,
-//! projection.js, service.js, fixtures.js, audit.js; crates/xenonet-assistant;
-//! core/actors/remote-presence.js): the view of XenoNet's own state, the six
-//! read-only operations with their checks, paging, shape, size and the
-//! four-at-a-time limit (the Rust's, each answer a task), the grant's
+//! What a remote actor reads and how (crates/xenonet-assistant): the view
+//! of XenoNet's own state, the six read-only operations with their checks,
+//! paging, shape, size and the four-at-a-time limit, the grant's
 //! standing and rate, the audit of every read, and what a read says of its
 //! actor on the map. The made-up reads (a grant you haven't verified, and
 //! the pairing's preview) are the fixtures'.
 
 use super::connections::Remote;
-use crate::fx::{self, now_ms, Locked, Perform};
+use crate::fx::{self, now_ms, Locked};
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{json, Map, Value};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use xenonet_actors::adapters::{ADAPTERS, TRANSPORTS};
@@ -21,8 +18,9 @@ use xenonet_actors::remote_presence::{self, RemotePresence};
 use xenonet_api::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, State, R};
 use xenonet_api::wire::Emitter;
 use xenonet_assistant::cursors::Cursors;
-use xenonet_assistant::service::{self, Config, Inflight, LIMITS};
+use xenonet_assistant::service::{self, Config, Inflight, ReadHost, LIMITS};
 use xenonet_assistant::{audit, fixtures, projection, source};
+use xenonet_os::error::Failure;
 use xenonet_schema::typed;
 
 pub const RESULT_SCHEMA: &str = "xenonet.assistant.result.v1";
@@ -97,7 +95,7 @@ fn result_ok(envelope: &Value) -> bool {
 }
 
 fn key() -> Vec<u8> {
-    xenonet_app::fsx::random_hex(32).into_bytes()
+    xenonet_os::files::random_hex(32).into_bytes()
 }
 
 /// What answering a read needs of the world: the view, an actor, a
@@ -108,9 +106,6 @@ enum World {
     Fixture,
 }
 
-/// One answer, as a task (service.answer) whose requests are answered
-/// here: its envelope and what it read, or its refusal (`{ refused, code,
-/// reason }`) or what it threw.
 /// One read to answer: its operation and tool, its arguments, the grant's
 /// policy and the request's id.
 struct Asked {
@@ -121,43 +116,76 @@ struct Asked {
     request_id: Value,
 }
 
+/// What an answer reads of the world, on the thread the answers run on;
+/// a session's stats are read on the service's runtime.
+struct Here {
+    world: World,
+    rt: tokio::runtime::Handle,
+}
+
+fn failure(e: CoreError) -> Failure {
+    Failure::msg(e.message)
+}
+
+#[async_trait(?Send)]
+impl ReadHost for Here {
+    async fn now(&self) -> f64 {
+        now_ms()
+    }
+    async fn cursor_now(&self) -> f64 {
+        now_ms()
+    }
+    async fn view(&self) -> Result<Value, Failure> {
+        match &self.world {
+            World::Real(r) => r.view().map_err(failure),
+            World::Fixture => Ok(fixtures::fixture_view(now_ms())),
+        }
+    }
+    async fn actor(&self, id: &Value) -> Result<Value, Failure> {
+        Ok(match &self.world {
+            World::Real(r) => r.actor(id),
+            World::Fixture => Value::Null,
+        })
+    }
+    async fn stats(&self, id: &str) -> Result<Value, Failure> {
+        match &self.world {
+            World::Real(r) => {
+                let (state, id) = (r.state.clone(), id.to_string());
+                let read = self.rt.spawn(async move { state.session_stats(&id).await.map(|s| s.unwrap_or(Value::Null)).map_err(failure) });
+                read.await.unwrap_or_else(|e| Err(Failure::msg(format!("a request failed: {e}"))))
+            }
+            World::Fixture => Ok(fixtures::fixture_stats(id)),
+        }
+    }
+    async fn id_key(&self) -> Result<Vec<u8>, Failure> {
+        match &self.world {
+            World::Real(r) => {
+                let k = r.remote.as_ref().map(|c| c.id_key()).transpose().map_err(failure)?.unwrap_or(Value::Null);
+                Ok(xenonet_text::text::display(&k).into_bytes())
+            }
+            World::Fixture => Ok(b"fixture".to_vec()),
+        }
+    }
+    async fn check(&self, _tool: &str, envelope: &Value) -> Result<bool, Failure> {
+        Ok(result_ok(envelope))
+    }
+}
+
+/// One answer: its envelope and what it read, or its refusal (`{ refused,
+/// code, reason }`) or what it failed with.
 async fn answer(world: World, version: String, cursor_key: Vec<u8>, a: Asked) -> Result<Value, Value> {
     let Asked { op, tool, args, policy, request_id } = a;
-    let w = world.clone();
-    let perform: Perform = Arc::new(move |q: Value| {
-        let w = w.clone();
-        Box::pin(async move {
-            let op = q.get("op").and_then(Value::as_str).unwrap_or("");
-            match (op, &w) {
-                ("now" | "cursorNow", _) => Ok(xenonet_text::json::number(now_ms())),
-                ("check", _) => Ok(json!(result_ok(q.get("envelope").unwrap_or(&Value::Null)))),
-                ("view", World::Fixture) => Ok(fixtures::fixture_view(now_ms())),
-                ("actor", World::Fixture) => Ok(Value::Null),
-                ("stats", World::Fixture) => Ok(fixtures::fixture_stats(&q.get("id").map(xenonet_text::text::display).unwrap_or_default())),
-                ("idKey", World::Fixture) => Ok(json!("fixture".as_bytes())),
-                ("view", World::Real(r)) => r.view().map_err(|e| fx::error(e.message, None)),
-                ("actor", World::Real(r)) => Ok(r.actor(&q["id"])),
-                ("stats", World::Real(r)) => {
-                    let id = q.get("id").map(xenonet_text::text::display).unwrap_or_default();
-                    r.state.session_stats(&id).await.map(|s| s.unwrap_or(Value::Null)).map_err(|e| fx::error(e.message, None))
-                }
-                ("idKey", World::Real(r)) => {
-                    let k = r.remote.as_ref().map(|c| c.id_key()).transpose().map_err(|e| fx::error(e.message, None))?.unwrap_or(Value::Null);
-                    Ok(json!(xenonet_text::text::display(&k).as_bytes()))
-                }
-                (other, _) => Err(fx::error(format!("no such request: {other}"), None)),
-            }
-        })
-    });
-    fx::drive(
-        move |io| async move {
-            let cfg = Rc::new(config(&version));
-            let cursors = Rc::new(Cursors::new(Some(cursor_key)));
-            service::answer(io, cfg, cursors, op, tool, args, policy, request_id).await
-        },
-        perform,
-    )
-    .await
+    let rt = tokio::runtime::Handle::current();
+    let done = fx::local(move || async move {
+        let (cfg, cursors) = (config(&version), Cursors::new(Some(cursor_key)));
+        service::answer(&Here { world, rt }, &cfg, &cursors, &op, &tool, &args, &policy, &request_id).await
+    })
+    .await;
+    match done {
+        Some(Ok(v)) => Ok(v),
+        Some(Err(f)) => Err(f.to_value()),
+        None => Err(fx::error("a read stopped before it was done", None)),
+    }
 }
 
 /// What a read refused for: its code, and the log's reason.

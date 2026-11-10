@@ -1,5 +1,5 @@
 //! Opening things (core/open.js) and the xenonet command on your PATH
-//! (core/command.js), crates/xenonet-app's open.rs and command.rs: the
+//! (core/command.js), xenonet-adapter's open.rs and xenonet-components' command.rs: the
 //! URLs and the script are the Rust's, the programs they start run here.
 
 use crate::fx::{self, platform};
@@ -25,21 +25,21 @@ fn start((cmd, args): (String, Vec<String>)) {
 
 impl Opener for Open {
     fn url_for(&self, node: &Value, action: &str) -> R<Option<String>> {
-        Ok(xenonet_app::open::url_for(&pick(node), action).and_then(|v| v.as_str().map(str::to_string)))
+        Ok(xenonet_adapter::open::url_for(&pick(node), action).and_then(|v| v.as_str().map(str::to_string)))
     }
 
     fn handoff_url(&self, target: &str, folder: &Value, brief: &str) -> R<String> {
         let folder = xenonet_text::text::truthy(Some(folder)).then(|| xenonet_text::text::display(folder));
-        xenonet_app::open::handoff_url(target, folder.as_deref(), brief).ok_or_else(|| CoreError::status(400, "bad handoff"))
+        xenonet_adapter::open::handoff_url(target, folder.as_deref(), brief).ok_or_else(|| CoreError::status(400, "bad handoff"))
     }
 
     fn launch(&self, target: &str) -> R<()> {
-        start(xenonet_app::open::launch_command(target, platform()));
+        start(xenonet_os::open::launch_command(target, platform()));
         Ok(())
     }
 
     fn reveal(&self, file: &str) -> R<()> {
-        start(xenonet_app::open::reveal_command(file, platform()));
+        start(xenonet_os::open::reveal_command(file, platform()));
         Ok(())
     }
 }
@@ -56,7 +56,7 @@ impl XenonetCommand {
     }
 
     fn dir(&self) -> String {
-        xenonet_app::command::command_dir(&self.home, platform(), std::env::var("LOCALAPPDATA").ok().as_deref())
+        xenonet_components::command::command_dir(&self.home, platform(), std::env::var("LOCALAPPDATA").ok().as_deref())
     }
 }
 
@@ -66,13 +66,13 @@ impl Default for XenonetCommand {
     }
 }
 
-fn state_json(st: xenonet_app::command::State) -> Value {
+fn state_json(st: xenonet_components::command::State) -> Value {
     json!({ "file": st.file, "installed": st.installed, "ours": st.ours, "runs": st.runs, "broken": st.broken, "onPath": st.on_path })
 }
 
 impl Command for XenonetCommand {
     fn state(&self) -> R<Value> {
-        Ok(state_json(xenonet_app::command::command_state(Some(&self.dir()), std::env::var("PATH").ok().as_deref(), platform())))
+        Ok(state_json(xenonet_components::command::command_state(Some(&self.dir()), std::env::var("PATH").ok().as_deref(), platform())))
     }
 
     /// A script that runs the xenonet binary (fx::xenonet_bin: installed
@@ -80,7 +80,9 @@ impl Command for XenonetCommand {
     /// entry and runtime, has no part in it.
     fn install(&self, _entry: &str, _runtime: Option<&str>) -> R<Value> {
         let path = std::env::var("PATH").ok();
-        xenonet_app::command::install_command(&self.dir(), &fx::xenonet_bin(&self.home), false, path.as_deref(), platform()).map(state_json).map_err(|e| CoreError::new(e.message))
+        xenonet_components::command::install_command(&self.dir(), &fx::xenonet_bin(&self.home), false, path.as_deref(), platform())
+            .map(state_json)
+            .map_err(|e| CoreError::new(e.message))
     }
 }
 
@@ -90,9 +92,11 @@ mod tests {
 
     #[test]
     fn urls_for_what_the_node_offers() {
+        // The apps' openers are their adapters'.
+        xenonet_platforms::install();
         let o = Open;
         let node = json!({ "kind": "project", "path": "/w/atlas", "title": "never read" });
-        assert_eq!(o.url_for(&node, "open-folder").unwrap().is_some(), xenonet_app::open::url_for(&pick(&node), "open-folder").is_some());
+        assert_eq!(o.url_for(&node, "open-folder").unwrap().is_some(), xenonet_adapter::open::url_for(&pick(&node), "open-folder").is_some());
         assert_eq!(o.url_for(&node, "no-such-action").unwrap(), None);
         assert!(o.handoff_url("claude", &json!("/w/atlas"), "go on").unwrap().starts_with("claude://"));
     }

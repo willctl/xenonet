@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-os"
-description = "The machine XenoNet runs on: files, paths, processes, locks, the error log, its own folders, the home folder, platform and random ids, fetch() and a program's output lines."
+description = "The machine XenoNet runs on: files, paths, processes, locks, the error log, its own folders, the home folder, platform and random ids, fetch(), a program's output lines, the programs that open things, the system panel's numbers, and why something failed."
 version.workspace = true
 edition.workspace = true
 # reqwest and tokio, as the service (Rust 1.88+).

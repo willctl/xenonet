@@ -427,6 +427,6 @@ mod tests {
         c.remove(&mut m).unwrap();
         let left: Value = serde_json::from_str(&m.files[&cf.settings_file]).unwrap();
         assert_eq!(left, json!({}));
-        assert!(m.files.contains_key(&format!("{}.before-xenonet", cf.settings_file)), "a copy of the file as it was");
+        assert!(m.files.contains_key(format!("{}.before-xenonet", cf.settings_file)), "a copy of the file as it was");
     }
 }

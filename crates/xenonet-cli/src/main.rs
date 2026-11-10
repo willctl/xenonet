@@ -139,7 +139,7 @@ fn log_error(fail: &Fail, argv: &[String]) {
 /// `xenonet serve`: the service, with each core the binary's own driver
 /// for it (crates/xenonet-wire-*): the demo's world first, which moves the
 /// folders the rest use, then the map, the engine and actors, then the
-/// app's parts, each given the settings it reads.
+/// app's parts and the console's, each given the settings it reads.
 fn serve(args: &[String]) -> i32 {
     xenonet_service::serve::run_with(
         args,
@@ -170,6 +170,7 @@ fn serve(args: &[String]) -> i32 {
                 runs_bin: config.runs_bin.clone(),
                 permission_hold_ms: config.permission_hold_ms,
                 launcher_exec: config.launcher_exec.clone(),
+                made_up: xenonet_wire_engine::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
             };
             // The engine's world, which the network's link plugs into once
             // the service has made it.
@@ -194,6 +195,7 @@ fn serve(args: &[String]) -> i32 {
                 world: config.world.clone(),
             };
             xenonet_wire_app::wire(&mut cores, &app, env);
+            xenonet_console::wire(&mut cores, config.demo, config.port, &config.state_dir, env);
             // The terminal drawer's shells live in the service.
             cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());
             cores

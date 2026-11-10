@@ -34,23 +34,13 @@ pub struct CheckRow {
 }
 
 /// Why a check ended without a verdict: an error of its own, or the error
-/// its last ask of the machine threw, passed on as it was.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Stop {
-    Error { message: String, code: Option<String> },
-    Rethrow,
-}
-
-impl Stop {
-    pub fn msg(message: impl Into<String>) -> Self {
-        Stop::Error { message: message.into(), code: None }
-    }
-}
+/// an ask of the machine ended with, passed on as it was.
+pub type Stop = xenonet_os::error::Failure;
 
 /// What a check may ask of the machine it runs on, and the facts the
 /// doctor gathered before it ran (its home folder, platform, paths, what
 /// a running XenoNet says of connect and of its sources). A check runs
-/// where the doctor's tasks do, on one thread, so nothing here is Send.
+/// where the doctor's checks do, on one thread, so nothing here is Send.
 #[async_trait(?Send)]
 pub trait CheckCtx {
     /// The doctor's facts, as its JSON object.

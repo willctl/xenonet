@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-components"
-description = "XenoNet's separately updated components: their packages and checksums, installing and switching them, the service's local connection, and the installed console."
+description = "XenoNet's install: the xenonet command, the service's settings, XenoNet Dev's instances and the version; and the separately updated components: their packages and checksums, installing and switching them, the service's local connection, and the installed console."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,12 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 flate2.workspace = true
 getrandom.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-xenonet-app.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
 

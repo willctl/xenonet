@@ -1,10 +1,12 @@
 //! Codex's adapter (docs/design/direction.md, "Adapters and surfaces"):
-//! its processes, its ways in for live delivery, and its connect through
-//! Codex's hooks and MCP settings.
+//! its processes, its ways in for live delivery, its connect through
+//! Codex's hooks and MCP settings, and what opens its threads in the
+//! ChatGPT app.
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
 use xenonet_adapter::delivery::{Start, Ways};
+use xenonet_adapter::open::Opener;
 use xenonet_adapter::processes::Rules;
 use xenonet_adapter::reader::{Lister, ListerEnv, Tailed};
 use xenonet_adapter::{Check, Platform};
@@ -40,6 +42,7 @@ fn start(s: &Start<'_>) -> (String, Vec<String>) {
 
 pub mod checks;
 pub mod connect;
+mod open;
 pub mod reader;
 
 /// The adapter.
@@ -63,6 +66,10 @@ impl Platform for Adapter {
 
     fn processes(&self) -> Option<Rules> {
         Some(Rules { program, script: Some(script), ..Rules::NONE })
+    }
+
+    fn opener(&self) -> Option<Opener> {
+        Some(open::opener())
     }
 
     fn delivery(&self) -> Option<Ways> {

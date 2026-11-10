@@ -74,14 +74,17 @@ crates/
                            vocabulary; no IO, no vendor
   xenonet-os               the machine: files, paths.js and Node's path rules, processes started with no window,
                            locks that outlive a panic, the error log (log.js), XenoNet's own folders (dirs.js's
-                           appDir), private-file.js, the home folder, platform, random ids, fetch, output lines
+                           appDir), private-file.js, the home folder, platform, random ids, fetch, output lines,
+                           the programs that open a URL or a file, the clock in its own zone, the system panel's
+                           numbers, and Failure: why something didn't give its value, as its callers read it
   xenonet-adapter          the Platform trait, the registry of apps (apps.json) and actor products, and what an
                            adapter brings: process rules, ways in for delivery, connect (Machine, Format), checks;
-                           where the desktop apps keep their folders and binaries (dirs.js), and the formats
-                           several crates read (apply_patch texts, OpenCode ids)
+                           where the desktop apps keep their folders and binaries (dirs.js), the formats
+                           several crates read (apply_patch texts, OpenCode ids), and the actions a node offers
+                           with the URLs they open (open, through each adapter's Opener)
 adapters/
   claude-code, codex,      one crate per platform, each implementing Platform: its process rules, its ways in,
-  grok-build, opencode     its connect format and its doctor checks
+  grok-build, opencode     its connect format and its doctor checks; claude-code's and codex's openers
   all                      xenonet-platforms: every adapter, installed at the binary's start
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
@@ -89,11 +92,18 @@ adapters/
                            claude-usage.js, openrouter-usage.js, reported-runs.js, xenolith.js, refusals/
   xenonet-state            graph.js, state.js, search.js, digest.js, stats.js, identities.js, projects.js,
                            workspace.js, classify.js, store.js, statefile.js, migrate.js, redact.js, frames.js,
-                           rename.js, export-labels.js, needs-you.js
+                           rename.js, export-labels.js, needs-you.js, decide.js (the project picks' and the
+                           decision model's checks)
   xenonet-engine           engine/, delivery/, procs.js
   xenonet-actors           actors/, assistant/, secret-store.js, integrations/
   xenonet-hosts            hosts/
-  xenonet-doctor           doctor/, diagnostics.js
+  xenonet-components       components/, with config.js, instances.js, version.js and command.js: the install
+  xenonet-integrations     integrations/, mcp-info.js, mcp-discovery.js
+  xenonet-doctor           doctor/, diagnostics.js; its checks read the machine through DoctorHost
+  xenonet-demo             demo.js, demo-root.js: the made-up world, used only by the composition root and the
+                           map's demo driver
+  xenonet-console          what only the console has: themes.js and themefiles.js, environments.js, spotify.js,
+                           control.js and script.js, and the Themes and Spotify cores the composition root wires
   xenonet-api              the typed local protocol: the core traits, the event sink and stream, and the client
                            of a running XenoNet (client.js, over HTTP/1.1 to 127.0.0.1)
   xenonet-server           server/: the API, static files, upstream, the actor gateway and its tunnels,
@@ -204,13 +214,14 @@ What crosses the boundary, and how:
   In the binary the same code runs against the system itself.
 - **Events.** A block's EventEmitter stays in its twin. Rust returns each
   state change, and the twin emits it.
-- **Tasks.** An async module whose awaits nest deeply (control.js's
-  launch, a host's relay) is ported as async Rust: wherever the JS awaited
-  a fetch, a child process, a timer or a function it was given, the Rust
-  awaits `io.ask(request)` (`crates/xenonet-app/src/task.rs`). The twin
-  steps the task, does what it asks with the fakes or Node's own calls,
-  and hands back each reply (`crates/xenonet-node/js/task.js`). The logic
-  ports await for await, and in the binary tokio does the asking.
+- **Hosts.** An async module whose awaits nest deeply (control.js's
+  launch, a service update, the doctor's checks) is async Rust over a
+  typed host trait: wherever the JS awaited a fetch, a child process, a
+  timer or a function it was given, the Rust awaits a method of its host
+  (`DoctorHost`, the components' `Lifecycle`, `Starter`, `Desktop` and
+  `Feed`, the console's `DevHost`, the assistant's `ReadHost`, the
+  integrations' `ShellHost` and `ReviewHost`). The binary implements each
+  against the system; the tests, with fakes.
 
 A call into the addon costs about 20 ns. A call back into JS costs more,
 about 300 ns with a string to pass, which matters only where a twin calls
@@ -675,14 +686,14 @@ place. This table follows it.
 | `core/delivery/selector.js`, `usage.js`, `policy.js`, `reach.js` | `xenonet-engine/src/delivery/` (the policy's clock, limits and files through the twin) | `delivery-scopes`, `delivery-wake`, `delivery-router`, `delivery-routes`, `delivery-opencode`, `engine` pass |
 | `core/delivery/channel.js`, `tmux.js`, `resume.js`, `runs.js`, `setup.js`, `opencode.js` | `xenonet-engine/src/delivery/` (polls, processes, commands, files and HTTP through the twins; a run's process, log and records in the JS runner, given Rust's decisions) | `delivery-router`, `delivery-wake`, `delivery-runs`, `delivery-opencode`, `doctor` pass |
 | `core/delivery/router.js` | `xenonet-engine/src/delivery/router.rs` (each record's JS object and the timers in the twin) | `delivery-router`, `delivery-wake`, `delivery-opencode`, `delivery-scopes`, `server` pass |
-| `core/config.js`, `core/instances.js`, `core/version.js`, `core/environments.js`, `core/demo-root.js` | `xenonet-app/src/config.rs`, `instances.rs`, `version.rs`, `environments.rs`, `demo_root.rs`, with Node's `path` (both flavors) in `nodepath.rs` | `environments`, `demo-root`, `control`, `golden`, `state`, `store`, `workspace` pass |
-| `core/command.js`, `core/open.js`, `core/decide.js` | `xenonet-app/src/command.rs`, `open.rs`, `decide.rs` (the credential store and OpenRouter are awaited by the twin) | `cli`, `doctor`, `windows-command`, `open`, `numbat`, `decide`, `costs`, `integrations` pass |
-| `core/mcp-info.js`, `core/mcp-discovery.js`, `core/diagnostics.js` | `xenonet-app/src/mcp_info.rs` (a state machine the twin drives), `mcp_discovery.rs` (the MCP client stays the SDK's for now), `diagnostics.rs` | `mcp-info`, `log` pass |
-| `core/script.js`, `core/spotify.js` | `xenonet-app/src/script.rs`, `spotify.rs`: each step, and each Spotify call, a state machine the twin drives | `script`, `spotify` pass |
-| `core/control.js` | `xenonet-app/src/control.rs`, on `task.rs`: async Rust whose awaits the twin answers (fetch, the system's processes, spawning) | `control-client`, `control` pass |
-| `core/system-stats.js`, `core/themes.js`, `core/themefiles.js` | `xenonet-app/src/system_stats.rs`, `themes.rs` (the page keeps `core/themes.js`; `themes.json` is made from it, and a test checks the two agree), `themefiles.rs` | `system-stats`, `themes`, `theme-gallery`, `theme-menu`, `actors-layer`, `schema-output` pass |
-| `core/demo.js` | `xenonet-app/src/demo.rs`; randomness, ids and the clock asked of JS, so the seeded world is the same | `golden`, `actors`, `actor-spend`, `state`, `root`, `hosts-merge` pass |
-| `core/components/` (protocol, console-policy, rpc, runtime, packages, install, updates, console) | `xenonet-components`: packages checked against their release's hash and size, then unpacked by its own tar reader behind the same filter; service updates and recovery as tasks | `components`, `component-packages`, `component-activation`, `component-install`, `component-download`, `component-auth`, `component-console`, `launcher`, `assistant-endpoint`, `control-client` pass |
+| `core/config.js`, `core/instances.js`, `core/version.js`, `core/environments.js`, `core/demo-root.js` | `xenonet-components/src/config.rs`, `instances.rs`, `version.rs`, `xenonet-console/src/environments.rs`, `xenonet-demo/src/root.rs`, with Node's `path` (both flavors) in `xenonet-os`'s `nodepath.rs` | `environments`, `demo-root`, `control`, `golden`, `state`, `store`, `workspace` pass |
+| `core/command.js`, `core/open.js`, `core/decide.js` | `xenonet-components/src/command.rs`; `xenonet-adapter/src/open.rs` with each app's opener in its adapter, and `xenonet-os/src/open.rs`; `xenonet-state/src/decide.rs` | `cli`, `doctor`, `windows-command`, `open`, `numbat`, `decide`, `costs`, `integrations` pass |
+| `core/mcp-info.js`, `core/mcp-discovery.js`, `core/diagnostics.js` | `xenonet-integrations/src/mcp_info.rs` (a state machine its driver steps), `mcp_discovery.rs`, `xenonet-doctor/src/diagnostics.rs` | `mcp-info`, `log` pass |
+| `core/script.js`, `core/spotify.js` | `xenonet-console/src/script.rs`, `spotify.rs`: each step, and each Spotify call, a state machine its driver steps | `script`, `spotify` pass |
+| `core/control.js` | `xenonet-console/src/control.rs`: async Rust over its `DevHost` (fetch, the system's processes, spawning) | `control-client`, `control` pass |
+| `core/system-stats.js`, `core/themes.js`, `core/themefiles.js` | `xenonet-os/src/stats.rs`, `xenonet-console/src/themes.rs` (the page keeps `core/themes.js`; `themes.json` is made from it, and a test checks the two agree), `themefiles.rs` | `system-stats`, `themes`, `theme-gallery`, `theme-menu`, `actors-layer`, `schema-output` pass |
+| `core/demo.js` | `xenonet-demo/src/world.rs`; randomness, ids and the clock asked of its `Around`, so the seeded world is the same | `golden`, `actors`, `actor-spend`, `state`, `root`, `hosts-merge` pass |
+| `core/components/` (protocol, console-policy, rpc, runtime, packages, install, updates, console) | `xenonet-components`: packages checked against their release's hash and size, then unpacked by its own tar reader behind the same filter; service updates and recovery as async Rust over its host traits (`host.rs`) | `components`, `component-packages`, `component-activation`, `component-install`, `component-download`, `component-auth`, `component-console`, `launcher`, `assistant-endpoint`, `control-client` pass |
 | `core/hosts/` (frames, aliases, cache, doctor, declared, config, link, merge, hub, relay) | `xenonet-hosts`: a link's state as effects the twin performs, every id from a host qualified and every value copied as its schema declares, the relay's scrubbing, shaping and allowlist; zod's checks and graph.js's activityOf through callbacks | `hosts-cli`, `hosts-config`, `hosts-doctor`, `hosts-frames`, `hosts-hub`, `hosts-ids`, `hosts-link`, `hosts-merge`, `hosts-relay`, `hosts-routes`, `hosts-server` pass |
 | `core/assistant/` (protocol, audit, cursors, credentials, fixtures, projection, source, service, client, tunnel-client, tunnels) | `xenonet-assistant`: grant credentials written private in the JS's order, signed page tokens (HMAC-SHA256 on sha2), what a grant sees and its labels cleaned, the six reads as tasks, the adapter's retries and standing, tunnels' runs and the client's own environment; zod's checks, the grants' standing and rate, and the processes stay in the twins | `assistant-connections`, `assistant-endpoint`, `assistant-routes`, `assistant-service`, `assistant-source`, `assistant-tunnels`, `schemas` pass |
 | `core/integrations/` (common, routing, pi, reviews, openshell, index) | `xenonet-integrations`: credentials redacted, tickets and records, the routing answer's check, Pi metadata, the frozen text snapshot (O_NOFOLLOW reads, stamps before and after), what a sandbox returns validated as untrusted, the patch, and OpenShell's argv and flows as tasks; JevRouter, git and the in-sandbox collector (JS run inside the sandbox) stay in the twins | `integrations`, `integrations-routes`, `sandbox-reviews` pass |

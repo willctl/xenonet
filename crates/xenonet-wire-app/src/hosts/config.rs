@@ -75,7 +75,7 @@ impl DocHooks<Value> for Hooks<'_> {
 
 // The host's key: made once, at random.
 fn new_key() -> String {
-    xenonet_app::fsx::random_hex(16)
+    xenonet_os::files::random_hex(16)
 }
 
 impl HostsStore {

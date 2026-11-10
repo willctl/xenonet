@@ -13,6 +13,7 @@ use crate::check::{Check, CheckRow};
 use crate::connect::{Format, Shared};
 use crate::delivery::Ways;
 use crate::observe::Observer;
+use crate::open::Opener;
 use crate::processes::Rules;
 use crate::reader::{Lister, ListerEnv, Native, Tailed};
 use serde_json::Value;
@@ -105,6 +106,12 @@ pub trait Platform: Send + Sync {
     /// Its lister of its sessions and transcripts, new for each map, for
     /// an app whose sessions the map lists.
     fn lister(&self, _env: &ListerEnv<'_>) -> Option<Box<dyn Lister>> {
+        None
+    }
+
+    /// What opens its sessions and projects in its desktop app, for an app
+    /// the registry gives `open`.
+    fn opener(&self) -> Option<Opener> {
         None
     }
 }

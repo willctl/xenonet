@@ -1,5 +1,5 @@
-//! core/demo.js's runtime: the made-up world xenonet-app's demo.rs writes
-//! (created before anything reads the folders), its sessions as the
+//! The demo's runtime: the made-up world xenonet-demo writes (created
+//! before anything reads the folders), its sessions as the
 //! adapters would list them, and the driver that keeps its live sessions
 //! writing, one step every 2.2 seconds. What the demo asks of the rest of
 //! XenoNet (git, the identities' ids, the clock) is answered here.
@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::sync::Mutex;
 use tokio::sync::OnceCell;
 use xenonet_api::cores::{CoreError, R};
-use xenonet_app::demo::{repo_steps, Around, Demo};
+use xenonet_demo::{repo_steps, Around, Demo};
 use xenonet_state::identities;
 
 /// What the demo asks of the rest of XenoNet.
@@ -144,6 +144,17 @@ impl DemoWorld {
             })
             .await;
     }
+}
+
+/// What the demo's map says in place of a model's narration.
+pub fn narration() -> &'static str {
+    xenonet_demo::NARRATION
+}
+
+/// The demo's picks for an outline of its projects folder, in place of a
+/// model's.
+pub fn picks(outline: &Value) -> Value {
+    xenonet_demo::demo_picks(outline)
 }
 
 /// The Demo core: createWorld, for the service.

@@ -247,7 +247,10 @@ mod tests {
         assert_eq!(foreign["apps"][0]["changes"][0]["state"], json!("different"));
         assert_eq!(
             foreign["apps"][0]["notes"][1],
-            json!("~/.grok/config.toml names mcp_servers.xenonet in a form XenoNet doesn't edit. Take it out, or write it as a [mcp_servers.xenonet] table, and connect again.")
+            json!(format!(
+                "{} names mcp_servers.xenonet in a form XenoNet doesn't edit. Take it out, or write it as a [mcp_servers.xenonet] table, and connect again.",
+                xenonet_os::nodepath::join(&["~", ".grok", "config.toml"])
+            ))
         );
         assert!(c.apply(&mut m, &["grok".to_string()]).unwrap_err().message.contains("doesn't edit"));
     }

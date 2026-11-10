@@ -110,7 +110,7 @@ mod tests {
         let mut m = MergeSchemas(&s);
         use merge::Schemas;
         // The demo's reading, as this machine's own /api/system answers it.
-        let demo = xenonet_app::system_stats::demo_reading(1_800_000_000_000.0);
+        let demo = xenonet_os::stats::demo_reading(1_800_000_000_000.0);
         assert_eq!(m.clean(merge::Kind::System, &demo).as_ref(), Some(&demo), "it fits, with nothing it doesn't declare");
         let mut sent = demo.clone();
         sent["cpu"]["script"] = json!("<b>x</b>");

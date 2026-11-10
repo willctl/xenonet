@@ -1,5 +1,5 @@
 //! core/demo.js's createWorld for the command: the demo's made-up world,
-//! in a temporary folder (xenonet-app's demo), with what it asks of the
+//! in a temporary folder (xenonet-demo), with what it asks of the
 //! rest of XenoNet answered here: whether git runs, the accounts' ids, the
 //! local time, and randomness and the clock.
 
@@ -7,7 +7,7 @@ use crate::clock;
 use crate::config::Config;
 use crate::out::Fail;
 use crate::sys;
-use xenonet_app::demo::{Around, Demo};
+use xenonet_demo::{Around, Demo};
 
 struct Here;
 

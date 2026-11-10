@@ -1,4 +1,4 @@
-//! The decision model (core/decide.js, crates/xenonet-app/src/decide.rs)
+//! The decision model (core/decide.js, crates/xenonet-state/src/decide.rs)
 //! and what OpenRouter's key has spent (core/openrouter-usage.js,
 //! crates/xenonet-sources/src/openrouter_usage.rs). One key serves both,
 //! kept in your credential store, the demo's in memory; it goes only into
@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{CoreError, Decider, Kind, OpenRouter, R};
 use xenonet_api::wire::Emitter;
-use xenonet_app::decide;
 use xenonet_sources::openrouter_usage as usage;
+use xenonet_state::decide;
 
 fn decision_error(e: decide::DecisionError) -> CoreError {
     CoreError::of(Kind::Decision, e.status, e.code, e.message)
