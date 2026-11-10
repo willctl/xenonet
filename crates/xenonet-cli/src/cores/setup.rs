@@ -2,12 +2,12 @@
 //! needs on this machine (xenonet-engine's delivery setup), with the
 //! commands, files and OpenCode servers it reads done here.
 
-use super::native::{fs_call, local_get, now, run, text};
+use super::native::{local_get, now, run};
 use crate::out::Fail;
 use crate::sys;
 use serde_json::Value;
 use xenonet_engine::delivery::{opencode, setup, Files};
-use xenonet_engine::sql::Arg;
+use xenonet_wire_engine::fs;
 
 /// How long a session listens after its turns (LISTEN_SECONDS).
 const LISTEN_SECONDS: f64 = 300.0;
@@ -31,25 +31,21 @@ impl setup::Host for Setup {
     }
 }
 
-fn fs(r: Result<Arg, xenonet_engine::peer::Thrown>) -> Result<(), String> {
-    r.map(|_| ()).map_err(|t| t.message)
-}
-
 impl Files for Setup {
     fn read_file(&mut self, path: &str) -> Result<String, String> {
-        fs_call("readFileSync", &[Arg::text(path), Arg::text("utf8")]).map(|a| text(&a)).map_err(|t| t.message)
+        fs::read_text(path).map_err(|e| e.message)
     }
     fn mkdir_all(&mut self, dir: &str) -> Result<(), String> {
-        fs(fs_call("mkdirSync", &[Arg::text(dir), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]))
+        fs::mkdir_all(dir).map_err(|e| e.message)
     }
     fn write_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
-        fs(fs_call("writeFileSync", &[Arg::text(path), Arg::text(body), mode.map_or(Arg::Undef, |m| Arg::Obj(vec![("mode".into(), Arg::Num(f64::from(m)))]))]))
+        fs::write_file(path, body.as_bytes(), mode).map_err(|e| e.message)
     }
     fn append_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
-        fs(fs_call("appendFileSync", &[Arg::text(path), Arg::text(body), mode.map_or(Arg::Undef, |m| Arg::Obj(vec![("mode".into(), Arg::Num(f64::from(m)))]))]))
+        fs::append_file(path, body.as_bytes(), mode).map_err(|e| e.message)
     }
     fn rename(&mut self, from: &str, to: &str) -> Result<(), String> {
-        fs(fs_call("renameSync", &[Arg::text(from), Arg::text(to)]))
+        fs::rename(from, to).map_err(|e| e.message)
     }
 }
 
@@ -69,16 +65,13 @@ impl opencode::System for OpenCode {
         }
     }
     fn read_file(&mut self, path: &str) -> Option<String> {
-        fs_call("readFileSync", &[Arg::text(path), Arg::text("utf8")]).ok().map(|a| text(&a))
+        fs::read_text(path).ok()
     }
     fn readdir(&mut self, path: &str) -> Option<Vec<String>> {
-        match fs_call("readdirSync", &[Arg::text(path)]).ok()? {
-            Arg::List(l) => Some(l.iter().map(text).collect()),
-            _ => None,
-        }
+        fs::read_dir(path).ok()
     }
     fn readlink(&mut self, path: &str) -> Option<String> {
-        fs_call("readlinkSync", &[Arg::text(path)]).ok().map(|a| text(&a))
+        fs::read_link(path).ok()
     }
 }
 

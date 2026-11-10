@@ -32,6 +32,7 @@ xenonet-blocks = { path = "../crates/xenonet-blocks" }
 xenonet-components = { path = "../crates/xenonet-components" }
 xenonet-engine = { path = "../crates/xenonet-engine" }
 xenonet-hosts = { path = "../crates/xenonet-hosts" }
+xenonet-model = { path = "../crates/xenonet-model" }
 xenonet-integrations = { path = "../crates/xenonet-integrations" }
 xenonet-net = { path = "../crates/xenonet-net" }
 xenonet-schema = { path = "../crates/xenonet-schema" }
@@ -136,13 +137,6 @@ bench = false
 [[bin]]
 name = "misc"
 path = "fuzz_targets/misc.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "jsregex"
-path = "fuzz_targets/jsregex.rs"
 test = false
 doc = false
 bench = false

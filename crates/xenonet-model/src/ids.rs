@@ -40,6 +40,12 @@ impl fmt::Display for NotAnId {
 
 impl std::error::Error for NotAnId {}
 
+// The error for a string read as an id that isn't one: what it is, and
+// the pattern an id matches.
+fn refused<E: serde::de::Error>(s: &str, pattern: &str) -> E {
+    E::invalid_value(serde::de::Unexpected::Str(crate::schema::shown(s)), &format!("a string matching {pattern}").as_str())
+}
+
 macro_rules! string_id {
     ($(#[$m:meta])* $name:ident, $pattern:expr, $check:expr) => {
         $(#[$m])*
@@ -82,7 +88,7 @@ macro_rules! string_id {
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
                 let s = <Cow<'de, str>>::deserialize(d)?;
-                Self::parse(&s).map_err(serde::de::Error::custom)
+                Self::parse(&s).map_err(|_| refused(&s, $pattern))
             }
         }
 
@@ -297,7 +303,7 @@ macro_rules! text_serde {
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
                 let s = <Cow<'de, str>>::deserialize(d)?;
-                Self::parse(&s).map_err(serde::de::Error::custom)
+                Self::parse(&s).map_err(|_| refused(&s, $pattern))
             }
         }
         impl FromStr for $name {

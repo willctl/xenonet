@@ -1,11 +1,10 @@
-//! The binary's drivers for the engine, delivery and actors (core/engine,
-//! core/delivery, core/actors, core/procs.js): their collaborators, timers,
-//! processes and waits, natively, where the twins' JS answers the same
-//! Rust cores during the port.
+//! The binary's drivers for the engine, delivery and actors: the runtime
+//! their cores run in (`runtime`), the hosts each core asks of it, and the
+//! timers, processes and waits they need.
 
-// The cores' collaborators answer with xenonet-engine's Thrown, which is
-// passed on as it is: what a JS call threw, kept whole.
-#![expect(clippy::result_large_err, reason = "the cores' Calls return xenonet-engine's Thrown, passed on whole")]
+// The service's traits answer with its CoreError, and a command that
+// failed with what it wrote (exec::Failed): both are passed on whole.
+#![expect(clippy::result_large_err, reason = "the service's traits return its CoreError, and a failed command keeps its output")]
 
 pub mod actors;
 pub mod asks;
@@ -13,8 +12,7 @@ pub mod connect;
 pub mod delivery;
 pub mod engine;
 pub mod exec;
-pub mod fsx;
-pub mod js;
+pub mod fs;
 pub mod map;
 pub mod network;
 pub mod observers;
@@ -22,17 +20,17 @@ pub mod procs;
 pub mod registration;
 pub mod reports;
 pub mod runs;
+pub mod runtime;
 pub mod spend;
 pub mod starts;
 pub mod store;
 pub mod tokens;
 pub mod verify;
 pub mod wakes;
-pub mod world;
 
+use runtime::{Runtime, Setup};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
-use world::{Setup, World};
 use xenonet_engine::store::{EngineStore, Shared};
 use xenonet_service::config::Config;
 use xenonet_service::cores::Cores;
@@ -65,14 +63,13 @@ fn demo_folders(cores: &Cores, config: &mut Config) {
     }
 }
 
-/// Puts this area's cores in place of the pending ones, as server/index.js
-/// makes them: the engine's store, the process checks, the engine and
-/// delivery, and with actors on, the actors, their registration, wakes,
-/// reports and observers (never in the demo). The world it made, for the
-/// network's link to plug into (`network::plug`), or None when
-/// engine.sqlite couldn't be opened.
-pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<World>> {
-    let w = world(cores, config, env)?;
+/// Puts this area's cores in place of the pending ones: the engine's
+/// store, the process checks, the engine and delivery, and with actors on,
+/// the actors, their registration, wakes, reports and observers (never in
+/// the demo). The runtime it made, for the network's link to plug into
+/// (`network::plug`), or None when engine.sqlite couldn't be opened.
+pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Runtime>> {
+    let w = runtime(cores, config, env)?;
     cores.engine_store = Arc::new(store::Store(w.store.clone()));
     cores.verify = w.checks.clone();
     cores.engine = Arc::new(engine::EngineDriver(w.clone()));
@@ -94,20 +91,19 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc
     Some(w)
 }
 
-/// The area's parts, made as server/index.js's top level makes them, on
-/// the map the cores already have; None when engine.sqlite can't be
-/// opened, and the engine's routes stay pending.
-pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<World>> {
+/// The runtime, made on the map the cores already have; None when
+/// engine.sqlite can't be opened, and the engine's routes stay pending.
+pub fn runtime(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Runtime>> {
     // The adapters the engine's checks and delivery ask for, in place
     // before anything asks: the binary installs them at start, and a test
-    // that makes a world here gets them too.
+    // that makes a runtime here gets them too.
     xenonet_platforms::install();
     demo_folders(cores, config);
     let file = Path::new(&config.state_dir).join("engine.sqlite");
     if let Err(e) = std::fs::create_dir_all(&config.state_dir) {
         log_later(env, "error", "engine.store", format!("the state folder can't be made: {e}"));
     }
-    let store = match EngineStore::open(&file.to_string_lossy(), js::now_ms()) {
+    let store = match EngineStore::open(&file.to_string_lossy(), xenonet_base::time::now_ms()) {
         Ok(s) => Shared::new(s),
         Err(e) => {
             log_later(env, "error", "engine.store", format!("engine.sqlite can't be opened: {e}"));
@@ -154,7 +150,7 @@ pub fn world(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Wo
     let registration = actors.as_ref().map(|_| registration::RegSide::new(store.clone(), &config.home));
     let wakes = actors.as_ref().map(|_| wakes::WakeSide::new(store.clone(), config.demo, &env.version));
     let state_dir = Path::new(&config.state_dir);
-    let w = Arc::new(World {
+    let w = Arc::new(Runtime {
         setup,
         env: env.clone(),
         rt: tokio::runtime::Handle::current(),

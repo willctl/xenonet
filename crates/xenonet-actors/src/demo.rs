@@ -187,8 +187,8 @@ impl Demo {
             actors.report(id, &Value::Object(o), host)?;
         }
         for t in step.get("targets").and_then(Value::as_array).cloned().unwrap_or_default() {
-            let node = xenonet_engine::js::template(t.get(0));
-            let relation = xenonet_engine::js::template(t.get(1));
+            let node = xenonet_base::text::template(t.get(0));
+            let relation = xenonet_base::text::template(t.get(1));
             actors.target(id, &node, &relation, when)?;
         }
         if let Some(e) = step.get("event") {

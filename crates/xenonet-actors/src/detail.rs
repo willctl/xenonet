@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::sync::OnceLock;
 use xenonet_base::log::js_slice;
 use xenonet_base::text::js_trim;
-use xenonet_engine::js::{template, truthy};
+use xenonet_base::text::{template, truthy};
 
 /// The agent apps by their id.
 pub fn app_name(app: &str) -> Option<&'static str> {

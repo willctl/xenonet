@@ -3,19 +3,27 @@
 //! (`assistant/error/v1`). Both are strict: nothing the contract doesn't
 //! name.
 
-use crate::num::Uint;
-use crate::schema::{Document, Nullable, Opt, Text};
+use crate::num::{Ranged, Uint};
+use crate::schema::{Bounded, Document, Nullable, Opt, Text};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-// A string of one shape: an id, a token, a time.
+// A string of one shape: an id, a token, a time, refused as it's read
+// when it doesn't match.
 macro_rules! patterned {
     ($(#[$m:meta])* $name:ident = $pattern:literal $(, $key:literal : $value:literal)*) => {
         $(#[$m])*
-        #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize)]
         #[serde(transparent)]
         pub struct $name(pub String);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                static PATTERN: crate::schema::Pattern = crate::schema::Pattern::new($pattern);
+                PATTERN.read(d).map($name)
+            }
+        }
 
         impl From<String> for $name {
             fn from(s: String) -> Self {
@@ -121,6 +129,7 @@ pub struct Error {
     pub request_id: Nullable<RequestId>,
     pub code: ErrorCode,
     /// A fixed sentence for each code: never a source's error, a path or a stack
+    #[schemars(extend("x-bounds-last" = false))]
     pub message: Text<0, 200>,
     pub retryable: bool,
     pub retry_after_ms: Nullable<Uint>,
@@ -327,8 +336,7 @@ pub struct Project {
 #[serde(deny_unknown_fields)]
 pub struct Projects {
     pub window_start: DateTime,
-    #[schemars(length(max = 50))]
-    pub projects: Vec<Project>,
+    pub projects: Bounded<Project, 0, 50>,
     pub next_cursor: Nullable<Cursor>,
 }
 
@@ -378,8 +386,7 @@ pub struct Session {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Sessions {
-    #[schemars(length(max = 50))]
-    pub sessions: Vec<Session>,
+    pub sessions: Bounded<Session, 0, 50>,
     pub next_cursor: Nullable<Cursor>,
     pub window_start: DateTime,
 }
@@ -413,8 +420,7 @@ pub enum ReasonCode {
 pub struct AttentionItem {
     pub attention_id: AttentionId,
     pub kind: AttentionKind,
-    #[schemars(length(min = 1, max = 2))]
-    pub session_ids: Vec<SessionId>,
+    pub session_ids: Bounded<SessionId, 1, 2>,
     pub project_id: ProjectId,
     pub first_observed_at: Nullable<DateTime>,
     pub last_observed_at: Nullable<DateTime>,
@@ -429,8 +435,7 @@ pub struct AttentionItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Attention {
-    #[schemars(length(max = 50))]
-    pub items: Vec<AttentionItem>,
+    pub items: Bounded<AttentionItem, 0, 50>,
     pub next_cursor: Nullable<Cursor>,
 }
 
@@ -531,8 +536,7 @@ pub struct Actor {
     pub presence_basis: PresenceBasis,
     pub connection_state: ConnectionState,
     pub account_link_state: AccountLinkState,
-    #[schemars(length(max = 16))]
-    pub relations: Vec<ActorRelation>,
+    pub relations: Bounded<ActorRelation, 0, 16>,
     /// Whether messages reach it; false for every remote actor in this version
     pub reachable: bool,
 }
@@ -542,8 +546,7 @@ pub struct Actor {
 #[serde(deny_unknown_fields)]
 pub struct Actors {
     pub self_actor_id: ActorId,
-    #[schemars(length(max = 50))]
-    pub actors: Vec<Actor>,
+    pub actors: Bounded<Actor, 0, 50>,
     pub next_cursor: Nullable<Cursor>,
 }
 
@@ -566,16 +569,14 @@ pub struct Answer {
     pub schema: ResultTag,
     pub request_id: RequestId,
     pub device_id: DeviceId,
-    #[schemars(range(min = 1))]
-    pub grant_revision: Uint,
+    pub grant_revision: Ranged<1>,
     /// When what this says was last observed; never refreshed for a cached answer
     pub observed_at: Nullable<DateTime>,
     /// When this answer was sent, which is not when it was observed
     pub served_at: DateTime,
     pub freshness: Freshness,
     pub partial: bool,
-    #[schemars(length(max = 16))]
-    pub warnings: Vec<Warning>,
+    pub warnings: Bounded<Warning, 0, 16>,
     pub data: Data,
 }
 

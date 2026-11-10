@@ -38,6 +38,8 @@ xenonet-components.workspace = true
 xenonet-doctor.workspace = true
 xenonet-engine.workspace = true
 xenonet-schema.workspace = true
+# state.json read as its type, for the doctor.
+xenonet-model.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
 # The assistant's service, over made-up data for --fixture.

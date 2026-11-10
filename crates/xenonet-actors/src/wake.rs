@@ -32,6 +32,7 @@
 //! the credential store, and the registry (whether an actor reports itself,
 //! and its name).
 
+use crate::re;
 use crate::secret_store::SECRET;
 use crate::store::{self, Tx};
 use serde_json::{json, Map, Value};
@@ -42,8 +43,7 @@ use xenonet_base::json::{number, stringify};
 use xenonet_base::jsstr::{base64, base64_bytes};
 use xenonet_base::sync::Locked;
 use xenonet_base::text::js_string;
-use xenonet_engine::js::truthy;
-use xenonet_engine::re;
+use xenonet_base::text::truthy;
 
 pub const WAKE_KINDS: [&str; 3] = ["webhook", "notify", "none"];
 const META: &str = "wakes";
@@ -670,7 +670,7 @@ impl Wakes {
             Some(u) => unbracket(&u.hostname).to_string(),
             None => return Err(store::Error::new("Invalid URL").into()),
         };
-        if !re!(r"^[\d.]+$").is_match(&bare) && !bare.contains(':') && h.resolve(&bare).iter().any(|a| link_local(a)) {
+        if !re!(r"^[0-9.]+$").is_match(&bare) && !bare.contains(':') && h.resolve(&bare).iter().any(|a| link_local(a)) {
             return Ok(out(false, None, Some(format!("{host} is a link-local address, which a wake never goes to")), Some("a link-local address".into())));
         }
         // A time that can't be written fails as a RangeError does, inside
@@ -712,7 +712,7 @@ impl Wakes {
             }
         });
         if !ok {
-            Self::log(h, &format!("{id}: {}", xenonet_engine::js::template(out.get("why"))));
+            Self::log(h, &format!("{id}: {}", xenonet_base::text::template(out.get("why"))));
         }
         out
     }

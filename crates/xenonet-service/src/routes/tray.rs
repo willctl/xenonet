@@ -252,28 +252,16 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Answer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xenonet_schema::check::{compile, Checker, Data};
-
-    const STATUS: &str = include_str!("../../../../schemas/tray/status/v1.json");
-    const EVENT: &str = include_str!("../../../../schemas/tray/event/v1.json");
-
-    fn checker() -> Checker {
-        let docs: Vec<Value> = [STATUS, EVENT].iter().map(|t| xenonet_base::json::parse(t).unwrap()).collect();
-        compile(&docs).unwrap()
-    }
-
-    fn fits(c: &Checker, root: usize, v: &Value) -> bool {
-        c.check(c.root(root), &Data::from(v), true).ok()
-    }
+    use xenonet_model::tray::{Event, Status};
+    use xenonet_schema::typed::fits;
 
     #[test]
     fn the_fixtures_the_tray_reads_are_what_the_schemas_say() {
-        let c = checker();
         let status = xenonet_base::json::parse(include_str!("../../../../test/fixtures/tray/status.json")).unwrap();
         let event = xenonet_base::json::parse(include_str!("../../../../test/fixtures/tray/event.json")).unwrap();
-        assert!(fits(&c, 0, &status));
-        assert!(fits(&c, 1, &event));
-        assert!(!fits(&c, 0, &event), "an alert isn't a status");
+        assert!(fits::<Status>(&status));
+        assert!(fits::<Event>(&event));
+        assert!(!fits::<Status>(&event), "an alert isn't a status");
     }
 
     #[test]
@@ -297,7 +285,7 @@ mod tests {
             "gateway": { "on": false, "state": "off", "url": null, "problem": null },
             "network": { "name": null, "host": null, "link": "off", "hosts": 0, "online": 0 }, "at": 1,
         });
-        assert!(fits(&checker(), 0, &status));
+        assert!(fits::<Status>(&status));
     }
 
     #[test]
@@ -311,7 +299,7 @@ mod tests {
         assert!(said[0].starts_with("event: alert\ndata: {") && said[0].contains("\"kind\":\"needs-you\"") && said[0].contains("\"key\":\"c\""), "{}", said[0]);
         assert!(said[1].contains("\"kind\":\"resolved\"") && said[1].contains("\"key\":\"a\""), "{}", said[1]);
         let event = xenonet_base::json::parse(said[0].trim_start_matches("event: alert\ndata: ").trim()).unwrap();
-        assert!(fits(&checker(), 1, &event));
+        assert!(fits::<Event>(&event));
     }
 
     #[test]

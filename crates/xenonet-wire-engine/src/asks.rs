@@ -17,14 +17,15 @@
 //! The answer is what Claude Code takes from a permission prompt tool:
 //! `{"behavior":"allow","updatedInput":…}` or `{"behavior":"deny","message":…}`.
 
-use crate::js::{now_ms, Locked};
 use crate::network::{clip, ms, net, send};
-use crate::world::World;
+use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 use xenonet_base::network::{Kind as FrameKind, To};
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 use xenonet_service::glue::From;
 
 /// The reserved target an ask crosses to window hosts as.
@@ -153,7 +154,7 @@ fn answer_json(decision: &str, input: &Value, why: &str) -> Value {
     }
 }
 
-fn hold_ms(w: &World) -> f64 {
+fn hold_ms(w: &Runtime) -> f64 {
     w.setup.permission_hold_ms.unwrap_or(HOLD_MS)
 }
 
@@ -169,7 +170,7 @@ fn minutes(ms_: f64) -> String {
 /// The run XenoNet started or resumed that `me` is: its record's id, or
 /// None for a session that isn't one (a fork's copy counts by the session
 /// it came from).
-fn run_of(w: &World, me: &str) -> Option<String> {
+fn run_of(w: &Runtime, me: &str) -> Option<String> {
     let runner = &w.router.resume.as_ref()?.runner;
     let parent = crate::starts::forks(w).into_iter().find(|(child, _)| child == me).map(|(_, p)| format!("fork:{p}"));
     runner.list().into_iter().rev().find(|r| r.end.is_none() && (r.key == me || parent.as_deref() == Some(r.key.as_str()))).map(|r| r.id)
@@ -179,7 +180,7 @@ fn run_of(w: &World, me: &str) -> Option<String> {
 /// which its watcher reads every 400 ms: while a fork runs, a caller that
 /// isn't known yet is looked for again, for three seconds at most, before
 /// it's refused.
-fn run_of_soon(w: &World, me: &str) -> Option<String> {
+fn run_of_soon(w: &Runtime, me: &str) -> Option<String> {
     let end = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(run) = run_of(w, me) {
@@ -194,11 +195,11 @@ fn run_of_soon(w: &World, me: &str) -> Option<String> {
 }
 
 /// The other machines that are window hosts: where an ask shows.
-fn window_hosts(w: &World) -> Vec<String> {
+fn window_hosts(w: &Runtime) -> Vec<String> {
     net(w).hosts().into_iter().filter(|h| h.window).map(|h| h.id).collect()
 }
 
-fn to_windows(w: &World, me: &str, body: &Value) {
+fn to_windows(w: &Runtime, me: &str, body: &Value) {
     if net(w).me().is_none() {
         return;
     }
@@ -227,7 +228,7 @@ fn to_windows(w: &World, me: &str, body: &Value) {
 /// `tool_use_id`, as Claude Code passes them. Held until you answer, or the
 /// hold runs out; then the answer Claude Code takes. Err(403) for a caller
 /// that isn't a run XenoNet started.
-pub fn ask(w: &World, me: &str, title: Option<&str>, body: &Value) -> Result<Value, (u16, String)> {
+pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value) -> Result<Value, (u16, String)> {
     let Some(run) = run_of_soon(w, me) else {
         return Err((403, "only the sessions XenoNet runs ask through this tool; anyone else asks in its own app".into()));
     };
@@ -306,7 +307,7 @@ pub fn ask(w: &World, me: &str, title: Option<&str>, body: &Value) -> Result<Val
 /// Your Allow or Deny for an ask here (`by` says from where: this
 /// machine's console, or another window host's). False for one that isn't
 /// waiting.
-pub fn decide(w: &World, id: &str, decision: &str, by: &str) -> bool {
+pub fn decide(w: &Runtime, id: &str, decision: &str, by: &str) -> bool {
     let side = &w.asks;
     let mut held = side.here.locked();
     let Some(h) = held.get_mut(id).filter(|h| h.answer.is_none()) else { return false };
@@ -320,7 +321,7 @@ pub fn decide(w: &World, id: &str, decision: &str, by: &str) -> bool {
 /// `operator` frame that answers it. That ask stays until the frame is on
 /// its way (`answer_sent`), so a send that fails leaves it to answer again.
 /// Err for one that isn't waiting.
-pub fn answer(w: &World, id: &str, decision: &str) -> Result<Option<String>, String> {
+pub fn answer(w: &Runtime, id: &str, decision: &str) -> Result<Option<String>, String> {
     if !matches!(decision, "allow" | "deny") {
         return Err("the answer is allow or deny".into());
     }
@@ -336,7 +337,7 @@ pub fn answer(w: &World, id: &str, decision: &str) -> Result<Option<String>, Str
 
 /// Another machine's ask, once your answer's frame is on its way there:
 /// taken off this console.
-pub fn answer_sent(w: &World, id: &str, decision: &str) {
+pub fn answer_sent(w: &Runtime, id: &str, decision: &str) {
     let had = {
         let mut there = w.asks.there.locked();
         let n = there.len();
@@ -350,7 +351,7 @@ pub fn answer_sent(w: &World, id: &str, decision: &str) {
 
 /// An ask from another machine (`message_in` routes the target here), or
 /// its end.
-pub fn ask_in(w: &World, from: &str, body: &str) {
+pub fn ask_in(w: &Runtime, from: &str, body: &str) {
     let Ok(v) = serde_json::from_str::<Value>(body) else { return };
     let side = &w.asks;
     match v.get("op").and_then(Value::as_str) {
@@ -386,7 +387,7 @@ pub fn ask_in(w: &World, from: &str, body: &str) {
 /// Your Allow or Deny from another window host's console: an `operator`
 /// frame's `answer` (`{ ask, decision }`), which the network checked came
 /// from a window host, strongly, fresh.
-pub fn answer_in(w: &World, from: &str, args: &Value) {
+pub fn answer_in(w: &Runtime, from: &str, args: &Value) {
     let (Some(id), Some(decision)) = (args.get("ask").and_then(Value::as_str), args.get("decision").and_then(Value::as_str)) else { return };
     if !matches!(decision, "allow" | "deny") {
         return;
@@ -397,7 +398,7 @@ pub fn answer_in(w: &World, from: &str, args: &Value) {
 }
 
 /// Every ask waiting: this machine's and the others', for the console.
-pub fn list(w: &World) -> Value {
+pub fn list(w: &Runtime) -> Value {
     let here = net(w).me().map(|m| m.host);
     let side = &w.asks;
     let now = now_ms();

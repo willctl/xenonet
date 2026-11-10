@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-schema"
-description = "XenoNet's schemas: vendor data read leniently against them, and what drifts."
+description = "XenoNet's schemas: vendor data read leniently against them, what drifts, and XenoNet's own documents read as their types."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,10 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
 serde_json.workspace = true
+# The path to the first problem a document has against its type.
+serde_path_to_error.workspace = true
 xenonet-base.workspace = true
 
 [lints]

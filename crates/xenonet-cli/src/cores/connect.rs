@@ -3,46 +3,42 @@
 //! and taken out again (xenonet-adapter's connect, through the adapters
 //! in place), with the files and the CLIs it reads done here.
 
-use super::native::{fs_call, on_path_existing, run, text};
+use super::native::{on_path_existing, run};
 use crate::out::Fail;
 use crate::sys;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect, Instance, Machine, Options, Problem};
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
+use xenonet_base::fs::FsError;
+use xenonet_wire_engine::fs;
 
 /// This computer: its files, and the agents' CLIs on PATH.
 struct Here;
 
-fn problem(t: Thrown) -> Problem {
-    Problem { message: t.message, code: t.code.as_deref().filter(|v| !v.is_null()).map(xenonet_base::text::js_string) }
-}
-
-fn fs(method: &str, args: Vec<Arg>) -> Result<Arg, Problem> {
-    fs_call(method, &args).map_err(problem)
+fn problem(e: FsError) -> Problem {
+    Problem { message: e.message, code: e.code }
 }
 
 impl Machine for Here {
     fn read_text(&mut self, file: &str) -> Result<String, Problem> {
-        fs("readFileSync", vec![Arg::text(file), Arg::text("utf8")]).map(|a| text(&a))
+        fs::read_text(file).map_err(problem)
     }
     fn write_text(&mut self, file: &str, text: &str) -> Result<(), Problem> {
-        fs("writeFileSync", vec![Arg::text(file), Arg::text(text)]).map(drop)
+        fs::write_file(file, text.as_bytes(), None).map_err(problem)
     }
     fn exists(&mut self, path: &str) -> bool {
-        fs("existsSync", vec![Arg::text(path)]).is_ok_and(|a| a.truthy())
+        fs::exists(path)
     }
     fn make_dir(&mut self, dir: &str) -> Result<(), Problem> {
-        fs("mkdirSync", vec![Arg::text(dir), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).map(drop)
+        fs::mkdir_all(dir).map_err(problem)
     }
     fn copy(&mut self, from: &str, to: &str) -> Result<(), Problem> {
-        fs("copyFileSync", vec![Arg::text(from), Arg::text(to)]).map(drop)
+        fs::copy(from, to).map_err(problem)
     }
     fn rename(&mut self, from: &str, to: &str) -> Result<(), Problem> {
-        fs("renameSync", vec![Arg::text(from), Arg::text(to)]).map(drop)
+        fs::rename(from, to).map_err(problem)
     }
     fn remove(&mut self, file: &str) -> Result<(), Problem> {
-        fs("rmSync", vec![Arg::text(file), Arg::Obj(vec![("force".into(), Arg::Bool(true))])]).map(drop)
+        fs::remove_if_there(file).map_err(problem)
     }
     fn cli(&mut self, name: &str) -> Option<String> {
         on_path_existing(name)

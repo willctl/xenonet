@@ -11,13 +11,15 @@
 //! without it.
 
 use crate::exec::{self, Spec};
-use crate::js::{now_ms, number, Locked};
-use crate::world::World;
+use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Condvar, Mutex};
 use xenonet_actors::token_file::HEAVY_FOLDERS;
 use xenonet_actors::tokens::{hash_token, TOKEN_GREP};
+use xenonet_base::json::number;
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 
 pub const TOKEN_SCAN_MS: f64 = 24.0 * 3600e3;
 const BUDGET_MS: f64 = 5000.0;
@@ -125,7 +127,7 @@ pub fn find_token_files(repos: &[String], issued: Option<&HashSet<String>>) -> V
         }
     });
     let (checked, mut files) = found.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-    files.sort_by(|a, b| xenonet_engine::js::utf16_cmp(a, b));
+    files.sort_by(|a, b| xenonet_base::sort::utf16_cmp(a, b));
     let mut out = json!({ "checked": checked, "files": files });
     if issued.is_none() {
         out["unchecked"] = json!(true);
@@ -144,7 +146,7 @@ pub struct TokenScan {
 
 impl TokenScan {
     /// { at, repos, checked, files }.
-    pub fn look(&self, w: &World, fresh: bool) -> Value {
+    pub fn look(&self, w: &Runtime, fresh: bool) -> Value {
         {
             let mut busy = self.looking.locked();
             if *busy {
@@ -168,7 +170,7 @@ impl TokenScan {
             .nodes()
             .unwrap_or_default()
             .iter()
-            .filter(|n| n["kind"] == "project" && crate::js::truthy_json(&n["git"]) && n["path"].as_str().is_some_and(|p| !p.is_empty()))
+            .filter(|n| n["kind"] == "project" && xenonet_base::text::truthy(Some(&n["git"])) && n["path"].as_str().is_some_and(|p| !p.is_empty()))
             .filter_map(|n| n["path"].as_str().map(str::to_string))
             .collect();
         // The tokens that work now, read for each look: None when the

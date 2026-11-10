@@ -10,8 +10,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use xenonet_adapter::apps::is_session_id;
 use xenonet_base::text::{js_number, js_string, truthy};
-use xenonet_engine::delivery::opencode::from_open_code_id;
-use xenonet_engine::sql::Arg;
+use xenonet_engine::delivery::opencode::xenonet_id;
 
 pub struct DeliveryRoutes {
     pub policy: Arc<dyn Policy>,
@@ -24,8 +23,13 @@ pub struct DeliveryRoutes {
 // session's own ses_… becomes XenoNet's opencode:ses-…, and anything that
 // isn't a session's id is refused rather than kept where nothing would
 // ever read it.
+// XenoNet's id for a session named as the request names it, null as none.
+fn open_code_id(text: &Value) -> String {
+    xenonet_id(&if text.is_null() { String::new() } else { js_string(text) })
+}
+
 fn session_of(text: &Value) -> Result<String, CoreError> {
-    let id = from_open_code_id(&Arg::from(text));
+    let id = open_code_id(text);
     if !is_session_id(&id) {
         let shown = if text.is_null() { String::new() } else { js_string(text) };
         return Err(CoreError::new(format!("\"{shown}\" isn't a session's id: give its id, such as opencode:ses-… or claude:…, which xenonet agents --json lists")));
@@ -106,7 +110,7 @@ impl DeliveryRoutes {
             // Taking consent back works for any key, so one kept before this
             // check can still go.
             "/api/delivery/disallow" => {
-                self.policy.disallow(&from_open_code_id(&Arg::from(b.get("session").unwrap_or(&Value::Null))))?;
+                self.policy.disallow(&open_code_id(b.get("session").unwrap_or(&Value::Null)))?;
                 ans(json!({ "ok": true }))
             }
             _ => Ok(Reply::error(404, "not found")),

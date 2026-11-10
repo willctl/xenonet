@@ -38,7 +38,7 @@ use xenonet_adapter::products::{product_of, PRODUCTS, WHY_NOT};
 use xenonet_base::ids::YOU;
 use xenonet_base::paths::tilde;
 use xenonet_base::text::js_string;
-use xenonet_engine::js::truthy;
+use xenonet_base::text::truthy;
 
 pub const REQUEST_MS: f64 = 10.0 * 60e3;
 /// A token unused for 30 days stops working.
@@ -196,7 +196,7 @@ fn col(r: &Value, k: &str) -> Value {
 
 /// `${v}` of a field, undefined when it isn't there.
 fn template(v: Option<&Value>) -> String {
-    xenonet_engine::js::template(v)
+    xenonet_base::text::template(v)
 }
 
 // Number(v), as a value compares with a number.

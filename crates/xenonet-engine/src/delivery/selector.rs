@@ -16,8 +16,6 @@
 //! before still means what it meant.
 
 use super::template;
-use crate::sql::Arg;
-use crate::store::js_text;
 use serde_json::{json, Value};
 use xenonet_base::text::is_js_space;
 
@@ -133,23 +131,6 @@ pub fn format_selector(sel: Option<&Selector>) -> String {
 
 pub fn within(inner: &Selector, outer: Option<&Selector>) -> bool {
     inner.within(outer)
-}
-
-// The engine (engine.rs) and the service's routes still hand selectors
-// and facts over as Arg: these go when the engine is typed.
-
-pub fn parse_selector(text: &Arg) -> Option<Selector> {
-    Selector::parse(&if text.is_nullish() { String::new() } else { js_text(text) })
-}
-
-pub fn is_selector(text: &Arg) -> bool {
-    Selector::is_selector(&js_text(text))
-}
-
-/// The facts a selector is matched against, for one session or actor:
-/// { app, project, projectNames[], identities[], machine, status, actors[] }.
-pub fn matches(sel: Option<&Selector>, f: &Arg) -> bool {
-    sel.is_some_and(|s| s.matches(&f.to_json()))
 }
 
 #[cfg(test)]

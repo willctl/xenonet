@@ -9,14 +9,16 @@
 //! engine's pins and the map, a product's database, and the vendor
 //! readers.
 
-use crate::js::{arg, now_ms, Locked};
-use crate::world::World;
+use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_adapter::observe::{self, Actors, Census, Db, Fail, Files, Observer, ObserverHost, Pins, Procs, SpawnsState, Stat, Vendor, LOOK_MS};
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 use xenonet_blocks::lifecycle::Lifecycle;
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
+use xenonet_engine::engine::Thrown;
+use xenonet_engine::sql::{self, Bind};
+use xenonet_engine::store::row_json;
 use xenonet_schema::drift::{DriftLog, Piece};
 use xenonet_schema::vendor::{Checked, Readers};
 
@@ -37,7 +39,7 @@ pub struct Observers {
 
 /// The observers the adapters bring, made once the world is, and their
 /// blocks listed with the map's.
-pub fn make(w: &std::sync::Arc<World>) {
+pub fn make(w: &std::sync::Arc<Runtime>) {
     let list: Vec<One> = xenonet_adapter::platforms()
         .observers()
         .into_iter()
@@ -61,13 +63,13 @@ pub fn make(w: &std::sync::Arc<World>) {
 }
 
 fn fail(t: Thrown) -> Fail {
-    Fail { message: t.message, code: t.code.as_deref().and_then(Value::as_str).map(str::to_string) }
+    Fail { message: t.message, code: t.code }
 }
 
 /// What the world answers an observer, or the reports' matcher (which has
 /// no observer of its own: it's always on, and keeps no block).
 struct Host<'a> {
-    w: &'a World,
+    w: &'a Runtime,
     o: Option<&'a One>,
 }
 
@@ -107,7 +109,7 @@ impl Host<'_> {
         list.iter().map(|w| json!({ "actor": w.actor, "app": w.app, "place": w.place, "own": w.own.iter().map(|p| xenonet_base::json::number(*p)).collect::<Vec<_>>(), "at": xenonet_base::json::number(w.at), "until": xenonet_base::json::number(w.until) })).collect()
     }
 
-    fn sql(e: xenonet_engine::sql::SqlError) -> Fail {
+    fn sql(e: sql::SqlError) -> Fail {
         fail(Thrown::from(e))
     }
 }
@@ -149,10 +151,10 @@ impl Procs for Host<'_> {
         self.w.sys.procs.supported
     }
     fn census(&self) -> observe::Result<Census> {
-        crate::procs::census(&self.w.sys).map(|v| Census::of(&v)).map_err(fail)
+        crate::procs::census(&self.w.sys).map(|v| Census::of(&v)).map_err(Fail::new)
     }
     fn alive(&self, pid: f64) -> bool {
-        crate::js::alive(pid)
+        crate::runtime::alive(pid)
     }
     fn cwds(&self, l: &[f64]) -> Vec<(f64, String)> {
         let sys = &self.w.sys;
@@ -226,7 +228,7 @@ impl Actors for Host<'_> {
     }
     fn has_ref(&self, id: &str, r: &str, since: f64) -> observe::Result<bool> {
         let Some(a) = self.actors() else { return Err(Fail::new("no actors")) };
-        a.store.with(|s| s.has_actor_ref(Arg::text(id), Arg::text(r), Arg::Num(since))).map_err(Host::sql)
+        a.store.with(|s| s.has_actor_ref(id, r, since)).map_err(Host::sql)
     }
     fn expire_waiting(&self, at: f64) -> Vec<Value> {
         self.actors().map_or_else(Vec::new, |a| Host::waiting_json(&a.reg.locked().expire_waiting(at)))
@@ -249,10 +251,10 @@ impl Pins for Host<'_> {
         Ok(self.w.map.sessions().map_err(fail)?.as_array().cloned().unwrap_or_default())
     }
     fn pins(&self, session: &str) -> observe::Result<Vec<Value>> {
-        self.w.store.with(|s| s.pins(Arg::text(session))).map(|rows| rows.iter().map(|r| crate::js::row(r).to_json()).collect()).map_err(Host::sql)
+        self.w.store.with(|s| s.pins(session)).map(|rows| rows.iter().map(row_json).collect()).map_err(Host::sql)
     }
     fn pinned_to(&self, pid: f64) -> observe::Result<Vec<Value>> {
-        self.w.store.with(|s| s.pinned_to(Arg::Num(pid))).map(|rows| rows.iter().map(|r| crate::js::row(r).to_json()).collect()).map_err(Host::sql)
+        self.w.store.with(|s| s.pinned_to(pid)).map(|rows| rows.iter().map(row_json).collect()).map_err(Host::sql)
     }
 }
 
@@ -260,7 +262,7 @@ impl Db for Host<'_> {
     fn open(&self, file: &str) -> observe::Result<()> {
         let Some(o) = self.o else { return Err(Fail::new("no observer")) };
         let c = rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)
-            .map_err(|e| Host::sql(xenonet_engine::sql::SqlError::from(e)))?;
+            .map_err(|e| Host::sql(sql::SqlError::from(e)))?;
         *o.db.locked() = Some(c);
         Ok(())
     }
@@ -268,9 +270,9 @@ impl Db for Host<'_> {
         let Some(o) = self.o else { return Err(Fail::new("no observer")) };
         let db = o.db.locked();
         let Some(c) = db.as_ref() else { return Err(Fail::new("the database isn't open")) };
-        let params: Vec<Arg> = args.iter().map(arg).collect();
-        let rows = xenonet_engine::sql::all(c, sql, &params).map_err(Host::sql)?;
-        Ok(rows.iter().map(|r| crate::js::row(r).to_json()).collect())
+        let params = args.iter().enumerate().map(|(i, v)| Bind::scalar(v).ok_or_else(|| sql::unbindable(i + 1))).collect::<sql::Result<Vec<Bind>>>().map_err(Host::sql)?;
+        let rows = sql::all(c, sql, &params).map_err(Host::sql)?;
+        Ok(rows.iter().map(row_json).collect())
     }
     fn get(&self, sql: &str, args: &[Value]) -> observe::Result<Value> {
         Ok(self.all(sql, args)?.into_iter().next().unwrap_or(Value::Null))
@@ -349,7 +351,7 @@ impl ObserverHost for Host<'_> {
 
 impl Observers {
     /// One observer's look, unless it's off or the map isn't there yet.
-    fn tick(w: &World, o: &One) {
+    fn tick(w: &Runtime, o: &One) {
         let h = Host { w, o: Some(o) };
         if !observe::may_look(&h) {
             return;
@@ -366,7 +368,7 @@ impl Observers {
     }
 
     /// Every observer's look, one after the other, then the waiting reports.
-    fn look(&self, w: &World) {
+    fn look(&self, w: &Runtime) {
         for o in &self.list {
             Self::tick(w, o);
         }
@@ -379,7 +381,7 @@ impl Observers {
     }
 
     /// The polls of the observers that poll, between looks.
-    fn poll(&self, w: &World, ms: f64) {
+    fn poll(&self, w: &Runtime, ms: f64) {
         for o in &self.list {
             if o.obs.poll_ms() != Some(ms) {
                 continue;
@@ -402,7 +404,7 @@ impl Observers {
         }
     }
 
-    fn status(&self, w: &World) -> Value {
+    fn status(&self, w: &Runtime) -> Value {
         Value::Array(
             self.list
                 .iter()
@@ -421,12 +423,12 @@ impl Observers {
 }
 
 /// What each observer reads, for the doctor: none in the demo.
-pub fn status(w: &World) -> Value {
+pub fn status(w: &Runtime) -> Value {
     w.observers.get().map_or_else(|| Value::Array(Vec::new()), |o| o.status(w))
 }
 
 /// The observers' looks and polls, while the service runs.
-pub fn start(w: &World) {
+pub fn start(w: &Runtime) {
     let Some(obs) = w.observers.get() else { return };
     let mut timers = obs.timers.locked();
     if !timers.is_empty() {
@@ -466,7 +468,7 @@ pub fn start(w: &World) {
     }
 }
 
-pub fn stop(w: &World) {
+pub fn stop(w: &Runtime) {
     let Some(obs) = w.observers.get() else { return };
     for t in obs.timers.locked().drain(..) {
         t.abort();
@@ -478,6 +480,6 @@ pub fn stop(w: &World) {
 }
 
 /// An observer's name and what it observes, for a test.
-pub fn names(w: &World) -> Vec<(String, String)> {
+pub fn names(w: &Runtime) -> Vec<(String, String)> {
     w.observers.get().map(|o| o.list.iter().map(|x| (x.obs.name().to_string(), x.obs.product().id.to_string())).collect()).unwrap_or_default()
 }

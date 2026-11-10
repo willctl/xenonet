@@ -29,7 +29,6 @@ use crate::delivery::policy;
 use crate::delivery::selector::{format_selector, Selector};
 use crate::host::{Collaborators, Repo, StatusSet};
 use crate::network::{self, network_host, NetHandle};
-use crate::peer::Thrown;
 use crate::sql::{self, Row};
 use crate::store::row_json;
 use serde_json::{Map, Value};
@@ -41,7 +40,7 @@ use xenonet_base::ids::{parse_actor_id, YOU};
 use xenonet_base::json::number;
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_number, js_trim, truthy};
+use xenonet_base::text::{js_number, js_string, js_trim, truthy};
 
 pub const ACTIVE_MS: f64 = 2.0 * 3600e3;
 const EDIT_HOLD_MS: f64 = 30.0 * 60e3;
@@ -87,6 +86,42 @@ impl From<policy::Fail> for Fail {
 
 pub type Result<T> = std::result::Result<T, Fail>;
 
+/// What a collaborator or the store failed with: its message, and its
+/// code when it gave one (an errno such as ENOENT, a store's
+/// ERR_SQLITE_ERROR), passed on to the caller as it came.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Thrown {
+    pub message: String,
+    pub code: Option<String>,
+}
+
+impl Thrown {
+    pub fn new(message: impl Into<String>) -> Self {
+        Thrown { message: message.into(), code: None }
+    }
+    pub fn coded(message: impl Into<String>, code: impl Into<String>) -> Self {
+        Thrown { message: message.into(), code: Some(code.into()) }
+    }
+}
+
+impl std::fmt::Display for Thrown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<sql::SqlError> for Thrown {
+    fn from(e: sql::SqlError) -> Self {
+        Thrown { message: e.message().to_string(), code: e.code().map(str::to_string) }
+    }
+}
+
+impl From<String> for Thrown {
+    fn from(message: String) -> Self {
+        Thrown::new(message)
+    }
+}
+
 fn err<T>(message: impl Into<String>) -> Result<T> {
     Err(Fail::Error(message.into()))
 }
@@ -111,7 +146,7 @@ fn as_str(v: Option<&Value>) -> Option<&str> {
 
 /// A value as a template literal writes it (undefined for none).
 fn text(v: Option<&Value>) -> String {
-    crate::js::template(v)
+    v.map_or_else(|| "undefined".into(), js_string)
 }
 
 /// `x ?? ""` as text.
@@ -274,19 +309,24 @@ pub fn matches(pattern: &str, file: &str) -> bool {
     if !p.contains('*') {
         return f == p;
     }
-    let mut re = String::new();
-    for ch in p.chars() {
-        if ".+?^${}()|[]".contains(ch) {
-            re.push('\\');
+    // ** (and the / after it) is anything on the line, * anything but a
+    // slash, and every other character itself.
+    let mut re = String::from("^");
+    let mut rest = p.as_str();
+    while let Some(c) = rest.chars().next() {
+        if let Some(after) = rest.strip_prefix("**") {
+            re.push_str(r"[^\n\r\x{2028}\x{2029}]*");
+            rest = after.strip_prefix('/').unwrap_or(after);
+        } else if let Some(after) = rest.strip_prefix('*') {
+            re.push_str("[^/]*");
+            rest = after;
+        } else {
+            re.push_str(&regex::escape(&rest[..c.len_utf8()]));
+            rest = &rest[c.len_utf8()..];
         }
-        re.push(ch);
     }
-    let re = crate::re!(r"\*\*/?").replace_all(&re, "\u{0}").into_owned();
-    let re = re.replace('*', "[^/]*").replace('\u{0}', ".*");
-    match regex::Regex::new(&format!("^{}$", crate::jsre::translate(&re))) {
-        Ok(r) => r.is_match(&f),
-        Err(_) => false,
-    }
+    re.push('$');
+    regex::Regex::new(&re).is_ok_and(|r| r.is_match(&f))
 }
 
 /// The files an edit tool is about to change. Claude Code's Edit, Write,
@@ -1266,7 +1306,7 @@ impl Engine {
             while truthy(Some(&r)) && depth < 50.0 {
                 depth += 1.0;
                 let next = or_null(get(&r, "reply_to"));
-                r = if truthy(Some(&next)) { row(c.store.with(|s| s.message(&next)))? } else { Value::Null };
+                r = if truthy(Some(&next)) { row(c.store.with(|s| s.message(num(Some(&next)))))? } else { Value::Null };
             }
             if let Some(h) = came {
                 depth = depth.max(h + 1.0);
@@ -1387,9 +1427,9 @@ impl Engine {
             return Ok(());
         }
         let since = c.clock.now() - RECENT_MS;
-        for m in rows(c.store.with(|s| s.scoped(&key, since)))? {
+        for m in rows(c.store.with(|s| s.scoped(&text(Some(&key)), since)))? {
             if as_str(get(&m, "sender")) != Some(me) {
-                c.store.with(|s| s.deliver(&m["id"], me))?;
+                c.store.with(|s| s.deliver(num(Some(&m["id"])), me))?;
             }
         }
         Ok(())
@@ -1406,7 +1446,7 @@ impl Engine {
         if !truthy(Some(&m)) || as_str(get(&m, "sender")) == Some(me) {
             return Ok(Value::Null);
         }
-        let sent_to_me = rows(c.store.with(|s| s.deliveries(&m["id"])))?.iter().any(|d| as_str(get(d, "agent")) == Some(me));
+        let sent_to_me = rows(c.store.with(|s| s.deliveries(num(Some(&m["id"])))))?.iter().any(|d| as_str(get(d, "agent")) == Some(me));
         Ok(if sent_to_me { or_null(get(&m, "sender")) } else { Value::Null })
     }
 
@@ -1455,7 +1495,7 @@ impl Engine {
         // In a network, other hosts' agents after this machine's.
         let far = self.remote_agents(c, me)?;
         let lower = to_text.to_lowercase();
-        let words: Vec<&str> = crate::re!(r"\s+").split(&lower).filter(|w| !w.is_empty()).collect();
+        let words: Vec<&str> = crate::re!(r"[\s\x{FEFF}--\x{85}]+").split(&lower).filter(|w| !w.is_empty()).collect();
         let pick = |list: Vec<Value>| -> Vec<Value> {
             let by_id: Vec<Value> = list
                 .iter()
@@ -1570,7 +1610,8 @@ impl Engine {
         let waiting: Vec<Value> = rows(c.store.with(|s| s.unseen(me)))?.into_iter().filter(|m| asked || !self.held(me, m)).collect();
         let ids: Vec<Value> = waiting.iter().map(|m| or_null(get(m, "id"))).collect();
         let now = c.clock.now();
-        c.store.with(|s| s.mark_seen(me, &Value::Array(ids.clone()), now))?;
+        let seen: Vec<f64> = ids.iter().map(|id| num(Some(id))).collect();
+        c.store.with(|s| s.mark_seen(me, &seen, now))?;
         if !waiting.is_empty() {
             c.events.emit("seen", obj(vec![("agent", string(me)), ("ids", Value::Array(ids))]));
         }
@@ -1701,7 +1742,15 @@ impl Engine {
 
     /// Lets claims go: all of `me`'s with null, else the patterns listed.
     pub fn release(&self, c: &Collaborators<'_>, me: &str, paths: &Value) -> Result<Value> {
-        let n = c.store.with(|s| s.release(me, paths))?;
+        // A list of patterns, or a text's characters; anything else falsy
+        // lets them all go.
+        let patterns: Option<Vec<String>> = match paths {
+            p if !truthy(Some(p)) => None,
+            Value::Array(a) => Some(a.iter().map(|p| text(Some(p))).collect()),
+            Value::String(s) => Some(s.chars().map(String::from).collect()),
+            _ => return Err(sql::SqlError::Other("that isn't a list".into()).into()),
+        };
+        let n = c.store.with(|s| s.release(me, patterns.as_deref()))?;
         Ok(obj(vec![("released", number(n))]))
     }
 
@@ -1716,7 +1765,7 @@ impl Engine {
             };
         }
         let now = c.clock.now();
-        c.store.with(|s| s.set_focus(me, clip_text(&t, 200), now))?;
+        c.store.with(|s| s.set_focus(me, &clip_text(&t, 200), now))?;
         let focus = row(c.store.with(|s| s.focus(me)))?;
         Ok(obj(vec![("focus", or_null(get(&focus, "text")))]))
     }
@@ -2230,7 +2279,7 @@ impl Engine {
         }
         let mut messages = Vec::new();
         for m in rows(c.store.with(|s| s.recent(now - 24.0 * 3600e3)))? {
-            let mut to: Vec<Value> = rows(c.store.with(|s| s.deliveries(&m["id"])))?
+            let mut to: Vec<Value> = rows(c.store.with(|s| s.deliveries(num(Some(&m["id"])))))?
                 .iter()
                 .map(|d| obj_some(vec![("id", get(d, "agent").cloned()), ("seen", Some(Value::Bool(truthy(get(d, "seen_at")))))]))
                 .collect();

@@ -38,6 +38,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde = { version = "1", features = ["derive"] }
 schemars = { version = "1", default-features = false, features = ["derive", "std"] }
 xenonet-model = { path = "crates/xenonet-model" }
+# Names the field a document fails at, which serde's own errors don't.
+serde_path_to_error = "0.1"
 xenonet-adapter = { path = "crates/xenonet-adapter" }
 # The adapters (adapters/*): one crate per platform, and all of them.
 xenonet-claude-code = { path = "adapters/claude-code" }

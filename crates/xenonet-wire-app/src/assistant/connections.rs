@@ -17,7 +17,7 @@ use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Ho
 use xenonet_actors::store::{self, Tx};
 use xenonet_assistant::credentials as disk;
 use xenonet_base::text::js_string;
-use xenonet_engine::sql::{Arg, SqlError};
+use xenonet_engine::sql::SqlError;
 use xenonet_engine::store::Shared;
 use xenonet_service::cores::assistant::ConnectionEvents;
 use xenonet_service::cores::{Actors, Connections, EngineStore, State, R};
@@ -64,18 +64,6 @@ impl disk::Private for Private {
     fn readers(&mut self, file: &str) -> Result<Vec<String>, String> {
         let mut run = |f: &str, a: &[&str]| xenonet_base::private_file::run_private(f, a);
         xenonet_base::private_file::other_readers(file, cfg!(windows), &mut run).map_err(|e| e.message().to_string())
-    }
-}
-
-impl Base<'_> {
-    /// The registry, by the JS names the actors' driver still answers.
-    fn registry(&self, method: &str, args: Vec<Value>) -> core::Result<Value> {
-        self.r.actors.registry(method, args).map_err(failed)
-    }
-
-    /// A read of the registry; what it can't answer is nothing.
-    fn ask(&self, method: &str, args: Vec<Value>) -> Value {
-        self.registry(method, args).unwrap_or(Value::Null)
     }
 }
 
@@ -154,28 +142,28 @@ impl Host for Base<'_> {
         disk::hash_token(&js_string(token))
     }
     fn ids(&mut self) -> Vec<String> {
-        self.ask("ids", vec![]).as_array().map(|l| l.iter().map(js_string).collect()).unwrap_or_default()
+        self.r.actors.ids()
     }
     fn remote_of(&mut self, id: &str) -> Value {
-        self.ask("remoteOf", vec![json!(id)])
+        self.r.actors.remote_of(id).unwrap_or(Value::Null)
     }
     fn set_remote(&mut self, id: &str, remote: &Value) -> core::Result<()> {
-        self.registry("setRemote", vec![json!(id), remote.clone()]).map(|_| ())
+        self.r.actors.set_remote(id, remote).map_err(failed)
     }
     fn has(&mut self, id: &str) -> bool {
-        xenonet_base::text::truthy(Some(&self.ask("has", vec![json!(id)])))
+        self.r.actors.has(id)
     }
     fn info(&mut self, id: &str) -> Value {
-        self.ask("info", vec![json!(id)])
+        self.r.actors.info(id).unwrap_or(Value::Null)
     }
     fn is_remote(&mut self, id: &str) -> bool {
-        xenonet_base::text::truthy(Some(&self.ask("isRemote", vec![json!(id)])))
+        self.r.actors.is_remote(id)
     }
     fn upsert(&mut self, def: &Value) -> core::Result<()> {
-        self.registry("upsert", vec![def.clone()]).map(|_| ())
+        self.r.actors.upsert(def).map_err(failed)
     }
     fn add_via(&mut self, id: &str, via: &str) -> core::Result<()> {
-        self.registry("addVia", vec![json!(id), json!(via)]).map(|_| ())
+        self.r.actors.add_via(id, via).map_err(failed)
     }
 }
 
@@ -186,9 +174,9 @@ fn sql(e: SqlError) -> store::Error {
     store::Error { message: e.message().to_string(), code: e.code().map(str::to_string) }
 }
 
-/// A JSON value as the store binds it.
-fn arg(v: &Value) -> Arg {
-    super::arg(v)
+/// An id or a place as the requests name it.
+fn text(v: &Value) -> String {
+    js_string(v)
 }
 
 /// Rows answered, as JSON.
@@ -224,19 +212,19 @@ impl Tx for EngineRows {
 
 impl Links for EngineRows {
     fn account_links(&self, slug: &str) -> store::Result<Vec<Value>> {
-        rows(self.0.with(|s| s.account_links(Arg::text(slug))))
+        rows(self.0.with(|s| s.account_links(slug)))
     }
     fn add_account_link(&self, row: &Value) -> store::Result<()> {
-        self.0.with(|s| s.add_account_link(&arg(row))).map_err(sql)
+        self.0.with(|s| s.add_account_link(row)).map_err(sql)
     }
     fn expire_account_link(&self, link_id: &Value, at: f64) -> store::Result<()> {
-        self.0.with(|s| s.expire_account_link(arg(link_id), Arg::Num(at))).map_err(sql)
+        self.0.with(|s| s.expire_account_link(&text(link_id), at)).map_err(sql)
     }
     fn external_ref(&self, key: &Value) -> store::Result<Option<Value>> {
-        row(self.0.with(|s| s.external_ref(&arg(key))))
+        row(self.0.with(|s| s.external_ref(key)))
     }
     fn add_external_ref(&self, row: &Value) -> store::Result<()> {
-        self.0.with(|s| s.add_external_ref(&arg(row))).map_err(sql)
+        self.0.with(|s| s.add_external_ref(row)).map_err(sql)
     }
 }
 
@@ -254,59 +242,59 @@ impl From<SqlError> for MakeFail {
 
 impl Store for EngineRows {
     fn meta(&self, key: &str) -> store::Result<Value> {
-        self.0.with(|s| s.meta(Arg::text(key))).map_err(sql)
+        self.0.with(|s| s.meta(key)).map_err(sql)
     }
     fn set_meta(&self, key: &str, value: &str) -> store::Result<()> {
-        self.0.with(|s| s.set_meta(Arg::text(key), Arg::text(value))).map_err(sql)
+        self.0.with(|s| s.set_meta(key, value)).map_err(sql)
     }
     fn grants(&self) -> store::Result<Vec<Value>> {
         rows(self.0.with(|s| s.grants()))
     }
     fn grant(&self, id: &str) -> store::Result<Option<Value>> {
-        row(self.0.with(|s| s.grant(Arg::text(id))))
+        row(self.0.with(|s| s.grant(id)))
     }
     fn connection(&self, id: &str) -> store::Result<Option<Value>> {
-        row(self.0.with(|s| s.connection(Arg::text(id))))
+        row(self.0.with(|s| s.connection(id)))
     }
     fn connections(&self) -> store::Result<Vec<Value>> {
         rows(self.0.with(|s| s.connections()))
     }
     fn connections_of(&self, slug: &str) -> store::Result<Vec<Value>> {
-        rows(self.0.with(|s| s.connections_of(Arg::text(slug))))
+        rows(self.0.with(|s| s.connections_of(slug)))
     }
     fn add_connection(&self, row: &Value) -> store::Result<()> {
-        self.0.with(|s| s.add_connection(&arg(row))).map_err(sql)
+        self.0.with(|s| s.add_connection(row)).map_err(sql)
     }
     fn add_grant(&self, row: &Value) -> store::Result<()> {
-        self.0.with(|s| s.add_grant(&arg(row))).map_err(sql)
+        self.0.with(|s| s.add_grant(row)).map_err(sql)
     }
     fn change_grant(&self, id: &str, change: &Value) -> store::Result<bool> {
-        self.0.with(|s| s.change_grant(Arg::text(id), &arg(change))).map_err(sql)
+        self.0.with(|s| s.change_grant(id, change)).map_err(sql)
     }
     fn revoke_grant(&self, id: &str, reason: &str, at: f64) -> store::Result<bool> {
-        self.0.with(|s| s.revoke_grant(Arg::text(id), Arg::text(reason), Arg::Num(at))).map_err(sql)
+        self.0.with(|s| s.revoke_grant(id, reason, at)).map_err(sql)
     }
     fn end_connection(&self, id: &str, at: f64) -> store::Result<()> {
-        self.0.with(|s| s.end_connection(Arg::text(id), Arg::Num(at))).map_err(sql)
+        self.0.with(|s| s.end_connection(id, at)).map_err(sql)
     }
     fn touch_grant(&self, id: &str, at: f64) -> store::Result<()> {
-        self.0.with(|s| s.touch_grant(Arg::text(id), Arg::Num(at))).map_err(sql)
+        self.0.with(|s| s.touch_grant(id, at)).map_err(sql)
     }
     fn add_audit(&self, row: &Value) -> store::Result<()> {
-        self.0.with(|s| s.add_audit(&arg(row))).map_err(sql)
+        self.0.with(|s| s.add_audit(row)).map_err(sql)
     }
     fn project_id_of(&self, place: &Value, make: &mut dyn FnMut() -> store::Result<Value>, now: f64) -> store::Result<Value> {
-        let mut made = || make().map(|v| arg(&v)).map_err(MakeFail::Store);
-        self.0.with(|s| s.project_id_of(arg(place), &mut made, Arg::Num(now))).map_err(|e| match e {
+        let mut made = || make().map(|v| text(&v)).map_err(MakeFail::Store);
+        self.0.with(|s| s.project_id_of(&text(place), &mut made, now)).map_err(|e| match e {
             MakeFail::Sql(e) => sql(e),
             MakeFail::Store(e) => e,
         })
     }
     fn project_id_for(&self, place: &Value) -> store::Result<Value> {
-        self.0.with(|s| s.project_id_for(arg(place))).map_err(sql)
+        self.0.with(|s| s.project_id_for(&text(place))).map_err(sql)
     }
     fn place_of_project(&self, project_id: &Value) -> store::Result<Value> {
-        self.0.with(|s| s.place_of_project(arg(project_id))).map_err(sql)
+        self.0.with(|s| s.place_of_project(&text(project_id))).map_err(sql)
     }
 }
 
@@ -483,43 +471,45 @@ mod tests {
     }
 
     impl Actors for FakeActors {
-        fn registry(&self, method: &str, args: Vec<Value>) -> R<Value> {
-            let mut known = self.known.locked();
-            let id = args.first().map(js_string).unwrap_or_default();
-            Ok(match method {
-                "ids" => json!(known.keys().cloned().collect::<Vec<_>>()),
-                "has" => json!(known.contains_key(&id)),
-                "info" => known.get(&id).cloned().unwrap_or(Value::Null),
-                "remoteOf" => known.get(&id).map_or(Value::Null, |a| a["remote"].clone()),
-                "isRemote" => json!(known.get(&id).is_some_and(|a| a["via"].as_array().is_some_and(|v| v.contains(&json!("remote"))))),
-                "setRemote" => {
-                    if let Some(a) = known.get_mut(&id) {
-                        a["remote"] = args.get(1).cloned().unwrap_or(Value::Null);
-                    }
-                    Value::Null
+        fn ids(&self) -> Vec<String> {
+            self.known.locked().keys().cloned().collect()
+        }
+        fn has(&self, id: &str) -> bool {
+            self.known.locked().contains_key(id)
+        }
+        fn info(&self, id: &str) -> Option<Value> {
+            self.known.locked().get(id).cloned()
+        }
+        fn remote_of(&self, id: &str) -> Option<Value> {
+            self.known.locked().get(id).map(|a| a["remote"].clone()).filter(|r| !r.is_null())
+        }
+        fn is_remote(&self, id: &str) -> bool {
+            self.known.locked().get(id).is_some_and(|a| a["via"].as_array().is_some_and(|v| v.contains(&json!("remote"))))
+        }
+        fn set_remote(&self, id: &str, remote: &Value) -> R<()> {
+            if let Some(a) = self.known.locked().get_mut(id) {
+                a["remote"] = remote.clone();
+            }
+            Ok(())
+        }
+        fn add_via(&self, id: &str, via: &str) -> R<()> {
+            if let Some(a) = self.known.locked().get_mut(id) {
+                if let Some(v) = a["via"].as_array_mut() {
+                    v.push(json!(via));
                 }
-                "addVia" => {
-                    if let Some(a) = known.get_mut(&id) {
-                        if let Some(v) = a["via"].as_array_mut() {
-                            v.push(args.get(1).cloned().unwrap_or(Value::Null));
-                        }
-                    }
-                    Value::Null
-                }
-                "upsert" => {
-                    let def = args.first().cloned().unwrap_or(Value::Null);
-                    let id = js_string(&def["id"]);
-                    let mut a = def.clone();
-                    a["via"] = json!([def.get("via").cloned().unwrap_or(json!("remote"))]);
-                    // The actor's row, which its connections refer to.
-                    let slug = id.trim_start_matches("actor:").to_string();
-                    let row = arg(&json!({ "slug": slug, "kind": "agent", "name": def["name"], "via": "[\"remote\"]", "capabilities": "[]", "created_at": now_ms() }));
-                    self.store.with(|s| s.save_actor(&row)).map_err(|e| xenonet_service::cores::CoreError::new(e.to_string()))?;
-                    known.insert(id, a);
-                    Value::Null
-                }
-                _ => Value::Null,
-            })
+            }
+            Ok(())
+        }
+        fn upsert(&self, def: &Value) -> R<()> {
+            let id = js_string(&def["id"]);
+            let mut a = def.clone();
+            a["via"] = json!([def.get("via").cloned().unwrap_or(json!("remote"))]);
+            // The actor's row, which its connections refer to.
+            let slug = id.trim_start_matches("actor:").to_string();
+            let row = json!({ "slug": slug, "kind": "agent", "name": def["name"], "via": "[\"remote\"]", "capabilities": "[]", "created_at": now_ms() });
+            self.store.with(|s| s.save_actor(&row)).map_err(|e| xenonet_service::cores::CoreError::new(e.to_string()))?;
+            self.known.locked().insert(id, a);
+            Ok(())
         }
         fn before_remove(&self, hook: Arc<dyn Fn(&str) + Send + Sync>) {
             self.hooks.locked().push(hook);

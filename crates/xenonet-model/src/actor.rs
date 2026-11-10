@@ -10,11 +10,59 @@
 //! console is an actor too (`actor/console/v1`).
 
 use crate::ids::{ActorId, ActorSlug};
-use crate::num::{Ms, PosInt, Uint};
-use crate::schema::{Document, Nullable, Opt, Ref, Text};
+use crate::num::{Ms, PosInt, Ranged, Uint};
+use crate::schema::{Bounded, Document, Nullable, Opt, Ref, Text};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+
+// ---------- strings of one shape ----------
+
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // A program's slug: hermes-agent, grok-bot, muse, dots.
+    pub struct ProductId(r"^[a-z0-9][a-z0-9-]{0,63}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // A device's id: dev_ and a UUID.
+    pub struct DeviceId(r"^dev_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // A project's id: prj_ and a UUID.
+    pub struct ProjectId(r"^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // A remote connection's id: cn_ and 24 hex digits.
+    pub struct ConnectionId(r"^cn_[0-9a-f]{24}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // A grant's id: gr_ and 24 hex digits.
+    pub struct GrantId(r"^gr_[0-9a-f]{24}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // An actor on this host: actor:<slug>.
+    pub struct LocalActorId(r"^actor:[a-z0-9][a-z0-9-]{0,31}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // An actor's token.
+    pub struct ActorTokenValue(r"^xenonet_actor_[0-9a-f]{64}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // An actor's gateway token.
+    pub struct GatewayTokenValue(r"^xenonet_gateway_[0-9a-f]{64}$");
+}
+crate::pattern! {
+    #[schemars(extend("x-bounds-last" = true))]
+    // An actor's own id for an event it reports.
+    pub struct EventRef(r"^[A-Za-z0-9._:-]{1,64}$");
+}
 
 // ---------- shared vocabularies ----------
 
@@ -64,8 +112,7 @@ crate::open!(Relation of KnownRelation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Product {
     /// A slug: hermes-agent, grok-bot, muse, dots
-    #[schemars(regex(pattern = r"^[a-z0-9][a-z0-9-]{0,63}$"))]
-    pub id: String,
+    pub id: ProductId,
     pub vendor: Nullable<String>,
     pub version: Nullable<String>,
 }
@@ -90,9 +137,16 @@ crate::tag!(pub ReadPermission = "read");
 const DATE_TIME_PATTERN: &str = r"^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$";
 
 // A time written as ISO 8601 in UTC.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct DateTime(pub String);
+
+impl<'de> Deserialize<'de> for DateTime {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        static PATTERN: crate::schema::Pattern = crate::schema::Pattern::new(DATE_TIME_PATTERN);
+        PATTERN.read(d).map(DateTime)
+    }
+}
 
 impl JsonSchema for DateTime {
     fn schema_name() -> Cow<'static, str> {
@@ -131,8 +185,7 @@ pub enum AudienceScope {
 #[serde(deny_unknown_fields)]
 pub struct Audience {
     /// Who can call the endpoint, in your words
-    #[schemars(length(max = 200))]
-    pub description: String,
+    pub description: Text<0, 200>,
     pub verification: Verification,
     pub scope: AudienceScope,
 }
@@ -158,8 +211,7 @@ pub struct AccountLink {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Device {
-    #[schemars(regex(pattern = r"^dev_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))]
-    pub id: String,
+    pub id: DeviceId,
     pub alias: Nullable<Text<0, 64>>,
 }
 
@@ -174,8 +226,7 @@ pub enum DataMode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectionProject {
-    #[schemars(regex(pattern = r"^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))]
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// The project's node id on your map, for this window only
     pub place: Nullable<String>,
     pub name: Nullable<String>,
@@ -210,21 +261,14 @@ pub struct Launch {
 #[serde(deny_unknown_fields)]
 pub struct Connection {
     pub schema: ConnectionTag,
-    #[schemars(regex(pattern = r"^cn_[0-9a-f]{24}$"))]
-    pub connection_id: String,
-    #[schemars(regex(pattern = r"^gr_[0-9a-f]{24}$"))]
-    pub grant_id: String,
-    #[schemars(regex(pattern = r"^actor:[a-z0-9][a-z0-9-]{0,31}$"))]
-    pub actor_id: String,
+    pub connection_id: ConnectionId,
+    pub grant_id: GrantId,
+    pub actor_id: LocalActorId,
     /// The name you gave it
-    #[schemars(length(min = 1, max = 64))]
-    pub label: String,
-    #[schemars(length(max = 32))]
-    pub adapter_id: String,
-    #[schemars(length(max = 32))]
-    pub provider: String,
-    #[schemars(length(max = 48))]
-    pub transport_kind: String,
+    pub label: Text<1, 64>,
+    pub adapter_id: Text<0, 32>,
+    pub provider: Text<0, 32>,
+    pub transport_kind: Text<0, 48>,
     pub audience: Audience,
     pub account_link: AccountLink,
     pub device: Device,
@@ -232,10 +276,8 @@ pub struct Connection {
     pub data_mode: DataMode,
     pub projects: Vec<ConnectionProject>,
     pub labels: bool,
-    #[schemars(range(min = 1, max = 30))]
-    pub lookback_days: Uint,
-    #[schemars(range(min = 1))]
-    pub revision: Uint,
+    pub lookback_days: Ranged<1, 30>,
+    pub revision: Ranged<1>,
     pub state: ConnectionState,
     /// Whether an adapter is connected now; it says nothing about whether the actor itself is working
     pub bridge: Bridge,
@@ -283,8 +325,7 @@ pub struct Did {
     /// looked: a selection that held 3 s; read: a preview or stats; opened: in its app; handed-off and started: a session; terminal: one opened in a folder
     pub what: ConsoleAction,
     /// The graph node it was done to
-    #[schemars(length(min = 1, max = 1024))]
-    pub node: String,
+    pub node: Text<1, 1024>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub at: Opt<Ms>,
     /// For handed-off: the app it went to
@@ -303,8 +344,7 @@ pub struct Console {
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub presence: Opt<ConsolePresence>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 20))]
-    pub did: Opt<Vec<Did>>,
+    pub did: Opt<Bounded<Did, 0, 20>>,
 }
 
 impl Document for Console {
@@ -325,8 +365,7 @@ pub struct Credentials {
     /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
     pub id: ActorId,
     /// Shown once: XenoNet keeps only its SHA-256
-    #[schemars(regex(pattern = r"^xenonet_actor_[0-9a-f]{64}$"))]
-    pub token: String,
+    pub token: ActorTokenValue,
     pub state: ActorState,
     /// While it waits: when the request lapses. Left out once it's allowed
     #[serde(default, skip_serializing_if = "Opt::is_none")]
@@ -418,8 +457,7 @@ pub struct GatewayAsk {
     pub id: ActorId,
     pub state: WaitingState,
     /// The ask's id, which the window answers with POST /api/actors/requests/<id>
-    #[schemars(length(min = 1))]
-    pub request: String,
+    pub request: Text<1, { usize::MAX }>,
     /// When the ask lapses unanswered, in epoch milliseconds
     pub expires_at: f64,
     /// The actor's app has a gateway token already, which Allow replaces
@@ -443,8 +481,7 @@ pub struct GatewayCredentials {
     /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
     pub id: ActorId,
     /// Shown once: XenoNet keeps only its SHA-256. It works only at XenoNet's actor gateway, as Authorization: Bearer
-    #[schemars(regex(pattern = r"^xenonet_gateway_[0-9a-f]{64}$"))]
-    pub token: String,
+    pub token: GatewayTokenValue,
     /// The gateway's address, when XenoNet knows it: where the program sends its MCP requests
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -517,8 +554,7 @@ crate::tag!(pub RegistrationTag = "actor/registration/v1");
 // What a registering program says it is: only the id is needed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RegistrationProduct {
-    #[schemars(regex(pattern = r"^[a-z0-9][a-z0-9-]{0,63}$"))]
-    pub id: String,
+    pub id: ProductId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vendor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -531,8 +567,7 @@ pub struct RegistrationProduct {
 pub struct Registration {
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub schema: Opt<RegistrationTag>,
-    #[schemars(length(min = 1, max = 64))]
-    pub name: String,
+    pub name: Text<1, 64>,
     /// Without one, XenoNet makes one from the name
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub slug: Opt<ActorSlug>,
@@ -615,15 +650,12 @@ pub struct ReportEvent {
     pub at: Opt<f64>,
     /// Its own id for the event, so a retry never counts twice
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(regex(pattern = r"^[A-Za-z0-9._:-]{1,64}$"))]
-    pub r#ref: Opt<String>,
+    pub r#ref: Opt<EventRef>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(range(min = 1, max = 10000))]
-    pub count: Opt<Uint>,
+    pub count: Opt<Ranged<1, 10000>>,
     /// For edited: absolute paths
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 20))]
-    pub paths: Opt<Vec<String>>,
+    pub paths: Opt<Bounded<String, 0, 20>>,
     /// For spawned, with a session not on the map yet
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub app: Opt<ReportApp>,
@@ -668,8 +700,7 @@ pub struct Report {
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub pid: Opt<PosInt>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 50))]
-    pub events: Opt<Vec<ReportEvent>>,
+    pub events: Opt<Bounded<ReportEvent, 0, 50>>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub targets: Opt<Vec<ReportTarget>>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
@@ -694,12 +725,10 @@ crate::tag!(pub RequestsTag = "actor/requests/v1");
 #[serde(rename_all = "camelCase")]
 pub struct Request {
     /// The request's own id: POST /api/actors/requests/<id> answers it
-    #[schemars(length(min = 1))]
-    pub id: String,
+    pub id: Text<1, { usize::MAX }>,
     /// The actor it would be
     pub actor: ActorId,
-    #[schemars(length(min = 1, max = 64))]
-    pub name: String,
+    pub name: Text<1, 64>,
     /// The product it says it is; null for a program of your own
     pub product: Nullable<Product>,
     /// What it asks to be allowed
@@ -722,12 +751,10 @@ pub struct Request {
 #[serde(rename_all = "camelCase")]
 pub struct PendingGatewayAsk {
     /// The ask's own id: POST /api/actors/requests/<id> answers it, and Allow makes the token
-    #[schemars(length(min = 1))]
-    pub id: String,
+    pub id: Text<1, { usize::MAX }>,
     /// The actor whose app would get the token
     pub actor: ActorId,
-    #[schemars(length(min = 1, max = 64))]
-    pub name: String,
+    pub name: Text<1, 64>,
     /// The actor's app has a gateway token already, which Allow replaces
     pub replaces: bool,
     /// Who asked, with ~ for the home folder; null where XenoNet couldn't look
@@ -785,8 +812,7 @@ crate::open!(Transport of KnownTransport {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NeedsYou {
     pub kind: NeedKind,
-    #[schemars(length(max = 140))]
-    pub text: String,
+    pub text: Text<0, 140>,
     pub since: Ms,
 }
 
@@ -828,8 +854,7 @@ pub struct Usage {
     pub unpriced: Uint,
     pub tokens: UsageTokens,
     /// The five that used the most tokens
-    #[schemars(length(max = 5))]
-    pub models: Vec<UsageModel>,
+    pub models: Bounded<UsageModel, 0, 5>,
 }
 
 // Something the actor is acting on, as the console draws it.
@@ -879,8 +904,7 @@ pub struct Snapshot {
     /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
     pub id: ActorId,
     pub kind: ActorKind,
-    #[schemars(length(min = 1))]
-    pub name: String,
+    pub name: Text<1, { usize::MAX }>,
     /// What it is; null for a custom actor
     pub product: Nullable<Product>,
     /// Null on this machine, else the host id, and the id is then qualified
@@ -904,8 +928,7 @@ pub struct Snapshot {
     /// What it's acting on
     pub targets: Vec<Target>,
     /// Its last events, newest last
-    #[schemars(length(max = 20))]
-    pub recent: Vec<Ref<Event>>,
+    pub recent: Bounded<Ref<Event>, 0, 20>,
     pub counts: Counts,
     /// The identity it acts as (claude:…, chatgpt:…, github:…), if XenoNet knows it
     pub identity: Nullable<String>,
@@ -1012,7 +1035,7 @@ mod tests {
         let r: Report = serde_json::from_str(r#"{"presence":"idle","events":[{"kind":"edited","paths":["/a"],"ref":"e1"}]}"#).unwrap();
         assert_eq!(r.presence.as_ref(), Some(&ReportPresence::Idle));
         let e = &r.events.as_ref().unwrap()[0];
-        assert_eq!((e.r#ref.as_ref().map(String::as_str), e.count.as_ref()), (Some("e1"), None));
+        assert_eq!((e.r#ref.as_ref().map(EventRef::as_str), e.count.as_ref()), (Some("e1"), None));
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"presence":"idle","events":[{"kind":"edited","ref":"e1","paths":["/a"]}]}"#);
         assert!(serde_json::from_str::<Connection>(r#"{"schema":"actor/connection/v1","extra":1}"#).is_err(), "a connection is strict");
     }

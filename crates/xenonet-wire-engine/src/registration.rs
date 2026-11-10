@@ -4,14 +4,16 @@
 //! tells (requests, asked, asked-gateway) goes to the page once the call
 //! is done.
 
-use crate::actors::{store_error, thrown, Rows};
-use crate::js::{now_ms, Locked};
-use crate::world::World;
+use crate::actors::{row_of, rows_json, thrown, Rows};
+use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::registration::{Fail, Host, Registration as Core, Store};
 use xenonet_actors::store as rows;
-use xenonet_engine::sql::Arg;
+use xenonet_base::sync::Locked;
+use xenonet_base::text::js_string;
+use xenonet_base::time::now_ms;
+use xenonet_engine::engine::Thrown;
 use xenonet_engine::store::Shared;
 use xenonet_service::cores::{CoreError, Kind, Registration, R};
 use xenonet_service::glue::From;
@@ -19,12 +21,12 @@ use xenonet_service::glue::From;
 /// What registering asks of the world: the registry, the clock, and its
 /// own observing().
 struct RegHost<'a> {
-    w: &'a World,
+    w: &'a Runtime,
 }
 
 /// A registry failure, as a registration call carries it on.
-fn registry_fail(t: xenonet_engine::peer::Thrown) -> Fail {
-    Fail::Error(store_error(t))
+fn registry_fail(t: Thrown) -> Fail {
+    Fail::Error(rows::Error { message: t.message, code: t.code })
 }
 
 impl RegHost<'_> {
@@ -99,83 +101,78 @@ impl Host for RegHost<'_> {
     }
 }
 
-/// A row, or none: the store answers null for one that isn't there.
-fn row(v: Value) -> Option<Value> {
-    (!v.is_null()).then_some(v)
-}
-
 impl Store for Rows {
     fn waiting_actor_requests(&self, now: f64) -> rows::Result<Vec<Value>> {
-        self.rows("waitingActorRequests", &[Arg::Num(now)])
+        rows_json(self.0.with(|s| s.waiting_actor_requests(now)))
     }
     fn lapsed_actor_requests(&self, now: f64) -> rows::Result<Vec<Value>> {
-        self.rows("lapsedActorRequests", &[Arg::Num(now)])
+        rows_json(self.0.with(|s| s.lapsed_actor_requests(now)))
     }
     fn actor_request(&self, id: &str) -> rows::Result<Option<Value>> {
-        self.call("actorRequest", &[Arg::text(id)]).map(row)
+        row_of(self.0.with(|s| s.actor_request(id)))
     }
     fn actor_request_by_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        self.call("actorRequestByToken", &[Arg::text(hash)]).map(row)
+        row_of(self.0.with(|s| s.actor_request_by_token(hash)))
     }
     fn add_actor_request(&self, r: &Value) -> rows::Result<()> {
-        self.run("addActorRequest", &[crate::actors::arg(r)])
+        self.direct(|s| s.add_actor_request(r))
     }
     fn decide_actor_request(&self, id: &Value, decision: &str, at: f64) -> rows::Result<bool> {
-        self.call("decideActorRequest", &[crate::actors::arg(id), Arg::text(decision), Arg::Num(at)]).map(|v| v == Value::Bool(true))
+        self.direct(|s| s.decide_actor_request(&js_string(id), decision, at))
     }
     fn actor_request_times(&self, since: f64) -> rows::Result<Vec<Value>> {
-        self.rows("actorRequestTimes", &[Arg::Num(since)])
+        self.direct(|s| s.actor_request_times(since))
     }
     fn revoke_actor_token(&self, r: &Value) -> rows::Result<()> {
-        self.run("revokeActorToken", &[crate::actors::arg(r)])
+        self.direct(|s| s.revoke_actor_token(r))
     }
     fn set_actor_token(&self, slug: &str, hash: &Value, at: f64) -> rows::Result<()> {
-        self.run("setActorToken", &[Arg::text(slug), crate::actors::arg(hash), Arg::Num(at)])
+        self.direct(|s| s.set_actor_token(slug, &js_string(hash), at))
     }
     fn drop_actor_token(&self, slug: &str) -> rows::Result<()> {
-        self.run("dropActorToken", &[Arg::text(slug)])
+        self.direct(|s| s.drop_actor_token(slug))
     }
     fn touch_actor_token(&self, slug: &str, at: f64) -> rows::Result<()> {
-        self.run("touchActorToken", &[Arg::text(slug), Arg::Num(at)])
+        self.direct(|s| s.touch_actor_token(slug, at))
     }
     fn actor_by_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        self.call("actorByToken", &[Arg::text(hash)]).map(row)
+        row_of(self.0.with(|s| s.actor_by_token(hash)))
     }
     fn actor_token(&self, slug: &str) -> rows::Result<Option<Value>> {
-        self.call("actorToken", &[Arg::text(slug)]).map(row)
+        row_of(self.0.with(|s| s.actor_token(slug)))
     }
     fn stale_actor_tokens(&self, before: f64) -> rows::Result<Vec<Value>> {
-        self.rows("staleActorTokens", &[Arg::Num(before)])
+        rows_json(self.0.with(|s| s.stale_actor_tokens(before)))
     }
     fn revoked_actor_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        self.call("revokedActorToken", &[Arg::text(hash)]).map(row)
+        row_of(self.0.with(|s| s.revoked_actor_token(hash)))
     }
     fn set_gateway_token(&self, slug: &str, hash: &str, at: f64) -> rows::Result<()> {
-        self.run("setGatewayToken", &[Arg::text(slug), Arg::text(hash), Arg::Num(at)])
+        self.direct(|s| s.set_gateway_token(slug, hash, at))
     }
     fn drop_gateway_token(&self, slug: &str) -> rows::Result<()> {
-        self.run("dropGatewayToken", &[Arg::text(slug)])
+        self.direct(|s| s.drop_gateway_token(slug))
     }
     fn touch_gateway_token(&self, slug: &str, at: f64) -> rows::Result<()> {
-        self.run("touchGatewayToken", &[Arg::text(slug), Arg::Num(at)])
+        self.direct(|s| s.touch_gateway_token(slug, at))
     }
     fn actor_by_gateway_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        self.call("actorByGatewayToken", &[Arg::text(hash)]).map(row)
+        row_of(self.0.with(|s| s.actor_by_gateway_token(hash)))
     }
     fn gateway_token(&self, slug: &str) -> rows::Result<Option<Value>> {
-        self.call("gatewayToken", &[Arg::text(slug)]).map(row)
+        row_of(self.0.with(|s| s.gateway_token(slug)))
     }
     fn stale_gateway_tokens(&self, before: f64) -> rows::Result<Vec<Value>> {
-        self.rows("staleGatewayTokens", &[Arg::Num(before)])
+        rows_json(self.0.with(|s| s.stale_gateway_tokens(before)))
     }
     fn release_claims(&self, agent: &str) -> rows::Result<()> {
-        self.direct(|s| s.release(Arg::text(agent), Arg::Null)).map(|_| ())
+        self.direct(|s| s.release(agent, None)).map(|_| ())
     }
     fn clear_focus(&self, agent: &str, at: f64) -> rows::Result<()> {
-        self.direct(|s| s.set_focus(Arg::text(agent), Arg::Null, Arg::Num(at))).map(|_| ())
+        self.direct(|s| s.set_focus(agent, "", at)).map(|_| ())
     }
     fn unseen_count(&self, agent: &str) -> rows::Result<usize> {
-        self.direct(|s| s.unseen(Arg::text(agent))).map(|r| r.len())
+        self.direct(|s| s.unseen(agent)).map(|r| r.len())
     }
 }
 
@@ -198,7 +195,7 @@ impl RegSide {
     }
 
     /// A call that holds what's kept, with what it told told once it's done.
-    fn with<T>(&self, w: &World, f: impl FnOnce(&mut Core, &mut RegHost<'_>) -> Result<T, Fail>) -> Result<T, Fail> {
+    fn with<T>(&self, w: &Runtime, f: impl FnOnce(&mut Core, &mut RegHost<'_>) -> Result<T, Fail>) -> Result<T, Fail> {
         let (out, emits) = {
             let mut core = self.core.locked();
             let out = f(&mut core, &mut RegHost { w });
@@ -212,16 +209,16 @@ impl RegSide {
 
     /// A call that needs none of what's kept (observers asks observing
     /// while another runs).
-    fn free<T>(w: &World, f: impl FnOnce(&mut RegHost<'_>) -> Result<T, Fail>) -> Result<T, Fail> {
+    fn free<T>(w: &Runtime, f: impl FnOnce(&mut RegHost<'_>) -> Result<T, Fail>) -> Result<T, Fail> {
         f(&mut RegHost { w })
     }
 
-    pub fn tick(&self, w: &World) {
+    pub fn tick(&self, w: &Runtime) {
         let _ = self.with(w, |r, _| r.tick(now_ms()));
     }
 
     /// Whether the observer of a product is on, as the observers ask.
-    pub fn observing(&self, w: &World, product: &str) -> bool {
+    pub fn observing(&self, w: &Runtime, product: &str) -> bool {
         Self::free(w, |c| Core::observing(c, product)).unwrap_or(true)
     }
 }
@@ -234,7 +231,7 @@ fn verdict_parts(v: &Value) -> (bool, Vec<Value>, Value) {
     (checked, chain, cwd)
 }
 
-pub struct RegistrationDriver(pub Arc<World>);
+pub struct RegistrationDriver(pub Arc<Runtime>);
 
 impl RegistrationDriver {
     fn side(&self) -> R<&RegSide> {
@@ -249,7 +246,7 @@ impl RegistrationDriver {
 /// What authenticate gives for a call that failed: a refusal, never a pass.
 fn refusal(f: Fail) -> Value {
     match f {
-        Fail::Actor(e) => json!({ "ok": false, "status": crate::js::number(e.status), "code": e.code, "error": e.message }),
+        Fail::Actor(e) => json!({ "ok": false, "status": xenonet_base::json::number(e.status), "code": e.code, "error": e.message }),
         Fail::Error(e) => json!({ "ok": false, "status": 500, "code": "error", "error": e.message }),
     }
 }

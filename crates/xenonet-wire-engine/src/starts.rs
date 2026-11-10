@@ -18,24 +18,24 @@
 //! The requests sent from here are kept in memory: after a restart, a late
 //! answer to one is let go.
 
-use crate::js::{now_ms, obj, Locked};
 use crate::network::{clip, ms, net, quiet_note, send, sender_kind, start_end_note};
 use crate::runs::{Runner, Turn};
-use crate::world::World;
+use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_base::ids::YOU;
 use xenonet_base::network::{Kind as FrameKind, To};
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::reach::{self, Action, Decision, Kind, Sender, Settings, Start, Wake};
 use xenonet_engine::delivery::starts::{self, Request, TARGET};
-use xenonet_engine::sql::Arg;
 use xenonet_service::glue::From;
 
 /// How long Claude Code waits on an MCP tool: a minute past the permission
 /// tool's hold, so a prompt waiting for you isn't cut short.
-pub(crate) fn mcp_tool_timeout_ms(w: &World) -> u64 {
+pub(crate) fn mcp_tool_timeout_ms(w: &Runtime) -> u64 {
     (w.setup.permission_hold_ms.unwrap_or(crate::asks::HOLD_MS) + 60e3).round() as u64
 }
 
@@ -67,7 +67,7 @@ pub struct StartSide {
 
 /// One turn: of XENONET_RUNS_BIN's program when it names one (the tests'
 /// fake), else of the app's CLI as the runner finds it.
-pub fn run_turn(w: &World, runner: &Arc<Runner>, t: Turn<'_>) -> Result<u32, String> {
+pub fn run_turn(w: &Runtime, runner: &Arc<Runner>, t: Turn<'_>) -> Result<u32, String> {
     match &w.setup.runs_bin {
         Some(bin) => runner.run_program(t, bin),
         None => runner.run(t, &w.setup.home),
@@ -76,7 +76,7 @@ pub fn run_turn(w: &World, runner: &Arc<Runner>, t: Turn<'_>) -> Result<u32, Str
 
 /// This machine as answers name it: its host id in a network, else "this
 /// machine".
-pub fn here_name(w: &World) -> String {
+pub fn here_name(w: &Runtime) -> String {
     net(w).me().map_or_else(|| "this machine".into(), |m| m.host)
 }
 
@@ -101,7 +101,7 @@ fn uuid() -> Result<String, String> {
 /// The folders this machine knows: its projects', folders' and Codex
 /// projects' paths by their ids on the map, and the folders its sessions
 /// are in.
-fn folders(w: &World) -> (Vec<(String, String)>, Vec<String>) {
+fn folders(w: &Runtime) -> (Vec<(String, String)>, Vec<String>) {
     let mut known = Vec::new();
     let graph = w.state().graph().ok().flatten().unwrap_or(Value::Null);
     let nodes: Vec<Value> = match graph.get("nodes") {
@@ -121,13 +121,13 @@ fn folders(w: &World) -> (Vec<(String, String)>, Vec<String>) {
 
 /// What a start tells whoever asked: started (at once, and again for Codex
 /// once its thread has an id), and ended.
-pub type Answer = Arc<dyn Fn(&World, &str, Value) + Send + Sync>;
+pub type Answer = Arc<dyn Fn(&Runtime, &str, Value) + Send + Sync>;
 
 /// A start on this machine, asked for by `by` ({ kind, id, title }) from
 /// `from` (another machine, or None for this one), which `sender` says how
 /// this machine sees. Its first answer, or why it didn't start; `answer`
 /// hears the rest.
-pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &Request, answer: Answer) -> Result<Value, String> {
+pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, sender: &Sender, r: &Request, answer: Answer) -> Result<Value, String> {
     let reach = net(w).reach();
     let settings = Settings { start: Start::parse(&reach.start), wake: Wake::parse(&reach.wake), ..Settings::default() };
     if let Decision::Refuse(why) = reach::decide(Action::Start, sender, "", &settings) {
@@ -146,7 +146,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     }
     let Some(resumes) = w.router.resume.as_ref() else { return Err("this XenoNet runs no sessions".into()) };
     // Paused, XenoNet starts nothing, whoever asks.
-    if w.policy.call("paused", &[]).is_ok_and(|p| p.truthy()) {
+    if w.policy.with(|p, _| p.paused()) {
         return Err("XenoNet is paused here, so it starts nothing until it's resumed".into());
     }
     let now = now_ms();
@@ -166,12 +166,11 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     }
     // This machine's limits on messages hold for a start too: too fast
     // from one sender, a repeat of the same prompt.
-    let ask =
-        obj(vec![("sender", Arg::text(sender.id.clone())), ("recipients", Arg::List(vec![Arg::text(TARGET)])), ("text", Arg::text(r.prompt.clone())), ("depth", Arg::num(0.0))]);
-    match w.policy.call("checkSend", &[ask]) {
-        Ok(_) => {}
-        Err(xenonet_engine::delivery::policy::Fail::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
-        Err(f) => return Err(format!("this machine's limits hold it: {}", crate::delivery::policy_thrown(f).0.message)),
+    use xenonet_engine::delivery::policy::Fail as Held;
+    match w.policy.with(|p, h| p.check_send(h, &sender.id, &[json!(TARGET)], &r.prompt, 0.0)) {
+        Ok(()) => {}
+        Err(Held::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
+        Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
     }
     let id = uuid()?;
     let session = (r.app != "codex").then(|| format!("{}:{id}", r.app));
@@ -191,7 +190,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
     } else {
         None
     };
-    let server = xenonet_engine::delivery::setup::server_name(&Arg::Num(f64::from(w.setup.port)));
+    let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let command = starts::command(r, &id, &cwd, resumes.settings.as_deref(), &server, prompt_file.as_deref());
     let (app, args) = match command {
         Ok(c) => c,
@@ -202,8 +201,7 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
             return Err(why);
         }
     };
-    let mut env: Vec<(String, String)> =
-        xenonet_engine::delivery::resume::resume_env(std::env::vars().map(|(k, v)| (k, Arg::Text(v))).collect()).into_iter().map(|(k, v)| (k, crate::js::text(&v))).collect();
+    let mut env: Vec<(String, String)> = xenonet_engine::delivery::resume::resume_env(std::env::vars().collect());
     if app == "claude" {
         env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
         env.push(("MCP_TOOL_TIMEOUT".into(), mcp_tool_timeout_ms(w).to_string()));
@@ -240,20 +238,20 @@ pub fn run_here(w: &World, by: &Value, from: Option<&str>, sender: &Sender, r: &
 
 // ---------- signing in for unattended runs ----------
 
-fn secrets(w: &World) -> crate::wakes::Secrets {
+fn secrets(w: &Runtime) -> crate::wakes::Secrets {
     crate::wakes::Secrets::new(w.setup.demo)
 }
 
 /// The long-lived Claude Code token XenoNet's runs sign in with, from your
 /// credential store: for its runs' environment alone, never logged or
 /// shown.
-pub fn run_token(w: &World) -> Option<String> {
-    secrets(w).call("get", &[Arg::text(starts::SIGN_IN_TARGET)]).ok().and_then(|v| v.as_str().map(str::to_string)).filter(|t| !t.is_empty())
+pub fn run_token(w: &Runtime) -> Option<String> {
+    secrets(w).get(starts::SIGN_IN_TARGET).ok().flatten().filter(|t| !t.is_empty())
 }
 
 /// The environment of a Claude Code run with XenoNet's sign-in, when you
 /// gave it one: CLAUDE_CODE_OAUTH_TOKEN.
-pub fn signed_env(w: &World, env: &mut Vec<(String, String)>) {
+pub fn signed_env(w: &Runtime, env: &mut Vec<(String, String)>) {
     if let Some(t) = run_token(w) {
         env.retain(|(k, _)| k != "CLAUDE_CODE_OAUTH_TOKEN");
         env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t));
@@ -263,42 +261,42 @@ pub fn signed_env(w: &World, env: &mut Vec<(String, String)>) {
 /// `xenonet runs sign-in` and its kin: `status` (whether a token is kept,
 /// and where), `sign-in` with the token you pasted, `forget`. The answer
 /// never carries the token.
-pub fn sign_in(w: &World, action: &str, pasted: &str) -> Result<Value, (u16, String)> {
+pub fn sign_in(w: &Runtime, action: &str, pasted: &str) -> Result<Value, (u16, String)> {
     let s = secrets(w);
     let kind = s.kind();
     match action {
         "sign-in" => {
             let token = starts::sign_in_token(pasted).map_err(|why| (400, why))?;
-            let comment = Arg::Obj(vec![("comment".into(), Arg::text("Claude Code's token for the sessions XenoNet runs, from claude setup-token"))]);
-            s.call("set", &[Arg::text(starts::SIGN_IN_TARGET), Arg::text(token), comment]).map_err(|t| (500, format!("your credential store didn't keep it: {}", t.message)))?;
+            let comment = "Claude Code's token for the sessions XenoNet runs, from claude setup-token";
+            s.set(starts::SIGN_IN_TARGET, &token, comment).map_err(|t| (500, format!("your credential store didn't keep it: {t}")))?;
             w.log("info", "runs.sign-in", &format!("a Claude Code token for XenoNet's runs is kept in {kind}"));
         }
         "forget" => {
-            let _ = s.call("remove", &[Arg::text(starts::SIGN_IN_TARGET)]);
+            let _ = s.remove(starts::SIGN_IN_TARGET);
             w.log("info", "runs.sign-in", "XenoNet forgot its runs' Claude Code token");
         }
         "status" => {}
         other => return Err((400, format!("{other} isn't something xenonet runs does: status, sign-in or forget"))),
     }
-    let kept = s.call("has", &[Arg::text(starts::SIGN_IN_TARGET)]).is_ok_and(|v| v.truthy());
+    let kept = s.has(starts::SIGN_IN_TARGET).is_ok_and(|v| v);
     Ok(json!({ "signedIn": kept, "store": kind }))
 }
 
 /// The folder a session was started in under a standing delegation, if it
 /// was: what a delegation covers is judged against it.
-pub fn delegated_folder(w: &World, session: &str) -> Option<String> {
+pub fn delegated_folder(w: &Runtime, session: &str) -> Option<String> {
     w.starts.delegations.locked().get(session).cloned()
 }
 
 /// The forks XenoNet made, newest last: each copy and the session it was
 /// forked from, for the console to link them.
-pub fn forks(w: &World) -> Vec<(String, String)> {
+pub fn forks(w: &Runtime) -> Vec<(String, String)> {
     w.starts.forks.locked().clone()
 }
 
 /// Grok Build's prompt for a turn, in a file only its owner can read, in
 /// the runs folder: its path.
-pub fn prompt_file(w: &World, text: &str) -> Result<String, String> {
+pub fn prompt_file(w: &Runtime, text: &str) -> Result<String, String> {
     let f = std::path::Path::new(&w.setup.state_dir).join("runs").join(format!("{}.prompt", uuid()?));
     write_private(&f, text).map_err(|e| format!("the prompt couldn't be written for Grok Build: {e}"))?;
     Ok(f.to_string_lossy().into_owned())
@@ -353,7 +351,7 @@ impl Tail {
 /// names it, linked to the session it came from (the fork event); the
 /// prompt file taken away when the turn ends; and a hint for you when
 /// Claude Code couldn't sign in for it.
-pub fn after_resume(w: &World, runner: &Arc<Runner>, app: &str, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
+pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
     let claude = app == "claude";
     if fork_of.is_none() && prompt_file.is_none() && !claude {
         return;
@@ -417,7 +415,7 @@ fn write_private(file: &std::path::Path, text: &str) -> std::io::Result<()> {
 /// (`outcome`), its last words, and the tools it was denied. `live` says
 /// its process is still running, listening for a reply.
 #[expect(clippy::too_many_arguments, reason = "the end's parts")]
-fn end_body(w: &World, app: &str, session: Option<&String>, finish: Option<&starts::Finish>, plain: &str, said: bool, signed_out: bool, minutes: f64, live: bool) -> Value {
+fn end_body(w: &Runtime, app: &str, session: Option<&String>, finish: Option<&starts::Finish>, plain: &str, said: bool, signed_out: bool, minutes: f64, live: bool) -> Value {
     let mut body = json!({ "session": session, "minutes": minutes, "app": app, "live": live });
     let mut kind = starts::outcome(finish, said);
     if signed_out {
@@ -445,7 +443,7 @@ fn end_body(w: &World, app: &str, session: Option<&String>, finish: Option<&star
 /// Claude Code needs a sign-in.
 #[expect(clippy::too_many_arguments, reason = "the run's parts")]
 fn watch(
-    w: &World,
+    w: &Runtime,
     runner: &Runner,
     key: &str,
     pid: u32,
@@ -519,7 +517,7 @@ fn watch(
 
 /// What the requester hears of an answer from `host`: a message to a
 /// session or an actor, or a line in your console.
-pub fn tell(w: &World, by: &Value, host: &str, state: &str, a: &Value) {
+pub fn tell(w: &Runtime, by: &Value, host: &str, state: &str, a: &Value) {
     // The last word of a run whose turns were all told: nothing to add.
     if a.get("closed").and_then(Value::as_bool) == Some(true) {
         return;
@@ -559,7 +557,7 @@ pub fn tell(w: &World, by: &Value, host: &str, state: &str, a: &Value) {
 /// CLI): `by` is { kind, id, title }, `req` { machine?, folder?, app?,
 /// mode?, prompt }; `strong` says you were checked by the window key (or
 /// by process checks on macOS). The first answer, or a status and why.
-pub fn ask(w: &World, by: Value, req: &Value, strong: bool) -> Result<Value, (u16, String)> {
+pub fn ask(w: &Runtime, by: Value, req: &Value, strong: bool) -> Result<Value, (u16, String)> {
     let r = starts::request(req).map_err(|why| (400, why))?;
     let me = net(w).me();
     let machine = s(req, "machine").filter(|m| !m.is_empty() && me.as_ref().is_none_or(|me| me.host != *m));
@@ -567,7 +565,7 @@ pub fn ask(w: &World, by: Value, req: &Value, strong: bool) -> Result<Value, (u1
         let kind = kind_of(by.get("kind").and_then(Value::as_str).unwrap_or(""));
         let sender = Sender { kind, id: s(&by, "id").unwrap_or_default(), host: None, window: true, strong };
         let who = by.clone();
-        let answer: Answer = Arc::new(move |w: &World, state: &str, a: Value| tell(w, &who, "this machine", state, &a));
+        let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| tell(w, &who, "this machine", state, &a));
         let first = run_here(w, &by, None, &sender, &r, answer).map_err(|why| (409, why))?;
         let mut out = first;
         out["state"] = json!("started");
@@ -627,7 +625,7 @@ pub fn ask(w: &World, by: Value, req: &Value, strong: bool) -> Result<Value, (u1
     )
 }
 
-fn start_receipt(w: &World, to: &str, mid: &str, state: &str, extra: &Value) {
+fn start_receipt(w: &Runtime, to: &str, mid: &str, state: &str, extra: &Value) {
     let mut body = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": TARGET, "state": state, "reason": null, "at": ms(now_ms()) });
     for (k, v) in extra.as_object().into_iter().flatten() {
         body[k.as_str()] = if k == "reason" { v.as_str().map_or(Value::Null, |r| json!(clip(r, 280))) } else { v.clone() };
@@ -640,7 +638,7 @@ fn start_receipt(w: &World, to: &str, mid: &str, state: &str, extra: &Value) {
 /// machine checked it strongly, `window` whether it's a window host, `at`
 /// when it was sent, by this clock.
 #[expect(clippy::too_many_arguments, reason = "the frame's parts")]
-pub fn start_in(w: &World, from: &str, mid: &str, kind: &str, sender: &str, body: &str, strong: bool, window: bool, at: f64) {
+pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, body: &str, strong: bool, window: bool, at: f64) {
     let refuse = |why: &str| start_receipt(w, from, mid, "refused", &json!({ "reason": why }));
     let now = now_ms();
     {
@@ -667,7 +665,7 @@ pub fn start_in(w: &World, from: &str, mid: &str, kind: &str, sender: &str, body
     let by = json!({ "kind": k.as_str(), "id": qualified, "title": v.get("by").and_then(|b| b.get("title")).and_then(Value::as_str) });
     let who = Sender { kind: k, id: qualified, host: Some(from.to_string()), window, strong };
     let (to, m) = (from.to_string(), mid.to_string());
-    let answer: Answer = Arc::new(move |w: &World, state: &str, a: Value| start_receipt(w, &to, &m, state, &a));
+    let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| start_receipt(w, &to, &m, state, &a));
     match run_here(w, &by, Some(from), &who, &r, answer) {
         Ok(first) => start_receipt(w, from, mid, "started", &first),
         Err(why) => {
@@ -678,7 +676,7 @@ pub fn start_in(w: &World, from: &str, mid: &str, kind: &str, sender: &str, body
 }
 
 /// A receipt for a start request sent from here: true when it was one.
-pub fn answer_in(w: &World, from: &str, mid: &str, b: &Value) -> bool {
+pub fn answer_in(w: &Runtime, from: &str, mid: &str, b: &Value) -> bool {
     let state = b.get("state").and_then(Value::as_str).unwrap_or("");
     let (by, host) = {
         let mut asked = w.starts.asked.locked();
@@ -706,7 +704,7 @@ pub fn answer_in(w: &World, from: &str, mid: &str, b: &Value) -> bool {
 
 /// Claude Code on `host` needs a sign-in for XenoNet's runs: a Needs-you
 /// hint in the console.
-pub fn sign_in_hint(w: &World, host: &str) {
+pub fn sign_in_hint(w: &Runtime, host: &str) {
     w.emit(From::Engine, "sign-in", json!({ "host": host, "app": "claude", "words": format!("Claude Code on {host} needs a sign-in for XenoNet's runs"), "fix": starts::sign_in_words(host), "at": ms(now_ms()) }));
 }
 
@@ -714,7 +712,6 @@ pub fn sign_in_hint(w: &World, host: &str) {
 mod tests {
     use super::Tail;
     use xenonet_engine::delivery::starts;
-    use xenonet_engine::sql::Arg;
 
     // The token is kept under a name the credential store takes, and read
     // back from it: each store checks the name the same way.
@@ -723,8 +720,8 @@ mod tests {
         assert!(xenonet_actors::secret_store::is_target(starts::SIGN_IN_TARGET), "{}", starts::SIGN_IN_TARGET);
         let s = crate::wakes::Secrets::new(true);
         let token = format!("sk-ant-oat01-{}", "a".repeat(80));
-        assert_eq!(s.call("set", &[Arg::text(starts::SIGN_IN_TARGET), Arg::text(token.clone())]).ok(), Some(Arg::Bool(true)));
-        assert_eq!(s.call("get", &[Arg::text(starts::SIGN_IN_TARGET)]).ok(), Some(Arg::Text(token)));
+        assert_eq!(s.set(starts::SIGN_IN_TARGET, &token, "Kept by XenoNet").ok(), Some(true));
+        assert_eq!(s.get(starts::SIGN_IN_TARGET).ok(), Some(Some(token)));
     }
 
     #[test]

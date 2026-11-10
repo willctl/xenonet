@@ -8,8 +8,6 @@
 //! the servers' processes and ports, and HTTP to them are `Host`'s.
 
 use super::{number_text, template, truthy, Delivered, Result};
-use crate::sql::Arg;
-use crate::store::js_text;
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::sync::Mutex;
@@ -64,12 +62,6 @@ pub fn xenonet_id(id: &str) -> String {
     }
 }
 
-/// `xenonet_id`, for the service's delivery routes, which still hand the
-/// id over as an Arg: goes when they're typed.
-pub fn from_open_code_id(id: &Arg) -> String {
-    xenonet_id(&if id.is_nullish() { String::new() } else { js_text(id) })
-}
-
 /// A process: its pid and command line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Proc {
@@ -78,7 +70,10 @@ pub struct Proc {
 }
 
 pub fn parse_ps(out: &str) -> Vec<Proc> {
-    out.split('\n').filter_map(|l| crate::re!(r"^\s*(\d+)\s+(.*)$").captures(l)).map(|m| Proc { pid: number(&m[1]), args: m[2].to_string() }).collect()
+    out.split('\n')
+        .filter_map(|l| crate::re!(r"^[\s\x{FEFF}--\x{85}]*([0-9]+)[\s\x{FEFF}--\x{85}]+([^\n\r\x{2028}\x{2029}]*)$").captures(l))
+        .map(|m| Proc { pid: number(&m[1]), args: m[2].to_string() })
+        .collect()
 }
 
 /// opencode processes: the command itself, not a shell or tmux that names
@@ -94,7 +89,10 @@ pub fn open_code_processes(sys: &mut dyn System, windows: bool) -> Vec<Proc> {
     let out = sys.run("ps", &["-axo", "pid=,args="]);
     parse_ps(&out)
         .into_iter()
-        .filter(|p| crate::re!(r"^(\S*[/\\])?opencode(\.exe)?(\s|$)").is_match(&p.args) || crate::re!(r"^\S*node\S*\s+\S*opencode-ai").is_match(&p.args))
+        .filter(|p| {
+            crate::re!(r"^([^\s\x{FEFF}--\x{85}]*[/\\])?opencode(\.exe)?([\s\x{FEFF}--\x{85}]|$)").is_match(&p.args)
+                || crate::re!(r"^[^\s\x{FEFF}--\x{85}]*node[^\s\x{FEFF}--\x{85}]*[\s\x{FEFF}--\x{85}]+[^\s\x{FEFF}--\x{85}]*opencode-ai").is_match(&p.args)
+        })
         .collect()
 }
 
@@ -109,7 +107,7 @@ fn unique(v: Vec<f64>) -> Vec<f64> {
 }
 
 fn words(s: &str) -> Vec<&str> {
-    crate::re!(r"\s+").split(xenonet_base::text::js_trim(s)).collect()
+    crate::re!(r"[\s\x{FEFF}--\x{85}]+").split(xenonet_base::text::js_trim(s)).collect()
 }
 
 fn number(s: &str) -> f64 {
@@ -147,7 +145,7 @@ pub fn listening_ports(sys: &mut dyn System, pid: f64, platform: &str) -> Vec<f6
             let mut inodes: Vec<String> = Vec::new();
             for fd in fds {
                 if let Some(link) = sys.readlink(&format!("/proc/{pid_text}/fd/{fd}")) {
-                    if let Some(m) = crate::re!(r"^socket:\[(\d+)\]$").captures(&link) {
+                    if let Some(m) = crate::re!(r"^socket:\[([0-9]+)\]$").captures(&link) {
                         inodes.push(m[1].to_string());
                     }
                 }
@@ -245,7 +243,7 @@ impl OpenCode {
         }
         let mut found: Vec<Server> = Vec::new();
         for p in h.processes() {
-            let ports = match crate::re!(r"--port[= ](\d+)").captures(&p.args) {
+            let ports = match crate::re!(r"--port[= ]([0-9]+)").captures(&p.args) {
                 Some(m) => vec![number(&m[1])],
                 None => h.ports(p.pid),
             };
@@ -379,7 +377,7 @@ mod tests {
         assert_eq!(open_code_id("opencode:ses-abc123"), "ses_abc123");
         assert_eq!(xenonet_id(" ses_abc123 "), "opencode:ses-abc123");
         assert_eq!(xenonet_id("claude:x"), "claude:x");
-        assert_eq!(from_open_code_id(&Arg::Null), "");
+        assert_eq!(xenonet_id(""), "");
     }
 
     #[test]

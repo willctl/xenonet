@@ -20,7 +20,6 @@ const CHECK_MS: u64 = 8000;
 const DAY_MS: f64 = 24.0 * 3600e3;
 
 /// The schemas state.json is checked against, as schemas/ has them.
-const STATE_SCHEMAS: [&str; 2] = [include_str!("../../../schemas/state/v1.json"), include_str!("../../../schemas/state/v2.json")];
 const STATE_VERSION: f64 = 2.0;
 
 /// The folders the checks look at (core/config.js's, with the projects
@@ -226,11 +225,13 @@ pub fn inspect_state(dir: &str) -> Value {
     let version = data.get("version").cloned().unwrap_or(json!(1));
     out["version"] = version.clone();
     if let Some(v) = version.as_f64().filter(|v| v.fract() == 0.0 && (1.0..=STATE_VERSION).contains(v)) {
-        let docs: Vec<Value> = STATE_SCHEMAS.iter().filter_map(|t| xenonet_base::json::parse(t).ok()).collect();
-        if let Ok(checker) = xenonet_schema::check::compile(&docs) {
-            let checked = checker.check(checker.root(v as usize - 1), &xenonet_schema::check::Data::from(&data), false);
-            out["issues"] = Value::Array(checked.issues.iter().map(|i| json!({ "path": i.path, "code": i.code, "message": i.message })).collect());
-        }
+        // The file read as its version's type: the first part that isn't one.
+        let issue = if v == 1.0 {
+            xenonet_schema::typed::read::<xenonet_model::state::StateV1>(&data).err()
+        } else {
+            xenonet_schema::typed::read::<xenonet_model::state::State>(&data).err()
+        };
+        out["issues"] = Value::Array(issue.into_iter().map(|i| json!({ "path": i.path, "message": i.message })).collect());
     }
     out
 }
@@ -595,7 +596,7 @@ mod tests {
             [("xenonet.server".into(), "warn".into()), ("xenonet.state".into(), "warn".into()), ("system.projects".into(), "ok".into()), ("system.runtime".into(), "ok".into())]
         );
         // A state.json of a workspace alone lacks the parts XenoNet writes.
-        assert_eq!(r["results"][1]["detail"], json!("state.json has 5 parts XenoNet can't use, such as layout: expected record, received undefined"));
+        assert_eq!(r["results"][1]["detail"], json!("state.json has 1 part XenoNet can't use, such as the whole file: missing field `layout`"));
         assert_eq!(r["results"][2]["detail"], json!(format!("{chosen}, 0 entries")));
         assert_eq!(r["by"], Value::Null);
         assert_eq!(r["summary"]["warn"], json!(2));

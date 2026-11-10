@@ -50,6 +50,8 @@ xenonet-schema.workspace = true
 xenonet-state.workspace = true
 
 [dev-dependencies]
+# The tray's status and a made-up machine's load, checked as their types.
+xenonet-model.workspace = true
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
 # The binary's engine driver on every host of the network's end-to-end

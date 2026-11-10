@@ -99,16 +99,16 @@ fn is_actor(id: &str) -> bool {
 /// white space, and [\s\S] as any character at all.
 fn secrets() -> [&'static regex::Regex; 10] {
     [
-        crate::re!(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}"),
-        crate::re!(r"\bxai-[A-Za-z0-9]{20,}"),
-        crate::re!(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
-        crate::re!(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
-        crate::re!(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
-        crate::re!(r"\bAKIA[0-9A-Z]{16}\b"),
-        crate::re!(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+        crate::re!(r"(?-u:\b)sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}"),
+        crate::re!(r"(?-u:\b)xai-[A-Za-z0-9]{20,}"),
+        crate::re!(r"(?-u:\b)gh[pousr]_[A-Za-z0-9]{20,}"),
+        crate::re!(r"(?-u:\b)github_pat_[A-Za-z0-9_]{20,}"),
+        crate::re!(r"(?-u:\b)xox[abprs]-[A-Za-z0-9-]{10,}"),
+        crate::re!(r"(?-u:\b)AKIA[0-9A-Z]{16}(?-u:\b)"),
+        crate::re!(r"(?-u:\b)eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
         private_key(),
-        crate::re!(r"\bxn[a-z]?_[A-Za-z0-9_-]{20,}"),
-        crate::re!(r"\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|APIKEY|PRIVATE_KEY))\s*[=:]\s*\S+"),
+        crate::re!(r"(?-u:\b)xn[a-z]?_[A-Za-z0-9_-]{20,}"),
+        crate::re!(r"(?-u:\b)([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|APIKEY|PRIVATE_KEY))[\s\x{FEFF}--\x{85}]*[=:][\s\x{FEFF}--\x{85}]*[^\s\x{FEFF}--\x{85}]+"),
     ]
 }
 
@@ -157,7 +157,7 @@ pub fn sanitize(text: &str, one_line: bool, max: f64) -> String {
     let s = if one_line { regex_replace(r"[\r\n\t]+", &s, " ") } else { regex_replace(r"\r\n?", &s, "\n") };
     let mut s = regex_replace(r"[\x00-\x08\x0b-\x1f\x7f-\x{9f}]", &s, "");
     if one_line {
-        s = crate::re!(r"\s{2,}").replace_all(&s, " ").into_owned();
+        s = crate::re!(r"[\s\x{FEFF}--\x{85}]{2,}").replace_all(&s, " ").into_owned();
         s = xenonet_base::text::js_trim(&s).to_string();
     }
     let len = s.encode_utf16().count();
@@ -553,7 +553,7 @@ impl Policy {
             Some(id) => template(id),
         };
         let mut ids: Vec<String> = recipients.iter().map(id_of).collect();
-        ids.sort_by(|a, b| crate::js::utf16_cmp(a, b));
+        ids.sort_by(|a, b| xenonet_base::sort::utf16_cmp(a, b));
         let hash = xenonet_base::jsstr::hex(&Sha256::digest(format!("{sender}|{}|{text}", ids.join(",")).as_bytes()));
         if self.recent.iter().any(|(k, _)| *k == hash) {
             return refuse(self, h, "you sent the same message to the same sessions under a minute ago".into(), "duplicate");
@@ -569,7 +569,7 @@ impl Policy {
                 return refuse(self, h, format!("{id} is getting too many messages; try again in a minute"), "target-rate");
             }
             let mut pair = [sender.to_string(), id.clone()];
-            pair.sort_by(|a, b| crate::js::utf16_cmp(a, b));
+            pair.sort_by(|a, b| xenonet_base::sort::utf16_cmp(a, b));
             let per_pair = self.limits.pair_per_ten_minutes;
             if !self.take(h, &format!("p:{}", pair.join("|")), per_pair, 600e3) {
                 return refuse(

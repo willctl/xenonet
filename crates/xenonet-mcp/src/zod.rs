@@ -60,10 +60,12 @@ pub struct Z {
     description: Option<String>,
 }
 
-// A pattern as JS's RegExp reads it, through the engine's translation (\d,
-// \s, \w, \b and . are JS's, not the regex crate's).
+// A schema's pattern, as the schema's readers take it: its \d is an ASCII
+// digit, where the regex crate's own is any Unicode digit, so it's read
+// with Unicode classes off. The patterns given (ISO times, ids) are ASCII
+// classes, ranges and anchors, which read the same either way otherwise.
 fn compile(pattern: &str) -> Regex {
-    xenonet_engine::jsre::js(pattern, false)
+    Regex::new(&format!("(?-u:{pattern})")).expect("a fixed pattern: the schemas pass them from the source")
 }
 
 // zod's last pass over what it wrote (compactTypeUnion): an anyOf whose

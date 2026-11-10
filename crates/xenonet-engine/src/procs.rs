@@ -24,7 +24,6 @@
 //! (`processes`), and of each actor product from
 //! `xenonet_adapter::products`: no app or product is named here.
 
-use crate::js::{template, truthy};
 use crate::re;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -35,6 +34,7 @@ use xenonet_base::nodepath::Style;
 use xenonet_base::paths::normalize_posix;
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_trim};
+use xenonet_base::text::{template, truthy};
 
 const TABLE_MS: f64 = 1500.0;
 // New vouched app bundles a census reads the ids of, at most.
@@ -231,7 +231,7 @@ pub fn is_node(base: &str) -> bool {
 }
 
 fn is_python(base: &str) -> bool {
-    re!(r"^python(\d+(\.\d+)*)?$", i).is_match(base)
+    re!(r"(?i)^python([0-9]+(\.[0-9]+)*)?$").is_match(base)
 }
 
 /// Whether a program needs its arguments read to say what it is: Node and
@@ -269,7 +269,7 @@ pub fn product_of(program: &str, args: &str) -> Option<Product> {
             return Some(Product { product, role: "tui" });
         }
     }
-    let bundle = re!(r"\/([^/]+)\.app\/").captures(&p).and_then(|c| c.get(1)).map(|m| m.as_str());
+    let bundle = re!(r"/([^/]+)\.app/").captures(&p).and_then(|c| c.get(1)).map(|m| m.as_str());
     bundle.and_then(products::app_of_bundle).map(|product| Product { product, role: "app" })
 }
 
@@ -355,7 +355,7 @@ pub fn parse_cwds(text: &str) -> PidMap<String> {
 pub fn parse_commands(text: &str) -> PidMap<String> {
     let mut out = PidMap::default();
     for line in text.split('\n') {
-        if let Some(c) = re!(r"^\s*(\d+)\s(.*)$").captures(line) {
+        if let Some(c) = re!(r"^[\s\x{FEFF}--\x{85}]*([0-9]+)[\s\x{FEFF}--\x{85}]([^\n\r\x{2028}\x{2029}]*)$").captures(line) {
             out.set(js_num(&c[1]), c[2].to_string());
         }
     }
@@ -390,7 +390,7 @@ fn date_utc(year: f64, month: f64, day: f64, h: f64, m: f64, s: f64) -> f64 {
 pub fn parse_ps(text: &str) -> Table {
     let mut table = PidMap::default();
     for line in text.split('\n') {
-        let Some(m) = re!(r"^\s*(\d+)\s+(\d+)\s+\w{3}\s+(\w{3})\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d{4})\s+(.*)$").captures(line) else {
+        let Some(m) = re!(r"^[\s\x{FEFF}--\x{85}]*([0-9]+)[\s\x{FEFF}--\x{85}]+([0-9]+)[\s\x{FEFF}--\x{85}]+[0-9A-Za-z_]{3}[\s\x{FEFF}--\x{85}]+([0-9A-Za-z_]{3})[\s\x{FEFF}--\x{85}]+([0-9]+)[\s\x{FEFF}--\x{85}]+([0-9]+):([0-9]+):([0-9]+)[\s\x{FEFF}--\x{85}]+([0-9]{4})[\s\x{FEFF}--\x{85}]+([^\n\r\x{2028}\x{2029}]*)$").captures(line) else {
             continue;
         };
         let start = match month(&m[3]) {
@@ -416,7 +416,7 @@ pub fn parse_netstat(text: &str, local_port: &str, remote_port: &str) -> Option<
     let server = format!("127.0.0.1.{local_port}");
     let mut closing = None;
     for line in text.split('\n') {
-        let Some(m) = re!(r"^tcp4\s+\d+\s+\d+\s+(\S+)\s+(\S+)\s+([A-Z_0-9]+)\s+\d+\s+\d+\s+\d+\s+\d+\s+(.*):(\d+)\s+[0-9a-f]{5}\s").captures(line) else {
+        let Some(m) = re!(r"^tcp4[\s\x{FEFF}--\x{85}]+[0-9]+[\s\x{FEFF}--\x{85}]+[0-9]+[\s\x{FEFF}--\x{85}]+([^\s\x{FEFF}--\x{85}]+)[\s\x{FEFF}--\x{85}]+([^\s\x{FEFF}--\x{85}]+)[\s\x{FEFF}--\x{85}]+([A-Z_0-9]+)[\s\x{FEFF}--\x{85}]+[0-9]+[\s\x{FEFF}--\x{85}]+[0-9]+[\s\x{FEFF}--\x{85}]+[0-9]+[\s\x{FEFF}--\x{85}]+[0-9]+[\s\x{FEFF}--\x{85}]+([^\n\r\x{2028}\x{2029}]*):([0-9]+)[\s\x{FEFF}--\x{85}]+[0-9a-f]{5}[\s\x{FEFF}--\x{85}]").captures(line) else {
             continue;
         };
         let state = &m[3];

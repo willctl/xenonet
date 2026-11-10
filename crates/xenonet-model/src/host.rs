@@ -2,8 +2,8 @@
 //! file (`host/list/v1`).
 
 use crate::ids;
-use crate::num::{Ms, Uint};
-use crate::schema::{Document, Nullable, Opt};
+use crate::num::{Ms, Ranged, Uint};
+use crate::schema::{Document, Nullable, Opt, Text};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct HostName(pub ids::HostId);
 
-/// Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct HostKey(#[schemars(regex(pattern = r"^[0-9a-f]{32}$"))] pub String);
+crate::pattern! {
+    /// Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that
+    pub struct HostKey(r"^[0-9a-f]{32}$");
+}
 
 // ---- host/hello/v1
 
@@ -37,15 +37,12 @@ pub struct Hello {
     pub t: HelloT,
     pub schema: HelloTag,
     /// The relay's protocol: a console refuses one it doesn't speak, naming the host's version
-    #[schemars(range(min = 1))]
-    pub protocol: Uint,
+    pub protocol: Ranged<1>,
     /// The host's XenoNet
-    #[schemars(length(min = 1, max = 64))]
-    pub version: String,
+    pub version: Text<1, 64>,
     pub host: HelloHost,
     /// process.platform on the host: darwin, linux, win32
-    #[schemars(length(min = 1, max = 32))]
-    pub platform: String,
+    pub platform: Text<1, 32>,
     /// The host shows made-up data
     pub demo: bool,
     /// The host's clock, as the hello leaves it
@@ -84,25 +81,25 @@ pub enum Transport {
     Local,
 }
 
-// A machine's name or address, as ssh takes it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct SshHostname(#[schemars(regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"))] pub String);
+crate::pattern! {
+    // A machine's name or address, as ssh takes it.
+    pub struct SshHostname(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$");
+}
 
-// A user name, as ssh takes it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct SshUser(#[schemars(regex(pattern = r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$"))] pub String);
+crate::pattern! {
+    // A user name, as ssh takes it.
+    pub struct SshUser(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$");
+}
 
-// An absolute path, or one under the home folder, as ssh's config takes it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct SshPath(#[schemars(regex(pattern = r#"^(?:\/|~\/)[^"\\%\u0000-\u001f\u007f]{1,1022}$"#))] pub String);
+crate::pattern! {
+    // An absolute path, or one under the home folder, as ssh's config takes it.
+    pub struct SshPath(r#"^(?:\/|~\/)[^"\\%\u0000-\u001f\u007f]{1,1022}$"#);
+}
 
 // A port.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct Port(#[schemars(range(min = 1, max = 65535))] pub Uint);
+pub struct Port(pub Ranged<1, 65535>);
 
 /// How ssh reaches the host, as XenoNet writes it into its own ssh config
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -121,15 +118,15 @@ pub struct Ssh {
     pub host_key_alias: Nullable<SshHostname>,
 }
 
-// The xenonet command on a host: by name, or by absolute path.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct Command(#[schemars(regex(pattern = r"^(?:xenonet|\/[A-Za-z0-9._+/-]{1,1023})$"))] pub String);
+crate::pattern! {
+    // The xenonet command on a host: by name, or by absolute path.
+    pub struct Command(r"^(?:xenonet|\/[A-Za-z0-9._+/-]{1,1023})$");
+}
 
-// A span back in time: 7d, 12h, 90m.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct Since(#[schemars(regex(pattern = r"^\d{1,4}[mhd]$"))] pub String);
+crate::pattern! {
+    // A span back in time: 7d, 12h, 90m.
+    pub struct Since(r"^\d{1,4}[mhd]$");
+}
 
 // Another machine's XenoNet this one shows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

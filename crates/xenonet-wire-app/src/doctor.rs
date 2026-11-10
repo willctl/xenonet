@@ -45,7 +45,6 @@ pub const DEMO_ONLY: [&str; 10] = [
     "hosts",
 ];
 
-const STATE_SCHEMAS: [&str; 2] = [include_str!("../../../schemas/state/v1.json"), include_str!("../../../schemas/state/v2.json")];
 const STATE_VERSION: f64 = 2.0;
 
 /// What the doctor reads XenoNet's own state through.
@@ -261,11 +260,13 @@ pub fn inspect_state(dir: &str) -> Value {
     let version = data.get("version").cloned().unwrap_or(json!(1));
     out["version"] = version.clone();
     if let Some(v) = version.as_f64().filter(|v| v.fract() == 0.0 && (1.0..=STATE_VERSION).contains(v)) {
-        let docs: Vec<Value> = STATE_SCHEMAS.iter().filter_map(|t| xenonet_base::json::parse(t).ok()).collect();
-        if let Ok(checker) = xenonet_schema::check::compile(&docs) {
-            let checked = checker.check(checker.root(v as usize - 1), &xenonet_schema::check::Data::from(&data), false);
-            out["issues"] = Value::Array(checked.issues.iter().map(|i| json!({ "path": i.path, "code": i.code, "message": i.message })).collect());
-        }
+        // The file read as its version's type: the first part that isn't one.
+        let issue = if v == 1.0 {
+            xenonet_schema::typed::read::<xenonet_model::state::StateV1>(&data).err()
+        } else {
+            xenonet_schema::typed::read::<xenonet_model::state::State>(&data).err()
+        };
+        out["issues"] = Value::Array(issue.into_iter().map(|i| json!({ "path": i.path, "message": i.message })).collect());
     }
     out
 }

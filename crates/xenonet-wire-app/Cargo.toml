@@ -34,6 +34,9 @@ xenonet-sources.workspace = true
 # state.json and the drift log against XenoNet's schemas.
 xenonet-engine.workspace = true
 xenonet-schema.workspace = true
+# state.json, another host's frames and the assistant's answers, read as
+# their types.
+xenonet-model.workspace = true
 # hosts.json, read as a versioned store; graph.js's activityOf and the SSH
 # aliases' reading, for a hub's merged map.
 xenonet-blocks.workspace = true

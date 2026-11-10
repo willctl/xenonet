@@ -5,16 +5,15 @@
 //! sessions, recentSession, describe, placeOf). A map that isn't made yet
 //! reads as an empty one, so the engine still answers from its own store.
 
-use crate::js::arg;
-use crate::js::Locked;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use xenonet_engine::engine::Fail;
+use xenonet_base::sync::Locked;
+use xenonet_engine::engine::{Fail, Thrown};
 use xenonet_engine::host::IndexEntry;
-use xenonet_engine::peer::{Result, Thrown};
-use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{CoreError, State, R};
+
+type Result<T> = std::result::Result<T, Thrown>;
 
 /// A State answer: what a pending map stands in for, or what failed.
 fn read<T>(r: R<T>, empty: impl FnOnce() -> T) -> Result<T> {
@@ -26,7 +25,7 @@ fn read<T>(r: R<T>, empty: impl FnOnce() -> T) -> Result<T> {
 }
 
 pub fn thrown(e: CoreError) -> Thrown {
-    Thrown { message: e.message, code: e.code.map(|c| Box::new(Value::String(c))), handle: None, stdout: None }
+    Thrown { message: e.message, code: e.code }
 }
 
 /// A map answer as the engine takes it.
@@ -82,7 +81,7 @@ impl Map {
             .map(|n| IndexEntry {
                 id: s(n, "id").unwrap_or_default(),
                 kind: s(n, "kind"),
-                archived: crate::js::truthy_json(&n["archived"]),
+                archived: xenonet_base::text::truthy(Some(&n["archived"])),
                 updated_at: n.get("updatedAt").and_then(Value::as_f64),
                 name: s(n, "name"),
                 path: s(n, "path"),
@@ -184,7 +183,7 @@ impl Map {
         let kept = self.kept()?;
         let mut k = xenonet_base::paths::path_key(p).unwrap_or_default();
         while !k.is_empty() {
-            if let Some(id) = kept.places.get(&k).filter(|v| crate::js::truthy_json(v)) {
+            if let Some(id) = kept.places.get(&k).filter(|v| xenonet_base::text::truthy(Some(v))) {
                 return Ok(id.clone());
             }
             k = match k.rfind('/') {
@@ -193,28 +192,6 @@ impl Map {
             };
         }
         Ok(Value::Null)
-    }
-
-    /// The actors' map, as its calls answer them.
-    pub fn call(&self, method: &str, args: &[Arg]) -> Result<Arg> {
-        let s = || crate::js::text(&crate::js::at(args, 0));
-        Ok(match method {
-            "ready" => Arg::Bool(self.ready()),
-            "has" => Arg::Bool(self.has(&s())?),
-            "sessions" => arg(&self.sessions()?),
-            "recentSession" => arg(&self.recent_session()?),
-            "describe" => arg(&self.describe(&s())?),
-            "placeOf" => arg(&self.place_of(&s())?),
-            _ => return Err(crate::js::no_method("actors.map", method)),
-        })
-    }
-
-    pub fn kind(method: &str) -> &'static str {
-        match method {
-            "" => "object",
-            "ready" | "has" | "sessions" | "recentSession" | "describe" | "placeOf" => "function",
-            _ => "undefined",
-        }
     }
 }
 

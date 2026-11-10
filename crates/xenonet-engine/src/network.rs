@@ -99,9 +99,9 @@ pub fn local_of(id: &str) -> &str {
 }
 
 /// A fresh id across the network: `<prefix>_<uuid v4>` (msg_, hof_).
-pub fn new_id(prefix: &str) -> Result<String, crate::peer::Thrown> {
+pub fn new_id(prefix: &str) -> Result<String, crate::engine::Thrown> {
     let mut b = [0u8; 16];
-    getrandom::fill(&mut b).map_err(|e| crate::peer::Thrown::new(format!("no random bytes: {e}")))?;
+    getrandom::fill(&mut b).map_err(|e| crate::engine::Thrown::new(format!("no random bytes: {e}")))?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h = xenonet_base::jsstr::hex(&b);

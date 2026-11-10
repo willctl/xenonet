@@ -24,7 +24,8 @@
 use serde_json::{json, Map, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use xenonet_engine::js::{locale_compare, template, utf16_cmp};
+use xenonet_base::sort::{locale_compare, utf16_cmp};
+use xenonet_base::text::template;
 
 pub const UNATTRIBUTED: &str = "unattributed";
 const LINEAGE_MAX: usize = 8;
@@ -57,7 +58,7 @@ pub fn attribute(sessions: &[Value], starts: &[Value], known: Option<&HashSet<St
     let mut by_id: HashMap<String, &Value> = HashMap::new();
     let mut order: Vec<Value> = Vec::new();
     for s in sessions {
-        if let Some(id) = s.get("id").filter(|v| xenonet_engine::js::truthy(Some(v))) {
+        if let Some(id) = s.get("id").filter(|v| xenonet_base::text::truthy(Some(v))) {
             if by_id.insert(id_key(id), s).is_none() {
                 order.push(id.clone());
             }
@@ -93,7 +94,7 @@ pub fn attribute(sessions: &[Value], starts: &[Value], known: Option<&HashSet<St
         let mut seen: HashSet<String> = HashSet::new();
         let mut cur = Some(id.clone());
         let mut up = 0;
-        while let Some(c) = cur.filter(|c| xenonet_engine::js::truthy(Some(c)) && up <= LINEAGE_MAX && !seen.contains(&id_key(c))) {
+        while let Some(c) = cur.filter(|c| xenonet_base::text::truthy(Some(c)) && up <= LINEAGE_MAX && !seen.contains(&id_key(c))) {
             seen.insert(id_key(&c));
             if let Some(o) = own(&c) {
                 let who = if up > 0 { Who { actor: o.actor, how: "parent" } } else { o };

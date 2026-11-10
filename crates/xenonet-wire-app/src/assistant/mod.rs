@@ -6,7 +6,7 @@
 //!
 //! Their rows are the engine's, in engine.sqlite, and the actors they
 //! belong to are the actors' registry's: both through the engine's driver
-//! (EngineStore::native, Actors::registry). Until it gives them, these
+//! (EngineStore::native, and the Actors trait). Until it gives them, these
 //! cores stay pending.
 
 pub mod connections;
@@ -14,20 +14,8 @@ pub mod reads;
 pub mod tunnels;
 
 use serde_json::{Map, Value};
-use xenonet_engine::sql::{Arg, Cell, Row};
+use xenonet_engine::sql::{Cell, Row};
 use xenonet_service::cores::{CoreError, Kind};
-
-/// A JSON value as the cores' JS-shaped arguments.
-pub fn arg(v: &Value) -> Arg {
-    match v {
-        Value::Null => Arg::Null,
-        Value::Bool(b) => Arg::Bool(*b),
-        Value::Number(n) => Arg::Num(n.as_f64().unwrap_or(f64::NAN)),
-        Value::String(s) => Arg::Text(s.clone()),
-        Value::Array(a) => Arg::List(a.iter().map(arg).collect()),
-        Value::Object(m) => Arg::Obj(m.iter().map(|(k, v)| (k.clone(), arg(v))).collect()),
-    }
-}
 
 /// A row of the engine's store as JSON: each column as node:sqlite read it,
 /// an integer as a number.

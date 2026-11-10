@@ -37,7 +37,7 @@ pub mod system;
 pub mod theme;
 pub mod tray;
 
-pub use schema::{Any, Document, Nullable, Opt, Record, Ref, Text, True};
+pub use schema::{Any, Bounded, Document, Nullable, Opt, Record, Ref, Text, True};
 
 /// Every schema document, as a writer of its file (`schema::documents()`
 /// renders them): each module lists its own in its `DOCUMENTS`.

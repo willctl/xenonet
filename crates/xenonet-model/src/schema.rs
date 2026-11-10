@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 
 /// Where every schema's `$id` lives.
 pub const BASE: &str = "https://xenonet.dev/schemas";
@@ -188,9 +189,17 @@ impl JsonSchema for Any {
 /// A string with a known bound: at most `MAX` characters, and at least
 /// `MIN` when that's more than 0. For a field whose bounds can't go on
 /// the field itself, as inside a `Nullable`: `Nullable<Text<0, 200>>`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Reading one refuses a string outside the bounds, its length counted in
+/// UTF-16 code units, as JS counts a string's length.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct Text<const MIN: usize, const MAX: usize>(pub String);
+
+impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 impl<const MIN: usize, const MAX: usize> From<String> for Text<MIN, MAX> {
     fn from(s: String) -> Self {
@@ -198,10 +207,65 @@ impl<const MIN: usize, const MAX: usize> From<String> for Text<MIN, MAX> {
     }
 }
 
+impl<const MIN: usize, const MAX: usize> From<&str> for Text<MIN, MAX> {
+    fn from(s: &str) -> Self {
+        Text(s.to_string())
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> From<Text<MIN, MAX>> for String {
+    fn from(t: Text<MIN, MAX>) -> Self {
+        t.0
+    }
+}
+
 impl<const MIN: usize, const MAX: usize> std::ops::Deref for Text<MIN, MAX> {
     type Target = str;
     fn deref(&self) -> &str {
         &self.0
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> std::fmt::Display for Text<MIN, MAX> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> PartialEq<str> for Text<MIN, MAX> {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> PartialEq<&str> for Text<MIN, MAX> {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+/// What a bounded string or list is expected to be, in words: "a string
+/// of at most 200 characters", "a list of 1 to 4 items".
+fn sized(what: &str, unit: &str, min: usize, max: usize) -> String {
+    let units = |n: usize| if n == 1 { format!("{n} {unit}") } else { format!("{n} {unit}s") };
+    match (min, max) {
+        (0, usize::MAX) => what.to_string(),
+        (0, max) => format!("{what} of at most {}", units(max)),
+        (min, usize::MAX) => format!("{what} of at least {}", units(min)),
+        (min, max) if min == max => format!("{what} of exactly {}", units(min)),
+        (min, max) => format!("{what} of {min} to {}", units(max)),
+    }
+}
+
+impl<'de, const MIN: usize, const MAX: usize> Deserialize<'de> for Text<MIN, MAX> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        let n = s.encode_utf16().count();
+        if (MIN..=MAX).contains(&n) {
+            Ok(Text(s))
+        } else {
+            Err(serde::de::Error::invalid_length(n, &sized("a string", "character", MIN, MAX).as_str()))
+        }
     }
 }
 
@@ -221,8 +285,296 @@ impl<const MIN: usize, const MAX: usize> JsonSchema for Text<MIN, MAX> {
         if MAX < usize::MAX {
             m.insert("maxLength".into(), Value::from(MAX));
         }
+        m.insert(BOUNDS_LAST.into(), Value::Bool(true));
         Schema::from(m)
     }
+}
+
+/// A list with a known bound: at least `MIN` items and at most `MAX`
+/// (`usize::MAX` for no limit). Its schema is the list's with `minItems`
+/// and `maxItems`; reading one refuses a list outside the bounds, without
+/// reading the items past `MAX`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct Bounded<T, const MIN: usize, const MAX: usize>(pub Vec<T>);
+
+impl<T, const MIN: usize, const MAX: usize> Default for Bounded<T, MIN, MAX> {
+    fn default() -> Self {
+        Bounded(Vec::new())
+    }
+}
+
+impl<T, const MIN: usize, const MAX: usize> From<Vec<T>> for Bounded<T, MIN, MAX> {
+    fn from(v: Vec<T>) -> Self {
+        Bounded(v)
+    }
+}
+
+impl<T, const MIN: usize, const MAX: usize> From<Bounded<T, MIN, MAX>> for Vec<T> {
+    fn from(b: Bounded<T, MIN, MAX>) -> Self {
+        b.0
+    }
+}
+
+impl<T, const MIN: usize, const MAX: usize> FromIterator<T> for Bounded<T, MIN, MAX> {
+    fn from_iter<I: IntoIterator<Item = T>>(i: I) -> Self {
+        Bounded(i.into_iter().collect())
+    }
+}
+
+impl<T, const MIN: usize, const MAX: usize> std::ops::Deref for Bounded<T, MIN, MAX> {
+    type Target = Vec<T>;
+    fn deref(&self) -> &Vec<T> {
+        &self.0
+    }
+}
+
+impl<T, const MIN: usize, const MAX: usize> std::ops::DerefMut for Bounded<T, MIN, MAX> {
+    fn deref_mut(&mut self) -> &mut Vec<T> {
+        &mut self.0
+    }
+}
+
+impl<T, const MIN: usize, const MAX: usize> IntoIterator for Bounded<T, MIN, MAX> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, T, const MIN: usize, const MAX: usize> IntoIterator for &'a Bounded<T, MIN, MAX> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'de, T: Deserialize<'de>, const MIN: usize, const MAX: usize> Deserialize<'de> for Bounded<T, MIN, MAX> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor<T, const MIN: usize, const MAX: usize>(PhantomData<T>);
+        impl<'de, T: Deserialize<'de>, const MIN: usize, const MAX: usize> serde::de::Visitor<'de> for Visitor<T, MIN, MAX> {
+            type Value = Bounded<T, MIN, MAX>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&sized("a list", "item", MIN, MAX))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+                // A list known to be too long is refused before its items
+                // are read; one whose length isn't known, at the first item
+                // past the bound, counting the rest without reading them.
+                if let Some(n) = a.size_hint().filter(|&n| n > MAX) {
+                    return Err(serde::de::Error::invalid_length(n, &self));
+                }
+                let mut out = Vec::with_capacity(a.size_hint().unwrap_or(0).min(MAX));
+                while out.len() < MAX {
+                    match a.next_element()? {
+                        Some(x) => out.push(x),
+                        None => break,
+                    }
+                }
+                let mut n = out.len();
+                while a.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    n += 1;
+                }
+                if n < MIN || n > MAX {
+                    return Err(serde::de::Error::invalid_length(n, &self));
+                }
+                Ok(Bounded(out))
+            }
+        }
+        d.deserialize_seq(Visitor::<T, MIN, MAX>(PhantomData))
+    }
+}
+
+impl<T: JsonSchema, const MIN: usize, const MAX: usize> JsonSchema for Bounded<T, MIN, MAX> {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Owned(format!("Bounded_of_{}_{MIN}_{MAX}", T::schema_name()))
+    }
+    fn schema_id() -> Cow<'static, str> {
+        Cow::Owned(format!("Bounded<{}, {MIN}, {MAX}>", T::schema_id()))
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(g: &mut SchemaGenerator) -> Schema {
+        let mut s = g.subschema_for::<Vec<T>>();
+        if MIN > 0 {
+            s.insert("minItems".into(), Value::from(MIN));
+        }
+        if MAX < usize::MAX {
+            s.insert("maxItems".into(), Value::from(MAX));
+        }
+        s.insert(BOUNDS_LAST.into(), Value::Bool(true));
+        s
+    }
+}
+
+/// A schema's `pattern`, checked as a string is read: the pattern is the
+/// source of a JS regular expression, as JSON Schema has it, and is
+/// compiled once, the first time it's needed. A module's patterned string
+/// type keeps one in a `static`.
+#[derive(Debug)]
+pub struct Pattern {
+    source: &'static str,
+    compiled: OnceLock<Option<regex::Regex>>,
+}
+
+impl Pattern {
+    pub const fn new(source: &'static str) -> Self {
+        Pattern { source, compiled: OnceLock::new() }
+    }
+
+    /// The pattern as the schema writes it.
+    pub fn source(&self) -> &'static str {
+        self.source
+    }
+
+    fn regex(&self) -> Option<&regex::Regex> {
+        self.compiled.get_or_init(|| regex::RegexBuilder::new(&rust_syntax(self.source)).size_limit(1 << 26).build().ok()).as_ref()
+    }
+
+    /// Whether the pattern compiles: one that doesn't matches nothing.
+    pub fn compiles(&self) -> bool {
+        self.regex().is_some()
+    }
+
+    /// Whether `s` matches, as JS's `RegExp.prototype.test` says: anywhere
+    /// in the string, unless the pattern anchors it.
+    pub fn test(&self, s: &str) -> bool {
+        self.regex().is_some_and(|r| r.is_match(s))
+    }
+
+    /// `s`, or the error that says it doesn't match.
+    pub fn check<E: serde::de::Error>(&self, s: String) -> Result<String, E> {
+        if self.test(&s) {
+            Ok(s)
+        } else {
+            Err(E::invalid_value(serde::de::Unexpected::Str(shown(&s)), &format!("a string matching {}", self.source).as_str()))
+        }
+    }
+
+    /// A string read from `d` that matches.
+    pub fn read<'de, D: serde::Deserializer<'de>>(&self, d: D) -> Result<String, D::Error> {
+        self.check(String::deserialize(d)?)
+    }
+}
+
+/// The start of a refused string, as an error shows it: never all of a
+/// long one.
+pub fn shown(s: &str) -> &str {
+    match s.char_indices().nth(64) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
+}
+
+// A JS pattern as the `regex` crate reads it. The patterns in the schemas
+// are plain: anchors, classes, groups and counted repeats. Where the two
+// differ on those, this writes JS's meaning: `\d` is ASCII's digits, `.`
+// stops at JS's line terminators, `\uXXXX` is a code point, and an escaped
+// punctuation mark is the mark itself. (JS without the u flag counts a
+// character outside the BMP as two; here it is one.)
+fn rust_syntax(js: &str) -> String {
+    let mut out = String::with_capacity(js.len() + 16);
+    let mut class = false;
+    let mut chars = js.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some('d') => out.push_str(if class { "0-9" } else { "[0-9]" }),
+                Some('D') if !class => out.push_str("[^0-9]"),
+                Some('u') => {
+                    out.push_str("\\x{");
+                    out.extend(chars.by_ref().take(4));
+                    out.push('}');
+                }
+                Some(e) if e.is_ascii_alphanumeric() => {
+                    out.push('\\');
+                    out.push(e);
+                }
+                Some(e) => out.push_str(&regex::escape(&e.to_string())),
+                None => out.push_str("\\\\"),
+            },
+            '[' if !class => {
+                class = true;
+                out.push('[');
+                if chars.peek() == Some(&'^') {
+                    chars.next();
+                    out.push('^');
+                }
+            }
+            ']' if class => {
+                class = false;
+                out.push(']');
+            }
+            // Inside a class these mean sets to the regex crate, and only
+            // themselves to JS.
+            '[' | '&' | '~' if class => {
+                out.push('\\');
+                out.push(c);
+            }
+            '.' if !class => out.push_str(r"[^\n\r\x{2028}\x{2029}]"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// A string of one shape: a newtype over `String` whose schema is
+/// `{"type": "string", "pattern": ...}` (with the type's doc comment as its
+/// description), and which refuses a string that doesn't match as it's
+/// read. `pattern!(pub struct KeyId(r"^xnk1_[a-z2-7]{32}$");)` makes one.
+#[macro_export]
+macro_rules! pattern {
+    ($(#[$m:meta])* $v:vis struct $name:ident($pattern:tt);) => {
+        #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, ::serde::Serialize, ::schemars::JsonSchema)]
+        $(#[$m])*
+        #[serde(transparent)]
+        $v struct $name(#[schemars(regex(pattern = $pattern))] pub String);
+
+        impl $name {
+            /// The pattern the string matches.
+            pub fn pattern() -> &'static $crate::schema::Pattern {
+                static PATTERN: $crate::schema::Pattern = $crate::schema::Pattern::new($pattern);
+                &PATTERN
+            }
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl<'de> ::serde::Deserialize<'de> for $name {
+            fn deserialize<D: ::serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                Self::pattern().read(d).map($name)
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                $name(s)
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(s: &str) -> Self {
+                $name(s.to_string())
+            }
+        }
+
+        impl ::std::ops::Deref for $name {
+            type Target = str;
+            fn deref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+    };
 }
 
 /// A record: keys of one shape (`K`, a string by default), values of one
@@ -309,6 +661,15 @@ impl<V: JsonSchema, K: JsonSchema> JsonSchema for Record<V, K> {
     }
 }
 
+/// A key a bounded type's schema carries until `Shapes` takes it off:
+/// `true` puts the bounds (`minLength`, `maxLength`, `minItems`,
+/// `maxItems`, `pattern`) after the description a field gives it, as the
+/// files have a field's bounds; a field whose file has them first says
+/// `#[schemars(extend("x-bounds-last" = false))]`.
+pub const BOUNDS_LAST: &str = "x-bounds-last";
+
+const BOUNDS: [&str; 5] = ["minLength", "maxLength", "minItems", "maxItems", "pattern"];
+
 /// Writes the shapes the files have always had (see the module's doc).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Shapes;
@@ -329,6 +690,13 @@ impl Transform for Shapes {
     fn transform(&mut self, schema: &mut Schema) {
         transform_subschemas(self, schema);
         let Some(m) = schema.as_object_mut() else { return };
+        if m.shift_remove(BOUNDS_LAST) == Some(Value::Bool(true)) {
+            for k in BOUNDS {
+                if let Some(v) = m.shift_remove(k) {
+                    m.insert(k.into(), v);
+                }
+            }
+        }
         // A loose object says so.
         if is_object_schema(m) && !is_record(m) && !m.contains_key("additionalProperties") {
             m.insert("additionalProperties".into(), Value::Object(Map::new()));
@@ -538,4 +906,69 @@ macro_rules! open {
             Other(String),
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn refused<T: serde::de::DeserializeOwned>(v: Value) -> String {
+        serde_json::from_value::<T>(v).err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_text_counts_utf16_code_units() {
+        type Name = Text<1, 4>;
+        assert_eq!(serde_json::from_value::<Name>(json!("abcd")).unwrap().as_str(), "abcd");
+        assert_eq!(serde_json::from_value::<Name>(json!("éééé")).unwrap().as_str(), "éééé", "é is one unit");
+        assert!(serde_json::from_value::<Name>(json!("😀😀")).is_ok(), "two units each");
+        assert_eq!(refused::<Name>(json!("😀😀a")), "invalid length 5, expected a string of 1 to 4 characters");
+        assert_eq!(refused::<Name>(json!("")), "invalid length 0, expected a string of 1 to 4 characters");
+        assert_eq!(refused::<Text<0, 200>>(json!("a".repeat(201))), "invalid length 201, expected a string of at most 200 characters");
+        assert_eq!(refused::<Text<1, { usize::MAX }>>(json!("")), "invalid length 0, expected a string of at least 1 character");
+        assert!(refused::<Text<0, 3>>(json!(3)).starts_with("invalid type: integer `3`"));
+    }
+
+    #[test]
+    fn a_bounded_list_refuses_one_too_long_or_too_short() {
+        type Few = Bounded<u8, 1, 2>;
+        assert_eq!(serde_json::from_value::<Few>(json!([1, 2])).unwrap().0, vec![1, 2]);
+        assert_eq!(refused::<Few>(json!([1, 2, 3])), "invalid length 3, expected a list of 1 to 2 items");
+        assert_eq!(refused::<Few>(json!([])), "invalid length 0, expected a list of 1 to 2 items");
+        // Read from text, the length isn't known ahead: the rest is counted.
+        assert_eq!(serde_json::from_str::<Few>("[1, 2, 3, 4]").unwrap_err().to_string(), "invalid length 4, expected a list of 1 to 2 items at line 1 column 12");
+        // The items past the bound aren't read, so their type doesn't matter.
+        assert!(serde_json::from_str::<Few>(r#"[1, 2, "x"]"#).unwrap_err().to_string().starts_with("invalid length 3"));
+        assert!(refused::<Few>(json!([1, "x"])).starts_with("invalid type: string \"x\""));
+        assert_eq!(refused::<Bounded<u8, 0, 16>>(json!(vec![0; 17])), "invalid length 17, expected a list of at most 16 items");
+    }
+
+    #[test]
+    fn a_pattern_is_read_as_js_reads_it() {
+        assert_eq!(rust_syntax(r"^\d{1,4}[mhd]$"), "^[0-9]{1,4}[mhd]$");
+        assert_eq!(rust_syntax(r#"^(?:\/|~\/)[^"\\%\u0000-\u001f\u007f]$"#), r#"^(?:/|~/)[^"\\%\x{0000}-\x{001f}\x{007f}]$"#);
+        assert_eq!(rust_syntax(r"^~(\/.*)?$"), r"^~(/[^\n\r\x{2028}\x{2029}]*)?$");
+        let digits = Pattern::new(r"^\d+$");
+        assert!(digits.test("2026") && !digits.test("٢٠٢٦"), "\\d is ASCII's digits");
+        let home = Pattern::new(r"^~(\/.*)?$");
+        assert!(home.test("~/a") && !home.test("~/a\nb") && !home.test("~/a\u{2028}"), ". stops at line terminators");
+        let path = Pattern::new(r#"^(?:\/|~\/)[^"\\%\u0000-\u001f\u007f]{1,1022}$"#);
+        assert!(path.test("~/.ssh/id") && !path.test("~/a\"b") && !path.test("~/a\u{7f}") && !path.test("/a%b"));
+        assert!(Pattern::new("^(?:@[a-z][a-z0-9-]{1,31}:)?project:").test("project:/x/y"), "unanchored at the end, as RegExp.test is");
+        assert!(!Pattern::new("[").compiles() && !Pattern::new("[").test("["), "a pattern that doesn't compile matches nothing");
+    }
+
+    crate::pattern! {
+        // A test id.
+        struct TestId(r"^t_[0-9]{2}$");
+    }
+
+    #[test]
+    fn a_patterned_string_refuses_one_that_does_not_match() {
+        assert_eq!(serde_json::from_value::<TestId>(json!("t_01")).unwrap().as_str(), "t_01");
+        assert_eq!(refused::<TestId>(json!("t_1")), r#"invalid value: string "t_1", expected a string matching ^t_[0-9]{2}$"#);
+        let long = refused::<TestId>(json!("x".repeat(1000)));
+        assert!(long.len() < 200, "a long string isn't shown whole: {long}");
+    }
 }

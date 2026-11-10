@@ -6,7 +6,6 @@
 
 use super::opencode::Server;
 use super::{number_text, Files, Result};
-use crate::sql::Arg;
 use serde_json::{json, Value};
 
 /// Commands and the OpenCode servers, as the doctor's live check reads
@@ -25,7 +24,7 @@ pub const LISTEN_SECONDS: f64 = 300.0;
 
 /// Whether version text `v` is `min` or newer.
 pub fn newer(v: Option<&str>, min: &[f64]) -> bool {
-    let Some(m) = crate::re!(r"(\d+)\.(\d+)\.(\d+)").captures(v.unwrap_or("")) else { return false };
+    let Some(m) = crate::re!(r"([0-9]+)\.([0-9]+)\.([0-9]+)").captures(v.unwrap_or("")) else { return false };
     for i in 0..3 {
         let p = xenonet_base::text::js_number(Some(&Value::String(m[i + 1].to_string())));
         let want = min.get(i).copied().unwrap_or(f64::NAN);
@@ -47,20 +46,6 @@ pub fn mcp_server_name(port: f64) -> String {
     } else {
         format!("xenonet-{}", number_text(port))
     }
-}
-
-/// `mcp_server_name`, for the starts, which still hand the port over as an
-/// Arg: goes when they're typed.
-pub fn server_name(port: &Arg) -> String {
-    let n = match port {
-        Arg::Num(n) => *n,
-        Arg::Null | Arg::Undef => 0.0,
-        other => xenonet_base::text::js_number(Some(&other.to_json())),
-    };
-    if !port.truthy() {
-        return "xenonet".into();
-    }
-    mcp_server_name(n)
 }
 
 /// Listening after each turn: a Claude Code session started with these
@@ -105,13 +90,13 @@ pub fn live_setup(h: &mut dyn Host, port: f64, listen_file: Option<&str>, home: 
     let command = format!("claude --dangerously-load-development-channels server:{name}");
     let version = match &claude {
         None => Value::Null,
-        Some(text) => Value::String(crate::re!(r"\d+\.\d+\.\d+").find(text).map_or_else(|| text.clone(), |m| m.as_str().to_string())),
+        Some(text) => Value::String(crate::re!(r"[0-9]+\.[0-9]+\.[0-9]+").find(text).map_or_else(|| text.clone(), |m| m.as_str().to_string())),
     };
     let listen = match listen_file.filter(|f| !f.is_empty()) {
         Some(f) => Value::String(format!("claude --settings {}", shell_path(f, home))),
         None => Value::Null,
     };
-    let tmux = tmux.map_or(Value::Null, |t| Value::String(crate::re!(r"^tmux\s+").replace(&t, "").into_owned()));
+    let tmux = tmux.map_or(Value::Null, |t| Value::String(crate::re!(r"^tmux[\s\x{FEFF}--\x{85}]+").replace(&t, "").into_owned()));
     json!({
         "claude": { "version": version, "channels": newer(claude.as_deref(), &CHANNELS_FROM) },
         "command": command,
@@ -134,8 +119,8 @@ mod tests {
         assert!(!newer(Some("2.0.99"), &CHANNELS_FROM));
         assert!(!newer(None, &CHANNELS_FROM));
         assert_eq!(mcp_server_name(47843.0), "xenonet-47843");
-        assert_eq!(server_name(&Arg::Null), "xenonet");
-        assert_eq!(server_name(&Arg::num(47842.0)), "xenonet-dev");
+        assert_eq!(mcp_server_name(0.0), "xenonet");
+        assert_eq!(mcp_server_name(47842.0), "xenonet-dev");
     }
 
     /// A machine with Claude Code and tmux, and one OpenCode server.

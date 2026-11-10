@@ -1,40 +1,41 @@
 //! What a registered actor reports, taken into the registry a part at a
 //! time (crates/xenonet-actors/src/reports.rs), and the checks on it: an
-//! event or a target against the schema (schemas/actor/report/v1.json's
-//! ReportEvent and ReportTarget, as npm run schemas writes them), a status
-//! line (detail.rs) and the processes below the first app in a verdict's
-//! chain (verify.ownOf).
+//! event or a target read as its type (xenonet-model's ReportEvent and
+//! ReportTarget), a status line (detail.rs) and the processes below the
+//! first app in a verdict's chain (verify.ownOf).
 
-use crate::js::{arg, items, json, now_ms, Locked};
-use crate::world::World;
+use crate::runtime::Runtime;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use xenonet_actors::registration::Fail;
 use xenonet_actors::reports;
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
-use xenonet_schema::check::{compile, Checker, Data};
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
+use xenonet_engine::engine::Thrown;
+use xenonet_engine::sql::Bind;
+use xenonet_model::actor::{ReportEvent, ReportTarget};
+use xenonet_schema::typed;
 use xenonet_service::cores::{CoreError, Reports, R};
 
 /// What a report reads besides the registry: the actor's processes as
 /// given, how to read a process's lineage, the indexes already dropped,
 /// and the targets to take away.
 struct ReportHost<'a> {
-    w: &'a World,
+    w: &'a Runtime,
     own: Option<Vec<u32>>,
     skip: Vec<usize>,
     remove: Vec<Value>,
 }
 
 fn thrown(t: Thrown) -> Fail {
-    Fail::Error(crate::actors::store_error(t))
+    Fail::Error(xenonet_actors::store::Error { message: t.message, code: t.code })
 }
 
 impl ReportHost<'_> {
     /// The registry, or the refusal a call on it gets without actors.
     fn actors(&self, method: &str) -> Result<&crate::actors::ActorSide, Fail> {
-        self.w.actors.as_ref().ok_or_else(|| thrown(crate::js::no_method("actors", method)))
+        self.w.actors.as_ref().ok_or_else(|| thrown(Thrown::coded(format!("actors.{method} is not a function"), "TypeError")))
     }
 
     fn with<T>(
@@ -50,8 +51,8 @@ impl ReportHost<'_> {
         self.w.actors.as_ref().map_or_else(T::default, |a| a.read(f))
     }
 
-    fn store(&self, name: &str, args: &[Arg]) -> Result<Value, Fail> {
-        crate::store::call(&self.w.store, name, args).map(|a| json(&a)).map_err(thrown)
+    fn store<T>(&self, f: impl FnOnce(&mut xenonet_engine::store::EngineStore) -> xenonet_engine::sql::Result<T>) -> Result<T, Fail> {
+        self.w.store.with(f).map_err(|e| Fail::Error(crate::actors::store_error(e)))
     }
 }
 
@@ -78,10 +79,16 @@ impl reports::Host for ReportHost<'_> {
         self.with("target", |r, _| r.target(id, node, relation, at))
     }
     fn pins(&mut self, session: &str) -> Result<Vec<Value>, Fail> {
-        self.store("pins", &[Arg::text(session)]).map(items)
+        self.store(|s| s.pins(session)).map(|rows| rows.iter().map(xenonet_engine::store::row_json).collect())
     }
     fn has_actor_ref(&mut self, id: &str, r: &Value, since: f64) -> Result<bool, Fail> {
-        self.store("hasActorRef", &[Arg::text(id), arg(r), Arg::Num(since)]).map(|v| crate::js::truthy_json(&v))
+        // The ref as the event gave it: a text, or a number kept as text.
+        let r = match Bind::scalar(r) {
+            Some(Bind::Text(t)) => t,
+            Some(Bind::Null) => return Ok(false),
+            _ => xenonet_base::text::js_string(r),
+        };
+        self.store(|s| s.has_actor_ref(id, &r, since))
     }
     fn map_ready(&mut self) -> bool {
         self.w.actors.is_some() && self.w.map.ready()
@@ -97,11 +104,8 @@ impl reports::Host for ReportHost<'_> {
         Some(pid.as_f64().is_some_and(|p| own.iter().any(|q| f64::from(*q) == p)))
     }
     fn lineage(&mut self, pid: &Value) -> Option<Vec<Value>> {
-        let line = self.w.checks.lineage(&arg(pid));
-        if line.is_nullish() {
-            return None;
-        }
-        Some(items(json(&line)))
+        let line = self.w.checks.lineage(pid.as_f64())?;
+        Some(line.into_iter().map(xenonet_base::json::number).collect())
     }
     fn skipped(&mut self, index: usize) -> bool {
         self.skip.contains(&index)
@@ -122,66 +126,18 @@ fn error(f: Fail) -> CoreError {
     crate::registration::actor_error(f)
 }
 
-/// ReportEvent and ReportTarget, as the report's schema has them.
-struct Schemas {
-    checker: Checker,
-    shapes: [Vec<String>; 2],
-}
-
-fn schemas() -> Option<&'static Schemas> {
-    static S: OnceLock<Option<Schemas>> = OnceLock::new();
-    S.get_or_init(|| {
-        let doc: Value = xenonet_base::json::parse(include_str!("../../../schemas/actor/report/v1.json")).ok()?;
-        let p = doc.get("properties")?;
-        let event = p.get("events")?.get("items")?.clone();
-        let target = p.get("targets")?.get("items")?.clone();
-        let keys = |v: &Value| v.get("properties").and_then(Value::as_object).map(|o| o.keys().cloned().collect()).unwrap_or_default();
-        let shapes = [keys(&event), keys(&target)];
-        let checker = compile(&[event, target]).ok()?;
-        Some(Schemas { checker, shapes })
-    })
-    .as_ref()
-}
-
-/// A path as zod's issues join it: keys and indexes with dots.
-fn dotted(path: &str) -> String {
-    let mut out = String::new();
-    let mut rest = path;
-    while !rest.is_empty() {
-        if let Some(r) = rest.strip_prefix('[') {
-            let end = r.find(']').unwrap_or(r.len());
-            let inner = &r[..end];
-            let key = xenonet_base::json::parse(inner).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| inner.to_string());
-            if !out.is_empty() {
-                out.push('.');
-            }
-            out.push_str(&key);
-            rest = r.get(end + 1..).unwrap_or("");
-        } else {
-            let r = rest.strip_prefix('.').unwrap_or(rest);
-            let end = r.find(['.', '[']).unwrap_or(r.len());
-            if !out.is_empty() {
-                out.push('.');
-            }
-            out.push_str(&r[..end]);
-            rest = &r[end..];
-        }
-    }
-    out
-}
-
-/// `X.safeParse(v)`: the value as a loose object gives it back (its
-/// shape's keys first, then the rest), or the first issue.
+/// An event (`i` 0) or a target (1) read as its type: the value as a loose
+/// object gives it back (its type's keys first, then the rest), or the
+/// first issue.
 fn parse(i: usize, v: &Value) -> Result<Value, String> {
-    let Some(s) = schemas() else { return Err("it can't be checked: the report's schema isn't there".into()) };
-    let checked = s.checker.check(s.checker.root(i), &Data::from(v), false);
-    if let Some(first) = checked.issues.first() {
-        let path = dotted(&first.path);
-        return Err(format!("{} {}", if path.is_empty() { "it" } else { &path }, first.message));
+    let shape = match i {
+        0 => typed::read::<ReportEvent>(v).map(|e| serde_json::to_value(e).unwrap_or_default()),
+        _ => typed::read::<ReportTarget>(v).map(|t| serde_json::to_value(t).unwrap_or_default()),
     }
+    .map_err(|issue| issue.worded("it"))?;
     let Value::Object(o) = v else { return Ok(v.clone()) };
     let mut out = Map::new();
-    for k in &s.shapes[i] {
+    for k in shape.as_object().into_iter().flat_map(Map::keys) {
         if let Some(x) = o.get(k) {
             out.insert(k.clone(), x.clone());
         }
@@ -194,7 +150,7 @@ fn parse(i: usize, v: &Value) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
-pub struct ReportsDriver(pub Arc<World>);
+pub struct ReportsDriver(pub Arc<Runtime>);
 
 #[async_trait]
 impl Reports for ReportsDriver {
@@ -235,8 +191,8 @@ impl Reports for ReportsDriver {
         parse(1, target)
     }
     fn own_of(&self, chain: &Value) -> Vec<u32> {
-        let chain = crate::js::list(arg(chain));
-        crate::verify::own_of(&chain).iter().filter_map(|p| p.field("pid").as_f64()).filter(|p| p.is_finite() && *p >= 0.0).map(|p| p as u32).collect()
+        let chain = chain.as_array().map_or(&[][..], Vec::as_slice);
+        crate::verify::own_of(chain).iter().filter_map(|p| p.get("pid").and_then(Value::as_f64)).filter(|p| p.is_finite() && *p >= 0.0).map(|p| p as u32).collect()
     }
 }
 
@@ -246,15 +202,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn events_and_targets_are_checked_as_zod_checks_them() {
+    fn events_and_targets_are_checked_as_their_types() {
         assert_eq!(parse(0, &json!({ "at": 5, "kind": "edited", "extra": 1 })).unwrap(), json!({ "kind": "edited", "at": 5, "extra": 1 }));
-        let e = parse(0, &json!({ "kind": "edited", "ref": "no spaces allowed" })).unwrap_err();
-        assert!(e.starts_with("ref "), "{e}");
         let e = parse(0, &json!({ "kind": "edited", "paths": [1] })).unwrap_err();
         assert!(e.starts_with("paths.0 "), "{e}");
-        assert!(parse(0, &json!({})).unwrap_err().starts_with("kind "));
+        assert_eq!(parse(0, &json!({})).unwrap_err(), "it missing field `kind`");
         assert!(parse(0, &json!(7)).unwrap_err().starts_with("it "));
         assert_eq!(parse(1, &json!({ "path": "/w/x" })).unwrap(), json!({ "path": "/w/x" }));
-        assert_eq!(dotted("a[3].b[\"x y\"]"), "a.3.b.x y");
     }
 }

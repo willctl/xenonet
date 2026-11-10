@@ -1,81 +1,30 @@
-//! core/schema/index.js's check, for the routes: XenoNet's JSON Schemas
-//! (schemas/, which npm run schemas writes from core/schema) checked as
-//! zod checks them (xenonet-schema's check.rs), and core/vendor.js's drift
-//! report, from the service's drift log and what the map's readers read.
+//! The routes' bodies checked, and core/vendor.js's drift report, from the
+//! service's drift log and what the map's readers read.
 
 use crate::vendor::Vendor;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use xenonet_base::json::number;
-use xenonet_schema::check::{compile, Checker, Data};
+use xenonet_model::actor;
 use xenonet_schema::drift::{source_name, DriftView, ADDITIONS};
 use xenonet_schema::lenient::{load_vendor, vendor_sources};
+use xenonet_schema::typed;
 use xenonet_service::cores::{DriftReport, Schemas, R};
 
-/// Every document under schemas/ but the vendors' (which the lenient
-/// readers load), by id: the file's path without .json.
-fn documents(dir: &Path) -> Vec<(String, Value)> {
-    fn walk(dir: &Path, rel: &str, out: &mut Vec<(String, Value)>) {
-        let Ok(list) = xenonet_base::paths::read_dir_sorted(dir) else { return };
-        for e in list {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let at = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
-            let Ok(t) = e.file_type() else { continue };
-            if t.is_dir() {
-                if at != "vendor" {
-                    walk(&e.path(), &at, out);
-                }
-            } else if let Some(id) = at.strip_suffix(".json") {
-                let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
-                let Ok(doc) = xenonet_base::json::parse(&text) else { continue };
-                out.push((id.to_string(), doc));
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(dir, "", &mut out);
-    out
-}
-
-// The documents compiled once, with each one's root by id.
-type Compiled = Result<(Checker, HashMap<String, usize>), String>;
-
-pub struct SchemaCore {
-    dir: PathBuf,
-    compiled: OnceLock<Compiled>,
-}
-
-impl SchemaCore {
-    pub fn new(dir: PathBuf) -> SchemaCore {
-        SchemaCore { dir, compiled: OnceLock::new() }
-    }
-
-    fn compiled(&self) -> &Compiled {
-        self.compiled.get_or_init(|| {
-            let docs = documents(&self.dir);
-            if docs.is_empty() {
-                return Err(format!("XenoNet's schemas aren't in {}", self.dir.display()));
-            }
-            let list: Vec<Value> = docs.iter().map(|(_, d)| d.clone()).collect();
-            let checker = compile(&list)?;
-            let roots = docs.iter().enumerate().map(|(i, (id, _))| (id.clone(), checker.root(i))).collect();
-            Ok((checker, roots))
-        })
-    }
-}
+/// A body checked by reading it as its type (crates/xenonet-model): the
+/// schema's id names the type.
+pub struct SchemaCore;
 
 impl Schemas for SchemaCore {
     fn check(&self, schema: &str, value: &Value) -> Result<(), String> {
-        let (checker, roots) = self.compiled().as_ref().map_err(|e| format!("the body can't be checked: {e}"))?;
-        let Some(&root) = roots.get(schema) else { return Err(format!("the body can't be checked: there's no schema called {schema}")) };
-        let checked = checker.check(root, &Data::from(value), false);
-        match checked.issues.first() {
-            None => Ok(()),
-            // `${path || "the body"} ${message}`, as the routes word it.
-            Some(i) => Err(format!("{} {}", if i.path.is_empty() { "the body" } else { &i.path }, i.message).trim().to_string()),
-        }
+        let issue = match schema {
+            "actor/console/v1" => typed::read::<actor::Console>(value).err(),
+            "actor/registration/v1" => typed::read::<actor::Registration>(value).err(),
+            "actor/report/v1" => typed::read::<actor::Report>(value).err(),
+            other => return Err(format!("the body can't be checked: there's no schema called {other}")),
+        };
+        // `${path || "the body"} ${message}`, as the routes word it.
+        issue.map_or(Ok(()), |i| Err(i.worded("the body")))
     }
 }
 
@@ -129,6 +78,7 @@ impl DriftReport for Drift {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::Mutex;
     use xenonet_schema::drift::DriftLog;
     use xenonet_schema::vendor::Readers;
@@ -140,10 +90,16 @@ mod tests {
 
     #[test]
     fn bodies_checked_as_the_routes_word_it() {
-        let s = SchemaCore::new(checkout());
+        let s = SchemaCore;
         assert_eq!(s.check("actor/registration/v1", &json!({ "name": "Kite", "capabilities": ["run-commands"] })), Ok(()));
         let e = s.check("actor/registration/v1", &json!({ "name": 3 })).unwrap_err();
-        assert!(e.starts_with("name "), "{e}");
+        assert!(e.starts_with("name invalid type: integer `3`"), "{e}");
+        let e = s.check("actor/registration/v1", &json!({})).unwrap_err();
+        assert_eq!(e, "the body missing field `name`");
+        assert_eq!(
+            s.check("actor/report/v1", &json!({ "events": [{ "kind": "edited", "paths": [1] }] })),
+            Err("events.0.paths.0 invalid type: integer `1`, expected a string".into())
+        );
         assert!(s.check("no/such/v1", &json!({})).is_err());
     }
 

@@ -492,7 +492,8 @@ impl Client {
         BlockHealth { name: "codex-app-server", kind: "client", life: lock(&self.inner).life.clone() }
     }
 
-    #[cfg(test)]
+    // Only the unix test of a fake app-server reads it.
+    #[cfg(all(test, unix))]
     fn codex_version(&self) -> Option<String> {
         lock(&self.inner).version.clone()
     }

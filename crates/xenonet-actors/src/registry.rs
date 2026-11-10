@@ -37,7 +37,7 @@ use xenonet_base::ids::{parse_actor_id, YOU};
 use xenonet_base::json::number;
 use xenonet_base::nodepath::{style_of, NATIVE};
 use xenonet_base::text::js_string;
-use xenonet_engine::js::truthy;
+use xenonet_base::text::truthy;
 
 pub const LIST_THROTTLE_MS: f64 = 500.0;
 pub const CLOCK_MS: f64 = 5000.0;
@@ -163,7 +163,7 @@ fn col(r: &Value, k: &str) -> Value {
 
 /// `${v}` of a field, undefined when it isn't there.
 fn template(v: Option<&Value>) -> String {
-    xenonet_engine::js::template(v)
+    xenonet_base::text::template(v)
 }
 
 /// What kind of node an id names, by its form.
@@ -181,7 +181,7 @@ fn node_kind_of(v: &Value) -> Option<&'static str> {
     match v {
         Value::Null => node_kind(""),
         Value::String(s) => node_kind(s),
-        other => node_kind(&xenonet_engine::js::template(Some(other))),
+        other => node_kind(&template(Some(other))),
     }
 }
 
@@ -760,9 +760,8 @@ impl Actors {
             return Ok(());
         }
         let next = if truthy(Some(remote)) {
-            let mut transports: Vec<String> =
-                remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| xenonet_engine::js::template(Some(x))).collect()).unwrap_or_default();
-            transports.sort_by(|x, y| xenonet_engine::js::utf16_cmp(x, y));
+            let mut transports: Vec<String> = remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| template(Some(x))).collect()).unwrap_or_default();
+            transports.sort_by(|x, y| xenonet_base::sort::utf16_cmp(x, y));
             transports.dedup();
             Some(json!({
                 "active": truthy(remote.get("active")),

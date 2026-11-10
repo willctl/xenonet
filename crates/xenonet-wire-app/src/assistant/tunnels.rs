@@ -21,7 +21,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use xenonet_assistant::tunnel_client as client;
 use xenonet_assistant::tunnels::{self as core, Binding};
-use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{CoreError, Kind, Tunnels, R};
 use xenonet_service::glue::From;
 use xenonet_service::wire::Emitter;
@@ -147,7 +146,7 @@ impl Runner {
     // ---------- what's set up ----------
 
     fn binding_of(&self, connection: &Value) -> Binding {
-        let row = self.store.with(|s| s.connection(super::arg(connection))).ok().flatten();
+        let row = self.store.with(|s| s.connection(&xenonet_base::text::js_string(connection))).ok().flatten();
         let text = row.as_ref().map(|r| xenonet_base::text::js_string(super::row_json(r).get("transport_binding").unwrap_or(&Value::Null)));
         core::binding_of(text.as_deref().filter(|t| !t.is_empty() && *t != "null"), &target_ok)
     }
@@ -573,7 +572,7 @@ impl Tunnels for TunnelsCore {
         let b = t.binding_of(&v["connection_id"]);
         let some = |k: &str| spec.get(k).filter(|x| !x.is_null());
         let next = core::configure(&b, some("tunnelId"), some("keyTarget"), some("autostart"), &target_ok).map_err(refused)?;
-        t.store.with(|s| s.set_transport_binding(super::arg(&v["connection_id"]), Arg::text(next.text()))).map_err(|e| CoreError::new(e.to_string()))?;
+        t.store.with(|s| s.set_transport_binding(&xenonet_base::text::js_string(&v["connection_id"]), Some(&next.text()))).map_err(|e| CoreError::new(e.to_string()))?;
         t.changed();
         Ok(json!({ "grant": grant, "tunnel_id": next.tunnel_id, "key_target": core::key_target_of(&next), "autostart": next.autostart }))
     }

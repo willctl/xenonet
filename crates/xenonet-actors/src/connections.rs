@@ -27,6 +27,7 @@ use crate::account_links::{self, LinkFail, Links};
 use crate::adapters::TRANSPORTS;
 use crate::detail::looks_like_key;
 use crate::names::{check_name, slug_from, slug_refusal, suggest_slug};
+use crate::re;
 use crate::store;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -36,7 +37,6 @@ use xenonet_base::ids::YOU;
 use xenonet_base::json::{number, stringify};
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_string, truthy};
-use xenonet_engine::re;
 
 const DAY_MS: f64 = 24.0 * 3600e3;
 pub const GRANT_DAYS: [f64; 6] = [1.0, 7.0, 14.0, 30.0, 60.0, 90.0];
@@ -291,7 +291,7 @@ fn words(value: Option<&Value>, what: &str, max: usize) -> Result<Option<String>
         Some(_) => return fail(400.0, "bad-request", format!("{what} is text")),
     };
     let blanked = re!(r"[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]").replace_all(text, " ");
-    let line = re!(r"\s+").replace_all(&blanked, " ");
+    let line = re!(r"[\s\x{FEFF}--\x{85}]+").replace_all(&blanked, " ");
     let line = xenonet_base::text::js_trim(&line);
     if line.is_empty() {
         return Ok(None);
@@ -641,7 +641,7 @@ impl Connections {
                     Some(p) => product_of(p).map_or("undefined", |p| p.name).to_string(),
                     None => "an actor of your own".to_string(),
                 };
-                return fail(400.0, "bad-request", format!("{} isn't {wanted}", xenonet_engine::js::template(info.get("name"))));
+                return fail(400.0, "bad-request", format!("{} isn't {wanted}", xenonet_base::text::template(info.get("name"))));
             }
             return Ok(Plan { id, create: None });
         }
@@ -765,7 +765,7 @@ impl Connections {
         }
         let asserted = link.as_str() == Some("owner_asserted");
         let identity = account_link.and_then(|a| a.get("identity"));
-        if asserted && !h.identities_has(&xenonet_engine::js::template(identity)) {
+        if asserted && !h.identities_has(&xenonet_base::text::template(identity)) {
             return fail(400.0, "bad-request", "pick one of the identities XenoNet knows");
         }
         if self.active_grants(h, t)? >= CONNECTIONS_MAX {

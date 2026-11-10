@@ -295,7 +295,7 @@ pub fn path_of(steps: &[Step]) -> Option<String> {
         match p {
             Step::Item(_) => s.push_str("[]"),
             Step::Entry(_) => s.push_str(if s.is_empty() { "*" } else { ".*" }),
-            Step::Prop(k) if crate::check::is_ident(k) => {
+            Step::Prop(k) if is_ident(k) => {
                 if !s.is_empty() {
                     s.push('.');
                 }
@@ -616,6 +616,14 @@ fn without(v: Value, keys: &[Key]) -> Value {
         }
         (v, _) => v,
     }
+}
+
+/// /^[A-Za-z_$][\w$-]*$/: a key a path writes after a dot.
+fn is_ident(k: &str) -> bool {
+    let b = k.as_bytes();
+    let head = |c: u8| c.is_ascii_alphabetic() || c == b'_' || c == b'$';
+    let rest = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'-';
+    !b.is_empty() && head(b[0]) && b[1..].iter().all(|&c| rest(c))
 }
 
 #[cfg(test)]

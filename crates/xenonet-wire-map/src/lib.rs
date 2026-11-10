@@ -76,7 +76,7 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
     let map = state::MapState::new(cfg, store.clone(), vendor.clone(), env.emitter.clone(), readers, live, &env.version);
     cores.state = map.clone();
     cores.store = Arc::new(store::StoreCore(store));
-    cores.schemas = Arc::new(schemas::SchemaCore::new(dir));
+    cores.schemas = Arc::new(schemas::SchemaCore);
     cores.drift = Arc::new(schemas::Drift { vendor });
     if let Some(d) = demo {
         cores.demo = Arc::new(demo::DemoCore(d));

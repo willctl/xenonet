@@ -320,7 +320,7 @@ pub fn reported(app: &str, log: &str) -> bool {
 /// lines, or an offer to go on when told to.
 fn asks(text: &str) -> bool {
     let tail: String = text.chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
-    tail.contains('?') || crate::re!(r"(?i)\b(want me to|shall i|should i|let me know|say so and i|tell me (if|whether|which))\b").is_match(&tail)
+    tail.contains('?') || crate::re!(r"(?i)(?-u:\b)(want me to|shall i|should i|let me know|say so and i|tell me (if|whether|which))(?-u:\b)").is_match(&tail)
 }
 
 /// What a turn came to, from its end: failed, denied a tool, asked

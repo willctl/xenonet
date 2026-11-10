@@ -26,9 +26,8 @@ use std::time::Duration;
 use xenonet_actors::tokens::token_in_url;
 use xenonet_base::nodepath::NATIVE;
 use xenonet_base::text::{js_number, truthy};
-use xenonet_engine::delivery::selector::parse_selector;
+use xenonet_engine::delivery::selector::Selector;
 use xenonet_engine::engine::is_agent_id;
-use xenonet_engine::sql::Arg;
 
 const ACTOR_BODY: usize = 16 << 10;
 
@@ -49,7 +48,7 @@ pub struct EngineRoutes<'a> {
 fn scope_of(s: &Value) -> String {
     match s.as_str() {
         Some("machine") => "machine".into(),
-        Some(t) if parse_selector(&Arg::text(t)).is_some() => t.to_string(),
+        Some(t) if Selector::parse(t).is_some() => t.to_string(),
         _ => "repo".into(),
     }
 }

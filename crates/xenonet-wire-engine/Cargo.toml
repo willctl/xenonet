@@ -23,9 +23,10 @@ xenonet-actors.workspace = true
 xenonet-blocks.workspace = true
 xenonet-engine.workspace = true
 rusqlite.workspace = true
-# The checks on what an actor reports, against the schema npm run schemas
-# writes (ReportEvent, ReportTarget).
+# The checks on what an actor reports: its events and targets read as their
+# types.
 xenonet-schema.workspace = true
+xenonet-model.workspace = true
 # The demo's sessions by title, for its made-up actors' scripts.
 xenonet-app.workspace = true
 xenonet-components.workspace = true

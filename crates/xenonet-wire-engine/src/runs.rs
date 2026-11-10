@@ -6,7 +6,7 @@
 //! `Tree` (a job object on Windows): a run counts until they've all ended,
 //! and its cap stops them all.
 
-use crate::js::{now_ms, platform, Locked};
+use crate::runtime::platform;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use xenonet_base::dirs::{self, CliEnv, Look, Unreadable};
 use xenonet_base::process::Tree;
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::runs::{self, Run};
 
 /// The disk as it is.

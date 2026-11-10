@@ -19,7 +19,7 @@ pub trait Shell {
 
 /// The JS's split(/\s+/).
 fn words(s: &str) -> Vec<&str> {
-    crate::re!(r"\s+").split(s).collect()
+    crate::re!(r"[\s\x{FEFF}--\x{85}]+").split(s).collect()
 }
 
 /// A pane: its id, process, terminal and command.

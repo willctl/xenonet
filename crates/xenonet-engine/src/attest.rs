@@ -16,9 +16,9 @@
 //! It says what XenoNet checked and names what it couldn't; it's never an
 //! approval of anything the message asks.
 
-use crate::js::template;
-use crate::peer::Thrown;
+use crate::engine::Thrown;
 use serde_json::{json, Value};
+use xenonet_base::text::template;
 use xenonet_base::text::truthy;
 
 pub const SCHEMA: &str = "message/envelope/v1";
@@ -111,7 +111,7 @@ fn how(method: &str) -> String {
         "window" => "XenoNet's own window, with its key".into(),
         "grant" => "its remote connection's credential".into(),
         "gateway" => "its gateway token alone".into(),
-        other => crate::js::proto_member(other).unwrap_or_else(|| other.to_string()),
+        other => crate::verify::object_member(other).unwrap_or_else(|| other.to_string()),
     }
 }
 

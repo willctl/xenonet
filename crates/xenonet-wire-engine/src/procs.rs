@@ -4,21 +4,17 @@
 //! as UTF-8 whatever XenoNet's own environment says, five seconds each at
 //! most. A command asked for while the same one runs waits for that one's
 //! answer.
-//!
-//! `call`, `get` and `kind` answer the observers and the reports' matcher,
-//! which still reach procs by method name with `Arg` values; they go when
-//! those are typed.
 
 use crate::exec::{self, Spec};
-use crate::js::{at, no_method, now_ms, number, obj, Locked};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
-use xenonet_engine::peer::{Result, Thrown};
+use xenonet_base::json::number;
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 use xenonet_engine::procs::{Call, Failure, Io, Link, PidMap, Procs, Product, Row};
-use xenonet_engine::sql::Arg;
 
-pub type Answer = std::result::Result<String, Failure>;
+pub type Answer = Result<String, Failure>;
 
 /// A run under way, which others asking for the same command wait on.
 #[derive(Default)]
@@ -48,7 +44,7 @@ fn spec_of(c: &Call) -> Spec {
     s
 }
 
-fn answer(r: std::result::Result<String, exec::Failed>) -> Answer {
+fn answer(r: Result<String, exec::Failed>) -> Answer {
     r.map_err(|f| Failure { message: f.message, stdout: Some(f.stdout) })
 }
 
@@ -56,7 +52,7 @@ impl System {
     pub fn new() -> Arc<System> {
         // procs' own calls on Linux and Windows are read from the system
         // itself; the rest are commands.
-        System::with(crate::js::platform(), Box::new(|c| xenonet_engine::procs_native::answer(c).unwrap_or_else(|| answer(exec::run(&spec_of(c))))))
+        System::with(crate::runtime::platform(), Box::new(|c| xenonet_engine::procs_native::answer(c).unwrap_or_else(|| answer(exec::run(&spec_of(c))))))
     }
 
     /// The lookups with commands run by `runner`, as if on `platform`.
@@ -129,15 +125,6 @@ pub fn table_json(t: &PidMap<Row>) -> Value {
     Value::Array(t.iter().map(|(pid, r)| json!([number(*pid), Value::Object(r.json())])).collect())
 }
 
-fn strings_json(t: &PidMap<String>) -> Value {
-    Value::Array(t.iter().map(|(pid, s)| json!([number(*pid), s])).collect())
-}
-
-/// The numbers among a list's items.
-fn numbers(a: Arg) -> Vec<f64> {
-    crate::js::list(a).iter().filter_map(Arg::as_f64).collect()
-}
-
 /// A number a field holds, or none (NaN), which names no process.
 fn num_of(o: &Value, k: &str) -> f64 {
     o.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN)
@@ -175,14 +162,10 @@ pub fn link_of(o: &Value) -> Link {
     Link { row: row_of(o), exe, agent, product }
 }
 
-fn failed(m: String) -> Thrown {
-    Thrown::new(m)
-}
-
 /// What a census reads, as an observer gets it: the table's [pid, row]
 /// pairs and what each process is.
-pub fn census(sys: &System) -> Result<Value> {
-    let t = sys.procs.census(&mut sys.io()).map_err(failed)?;
+pub fn census(sys: &System) -> Result<Value, String> {
+    let t = sys.procs.census(&mut sys.io())?;
     let Some(t) = t else { return Ok(json!({ "table": [], "of": [] })) };
     let of: Vec<Value> = t
         .iter()
@@ -210,69 +193,6 @@ pub fn peer_of(sys: &System, conn: u64, local_port: u16, remote_port: u16) -> Va
         peers.insert(conn, pid.clone());
     }
     pid
-}
-
-/// `procs.<method>(...args)`, for the observers and the reports' matcher,
-/// onto the typed lookups.
-pub fn call(sys: &System, method: &str, args: &[Arg]) -> Result<Arg> {
-    let p = &sys.procs;
-    let io = &mut sys.io();
-    let v = |a: Arg| a.to_json();
-    let out: Value = match method {
-        "snapshot" => table_json(&*p.snapshot(io).map_err(failed)?),
-        "chain" => {
-            let o = at(args, 1);
-            // { again = true, exe = false }: a default only for undefined.
-            let again = match o.field("again") {
-                Arg::Undef => true,
-                a => a.truthy(),
-            };
-            let exe = o.field("exe").truthy();
-            let pid = at(args, 0).as_f64();
-            Value::Array(p.chain(io, pid, again, exe).map_err(failed)?.iter().map(Link::json).collect())
-        }
-        "alive" => {
-            let o = v(at(args, 0));
-            Value::Bool(p.alive(io, num_of(&o, "pid"), num_of(&o, "start")).map_err(failed)?)
-        }
-        "signed" => {
-            let o = v(at(args, 0));
-            let agent = o.get("agent").and_then(Value::as_str);
-            let product =
-                o.get("product").filter(|x| x.is_object()).map(|x| (x.get("product").and_then(Value::as_str).unwrap_or(""), x.get("role").and_then(Value::as_str).unwrap_or("")));
-            Value::Bool(p.signed(io, num_of(&o, "pid"), num_of(&o, "start"), &text_of(&o, "program"), agent, product))
-        }
-        "cwd" => p.cwd(io, at(args, 0).as_f64().unwrap_or(f64::NAN)).map_or(Value::Null, Value::String),
-        "census" => census(sys)?,
-        "children" => Value::Array(p.children(io, &numbers(at(args, 0))).into_iter().map(number).collect()),
-        "describe" => table_json(&p.describe(io, &numbers(at(args, 0)))),
-        "cwds" => strings_json(&p.cwds(io, &numbers(at(args, 0)))),
-        "of" => {
-            let (agent, product) = p.of(&row_of(&v(at(args, 0))));
-            json!({ "agent": agent, "product": product_json(product) })
-        }
-        _ => return Err(no_method("procs", method)),
-    };
-    Ok(crate::js::arg(&out))
-}
-
-/// `procs.<path>` read: its `supported` and `chains`, and its calls.
-pub fn get(sys: &System, field: &str) -> Arg {
-    match field {
-        "supported" => Arg::Bool(sys.procs.supported),
-        "chains" => Arg::Bool(sys.procs.chains),
-        "" => obj(vec![("supported", Arg::Bool(sys.procs.supported)), ("chains", Arg::Bool(sys.procs.chains))]),
-        _ => Arg::Undef,
-    }
-}
-
-pub fn kind(field: &str) -> &'static str {
-    match field {
-        "" => "object",
-        "supported" | "chains" => "boolean",
-        "snapshot" | "chain" | "alive" | "signed" | "cwd" | "census" | "children" | "describe" | "cwds" | "of" | "peer" => "function",
-        _ => "undefined",
-    }
 }
 
 #[cfg(test)]
@@ -313,12 +233,12 @@ mod tests {
     fn this_process_and_the_ones_above_it() {
         let sys = System::new();
         let me = f64::from(std::process::id());
-        let chain = crate::js::list(call(&sys, "chain", &[Arg::Num(me), obj(vec![("exe", Arg::Bool(true))])]).unwrap());
-        assert_eq!(chain[0].field("pid"), Arg::Num(me));
-        assert!(chain[0].field("exe").as_str().is_some(), "{chain:?}");
-        let first = chain[0].clone();
-        assert_eq!(call(&sys, "alive", &[first]).unwrap(), Arg::Bool(true));
-        assert!(call(&sys, "cwd", &[Arg::Num(me)]).unwrap().as_str().is_some());
-        assert!(matches!(get(&sys, "supported"), Arg::Bool(true)));
+        let chain = sys.procs.chain(&mut sys.io(), Some(me), true, true).unwrap();
+        assert_eq!(chain[0].row.pid, me);
+        assert!(chain[0].exe.as_ref().is_some_and(Option::is_some), "{chain:?}");
+        let first = &chain[0].row;
+        assert!(sys.procs.alive(&mut sys.io(), first.pid, first.start).unwrap());
+        assert!(sys.procs.cwd(&mut sys.io(), me).is_some());
+        assert!(sys.procs.supported);
     }
 }

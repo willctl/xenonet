@@ -10,43 +10,38 @@ use async_trait::async_trait;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect as Core, Instance, Machine, Options, Problem};
 use xenonet_app::instances::INSTANCES;
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
+use xenonet_base::fs::FsError;
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Connect, CoreError, R};
 
 /// This machine: its files, and the agents' CLIs on PATH.
 struct Here;
 
-fn problem(t: Thrown) -> Problem {
-    Problem { message: t.message, code: t.code.as_deref().filter(|v| !v.is_null()).map(xenonet_base::text::js_string) }
-}
-
-fn fs(method: &str, args: &[Arg]) -> Result<Arg, Problem> {
-    crate::fsx::call(method, args).map_err(problem)
+fn problem(e: FsError) -> Problem {
+    Problem { message: e.message, code: e.code }
 }
 
 impl Machine for Here {
     fn read_text(&mut self, file: &str) -> Result<String, Problem> {
-        fs("readFileSync", &[Arg::text(file), Arg::text("utf8")]).map(|a| crate::js::text(&a))
+        crate::fs::read_text(file).map_err(problem)
     }
     fn write_text(&mut self, file: &str, text: &str) -> Result<(), Problem> {
-        fs("writeFileSync", &[Arg::text(file), Arg::text(text)]).map(drop)
+        crate::fs::write_file(file, text.as_bytes(), None).map_err(problem)
     }
     fn exists(&mut self, path: &str) -> bool {
-        fs("existsSync", &[Arg::text(path)]).is_ok_and(|a| a.truthy())
+        crate::fs::exists(path)
     }
     fn make_dir(&mut self, dir: &str) -> Result<(), Problem> {
-        fs("mkdirSync", &[Arg::text(dir), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).map(drop)
+        crate::fs::mkdir_all(dir).map_err(problem)
     }
     fn copy(&mut self, from: &str, to: &str) -> Result<(), Problem> {
-        fs("copyFileSync", &[Arg::text(from), Arg::text(to)]).map(drop)
+        crate::fs::copy(from, to).map_err(problem)
     }
     fn rename(&mut self, from: &str, to: &str) -> Result<(), Problem> {
-        fs("renameSync", &[Arg::text(from), Arg::text(to)]).map(drop)
+        crate::fs::rename(from, to).map_err(problem)
     }
     fn remove(&mut self, file: &str) -> Result<(), Problem> {
-        fs("rmSync", &[Arg::text(file), Arg::Obj(vec![("force".into(), Arg::Bool(true))])]).map(drop)
+        crate::fs::remove_if_there(file).map_err(problem)
     }
     /// A CLI on PATH (XenoNet's PATH is your login shell's).
     fn cli(&mut self, name: &str) -> Option<String> {
@@ -64,11 +59,20 @@ impl Machine for Here {
     }
 }
 
+/// This system as Node's process.platform names it.
+fn platform() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    }
+}
+
 /// The xenonet binary the hooks and servers run: XENONET_BIN, installed
 /// XenoNet's launcher, which never moves, else this one.
 fn bin(config: &Config) -> String {
     let env: xenonet_components::runtime::Env = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
-    let m = xenonet_components::runtime::Machine { platform: crate::js::platform().into(), arch: std::env::consts::ARCH.into(), home: config.home.clone() };
+    let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: std::env::consts::ARCH.into(), home: config.home.clone() };
     let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     xenonet_components::runtime::xenonet_bin(&env, &m, &this)
 }
@@ -88,7 +92,7 @@ impl ConnectDriver {
             grok_home: env("GROK_HOME"),
             // Installed XenoNet's console operator, which Desktop registers.
             console_mcp: env("XENONET_LAUNCHER_BIN").is_some_and(|b| !b.is_empty()) || config.launcher_exec.is_some(),
-            platform: crate::js::platform().into(),
+            platform: platform().into(),
             instances: INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: f64::from(i.port) }).collect(),
         };
         ConnectDriver(std::sync::Arc::new(Core::new(options)))

@@ -11,12 +11,13 @@
 //! file with data in it before taking it a step up (`engine.v<n>.sqlite`
 //! beside it).
 //!
-//! Every call binds and reads as node:sqlite does (`sql`). The engine's
-//! calls take whatever binds (`Into<Arg>`: a text, a number, a JSON
-//! document), and every call answers rows; `row_json` reads one as the
-//! engine does, with every integer a number.
+//! Every call binds and reads as `sql` does: ids and texts as text, times
+//! and counts as numbers (REALs), a record (a message, an actor's row, an
+//! event) as a JSON object whose fields are bound as `sql::Bind::scalar`
+//! takes them. Every call answers rows; `row_json` reads one as the engine
+//! does, with every integer a number.
 
-use crate::sql::{self, Arg, Cell, Changes, Result, Row, SqlError};
+use crate::sql::{self, Bind, Cell, Changes, Result, Row, SqlError};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use xenonet_base::ids::YOU;
@@ -251,58 +252,62 @@ pub fn engine_steps() -> Vec<Step> {
 
 // The columns of an actor's row that the actors write, and their values
 // when they leave one out.
-fn actor_defaults() -> Vec<(&'static str, Arg)> {
+fn actor_defaults() -> Vec<(&'static str, Value)> {
     vec![
-        ("slug", Arg::Null),
-        ("kind", Arg::Null),
-        ("name", Arg::Null),
-        ("product", Arg::Null),
-        ("via", Arg::text("[]")),
-        ("capabilities", Arg::text("[]")),
-        ("heartbeat_ms", Arg::Null),
-        ("identity", Arg::Null),
-        ("enabled", Arg::Num(1.0)),
-        ("created_at", Arg::Null),
-        ("allowed_at", Arg::Null),
-        ("last_seen", Arg::Null),
-        ("presence", Arg::text("unknown")),
-        ("presence_at", Arg::Null),
-        ("status", Arg::Null),
-        ("status_at", Arg::Null),
-        ("seq", Arg::Num(0.0)),
+        ("slug", Value::Null),
+        ("kind", Value::Null),
+        ("name", Value::Null),
+        ("product", Value::Null),
+        ("via", json!("[]")),
+        ("capabilities", json!("[]")),
+        ("heartbeat_ms", Value::Null),
+        ("identity", Value::Null),
+        ("enabled", json!(1.0)),
+        ("created_at", Value::Null),
+        ("allowed_at", Value::Null),
+        ("last_seen", Value::Null),
+        ("presence", json!("unknown")),
+        ("presence_at", Value::Null),
+        ("status", Value::Null),
+        ("status_at", Value::Null),
+        ("seq", json!(0.0)),
     ]
 }
 
-/// A value given, or `d` when it's undefined (a JS default).
-pub fn def(v: Arg, d: Arg) -> Arg {
-    if v == Arg::Undef {
-        d
-    } else {
-        v
+fn n(x: f64) -> Bind {
+    Bind::Real(x)
+}
+
+/// A record's field, bound as `Bind::scalar` takes it, for parameter `at`
+/// (from 1): one left out, or one that isn't a scalar, can't be bound.
+fn field(record: &Value, k: &str, at: usize) -> Result<Bind> {
+    record.get(k).and_then(Bind::scalar).ok_or_else(|| sql::unbindable(at))
+}
+
+/// The same, with a field left out bound as NULL.
+fn field_or_null(record: &Value, k: &str, at: usize) -> Result<Bind> {
+    match record.get(k) {
+        None => Ok(Bind::Null),
+        Some(v) => Bind::scalar(v).ok_or_else(|| sql::unbindable(at)),
     }
 }
 
-fn n(x: f64) -> Arg {
-    Arg::Num(x)
+/// A record's fields, for its statement's named parameters.
+fn record(v: &Value) -> serde_json::Map<String, Value> {
+    v.as_object().cloned().unwrap_or_default()
 }
 
-fn items(v: &Arg) -> Result<Vec<Arg>> {
+/// The ids a message goes to: a list's items, or a text's characters.
+fn recipients(v: Option<&Value>) -> Result<Vec<Value>> {
     match v {
-        Arg::List(a) => Ok(a.clone()),
-        Arg::Text(s) => Ok(s.chars().map(|c| Arg::Text(c.to_string())).collect()),
+        Some(Value::Array(a)) => Ok(a.clone()),
+        Some(Value::String(s)) => Ok(s.chars().map(|c| Value::String(c.to_string())).collect()),
         _ => Err(SqlError::Other("that isn't a list".into())),
     }
 }
 
-fn num(c: &Cell) -> Arg {
-    c.as_f64().map_or(Arg::Null, Arg::Num)
-}
-
-/// A caller's own value, bound as it is.
-impl From<&Arg> for Arg {
-    fn from(a: &Arg) -> Self {
-        a.clone()
-    }
+fn num(c: &Cell) -> Bind {
+    c.as_f64().map_or(Bind::Null, Bind::Real)
 }
 
 /// A cell as the engine reads it: every integer a number.
@@ -358,13 +363,16 @@ impl EngineStore {
         self.block.close(now);
     }
 
-    fn run(&self, q: &str, args: &[Arg]) -> Result<Changes> {
+    fn run(&self, q: &str, args: &[Bind]) -> Result<Changes> {
         sql::run(self.db()?, q, args)
     }
-    fn get(&self, q: &str, args: &[Arg]) -> Result<Option<Row>> {
+    fn run_record(&self, q: &str, record: &serde_json::Map<String, Value>) -> Result<Changes> {
+        sql::run_record(self.db()?, q, record)
+    }
+    fn get(&self, q: &str, args: &[Bind]) -> Result<Option<Row>> {
         sql::get(self.db()?, q, args)
     }
-    fn all(&self, q: &str, args: &[Arg]) -> Result<Vec<Row>> {
+    fn all(&self, q: &str, args: &[Bind]) -> Result<Vec<Row>> {
         sql::all(self.db()?, q, args)
     }
 
@@ -391,9 +399,9 @@ impl EngineStore {
             self.run("DELETE FROM messages WHERE created_at < ?", &[n(now - WEEK_MS)])?;
             self.run("DELETE FROM claims WHERE expires_at < ?", &[n(now)])?;
             self.run("DELETE FROM pins WHERE at < ?", &[n(now - WEEK_MS)])?;
-            self.run("DELETE FROM actor_events WHERE at < ? OR (actor = ? AND at < ?)", &[n(now - WEEK_MS), Arg::text(YOU), n(now - DAY_MS)])?;
+            self.run("DELETE FROM actor_events WHERE at < ? OR (actor = ? AND at < ?)", &[n(now - WEEK_MS), YOU.into(), n(now - DAY_MS)])?;
             for r in self.all("SELECT actor FROM actor_events GROUP BY actor HAVING count(*) > ?", &[n(ACTOR_EVENTS_KEPT)])? {
-                let actor = r.get("actor").arg();
+                let actor = r.get("actor").bind();
                 if let Some(last) =
                     self.get("SELECT at, rowid FROM actor_events WHERE actor = ? ORDER BY at DESC, rowid DESC LIMIT 1 OFFSET ?", &[actor.clone(), n(ACTOR_EVENTS_KEPT - 1.0)])?
                 {
@@ -403,10 +411,10 @@ impl EngineStore {
                     )?;
                 }
             }
-            self.run("DELETE FROM actor_targets WHERE last_at < ? OR (actor = ? AND last_at < ?)", &[n(now - WEEK_MS), Arg::text(YOU), n(now - DAY_MS)])?;
+            self.run("DELETE FROM actor_targets WHERE last_at < ? OR (actor = ? AND last_at < ?)", &[n(now - WEEK_MS), YOU.into(), n(now - DAY_MS)])?;
             self.run("DELETE FROM actor_requests WHERE created_at < ?", &[n(now - DAY_MS)])?;
             self.run("DELETE FROM actor_revoked WHERE at < ?", &[n(now - WEEK_MS)])?;
-            self.run("UPDATE actors SET status = NULL, status_at = NULL WHERE slug = ? AND status_at < ?", &[Arg::text(you_slug()), n(now - DAY_MS)])?;
+            self.run("UPDATE actors SET status = NULL, status_at = NULL WHERE slug = ? AND status_at < ?", &[you_slug().into(), n(now - DAY_MS)])?;
             self.run("DELETE FROM net_claims WHERE until < ?", &[n(now)])?;
             self.run("DELETE FROM handoffs WHERE expires_at < ?", &[n(now - WEEK_MS)])?;
             self.prune_audit(now)
@@ -420,7 +428,7 @@ impl EngineStore {
 
     /// Another host's presence: its row, or None.
     pub fn net_presence(&self, host: &str) -> Result<Option<Row>> {
-        self.get("SELECT * FROM net_presence WHERE host = ?", &[Arg::text(host)])
+        self.get("SELECT * FROM net_presence WHERE host = ?", &[host.into()])
     }
     /// Every other host's latest presence, by host.
     pub fn net_presences(&self) -> Result<Vec<Row>> {
@@ -431,14 +439,14 @@ impl EngineStore {
     pub fn set_net_presence(&self, host: &str, counter: f64, at: f64, you: bool, roster: &str, agents: &str) -> Result<()> {
         self.run(
             "INSERT INTO net_presence (host, counter, at, you, roster, agents) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(host) DO UPDATE SET counter = excluded.counter, at = excluded.at, you = excluded.you, roster = excluded.roster, agents = excluded.agents",
-            &[Arg::text(host), n(counter), n(at), n(if you { 1.0 } else { 0.0 }), Arg::text(roster), Arg::text(agents)],
+            &[host.into(), n(counter), n(at), n(if you { 1.0 } else { 0.0 }), roster.into(), agents.into()],
         )?;
         Ok(())
     }
     /// A host removed from the network: its presence, its claims and the
     /// handoffs it made that wait.
     pub fn drop_net_host(&self, host: &str) -> Result<()> {
-        let h = Arg::text(host);
+        let h = host.into();
         self.transaction(|| {
             self.run("DELETE FROM net_presence WHERE host = ?", std::slice::from_ref(&h))?;
             self.run("DELETE FROM net_claims WHERE host = ?", std::slice::from_ref(&h))?;
@@ -452,61 +460,61 @@ impl EngineStore {
     }
     /// Other hosts' live claims in clones of one repo.
     pub fn net_claims_in(&self, repo_key: &str, now: f64) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM net_claims WHERE repo_key = ? AND (until IS NULL OR until >= ?) ORDER BY host, path", &[Arg::text(repo_key), n(now)])
+        self.all("SELECT * FROM net_claims WHERE repo_key = ? AND (until IS NULL OR until >= ?) ORDER BY host, path", &[repo_key.into(), n(now)])
     }
     /// How many claims a host has here.
     pub fn net_claim_count(&self, host: &str) -> Result<f64> {
-        Ok(self.get("SELECT COUNT(*) AS n FROM net_claims WHERE host = ?", &[Arg::text(host)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+        Ok(self.get("SELECT COUNT(*) AS n FROM net_claims WHERE host = ?", &[host.into()])?.and_then(|r| r.num("n")).unwrap_or(0.0))
     }
     /// Whether a host's claim is here already.
     pub fn has_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, kind: &str) -> Result<bool> {
         Ok(self
             .get(
                 "SELECT 1 AS one FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ? AND kind = ?",
-                &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent), Arg::text(kind)],
+                &[host.into(), repo_key.into(), path.into(), agent.into(), kind.into()],
             )?
             .is_some())
     }
     /// A host's whole set of claims, in place of what it had.
     pub fn clear_net_claims(&self, host: &str) -> Result<()> {
-        self.run("DELETE FROM net_claims WHERE host = ?", &[Arg::text(host)])?;
+        self.run("DELETE FROM net_claims WHERE host = ?", &[host.into()])?;
         Ok(())
     }
     #[expect(clippy::too_many_arguments, reason = "one row's columns")]
     pub fn put_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, branch: Option<&str>, kind: &str, until: Option<f64>, at: f64) -> Result<()> {
         self.run(
             "INSERT INTO net_claims (host, repo_key, path, agent, branch, kind, until, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(host, repo_key, path, agent, kind) DO UPDATE SET branch = excluded.branch, until = excluded.until, at = excluded.at",
-            &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent), Arg::opt_text(branch), Arg::text(kind), Arg::opt_num(until), n(at)],
+            &[host.into(), repo_key.into(), path.into(), agent.into(), branch.into(), kind.into(), until.into(), n(at)],
         )?;
         Ok(())
     }
     pub fn drop_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str) -> Result<()> {
-        self.run("DELETE FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ?", &[Arg::text(host), Arg::text(repo_key), Arg::text(path), Arg::text(agent)])?;
+        self.run("DELETE FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ?", &[host.into(), repo_key.into(), path.into(), agent.into()])?;
         Ok(())
     }
 
     /// Where a message came from (null: made here) and its id across the
     /// network.
     pub fn set_message_net(&self, id: f64, host: Option<&str>, mid: &str) -> Result<()> {
-        self.run("UPDATE messages SET host = ?, mid = ? WHERE id = ?", &[Arg::opt_text(host), Arg::text(mid), n(id)])?;
+        self.run("UPDATE messages SET host = ?, mid = ? WHERE id = ?", &[host.into(), mid.into(), n(id)])?;
         Ok(())
     }
     /// A message by its id across the network: one made here (`host`
     /// None), or one that came from `host`.
     pub fn message_by_mid(&self, mid: &str, host: Option<&str>) -> Result<Option<Row>> {
         match host {
-            None => self.get("SELECT * FROM messages WHERE mid = ? AND host IS NULL ORDER BY id LIMIT 1", &[Arg::text(mid)]),
-            Some(h) => self.get("SELECT * FROM messages WHERE mid = ? AND host = ? ORDER BY id LIMIT 1", &[Arg::text(mid), Arg::text(h)]),
+            None => self.get("SELECT * FROM messages WHERE mid = ? AND host IS NULL ORDER BY id LIMIT 1", &[mid.into()]),
+            Some(h) => self.get("SELECT * FROM messages WHERE mid = ? AND host = ? ORDER BY id LIMIT 1", &[mid.into(), h.into()]),
         }
     }
     /// A message's delivery to an agent on another host, with the frame
     /// that carries it, which waits for its stored receipt.
     pub fn set_delivery_net(&self, id: f64, agent: &str, host: &str, frame: &str) -> Result<()> {
-        self.run("UPDATE deliveries SET host = ?, frame = ? WHERE message_id = ? AND agent = ?", &[Arg::text(host), Arg::text(frame), n(id), Arg::text(agent)])?;
+        self.run("UPDATE deliveries SET host = ?, frame = ? WHERE message_id = ? AND agent = ?", &[host.into(), frame.into(), n(id), agent.into()])?;
         Ok(())
     }
     pub fn delivery(&self, id: f64, agent: &str) -> Result<Option<Row>> {
-        self.get("SELECT * FROM deliveries WHERE message_id = ? AND agent = ?", &[n(id), Arg::text(agent)])
+        self.get("SELECT * FROM deliveries WHERE message_id = ? AND agent = ?", &[n(id), agent.into()])
     }
     /// What the other host said of a delivery. A receipt never goes back
     /// to an earlier state, and seen marks it seen.
@@ -526,9 +534,9 @@ impl EngineStore {
         if rank(had.text("receipt").unwrap_or("")) >= rank(state) {
             return Ok(false);
         }
-        self.run("UPDATE deliveries SET receipt = ?, receipt_at = ? WHERE message_id = ? AND agent = ?", &[Arg::text(state), n(at), n(id), Arg::text(agent)])?;
+        self.run("UPDATE deliveries SET receipt = ?, receipt_at = ? WHERE message_id = ? AND agent = ?", &[state.into(), n(at), n(id), agent.into()])?;
         if state == "seen" {
-            self.run("UPDATE deliveries SET seen_at = COALESCE(seen_at, ?) WHERE message_id = ? AND agent = ?", &[n(at), n(id), Arg::text(agent)])?;
+            self.run("UPDATE deliveries SET seen_at = COALESCE(seen_at, ?) WHERE message_id = ? AND agent = ?", &[n(at), n(id), agent.into()])?;
         }
         Ok(true)
     }
@@ -550,7 +558,7 @@ impl EngineStore {
         )?;
         for r in &rows {
             let (Some(id), Some(agent)) = (r.num("message_id"), r.text("agent")) else { continue };
-            self.run("UPDATE deliveries SET receipt = 'unread', receipt_at = ? WHERE message_id = ? AND agent = ?", &[n(at), n(id), Arg::text(agent)])?;
+            self.run("UPDATE deliveries SET receipt = 'unread', receipt_at = ? WHERE message_id = ? AND agent = ?", &[n(at), n(id), agent.into()])?;
         }
         Ok(rows)
     }
@@ -560,40 +568,32 @@ impl EngineStore {
         self.all("SELECT agent, seen_at, host, receipt FROM deliveries WHERE message_id = ?", &[n(id)])
     }
 
-    /// A handoff, made here (`host` null) or by another host.
-    pub fn add_handoff(&self, h: &Arg) -> Result<bool> {
-        let f = |k: &str| def(h.field(k), Arg::Null);
+    /// A handoff, made here (`host` null) or by another host: a record
+    /// with its columns' names.
+    pub fn add_handoff(&self, h: &Value) -> Result<bool> {
+        let cols = ["id", "host", "maker", "to_agent", "to_repo", "to_scope", "to_host", "goal", "done", "next", "files", "branch", "commit_sha", "created_at", "expires_at"];
+        let mut args = Vec::with_capacity(cols.len());
+        for (i, k) in cols.into_iter().enumerate() {
+            args.push(match (k, h.get(k)) {
+                ("files", None) => Bind::from("[]"),
+                _ => field_or_null(h, k, i + 1)?,
+            });
+        }
         Ok(self
             .run(
                 "INSERT OR IGNORE INTO handoffs (id, host, maker, to_agent, to_repo, to_scope, to_host, goal, done, next, files, branch, commit_sha, state, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
-                &[
-                    f("id"),
-                    f("host"),
-                    f("maker"),
-                    f("to_agent"),
-                    f("to_repo"),
-                    f("to_scope"),
-                    f("to_host"),
-                    f("goal"),
-                    f("done"),
-                    f("next"),
-                    def(h.field("files"), Arg::text("[]")),
-                    f("branch"),
-                    f("commit_sha"),
-                    f("created_at"),
-                    f("expires_at"),
-                ],
+                &args,
             )?
             .changes
             > 0)
     }
     pub fn handoff(&self, id: &str) -> Result<Option<Row>> {
-        self.get("SELECT * FROM handoffs WHERE id = ?", &[Arg::text(id)])
+        self.get("SELECT * FROM handoffs WHERE id = ?", &[id.into()])
     }
     /// The handoffs no one has taken that haven't lapsed.
     /// How many handoffs made on `host` are open here.
     pub fn open_handoffs_from(&self, host: &str, now: f64) -> Result<f64> {
-        Ok(self.get("SELECT COUNT(*) AS n FROM handoffs WHERE host = ? AND state = 'open' AND expires_at > ?", &[Arg::text(host), n(now)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+        Ok(self.get("SELECT COUNT(*) AS n FROM handoffs WHERE host = ? AND state = 'open' AND expires_at > ?", &[host.into(), n(now)])?.and_then(|r| r.num("n")).unwrap_or(0.0))
     }
     pub fn open_handoffs(&self, now: f64) -> Result<Vec<Row>> {
         self.all("SELECT * FROM handoffs WHERE state = 'open' AND expires_at > ? ORDER BY created_at", &[n(now)])
@@ -604,16 +604,16 @@ impl EngineStore {
     }
     /// Taken by `by`, if it's still open: whether this was the take.
     pub fn take_handoff(&self, id: &str, by: &str, at: f64) -> Result<bool> {
-        Ok(self.run("UPDATE handoffs SET state = 'taken', taken_by = ?, taken_at = ? WHERE id = ? AND state = 'open'", &[Arg::text(by), n(at), Arg::text(id)])?.changes > 0)
+        Ok(self.run("UPDATE handoffs SET state = 'taken', taken_by = ?, taken_at = ? WHERE id = ? AND state = 'open'", &[by.into(), n(at), id.into()])?.changes > 0)
     }
     /// What the making host decided, on another host's copy.
     pub fn settle_handoff(&self, id: &str, state: &str, by: Option<&str>, at: f64) -> Result<()> {
-        self.run("UPDATE handoffs SET state = ?, taken_by = COALESCE(?, taken_by), taken_at = ? WHERE id = ?", &[Arg::text(state), Arg::opt_text(by), n(at), Arg::text(id)])?;
+        self.run("UPDATE handoffs SET state = ?, taken_by = COALESCE(?, taken_by), taken_at = ? WHERE id = ?", &[state.into(), by.into(), n(at), id.into()])?;
         Ok(())
     }
     /// A session here asked the making host for it.
     pub fn ask_handoff(&self, id: &str, by: &str) -> Result<()> {
-        self.run("UPDATE handoffs SET asked_by = ? WHERE id = ?", &[Arg::text(by), Arg::text(id)])?;
+        self.run("UPDATE handoffs SET asked_by = ? WHERE id = ?", &[by.into(), id.into()])?;
         Ok(())
     }
 
@@ -628,147 +628,150 @@ impl EngineStore {
 
     // ---------- contacts ----------
 
-    pub fn touch(&self, agent: impl Into<Arg>, o: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
-        let (agent, o, now) = (agent.into(), o.into(), now.into());
+    /// An agent heard from directly: `contact` is `{ app, cwd, via, pid }`,
+    /// cwd and pid left as they were when it hasn't them.
+    pub fn touch(&self, agent: &str, contact: &Value, now: f64) -> Result<()> {
         self.run(
             "INSERT INTO contacts (agent, app, cwd, via, at, pid) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent) DO UPDATE SET app = excluded.app, cwd = COALESCE(excluded.cwd, contacts.cwd), via = excluded.via, at = excluded.at, pid = COALESCE(excluded.pid, contacts.pid), ended_at = NULL",
-            &[agent, o.field("app"), def(o.field("cwd"), Arg::Null), o.field("via"), now, def(o.field("pid"), Arg::Null)],
+            &[agent.into(), field(contact, "app", 2)?, field_or_null(contact, "cwd", 3)?, field(contact, "via", 4)?, n(now), field_or_null(contact, "pid", 6)?],
         )?;
         Ok(())
     }
-    pub fn ended(&self, agent: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
-        self.run("UPDATE contacts SET ended_at = ? WHERE agent = ?", &[now.into(), agent.into()])?;
+    pub fn ended(&self, agent: &str, now: f64) -> Result<()> {
+        self.run("UPDATE contacts SET ended_at = ? WHERE agent = ?", &[n(now), agent.into()])?;
         Ok(())
     }
-    pub fn contact(&self, agent: impl Into<Arg>) -> Result<Option<Row>> {
+    pub fn contact(&self, agent: &str) -> Result<Option<Row>> {
         self.get("SELECT * FROM contacts WHERE agent = ?", &[agent.into()])
     }
-    pub fn contacts(&self, since: impl Into<Arg>) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM contacts WHERE at >= ?", &[since.into()])
+    pub fn contacts(&self, since: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM contacts WHERE at >= ?", &[n(since)])
     }
 
     // ---------- pins: the process (pid and start time) holding a session ----------
 
-    pub fn pins(&self, agent: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT pid, start, sure, at FROM pins WHERE agent = ?", &[agent])
+    pub fn pins(&self, agent: &str) -> Result<Vec<Row>> {
+        self.all("SELECT pid, start, sure, at FROM pins WHERE agent = ?", &[agent.into()])
     }
     /// The sessions pinned to a process.
-    pub fn pinned_to(&self, pid: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT agent, start, sure, at FROM pins WHERE pid = ?", &[pid])
+    pub fn pinned_to(&self, pid: f64) -> Result<Vec<Row>> {
+        self.all("SELECT agent, start, sure, at FROM pins WHERE pid = ?", &[n(pid)])
     }
-    pub fn pin(&self, agent: Arg, p: &Arg, sure: Arg, now: Arg) -> Result<()> {
+    pub fn pin(&self, agent: &str, pid: f64, start: f64, sure: bool, now: f64) -> Result<()> {
         self.run(
             "INSERT INTO pins (agent, pid, start, sure, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(agent, pid, start) DO UPDATE SET sure = MAX(pins.sure, excluded.sure), at = excluded.at",
-            &[agent, p.field("pid"), p.field("start"), n(if sure.truthy() { 1.0 } else { 0.0 }), now],
+            &[agent.into(), n(pid), n(start), n(if sure { 1.0 } else { 0.0 }), n(now)],
         )?;
         Ok(())
     }
     /// Takes back the guesses for an agent once its own process has spoken.
-    pub fn drop_guesses(&self, agent: Arg) -> Result<()> {
-        self.run("DELETE FROM pins WHERE agent = ? AND sure = 0", &[agent])?;
+    pub fn drop_guesses(&self, agent: &str) -> Result<()> {
+        self.run("DELETE FROM pins WHERE agent = ? AND sure = 0", &[agent.into()])?;
         Ok(())
     }
-    pub fn unpin(&self, agent: Arg, p: &Arg) -> Result<()> {
-        self.run("DELETE FROM pins WHERE agent = ? AND pid = ? AND start = ?", &[agent, p.field("pid"), p.field("start")])?;
+    pub fn unpin(&self, agent: &str, pid: f64, start: f64) -> Result<()> {
+        self.run("DELETE FROM pins WHERE agent = ? AND pid = ? AND start = ?", &[agent.into(), n(pid), n(start)])?;
         Ok(())
     }
 
     // ---------- messages ----------
 
-    /// A message, delivered to its recipients: its id.
-    pub fn send(&self, m: impl Into<Arg>, now: impl Into<Arg>) -> Result<f64> {
-        let (m, now) = (m.into(), now.into());
-        let envelope = def(m.field("envelope"), Arg::Null);
-        let envelope = if envelope.truthy() { Arg::Text(xenonet_base::json::stringify(&envelope.to_json(), 0)) } else { Arg::Null };
+    /// A message, delivered to its recipients: its id. `m` is `{ sender,
+    /// target, scope, body, replyTo, recipients, envelope }`; an envelope
+    /// is kept as its JSON text.
+    pub fn send(&self, m: &Value, now: f64) -> Result<f64> {
+        let envelope = match m.get("envelope") {
+            Some(e) if xenonet_base::text::truthy(Some(e)) => Bind::Text(xenonet_base::json::stringify(e, 0)),
+            _ => Bind::Null,
+        };
         let c = self.run(
             "INSERT INTO messages (sender, target, scope, body, reply_to, created_at, envelope) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            &[m.field("sender"), m.field("target"), def(m.field("scope"), Arg::Null), m.field("body"), def(m.field("replyTo"), Arg::Null), now, envelope],
+            &[field(m, "sender", 1)?, field(m, "target", 2)?, field_or_null(m, "scope", 3)?, field(m, "body", 4)?, field_or_null(m, "replyTo", 5)?, n(now), envelope],
         )?;
         let id = c.last_insert_rowid as f64;
-        for r in items(&m.field("recipients"))? {
-            self.deliver(n(id), r)?;
+        for r in recipients(m.get("recipients"))? {
+            let agent = Bind::scalar(&r).ok_or_else(|| sql::unbindable(2))?;
+            self.run("INSERT OR IGNORE INTO deliveries (message_id, agent) VALUES (?, ?)", &[n(id), agent])?;
         }
         Ok(id)
     }
-    pub fn deliver(&self, id: impl Into<Arg>, agent: impl Into<Arg>) -> Result<()> {
-        self.run("INSERT OR IGNORE INTO deliveries (message_id, agent) VALUES (?, ?)", &[id.into(), agent.into()])?;
+    pub fn deliver(&self, id: f64, agent: &str) -> Result<()> {
+        self.run("INSERT OR IGNORE INTO deliveries (message_id, agent) VALUES (?, ?)", &[n(id), agent.into()])?;
         Ok(())
     }
     /// Messages to everyone in a repo since `since`, for an agent that
     /// joins it.
-    pub fn scoped(&self, scope: impl Into<Arg>, since: impl Into<Arg>) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM messages WHERE scope = ? AND created_at >= ? ORDER BY id", &[scope.into(), since.into()])
+    pub fn scoped(&self, scope: &str, since: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM messages WHERE scope = ? AND created_at >= ? ORDER BY id", &[scope.into(), n(since)])
     }
-    pub fn message(&self, id: impl Into<Arg>) -> Result<Option<Row>> {
-        self.get("SELECT * FROM messages WHERE id = ?", &[id.into()])
+    pub fn message(&self, id: f64) -> Result<Option<Row>> {
+        self.get("SELECT * FROM messages WHERE id = ?", &[n(id)])
     }
-    pub fn unseen(&self, agent: impl Into<Arg>) -> Result<Vec<Row>> {
+    pub fn unseen(&self, agent: &str) -> Result<Vec<Row>> {
         self.all("SELECT m.* FROM deliveries d JOIN messages m ON m.id = d.message_id WHERE d.agent = ? AND d.seen_at IS NULL ORDER BY m.id", &[agent.into()])
     }
-    pub fn mark_seen(&self, agent: impl Into<Arg>, ids: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
-        let (agent, now) = (agent.into(), now.into());
-        for id in items(&ids.into())? {
-            self.run("UPDATE deliveries SET seen_at = ? WHERE agent = ? AND message_id = ? AND seen_at IS NULL", &[now.clone(), agent.clone(), id])?;
+    pub fn mark_seen(&self, agent: &str, ids: &[f64], now: f64) -> Result<()> {
+        for id in ids {
+            self.run("UPDATE deliveries SET seen_at = ? WHERE agent = ? AND message_id = ? AND seen_at IS NULL", &[n(now), agent.into(), n(*id)])?;
         }
         Ok(())
     }
     /// A message pushed into a session that never showed it got there waits
     /// for the session's hooks again.
-    pub fn mark_unseen(&self, agent: impl Into<Arg>, ids: impl Into<Arg>) -> Result<()> {
-        let agent = agent.into();
-        for id in items(&ids.into())? {
-            self.run("UPDATE deliveries SET seen_at = NULL WHERE agent = ? AND message_id = ?", &[agent.clone(), id])?;
+    pub fn mark_unseen(&self, agent: &str, ids: &[f64]) -> Result<()> {
+        for id in ids {
+            self.run("UPDATE deliveries SET seen_at = NULL WHERE agent = ? AND message_id = ?", &[agent.into(), n(*id)])?;
         }
         Ok(())
     }
     /// Who a message went to, and who has seen it.
-    pub fn deliveries(&self, id: impl Into<Arg>) -> Result<Vec<Row>> {
-        self.all("SELECT agent, seen_at FROM deliveries WHERE message_id = ?", &[id.into()])
+    pub fn deliveries(&self, id: f64) -> Result<Vec<Row>> {
+        self.all("SELECT agent, seen_at FROM deliveries WHERE message_id = ?", &[n(id)])
     }
-    pub fn recent(&self, since: impl Into<Arg>) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM messages WHERE created_at >= ? ORDER BY id", &[since.into()])
+    pub fn recent(&self, since: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM messages WHERE created_at >= ? ORDER BY id", &[n(since)])
     }
 
     // ---------- claims ----------
 
-    pub fn claim(&self, agent: impl Into<Arg>, pattern: impl Into<Arg>, note: impl Into<Arg>, expires_at: impl Into<Arg>, now: impl Into<Arg>) -> Result<()> {
-        let (agent, pattern) = (agent.into(), pattern.into());
-        self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.clone(), pattern.clone()])?;
-        self.run(
-            "INSERT INTO claims (agent, pattern, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-            &[agent, pattern, note.into().or(Arg::Null), now.into(), expires_at.into()],
-        )?;
+    /// A claim, its note as the request gave it (a text, or null).
+    pub fn claim(&self, agent: &str, pattern: &str, note: &Value, expires_at: f64, now: f64) -> Result<()> {
+        let note = Bind::scalar(note).ok_or_else(|| sql::unbindable(3))?;
+        self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.into(), pattern.into()])?;
+        self.run("INSERT INTO claims (agent, pattern, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)", &[agent.into(), pattern.into(), note, n(now), n(expires_at)])?;
         Ok(())
     }
-    /// The claims let go: all of an agent's, or those of `patterns`.
-    pub fn release(&self, agent: impl Into<Arg>, patterns: impl Into<Arg>) -> Result<f64> {
-        let (agent, patterns) = (agent.into(), patterns.into());
-        if !patterns.truthy() {
-            return Ok(self.run("DELETE FROM claims WHERE agent = ?", &[agent])?.changes as f64);
-        }
+    /// The claims let go: all of an agent's (`patterns` None), or those of
+    /// `patterns`.
+    pub fn release(&self, agent: &str, patterns: Option<&[String]>) -> Result<f64> {
+        let Some(patterns) = patterns else {
+            return Ok(self.run("DELETE FROM claims WHERE agent = ?", &[agent.into()])?.changes as f64);
+        };
         let mut count = 0.0;
-        for p in items(&patterns)? {
-            count += self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.clone(), p])?.changes as f64;
+        for p in patterns {
+            count += self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.into(), p.into()])?.changes as f64;
         }
         Ok(count)
     }
-    pub fn claims(&self, now: impl Into<Arg>) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM claims WHERE expires_at >= ? ORDER BY created_at", &[now.into()])
+    pub fn claims(&self, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM claims WHERE expires_at >= ? ORDER BY created_at", &[n(now)])
     }
 
     // ---------- focus ----------
 
-    /// Sets what an agent says it's doing; a falsy text takes it away (and
-    /// says what that changed, as JS returned the run's result).
-    pub fn set_focus(&self, agent: impl Into<Arg>, text: impl Into<Arg>, now: impl Into<Arg>) -> Result<Option<Changes>> {
-        let (agent, text) = (agent.into(), text.into());
-        if !text.truthy() {
-            return self.run("DELETE FROM focus WHERE agent = ?", &[agent]).map(Some);
+    /// Sets what an agent says it's doing; an empty text takes it away (and
+    /// says what that changed).
+    pub fn set_focus(&self, agent: &str, text: &str, now: f64) -> Result<Option<Changes>> {
+        if text.is_empty() {
+            return self.run("DELETE FROM focus WHERE agent = ?", &[agent.into()]).map(Some);
         }
-        self.run("INSERT INTO focus (agent, text, at) VALUES (?, ?, ?) ON CONFLICT(agent) DO UPDATE SET text = excluded.text, at = excluded.at", &[agent, text, now.into()])?;
+        self.run(
+            "INSERT INTO focus (agent, text, at) VALUES (?, ?, ?) ON CONFLICT(agent) DO UPDATE SET text = excluded.text, at = excluded.at",
+            &[agent.into(), text.into(), n(now)],
+        )?;
         Ok(None)
     }
-    pub fn focus(&self, agent: impl Into<Arg>) -> Result<Option<Row>> {
+    pub fn focus(&self, agent: &str) -> Result<Option<Row>> {
         self.get("SELECT text, at FROM focus WHERE agent = ?", &[agent.into()])
     }
 
@@ -777,129 +780,128 @@ impl EngineStore {
     pub fn actor_rows(&self) -> Result<Vec<Row>> {
         self.all("SELECT * FROM actors ORDER BY created_at, rowid", &[])
     }
-    pub fn actor_row(&self, slug: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actors WHERE slug = ?", &[slug])
+    pub fn actor_row(&self, slug: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actors WHERE slug = ?", &[slug.into()])
     }
     /// A row as the actors keep it: everything but the token, which only
     /// registering, allowing and rotating touch. Columns left out take
     /// their defaults on a new row, and are cleared on one that's there.
-    pub fn save_actor(&self, row: &Arg) -> Result<()> {
-        let values: Vec<(String, Arg)> = actor_defaults().into_iter().map(|(k, d)| (k.to_string(), def(row.field(k), d))).collect();
-        self.run(
+    pub fn save_actor(&self, row: &Value) -> Result<()> {
+        let values: serde_json::Map<String, Value> = actor_defaults().into_iter().map(|(k, d)| (k.to_string(), row.get(k).cloned().unwrap_or(d))).collect();
+        self.run_record(
             "INSERT INTO actors (slug, kind, name, product, via, capabilities, heartbeat_ms, identity, enabled, created_at, allowed_at, last_seen, presence, presence_at, status, status_at, seq)
          VALUES (:slug, :kind, :name, :product, :via, :capabilities, :heartbeat_ms, :identity, :enabled, :created_at, :allowed_at, :last_seen, :presence, :presence_at, :status, :status_at, :seq)
          ON CONFLICT(slug) DO UPDATE SET kind = excluded.kind, name = excluded.name, product = excluded.product, via = excluded.via, capabilities = excluded.capabilities,
            heartbeat_ms = excluded.heartbeat_ms, identity = excluded.identity, enabled = excluded.enabled, allowed_at = excluded.allowed_at, last_seen = excluded.last_seen,
            presence = excluded.presence, presence_at = excluded.presence_at, status = excluded.status, status_at = excluded.status_at, seq = excluded.seq",
-            &[Arg::Obj(values)],
+            &values,
         )?;
         Ok(())
     }
     /// An actor gone: its row, events and targets.
-    pub fn remove_actor(&self, slug: Arg) -> Result<()> {
-        let id = Arg::Text(format!("actor:{}", js_text(&slug)));
+    pub fn remove_actor(&self, slug: &str) -> Result<()> {
+        let id = format!("actor:{slug}");
         self.transaction(|| {
-            self.run("DELETE FROM actors WHERE slug = ?", std::slice::from_ref(&slug))?;
-            self.run("DELETE FROM actor_events WHERE actor = ?", std::slice::from_ref(&id))?;
-            self.run("DELETE FROM actor_targets WHERE actor = ?", std::slice::from_ref(&id))?;
+            self.run("DELETE FROM actors WHERE slug = ?", &[slug.into()])?;
+            self.run("DELETE FROM actor_events WHERE actor = ?", &[(&id).into()])?;
+            self.run("DELETE FROM actor_targets WHERE actor = ?", &[(&id).into()])?;
             Ok(())
         })
     }
     /// An actor's record let go and the actor kept: its events and targets.
-    pub fn forget_actor(&self, slug: Arg) -> Result<()> {
-        let id = Arg::Text(format!("actor:{}", js_text(&slug)));
+    pub fn forget_actor(&self, slug: &str) -> Result<()> {
+        let id = format!("actor:{slug}");
         self.transaction(|| {
-            self.run("DELETE FROM actor_events WHERE actor = ?", std::slice::from_ref(&id))?;
-            self.run("DELETE FROM actor_targets WHERE actor = ?", std::slice::from_ref(&id))?;
+            self.run("DELETE FROM actor_events WHERE actor = ?", &[(&id).into()])?;
+            self.run("DELETE FROM actor_targets WHERE actor = ?", &[(&id).into()])?;
             Ok(())
         })
     }
-    pub fn add_actor_event(&self, e: &Arg) -> Result<()> {
+    /// An event: `{ id, actor, at, kind, target, detail, via, facts, ref }`.
+    pub fn add_actor_event(&self, e: &Value) -> Result<()> {
         self.run(
             "INSERT INTO actor_events (id, actor, at, kind, target, detail, via, facts, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             &[
-                e.field("id"),
-                e.field("actor"),
-                e.field("at"),
-                e.field("kind"),
-                def(e.field("target"), Arg::Null),
-                def(e.field("detail"), Arg::Null),
-                e.field("via"),
-                def(e.field("facts"), Arg::Null),
-                def(e.field("ref"), Arg::Null),
+                field(e, "id", 1)?,
+                field(e, "actor", 2)?,
+                field(e, "at", 3)?,
+                field(e, "kind", 4)?,
+                field_or_null(e, "target", 5)?,
+                field_or_null(e, "detail", 6)?,
+                field(e, "via", 7)?,
+                field_or_null(e, "facts", 8)?,
+                field_or_null(e, "ref", 9)?,
             ],
         )?;
         Ok(())
     }
     /// An actor's last `limit` events, newest last.
-    pub fn last_actor_events(&self, actor: Arg, limit: Arg) -> Result<Vec<Row>> {
-        let mut rows = self.all("SELECT * FROM actor_events WHERE actor = ? ORDER BY at DESC, rowid DESC LIMIT ?", &[actor, def(limit, n(20.0))])?;
+    pub fn last_actor_events(&self, actor: &str, limit: f64) -> Result<Vec<Row>> {
+        let mut rows = self.all("SELECT * FROM actor_events WHERE actor = ? ORDER BY at DESC, rowid DESC LIMIT ?", &[actor.into(), n(limit)])?;
         rows.reverse();
         Ok(rows)
     }
-    /// Events since `since`, oldest first: only `only`'s, or all but
-    /// `except`'s.
-    pub fn actor_events_since(&self, since: Arg, o: &Arg) -> Result<Vec<Row>> {
-        let limit = def(o.field("limit"), n(1000.0));
-        let only = def(o.field("only"), Arg::Null);
-        if only.truthy() {
-            self.all("SELECT * FROM actor_events WHERE actor = ? AND at >= ? ORDER BY at, rowid LIMIT ?", &[only, since, limit])
-        } else {
-            self.all("SELECT * FROM actor_events WHERE at >= ? AND actor IS NOT ? ORDER BY at, rowid LIMIT ?", &[since, def(o.field("except"), Arg::Null), limit])
+    /// Events since `since`, oldest first, at most `limit`: only `only`'s,
+    /// or all but `except`'s.
+    pub fn actor_events_since(&self, since: f64, limit: f64, only: Option<&str>, except: Option<&str>) -> Result<Vec<Row>> {
+        match only.filter(|o| !o.is_empty()) {
+            Some(only) => self.all("SELECT * FROM actor_events WHERE actor = ? AND at >= ? ORDER BY at, rowid LIMIT ?", &[only.into(), n(since), n(limit)]),
+            None => self.all("SELECT * FROM actor_events WHERE at >= ? AND actor IS NOT ? ORDER BY at, rowid LIMIT ?", &[n(since), except.into(), n(limit)]),
         }
     }
     /// How many events of each kind each actor has had since `since`.
-    pub fn actor_event_counts(&self, since: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT actor, kind, count(*) AS n FROM actor_events WHERE at >= ? GROUP BY actor, kind", &[since])
+    pub fn actor_event_counts(&self, since: f64) -> Result<Vec<Row>> {
+        self.all("SELECT actor, kind, count(*) AS n FROM actor_events WHERE at >= ? GROUP BY actor, kind", &[n(since)])
     }
     /// The targets of each actor's spawned events since `since`, the first
     /// time from each source.
-    pub fn actor_spawns(&self, since: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT actor, target, via, MIN(at) AS at FROM actor_events WHERE kind = 'spawned' AND target IS NOT NULL AND at >= ? GROUP BY actor, target, via", &[since])
+    pub fn actor_spawns(&self, since: f64) -> Result<Vec<Row>> {
+        self.all("SELECT actor, target, via, MIN(at) AS at FROM actor_events WHERE kind = 'spawned' AND target IS NOT NULL AND at >= ? GROUP BY actor, target, via", &[n(since)])
     }
     /// Whether an actor reported an event with this `ref` since `since`.
-    pub fn has_actor_ref(&self, actor: Arg, r: Arg, since: Arg) -> Result<bool> {
-        Ok(self.get("SELECT 1 FROM actor_events WHERE actor = ? AND ref = ? AND at >= ? LIMIT 1", &[actor, r, since])?.is_some())
+    pub fn has_actor_ref(&self, actor: &str, r: &str, since: f64) -> Result<bool> {
+        Ok(self.get("SELECT 1 FROM actor_events WHERE actor = ? AND ref = ? AND at >= ? LIMIT 1", &[actor.into(), r.into(), n(since)])?.is_some())
     }
     pub fn actor_targets(&self) -> Result<Vec<Row>> {
         self.all("SELECT * FROM actor_targets", &[])
     }
-    pub fn save_actor_target(&self, t: &Arg) -> Result<()> {
+    /// A target: `{ actor, target, relation, since, last_at }`.
+    pub fn save_actor_target(&self, t: &Value) -> Result<()> {
         self.run(
             "INSERT INTO actor_targets (actor, target, relation, since, last_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(actor, target, relation) DO UPDATE SET since = MIN(actor_targets.since, excluded.since), last_at = MAX(actor_targets.last_at, excluded.last_at)",
-            &[t.field("actor"), t.field("target"), t.field("relation"), t.field("since"), t.field("last_at")],
+            &[field(t, "actor", 1)?, field(t, "target", 2)?, field(t, "relation", 3)?, field(t, "since", 4)?, field(t, "last_at", 5)?],
         )?;
         Ok(())
     }
-    pub fn drop_actor_target(&self, actor: Arg, target: Arg, relation: Arg) -> Result<()> {
-        self.run("DELETE FROM actor_targets WHERE actor = ? AND target = ? AND relation = ?", &[actor, target, relation])?;
+    pub fn drop_actor_target(&self, actor: &str, target: &str, relation: &str) -> Result<()> {
+        self.run("DELETE FROM actor_targets WHERE actor = ? AND target = ? AND relation = ?", &[actor.into(), target.into(), relation.into()])?;
         Ok(())
     }
     /// What an actor's events of one kind said as facts since `since`,
     /// newest first, with the source that said it.
-    pub fn actor_facts_since(&self, actor: Arg, kind: Arg, since: Arg) -> Result<Vec<Row>> {
+    pub fn actor_facts_since(&self, actor: &str, kind: &str, since: f64) -> Result<Vec<Row>> {
         self.all(
             "SELECT at, facts, via FROM actor_events WHERE actor = ? AND kind = ? AND at >= ? AND facts IS NOT NULL ORDER BY at DESC, rowid DESC LIMIT 200",
-            &[actor, kind, since],
+            &[actor.into(), kind.into(), n(since)],
         )
     }
 
     // ---------- actors' tokens, registrations, revoked tokens ----------
 
-    pub fn set_actor_token(&self, slug: Arg, hash: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actors SET token_hash = ?, token_at = ? WHERE slug = ?", &[hash, at, slug])?;
+    pub fn set_actor_token(&self, slug: &str, hash: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actors SET token_hash = ?, token_at = ? WHERE slug = ?", &[hash.into(), n(at), slug.into()])?;
         Ok(())
     }
-    pub fn drop_actor_token(&self, slug: Arg) -> Result<()> {
-        self.run("UPDATE actors SET token_hash = NULL, token_at = NULL WHERE slug = ?", &[slug])?;
+    pub fn drop_actor_token(&self, slug: &str) -> Result<()> {
+        self.run("UPDATE actors SET token_hash = NULL, token_at = NULL WHERE slug = ?", &[slug.into()])?;
         Ok(())
     }
-    pub fn touch_actor_token(&self, slug: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actors SET token_at = ? WHERE slug = ?", &[at, slug])?;
+    pub fn touch_actor_token(&self, slug: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actors SET token_at = ? WHERE slug = ?", &[n(at), slug.into()])?;
         Ok(())
     }
-    pub fn actor_by_token(&self, hash: Arg) -> Result<Option<Row>> {
-        self.get("SELECT slug, token_hash, token_at FROM actors WHERE token_hash = ?", &[hash])
+    pub fn actor_by_token(&self, hash: &str) -> Result<Option<Row>> {
+        self.get("SELECT slug, token_hash, token_at FROM actors WHERE token_hash = ?", &[hash.into()])
     }
     /// Each actor's token as XenoNet's window may see it: whether it has
     /// one, and when it was last used (or made). Never the hash.
@@ -910,11 +912,11 @@ impl EngineStore {
             .map(|r| json!({ "slug": r.get("slug").to_json(), "hasToken": truthy(r.get("has_token")), "at": r.get("token_at").to_json(), "hasGateway": truthy(r.get("has_gateway")), "gatewayAt": r.get("gateway_at").to_json() }))
             .collect())
     }
-    pub fn actor_token(&self, slug: Arg) -> Result<Option<Row>> {
-        self.get("SELECT token_hash, token_at FROM actors WHERE slug = ? AND token_hash IS NOT NULL", &[slug])
+    pub fn actor_token(&self, slug: &str) -> Result<Option<Row>> {
+        self.get("SELECT token_hash, token_at FROM actors WHERE slug = ? AND token_hash IS NOT NULL", &[slug.into()])
     }
-    pub fn stale_actor_tokens(&self, before: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT slug, token_hash, token_at FROM actors WHERE token_hash IS NOT NULL AND token_at < ?", &[before])
+    pub fn stale_actor_tokens(&self, before: f64) -> Result<Vec<Row>> {
+        self.all("SELECT slug, token_hash, token_at FROM actors WHERE token_hash IS NOT NULL AND token_at < ?", &[n(before)])
     }
     /// Actors you allowed whose token is gone (unused for 30 days): their
     /// slugs and names, never a hash. One that reports only through the
@@ -943,212 +945,248 @@ impl EngineStore {
             .filter_map(|r| r.text("hash").map(str::to_string))
             .collect())
     }
-    /// A registration waiting for you.
-    pub fn add_actor_request(&self, r: &Arg) -> Result<()> {
+    /// A registration waiting for you: `{ id, slug, ask, token_hash, asker,
+    /// created_at, expires_at }`.
+    pub fn add_actor_request(&self, r: &Value) -> Result<()> {
         self.run(
             "INSERT INTO actor_requests (id, slug, ask, token_hash, asker, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            &[r.field("id"), r.field("slug"), r.field("ask"), r.field("token_hash"), def(r.field("asker"), Arg::Null), r.field("created_at"), r.field("expires_at")],
+            &[
+                field(r, "id", 1)?,
+                field(r, "slug", 2)?,
+                field(r, "ask", 3)?,
+                field(r, "token_hash", 4)?,
+                field_or_null(r, "asker", 5)?,
+                field(r, "created_at", 6)?,
+                field(r, "expires_at", 7)?,
+            ],
         )?;
         Ok(())
     }
-    pub fn actor_request(&self, id: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_requests WHERE id = ?", &[id])
+    pub fn actor_request(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actor_requests WHERE id = ?", &[id.into()])
     }
-    pub fn actor_request_by_token(&self, hash: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_requests WHERE token_hash = ?", &[hash])
+    pub fn actor_request_by_token(&self, hash: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actor_requests WHERE token_hash = ?", &[hash.into()])
     }
-    pub fn waiting_actor_requests(&self, now: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM actor_requests WHERE decision IS NULL AND expires_at > ? ORDER BY created_at, rowid", &[now])
+    pub fn waiting_actor_requests(&self, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM actor_requests WHERE decision IS NULL AND expires_at > ? ORDER BY created_at, rowid", &[n(now)])
     }
-    pub fn lapsed_actor_requests(&self, now: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM actor_requests WHERE decision IS NULL AND expires_at <= ?", &[now])
+    pub fn lapsed_actor_requests(&self, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM actor_requests WHERE decision IS NULL AND expires_at <= ?", &[n(now)])
     }
     /// Answers a waiting registration; whether it was still waiting.
-    pub fn decide_actor_request(&self, id: Arg, decision: Arg, at: Arg) -> Result<bool> {
-        Ok(self.run("UPDATE actor_requests SET decision = ?, decided_at = ? WHERE id = ? AND decision IS NULL", &[decision, at, id])?.changes > 0)
+    pub fn decide_actor_request(&self, id: &str, decision: &str, at: f64) -> Result<bool> {
+        Ok(self.run("UPDATE actor_requests SET decision = ?, decided_at = ? WHERE id = ? AND decision IS NULL", &[decision.into(), n(at), id.into()])?.changes > 0)
     }
     /// When each registration since `since` was made, oldest first.
-    pub fn actor_request_times(&self, since: Arg) -> Result<Vec<Value>> {
-        Ok(self.all("SELECT created_at FROM actor_requests WHERE created_at >= ? ORDER BY created_at", &[since])?.iter().map(|r| r.get("created_at").to_json()).collect())
+    pub fn actor_request_times(&self, since: f64) -> Result<Vec<Value>> {
+        Ok(self.all("SELECT created_at FROM actor_requests WHERE created_at >= ? ORDER BY created_at", &[n(since)])?.iter().map(|r| r.get("created_at").to_json()).collect())
     }
-    pub fn set_gateway_token(&self, slug: Arg, hash: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actors SET gateway_hash = ?, gateway_at = ? WHERE slug = ?", &[hash, at, slug])?;
+    pub fn set_gateway_token(&self, slug: &str, hash: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actors SET gateway_hash = ?, gateway_at = ? WHERE slug = ?", &[hash.into(), n(at), slug.into()])?;
         Ok(())
     }
-    pub fn drop_gateway_token(&self, slug: Arg) -> Result<()> {
-        self.run("UPDATE actors SET gateway_hash = NULL, gateway_at = NULL WHERE slug = ?", &[slug])?;
+    pub fn drop_gateway_token(&self, slug: &str) -> Result<()> {
+        self.run("UPDATE actors SET gateway_hash = NULL, gateway_at = NULL WHERE slug = ?", &[slug.into()])?;
         Ok(())
     }
-    pub fn touch_gateway_token(&self, slug: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actors SET gateway_at = ? WHERE slug = ?", &[at, slug])?;
+    pub fn touch_gateway_token(&self, slug: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actors SET gateway_at = ? WHERE slug = ?", &[n(at), slug.into()])?;
         Ok(())
     }
-    pub fn actor_by_gateway_token(&self, hash: Arg) -> Result<Option<Row>> {
-        self.get("SELECT slug, gateway_hash, gateway_at FROM actors WHERE gateway_hash = ?", &[hash])
+    pub fn actor_by_gateway_token(&self, hash: &str) -> Result<Option<Row>> {
+        self.get("SELECT slug, gateway_hash, gateway_at FROM actors WHERE gateway_hash = ?", &[hash.into()])
     }
-    pub fn gateway_token(&self, slug: Arg) -> Result<Option<Row>> {
-        self.get("SELECT gateway_hash, gateway_at FROM actors WHERE slug = ? AND gateway_hash IS NOT NULL", &[slug])
+    pub fn gateway_token(&self, slug: &str) -> Result<Option<Row>> {
+        self.get("SELECT gateway_hash, gateway_at FROM actors WHERE slug = ? AND gateway_hash IS NOT NULL", &[slug.into()])
     }
-    pub fn stale_gateway_tokens(&self, before: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT slug, gateway_hash, gateway_at FROM actors WHERE gateway_hash IS NOT NULL AND gateway_at < ?", &[before])
+    pub fn stale_gateway_tokens(&self, before: f64) -> Result<Vec<Row>> {
+        self.all("SELECT slug, gateway_hash, gateway_at FROM actors WHERE gateway_hash IS NOT NULL AND gateway_at < ?", &[n(before)])
     }
-    /// A token that stopped working, and why. The first reason stands.
-    pub fn revoke_actor_token(&self, r: &Arg) -> Result<()> {
+    /// A token that stopped working, and why: `{ token_hash, actor, reason,
+    /// at }`. The first reason stands.
+    pub fn revoke_actor_token(&self, r: &Value) -> Result<()> {
         self.run(
             "INSERT OR IGNORE INTO actor_revoked (token_hash, actor, reason, at) VALUES (?, ?, ?, ?)",
-            &[r.field("token_hash"), r.field("actor"), r.field("reason"), r.field("at")],
+            &[field(r, "token_hash", 1)?, field(r, "actor", 2)?, field(r, "reason", 3)?, field(r, "at", 4)?],
         )?;
         Ok(())
     }
-    pub fn revoked_actor_token(&self, hash: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_revoked WHERE token_hash = ?", &[hash])
+    pub fn revoked_actor_token(&self, hash: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actor_revoked WHERE token_hash = ?", &[hash.into()])
     }
 
     // ---------- remote connections ----------
 
-    pub fn meta(&self, key: Arg) -> Result<Value> {
-        Ok(self.get("SELECT value FROM assistant_meta WHERE key = ?", &[key])?.map_or(Value::Null, |r| match r.get("value") {
+    pub fn meta(&self, key: &str) -> Result<Value> {
+        Ok(self.get("SELECT value FROM assistant_meta WHERE key = ?", &[key.into()])?.map_or(Value::Null, |r| match r.get("value") {
             Cell::Null => Value::Null,
             c => c.to_json(),
         }))
     }
-    pub fn set_meta(&self, key: Arg, value: Arg) -> Result<()> {
-        self.run("INSERT INTO assistant_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", &[key, Arg::Text(js_text(&value))])?;
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.run("INSERT INTO assistant_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", &[key.into(), value.into()])?;
         Ok(())
     }
     /// A place's own id for remote readers (`prj_<uuid>`), made the first
     /// time it's asked for; `make` makes one.
-    pub fn project_id_of<E: From<SqlError>>(&self, place: Arg, make: &mut dyn FnMut() -> std::result::Result<Arg, E>, now: Arg) -> std::result::Result<Value, E> {
-        if let Some(had) = self.get("SELECT project_id FROM assistant_places WHERE place = ?", std::slice::from_ref(&place))? {
+    pub fn project_id_of<E: From<SqlError>>(&self, place: &str, make: &mut dyn FnMut() -> std::result::Result<String, E>, now: f64) -> std::result::Result<Value, E> {
+        if let Some(had) = self.get("SELECT project_id FROM assistant_places WHERE place = ?", &[place.into()])? {
             return Ok(had.get("project_id").to_json());
         }
         let id = make()?;
-        let out = id.to_json();
-        self.run("INSERT INTO assistant_places (place, project_id, created_at) VALUES (?, ?, ?)", &[place, id, now])?;
-        Ok(out)
+        self.run("INSERT INTO assistant_places (place, project_id, created_at) VALUES (?, ?, ?)", &[place.into(), (&id).into(), n(now)])?;
+        Ok(Value::String(id))
     }
-    pub fn project_id_for(&self, place: Arg) -> Result<Value> {
-        Ok(self.get("SELECT project_id FROM assistant_places WHERE place = ?", &[place])?.map_or(Value::Null, |r| null_if_missing(r.get("project_id"))))
+    pub fn project_id_for(&self, place: &str) -> Result<Value> {
+        Ok(self.get("SELECT project_id FROM assistant_places WHERE place = ?", &[place.into()])?.map_or(Value::Null, |r| r.get("project_id").to_json()))
     }
-    pub fn place_of_project(&self, project_id: Arg) -> Result<Value> {
-        Ok(self.get("SELECT place FROM assistant_places WHERE project_id = ?", &[project_id])?.map_or(Value::Null, |r| null_if_missing(r.get("place"))))
+    pub fn place_of_project(&self, project_id: &str) -> Result<Value> {
+        Ok(self.get("SELECT place FROM assistant_places WHERE project_id = ?", &[project_id.into()])?.map_or(Value::Null, |r| r.get("place").to_json()))
     }
-    pub fn add_connection(&self, row: &Arg) -> Result<()> {
-        self.run(
+    /// A connection: a record with its columns' names.
+    pub fn add_connection(&self, row: &Value) -> Result<()> {
+        self.run_record(
             "INSERT INTO actor_connections (connection_id, actor_slug, adapter_id, provider, transport_kind, transport_binding, label, device_alias, audience_description, audience_verification, audience_scope, state, created_at)
          VALUES (:connection_id, :actor_slug, :adapter_id, :provider, :transport_kind, :transport_binding, :label, :device_alias, :audience_description, :audience_verification, :audience_scope, 'active', :created_at)",
-            std::slice::from_ref(row),
+            &record(row),
         )?;
         Ok(())
     }
-    pub fn connection(&self, id: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_connections WHERE connection_id = ?", &[id])
+    pub fn connection(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actor_connections WHERE connection_id = ?", &[id.into()])
     }
-    pub fn connections_of(&self, slug: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM actor_connections WHERE actor_slug = ? ORDER BY created_at, rowid", &[slug])
+    pub fn connections_of(&self, slug: &str) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM actor_connections WHERE actor_slug = ? ORDER BY created_at, rowid", &[slug.into()])
     }
     pub fn connections(&self) -> Result<Vec<Row>> {
         self.all("SELECT * FROM actor_connections ORDER BY created_at, rowid", &[])
     }
-    /// How a connection's transport is set up, as JSON; never a secret.
-    pub fn set_transport_binding(&self, id: Arg, binding: Arg) -> Result<()> {
-        self.run("UPDATE actor_connections SET transport_binding = ? WHERE connection_id = ?", &[binding, id])?;
+    /// How a connection's transport is set up, as JSON text; never a secret.
+    pub fn set_transport_binding(&self, id: &str, binding: Option<&str>) -> Result<()> {
+        self.run("UPDATE actor_connections SET transport_binding = ? WHERE connection_id = ?", &[binding.into(), id.into()])?;
         Ok(())
     }
-    pub fn end_connection(&self, id: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actor_connections SET state = 'revoked', revoked_at = COALESCE(revoked_at, ?) WHERE connection_id = ?", &[at, id])?;
+    pub fn end_connection(&self, id: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actor_connections SET state = 'revoked', revoked_at = COALESCE(revoked_at, ?) WHERE connection_id = ?", &[n(at), id.into()])?;
         Ok(())
     }
-    pub fn add_grant(&self, row: &Arg) -> Result<()> {
-        self.run(
+    /// A grant: a record with its columns' names.
+    pub fn add_grant(&self, row: &Value) -> Result<()> {
+        self.run_record(
             "INSERT INTO actor_grants (grant_id, connection_id, device_id, permissions, project_allowlist, field_policy, data_mode, lookback_ms, revision, token_hash, created_at, expires_at)
          VALUES (:grant_id, :connection_id, :device_id, :permissions, :project_allowlist, :field_policy, :data_mode, :lookback_ms, 1, :token_hash, :created_at, :expires_at)",
-            std::slice::from_ref(row),
+            &record(row),
         )?;
         Ok(())
     }
-    pub fn grant(&self, id: Arg) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_grants WHERE grant_id = ?", &[id])
+    pub fn grant(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actor_grants WHERE grant_id = ?", &[id.into()])
     }
     pub fn grants(&self) -> Result<Vec<Row>> {
         self.all("SELECT * FROM actor_grants ORDER BY created_at, rowid", &[])
     }
-    /// A grant's scope changed: its revision moves on. Whether it was
-    /// changed (it isn't once revoked).
-    pub fn change_grant(&self, id: Arg, c: &Arg) -> Result<bool> {
-        let sets: Vec<(&str, Arg)> =
-            ["project_allowlist", "field_policy", "data_mode", "token_hash", "expires_at"].into_iter().map(|k| (k, c.field(k))).filter(|(_, v)| *v != Arg::Undef).collect();
+    /// A grant's scope changed (the fields of `c` it has of
+    /// project_allowlist, field_policy, data_mode, token_hash and
+    /// expires_at): its revision moves on. Whether it was changed (it isn't
+    /// once revoked).
+    pub fn change_grant(&self, id: &str, c: &Value) -> Result<bool> {
+        let sets: Vec<(&str, &Value)> = ["project_allowlist", "field_policy", "data_mode", "token_hash", "expires_at"].into_iter().filter_map(|k| Some((k, c.get(k)?))).collect();
         let mut parts: Vec<String> = sets.iter().map(|(k, _)| format!("{k} = ?")).collect();
         parts.push("revision = revision + 1".into());
         let q = format!("UPDATE actor_grants SET {} WHERE grant_id = ? AND revoked_at IS NULL", parts.join(", "));
-        let mut args: Vec<Arg> = sets.into_iter().map(|(_, v)| v).collect();
-        args.push(id);
+        let mut args = Vec::with_capacity(sets.len() + 1);
+        for (i, (_, v)) in sets.iter().enumerate() {
+            args.push(Bind::scalar(v).ok_or_else(|| sql::unbindable(i + 1))?);
+        }
+        args.push(id.into());
         Ok(self.run(&q, &args)?.changes > 0)
     }
     /// Revoked, for good: the first reason stands, and the revision moves on.
-    pub fn revoke_grant(&self, id: Arg, reason: Arg, at: Arg) -> Result<bool> {
-        Ok(self.run("UPDATE actor_grants SET revoked_at = ?, revoked_reason = ?, revision = revision + 1 WHERE grant_id = ? AND revoked_at IS NULL", &[at, reason, id])?.changes
+    pub fn revoke_grant(&self, id: &str, reason: &str, at: f64) -> Result<bool> {
+        Ok(self
+            .run(
+                "UPDATE actor_grants SET revoked_at = ?, revoked_reason = ?, revision = revision + 1 WHERE grant_id = ? AND revoked_at IS NULL",
+                &[n(at), reason.into(), id.into()],
+            )?
+            .changes
             > 0)
     }
-    pub fn touch_grant(&self, id: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actor_grants SET last_used_at = ? WHERE grant_id = ?", &[at.clone(), id.clone()])?;
-        self.run("UPDATE actor_connections SET last_used_at = ? WHERE connection_id = (SELECT connection_id FROM actor_grants WHERE grant_id = ?)", &[at, id])?;
+    pub fn touch_grant(&self, id: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actor_grants SET last_used_at = ? WHERE grant_id = ?", &[n(at), id.into()])?;
+        self.run("UPDATE actor_connections SET last_used_at = ? WHERE connection_id = (SELECT connection_id FROM actor_grants WHERE grant_id = ?)", &[n(at), id.into()])?;
         Ok(())
     }
-    pub fn add_account_link(&self, row: &Arg) -> Result<()> {
-        self.run(
+    /// An account link: a record with its columns' names.
+    pub fn add_account_link(&self, row: &Value) -> Result<()> {
+        self.run_record(
             "INSERT INTO actor_account_links (link_id, actor_slug, identity_id, issuer, provider, workspace, proof_status, proof_method, subject_binding, checked_at, expires_at, created_at)
          VALUES (:link_id, :actor_slug, :identity_id, :issuer, :provider, :workspace, :proof_status, :proof_method, :subject_binding, :checked_at, :expires_at, :created_at)",
-            std::slice::from_ref(row),
+            &record(row),
         )?;
         Ok(())
     }
-    pub fn account_links(&self, slug: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM actor_account_links WHERE actor_slug = ? ORDER BY created_at, rowid", &[slug])
+    pub fn account_links(&self, slug: &str) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM actor_account_links WHERE actor_slug = ? ORDER BY created_at, rowid", &[slug.into()])
     }
-    pub fn drop_account_link(&self, id: Arg) -> Result<()> {
-        self.run("DELETE FROM actor_account_links WHERE link_id = ?", &[id])?;
+    pub fn drop_account_link(&self, id: &str) -> Result<()> {
+        self.run("DELETE FROM actor_account_links WHERE link_id = ?", &[id.into()])?;
         Ok(())
     }
     /// A verified account link's lapse, when the account changed.
-    pub fn expire_account_link(&self, id: Arg, at: Arg) -> Result<()> {
-        self.run("UPDATE actor_account_links SET expires_at = ? WHERE link_id = ?", &[at, id])?;
+    pub fn expire_account_link(&self, id: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actor_account_links SET expires_at = ? WHERE link_id = ?", &[n(at), id.into()])?;
         Ok(())
     }
-    pub fn add_external_ref(&self, row: &Arg) -> Result<()> {
-        self.run(
+    /// An external ref: a record with its columns' names.
+    pub fn add_external_ref(&self, row: &Value) -> Result<()> {
+        self.run_record(
             "INSERT INTO actor_external_refs (external_ref_id, actor_slug, adapter_id, issuer, account_binding, external_actor_id, verified_at)
          VALUES (:external_ref_id, :actor_slug, :adapter_id, :issuer, :account_binding, :external_actor_id, :verified_at)",
-            std::slice::from_ref(row),
+            &record(row),
         )?;
         Ok(())
     }
-    pub fn external_ref(&self, k: &Arg) -> Result<Option<Row>> {
+    /// The ref with `k`'s adapter_id, issuer, account_binding and
+    /// external_actor_id.
+    pub fn external_ref(&self, k: &Value) -> Result<Option<Row>> {
         self.get(
             "SELECT * FROM actor_external_refs WHERE adapter_id = ? AND issuer = ? AND account_binding = ? AND external_actor_id = ?",
-            &[k.field("adapter_id"), k.field("issuer"), k.field("account_binding"), k.field("external_actor_id")],
+            &[field(k, "adapter_id", 1)?, field(k, "issuer", 2)?, field(k, "account_binding", 3)?, field(k, "external_actor_id", 4)?],
         )
     }
-    pub fn external_refs(&self, slug: Arg) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM actor_external_refs WHERE actor_slug = ?", &[slug])
+    pub fn external_refs(&self, slug: &str) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM actor_external_refs WHERE actor_slug = ?", &[slug.into()])
     }
-    pub fn add_audit(&self, a: &Arg) -> Result<()> {
-        let f = |k: &str| def(a.field(k), Arg::Null);
+    /// A remote read logged: `{ at, kind, request_id, grant_id,
+    /// grant_revision, actor, connection_id, operation, result, latency_ms,
+    /// bytes, projects }`, the ids and counts it hasn't left NULL.
+    pub fn add_audit(&self, a: &Value) -> Result<()> {
         self.run(
             "INSERT INTO assistant_audit (at, kind, request_id, grant_id, grant_revision, actor, connection_id, operation, result, latency_ms, bytes, projects) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            &[a.field("at"), a.field("kind"), f("request_id"), f("grant_id"), f("grant_revision"), f("actor"), f("connection_id"), a.field("operation"), a.field("result"), f("latency_ms"), f("bytes"), f("projects")],
+            &[
+                field(a, "at", 1)?,
+                field(a, "kind", 2)?,
+                field_or_null(a, "request_id", 3)?,
+                field_or_null(a, "grant_id", 4)?,
+                field_or_null(a, "grant_revision", 5)?,
+                field_or_null(a, "actor", 6)?,
+                field_or_null(a, "connection_id", 7)?,
+                field(a, "operation", 8)?,
+                field(a, "result", 9)?,
+                field_or_null(a, "latency_ms", 10)?,
+                field_or_null(a, "bytes", 11)?,
+                field_or_null(a, "projects", 12)?,
+            ],
         )?;
         Ok(())
     }
-    /// The newest `limit` records since `since`, newest first.
-    pub fn audit(&self, o: &Arg) -> Result<Vec<Row>> {
-        let since = def(o.field("since"), n(0.0));
-        let limit = def(o.field("limit"), n(200.0));
-        let grant = def(o.field("grant"), Arg::Null);
-        if grant.truthy() {
-            self.all("SELECT * FROM assistant_audit WHERE at >= ? AND grant_id = ? ORDER BY id DESC LIMIT ?", &[since, grant, limit])
-        } else {
-            self.all("SELECT * FROM assistant_audit WHERE at >= ? ORDER BY id DESC LIMIT ?", &[since, limit])
+    /// The newest `limit` records since `since`, newest first: only
+    /// `grant`'s when it's given.
+    pub fn audit(&self, since: f64, limit: f64, grant: Option<&str>) -> Result<Vec<Row>> {
+        match grant.filter(|g| !g.is_empty()) {
+            Some(grant) => self.all("SELECT * FROM assistant_audit WHERE at >= ? AND grant_id = ? ORDER BY id DESC LIMIT ?", &[n(since), grant.into(), n(limit)]),
+            None => self.all("SELECT * FROM assistant_audit WHERE at >= ? ORDER BY id DESC LIMIT ?", &[n(since), n(limit)]),
         }
     }
 }
@@ -1163,33 +1201,15 @@ fn truthy(c: &Cell) -> bool {
     }
 }
 
-fn null_if_missing(c: &Cell) -> Value {
-    c.to_json()
-}
-
-/// A value as JS's template literal or String() writes it.
-pub fn js_text(v: &Arg) -> String {
-    match v {
-        Arg::Undef => "undefined".into(),
-        Arg::Other => "[object Object]".into(),
-        other => crate::js::template(Some(&other.to_json())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn obj(fields: &[(&str, Arg)]) -> Arg {
-        Arg::Obj(fields.iter().map(|(k, v)| (k.to_string(), v.clone())).collect())
-    }
 
     #[test]
     fn a_new_store_takes_every_step_and_keeps_messages() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
         assert_eq!(s.version().unwrap(), Version { from: 0, version: 8, newer: false });
-        let id =
-            s.send(obj(&[("sender", "claude:a".into()), ("target", "codex:b".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["codex:b".into()]))]), 1000.0).unwrap();
+        let id = s.send(&json!({ "sender": "claude:a", "target": "codex:b", "body": "hi", "recipients": ["codex:b"] }), 1000.0).unwrap();
         assert_eq!(id, 1.0);
         let unseen = s.unseen("codex:b").unwrap();
         assert_eq!(unseen.len(), 1);
@@ -1206,12 +1226,7 @@ mod tests {
         s.set_net_presence("laptop", 5.0, 1000.0, true, "", "[]").unwrap();
         s.set_net_presence("laptop", 6.0, 1001.0, false, "", "[{\"id\":\"claude:x\"}]").unwrap();
         assert_eq!(s.net_presence("laptop").unwrap().unwrap().num("counter"), Some(6.0));
-        let id = s
-            .send(
-                obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:x".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:x".into()]))]),
-                n(1000.0),
-            )
-            .unwrap();
+        let id = s.send(&json!({ "sender": "claude:a", "target": "@laptop:claude:x", "body": "hi", "recipients": ["@laptop:claude:x"] }), 1000.0).unwrap();
         s.set_message_net(id, None, "msg_1").unwrap();
         s.set_delivery_net(id, "@laptop:claude:x", "laptop", "{}").unwrap();
         assert_eq!(s.outbox(0.0).unwrap().len(), 1, "it waits for its receipt");
@@ -1220,12 +1235,7 @@ mod tests {
         assert_eq!(s.outbox(0.0).unwrap().len(), 0);
         // Stored there and not read in the outbox's week: unread here, until
         // it's read after all.
-        let later = s
-            .send(
-                obj(&[("sender", "claude:a".into()), ("target", "@laptop:claude:y".into()), ("body", "hi".into()), ("recipients", Arg::List(vec!["@laptop:claude:y".into()]))]),
-                n(1000.0),
-            )
-            .unwrap();
+        let later = s.send(&json!({ "sender": "claude:a", "target": "@laptop:claude:y", "body": "hi", "recipients": ["@laptop:claude:y"] }), 1000.0).unwrap();
         s.set_delivery_net(later, "@laptop:claude:y", "laptop", "{}").unwrap();
         assert!(s.set_receipt(later, "@laptop:claude:y", "stored", 1001.0).unwrap());
         assert_eq!(s.unread_since(1000.0, 5000.0).unwrap().len(), 0, "not a week yet");
@@ -1238,7 +1248,7 @@ mod tests {
         assert!(s.message_by_mid("msg_1", Some("laptop")).unwrap().is_none());
         s.put_net_claim("laptop", "github.com/x/y", "src/a.rs", "claude:x", Some("main"), "edit", None, 1000.0).unwrap();
         assert_eq!(s.net_claims(1000.0).unwrap().len(), 1);
-        let h = obj(&[("id", "hof_1".into()), ("host", "laptop".into()), ("maker", "claude:x".into()), ("created_at", n(1000.0)), ("expires_at", n(2000.0))]);
+        let h = json!({ "id": "hof_1", "host": "laptop", "maker": "claude:x", "created_at": 1000.0, "expires_at": 2000.0 });
         assert!(s.add_handoff(&h).unwrap());
         assert!(!s.add_handoff(&h).unwrap(), "once");
         assert!(s.take_handoff("hof_1", "claude:a", 1500.0).unwrap());
@@ -1255,26 +1265,26 @@ mod tests {
         for (slug, token, gateway) in [("muse", Some("h-muse"), Some("g-muse")), ("wren", Some("h-wren"), None), ("moth", None, None)] {
             s.run(
                 "INSERT INTO actors (slug, kind, name, via, capabilities, created_at, token_hash, gateway_hash) VALUES (?, 'agent', ?, '[]', '[]', 1, ?, ?)",
-                &[Arg::text(slug), Arg::text(slug), token.map_or(Arg::Null, Arg::text), gateway.map_or(Arg::Null, Arg::text)],
+                &[slug.into(), slug.into(), token.into(), gateway.into()],
             )
             .unwrap();
         }
         for (id, hash, decision) in [("r1", "h-waiting", None), ("r2", "h-denied", Some("deny")), ("r3", "h-wren", Some("allow"))] {
             s.run(
                 "INSERT INTO actor_requests (id, slug, ask, token_hash, created_at, expires_at, decision) VALUES (?, 'heron', '{}', ?, 1, 2, ?)",
-                &[Arg::text(id), Arg::text(hash), decision.map_or(Arg::Null, Arg::text)],
+                &[id.into(), hash.into(), decision.into()],
             )
             .unwrap();
         }
-        s.revoke_actor_token(&obj(&[("token_hash", "h-old".into()), ("actor", "actor:muse".into()), ("reason", "rotated".into()), ("at", n(5.0))])).unwrap();
+        s.revoke_actor_token(&json!({ "token_hash": "h-old", "actor": "actor:muse", "reason": "rotated", "at": 5.0 })).unwrap();
         let mut hashes = s.issued_token_hashes().unwrap();
         hashes.sort();
         assert_eq!(hashes, ["g-muse", "h-muse", "h-waiting", "h-wren"], "a revoked token, or a refused registration's, no longer works");
     }
 }
 
-/// A store shared by the parts that use it (the actors, the twin's own
-/// calls): each call holds it only while it runs SQL, so a call may come
+/// A store shared by the parts that use it (the engine, the actors, the
+/// checks): each call holds it only while it runs SQL, so a call may come
 /// back to it from within another's transaction.
 #[derive(Clone)]
 pub struct Shared(pub std::sync::Arc<std::sync::Mutex<EngineStore>>);

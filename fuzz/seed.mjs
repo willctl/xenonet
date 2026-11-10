@@ -239,12 +239,6 @@ seed("misc", "theme", 5, JSON.stringify({ midnight: { extends: "phosphor", color
   seed("misc", "tar", 0, Buffer.concat([header("cli/", "5", 0), header("PaxHeader", "x", pax.length), pad(pax), header("cli/xenonet.js", "0", body.length), pad(body), Buffer.alloc(1024)]));
 }
 
-// ---------- jsregex ----------
-seed("jsregex", "session", 0, "claude:0190d3e0-0000-7000-8000-000000000001");
-seed("jsregex", "host", 2, "@vm1:project:/home/nova/projects/atlas-api");
-seed("jsregex", "compile", 1, "^(?:@[a-z][a-z0-9-]{1,31}:)?(claude|codex):(?=.)[^\\s]+$", "\0", "@vm1:claude:x");
-seed("jsregex", "classes", 1, "[\\w\\d\\s\\u00e9-\\u00ff]+?(?<!x)\\b", "\0", "café au lait");
-
 // ---------- tools ----------
 seed("tools", "gh-hosts", 0, "github.com:\n    git_protocol: https\n    users:\n        nova-dev:\n        orbitworks:\n            oauth_token: gho_made_up\n    user: nova-dev\nghe.atlas.example:\n    user: nova\n");
 seed("tools", "ssh-config", 0, "Host gh-orbit\n  HostName github.com\n  User git\nHost *\n  AddKeysToAgent yes\ngit@gh-orbit:orbitworks/pathfinder.git\nhttps://github.com/atlas-co/atlas-api.git\n");

@@ -3,8 +3,8 @@
 //! as a host sees it.
 
 use crate::ids;
-use crate::num::{Int, Ms, Uint};
-use crate::schema::{Any, Document, Nullable, Opt, Record, Text};
+use crate::num::{Int, Ms, Ranged, Uint};
+use crate::schema::{Any, Bounded, Document, Nullable, Opt, Record, Text};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -14,50 +14,50 @@ use std::borrow::Cow;
 #[serde(transparent)]
 pub struct HostId(pub ids::HostId);
 
-/// What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct KeyId(#[schemars(regex(pattern = r"^xnk1_[a-z2-7]{32}$"))] pub String);
+crate::pattern! {
+    /// What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys
+    pub struct KeyId(r"^xnk1_[a-z2-7]{32}$");
+}
 
-// A network's id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct NetworkId(#[schemars(regex(pattern = r"^net_[0-9a-f]{32}$"))] pub String);
+crate::pattern! {
+    // A network's id.
+    pub struct NetworkId(r"^net_[0-9a-f]{32}$");
+}
 
-/// The message's id across the network (its envelope's mid)
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct Mid(#[schemars(regex(pattern = r"^msg_[0-9a-f-]{36}$"))] pub String);
+crate::pattern! {
+    /// The message's id across the network (its envelope's mid)
+    pub struct Mid(r"^msg_[0-9a-f-]{36}$");
+}
 
-/// base64url, no padding
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct Base64Url(#[schemars(regex(pattern = r"^[A-Za-z0-9_-]*$"))] pub String);
+crate::pattern! {
+    /// base64url, no padding
+    pub struct Base64Url(r"^[A-Za-z0-9_-]*$");
+}
 
-// base64url bytes whose field says what they are.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct Base64Bytes(#[schemars(regex(pattern = r"^[A-Za-z0-9_-]*$"))] pub String);
+crate::pattern! {
+    // base64url bytes whose field says what they are.
+    pub struct Base64Bytes(r"^[A-Za-z0-9_-]*$");
+}
 
 // An agent's id on its host, as presence and claims carry it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct AgentName(#[schemars(length(max = 200))] pub String);
+pub struct AgentName(pub Text<0, 200>);
 
 // A path inside a repo.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct FilePath(#[schemars(length(max = 1000))] pub String);
+pub struct FilePath(pub Text<0, 1000>);
 
 // One line of what an agent said or why it seems stuck.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct Line(#[schemars(length(max = 280))] pub String);
+pub struct Line(pub Text<0, 280>);
 
 // Something a host's XenoNet takes beyond messages: start, answer…
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct Capability(#[schemars(length(max = 32))] pub String);
+pub struct Capability(pub Text<0, 32>);
 
 /// strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -104,8 +104,7 @@ pub enum Widened {
 // A widening another window host asked for.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Widening {
-    #[schemars(length(min = 1, max = 64))]
-    pub id: String,
+    pub id: Text<1, 64>,
     pub setting: ReachSetting,
     pub value: Widened,
     /// The window host that asked
@@ -127,8 +126,7 @@ pub struct Reach {
     pub start: StartReach,
     pub wake: WakeReach,
     /// Widenings to network (or, for a start, to delegate) another window host asked for, waiting ten minutes at most for the founder or a second window host to approve
-    #[schemars(length(max = 4))]
-    pub pending: Vec<Widening>,
+    pub pending: Bounded<Widening, 0, 4>,
     /// While start is delegate: who put the machine on it, and when
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub delegated: Opt<Delegated>,
@@ -150,13 +148,10 @@ pub enum ClaimKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HostClaim {
-    #[schemars(length(min = 1, max = 300))]
-    pub repo_key: String,
+    pub repo_key: Text<1, 300>,
     /// Inside the repo, with / between parts
-    #[schemars(length(min = 1, max = 1000))]
-    pub path: String,
-    #[schemars(length(min = 1, max = 200))]
-    pub agent: String,
+    pub path: Text<1, 1000>,
+    pub agent: Text<1, 200>,
     pub branch: Nullable<Text<0, 200>>,
     pub kind: ClaimKind,
     pub until: Nullable<Ms>,
@@ -166,12 +161,9 @@ pub struct HostClaim {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleasedClaim {
-    #[schemars(length(max = 300))]
-    pub repo_key: String,
-    #[schemars(length(max = 1000))]
-    pub path: String,
-    #[schemars(length(max = 200))]
-    pub agent: String,
+    pub repo_key: Text<0, 300>,
+    pub path: Text<0, 1000>,
+    pub agent: Text<0, 200>,
 }
 
 /// Claims across clones.
@@ -179,10 +171,8 @@ pub struct ReleasedClaim {
 pub struct Claims {
     pub schema: ClaimsTag,
     pub full: bool,
-    #[schemars(length(max = 5000))]
-    pub claims: Vec<HostClaim>,
-    #[schemars(length(max = 5000))]
-    pub released: Vec<ReleasedClaim>,
+    pub claims: Bounded<HostClaim, 0, 5000>,
+    pub released: Bounded<ReleasedClaim, 0, 5000>,
 }
 
 impl Document for Claims {
@@ -198,10 +188,10 @@ crate::constant!(
     pub FrameVersion = 1
 );
 
-// A frame's id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct FrameId(#[schemars(regex(pattern = r"^frm_[0-9a-f-]{36}$"))] pub String);
+crate::pattern! {
+    // A frame's id.
+    pub struct FrameId(r"^frm_[0-9a-f-]{36}$");
+}
 
 // What a frame carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -266,15 +256,15 @@ impl Document for Frame {
 
 crate::tag!(pub HandoffTag = "network/handoff/v1");
 
-// A git commit's hash, 7 to 64 hex digits.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct CommitHash(#[schemars(regex(pattern = r"^[0-9a-f]{7,64}$"))] pub String);
+crate::pattern! {
+    // A git commit's hash, 7 to 64 hex digits.
+    pub struct CommitHash(r"^[0-9a-f]{7,64}$");
+}
 
-// A handoff's id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct HandoffId(#[schemars(regex(pattern = r"^hof_[0-9a-f-]{36}$"))] pub String);
+crate::pattern! {
+    // A handoff's id.
+    pub struct HandoffId(r"^hof_[0-9a-f-]{36}$");
+}
 
 /// offer: from the maker; accept: from a session that wants it; taken or lapsed: the maker's answer
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -302,14 +292,12 @@ pub struct Handoff {
     pub id: HandoffId,
     pub op: HandoffOp,
     /// The maker, unqualified, on the frame's sender
-    #[schemars(length(max = 200))]
-    pub from: String,
+    pub from: Text<0, 200>,
     pub to: HandoffTo,
     pub goal: Nullable<Text<0, 2000>>,
     pub done: Nullable<Text<0, 8000>>,
     pub next: Nullable<Text<0, 8000>>,
-    #[schemars(length(max = 200))]
-    pub files: Vec<FilePath>,
+    pub files: Bounded<FilePath, 0, 200>,
     pub branch: Nullable<Text<0, 200>>,
     pub commit: Nullable<CommitHash>,
     /// For accept and taken: the session that took it, qualified
@@ -339,8 +327,7 @@ pub enum SenderKind {
 /// How the sender's own host checked it
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageAuth {
-    #[schemars(length(max = 32))]
-    pub method: String,
+    pub method: Text<0, 32>,
     pub strength: Strength,
 }
 
@@ -359,15 +346,12 @@ pub struct Message {
     pub schema: MessageTag,
     pub mid: Mid,
     /// The sender's id on its own host; the receiver qualifies it
-    #[schemars(length(min = 1, max = 200))]
-    pub sender: String,
+    pub sender: Text<1, 200>,
     pub sender_kind: SenderKind,
     pub auth: MessageAuth,
     /// The recipient's id on the receiving host, unqualified
-    #[schemars(length(min = 1, max = 200))]
-    pub target: String,
-    #[schemars(length(min = 1, max = 16000))]
-    pub body: String,
+    pub target: Text<1, 200>,
+    pub body: Text<1, 16000>,
     pub reply_to: Nullable<Mid>,
     /// direct, repo or all: how the sender addressed it
     pub scope: Nullable<Text<0, 64>>,
@@ -436,8 +420,7 @@ crate::tag!(pub PresenceTag = "network/presence/v1");
 #[serde(rename_all = "camelCase")]
 pub struct PresenceAgent {
     /// The agent's id on its own host (claude:<uuid>, codex:<id>, actor:<slug>): receivers qualify it as @<host>:<id>
-    #[schemars(length(min = 1, max = 200))]
-    pub id: String,
+    pub id: Text<1, 200>,
     pub app: Nullable<Text<1, 32>>,
     pub title: Nullable<Text<0, 200>>,
     /// What the live state says: working, waiting, idle…
@@ -454,16 +437,13 @@ pub struct PresenceAgent {
     pub waits_on_you: bool,
     /// While it waits on the person: the text of its question, or of the permission it asks for, with the home folder as ~
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 320))]
-    pub question: Option<String>,
+    pub question: Option<Text<0, 320>>,
     /// What it said last, its last 280 characters, with the home folder as ~
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 280))]
-    pub last_message: Option<String>,
+    pub last_message: Option<Text<0, 280>>,
     /// Why it seems stuck, with the home folder as ~
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 8))]
-    pub stuck: Option<Vec<Line>>,
+    pub stuck: Option<Bounded<Line, 0, 8>>,
 }
 
 /// A host's presence.
@@ -475,11 +455,9 @@ pub struct Presence {
     pub counter: Uint,
     /// true: every agent on the host; false: only the agents listed changed, and removed went
     pub full: bool,
-    #[schemars(length(max = 1000))]
-    pub agents: Vec<PresenceAgent>,
+    pub agents: Bounded<PresenceAgent, 0, 1000>,
     /// Agents that went since the last presence
-    #[schemars(length(max = 1000))]
-    pub removed: Vec<AgentName>,
+    pub removed: Bounded<AgentName, 0, 1000>,
     /// The person's last input was in this host's console: they're here
     pub you: bool,
     /// When the person last worked at this host's console (input in the last two minutes), to the half minute, by the gateway's clock: the consoles chime only where it's latest, or everywhere once it's five minutes old
@@ -491,8 +469,7 @@ pub struct Presence {
     pub reach: Opt<Reach>,
     /// What the host's XenoNet takes beyond messages: start (a start request) and answer (an answer to a run's permission prompt). An older XenoNet says nothing
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 16))]
-    pub can: Opt<Vec<Capability>>,
+    pub can: Opt<Bounded<Capability, 0, 16>>,
 }
 
 impl Document for Presence {
@@ -534,22 +511,19 @@ pub struct Receipt {
     pub schema: ReceiptTag,
     pub mid: Mid,
     /// The recipient, unqualified: xenonet:start for a start request
-    #[schemars(length(min = 1, max = 200))]
-    pub agent: String,
+    pub agent: Text<1, 200>,
     pub state: ReceiptState,
     pub reason: Nullable<Text<0, 280>>,
     pub at: Ms,
     /// For started and ended: the new session's id (null for Codex until it names its thread)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 200))]
-    pub session: Option<String>,
+    pub session: Option<Text<0, 200>>,
     /// For started: its process
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub pid: Opt<Uint>,
     /// For started: its folder, with the home folder as ~
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 1000))]
-    pub folder: Opt<String>,
+    pub folder: Opt<Text<0, 1000>>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub app: Opt<RunApp>,
     /// For ended: its exit code, null when it was stopped
@@ -573,10 +547,10 @@ impl Document for Receipt {
 
 crate::tag!(pub RelayTag = "network/relay/v1");
 
-/// The subscription, made at random by the subscribing host
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct SubscriptionId(#[schemars(regex(pattern = r"^sub_[0-9a-f]{32}$"))] pub String);
+crate::pattern! {
+    /// The subscription, made at random by the subscribing host
+    pub struct SubscriptionId(r"^sub_[0-9a-f]{32}$");
+}
 
 /// From the subscribing host. open: start, with a hello and a snapshot; get: one read from the relay's allowlist, as GET; time: the host's clock; renew: still watching (every 20 s; a subscription lapses after 60 s without one), with fresh for a new snapshot after a gap; close: stop
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -597,12 +571,10 @@ pub struct RelayAsk {
     pub sub: SubscriptionId,
     /// For get and time: the console's question, which the answer's res or time frame names
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(range(min = 1))]
-    pub id: Opt<Uint>,
+    pub id: Opt<Ranged<1>>,
     /// For get: the path and query to read
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(min = 1, max = 2048))]
-    pub path: Opt<String>,
+    pub path: Opt<Text<1, 2048>>,
     /// For renew: send a fresh snapshot, since frames were lost
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub fresh: Opt<bool>,
@@ -611,8 +583,7 @@ pub struct RelayAsk {
 // One of the SSH relay's frames, by its kind.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RelayFrame {
-    #[schemars(length(min = 1, max = 16))]
-    pub t: String,
+    pub t: Text<1, 16>,
 }
 
 // What the watched host answers.
@@ -621,11 +592,9 @@ pub struct RelayAnswer {
     pub schema: RelayTag,
     pub sub: SubscriptionId,
     /// 1, 2, 3… within the subscription: a hole means frames were lost, and the console asks for a fresh snapshot
-    #[schemars(range(min = 1))]
-    pub seq: Uint,
+    pub seq: Ranged<1>,
     /// The relay's frames, in order
-    #[schemars(length(max = 1000))]
-    pub frames: Vec<RelayFrame>,
+    pub frames: Bounded<RelayFrame, 0, 1000>,
 }
 
 /// The map between hosts.
@@ -672,8 +641,7 @@ pub struct RosterHost {
 // Where the gateway is, for op gateway.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RosterGateway {
-    #[schemars(length(max = 300))]
-    pub address: String,
+    pub address: Text<0, 300>,
     pub version: Uint,
 }
 
@@ -696,8 +664,7 @@ pub struct RosterEntry {
     /// For op gateway: where the network's gateway is now
     pub gateway: Nullable<RosterGateway>,
     pub at: Ms,
-    #[schemars(length(min = 1, max = 4))]
-    pub signers: Vec<Signer>,
+    pub signers: Bounded<Signer, 1, 4>,
 }
 
 impl Document for RosterEntry {
@@ -714,8 +681,7 @@ crate::tag!(pub StateTag = "network/state/v1");
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NetworkInfo {
     pub id: NetworkId,
-    #[schemars(length(max = 64))]
-    pub name: String,
+    pub name: Text<0, 64>,
 }
 
 // This machine as a host of the network.
@@ -754,8 +720,7 @@ pub enum LinkState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Gateway {
-    #[schemars(length(max = 300))]
-    pub address: String,
+    pub address: Text<0, 300>,
     pub key_id: KeyId,
     pub kind: GatewayKind,
     pub link: LinkState,
@@ -790,8 +755,7 @@ pub struct HostRow {
     pub reach: Option<Reach>,
     /// What the host's XenoNet takes beyond messages: start (a start request) and answer (an answer to a run's permission prompt). An older XenoNet says nothing
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 16))]
-    pub can: Opt<Vec<Capability>>,
+    pub can: Opt<Bounded<Capability, 0, 16>>,
 }
 
 // A ticket that waits to be used.
@@ -900,8 +864,7 @@ pub struct State {
     pub removed: Opt<Removal>,
     /// The LAN address this machine's gateway listens on, when it's a LAN-only gateway
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    #[schemars(length(max = 300))]
-    pub lan: Opt<String>,
+    pub lan: Opt<Text<0, 300>>,
     /// XenoNet Dev's made-up network (simulate net-…)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub simulated: Opt<bool>,
@@ -919,20 +882,20 @@ crate::tag!(pub SvcTag = "network/svc/v1");
 crate::tag!(pub SvcRequestOp = "request");
 crate::tag!(pub SvcAnswerOp = "answer");
 
-/// The request, made at random by the calling host; its answer names it
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct SvcId(#[schemars(regex(pattern = r"^svq_[0-9a-f]{32}$"))] pub String);
+crate::pattern! {
+    /// The request, made at random by the calling host; its answer names it
+    pub struct SvcId(r"^svq_[0-9a-f]{32}$");
+}
 
-// A service's name, as its host published it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct ServiceName(#[schemars(regex(pattern = r"^[a-z][a-z0-9-]{1,31}$"))] pub String);
+crate::pattern! {
+    // A service's name, as its host published it.
+    pub struct ServiceName(r"^[a-z][a-z0-9-]{1,31}$");
+}
 
-// An HTTP method.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct HttpMethod(#[schemars(regex(pattern = r"^[A-Z]{1,16}$"))] pub String);
+crate::pattern! {
+    // An HTTP method.
+    pub struct HttpMethod(r"^[A-Z]{1,16}$");
+}
 
 // One HTTP header, a name and a value, as a two-element array.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -953,10 +916,10 @@ impl JsonSchema for Header {
     }
 }
 
-// Why XenoNet answered rather than the service.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct SvcCode(#[schemars(regex(pattern = r"^[a-z-]{1,32}$"))] pub String);
+crate::pattern! {
+    // Why XenoNet answered rather than the service.
+    pub struct SvcCode(r"^[a-z-]{1,32}$");
+}
 
 // A request to a published service.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -970,11 +933,9 @@ pub struct SvcRequest {
     /// A host passes on GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS
     pub method: HttpMethod,
     /// The path after /api/svc/<host>/<name>, with its query: the publishing host normalizes it and checks it against the paths it publishes
-    #[schemars(length(max = 4096))]
-    pub path: String,
+    pub path: Text<0, 4096>,
     /// Only the caller's Authorization, Content-Type, Accept and User-Agent cross; the publishing host adds Host and Forwarded itself
-    #[schemars(length(max = 64))]
-    pub headers: Vec<Header>,
+    pub headers: Bounded<Header, 0, 64>,
     /// The request's body, at most 1 MiB
     pub body: Base64Bytes,
 }
@@ -986,11 +947,9 @@ pub struct SvcAnswer {
     /// From the publishing host
     pub op: SvcAnswerOp,
     pub id: SvcId,
-    #[schemars(range(min = 200, max = 599))]
-    pub status: Uint,
+    pub status: Ranged<200, 599>,
     /// The service's answer's headers, without Set-Cookie and hop-by-hop headers
-    #[schemars(length(max = 64))]
-    pub headers: Vec<Header>,
+    pub headers: Bounded<Header, 0, 64>,
     /// The answer's body, at most 4 MiB
     pub body: Base64Bytes,
     /// Set when XenoNet answered rather than the service: not-published, not-allowed, rate, path-refused, too-big, timeout…

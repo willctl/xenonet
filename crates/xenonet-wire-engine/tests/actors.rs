@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Actors, Cores, Engine, Registration, Reports, State, Wakes, R};
 use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
-use xenonet_wire_engine::world::World;
+use xenonet_wire_engine::runtime::Runtime;
 
 /// A map with nothing on it yet, and the blocks the drivers list in it.
 #[derive(Default)]
@@ -35,7 +35,7 @@ impl State for Empty {
     }
 }
 
-fn world(name: &str, demo: bool) -> (Arc<World>, Arc<Empty>, std::path::PathBuf) {
+fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("xenonet-wire-actors-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a temp folder");
@@ -61,7 +61,7 @@ fn world(name: &str, demo: bool) -> (Arc<World>, Arc<Empty>, std::path::PathBuf)
     let mut cores = Cores::pending(true, false, false);
     cores.state = empty.clone();
     let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
-    let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the area's parts");
+    let w = xenonet_wire_engine::runtime(&cores, &mut config, &env).expect("the area's parts");
     (w, empty, dir)
 }
 

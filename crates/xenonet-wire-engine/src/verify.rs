@@ -4,13 +4,13 @@
 //! request says it is. The lookups block on commands, so each check runs
 //! on a blocking thread.
 
-use crate::js::{now_ms, number};
 use crate::procs::{self, System};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_base::json::number;
+use xenonet_base::time::now_ms;
 use xenonet_engine::procs::Link;
-use xenonet_engine::sql::Arg;
 use xenonet_engine::store::Shared;
 use xenonet_engine::verify::{Fail, Host, Verdict, Verifier};
 use xenonet_service::cores::Verify;
@@ -92,10 +92,9 @@ fn pid_of(v: &Value) -> Option<f64> {
 }
 
 /// The processes an actor's request may call its own, nearest first, for
-/// a chain as a verdict's JSON gives it (`Arg` values). Goes when the
-/// reports' matcher is typed and reads `Link`s.
-pub fn own_of(chain: &[Arg]) -> &[Arg] {
-    let links: Vec<Link> = chain.iter().map(|a| procs::link_of(&a.to_json())).collect();
+/// a chain as a verdict's JSON gives it.
+pub fn own_of(chain: &[Value]) -> &[Value] {
+    let links: Vec<Link> = chain.iter().map(procs::link_of).collect();
     let n = xenonet_engine::verify::own_of(&links).len();
     &chain[..n]
 }
@@ -128,15 +127,11 @@ impl Checks {
         }
     }
 
-    /// `verify.lineage(pid)`: a process and the ones above it, as pids;
-    /// null where XenoNet can't look. For the reports' matcher, which
-    /// still reads it as an `Arg`; goes when that's typed.
-    pub fn lineage(&self, pid: &Arg) -> Arg {
+    /// A process and the ones above it, as pids; None where XenoNet can't
+    /// look.
+    pub fn lineage(&self, pid: Option<f64>) -> Option<Vec<f64>> {
         let mut h = Lookups { sys: &self.sys, peer: None };
-        match self.verifier.lineage(&mut h, pid.as_f64()) {
-            Some(pids) => Arg::List(pids.into_iter().map(Arg::Num).collect()),
-            None => Arg::Null,
-        }
+        self.verifier.lineage(&mut h, pid)
     }
 }
 
@@ -328,13 +323,12 @@ mod tests {
         assert_eq!(c.person(from(51001)).await["ok"], true);
         assert_eq!(c.peer(from(51001)).await, "400");
         assert_eq!(c.state()["refused"], json!(3));
-        assert_eq!(c.lineage(&Arg::Num(220.0)), Arg::List(vec![Arg::Num(220.0), Arg::Num(200.0), Arg::Num(100.0)]));
+        assert_eq!(c.lineage(Some(220.0)), Some(vec![220.0, 200.0, 100.0]));
         // An actor's own script from the plain terminal, and the chain its
         // verdict shows; a pid that's no number names no process of its.
         let own = c.actor(from(51001), "wren", Value::Null, Value::Null).await;
         assert_eq!((own["ok"].clone(), own["root"]["pid"].clone(), own["chain"].as_array().map(Vec::len)), (json!(true), json!(400), Some(1)), "{own}");
-        let chain: Vec<Arg> = own["chain"].as_array().unwrap().iter().map(crate::js::arg).collect();
-        assert_eq!(own_of(&chain).len(), 1, "no app above the shell");
+        assert_eq!(own_of(own["chain"].as_array().unwrap()).len(), 1, "no app above the shell");
         let named = c.actor(from(51001), "wren", Value::Null, json!("400")).await;
         assert_eq!(named["reason"], "the pid it names has to be the calling process or one of its parents", "{named}");
     }

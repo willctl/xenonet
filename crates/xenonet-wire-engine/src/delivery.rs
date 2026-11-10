@@ -1,22 +1,22 @@
-//! Delivery (core/delivery/): its policy (policy.js, kept in delivery.json
-//! with its audit log beside it), the router that puts messages into live
-//! sessions (router.js, with its ways in: a listening Stop hook, a Claude
-//! Code channel, OpenCode's server, tmux, a headless resume) and Claude
-//! Code's channels (channel.js). The decisions are the engine's cores'; the
+//! Delivery: its policy (kept in delivery.json with its audit log beside
+//! it), the router that puts messages into live sessions (with its ways
+//! in: a listening Stop hook, a Claude Code channel, OpenCode's server,
+//! tmux, a headless resume) and Claude Code's channels. The decisions are the engine's cores'; the
 //! files, commands, HTTP, timers and events are here, behind the cores'
 //! host traits.
 
-use crate::engine::EngineCalls;
+use crate::engine::Side;
 use crate::exec::{self, Spec};
-use crate::js::Locked;
-use crate::js::{arg, at, json, list, no_method, now_ms, obj, text};
 use crate::runs::{Runner, Turn};
-use crate::world::World;
+use crate::runtime::Runtime;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
+use xenonet_base::sync::Locked;
+use xenonet_base::text::js_number;
+use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::channel::{Channels as ChannelCore, Push};
 use xenonet_engine::delivery::opencode::{self as oc, OpenCode, Posted};
 use xenonet_engine::delivery::policy::{self, Fail, Policy as PolicyCore, WakeAllowed};
@@ -26,8 +26,6 @@ use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
 use xenonet_engine::delivery::usage::plan_usage;
 use xenonet_engine::delivery::{Delivered, Error, Files};
-use xenonet_engine::peer::{Result, Thrown};
-use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{Channels, CoreError, Policy, Router, R};
 use xenonet_service::glue::From;
 
@@ -36,25 +34,21 @@ use xenonet_service::glue::From;
 /// The disk, with errors worded as Node words them.
 struct Fs;
 
-fn fs(r: Result<Arg>) -> std::result::Result<(), String> {
-    r.map(|_| ()).map_err(|t| t.message)
-}
-
 impl Files for Fs {
-    fn read_file(&mut self, path: &str) -> std::result::Result<String, String> {
-        crate::fsx::call("readFileSync", &[Arg::text(path), Arg::text("utf8")]).map(|a| text(&a)).map_err(|t| t.message)
+    fn read_file(&mut self, path: &str) -> Result<String, String> {
+        crate::fs::read_text(path).map_err(|e| e.message)
     }
-    fn mkdir_all(&mut self, dir: &str) -> std::result::Result<(), String> {
-        fs(crate::fsx::call("mkdirSync", &[Arg::text(dir), obj(vec![("recursive", Arg::Bool(true))])]))
+    fn mkdir_all(&mut self, dir: &str) -> Result<(), String> {
+        crate::fs::mkdir_all(dir).map_err(|e| e.message)
     }
-    fn write_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> std::result::Result<(), String> {
-        fs(crate::fsx::call("writeFileSync", &[Arg::text(path), Arg::text(body), mode.map_or(Arg::Undef, |m| obj(vec![("mode", Arg::Num(f64::from(m)))]))]))
+    fn write_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
+        crate::fs::write_file(path, body.as_bytes(), mode).map_err(|e| e.message)
     }
-    fn append_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> std::result::Result<(), String> {
-        fs(crate::fsx::call("appendFileSync", &[Arg::text(path), Arg::text(body), mode.map_or(Arg::Undef, |m| obj(vec![("mode", Arg::Num(f64::from(m)))]))]))
+    fn append_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
+        crate::fs::append_file(path, body.as_bytes(), mode).map_err(|e| e.message)
     }
-    fn rename(&mut self, from: &str, to: &str) -> std::result::Result<(), String> {
-        fs(crate::fsx::call("renameSync", &[Arg::text(from), Arg::text(to)]))
+    fn rename(&mut self, from: &str, to: &str) -> Result<(), String> {
+        crate::fs::rename(from, to).map_err(|e| e.message)
     }
 }
 
@@ -68,15 +62,6 @@ impl policy::Host for Fs {
 
 pub struct PolicySide {
     core: Mutex<PolicyCore>,
-}
-
-/// A policy refusal or error, as the JS threw it: a refusal has its code
-/// and status 429.
-pub fn policy_thrown(f: Fail) -> (Thrown, Option<u16>) {
-    match f {
-        Fail::Refused { why, code } => (Thrown::coded(why, code), Some(429)),
-        Fail::Error(m) => (Thrown::new(m), None),
-    }
 }
 
 /// A refusal's or error's words.
@@ -108,72 +93,6 @@ impl PolicySide {
     pub fn consent(&self) -> Value {
         self.with(|p, _| p.consent())
     }
-
-    /// `policy.<method>(...args)`, as the engine's string calls and the
-    /// starts still make them: goes when they're typed.
-    pub fn call(&self, method: &str, args: &[Arg]) -> std::result::Result<Arg, Fail> {
-        let x = |i| at(args, i);
-        let by = |a: Arg| match a {
-            Arg::Undef => "you".to_string(),
-            a => text(&a),
-        };
-        let ttl = |a: Arg| match a {
-            Arg::Undef => None,
-            a => Some(crate::js::num(&a)),
-        };
-        self.with(|p, h| match method {
-            "paused" => Ok(Arg::Bool(p.paused())),
-            "setPaused" => p.set_paused(h, x(0).truthy(), &by(x(1))).map(|v| arg(&v)),
-            "grant" => {
-                let o = x(2);
-                p.grant(h, &text(&x(0)), &text(&x(1)), ttl(o.field("ttlMs")), &by(o.field("by"))).map(|v| arg(&v))
-            }
-            "revoke" => p.revoke(h, &text(&x(0)), &by(x(1))).map(|v| arg(&v)),
-            "grants" => Ok(Arg::List(p.grants(h).iter().map(arg).collect())),
-            "scopeOf" => Ok(arg(&p.scope_of(h, &text(&x(0))).to_json())),
-            "visible" => Ok(Arg::Bool(p.visible(h, &text(&x(0)), &json(&x(1))))),
-            "checkSend" => {
-                let o = x(0);
-                let depth = match o.field("depth") {
-                    Arg::Undef => 0.0,
-                    d => crate::js::num(&d),
-                };
-                let recipients: Vec<Value> = list(o.field("recipients")).iter().map(json).collect();
-                p.check_send(h, &text(&o.field("sender")), &recipients, &text(&o.field("text")), depth).map(|()| Arg::Undef)
-            }
-            "textFor" => {
-                let o = x(0);
-                let (t, n) = policy::text_for(&text(&o.field("text")), &text(&o.field("sender")), &json(&o.field("senderFacts")), &json(&o.field("recipientFacts")));
-                Ok(obj(vec![("text", Arg::text(t)), ("redacted", Arg::Num(n as f64))]))
-            }
-            "allow" => {
-                let o = x(1);
-                p.allow(h, &text(&x(0)), o.field("remote").truthy(), ttl(o.field("ttlMs")), &by(o.field("by"))).map(|v| arg(&v))
-            }
-            "disallow" => p.disallow(h, &text(&x(0)), &by(x(1))).map(|()| Arg::Undef),
-            "consented" => Ok(Arg::Bool(p.consented(h, &text(&x(0)), x(1).field("remote").truthy()))),
-            "wakeAllowed" => {
-                let usage = match x(2).field("usage") {
-                    Arg::Undef | Arg::Null => None,
-                    u => Some(crate::js::num(&u)),
-                };
-                Ok(arg(&p.wake_allowed(h, &text(&x(0)), &text(&x(1)), usage).to_json()))
-            }
-            "spendWake" => {
-                p.spend_wake(h, &text(&x(0)), &text(&x(1)));
-                Ok(Arg::Undef)
-            }
-            "audit" => p.audit(h, json(&x(0))).map(|v| arg(&v)),
-            "readAudit" => {
-                let limit = match x(0) {
-                    Arg::Undef => 100.0,
-                    l => crate::js::num(&l),
-                };
-                Ok(Arg::List(p.read_audit(h, limit).iter().map(arg).collect()))
-            }
-            _ => Err(Fail::Error(no_method("policy", method).message)),
-        })
-    }
 }
 
 impl policy::Guard for PolicySide {
@@ -191,7 +110,7 @@ impl policy::Guard for PolicySide {
     }
 }
 
-pub struct PolicyDriver(pub std::sync::Arc<World>);
+pub struct PolicyDriver(pub std::sync::Arc<Runtime>);
 
 impl Policy for PolicyDriver {
     fn paused(&self) -> R<bool> {
@@ -282,7 +201,7 @@ impl ChannelSide {
     }
 }
 
-pub struct ChannelsDriver(pub std::sync::Arc<World>);
+pub struct ChannelsDriver(pub std::sync::Arc<Runtime>);
 
 #[async_trait]
 impl Channels for ChannelsDriver {
@@ -321,10 +240,9 @@ impl RouterSide {
         }
     }
 
-    /// The latest deliveries, as the network's receipts still read them:
-    /// goes when the network is typed (`core.list` has them as JSON).
-    pub fn list(&self, n: usize) -> Vec<Arg> {
-        self.core.list(n).iter().map(arg).collect()
+    /// The latest deliveries, as JSON.
+    pub fn list(&self, n: usize) -> Vec<Value> {
+        self.core.list(n)
     }
 }
 
@@ -332,14 +250,14 @@ impl RouterSide {
 /// reach, the events and timers, the engine, the policy, the channels and
 /// the ways in.
 pub struct RouterHost<'a> {
-    pub w: &'a World,
+    pub w: &'a Runtime,
     /// Who was listening when the message was sent, for a route that runs
     /// after it (route()); None asks the engine now.
     pub listening: Option<&'a [String]>,
 }
 
 impl<'a> RouterHost<'a> {
-    pub fn of(w: &'a World) -> Self {
+    pub fn of(w: &'a Runtime) -> Self {
         RouterHost { w, listening: None }
     }
 }
@@ -350,7 +268,7 @@ fn windows() -> bool {
 
 /// A provider's plan as the wake budget reads it, from the live snapshot's
 /// limits.
-fn usage(w: &World, app: &str) -> Option<f64> {
+fn usage(w: &Runtime, app: &str) -> Option<f64> {
     let limits = match w.state().live_snapshot() {
         Ok(s) => s.get("limits").cloned().unwrap_or(Value::Null),
         Err(_) => Value::Null,
@@ -364,7 +282,7 @@ fn store_error(e: xenonet_engine::sql::SqlError) -> Error {
 
 /// A turn resumed for a session (or, `fork`, a copy of it) with the
 /// message as its prompt: where it runs, or why it couldn't.
-fn resume_deliver(w: &World, agent: &str, cwd: Option<&str>, input: &str, fork: bool) -> Delivered {
+fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork: bool) -> Delivered {
     let Some(r) = &w.router.resume else { return Err("there's no resume here".into()) };
     let settings = r.settings.as_deref();
     let mut plans = ResumePlan { r };
@@ -426,7 +344,7 @@ impl resume::Host for ResumePlan<'_> {
 
 /// A command for the ways in: its output, or Err when it failed to run or
 /// failed.
-fn run_quiet(cmd: &str, args: &[&str], ms: u64, max: usize) -> std::result::Result<String, String> {
+fn run_quiet(cmd: &str, args: &[&str], ms: u64, max: usize) -> Result<String, String> {
     let mut s = Spec::new(cmd, &args.iter().map(|a| (*a).to_string()).collect::<Vec<_>>(), ms);
     s.max = max;
     exec::run(&s).map_err(|f| f.message)
@@ -452,11 +370,11 @@ impl oc::System for Ps {
 
 /// OpenCode's servers, found and asked: the clock, the processes, and HTTP.
 struct OpenCodeHost<'a> {
-    w: &'a World,
+    w: &'a Runtime,
 }
 
 impl OpenCodeHost<'_> {
-    fn fetch(&self, method: &str, url: &str, body: Option<String>, ms: f64) -> std::result::Result<xenonet_service::net::Fetched, String> {
+    fn fetch(&self, method: &str, url: &str, body: Option<String>, ms: f64) -> Result<xenonet_service::net::Fetched, String> {
         let headers = if body.is_some() { vec![("content-type".to_string(), "application/json".to_string())] } else { Vec::new() };
         let timeout = Duration::from_secs_f64(ms.max(0.0) / 1000.0);
         self.w.block_on(xenonet_service::net::fetch(method, url, &headers, body.map(String::into_bytes), timeout))
@@ -471,13 +389,13 @@ impl oc::Host for OpenCodeHost<'_> {
         oc::open_code_processes(&mut Ps, windows())
     }
     fn ports(&mut self, pid: f64) -> Vec<f64> {
-        oc::listening_ports(&mut Ps, pid, crate::js::platform())
+        oc::listening_ports(&mut Ps, pid, crate::runtime::platform())
     }
     fn get(&mut self, url: &str, ms: f64) -> Option<Value> {
         let r = self.fetch("GET", url, None, ms).ok().filter(xenonet_service::net::Fetched::ok)?;
         xenonet_base::json::parse(&r.text()).ok()
     }
-    fn post(&mut self, url: &str, body: &str) -> std::result::Result<Posted, String> {
+    fn post(&mut self, url: &str, body: &str) -> Result<Posted, String> {
         let r = self.fetch("POST", url, Some(body.to_string()), 3000.0)?;
         Ok(Posted { ok: r.ok(), status: f64::from(r.status) })
     }
@@ -526,19 +444,21 @@ impl router::Host for RouterHost<'_> {
     }
 
     fn view(&mut self, id: &str) -> Option<Value> {
-        EngineCalls::new(self.w, None).view(&Arg::text(id)).ok().map(|v| json(&v))
+        self.w.engine.view(&Side::new(self.w, None).collaborators(), id).ok()
     }
     fn listening(&mut self, id: &str) -> bool {
         self.listening.map_or_else(|| self.w.mail.listening_has(id), |l| l.iter().any(|x| x == id))
     }
     fn contact_pid(&mut self, agent: &str) -> Option<f64> {
-        self.w.store.with(|s| s.contact(Arg::text(agent))).ok().flatten().and_then(|r| r.num("pid"))
+        self.w.store.with(|s| s.contact(agent)).ok().flatten().and_then(|r| r.num("pid"))
     }
     fn mark_seen(&mut self, agent: &str, ids: &[Value], now: f64) -> xenonet_engine::delivery::Result<()> {
-        self.w.store.with(|s| s.mark_seen(Arg::text(agent), Arg::List(ids.iter().map(arg).collect()), Arg::Num(now))).map_err(store_error)
+        let ids: Vec<f64> = ids.iter().map(|id| js_number(Some(id))).collect();
+        self.w.store.with(|s| s.mark_seen(agent, &ids, now)).map_err(store_error)
     }
     fn mark_unseen(&mut self, agent: &str, ids: &[Value]) -> xenonet_engine::delivery::Result<()> {
-        self.w.store.with(|s| s.mark_unseen(Arg::text(agent), Arg::List(ids.iter().map(arg).collect()))).map_err(store_error)
+        let ids: Vec<f64> = ids.iter().map(|id| js_number(Some(id))).collect();
+        self.w.store.with(|s| s.mark_unseen(agent, &ids)).map_err(store_error)
     }
 
     fn consented(&mut self, session: &str, remote: bool) -> bool {
@@ -583,60 +503,28 @@ impl router::Host for RouterHost<'_> {
     }
 }
 
-// The engine (engine.rs) still reaches the router by string, as
-// "engine.delivery": these go when it's typed.
-
-/// The router's own methods, as the engine calls them.
-pub fn router_call(w: &World, method: &str, args: &[Arg]) -> Result<Arg> {
-    let h = &mut RouterHost::of(w);
-    let r = &w.router.core;
-    let x = |i| at(args, i);
-    match method {
-        "reaches" => Ok(Arg::Bool(r.reaches(h, &text(&x(0))))),
-        "known" => Ok(Arg::List(r.known(h).into_iter().map(Arg::Text).collect())),
-        "describe" => Ok(r.describe(h, &text(&x(0))).map_or(Arg::Null, |v| arg(&v))),
-        "resumable" => Ok(Arg::Bool(r.resumable(h, &json(&x(0))))),
-        "wake" => Ok(arg(&r.wake(h, &text(&x(0)), &text(&x(1))).to_json())),
-        "way" => Ok(r.way(h, &text(&x(0)), &json(&x(1))).map_or(Arg::Null, Arg::text)),
-        "list" => Ok(Arg::List(w.router.list(match x(0) {
-            Arg::Undef => 100,
-            n => crate::js::num(&n).max(0.0) as usize,
-        }))),
-        _ => Err(no_method("engine.delivery", method)),
-    }
-}
-
-pub fn router_kind(method: &str) -> &'static str {
-    match method {
-        "" => "object",
-        "reaches" | "known" | "describe" | "resumable" | "wake" | "way" | "list" | "route" => "function",
-        _ => "undefined",
-    }
-}
-
 /// A message routed: each of its sessions' way in tried. What failed goes
 /// out as the router's error event. `listening` is who was listening when it
 /// was sent: a listening hook can take the message and go before the route
 /// runs.
-pub fn route(w: &World, m: &Arg, listening: &[String]) {
+pub fn route(w: &Runtime, m: &Value, listening: &[String]) {
     let mut h = RouterHost { w, listening: Some(listening) };
-    if let Err(e) = w.router.core.route(&mut h, &json(m)) {
+    if let Err(e) = w.router.core.route(&mut h, m) {
         w.emit(From::Delivery, "error", serde_json::json!({ "message": e.0 }));
     }
 }
 
 /// Messages the engine says a session has seen.
-pub fn seen(w: &World, agent: &Arg, ids: &[Arg]) {
-    let ids: Vec<Value> = ids.iter().map(json).collect();
-    w.router.core.seen(&mut RouterHost::of(w), &text(agent), &ids);
+pub fn seen(w: &Runtime, agent: &str, ids: &[Value]) {
+    w.router.core.seen(&mut RouterHost::of(w), agent, ids);
 }
 
 /// A hook from the session.
-pub fn contact(w: &World, agent: &Arg) {
-    w.router.core.contact(&mut RouterHost::of(w), &text(agent));
+pub fn contact(w: &Runtime, agent: &str) {
+    w.router.core.contact(&mut RouterHost::of(w), agent);
 }
 
-pub struct RouterDriver(pub std::sync::Arc<World>);
+pub struct RouterDriver(pub std::sync::Arc<Runtime>);
 
 impl Router for RouterDriver {
     fn usage(&self, app: &str) -> R<Value> {
@@ -670,6 +558,6 @@ impl Delivery for RouterDriver {
 
 /// The settings a Claude Code session starts with to listen after its
 /// turns (writeListenSettings), written to the state folder: their file.
-pub fn listen_settings(dir: &str, port: u16) -> std::result::Result<String, String> {
+pub fn listen_settings(dir: &str, port: u16) -> Result<String, String> {
     xenonet_engine::delivery::setup::write_listen_settings(&mut Fs, dir, f64::from(port), 300.0).map_err(|e| e.0)
 }

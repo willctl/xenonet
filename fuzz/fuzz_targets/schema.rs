@@ -2,37 +2,24 @@
 
 // Records checked against XenoNet's own schemas (schemas/), as the service
 // checks what other programs write: leniently against each vendor schema
-// (what drifts is recorded, the record stripped or dropped), and strictly,
-// as zod does, against the documents the doctor checks state.json with.
-// The first byte picks the schema; the second, the version a record says
-// it was written by and whether the strict check is strict.
+// (what drifts is recorded, the record stripped or dropped), and as
+// XenoNet's own documents, read as their types (state.json as the doctor
+// reads it, what other hosts and actors send). The first byte picks the
+// schema; the second, the version a record says it was written by.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use xenonet_schema::check::{self, Checker, Data};
+use xenonet_model::{actor, host, state, system};
 use xenonet_schema::drift::DriftLog;
 use xenonet_schema::lenient;
+use xenonet_schema::typed;
 use xenonet_schema::vendor::{self, VendorReader};
 
 struct Schemas {
     dir: PathBuf,
     vendor: Vec<(String, Vec<lenient::Major>)>,
-    checker: Checker,
-    roots: Vec<usize>,
-}
-
-fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-    let Ok(ents) = xenonet_base::paths::read_dir_sorted(dir) else { return };
-    for e in ents {
-        let p = e.path();
-        if p.is_dir() {
-            walk(&p, out);
-        } else if p.extension().is_some_and(|x| x == "json") {
-            out.push(p);
-        }
-    }
 }
 
 fn schemas() -> &'static Schemas {
@@ -40,17 +27,21 @@ fn schemas() -> &'static Schemas {
     S.get_or_init(|| {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../schemas");
         let vendor = lenient::vendor_sources(&dir).into_iter().map(|s| (s.clone(), lenient::load_vendor(&s, &dir))).collect();
-        // XenoNet's own documents refer to each other by $id, so they're
-        // compiled together.
-        let mut files = Vec::new();
-        walk(&dir, &mut files);
-        let docs: Vec<Value> =
-            files.iter().filter(|p| !p.starts_with(dir.join("vendor"))).filter_map(|p| xenonet_base::json::parse(&std::fs::read_to_string(p).ok()?).ok()).collect();
-        let checker = check::compile(&docs).expect("XenoNet's schemas compile");
-        let roots = (0..docs.len()).map(|i| checker.root(i)).collect();
-        Schemas { dir, vendor, checker, roots }
+        Schemas { dir, vendor }
     })
 }
+
+/// XenoNet's own documents a record is read as: each gives the first
+/// problem, worded, or the record cleaned to what its type declares.
+const OWN: [fn(&Value) -> Option<String>; 7] = [
+    |v| typed::read::<state::StateV1>(v).err().map(|i| i.worded("the whole file")),
+    |v| typed::read::<state::State>(v).err().map(|i| i.worded("the whole file")),
+    |v| typed::read::<host::Host>(v).err().map(|i| i.worded("(the value)")),
+    |v| typed::read::<host::Hello>(v).err().map(|i| i.worded("(the value)")),
+    |v| typed::clean::<system::System>(v).map(|c| c.to_string()),
+    |v| typed::read::<actor::Report>(v).err().map(|i| i.worded("the body")),
+    |v| typed::read::<actor::Registration>(v).err().map(|i| i.worded("the body")),
+];
 
 const VERSIONS: [Option<&str>; 6] = [None, Some("2.1.280"), Some("0.40.0"), Some("99.0.0-beta.1"), Some("x"), Some("")];
 
@@ -80,10 +71,7 @@ fuzz_target!(|data: &[u8]| {
                 let _ = vendor::parse_version(v);
             }
         } else {
-            let root = s.roots[(n / 2) % s.roots.len()];
-            let checked = s.checker.check(root, &Data::from(&record), how & 1 != 0);
-            let issues: Vec<(String, String)> = checked.issues.iter().map(|f| (f.path.clone(), f.message.clone())).collect();
-            let _ = check::explain(&issues, &checked.undeclared);
+            let _ = OWN[(n / 2) % OWN.len()](&record);
         }
     });
 });

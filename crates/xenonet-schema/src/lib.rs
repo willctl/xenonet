@@ -2,12 +2,11 @@
 //! hand-kept under schemas/vendor/, XenoNet's own written from
 //! crates/xenonet-model): vendor data read leniently against them
 //! (`lenient`), which keys are fields and which are data (`fields`), the
-//! vendor readers (`vendor`) and the drift log (`drift`), and data checked
-//! against a schema (`check`, with JS's regular expressions in `jsregex`).
+//! vendor readers (`vendor`) and the drift log (`drift`); and XenoNet's own
+//! documents read as their types (`typed`), where the type is the check.
 
-pub mod check;
 pub mod drift;
 pub mod fields;
-pub mod jsregex;
 pub mod lenient;
+pub mod typed;
 pub mod vendor;

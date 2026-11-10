@@ -1130,9 +1130,7 @@ async fn the_trays_routes_need_its_key_and_you_never_an_agent_or_an_actor() {
     assert_eq!((s["schema"].clone(), s["running"].clone(), s["working"].clone(), s["needsYou"]["count"].clone()), (json!("tray/status/v1"), json!(true), json!(2), json!(1)));
     assert_eq!((s["needsYou"]["items"][0]["title"].clone(), s["needsYou"]["items"][0]["words"].clone()), (json!("Rate-limit the API"), json!("asks")));
     assert_eq!((s["gateway"]["state"].clone(), s["network"]["link"].clone(), s["desktop"].clone()), (json!("off"), json!("off"), json!(false)));
-    let doc = xenonet_base::json::parse(include_str!("../../../schemas/tray/status/v1.json")).unwrap();
-    let checker = xenonet_schema::check::compile(&[doc]).unwrap();
-    assert!(checker.check(checker.root(0), &xenonet_schema::check::Data::from(&s), true).ok(), "{s}");
+    assert!(xenonet_schema::typed::fits::<xenonet_model::tray::Status>(&s), "{s}");
     // The events: a stream.
     let r = go(&ctx, "GET", "/api/tray/v1/events", &[tray], None).await;
     assert_eq!((r.status, r.header("content-type")), (200, Some("text/event-stream")));

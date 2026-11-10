@@ -4,10 +4,9 @@
 //! to you. The timers, the streams' sinks, DNS, fetch and URL parsing are
 //! here, as the wakes' host, and their rows are the engine store's.
 
-use crate::actors::Rows;
+use crate::actors::{rows_json, Rows};
 use crate::exec::Spec;
-use crate::js::{at, no_method, now_ms, text, Locked};
-use crate::world::World;
+use crate::runtime::Runtime;
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -18,8 +17,8 @@ use tokio::sync::mpsc;
 use xenonet_actors::secret_store::{self, MemorySecrets, SecretStore};
 use xenonet_actors::store as rows;
 use xenonet_actors::wake::{self, Fail, Fetched, Request, Wakes as Core, TIMEOUT_MS};
-use xenonet_engine::peer::{Result, Thrown};
-use xenonet_engine::sql::Arg;
+use xenonet_base::sync::Locked;
+use xenonet_base::time::now_ms;
 use xenonet_engine::store::Shared;
 use xenonet_service::cores::actors::WakeStream;
 use xenonet_service::cores::{CoreError, Kind, Wakes, R};
@@ -34,7 +33,7 @@ pub enum Secrets {
 struct Runner;
 
 impl secret_store::Run for Runner {
-    fn run(&mut self, c: secret_store::Command) -> std::result::Result<secret_store::Ran, String> {
+    fn run(&mut self, c: secret_store::Command) -> Result<secret_store::Ran, String> {
         let mut s = Spec::new(&c.file, &c.args, 20000);
         s.input = Some(c.input.unwrap_or_default().into_bytes());
         Ok(match crate::exec::run(&s) {
@@ -50,7 +49,7 @@ impl Secrets {
             return Secrets::Memory(Mutex::new(MemorySecrets::default()));
         }
         let tool = std::env::var("PATH").ok().and_then(|p| xenonet_base::paths::on_path("secret-tool", &p, None, false, &mut |f: &str| xenonet_base::paths::can_run(f)));
-        Secrets::System(SecretStore::new(crate::js::platform(), tool))
+        Secrets::System(SecretStore::new(crate::runtime::platform(), tool))
     }
 
     pub(crate) fn kind(&self) -> &'static str {
@@ -67,53 +66,32 @@ impl Secrets {
         }
     }
 
-    pub(crate) fn has(&self, target: &str) -> std::result::Result<bool, String> {
+    pub(crate) fn has(&self, target: &str) -> Result<bool, String> {
         match self {
             Secrets::Memory(m) => Ok(m.locked().has(target)),
             Secrets::System(s) => s.has(&mut Runner, target),
         }
     }
 
-    pub(crate) fn get(&self, target: &str) -> std::result::Result<Option<String>, String> {
+    pub(crate) fn get(&self, target: &str) -> Result<Option<String>, String> {
         match self {
             Secrets::Memory(m) => Ok(m.locked().get(target)),
             Secrets::System(s) => s.get(&mut Runner, target),
         }
     }
 
-    pub(crate) fn set(&self, target: &str, value: &str, comment: &str) -> std::result::Result<bool, String> {
+    pub(crate) fn set(&self, target: &str, value: &str, comment: &str) -> Result<bool, String> {
         match self {
             Secrets::Memory(m) => m.locked().set(target, value),
             Secrets::System(s) => s.set(&mut Runner, target, value, comment),
         }
     }
 
-    pub(crate) fn remove(&self, target: &str) -> std::result::Result<bool, String> {
+    pub(crate) fn remove(&self, target: &str) -> Result<bool, String> {
         match self {
             Secrets::Memory(m) => Ok(m.locked().remove(target)),
             Secrets::System(s) => s.remove(&mut Runner, target),
         }
-    }
-
-    /// `secrets.<method>(...args)` by name, for the runs' sign-in
-    /// (starts.rs). Goes with starts.rs, once it calls the methods above.
-    pub(crate) fn call(&self, method: &str, args: &[Arg]) -> Result<Arg> {
-        let t = text(&at(args, 0));
-        let r: std::result::Result<Arg, String> = match method {
-            "available" => Ok(Arg::Bool(self.available())),
-            "has" => self.has(&t).map(Arg::Bool),
-            "get" => self.get(&t).map(|v| v.map_or(Arg::Null, Arg::Text)),
-            "set" => {
-                let comment = match at(args, 2).field("comment") {
-                    Arg::Undef => "Kept by XenoNet".to_string(),
-                    c => text(&c),
-                };
-                self.set(&t, &text(&at(args, 1)), &comment).map(Arg::Bool)
-            }
-            "remove" => self.remove(&t).map(Arg::Bool),
-            _ => return Err(no_method("secrets", method)),
-        };
-        r.map_err(Thrown::new)
     }
 }
 
@@ -136,7 +114,7 @@ pub struct WakeSide {
 
 /// The wakes' collaborators, over the world.
 struct WakeHost<'a> {
-    w: &'a World,
+    w: &'a Runtime,
     side: &'a WakeSide,
 }
 
@@ -206,7 +184,7 @@ impl WakeHost<'_> {
 
 /// One request, without following a redirect: its status, or the error's
 /// name.
-async fn fetch_once(method: &str, url: &str, headers: &[(String, String)], body: Option<Vec<u8>>) -> std::result::Result<u16, String> {
+async fn fetch_once(method: &str, url: &str, headers: &[(String, String)], body: Option<Vec<u8>>) -> Result<u16, String> {
     static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
     let client = CLIENT.get_or_init(|| {
         let _ = xenonet_service::net::client();
@@ -304,19 +282,19 @@ impl wake::Host for WakeHost<'_> {
 
 impl wake::Store for Rows {
     fn meta(&self, key: &str) -> rows::Result<Value> {
-        self.call("meta", &[Arg::text(key)])
+        self.direct(|s| s.meta(key))
     }
     fn set_meta(&self, key: &str, value: &str) -> rows::Result<()> {
-        self.run("setMeta", &[Arg::text(key), Arg::text(value)])
+        self.direct(|s| s.set_meta(key, value))
     }
     fn has_gateway_token(&self, slug: &str) -> rows::Result<bool> {
-        self.call("gatewayToken", &[Arg::text(slug)]).map(|r| !r.is_null())
+        self.direct(|s| s.gateway_token(slug)).map(|r| r.is_some())
     }
     fn unseen_ids(&self, actor: &str) -> rows::Result<Vec<Value>> {
-        self.direct(|s| s.unseen(Arg::text(actor))).map(|rs| rs.iter().map(|r| crate::js::json(&crate::js::cell(r.get("id")))).collect())
+        rows_json(self.0.with(|s| s.unseen(actor))).map(|rs| rs.into_iter().map(|r| r["id"].clone()).collect())
     }
     fn actor_token_times(&self) -> rows::Result<Vec<Value>> {
-        self.rows("actorTokenTimes", &[])
+        self.direct(|s| s.actor_token_times())
     }
 }
 
@@ -342,29 +320,28 @@ impl WakeSide {
         }
     }
 
-    /// A message arrived for `id`, as the engine's core says it. Goes with
-    /// engine.rs, once it passes the id as text.
-    pub fn arrived(&self, w: &World, id: &Arg) {
-        let _ = self.core.arrived(&mut WakeHost { w, side: self }, &text(id));
+    /// A message arrived for `id`.
+    pub fn arrived(&self, w: &Runtime, id: &str) {
+        let _ = self.core.arrived(&mut WakeHost { w, side: self }, id);
     }
 
-    fn run<T>(&self, w: &World, f: impl FnOnce(&Core, &mut WakeHost<'_>) -> std::result::Result<T, Fail>) -> R<T> {
+    fn run<T>(&self, w: &Runtime, f: impl FnOnce(&Core, &mut WakeHost<'_>) -> Result<T, Fail>) -> R<T> {
         f(&self.core, &mut WakeHost { w, side: self }).map_err(wake_error)
     }
 
-    pub fn list(&self, w: &World) -> R<Value> {
+    pub fn list(&self, w: &Runtime) -> R<Value> {
         self.run(w, |c, k| c.list(k))
     }
 }
 
-pub struct WakesDriver(pub Arc<World>);
+pub struct WakesDriver(pub Arc<Runtime>);
 
 impl WakesDriver {
     fn side(&self) -> R<&WakeSide> {
         self.0.wakes.as_ref().ok_or_else(|| CoreError::pending("core/actors/wake.js"))
     }
 
-    async fn blocking<T: Send + 'static>(&self, f: impl FnOnce(&World, &WakeSide) -> R<T> + Send + 'static) -> R<T> {
+    async fn blocking<T: Send + 'static>(&self, f: impl FnOnce(&Runtime, &WakeSide) -> R<T> + Send + 'static) -> R<T> {
         let w = self.0.clone();
         tokio::task::spawn_blocking(move || match &w.wakes {
             Some(side) => f(&w, side),

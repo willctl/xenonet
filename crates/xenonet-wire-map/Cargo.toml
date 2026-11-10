@@ -20,6 +20,8 @@ xenonet-base.workspace = true
 xenonet-service.workspace = true
 xenonet-blocks.workspace = true
 xenonet-schema.workspace = true
+# The routes' bodies, read as their types.
+xenonet-model.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
 xenonet-app.workspace = true

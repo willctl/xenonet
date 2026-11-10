@@ -34,7 +34,7 @@ use xenonet_service::gateway::network::NetService;
 use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
 use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
-use xenonet_wire_engine::world::World;
+use xenonet_wire_engine::runtime::Runtime;
 
 const S1: &str = "claude:aaaaaaaa-0001";
 const L1: &str = "claude:bbbbbbbb-0001";
@@ -235,7 +235,7 @@ struct Host {
     name: &'static str,
     ctx: Arc<Ctx>,
     svc: Arc<NetService>,
-    world: Arc<World>,
+    world: Arc<Runtime>,
     dir: PathBuf,
     sessions: Vec<Sess>,
     door: Option<(ActorGateway, Arc<A2a>, u16)>,
@@ -373,7 +373,7 @@ impl Host {
     /// The receipts this host has for the messages it sent, by agent.
     fn receipts(&self) -> Vec<(String, Option<String>)> {
         self.world.store.with(|s| {
-            s.recent(xenonet_engine::sql::Arg::Num(0.0))
+            s.recent(0.0)
                 .unwrap()
                 .iter()
                 .flat_map(|m| s.net_deliveries(m.num("id").unwrap()).unwrap())
@@ -792,12 +792,8 @@ async fn actors_reach_actors_on_other_machines() {
     assert_eq!((wren.as_str(), kite.as_str()), ("actor:wren", "actor:kite"));
     // Grok Bot as XenoNet on laptop sees it: observed, with no way to
     // message it.
-    let grok = xenonet_engine::sql::Arg::Obj(vec![
-        ("id".into(), xenonet_engine::sql::Arg::text("actor:grok")),
-        ("name".into(), xenonet_engine::sql::Arg::text("Grok")),
-        ("via".into(), xenonet_engine::sql::Arg::List(vec![xenonet_engine::sql::Arg::text("observed")])),
-    ]);
-    b.world.actors.as_ref().unwrap().call(&b.world, "upsert", &[grok]).unwrap();
+    let grok = json!({ "id": "actor:grok", "name": "Grok", "via": ["observed"] });
+    b.world.actors.as_ref().unwrap().with(&b.world, |r, h| r.upsert(&grok, h)).unwrap();
     let send = |h: &Host, me: &str, body: Value| {
         let (engine, me) = (h.ctx.cores.engine.clone(), me.to_string());
         async move { engine.send(&me, body, None).await }

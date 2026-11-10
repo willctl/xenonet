@@ -19,8 +19,6 @@
 //! ```
 
 use super::policy::{actor_of, is_you};
-use crate::sql::Arg;
-use crate::store::js_text;
 use serde_json::{json, Value};
 
 /// Who sent it, as this machine sees them.
@@ -68,12 +66,6 @@ impl Sender {
         let host = xenonet_base::ids::parse_qualified(id).and_then(|(h, _)| h).map(str::to_string);
         make(Kind::Session, host)
     }
-}
-
-/// `Sender::from_id`, for the network's message_in, which still names the
-/// sender as an Arg: goes when it's typed.
-pub fn sender_of(id: &Arg) -> Sender {
-    Sender::from_id(&if id.is_nullish() { String::new() } else { js_text(id) })
 }
 
 /// What a sender asks to do.

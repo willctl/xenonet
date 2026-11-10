@@ -1,142 +1,92 @@
-//! SQL as node:sqlite runs it, over rusqlite: what the engine's store
-//! (core/engine/store.js) and the tests that look into it expect of a
-//! DatabaseSync and its statements.
+//! SQL over rusqlite, bound and read as the engine's store (`store`) and
+//! the tests that look into it expect, and as the file it keeps has
+//! always been written:
 //!
-//! - A number is bound as a REAL, as node:sqlite binds every JS number;
-//!   a column with INTEGER affinity keeps a whole one as an integer, and
-//!   one with TEXT affinity keeps "5.0". A BigInt is an integer.
-//! - undefined, a boolean or an object can't be bound: a TypeError.
-//! - Named parameters come as an object, its keys without their prefix
+//! - A number (`Bind::Real`, what an f64 becomes) is bound as a REAL; a
+//!   column with INTEGER affinity keeps a whole one as an integer, and one
+//!   with TEXT affinity keeps "5.0". `Bind::Int` is an integer.
+//! - A record's field that is a boolean, a list or an object can't be
+//!   bound: an error naming the parameter.
+//! - Named parameters come as a record, its keys without their prefix
 //!   (:x, $x or @x); a key no parameter has is an error, and a parameter
-//!   the object leaves out is NULL. Positional ones fill the anonymous
+//!   the record leaves out is NULL. Positional ones fill the anonymous
 //!   parameters in order; too few leave the rest NULL, too many are an
 //!   error.
-//! - Rows are read as JS objects: an integer as a number (one past 2^53 is
+//! - Rows are read as records: an integer as a number (one past 2^53 is
 //!   an error), a real as a number, text, a blob as bytes; of two columns
 //!   with one name, the last one's value.
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, Statement};
 
-/// A value from the caller, as JS gave it.
+/// A value bound to a statement's parameter.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Arg {
-    Undef,
+pub enum Bind {
     Null,
-    Num(f64),
-    Big(i64),
+    Int(i64),
+    Real(f64),
     Text(String),
-    Bool(bool),
-    Bytes(Vec<u8>),
-    List(Vec<Arg>),
-    Obj(Vec<(String, Arg)>),
-    /// A function, a symbol, anything else JS has.
-    Other,
+    Blob(Vec<u8>),
 }
 
-impl Arg {
-    pub fn text(s: impl Into<String>) -> Arg {
-        Arg::Text(s.into())
-    }
-    pub fn num(n: f64) -> Arg {
-        Arg::Num(n)
-    }
-    pub fn opt_text(s: Option<&str>) -> Arg {
-        s.map_or(Arg::Null, |s| Arg::Text(s.into()))
-    }
-    pub fn opt_num(n: Option<f64>) -> Arg {
-        n.map_or(Arg::Null, Arg::Num)
-    }
-    /// A field of an object, Undef when it isn't there.
-    #[must_use]
-    pub fn field(&self, k: &str) -> Arg {
-        match self {
-            Arg::Obj(fields) => fields.iter().rev().find(|(n, _)| n == k).map_or(Arg::Undef, |(_, v)| v.clone()),
-            _ => Arg::Undef,
-        }
-    }
-    pub fn is_nullish(&self) -> bool {
-        matches!(self, Arg::Undef | Arg::Null)
-    }
-    pub fn as_str(&self) -> Option<&str> {
-        match self {
-            Arg::Text(s) => Some(s),
-            _ => None,
-        }
-    }
-    pub fn as_f64(&self) -> Option<f64> {
-        match self {
-            Arg::Num(n) => Some(*n),
-            Arg::Big(n) => Some(*n as f64),
-            _ => None,
-        }
-    }
-    /// JS's truthiness.
-    pub fn truthy(&self) -> bool {
-        match self {
-            Arg::Undef | Arg::Null => false,
-            Arg::Num(n) => *n != 0.0 && !n.is_nan(),
-            Arg::Big(n) => *n != 0,
-            Arg::Text(s) => !s.is_empty(),
-            Arg::Bool(b) => *b,
-            _ => true,
-        }
-    }
-    /// What `value ?? fallback` takes.
-    #[must_use]
-    pub fn or(self, fallback: Arg) -> Arg {
-        if self.is_nullish() {
-            fallback
-        } else {
-            self
-        }
-    }
-    /// The value as JSON, as JSON.stringify writes it (undefined fields
-    /// left out, null in a list).
-    pub fn to_json(&self) -> serde_json::Value {
-        use serde_json::Value as V;
-        match self {
-            Arg::Undef | Arg::Null | Arg::Other => V::Null,
-            Arg::Num(n) => xenonet_base::json::number(*n),
-            Arg::Big(n) => V::from(*n),
-            Arg::Text(s) => V::String(s.clone()),
-            Arg::Bool(b) => V::Bool(*b),
-            Arg::Bytes(b) => V::Object(b.iter().enumerate().map(|(i, x)| (i.to_string(), V::from(*x))).collect()),
-            Arg::List(a) => V::Array(a.iter().map(Arg::to_json).collect()),
-            Arg::Obj(f) => V::Object(f.iter().filter(|(_, v)| !matches!(v, Arg::Undef | Arg::Other)).map(|(k, v)| (k.clone(), v.to_json())).collect()),
-        }
-    }
-}
-
-impl From<&str> for Arg {
-    fn from(s: &str) -> Self {
-        Arg::Text(s.into())
-    }
-}
-
-impl From<String> for Arg {
-    fn from(s: String) -> Self {
-        Arg::Text(s)
-    }
-}
-
-impl From<f64> for Arg {
-    fn from(n: f64) -> Self {
-        Arg::Num(n)
-    }
-}
-
-/// A JSON value as JS would hand it over.
-impl From<&serde_json::Value> for Arg {
-    fn from(v: &serde_json::Value) -> Self {
+impl Bind {
+    /// A JSON scalar as a parameter: null, a number (a REAL, as every
+    /// number binds) or a text. None for a boolean, a list or an object,
+    /// which can't be bound.
+    pub fn scalar(v: &serde_json::Value) -> Option<Bind> {
         use serde_json::Value as V;
         match v {
-            V::Null => Arg::Null,
-            V::Bool(b) => Arg::Bool(*b),
-            V::Number(n) => Arg::Num(n.as_f64().unwrap_or(f64::NAN)),
-            V::String(s) => Arg::Text(s.clone()),
-            V::Array(a) => Arg::List(a.iter().map(Arg::from).collect()),
-            V::Object(o) => Arg::Obj(o.iter().map(|(k, v)| (k.clone(), Arg::from(v))).collect()),
+            V::Null => Some(Bind::Null),
+            V::Number(n) => Some(Bind::Real(n.as_f64().unwrap_or(f64::NAN))),
+            V::String(s) => Some(Bind::Text(s.clone())),
+            V::Bool(_) | V::Array(_) | V::Object(_) => None,
+        }
+    }
+}
+
+impl From<&str> for Bind {
+    fn from(s: &str) -> Self {
+        Bind::Text(s.into())
+    }
+}
+
+impl From<&String> for Bind {
+    fn from(s: &String) -> Self {
+        Bind::Text(s.clone())
+    }
+}
+
+impl From<String> for Bind {
+    fn from(s: String) -> Self {
+        Bind::Text(s)
+    }
+}
+
+/// A number binds as a REAL: see the module's doc.
+impl From<f64> for Bind {
+    fn from(n: f64) -> Self {
+        Bind::Real(n)
+    }
+}
+
+impl From<i64> for Bind {
+    fn from(n: i64) -> Self {
+        Bind::Int(n)
+    }
+}
+
+impl<T: Into<Bind>> From<Option<T>> for Bind {
+    fn from(v: Option<T>) -> Self {
+        v.map_or(Bind::Null, Into::into)
+    }
+}
+
+/// A JSON document, kept as its text; null stays NULL.
+impl From<&serde_json::Value> for Bind {
+    fn from(v: &serde_json::Value) -> Self {
+        match v {
+            serde_json::Value::Null => Bind::Null,
+            v => Bind::Text(xenonet_base::json::stringify(v, 0)),
         }
     }
 }
@@ -178,13 +128,13 @@ impl Cell {
         }
     }
     /// The cell as a value to bind again.
-    pub fn arg(&self) -> Arg {
+    pub fn bind(&self) -> Bind {
         match self {
-            Cell::Null => Arg::Null,
-            Cell::Int(i) => Arg::Big(*i),
-            Cell::Real(f) => Arg::Num(*f),
-            Cell::Text(s) => Arg::Text(s.clone()),
-            Cell::Blob(b) => Arg::Bytes(b.clone()),
+            Cell::Null => Bind::Null,
+            Cell::Int(i) => Bind::Int(*i),
+            Cell::Real(f) => Bind::Real(*f),
+            Cell::Text(s) => Bind::Text(s.clone()),
+            Cell::Blob(b) => Bind::Blob(b.clone()),
         }
     }
 }
@@ -270,14 +220,19 @@ impl From<rusqlite::Error> for SqlError {
 
 pub type Result<T> = std::result::Result<T, SqlError>;
 
-fn bind_one(stmt: &mut Statement<'_>, index: usize, v: &Arg) -> Result<()> {
+/// The error for a value that can't be bound to parameter `index` (from
+/// 1), as node:sqlite words it.
+pub fn unbindable(index: usize) -> SqlError {
+    SqlError::Bind(format!("Provided value cannot be bound to SQLite parameter {index}."))
+}
+
+fn bind_one(stmt: &mut Statement<'_>, index: usize, v: &Bind) -> Result<()> {
     let value = match v {
-        Arg::Null => SqlValue::Null,
-        Arg::Num(n) => SqlValue::Real(*n),
-        Arg::Big(n) => SqlValue::Integer(*n),
-        Arg::Text(s) => SqlValue::Text(s.clone()),
-        Arg::Bytes(b) => SqlValue::Blob(b.clone()),
-        _ => return Err(SqlError::Bind(format!("Provided value cannot be bound to SQLite parameter {index}."))),
+        Bind::Null => SqlValue::Null,
+        Bind::Int(n) => SqlValue::Integer(*n),
+        Bind::Real(n) => SqlValue::Real(*n),
+        Bind::Text(s) => SqlValue::Text(s.clone()),
+        Bind::Blob(b) => SqlValue::Blob(b.clone()),
     };
     if index == 0 || index > stmt.parameter_count() {
         return Err(SqlError::Sqlite { message: "column index out of range".into(), errcode: 25, errstr: "column index out of range".into() });
@@ -285,36 +240,43 @@ fn bind_one(stmt: &mut Statement<'_>, index: usize, v: &Arg) -> Result<()> {
     stmt.raw_bind_parameter(index, value).map_err(SqlError::from)
 }
 
-/// Binds a call's arguments as node:sqlite does.
-pub fn bind(stmt: &mut Statement<'_>, args: &[Arg]) -> Result<()> {
+fn clear(stmt: &mut Statement<'_>) -> Result<()> {
     for i in 1..=stmt.parameter_count() {
         stmt.raw_bind_parameter(i, SqlValue::Null)?;
     }
-    let mut rest = args;
-    if let Some(Arg::Obj(fields)) = args.first() {
-        for (k, v) in fields {
-            if matches!(v, Arg::Other) {
-                continue;
-            }
-            let mut index = None;
-            for prefix in [":", "$", "@"] {
-                if let Some(i) = stmt.parameter_index(&format!("{prefix}{k}"))? {
-                    index = Some(i);
-                    break;
-                }
-            }
-            let Some(i) = index else { return Err(SqlError::Other(format!("Unknown named parameter '{k}'"))) };
-            bind_one(stmt, i, v)?;
-        }
-        rest = &args[1..];
-    }
+    Ok(())
+}
+
+/// Binds the anonymous parameters in order; too few leave the rest NULL,
+/// too many are an error.
+pub fn bind(stmt: &mut Statement<'_>, args: &[Bind]) -> Result<()> {
+    clear(stmt)?;
     let mut anon = 1;
-    for v in rest {
+    for v in args {
         while anon <= stmt.parameter_count() && stmt.parameter_name(anon).is_some() {
             anon += 1;
         }
         bind_one(stmt, anon, v)?;
         anon += 1;
+    }
+    Ok(())
+}
+
+/// Binds a record's fields to the named parameters (:x, $x or @x) of the
+/// same names, each as `Bind::scalar` takes it. A field no parameter has is
+/// an error, and a parameter the record leaves out is NULL.
+pub fn bind_record(stmt: &mut Statement<'_>, record: &serde_json::Map<String, serde_json::Value>) -> Result<()> {
+    clear(stmt)?;
+    for (k, v) in record {
+        let mut index = None;
+        for prefix in [":", "$", "@"] {
+            if let Some(i) = stmt.parameter_index(&format!("{prefix}{k}"))? {
+                index = Some(i);
+                break;
+            }
+        }
+        let Some(i) = index else { return Err(SqlError::Other(format!("Unknown named parameter '{k}'"))) };
+        bind_one(stmt, i, &Bind::scalar(v).ok_or_else(|| unbindable(i))?)?;
     }
     Ok(())
 }
@@ -355,14 +317,14 @@ fn read_rows(stmt: &mut Statement<'_>, first: bool) -> Result<Vec<Row>> {
 
 /// A statement prepared (and kept, as the store keeps the ones it runs
 /// often): its rows.
-pub fn all(db: &Connection, sql: &str, args: &[Arg]) -> Result<Vec<Row>> {
+pub fn all(db: &Connection, sql: &str, args: &[Bind]) -> Result<Vec<Row>> {
     let mut st = db.prepare_cached(sql)?;
     bind(&mut st, args)?;
     read_rows(&mut st, false)
 }
 
 /// Its first row, or None.
-pub fn get(db: &Connection, sql: &str, args: &[Arg]) -> Result<Option<Row>> {
+pub fn get(db: &Connection, sql: &str, args: &[Bind]) -> Result<Option<Row>> {
     let mut st = db.prepare_cached(sql)?;
     bind(&mut st, args)?;
     Ok(read_rows(&mut st, true)?.into_iter().next())
@@ -375,9 +337,17 @@ pub struct Changes {
     pub last_insert_rowid: i64,
 }
 
-pub fn run(db: &Connection, sql: &str, args: &[Arg]) -> Result<Changes> {
+pub fn run(db: &Connection, sql: &str, args: &[Bind]) -> Result<Changes> {
     let mut st = db.prepare_cached(sql)?;
     bind(&mut st, args)?;
+    st.raw_execute()?;
+    Ok(Changes { changes: db.changes() as i64, last_insert_rowid: db.last_insert_rowid() })
+}
+
+/// A run with a record's fields as its named parameters (`bind_record`).
+pub fn run_record(db: &Connection, sql: &str, record: &serde_json::Map<String, serde_json::Value>) -> Result<Changes> {
+    let mut st = db.prepare_cached(sql)?;
+    bind_record(&mut st, record)?;
     st.raw_execute()?;
     Ok(Changes { changes: db.changes() as i64, last_insert_rowid: db.last_insert_rowid() })
 }
@@ -415,18 +385,22 @@ mod tests {
     fn binds_and_reads_as_node_does() {
         let db = Connection::open_in_memory().unwrap();
         exec(&db, "CREATE TABLE t (a TEXT, b, c INTEGER)").unwrap();
-        run(&db, "INSERT INTO t VALUES (?, ?, ?)", &[Arg::Num(5.0), Arg::Num(5.0), Arg::Num(5.0)]).unwrap();
+        run(&db, "INSERT INTO t VALUES (?, ?, ?)", &[Bind::Real(5.0), Bind::Real(5.0), Bind::Real(5.0)]).unwrap();
         let r = get(&db, "SELECT a, b, typeof(b) tb, c, typeof(c) tc FROM t", &[]).unwrap().unwrap();
         assert_eq!(r.get("a"), &Cell::Text("5.0".into()));
         assert_eq!((r.get("b"), r.text("tb")), (&Cell::Real(5.0), Some("real")));
         assert_eq!((r.get("c"), r.text("tc")), (&Cell::Int(5), Some("integer")));
-        assert!(matches!(run(&db, "INSERT INTO t VALUES (?, ?, ?)", &[Arg::Undef]), Err(SqlError::Bind(m)) if m.contains("parameter 1")));
-        assert!(matches!(run(&db, "INSERT INTO t VALUES (:a, :b, :c)", &[Arg::Obj(vec![("z".into(), Arg::Null)])]), Err(SqlError::Other(m)) if m == "Unknown named parameter 'z'"));
-        run(&db, "INSERT INTO t VALUES (:a, $b, @c)", &[Arg::Obj(vec![("a".into(), Arg::text("x"))])]).unwrap();
+        let record = |v: serde_json::Value| v.as_object().cloned().unwrap();
+        assert!(matches!(run_record(&db, "INSERT INTO t VALUES (:a, :b, :c)", &record(serde_json::json!({ "b": true }))), Err(SqlError::Bind(m)) if m.contains("parameter 2")));
+        assert!(
+            matches!(run_record(&db, "INSERT INTO t VALUES (:a, :b, :c)", &record(serde_json::json!({ "z": null }))), Err(SqlError::Other(m)) if m == "Unknown named parameter 'z'")
+        );
+        run_record(&db, "INSERT INTO t VALUES (:a, $b, @c)", &record(serde_json::json!({ "a": "x" }))).unwrap();
         assert_eq!(get(&db, "SELECT * FROM t WHERE a = 'x'", &[]).unwrap().unwrap().get("b"), &Cell::Null);
-        assert!(matches!(run(&db, "INSERT INTO t VALUES (?, ?, ?)", &[Arg::Null, Arg::Null, Arg::Null, Arg::Null]), Err(SqlError::Sqlite { errcode: 25, .. })));
+        assert!(matches!(run(&db, "INSERT INTO t VALUES (?, ?, ?)", &[Bind::Null, Bind::Null, Bind::Null, Bind::Null]), Err(SqlError::Sqlite { errcode: 25, .. })));
         assert!(matches!(get(&db, "SELECT 9007199254740993 n", &[]), Err(SqlError::Range(_))));
         assert_eq!(get(&db, "SELECT 1 a, 2 a", &[]).unwrap().unwrap().0, vec![("a".to_string(), Cell::Int(2))]);
+        assert_eq!((Bind::from(&serde_json::json!({ "k": 1 })), Bind::from(&serde_json::Value::Null)), (Bind::Text("{\"k\":1}".into()), Bind::Null));
         match all(&db, "SELECT * FROM nope", &[]) {
             Err(SqlError::Sqlite { message, errcode, errstr }) => assert_eq!((message.as_str(), errcode, errstr.as_str()), ("no such table: nope", 1, "SQL logic error")),
             other => panic!("{other:?}"),

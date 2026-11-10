@@ -1,9 +1,10 @@
-//! Everything this area's cores share, as server/index.js's top level
-//! made them: the engine's store, the map's readers, the process table and
-//! its checks, the engine and the waits on it, delivery (its policy, router
-//! and channels) and, with actors on, the actors, their registrations,
-//! wakes and observers. Each core's collaborators are the others here,
-//! called by the paths and methods the JS called them by.
+//! The runtime the engine's cores run in: the engine's store, the map's
+//! readers, the process table and its checks, the engine and the waits on
+//! it, delivery (its policy, router and channels) and, with actors on, the
+//! actors, their registrations, wakes and observers. Each core's host is
+//! made of the others here; the runtime also keeps the timers and tasks
+//! they start, and the few facts about this machine they ask for
+//! (`platform`, `alive`, local times).
 
 use crate::actors::ActorSide;
 use crate::delivery::{ChannelSide, PolicySide, RouterSide};
@@ -38,7 +39,7 @@ pub struct Setup {
     pub permission_hold_ms: Option<f64>,
 }
 
-pub struct World {
+pub struct Runtime {
     pub setup: Setup,
     pub env: WireEnv,
     pub rt: tokio::runtime::Handle,
@@ -57,8 +58,8 @@ pub struct World {
     pub wakes: Option<WakeSide>,
     /// The observers of actor products, outside the demo.
     pub observers: OnceLock<crate::observers::Observers>,
-    /// The world itself, for the timers and tasks it starts.
-    pub me: OnceLock<std::sync::Weak<World>>,
+    /// The runtime itself, for the timers and tasks it starts.
+    pub me: OnceLock<std::sync::Weak<Runtime>>,
     /// What this machine last told the network of itself (its presence
     /// and claims), and the timer that tells it again.
     pub net: crate::network::NetState,
@@ -69,17 +70,17 @@ pub struct World {
     pub asks: crate::asks::AskSide,
 }
 
-impl World {
+impl Runtime {
     pub fn state(&self) -> &Arc<dyn State> {
         &self.map.state
     }
 
-    /// The world, held, for a task that outlives the call.
-    pub fn arc(&self) -> Option<Arc<World>> {
+    /// The runtime, held, for a task that outlives the call.
+    pub fn arc(&self) -> Option<Arc<Runtime>> {
         self.me.get().and_then(std::sync::Weak::upgrade)
     }
 
-    /// An event for server/index.js's handlers.
+    /// An event for the service's handlers (the page, the hooks).
     pub fn emit(&self, from: From, name: &str, data: Value) {
         self.env.emitter.emit(from, name, data);
     }
@@ -88,15 +89,15 @@ impl World {
         self.env.emitter.log(level, code, message);
     }
 
-    /// Runs blocking work on the runtime's blocking threads, with the world.
-    pub fn spawn_blocking(&self, f: impl FnOnce(&World) + Send + 'static) {
+    /// Runs blocking work on tokio's blocking threads, with the runtime.
+    pub fn spawn_blocking(&self, f: impl FnOnce(&Runtime) + Send + 'static) {
         if let Some(w) = self.arc() {
             self.rt.spawn_blocking(move || f(&w));
         }
     }
 
-    /// Runs `f` after `ms`, on a blocking thread, unless the world went.
-    pub fn after(&self, ms: f64, f: impl FnOnce(&World) + Send + 'static) -> tokio::task::JoinHandle<()> {
+    /// Runs `f` after `ms`, on a blocking thread, unless the runtime went.
+    pub fn after(&self, ms: f64, f: impl FnOnce(&Runtime) + Send + 'static) -> tokio::task::JoinHandle<()> {
         let weak = self.me.get().cloned().unwrap_or_default();
         let ms = if ms.is_finite() && ms > 0.0 { ms } else { 0.0 };
         self.rt.spawn(async move {
@@ -108,7 +109,7 @@ impl World {
     }
 
     /// Runs `f` every `ms` on a blocking thread, until the handle is aborted.
-    pub fn every(&self, ms: f64, f: impl Fn(&World) + Send + Sync + 'static) -> tokio::task::JoinHandle<()> {
+    pub fn every(&self, ms: f64, f: impl Fn(&Runtime) + Send + Sync + 'static) -> tokio::task::JoinHandle<()> {
         let weak = self.me.get().cloned().unwrap_or_default();
         let f = Arc::new(f);
         self.rt.spawn(async move {
@@ -127,5 +128,53 @@ impl World {
     /// Waits on async work from a blocking thread.
     pub fn block_on<F: std::future::Future>(&self, f: F) -> F::Output {
         self.rt.block_on(f)
+    }
+}
+
+/// This system as Node names it (darwin, linux, win32), as the adapters'
+/// process rules and the credential stores take it.
+pub fn platform() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    }
+}
+
+/// Whether a process still runs, a process of another user's included.
+pub fn alive(pid: f64) -> bool {
+    pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= f64::from(i32::MAX) && xenonet_base::process::running(pid as u32, true)
+}
+
+/// A time in epoch ms as the console's notices write it in an English
+/// locale, in local time: 9:04 AM.
+pub fn time_of(ms: f64) -> String {
+    if !ms.is_finite() {
+        return "Invalid Date".into();
+    }
+    let local = ms + xenonet_base::jsstr::local_offset_ms(ms);
+    let minutes = (local / 60e3).floor() as i64;
+    let (h, m) = (minutes.div_euclid(60).rem_euclid(24), minutes.rem_euclid(60));
+    let (h12, half) = (if h % 12 == 0 { 12 } else { h % 12 }, if h < 12 { "AM" } else { "PM" });
+    format!("{h12}:{m:02} {half}")
+}
+
+/// The start of a time's local day, in epoch ms.
+pub fn day_start(ms: f64) -> f64 {
+    let off = xenonet_base::jsstr::local_offset_ms(ms);
+    let start = ((ms + off) / 86400e3).floor() * 86400e3;
+    // Midnight's own offset, which differs on a day the clocks change.
+    start - xenonet_base::jsstr::local_offset_ms(start - off)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn this_process_is_alive_and_nonsense_is_not() {
+        assert!(alive(f64::from(std::process::id())));
+        assert!(!alive(-1.0));
+        assert!(!alive(f64::NAN));
     }
 }

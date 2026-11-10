@@ -91,11 +91,37 @@ pub trait Actors: Send + Sync {
     }
     fn start(&self) {}
     fn stop(&self) {}
-    /// The registry's own methods by their JS names (upsert, addVia, has,
-    /// ids, info, isRemote, remoteOf, setRemote, isRegistered), JSON in and
-    /// out, for the remote actors' connections (core/actors/connections.js
-    /// calls them on `actors`).
-    fn registry(&self, _method: &str, _args: Vec<Value>) -> R<Value> {
+    /// Whether there's an actor with this id.
+    fn has(&self, _id: &str) -> bool {
+        false
+    }
+    /// Whether it came as a remote actor (through a connection).
+    fn is_remote(&self, _id: &str) -> bool {
+        false
+    }
+    /// Whether it registered itself.
+    fn is_registered(&self, _id: &str) -> bool {
+        false
+    }
+    /// An actor made or brought up to date from its definition, as the
+    /// remote actors' connections make theirs.
+    fn upsert(&self, _def: &Value) -> R<()> {
+        pending(ACTORS)
+    }
+    /// One more way the actor is known (remote, observed…).
+    fn add_via(&self, _id: &str, _via: &str) -> R<()> {
+        pending(ACTORS)
+    }
+    /// What its remote connections come to (transports, whether active).
+    fn set_remote(&self, _id: &str, _remote: &Value) -> R<()> {
+        pending(ACTORS)
+    }
+    /// A remote actor's presence report.
+    fn report(&self, _id: &str, _report: &Value) -> R<()> {
+        pending(ACTORS)
+    }
+    /// `target`, at a given time.
+    fn target_at(&self, _actor: &str, _id: &str, _relation: &str, _at: f64) -> R<()> {
         pending(ACTORS)
     }
     /// `actors.beforeRemove.push(hook)`: run with an actor's slug before

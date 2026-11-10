@@ -1,15 +1,11 @@
-//! What the cores ask of this machine, done natively: what a twin's JS did
-//! with node:child_process, node:fs and fetch. A program runs as execFile
-//! runs it, a CLI is found on PATH, and a file is read or written as
-//! node:fs does, with its errors worded as Node words them.
+//! What the cores ask of this machine: a program run as execFile runs it,
+//! a CLI found on PATH, and a GET to a server on this machine. Files are
+//! read and written through xenonet-wire-engine's fs, with their errors
+//! worded as Node words them.
 
-use serde_json::Value;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use xenonet_base::fs::FsError;
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
 
 /// What a program said: its exit code (None when it couldn't start, or
 /// was ended at its time limit), its output, and why it failed, worded as
@@ -122,77 +118,6 @@ pub fn now() -> f64 {
     xenonet_app::task::now_ms()
 }
 
-/// An argument's text, as String(v) has it.
-pub fn text(a: &Arg) -> String {
-    xenonet_engine::store::js_text(a)
-}
-
-fn thrown(e: FsError) -> Thrown {
-    Thrown { message: e.message, code: e.code.map(|c| Box::new(Value::String(c))), handle: None, stdout: None }
-}
-
-/// A node:fs call a core makes, synchronously: `fs.<method>(...args)`.
-pub fn fs_call(method: &str, args: &[Arg]) -> Result<Arg, Thrown> {
-    let p = |i: usize| args.get(i).map(text).unwrap_or_default();
-    let of = |e: std::io::Error, syscall: &str, path: &str| thrown(FsError::of(e, syscall, path));
-    match method {
-        "existsSync" => Ok(Arg::Bool(xenonet_app::fsx::exists(&p(0)))),
-        "readFileSync" => {
-            let file = p(0);
-            let bytes = std::fs::read(&file).map_err(|e| of(e, "open", &file))?;
-            // With an encoding, text; without, the bytes.
-            Ok(if args.len() > 1 && !args[1].is_nullish() { Arg::Text(String::from_utf8_lossy(&bytes).into_owned()) } else { Arg::Bytes(bytes) })
-        }
-        "writeFileSync" => {
-            let file = p(0);
-            let data = match args.get(1) {
-                Some(Arg::Bytes(b)) => b.clone(),
-                Some(a) => text(a).into_bytes(),
-                None => Vec::new(),
-            };
-            std::fs::write(&file, data).map_err(|e| of(e, "open", &file))?;
-            Ok(Arg::Undef)
-        }
-        "mkdirSync" => {
-            let dir = p(0);
-            let recursive = args.get(1).is_some_and(|o| o.field("recursive").truthy());
-            let r = if recursive { std::fs::create_dir_all(&dir) } else { std::fs::create_dir(&dir) };
-            r.map_err(|e| of(e, "mkdir", &dir))?;
-            Ok(Arg::Undef)
-        }
-        "copyFileSync" => {
-            let (from, to) = (p(0), p(1));
-            std::fs::copy(&from, &to).map_err(|e| of(e, "copyfile", &format!("{from}' -> '{to}")))?;
-            Ok(Arg::Undef)
-        }
-        "renameSync" => {
-            let (from, to) = (p(0), p(1));
-            std::fs::rename(&from, &to).map_err(|e| of(e, "rename", &format!("{from}' -> '{to}")))?;
-            Ok(Arg::Undef)
-        }
-        "rmSync" => {
-            let file = p(0);
-            match std::fs::remove_file(&file) {
-                Ok(()) => {}
-                Err(e) if args.get(1).is_some_and(|o| o.field("force").truthy()) && e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(of(e, "rm", &file)),
-            }
-            Ok(Arg::Undef)
-        }
-        "readdirSync" => {
-            let dir = p(0);
-            let names = xenonet_base::paths::read_dir_sorted(std::path::Path::new(&dir)).map_err(|e| of(e, "scandir", &dir))?;
-            Ok(Arg::List(names.iter().map(|e| Arg::Text(e.file_name().to_string_lossy().into_owned())).collect()))
-        }
-        "readlinkSync" => {
-            let link = p(0);
-            let to = std::fs::read_link(&link).map_err(|e| of(e, "readlink", &link))?;
-            Ok(Arg::Text(to.to_string_lossy().into_owned()))
-        }
-        other => Err(Thrown::new(format!("fs.{other} isn't one XenoNet's cores call"))),
-    }
-}
-
 /// A GET to a server on this machine, within `ms`: its status and body.
 /// Err with fetch's words when nothing answered.
 pub fn local_get(url: &str, ms: f64) -> Result<(u16, Vec<u8>), String> {
@@ -235,20 +160,5 @@ mod tests {
         assert_eq!(fed.stdout, "fed");
         let none = run("/no/such/program", &[], 1000.0, None);
         assert_eq!(none.error.as_deref(), Some("spawn /no/such/program ENOENT"));
-    }
-
-    #[test]
-    fn files_as_node_fs_has_them() {
-        let dir = std::env::temp_dir().join(format!("xenonet-cli-native-{}", std::process::id()));
-        let d = dir.to_string_lossy().into_owned();
-        let f = format!("{d}/a/b.json");
-        fs_call("mkdirSync", &[Arg::text(format!("{d}/a")), Arg::Obj(vec![("recursive".into(), Arg::Bool(true))])]).unwrap();
-        fs_call("writeFileSync", &[Arg::text(f.clone()), Arg::text("{}")]).unwrap();
-        assert_eq!(fs_call("readFileSync", &[Arg::text(f.clone()), Arg::text("utf8")]).unwrap(), Arg::text("{}"));
-        assert_eq!(fs_call("existsSync", &[Arg::text(f)]).unwrap(), Arg::Bool(true));
-        let gone = fs_call("readFileSync", &[Arg::text(format!("{d}/none")), Arg::text("utf8")]).unwrap_err();
-        assert_eq!(gone.code.as_deref(), Some(&Value::String("ENOENT".into())));
-        assert!(gone.message.starts_with("ENOENT: no such file or directory, open"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

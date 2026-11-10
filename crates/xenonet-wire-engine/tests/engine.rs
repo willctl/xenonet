@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Channels, Cores, Engine, State, R};
 use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
-use xenonet_wire_engine::world::World;
+use xenonet_wire_engine::runtime::Runtime;
 
 const A: &str = "claude:aaaaaaaa-0001";
 const B: &str = "codex:bbbbbbbb-0002";
@@ -89,7 +89,7 @@ impl State for Fake {
 
 /// The area's parts on the made-up map, with its files in a folder of the
 /// test's own and actors off.
-fn world(name: &str) -> (Arc<World>, std::path::PathBuf) {
+fn world(name: &str) -> (Arc<Runtime>, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("xenonet-wire-engine-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a temp folder");
@@ -101,11 +101,11 @@ fn world(name: &str) -> (Arc<World>, std::path::PathBuf) {
     let mut cores = Cores::pending(false, false, false);
     cores.state = Arc::new(Fake { at: now() });
     let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
-    let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the engine's parts");
+    let w = xenonet_wire_engine::runtime(&cores, &mut config, &env).expect("the engine's parts");
     (w, dir)
 }
 
-fn engine(w: &Arc<World>) -> xenonet_wire_engine::engine::EngineDriver {
+fn engine(w: &Arc<Runtime>) -> xenonet_wire_engine::engine::EngineDriver {
     xenonet_wire_engine::engine::EngineDriver(w.clone())
 }
 

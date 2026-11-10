@@ -5,9 +5,9 @@
 //! the network. An engine call blocks on its waits and on git, so each
 //! runs on a blocking thread (`EngineDriver`).
 
-use crate::delivery::{self, policy_thrown, RouterDriver};
-use crate::js::{alive, arg, json, list, now_ms, text, time_of, Locked};
-use crate::world::World;
+use crate::delivery::{self, RouterDriver};
+use crate::runtime::Runtime;
+use crate::runtime::{alive, time_of};
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -15,10 +15,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
+use xenonet_base::sync::Locked;
+use xenonet_base::text::{js_number, js_string};
+use xenonet_base::time::now_ms;
 use xenonet_engine::engine::{Fail, ACTIVE_MS};
 use xenonet_engine::host::{self, Collaborators, IndexEntry, Repo, StatusSet};
-use xenonet_engine::peer::Thrown;
-use xenonet_engine::sql::Arg;
 use xenonet_service::cores::{CoreError, Engine, Kind, R};
 use xenonet_service::glue::From;
 
@@ -114,7 +115,7 @@ impl Mail {
     }
 
     pub fn listening(&self) -> Vec<(String, Value)> {
-        self.listening.locked().iter().map(|(a, u)| (a.clone(), crate::js::number(*u))).collect()
+        self.listening.locked().iter().map(|(a, u)| (a.clone(), xenonet_base::json::number(*u))).collect()
     }
 
     fn set_listening(&self, id: &str, until: f64) {
@@ -189,14 +190,6 @@ impl Repos {
         v
     }
 
-    /// The same, as network.rs still asks it: goes with network.rs.
-    pub fn remote_key(&self, cwd: &Arg) -> Arg {
-        if !cwd.truthy() {
-            return Arg::Null;
-        }
-        self.remote_key_of(&text(cwd)).map_or(Arg::Null, Arg::Text)
-    }
-
     pub fn of(&self, cwd: &str) -> Option<Repo> {
         if cwd.is_empty() {
             return None;
@@ -223,7 +216,7 @@ impl Repos {
 /// The engine's collaborators for one call, over the world. `signal`: a
 /// listening hook's request.
 pub struct Side<'a> {
-    w: &'a World,
+    w: &'a Runtime,
     signal: Option<Arc<Signal>>,
     /// Live delivery, which holds the world: None only while the world is
     /// going.
@@ -231,7 +224,7 @@ pub struct Side<'a> {
 }
 
 impl<'a> Side<'a> {
-    pub fn new(w: &'a World, signal: Option<Arc<Signal>>) -> Side<'a> {
+    pub fn new(w: &'a Runtime, signal: Option<Arc<Signal>>) -> Side<'a> {
         Side { w, signal, router: w.arc().map(RouterDriver) }
     }
 
@@ -277,13 +270,6 @@ impl<'a> Side<'a> {
     ) -> xenonet_engine::engine::Result<T> {
         let Some(a) = &self.w.actors else { return Err(Fail::Error("actors is not an object".into())) };
         a.with(self.w, f).map_err(Fail::from)
-    }
-
-    /// `engine.net.<method>`, as network.rs answers it: goes with
-    /// network.rs.
-    fn net(&self, method: &str, args: &[Arg]) -> xenonet_engine::engine::Result<Arg> {
-        let mut c = EngineCalls::new(self.w, None);
-        crate::network::call(self.w, &mut c, method, args).map_err(Fail::from)
     }
 }
 
@@ -406,86 +392,28 @@ impl host::Events for Side<'_> {
 
 impl host::Net for Side<'_> {
     fn agents(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
-        Ok(list(self.net("agents", &[])?).iter().map(json).collect())
+        Ok(crate::network::remote_views(self.w, false))
     }
     fn console(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
-        Ok(list(self.net("console", &[])?).iter().map(json).collect())
+        Ok(crate::network::remote_views(self.w, true))
     }
     fn view(&self, id: &str) -> xenonet_engine::engine::Result<Value> {
-        Ok(json(&self.net("view", &[Arg::text(id)])?))
+        Ok(crate::network::remote_view(self.w, id))
     }
     fn repo_key(&self, cwd: &str) -> xenonet_engine::engine::Result<Option<String>> {
         Ok(self.w.repos.remote_key_of(cwd))
     }
     fn sent(&self, message: &Value) -> xenonet_engine::engine::Result<()> {
-        self.net("sent", &[arg(message)]).map(|_| ())
+        crate::network::sent(self.w, message)
     }
     fn claim_hits(&self, me: &str, files: &[String]) -> xenonet_engine::engine::Result<Vec<Value>> {
-        let files = Arg::List(files.iter().map(Arg::text).collect());
-        Ok(list(self.net("claimHits", &[Arg::text(me), files])?).iter().map(json).collect())
+        crate::network::claim_hits(self.w, me, files)
     }
     fn handoffs(&self, view: &Value) -> xenonet_engine::engine::Result<Vec<Value>> {
-        Ok(list(self.net("handoffs", &[arg(view)])?).iter().map(json).collect())
+        crate::network::offers(self.w, view)
     }
     fn receipt(&self, message_id: f64, agent: &str) -> xenonet_engine::engine::Result<Option<Value>> {
-        let r = self.net("receipt", &[Arg::Num(message_id), Arg::text(agent)])?;
-        Ok((!r.is_nullish()).then(|| json(&r)))
-    }
-}
-
-/// The engine as network.rs still calls it, with its values as `Arg`:
-/// goes with network.rs. `signal`: a listening hook's request.
-pub struct EngineCalls<'a> {
-    side: Side<'a>,
-}
-
-impl<'a> EngineCalls<'a> {
-    pub fn new(w: &'a World, signal: Option<Arc<Signal>>) -> EngineCalls<'a> {
-        EngineCalls { side: Side::new(w, signal) }
-    }
-
-    fn engine(&self) -> &xenonet_engine::engine::Engine {
-        &self.side.w.engine
-    }
-
-    /// `engine.view(id)`.
-    pub fn view(&self, id: &Arg) -> xenonet_engine::peer::Result<Arg> {
-        self.engine().view(&self.side.collaborators(), &text(id)).map(|v| arg(&v)).map_err(thrown_of)
-    }
-
-    /// Everyone who worked in the last `within_ms`.
-    pub fn agents(&self, within_ms: f64) -> xenonet_engine::peer::Result<Vec<Arg>> {
-        self.engine().agents(&self.side.collaborators(), within_ms).map(|l| l.iter().map(arg).collect()).map_err(thrown_of)
-    }
-
-    /// Why a message from another machine can't reach an agent here, or
-    /// None when it can.
-    pub fn unreached(&self, view: &Arg) -> xenonet_engine::peer::Result<Option<String>> {
-        xenonet_engine::engine::Engine::unreached(&self.side.collaborators(), &json(view)).map_err(thrown_of)
-    }
-
-    /// The policy's checks on a message, `{ sender, recipients, text, depth }`.
-    pub fn check_send(&self, ask: &Arg) -> xenonet_engine::peer::Result<()> {
-        use xenonet_engine::delivery::policy::Guard;
-        let depth = match ask.field("depth") {
-            Arg::Undef => 0.0,
-            d => crate::js::num(&d),
-        };
-        let recipients: Vec<Value> = list(ask.field("recipients")).iter().map(json).collect();
-        self.side.w.policy.check_send(&text(&ask.field("sender")), &recipients, &text(&ask.field("text")), depth).map_err(|f| policy_thrown(f).0)
-    }
-
-    /// A message from `me`: `{ to, text, replyTo }`, with its envelope.
-    pub fn send(&self, me: &Arg, ask: &Arg, envelope: &Arg) -> Result<Arg, Fail> {
-        self.engine().send(&self.side.collaborators(), &text(me), &json(ask), &json(envelope)).map(|v| arg(&v))
-    }
-}
-
-fn thrown_of(f: Fail) -> Thrown {
-    match f {
-        Fail::Error(m) | Fail::Bad(m) => Thrown::new(m),
-        Fail::Refused { why, code } => Thrown::coded(why, code),
-        Fail::Thrown(t) => t,
+        crate::network::receipt_of(self.w, message_id, agent)
     }
 }
 
@@ -495,67 +423,60 @@ fn error(f: Fail) -> CoreError {
         Fail::Error(m) => CoreError::new(m),
         Fail::Bad(m) => CoreError::of(Kind::Error, 400, "bad-request", m),
         Fail::Refused { why, code } => CoreError::of(Kind::Error, 429, code, why),
-        Fail::Thrown(t) => CoreError { code: t.code.as_deref().and_then(Value::as_str).map(str::to_string), ..CoreError::new(t.message) },
+        Fail::Thrown(t) => CoreError { code: t.code, ..CoreError::new(t.message) },
     }
 }
 
 /// What the engine tells: a message to the page, the actors, the router and
 /// the wakes; mail taken to the router and the listening hooks; a hook's
 /// contact to the router.
-pub fn event(w: &World, name: &str, payload: &Value) {
+pub fn event(w: &Runtime, name: &str, payload: &Value) {
     match name {
         "message" => {
             w.emit(From::Engine, "message", payload.clone());
             // A message from another machine to a session that holds them
             // waits until the session asks.
-            if crate::js::truthy_json(&payload["held"]) {
+            if xenonet_base::text::truthy(Some(&payload["held"])) {
                 return;
             }
             // Agents on other hosts get it there, through the network.
             let to: Vec<Value> = payload["to"].as_array().cloned().unwrap_or_default();
             let mut m = payload.clone();
-            if to.iter().any(|r| xenonet_engine::network::is_remote(&xenonet_base::text::js_string(r))) {
+            if to.iter().any(|r| xenonet_engine::network::is_remote(&js_string(r))) {
                 if let Value::Object(f) = &mut m {
                     f.retain(|k, _| k != "to");
-                    f.insert("to".into(), Value::Array(to.iter().filter(|r| !xenonet_engine::network::is_remote(&xenonet_base::text::js_string(r))).cloned().collect()));
+                    f.insert("to".into(), Value::Array(to.iter().filter(|r| !xenonet_engine::network::is_remote(&js_string(r))).cloned().collect()));
                 }
             }
             // Who is listening now, before the route below runs.
             let here: Vec<Value> = m["to"].as_array().cloned().unwrap_or_default();
-            let listening: Vec<String> = here.iter().map(xenonet_base::text::js_string).filter(|id| w.mail.listening_has(id)).collect();
-            let m = arg(&m);
+            let listening: Vec<String> = here.iter().map(js_string).filter(|id| w.mail.listening_has(id)).collect();
             w.spawn_blocking(move |w| {
                 delivery::route(w, &m, &listening);
                 crate::network::delivered(w, &m);
             });
             if let Some(wakes) = &w.wakes {
                 for r in here {
-                    wakes.arrived(w, &arg(&r));
+                    wakes.arrived(w, &js_string(&r));
                 }
             }
         }
         "seen" => {
-            let agent = arg(&payload["agent"]);
-            let ids: Vec<Arg> = payload["ids"].as_array().map(|l| l.iter().map(arg).collect()).unwrap_or_default();
-            w.mail.seen(&text(&agent));
-            delivery::seen(w, &agent, &ids);
-            crate::network::seen(w, &agent, &ids);
+            let ids: Vec<Value> = payload["ids"].as_array().cloned().unwrap_or_default();
+            let me = js_string(&payload["agent"]);
+            w.mail.seen(&me);
+            delivery::seen(w, &me, &ids);
+            crate::network::seen(w, &me, &ids);
         }
         "contact" if payload["via"].as_str() == Some("hook") => {
-            delivery::contact(w, &arg(&payload["agent"]));
+            delivery::contact(w, &js_string(&payload["agent"]));
         }
         _ => {}
     }
 }
 
-/// The same, with the event as network.rs still builds it: goes with
-/// network.rs.
-pub fn told(w: &World, name: &str, payload: &Arg) {
-    event(w, name, &json(payload));
-}
-
 /// The engine, as the routes call it.
-pub struct EngineDriver(pub Arc<World>);
+pub struct EngineDriver(pub Arc<Runtime>);
 
 impl EngineDriver {
     /// An engine call on a blocking thread.
@@ -626,7 +547,7 @@ impl Engine for EngineDriver {
     }
     async fn claim(&self, me: &str, args: Value) -> R<Value> {
         let me = me.to_string();
-        let minutes = args.get("minutes").cloned().unwrap_or_else(|| crate::js::number(CLAIM_MINUTES));
+        let minutes = args.get("minutes").cloned().unwrap_or_else(|| xenonet_base::json::number(CLAIM_MINUTES));
         let ask = fields(vec![("paths", args.get("paths").cloned()), ("note", Some(or_null(args.get("note")))), ("minutes", Some(minutes))]);
         self.run(None, move |e, c| e.claim(c, &me, &ask)).await
     }
@@ -667,14 +588,10 @@ impl Engine for EngineDriver {
         out
     }
     async fn handoff(&self, me: &str, args: Value, extra: Option<Value>) -> R<Value> {
-        let me = Arg::text(me);
+        let me = me.to_string();
         let envelope = extra.as_ref().and_then(|e| e.get("envelope")).cloned().unwrap_or(Value::Null);
         let w = self.0.clone();
-        let out = tokio::task::spawn_blocking(move || {
-            let mut c = EngineCalls::new(&w, None);
-            crate::network::handoff(&w, &mut c, &me, &args, &envelope).map_err(error)
-        })
-        .await;
+        let out = tokio::task::spawn_blocking(move || crate::network::handoff(&w, &me, &args, &envelope).map_err(error)).await;
         out.map_err(|e| CoreError::new(e.to_string()))?
     }
     async fn start(&self, by: Value, req: Value, strong: bool) -> R<Value> {
@@ -709,7 +626,13 @@ impl Engine for EngineDriver {
         )
     }
     fn mark_unseen(&self, me: &str, ids: &Value) -> R<()> {
-        self.0.store.with(|s| s.mark_unseen(me, ids)).map_err(|e| CoreError::new(e.message().to_string()))
+        // The ids listed, or a text's characters.
+        let ids: Vec<f64> = match ids {
+            Value::Array(a) => a.iter().map(|id| js_number(Some(id))).collect(),
+            Value::String(s) => s.chars().map(|c| js_number(Some(&Value::String(c.to_string())))).collect(),
+            _ => return Err(CoreError::new("that isn't a list")),
+        };
+        self.0.store.with(|s| s.mark_unseen(me, &ids)).map_err(|e| CoreError::new(e.message().to_string()))
     }
     fn listening(&self) -> R<Vec<(String, Value)>> {
         Ok(self.0.mail.listening())

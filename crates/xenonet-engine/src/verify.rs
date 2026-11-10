@@ -31,7 +31,6 @@
 //! `xenonet_adapter::products`.
 
 use crate::procs::Link;
-use crate::sql::Arg;
 use crate::store::Shared;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -182,10 +181,32 @@ fn rules(app: &str) -> Option<crate::processes::Rules> {
     crate::processes::agent(app).map(|a| a.rules)
 }
 
-/// `APP[app]`, as JS reads a property of an object literal: its own, or
-/// what Object.prototype has under that name, as String() writes it.
+/// An app's name, looked up as a record's field: its own, or for a name
+/// every record has (`object_member`), what that member reads as.
 fn app_lookup(app: &str) -> Option<String> {
-    app_name(app).map(str::to_string).or_else(|| crate::js::proto_member(app))
+    app_name(app).map(str::to_string).or_else(|| object_member(app))
+}
+
+/// What a name every plain record has without being given it (its
+/// constructor, toString and the rest) reads as in a sentence: the member's
+/// text, or None for any other name. A sender's method or app named so is
+/// worded as it always was.
+pub fn object_member(name: &str) -> Option<String> {
+    match name {
+        "constructor" => Some("function Object() { [native code] }".into()),
+        "__proto__" => Some("[object Object]".into()),
+        "__defineGetter__"
+        | "__defineSetter__"
+        | "hasOwnProperty"
+        | "__lookupGetter__"
+        | "__lookupSetter__"
+        | "isPrototypeOf"
+        | "propertyIsEnumerable"
+        | "toString"
+        | "valueOf"
+        | "toLocaleString" => Some(format!("function {name}() {{ [native code] }}")),
+        _ => None,
+    }
 }
 
 fn a_app(app: &str) -> String {
@@ -326,11 +347,6 @@ pub struct Verifier {
     inner: Mutex<Inner>,
 }
 
-/// A process's pin, as the store binds it: its pid and start time.
-fn pin_arg(pid: f64, start: f64) -> Arg {
-    Arg::Obj(vec![("pid".into(), Arg::Num(pid)), ("start".into(), Arg::Num(start))])
-}
-
 /// A pid as a map's key: the same for 0 and -0.
 fn key_of(pid: f64) -> u64 {
     if pid == 0.0 {
@@ -438,25 +454,25 @@ impl Verifier {
         }
         // The pins of processes still running; the others go.
         let mut held: Vec<(f64, f64, bool)> = Vec::new();
-        for p in self.store.with(|s| s.pins(Arg::text(agent)))? {
+        for p in self.store.with(|s| s.pins(agent))? {
             let (pid, start) = (p.num("pid").unwrap_or(f64::NAN), p.num("start").unwrap_or(f64::NAN));
             if h.alive(pid, start)? {
                 held.push((pid, start, p.num("sure").is_some_and(|s| s != 0.0)));
             } else {
-                self.store.with(|s| s.unpin(Arg::text(agent), &pin_arg(pid, start)))?;
+                self.store.with(|s| s.unpin(agent, pid, start))?;
             }
         }
         // Claude Code itself, in one of its HTTP hooks: this process holds
         // the session.
         if hook && rules(app).is_some_and(|r| r.pins_by_hook) && chain[0].row.pid == holder.row.pid && h.signed(holder) {
             let t = h.now();
-            self.store.with(|s| s.pin(Arg::text(agent), &pin_arg(root.0, root.1), Arg::Bool(true), Arg::Num(t)))?;
-            self.store.with(|s| s.drop_guesses(Arg::text(agent)))?;
+            self.store.with(|s| s.pin(agent, root.0, root.1, true, t))?;
+            self.store.with(|s| s.drop_guesses(agent))?;
             return Ok(ok(true));
         }
         if let Some((_, _, sure)) = held.iter().find(|(pid, start, _)| *pid == root.0 && *start == root.1) {
             let t = h.now();
-            self.store.with(|s| s.pin(Arg::text(agent), &pin_arg(root.0, root.1), Arg::Bool(*sure), Arg::Num(t)))?;
+            self.store.with(|s| s.pin(agent, root.0, root.1, *sure, t))?;
             return Ok(ok(false));
         }
         if !held.is_empty() {
@@ -464,7 +480,7 @@ impl Verifier {
             return Ok(self.refuse(h, Some(agent), &format!("{agent} belongs to another {word} process")));
         }
         let t = h.now();
-        self.store.with(|s| s.pin(Arg::text(agent), &pin_arg(root.0, root.1), Arg::Bool(false), Arg::Num(t)))?;
+        self.store.with(|s| s.pin(agent, root.0, root.1, false, t))?;
         Ok(ok(false))
     }
 

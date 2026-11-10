@@ -7,7 +7,6 @@
 //! actor on the map. The made-up reads (a grant you haven't verified, and
 //! the pairing's preview) are the fixtures'.
 
-use super::arg;
 use super::connections::Remote;
 use crate::fx::{self, now_ms, Locked, Perform};
 use async_trait::async_trait;
@@ -22,13 +21,12 @@ use xenonet_actors::remote_presence::{self, RemotePresence};
 use xenonet_assistant::cursors::Cursors;
 use xenonet_assistant::service::{self, Config, Inflight, LIMITS};
 use xenonet_assistant::{audit, fixtures, projection, source};
-use xenonet_schema::check::{compile, Checker, Data};
+use xenonet_schema::typed;
 use xenonet_service::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, State, R};
 use xenonet_service::wire::Emitter;
 
 pub const RESULT_SCHEMA: &str = "xenonet.assistant.result.v1";
 pub const ERROR_SCHEMA: &str = "xenonet.assistant.error.v1";
-const RESULT_DOC: &str = include_str!("../../../../schemas/assistant/result/v1.json");
 const OPERATIONS: [(&str, &str); 6] = [
     ("xenonet_status", "status"),
     ("xenonet_projects", "projects"),
@@ -92,14 +90,10 @@ pub fn input_ok(tool: &str, args: &Value) -> bool {
     o.iter().all(|(k, v)| fields.iter().find(|(f, _)| f == k).is_some_and(|(_, ok)| ok(v)))
 }
 
-fn result_checker() -> Option<&'static Checker> {
-    static C: OnceLock<Option<Checker>> = OnceLock::new();
-    C.get_or_init(|| xenonet_base::json::parse(RESULT_DOC).ok().and_then(|d| compile(&[d]).ok())).as_ref()
-}
-
-/// RESULTS[tool].safeParse(envelope): the answer against the contract's.
+/// The answer against the contract's: an assistant/result/v1, read as its
+/// type.
 fn result_ok(envelope: &Value) -> bool {
-    result_checker().is_some_and(|c| c.check(c.root(0), &Data::from(envelope), false).ok())
+    typed::fits::<xenonet_model::assistant::Answer>(envelope)
 }
 
 fn key() -> Vec<u8> {
@@ -193,24 +187,20 @@ struct Presence<'a> {
     r: &'a Reads,
 }
 
-impl Presence<'_> {
-    /// The registry by the JS names the actors' driver answers; nothing
-    /// without actors.
-    fn registry(&self, method: &str, args: Vec<Value>) -> Result<Value, xenonet_actors::store::Error> {
-        let Some(a) = &self.r.actors else { return Ok(Value::Null) };
-        a.registry(method, args).map_err(|e| xenonet_actors::store::Error { message: e.message, code: e.code })
-    }
+// What the actors failed with, as the presence core hears it.
+fn actor_error(e: CoreError) -> xenonet_actors::store::Error {
+    xenonet_actors::store::Error { message: e.message, code: e.code }
 }
 
 impl remote_presence::Host for Presence<'_> {
     fn has(&mut self, id: &str) -> bool {
-        xenonet_base::text::truthy(self.registry("has", vec![json!(id)]).ok().as_ref())
+        self.r.actors.as_ref().is_some_and(|a| a.has(id))
     }
     fn report(&mut self, id: &str, report: &Value) -> Result<(), xenonet_actors::store::Error> {
-        self.registry("report", vec![json!(id), report.clone()]).map(|_| ())
+        self.r.actors.as_ref().map_or(Ok(()), |a| a.report(id, report).map_err(actor_error))
     }
     fn target(&mut self, id: &str, node: &str, relation: &str, at: f64) -> Result<(), xenonet_actors::store::Error> {
-        self.registry("target", vec![json!(id), json!(node), json!(relation), xenonet_base::json::number(at)]).map(|_| ())
+        self.r.actors.as_ref().map_or(Ok(()), |a| a.target_at(id, node, relation, at).map_err(actor_error))
     }
     fn on_read(&mut self, read: Value) {
         let connection = xenonet_base::text::js_string(&read["connection"]);
@@ -234,7 +224,7 @@ impl source::Around for Around<'_> {
         product(id)
     }
     fn registered(&mut self, id: &Value) -> bool {
-        self.actors.is_some_and(|a| a.registry("isRegistered", vec![id.clone()]).is_ok_and(|v| xenonet_base::text::truthy(Some(&v))))
+        self.actors.is_some_and(|a| a.is_registered(&xenonet_base::text::js_string(id)))
     }
 }
 
@@ -314,7 +304,7 @@ impl Reads {
 
     fn log(&self, record: Value) {
         if let Some(s) = &self.store {
-            let row = arg(&audit::access(&record, now_ms()));
+            let row = audit::access(&record, now_ms());
             let _ = s.with(|st| st.add_audit(&row));
         }
     }
@@ -555,8 +545,7 @@ pub struct AuditCore(pub Arc<Reads>);
 impl Audit for AuditCore {
     fn recent(&self, grant: Option<&str>, limit: f64) -> R<Value> {
         let Some(s) = &self.0.store else { return Ok(json!([])) };
-        let ask = arg(&json!({ "since": xenonet_base::json::number(now_ms() - 7.0 * 24.0 * 3600e3), "limit": xenonet_base::json::number(audit::limit_of(limit)), "grant": grant }));
-        let rows = s.with(|st| st.audit(&ask)).map_err(|e| CoreError::new(e.to_string()))?;
+        let rows = s.with(|st| st.audit(now_ms() - 7.0 * 24.0 * 3600e3, audit::limit_of(limit), grant)).map_err(|e| CoreError::new(e.to_string()))?;
         let rows: Vec<Value> = rows.iter().map(super::row_json).collect();
         Ok(Value::Array(audit::recent(&rows)))
     }

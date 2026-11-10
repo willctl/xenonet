@@ -86,5 +86,5 @@ pub fn template(v: &Value) -> String {
 
 /// JS's truthiness of a JSON value, a missing one false.
 pub fn truthy(v: Option<&Value>) -> bool {
-    crate::js::truthy(v)
+    xenonet_base::text::truthy(v)
 }

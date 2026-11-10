@@ -22,7 +22,7 @@ use xenonet_adapter::products::{product_of, product_of_slug};
 use xenonet_base::ids::is_actor_slug;
 use xenonet_base::log::js_slice;
 use xenonet_base::text::js_trim;
-use xenonet_engine::js::{template, truthy};
+use xenonet_base::text::{template, truthy};
 
 fn re(p: &str) -> Regex {
     Regex::new(p).expect("a fixed pattern")

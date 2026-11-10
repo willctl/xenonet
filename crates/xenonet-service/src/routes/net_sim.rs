@@ -1297,14 +1297,11 @@ mod tests {
 
     #[test]
     fn each_made_up_machine_has_a_load_of_its_own_that_fits_system_v1() {
-        let doc = xenonet_base::json::parse(include_str!("../../../../schemas/system/v1.json")).unwrap();
-        let checker = xenonet_schema::check::compile(&[doc]).unwrap();
         let now = 1_800_000_000_000.0;
         let mut threads = Vec::new();
         for host in ["studio", "laptop", "rack"] {
             let r = made_up_reading(host, now).unwrap();
-            let c = checker.check(checker.root(0), &xenonet_schema::check::Data::from(&r), true);
-            assert!(c.ok(), "{host}: {r}");
+            assert!(xenonet_schema::typed::fits::<xenonet_model::system::System>(&r), "{host}: {r}");
             threads.push(r["cpu"]["threads"].as_u64().unwrap());
         }
         assert_eq!(threads, [24, 12, 32], "each its own machine");

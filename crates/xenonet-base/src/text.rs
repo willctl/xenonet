@@ -57,6 +57,12 @@ pub fn js_string(v: &Value) -> String {
     }
 }
 
+/// A value as `${value}` writes it: String(value), and "undefined" for a
+/// value that isn't there.
+pub fn template(v: Option<&Value>) -> String {
+    v.map_or_else(|| "undefined".into(), js_string)
+}
+
 /// An item as Array.prototype.join writes it: null and missing as "".
 pub fn join_item(v: Option<&Value>) -> String {
     match v {

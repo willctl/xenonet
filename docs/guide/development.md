@@ -155,7 +155,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `json` | JSON as XenoNet parses and writes it |
 | `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
 | `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, archived rollouts' Zstandard, stats |
-| `schema`, `jsregex` | Records checked against the vendor schemas and XenoNet's own, and the schemas' patterns |
+| `schema` | Records checked against the vendor schemas, and read as XenoNet's own types |
 | `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context (`wiki`) |
 | `base` | Strings, times, paths, git remotes and model names |
 | `http`, `hooks` | The service's routes, hook payloads and the actor gateway |

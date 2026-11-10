@@ -28,3 +28,19 @@ pub mod wake;
 pub mod you;
 
 pub use xenonet_adapter::products;
+
+/// A pattern, in the regex crate's syntax, compiled once, the first time
+/// it's used. White space in a pattern that reads what an actor sent is
+/// `[\s\x{FEFF}--\x{85}]`, what trim() takes off.
+macro_rules! re {
+    ($p:expr) => {{
+        static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        R.get_or_init(|| $crate::compile($p))
+    }};
+}
+pub(crate) use re;
+
+/// A pattern `re!` was given: one written in the source, so it compiles.
+pub(crate) fn compile(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("a fixed pattern: callers pass them from the source")
+}

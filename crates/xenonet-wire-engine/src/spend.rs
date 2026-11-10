@@ -2,23 +2,25 @@
 //! over crates/xenonet-actors/src/spend.rs): the live state's costs, the
 //! map's sessions and who started them, from the local day's start.
 
-use crate::js::{day_start, now_ms, number};
-use crate::world::World;
+use crate::runtime::day_start;
+use crate::runtime::Runtime;
 use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::spend::{reported_today, spend_by_actor};
+use xenonet_base::json::number;
 use xenonet_base::pricing::PRICES_CHECKED;
+use xenonet_base::time::now_ms;
 use xenonet_service::cores::{Spend, R};
 
 pub struct SpendDriver {
-    world: Arc<World>,
+    world: Arc<Runtime>,
     // What Hermes and OpenCode reported at first sight and since today
     // began (spend::reported_today), kept between requests.
     reported: Mutex<Value>,
 }
 
 impl SpendDriver {
-    pub fn new(world: Arc<World>) -> Self {
+    pub fn new(world: Arc<Runtime>) -> Self {
         Self { world, reported: Mutex::new(Value::Null) }
     }
 }
