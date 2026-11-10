@@ -71,6 +71,15 @@ pub fn xenonet_bin(env: &Env, m: &Machine, this: &str) -> String {
     this.into()
 }
 
+/// `xenonet_bin` for this process: its environment, this machine with
+/// `home` as its home folder, and the running binary.
+pub fn xenonet_bin_here(home: &str) -> String {
+    let env: Env = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
+    let m = Machine { platform: xenonet_os::platform().into(), arch: std::env::consts::ARCH.into(), home: home.into() };
+    let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    xenonet_bin(&env, &m, &this)
+}
+
 pub fn port_of(env: &Env) -> String {
     set(env, "XENONET_PORT").unwrap_or("47840").to_string()
 }

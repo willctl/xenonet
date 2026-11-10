@@ -110,12 +110,9 @@ rmcp = { version = "3.9", default-features = false, features = ["server", "trans
 # The service's cores are traits the routes call through, async where the
 # JS awaits (crates/xenonet-service/src/cores).
 async-trait = "0.1"
-# The binary's own drivers for the cores: the map and its readers; the
-# engine, delivery and actors; the app's parts, hosts, assistant and doctor
-# (each wires its cores into the service).
-xenonet-wire-map = { path = "crates/xenonet-wire-map" }
-xenonet-wire-engine = { path = "crates/xenonet-wire-engine" }
-xenonet-wire-app = { path = "crates/xenonet-wire-app" }
+# The engine running on this machine: its runtime, delivery, the network
+# and the actors' sides.
+xenonet-runtime = { path = "crates/xenonet-runtime" }
 # fetch(), in the binary: HTTPS to the APIs XenoNet calls (Spotify,
 # OpenRouter, Anthropic's usage, webhooks, updates), with rustls on ring
 # and the system's own certificates, and the system's proxy.

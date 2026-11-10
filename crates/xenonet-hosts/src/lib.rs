@@ -8,7 +8,8 @@
 //! answers only an allowlist of reads. ssh runs with XenoNet's own config,
 //! never a prompt, and a host key that must be known and unchanged. Inside
 //! a XenoNet network the same frames cross through its gateway, sealed
-//! between the two hosts (network.rs).
+//! between the two hosts (network.rs). `runtime` runs them in the
+//! service: hosts.json's store, the hub's links and the relay.
 
 pub mod aliases;
 pub mod cache;
@@ -21,3 +22,4 @@ pub mod link;
 pub mod merge;
 pub mod network;
 pub mod relay;
+pub mod runtime;

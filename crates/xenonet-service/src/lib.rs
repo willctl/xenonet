@@ -16,6 +16,7 @@ pub mod actor_caller;
 pub mod assistant_endpoint;
 pub mod borrowed;
 pub mod component;
+pub mod compose;
 pub mod config;
 pub mod ctx;
 pub mod events;

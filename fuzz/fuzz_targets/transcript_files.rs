@@ -17,9 +17,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use xenonet_blocks::tailer::Tailer;
 use xenonet_schema::drift::DriftLog;
 use xenonet_state::stats::{session_stats, File};
-use xenonet_wire_map::codex::CodexClient;
-use xenonet_wire_map::vendor::{Tailed, Vendor};
-use xenonet_wire_map::{sdk, stats};
+use xenonet_state::runtime::codex::CodexClient;
+use xenonet_state::runtime::vendor::{Tailed, Vendor};
+use xenonet_state::runtime::{sdk, stats};
 
 const ID: &str = "0190d3e0-0000-7000-8000-000000000001";
 
@@ -101,7 +101,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = client.rollout_page(&file, Some("rollout:3"), 1.0);
             // The same bytes as an archived rollout's (.jsonl.zst): the
             // decoder says what's wrong with them rather than panic.
-            let _ = xenonet_wire_map::archive::unzstd(transcript, 1 << 24);
+            let _ = xenonet_state::runtime::archive::unzstd(transcript, 1 << 24);
         }
         // The file grows by a line, and is listed again from what the
         // first listing kept.

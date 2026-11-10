@@ -7,7 +7,7 @@
 //!
 //! What a module does with the outside world (running a command, reading
 //! the clock, the store) goes through a trait of its own, which the
-//! runtime (xenonet-wire-engine) and the tests implement.
+//! runtime (xenonet-runtime) and the tests implement.
 
 pub mod attest;
 pub mod delivery;

@@ -15,10 +15,10 @@ const out = path.join(repo, "fuzz", "seeds");
 const T = Date.parse("2026-10-05T12:00:00.000Z");
 
 // The demo's made-up world, as the map's golden test froze it
-// (crates/xenonet-wire-map/tests/fixtures/golden-world): its folders by
+// (crates/xenonet-state/tests/fixtures/golden-world): its folders by
 // name, a leading dot in a path part written %2E so git keeps it, and
 // <world> in a file where the world's root was.
-const frozen = path.join(repo, "crates", "xenonet-wire-map", "tests", "fixtures", "golden-world");
+const frozen = path.join(repo, "crates", "xenonet-state", "tests", "fixtures", "golden-world");
 const { dirs } = JSON.parse(fs.readFileSync(path.join(frozen, "manifest.json"), "utf8"));
 const at = (rel) => path.join(frozen, "world", ...rel.split("/").map((p) => (p.startsWith(".") ? `%2E${p.slice(1)}` : p)));
 const world = { root: "<world>", claudeRoot: at(dirs.claudeRoot), codexHome: at(dirs.codexHome), stateDir: at(dirs.stateDir), wikiDir: at(dirs.wikiDir) };

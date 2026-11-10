@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-integrations"
-description = "XenoNet's integrations: routing suggestions through OpenRouter, OpenShell sandboxes with a frozen text baseline and the review of what comes back, Pi sessions and exports read as metadata, and MCP servers' catalogs."
+description = "XenoNet's integrations: routing suggestions through OpenRouter, OpenShell sandboxes with a frozen text baseline and the review of what comes back, Pi sessions and exports read as metadata, and MCP servers' catalogs; the decision model and OpenRouter's spend; and the service's cores over them."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,6 +19,14 @@ regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 xenonet-text.workspace = true
+# The runtime (src/runtime): the cores it implements, the decision model's
+# requests and answers, OpenRouter's spend, your credential store for the
+# key, and the commands, git runs and MCP servers it waits on.
+tokio.workspace = true
+xenonet-api.workspace = true
+xenonet-actors.workspace = true
+xenonet-sources.workspace = true
+xenonet-state.workspace = true
 
 [lints]
 workspace = true

@@ -126,16 +126,16 @@ On 2026-11-08 the tests ran this share of each crate's lines:
 | xenonet-integrations | 2,323 | 53.9% |
 | xenonet-mcp | 3,706 | 57.4% |
 | xenonet-net | 5,923 | 91.4% |
+| xenonet-runtime | 6,708 | 72.5% |
 | xenonet-schema | 3,349 | 74.6% |
 | xenonet-service | 12,132 | 69.7% |
 | xenonet-sources | 10,785 | 85.7% |
 | xenonet-state | 6,350 | 86.3% |
 | xenonet-wire-app | 6,779 | 64.4% |
-| xenonet-wire-engine | 6,708 | 72.5% |
 | xenonet-wire-map | 6,465 | 82.0% |
 | All | 114,572 | 70.0% |
 
-The run came before xenonet-text, xenonet-os's files, paths, processes and log, and xenonet-api's client were their own crates: those lines, 91.0% run, count in All but have no row yet. The xenonet-app row is code that is now xenonet-console, xenonet-demo and parts of xenonet-components, xenonet-doctor, xenonet-integrations, xenonet-os and xenonet-state.
+The run came before xenonet-text, xenonet-os's files, paths, processes and log, and xenonet-api's client were their own crates: those lines, 91.0% run, count in All but have no row yet. The xenonet-wire-map row is code that is now xenonet-state's runtime. The xenonet-wire-app row is code that is now the `runtime` modules of xenonet-assistant, xenonet-hosts, xenonet-doctor, xenonet-integrations and xenonet-sources, parts of xenonet-os, xenonet-actors and xenonet-console, and xenonet-service's `compose/app.rs`. The xenonet-app row is code that is now xenonet-console, xenonet-demo and parts of xenonet-components, xenonet-doctor, xenonet-integrations, xenonet-os and xenonet-state.
 
 The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-actors`, `xenonet-integrations`, `xenonet-doctor`, `xenonet-mcp` and `xenonet-assistant`.
 
@@ -172,7 +172,7 @@ The network's targets build well-formed frames, entries and requests from a made
 
 `fuzz/run.sh` keeps what a target learns in `fuzz/corpus/<target>` and reads the seeds in `fuzz/seeds/<target>` too. A crash is saved in `fuzz/artifacts/<target>`. Run the target on that file alone to see the crash again, and `cargo fuzz tmin --fuzz-dir fuzz <target> <file>` makes it smaller. The corpora and crashes stay out of git.
 
-Fix a crash where it starts, and add a unit test with the smallest input that showed it, in the crate that had the bug. The fuzz crate needs nightly, so it holds no tests of its own. The seeds come from the test fixtures and the demo's made-up world as the map's golden test froze it (`crates/xenonet-wire-map/tests/fixtures/golden-world/`), never from real sessions: `node fuzz/seed.mjs` writes them again, and stops if one would hold this machine's home folder.
+Fix a crash where it starts, and add a unit test with the smallest input that showed it, in the crate that had the bug. The fuzz crate needs nightly, so it holds no tests of its own. The seeds come from the test fixtures and the demo's made-up world as the map's golden test froze it (`crates/xenonet-state/tests/fixtures/golden-world/`), never from real sessions: `node fuzz/seed.mjs` writes them again, and stops if one would hold this machine's home folder.
 
 ## Driving XenoNet from agents, scripts and tests
 
@@ -258,7 +258,7 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 | --- | --- | --- |
 | `crates/xenonet-mcp/tests/golden/` | The MCP servers' answers (`xenonet mcp`, `mcp assistant`, `mcp console`): the probe, the handshake, `tools/list` with every schema key for key, and refused calls | `crates/xenonet-mcp/tests/contract.rs` |
 | `crates/xenonet-cli/tests/golden/` | The HTTP API's reads and the command's output, over the made-up home in `tests/fixtures/home/` | `crates/xenonet-cli/tests/golden.rs` |
-| `crates/xenonet-wire-map/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search and the projects scan. `state.json` (the map, identities and repos) is kept there too, but nothing replays it until the map's driver takes a clock | `crates/xenonet-wire-map/tests/golden.rs` |
+| `crates/xenonet-state/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search and the projects scan. `state.json` (the map, identities and repos) is kept there too, but nothing replays it until the map's runtime takes a clock | `crates/xenonet-state/tests/golden.rs` |
 | `test/fixtures/net/` | The network's frames, signatures and sealing, as known answers | `crates/xenonet-net/tests/known_answers.rs` |
 
 `schemas/` holds the JSON Schema of every record XenoNet reads or writes. XenoNet's own are written from the types in `crates/xenonet-model` (`XENONET_SCHEMAS_WRITE=1 cargo test -p xenonet-model` rewrites them, and the same test fails when a file is stale); the vendors' under `schemas/vendor/` are hand-kept. `crates/xenonet-schema` checks against them, and so do the page's tests (`test/harness/schema.js`).

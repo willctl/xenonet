@@ -2229,6 +2229,7 @@ dependencies = [
  "regex",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
  "unicode-normalization",
  "xenonet-adapter",
  "xenonet-model",
@@ -2274,11 +2275,19 @@ dependencies = [
  "async-trait",
  "getrandom 0.3.4",
  "icu_normalizer",
+ "libc",
  "regex",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
+ "xenonet-actors",
+ "xenonet-adapter",
+ "xenonet-api",
  "xenonet-components",
+ "xenonet-engine",
+ "xenonet-model",
  "xenonet-os",
+ "xenonet-schema",
  "xenonet-text",
 ]
 
@@ -2331,14 +2340,12 @@ dependencies = [
  "xenonet-mcp",
  "xenonet-os",
  "xenonet-platforms",
+ "xenonet-runtime",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
  "xenonet-text",
- "xenonet-wire-app",
- "xenonet-wire-engine",
- "xenonet-wire-map",
 ]
 
 [[package]]
@@ -2385,11 +2392,13 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "xenonet-actors",
+ "xenonet-adapter",
  "xenonet-api",
  "xenonet-components",
  "xenonet-os",
+ "xenonet-platforms",
  "xenonet-text",
- "xenonet-wire-app",
 ]
 
 [[package]]
@@ -2429,12 +2438,20 @@ name = "xenonet-doctor"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "libc",
  "regex",
  "serde_json",
+ "tokio",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-components",
+ "xenonet-engine",
+ "xenonet-hosts",
+ "xenonet-model",
+ "xenonet-net",
  "xenonet-os",
  "xenonet-schema",
+ "xenonet-sources",
  "xenonet-text",
 ]
 
@@ -2509,12 +2526,19 @@ dependencies = [
 name = "xenonet-hosts"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "regex",
  "serde_json",
+ "tokio",
  "url",
  "xenonet-adapter",
+ "xenonet-api",
+ "xenonet-blocks",
  "xenonet-model",
+ "xenonet-net",
  "xenonet-os",
+ "xenonet-schema",
+ "xenonet-state",
  "xenonet-text",
 ]
 
@@ -2528,8 +2552,13 @@ dependencies = [
  "regex",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
  "url",
+ "xenonet-actors",
+ "xenonet-api",
  "xenonet-os",
+ "xenonet-sources",
+ "xenonet-state",
  "xenonet-text",
 ]
 
@@ -2649,6 +2678,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-runtime"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "url",
+ "xenonet-actors",
+ "xenonet-adapter",
+ "xenonet-api",
+ "xenonet-blocks",
+ "xenonet-demo",
+ "xenonet-engine",
+ "xenonet-hosts",
+ "xenonet-model",
+ "xenonet-os",
+ "xenonet-platforms",
+ "xenonet-schema",
+ "xenonet-text",
+]
+
+[[package]]
 name = "xenonet-schema"
 version = "0.2.0"
 dependencies = [
@@ -2677,17 +2731,23 @@ dependencies = [
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
+ "xenonet-assistant",
+ "xenonet-components",
  "xenonet-console",
+ "xenonet-doctor",
  "xenonet-engine",
+ "xenonet-grok-build",
+ "xenonet-hosts",
+ "xenonet-integrations",
  "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-platforms",
+ "xenonet-runtime",
  "xenonet-schema",
+ "xenonet-sources",
  "xenonet-state",
  "xenonet-text",
- "xenonet-wire-app",
- "xenonet-wire-engine",
 ]
 
 [[package]]
@@ -2701,6 +2761,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-model",
  "xenonet-os",
  "xenonet-platforms",
@@ -2712,14 +2773,23 @@ dependencies = [
 name = "xenonet-state"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "getrandom 0.3.4",
  "regex",
  "rusqlite",
+ "ruzstd",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
  "xenonet-adapter",
+ "xenonet-api",
+ "xenonet-blocks",
+ "xenonet-components",
+ "xenonet-demo",
  "xenonet-model",
  "xenonet-os",
+ "xenonet-platforms",
+ "xenonet-schema",
  "xenonet-sources",
  "xenonet-text",
 ]
@@ -2730,86 +2800,6 @@ version = "0.2.0"
 dependencies = [
  "libc",
  "serde_json",
-]
-
-[[package]]
-name = "xenonet-wire-app"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "libc",
- "regex",
- "serde_json",
- "tokio",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-assistant",
- "xenonet-blocks",
- "xenonet-components",
- "xenonet-doctor",
- "xenonet-engine",
- "xenonet-grok-build",
- "xenonet-hosts",
- "xenonet-integrations",
- "xenonet-model",
- "xenonet-net",
- "xenonet-os",
- "xenonet-platforms",
- "xenonet-schema",
- "xenonet-sources",
- "xenonet-state",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-wire-engine"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "regex",
- "reqwest",
- "rusqlite",
- "serde_json",
- "tokio",
- "url",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-blocks",
- "xenonet-components",
- "xenonet-demo",
- "xenonet-engine",
- "xenonet-hosts",
- "xenonet-model",
- "xenonet-os",
- "xenonet-platforms",
- "xenonet-schema",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-wire-map"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "getrandom 0.3.4",
- "rusqlite",
- "ruzstd",
- "serde_json",
- "tokio",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-blocks",
- "xenonet-components",
- "xenonet-demo",
- "xenonet-model",
- "xenonet-os",
- "xenonet-platforms",
- "xenonet-schema",
- "xenonet-sources",
- "xenonet-state",
- "xenonet-text",
 ]
 
 [[package]]

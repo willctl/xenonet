@@ -48,9 +48,7 @@ xenonet-engine.workspace = true
 xenonet-hosts.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
-xenonet-wire-app.workspace = true
-xenonet-wire-engine.workspace = true
-xenonet-wire-map.workspace = true
+xenonet-runtime.workspace = true
 
 # The local time zone, as JS's Date shows a time (localtime_r), and the
 # terminal's width (TIOCGWINSZ), as Node's process.stdout.columns reads it.

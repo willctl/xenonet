@@ -575,10 +575,16 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
 - **The binary drives the cores itself.** The slices' Rust decides, and
   each twin's JS did the waiting around it: processes, timers, fetch,
   watches, events. In the binary, crates of drivers do that natively, on
-  tokio: `xenonet-wire-map` (the state, the readers, the store, the demo's
-  world, the schema checks and drift), `xenonet-wire-engine` (the engine,
-  delivery, verify and the actors) and `xenonet-wire-app` (hosts and the
-  hub, the assistant, the doctor, integrations and the app's own parts).
+  tokio: `xenonet-state`'s runtime (the state, the readers, the store,
+  the demo's world, the schema checks and drift), `xenonet-runtime` (the engine
+  running on this machine: delivery, verify, the network and the actors'
+  sides) and the domain crates' own `runtime` modules (`xenonet-hosts`:
+  hosts.json, the hub and the relay; `xenonet-assistant`: remote actors'
+  connections, reads and tunnels; `xenonet-doctor`; `xenonet-integrations`:
+  the integrations, the decision model and the MCP catalog;
+  `xenonet-sources`: refusals), with the console's own cores in
+  `xenonet-console` and the composition in `xenonet-service`'s
+  `compose/app.rs`.
   They depend on `xenonet-api` and never on the service. `xenonet serve`
   makes the demo's world first, since it moves the folders the rest read,
   then runs them in that order, giving each the narrow settings it reads
@@ -632,7 +638,7 @@ place. This table follows it.
 | `core/drift.js`, `core/vendor.js` | `xenonet-schema/src/drift.rs`, `vendor.rs` | `drift`, `vendor-reader`, `server` pass |
 | `core/blocks/clock.js`, `core/blocks/index.js` | `xenonet-blocks/src/clock.rs`, `lib.rs` (the twin keeps `Date.now()` and the timers, which tests mock) | `xenolith`, and every test that loads a block |
 | `core/xenolith.js` | `xenonet-sources/src/xenolith.rs` | `xenolith` passes |
-| `core/mcp-names.js`, `core/desktop-connectors.js` | `xenonet-sources/src/live/names.rs` (each line fed by `telemetry.rs`), `desktop_connectors.rs` (read for the service by `xenonet-wire-map/src/live.rs`) | No twin: Rust tests of the same cases. `live` and `graph` pass with the twins, which feed the lines to names.rs |
+| `core/mcp-names.js`, `core/desktop-connectors.js` | `xenonet-sources/src/live/names.rs` (each line fed by `telemetry.rs`), `desktop_connectors.rs` (read for the service by `xenonet-state/src/runtime/live.rs`) | No twin: Rust tests of the same cases. `live` and `graph` pass with the twins, which feed the lines to names.rs |
 | `core/frames.js`, `core/rename.js`, `core/export-labels.js`, `core/needs-you.js` | `xenonet-state/src/frames.rs`, `rename.rs`, `export_labels.rs`, `needs_you.rs` (the page keeps their JS) | `frames`, `rename`, `export-labels`, `needs-you`, `poster`, `page-markup` pass |
 | `core/refusals/demo.js`, `query.js`, `store.js` | `xenonet-sources/src/refusals/` (in xenonet-sources, not xenonet-actors: the live tailer reads refusals) | `refusals`, `refusal-browser` pass |
 | `core/redact.js`, `core/digest.js`, `core/classify.js` | `xenonet-state/src/redact.rs`, `digest.rs`, `classify.rs` (running Codex and asking the decider stay in the twins) | `redact`, `digest`, `decide`, `poster` pass |
@@ -702,7 +708,7 @@ place. This table follows it.
 | `xenonet mcp assistant` (`mcp/assistant.js`, with `core/assistant/client.js`) | `xenonet-mcp` | Contract tests against the JS server, for a grant and against its `--fixture`; `assistant-endpoint`, `e2e/assistant` pass against the binary |
 | `xenonet mcp console` (`mcp/console.js`, over `core/control.js`) | `xenonet-mcp/src/console.rs`, through `xenonet-cli/src/cores/control.rs` | Contract tests against the JS server (the handshake, `tools/list` key for key, its refusals, in both revisions); `control` passes against the binary |
 | `xenonet hook` and every other command (`cli/`) | `xenonet-cli`, the `xenonet` binary, its cores driven in `src/cores` | `cli`, `cli-actor`, `cli-gateway`, `cli-status-agents`, `hosts-cli`, `launcher` pass against the binary |
-| `xenonet serve` (`server/index.js`, `server/routes/`, `component-service.js`, `static.js`, `upstream.js`) | `xenonet-service`, its cores driven by `xenonet-wire-map`, `-engine` and `-app` | The JS route tests' cases as Rust tests of the routes; `server`, `hosts-server`, `engine`, `control` pass against the binary; `scripts/rust-diff.mjs` asks it and the JS service the same reads side by side |
+| `xenonet serve` (`server/index.js`, `server/routes/`, `component-service.js`, `static.js`, `upstream.js`) | `xenonet-service`, its cores driven by `xenonet-state`'s runtime, `xenonet-runtime` and the domain crates' runtimes (hosts, assistant, doctor, integrations, sources) | The JS route tests' cases as Rust tests of the routes; `server`, `hosts-server`, `engine`, `control` pass against the binary; `scripts/rust-diff.mjs` asks it and the JS service the same reads side by side |
 | The actor gateway, its switch and tunnels (`server/actor-gateway.js`, `gateway-control.js`, `gateway-tunnel.js`, `gateway-reach.js`) | `xenonet-service/src/gateway`, the public address check over its own DNS (`reach.rs`) | 69 of the JS gateway's answers, byte for byte; `gateway-tunnel`'s cases |
 | The terminal drawer's shells (`server/terminals.js`) | `xenonet-service/src/terminals.rs`, on portable-pty | Its own Rust tests, a real shell's among them |
 | The assistant's endpoint (`server/assistant-endpoint.js`) | `xenonet-service` | Its hello, read and sweep, as a Rust test |

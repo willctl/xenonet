@@ -16,7 +16,9 @@
 //! - `net`: fetch() over HTTPS; `lines`: lines of another program's output;
 //! - `open`: the programs that open a URL, a file or a folder;
 //! - `stats`: what the computer is doing (CPU, memory, GPU), for the
-//!   console's system panel;
+//!   console's system panel, and `system`, which reads it;
+//! - `fx`: child processes run and started, the environment, and a thread
+//!   for work whose futures aren't Send;
 //! - and, as Node's built-ins give them, the home folder, the platform and
 //!   random ids (below).
 
@@ -25,6 +27,7 @@ pub mod dirs;
 pub mod error;
 pub mod files;
 pub mod fs;
+pub mod fx;
 pub mod lines;
 pub mod log;
 pub mod net;
@@ -35,6 +38,7 @@ pub mod private_file;
 pub mod process;
 pub mod stats;
 pub mod sync;
+pub mod system;
 
 /// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.
 pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> String {

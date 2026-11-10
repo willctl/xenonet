@@ -394,7 +394,7 @@ service runs a local build.
    the contract: the MCP servers' answers
    (`crates/xenonet-mcp/tests/golden/`), 42 HTTP routes and 60 command
    cases over a made-up home (`crates/xenonet-cli/tests/golden/`), the map's
-   golden world (`crates/xenonet-wire-map/tests/golden/`), and the network's
+   golden world (`crates/xenonet-state/tests/golden/`), and the network's
    known answers (`test/fixtures/net/`). The modules the page and Desktop
    import moved to `src/shared/` and `electron/lib/`. Desktop installs and
    updates its components through the binary (`xenonet components`, over

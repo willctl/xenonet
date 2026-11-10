@@ -18,7 +18,7 @@
 //!
 //! The core asks the registry for these (`Platform::tailed`,
 //! `Platform::native`, `Platform::lister`); the drivers in xenonet-sources
-//! and xenonet-wire-map implement `Tail` and run the readers.
+//! and xenonet-state's runtime implement `Tail` and run the readers.
 
 pub mod files;
 pub mod native;

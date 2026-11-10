@@ -20,7 +20,7 @@ const root = path.resolve(new URL("..", import.meta.url).pathname);
 const report = process.argv.includes("--report");
 const SURFACES = new Set(["xenonet-cli", "xenonet-mcp", "xenonet-service", "xenonet-console"]);
 // What may depend on the demo besides the surfaces: the map's demo driver.
-const DEMO_USERS = new Set([...SURFACES, "xenonet-wire-map"]);
+const DEMO_USERS = new Set([...SURFACES, "xenonet-state"]);
 // Crates whose literals aren't the core's: the registry and the demo.
 const NAMING = new Set(["xenonet-adapter", "xenonet-demo"]);
 

@@ -16,7 +16,7 @@ use xenonet_hosts::frames::{self, LineSplitter, FROM_CONSOLE, FROM_RELAY};
 use xenonet_hosts::link::{Asks, Ended, Link, Options};
 use xenonet_hosts::merge::{self, HostIn};
 use xenonet_hosts::relay::{self, Scrubber};
-use xenonet_wire_app::hosts::schemas::{HostSchemas, MergeSchemas};
+use xenonet_hosts::runtime::schemas::{HostSchemas, MergeSchemas};
 
 const NOW: f64 = 1_791_230_000_000.0;
 

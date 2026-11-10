@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-sources"
-description = "What XenoNet reads: the transcripts' lines and events, the records the readers make, and the other sources of the map."
+description = "What XenoNet reads: the transcripts' lines and events, the records the readers make, and the other sources of the map; and the refusals XenoNet keeps, as the service's Refusals core."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,6 +24,8 @@ xenonet-text.workspace = true
 # A transcript's lines are sampled per file as they go through the
 # normalizer (`lines::records`).
 xenonet-schema.workspace = true
+# The Refusals core it implements (refusals/runtime.rs).
+xenonet-api.workspace = true
 
 # The telemetry's tests read lines through the adapters' readers.
 

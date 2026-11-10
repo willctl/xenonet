@@ -29,11 +29,11 @@ use xenonet_hosts::network::{self as wire, Op};
 use xenonet_service::cores::{Hub, Pending, SelfApi};
 use xenonet_service::events::Events;
 use xenonet_service::wire::Emitter;
-use xenonet_wire_app::hosts::config::HostsStore;
-use xenonet_wire_app::hosts::hub::{HostHub, HubCore, HubParts};
-use xenonet_wire_app::hosts::relay::{net_allowed, net_key, Parts, RelayServer, Timing};
-use xenonet_wire_app::hosts::schemas::HostSchemas;
-use xenonet_wire_app::hosts::transport::{new_sub, Transport};
+use xenonet_hosts::runtime::config::HostsStore;
+use xenonet_hosts::runtime::hub::{HostHub, HubCore, HubParts};
+use xenonet_hosts::runtime::relay::{net_allowed, net_key, Parts, RelayServer, Timing};
+use xenonet_hosts::runtime::schemas::HostSchemas;
+use xenonet_hosts::runtime::transport::{new_sub, Transport};
 
 const NETWORK: &str = "net_0123456789abcdef0123456789abcdef";
 const SUBS: [&str; 2] = ["sub_0123456789abcdef0123456789abcdef", "sub_fedcba9876543210fedcba9876543210"];

@@ -9,7 +9,8 @@
 //!   (launch, call, quit); `script`: the steps `xenonet console` and
 //!   scripts run through it;
 //! - `cores`: the service's Themes and Spotify cores over them, which the
-//!   composition root puts in place (`wire`).
+//!   composition root puts in place (`wire`), and the system panel's, the
+//!   openers' and the xenonet command's.
 
 // A core's error carries what the routes answer (a status, a code, extra
 // fields), and is rare: boxing it would only make each core wordier.

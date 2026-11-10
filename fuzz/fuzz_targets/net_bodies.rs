@@ -25,9 +25,9 @@ use xenonet_fuzz::net::{body_for, overlay, Choices};
 use xenonet_service::config::Config;
 use xenonet_service::cores::{Cores, State, R};
 use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
-use xenonet_wire_engine::engine::EngineCalls;
-use xenonet_wire_engine::network;
-use xenonet_wire_engine::world::World;
+use xenonet_runtime::engine::EngineCalls;
+use xenonet_runtime::network;
+use xenonet_runtime::world::World;
 
 const A: &str = "claude:aaaaaaaa-0001";
 const B: &str = "codex:cccccccc-0001";
@@ -82,10 +82,10 @@ impl State for Map {
         Ok(Value::Null)
     }
     fn live_ids(&self) -> R<Vec<(String, Value)>> {
-        Ok([A, B].iter().map(|id| ((*id).to_string(), json!(xenonet_wire_engine::js::now_ms()))).collect())
+        Ok([A, B].iter().map(|id| ((*id).to_string(), json!(xenonet_runtime::js::now_ms()))).collect())
     }
     fn live_info(&self, id: &str, _now: f64) -> R<Option<Value>> {
-        Ok([A, B].contains(&id).then(|| json!({ "lastEventAt": xenonet_wire_engine::js::now_ms(), "endedAt": null, "status": "tool", "needsYou": null, "edits": [] })))
+        Ok([A, B].contains(&id).then(|| json!({ "lastEventAt": xenonet_runtime::js::now_ms(), "endedAt": null, "status": "tool", "needsYou": null, "edits": [] })))
     }
     fn observed_live(&self, _id: &str) -> R<bool> {
         Ok(false)
@@ -129,7 +129,7 @@ fn engine() -> Engine {
     cores.state = Arc::new(Map { cwd: dir.join("home/atlas").to_string_lossy().into_owned() });
     let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
     let _in = runtime().enter();
-    let w = xenonet_wire_engine::world(&cores, &mut config, &env).expect("the engine's parts");
+    let w = xenonet_runtime::world(&cores, &mut config, &env).expect("the engine's parts");
     let net = Arc::new(FakeNet::default());
     network::set_net(&w, net.clone());
     Engine { dir, w, net, runs: 0, last: 0.0 }
@@ -160,7 +160,7 @@ fn body(kind: Kind, c: &mut Choices<'_>) -> Value {
         Kind::Presence => {
             let agents: Vec<Value> = (0..c.below(4)).map(|_| json!({ "id": *c.pick(&["claude:bbbbbbbb-0001", "actor:wren", "@studio:claude:aaaaaaaa-0001", "actor:you", "codex:x", "claude:"]), "title": String::from_utf8_lossy(c.chunk()), "repoKey": "github.com/acme/atlas", "cwd": "~/atlas", "state": "working" })).collect();
             b["agents"] = Value::Array(agents);
-            b["counter"] = json!(xenonet_wire_engine::js::now_ms() + f64::from(c.u16()));
+            b["counter"] = json!(xenonet_runtime::js::now_ms() + f64::from(c.u16()));
         }
         _ => {}
     }
@@ -214,7 +214,7 @@ fuzz_target!(|data: &[u8]| {
         let from = *c.pick(&["laptop", "laptop", "desk", "vm1"]);
         let window = HOSTS.iter().find(|(h, _)| *h == from).is_some_and(|(_, win)| *win) || c.rarely(16);
         let b = body(kind, &mut c);
-        let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: xenonet_wire_engine::js::now_ms(), from_window_host: window };
+        let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: xenonet_runtime::js::now_ms(), from_window_host: window };
         xenonet_fuzz::run(data, || network::receive(w, incoming.clone()));
         landed_as_theirs(w, &mut e.last, from, window, &b);
         if c.is_empty() {

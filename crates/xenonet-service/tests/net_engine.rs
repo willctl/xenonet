@@ -28,6 +28,7 @@ use xenonet_api::wire::WireEnv;
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_os::log::Log;
+use xenonet_runtime::runtime::Runtime;
 use xenonet_service::a2a::{A2a, A2aCores, A2aParts, Limits};
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
@@ -35,7 +36,6 @@ use xenonet_service::gateway::actor_gateway::{ActorGateway, GatewayCores, Gatewa
 use xenonet_service::gateway::network::NetService;
 use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
-use xenonet_wire_engine::runtime::Runtime;
 
 const S1: &str = "claude:aaaaaaaa-0001";
 const L1: &str = "claude:bbbbbbbb-0001";
@@ -274,7 +274,7 @@ impl Host {
         cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone() });
         let env = WireEnv::new("0.0.0-test");
         // As the binary's serve closure gives the engine its settings.
-        let setup = xenonet_wire_engine::runtime::Setup {
+        let setup = xenonet_runtime::runtime::Setup {
             demo: config.demo,
             actors: config.actors,
             port: config.port,
@@ -286,13 +286,15 @@ impl Host {
             runs_bin: config.runs_bin.clone(),
             permission_hold_ms: config.permission_hold_ms,
             launcher_exec: config.launcher_exec.clone(),
-            made_up: xenonet_wire_engine::actors::MadeUp::none(),
+            made_up: xenonet_runtime::actors::MadeUp::none(),
         };
-        let world = xenonet_wire_engine::wire(&mut cores, setup, &env).expect("the engine's parts");
+        // The real adapters, as the binary installs them at start.
+        xenonet_platforms::install();
+        let world = xenonet_runtime::wire(&mut cores, setup, &env).expect("the engine's parts");
         // As the binary's serve closure plugs it.
         let plugged = world.clone();
         cores.on_net = Some(Arc::new(move |svc: &dyn NetLink| {
-            svc.sinks().set(xenonet_wire_engine::network::plug(&plugged, svc.net()));
+            svc.sinks().set(xenonet_runtime::network::plug(&plugged, svc.net()));
         }));
         cores.verify = Arc::new(You);
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -851,7 +853,7 @@ async fn actors_reach_actors_on_other_machines() {
     let id = unread["id"].as_f64().unwrap();
     let receipt = || a.world.store.with(|s| s.net_deliveries(id).unwrap().first().and_then(|d| d.text("receipt").map(str::to_string)));
     until("the stored receipt", 10, || async { receipt().as_deref() == Some("stored") }).await;
-    xenonet_wire_engine::network::unread_at(&a.world, now_ms() + 8.0 * 24.0 * 3600e3);
+    xenonet_runtime::network::unread_at(&a.world, now_ms() + 8.0 * 24.0 * 3600e3);
     assert_eq!(receipt().as_deref(), Some("unread"));
     assert_eq!(texts(&b.ctx.cores.engine.inbox(&kite, Duration::ZERO).await.unwrap()), ["Are you there?"]);
     until("the seen receipt after unread", 10, || async { receipt().as_deref() == Some("seen") }).await;
@@ -1038,7 +1040,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     // A start as you that studio couldn't check by its window key (from a
     // terminal on Linux or Windows, had the route let it go) is refused by
     // desk, which takes you only strongly checked.
-    let weak = xenonet_wire_engine::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
+    let weak = xenonet_runtime::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
     assert_eq!(weak.map(|v| v["state"].clone()), Ok(json!("sent")));
     let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
     assert_eq!(refused["reason"], "a start as you comes only from a window host's console, checked by its window key", "{refused}");
@@ -1151,7 +1153,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let (_, v) = a.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hello" })).await;
     let mid = v["request"].as_str().unwrap().to_string();
     let _ = studio.next("start", 15, |d| d["state"] == "started").await;
-    xenonet_wire_engine::network::receive(
+    xenonet_runtime::network::receive(
         &a.world,
         xenonet_model::ops::Incoming {
             from: "laptop".into(),
@@ -1295,7 +1297,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     // An answer whose frame can't go (to a machine that isn't in the
     // network) leaves the ask on the console, to answer again.
     let ghost = json!({ "op": "ask", "id": "ask_ghost", "session": "claude:x", "tool": "Bash", "input": "ls", "at": now_ms(), "until": now_ms() + 60e3 });
-    xenonet_wire_engine::asks::ask_in(&b.world, "ghost", &ghost.to_string());
+    xenonet_runtime::asks::ask_in(&b.world, "ghost", &ghost.to_string());
     let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": "ask_ghost", "decision": "allow" })).await;
     assert_ne!(s, 200, "{v}");
     assert!(shown(&b).await.iter().any(|x| x["id"] == "ask_ghost"), "kept to answer again");

@@ -7,7 +7,7 @@ use crate::out::Fail;
 use crate::sys;
 use serde_json::Value;
 use xenonet_engine::delivery::{opencode, setup, Files};
-use xenonet_wire_engine::fs;
+use xenonet_runtime::fs;
 
 /// How long a session listens after its turns (LISTEN_SECONDS).
 const LISTEN_SECONDS: f64 = 300.0;

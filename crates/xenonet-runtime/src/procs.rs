@@ -1,0 +1,243 @@
+//! The process lookups (crates/xenonet-engine/src/procs.rs) on this
+//! machine: the commands Rust asks for (ps, netstat, lsof, codesign,
+//! plutil, pgrep) run here, with start times in English and UTC and text
+//! as UTF-8 whatever XenoNet's own environment says, five seconds each at
+//! most. A command asked for while the same one runs waits for that one's
+//! answer.
+
+use crate::exec::{self, Spec};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, Condvar, Mutex};
+use xenonet_engine::procs::{Call, Failure, Io, Link, PidMap, Procs, Product, Row};
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number;
+use xenonet_text::time::now_ms;
+
+pub type Answer = Result<String, Failure>;
+
+/// A run under way, which others asking for the same command wait on.
+#[derive(Default)]
+struct Slot {
+    done: Mutex<Option<Answer>>,
+    ready: Condvar,
+}
+
+/// The machine's process table and what's read of it, shared by the
+/// verifier, the observers and delivery.
+pub struct System {
+    pub procs: Procs,
+    /// The process found on the other end of each connection, by its id
+    /// (`Peer::conn`), kept for the connection's next requests.
+    peers: Mutex<HashMap<u64, Value>>,
+    running: Mutex<HashMap<String, Arc<Slot>>>,
+    /// What runs a command: the system, or a test's made-up machine.
+    runner: Runner,
+}
+
+/// A command's answer, from the machine or a test's stand-in for it.
+pub type Runner = Box<dyn Fn(&Call) -> Answer + Send + Sync>;
+
+fn spec_of(c: &Call) -> Spec {
+    let mut s = Spec::new(&c.file, &c.args, 5000);
+    s.env = vec![("LC_TIME".into(), Some("C".into())), ("LC_CTYPE".into(), Some("UTF-8".into())), ("TZ".into(), Some("UTC".into())), ("LC_ALL".into(), None)];
+    s
+}
+
+fn answer(r: Result<String, exec::Failed>) -> Answer {
+    r.map_err(|f| Failure { message: f.message, stdout: Some(f.stdout) })
+}
+
+impl System {
+    pub fn new() -> Arc<System> {
+        // procs' own calls on Linux and Windows are read from the system
+        // itself; the rest are commands.
+        System::with(crate::runtime::platform(), Box::new(|c| xenonet_engine::procs_native::answer(c).unwrap_or_else(|| answer(exec::run(&spec_of(c))))))
+    }
+
+    /// The lookups with commands run by `runner`, as if on `platform`.
+    pub fn with(platform: &str, runner: Runner) -> Arc<System> {
+        Arc::new(System { procs: Procs::new(platform), peers: Mutex::new(HashMap::new()), running: Mutex::new(HashMap::new()), runner })
+    }
+
+    fn run(&self, c: &Call) -> Answer {
+        let Some(key) = c.share.clone() else { return (self.runner)(c) };
+        let (slot, mine) = {
+            let mut r = self.running.locked();
+            match r.get(&key) {
+                Some(s) => (s.clone(), false),
+                None => {
+                    let s = Arc::new(Slot::default());
+                    r.insert(key.clone(), s.clone());
+                    (s, true)
+                }
+            }
+        };
+        if !mine {
+            let mut done = slot.done.locked();
+            loop {
+                if let Some(answer) = done.clone() {
+                    return answer;
+                }
+                done = slot.ready.wait(done).unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+        }
+        let out = (self.runner)(c);
+        *slot.done.locked() = Some(out.clone());
+        slot.ready.notify_all();
+        self.running.locked().remove(&key);
+        out
+    }
+
+    /// The commands and the clock, for one lookup.
+    pub fn io(&self) -> SystemIo<'_> {
+        SystemIo(self)
+    }
+}
+
+pub struct SystemIo<'a>(&'a System);
+
+impl Io for SystemIo<'_> {
+    fn exec(&mut self, call: Call) -> Answer {
+        self.0.run(&call)
+    }
+    fn exec_all(&mut self, calls: Vec<Call>) -> Vec<Answer> {
+        if calls.len() <= 1 {
+            return calls.into_iter().map(|c| self.0.run(&c)).collect();
+        }
+        let sys = self.0;
+        std::thread::scope(|s| {
+            let hs: Vec<_> = calls.iter().map(|c| s.spawn(move || sys.run(c))).collect();
+            hs.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(Failure { message: "the command's thread failed".into(), stdout: None }))).collect()
+        })
+    }
+    fn now(&mut self) -> f64 {
+        now_ms()
+    }
+}
+
+fn product_json(p: Option<Product>) -> Value {
+    p.map_or(Value::Null, Product::json)
+}
+
+/// A table as a Map's [pid, row] pairs.
+pub fn table_json(t: &PidMap<Row>) -> Value {
+    Value::Array(t.iter().map(|(pid, r)| json!([number(*pid), Value::Object(r.json())])).collect())
+}
+
+/// A number a field holds, or none (NaN), which names no process.
+fn num_of(o: &Value, k: &str) -> f64 {
+    o.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN)
+}
+
+fn text_of(o: &Value, k: &str) -> String {
+    match o.get(k) {
+        None | Some(Value::Null) => String::new(),
+        Some(v) => xenonet_text::text::display(v),
+    }
+}
+
+/// A row as a call gives it: `{ pid, start, program }`, and `ppid` when it
+/// has one.
+fn row_of(o: &Value) -> Row {
+    Row { pid: num_of(o, "pid"), ppid: num_of(o, "ppid"), start: num_of(o, "start"), program: text_of(o, "program") }
+}
+
+/// A process of a chain as a verdict's JSON gives it, read back: its row,
+/// `exe` as given (absent, null or a path), and the agent or product it
+/// was taken for, among the ones XenoNet knows.
+pub fn link_of(o: &Value) -> Link {
+    let exe = o.get("exe").map(|e| e.as_str().map(str::to_string));
+    let agent = o.get("agent").and_then(Value::as_str).and_then(|a| xenonet_engine::processes::agent(a)).map(|a| a.id);
+    let product = o.get("product").filter(|p| p.is_object()).and_then(|p| {
+        let id = xenonet_adapter::products::product_of(p.get("product")?.as_str()?)?.id;
+        let role = match p.get("role")?.as_str()? {
+            "host" => "host",
+            "tui" => "tui",
+            "app" => "app",
+            _ => return None,
+        };
+        Some(Product { product: id, role })
+    });
+    Link { row: row_of(o), exe, agent, product }
+}
+
+/// What a census reads, as an observer gets it: the table's [pid, row]
+/// pairs and what each process is.
+pub fn census(sys: &System) -> Result<Value, String> {
+    let t = sys.procs.census(&mut sys.io())?;
+    let Some(t) = t else { return Ok(json!({ "table": [], "of": [] })) };
+    let of: Vec<Value> = t
+        .iter()
+        .map(|(_, r)| {
+            let (agent, product) = sys.procs.of(r);
+            json!({ "agent": agent, "product": product_json(product) })
+        })
+        .collect();
+    Ok(json!({ "table": table_json(&t), "of": of }))
+}
+
+/// The process on the other end of a connection (`conn`, by its ports), or
+/// null. What's found is kept for the connection's next requests, so a
+/// connection asks netstat (on Windows) once. Connection ids are never reused, so what's kept can't
+/// stand for another connection.
+pub fn peer_of(sys: &System, conn: u64, local_port: u16, remote_port: u16) -> Value {
+    let kept = sys.peers.locked().get(&conn).cloned();
+    let (pid, keep) = sys.procs.peer(&mut sys.io(), Some(&Value::from(local_port)), Some(&Value::from(remote_port)), kept.as_ref());
+    if keep {
+        let mut peers = sys.peers.locked();
+        if peers.len() > 1024 {
+            peers.clear();
+        }
+        peers.insert(conn, pid.clone());
+    }
+    pid
+}
+
+#[cfg(test)]
+mod peers {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn a_connections_process_is_looked_up_once_and_kept_for_its_next_requests() {
+        // A made-up Windows, whose netstat names 22 for the connection from
+        // port 51000, and is counted.
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        let sys = System::with(
+            "win32",
+            Box::new(|c| {
+                ASKED.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(c.file, "netstat");
+                Ok("  TCP    127.0.0.1:51000        127.0.0.1:47840        ESTABLISHED     22\r\n".into())
+            }),
+        );
+        assert_eq!(peer_of(&sys, 7, 47840, 51000), json!(22));
+        assert_eq!(peer_of(&sys, 7, 47840, 51000), json!(22));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 1, "kept for the connection's next requests");
+        assert_eq!(peer_of(&sys, 8, 47840, 51000), json!(22));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 2, "another connection is looked up afresh");
+        // A lookup that found nothing isn't kept: it's tried again.
+        assert_eq!(peer_of(&sys, 9, 47840, 51001), Value::Null);
+        assert_eq!(peer_of(&sys, 9, 47840, 51001), Value::Null);
+        assert_eq!(ASKED.load(Ordering::SeqCst), 4);
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn this_process_and_the_ones_above_it() {
+        let sys = System::new();
+        let me = f64::from(std::process::id());
+        let chain = sys.procs.chain(&mut sys.io(), Some(me), true, true).unwrap();
+        assert_eq!(chain[0].row.pid, me);
+        assert!(chain[0].exe.as_ref().is_some_and(Option::is_some), "{chain:?}");
+        let first = &chain[0].row;
+        assert!(sys.procs.alive(&mut sys.io(), first.pid, first.start).unwrap());
+        assert!(sys.procs.cwd(&mut sys.io(), me).is_some());
+        assert!(sys.procs.supported);
+    }
+}

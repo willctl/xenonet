@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-state"
-description = "The map's data and what XenoNet remembers: state.json and its versions, and, as the port goes on, the graph, search and stats; and the checks of what the decision model answers."
+description = "The map's data and what XenoNet remembers: state.json and its versions, the graph, search and stats, the checks of what the decision model answers; and the map's runtime, which refreshes the map from the vendor files, tails them live and drives the demo's world."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,16 +10,32 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 getrandom.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tokio.workspace = true
 xenonet-adapter.workspace = true
+# The cores' traits the runtime implements, and the service's events.
+xenonet-api.workspace = true
+xenonet-blocks.workspace = true
+# The settings file the runtime's settings are read from.
+xenonet-components.workspace = true
+# The demo's made-up world, used by runtime::demo alone.
+xenonet-demo.workspace = true
 xenonet-model.workspace = true
 xenonet-os.workspace = true
+xenonet-schema.workspace = true
 xenonet-text.workspace = true
 xenonet-sources.workspace = true
+
+# tests/golden.rs reads the search index's documents back, the tests read
+# transcripts through the adapters' readers, and two archive a transcript.
+[dev-dependencies]
+ruzstd.workspace = true
+xenonet-platforms.workspace = true
 
 [lints]
 workspace = true

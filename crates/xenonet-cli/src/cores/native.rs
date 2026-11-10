@@ -1,6 +1,6 @@
 //! What the cores ask of this machine: a program run as execFile runs it,
 //! a CLI found on PATH, and a GET to a server on this machine. Files are
-//! read and written through xenonet-wire-engine's fs, with their errors
+//! read and written through xenonet-runtime's fs, with their errors
 //! worded as Node words them.
 
 use std::io::{Read, Write};

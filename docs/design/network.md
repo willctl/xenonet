@@ -44,7 +44,7 @@ a second way to look at a machine. The guide is
 ## As built
 
 Built, each with its tests (`crates/xenonet-net`, the service's front door
-and `/api/net`, `crates/xenonet-wire-engine/src/network.rs`, the console's
+and `/api/net`, `crates/xenonet-runtime/src/network.rs`, the console's
 Network panel, A2A in `crates/xenonet-service/src/a2a`):
 
 - The seam, keys, signing and sealing, frames, the roster chain, tickets,
@@ -85,7 +85,7 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
     every half second within it. `seq` counts within the subscription: a
     hole, or a `gap`, makes the console ask for a fresh snapshot.
   - The serving side is the service's relay
-    (`crates/xenonet-wire-app/src/hosts/relay.rs`), which runs
+    (`crates/xenonet-hosts/src/runtime/relay.rs`), which runs
     `xenonet_hosts::relay::Producer`, the SSH relay's shaping, in-process:
     it follows this machine's own view of its events from the event
     stream, and reads its own API as a 127.0.0.1 client with no window key
@@ -109,7 +109,7 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   - The subscribing side is the hub, now always built: hosts.json's hosts
     over SSH with `XENONET_HOSTS=1`, and the roster's always, each a link
     whose transport is the network (`link::Start::Network`,
-    `crates/xenonet-wire-app/src/hosts/transport.rs`). The link's states,
+    `crates/xenonet-hosts/src/runtime/transport.rs`). The link's states,
     the merge, the declared-field cleaning and the caps are the SSH
     links'. A window host's hub subscribes only while a console is open
     there (Desktop's window shown, or a page reading the event stream). A

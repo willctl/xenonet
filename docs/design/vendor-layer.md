@@ -41,7 +41,7 @@ Apps reach XenoNet in three ways:
 | Way in | Apps | Where they're known |
 |---|---|---|
 | Tailed and connected | Claude Code: its transcripts, sessions listed through the Agent SDK and Claude desktop's files, plan usage from Anthropic's API and Claude desktop. Codex: its rollouts, threads through `codex app-server`, projects from its state database | `core/lines.js`, `live.js`, `stats.js`, `search.js`, `claude.js`, `codex.js`, `identities.js`, `engine/connect.js`, `delivery/*`, `procs.js`, `engine/verify.js`, `open.js`, `doctor/`, `mcp/xenonet.js`, and their Rust twins |
-| Experimental native readers, on only when `XENONET_READERS` names them | OpenCode, Gemini CLI, Copilot CLI, Cursor | `core/native/*.js`, `crates/xenonet-sources/src/native/*`, wired in `core/state.js` and `crates/xenonet-wire-map/src/observed.rs` |
+| Experimental native readers, on only when `XENONET_READERS` names them | OpenCode, Gemini CLI, Copilot CLI, Cursor | `core/native/*.js`, `crates/xenonet-sources/src/native/*`, wired in `core/state.js` and `crates/xenonet-state/src/runtime/observed.rs` |
 | Observed or reported runs | about 20 more apps through numbat's records and actors' reports | `core/numbat.js` (with its own app names and a version allowlist), `core/reported-runs.js` |
 
 The first two read vendor data checked against vendor schemas as
@@ -53,7 +53,7 @@ What they map into:
 | Shape | JS | Rust |
 |---|---|---|
 | A session (`session/v1`) | `core/schema/session.js`, whose app enum already lists every app in `SESSION_APPS` | No struct: ordered key lists (`sources/src/codex.rs` `Obj`, `native/mod.rs` `Out`), in each app's own key order. Claude's go through a function named `codex_obj` |
-| A transcript line | `ClaudeLine`, `CodexLine` through a `Normalizer` | `sources/src/lines.rs`; `wire-map/src/vendor.rs` holds exactly two normalizers, picked by `codex: bool` |
+| A transcript line | `ClaudeLine`, `CodexLine` through a `Normalizer` | `sources/src/lines.rs`; `state/src/runtime/vendor.rs` holds exactly two normalizers, picked by `codex: bool` |
 | One call's tokens | `{ input, cacheRead, cacheWrite5m, cacheWrite1h, output }`, as stats and pricing take it; `ClaudeLine.usage` adds `cacheWrite` and `fast` | Three shapes and a wrapper: `lines::Usage`, `pricing::Tokens` (wrapped by `telemetry::Call`), `stats::Event.tokens` |
 | A stats event | `stats.js` `claudeEvents` (call, tool, result, prompt, end, spawn, task, compact) and `codexEvents` (prompt, end, call, tool, result) | `state/src/stats.rs` |
 | Plan limits | Claude's and Codex's own shapes in `live/snapshot/v1` | The same |
@@ -69,7 +69,7 @@ What repeats:
 - Source names are kept in six tables: `core/drift.js`, `drift.rs`,
   `scripts/provider-drift/registry.mjs` (which is already a registry of
   providers, with their sources, release feeds and inspectors), the
-  readers, `observed.rs` and `wire-map/src/vendor.rs`.
+  readers, `observed.rs` and `state/src/runtime/vendor.rs`.
 - The Rust binary keeps two drift-reader pools, so the drift report lists
   no read counts or versions for what the actors' observers read (their
   drift itself is logged).
@@ -275,7 +275,7 @@ prefix). Per-app tool lists would change today's categories, so
 **Other readers of transcripts** stay outside the stream, as session or
 identity sources reading through the normalizer: the console's Codex
 thread from its rollout (`readRolloutPage`), the Agent SDK's listing as
-the binary reads it (`wire-map/src/sdk.rs`), and `identities.js`'s
+the binary reads it (`adapters/claude-code/src/reader/sdk.rs`), and `identities.js`'s
 transcript owner.
 
 **Native readers** keep their session-level shape (section 4). One with
@@ -306,7 +306,7 @@ In Rust, with the JS shapes they mirror:
   native readers use it and keep their own records (live's
   `{ path, kind, diff }`, the engine's `{ ts, path }`). Live left out
   `*** Move to:` until step 6, and reads it too now.
-- **One drift-reader pool**: `wire-map`'s `Vendor` is made once and
+- **One drift-reader pool**: the map runtime's `Vendor` is made once and
   handed to the actors' observers, which drop their own pool.
 
 ## 4. Capabilities
@@ -317,8 +317,8 @@ In Rust these are traits; in JS, objects with the same methods:
 
 | Capability (`has`) | What it does | Today |
 |---|---|---|
-| `lines` | The sampling hooks (`kindOf`, `versionOf`), the mapper, which files are its transcripts and the session id of each (for each reader, as `blocks.md` records), and a session's files from its id, as stats needs | `lines.js`, `lines.rs`, `wire-map/src/vendor.rs`, `live.js` `classify`, `stats.js`, `search.js` |
-| `sessions` | List sessions, rename one, read its transcript; for Claude Code through the Agent SDK and Claude desktop's files, for Codex through `codex app-server` (with its lifecycle and its state database's projects) | `claude.js`, `codex.js`, `wire-map/src/sdk.rs`, `wire-map/src/codex.rs` |
+| `lines` | The sampling hooks (`kindOf`, `versionOf`), the mapper, which files are its transcripts and the session id of each (for each reader, as `blocks.md` records), and a session's files from its id, as stats needs | `lines.js`, `lines.rs`, `state/src/runtime/vendor.rs`, `live.js` `classify`, `stats.js`, `search.js` |
+| `sessions` | List sessions, rename one, read its transcript; for Claude Code through the Agent SDK and Claude desktop's files, for Codex through `codex app-server` (with its lifecycle and its state database's projects) | `claude.js`, `codex.js`, `adapters/claude-code/src/reader/sdk.rs`, `adapters/codex/src/reader/app_server.rs` |
 | `native` | `read`, `sessions`, `live`, `ids`, `status` | `core/native/*.js`; the `Reader` enum's five variants in `observed.rs` (four readers and numbat) |
 | `connect` | Preview, apply and remove XenoNet's entries in one config format | `engine/connect.js`, `connect.rs` (`Kind::Claude`, `Kind::Codex`) |
 | `delivery` | Resume a turn (with the environment it keeps), or reach a running session | `delivery/resume.js`, `channel.js`, `opencode.js`, `router.js` |

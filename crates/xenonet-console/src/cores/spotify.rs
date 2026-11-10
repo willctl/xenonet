@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xenonet_actors::secrets::Secrets;
 use xenonet_api::cores::{CoreError, Kind, Spotify, R};
 use xenonet_api::wire::Emitter;
 use xenonet_os::sync::Locked;
 use xenonet_text::time::now_ms;
-use xenonet_wire_app::secrets::Secrets;
 
 fn spotify_error(e: SpotifyError) -> CoreError {
     CoreError::of(Kind::Spotify, e.status, e.code, e.message)

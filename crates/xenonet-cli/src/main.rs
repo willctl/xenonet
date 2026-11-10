@@ -147,9 +147,9 @@ fn serve(args: &[String]) -> i32 {
         Box::new(|config, env| {
             let mut cores = xenonet_api::cores::Cores::pending(config.actors, config.assistant, config.hosts);
             let home = config.home.clone();
-            let demo = xenonet_wire_map::demo_world(&mut cores, config.demo, config.port);
+            let demo = xenonet_state::runtime::demo_world(&mut cores, config.demo, config.port);
             config.take_world(&*cores.demo);
-            let map = xenonet_wire_map::Settings {
+            let map = xenonet_state::runtime::Settings {
                 demo: config.demo,
                 dev: config.dev,
                 home,
@@ -157,8 +157,8 @@ fn serve(args: &[String]) -> i32 {
                 root: config.root.clone(),
                 world: config.world.clone(),
             };
-            xenonet_wire_map::wire(&mut cores, &map, demo, env);
-            let setup = xenonet_wire_engine::runtime::Setup {
+            xenonet_state::runtime::wire(&mut cores, &map, demo, env);
+            let setup = xenonet_runtime::runtime::Setup {
                 demo: config.demo,
                 actors: config.actors,
                 port: config.port,
@@ -170,16 +170,18 @@ fn serve(args: &[String]) -> i32 {
                 runs_bin: config.runs_bin.clone(),
                 permission_hold_ms: config.permission_hold_ms,
                 launcher_exec: config.launcher_exec.clone(),
-                made_up: xenonet_wire_engine::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
+                made_up: xenonet_runtime::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
             };
             // The engine's world, which the network's link plugs into once
             // the service has made it.
-            if let Some(world) = xenonet_wire_engine::wire(&mut cores, setup, env) {
+            let connect = xenonet_service::compose::connect::ConnectDriver::new(&setup);
+            if let Some(world) = xenonet_runtime::wire(&mut cores, setup, env) {
+                cores.connect = std::sync::Arc::new(connect);
                 cores.on_net = Some(std::sync::Arc::new(move |svc: &dyn NetLink| {
-                    svc.sinks().set(xenonet_wire_engine::network::plug(&world, svc.net()));
+                    svc.sinks().set(xenonet_runtime::network::plug(&world, svc.net()));
                 }));
             }
-            let app = xenonet_wire_app::Settings {
+            let app = xenonet_service::compose::app::Settings {
                 demo: config.demo,
                 dev: config.dev,
                 port: config.port,
@@ -194,7 +196,7 @@ fn serve(args: &[String]) -> i32 {
                 hosts: config.hosts,
                 world: config.world.clone(),
             };
-            xenonet_wire_app::wire(&mut cores, &app, env);
+            xenonet_service::compose::app::wire(&mut cores, &app, env);
             xenonet_console::wire(&mut cores, config.demo, config.port, &config.state_dir, env);
             // The terminal drawer's shells live in the service.
             cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());

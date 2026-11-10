@@ -3,7 +3,8 @@
 //! native readers' contract and numbat's, what the transcripts say as
 //! they're written (`live`), Codex's archived rollouts (`archive`), Grok
 //! Build's usage ledger (`grok`), the shared context (`xenolith`, `wiki`),
-//! plan usage and refusals.
+//! plan usage and refusals (with the service's Refusals core,
+//! `refusals::runtime`).
 
 pub mod archive;
 pub mod claude_usage;
