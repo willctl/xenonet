@@ -1,7 +1,7 @@
 //! This machine in its network (docs/design/network.md, sections 3, 4 and
 //! 9): its key, its copy of the roster, its link to the gateway, and, on
 //! the gateway's own host, the gateway. It's what the engine sees through
-//! `xenonet_base::network::Net`, and it calls the engine's `Sink` with
+//! `xenonet_model::ops::Net`, and it calls the engine's `Sink` with
 //! what arrives, after checking each frame's signature against its own
 //! roster, opening it and dropping repeats.
 //!
@@ -27,9 +27,9 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, Weak};
 use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
-use xenonet_base::ids::is_host_id;
-use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
-use xenonet_base::sync::{Locked, ReadWrite};
+use xenonet_model::ids::is_host_id;
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
+use xenonet_os::sync::{Locked, ReadWrite};
 
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
@@ -94,7 +94,7 @@ impl Options {
     }
 }
 
-pub use xenonet_base::time::now_ms;
+pub use xenonet_text::time::now_ms;
 
 /// How the link stands.
 #[derive(Debug, Clone)]
@@ -153,7 +153,7 @@ pub struct Peer {
     /// Who may start and wake sessions there, and the widenings that wait,
     /// as its presence last said (`network/presence/v1`'s reach).
     pub reach: Option<Value>,
-    /// What it takes beyond messages (`xenonet_base::network::CAN`).
+    /// What it takes beyond messages (`xenonet_model::ops::CAN`).
     pub can: Vec<String>,
 }
 
@@ -653,7 +653,7 @@ impl Shared {
 
     fn set_removed(&self, info: Value) {
         let by = info.get("by").and_then(Value::as_array).map(|b| b.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" and ")).unwrap_or_default();
-        let at = info.get("at").and_then(Value::as_f64).map(xenonet_base::time::iso).unwrap_or_default();
+        let at = info.get("at").and_then(Value::as_f64).map(xenonet_text::time::iso).unwrap_or_default();
         let words = format!("Removed on {} by {by}. Run xenonet net leave.", at.get(..10).unwrap_or(&at));
         self.status.locked().removed = Some(info);
         self.set("removed", Some(&words));
@@ -1324,11 +1324,11 @@ impl Net for Shared {
         self.network().is_some_and(|n| self.roster().view_ref().is_some_and(|v| v.is_window(&n.host)))
     }
 
-    fn reach(&self) -> xenonet_base::network::Reach {
-        let Some(n) = self.network() else { return xenonet_base::network::Reach::default() };
+    fn reach(&self) -> xenonet_model::ops::Reach {
+        let Some(n) = self.network() else { return xenonet_model::ops::Reach::default() };
         let now = self.now();
         let pending = self.widens.locked().iter().filter(|w| now - w.at < crate::operator::WIDEN_MS).map(crate::operator::Widen::to_json).collect();
-        xenonet_base::network::Reach { start: n.start, wake: n.wake, pending, delegated: n.delegated.map(|d| (d.by, d.at)) }
+        xenonet_model::ops::Reach { start: n.start, wake: n.wake, pending, delegated: n.delegated.map(|d| (d.by, d.at)) }
     }
 
     fn host_can(&self, host: &str, what: &str) -> bool {
@@ -1799,10 +1799,10 @@ impl Node {
     pub fn settings(&self, change: Change) -> R<Value> {
         let Change { titles_only, share_load, lan, start, wake } = change;
         let n = &self.shared;
-        if start.as_deref().is_some_and(|s| !xenonet_base::network::STARTS.contains(&s)) {
+        if start.as_deref().is_some_and(|s| !xenonet_model::ops::STARTS.contains(&s)) {
             return Err(NetError::bad("start is off, you, network or delegate"));
         }
-        if wake.as_deref().is_some_and(|w| !xenonet_base::network::WAKES.contains(&w)) {
+        if wake.as_deref().is_some_and(|w| !xenonet_model::ops::WAKES.contains(&w)) {
             return Err(NetError::bad("wake is consent or network"));
         }
         {
@@ -1882,10 +1882,10 @@ impl Node {
         if a.is_empty() {
             return Err(NetError::bad("say what to set: start or wake, or approve a change that waits"));
         }
-        if a.get("start").and_then(Value::as_str).is_some_and(|s| !xenonet_base::network::STARTS.contains(&s)) {
+        if a.get("start").and_then(Value::as_str).is_some_and(|s| !xenonet_model::ops::STARTS.contains(&s)) {
             return Err(NetError::bad("start is off, you, network or delegate"));
         }
-        if a.get("wake").and_then(Value::as_str).is_some_and(|w| !xenonet_base::network::WAKES.contains(&w)) {
+        if a.get("wake").and_then(Value::as_str).is_some_and(|w| !xenonet_model::ops::WAKES.contains(&w)) {
             return Err(NetError::bad("wake is consent or network"));
         }
         self.operator(host, "settings", Value::Object(a), checked, strong)?;
@@ -1968,7 +1968,7 @@ impl Node {
                 // Who may start and wake sessions there, and what it takes:
                 // null and none for a host whose XenoNet doesn't say.
                 "reach": if me { n.reach().to_json() } else { p.and_then(|p| p.reach.clone()).unwrap_or(Value::Null) },
-                "can": if me { json!(xenonet_base::network::CAN) } else { json!(p.map(|p| p.can.clone()).unwrap_or_default()) },
+                "can": if me { json!(xenonet_model::ops::CAN) } else { json!(p.map(|p| p.can.clone()).unwrap_or_default()) },
             }));
         }
         // The gateway's host lists every ticket that waits; another window

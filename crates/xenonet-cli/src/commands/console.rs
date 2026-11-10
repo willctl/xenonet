@@ -20,7 +20,7 @@ pub const INSTALLED: bool = matches!(env!("XENONET_COMPONENT").as_bytes(), b"too
 /// A step's word, as the command prints it: text as it is, anything else
 /// as JSON.
 pub fn said(v: &Value) -> String {
-    v.as_str().map_or_else(|| xenonet_base::json::stringify(v, 0), str::to_string)
+    v.as_str().map_or_else(|| xenonet_text::json::stringify(v, 0), str::to_string)
 }
 
 pub fn run(args: &[String], flags: &Flags) -> Done {

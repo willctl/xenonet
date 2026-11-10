@@ -48,7 +48,7 @@ pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError>
             Some(d) => d.as_array().and_then(|l| l.iter().find(|r| r["id"] == json!(id)).cloned()),
             None => refusals.get(id)?,
         };
-        let Some(record) = record.filter(|r| xenonet_base::text::truthy(r.get("context"))) else {
+        let Some(record) = record.filter(|r| xenonet_text::text::truthy(r.get("context"))) else {
             return Ok(Some(Reply::error(404, "No saved request for this record.")));
         };
         if demo.is_some() {
@@ -68,7 +68,7 @@ pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError>
                 return Some(Err(()));
             }
             let text = std::fs::read_to_string(&file).ok()?;
-            xenonet_base::json::parse(&text).ok().map(Ok)
+            xenonet_text::json::parse(&text).ok().map(Ok)
         };
         return Ok(Some(match read() {
             Some(Ok(request)) => Reply::json(200, json!({ "request": request })),

@@ -11,9 +11,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
 use xenonet_adapter::apps::{is_session_app, session_apps};
-use xenonet_base::jsstr;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::text::js_trim;
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::trim;
+use xenonet_text::utf16;
 
 const STALE_MS: f64 = 3600e3;
 const ENDED_KEEP_MS: f64 = 10.0 * 60e3;
@@ -112,8 +112,8 @@ impl ReportedRuns {
         }
         let r = self.runs.get_mut(&id).expect("just added");
         r.updated_at = now;
-        if let Some(t) = title.map(js_trim).filter(|t| !t.is_empty()) {
-            r.title = Some(jsstr::head(&jsstr::collapse_space(t), 90));
+        if let Some(t) = title.map(trim).filter(|t| !t.is_empty()) {
+            r.title = Some(utf16::head(&utf16::collapse_space(t), 90));
         }
         r.ended_at = (presence == "ended").then_some(now);
         Ok(id)

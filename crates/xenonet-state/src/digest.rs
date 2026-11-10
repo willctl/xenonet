@@ -6,19 +6,19 @@ use serde_json::{json, Map, Value};
 use std::collections::hash_map::Entry;
 use std::fmt::Write as _;
 use std::path::Path;
-use xenonet_base::json::{number, number_string};
-use xenonet_base::jsstr;
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_text::json::{number, number_string};
+use xenonet_text::text::{display, to_number, truthy};
+use xenonet_text::utf16;
 
 fn base(p: &Value) -> String {
-    let s = js_string(p);
+    let s = display(p);
     s.rsplit(['\\', '/']).next().unwrap_or("").to_string()
 }
 
 // The value a template literal writes: "undefined" for one that isn't
 // there.
 fn tpl(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 fn num_text(n: f64) -> String {
@@ -31,7 +31,7 @@ fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
 
 // A JS Map key for a value: values of different types stay apart.
 fn map_key(v: Option<&Value>) -> String {
-    v.map_or_else(|| "u".into(), |v| xenonet_base::json::stringify(v, 0))
+    v.map_or_else(|| "u".into(), |v| xenonet_text::json::stringify(v, 0))
 }
 
 struct Per {
@@ -58,7 +58,7 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
     let mut order: Vec<String> = Vec::new();
     let mut per: std::collections::HashMap<String, Per> = std::collections::HashMap::new();
     for e in events {
-        let ts = js_number(get(e, "ts"));
+        let ts = to_number(get(e, "ts"));
         if ts < since || ts > until {
             continue;
         }
@@ -92,7 +92,7 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
             Some("tool") => {
                 s.tool_calls += 1.0;
                 let cat = tpl(get(e, "category"));
-                let n = s.tools.get(&cat).map_or(0.0, |v| js_number(Some(v)));
+                let n = s.tools.get(&cat).map_or(0.0, |v| to_number(Some(v)));
                 s.tools.insert(cat, number(n + 1.0));
                 if get(e, "category").and_then(Value::as_str) == Some("edit") {
                     for f in get(e, "files").and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
@@ -124,7 +124,7 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
             m.insert("title".into(), s.title.clone());
             m.insert("turns".into(), number(s.turns));
             m.insert("prompts".into(), number(s.prompts));
-            m.insert("tools".into(), Value::Object(jsstr::js_key_order(s.tools.clone())));
+            m.insert("tools".into(), Value::Object(utf16::key_order(s.tools.clone())));
             m.insert("toolCalls".into(), number(s.tool_calls));
             m.insert("files".into(), json!(s.files));
             m.insert("errors".into(), number(s.errors));
@@ -138,15 +138,15 @@ pub fn summarize<E>(events: &[Value], since: f64, until: f64, title_of: &mut dyn
             (s.tool_calls + s.turns * 5.0, Value::Object(m))
         })
         .collect();
-    xenonet_base::sort::sort_by(&mut sessions, |a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut sessions, |a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut t = [0.0f64; 6];
     for (_, s) in &sessions {
         t[0] += 1.0;
-        t[1] += js_number(s.get("turns"));
-        t[2] += js_number(s.get("toolCalls"));
+        t[1] += to_number(s.get("turns"));
+        t[2] += to_number(s.get("toolCalls"));
         t[3] += s["files"].as_array().map_or(0, Vec::len) as f64;
-        t[4] += js_number(s.get("errors"));
-        t[5] += js_number(s.get("subagents"));
+        t[4] += to_number(s.get("errors"));
+        t[5] += to_number(s.get("subagents"));
     }
     Ok(json!({
         "since": number(since),
@@ -165,8 +165,8 @@ pub fn long_date(ms: f64) -> String {
     if !ms.is_finite() || ms.abs() > 8.64e15 {
         return "Invalid Date".into();
     }
-    let days = ((ms + jsstr::local_offset_ms(ms)) / 86_400_000.0).floor() as i64;
-    let (_, m, d) = xenonet_base::time::civil_from_days(days);
+    let days = ((ms + utf16::local_offset_ms(ms)) / 86_400_000.0).floor() as i64;
+    let (_, m, d) = xenonet_text::time::civil_from_days(days);
     format!("{}, {} {d}", WEEKDAYS[days.rem_euclid(7) as usize], MONTHS[(m - 1) as usize])
 }
 
@@ -175,7 +175,7 @@ fn local_hour(ms: f64) -> Option<usize> {
     if !ms.is_finite() {
         return None;
     }
-    let local = ms + jsstr::local_offset_ms(ms);
+    let local = ms + utf16::local_offset_ms(ms);
     Some((local.rem_euclid(86_400_000.0) / 3_600_000.0).floor() as usize)
 }
 
@@ -194,7 +194,7 @@ pub struct DayHooks<'a, E> {
 /// dayLog(events, { now, titleOf, homeOf, nameOf, live, repos }): the
 /// day so far, from local midnight.
 pub fn day_log<E>(events: &[Value], now: f64, hooks: DayHooks<'_, E>, live: Option<&Value>, repos: &[Value]) -> Result<Value, E> {
-    let (midnight, _) = jsstr::local_day_bounds(now);
+    let (midnight, _) = utf16::local_day_bounds(now);
     let mut own = |id: &Value| Ok::<Value, E>(id.clone());
     let title_of: &mut dyn FnMut(&Value) -> Result<Value, E> = match hooks.title_of {
         Some(f) => f,
@@ -205,7 +205,7 @@ pub fn day_log<E>(events: &[Value], now: f64, hooks: DayHooks<'_, E>, live: Opti
     let mut projects: Vec<(Value, f64)> = Vec::new();
     let mut home_of = hooks.home_of;
     for e in events {
-        let ts = js_number(get(e, "ts"));
+        let ts = to_number(get(e, "ts"));
         if ts < midnight || get(e, "kind").and_then(Value::as_str) != Some("tool") {
             continue;
         }
@@ -225,9 +225,9 @@ pub fn day_log<E>(events: &[Value], now: f64, hooks: DayHooks<'_, E>, live: Opti
     }
     let max = hours.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let busiest = hours.iter().position(|&h| h == max).unwrap_or(0);
-    let today: Vec<&Value> = events.iter().filter(|e| js_number(get(e, "ts")) >= midnight).collect();
+    let today: Vec<&Value> = events.iter().filter(|e| to_number(get(e, "ts")) >= midnight).collect();
     let ts_of = |e: Option<&&Value>| e.and_then(|e| get(e, "ts")).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
-    xenonet_base::sort::sort_by(&mut projects, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut projects, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let mut top = Vec::new();
     let mut name_of = hooks.name_of;
     for (id, n) in projects.into_iter().take(5) {
@@ -251,7 +251,7 @@ pub fn day_log<E>(events: &[Value], now: f64, hooks: DayHooks<'_, E>, live: Opti
     out.insert("lastAt".into(), ts_of(today.last()));
     out.insert("topProjects".into(), Value::Array(top));
     out.insert("waiting".into(), Value::from(waiting));
-    out.insert("uncommitted".into(), Value::Array(repos.iter().filter(|r| js_number(get(r, "dirty")) > 0.0).cloned().collect()));
+    out.insert("uncommitted".into(), Value::Array(repos.iter().filter(|r| to_number(get(r, "dirty")) > 0.0).cloned().collect()));
     Ok(Value::Object(out))
 }
 
@@ -260,8 +260,8 @@ pub fn summary_text(sum: &Value, label: &str) -> String {
     let t = |k: &str| tpl(sum.get("totals").and_then(|t| get(t, k)));
     let mut lines = vec![format!("{label}: {} sessions, {} turns, {} tool calls, {} files edited, {} errors.", t("sessions"), t("turns"), t("toolCalls"), t("files"), t("errors"))];
     for s in sum.get("sessions").and_then(Value::as_array).map_or(&[][..], Vec::as_slice).iter().take(12) {
-        let tools = get(s, "tools").and_then(Value::as_object).map_or_else(String::new, |m| m.iter().map(|(k, v)| format!("{k} {}", js_string(v))).collect::<Vec<_>>().join(", "));
-        let files: Vec<String> = get(s, "files").and_then(Value::as_array).map_or_else(Vec::new, |f| f.iter().map(|x| xenonet_base::text::join_item(Some(x))).collect());
+        let tools = get(s, "tools").and_then(Value::as_object).map_or_else(String::new, |m| m.iter().map(|(k, v)| format!("{k} {}", display(v))).collect::<Vec<_>>().join(", "));
+        let files: Vec<String> = get(s, "files").and_then(Value::as_array).map_or_else(Vec::new, |f| f.iter().map(|x| xenonet_text::text::join_item(Some(x))).collect());
         let mut line = format!(
             "- {} \"{}\": {} turns, {} tool calls ({})",
             tpl(get(s, "app")),
@@ -291,9 +291,9 @@ pub fn summary_text(sum: &Value, label: &str) -> String {
 // s.slice(0, n - 1) + "…" for a string longer than n, else s ?? "".
 fn clip_text(s: Option<&Value>, n: usize) -> String {
     match s {
-        Some(Value::String(t)) if jsstr::len(t) > n => format!("{}…", jsstr::head(t, n - 1)),
+        Some(Value::String(t)) if utf16::len(t) > n => format!("{}…", utf16::head(t, n - 1)),
         None | Some(Value::Null) => String::new(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -314,15 +314,15 @@ pub fn handoff_brief(node: &Value, notes: &Value, target: Option<&str>) -> Strin
     let mut files: Vec<String> = Vec::new();
     for list in ["edits", "files"] {
         for f in get(notes, list).and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
-            let f = js_string(f);
+            let f = display(f);
             if !files.contains(&f) {
                 files.push(f);
             }
         }
     }
     files.truncate(12);
-    let folder = ["worktree", "cwd"].iter().find_map(|k| get(node, k).filter(|v| truthy(Some(v)))).map_or_else(|| "unknown".to_string(), js_string);
-    let branch = get(node, "branch").filter(|v| truthy(Some(v))).map_or_else(String::new, |b| format!(", on branch {}", js_string(b)));
+    let folder = ["worktree", "cwd"].iter().find_map(|k| get(node, k).filter(|v| truthy(Some(v)))).map_or_else(|| "unknown".to_string(), display);
+    let branch = get(node, "branch").filter(|v| truthy(Some(v))).map_or_else(String::new, |b| format!(", on branch {}", display(b)));
     let mut parts = vec![format!("Continue the work from {from} titled \"{}\".", tpl(get(node, "title"))), String::new(), format!("Folder: {folder}{branch}")];
     if truthy(goal) {
         parts.extend([String::new(), format!("Original goal: {}", clip_text(goal, 700))]);
@@ -501,7 +501,7 @@ mod tests {
             json!({ "sessionId": "claude:a", "app": "claude", "kind": "turn-end", "ts": 13 }),
             json!({ "sessionId": "claude:c", "app": "claude", "kind": "turn-end", "ts": 99 }),
         ];
-        let sum = summarize::<()>(&events, 0.0, 50.0, &mut |id| Ok(json!(format!("T {}", js_string(id)))), None).unwrap();
+        let sum = summarize::<()>(&events, 0.0, 50.0, &mut |id| Ok(json!(format!("T {}", display(id)))), None).unwrap();
         assert_eq!(sum["totals"]["sessions"], 2);
         assert_eq!(sum["sessions"][0]["files"], json!(["a.js", "b.js"]));
         assert_eq!(sum["sessions"][0]["title"], "T claude:a");

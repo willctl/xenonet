@@ -1,5 +1,5 @@
 //! A program XenoNet starts in the background shows no window on Windows
-//! (`xenonet_base::process::Background::no_window`). What's checked is
+//! (`xenonet_os::process::Background::no_window`). What's checked is
 //! the window, not the console host: CREATE_NO_WINDOW still gives each
 //! console program a conhost.exe of its own, only one without a window, so
 //! counting conhosts says nothing. The check runs where the service and
@@ -12,7 +12,7 @@
 use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-use xenonet_base::process::Background;
+use xenonet_os::process::Background;
 
 /// Set in the copy started without a console.
 const HELPER: &str = "XENONET_NO_WINDOW_HELPER";

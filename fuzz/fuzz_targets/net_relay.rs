@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink};
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink};
 use xenonet_fuzz::net::{overlay, Choices};
 use xenonet_hosts::network::{self as wire, Op};
 use xenonet_service::cores::{Hub, Pending, SelfApi};

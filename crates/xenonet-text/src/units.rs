@@ -7,12 +7,12 @@
 //! - `locale` as toLocaleString("en-US"): the shortest decimal that reads
 //!   back as the number, rounded half away from zero (1.005 → 1.01), with
 //!   thousands grouped;
-//! - `js_round` as Math.round: a tie goes up (-2.5 → -2).
+//! - `round` as Math.round: a tie goes up (-2.5 → -2).
 
 use crate::json::{number_string, shortest};
 
 /// Math.round.
-pub fn js_round(x: f64) -> f64 {
+pub fn round(x: f64) -> f64 {
     if !x.is_finite() || x.fract() == 0.0 {
         return x;
     }
@@ -79,7 +79,7 @@ fn group(int: &str) -> String {
     let b = int.as_bytes();
     let mut out = String::new();
     for (i, c) in b.iter().enumerate() {
-        if i > 0 && (b.len() - i) % 3 == 0 {
+        if i > 0 && (b.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(*c as char);
@@ -139,16 +139,16 @@ pub fn tokens(n: Option<f64>) -> String {
     } else if a >= 1e3 {
         one(n / 1e3, "k")
     } else {
-        number_string(js_round(n))
+        number_string(round(n))
     }
 }
 
 /// A duration: "12 s", "5 min", "2 h 5 min", "—" for none.
 pub fn duration(ms: Option<f64>) -> String {
     let Some(ms) = ms else { return "—".into() };
-    let m = js_round(ms / 60000.0);
+    let m = round(ms / 60000.0);
     if m < 1.0 {
-        return format!("{} s", number_string(js_round(ms / 1000.0).max(1.0)));
+        return format!("{} s", number_string(round(ms / 1000.0).max(1.0)));
     }
     if m < 60.0 {
         return format!("{} min", number_string(m));
@@ -182,7 +182,7 @@ pub fn share_of(p: f64) -> String {
     if p > 0.0 && p < 0.005 {
         "<1%".into()
     } else {
-        format!("{}%", number_string(js_round(p * 100.0)))
+        format!("{}%", number_string(round(p * 100.0)))
     }
 }
 
@@ -191,7 +191,7 @@ pub fn share_of(p: f64) -> String {
 pub fn excerpt(s: &str, n: usize) -> String {
     let len = s.encode_utf16().count();
     if len > n {
-        let head = crate::log::js_slice(s, n);
+        let head = crate::utf16::whole_head(s, n);
         let half = if head.encode_utf16().count() < n { "\u{FFFD}" } else { "" };
         format!("{head}{half}\n… ({} more chars)", len - n)
     } else {
@@ -224,7 +224,7 @@ mod tests {
         {
             assert_eq!((locale(x, 0, 3).as_str(), locale(x, 2, 2).as_str()), (l, l2), "{x}");
         }
-        assert_eq!((js_round(2.5), js_round(-2.5), js_round(0.49999999999999994)), (3.0, -2.0, 0.0));
+        assert_eq!((round(2.5), round(-2.5), round(0.49999999999999994)), (3.0, -2.0, 0.0));
     }
 
     #[test]

@@ -17,11 +17,11 @@
 use super::{text, Core, ObserverHost, Result};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use xenonet_base::json::{number, number_string};
-use xenonet_base::log::js_slice;
-use xenonet_base::paths::path_key;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::truthy;
+use xenonet_os::paths::path_key;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::{number, number_string};
+use xenonet_text::text::truthy;
+use xenonet_text::utf16::whole_head;
 
 pub const SPAWN_WAIT_MS: f64 = 2.0 * 60e3;
 // ps gives a process's start to the second, and a transcript's first line
@@ -249,7 +249,7 @@ pub fn session_of(state: &SpawnsState, h: &dyn ObserverHost, s: &Pending) -> Res
         })
         .collect();
     if !pins.is_empty() {
-        xenonet_base::sort::sort_by(&mut pins, |a, b| {
+        xenonet_text::sort::sort_by(&mut pins, |a, b| {
             let d = |k: &str| num(b.get(k)) - num(a.get(k));
             let first = d("sure");
             let v = if first != 0.0 && !first.is_nan() { first } else { d("at") };
@@ -421,7 +421,7 @@ pub fn spawned(h: &dyn ObserverHost, core: &Core, actor: &str, s: &Settled) -> R
                 None => Value::Null,
             };
             json!({
-                "ref": js_slice(&r, 200),
+                "ref": whole_head(&r, 200),
                 "kind": "spawned",
                 "target": target,
                 "app": s.agent,

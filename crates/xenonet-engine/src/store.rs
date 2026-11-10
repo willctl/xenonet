@@ -20,9 +20,9 @@
 use crate::sql::{self, Bind, Cell, Changes, Result, Row, SqlError};
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use xenonet_base::ids::YOU;
-use xenonet_base::sync::Locked;
 use xenonet_blocks::sqlite::{SqliteStore, Step, Version};
+use xenonet_model::ids::YOU;
+use xenonet_os::sync::Locked;
 
 const DAY_MS: f64 = 24.0 * 3600e3;
 const WEEK_MS: f64 = 7.0 * DAY_MS;
@@ -313,8 +313,8 @@ fn num(c: &Cell) -> Bind {
 /// A cell as the engine reads it: every integer a number.
 fn cell_json(c: &Cell) -> Value {
     match c {
-        Cell::Int(i) => xenonet_base::json::number(*i as f64),
-        Cell::Real(f) => xenonet_base::json::number(*f),
+        Cell::Int(i) => xenonet_text::json::number(*i as f64),
+        Cell::Real(f) => xenonet_text::json::number(*f),
         Cell::Text(s) => Value::String(s.clone()),
         Cell::Null => Value::Null,
         Cell::Blob(b) => Value::Object(b.iter().enumerate().map(|(i, x)| (i.to_string(), Value::from(*x))).collect()),
@@ -681,7 +681,7 @@ impl EngineStore {
     /// is kept as its JSON text.
     pub fn send(&self, m: &Value, now: f64) -> Result<f64> {
         let envelope = match m.get("envelope") {
-            Some(e) if xenonet_base::text::truthy(Some(e)) => Bind::Text(xenonet_base::json::stringify(e, 0)),
+            Some(e) if xenonet_text::text::truthy(Some(e)) => Bind::Text(xenonet_text::json::stringify(e, 0)),
             _ => Bind::Null,
         };
         let c = self.run(

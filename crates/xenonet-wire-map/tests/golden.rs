@@ -41,10 +41,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
-use xenonet_base::fs::{DirEntry, Fs, StdFs};
 use xenonet_blocks::scanner::{FnRules, Limits, Rules, Scanner};
 use xenonet_blocks::tailer::{Listed, Tailer};
 use xenonet_blocks::Halt;
+use xenonet_os::fs::{DirEntry, Fs, StdFs};
 use xenonet_schema::drift::DriftLog;
 use xenonet_schema::vendor::Sampling;
 use xenonet_sources::claude_usage;
@@ -105,7 +105,7 @@ impl World {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("the world's root");
         let text = std::fs::read_to_string(Path::new(FIXTURE).join("manifest.json")).expect("the manifest");
-        World { root: root.to_string_lossy().into_owned(), m: xenonet_base::json::parse(&text).expect("the manifest's JSON") }
+        World { root: root.to_string_lossy().into_owned(), m: xenonet_text::json::parse(&text).expect("the manifest's JSON") }
     }
 
     fn clock(&self) -> f64 {
@@ -251,7 +251,7 @@ struct Check {
 impl Check {
     fn new(root: &str) -> Check {
         let mut forms: Vec<String> = Vec::new();
-        for f in [Some(root.to_string()), Some(root.replace('\\', "/")), xenonet_base::paths::path_key(root)].into_iter().flatten() {
+        for f in [Some(root.to_string()), Some(root.replace('\\', "/")), xenonet_os::paths::path_key(root)].into_iter().flatten() {
             if !forms.contains(&f) {
                 forms.push(f);
             }
@@ -264,7 +264,7 @@ impl Check {
         let text = std::fs::read_to_string(Path::new(GOLDEN).join(format!("{name}.json"))).expect("the golden");
         // As JSON.parse reads it: serde_json's own parse can be a bit off in
         // a double's last digit.
-        let want = canon(&xenonet_base::json::parse(&text).expect("the golden's JSON"), &self.forms);
+        let want = canon(&xenonet_text::json::parse(&text).expect("the golden's JSON"), &self.forms);
         if let Ok(dir) = std::env::var("XENONET_GOLDEN_OUT") {
             let _ = std::fs::create_dir_all(&dir);
             let _ = std::fs::write(Path::new(&dir).join(format!("golden-{name}.json")), serde_json::to_string_pretty(&got).unwrap_or_default() + "\n");
@@ -283,7 +283,7 @@ fn vendor() -> Arc<Vendor> {
 
 fn stat(file: &str) -> Option<(f64, u64)> {
     let m = std::fs::metadata(file).ok()?;
-    Some((xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), m.len()))
+    Some((xenonet_os::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), m.len()))
 }
 
 // ---------- the live tailer ----------
@@ -327,7 +327,7 @@ impl Live {
         let roots: Vec<(String, String)> = roots
             .iter()
             .filter(|(d, _)| !d.is_empty() && Path::new(d).exists())
-            .map(|(d, app)| (xenonet_base::fs::realpath_native(d).unwrap_or_else(|_| (*d).to_string()), (*app).to_string()))
+            .map(|(d, app)| (xenonet_os::fs::realpath_native(d).unwrap_or_else(|_| (*d).to_string()), (*app).to_string()))
             .collect();
         let scanners = roots.iter().map(|(dir, _)| Scanner::new(&format!("transcripts:{dir}"), dir, Limits { depth: 6.0, ..Limits::default() }, true, now)).collect();
         Live {
@@ -426,11 +426,11 @@ impl Live {
         }
         self.telemetry.primed(now);
         let file = Path::new(&self.desktop).join("plan-usage-history.json");
-        if let Some(raw) = std::fs::read_to_string(file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()) {
+        if let Some(raw) = std::fs::read_to_string(file).ok().and_then(|t| xenonet_text::json::parse(&t).ok()) {
             let version = claude_usage::desktop_version(Some(&raw));
             let checked = self.vendor.check("anthropic/claude-desktop/plan-usage", raw.clone(), version.as_deref(), None);
             if let Ok(samples) = claude_usage::desktop_samples(Some(&raw), checked.as_ref()) {
-                if xenonet_base::text::truthy(Some(&samples)) {
+                if xenonet_text::text::truthy(Some(&samples)) {
                     self.telemetry.usage_samples("claude", &samples);
                 }
             }
@@ -661,7 +661,7 @@ fn text_of(v: &Value) -> String {
 
 // What a scan with other limits finds, a line each (golden.test.js's brief).
 fn brief(found: &Value) -> Value {
-    let truthy = |v: &Value| xenonet_base::text::truthy(Some(v));
+    let truthy = |v: &Value| xenonet_text::text::truthy(Some(v));
     let projects = found["projects"].as_array().map_or(&[][..], Vec::as_slice);
     let lines: Vec<Value> = projects
         .iter()
@@ -706,7 +706,7 @@ fn brief(found: &Value) -> Value {
 
 fn rule_of(root: &str, rel: &str, as_: &str, by: &str) -> (String, Value) {
     let p = if rel.is_empty() { root.to_string() } else { format!("{root}/{rel}") };
-    (xenonet_base::paths::path_key(&p).expect("a key"), json!({ "path": p, "as": as_, "by": by }))
+    (xenonet_os::paths::path_key(&p).expect("a key"), json!({ "path": p, "as": as_, "by": by }))
 }
 
 fn rules(list: &[(String, Value)]) -> Value {

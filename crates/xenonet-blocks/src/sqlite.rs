@@ -158,7 +158,7 @@ impl SqliteStore {
             }
             let file = dir.join(&name).to_string_lossy().into_owned();
             let Ok(meta) = std::fs::metadata(&file) else { continue };
-            let Ok(mtime) = xenonet_base::fs::mtime_ms_of(&meta) else { continue };
+            let Ok(mtime) = xenonet_os::fs::mtime_ms_of(&meta) else { continue };
             if now - mtime < self.keep_backup_ms {
                 continue;
             }

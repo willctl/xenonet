@@ -4,7 +4,7 @@
 //! (a test's) reads through that.
 
 use std::io;
-use xenonet_base::fs::{code_of, mtime_ms_of, FsError};
+use xenonet_os::fs::{code_of, mtime_ms_of, FsError};
 
 /// A folder's entry, as a Dirent tells it: neither follows a link.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,7 +49,7 @@ fn read_error(e: io::Error) -> FsError {
 
 impl Files for StdFiles {
     fn read_dir(&mut self, dir: &str) -> Result<Vec<Entry>, FsError> {
-        let ents = xenonet_base::paths::read_dir_sorted(std::path::Path::new(dir)).map_err(|e| FsError::of(e, "scandir", dir))?;
+        let ents = xenonet_os::paths::read_dir_sorted(std::path::Path::new(dir)).map_err(|e| FsError::of(e, "scandir", dir))?;
         Ok(ents
             .into_iter()
             .map(|e| {
@@ -67,7 +67,7 @@ impl Files for StdFiles {
             Some(m.ino() as f64)
         };
         #[cfg(windows)]
-        let ino = xenonet_base::fs::file_index(file).map(|i| i as f64);
+        let ino = xenonet_os::fs::file_index(file).map(|i| i as f64);
         #[cfg(not(any(unix, windows)))]
         let ino = None;
         Ok(Stat { mtime_ms: mtime_ms_of(&m).map_err(|e| FsError::of(e, "stat", file))?, size: m.len() as f64, ino })

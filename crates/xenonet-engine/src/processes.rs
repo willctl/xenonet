@@ -6,7 +6,7 @@
 
 use crate::procs::slashes;
 use xenonet_adapter::apps::App;
-use xenonet_base::nodepath::Style;
+use xenonet_os::nodepath::Style;
 
 pub use xenonet_adapter::processes::Rules;
 

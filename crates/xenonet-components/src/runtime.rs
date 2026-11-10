@@ -34,7 +34,7 @@ pub fn runtime_dir(env: &Env, m: &Machine) -> String {
     if let Some(d) = set(env, "XENONET_RUNTIME_DIR") {
         return d.into();
     }
-    let state = xenonet_base::dirs::app_dir("state", var(env, "XDG_STATE_HOME"), var(env, "LOCALAPPDATA"), &m.platform, &m.home, "XenoNet");
+    let state = xenonet_os::dirs::app_dir("state", var(env, "XDG_STATE_HOME"), var(env, "LOCALAPPDATA"), &m.platform, &m.home, "XenoNet");
     NATIVE.join(&[&state, "runtime"])
 }
 
@@ -89,9 +89,9 @@ pub fn stop_file(env: &Env, m: &Machine) -> String {
 pub fn read_descriptor(env: &Env, m: &Machine) -> Result<(f64, String), FsError> {
     let file = descriptor_file(env, m);
     let text = fsx::read_text(&file)?;
-    let d = xenonet_base::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
+    let d = xenonet_text::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
     let port = d.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p));
-    let token = d.get("token").map(xenonet_base::text::js_string).filter(|t| crate::packages::sha_re().is_match(t));
+    let token = d.get("token").map(xenonet_text::text::display).filter(|t| crate::packages::sha_re().is_match(t));
     match (port, token) {
         (Some(p), Some(t)) => Ok((p, t)),
         _ => Err(fsx::said("Invalid XenoNet service connection file.")),
@@ -107,7 +107,7 @@ pub fn hello(token: &str, role: &str) -> Value {
 /// `serve`.
 pub fn service_args(args: Option<&Value>) -> Vec<String> {
     match args {
-        Some(Value::Array(a)) => a.iter().map(xenonet_base::text::js_string).collect(),
+        Some(Value::Array(a)) => a.iter().map(xenonet_text::text::display).collect(),
         _ => vec!["serve".into()],
     }
 }

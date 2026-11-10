@@ -24,10 +24,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use xenonet_actors::tokens::token_in_url;
-use xenonet_base::nodepath::NATIVE;
-use xenonet_base::text::{js_number, truthy};
 use xenonet_engine::delivery::selector::Selector;
 use xenonet_engine::engine::is_agent_id;
+use xenonet_os::nodepath::NATIVE;
+use xenonet_text::text::{to_number, truthy};
 
 const ACTOR_BODY: usize = 16 << 10;
 
@@ -88,7 +88,7 @@ impl EngineRoutes<'_> {
             "who-has" => e.who_has(Some(me), &js_string_or_empty(&get(b, "path"))).await,
             "send" => e.send(me, pick(b, &[("to", "to"), ("text", "text"), ("replyTo", "replyTo")]), extra).await,
             "inbox" => {
-                let secs = js_number(b.get("waitSeconds")).min(120.0);
+                let secs = to_number(b.get("waitSeconds")).min(120.0);
                 let secs = if secs.is_nan() || secs <= 0.0 { 0.0 } else { secs };
                 e.inbox(me, Duration::from_secs_f64(secs)).await
             }
@@ -129,7 +129,7 @@ impl EngineRoutes<'_> {
                 let Some(channels) = self.channels.as_ref().filter(|_| me.starts_with("claude:")) else {
                     return Ok(json!({ "items": [], "off": true }));
                 };
-                let secs = js_number(b.get("waitSeconds"));
+                let secs = to_number(b.get("waitSeconds"));
                 let secs = if secs.is_nan() || secs == 0.0 { 25.0 } else { secs }.min(50.0);
                 let items = channels.poll(me, Duration::from_secs_f64(secs.max(0.0))).await?;
                 Ok(json!({ "items": items }))
@@ -214,7 +214,7 @@ impl EngineRoutes<'_> {
         if req.method == "POST" && route == "/api/hook/codex" {
             let body = req.json_body().await.unwrap_or_else(|_| json!({}));
             if truthy(body.get("session_id")) {
-                let id = format!("codex:{}", xenonet_base::text::js_string(&body["session_id"]));
+                let id = format!("codex:{}", xenonet_text::text::display(&body["session_id"]));
                 let verdict = self.verify.check(req.peer, &id, true).await;
                 if !ok(&verdict) {
                     return Ok(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));
@@ -278,7 +278,7 @@ impl EngineRoutes<'_> {
         let body = req.json_body().await?;
         // The agent's own process, where XenoNet could see it; else what the
         // MCP server says.
-        let pid = verdict.get("root").and_then(|r| r.get("pid")).filter(|p| !p.is_null()).cloned().unwrap_or_else(|| xenonet_base::json::number(js_number(body.get("pid"))));
+        let pid = verdict.get("root").and_then(|r| r.get("pid")).filter(|p| !p.is_null()).cloned().unwrap_or_else(|| xenonet_text::json::number(to_number(body.get("pid"))));
         let cwd = body.get("cwd").filter(|c| c.is_string()).cloned().unwrap_or(Value::Null);
         self.engine.touch(&me, json!({ "app": me.split(':').next().unwrap_or(""), "cwd": cwd, "via": "mcp", "pid": pid }))?;
         let extra = if name == "send" || name == "handoff" {
@@ -294,6 +294,6 @@ impl EngineRoutes<'_> {
 fn js_string_or_empty(v: &Value) -> String {
     match v {
         Value::Null => String::new(),
-        v => xenonet_base::text::js_string(v),
+        v => xenonet_text::text::display(v),
     }
 }

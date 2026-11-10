@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 use xenonet_adapter::check::{connected, folder, list, privacy_fix, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
-use xenonet_base::nodepath::style_of;
-use xenonet_base::text::{js_string, truthy};
-use xenonet_base::units::plural;
+use xenonet_os::nodepath::style_of;
+use xenonet_text::text::{display, truthy};
+use xenonet_text::units::plural;
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
@@ -30,7 +30,7 @@ fn grok_home(f: Facts<'_>) -> String {
             let home = f.home();
             style_of(&home).join(&[&home, ".grok"])
         },
-        js_string,
+        display,
     )
 }
 fn in_grok(f: Facts<'_>, parts: &[&str]) -> String {

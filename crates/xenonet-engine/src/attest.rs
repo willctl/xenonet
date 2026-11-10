@@ -18,8 +18,8 @@
 
 use crate::engine::Thrown;
 use serde_json::{json, Value};
-use xenonet_base::text::template;
-use xenonet_base::text::truthy;
+use xenonet_text::text::template;
+use xenonet_text::text::truthy;
 
 pub const SCHEMA: &str = "message/envelope/v1";
 
@@ -65,7 +65,7 @@ fn uuid() -> Result<String, Thrown> {
     getrandom::fill(&mut b).map_err(|e| Thrown::new(format!("no random bytes: {e}")))?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h = xenonet_base::jsstr::hex(&b);
+    let h = xenonet_text::utf16::hex(&b);
     Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 
@@ -79,8 +79,8 @@ pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now
     let client = match exe {
         Some(exe) => {
             let text = template(Some(exe));
-            let shown = if home.is_empty() { text.clone() } else { xenonet_base::paths::tilde(&text, home) };
-            json!({ "exe": shown, "name": xenonet_base::nodepath::basename(&text) })
+            let shown = if home.is_empty() { text.clone() } else { xenonet_os::paths::tilde(&text, home) };
+            json!({ "exe": shown, "name": xenonet_os::nodepath::basename(&text) })
         }
         None => Value::Null,
     };
@@ -92,7 +92,7 @@ pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now
     let mut env = json!({
         "schema": SCHEMA,
         "mid": format!("msg_{}", uuid()?),
-        "at": xenonet_base::json::number(now),
+        "at": xenonet_text::json::number(now),
         "sender": { "id": sender.id, "kind": sender.kind, "name": sender.name, "product": sender.product },
         "auth": { "method": method, "process": process, "strength": strength },
         "client": client,

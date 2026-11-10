@@ -66,16 +66,23 @@ ran.
 ```
 Cargo.toml                 the workspace: shared versions, the release profile
 crates/
-  xenonet-model            the data model: typed ids, every document (serde + schemars, written to schemas/),
-                           the operations' kinds and the action vocabulary; no IO, no vendor
+  xenonet-text             the formats XenoNet writes, as the golden files pin them: JSON as XenoNet writes it,
+                           text and UTF-16 strings, times, units.js for the command, orderings; no IO
+  xenonet-model            the data model: typed ids (schema/ids.js), every document (serde + schemars, written
+                           to schemas/), the operations' kinds and the engine's seam to the network (ops: Net,
+                           Sink, RelaySink), a call's tokens and API prices (usage, pricing.js), the action
+                           vocabulary; no IO, no vendor
+  xenonet-os               the machine: files, paths.js and Node's path rules, processes started with no window,
+                           locks that outlive a panic, the error log (log.js), XenoNet's own folders (dirs.js's
+                           appDir), private-file.js, the home folder, platform, random ids, fetch, output lines
   xenonet-adapter          the Platform trait, the registry of apps (apps.json) and actor products, and what an
-                           adapter brings: process rules, ways in for delivery, connect (Machine, Format), checks
+                           adapter brings: process rules, ways in for delivery, connect (Machine, Format), checks;
+                           where the desktop apps keep their folders and binaries (dirs.js), and the formats
+                           several crates read (apply_patch texts, OpenCode ids)
 adapters/
   claude-code, codex,      one crate per platform, each implementing Platform: its process rules, its ways in,
   grok-build, opencode     its connect format and its doctor checks
   all                      xenonet-platforms: every adapter, installed at the binary's start
-  xenonet-base             paths.js, pricing.js, dirs.js, log.js, schema/ids.js, JSON and time as JS reads them,
-                           units.js for the command, private-file.js, client.js
   xenonet-blocks           core/blocks/: lifecycle, scanner, gatherer, tailer, normalizer, JSON and SQLite stores
   xenonet-schema           core/schema/, vendor.js, drift.js: the schemas, lenient reading, drift records
   xenonet-sources          lines.js, claude.js, codex.js, git.js, wiki.js, live.js, numbat.js, demo.js, native/,
@@ -87,6 +94,8 @@ adapters/
   xenonet-actors           actors/, assistant/, secret-store.js, integrations/
   xenonet-hosts            hosts/
   xenonet-doctor           doctor/, diagnostics.js
+  xenonet-api              the typed local protocol: the core traits, the event sink and stream, and the client
+                           of a running XenoNet (client.js, over HTTP/1.1 to 127.0.0.1)
   xenonet-server           server/: the API, static files, upstream, the actor gateway and its tunnels,
                            the assistant endpoint, the component service
   xenonet-mcp              mcp/: the xenonet, xenonet-console and assistant servers
@@ -104,7 +113,7 @@ two. Only `xenonet-node` knows about Node.
 
 The workspace uses cargo's resolver 3, which picks dependency versions
 that build on the declared `rust-version`. The crates are edition 2021
-and need Rust 1.85. Xenolith's are edition 2024; editions mix per crate.
+and need Rust 1.88. Xenolith's are edition 2024; editions mix per crate.
 
 ### Dependencies
 
@@ -375,10 +384,8 @@ it for the checkout without changing anyone's default), so builds are the
 same everywhere and clippy has its latest checks. It moves to each new
 stable release once the workspace builds, tests and lints clean on it.
 Every current `rmcp` release needs Rust 1.88 or later (through let-chains
-and `darling` 0.23), so `crates/xenonet-mcp` builds into the one binary
-with the rest. The crates that hold `rmcp` or `tokio` (`xenonet-mcp`,
-`xenonet-service`, `xenonet-cli`) declare Rust 1.88; the rest still build
-on 1.85. A PATH can name a toolchain's own `cargo` rather than rustup's,
+and `darling` 0.23), and so does tokio's use in `xenonet-os`, which nearly
+every crate depends on, so the whole workspace declares Rust 1.88. A PATH can name a toolchain's own `cargo` rather than rustup's,
 which ignores the pin, so the scripts run cargo through
 `scripts/cargo.mjs`, which finds the pinned toolchain.
 
@@ -408,7 +415,7 @@ as well (`scripts/rust-lint.mjs`):
   wildcard versions, crates only from crates.io. `cargo shear`: no
   dependency a crate doesn't use.
 
-Locks go through `xenonet_base::sync` (`locked()`, `reading()`,
+Locks go through `xenonet_os::sync` (`locked()`, `reading()`,
 `writing()`) rather than `lock().unwrap()`. std poisons a lock whose
 holder panicked, and every later `unwrap` would panic too, taking the
 service down with one bad request; the state under XenoNet's locks is
@@ -602,8 +609,8 @@ place. This table follows it.
 
 | Module | Rust | Its own tests, with twins |
 |---|---|---|
-| `core/pricing.js` | `xenonet-base/src/pricing.rs` | `costs`, `stats` pass |
-| `core/paths.js` | `xenonet-base/src/paths.rs` | `platform`, `windows-command` pass |
+| `core/pricing.js` | `xenonet-model/src/usage/pricing.rs` | `costs`, `stats` pass |
+| `core/paths.js` | `xenonet-os/src/paths.rs` | `platform`, `windows-command` pass |
 | `core/blocks/lifecycle.js` | `xenonet-blocks/src/lifecycle.rs` | `blocks-lifecycle` passes |
 | `core/blocks/normalizer.js` | `xenonet-blocks/src/normalizer.rs` | `blocks-normalizer` passes |
 | `core/blocks/scanner.js` | `xenonet-blocks/src/scanner.rs`, with the read-again fix | `blocks-scanner`, `projects` pass |
@@ -625,7 +632,7 @@ place. This table follows it.
 | `core/live.js` | `xenonet-sources/src/live/telemetry.rs`, with `live/mod.rs`'s helpers | `live`, `stall`, `signals`, `costs`, `golden`, `state`, `server` pass |
 | `core/claude-usage.js` | `xenonet-sources/src/claude_usage.rs` (the keychain, files, fetch and timers stay in the twin) | `claude-usage`, `live` pass |
 | `core/refusals/detect.js` | `xenonet-sources/src/refusals/detect.rs` | `refusals`, `refusal-browser`, `live` pass |
-| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `xenonet-base`'s `nodepath.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
+| `core/native/copilot-cli.js`, `gemini-cli.js`, `cursor.js` | `xenonet-sources/src/native/{copilot_cli,gemini_cli,cursor}.rs`, with Node's path rules in `xenonet-os`'s `nodepath.rs` (vendor.js's check called back) | `copilot-cli`, `gemini-cli`, `cursor` pass |
 | `core/native/opencode.js` | `xenonet-sources/src/native/opencode.rs`, on rusqlite with SQLite bundled (a test's `open` handle runs its statements) | `opencode` passes |
 | `core/numbat.js` | `xenonet-sources/src/numbat.rs` | `numbat`, `gemini-cli` pass |
 | `core/reported-runs.js` | `xenonet-sources/src/reported_runs.rs` | `space-presence`, `actor-spend`, and `state`, `golden` through core/state.js pass |
@@ -643,12 +650,12 @@ place. This table follows it.
 | `core/blocks/sqlite.js` | `xenonet-blocks/src/sqlite.rs`, on rusqlite with SQLite bundled | No twin (its migrations take a `node:sqlite` handle): Rust tests of the same cases, and the Rust opens a JS-made `engine.sqlite` (version 7, WAL, 18 tables) and `search.sqlite` (an FTS5 match on what node:sqlite indexed) |
 | `core/blocks/store.js` | `xenonet-blocks/src/store.rs` | `blocks-store`, `statefile`, `store`, `hosts-config` pass |
 | `core/migrate.js`, `core/statefile.js` | `xenonet-state/src/migrate.rs`, `statefile.rs` | `statefile`, `store`, `state` pass |
-| `core/dirs.js`, `core/log.js` | `xenonet-base/src/dirs.rs`, `log.rs` | `platform`, `log`, `cli`, `doctor` pass |
-| `core/schema/ids.js` | `xenonet-base/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |
-| `core/client.js` | `xenonet-base/src/client.rs`, `http.rs` (HTTP/1.1 to 127.0.0.1, which the hook uses too) | `client`, `cli`, and the MCP servers' tests through it |
-| `core/units.js` | `xenonet-base/src/units.rs`, rounding as `toFixed`, `toLocaleString` and `Math.round` do | `stats`, `token-files`, `state`, `server` pass |
+| `core/dirs.js`, `core/log.js` | `xenonet-os/src/dirs.rs` (XenoNet's own folders), `xenonet-adapter/src/dirs.rs` (the apps'), `xenonet-os/src/log.rs` | `platform`, `log`, `cli`, `doctor` pass |
+| `core/schema/ids.js` | `xenonet-model/src/ids.rs` | `schema-ids`, `hosts-ids`, `schemas` pass |
+| `core/client.js` | `xenonet-api/src/client.rs`, `http.rs` (HTTP/1.1 to 127.0.0.1, which the hook uses too) | `client`, `cli`, and the MCP servers' tests through it |
+| `core/units.js` | `xenonet-text/src/units.rs`, rounding as `toFixed`, `toLocaleString` and `Math.round` do | `stats`, `token-files`, `state`, `server` pass |
 | `core/actors/tokens.js` | `xenonet-actors/src/tokens.rs` | `token-files`, `actor-registration`, `actor-routes`, `actor-gateway` pass |
-| `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-base/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
+| `core/private-file.js`, `core/actors/token-file.js` (but the doctor's look in repos) | `xenonet-os/src/private_file.rs`, `xenonet-actors/src/token_file.rs` | `private-file`, `token-files`, `cli-actor`, `mcp-actor`, `hosts-config` pass, the Windows ACL cases included |
 | `core/procs.js` | `xenonet-engine/src/procs.rs`, its lookups a machine the twin answers with the commands' output | `procs` and the 20 other files that reach it pass |
 | `core/secret-store.js` | `xenonet-actors/src/secret_store.rs` (the store's program still runs in the twin) | `assistant-tunnels`, `actor-wake`, `decide`, `costs`, `integrations`, `spotify` pass |
 | `core/actors/products.js`, `detail.js`, `names.js`, `key.js`, `limits.js`, `handoff.js`, `adapters.js`, `spend.js` | `xenonet-engine/src/products.rs`; `xenonet-actors/src/detail.rs`, `names.rs` (on unicode-normalization), `key.rs`, `limits.rs`, `handoff.rs`, `adapters.rs`, `spend.rs` | `actor-names`, `actor-limits`, `actor-spend`, `actors`, `actor-gateway`, `actor-routes`, `gateway-tunnel`, `assistant-connections`, `server` pass |

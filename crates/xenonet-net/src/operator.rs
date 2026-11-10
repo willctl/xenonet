@@ -16,7 +16,7 @@
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use xenonet_base::network::{STARTS, WAKES};
+use xenonet_model::ops::{STARTS, WAKES};
 
 /// What another host may ask of this one.
 pub const ACTIONS: [&str; 6] = ["message", "ticket", "remove", "replace", "settings", "answer"];

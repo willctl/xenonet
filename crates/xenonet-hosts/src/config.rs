@@ -13,8 +13,8 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 use xenonet_app::jsv::truthy;
-use xenonet_base::ids::is_host_id;
-use xenonet_base::text::{js_number, js_string, js_trim, JS_SPACE};
+use xenonet_model::ids::is_host_id;
+use xenonet_text::text::{display, to_number, trim, SPACE};
 
 pub const HOSTS_FILE: &str = "hosts.json";
 pub const SSH_CONFIG_FILE: &str = "ssh_config";
@@ -34,7 +34,7 @@ fn fail(message: impl Into<String>) -> Refused {
 
 // JSON.stringify(String(v)).
 fn say(v: Option<&Value>) -> String {
-    xenonet_base::json::stringify(&Value::String(v.map_or_else(|| "undefined".into(), js_string)), 0)
+    xenonet_text::json::stringify(&Value::String(v.map_or_else(|| "undefined".into(), display)), 0)
 }
 
 // schema/host.js's patterns.
@@ -46,7 +46,7 @@ fn re(i: usize) -> &'static Regex {
             Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$").expect("a fixed pattern"),
             Regex::new(r"^(?:xenonet|/[A-Za-z0-9._+/-]{1,1023})$").expect("a fixed pattern"),
             Regex::new(r"^[0-9]{1,4}[mhd]$").expect("a fixed pattern"),
-            Regex::new(&format!("^(?:([^@{JS_SPACE}]+)@)?([^@{JS_SPACE}]+)$")).expect("a fixed pattern"),
+            Regex::new(&format!("^(?:([^@{SPACE}]+)@)?([^@{SPACE}]+)$")).expect("a fixed pattern"),
         ]
     });
     &r[i]
@@ -80,8 +80,8 @@ pub fn ssh_file_ok(s: &str) -> bool {
 /// "lab@vm1.local" → (Some("lab"), "vm1.local"). Only what ssh takes as
 /// it is: nothing that starts with a dash, no spaces, no second @.
 pub fn parse_target(target: Option<&Value>) -> Result<(Option<String>, String), Refused> {
-    let t = target.filter(|v| !v.is_null()).map_or_else(String::new, js_string);
-    let Some(c) = re(4).captures(js_trim(&t)) else { return Err(fail(format!("{} isn't an ssh target: give [user@]host, such as lab@192.168.5.15 or vm1.local", say(target)))) };
+    let t = target.filter(|v| !v.is_null()).map_or_else(String::new, display);
+    let Some(c) = re(4).captures(trim(&t)) else { return Err(fail(format!("{} isn't an ssh target: give [user@]host, such as lab@192.168.5.15 or vm1.local", say(target)))) };
     let user = c.get(1).map(|m| m.as_str().to_string());
     let hostname = c[2].to_string();
     if !ssh_hostname_ok(&hostname) {
@@ -100,7 +100,7 @@ fn ssh_file(value: Option<&Value>, what: &str) -> Result<Value, Refused> {
         None | Some(Value::Null) => Ok(Value::Null),
         Some(Value::String(s)) if s.is_empty() => Ok(Value::Null),
         Some(v) => {
-            let s = js_string(v);
+            let s = display(v);
             if !ssh_file_ok(&s) {
                 return Err(fail(format!("{what} has to be a full path (or one under ~/) with no quotes, backslashes or % in it, not {}", say(Some(v)))));
             }
@@ -132,11 +132,11 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
     let Some(transport_s) = transport_s else {
         return Err(fail(format!("a host is reached over ssh, or locally (another XenoNet on this machine), not {}", say(Some(&transport)))));
     };
-    let port = if blank(input.get("port")) { DEFAULT_PORT } else { js_number(input.get("port")) };
+    let port = if blank(input.get("port")) { DEFAULT_PORT } else { to_number(input.get("port")) };
     if port.fract() != 0.0 || !(1.0..=65535.0).contains(&port) {
         return Err(fail(format!("the port of the XenoNet to read there is a number from 1 to 65535, not {}", say(input.get("port")))));
     }
-    let since = get(input, "since").map_or_else(|| DEFAULT_SINCE.to_string(), js_string);
+    let since = get(input, "since").map_or_else(|| DEFAULT_SINCE.to_string(), display);
     if !since_ok(&since) {
         return Err(fail(format!("how far back sessions go is a number and m, h or d, such as 7d, 12h or 90m, not {}", say(Some(&json!(since))))));
     }
@@ -145,21 +145,21 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
         let empty = json!({});
         let given = get(input, "ssh").unwrap_or(&empty);
         let target = if truthy(given.get("hostname")) {
-            let user = if truthy(given.get("user")) { format!("{}@", js_string(&given["user"])) } else { String::new() };
-            json!(format!("{user}{}", js_string(&given["hostname"])))
+            let user = if truthy(given.get("user")) { format!("{}@", display(&given["user"])) } else { String::new() };
+            json!(format!("{user}{}", display(&given["hostname"])))
         } else {
             get(input, "target").cloned().unwrap_or_else(|| json!(id_s))
         };
         let (user, hostname) = parse_target(Some(&target))?;
         let ssh_port = get(given, "port").or_else(|| input.get("sshPort"));
-        let ssh_port_n = (!blank(ssh_port)).then(|| js_number(ssh_port));
+        let ssh_port_n = (!blank(ssh_port)).then(|| to_number(ssh_port));
         if let Some(p) = ssh_port_n {
             if !(p.fract() == 0.0 && (1.0..=65535.0).contains(&p)) {
                 return Err(fail(format!("ssh's port is a number from 1 to 65535, not {}", say(ssh_port))));
             }
         }
         let alias = get(given, "hostKeyAlias").or_else(|| get(input, "hostKeyAlias"));
-        if alias.filter(|a| !blank(Some(a))).is_some_and(|a| !ssh_hostname_ok(&js_string(a))) {
+        if alias.filter(|a| !blank(Some(a))).is_some_and(|a| !ssh_hostname_ok(&display(a))) {
             return Err(fail(format!("{} isn't a name ssh can keep a host key under", say(alias))));
         }
         let identity = ssh_file(get(given, "identity").or_else(|| input.get("identity")), "the key file")?;
@@ -167,12 +167,12 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
         ssh = json!({
             "hostname": hostname,
             "user": user,
-            "port": ssh_port_n.map(xenonet_base::json::number),
+            "port": ssh_port_n.map(xenonet_text::json::number),
             "identity": identity,
             "knownHosts": known,
             "hostKeyAlias": alias.filter(|a| truthy(Some(a))).cloned().unwrap_or(Value::Null),
         });
-        let c = get(input, "command").map_or_else(|| "xenonet".to_string(), js_string);
+        let c = get(input, "command").map_or_else(|| "xenonet".to_string(), display);
         if !command_ok(&c) {
             return Err(fail(format!("the xenonet command on the host is xenonet, or its full path with no spaces or shell characters in it, not {}", say(Some(&json!(c))))));
         }
@@ -182,7 +182,7 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
     entry.insert("id".into(), json!(id_s));
     entry.insert("transport".into(), json!(transport_s));
     entry.insert("ssh".into(), ssh);
-    entry.insert("port".into(), xenonet_base::json::number(port));
+    entry.insert("port".into(), xenonet_text::json::number(port));
     entry.insert("command".into(), command);
     entry.insert("since".into(), json!(since));
     entry.insert("detail".into(), json!(input.get("detail") == Some(&json!(true))));
@@ -191,7 +191,7 @@ pub fn host_entry(input: &Value, now: f64, check: &mut dyn FnMut(&Value) -> Resu
     }
     entry.insert("key".into(), Value::Null);
     entry.insert("name".into(), Value::Null);
-    entry.insert("addedAt".into(), xenonet_base::json::number(now));
+    entry.insert("addedAt".into(), xenonet_text::json::number(now));
     let entry = Value::Object(entry);
     // The schema again, so nothing written here can be what it refuses.
     check(&entry).map_err(|why| fail(format!("that host can't be kept: {why}")))?;
@@ -203,7 +203,7 @@ fn one_line(h: &Value) -> bool {
     let ssh = &h["ssh"];
     [&h["id"], &ssh["hostname"], &ssh["user"], &ssh["port"], &ssh["identity"], &ssh["knownHosts"], &ssh["hostKeyAlias"]]
         .iter()
-        .all(|v| !js_string(v).contains(['\n', '\r', '\u{2028}', '\u{2029}', '\0']))
+        .all(|v| !display(v).contains(['\n', '\r', '\u{2028}', '\u{2029}', '\0']))
 }
 
 /// XenoNet's own ssh config, a Host block per ssh host, named by its id.
@@ -221,23 +221,23 @@ pub fn ssh_config_text(hosts: &[Value], check: &mut dyn FnMut(&Value) -> bool) -
         }
         let ssh = &h["ssh"];
         lines.push(String::new());
-        lines.push(format!("Host {}", js_string(&h["id"])));
-        lines.push(format!("  HostName {}", js_string(&ssh["hostname"])));
+        lines.push(format!("Host {}", display(&h["id"])));
+        lines.push(format!("  HostName {}", display(&ssh["hostname"])));
         if truthy(ssh.get("user")) {
-            lines.push(format!("  User {}", js_string(&ssh["user"])));
+            lines.push(format!("  User {}", display(&ssh["user"])));
         }
         if truthy(ssh.get("port")) {
-            lines.push(format!("  Port {}", js_string(&ssh["port"])));
+            lines.push(format!("  Port {}", display(&ssh["port"])));
         }
         if truthy(ssh.get("identity")) {
-            lines.push(format!("  IdentityFile \"{}\"", js_string(&ssh["identity"])));
+            lines.push(format!("  IdentityFile \"{}\"", display(&ssh["identity"])));
             lines.push("  IdentitiesOnly yes".into());
         }
         if truthy(ssh.get("knownHosts")) {
-            lines.push(format!("  UserKnownHostsFile \"{}\"", js_string(&ssh["knownHosts"])));
+            lines.push(format!("  UserKnownHostsFile \"{}\"", display(&ssh["knownHosts"])));
         }
         if truthy(ssh.get("hostKeyAlias")) {
-            lines.push(format!("  HostKeyAlias {}", js_string(&ssh["hostKeyAlias"])));
+            lines.push(format!("  HostKeyAlias {}", display(&ssh["hostKeyAlias"])));
         }
     }
     format!("{}\n", lines.join("\n"))
@@ -247,7 +247,7 @@ pub fn ssh_config_text(hosts: &[Value], check: &mut dyn FnMut(&Value) -> bool) -
 pub fn version_of(doc: &Value) -> Option<f64> {
     match doc.get("schema") {
         None => Some(1.0),
-        Some(s) => xenonet_base::ids::parse_schema_id(&js_string(s)).filter(|p| p.path == "host/list").map(|p| p.major as f64),
+        Some(s) => xenonet_model::ids::SchemaId::parse(&display(s)).ok().filter(|p| p.path == "host/list").map(|p| p.major as f64),
     }
 }
 
@@ -257,10 +257,10 @@ pub fn version_of(doc: &Value) -> Option<f64> {
 /// rest, as they were dropped.
 pub fn prepare(doc: &Value, now: f64, check: &mut dyn FnMut(&Value) -> bool) -> (Value, Value, Vec<String>) {
     let self_v = match doc.get("self") {
-        Some(s @ (Value::Object(_) | Value::Array(_))) if host_key().is_match(&s.get("key").filter(|k| !k.is_null()).map_or_else(String::new, js_string)) => {
+        Some(s @ (Value::Object(_) | Value::Array(_))) if host_key().is_match(&s.get("key").filter(|k| !k.is_null()).map_or_else(String::new, display)) => {
             let id = s.get("id").and_then(Value::as_str).filter(|i| is_host_id(i));
             let created = s.get("createdAt").and_then(Value::as_f64).unwrap_or(now);
-            json!({ "id": id, "key": s["key"], "createdAt": xenonet_base::json::number(created) })
+            json!({ "id": id, "key": s["key"], "createdAt": xenonet_text::json::number(created) })
         }
         _ => Value::Null,
     };
@@ -302,7 +302,7 @@ pub fn add(hosts: &[Value], entry: &Value, replace: bool) -> Result<Vec<Value>, 
     let mut out = hosts.to_vec();
     match at {
         Some(_) if !replace => {
-            let id = id.map(js_string).unwrap_or_default();
+            let id = id.map(display).unwrap_or_default();
             Err(Refused { message: format!("there's already a host called {id}: remove it first, or replace it (xenonet hosts add {id} … --replace)"), status: 409 })
         }
         Some(i) => {

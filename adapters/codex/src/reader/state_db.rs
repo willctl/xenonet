@@ -6,9 +6,9 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Map, Value};
 use xenonet_adapter::reader::VendorCheck;
-use xenonet_base::json as js;
 use xenonet_sources::lines::{prop, Js, TypeError};
 use xenonet_sources::record::{nn, obj_json, Obj, F};
+use xenonet_text::json as js;
 
 /// The state database XenoNet reads, and its format's version.
 pub const STATE_DB: u32 = 5;

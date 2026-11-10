@@ -22,9 +22,9 @@ use crate::registry::node_kind;
 use crate::store;
 use serde_json::{json, Map, Value};
 use xenonet_adapter::apps::is_session_id;
-use xenonet_base::json::number;
-use xenonet_base::nodepath::{style_of, NATIVE};
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_os::nodepath::{style_of, NATIVE};
+use xenonet_text::json::number;
+use xenonet_text::text::{display, truthy};
 
 const DAY_MS: f64 = 24.0 * 3600e3;
 const AHEAD_MS: f64 = 60e3;
@@ -110,7 +110,7 @@ fn word(kind: Option<&str>) -> &'static str {
 
 /// Number(v), as a time in a report is compared with the clock.
 fn to_number(v: &Value) -> f64 {
-    js_number(Some(v))
+    xenonet_text::text::to_number(Some(v))
 }
 
 /// Whether a field is missing or null.
@@ -124,7 +124,7 @@ fn one_of(set: &[&str], v: Option<&Value>) -> bool {
 
 /// nodeKind(id), with `String(id ?? "")`.
 fn kind_of(id: Option<&Value>) -> Option<&'static str> {
-    node_kind(&if nullish(id) { String::new() } else { js_string(id.unwrap_or(&Value::Null)) })
+    node_kind(&if nullish(id) { String::new() } else { display(id.unwrap_or(&Value::Null)) })
 }
 
 /// `a === b` for two values a report may hold.
@@ -154,7 +154,7 @@ fn same_value_zero(a: &Value, b: &Value) -> bool {
 fn not_a_path(v: &Value) -> store::Error {
     let received = match v {
         Value::Null => "null".to_string(),
-        Value::Number(_) => format!("type number ({})", js_string(v)),
+        Value::Number(_) => format!("type number ({})", display(v)),
         Value::Bool(b) => format!("type boolean ({b})"),
         Value::Array(_) => "an instance of Array".to_string(),
         Value::Object(_) => "an instance of Object".to_string(),
@@ -174,7 +174,7 @@ fn absolute(p: &Value) -> Result<bool> {
 
 /// A path already judged absolute, resolved in its own style.
 fn resolved(p: &Value) -> Value {
-    let p = js_string(p);
+    let p = display(p);
     Value::String(style_of(&p).resolve(&[&p]))
 }
 
@@ -194,12 +194,12 @@ fn node_of(host: &mut dyn Host, target: Option<&Value>, p: Option<&Value>) -> Re
         if kind.is_none() || kind == Some("actor") {
             return Ok(Node::Why("a target is a project, folder or session on XenoNet's map, never an actor"));
         }
-        if kind == Some("session") && !is_session_id(&js_string(target)) {
+        if kind == Some("session") && !is_session_id(&display(target)) {
             return Ok(Node::Why("that isn't a session's id"));
         }
         // Before XenoNet's first look at the map, at start, every node is
         // taken; the registry lets go of the ones that never turn up.
-        if kind != Some("session") && host.map_ready() && !host.map_has(&js_string(target)) {
+        if kind != Some("session") && host.map_ready() && !host.map_has(&display(target)) {
             return Ok(Node::Why("XenoNet doesn't know that node"));
         }
         return Ok(Node::Id(target.clone()));
@@ -224,7 +224,7 @@ fn holds_session(host: &mut dyn Host, session: &Value) -> Result<Option<bool>> {
         return Ok(None);
     }
     let mut seen = false;
-    for pin in host.pins(&js_string(session))? {
+    for pin in host.pins(&display(session))? {
         let Some(line) = host.lineage(pin.get("pid").unwrap_or(&Value::Null)) else { return Ok(None) };
         if line.is_empty() {
             continue;
@@ -459,7 +459,7 @@ pub fn take_targets(host: &mut dyn Host, id: &str, targets: &[Value], replace: b
         }
         let mut drop = |reason: String| out.dropped.push((index, reason));
         let relation = t.get("relation").filter(|r| !r.is_null()).cloned().unwrap_or_else(|| json!("works-on"));
-        let name = js_string(&relation);
+        let name = display(&relation);
         let Some(points) = points_at(&name) else {
             drop(
                 if relation.as_str() == Some("messaged") {
@@ -506,14 +506,14 @@ pub fn take_targets(host: &mut dyn Host, id: &str, targets: &[Value], replace: b
         }
         keep.push((node, relation));
     }
-    let mine = |relation: &Value| points_at(&js_string(relation)).is_some();
+    let mine = |relation: &Value| points_at(&display(relation)).is_some();
     let parts = |t: &Value| (t.get("id").cloned().unwrap_or(Value::Null), t.get("relation").cloned().unwrap_or(Value::Null));
     if replace {
-        let wanted: Vec<String> = keep.iter().map(|(n, r)| format!("{}|{}", js_string(r), js_string(n))).collect();
+        let wanted: Vec<String> = keep.iter().map(|(n, r)| format!("{}|{}", display(r), display(n))).collect();
         for t in host.targets_of(id) {
             let (tid, rel) = parts(&t);
-            if mine(&rel) && !wanted.contains(&format!("{}|{}", js_string(&rel), js_string(&tid))) {
-                host.untarget(id, &js_string(&tid), &js_string(&rel))?;
+            if mine(&rel) && !wanted.contains(&format!("{}|{}", display(&rel), display(&tid))) {
+                host.untarget(id, &display(&tid), &display(&rel))?;
             }
         }
     }
@@ -526,12 +526,12 @@ pub fn take_targets(host: &mut dyn Host, id: &str, targets: &[Value], replace: b
         for t in host.targets_of(id) {
             let (tid, rel) = parts(&t);
             if strict_eq(&tid, &node) && mine(&rel) && (nullish(only) || only.is_some_and(|o| strict_eq(o, &rel))) {
-                host.untarget(id, &js_string(&tid), &js_string(&rel))?;
+                host.untarget(id, &display(&tid), &display(&rel))?;
             }
         }
     }
     for (node, relation) in &keep {
-        host.target(id, &js_string(node), &js_string(relation), now)?;
+        host.target(id, &display(node), &display(relation), now)?;
     }
     out.accepted = keep.len();
     Ok(out)

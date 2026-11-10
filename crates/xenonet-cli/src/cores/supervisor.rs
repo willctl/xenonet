@@ -9,11 +9,11 @@ use super::components::{machine, service_request};
 use crate::out::Fail;
 use crate::sys;
 use serde_json::{json, Value};
-use xenonet_base::nodepath::NATIVE;
 use xenonet_components::packages::{current_component, TRAY, TRAY_APP};
 use xenonet_components::runtime::{self, Env};
 use xenonet_components::supervisor::{self, Disk, Files, Job, Place, System};
 use xenonet_components::tray::{self, TrayPlace};
+use xenonet_os::nodepath::NATIVE;
 
 /// Where this machine keeps the registration, or None where there's no
 /// supervisor XenoNet registers with. XENONET_SUPERVISOR_DIR and
@@ -134,7 +134,7 @@ pub fn running(env: &Value) -> Option<Value> {
 
 /// Whether a service's status has a terminal still open.
 pub fn has_terminals(status: &Value) -> bool {
-    status.get("terminals").and_then(Value::as_array).is_some_and(|l| l.iter().any(|t| !xenonet_base::text::truthy(t.get("exited"))))
+    status.get("terminals").and_then(Value::as_array).is_some_and(|l| l.iter().any(|t| !xenonet_text::text::truthy(t.get("exited"))))
 }
 
 /// Whether the service that answers is the one the supervisor runs.
@@ -319,7 +319,7 @@ pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
     let _ = super::recover_service_update(given);
     let (bin, mut env) = match super::installed_runtime(given) {
         Ok(rt) => {
-            let root = rt.get("root").map(xenonet_base::text::js_string).unwrap_or_default();
+            let root = rt.get("root").map(xenonet_text::text::display).unwrap_or_default();
             let bin = NATIVE.join(&[&root, "bin", runtime::bin_name(sys::platform())]);
             let env: Env = rt.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
             (if std::path::Path::new(&bin).is_file() { bin } else { this_binary() }, env)
@@ -339,10 +339,10 @@ pub fn run(given: &Value, settings: &[String]) -> Result<i32, Fail> {
     let port: u16 = runtime::port_of(&env).parse().unwrap_or(47840);
     let stop_file = runtime::stop_file(&env, &machine());
     let mut cmd = std::process::Command::new(&bin);
-    xenonet_base::process::Background::no_window(&mut cmd);
+    xenonet_os::process::Background::no_window(&mut cmd);
     cmd.arg("serve").env_clear();
     for (k, v) in &env {
-        cmd.env(k, xenonet_base::text::js_string(v));
+        cmd.env(k, xenonet_text::text::display(v));
     }
     #[cfg(unix)]
     {

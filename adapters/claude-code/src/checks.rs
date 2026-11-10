@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use xenonet_adapter::check::{connected, folder, privacy_fix, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
-use xenonet_base::text::{js_string, truthy};
-use xenonet_base::units::plural;
+use xenonet_text::text::{display, truthy};
+use xenonet_text::units::plural;
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
@@ -51,10 +51,10 @@ impl Check for Auth {
         if truthy(r.get("timedOut")) {
             return Ok(Verdict::warn("claude auth status didn't answer in 6 seconds", None));
         }
-        let st = xenonet_base::json::parse(&s(r.get("stdout"))).ok();
+        let st = xenonet_text::json::parse(&s(r.get("stdout"))).ok();
         if let Some(st) = &st {
             if truthy(st.get("loggedIn")) {
-                let by = st.get("authMethod").filter(|v| truthy(Some(v))).map_or(String::new(), |m| format!(" with {}", js_string(m)));
+                let by = st.get("authMethod").filter(|v| truthy(Some(v))).map_or(String::new(), |m| format!(" with {}", display(m)));
                 return Ok(Verdict::ok(format!("signed in{by}")));
             }
             if truthy(Some(st)) && st.get("loggedIn") == Some(&json!(false)) {
@@ -97,7 +97,7 @@ impl Check for Usage {
             Some(at) => format!("no reading since {}", c.local_time(at).await?),
             None => "no reading yet".into(),
         };
-        let reason = cl.get("reason").filter(|v| !v.is_null()).map_or_else(String::new, js_string);
+        let reason = cl.get("reason").filter(|v| !v.is_null()).map_or_else(String::new, display);
         let any = |words: &[&str]| words.iter().any(|w| reason.contains(w));
         if any(&["expired", "refused"]) {
             return Ok(Verdict::warn(format!("{reason}, so there's {since}"), Some("Open Claude Code once; it refreshes its sign-in, and XenoNet reads it on its next try.")));

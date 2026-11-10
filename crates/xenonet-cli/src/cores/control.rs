@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use xenonet_app::control::{self, Instance, Opts};
 use xenonet_app::script::{self, Answer, Arg, Then};
 use xenonet_app::task::{Reply, Task};
-use xenonet_base::process::Background as _;
 use xenonet_components::console::Console;
+use xenonet_os::process::Background as _;
 
 /// Who a command drives: an instance of XenoNet Dev from this checkout,
 /// or installed XenoNet.
@@ -145,11 +145,11 @@ fn electron_command(root: &str) -> Result<Value, Value> {
     let command = match command {
         Some(c) => c,
         None => {
-            let dir = xenonet_base::paths::join_all(&[root, "node_modules", "electron"]);
-            let path = std::fs::read_to_string(xenonet_base::paths::join(&dir, "path.txt"))
+            let dir = xenonet_os::paths::join_all(&[root, "node_modules", "electron"]);
+            let path = std::fs::read_to_string(xenonet_os::paths::join(&dir, "path.txt"))
                 .map_err(|_| error("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually."))?;
-            let dist = sys::var("ELECTRON_OVERRIDE_DIST_PATH").unwrap_or_else(|| xenonet_base::paths::join(&dir, "dist"));
-            xenonet_base::paths::join(&dist, path.trim())
+            let dist = sys::var("ELECTRON_OVERRIDE_DIST_PATH").unwrap_or_else(|| xenonet_os::paths::join(&dir, "dist"));
+            xenonet_os::paths::join(&dist, path.trim())
         }
     };
     Ok(json!({ "command": command, "args": args }))
@@ -158,12 +158,12 @@ fn electron_command(root: &str) -> Result<Value, Value> {
 /// The stdio a detached child is started with: its output to a log, or
 /// nowhere.
 fn spawn(q: &Value, log: Option<&str>) -> Result<std::process::Child, Value> {
-    let text = |k: &str| q.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
+    let text = |k: &str| q.get(k).map(xenonet_text::text::display).unwrap_or_default();
     let mut cmd = std::process::Command::new(text("command"));
-    cmd.args(q.get("args").and_then(Value::as_array).into_iter().flatten().map(xenonet_base::text::js_string)).stdin(std::process::Stdio::null());
+    cmd.args(q.get("args").and_then(Value::as_array).into_iter().flatten().map(xenonet_text::text::display)).stdin(std::process::Stdio::null());
     match log {
         Some(file) => {
-            let out = std::fs::OpenOptions::new().create(true).append(true).open(file).map_err(|e| error(xenonet_base::fs::FsError::of(e, "open", file).message))?;
+            let out = std::fs::OpenOptions::new().create(true).append(true).open(file).map_err(|e| error(xenonet_os::fs::FsError::of(e, "open", file).message))?;
             let err = out.try_clone().map_err(|e| error(e.to_string()))?;
             cmd.stdout(out).stderr(err);
         }
@@ -177,7 +177,7 @@ fn spawn(q: &Value, log: Option<&str>) -> Result<std::process::Child, Value> {
     if let Some(env) = q.get("env").and_then(Value::as_object) {
         cmd.env_clear();
         for (k, v) in env {
-            cmd.env(k, xenonet_base::text::js_string(v));
+            cmd.env(k, xenonet_text::text::display(v));
         }
     }
     #[cfg(unix)]
@@ -191,7 +191,7 @@ fn spawn(q: &Value, log: Option<&str>) -> Result<std::process::Child, Value> {
         cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
     }
     cmd.spawn().map_err(|e| {
-        let code = xenonet_base::fs::code_of(&e).unwrap_or("ENOENT");
+        let code = xenonet_os::fs::code_of(&e).unwrap_or("ENOENT");
         coded(format!("spawn {} {code}", text("command")), code)
     })
 }
@@ -217,7 +217,7 @@ impl Perform for Dev {
             Some("env") => Ok(Value::Object(super::env_map())),
             Some("command") => electron_command(&self.root),
             Some("spawn") => {
-                let log = q.get("logFile").map(xenonet_base::text::js_string).unwrap_or_default();
+                let log = q.get("logFile").map(xenonet_text::text::display).unwrap_or_default();
                 self.child = Some(spawn(q, Some(&log))?);
                 Ok(Value::Null)
             }
@@ -281,7 +281,7 @@ impl Perform for Installed {
             }
             Some("spawn") => spawn(q, None).map(|_| Value::Null),
             Some("fetch") => {
-                let url = q.get("url").map(xenonet_base::text::js_string).unwrap_or_default();
+                let url = q.get("url").map(xenonet_text::text::display).unwrap_or_default();
                 let res = super::tasks::fetch("GET", &url, &[], None, None).await?;
                 self.next += 1;
                 self.bodies.insert(self.next, res.body);
@@ -289,7 +289,7 @@ impl Perform for Installed {
             }
             Some("json") => {
                 let body = self.bodies.get(&id("res")).cloned().unwrap_or_default();
-                xenonet_base::json::parse(&String::from_utf8_lossy(&body)).map_err(|e| json!({ "message": e.to_string(), "name": "SyntaxError" }))
+                xenonet_text::json::parse(&String::from_utf8_lossy(&body)).map_err(|e| json!({ "message": e.to_string(), "name": "SyntaxError" }))
             }
             other => Err(error(format!("the console asked for {}", other.unwrap_or("undefined")))),
         }
@@ -360,7 +360,7 @@ async fn method(t: &Target, kind: &str, a: Value) -> Result<Value, Failed> {
                     "ready" => c.ready(&io, num(&a, "timeout", 60000.0)).await,
                     "quit" => c.quit(&io).await,
                     "launch" => {
-                        let show = a.get("show").filter(|s| !s.is_null()).map_or_else(|| "inactive".to_string(), xenonet_base::text::js_string);
+                        let show = a.get("show").filter(|s| !s.is_null()).map_or_else(|| "inactive".to_string(), xenonet_text::text::display);
                         c.launch(&io, &show, a.get("restart") == Some(&Value::Bool(true)), num(&a, "timeout", 60000.0)).await
                     }
                     "driver" => {
@@ -373,7 +373,7 @@ async fn method(t: &Target, kind: &str, a: Value) -> Result<Value, Failed> {
                 }
             });
             let out = drive(task, &mut Installed { env, clients: HashMap::new(), bodies: HashMap::new(), next: 0 }).await?;
-            Ok(if health { json!(xenonet_base::text::truthy(Some(&out))) } else { out })
+            Ok(if health { json!(xenonet_text::text::truthy(Some(&out))) } else { out })
         }
     }
 }
@@ -522,7 +522,7 @@ pub fn run_script(instance: &str, steps: &[Value], say: &mut dyn FnMut(&Value)) 
 /// `plain`, or nowhere when `quiet`.
 pub fn run_module(full: &str, file: &str, instance: &str, quiet: bool, plain: bool) -> Result<(), Fail> {
     let root = sys::xenonet_root();
-    let control = xenonet_base::paths::join_all(&[&root, "core", "control.js"]);
+    let control = xenonet_os::paths::join_all(&[&root, "core", "control.js"]);
     if !std::path::Path::new(&control).is_file() {
         return Err(Fail::new(format!("{file} is a JS module, which runs only with XenoNet's checkout (core/control.js); run it there with node cli/xenonet.js script run"), 1));
     }
@@ -552,10 +552,10 @@ try {
         .args(["--input-type=module", "-e", code, &root, full, file, instance, if quiet { "1" } else { "0" }, if plain { "1" } else { "0" }, &said.to_string_lossy()])
         .status()
         .map_err(|e| Fail::error(format!("couldn't start node: {e}")))?;
-    let why = std::fs::read_to_string(&said).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
+    let why = std::fs::read_to_string(&said).ok().and_then(|t| xenonet_text::json::parse(&t).ok());
     let _ = std::fs::remove_file(&said);
     if let Some(w) = why {
-        let message = w.get("message").map(xenonet_base::text::js_string).unwrap_or_default();
+        let message = w.get("message").map(xenonet_text::text::display).unwrap_or_default();
         return Err(if w.get("expected") == Some(&json!(true)) { Fail::new(message, 1) } else { Fail::error(message) });
     }
     if !status.success() {

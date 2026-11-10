@@ -2,7 +2,7 @@
 //! and the step from version 1.
 
 use serde_json::{Map, Value};
-use xenonet_base::text::truthy;
+use xenonet_text::text::truthy;
 
 pub const STATE_VERSION: f64 = 2.0;
 
@@ -64,7 +64,7 @@ mod tests {
     fn v1_to_v2() {
         let v2 = up_1_to_2(&json!({ "layout": {}, "projects": { "codex": { "picks": [] }, "rules": {} } }), Some("/users/nova/projects"));
         assert_eq!(
-            xenonet_base::json::stringify(&v2, 0),
+            xenonet_text::json::stringify(&v2, 0),
             r#"{"version":2,"workspace":{"root":null},"layout":{},"projects":{"rules":{},"codexByRoot":{"/users/nova/projects":{"picks":[]}}}}"#
         );
         assert_eq!(up_1_to_2(&json!({}), None), json!({ "version": 2, "workspace": { "root": null }, "projects": { "codexByRoot": {} } }));

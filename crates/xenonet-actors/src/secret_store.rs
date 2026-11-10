@@ -157,7 +157,7 @@ pub fn encoded_command(script: &str) -> String {
 }
 
 fn json_string(s: &str) -> String {
-    xenonet_base::json::stringify(&serde_json::Value::String(s.into()), 0)
+    xenonet_text::json::stringify(&serde_json::Value::String(s.into()), 0)
 }
 
 /// The credential store of this platform: `tool` is its program, when

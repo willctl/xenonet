@@ -60,7 +60,7 @@ pub struct Adapter {
 
 impl Adapter {
     pub fn new(grant: &Value) -> Result<Self, String> {
-        if !is_grant(&xenonet_base::text::js_string(grant)) {
+        if !is_grant(&xenonet_text::text::display(grant)) {
             return Err("--grant takes a grant's id (gr_…), as XenoNet's window shows it".into());
         }
         Ok(Adapter { grant: grant.clone(), failures: 0, retry_at: 0.0, state_dir: None })
@@ -77,7 +77,7 @@ impl Adapter {
     /// listen on since, and a credential never goes there.
     pub fn endpoint(&mut self, text: Option<&str>, alive: &mut dyn FnMut(f64) -> bool) -> Result<Endpoint, Refused> {
         let d = text
-            .and_then(|t| xenonet_base::json::parse(t).ok())
+            .and_then(|t| xenonet_text::json::parse(t).ok())
             .ok_or_else(|| refused("SERVICE_UNAVAILABLE", "XenoNet's endpoint for remote actors isn't listening: XenoNet isn't running, or no grant is active"))?;
         let int = |v: Option<&Value>| v.and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.is_finite());
         let (Some(port), Some(state)) = (int(d.get("port")), d.get("state").and_then(Value::as_str)) else {
@@ -106,7 +106,7 @@ impl Adapter {
     pub fn failed(&mut self, now: f64, random: f64) {
         self.failures += 1;
         let base = MAX.min(FIRST * 2f64.powi(self.failures as i32 - 1));
-        self.retry_at = now + xenonet_base::units::js_round(base * (0.8 + 0.4 * random));
+        self.retry_at = now + xenonet_text::units::round(base * (0.8 + 0.4 * random));
     }
 
     /// Whether the grant still stands as far as this computer's files say:
@@ -123,7 +123,7 @@ impl Adapter {
         if c["expiresAt"].as_f64().is_some_and(|e| e <= now) {
             return json!({ "ok": false, "code": "GRANT_EXPIRED" });
         }
-        json!({ "ok": true, "revision": revision_of(dir, &self.grant).map_or(Value::Null, xenonet_base::json::number) })
+        json!({ "ok": true, "revision": revision_of(dir, &self.grant).map_or(Value::Null, xenonet_text::json::number) })
     }
 }
 

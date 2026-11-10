@@ -101,10 +101,10 @@ impl Fixture {
         let (cfg, op, tool, policy, rid) = (Rc::new(cfg), op.to_string(), tool.to_string(), self.policy.clone(), request_id.clone());
         let task = Task::new(move |io| async move { service::answer(io, cfg, cursors, op, tool, parsed, policy, rid).await });
         let done = run_with(task, |q| match q.get("op").and_then(Value::as_str) {
-            Some("now" | "cursorNow") => Ok(xenonet_base::json::number(now())),
+            Some("now" | "cursorNow") => Ok(xenonet_text::json::number(now())),
             Some("view") => Ok(fixtures::fixture_view(now())),
             Some("actor") => Ok(Value::Null),
-            Some("stats") => Ok(fixtures::fixture_stats(&q.get("id").map(xenonet_base::text::js_string).unwrap_or_default())),
+            Some("stats") => Ok(fixtures::fixture_stats(&q.get("id").map(xenonet_text::text::display).unwrap_or_default())),
             Some("idKey") => Ok(json!("fixture".as_bytes())),
             Some("check") => {
                 let tool = q.get("tool").and_then(Value::as_str).unwrap_or("");

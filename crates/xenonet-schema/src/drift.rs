@@ -20,9 +20,9 @@ use crate::lenient::json_type;
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::path::Path;
-use xenonet_base::json;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::text::js_string;
+use xenonet_text::json;
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::display;
 
 pub const DRIFT_MAX: usize = 500;
 pub const DRIFT_FILE: &str = "drift.json";
@@ -246,7 +246,7 @@ fn variant_key(variant: Option<&Value>) -> String {
 
 // A value as a template literal writes it.
 fn tpl(v: Option<&Value>) -> String {
-    v.map_or("undefined".into(), js_string)
+    v.map_or("undefined".into(), display)
 }
 
 /// A piece of drift: what `record` takes, and what `key_of` reads.
@@ -281,15 +281,15 @@ impl Piece {
 /// variant's.
 pub fn key_of(p: &Piece) -> String {
     let (src, kind) = (&p.source, &p.kind);
-    let at = js_string(&p.path);
+    let at = display(&p.path);
     let vk = variant_key(Some(&p.variant));
     match kind.as_str() {
-        "new-version" => format!("{src}|{kind}|{}", js_string(&p.vendor_version)),
+        "new-version" => format!("{src}|{kind}|{}", display(&p.vendor_version)),
         "type-change" => {
-            let t = if p.type_.is_null() { root_type(p.shape.as_str()) } else { js_string(&p.type_) };
+            let t = if p.type_.is_null() { root_type(p.shape.as_str()) } else { display(&p.type_) };
             format!("{src}|{kind}|{at}|{t}{vk}")
         }
-        "new-variant" => format!("{src}|{kind}|{at}|{}{vk}", js_string(&p.shape)),
+        "new-variant" => format!("{src}|{kind}|{at}|{}{vk}", display(&p.shape)),
         "unparsable" => format!("{src}|{kind}"),
         _ => format!("{src}|{kind}|{at}{vk}"),
     }
@@ -297,12 +297,12 @@ pub fn key_of(p: &Piece) -> String {
 
 /// What a record says, in a few words.
 pub fn describe(r: &Value) -> String {
-    let s = |k: &str| r.get(k).map_or("undefined".to_string(), js_string);
-    let wh = clean_variant(r.get("variant")).map_or(String::new(), |v| format!(", in {}", v.iter().map(js_string).collect::<Vec<_>>().join(" › ")));
+    let s = |k: &str| r.get(k).map_or("undefined".to_string(), display);
+    let wh = clean_variant(r.get("variant")).map_or(String::new(), |v| format!(", in {}", v.iter().map(display).collect::<Vec<_>>().join(" › ")));
     match r.get("kind").and_then(Value::as_str) {
         Some("new-field") => format!("{} is new ({}){wh}", s("path"), s("shape")),
         Some("missing-field") => format!("{} is missing{wh}", s("path")),
-        Some("type-change") => format!("{} is {} now{wh}", r.get("path").filter(|p| !p.is_null()).map_or("a record".to_string(), js_string), s("shape")),
+        Some("type-change") => format!("{} is {} now{wh}", r.get("path").filter(|p| !p.is_null()).map_or("a record".to_string(), display), s("shape")),
         Some("new-variant") => format!("{} {} isn't one the schema lists{wh}", s("path"), s("shape")),
         Some("new-version") => format!("version {} is outside the versions the schema was made for", s("vendorVersion")),
         Some("unparsable") => "lines that aren't JSON".into(),
@@ -502,7 +502,7 @@ impl DriftLog {
     pub fn sync(&mut self, force: bool) {
         let Some(file) = self.file.clone() else { return };
         let Ok(meta) = std::fs::metadata(&file) else { return };
-        let mtime = xenonet_base::fs::mtime_ms_of(&meta).ok();
+        let mtime = xenonet_os::fs::mtime_ms_of(&meta).ok();
         if !force && self.mtime.is_some() && self.mtime == mtime {
             return;
         }
@@ -559,9 +559,9 @@ impl DriftLog {
             Ok(())
         })();
         if let Err(e) = wrote {
-            return Some(xenonet_base::fs::FsError::of(e, "open", &tmp).message);
+            return Some(xenonet_os::fs::FsError::of(e, "open", &tmp).message);
         }
-        self.mtime = std::fs::metadata(&file).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok());
+        self.mtime = std::fs::metadata(&file).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok());
         for (_, e) in self.records.iter_mut() {
             e.base = num(&e.record, "count");
             e.delta = 0.0;

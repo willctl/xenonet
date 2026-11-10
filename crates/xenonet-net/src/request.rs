@@ -39,7 +39,7 @@ pub struct Signed {
 impl Signed {
     /// From the headers, or None when one is missing or malformed.
     pub fn from_headers(get: impl Fn(&str) -> Option<String>) -> Option<Signed> {
-        let host = get(HOST).filter(|h| xenonet_base::ids::is_host_id(h))?;
+        let host = get(HOST).filter(|h| xenonet_model::ids::is_host_id(h))?;
         let time = get(TIME)?.parse::<i64>().ok()?;
         let nonce = get(NONCE).filter(|n| (8..=64).contains(&n.len()) && crate::codec::is_b64(n))?;
         let sig = unb64(&get(SIG)?).filter(|s| s.len() == 64)?;

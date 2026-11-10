@@ -12,7 +12,7 @@
 
 use crate::jsv::{raw, truthy};
 use serde_json::{json, Map, Value};
-use xenonet_base::text::{js_number, js_string};
+use xenonet_text::text::{display, to_number};
 
 pub const STEPS: &str = r#"  launch[:inactive|front|hidden]  start it unless it's running, and wait until it's ready
   launch:restart[:…]              quit it if it's running, or end a copy stuck holding its
@@ -168,7 +168,7 @@ fn type_error(message: impl Into<String>) -> Then {
 
 // A value in a template literal: String(v), "undefined" when missing.
 fn t(x: Option<&Value>) -> String {
-    x.map_or_else(|| "undefined".into(), js_string)
+    x.map_or_else(|| "undefined".into(), display)
 }
 
 fn read<'a>(x: Option<&'a Value>, k: &str) -> Result<Option<&'a Value>, String> {
@@ -222,11 +222,11 @@ pub fn brief(st: &Value) -> Result<Value, String> {
 }
 
 fn number(s: &str) -> f64 {
-    js_number(Some(&Value::String(s.into())))
+    to_number(Some(&Value::String(s.into())))
 }
 
 fn num(n: f64) -> Value {
-    xenonet_base::json::number(n)
+    xenonet_text::json::number(n)
 }
 
 // `arg.split(",").map(Number)`, with a part that isn't there undefined.
@@ -302,11 +302,11 @@ pub fn begin(step: &Value, ctx: &Context) -> (State, Out) {
             let first = args.first();
             match op.as_ref().and_then(Value::as_str) {
                 Some("wait") => {
-                    let ms = js_number(first);
+                    let ms = to_number(first);
                     r.st.insert("object".into(), json!("wait"));
                     return r.out(Then::Sleep(if ms.is_nan() || ms == 0.0 { 0.0 } else { ms }));
                 }
-                Some("shot") => return begin(&json!(format!("shot:{}", first.filter(|x| !x.is_null()).map_or_else(|| "shot".into(), js_string))), ctx),
+                Some("shot") => return begin(&json!(format!("shot:{}", first.filter(|x| !x.is_null()).map_or_else(|| "shot".into(), display))), ctx),
                 Some("theme") => return begin(&json!(format!("theme:{}", t(first))), ctx),
                 Some("film") => {
                     let seconds = raw(first, "seconds").filter(|x| !x.is_null()).or(first.filter(|x| !x.is_null())).cloned().unwrap_or_else(|| num(ctx.film_seconds));
@@ -322,7 +322,7 @@ pub fn begin(step: &Value, ctx: &Context) -> (State, Out) {
             }
         }
         _ => {
-            let text = js_string(step);
+            let text = display(step);
             let (cmd, arg) = match text.find(':') {
                 None => (text.clone(), String::new()),
                 Some(i) => (text[..i].to_string(), text[i + 1..].to_string()),
@@ -592,7 +592,7 @@ fn resume_in(r: &mut Run, answer: Answer) -> Result<Then, String> {
                 let beams = length(read(a, "beams")?)?.and_then(|n| n.as_f64()).unwrap_or(f64::NAN);
                 let beams = if beams > 0.0 { format!("  → {} beam{}", num(beams), if beams == 1.0 { "" } else { "s" }) } else { String::new() };
                 let tunnel = match gate(raw(a, "id")) {
-                    Some(gt) => format!("  ⊙ tunnel {}", if js_number(raw(Some(&gt), "open")) >= 0.5 { "open" } else { "shut" }),
+                    Some(gt) => format!("  ⊙ tunnel {}", if to_number(raw(Some(&gt), "open")) >= 0.5 { "open" } else { "shut" }),
                     None => String::new(),
                 };
                 r.say(json!(format!("{}  {}  {}{status}{beams}{tunnel}", t(raw(a, "id")), t(raw(a, "presence")), t(raw(a, "title")))));
@@ -646,7 +646,7 @@ fn resume_in(r: &mut Run, answer: Answer) -> Result<Then, String> {
         }
         ("shot", _) => {
             let notes = list(read(g, "notes")?)?;
-            let notes = if notes.is_empty() { String::new() } else { format!(" {}", xenonet_base::text::join(notes.iter().map(Some), "; ")) };
+            let notes = if notes.is_empty() { String::new() } else { format!(" {}", xenonet_text::text::join(notes.iter().map(Some), "; ")) };
             r.say(json!(format!("shot {} ({}×{}){notes}", t(read(g, "file")?), t(read(g, "width")?), t(read(g, "height")?))));
             Then::Done
         }

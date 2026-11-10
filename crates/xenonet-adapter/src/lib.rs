@@ -14,6 +14,10 @@
 //! - `check`: a doctor row an adapter brings; `processes`, `delivery` and
 //!   `connect`: what an adapter gives for its app's processes, its ways
 //!   in, and its config format.
+//! - `dirs`: where the desktop apps keep their folders and binaries, which
+//!   the adapters and the core both look up.
+//! - `formats`: formats several crates read: Codex's apply_patch text
+//!   (`patch`) and OpenCode's ids (`opencode`).
 //!
 //! The binary installs the adapters it was built with (`install`), and
 //! the core asks `platforms()`.
@@ -22,6 +26,8 @@ pub mod apps;
 pub mod check;
 pub mod connect;
 pub mod delivery;
+pub mod dirs;
+pub mod formats;
 pub mod observe;
 pub mod platform;
 pub mod processes;

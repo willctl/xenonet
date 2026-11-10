@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use xenonet_app::fsx::{self, FsError};
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{Failure, Io};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 pub const FEED: &str = "https://github.com/willctl/xenonet/releases/latest/download/components.json";
 const DOWNLOADS: &str = "https://github.com/willctl/xenonet/releases/latest/download/";
@@ -52,11 +52,11 @@ pub async fn component_updates(io: &Io, env: &Env, m: &Machine) -> Result<Value,
     for item in packages.iter().filter(|i| i.get("platform").and_then(Value::as_str) == Some(m.platform.as_str()) && i.get("arch").and_then(Value::as_str) == Some(m.arch.as_str()))
     {
         package_info(Some(item), &m.platform, &m.arch).map_err(Failure::msg)?;
-        let file = item.get("file").map_or_else(|| "undefined".into(), js_string);
+        let file = item.get("file").map_or_else(|| "undefined".into(), display);
         if !file_re().is_match(&file) || !size_ok(item.get("size")) || !is_sha(item.get("sha256")) {
             return Err(Failure::msg("Invalid component download."));
         }
-        let component = js_string(&item["component"]);
+        let component = display(&item["component"]);
         let current = current_component(&component, env, m)?;
         let available = match &current {
             None => true,
@@ -84,14 +84,14 @@ fn valid(file: &str, size: f64, sha: &str) -> Result<bool, FsError> {
 /// from: its file, and whether a good copy is there already (a bad one is
 /// taken away).
 pub fn download_plan(item: &Value, env: &Env, m: &Machine) -> Result<(String, bool), FsError> {
-    let url = item.get("url").map_or_else(|| "undefined".into(), js_string);
+    let url = item.get("url").map_or_else(|| "undefined".into(), display);
     if !url_re().is_match(&url) {
         return Err(fsx::said("Unexpected component download address."));
     }
     if !is_sha(item.get("sha256")) || !size_ok(item.get("size")) {
         return Err(fsx::said("Invalid component download."));
     }
-    let sha = js_string(&item["sha256"]);
+    let sha = display(&item["sha256"]);
     let size = item["size"].as_f64().unwrap_or(0.0);
     let dir = NATIVE.join(&[&runtime_dir(env, m), "downloads"]);
     fsx::mkdir_p(&dir, Some(0o700))?;
@@ -119,7 +119,7 @@ impl Download {
     pub fn new(file: &str, size: f64, sha256: &str) -> Result<Self, FsError> {
         let mut b = [0u8; 16];
         getrandom::fill(&mut b).expect("the system's random numbers");
-        let tmp = format!("{file}.{}.tmp", xenonet_base::jsstr::hex(&b));
+        let tmp = format!("{file}.{}.tmp", xenonet_text::utf16::hex(&b));
         let mut o = std::fs::OpenOptions::new();
         o.write(true).create_new(true);
         #[cfg(unix)]

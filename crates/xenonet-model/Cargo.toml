@@ -15,6 +15,9 @@ regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Text and times as XenoNet reads them: remotes trimmed as JS trims, token
+# figures as numbers, a price's day. No IO.
+xenonet-text.workspace = true
 
 [lints]
 workspace = true

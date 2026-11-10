@@ -6,8 +6,8 @@
 
 use crate::lines::Js;
 use serde_json::{Map, Value};
-use xenonet_base::text::js_string;
-use xenonet_base::{json, units};
+use xenonet_text::text::display;
+use xenonet_text::{json, units};
 
 /// A field of an object made for JS: missing (undefined), a number JSON
 /// can't hold (NaN), a JSON value, or a list of such.
@@ -72,7 +72,7 @@ pub fn nn(v: Js<'_>) -> Js<'_> {
 
 /// `${v}` in a template: undefined as "undefined".
 pub fn tpl(v: Js<'_>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 /// excerpt(s, n) on any value, as units.js does it: a long string cut and
@@ -81,7 +81,7 @@ pub fn excerpt(s: Js<'_>, n: usize) -> F {
     match s {
         None | Some(Value::Null) => F::s(""),
         Some(Value::String(t)) => F::s(units::excerpt(t, n)),
-        Some(Value::Array(a)) if a.len() > n => F::s(format!("{}\n… ({} more chars)", js_string(&Value::Array(a[..n].to_vec())), a.len() - n)),
+        Some(Value::Array(a)) if a.len() > n => F::s(format!("{}\n… ({} more chars)", display(&Value::Array(a[..n].to_vec())), a.len() - n)),
         Some(v) => F::V(v.clone()),
     }
 }

@@ -9,19 +9,19 @@ use super::entries;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use xenonet_adapter::reader::{Lister, VendorCheck};
-use xenonet_base::jsstr;
-use xenonet_base::text::js_trim;
 use xenonet_sources::grok::grok_time;
 use xenonet_sources::lines::GrokLine;
+use xenonet_text::text::trim;
+use xenonet_text::utf16;
 
 // Text's first line, trimmed, at most n characters (UTF-16 units, as JS
 // counts them).
 fn first_line(s: Option<&Value>, n: usize) -> String {
     let text = s.and_then(Value::as_str).unwrap_or_default();
-    let line = js_trim(text).split('\n').next().unwrap_or_default();
-    let t = js_trim(line.strip_suffix('\r').unwrap_or(line)).to_string();
-    if jsstr::len(&t) > n {
-        format!("{}…", jsstr::slice(&t, 0, Some(n as i64 - 1)))
+    let line = trim(text).split('\n').next().unwrap_or_default();
+    let t = trim(line.strip_suffix('\r').unwrap_or(line)).to_string();
+    if utf16::len(&t) > n {
+        format!("{}…", utf16::slice(&t, 0, Some(n as i64 - 1)))
     } else {
         t
     }
@@ -33,7 +33,7 @@ fn dirs_in(dir: &Path) -> Vec<String> {
     let Ok(read) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut out: Vec<String> =
         read.filter_map(Result::ok).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).filter_map(|e| e.file_name().into_string().ok()).filter(|n| !n.starts_with('.')).collect();
-    out.sort_by(|a, b| jsstr::cmp_units(a, b));
+    out.sort_by(|a, b| utf16::cmp_units(a, b));
     out
 }
 
@@ -67,7 +67,7 @@ fn decode_uri_component(s: &str) -> Option<String> {
 /// group. None when neither says (each session's summary may).
 pub fn group_cwd(group_dir: &Path, name: &str) -> Option<String> {
     if let Ok(written) = std::fs::read_to_string(group_dir.join(".cwd")) {
-        let w = js_trim(&written);
+        let w = trim(&written);
         if !w.is_empty() {
             return Some(w.to_string());
         }
@@ -91,7 +91,7 @@ fn or_null(v: Option<String>) -> Value {
 }
 
 fn number(v: Option<f64>) -> Value {
-    v.map_or(Value::Null, xenonet_base::json::number)
+    v.map_or(Value::Null, xenonet_text::json::number)
 }
 
 /// A subagent a session ran, as its folder's `subagents/<id>/meta.json` says:
@@ -110,7 +110,7 @@ pub struct Subagent {
 fn subagents_in(dir: &Path, id: &str, sample: &mut dyn FnMut(&str, Value) -> Option<Value>) -> Vec<Subagent> {
     let mut out = Vec::new();
     for name in dirs_in(&dir.join("subagents")) {
-        let Some(raw) = std::fs::read_to_string(dir.join("subagents").join(&name).join("meta.json")).ok().and_then(|t| xenonet_base::json::parse(&t).ok()) else { continue };
+        let Some(raw) = std::fs::read_to_string(dir.join("subagents").join(&name).join("meta.json")).ok().and_then(|t| xenonet_text::json::parse(&t).ok()) else { continue };
         let Some(m @ Value::Object(_)) = sample(META, raw) else { continue };
         let either = |a: &str, b: &str| nonempty(m.get(a)).or_else(|| nonempty(m.get(b))).map(str::to_string);
         if let Some(child) = either("child_session_id", "childSessionId") {
@@ -192,8 +192,8 @@ pub fn list_sessions(home: &str, sample: &mut dyn FnMut(&str, Value) -> Option<V
         let cwd = group_cwd(&group_dir, &group);
         for id in dirs_in(&group_dir) {
             let dir = group_dir.join(&id);
-            let updates = std::fs::metadata(dir.join("updates.jsonl")).ok().map(|m| (xenonet_base::fs::mtime_ms_of(&m).ok(), m.len() as f64));
-            let raw = std::fs::read_to_string(dir.join("summary.json")).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
+            let updates = std::fs::metadata(dir.join("updates.jsonl")).ok().map(|m| (xenonet_os::fs::mtime_ms_of(&m).ok(), m.len() as f64));
+            let raw = std::fs::read_to_string(dir.join("summary.json")).ok().and_then(|t| xenonet_text::json::parse(&t).ok());
             // A folder without a summary yet is a session being made, once
             // its conversation is there.
             let s = match raw {

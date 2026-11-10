@@ -35,11 +35,11 @@ use xenonet_actors::names::hermes_slug;
 use xenonet_adapter::observe::attribution::{self, census, spawned, Census, Pending, SpawnsState};
 use xenonet_adapter::observe::{Core, Gather, Keep, Observer, ObserverHost, Result, Say};
 use xenonet_adapter::products::Product;
-use xenonet_base::json::{number, number_string};
-use xenonet_base::nodepath::{style_of, NATIVE};
-use xenonet_base::paths::{is_under, path_key, tilde};
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_string, truthy, JS_SPACE};
+use xenonet_os::nodepath::{style_of, NATIVE};
+use xenonet_os::paths::{is_under, path_key, tilde};
+use xenonet_os::sync::Locked;
+use xenonet_text::json::{number, number_string};
+use xenonet_text::text::{display, truthy, SPACE};
 
 /// Every Hermes heartbeat (the gateway's, the ticker's, a backend's)
 /// comes every 60 s.
@@ -105,9 +105,9 @@ pub fn tool_words(tool: &str) -> Option<&'static str> {
 /// What a session's activity stamp says it's doing, in XenoNet's words, or
 /// None. The stamp itself is never shown: some templates carry free text.
 pub fn doing_of(d: &str) -> Option<&'static str> {
-    let tool = re!(format!(r"(?i)^(?:executing tool|tool completed|sequential tool running \([^)]*\)):[{JS_SPACE}]*([a-z_][a-z0-9_]*)"))
+    let tool = re!(format!(r"(?i)^(?:executing tool|tool completed|sequential tool running \([^)]*\)):[{SPACE}]*([a-z_][a-z0-9_]*)"))
         .captures(d)
-        .or_else(|| re!(format!(r"(?i)^executing [0-9]+ tools concurrently:[{JS_SPACE}]*([a-z_][a-z0-9_]*)")).captures(d))
+        .or_else(|| re!(format!(r"(?i)^executing [0-9]+ tools concurrently:[{SPACE}]*([a-z_][a-z0-9_]*)")).captures(d))
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string());
     if let Some(t) = tool {
@@ -137,7 +137,7 @@ pub fn ending_of(r: &str) -> Option<&'static str> {
 fn text_of(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => String::new(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -155,7 +155,7 @@ fn stamp_of(h: &dyn ObserverHost, paths: &[String]) -> String {
 }
 
 fn join(base: &str, parts: &[&str]) -> String {
-    parts.iter().fold(base.to_string(), |a, p| xenonet_base::paths::join(&a, p))
+    parts.iter().fold(base.to_string(), |a, p| xenonet_os::paths::join(&a, p))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -326,8 +326,8 @@ impl Hermes {
         self.roots.get_or_init(|| {
             let home = h.home().to_string();
             let root = match std::env::var("HERMES_HOME").ok().filter(|r| !r.is_empty()) {
-                Some(r) => xenonet_base::paths::resolve(&r),
-                None => xenonet_base::paths::join(&home, ".hermes"),
+                Some(r) => xenonet_os::paths::resolve(&r),
+                None => xenonet_os::paths::join(&home, ".hermes"),
             };
             Roots { root, home }
         })
@@ -407,8 +407,8 @@ impl Hermes {
         // Only a plain name, so a profile's folder stays inside Hermes's.
         for e in ledger {
             let profile = e.get("profile").filter(|p| truthy(Some(p)));
-            if profile.is_none_or(|p| re!(r"^[A-Za-z0-9][0-9A-Za-z_.-]{0,63}$").is_match(&js_string(p))) {
-                let name = profile.map_or_else(|| "default".to_string(), js_string);
+            if profile.is_none_or(|p| re!(r"^[A-Za-z0-9][0-9A-Za-z_.-]{0,63}$").is_match(&display(p))) {
+                let name = profile.map_or_else(|| "default".to_string(), display);
                 if !names.contains(&name) {
                     names.push(name);
                 }
@@ -445,7 +445,7 @@ impl Hermes {
     fn absolute(home: &str, p: &Value, s: Option<&Session>) -> Option<String> {
         let p = p.as_str().filter(|p| !p.is_empty() && !p.contains('\0'))?;
         if p == "~" || p.starts_with("~/") {
-            return Some(xenonet_base::paths::join(home, &p[1..]));
+            return Some(xenonet_os::paths::join(home, &p[1..]));
         }
         if NATIVE.is_absolute(p) {
             return Some(style_of(p).join(&[p]));
@@ -653,7 +653,7 @@ impl Hermes {
         let latest = |s: &Session| s.activity_at.unwrap_or(0.0).max(s.last_message_at.unwrap_or(0.0));
         let mut active: Vec<Session> =
             p.sessions.iter().map(|(_, s)| s.clone()).filter(|s| s.ended_at.is_none() && !s.archived && !s.hidden && latest(s) >= at - ACTIVE_MS).collect();
-        xenonet_base::sort::sort_by(&mut active, |a, b| latest(b).partial_cmp(&latest(a)).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_text::sort::sort_by(&mut active, |a, b| latest(b).partial_cmp(&latest(a)).unwrap_or(std::cmp::Ordering::Equal));
         // A gateway whose heartbeat is stale while its process runs has gone
         // quiet: only its sessions' own activity says what it's doing.
         let quiet = r.gateway_alive && n(r.gateway.get("updatedAt")).is_some_and(|u| at - u > STALE_MS);
@@ -667,7 +667,7 @@ impl Hermes {
                     let place = Self::place_of_session(h, Some(top));
                     let name = actors.where_of(&place).get("name").cloned().unwrap_or(Value::Null);
                     if truthy(Some(&name)) {
-                        format!("{words} in {}", js_string(&name))
+                        format!("{words} in {}", display(&name))
                     } else {
                         words.to_string()
                     }
@@ -779,7 +779,7 @@ impl Hermes {
                 s.last_message_at = Some(s.last_message_at.unwrap_or(0.0).max(when));
             }
             let s = p.sessions.iter().find(|(k, _)| *k == sid).map(|(_, s)| s.clone());
-            let tool = m.get("tool_name").filter(|t| truthy(Some(t))).map(js_string).filter(|_| m["role"].as_str() == Some("tool"));
+            let tool = m.get("tool_name").filter(|t| truthy(Some(t))).map(display).filter(|_| m["role"].as_str() == Some("tool"));
             if let Some(tool) = tool {
                 match p.last_tool.iter_mut().find(|(k, _)| *k == sid) {
                     Some(slot) => slot.1.clone_from(&tool),
@@ -1005,7 +1005,7 @@ impl Observer for Hermes {
             None => to.push((pid, name.into())),
         };
         for e in &live {
-            let name = e.get("profile").filter(|p| truthy(Some(p))).map_or_else(|| "default".to_string(), js_string);
+            let name = e.get("profile").filter(|p| truthy(Some(p))).map_or_else(|| "default".to_string(), display);
             if self.s().profiles.iter().any(|p| p.name == name) {
                 set(n(e.get("pid")).unwrap_or(f64::NAN), &name, &mut profile_of);
             }
@@ -1051,7 +1051,7 @@ impl Observer for Hermes {
                 .iter()
                 .find(|e| e["purpose"].as_str() == Some("serve") && n(e.get("spawnerPid")) == Some(census.table[a].pid))
                 .and_then(|e| e.get("profile").filter(|p| truthy(Some(p))))
-                .map_or_else(|| "default".to_string(), js_string);
+                .map_or_else(|| "default".to_string(), display);
             add(&mut apps_of, profile, a);
         }
         for p in &mut profiles {

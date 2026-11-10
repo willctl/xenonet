@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::fmt::Write as _;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
-use xenonet_base::json;
+use xenonet_text::json;
 
 pub use xenonet_api::peer::Peer;
 

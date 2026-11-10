@@ -19,7 +19,7 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing};
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing};
 use xenonet_engine::sql::Arg;
 use xenonet_fuzz::net::{body_for, overlay, Choices};
 use xenonet_service::config::Config;

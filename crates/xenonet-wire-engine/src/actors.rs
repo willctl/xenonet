@@ -15,11 +15,11 @@ use xenonet_actors::registry::{self, Actors as Registry, Fail, Host, CLOCK_MS, L
 use xenonet_actors::store::{self as rows, Tx};
 use xenonet_api::cores::{Actors, CoreError, R};
 use xenonet_api::From;
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::sql::{self, Row, SqlError};
 use xenonet_engine::store::{row_json, EngineStore, Shared};
+use xenonet_os::sync::Locked;
+use xenonet_text::time::now_ms;
 
 type Result<T> = std::result::Result<T, Thrown>;
 
@@ -131,9 +131,9 @@ impl DemoNames {
     }
 
     fn resolve(&self, kind: &str, what: &str) -> Value {
-        let file = || what.split('/').fold(self.projects_dir.clone(), |p, part| xenonet_base::paths::join(&p, part));
+        let file = || what.split('/').fold(self.projects_dir.clone(), |p, part| xenonet_os::paths::join(&p, part));
         match kind {
-            "project" => json!(format!("project:{}", xenonet_base::paths::path_key(&file()).unwrap_or_default())),
+            "project" => json!(format!("project:{}", xenonet_os::paths::path_key(&file()).unwrap_or_default())),
             "session" => self.sessions.iter().find(|(t, _)| t == what).map_or(Value::Null, |(_, id)| json!(id)),
             "file" => json!(file()),
             "identity" => {
@@ -390,9 +390,9 @@ impl Actors for ActorsDriver {
     fn events(&self, since: Option<f64>, only: Option<&str>, view: Option<&str>, limit: f64) -> R<Value> {
         let mut o = JsonMap::new();
         if let Some(since) = since {
-            o.insert("since".into(), xenonet_base::json::number(since));
+            o.insert("since".into(), xenonet_text::json::number(since));
         }
-        o.insert("limit".into(), xenonet_base::json::number(limit));
+        o.insert("limit".into(), xenonet_text::json::number(limit));
         if let Some(view) = view {
             o.insert("view".into(), json!(view));
         }
@@ -408,7 +408,7 @@ impl Actors for ActorsDriver {
     }
     fn you_window(&self, state: &Value) {
         if let Ok(a) = self.side() {
-            let s = xenonet_base::text::js_string(state);
+            let s = xenonet_text::text::display(state);
             let _ = a.with(&self.0, |r, h| r.you_window(&s, now_ms(), h));
         }
     }
@@ -427,8 +427,8 @@ impl Actors for ActorsDriver {
     }
     fn said(&self, message: &Value) {
         let Ok(a) = self.side() else { return };
-        let to: Vec<String> = message.get("to").and_then(Value::as_array).map(|l| l.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default();
-        let from = xenonet_base::text::js_string(message.get("from").unwrap_or(&Value::Null));
+        let to: Vec<String> = message.get("to").and_then(Value::as_array).map(|l| l.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
+        let from = xenonet_text::text::display(message.get("from").unwrap_or(&Value::Null));
         let ts = message.get("ts").and_then(Value::as_f64);
         let _ = a.with(&self.0, |r, h| r.said(&from, &to, ts, h));
     }

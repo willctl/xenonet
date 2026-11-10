@@ -72,7 +72,7 @@ impl Stats {
             .collect();
         // Its usage.json through its own schema, leniently, so a change in
         // Grok's format shows as drift.
-        let json = |file: &String| std::fs::read_to_string(file).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
+        let json = |file: &String| std::fs::read_to_string(file).ok().and_then(|t| xenonet_text::json::parse(&t).ok());
         let usage = grok.first().and_then(json).and_then(|raw| self.vendor.sample("spacexai/grok-build/usage", raw, None, None, 16));
         let summary = grok.get(1).and_then(json);
         let out = stats::session_stats(session_id, read, stats::GrokFiles { usage: usage.as_ref(), summary: summary.as_ref() }).map_err(|e| e.0)?;
@@ -112,7 +112,7 @@ mod tests {
             json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": "Go" } }),
             json!({ "type": "assistant", "timestamp": "2026-10-17T10:00:05.000Z", "message": { "id": "m1", "model": "claude-sonnet-4-5", "stop_reason": "end_turn", "usage": { "input_tokens": 10, "output_tokens": 20 }, "content": [{ "type": "text", "text": "Done" }] } }),
         ];
-        let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
+        let text: String = lines.iter().map(|l| xenonet_text::json::stringify(l, 0) + "\n").collect();
         std::fs::write(p.join(format!("{id}.jsonl")), text).expect("a transcript");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
         let s = Stats::new(&dir.to_string_lossy(), &[], "", vendor);
@@ -136,7 +136,7 @@ mod tests {
             json!({ "type": "event_msg", "timestamp": "2026-10-05T13:00:01Z", "payload": { "type": "user_message", "message": "Tidy CI" } }),
             json!({ "type": "event_msg", "timestamp": "2026-10-05T13:00:05Z", "payload": { "type": "token_count", "info": { "total_token_usage": { "total_tokens": 1200 }, "last_token_usage": { "input_tokens": 1000, "output_tokens": 200, "total_tokens": 1200 } } } }),
         ];
-        let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
+        let text: String = lines.iter().map(|l| xenonet_text::json::stringify(l, 0) + "\n").collect();
         let packed = ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
         std::fs::write(day.join(format!("rollout-2026-10-05T13-00-00-{id}.jsonl.zst")), packed).expect("an archive");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));

@@ -41,20 +41,21 @@ xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 # The places around the map (core/environments.js).
 xenonet-app.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 # The engine's ids, selectors and envelopes, which the routes check with.
 xenonet-engine.workspace = true
 # One network across machines: the gateway's routes behind the front door,
 # the link, and /api/net.
 xenonet-net.workspace = true
+# Ids, and the engine's seam to the network; the tray's status and a
+# made-up machine's load are checked as their types in the tests.
+xenonet-model.workspace = true
 xenonet-schema.workspace = true
 # The Needs you queue as the console has it (core/needs-you.js's twin), for
 # the tray's status (routes/tray.rs).
 xenonet-state.workspace = true
 
 [dev-dependencies]
-# The tray's status and a made-up machine's load, checked as their types.
-xenonet-model.workspace = true
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
 # The binary's engine driver on every host of the network's end-to-end

@@ -188,7 +188,7 @@ impl Store {
                     let _ = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(p);
                 }
                 let db = Connection::open(p)?;
-                let _ = xenonet_base::private_file::chmod_600(p);
+                let _ = xenonet_os::private_file::chmod_600(p);
                 db.execute_batch("PRAGMA journal_mode = WAL")?;
                 db
             }
@@ -245,7 +245,7 @@ impl Store {
         let mut st = self.db.prepare("SELECT actor, last_at, target FROM agents ORDER BY last_at DESC LIMIT 200")?;
         let rows = st.query_map([], |r| {
             let (id, at, target): (String, f64, Option<String>) = (r.get(0)?, r.get(1)?, r.get(2)?);
-            Ok(json!({ "id": id, "lastAt": xenonet_base::json::number(at), "target": target }))
+            Ok(json!({ "id": id, "lastAt": xenonet_text::json::number(at), "target": target }))
         })?;
         rows.collect()
     }

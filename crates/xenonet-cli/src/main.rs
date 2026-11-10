@@ -22,7 +22,7 @@ use commands::{alias, find, COMMANDS};
 use out::{c, print, Done, Fail};
 use serde_json::{json, Value};
 use xenonet_api::cores::NetLink;
-use xenonet_base::log::{log_dir, ErrInfo, Log, MAX_BYTES};
+use xenonet_os::log::{log_dir, ErrInfo, Log, MAX_BYTES};
 
 const VERSION: &str = env!("XENONET_VERSION");
 
@@ -92,14 +92,14 @@ fn main_of(argv: &[String]) -> Done {
     let args: Vec<String> = words.collect();
     if flags.on("version") {
         let version = sys::version(VERSION);
-        print(if flags.on("json") { xenonet_base::json::stringify(&json!({ "version": version }), 0) } else { format!("xenonet {version}") });
+        print(if flags.on("json") { xenonet_text::json::stringify(&json!({ "version": version }), 0) } else { format!("xenonet {version}") });
         return Ok(0);
     }
     // What this binary is as installed XenoNet's launcher, a copy of the
     // Tools' (docs/design/contracts.md, section 12): launcher 3, with no
     // node of its own.
     if flags.on("launcher") && name.is_none() {
-        print(xenonet_base::json::stringify(&json!({ "launcher": 3, "protocol": 1, "tools": VERSION, "node": null }), 0));
+        print(xenonet_text::json::stringify(&json!({ "launcher": 3, "protocol": 1, "tools": VERSION, "node": null }), 0));
         return Ok(0);
     }
     let Some(name) = name else {

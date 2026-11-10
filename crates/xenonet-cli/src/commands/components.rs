@@ -9,7 +9,7 @@ use crate::js::str;
 use crate::out::{print, Done, Fail};
 use crate::sys;
 use serde_json::{json, Value};
-use xenonet_base::json::stringify;
+use xenonet_text::json::stringify;
 
 pub const HELP: &str = include_str!("help/components.txt");
 
@@ -28,8 +28,8 @@ fn state(component: &str) -> Result<&'static str, Fail> {
 /// The components a bundle carries for this machine.
 fn carried(bundle: &str) -> Result<Vec<String>, Fail> {
     let file = sys::join(bundle, "components.json");
-    let text = std::fs::read_to_string(&file).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &file).message))?;
-    let manifest = xenonet_base::json::parse(&text).map_err(|e| Fail::error(e.to_string()))?;
+    let text = std::fs::read_to_string(&file).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "open", &file).message))?;
+    let manifest = xenonet_text::json::parse(&text).map_err(|e| Fail::error(e.to_string()))?;
     let m = cores::machine();
     Ok(manifest
         .get("packages")
@@ -124,7 +124,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             cores::update_component(&item)?
         }
         Some("activate") => {
-            let item = xenonet_base::json::parse(arg(args, 2)?).map_err(|e| Fail::error(format!("<item> isn't JSON: {e}")))?;
+            let item = xenonet_text::json::parse(arg(args, 2)?).map_err(|e| Fail::error(format!("<item> isn't JSON: {e}")))?;
             cores::activate_package(arg(args, 1)?, &item)?
         }
         Some("current") => match cores::current_component(arg(args, 1)?)? {

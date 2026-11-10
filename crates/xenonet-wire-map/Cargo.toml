@@ -16,7 +16,7 @@ getrandom.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 xenonet-adapter.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 xenonet-api.workspace = true
 # Home, platform, random ids, fetch and output lines.
 xenonet-os.workspace = true
@@ -30,6 +30,7 @@ xenonet-app.workspace = true
 
 # tests/golden.rs reads the search index's documents back, the tests read
 # transcripts through the adapters' readers, and one archives a rollout.
+
 [dev-dependencies]
 rusqlite.workspace = true
 ruzstd.workspace = true

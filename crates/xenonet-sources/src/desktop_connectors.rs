@@ -10,8 +10,8 @@ use crate::live::names::is_uuid;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use xenonet_base::jsstr;
-use xenonet_base::text::js_trim;
+use xenonet_text::text::trim;
+use xenonet_text::utf16;
 
 // The newest records say what the account has now; older ones only repeat
 // them, and there are hundreds.
@@ -22,7 +22,7 @@ const TTL_MS: f64 = 30000.0;
 /// A name as one line to show: no control characters, and never a uuid.
 pub fn clean_name(value: &str) -> Option<String> {
     let spaced: String = value.chars().map(|c| if c <= '\u{1f}' || c == '\u{7f}' { ' ' } else { c }).collect();
-    let name = js_trim(&jsstr::head(js_trim(&jsstr::collapse_space(&spaced)), MAX_NAME)).to_string();
+    let name = trim(&utf16::head(trim(&utf16::collapse_space(&spaced)), MAX_NAME)).to_string();
     (!name.is_empty() && !is_uuid(&name)).then_some(name)
 }
 
@@ -46,14 +46,14 @@ fn records(dir: &str) -> Vec<String> {
                 }
             } else if kind.is_file() && is_record(&name) {
                 if let (Some(full), Ok(meta)) = (path.to_str(), ent.metadata()) {
-                    found.push((full.to_string(), xenonet_base::fs::mtime_ms_of(&meta).unwrap_or(0.0)));
+                    found.push((full.to_string(), xenonet_os::fs::mtime_ms_of(&meta).unwrap_or(0.0)));
                 }
             }
         }
     }
     let mut found = Vec::new();
     walk(&Path::new(dir).join("claude-code-sessions"), 0, &mut found);
-    found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| jsstr::cmp_units(&a.0, &b.0)));
+    found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| utf16::cmp_units(&a.0, &b.0)));
     found.into_iter().map(|(path, _)| path).collect()
 }
 

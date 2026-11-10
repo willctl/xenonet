@@ -8,8 +8,8 @@
 
 use crate::nodepath;
 use serde_json::{Map, Value};
-use xenonet_base::dirs;
-use xenonet_base::text::{js_number, js_trim};
+use xenonet_os::dirs;
+use xenonet_text::text::{to_number, trim};
 
 /// The variables of the environment, as process.env has them.
 pub type Env = Map<String, Value>;
@@ -60,7 +60,7 @@ fn set<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
 }
 
 fn number(s: &str) -> f64 {
-    js_number(Some(&Value::String(s.into())))
+    to_number(Some(&Value::String(s.into())))
 }
 
 // A world's field as `world?.field ?? fallback` reads it.
@@ -69,7 +69,7 @@ fn world_str(world: Option<&Value>, key: &str) -> Option<Value> {
 }
 
 fn list(text: &str) -> Vec<String> {
-    text.split(',').map(|s| js_trim(s).to_string()).filter(|s| !s.is_empty()).collect()
+    text.split(',').map(|s| trim(s).to_string()).filter(|s| !s.is_empty()).collect()
 }
 
 /// The settings for this command line (process.argv), environment, home
@@ -133,7 +133,7 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
         _ => Value::Null,
     };
     let readers = if demo { Vec::new() } else { list(var(env, "XENONET_READERS").unwrap_or("")) };
-    let world_home = world.and_then(|w| w.get("home")).map(xenonet_base::text::js_string);
+    let world_home = world.and_then(|w| w.get("home")).map(xenonet_text::text::display);
     let claude_config_file = match &world_home {
         Some(h) => path.join(&[h, ".claude.json"]),
         None => path.join(&[claude_config_dir.unwrap_or(home), ".claude.json"]),

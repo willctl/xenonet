@@ -286,7 +286,7 @@ stats and search; that isn't part of this change.
 
 In Rust, with the JS shapes they mirror:
 
-- **`TokenUsage`** (`xenonet-base`): `input`, `cache_read`,
+- **`TokenUsage`** (`xenonet_model::usage`): `input`, `cache_read`,
   `cache_write_5m`, `cache_write_1h`, `output`, and the call's speed
   (standard, fast, priority). It replaces `lines::Usage`,
   `pricing::Tokens` and `stats::Event.tokens`, and `telemetry::Call`
@@ -389,7 +389,7 @@ Each step is its own PR. Steps 1 to 5 leave output unchanged:
      sessions share.
    - OpenCode ids that don't round-trip with numbat. Decided and done on
      2026-10-21: one reading of OpenCode's ids (`localId` and `openCodeId`
-     in `core/native/opencode.js`, `xenonet_base::opencode` in Rust) serves
+     in `core/native/opencode.js`, `xenonet_adapter::formats::opencode` in Rust) serves
      the reader, numbat and delivery. An id of letters and digits in runs
      joined by single underscores takes a dash for each, as before; any
      other is `x--` and its bytes in hex. Both read back whole, and

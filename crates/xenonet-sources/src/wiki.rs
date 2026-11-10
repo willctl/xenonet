@@ -12,8 +12,9 @@ use crate::live::day_key;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::LazyLock;
-use xenonet_base::text::{is_js_line_terminator, is_js_space, js_number, js_trim, JS_DOT, JS_SPACE};
-use xenonet_base::{json, jsstr, paths, time};
+use xenonet_os::paths;
+use xenonet_text::text::{is_line_terminator, is_space, to_number, trim, DOT, SPACE};
+use xenonet_text::{json, time, utf16};
 
 /// A JS value as an answer is built: what JSON can't hold too (undefined,
 /// NaN, bytes), and objects with keys made as it goes.
@@ -83,7 +84,7 @@ pub fn to_str_or_empty(v: Option<&Value>) -> Result<String, TypeError> {
 }
 
 fn truthy(v: Option<&Value>) -> bool {
-    xenonet_base::text::truthy(v)
+    xenonet_text::text::truthy(v)
 }
 
 // ---------- frontmatter ----------
@@ -132,8 +133,8 @@ fn key_value(line: &str) -> Option<(&str, &str)> {
     if b.get(i) != Some(&b':') {
         return None;
     }
-    let rest = line[i + 1..].trim_start_matches(is_js_space);
-    if rest.chars().any(is_js_line_terminator) {
+    let rest = line[i + 1..].trim_start_matches(is_space);
+    if rest.chars().any(is_line_terminator) {
         return None;
     }
     Some((&line[..i], rest))
@@ -152,7 +153,7 @@ pub fn frontmatter_at(text: &str) -> (Map<String, Value>, Option<usize>) {
     let Some((start, end, after)) = frontmatter(text) else { return (meta, None) };
     for line in crate::git::split_lines(&text[start..end]) {
         let Some((key, raw)) = key_value(line) else { continue };
-        let v = js_trim(raw);
+        let v = trim(raw);
         let value = if v.starts_with('[') {
             json::parse(v).unwrap_or_else(|_| Value::String(v.to_string()))
         } else if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
@@ -182,8 +183,8 @@ fn date_parse(s: &str) -> Option<f64> {
     if time_of_day.ends_with(['Z', 'z']) || time_of_day.contains(['+', '-']) {
         return Some(t);
     }
-    let first = t - jsstr::local_offset_ms(t);
-    let utc = t - jsstr::local_offset_ms(first);
+    let first = t - utf16::local_offset_ms(t);
+    let utc = t - utf16::local_offset_ms(first);
     (utc.abs() <= 8.64e15).then_some(utc)
 }
 
@@ -223,7 +224,7 @@ pub fn wiki_links(text: &str) -> Vec<String> {
 }
 
 fn is_line_start(text: &str, i: usize) -> bool {
-    i == 0 || text[..i].chars().next_back().is_some_and(is_js_line_terminator)
+    i == 0 || text[..i].chars().next_back().is_some_and(is_line_terminator)
 }
 
 /// A page's first "# " heading, its title when the frontmatter gives none
@@ -233,14 +234,14 @@ fn is_line_start(text: &str, i: usize) -> bool {
 fn first_heading(body: &str) -> String {
     for (i, _) in body.match_indices('#').filter(|(i, _)| is_line_start(body, *i)) {
         let rest = &body[i + 1..];
-        let after = rest.trim_start_matches(is_js_space);
+        let after = rest.trim_start_matches(is_space);
         if after.len() == rest.len() {
             continue;
         }
         // White space to the very end leaves a match of white space alone,
         // which comes to nothing once trimmed.
-        let line = after.split(is_js_line_terminator).next().unwrap_or("");
-        return js_trim(line).to_string();
+        let line = after.split(is_line_terminator).next().unwrap_or("");
+        return trim(line).to_string();
     }
     String::new()
 }
@@ -259,7 +260,7 @@ fn one_line(s: &str) -> String {
         run.clear();
     };
     for c in s.chars() {
-        if is_js_space(c) {
+        if is_space(c) {
             run.push(c);
         } else {
             flush(&mut run, &mut out);
@@ -282,7 +283,7 @@ fn aliases_of(v: Option<&Value>) -> Result<Vec<String>, TypeError> {
     let mut out: Vec<String> = Vec::new();
     for a in list {
         let one = one_line(&a);
-        let name = js_trim(js_trim(&one).trim_start_matches('#')).to_lowercase();
+        let name = trim(trim(&one).trim_start_matches('#')).to_lowercase();
         if !name.is_empty() && !out.contains(&name) {
             out.push(name);
         }
@@ -416,13 +417,13 @@ impl LogEntry {
 }
 
 fn entry(lead: &str) -> Regex {
-    let s = format!("[{JS_SPACE}]");
-    Regex::new(&format!(r"\A{lead}{s}+([0-9]{{1,2}}):([0-9]{{2}}){s}+·{s}+([^·]+?){s}+·{s}+({JS_DOT}+)\z")).expect("a pattern of fixed parts")
+    let s = format!("[{SPACE}]");
+    Regex::new(&format!(r"\A{lead}{s}+([0-9]{{1,2}}):([0-9]{{2}}){s}+·{s}+([^·]+?){s}+·{s}+({DOT}+)\z")).expect("a pattern of fixed parts")
 }
 
 static HEADING: LazyLock<Regex> = LazyLock::new(|| entry("##"));
 static BULLET: LazyLock<Regex> = LazyLock::new(|| entry("-"));
-static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"[{JS_SPACE}]*\[\[[^\]]+\]\][{JS_SPACE}]*\z")).expect("a pattern of fixed parts"));
+static LINK_AT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"[{SPACE}]*\[\[[^\]]+\]\][{SPACE}]*\z")).expect("a pattern of fixed parts"));
 
 // new Date(y, m, d, h, min).getTime(): a local time, as JS works it out
 // from its parts.
@@ -439,8 +440,8 @@ fn local_time(y: f64, m: f64, d: f64, h: f64, min: f64) -> f64 {
     }
     let day = time::days_from_civil(ym as i64, mn as u32 + 1, 1) as f64 + d - 1.0;
     let local = day * 86_400_000.0 + h * 3_600_000.0 + min * 60_000.0;
-    let first = local - jsstr::local_offset_ms(local);
-    let utc = local - jsstr::local_offset_ms(first);
+    let first = local - utf16::local_offset_ms(local);
+    let utc = local - utf16::local_offset_ms(first);
     if utc.abs() > 8.64e15 {
         f64::NAN
     } else {
@@ -456,7 +457,7 @@ fn date_parts(date: Option<&Value>) -> Result<[f64; 3], TypeError> {
         Some(Value::Null) => return Err(TypeError("Cannot read properties of null (reading 'split')".into())),
         Some(_) => return Err(TypeError("date.split is not a function".into())),
     };
-    let mut parts = date.split('-').map(|p| js_number(Some(&Value::String(p.to_string()))));
+    let mut parts = date.split('-').map(|p| to_number(Some(&Value::String(p.to_string()))));
     Ok([parts.next().unwrap_or(f64::NAN), parts.next().unwrap_or(f64::NAN), parts.next().unwrap_or(f64::NAN)])
 }
 
@@ -475,7 +476,7 @@ pub fn parse_log(text: &str, date: Option<&Value>) -> Result<Vec<LogEntry>, Type
             let n = |i: usize| hit[i].parse::<f64>().unwrap_or(f64::NAN);
             let said = &hit[4];
             let title = LINK_AT_END.find(said).map_or(said.to_string(), |m| format!("{}{}", &said[..m.start()], &said[m.end()..]));
-            out.push(LogEntry { ts: local_time(y, mo - 1.0, d, n(1), n(2)), app: js_trim(&hit[3]).to_string(), title: js_trim(&title).to_string(), pages: wiki_links(said) });
+            out.push(LogEntry { ts: local_time(y, mo - 1.0, d, n(1), n(2)), app: trim(&hit[3]).to_string(), title: trim(&title).to_string(), pages: wiki_links(said) });
             cur = if bullet { None } else { Some(out.len() - 1) };
             continue;
         }
@@ -529,7 +530,7 @@ const TEXT_MAX: u64 = 8 * 1024 * 1024;
 
 // A file's text, as fs.readFile(f, "utf8") reads it; None when it can't be.
 fn read_text(file: &str) -> Option<String> {
-    xenonet_base::fs::read_capped(std::path::Path::new(file), TEXT_MAX).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    xenonet_os::fs::read_capped(std::path::Path::new(file), TEXT_MAX).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 // `v || fallback`.
@@ -650,7 +651,7 @@ fn read_space(space: &SpaceDir, projects: Option<&Value>, root: Option<&Value>, 
     let mut log: Vec<LogEntry> = Vec::new();
     for offset in [1.0, 0.0] {
         let date = day_key(now - offset * 86_400e3);
-        let year = paths::join_all(&[dir, "log", &jsstr::slice(&date, 0, Some(4))]);
+        let year = paths::join_all(&[dir, "log", &utf16::slice(&date, 0, Some(4))]);
         let file = paths::join(&year, &format!("{date}.md"));
         if linked(&paths::join(dir, "log")) || linked(&year) || linked(&file) {
             continue;
@@ -706,10 +707,10 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         }
         let text = read_text(&paths::join(&inbox_dir, &f)).unwrap_or_default();
         let (meta, body) = parse_frontmatter(&text);
-        let first = crate::git::split_lines(&body).into_iter().find(|l| !js_trim(l).is_empty()).map(|l| {
+        let first = crate::git::split_lines(&body).into_iter().find(|l| !trim(l).is_empty()).map(|l| {
             let rest = l.trim_start_matches('#');
             if rest.len() < l.len() {
-                rest.trim_start_matches(is_js_space).to_string()
+                rest.trim_start_matches(is_space).to_string()
             } else {
                 l.to_string()
             }
@@ -717,7 +718,7 @@ pub fn read_wiki(dir: &str, projects: Option<&Value>, root: Option<&Value>, now:
         let title = if truthy(meta.get("title")) { Out::of(meta.get("title")) } else { Out::Str(first.filter(|t| !t.is_empty()).unwrap_or_else(|| f.clone())) };
         inbox.push(Out::obj(vec![("id", Out::Str(f[..f.len() - 3].to_string())), ("title", title), ("app", or(meta.get("app"), Out::Null))]));
     }
-    xenonet_base::sort::sort_by(&mut log, |a, b| (a.ts - b.ts).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut log, |a, b| (a.ts - b.ts).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
     let pages = pages
         .into_iter()
         .map(|p| {
@@ -751,7 +752,7 @@ mod tests {
         assert_eq!(date_parse("2026-10-02T10:00:00-05:00"), Some(1_790_953_200_000.0));
         assert_eq!(date_parse("2026-10-02"), Some(1_790_899_200_000.0), "a day alone is UTC");
         let local = 1_790_935_200_000.0;
-        assert_eq!(date_parse("2026-10-02 10:00"), Some(local - jsstr::local_offset_ms(local - jsstr::local_offset_ms(local))));
+        assert_eq!(date_parse("2026-10-02 10:00"), Some(local - utf16::local_offset_ms(local - utf16::local_offset_ms(local))));
         assert_eq!(body, "more\nrest");
         assert_eq!(parse_frontmatter("---\n---\n").1, "---\n---\n", "no lines between");
         assert_eq!(parse_frontmatter("---\n\n---").1, "");

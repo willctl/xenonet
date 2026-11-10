@@ -24,7 +24,7 @@ struct Setup;
 impl setup::Host for Setup {
     fn exec(&mut self, cmd: &str, args: &[&str]) -> Option<String> {
         let r = if cfg!(windows) { run("cmd.exe", &[strings(&["/d", "/s", "/c", cmd]), strings(args)].concat(), 5000.0, None) } else { run(cmd, &strings(args), 5000.0, None) };
-        r.ok().then(|| xenonet_base::text::js_trim(&r.stdout).to_string())
+        r.ok().then(|| xenonet_text::text::trim(&r.stdout).to_string())
     }
     fn servers(&mut self) -> Vec<opencode::Server> {
         opencode::OpenCode::new(10e3).servers(&mut OpenCode)
@@ -91,7 +91,7 @@ impl opencode::Host for OpenCode {
         if !(200..300).contains(&status) {
             return None;
         }
-        xenonet_base::json::parse(&String::from_utf8_lossy(&body)).ok()
+        xenonet_text::json::parse(&String::from_utf8_lossy(&body)).ok()
     }
     fn post(&mut self, _: &str, _: &str) -> Result<opencode::Posted, String> {
         Err("the doctor posts nothing to OpenCode".into())
@@ -100,10 +100,10 @@ impl opencode::Host for OpenCode {
 
 /// writeListenSettings({ dir, port }): the file's path.
 pub fn write_listen_settings(dir: &str, port: &Value) -> Result<String, Fail> {
-    setup::write_listen_settings(&mut Setup, dir, xenonet_base::text::js_number(Some(port)), LISTEN_SECONDS).map_err(|e| Fail::error(e.0))
+    setup::write_listen_settings(&mut Setup, dir, xenonet_text::text::to_number(Some(port)), LISTEN_SECONDS).map_err(|e| Fail::error(e.0))
 }
 
 /// liveSetup({ port, listenFile })
 pub fn live_setup(port: &Value, listen_file: Option<&str>) -> Result<Value, Fail> {
-    Ok(setup::live_setup(&mut Setup, xenonet_base::text::js_number(Some(port)), listen_file, &sys::home()))
+    Ok(setup::live_setup(&mut Setup, xenonet_text::text::to_number(Some(port)), listen_file, &sys::home()))
 }

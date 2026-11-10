@@ -9,9 +9,9 @@ use crate::js::{list, num, on, t};
 use crate::out::{c, json, json_at, print, table, Done, Fail, Layout};
 use crate::reach::need;
 use serde_json::{Map, Value};
-use xenonet_base::json::{number, number_string, stringify};
-use xenonet_base::text::js_string;
-use xenonet_base::units::{js_round, to_fixed};
+use xenonet_text::json::{number, number_string, stringify};
+use xenonet_text::text::display;
+use xenonet_text::units::{round, to_fixed};
 
 pub const HELP: &str = include_str!("help/live.txt");
 
@@ -52,11 +52,11 @@ fn status(d: &Value) {
         .into_iter()
         .flatten()
         .filter(|(_, u)| !u.is_null())
-        .map(|(app, u)| (app.clone(), xenonet_base::text::js_number(Some(u))))
+        .map(|(app, u)| (app.clone(), xenonet_text::text::to_number(Some(u))))
         .collect();
     if !plans.is_empty() {
         let said: Vec<String> =
-            plans.iter().map(|(app, u)| format!("{app} {}%{}", number_string(js_round(u * 100.0)), if *u >= 0.9 { c::red(" (no wakes)") } else { String::new() })).collect();
+            plans.iter().map(|(app, u)| format!("{app} {}%{}", number_string(round(u * 100.0)), if *u >= 0.9 { c::red(" (no wakes)") } else { String::new() })).collect();
         print(format!("Plans used: {}{}", said.join(", "), c::dim(" · a provider at 90% takes no wakes")));
     }
     print(c::bold("\nActors' scopes"));
@@ -169,7 +169,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             for a in list(&d, "audit") {
                 let rest: Vec<String> =
-                    a.as_object().into_iter().flatten().filter(|(k, _)| k.as_str() != "at" && k.as_str() != "kind").map(|(k, v)| format!("{k}={}", js_string(v))).collect();
+                    a.as_object().into_iter().flatten().filter(|(k, _)| k.as_str() != "at" && k.as_str() != "kind").map(|(k, v)| format!("{k}={}", display(v))).collect();
                 print(format!("{} {} {}", c::dim(clock::date_time(num(a, "at"))), t(a, "kind"), rest.join(" ")));
             }
             Ok(0)

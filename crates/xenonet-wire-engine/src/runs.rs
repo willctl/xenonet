@@ -12,11 +12,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use xenonet_base::dirs::{self, CliEnv, Look, Unreadable};
-use xenonet_base::process::Tree;
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
+use xenonet_adapter::dirs::{self, CliEnv, Look, Unreadable};
 use xenonet_engine::delivery::runs::{self, Run};
+use xenonet_os::process::Tree;
+use xenonet_os::sync::Locked;
+use xenonet_text::time::now_ms;
 
 /// The disk as it is.
 struct Disk;
@@ -32,7 +32,7 @@ impl Look for Disk {
         Ok(out)
     }
     fn mtime(&mut self, p: &str) -> f64 {
-        std::fs::metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
+        std::fs::metadata(p).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
     }
 }
 
@@ -161,7 +161,7 @@ pub struct Runner {
 }
 
 fn alive(pid: f64) -> bool {
-    pid >= 0.0 && pid <= f64::from(u32::MAX) && xenonet_base::process::running(pid as u32, true)
+    pid >= 0.0 && pid <= f64::from(u32::MAX) && xenonet_os::process::running(pid as u32, true)
 }
 
 impl Runner {
@@ -203,7 +203,7 @@ impl Runner {
         let Ok(names) = std::fs::read_dir(logs) else { return };
         let files: Vec<(String, f64)> = names
             .filter_map(Result::ok)
-            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.metadata().ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.metadata().ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)))
             .collect();
         for name in runs::stale_logs(&files, now_ms()) {
             let _ = std::fs::remove_file(logs.join(name));
@@ -227,7 +227,7 @@ impl Runner {
     pub fn run(self: &Arc<Self>, t: Turn<'_>, home: &str) -> Result<u32, String> {
         self.admit(t.key)?;
         let key = t.key.to_string();
-        let started = match dirs::find_cli(t.app, &cli_env(), platform(), home, &mut Disk, &mut xenonet_base::paths::can_run) {
+        let started = match dirs::find_cli(t.app, &cli_env(), platform(), home, &mut Disk, &mut xenonet_os::paths::can_run) {
             Some(program) => self.start(t, &program),
             None => Err(format!("{} isn't installed here", t.app)),
         };
@@ -262,7 +262,7 @@ impl Runner {
         let log = log_path.as_ref().and_then(|p| Log::open(p)).map(|l| Arc::new(Mutex::new(l)));
         let out = || if log.is_some() { Stdio::piped() } else { Stdio::null() };
         let mut cmd = Command::new(&how.program);
-        xenonet_base::process::Background::no_window(&mut cmd);
+        xenonet_os::process::Background::no_window(&mut cmd);
         if how.verbatim {
             verbatim(&mut cmd, &how.args);
         } else {
@@ -371,7 +371,7 @@ mod tests {
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
         let cwd = dir.to_string_lossy().into_owned();
-        let found = dirs::find_cli("claude", &CliEnv { path: cwd.clone(), ..CliEnv::default() }, platform(), "/nowhere", &mut Disk, &mut xenonet_base::paths::can_run).unwrap();
+        let found = dirs::find_cli("claude", &CliEnv { path: cwd.clone(), ..CliEnv::default() }, platform(), "/nowhere", &mut Disk, &mut xenonet_os::paths::can_run).unwrap();
         assert_eq!(found, bin.to_string_lossy());
         let r = Runner::new(Some(dir.clone()));
         let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("GO".to_string(), go.to_string_lossy().into_owned())];

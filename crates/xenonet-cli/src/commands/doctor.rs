@@ -8,8 +8,8 @@ use crate::js::{list, num, on, str, t};
 use crate::out::{c, json, plural, print, table, Done, Fail, Layout};
 use crate::reach::find;
 use serde_json::{json, Map, Value};
-use xenonet_base::client::name_of;
-use xenonet_base::units::to_fixed;
+use xenonet_api::client::name_of;
+use xenonet_text::units::to_fixed;
 
 pub const HELP: &str = include_str!("help/doctor.txt");
 
@@ -100,7 +100,7 @@ fn live(flags: &Flags) -> Done {
         .map_or_else(|| "not found: XenoNet can't type into terminals, which only matters for sessions you allow it to".into(), |v| crate::js::text(Some(v)));
     print(format!("  {} tmux {tmux}", ok(on(&r, "tmux"))));
     let opencode = list(&r, "opencode");
-    print(format!("  {} OpenCode servers running: {}", c::blue("·"), if opencode.is_empty() { "none".into() } else { xenonet_base::text::join(opencode.iter().map(Some), ", ") }));
+    print(format!("  {} OpenCode servers running: {}", c::blue("·"), if opencode.is_empty() { "none".into() } else { xenonet_text::text::join(opencode.iter().map(Some), ", ") }));
     print("");
     print("Start Claude Code with XenoNet as a channel, so messages reach the session as they're sent:");
     print(format!("  {}", t(&r, "command")));
@@ -127,7 +127,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     if flags.on("live") {
         return live(flags);
     }
-    let only: Option<Vec<String>> = flags.str("only").map(|o| o.split(',').map(|x| xenonet_base::text::js_trim(x).to_string()).filter(|x| !x.is_empty()).collect());
+    let only: Option<Vec<String>> = flags.str("only").map(|o| o.split(',').map(|x| xenonet_text::text::trim(x).to_string()).filter(|x| !x.is_empty()).collect());
     let result = checkup(flags, only.as_deref())?;
     let results = list(&result, "results");
     let count = |status: &str| results.iter().filter(|r| str(r, "status") == Some(status)).count();

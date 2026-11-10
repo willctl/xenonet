@@ -13,9 +13,10 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use xenonet_base::text::{is_js_line_terminator, js_number, js_string, js_trim, js_trim_start, truthy, JS_DOT, JS_SPACE};
-use xenonet_base::{json as js_json, jsstr, paths};
+use xenonet_os::paths;
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
+use xenonet_text::text::{display, is_line_terminator, to_number, trim, trim_start, truthy, DOT, SPACE};
+use xenonet_text::{json as js_json, utf16};
 
 // A sign-in's span is extended this often while it lasts, so state.json
 // isn't rewritten on every refresh.
@@ -25,13 +26,13 @@ pub const HEAD_BYTES: u64 = 64 * 1024;
 
 fn re(pattern: &str) -> Regex {
     // JS's \s, \S and `.` (written DOT), as the regex crate has them.
-    let p = pattern.replace("\\s", &format!("[{JS_SPACE}]")).replace("\\S", &format!("[^{JS_SPACE}]")).replace("DOT", JS_DOT);
+    let p = pattern.replace("\\s", &format!("[{SPACE}]")).replace("\\S", &format!("[^{SPACE}]")).replace("DOT", DOT);
     Regex::new(&p).expect("a regular expression of identities.rs")
 }
 
 // /^\s*([^:#\s][^:]*?)\s*:(?:\s+(.*?))?\s*$/
 static KEY_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    let first = format!("[^:#{JS_SPACE}]");
+    let first = format!("[^:#{SPACE}]");
     re(&format!(r"^\s*({first}[^:]*?)\s*:(?:\s+(DOT*?))?\s*$"))
 });
 // /^\s*(\w+)\s*(?:=\s*|\s+)(.+?)\s*$/
@@ -47,7 +48,7 @@ static GH_HELPER: LazyLock<Regex> = LazyLock::new(|| re(r#"(?-u:\b)gh(?:\.exe)?[
 /// `typeof v === "string" && v.trim() ? v.trim() : null`
 fn str_of(v: Js<'_>) -> Option<String> {
     match v {
-        Some(Value::String(s)) if !js_trim(s).is_empty() => Some(js_trim(s).to_string()),
+        Some(Value::String(s)) if !trim(s).is_empty() => Some(trim(s).to_string()),
         _ => None,
     }
 }
@@ -57,7 +58,7 @@ fn nn(v: Js<'_>) -> Js<'_> {
 }
 
 fn tpl(v: Js<'_>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 fn opt_str(v: Option<String>) -> Value {
@@ -66,7 +67,7 @@ fn opt_str(v: Option<String>) -> Value {
 
 // raw.length - raw.trimStart().length
 fn indent_of(raw: &str) -> usize {
-    jsstr::len(raw) - jsstr::len(js_trim_start(raw))
+    utf16::len(raw) - utf16::len(trim_start(raw))
 }
 
 // v.replace(/^(['"])(.*)\1$/, "$2")
@@ -75,7 +76,7 @@ fn unquote(v: &str) -> String {
     match (cs.next(), cs.next_back()) {
         (Some(a), Some(b)) if a == b && (a == '\'' || a == '"') => {
             let mid = &v[1..v.len() - 1];
-            if mid.contains(is_js_line_terminator) {
+            if mid.contains(is_line_terminator) {
                 v.to_string()
             } else {
                 mid.to_string()
@@ -105,7 +106,7 @@ pub fn claude_account(data: Js<'_>) -> Value {
     if str_of(get("accountUuid")).is_none() || str_of(get("organizationUuid")).is_none() {
         return Value::Null;
     }
-    let ty = nn(get("organizationType")).map_or_else(String::new, js_string).to_ascii_lowercase();
+    let ty = nn(get("organizationType")).map_or_else(String::new, display).to_ascii_lowercase();
     let team = ty.contains("team") || ty.contains("enterprise");
     json!({
         "id": format!("claude:{}:{}", tpl(get("accountUuid")), tpl(get("organizationUuid"))),
@@ -169,7 +170,7 @@ pub fn chatgpt_account(auth: Js<'_>, claims: Js<'_>) -> Value {
     let mode = nn(opt_prop(auth, "auth_mode"));
     if let Some(w) = workspace {
         if mode.is_none() || mode.and_then(Value::as_str) == Some("chatgpt") {
-            let since = js_number(opt_prop(claims, "auth_time")) * 1000.0;
+            let since = to_number(opt_prop(claims, "auth_time")) * 1000.0;
             let since = if since == 0.0 || since.is_nan() { Value::Null } else { js_json::number(since) };
             return json!({ "id": format!("chatgpt:{w}"), "kind": "chatgpt", "handle": opt_str(str_of(opt_prop(claims, "email"))), "detail": { "plan": opt_str(str_of(opt_prop(oa, "chatgpt_plan_type"))) }, "since": since });
         }
@@ -193,7 +194,7 @@ pub fn parse_gh_hosts(text: &str) -> Vec<Value> {
     let mut users_at: i64 = -1;
     let mut user_at: i64 = -1;
     for raw in xenonet_sources::git::split_lines(text) {
-        let t = js_trim(raw);
+        let t = trim(raw);
         if t.is_empty() || t.starts_with('#') {
             continue;
         }
@@ -282,7 +283,7 @@ pub fn gh_hosts_shape(text: &str) -> Value {
     let mut nodes = vec![Node::Obj(Vec::new())];
     let mut stack = vec![Frame { indent: -1, parent: None, key: String::new(), obj: Some(0) }];
     for raw in xenonet_sources::git::split_lines(text) {
-        let line = js_trim(raw);
+        let line = trim(raw);
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -378,11 +379,11 @@ fn scp_form(s: &str) -> Option<(String, String)> {
         let rest = &s[start..];
         let end = rest.find([':', '/', '\\']).unwrap_or(rest.len());
         let host = &rest[..end];
-        if jsstr::len(host) < 2 || rest.as_bytes().get(end) != Some(&b':') {
+        if utf16::len(host) < 2 || rest.as_bytes().get(end) != Some(&b':') {
             continue;
         }
         let path = &rest[end + 1..];
-        if path.starts_with("//") || path.is_empty() || path.contains(is_js_line_terminator) {
+        if path.starts_with("//") || path.is_empty() || path.contains(is_line_terminator) {
             continue;
         }
         return Some((host.to_string(), path.to_string()));
@@ -392,7 +393,7 @@ fn scp_form(s: &str) -> Option<(String, String)> {
 
 /// parseRemote: a remote URL's host, owner and repo.
 pub fn parse_remote(url: &str, aliases: &[(String, String)]) -> Option<Remote> {
-    let s = js_trim(url);
+    let s = trim(url);
     let (scheme, user, host, rest) = match URL.captures(s) {
         Some(m) => (m[1].to_string(), m.get(2).map(|x| x.as_str().to_string()), m[3].to_string(), m[4].to_string()),
         None => {
@@ -423,7 +424,7 @@ pub fn parse_git_config(out: &str) -> Value {
             continue;
         }
         let (key, value) = match line.find(' ') {
-            Some(sp) => (&line[..sp], js_trim(&line[sp + 1..])),
+            Some(sp) => (&line[..sp], trim(&line[sp + 1..])),
             None => (line, ""),
         };
         let lower = key.to_lowercase();
@@ -434,8 +435,8 @@ pub fn parse_git_config(out: &str) -> Value {
             email = some(value);
         } else if lower.starts_with("credential.") {
             let v = &lower[lower.rfind('.').map_or(0, |i| i + 1)..];
-            let end = jsstr::len(key) as i64 - jsstr::len(v) as i64 - 1;
-            let scope = jsstr::slice(key, 11, Some(end));
+            let end = utf16::len(key) as i64 - utf16::len(v) as i64 - 1;
+            let scope = utf16::slice(key, 11, Some(end));
             let scope = if scope.is_empty() { Value::Null } else { Value::String(scope) };
             if v == "helper" {
                 helpers.push(json!({ "scope": scope, "value": value }));
@@ -468,7 +469,7 @@ fn items<'a>(v: Js<'a>, what: &str) -> Result<&'a [Value], TypeError> {
 /// credential settings, or, with gh as the credential helper, gh's active
 /// account for the host. SSH pushes use a key, which names no account.
 pub fn push_account(url: Js<'_>, cfg: Js<'_>, aliases: &[(String, String)]) -> Result<Value, TypeError> {
-    let url = nn(url).map_or_else(String::new, js_string);
+    let url = nn(url).map_or_else(String::new, display);
     let Some(r) = parse_remote(&url, aliases).filter(|r| r.https) else { return Ok(Value::Null) };
     if let Some(u) = &r.user {
         return Ok(json!({ "host": r.host, "user": u, "how": "the remote URL" }));
@@ -477,7 +478,7 @@ pub fn push_account(url: Js<'_>, cfg: Js<'_>, aliases: &[(String, String)]) -> R
     let mut named = None;
     for u in usernames {
         let scope = prop(Some(u), "scope")?;
-        if scope.filter(|s| truthy(Some(s))).is_some_and(|s| covers(&js_string(s), &r)) {
+        if scope.filter(|s| truthy(Some(s))).is_some_and(|s| covers(&display(s), &r)) {
             named = Some(u);
         }
     }
@@ -494,10 +495,10 @@ pub fn push_account(url: Js<'_>, cfg: Js<'_>, aliases: &[(String, String)]) -> R
     let mut helpers: Vec<String> = Vec::new();
     for h in items(prop(cfg, "helpers")?, "cfg.helpers")? {
         let scope = prop(Some(h), "scope")?;
-        if scope.filter(|s| truthy(Some(s))).is_none_or(|s| covers(&js_string(s), &r)) {
+        if scope.filter(|s| truthy(Some(s))).is_none_or(|s| covers(&display(s), &r)) {
             let value = prop(Some(h), "value")?;
             if let Some(value) = value.filter(|v| truthy(Some(v))) {
-                helpers.push(js_string(value));
+                helpers.push(display(value));
             } else {
                 helpers.clear();
             }
@@ -539,17 +540,17 @@ fn strict_eq(a: Js<'_>, b: Js<'_>) -> bool {
 pub fn note_signin(spans: &[Value], id: &Value, now: f64, since: Js<'_>) -> Signin {
     let last = spans.last();
     if strict_eq(opt_prop(last, "id"), Some(id)) {
-        if now - js_number(opt_prop(last, "to")) < SIGNIN_STEP_MS {
+        if now - to_number(opt_prop(last, "to")) < SIGNIN_STEP_MS {
             return Signin::Same;
         }
         return Signin::Extend(now);
     }
     let from = match nn(since) {
-        Some(s) => js_number(Some(s)),
+        Some(s) => to_number(Some(s)),
         None => now,
     };
     // last?.to ?? -Infinity
-    let to = nn(opt_prop(last, "to")).map_or(f64::NEG_INFINITY, |t| js_number(Some(t)));
+    let to = nn(opt_prop(last, "to")).map_or(f64::NEG_INFINITY, |t| to_number(Some(t)));
     let from = if from.is_nan() || to.is_nan() { f64::NAN } else { from.max(to) };
     let span = json!({ "id": id, "from": js_json::number(from), "to": js_json::number(now) });
     let drop = (spans.len() + 1).saturating_sub(MAX_SPANS);
@@ -593,14 +594,14 @@ fn link(id: Value, confidence: &str, via: &str) -> Value {
 /// those, the only account XenoNet knows of for the app.
 pub fn account_at(spans: &[Value], current: Js<'_>, t: Js<'_>, known: &[Value]) -> Value {
     if nn(t).is_some() {
-        let t = js_number(t);
+        let t = to_number(t);
         let last = spans.last();
         if truthy(current) {
             let since = match nn(opt_prop(current, "since")) {
-                Some(s) => js_number(Some(s)),
+                Some(s) => to_number(Some(s)),
                 None => f64::INFINITY,
             };
-            let from = if strict_eq(opt_prop(last, "id"), opt_prop(current, "id")) { js_number(opt_prop(last, "from")) } else { f64::INFINITY };
+            let from = if strict_eq(opt_prop(last, "id"), opt_prop(current, "id")) { to_number(opt_prop(last, "from")) } else { f64::INFINITY };
             let min = if since.is_nan() || from.is_nan() { f64::NAN } else { since.min(from) };
             if t >= min {
                 return link(opt_prop(current, "id").cloned().unwrap_or(Value::Null), "likely", "signed in when it ran");
@@ -609,8 +610,8 @@ pub fn account_at(spans: &[Value], current: Js<'_>, t: Js<'_>, known: &[Value]) 
         for i in (0..spans.len()).rev() {
             let s = Some(&spans[i]);
             let next = spans.get(i + 1);
-            let from = js_number(opt_prop(s, "from"));
-            let inside = t <= js_number(opt_prop(s, "to")) || (next.is_some() && strict_eq(opt_prop(next, "id"), opt_prop(s, "id")) && t < js_number(opt_prop(next, "from")));
+            let from = to_number(opt_prop(s, "from"));
+            let inside = t <= to_number(opt_prop(s, "to")) || (next.is_some() && strict_eq(opt_prop(next, "id"), opt_prop(s, "id")) && t < to_number(opt_prop(next, "from")));
             if t >= from && inside {
                 return link(opt_prop(s, "id").cloned().unwrap_or(Value::Null), "likely", "signed in when it ran");
             }
@@ -652,7 +653,7 @@ pub fn github_id(host: &str, login: &str) -> String {
 /// A git identity's id: a hash of its email, never the email.
 pub fn git_id(email: &str) -> String {
     use std::fmt::Write;
-    let h = Sha256::digest(js_trim(email).to_lowercase().as_bytes());
+    let h = Sha256::digest(trim(email).to_lowercase().as_bytes());
     let mut id = String::from("git:");
     for b in &h[..8] {
         let _ = write!(id, "{b:02x}");
@@ -796,7 +797,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         Some(Value::Array(a)) => a,
         Some(_) => return Err(TypeError("gh is not iterable".into())),
     };
-    let file_of = |k: &str, dflt: &str| nn(acc(k)).map_or_else(|| dflt.to_string(), js_string);
+    let file_of = |k: &str, dflt: &str| nn(acc(k)).map_or_else(|| dflt.to_string(), display);
     if let Some(claude) = acc("claude").filter(|v| truthy(Some(v))) {
         recs.record(claude, Some(&source(file_of("claudeFile", "~/.claude.json"))), &[("signedIn", Value::Bool(true))]);
     }
@@ -819,7 +820,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         };
         for u in items(prop(Some(h), "users")?, "h.users")? {
             let login = lower(Some(u), "")?;
-            let id = github_id(&tpl(host), &js_string(u));
+            let id = github_id(&tpl(host), &display(u));
             let r = json!({ "id": id, "kind": "github", "handle": u, "detail": { "host": host.cloned().unwrap_or(Value::Null) } });
             recs.record(&r, Some("gh"), &[("signedIn", Value::Bool(true)), ("active", Value::Bool(Some(&login) == active.as_ref()))]);
         }
@@ -946,7 +947,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     for &pi in &projects {
         let p = &nodes[pi];
         let mut ls = Vec::new();
-        let origin = nn(p.get("origin")).map_or_else(String::new, js_string);
+        let origin = nn(p.get("origin")).map_or_else(String::new, display);
         if let Some(remote) = parse_remote(&origin, ssh).filter(|r| is_forge(&r.host)) {
             let login = gh_login(&remote.host, &remote.owner).unwrap_or_else(|| remote.owner.clone());
             let id = github_id(&remote.host, &login);
@@ -955,7 +956,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         }
         let repo = repos_by.get(&key_of(p.get("key"))).copied();
         if let Some(email) = opt_prop(repo, "email").filter(|e| truthy(Some(e))) {
-            let id = git_id(&js_string(email));
+            let id = git_id(&display(email));
             recs.record(
                 &json!({ "id": id, "kind": "git", "handle": email, "detail": { "name": nn(opt_prop(repo, "name")).cloned().unwrap_or(Value::Null) } }),
                 Some("git config"),
@@ -970,9 +971,9 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             let host_s = tpl(host);
             let login = user.cloned().or_else(|| host.and_then(Value::as_str).and_then(gh_host).and_then(|h| h.get("active").cloned()));
             if let Some(login) = login.filter(|l| truthy(Some(l))) {
-                let login_s = js_string(&login);
+                let login_s = display(&login);
                 let spelled = gh_login(&host_s, &login_s).map_or(login.clone(), Value::String);
-                let id = github_id(&host_s, &js_string(&spelled));
+                let id = github_id(&host_s, &display(&spelled));
                 let mine = truthy(user);
                 recs.record(
                     &json!({ "id": id, "kind": "github", "handle": spelled, "detail": { "host": host.cloned().unwrap_or(Value::Null) } }),
@@ -1002,7 +1003,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     // once there are two groups to compare.
     let key_len = |i: usize| -> Result<usize, TypeError> {
         match nodes[i].get("key") {
-            Some(Value::String(k)) => Ok(jsstr::len(k)),
+            Some(Value::String(k)) => Ok(utf16::len(k)),
             None => Err(TypeError("Cannot read properties of undefined (reading 'length')".into())),
             Some(Value::Null) => Err(TypeError("Cannot read properties of null (reading 'length')".into())),
             Some(_) => Ok(0),
@@ -1094,7 +1095,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
             Some(k) => {
                 let handle = rec.get("handle").filter(|h| truthy(Some(h)));
                 let changed = handle.is_some_and(|h| !strict_eq(Some(h), k.get("handle")));
-                let last = js_number(Some(nn(k.get("lastSeen")).unwrap_or(&Value::from(0))));
+                let last = to_number(Some(nn(k.get("lastSeen")).unwrap_or(&Value::from(0))));
                 if changed || now - last >= SIGNIN_STEP_MS {
                     let v = json!({ "handle": nn(rec.get("handle")).or(k.get("handle")).cloned(), "detail": merged(k.get("detail"), rec.get("detail")), "lastSeen": js_json::number(now) });
                     if let Some(Value::Object(km)) = known.get_mut(&id) {
@@ -1207,7 +1208,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         num(b, "sessions")
             .total_cmp(&num(a, "sessions"))
             .then(num(b, "projects").total_cmp(&num(a, "projects")))
-            .then_with(|| jsstr::locale_compare(&tpl(a.get("id")), &tpl(b.get("id"))))
+            .then_with(|| utf16::locale_compare(&tpl(a.get("id")), &tpl(b.get("id"))))
     });
     out.list = list;
     out.identities = projects.iter().map(|&p| (p, Value::Array(ids_of.remove(&p).unwrap_or_default()))).collect();
@@ -1223,19 +1224,19 @@ pub fn repo_config_file(dir: &str) -> Option<String> {
     if std::fs::metadata(&git_dir).ok()?.is_file() {
         let text = String::from_utf8_lossy(&std::fs::read(&git_dir).ok()?).into_owned();
         let to = jsre::rest_after(&text, "gitdir:")?;
-        git_dir = xenonet_base::nodepath::resolve(&[dir, js_trim(&to)]);
+        git_dir = xenonet_os::nodepath::resolve(&[dir, trim(&to)]);
     }
     let common_file = paths::join(&git_dir, "commondir");
-    let common = if std::path::Path::new(&common_file).exists() { Some(js_trim(&String::from_utf8_lossy(&std::fs::read(&common_file).ok()?)).to_string()) } else { None };
+    let common = if std::path::Path::new(&common_file).exists() { Some(trim(&String::from_utf8_lossy(&std::fs::read(&common_file).ok()?)).to_string()) } else { None };
     let base = match common.filter(|c| !c.is_empty()) {
-        Some(c) => xenonet_base::nodepath::resolve(&[git_dir.as_str(), c.as_str()]),
+        Some(c) => xenonet_os::nodepath::resolve(&[git_dir.as_str(), c.as_str()]),
         None => git_dir,
     };
     Some(paths::join(&base, "config"))
 }
 
 fn mtime_of(file: &str) -> Option<f64> {
-    std::fs::metadata(file).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok())
+    std::fs::metadata(file).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok())
 }
 
 /// The mtime of a repo's config file, or None.
@@ -1339,7 +1340,7 @@ impl TranscriptOwners {
     /// Read once per session, again only while the file is still short
     /// enough for the entry to turn up. An error other than a missing file
     /// when it's looked at is thrown, as statSync throws it.
-    pub fn owner(&mut self, id: &str, now: f64) -> Result<Value, xenonet_base::fs::FsError> {
+    pub fn owner(&mut self, id: &str, now: f64) -> Result<Value, xenonet_os::fs::FsError> {
         let hit = self.owners.get(id).cloned();
         if let Some((owner, size)) = &hit {
             if !owner.is_null() || *size >= HEAD_BYTES as f64 {
@@ -1352,7 +1353,7 @@ impl TranscriptOwners {
             Some(f) => match std::fs::metadata(f) {
                 Ok(m) => m.len() as f64,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0.0,
-                Err(e) => return Err(xenonet_base::fs::FsError::of(e, "stat", f)),
+                Err(e) => return Err(xenonet_os::fs::FsError::of(e, "stat", f)),
             },
         };
         if hit.as_ref().is_some_and(|(_, s)| *s == size) {

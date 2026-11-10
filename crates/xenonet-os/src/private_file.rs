@@ -101,7 +101,7 @@ fn random_hex() -> String {
 }
 
 fn read_text(raw: &[u8]) -> String {
-    let utf16 = |b: &[u8]| String::from_utf16_lossy(&b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>());
+    let utf16 = |b: &[u8]| String::from_utf16_lossy(&b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect::<Vec<_>>());
     if raw.len() >= 2 && raw[0] == 0xff && raw[1] == 0xfe {
         utf16(&raw[2..])
     } else if raw.len() > 1 && raw[1] == 0 {

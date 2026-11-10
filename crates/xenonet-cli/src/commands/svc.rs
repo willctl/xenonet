@@ -11,7 +11,7 @@ use crate::js::{list, str, t};
 use crate::out::{c, json, pad, print, Done, Fail};
 use crate::reach::need;
 use serde_json::{json, Value};
-use xenonet_base::client::Server;
+use xenonet_api::client::Server;
 
 pub const HELP: &str = include_str!("help/svc.txt");
 

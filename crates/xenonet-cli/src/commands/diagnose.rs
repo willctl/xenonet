@@ -12,7 +12,7 @@ use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Value};
 use std::path::Path;
-use xenonet_base::log::{log_dir, read_logs};
+use xenonet_os::log::{log_dir, read_logs};
 
 pub const HELP: &str = include_str!("help/diagnose.txt");
 
@@ -51,9 +51,9 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     };
     let (state_dir, bundle) = gather(flags)?;
     if !flags.on("ask") {
-        let text = if flags.on("json") { format!("{}\n", xenonet_base::json::stringify(&bundle, 2)) } else { cores::bundle_markdown(&bundle)? };
+        let text = if flags.on("json") { format!("{}\n", xenonet_text::json::stringify(&bundle, 2)) } else { cores::bundle_markdown(&bundle)? };
         if let Some(out) = flags.text("out") {
-            std::fs::write(&out, &text).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &out).message))?;
+            std::fs::write(&out, &text).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "open", &out).message))?;
             print(format!("{} Wrote {out}. It's safe to share: no transcripts, titles, names or keys.", c::green("✓")));
             return Ok(0);
         }
@@ -64,7 +64,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let named = if app == "claude" { "Claude Code" } else { "Codex" };
     let path_var = std::env::var("PATH").unwrap_or_default();
     let pathext = std::env::var("PATHEXT").ok();
-    let Some(bin) = xenonet_base::paths::on_path(app, &path_var, pathext.as_deref(), cfg!(windows), &mut xenonet_base::paths::can_run) else {
+    let Some(bin) = xenonet_os::paths::on_path(app, &path_var, pathext.as_deref(), cfg!(windows), &mut xenonet_os::paths::can_run) else {
         return Err(Fail::error(format!("{named} isn't on your PATH; install it, or use --app {}.", if app == "claude" { "codex" } else { "claude" })));
     };
     let root = sys::xenonet_root();

@@ -6,8 +6,8 @@
 
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
-use xenonet_base::jsstr::cmp_units;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_text::text::{display, truthy};
+use xenonet_text::utf16::cmp_units;
 
 pub const KINDS: [&str; 8] = ["question", "permission", "actor", "request", "gateway", "requests", "ask", "sign-in"];
 
@@ -54,7 +54,7 @@ fn str_of(v: Option<&Value>) -> Value {
     match v {
         None | Some(Value::Null) => Value::Null,
         Some(Value::String(s)) => Value::String(s.clone()),
-        Some(v) => Value::String(js_string(v)),
+        Some(v) => Value::String(display(v)),
     }
 }
 
@@ -91,7 +91,7 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         let id = s.get("id").cloned().unwrap_or(Value::Null);
         let local = !truthy(s.get("host"));
         let mut m = Map::new();
-        m.insert("key".into(), Value::String(format!("session:{}", js_string(&id))));
+        m.insert("key".into(), Value::String(format!("session:{}", display(&id))));
         m.insert("kind".into(), Value::String(kind.into()));
         m.insert("id".into(), id.clone());
         m.insert("title".into(), or_id(str_of(s.get("title")), &id));
@@ -125,7 +125,7 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
             _ => Value::String("Waiting for you".into()),
         };
         let mut m = Map::new();
-        m.insert("key".into(), Value::String(format!("actor:{}", a.get("id").map_or_else(|| "undefined".into(), js_string))));
+        m.insert("key".into(), Value::String(format!("actor:{}", a.get("id").map_or_else(|| "undefined".into(), display))));
         m.insert("kind".into(), Value::String("actor".into()));
         m.insert("id".into(), id.clone());
         m.insert("title".into(), or_id(str_of(a.get("name")), &id));
@@ -155,7 +155,7 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
             }
             let id = a["id"].clone();
             let mut m = Map::new();
-            m.insert("key".into(), Value::String(format!("ask:{}", js_string(&id))));
+            m.insert("key".into(), Value::String(format!("ask:{}", display(&id))));
             m.insert("kind".into(), Value::String("ask".into()));
             m.insert("id".into(), id.clone());
             m.insert("title".into(), or_id(str_of(a.get("title")), &id));
@@ -179,7 +179,7 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
                 }
                 let id = r["id"].clone();
                 let mut m = Map::new();
-                m.insert("key".into(), Value::String(format!("{kind}:{}", js_string(&id))));
+                m.insert("key".into(), Value::String(format!("{kind}:{}", display(&id))));
                 m.insert("kind".into(), Value::String(kind.into()));
                 m.insert("id".into(), id.clone());
                 m.insert("title".into(), or_id(str_of(r.get("name")), &id));
@@ -195,13 +195,13 @@ pub fn needs_you_queue(input: &Value) -> Vec<Value> {
         m.insert("key".into(), Value::String("requests".into()));
         m.insert("kind".into(), Value::String("requests".into()));
         m.insert("id".into(), Value::Null);
-        m.insert("title".into(), Value::String(if waiting == 1.0 { "A program".into() } else { format!("{} programs", xenonet_base::json::number_string(waiting)) }));
-        m.insert("count".into(), xenonet_base::json::number(waiting));
+        m.insert("title".into(), Value::String(if waiting == 1.0 { "A program".into() } else { format!("{} programs", xenonet_text::json::number_string(waiting)) }));
+        m.insert("count".into(), xenonet_text::json::number(waiting));
         m.insert("since".into(), Value::Null);
         m.insert("actions".into(), Value::Array(Vec::new()));
         out.push(Value::Object(m));
     }
-    xenonet_base::sort::sort_by(&mut out, order);
+    xenonet_text::sort::sort_by(&mut out, order);
     out
 }
 
@@ -214,7 +214,7 @@ fn since(v: &Value) -> Option<f64> {
 pub fn order(a: &Value, b: &Value) -> Ordering {
     let stale = |v: &Value| truthy(v.get("stale"));
     let undated = |v: &Value| v.get("since").is_none_or(Value::is_null);
-    let key = |v: &Value| v.get("key").map_or_else(String::new, js_string);
+    let key = |v: &Value| v.get("key").map_or_else(String::new, display);
     stale(a)
         .cmp(&stale(b))
         .then(undated(a).cmp(&undated(b)))
@@ -259,7 +259,7 @@ pub fn count_of(items: &[Value]) -> f64 {
         n + if truthy(it.get("stale")) {
             0.0
         } else if it.get("kind").and_then(Value::as_str) == Some("requests") {
-            xenonet_base::text::js_number(it.get("count"))
+            xenonet_text::text::to_number(it.get("count"))
         } else {
             1.0
         }

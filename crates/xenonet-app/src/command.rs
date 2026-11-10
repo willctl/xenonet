@@ -127,7 +127,7 @@ pub fn reg_path(stdout: &str, env: &Map<String, Value>) -> Vec<String> {
         .split(';')
         .map(|d| {
             let filled = var_ref().replace_all(d, |c: &regex::Captures<'_>| env_value(env, &c[1]).unwrap_or_else(|| c[0].to_string()));
-            xenonet_base::text::js_trim(&filled).to_string()
+            xenonet_text::text::trim(&filled).to_string()
         })
         .filter(|d| !d.is_empty())
         .collect()
@@ -139,7 +139,7 @@ pub fn env_value(env: &Map<String, Value>, name: &str) -> Option<String> {
     let text = |v: &Value| match v {
         Value::Null => None,
         Value::String(s) => Some(s.clone()),
-        other => Some(xenonet_base::text::js_string(other)),
+        other => Some(xenonet_text::text::display(other)),
     };
     if let Some(v) = env.get(name).and_then(text) {
         return Some(v);

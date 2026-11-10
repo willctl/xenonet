@@ -690,7 +690,7 @@ across machines needs messages to reach agents, so the rule becomes:
 - the map's data (transcripts, titles, live detail) never does.
 
 **The seam.** The engine reaches the network through a small trait
-(`xenonet_base::network`): it sends bodies and receives them. It knows
+(`xenonet_model::ops`): it sends bodies and receives them. It knows
 nothing of frames, keys or the gateway. When the service isn't in a
 network, the trait has nothing behind it, so every local path, and the JS
 twins, are unchanged.
@@ -1142,7 +1142,7 @@ does `xenonet svc --help`.
   the sending host. `relay` and `svc` frames go up in relay batches of
   their own (`frames?relay=1`).
 - Their bodies are in `schemas/network/<kind>/v1.json`, and the engine's
-  side of them in `xenonet_base::network`.
+  side of them in `xenonet_model::ops`.
 
 **Routes on the gateway**, all under `/net/v1/`:
 
@@ -1246,7 +1246,7 @@ from 47840–47842), `test:bin`, and e2e for the page. Steps 1 to 4 are
 built ("As built").
 
 1. **The seam and the wire:**
-   - `xenonet_base::network` (the trait and body types);
+   - `xenonet_model::ops` (the trait and body types);
    - `schemas/network/*`;
    - fixtures in `test/fixtures/net/`.
 

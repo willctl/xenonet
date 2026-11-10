@@ -5,11 +5,11 @@ use crate::vendor::Vendor;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use xenonet_api::cores::{DriftReport, Schemas, R};
-use xenonet_base::json::number;
 use xenonet_model::actor;
 use xenonet_schema::drift::{source_name, DriftView, ADDITIONS};
 use xenonet_schema::lenient::{load_vendor, vendor_sources};
 use xenonet_schema::typed;
+use xenonet_text::json::number;
 
 /// A body checked by reading it as its type (crates/xenonet-model): the
 /// schema's id names the type.
@@ -64,7 +64,7 @@ impl DriftReport for Drift {
         let known: u64 = sources.iter().map(|s| s["known"].as_u64().unwrap_or(0)).sum();
         let mut out = Map::new();
         out.insert("at".into(), number(now));
-        out.insert("file".into(), file.map_or(Value::Null, |f| Value::String(if home.is_empty() { f } else { xenonet_base::paths::tilde(&f, home) })));
+        out.insert("file".into(), file.map_or(Value::Null, |f| Value::String(if home.is_empty() { f } else { xenonet_os::paths::tilde(&f, home) })));
         out.insert("since".into(), looked_at.map_or(Value::Null, number));
         out.insert("all".into(), Value::Bool(all));
         out.insert("sources".into(), Value::Array(sources));

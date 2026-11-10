@@ -19,7 +19,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use xenonet_app::jstext::{locale_compare, slice16, utf16_len};
 use xenonet_app::jsv::truthy;
-use xenonet_base::text::{js_number, js_string};
+use xenonet_text::text::{display, to_number};
 
 pub const MAX_NODES: usize = 5000;
 const MAX_ID: usize = 2048;
@@ -71,7 +71,7 @@ fn num(v: Option<&Value>) -> f64 {
 }
 
 fn n(x: f64) -> Value {
-    xenonet_base::json::number(x)
+    xenonet_text::json::number(x)
 }
 
 fn str_of(v: Option<&Value>, max: usize) -> Value {
@@ -99,7 +99,7 @@ pub fn remote_id(host: &str, id: Option<&Value>) -> Option<String> {
     if id.is_empty() || utf16_len(id) > MAX_ID || id.starts_with('@') {
         return None;
     }
-    xenonet_base::ids::qualify(id, Some(host), None).ok()
+    xenonet_model::ids::qualify(id, Some(host), None).ok()
 }
 
 /// An identity's id from a host: account ids are global, so they stay as
@@ -110,7 +110,7 @@ pub fn identity_id(host: &str, id: Option<&Value>) -> Option<String> {
         return None;
     }
     if id == "openai:api-key" {
-        return xenonet_base::ids::qualify(id, Some(host), None).ok();
+        return xenonet_model::ids::qualify(id, Some(host), None).ok();
     }
     Some(id.to_string())
 }
@@ -136,8 +136,8 @@ pub struct CleanOnce {
 
 impl CleanOnce {
     pub fn clean(&mut self, schemas: &mut dyn Schemas, node: &Value) -> Option<Value> {
-        let text = xenonet_base::json::stringify(node, 0);
-        let id = node.get("id").map(js_string).unwrap_or_default();
+        let text = xenonet_text::json::stringify(node, 0);
+        let id = node.get("id").map(display).unwrap_or_default();
         let kept = match self.known.get(&id) {
             Some((t, k)) if *t == text => k.clone(),
             _ => clean_node(schemas, node),
@@ -252,8 +252,8 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     if candidates.len() > MAX_NODES - 1 {
         truncated = true;
         let (mut sessions, places): (Vec<Value>, Vec<Value>) = candidates.into_iter().partition(|x| x.get("kind") == Some(&json!("session")));
-        let at = |x: &Value| x.get("updatedAt").filter(|v| !v.is_null()).map_or(0.0, |v| js_number(Some(v)));
-        xenonet_base::sort::sort_by(&mut sessions, |a, b| (at(b) - at(a)).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+        let at = |x: &Value| x.get("updatedAt").filter(|v| !v.is_null()).map_or(0.0, |v| to_number(Some(v)));
+        xenonet_text::sort::sort_by(&mut sessions, |a, b| (at(b) - at(a)).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         candidates = places.into_iter().chain(sessions).take(MAX_NODES - 1).collect();
     }
 
@@ -390,7 +390,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     }
     let mut children: HashMap<String, Vec<String>> = HashMap::new();
     for l in parent_of.values() {
-        children.entry(js_string(&l["source"])).or_default().push(js_string(&l["target"]));
+        children.entry(display(&l["source"])).or_default().push(display(&l["target"]));
     }
     let mut reached: HashSet<String> = HashSet::new();
     let reach = |from: &str, reached: &mut HashSet<String>, children: &HashMap<String, Vec<String>>| {
@@ -443,7 +443,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
             x["activeCount"] = json!(0);
         }
     }
-    let up: HashMap<String, String> = parent_of.values().map(|l| (js_string(&l["target"]), js_string(&l["source"]))).collect();
+    let up: HashMap<String, String> = parent_of.values().map(|l| (display(&l["target"]), display(&l["source"]))).collect();
     let actives: Vec<String> =
         nodes.iter().filter(|(_, x)| x.get("kind") == Some(&json!("session")) && x.get("activity") == Some(&json!("active"))).map(|(id, _)| id.clone()).collect();
     for sid in actives {
@@ -466,7 +466,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     let project_ms = finite(windows.get("projectActiveMs")).unwrap_or(3600e3);
     for (_, x) in &mut nodes {
         if matches!(x.get("kind").and_then(Value::as_str), Some("project" | "native" | "zone")) {
-            let last = x.get("lastSessionAt").filter(|v| !v.is_null()).map(|v| js_number(Some(v)));
+            let last = x.get("lastSessionAt").filter(|v| !v.is_null()).map(|v| to_number(Some(v)));
             x["active"] = json!(last.is_some_and(|l| now - l <= project_ms));
         }
     }
@@ -486,7 +486,7 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     let projects: Vec<&Value> = all.iter().filter(|x| kind_is(x, "project")).collect();
     let mut stats = Map::new();
     stats.insert("wikiPages".into(), json!(all.iter().filter(|x| kind_is(x, "page")).count()));
-    stats.insert("dirtyRepos".into(), json!(projects.iter().filter(|x| js_number(x.get("repo").and_then(|r| r.get("dirty"))) > 0.0).count()));
+    stats.insert("dirtyRepos".into(), json!(projects.iter().filter(|x| to_number(x.get("repo").and_then(|r| r.get("dirty"))) > 0.0).count()));
     stats.insert("projects".into(), json!(projects.iter().filter(|x| !truthy(x.get("group"))).count()));
     stats.insert("groups".into(), json!(projects.iter().filter(|x| truthy(x.get("group"))).count()));
     stats.insert("sessions".into(), json!(sessions.len()));
@@ -510,7 +510,7 @@ pub fn same_repo(nodes: &[Value], cap: usize) -> Vec<Value> {
             continue;
         }
         let Some(key) = x.get("repoKey").and_then(Value::as_str).filter(|k| !k.is_empty()) else { continue };
-        let host = x.get("host").filter(|h| !h.is_null()).map_or_else(String::new, js_string);
+        let host = x.get("host").filter(|h| !h.is_null()).map_or_else(String::new, display);
         let at = match repos.iter().position(|(k, _)| k == key) {
             Some(i) => i,
             None => {
@@ -558,12 +558,12 @@ pub fn merge_identities(local: &[Value], remotes: &[(String, Vec<Value>)], names
         m.insert("sources".into(), Value::Array(list(i.get("sources"), usize::MAX)));
         m.insert("hosts".into(), json!([null]));
         m.insert("signedInOn".into(), if truthy(i.get("signedIn")) { json!([null]) } else { json!([]) });
-        by_id.insert(i.get("id").map(js_string).unwrap_or_default(), Value::Object(m));
+        by_id.insert(i.get("id").map(display).unwrap_or_default(), Value::Object(m));
     }
     for (host, identities) in remotes {
         for r in identities {
             let sources: Vec<Value> = list(r.get("sources"), usize::MAX).into_iter().filter_map(|x| x.as_str().map(|t| json!(format!("{host}: {t}")))).collect();
-            let id = r.get("id").map(js_string).unwrap_or_default();
+            let id = r.get("id").map(display).unwrap_or_default();
             let Some(cur) = by_id.get_mut(&id) else {
                 let mut m = r.as_object().cloned().unwrap_or_default();
                 m.insert("sources".into(), Value::Array(sources));
@@ -614,11 +614,11 @@ pub fn merge_identities(local: &[Value], remotes: &[(String, Vec<Value>)], names
         }
     }
     let mut out: Vec<Value> = by_id.into_iter().map(|(_, v)| v).collect();
-    xenonet_base::sort::sort_by(&mut out, |a, b| {
-        let d = js_number(b.get("sessions")) - js_number(a.get("sessions"));
-        let d = if d == 0.0 || d.is_nan() { js_number(b.get("projects")) - js_number(a.get("projects")) } else { d };
+    xenonet_text::sort::sort_by(&mut out, |a, b| {
+        let d = to_number(b.get("sessions")) - to_number(a.get("sessions"));
+        let d = if d == 0.0 || d.is_nan() { to_number(b.get("projects")) - to_number(a.get("projects")) } else { d };
         if d == 0.0 || d.is_nan() {
-            locale_compare(&a.get("id").map(js_string).unwrap_or_default(), &b.get("id").map(js_string).unwrap_or_default())
+            locale_compare(&a.get("id").map(display).unwrap_or_default(), &b.get("id").map(display).unwrap_or_default())
         } else if d < 0.0 {
             std::cmp::Ordering::Less
         } else {
@@ -662,10 +662,10 @@ pub struct HostIn<'a> {
 /// repoKey(origin, aliases) from schema/ids.js: a remote's host (through
 /// the SSH aliases) and its repo's path, normalized.
 pub fn repo_key(origin: Option<&Value>, aliases: &HashMap<String, String>) -> Option<String> {
-    let url = origin.filter(|o| !o.is_null()).map_or_else(String::new, js_string);
-    let (host, repo) = xenonet_base::ids::remote_parts(&url)?;
+    let url = origin.filter(|o| !o.is_null()).map_or_else(String::new, display);
+    let (host, repo) = xenonet_model::ids::remote_parts(&url)?;
     let h = aliases.get(&host).cloned().unwrap_or(host);
-    Some(xenonet_base::ids::normalize_remote(&format!("{h}/{repo}")))
+    Some(xenonet_model::ids::normalize_remote(&format!("{h}/{repo}")))
 }
 
 /// This XenoNet's map with every host's in it. With no hosts, the map is
@@ -939,7 +939,7 @@ fn add_series(into: &mut Map<String, Value>, from: &Value, lag: f64) {
             if j >= 0.0 && j < len {
                 if let Some(v) = finite(Some(x)) {
                     let at = j as usize;
-                    let sum = js_number(Some(&a[at])) + v;
+                    let sum = to_number(Some(&a[at])) + v;
                     a[at] = n(sum);
                 }
             }
@@ -962,7 +962,7 @@ pub fn merge_limits_with(local: &Value, readings: &[Value]) -> (Value, Vec<Strin
     let mut others: Map<String, Value> = Map::new();
     let at = |r: &Value| finite(r.get("observedAt")).unwrap_or(f64::NEG_INFINITY);
     for x in readings {
-        let app = x.get("app").map(js_string).unwrap_or_default();
+        let app = x.get("app").map(display).unwrap_or_default();
         let host = x.get("host").cloned().unwrap_or(Value::Null);
         let reading = x.get("reading").cloned().unwrap_or(Value::Null);
         let identity = reading.get("identity").filter(|v| truthy(Some(v))).cloned();
@@ -981,7 +981,7 @@ pub fn merge_limits_with(local: &Value, readings: &[Value]) -> (Value, Vec<Strin
         }
         // As the JS's ??: an identity that's there but empty still names one.
         let named = reading.get("identity").filter(|v| !v.is_null()).cloned();
-        let who = named.as_ref().map_or_else(|| format!("@{}", js_string(&host)), js_string);
+        let who = named.as_ref().map_or_else(|| format!("@{}", display(&host)), display);
         let key = format!("{app} {who}");
         let newer = match others.get(&key) {
             None => true,
@@ -1028,7 +1028,7 @@ pub fn merge_live_with(local: &Value, hosts: &[(Value, Value)], schemas: &mut dy
         today += q.today;
         total += q.total24h;
         if let (false, Some(qa), Some(la)) = (q.series.is_null(), finite(Some(&q.at)), finite(local.get("at"))) {
-            add_series(&mut series, &q.series, xenonet_base::units::js_round((la - qa) / 1000.0));
+            add_series(&mut series, &q.series, xenonet_text::units::round((la - qa) / 1000.0));
         }
         readings.extend(q.readings);
     }
@@ -1073,7 +1073,7 @@ pub fn merge_summary(local: &Value, hosts: &[(Value, Value)], schemas: &mut dyn 
         }
         let title = |id: &str| titles.get(id).cloned().unwrap_or_else(|| json!(id));
         for x in &q.sessions {
-            let id = js_string(&x["id"]);
+            let id = display(&x["id"]);
             if let Some(nv) = x.get("needsYou").filter(|v| truthy(Some(v))) {
                 if nv.get("kind") != Some(&json!("review")) {
                     needs.push(json!({ "id": id, "app": x.get("app"), "title": title(&id), "kind": nv.get("kind"), "text": nv.get("text"), "host": h }));
@@ -1152,7 +1152,7 @@ pub fn qualify_event(name: &str, data: &Value, host: &Value, schemas: &mut dyn S
                 t => t,
             };
             Some(
-                json!({ "id": format!("@{h}:{}", slice16(&js_string(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }),
+                json!({ "id": format!("@{h}:{}", slice16(&display(id), 64)), "from": from, "to": to, "target": str_of(data.get("target"), 200), "text": text, "ts": shift.at(data.get("ts")), "host": h }),
             )
         }
         // Its load: what system/v1 declares, without another machine's
@@ -1175,7 +1175,7 @@ pub fn event_note(name: &str, data: &Value, host: &Value) -> Option<String> {
     if name != "tokens" || !data.is_object() || xenonet_adapter::apps::tailed_or(data.get("app"), None).is_some() {
         return None;
     }
-    let app = xenonet_base::json::stringify(data.get("app").unwrap_or(&Value::Null), 0);
+    let app = xenonet_text::json::stringify(data.get("app").unwrap_or(&Value::Null), 0);
     let id = s(host, "id").unwrap_or_else(|| "undefined".into());
     Some(format!("{id} sent tokens for {}, an app this XenoNet doesn't tail, and they were left out", slice16(&app, 60)))
 }
@@ -1206,7 +1206,7 @@ pub fn qualify_engine(engine: &Value, host: &Value, schemas: &mut dyn Schemas) -
                 Some(Value::Object(x))
             })
             .collect();
-        let id = m.get("id").map_or_else(|| "undefined".to_string(), js_string);
+        let id = m.get("id").map_or_else(|| "undefined".to_string(), display);
         kept.insert("id".into(), json!(format!("@{h}:{}", slice16(&id, 64))));
         kept.insert("from".into(), json!(from));
         kept.insert("to".into(), Value::Array(to));

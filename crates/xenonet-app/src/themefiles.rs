@@ -29,7 +29,7 @@ pub fn read_themes(dir: &str) -> (Map<String, Value>, Vec<String>) {
             problems.push(format!("{f}: a theme's file name is its id: lowercase letters, digits and dashes"));
             continue;
         }
-        let parsed = fsx::read_text(&NATIVE.join(&[dir, &f])).map_err(|e| e.message).and_then(|text| xenonet_base::json::parse(&text).map_err(|e| e.to_string()));
+        let parsed = fsx::read_text(&NATIVE.join(&[dir, &f])).map_err(|e| e.message).and_then(|text| xenonet_text::json::parse(&text).map_err(|e| e.to_string()));
         match parsed {
             Ok(t @ Value::Object(_)) => {
                 custom.insert(id, t);
@@ -55,7 +55,7 @@ pub fn copy_theme(dir: &str, from: Option<&str>, id: &str, name: Option<&Value>)
     let base = from.and_then(|f| all.get(f)).or_else(|| all.get(DEFAULT_THEME)).cloned().unwrap_or(Value::Null);
     let mut out = Map::new();
     out.insert("name".into(), name.filter(|n| !n.is_null()).cloned().unwrap_or_else(|| Value::String(id.into())));
-    out.insert("about".into(), Value::String(format!("Starts from {}", base.get("name").map_or_else(|| "undefined".into(), xenonet_base::text::js_string))));
+    out.insert("about".into(), Value::String(format!("Starts from {}", base.get("name").map_or_else(|| "undefined".into(), xenonet_text::text::display))));
     let built_in = crate::jsv::truthy(base.get("builtIn"));
     match (built_in, from) {
         (true, Some(f)) => {
@@ -74,7 +74,7 @@ pub fn copy_theme(dir: &str, from: Option<&str>, id: &str, name: Option<&Value>)
         }
     }
     fsx::mkdir_p(dir, None)?;
-    fsx::write_file(&file, format!("{}\n", xenonet_base::json::stringify(&Value::Object(out), 2)).as_bytes(), None)?;
+    fsx::write_file(&file, format!("{}\n", xenonet_text::json::stringify(&Value::Object(out), 2)).as_bytes(), None)?;
     Ok(file)
 }
 

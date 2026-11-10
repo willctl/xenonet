@@ -20,11 +20,11 @@ use super::{number_text, template, text_of, truthy, Files};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use xenonet_base::json::stringify;
-use xenonet_base::nodepath::NATIVE;
-use xenonet_base::sync::Locked;
+use xenonet_os::nodepath::NATIVE;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::stringify;
 
-pub const YOU: &str = xenonet_base::ids::YOU;
+pub const YOU: &str = xenonet_model::ids::YOU;
 
 /// The policy's clock, and the files it keeps.
 pub trait Host: Files {
@@ -84,7 +84,7 @@ pub fn actor_of(id: &str) -> Option<(Option<String>, String)> {
     if !id.starts_with('@') {
         return None;
     }
-    let (host, slug) = xenonet_base::ids::parse_actor_id(id)?;
+    let (host, slug) = xenonet_model::ids::parse_actor_id(id)?;
     let host = host?;
     (slug != "you").then(|| (Some(host.to_string()), slug.to_string()))
 }
@@ -158,7 +158,7 @@ pub fn sanitize(text: &str, one_line: bool, max: f64) -> String {
     let mut s = regex_replace(r"[\x00-\x08\x0b-\x1f\x7f-\x{9f}]", &s, "");
     if one_line {
         s = crate::re!(r"[\s\x{FEFF}--\x{85}]{2,}").replace_all(&s, " ").into_owned();
-        s = xenonet_base::text::js_trim(&s).to_string();
+        s = xenonet_text::text::trim(&s).to_string();
     }
     let len = s.encode_utf16().count();
     if len as f64 > max {
@@ -209,7 +209,7 @@ pub fn framed(id: &str, from: &str, verified: Option<&str>, text: &str, user: bo
 }
 
 pub fn hash_text(text: &str) -> String {
-    xenonet_base::jsstr::hex(&Sha256::digest(text.as_bytes())[..8])
+    xenonet_text::utf16::hex(&Sha256::digest(text.as_bytes())[..8])
 }
 
 /// How a policy call went wrong: a refusal the sender can read (with its
@@ -235,7 +235,7 @@ fn num(v: Option<&Value>) -> f64 {
         Some(Value::Null) => 0.0,
         Some(Value::Bool(b)) => f64::from(u8::from(*b)),
         Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
-        Some(v @ Value::String(_)) => xenonet_base::text::js_number(Some(v)),
+        Some(v @ Value::String(_)) => xenonet_text::text::to_number(Some(v)),
         Some(_) => f64::NAN,
     }
 }
@@ -317,7 +317,7 @@ impl Policy {
         let mut p = Policy { file, audit_file, ..Policy::default() };
         if let Some(file) = p.file.clone().filter(|f| !f.is_empty()) {
             if let Ok(text) = h.read_file(&file) {
-                if let Ok(v) = xenonet_base::json::parse(&text) {
+                if let Ok(v) = xenonet_text::json::parse(&text) {
                     for (k, v) in spread(&v) {
                         p.data.insert(k, v);
                     }
@@ -326,7 +326,7 @@ impl Policy {
             // The wake budget's counts, so a restart doesn't hand every
             // sender and session a fresh budget.
             if let Ok(text) = h.read_file(&Self::wakes_file(&file)) {
-                if let Ok(Value::Object(m)) = xenonet_base::json::parse(&text) {
+                if let Ok(Value::Object(m)) = xenonet_text::json::parse(&text) {
                     for (k, times) in m {
                         if let (true, Value::Array(times)) = (k.starts_with("w:") || k.starts_with("wt:"), times) {
                             p.hits.insert(k, times.iter().filter_map(Value::as_f64).collect());
@@ -356,7 +356,7 @@ impl Policy {
             if !(k.starts_with("w:") || k.starts_with("wt:")) {
                 continue;
             }
-            let live: Vec<Value> = times.iter().filter(|x| t - **x < 3600e3).map(|x| xenonet_base::json::number(*x)).collect();
+            let live: Vec<Value> = times.iter().filter(|x| t - **x < 3600e3).map(|x| xenonet_text::json::number(*x)).collect();
             if !live.is_empty() {
                 keep.insert(k.clone(), Value::Array(live));
             }
@@ -421,10 +421,10 @@ impl Policy {
         let at = h.now();
         let ttl = if ttl.is_nan() { f64::NAN } else { ttl.max(60e3) };
         let expires_at = h.now() + ttl;
-        let g = json!({ "selector": Selector::format(Some(&sel)), "at": xenonet_base::json::number(at), "expiresAt": xenonet_base::json::number(expires_at) });
+        let g = json!({ "selector": Selector::format(Some(&sel)), "at": xenonet_text::json::number(at), "expiresAt": xenonet_text::json::number(expires_at) });
         self.table("grants")?.insert(actor.to_string(), g.clone());
         self.save(h)?;
-        self.audit(h, json!({ "kind": "grant", "actor": actor, "selector": g["selector"], "expiresAt": xenonet_base::json::number(expires_at), "by": by }))?;
+        self.audit(h, json!({ "kind": "grant", "actor": actor, "selector": g["selector"], "expiresAt": xenonet_text::json::number(expires_at), "by": by }))?;
         Ok(g)
     }
 
@@ -553,8 +553,8 @@ impl Policy {
             Some(id) => template(id),
         };
         let mut ids: Vec<String> = recipients.iter().map(id_of).collect();
-        ids.sort_by(|a, b| xenonet_base::sort::utf16_cmp(a, b));
-        let hash = xenonet_base::jsstr::hex(&Sha256::digest(format!("{sender}|{}|{text}", ids.join(",")).as_bytes()));
+        ids.sort_by(|a, b| xenonet_text::sort::utf16_cmp(a, b));
+        let hash = xenonet_text::utf16::hex(&Sha256::digest(format!("{sender}|{}|{text}", ids.join(",")).as_bytes()));
         if self.recent.iter().any(|(k, _)| *k == hash) {
             return refuse(self, h, "you sent the same message to the same sessions under a minute ago".into(), "duplicate");
         }
@@ -569,7 +569,7 @@ impl Policy {
                 return refuse(self, h, format!("{id} is getting too many messages; try again in a minute"), "target-rate");
             }
             let mut pair = [sender.to_string(), id.clone()];
-            pair.sort_by(|a, b| xenonet_base::sort::utf16_cmp(a, b));
+            pair.sort_by(|a, b| xenonet_text::sort::utf16_cmp(a, b));
             let per_pair = self.limits.pair_per_ten_minutes;
             if !self.take(h, &format!("p:{}", pair.join("|")), per_pair, 600e3) {
                 return refuse(
@@ -595,10 +595,10 @@ impl Policy {
         let ttl = ttl_ms.unwrap_or(self.limits.consent_ms);
         let until = h.now() + ttl;
         let at = h.now();
-        let consent = json!({ "until": xenonet_base::json::number(until), "remote": remote, "at": xenonet_base::json::number(at) });
+        let consent = json!({ "until": xenonet_text::json::number(until), "remote": remote, "at": xenonet_text::json::number(at) });
         self.table("consent")?.insert(session.to_string(), consent.clone());
         self.save(h)?;
-        self.audit(h, json!({ "kind": "consent", "session": session, "until": xenonet_base::json::number(until), "remote": remote, "by": by }))?;
+        self.audit(h, json!({ "kind": "consent", "session": session, "until": xenonet_text::json::number(until), "remote": remote, "by": by }))?;
         Ok(consent)
     }
 
@@ -657,7 +657,7 @@ impl Policy {
     /// The line: { at, ...entry }.
     pub fn audit(&mut self, h: &mut dyn Host, entry: Value) -> Result<Value> {
         let mut line = Map::new();
-        line.insert("at".into(), xenonet_base::json::number(h.now()));
+        line.insert("at".into(), xenonet_text::json::number(h.now()));
         if let Value::Object(f) = entry {
             for (k, v) in f {
                 line.insert(k, v);
@@ -695,11 +695,11 @@ impl Policy {
         let Ok(text) = h.read_file(file) else {
             return Vec::new();
         };
-        let lines: Vec<&str> = xenonet_base::text::js_trim(&text).split('\n').collect();
+        let lines: Vec<&str> = xenonet_text::text::trim(&text).split('\n').collect();
         let from = tail(lines.len());
         let mut out = Vec::new();
         for l in &lines[from..] {
-            match xenonet_base::json::parse(l) {
+            match xenonet_text::json::parse(l) {
                 Ok(v) => out.push(v),
                 Err(_) => return Vec::new(),
             }
@@ -867,7 +867,7 @@ mod tests {
         assert_eq!(
             p.grants(&mut c),
             vec![
-                json!({ "actor": wren, "selector": "by:wren", "at": 1_000_000, "expiresAt": xenonet_base::json::number(1_000_000.0 + 30.0 * 24.0 * 3600e3), "expired": false }),
+                json!({ "actor": wren, "selector": "by:wren", "at": 1_000_000, "expiresAt": xenonet_text::json::number(1_000_000.0 + 30.0 * 24.0 * 3600e3), "expired": false }),
                 json!({ "actor": muse, "selector": "all", "at": 1_000_000, "expiresAt": 1_060_000, "expired": true }),
             ]
         );

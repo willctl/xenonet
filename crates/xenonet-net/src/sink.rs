@@ -1,5 +1,5 @@
 //! Where the network's news goes: the engine's `Sink`
-//! (`xenonet_base::network::Sink`), set once the engine is there. Until
+//! (`xenonet_model::ops::Sink`), set once the engine is there. Until
 //! then, and in a service without the engine, a `LogSink` writes each call
 //! to the log, so nothing that arrives is lost silently.
 //!
@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
-use xenonet_base::network::{Incoming, RelaySink, Sink};
-use xenonet_base::sync::{Locked, ReadWrite};
+use xenonet_model::ops::{Incoming, RelaySink, Sink};
+use xenonet_os::sync::{Locked, ReadWrite};
 
 pub type LogFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
@@ -119,7 +119,7 @@ impl Sink for LogSink {
 mod tests {
     use super::*;
     use serde_json::json;
-    use xenonet_base::network::Kind;
+    use xenonet_model::ops::Kind;
 
     #[derive(Default)]
     struct Heard(Mutex<Vec<String>>);

@@ -34,7 +34,7 @@ fn each_reader_reports_a_failed_vendor_check_as_its_rule_says() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
-    let now = xenonet_base::time::parse_iso("2026-10-16T12:00:00.000Z").unwrap();
+    let now = xenonet_text::time::parse_iso("2026-10-16T12:00:00.000Z").unwrap();
     let read = |r: &mut dyn NativeReader, path: &str, got: bool| r.read(path, now, &mut StdFiles, &mut Broken { got });
     let failed = Err(VENDOR_FAILED.to_string());
 

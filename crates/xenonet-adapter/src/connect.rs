@@ -26,11 +26,11 @@
 
 use crate::apps::App;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::{number, number_string, stringify};
-use xenonet_base::jsstr::{base64, base64_bytes, cmp_units, from_utf16le, js_key_order, utf16le};
-use xenonet_base::nodepath::{Style, NATIVE};
-use xenonet_base::paths::tilde;
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_os::nodepath::{Style, NATIVE};
+use xenonet_os::paths::tilde;
+use xenonet_text::json::{number, number_string, stringify};
+use xenonet_text::text::{display, to_number, truthy};
+use xenonet_text::utf16::{base64, base64_bytes, cmp_units, from_utf16le, key_order, utf16le};
 
 /// A pattern compiled once.
 macro_rules! re {
@@ -129,7 +129,7 @@ fn strict_eq(a: &Value, b: &Value) -> bool {
 /// them: array indexes first, then the rest as they came.
 pub fn normalized(v: &Value) -> Value {
     match v {
-        Value::Object(m) => Value::Object(js_key_order(m.iter().map(|(k, v)| (k.clone(), normalized(v))).collect())),
+        Value::Object(m) => Value::Object(key_order(m.iter().map(|(k, v)| (k.clone(), normalized(v))).collect())),
         Value::Array(a) => Value::Array(a.iter().map(normalized).collect()),
         other => other.clone(),
     }
@@ -175,7 +175,7 @@ pub fn text_of(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => String::new(),
         Some(Value::String(s)) => s.clone(),
-        Some(other) => js_string(other),
+        Some(other) => display(other),
     }
 }
 
@@ -196,7 +196,7 @@ fn ps_quote(s: &str) -> String {
 
 /// A path under a folder, on this machine.
 pub fn join(dir: &str, name: &str) -> String {
-    xenonet_base::nodepath::join(&[dir, name])
+    xenonet_os::nodepath::join(&[dir, name])
 }
 
 /// A port as text, as the entries carry it.
@@ -367,7 +367,7 @@ impl Shared {
         } else {
             re!(r#"XENONET_PORT=['"]?([0-9]+)"#).captures(&Self::hook_text(h)).map(|m| m[1].to_string())
         };
-        m.map(|d| js_number(Some(&Value::String(d))))
+        m.map(|d| to_number(Some(&Value::String(d))))
     }
 
     /// Whether an entry is for this XenoNet's port, or names none.
@@ -472,7 +472,7 @@ impl Shared {
     /// left alone too.
     pub fn read_json(&self, c: &mut dyn Machine, file: &str) -> Result<Value> {
         let Some(text) = self.read(c, file)? else { return Ok(json!({})) };
-        match xenonet_base::json::parse(&text) {
+        match xenonet_text::json::parse(&text) {
             Ok(v) => Ok(normalized(&v)),
             Err(_) => {
                 let message = match xenonet_schema::vendor::json_error_at(&text) {

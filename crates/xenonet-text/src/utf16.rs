@@ -78,6 +78,19 @@ pub fn head(s: &str, n: usize) -> String {
     units(s, 0, n)
 }
 
+/// The first `n` UTF-16 units of a text, as JS's slice(0, n) takes them,
+/// as a slice of it: a character that would be cut in half is left out.
+pub fn whole_head(s: &str, n: usize) -> &str {
+    let mut units = 0;
+    for (i, c) in s.char_indices() {
+        units += c.len_utf16();
+        if units > n {
+            return &s[..i];
+        }
+    }
+    s
+}
+
 /// `s.slice(-n)`: at most the last n units (all of it for 0, as JS's
 /// `slice(-0)` is).
 pub fn last(s: &str, n: usize) -> String {
@@ -124,7 +137,7 @@ pub fn collapse_space(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut space = false;
     for c in s.chars() {
-        if crate::text::is_js_space(c) {
+        if crate::text::is_space(c) {
             space = true;
         } else {
             if space {
@@ -201,7 +214,7 @@ pub fn utf16le(s: &str) -> Vec<u8> {
 
 /// `buffer.toString("utf16le")`: a byte left over is dropped.
 pub fn from_utf16le(b: &[u8]) -> String {
-    let units: Vec<u16> = b.chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect();
+    let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|p| u16::from_le_bytes(*p)).collect();
     String::from_utf16_lossy(&units)
 }
 
@@ -220,7 +233,7 @@ pub fn is_array_index(key: &str) -> bool {
 /// An object's keys in the order a JS object made from them in this order
 /// would list them: array indexes first, by number, then the rest as
 /// given.
-pub fn js_key_order(map: serde_json::Map<String, serde_json::Value>) -> serde_json::Map<String, serde_json::Value> {
+pub fn key_order(map: serde_json::Map<String, serde_json::Value>) -> serde_json::Map<String, serde_json::Value> {
     if !map.keys().any(|k| is_array_index(k)) {
         return map;
     }
@@ -473,6 +486,7 @@ mod tests {
         assert_eq!(slice("hello", 2, Some(-1)), "ll");
         assert_eq!(slice("hello", 4, Some(2)), "");
         assert_eq!(head("héllo", 2), "hé");
+        assert_eq!(whole_head("a😀b", 2), "a", "half a pair is left out");
         assert_eq!(last("héllo", 0), "héllo");
         assert_eq!(substring("hello", 4, Some(1)), "ell");
         assert_eq!(pad_start("7", 3, "0"), "007");
@@ -483,7 +497,7 @@ mod tests {
     #[test]
     fn array_indexes_go_first() {
         let m: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r#"{"b":1,"10":2,"2":3,"02":4,"-1":5}"#).unwrap();
-        assert_eq!(js_key_order(m).keys().collect::<Vec<_>>(), ["2", "10", "b", "02", "-1"]);
+        assert_eq!(key_order(m).keys().collect::<Vec<_>>(), ["2", "10", "b", "02", "-1"]);
         assert!(is_array_index("4294967294") && !is_array_index("4294967295"));
     }
 

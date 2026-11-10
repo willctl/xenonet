@@ -13,7 +13,7 @@ use crate::out::{ago, c, json, json_at, now, pad, print, Done, Fail};
 use crate::reach::need;
 use serde_json::{json, Map, Value};
 use xenonet_actors::handoff::handoff;
-use xenonet_base::client::{name_of, Server};
+use xenonet_api::client::{name_of, Server};
 
 pub const HELP: &str = include_str!("help/gateway.txt");
 
@@ -81,7 +81,7 @@ fn connection(a: &Value) -> String {
         bits.push(c::yellow(format!("! last called {}, an older address: xenonet gateway address {}", t(a, "lastHost"), id.strip_prefix("actor:").unwrap_or(&id))));
     }
     if on(a, "token") && on(a, "expiring") {
-        let at = xenonet_base::time::iso(num(a, "expiresAt"));
+        let at = xenonet_text::time::iso(num(a, "expiresAt"));
         bits.push(c::yellow(format!("! its token stops working on {} unless it calls", &at[..at.len().min(10)])));
     }
     if bits.is_empty() {

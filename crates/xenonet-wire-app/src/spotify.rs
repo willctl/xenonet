@@ -58,7 +58,7 @@ impl SpotifyRemote {
                     let headers: Vec<(String, String)> = headers.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
                     match xenonet_os::net::fetch(method, url, &headers, body.clone().map(String::into_bytes), Duration::from_millis(*timeout_ms as u64)).await {
                         Ok(res) => {
-                            let body = if skip.contains(&res.status) { Value::Null } else { xenonet_base::json::parse(&res.text()).unwrap_or_else(|_| fallback.clone()) };
+                            let body = if skip.contains(&res.status) { Value::Null } else { xenonet_text::json::parse(&res.text()).unwrap_or_else(|_| fallback.clone()) };
                             Got::Response { ok: res.ok(), status: res.status, body, retry_after: res.header("retry-after").map(str::to_string) }
                         }
                         Err(m) => {
@@ -110,7 +110,7 @@ impl Spotify for SpotifyRemote {
     }
 
     fn set_app(&self, client_id: &Value) -> R<Value> {
-        let id = if client_id.is_null() { String::new() } else { xenonet_base::text::js_string(client_id) };
+        let id = if client_id.is_null() { String::new() } else { xenonet_text::text::display(client_id) };
         settle(self.core.locked().set_app(&id))
     }
 
@@ -136,7 +136,7 @@ fn plan(waiting: bool, player: &Value, device: &Value, held: &Value) -> Value {
     }
     let d = core::duck_plan(waiting, some(player), some(device), some(held), 0.35);
     let mut out = match d.volume {
-        Some(v) => json!({ "op": "volume", "volume": xenonet_base::json::number(v) }),
+        Some(v) => json!({ "op": "volume", "volume": xenonet_text::json::number(v) }),
         None => json!({ "op": null }),
     };
     out["held"] = d.held.unwrap_or(Value::Null);
@@ -201,7 +201,7 @@ impl Spotify for DemoSpotify {
             s["device"] = device.clone();
         }
         if !duck.is_null() {
-            s["duck"] = json!(xenonet_base::text::truthy(Some(duck)));
+            s["duck"] = json!(xenonet_text::text::truthy(Some(duck)));
         }
         Ok(json!({ "device": s["device"], "duck": s["duck"] }))
     }

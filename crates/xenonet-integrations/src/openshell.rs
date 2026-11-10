@@ -13,7 +13,7 @@ use xenonet_app::fsx;
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{Failure, Io};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 fn word(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
@@ -29,7 +29,7 @@ pub fn wsl_profiles(stdout: &str) -> Value {
     let s = stdout.replace('\0', "");
     Value::Array(
         s.split('\n')
-            .map(|l| xenonet_base::text::js_trim(l.strip_suffix('\r').unwrap_or(l)))
+            .map(|l| xenonet_text::text::trim(l.strip_suffix('\r').unwrap_or(l)))
             .filter(|d| word(d) && !d.starts_with("docker-desktop"))
             .map(|d| json!({ "backend": "wsl", "distro": d }))
             .collect(),
@@ -125,7 +125,7 @@ async fn ask(io: &Io, q: Value) -> Result<Value, Failure> {
 }
 
 async fn now(io: &Io) -> Result<f64, Failure> {
-    ask(io, json!({ "op": "now" })).await.map(|v| xenonet_base::text::js_number(Some(&v)))
+    ask(io, json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v)))
 }
 
 /// Why a command didn't answer: what the twin's run threw (its message,
@@ -144,7 +144,7 @@ impl CallErr {
     }
     fn stderr(&self) -> String {
         match self {
-            CallErr::Thrown(e) => e.get("stderr").filter(|v| !v.is_null()).map_or_else(String::new, js_string),
+            CallErr::Thrown(e) => e.get("stderr").filter(|v| !v.is_null()).map_or_else(String::new, display),
             CallErr::Own(_) => String::new(),
         }
     }
@@ -171,7 +171,7 @@ async fn asked(io: &Io, q: Value) -> Result<Value, CallErr> {
 }
 
 fn parsed(text: &str) -> Result<Value, CallErr> {
-    xenonet_base::json::parse(text).map_err(|e| CallErr::Own(Fail { status: 0, code: String::new(), message: e.message }))
+    xenonet_text::json::parse(text).map_err(|e| CallErr::Own(Fail { status: 0, code: String::new(), message: e.message }))
 }
 
 fn strs(v: &[&str]) -> Vec<Value> {
@@ -191,7 +191,7 @@ async fn linux_path(io: &Io, s: &Shared, profile: &Value, file: &str) -> Result<
     args.extend(strs(&["wslpath", "-a"]));
     args.push(json!(file));
     let out = ask(io, json!({ "op": "run", "file": c["file"], "args": args })).await?;
-    let translated = xenonet_base::text::js_trim(&js_string(&out["stdout"])).to_string();
+    let translated = xenonet_text::text::trim(&display(&out["stdout"])).to_string();
     if !translated.starts_with('/') || translated.contains(['\r', '\n', '\0', ':']) {
         return Err(failure(Fail { status: 400, code: "bad-request".into(), message: "WSL could not translate this project path.".into() }));
     }
@@ -275,7 +275,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         args.extend(strs(&["--provider", &provider]));
     }
     if !policy.is_null() {
-        let p = linux_path(&io, &s, &profile, &js_string(&policy["file"])).await?;
+        let p = linux_path(&io, &s, &profile, &display(&policy["file"])).await?;
         args.extend(strs(&["--policy", &p]));
     }
     let mut agent_args = vec![json!(agent)];
@@ -303,7 +303,7 @@ pub async fn preview(io: Io, s: Shared, body: Value) -> Result<Value, Failure> {
         if baseline.is_some() {
             rest.push(strs(&["sandbox", "exec", &name, "--no-login-shell", "--", "/usr/local/bin/node", "--version"]));
         }
-        let from = baseline.as_ref().map_or_else(|| source.clone(), |b| js_string(&b["upload"]));
+        let from = baseline.as_ref().map_or_else(|| source.clone(), |b| display(&b["upload"]));
         let up = linux_path(&io, &s, &profile, &from).await?;
         let mut upload = strs(&["sandbox", "upload"]);
         if baseline.is_some() {
@@ -369,9 +369,9 @@ pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> 
         return Err(failure(Fail { status: 409, code: "busy".into(), message: "Delete or reconcile an old sandbox before launching another (64 maximum).".into() }));
     }
     let t = now(&io).await?;
-    let value = s.borrow_mut().tickets.take(&js_string(&ticket), t).map_err(failure)?;
+    let value = s.borrow_mut().tickets.take(&display(&ticket), t).map_err(failure)?;
     let changed = |m: &str| failure(Fail { status: 409, code: "changed".into(), message: m.into() });
-    if truthy(value.get("source")) && source_dir(value.get("source")).map_err(failure)? != js_string(&value["source"]) {
+    if truthy(value.get("source")) && source_dir(value.get("source")).map_err(failure)? != display(&value["source"]) {
         return Err(changed("The project folder changed. Preview again."));
     }
     if truthy(value.get("policy")) {
@@ -396,7 +396,7 @@ pub async fn launch(io: Io, s: Shared, ticket: Value) -> Result<Value, Failure> 
             let options = if collecting { json!({ "timeout": 120000, "maxBuffer": 8 * 1024 * 1024 }) } else { json!({ "timeout": 120000 }) };
             let response = call(&io, &s, &value["profile"], &args, options).await?;
             if truthy(value.get("reviewId")) && collecting {
-                let got = parsed(&js_string(&response["stdout"]))?;
+                let got = parsed(&display(&response["stdout"]))?;
                 asked(&io, json!({ "op": "reviews.verifyUploaded", "id": value["reviewId"], "value": got })).await?;
             }
             completed = i + 1;
@@ -439,16 +439,16 @@ pub async fn inspect(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
         Some("not-created") => return Err(failure(Fail { status: 404, code: "missing".into(), message: "No sandbox was made for this job.".into() })),
         _ => {}
     }
-    let name = js_string(&value["name"]);
+    let name = display(&value["name"]);
     let profile = &value["profile"];
     let got = call(&io, &s, profile, &strs(&["sandbox", "get", &name, "--output", "json"]), Value::Null).await.map_err(CallErr::thrown)?;
-    let sandbox = xenonet_base::json::parse(&js_string(&got["stdout"])).map_err(|e| Failure::with(e.message, Map::new()))?;
+    let sandbox = xenonet_text::json::parse(&display(&got["stdout"])).map_err(|e| Failure::with(e.message, Map::new()))?;
     let policy = call(&io, &s, profile, &strs(&["policy", "get", &name, "--full"]), Value::Null).await.map_err(CallErr::thrown)?;
     let logs = call(&io, &s, profile, &strs(&["logs", &name, "--since", "10m", "--source", "sandbox"]), Value::Null).await.map_err(CallErr::thrown)?;
     // A deletion still pending stays pending: seeing the sandbox doesn't undo the request.
     let status = if value.get("status").and_then(Value::as_str) == Some("deletion-requested") { value["status"].clone() } else { json!("observed") };
     let t = now(&io).await?;
-    update(&io, &id, json!({ "status": status, "checkedAt": xenonet_base::json::number(t) })).await?;
+    update(&io, &id, json!({ "status": status, "checkedAt": xenonet_text::json::number(t) })).await?;
     let phase = [sandbox.get("phase"), sandbox.get("sandbox").and_then(|x| x.get("phase")), sandbox.get("status").and_then(|x| x.get("phase"))]
         .into_iter()
         .flatten()
@@ -490,7 +490,7 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     }
     ask(&io, json!({ "op": "reviews.view", "id": value["reviewId"] })).await?;
     let collect = s.borrow().collect_text.clone();
-    let name = js_string(&value["name"]);
+    let name = display(&value["name"]);
     let got = async {
         let out = call(
             &io,
@@ -500,7 +500,7 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
             json!({ "timeout": 45000, "maxBuffer": 8 * 1024 * 1024 }),
         )
         .await?;
-        let got = parsed(&js_string(&out["stdout"]))?;
+        let got = parsed(&display(&out["stdout"]))?;
         let result = asked(&io, json!({ "op": "reviews.accept", "id": value["reviewId"], "value": got })).await?;
         let t = asked(&io, json!({ "op": "now" })).await?;
         let complete = truthy(result.get("result").and_then(|r| r.get("complete")));
@@ -518,7 +518,7 @@ pub async fn retrieve(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
         }
         Err(err) => {
             let t = now(&io).await?;
-            update(&io, &id, json!({ "retrieval": "unavailable", "retrievalCheckedAt": xenonet_base::json::number(t) })).await?;
+            update(&io, &id, json!({ "retrieval": "unavailable", "retrievalCheckedAt": xenonet_text::json::number(t) })).await?;
             if ["retrieval-invalid", "review-too-large", "review-capacity"].contains(&err.code().as_str()) {
                 return Err(err.thrown());
             }
@@ -561,12 +561,12 @@ pub async fn remove(io: Io, s: Shared, id: Value) -> Result<Value, Failure> {
     if sandbox_gone(&value) {
         return Ok(value);
     }
-    let name = js_string(&value["name"]);
+    let name = display(&value["name"]);
     let _ = call(&io, &s, &value["profile"], &strs(&["sandbox", "delete", &name]), json!({ "timeout": 60000 })).await;
     let listed = call(&io, &s, &value["profile"], &strs(&["sandbox", "list", "--selector", &format!("xenonet-job={name}"), "-o", "json"]), Value::Null).await;
     let gone = listed
         .ok()
-        .and_then(|l| xenonet_base::json::parse(&js_string(&l["stdout"])).ok())
+        .and_then(|l| xenonet_text::json::parse(&display(&l["stdout"])).ok())
         .is_some_and(|l| l.get("sandboxes").and_then(Value::as_array).is_some_and(Vec::is_empty) && !truthy(l.get("next_page_token")));
     update(&io, &id, json!({ "status": if gone { "deleted" } else { "deletion-requested" }, "eventKind": if gone { "sandbox-deleted" } else { "sandbox-deletion-requested" } }))
         .await

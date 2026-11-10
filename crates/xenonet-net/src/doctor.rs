@@ -38,7 +38,7 @@ fn span(ms: f64) -> String {
 
 /// The time of day of `ms`, in UTC as HH:MM.
 fn clock_time(ms: f64) -> String {
-    let iso = xenonet_base::time::iso(ms);
+    let iso = xenonet_text::time::iso(ms);
     iso.get(11..16).unwrap_or(&iso).to_string()
 }
 

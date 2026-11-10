@@ -78,8 +78,8 @@ pub fn failure_value(f: Failure, last: Option<Value>) -> Value {
 pub fn message_of(e: &Value) -> String {
     match e.get("message") {
         Some(Value::String(s)) => s.clone(),
-        Some(v) => xenonet_base::text::js_string(v),
-        None => xenonet_base::text::js_string(e),
+        Some(v) => xenonet_text::text::display(v),
+        None => xenonet_text::text::display(e),
     }
 }
 
@@ -183,7 +183,7 @@ pub struct RunOptions {
 }
 
 fn io_code(e: &std::io::Error) -> String {
-    xenonet_base::fs::code_of(e).map_or_else(|| e.to_string(), str::to_string)
+    xenonet_os::fs::code_of(e).map_or_else(|| e.to_string(), str::to_string)
 }
 
 /// execFile(file, args, { timeout }): its output, whatever it came to.
@@ -258,7 +258,7 @@ pub async fn exec_file(file: &str, args: &[String], timeout_ms: u64, opts: RunOp
 /// output ignored, its exit code too (explorer.exe exits 1 when it worked).
 pub fn start_detached(file: &str, args: &[String]) {
     let mut cmd = std::process::Command::new(file);
-    xenonet_base::process::Background::no_window(&mut cmd);
+    xenonet_os::process::Background::no_window(&mut cmd);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(unix)]
     {
@@ -282,7 +282,7 @@ pub fn start_detached(file: &str, args: &[String]) {
 pub fn on_path(cmd: &str) -> Option<String> {
     let path = std::env::var("PATH").unwrap_or_default();
     let pathext = std::env::var("PATHEXT").ok();
-    xenonet_base::paths::on_path(cmd, &path, pathext.as_deref(), cfg!(windows), &mut |f| xenonet_base::paths::can_run(f))
+    xenonet_os::paths::on_path(cmd, &path, pathext.as_deref(), cfg!(windows), &mut |f| xenonet_os::paths::can_run(f))
 }
 
 /// The service's environment, as process.env is.
@@ -310,20 +310,20 @@ pub async fn fetch_asked(q: &Value) -> Reply {
     let url = q.get("url").and_then(Value::as_str).unwrap_or("");
     let method = q.get("method").and_then(Value::as_str).unwrap_or("GET");
     let headers: Vec<(String, String)> =
-        q.get("headers").and_then(Value::as_object).map(|h| h.iter().map(|(k, v)| (k.clone(), xenonet_base::text::js_string(v))).collect()).unwrap_or_default();
+        q.get("headers").and_then(Value::as_object).map(|h| h.iter().map(|(k, v)| (k.clone(), xenonet_text::text::display(v))).collect()).unwrap_or_default();
     let body = q.get("body").filter(|b| !b.is_null()).map(|b| match b {
         Value::String(s) => s.clone().into_bytes(),
-        other => xenonet_base::json::stringify(other, 0).into_bytes(),
+        other => xenonet_text::json::stringify(other, 0).into_bytes(),
     });
     let timeout = q.get("timeoutMs").and_then(Value::as_f64).filter(|t| *t > 0.0).unwrap_or(300e3);
     let res = xenonet_os::net::fetch(method, url, &headers, body, Duration::from_millis(timeout as u64)).await.map_err(|m| fetch_error(&m))?;
     let mut out = json!({ "ok": res.ok(), "status": res.status, "statusText": "" });
     match q.get("read").and_then(Value::as_str) {
-        Some("json") => match xenonet_base::json::parse(&res.text()) {
+        Some("json") => match xenonet_text::json::parse(&res.text()) {
             Ok(v) => out["body"] = v,
             Err(_) => out["bodyError"] = json!(true),
         },
-        Some("json!") => match xenonet_base::json::parse(&res.text()) {
+        Some("json!") => match xenonet_text::json::parse(&res.text()) {
             Ok(v) => out["body"] = v,
             Err(e) => return Err(error(format!("Unexpected token in JSON: {e:?}"), None)),
         },
@@ -347,7 +347,7 @@ pub fn fetch_error(message: &str) -> Value {
 /// Child process environment for a spawn: the service's, with these on
 /// top (a JSON object of strings), as `{ ...process.env, ...env }`.
 pub fn env_pairs(env: &Map<String, Value>) -> Vec<(String, String)> {
-    env.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), xenonet_base::text::js_string(v))).collect()
+    env.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), xenonet_text::text::display(v))).collect()
 }
 
 #[cfg(test)]

@@ -29,7 +29,7 @@ impl AliasReader {
 
     pub fn look(&mut self) -> Look {
         let Some(file) = &self.file else { return Look::None };
-        let now = std::fs::metadata(file).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok());
+        let now = std::fs::metadata(file).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok());
         if self.looked && self.stamp == now {
             return Look::Same;
         }

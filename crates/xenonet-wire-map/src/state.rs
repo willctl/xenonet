@@ -33,11 +33,11 @@ use xenonet_adapter::reader::{Lister, ListerEnv};
 use xenonet_api::cores::{CoreError, Decider, Runs, State, R};
 use xenonet_api::wire::{Emitter, Slot, WireEnv};
 use xenonet_api::From;
-use xenonet_base::paths::path_key;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_os::paths::path_key;
 use xenonet_sources::reported_runs::ReportedRuns;
 use xenonet_state::state::{self as decide, Memory};
 use xenonet_state::{classify, digest, redact, rename, workspace};
+use xenonet_text::text::{display, truthy};
 
 // An event's fields, as the telemetry takes them (undefined as None).
 type Fields = Vec<(String, Option<Value>)>;
@@ -329,7 +329,7 @@ impl MapState {
         }
         let g = lock(&self.inner);
         let nodes = g.map.graph.as_ref().map_or(&[][..], |gr| items(gr.get("nodes")));
-        let mut kind_of = |cur: &str| g.map.index.get(cur).and_then(|&i| nodes.get(i)).map(|n| n.get("kind").map_or_else(|| "undefined".into(), js_string));
+        let mut kind_of = |cur: &str| g.map.index.get(cur).and_then(|&i| nodes.get(i)).map(|n| n.get("kind").map_or_else(|| "undefined".into(), display));
         let mut parent_of = |cur: &str| g.map.parent.get(cur).cloned();
         decide::home_of(id, &mut kind_of, &mut parent_of)
     }
@@ -449,7 +449,7 @@ impl MapState {
             Err(e) => (Vec::new(), None, decide::source_status("projects", false, Some(&num(now_ms() - t0)), None, Some(&json!(e)))),
         };
         for p in &mut projects {
-            let key = p.get("key").map(js_string).unwrap_or_default();
+            let key = p.get("key").map(display).unwrap_or_default();
             if let Some(m) = p.as_object_mut() {
                 m.insert("rule".into(), rules.get(&key).cloned().unwrap_or(Value::Null));
             }
@@ -492,7 +492,7 @@ impl MapState {
         if self.cfg.demo {
             resources.push(json!({ "server": "reference-library", "ts": null }));
         }
-        resources.retain(|r| r.get("server").map(js_string).is_some_and(|srv| decide::visible_resource(&srv, &hidden)));
+        resources.retain(|r| r.get("server").map(display).is_some_and(|srv| decide::visible_resource(&srv, &hidden)));
         let input = json!({
             "projectsDir": root,
             "homeDir": self.cfg.home_dir,
@@ -567,11 +567,11 @@ impl MapState {
             let pulses = g.memory.updated(&sessions);
             let changed = g.memory.changed(&graph);
             let nodes = items(graph.get("nodes"));
-            g.map.index = nodes.iter().enumerate().map(|(i, n)| (n.get("id").map(js_string).unwrap_or_default(), i)).collect();
+            g.map.index = nodes.iter().enumerate().map(|(i, n)| (n.get("id").map(display).unwrap_or_default(), i)).collect();
             g.map.parent = items(graph.get("links"))
                 .iter()
                 .filter(|l| s(l, "kind") != Some("lineage-cross"))
-                .map(|l| (l.get("target").map(js_string).unwrap_or_default(), l.get("source").map(js_string).unwrap_or_default()))
+                .map(|l| (l.get("target").map(display).unwrap_or_default(), l.get("source").map(display).unwrap_or_default()))
                 .collect();
             g.map.sources = sources;
             g.map.graph = Some(graph.clone());
@@ -638,7 +638,7 @@ impl MapState {
         let _one = self.repo_pass.lock().await;
         let projects = lock(&self.inner).map.projects.clone();
         let sig = |r: &RepoWatch| {
-            xenonet_base::json::stringify(&Value::Array(r.status().into_iter().map(|(k, v)| json!([k, v.get("dirty"), v.get("branch"), v.get("ahead")])).collect()), 0)
+            xenonet_text::json::stringify(&Value::Array(r.status().into_iter().map(|(k, v)| json!([k, v.get("dirty"), v.get("branch"), v.get("ahead")])).collect()), 0)
         };
         let before = sig(&self.repos);
         self.repos.refresh(&projects).await;
@@ -914,7 +914,7 @@ impl MapState {
             projects
                 .iter()
                 .filter_map(|p| {
-                    let key = p.get("key").map(js_string)?;
+                    let key = p.get("key").map(display)?;
                     let st = self.repos.status_of(&key).filter(|st| truthy(st.get("dirty")))?;
                     let mut m = Map::new();
                     m.insert("name".into(), p.get("name").cloned().unwrap_or(Value::Null));
@@ -1065,10 +1065,10 @@ impl MapState {
 // and mtime, three folders down.
 fn wiki_stamp(dir: &str) -> String {
     let mut pick = |_: &str| true;
-    xenonet_base::paths::list_files(dir, &mut pick, 3)
+    xenonet_os::paths::list_files(dir, &mut pick, 3)
         .into_iter()
         .map(|f| match std::fs::metadata(&f) {
-            Ok(m) => format!("{f}:{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).unwrap_or(0.0)),
+            Ok(m) => format!("{f}:{}:{}", m.len(), xenonet_os::fs::mtime_ms_of(&m).unwrap_or(0.0)),
             Err(_) => f,
         })
         .collect::<Vec<_>>()
@@ -1213,9 +1213,9 @@ impl State for MapState {
         self.detection().await
     }
     async fn set_project_rule(&self, dir: Value, as_: Value) -> R<Value> {
-        let full = xenonet_base::paths::resolve(&match &dir {
+        let full = xenonet_os::paths::resolve(&match &dir {
             Value::Null => String::new(),
-            v => js_string(v),
+            v => display(v),
         });
         let is_dir = truthy(Some(&as_)) && std::fs::metadata(&full).is_ok_and(|m| m.is_dir());
         if let Some(problem) = decide::rule_problem(Some(&as_), &full, &self.projects_dir(), is_dir) {
@@ -1312,7 +1312,7 @@ impl State for MapState {
         let id = match &node {
             Value::String(s) => s.clone(),
             Value::Null => "null".into(),
-            v => js_string(v),
+            v => display(v),
         };
         let kind = match self.node_of(&id) {
             Some(n) => n.get("kind").and_then(Value::as_str).map(str::to_string),
@@ -1612,7 +1612,7 @@ pub struct RunsCore(pub Arc<MapState>);
 impl Runs for RunsCore {
     fn report(&self, actor: &str, run: Value) -> Value {
         let text = |k: &str| run.get(k).and_then(Value::as_str).map(str::to_string);
-        let app = run.get("app").filter(|a| !a.is_null()).map(js_string).unwrap_or_default();
+        let app = run.get("app").filter(|a| !a.is_null()).map(display).unwrap_or_default();
         // presence = "working" when it isn't given.
         let presence = match run.get("presence") {
             None => Some("working".to_string()),

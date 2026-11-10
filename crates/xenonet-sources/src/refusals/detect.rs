@@ -20,9 +20,9 @@
 use crate::line_events::{self, Kind, LineEvent, LineFile};
 use crate::lines::{opt_prop, ClaudeLine, CodexLine};
 use serde_json::{Map, Value};
-use xenonet_base::jsstr;
-use xenonet_base::text::{join, js_string, truthy};
-use xenonet_base::time::parse_iso;
+use xenonet_text::text::{display, join, truthy};
+use xenonet_text::time::parse_iso;
+use xenonet_text::utf16;
 
 // /policy|cyber|bio|misalignment|safety|content_filter/i, without the u
 // flag: ASCII letters only, any case.
@@ -34,7 +34,7 @@ fn is_policy(code: &str) -> bool {
 /// `typeof v === "string" && v ? v.slice(0, max) : null`.
 fn words(v: Option<&Value>, max: usize) -> Value {
     match v {
-        Some(Value::String(s)) if !s.is_empty() => Value::String(jsstr::head(s, max)),
+        Some(Value::String(s)) if !s.is_empty() => Value::String(utf16::head(s, max)),
         _ => Value::Null,
     }
 }
@@ -58,7 +58,7 @@ fn text_of(content: Option<&Value>) -> Value {
         })
         .filter(|v| truthy(*v))
         .collect();
-    let text = jsstr::head(&join(parts.into_iter(), "\n"), 4000);
+    let text = utf16::head(&join(parts.into_iter(), "\n"), 4000);
     if text.is_empty() {
         Value::Null
     } else {
@@ -70,7 +70,7 @@ fn text_of(content: Option<&Value>) -> Value {
 fn time_of(t: Option<&Value>) -> Value {
     match t {
         Some(Value::String(s)) => match parse_iso(s) {
-            Some(ms) if ms != 0.0 => xenonet_base::json::number(ms),
+            Some(ms) if ms != 0.0 => xenonet_text::json::number(ms),
             _ => Value::Null,
         },
         _ => Value::Null,
@@ -223,8 +223,8 @@ pub fn claude_refusal(raw: Option<&Value>) -> Option<Value> {
 fn first_key(v: &Value) -> Option<String> {
     match v {
         Value::Object(m) => {
-            if m.keys().any(|k| jsstr::is_array_index(k)) {
-                jsstr::js_key_order(m.clone()).keys().next().cloned()
+            if m.keys().any(|k| utf16::is_array_index(k)) {
+                utf16::key_order(m.clone()).keys().next().cloned()
             } else {
                 m.keys().next().cloned()
             }
@@ -302,7 +302,7 @@ pub fn codex_refusal(raw: Option<&Value>) -> Option<Value> {
 fn tpl(v: Option<&Value>) -> String {
     match v {
         None => "undefined".into(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -311,7 +311,7 @@ fn tpl(v: Option<&Value>) -> String {
 pub fn key_of(sig: &Value, session_id: &str) -> String {
     let get = |k: &str| opt_prop(Some(sig), k);
     let nn = |k: &str| get(k).filter(|v| !v.is_null());
-    let id = nn("requestId").or(nn("messageId")).or(nn("uuid")).map_or_else(|| format!("{session_id}@{}", tpl(get("at"))), js_string);
+    let id = nn("requestId").or(nn("messageId")).or(nn("uuid")).map_or_else(|| format!("{session_id}@{}", tpl(get("at"))), display);
     format!("{}|{}|{id}", tpl(get("provider")), tpl(get("kind")))
 }
 

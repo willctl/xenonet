@@ -96,7 +96,7 @@ impl Runner {
         tokio::spawn(async move {
             while let Some((name, data)) = events.recv().await {
                 let Some(t) = me.upgrade() else { return };
-                let grant = xenonet_base::text::js_string(&data["grant"]);
+                let grant = xenonet_text::text::display(&data["grant"]);
                 match name.as_str() {
                     "revoked" => t.stop_run(&grant, Some("its connection was revoked")),
                     "expired" => t.stop_run(&grant, Some("its grant expired")),
@@ -146,8 +146,8 @@ impl Runner {
     // ---------- what's set up ----------
 
     fn binding_of(&self, connection: &Value) -> Binding {
-        let row = self.store.with(|s| s.connection(&xenonet_base::text::js_string(connection))).ok().flatten();
-        let text = row.as_ref().map(|r| xenonet_base::text::js_string(super::row_json(r).get("transport_binding").unwrap_or(&Value::Null)));
+        let row = self.store.with(|s| s.connection(&xenonet_text::text::display(connection))).ok().flatten();
+        let text = row.as_ref().map(|r| xenonet_text::text::display(super::row_json(r).get("transport_binding").unwrap_or(&Value::Null)));
         core::binding_of(text.as_deref().filter(|t| !t.is_empty() && *t != "null"), &target_ok)
     }
 
@@ -160,7 +160,7 @@ impl Runner {
             return Err(fail(400, "bad-request", "that connection doesn't go through a tunnel"));
         }
         if active && v["state"] != json!("active") {
-            return Err(fail(409, "not-active", format!("that connection is {}", xenonet_base::text::js_string(&v["state"]))));
+            return Err(fail(409, "not-active", format!("that connection is {}", xenonet_text::text::display(&v["state"]))));
         }
         Ok(v)
     }
@@ -212,7 +212,7 @@ impl Runner {
                 std::fs::read_to_string(file).map_err(|_| ())
             }
             fn mtime(&mut self, file: &str) -> Result<f64, ()> {
-                std::fs::metadata(file).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).ok_or(())
+                std::fs::metadata(file).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).ok_or(())
             }
         }
         let dirs = client::profile_dirs(&fx::env_map(), fx::platform(), &self.home);
@@ -230,7 +230,7 @@ impl Runner {
         for p in self.profiles().into_iter().filter(|p| p["grant"] == json!(grant)) {
             let Some(url) = core::readyz_of(p.get("health").and_then(Value::as_str)) else { continue };
             if Self::probe(&url, 1000).await.is_some() {
-                return Some(xenonet_base::text::js_string(&p["name"]));
+                return Some(xenonet_text::text::display(&p["name"]));
             }
         }
         None
@@ -311,7 +311,7 @@ impl Runner {
             self.changed();
         }
         let mut cmd = tokio::process::Command::new(file);
-        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        xenonet_os::process::Background::no_window(cmd.as_std_mut());
         cmd.args(["run", "--profile-file", &profile, "--health.url-file", &url_file])
             .env_clear()
             .envs(fx::env_pairs(&env))
@@ -394,7 +394,7 @@ impl Runner {
             if !current(&t) {
                 return;
             }
-            let health = body.and_then(|b| xenonet_base::json::parse(&b).ok());
+            let health = body.and_then(|b| xenonet_text::json::parse(&b).ok());
             if t.core.locked().health(&g, health.as_ref(), now_ms()) {
                 t.changed();
             }
@@ -488,11 +488,11 @@ impl Tunnels for TunnelsCore {
             let target = core::key_target_of(&b);
             let yours = found.iter().find(|p| p["grant"] == x["grant_id"]).cloned();
             let stored = t.has_key(target.as_deref()).await;
-            let run = t.view(&xenonet_base::text::js_string(&x["grant_id"]));
+            let run = t.view(&xenonet_text::text::display(&x["grant_id"]));
             tunnels.push(core::status_entry(x, &b, stored, yours.as_ref(), &run));
         }
         Ok(json!({
-            "client": { "found": path.is_some(), "path": path.map(|p| xenonet_base::paths::tilde(&p, &t.home)), "version": version },
+            "client": { "found": path.is_some(), "path": path.map(|p| xenonet_os::paths::tilde(&p, &t.home)), "version": version },
             "store": { "kind": t.secrets.kind(), "available": t.secrets.available() },
             "links": { "releases": client::RELEASES, "tunnels": client::TUNNELS_PAGE, "guide": core::GUIDE },
             "tunnels": tunnels,
@@ -572,7 +572,7 @@ impl Tunnels for TunnelsCore {
         let b = t.binding_of(&v["connection_id"]);
         let some = |k: &str| spec.get(k).filter(|x| !x.is_null());
         let next = core::configure(&b, some("tunnelId"), some("keyTarget"), some("autostart"), &target_ok).map_err(refused)?;
-        t.store.with(|s| s.set_transport_binding(&xenonet_base::text::js_string(&v["connection_id"]), Some(&next.text()))).map_err(|e| CoreError::new(e.to_string()))?;
+        t.store.with(|s| s.set_transport_binding(&xenonet_text::text::display(&v["connection_id"]), Some(&next.text()))).map_err(|e| CoreError::new(e.to_string()))?;
         t.changed();
         Ok(json!({ "grant": grant, "tunnel_id": next.tunnel_id, "key_target": core::key_target_of(&next), "autostart": next.autostart }))
     }
@@ -586,7 +586,7 @@ impl Tunnels for TunnelsCore {
             if x["transport_kind"] != json!(core::TUNNEL_TRANSPORT) || x["state"] != json!("active") || !t.binding_of(&x["connection_id"]).autostart {
                 continue;
             }
-            let grant = xenonet_base::text::js_string(&x["grant_id"]);
+            let grant = xenonet_text::text::display(&x["grant_id"]);
             if let Err(e) = t.start_run(&grant).await {
                 t.log(&format!("tunnel {grant}: didn't start with XenoNet: {}", e.message));
             }

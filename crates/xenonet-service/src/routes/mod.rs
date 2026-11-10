@@ -31,11 +31,11 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use xenonet_base::ids::YOU;
-use xenonet_base::log::{log_dir, read_logs, summarize, LEVELS};
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_engine::engine::{is_actor_agent, is_agent_id};
+use xenonet_model::ids::YOU;
+use xenonet_os::log::{log_dir, read_logs, summarize, LEVELS};
+use xenonet_os::sync::Locked;
+use xenonet_text::text::{display, to_number, truthy};
 
 pub const SERVICE_API: (u32, u32) = (1, 1);
 pub const CONSOLE_API: (u32, u32) = (1, 1);
@@ -46,12 +46,12 @@ pub fn api_range((min, max): (u32, u32)) -> Value {
 }
 
 fn num_param(req: &Req, k: &str) -> f64 {
-    js_number(req.param(k).map(|s| Value::String(s.to_string())).as_ref())
+    to_number(req.param(k).map(|s| Value::String(s.to_string())).as_ref())
 }
 
 /// `Number(q.get(k) ?? fallback)`: the fallback only when it's absent.
 fn num_or(req: &Req, k: &str, fallback: f64) -> f64 {
-    req.param(k).map_or(fallback, |s| js_number(Some(&Value::String(s.to_string()))))
+    req.param(k).map_or(fallback, |s| to_number(Some(&Value::String(s.to_string()))))
 }
 
 pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
@@ -101,7 +101,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
         // Another host's session or actor, by its qualified id.
         let local_id = |id: &str| is_agent_id(id) || is_actor_agent(id);
-        let remote = xenonet_base::ids::parse_qualified(&to).is_some_and(|(h, local)| h.is_some() && local_id(local));
+        let remote = xenonet_model::ids::parse_qualified(&to).is_some_and(|q| q.host.is_some() && local_id(q.local));
         if !(local_id(&to) || remote) {
             return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));
         }
@@ -177,7 +177,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
                 "instance": ctx.config.instance,
                 "pid": std::process::id(),
                 // The program this service is, as a firewall knows it.
-                "exe": xenonet_base::fs::running_exe(),
+                "exe": xenonet_os::fs::running_exe(),
                 "sources": cores.state.sources().unwrap_or_else(|_| json!([])),
                 "blocks": cores.state.blocks().unwrap_or_else(|_| json!([])),
             }),
@@ -189,8 +189,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let body = req.json(8192).await.ok();
         if let Some(message) = body.as_ref().and_then(|b| b.get("message")).and_then(Value::as_str) {
             let stack = body.as_ref().and_then(|b| b.get("stack")).and_then(Value::as_str).filter(|s| !s.is_empty());
-            let err = stack.map(|s| xenonet_base::log::ErrInfo { message: Some(message.to_string()), stack: Some(xenonet_base::log::js_slice(s, 3000).to_string()), code: None });
-            ctx.log("error", "page.uncaught", xenonet_base::log::js_slice(message, 1000), err.as_ref(), None);
+            let err = stack.map(|s| xenonet_os::log::ErrInfo { message: Some(message.to_string()), stack: Some(xenonet_text::utf16::whole_head(s, 3000).to_string()), code: None });
+            ctx.log("error", "page.uncaught", xenonet_text::utf16::whole_head(message, 1000), err.as_ref(), None);
         }
         return Ok(Reply::json(200, json!({ "ok": true })));
     }
@@ -208,7 +208,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             let code = req.param("code").filter(|c| !c.is_empty()).map(str::to_string);
             read_logs(Path::new(&log_dir(&ctx.config.state_dir)), since, &level, component.as_deref(), code.as_deref(), limit.max(0.0) as usize)
         };
-        let at = xenonet_base::json::number(now);
+        let at = xenonet_text::json::number(now);
         return Ok(Reply::json(200, if req.param("summary") == Some("1") { json!({ "at": at, "summary": summarize(&entries) }) } else { json!({ "at": at, "entries": entries }) }));
     }
 
@@ -268,7 +268,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let id = req.json_body().await?.get("id").cloned().unwrap_or(Value::Null);
         let read = cores.themes.read(&ctx.themes_dir)?;
         let Some(id) = id.as_str().filter(|i| read["themes"].get(*i).is_some()).map(str::to_string) else {
-            let shown = if id.is_null() { "undefined".into() } else { js_string(&id) };
+            let shown = if id.is_null() { "undefined".into() } else { display(&id) };
             return Ok(Reply::error(404, format!("there's no theme called {shown}")));
         };
         cores.store.set_theme(&id)?;
@@ -279,10 +279,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/themes/copy" && m == "POST" {
         let body = req.json_body().await?;
         let from = match body.get("from").filter(|f| !f.is_null()) {
-            Some(f) => js_string(f),
-            None => js_string(&current_theme(ctx)?["id"]),
+            Some(f) => display(f),
+            None => display(&current_theme(ctx)?["id"]),
         };
-        let id = body.get("id").filter(|i| !i.is_null()).map(js_string).unwrap_or_default();
+        let id = body.get("id").filter(|i| !i.is_null()).map(display).unwrap_or_default();
         return Ok(match cores.themes.copy(&ctx.themes_dir, &from, &id, body.get("name").unwrap_or(&Value::Null)) {
             Ok(file) => Reply::json(200, json!({ "file": file })),
             Err(e) if e.is_pending() => pending_reply(&e),
@@ -407,7 +407,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             .unwrap_or_default()
             .iter()
             .map(|a| {
-                let a = js_string(a);
+                let a = display(a);
                 if !a.is_empty() && a.bytes().all(|c| c.is_ascii_alphanumeric() || b"._:=/-".contains(&c)) {
                     a
                 } else {
@@ -416,7 +416,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             })
             .collect();
         let line = std::iter::once(app.to_string()).chain(words).collect::<Vec<_>>().join(" ");
-        return Ok(Reply::json(200, json!({ "app": app, "model": model, "dir": dir, "folder": xenonet_base::paths::tilde(&dir, &ctx.config.home), "command": line })));
+        return Ok(Reply::json(200, json!({ "app": app, "model": model, "dir": dir, "folder": xenonet_os::paths::tilde(&dir, &ctx.config.home), "command": line })));
     }
 
     // With hosts on, other hosts' maps and live state are in them, except
@@ -449,7 +449,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if m == "GET" && route == "/api/history" {
         let now = ctx.now();
         let since = num_or(req, "since", now - 24.0 * 3600e3);
-        return Ok(Reply::json(200, json!({ "events": cores.state.history_since(since)?, "now": xenonet_base::json::number(now) })));
+        return Ok(Reply::json(200, json!({ "events": cores.state.history_since(since)?, "now": xenonet_text::json::number(now) })));
     }
     if m == "GET" && route == "/api/search" {
         let q = req.param("q").unwrap_or("").to_string();
@@ -508,7 +508,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
                 None => None,
             };
             let target = body.get("target").and_then(Value::as_str).filter(|t| ["claude", "codex"].contains(t));
-            let brief = body.get("brief").and_then(Value::as_str).filter(|b| !xenonet_base::text::is_blank(b) && b.encode_utf16().count() <= MAX_BRIEF);
+            let brief = body.get("brief").and_then(Value::as_str).filter(|b| !xenonet_text::text::is_blank(b) && b.encode_utf16().count() <= MAX_BRIEF);
             let (Some(node), Some(target), Some(brief)) = (node.filter(|n| n["kind"] == "session"), target, brief) else {
                 return Ok(Reply::error(400, "bad handoff"));
             };
@@ -537,7 +537,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if m == "POST" && route == "/api/narrate" {
         let body = req.json_body().await?;
         let kind = if body.get("kind").and_then(Value::as_str) == Some("day") { "day" } else { "away" };
-        let since = js_number(body.get("since"));
+        let since = to_number(body.get("since"));
         let since = if since.is_nan() || since == 0.0 { ctx.now() - 2.0 * 3600e3 } else { since };
         return Ok(match cores.state.narrate(kind, since).await {
             Ok(text) => Reply::json(200, json!({ "text": text })),
@@ -616,7 +616,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             let Some(node) = cores.state.node(&id)?.filter(|n| n["kind"] == "session") else {
                 return Ok(Reply::error(404, "XenoNet doesn't know that session"));
             };
-            let nid = js_string(&node["id"]);
+            let nid = display(&node["id"]);
             let result = match cores.state.session_stats(&nid).await {
                 Ok(r) => r,
                 Err(e) if e.is_pending() => return Ok(pending_reply(&e)),
@@ -704,7 +704,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         // an event is in Claude Code's settings, that one counts and the
         // plugin's stands by, so each event arrives once.
         if req.param("via") == Some("plugin") {
-            let event = body.get("hook_event_name").map(js_string).unwrap_or_default();
+            let event = body.get("hook_event_name").map(display).unwrap_or_default();
             if cores.connect.hook_connected(&event).await.unwrap_or(false) {
                 return Ok(Reply::empty(204));
             }
@@ -845,13 +845,13 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return Ok(Reply::error(415, "send JSON (content-type: application/json)"));
         }
         let body = req.json(1 << 16).await?;
-        let timeout = js_number(body.get("timeout"));
+        let timeout = to_number(body.get("timeout"));
         let ms = 30e3 + (if timeout.is_nan() { 0.0 } else { timeout }).min(120e3);
         return Ok(match tokio::time::timeout(Duration::from_millis(ms.max(0.0) as u64), components.console(body)).await {
-            Err(_) => Reply::error(504, format!("XenoNet Dev didn't answer in {}s", xenonet_base::json::number_string(ms / 1000.0))),
+            Err(_) => Reply::error(504, format!("XenoNet Dev didn't answer in {}s", xenonet_text::json::number_string(ms / 1000.0))),
             Ok(Err(e)) => Reply::error(400, e),
             // Always JSON: a result can be a string.
-            Ok(Ok(result)) => Reply::raw(200, xenonet_base::json::stringify(&result, 0), &[]),
+            Ok(Ok(result)) => Reply::raw(200, xenonet_text::json::stringify(&result, 0), &[]),
         });
     }
 
@@ -955,8 +955,8 @@ fn waits_on_you(ctx: &Ctx) -> Result<Value, CoreError> {
 }
 
 fn sessions(ctx: &Ctx, req: &Req) -> Result<Value, CoreError> {
-    let q = xenonet_base::text::js_trim(req.param("q").unwrap_or("")).to_lowercase();
-    let words: Vec<&str> = q.split(xenonet_base::text::is_js_space).filter(|w| !w.is_empty()).collect();
+    let q = xenonet_text::text::trim(req.param("q").unwrap_or("")).to_lowercase();
+    let words: Vec<&str> = q.split(xenonet_text::text::is_space).filter(|w| !w.is_empty()).collect();
     let cwd = req.param("cwd").map(str::to_string);
     let sep = if cfg!(windows) { '\\' } else { '/' };
     let under = |dir: &Value| -> bool {
@@ -975,8 +975,8 @@ fn sessions(ctx: &Ctx, req: &Req) -> Result<Value, CoreError> {
             q.is_empty() || lower(&n["id"]).is_some_and(|i| i.starts_with(&q)) || lower(&n["rawId"]).is_some_and(|i| i.starts_with(&q)) || {
                 let text = format!(
                     "{} {}",
-                    n.get("title").filter(|t| !t.is_null()).map(js_string).unwrap_or_default(),
-                    n.get("cwd").filter(|t| !t.is_null()).map(js_string).unwrap_or_default()
+                    n.get("title").filter(|t| !t.is_null()).map(display).unwrap_or_default(),
+                    n.get("cwd").filter(|t| !t.is_null()).map(display).unwrap_or_default()
                 )
                 .to_lowercase();
                 words.iter().all(|w| text.contains(w))
@@ -1132,7 +1132,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
                     return Ok(Some(Reply::json(200, s.set(&device, body.get("duck").unwrap_or(&Value::Null))?)));
                 }
                 "/api/spotify/player" => {
-                    let op = body.get("op").filter(|o| !o.is_null()).map(js_string).unwrap_or_default();
+                    let op = body.get("op").filter(|o| !o.is_null()).map(display).unwrap_or_default();
                     s.command(&op, body.get("value").unwrap_or(&Value::Null)).await?;
                     ctx.music.locked().last.clear();
                     crate::serve::poll_spotify_soon(ctx, 400);
@@ -1158,7 +1158,7 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
     let kind_s = match kind {
         Value::String(s) => s.clone(),
         Value::Null => "undefined".into(),
-        v => js_string(v),
+        v => display(v),
     };
     let str_arg = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     let (a, b) = (str_arg("a"), str_arg("b"));
@@ -1187,7 +1187,7 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             }
         };
         let transport = actors.remote_of(&a).and_then(|r| r.get("transports").and_then(|t| t.get(0)).cloned()).unwrap_or(Value::Null);
-        ctx.broadcast("remote-read", &json!({ "actor": a, "transport": transport, "reach": reach, "at": xenonet_base::json::number(ctx.now()) }));
+        ctx.broadcast("remote-read", &json!({ "actor": a, "transport": transport, "reach": reach, "at": xenonet_text::json::number(ctx.now()) }));
         return Ok(Some(json!({ "ok": true, "kind": kind_s, "a": a, "reach": reach })));
     }
     if kind_s.starts_with("actor-") {
@@ -1216,7 +1216,7 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
             cores.doctor.last().and_then(|l| l["results"].as_array().cloned()).unwrap_or_default().into_iter().filter(|r| r["id"] != problem["id"]).collect();
         results.push(problem.clone());
         let results = Value::Array(results);
-        let now = xenonet_base::json::number(ctx.now());
+        let now = xenonet_text::json::number(ctx.now());
         cores.doctor.report(json!({ "at": now, "ms": 1, "results": results, "summary": cores.doctor.summarize(&results)? }))?;
         crate::serve::notify_doctor(ctx, &[problem]);
         return Ok(Some(json!({ "ok": true, "kind": kind_s })));

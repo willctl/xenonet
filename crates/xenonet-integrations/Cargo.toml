@@ -16,7 +16,7 @@ regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 xenonet-app.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 
 [lints]
 workspace = true

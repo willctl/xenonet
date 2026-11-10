@@ -27,7 +27,7 @@ fn read_key() -> String {
         let _ = std::io::stdin().read_to_end(&mut bytes);
         text = String::from_utf8_lossy(&bytes).into_owned();
     }
-    xenonet_base::text::js_trim(&text).to_string()
+    xenonet_text::text::trim(&text).to_string()
 }
 
 pub fn run(args: &[String], _flags: &Flags) -> Done {

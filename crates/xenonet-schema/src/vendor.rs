@@ -22,8 +22,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
+use xenonet_text::ordered::OrderedMap;
 
 // ---------- versions ----------
 
@@ -33,7 +33,7 @@ pub type Version = (f64, f64, f64, Option<String>);
 /// "2.1.288" or "0.155.0-alpha.9.2" → (2, 1, 288, pre); a missing part is 0.
 pub fn parse_version(v: &str) -> Option<Version> {
     // /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
-    let s = xenonet_base::text::js_trim(v);
+    let s = xenonet_text::text::trim(v);
     let s = s.strip_prefix('v').unwrap_or(s);
     let ident = |t: &str| !t.is_empty() && t.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-');
     let (main, build) = match s.split_once('+') {
@@ -597,7 +597,7 @@ impl VendorReader {
     /// the rest guarded.
     pub fn sample(&mut self, record: &Value, version: Option<&str>, kind: Option<String>, every: u64, log: &mut DriftLog, now: f64) -> Checked {
         self.stats.records += 1;
-        let whole = self.calls % every.max(1) == 0;
+        let whole = self.calls.is_multiple_of(every.max(1));
         self.calls += 1;
         if whole {
             self.inspect(record, version, kind, log, now)
@@ -669,7 +669,7 @@ impl Readers {
 
 fn variant_string(v: Option<&[Value]>) -> String {
     // String(variant), as the JS compares them: a list joined with commas.
-    v.map_or("null".into(), |v| v.iter().map(|x| xenonet_base::text::join_item(Some(x))).collect::<Vec<_>>().join(","))
+    v.map_or("null".into(), |v| v.iter().map(|x| xenonet_text::text::join_item(Some(x))).collect::<Vec<_>>().join(","))
 }
 
 fn value_at<'a>(record: &'a Value, keys: &[Key]) -> Option<&'a Value> {

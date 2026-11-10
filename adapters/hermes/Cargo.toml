@@ -18,7 +18,8 @@ xenonet-adapter.workspace = true
 # The actor a profile is named for (names::hermes_slug), which a Hermes
 # plugin registering later takes too.
 xenonet-actors.workspace = true
-xenonet-base.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
 # Hermes's versions as the drift report cleans them.
 xenonet-schema.workspace = true
 

@@ -64,7 +64,7 @@ impl DemoWorld {
     /// The demo for the instance on `port`: one world per port, so demo
     /// servers running side by side don't wipe each other's.
     pub fn new(port: u16) -> DemoWorld {
-        let tmp = xenonet_base::paths::real_path(&std::env::temp_dir());
+        let tmp = xenonet_os::paths::real_path(&std::env::temp_dir());
         DemoWorld { demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))), world: Mutex::new(None), clients: OnceCell::new() }
     }
 
@@ -116,7 +116,7 @@ impl DemoWorld {
                         tokio::spawn(async move {
                             for args in &steps {
                                 let mut git = tokio::process::Command::new("git");
-                                xenonet_base::process::Background::no_window(git.as_std_mut());
+                                xenonet_os::process::Background::no_window(git.as_std_mut());
                                 let ok = git
                                     .args(args)
                                     .current_dir(&r.dir)

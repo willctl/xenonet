@@ -33,11 +33,11 @@ use crate::you::You;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use xenonet_adapter::apps::app_of_session;
-use xenonet_base::ids::{parse_actor_id, YOU};
-use xenonet_base::json::number;
-use xenonet_base::nodepath::{style_of, NATIVE};
-use xenonet_base::text::js_string;
-use xenonet_base::text::truthy;
+use xenonet_model::ids::{parse_actor_id, YOU};
+use xenonet_os::nodepath::{style_of, NATIVE};
+use xenonet_text::json::number;
+use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 pub const LIST_THROTTLE_MS: f64 = 500.0;
 pub const CLOCK_MS: f64 = 5000.0;
@@ -163,7 +163,7 @@ fn col(r: &Value, k: &str) -> Value {
 
 /// `${v}` of a field, undefined when it isn't there.
 fn template(v: Option<&Value>) -> String {
-    xenonet_base::text::template(v)
+    xenonet_text::text::template(v)
 }
 
 /// What kind of node an id names, by its form.
@@ -202,7 +202,7 @@ fn relation_for(kind: &str, target: &Value) -> Option<&'static str> {
 fn parse_json(s: Option<&str>, fallback: Value) -> Value {
     match s {
         None => fallback,
-        Some(s) => xenonet_base::json::parse(s).unwrap_or(fallback),
+        Some(s) => xenonet_text::json::parse(s).unwrap_or(fallback),
     }
 }
 
@@ -607,7 +607,7 @@ impl Actors {
     }
 
     fn row(a: &Actor) -> Value {
-        let json_text = |v: &Value| Value::String(xenonet_base::json::stringify(v, 0));
+        let json_text = |v: &Value| Value::String(xenonet_text::json::stringify(v, 0));
         json!({
             "slug": a.slug,
             "kind": a.kind,
@@ -664,7 +664,7 @@ impl Actors {
         if elsewhere {
             return err(format!("not an actor id of this machine: {id}"));
         }
-        let kind = def.get("kind").map_or_else(|| "agent".to_string(), js_string);
+        let kind = def.get("kind").map_or_else(|| "agent".to_string(), display);
         if (kind == "human") != (id == YOU) {
             return err(format!("only {YOU} is human"));
         }
@@ -713,7 +713,7 @@ impl Actors {
         a.kind = kind;
         a.name = col(def, "name");
         a.product = col(def, "product");
-        a.via = def.get("via").and_then(Value::as_array).map(|l| l.iter().map(js_string).collect()).unwrap_or_default();
+        a.via = def.get("via").and_then(Value::as_array).map(|l| l.iter().map(display).collect()).unwrap_or_default();
         a.heartbeat_ms = def.get("heartbeatMs").and_then(Value::as_f64);
         a.capabilities = def.get("capabilities").and_then(Value::as_array).cloned().unwrap_or_default();
         a.identity = col(def, "identity");
@@ -761,7 +761,7 @@ impl Actors {
         }
         let next = if truthy(Some(remote)) {
             let mut transports: Vec<String> = remote.get("transports").and_then(Value::as_array).map(|t| t.iter().map(|x| template(Some(x))).collect()).unwrap_or_default();
-            transports.sort_by(|x, y| xenonet_base::sort::utf16_cmp(x, y));
+            transports.sort_by(|x, y| xenonet_text::sort::utf16_cmp(x, y));
             transports.dedup();
             Some(json!({
                 "active": truthy(remote.get("active")),
@@ -774,7 +774,7 @@ impl Actors {
         } else {
             None
         };
-        let same = xenonet_base::json::stringify(&next.clone().unwrap_or(Value::Null), 0) == xenonet_base::json::stringify(&a.remote.clone().unwrap_or(Value::Null), 0);
+        let same = xenonet_text::json::stringify(&next.clone().unwrap_or(Value::Null), 0) == xenonet_text::json::stringify(&a.remote.clone().unwrap_or(Value::Null), 0);
         if same {
             return Ok(());
         }
@@ -940,7 +940,7 @@ impl Actors {
     /// presence, status, needsYou, heartbeatMs, leaseMs, pid, cwd, via, at).
     pub fn report(&mut self, id: &str, o: &Value, host: &mut dyn Host) -> Result<()> {
         let i = self.need_index(id)?;
-        let instance = o.get("instance").map_or_else(|| "main".to_string(), js_string);
+        let instance = o.get("instance").map_or_else(|| "main".to_string(), display);
         let presence = o.get("presence");
         let at = match o.get("at") {
             None => host.now(),
@@ -965,7 +965,7 @@ impl Actors {
         let pid = o.get("pid");
         if a.instance(&instance).is_none() {
             let inst = Instance {
-                presence: presence.filter(|p| !p.is_null()).map_or_else(|| "idle".into(), js_string),
+                presence: presence.filter(|p| !p.is_null()).map_or_else(|| "idle".into(), display),
                 at,
                 heartbeat_ms: heartbeat.map_or(a.heartbeat_ms, Value::as_f64),
                 pid: pid.and_then(Value::as_f64),
@@ -976,7 +976,7 @@ impl Actors {
             // At most INSTANCES_MAX: the one silent longest goes.
             if a.instances.len() > INSTANCES_MAX {
                 let mut others: Vec<(usize, f64)> = a.instances.iter().enumerate().filter(|(_, (n, _))| *n != instance).map(|(j, (_, x))| (j, x.at)).collect();
-                xenonet_base::sort::sort_by(&mut others, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+                xenonet_text::sort::sort_by(&mut others, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
                 if let Some((j, _)) = others.first() {
                     a.instances.remove(*j);
                 }
@@ -984,7 +984,7 @@ impl Actors {
         }
         let inst = &mut a.instances.iter_mut().find(|(n, _)| *n == instance).expect("added above when it wasn't there").1;
         if let Some(p) = presence {
-            inst.presence = js_string(p);
+            inst.presence = display(p);
         }
         if let Some(h) = heartbeat {
             inst.heartbeat_ms = h.as_f64();
@@ -1140,7 +1140,7 @@ impl Actors {
             let rel = match &relation {
                 None => relation_for(&kind, &target).map(str::to_string),
                 Some(Value::Null) => None,
-                Some(v) => Some(js_string(v)),
+                Some(v) => Some(display(v)),
             };
             if let (Some(t), Some(rel)) = (target.as_str().filter(|t| !t.is_empty()), rel.filter(|r| !r.is_empty())) {
                 if node_kind(t) != Some("actor") {
@@ -1169,7 +1169,7 @@ impl Actors {
         let detail = detail.map(|d| clip(&d, 200));
         let event = json!({
             "schema": "actor/event/v1",
-            "id": format!("{}:{}", a.slug, xenonet_base::json::number_string(a.seq)),
+            "id": format!("{}:{}", a.slug, xenonet_text::json::number_string(a.seq)),
             "actor": a.id,
             "at": number(at),
             "kind": kind,
@@ -1178,7 +1178,7 @@ impl Actors {
             "via": via,
         });
         a.last_seen = Some(js_max(a.last_seen.unwrap_or(0.0), at));
-        let facts = facts.filter(|f| f.as_object().is_some_and(|o| !o.is_empty())).map_or(Value::Null, |f| Value::String(xenonet_base::json::stringify(f, 0)));
+        let facts = facts.filter(|f| f.as_object().is_some_and(|o| !o.is_empty())).map_or(Value::Null, |f| Value::String(xenonet_text::json::stringify(f, 0)));
         let row = json!({
             "schema": "actor/event/v1",
             "id": event["id"],
@@ -1273,7 +1273,7 @@ impl Actors {
         let a = &mut self.all[i];
         if a.targets.len() > TARGETS_KEPT {
             let mut order: Vec<(usize, f64)> = a.targets.iter().enumerate().map(|(j, (_, t))| (j, t.last_at)).collect();
-            xenonet_base::sort::sort_by(&mut order, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
+            xenonet_text::sort::sort_by(&mut order, |x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal));
             let gone = a.targets.remove(order[0].0).1;
             self.store.drop_actor_target(&actor, &gone.id, &gone.relation)?;
         }
@@ -1348,7 +1348,7 @@ impl Actors {
                 targets.push(t);
             }
         }
-        xenonet_base::sort::sort_by(&mut targets, |x, y| y.last_at.partial_cmp(&x.last_at).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_text::sort::sort_by(&mut targets, |x, y| y.last_at.partial_cmp(&x.last_at).unwrap_or(std::cmp::Ordering::Equal));
         let targets: Vec<Value> =
             targets.into_iter().take(TARGETS_SHOWN).map(|t| json!({ "id": t.id, "relation": t.relation, "since": number(t.since), "lastAt": number(t.last_at) })).collect();
         let mut o = Map::new();
@@ -1541,7 +1541,7 @@ impl Actors {
         let rows = self.store.actor_token_times()?;
         let row = |slug: &str| rows.iter().rev().find(|r| r.get("slug").and_then(Value::as_str) == Some(slug));
         let mut list: Vec<&Actor> = self.all.iter().filter(|a| a.id != YOU && self.is_registered(&a.id)).collect();
-        xenonet_base::sort::sort_by(&mut list, |x, y| x.created_at.partial_cmp(&y.created_at).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_text::sort::sort_by(&mut list, |x, y| x.created_at.partial_cmp(&y.created_at).unwrap_or(std::cmp::Ordering::Equal));
         Ok(list
             .into_iter()
             .map(|a| {
@@ -1587,7 +1587,7 @@ impl Actors {
             self.all.iter().filter(|a| Self::listed(a, now)).map(|a| (a.id.clone(), a.id == YOU, a.last_seen.unwrap_or(0.0), a.created_at)).collect();
         if shown.len() > LIST_MAX {
             let mut by_seen = shown.clone();
-            xenonet_base::sort::sort_by(&mut by_seen, |x, y| {
+            xenonet_text::sort::sort_by(&mut by_seen, |x, y| {
                 let you = i32::from(y.1) - i32::from(x.1);
                 if you != 0 {
                     return you.cmp(&0);
@@ -1604,7 +1604,7 @@ impl Actors {
             let keep: Vec<String> = by_seen.into_iter().take(LIST_MAX).map(|s| s.0).collect();
             shown.retain(|s| keep.contains(&s.0));
         }
-        xenonet_base::sort::sort_by(&mut shown, |x, y| {
+        xenonet_text::sort::sort_by(&mut shown, |x, y| {
             let you = i32::from(y.1) - i32::from(x.1);
             if you != 0 {
                 return you.cmp(&0);
@@ -1629,7 +1629,7 @@ impl Actors {
     /// (and it's sent now), or null.
     pub fn list_if_changed(&mut self, host: &mut dyn Host) -> Result<Value> {
         let list = self.list("public", None, host)?;
-        let said = xenonet_base::json::stringify(&list["actors"], 0);
+        let said = xenonet_text::json::stringify(&list["actors"], 0);
         if self.last_list.as_deref() == Some(said.as_str()) {
             return Ok(Value::Null);
         }
@@ -1648,8 +1648,8 @@ impl Actors {
         };
         let floor = limit.floor();
         let n = js_min(js_max(1.0, if floor == 0.0 || floor.is_nan() { 1.0 } else { floor }), EVENTS_MAX);
-        let view = o.get("view").map_or_else(|| "public".to_string(), js_string);
-        let only = o.get("only").filter(|v| truthy(Some(v))).map(js_string);
+        let view = o.get("view").map_or_else(|| "public".to_string(), display);
+        let only = o.get("only").filter(|v| truthy(Some(v))).map(display);
         if let Some(only) = &only {
             if view != "window" && !self.is_public(only) {
                 return Ok(json!({ "schema": "actor/events/v1", "at": number(now), "events": [] }));
@@ -1942,7 +1942,7 @@ impl Actors {
         self.you.off = false;
         let presence = body.get("presence");
         if truthy(presence) {
-            self.you.page = presence.map(js_string);
+            self.you.page = presence.map(display);
         }
         let did = match body.get("did") {
             None | Some(Value::Null) => Vec::new(),
@@ -1991,7 +1991,7 @@ impl Actors {
 /// The source a report or record names (`via`), or None for the actor's
 /// own.
 fn via_of(o: &Value) -> Option<String> {
-    o.get("via").filter(|v| !v.is_null()).map(js_string)
+    o.get("via").filter(|v| !v.is_null()).map(display)
 }
 
 // Math.max and Math.min, NaN when either side is.

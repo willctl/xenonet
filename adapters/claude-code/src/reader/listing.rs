@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 use xenonet_adapter::reader::{Lister, Renamed, VendorCheck};
-use xenonet_base::text::{js_number, js_string, truthy};
-use xenonet_base::{json as js, jsstr};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_sources::record::{nn, obj_json, Obj, F};
 use xenonet_sources::session::{ClaudeSession, Parent, ParentKind};
+use xenonet_text::text::{display, to_number, truthy};
+use xenonet_text::{json as js, utf16};
 
 const DESKTOP_SOURCE: &str = "anthropic/claude-desktop/session";
 const LISTING_SOURCE: &str = "anthropic/agent-sdk/session-listing";
@@ -78,7 +78,7 @@ impl Claude {
             match std::fs::rename(&tmp, &file) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    let busy = matches!(xenonet_base::fs::code_of(&e), Some("EPERM" | "EBUSY" | "EACCES"));
+                    let busy = matches!(xenonet_os::fs::code_of(&e), Some("EPERM" | "EBUSY" | "EACCES"));
                     if attempt >= 4 || !busy {
                         let _ = std::fs::remove_file(&tmp);
                         return Err(e.to_string());
@@ -177,7 +177,7 @@ pub fn sessions(listed: &[Value], desktop: &[Value]) -> Result<Vec<Obj>, TypeErr
             None => {
                 let cut = match nn(first) {
                     None => None,
-                    Some(Value::String(p)) => Some(Value::String(jsstr::head(p, 80))),
+                    Some(Value::String(p)) => Some(Value::String(utf16::head(p, 80))),
                     Some(Value::Array(a)) => Some(Value::Array(a.iter().take(80).cloned().collect())),
                     Some(_) => return Err(TypeError("s.firstPrompt?.slice is not a function".into())),
                 };
@@ -186,8 +186,8 @@ pub fn sessions(listed: &[Value], desktop: &[Value]) -> Result<Vec<Obj>, TypeErr
         };
         let cwd = [dp("originCwd"), get("cwd")?].into_iter().flatten().find(|v| truthy(Some(v))).cloned().unwrap_or(Value::Null);
         let updated = {
-            let a = js_number(Some(nn(get("lastModified")?).unwrap_or(&Value::from(0))));
-            let b = js_number(Some(nn(dp("lastActivityAt")).unwrap_or(&Value::from(0))));
+            let a = to_number(Some(nn(get("lastModified")?).unwrap_or(&Value::from(0))));
+            let b = to_number(Some(nn(dp("lastActivityAt")).unwrap_or(&Value::from(0))));
             let m = if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) };
             if m == 0.0 || m.is_nan() {
                 F::null()
@@ -216,7 +216,7 @@ pub fn sessions(listed: &[Value], desktop: &[Value]) -> Result<Vec<Obj>, TypeErr
                 branch: or_null(nn(dp("branch")).or(nn(get("gitBranch")?))),
                 tag: or_null(get("tag")?),
                 size_bytes: or_null(get("fileSize")?),
-                parent: parent_cli.map(|p| Parent { id: format!("claude:{}", js_string(p)), kind: ParentKind::Spawn }),
+                parent: parent_cli.map(|p| Parent { id: format!("claude:{}", display(p)), kind: ParentKind::Spawn }),
                 claude_account: or_null(dp("account")),
             }
             .record(),

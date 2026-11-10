@@ -21,7 +21,7 @@ use crate::registry::REMOTE_LEASE_MS;
 use crate::store;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use xenonet_base::json::number;
+use xenonet_text::json::number;
 
 const PRESENCE_MS: f64 = 15e3;
 const TARGET_MS: f64 = 60e3;
@@ -101,7 +101,7 @@ impl RemotePresence {
             host.report(actor_id, &report)?;
         }
         for target in targets.iter().take(4) {
-            let node = xenonet_base::text::js_string(target);
+            let node = xenonet_text::text::display(target);
             let k = format!("{actor}|{node}");
             if at - self.watched.get(&k).copied().unwrap_or(f64::NEG_INFINITY) < TARGET_MS {
                 continue;

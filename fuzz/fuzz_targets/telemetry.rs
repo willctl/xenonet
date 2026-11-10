@@ -8,7 +8,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
-use xenonet_base::json;
+use xenonet_text::json;
 use xenonet_sources::lines;
 use xenonet_sources::live::telemetry::{Telemetry, Where};
 use xenonet_sources::refusals::{detect, store};

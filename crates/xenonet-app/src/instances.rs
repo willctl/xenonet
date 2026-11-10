@@ -4,7 +4,7 @@
 //! XENONET_DEMO=1 means demo, and anything else dev. A frozen instance
 //! runs the code as it was at launch.
 
-use xenonet_base::text::js_number;
+use xenonet_text::text::to_number;
 
 pub struct Instance {
     pub id: &'static str,
@@ -42,7 +42,7 @@ pub fn instance_from(xenonet_instance: Option<&str>, xenonet_demo: Option<&str>,
         return Err(format!("XENONET_INSTANCE is {id}; it can be {}", ids.join(", ")));
     };
     let port = match xenonet_port {
-        Some(p) => js_number(Some(&serde_json::Value::String(p.into()))),
+        Some(p) => to_number(Some(&serde_json::Value::String(p.into()))),
         None => f64::from(found.port),
     };
     Ok((found, port))

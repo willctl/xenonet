@@ -22,7 +22,7 @@ fn or_null(v: Option<&Value>) -> Value {
 /// tailer (their health(), or None): ready while both work, degraded when
 /// one has a problem, unavailable when the list failed or hasn't run yet.
 pub fn source_of(g: Option<&Value>, l: Option<&Value>, t: f64) -> Value {
-    let num = xenonet_base::json::number;
+    let num = xenonet_text::json::number;
     let Some(g) = g.filter(|g| truthy(Some(g))) else { return json!({ "state": "unavailable", "observedAt": null, "coverage": "unknown", "reason": "not_started" }) };
     let state = g.get("state").and_then(Value::as_str);
     let last_ok = g.get("lastOk").filter(|v| !v.is_null());
@@ -38,7 +38,7 @@ pub fn source_of(g: Option<&Value>, l: Option<&Value>, t: f64) -> Value {
     let observed = match live_at {
         None => last_ok.clone(),
         Some(at) => {
-            let (a, b) = (xenonet_base::text::js_number(Some(last_ok)), xenonet_base::text::js_number(Some(&at)));
+            let (a, b) = (xenonet_text::text::to_number(Some(last_ok)), xenonet_text::text::to_number(Some(&at)));
             num(if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) })
         }
     };
@@ -72,7 +72,7 @@ fn via(a: &Value) -> Value {
 pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors: bool, claude: Value, codex: Value, grok: Value, around: &mut dyn Around) -> Value {
     let mut live_by_id: Map<String, Value> = Map::new();
     for s in live.get("sessions").and_then(Value::as_array).into_iter().flatten() {
-        live_by_id.insert(s.get("id").map(xenonet_base::text::js_string).unwrap_or_default(), s.clone());
+        live_by_id.insert(s.get("id").map(xenonet_text::text::display).unwrap_or_default(), s.clone());
     }
     let mut places: Vec<(Value, Value)> = Vec::new();
     let mut sessions = Vec::new();
@@ -91,7 +91,7 @@ pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors:
             continue;
         }
         let id = n.get("id").cloned().unwrap_or(Value::Null);
-        let l = live_by_id.get(&xenonet_base::text::js_string(&id));
+        let l = live_by_id.get(&xenonet_text::text::display(&id));
         let live = l.map_or(Value::Null, |l| {
             let mut m = Map::new();
             if let Some(s) = l.get("status") {
@@ -136,7 +136,7 @@ pub fn view(t: f64, nodes: &[Value], live: &Value, actors: &[Value], has_actors:
         .map(|c| json!({ "a": c.get("a"), "b": c.get("b"), "files": files_of(c.get("files")), "ts": or_null(c.get("ts")) }))
         .collect();
     json!({
-        "at": xenonet_base::json::number(t),
+        "at": xenonet_text::json::number(t),
         "fixture": false,
         "sources": { "claude": claude, "codex": codex, "grok": grok },
         "places": places.into_iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),

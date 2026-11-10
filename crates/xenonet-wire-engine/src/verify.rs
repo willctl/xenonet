@@ -10,11 +10,11 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use xenonet_api::cores::Verify;
 use xenonet_api::peer::Peer;
-use xenonet_base::json::number;
-use xenonet_base::time::now_ms;
 use xenonet_engine::procs::Link;
 use xenonet_engine::store::Shared;
 use xenonet_engine::verify::{Fail, Host, Verdict, Verifier};
+use xenonet_text::json::number;
+use xenonet_text::time::now_ms;
 
 /// What a check reads: procs, the clock, and the process on the other end
 /// of this request's socket.
@@ -170,7 +170,7 @@ impl Verify for Checks {
         let (v, sys) = (self.verifier.clone(), self.sys.clone());
         let pid = tokio::task::spawn_blocking(move || v.peer(&mut Lookups { sys: &sys, peer: Some(peer) })).await;
         match pid {
-            Ok(Some(pid)) => xenonet_base::json::number_string(pid),
+            Ok(Some(pid)) => xenonet_text::json::number_string(pid),
             _ => "?".into(),
         }
     }

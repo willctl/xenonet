@@ -12,9 +12,9 @@ use crate::prompt::ask;
 use crate::reach::need;
 use crate::sys;
 use serde_json::{json, Map, Value};
-use xenonet_base::client::{name_of, Server};
-use xenonet_base::json::number_string;
-use xenonet_base::units::{js_round, to_fixed};
+use xenonet_api::client::{name_of, Server};
+use xenonet_text::json::number_string;
+use xenonet_text::units::{round, to_fixed};
 
 pub const HELP: &str = include_str!("help/hosts.txt");
 
@@ -61,7 +61,7 @@ pub fn trust_command(id: &str, ssh_config: Option<&str>) -> String {
 pub fn offset(ms: Option<f64>) -> String {
     let Some(ms) = ms.filter(|m| m.abs() >= 2000.0 || m.is_nan()) else { return String::new() };
     let a = ms.abs();
-    let size = if a < 90e3 { format!("{} s", number_string(js_round(a / 1000.0))) } else { format!("{} min", number_string(js_round(a / 60e3))) };
+    let size = if a < 90e3 { format!("{} s", number_string(round(a / 1000.0))) } else { format!("{} min", number_string(round(a / 60e3))) };
     format!("clock {size} {}", if ms > 0.0 { "ahead" } else { "behind" })
 }
 
@@ -77,18 +77,18 @@ fn describe(h: &Value, now: f64) -> (String, Option<String>) {
     if on(h, "calls") {
         what.push(format!("calls itself {}", t(h, "calls")));
     }
-    let off = offset(have(h, "offsetMs").map(|v| xenonet_base::text::js_number(Some(v))));
+    let off = offset(have(h, "offsetMs").map(|v| xenonet_text::text::to_number(Some(v))));
     if !off.is_empty() {
         what.push(off);
     }
     match str(h, "state") {
         Some("live") => return (if what.is_empty() { "live".into() } else { what.join(" · ") }, None),
         Some("connecting") => return ("connecting".into(), None),
-        Some("stale") => return (format!("no word since {}", clock::hour_minute(have(h, "lastHeard").map_or(now, |v| xenonet_base::text::js_number(Some(v))))), None),
+        Some("stale") => return (format!("no word since {}", clock::hour_minute(have(h, "lastHeard").map_or(now, |v| xenonet_text::text::to_number(Some(v))))), None),
         _ => {}
     }
     let since = if on(h, "lastHeard") { format!("last heard {}", ago(num(h, "lastHeard"), now)) } else { "never reached".into() };
-    let retry = if on(h, "nextTryAt") { format!(", trying again in {} s", number_string(js_round((num(h, "nextTryAt") - now) / 1000.0).max(1.0))) } else { String::new() };
+    let retry = if on(h, "nextTryAt") { format!(", trying again in {} s", number_string(round((num(h, "nextTryAt") - now) / 1000.0).max(1.0))) } else { String::new() };
     let error = h.get("error").filter(|e| !e.is_null());
     let said = error.and_then(|e| have(e, "message")).map_or_else(|| t(h, "state"), |m| crate::js::text(Some(m)));
     let cached = if on(h, "cached") { " · its last snapshot is on the map" } else { "" };
@@ -111,7 +111,7 @@ fn off(s: &Server) -> String {
 // key.slice(0, 8)…
 fn key_of(v: &Value) -> String {
     let key = t(v, "key");
-    format!("key {}…", xenonet_base::log::js_slice(&key, 8))
+    format!("key {}…", xenonet_text::utf16::whole_head(&key, 8))
 }
 
 fn this_self(s: &Server, rest: &[String], flags: &Flags) -> Done {
@@ -288,7 +288,7 @@ fn test(s: &Server, rest: &[String], flags: &Flags) -> Done {
     let error = tried.get("error").filter(|e| !e.is_null());
     if !on(&tried, "ok") {
         let said =
-            error.and_then(|e| have(e, "message")).map_or_else(|| format!("no answer in {} s", number_string(js_round(num(&tried, "ms") / 1000.0))), |m| crate::js::text(Some(m)));
+            error.and_then(|e| have(e, "message")).map_or_else(|| format!("no answer in {} s", number_string(round(num(&tried, "ms") / 1000.0))), |m| crate::js::text(Some(m)));
         print(format!("{} {id}: {said}", c::red("✗")));
         if let Some(fix) = error.and_then(|e| crate::js::some(e, "fix")) {
             print(c::dim(format!("  ↳ {}", crate::js::text(Some(fix)))));
@@ -305,7 +305,7 @@ fn test(s: &Server, rest: &[String], flags: &Flags) -> Done {
         t(&h, "platform"),
         if on(&h, "demo") { ", made-up data" } else { "" }
     ));
-    let days = js_round(num(&h, "sinceMs") / 86400e3);
+    let days = round(num(&h, "sinceMs") / 86400e3);
     let window = if on(&h, "sinceMs") { format!(" for sessions of the last {} d", number_string(if days == 0.0 || days.is_nan() { 1.0 } else { days })) } else { String::new() };
     print(format!(
         "{} its relay speaks protocol {}, and sends {}{window}",
@@ -315,7 +315,7 @@ fn test(s: &Server, rest: &[String], flags: &Flags) -> Done {
     ));
     let snap = tried.get("snapshot").cloned().unwrap_or(Value::Null);
     print(format!("{} a map of {} places and sessions, {} of them sessions, {} live", c::green("✓"), t(&snap, "nodes"), t(&snap, "sessions"), t(&snap, "live")));
-    let skew = have(&tried, "offsetMs").map(|v| xenonet_base::text::js_number(Some(v)));
+    let skew = have(&tried, "offsetMs").map(|v| xenonet_text::text::to_number(Some(v)));
     let off = offset(skew);
     let off = off.strip_prefix("clock ").unwrap_or(&off);
     print(match skew {

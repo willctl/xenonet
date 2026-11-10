@@ -3,7 +3,7 @@
 //! shared systems and machines, and no label on a session.
 
 use serde_json::Value;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_text::text::{display, truthy};
 
 pub const LABELLED_KINDS: [&str; 8] = ["core", "project", "zone", "native", "wiki", "page", "resource", "host"];
 
@@ -19,7 +19,7 @@ pub fn export_label(node: Option<&Value>, labels: Option<&Value>) -> Option<Stri
         return None;
     }
     // labels[node.id]: the id as a property key.
-    let key = n.get("id").map_or_else(|| "undefined".to_string(), js_string);
+    let key = n.get("id").map_or_else(|| "undefined".to_string(), display);
     let name = labels.as_object()?.get(&key)?.as_str().filter(|s| !s.is_empty())?;
     let upper = name.to_uppercase();
     Some(if n.get("kind").and_then(Value::as_str) == Some("project") && truthy(n.get("group")) { format!("{upper} /") } else { upper })

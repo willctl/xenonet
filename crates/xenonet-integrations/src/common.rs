@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use xenonet_app::fsx;
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::NATIVE;
-use xenonet_base::text::{js_string, JS_SPACE};
+use xenonet_text::text::{display, SPACE};
 
 /// An error with its HTTP status and code (IntegrationError).
 #[derive(Clone, Debug, PartialEq)]
@@ -38,10 +38,8 @@ impl From<fsx::FsError> for Fail {
 fn secrets() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(&format!(
-            r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{JS_SPACE}]+[^{JS_SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{JS_SPACE}]*[=:][{JS_SPACE}]*[^{JS_SPACE},;]+"
-        ))
-        .expect("a fixed pattern")
+        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:][{SPACE}]*[^{SPACE},;]+"))
+            .expect("a fixed pattern")
     })
 }
 
@@ -49,8 +47,7 @@ fn secrets() -> &'static Regex {
 pub fn has_credential(text: &str) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{JS_SPACE}]+[^{JS_SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{JS_SPACE}]*[=:]"))
-            .expect("a fixed pattern")
+        Regex::new(&format!(r"(?i-u:sk-)[A-Za-z0-9_-]{{16,}}|(?i-u:bearer)[{SPACE}]+[^{SPACE}]+|(?i-u:password|api[_-]?key|token|secret)[{SPACE}]*[=:]")).expect("a fixed pattern")
     })
     .is_match(text)
 }
@@ -58,7 +55,7 @@ pub fn has_credential(text: &str) -> bool {
 /// clean(value, max): a value as text, credentials as `[redacted]`, control
 /// characters as spaces, at most `max` UTF-16 units.
 pub fn clean(value: Option<&Value>, max: usize) -> String {
-    let s = value.filter(|v| !v.is_null()).map_or_else(String::new, js_string);
+    let s = value.filter(|v| !v.is_null()).map_or_else(String::new, display);
     let s = secrets().replace_all(&s, "[redacted]");
     let s: String = s.chars().map(|c| if (c as u32) < 0x20 || c == '\u{7f}' { ' ' } else { c }).collect();
     xenonet_app::jstext::slice16(&s, max)
@@ -67,8 +64,8 @@ pub fn clean(value: Option<&Value>, max: usize) -> String {
 /// text(value, name, max): text, trimmed, of at most `max` units, or why not.
 pub fn text(value: Option<&Value>, name: &str, max: usize) -> Result<String, Fail> {
     match value {
-        Some(Value::String(s)) if !xenonet_base::text::js_trim(s).is_empty() && xenonet_app::jstext::utf16_len(s) <= max && !s.contains('\0') => {
-            Ok(xenonet_base::text::js_trim(s).to_string())
+        Some(Value::String(s)) if !xenonet_text::text::trim(s).is_empty() && xenonet_app::jstext::utf16_len(s) <= max && !s.contains('\0') => {
+            Ok(xenonet_text::text::trim(s).to_string())
         }
         _ => fail(format!("{name} must be text, at most {max} characters.")),
     }
@@ -105,7 +102,7 @@ impl Tickets {
         self.check(now)?;
         let (ticket, expires) = (uuid(), now + TICKET_MS);
         self.held.push((ticket.clone(), value, expires));
-        Ok(json!({ "ticket": ticket, "expires": xenonet_base::json::number(expires) }))
+        Ok(json!({ "ticket": ticket, "expires": xenonet_text::json::number(expires) }))
     }
 
     pub fn take(&mut self, id: &str, now: f64) -> Result<Value, Fail> {
@@ -131,7 +128,7 @@ fn newest_first(a: &Value, b: &Value) -> std::cmp::Ordering {
     if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
         return o;
     }
-    xenonet_app::jstext::locale_compare(&js_string(&a["id"]), &js_string(&b["id"]))
+    xenonet_app::jstext::locale_compare(&display(&a["id"]), &display(&b["id"]))
 }
 
 /// The records of decisions and sandbox jobs: a folder of one JSON file
@@ -153,7 +150,7 @@ impl Records {
     pub fn list(&self) -> Result<Vec<Value>, Fail> {
         let Some(dir) = &self.dir else {
             let mut all = self.memory.clone();
-            xenonet_base::sort::sort_by(&mut all, newest_first);
+            xenonet_text::sort::sort_by(&mut all, newest_first);
             return Ok(all);
         };
         let mut out = Vec::new();
@@ -164,22 +161,22 @@ impl Records {
                 continue;
             }
             let Ok(text) = fsx::read_text(&file) else { continue };
-            let Ok(r) = xenonet_base::json::parse(&text) else { continue };
+            let Ok(r) = xenonet_text::json::parse(&text) else { continue };
             if r.get("id").and_then(Value::as_str) != Some(&name[..36]) || !r.get("at").and_then(Value::as_f64).is_some_and(f64::is_finite) {
                 continue;
             }
             out.push(r);
         }
-        xenonet_base::sort::sort_by(&mut out, newest_first);
+        xenonet_text::sort::sort_by(&mut out, newest_first);
         Ok(out)
     }
 
     fn save(&mut self, record: Value) -> Result<Value, Fail> {
-        let id = js_string(&record["id"]);
+        let id = display(&record["id"]);
         match &self.dir {
             Some(dir) => {
                 let tmp = NATIVE.join(&[dir, &format!("{id}.{}.tmp", uuid())]);
-                let r = write_new(&tmp, xenonet_base::json::stringify(&record, 0).as_bytes(), 0o600).and_then(|()| fsx::rename(&tmp, &NATIVE.join(&[dir, &format!("{id}.json")])));
+                let r = write_new(&tmp, xenonet_text::json::stringify(&record, 0).as_bytes(), 0o600).and_then(|()| fsx::rename(&tmp, &NATIVE.join(&[dir, &format!("{id}.json")])));
                 let _ = std::fs::remove_file(&tmp);
                 r?;
             }
@@ -194,14 +191,14 @@ impl Records {
     pub fn add(&mut self, value: &Value, now: f64) -> Result<Value, Fail> {
         let mut m: Map<String, Value> = value.as_object().cloned().unwrap_or_default();
         m.insert("id".into(), json!(uuid()));
-        m.insert("at".into(), xenonet_base::json::number(now));
+        m.insert("at".into(), xenonet_text::json::number(now));
         let record = self.save(Value::Object(m))?;
         // A saved live job is the owner's way to inspect or delete its
         // remote sandbox: retention never orphans it.
         let completed: Vec<Value> =
             self.list()?.into_iter().filter(|r| !truthy(r.get("reviewId")) && (r.get("kind").and_then(Value::as_str) != Some("sandbox") || sandbox_gone(r))).collect();
         for old in completed.iter().skip(self.limit) {
-            let id = js_string(&old["id"]);
+            let id = display(&old["id"]);
             match &self.dir {
                 Some(dir) => fsx::unlink(&NATIVE.join(&[dir, &format!("{id}.json")]))?,
                 None => self.memory.retain(|r| r["id"] != old["id"]),
@@ -243,9 +240,9 @@ pub fn query(records: &[Value], q: &Value) -> Value {
     let words: Vec<String> = q
         .get("q")
         .filter(|v| !v.is_null())
-        .map_or_else(String::new, js_string)
+        .map_or_else(String::new, display)
         .to_lowercase()
-        .split(xenonet_base::text::is_js_space)
+        .split(xenonet_text::text::is_space)
         .filter(|w| !w.is_empty())
         .map(String::from)
         .collect();
@@ -256,30 +253,30 @@ pub fn query(records: &[Value], q: &Value) -> Value {
         .iter()
         .filter(|r| status.is_none_or(|s| xenonet_app::jsv::strict_eq(r.get("status"), Some(s))))
         .filter(|r| {
-            let text = xenonet_base::json::stringify(r, 0).to_lowercase();
+            let text = xenonet_text::json::stringify(r, 0).to_lowercase();
             words.iter().all(|w| text.contains(w.as_str()))
         })
         .map(|r| (*r).clone())
         .collect();
     if q.get("sort").and_then(Value::as_str) == Some("oldest") {
-        xenonet_base::sort::sort_by(&mut found, |a, b| {
+        xenonet_text::sort::sort_by(&mut found, |a, b| {
             let at = |r: &Value| r.get("at").and_then(Value::as_f64).unwrap_or(f64::NAN);
             let d = at(a) - at(b);
             if let Some(o) = d.partial_cmp(&0.0).filter(|o| o.is_ne()) {
                 return o;
             }
-            xenonet_app::jstext::locale_compare(&js_string(&a["id"]), &js_string(&b["id"]))
+            xenonet_app::jstext::locale_compare(&display(&a["id"]), &display(&b["id"]))
         });
     } else {
-        xenonet_base::sort::sort_by(&mut found, newest_first);
+        xenonet_text::sort::sort_by(&mut found, newest_first);
     }
     let pages = (found.len() as f64 / 50.0).ceil();
-    let given = q.get("page").map_or(1.0, |p| xenonet_base::text::js_number(Some(p)));
+    let given = q.get("page").map_or(1.0, |p| xenonet_text::text::to_number(Some(p)));
     let given = if given.is_nan() || given == 0.0 { 1.0 } else { given };
     let page = (if pages == 0.0 { 1.0 } else { pages }).min(given.floor()).max(1.0);
     let start = ((page - 1.0) * 50.0) as usize;
     let shown: Vec<Value> = found.iter().skip(start).take(50).cloned().collect();
-    json!({ "total": kept.len(), "matched": found.len(), "page": xenonet_base::json::number(page), "pages": xenonet_base::json::number(pages), "records": shown })
+    json!({ "total": kept.len(), "matched": found.len(), "page": xenonet_text::json::number(page), "pages": xenonet_text::json::number(pages), "records": shown })
 }
 
 #[cfg(test)]

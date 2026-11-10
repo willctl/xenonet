@@ -4,8 +4,8 @@
 use async_trait::async_trait;
 use xenonet_adapter::check::{connected, folder, privacy_fix, s, Facts, Folder};
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
-use xenonet_base::nodepath::{style_of, NATIVE};
-use xenonet_base::text::{js_string, truthy};
+use xenonet_os::nodepath::{style_of, NATIVE};
+use xenonet_text::text::{display, truthy};
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
@@ -25,7 +25,7 @@ struct Threads;
 pub async fn codex_bin(c: &dyn CheckCtx) -> Result<Option<String>, Stop> {
     let mut bins: Vec<String> = Vec::new();
     if let Some(b) = Facts(c.facts()).get("codexBin").filter(|v| truthy(Some(v))) {
-        bins.push(js_string(b));
+        bins.push(display(b));
     }
     if let Some(b) = c.which("codex").await? {
         bins.push(b);
@@ -71,7 +71,7 @@ impl Check for Auth {
         };
         let Some(bin) = bin else { return Ok(Verdict::skip("Codex isn't installed")) };
         let r = c.run(&bin, &["login", "status"], 6000.0).await?;
-        let text = xenonet_base::text::js_trim(&format!("{}{}", s(r.get("stdout")), s(r.get("stderr")))).to_string();
+        let text = xenonet_text::text::trim(&format!("{}{}", s(r.get("stdout")), s(r.get("stderr")))).to_string();
         let lower = text.to_ascii_lowercase();
         let first = text.split('\n').next().unwrap_or("").to_string();
         if lower.contains("logged in") && !lower.contains("not logged in") {
@@ -93,7 +93,7 @@ impl Check for Sessions {
         CheckRow { id: "codex.sessions", group: GROUP, title: "XenoNet can read Codex's sessions", slot: Slot::App }
     }
     async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
-        let home = Facts(c.facts()).get("paths").and_then(|p| p.get("codexHome")).filter(|v| !v.is_null()).map(js_string);
+        let home = Facts(c.facts()).get("paths").and_then(|p| p.get("codexHome")).filter(|v| !v.is_null()).map(display);
         let dir = home.as_ref().map(|h| if h.is_empty() { String::new() } else { style_of(h).join(&[h, "sessions"]) });
         let shown = c.tilde(&dir.clone().unwrap_or_else(|| "undefined".into()));
         Ok(match folder(c, dir.as_deref()).await? {

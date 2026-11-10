@@ -55,13 +55,13 @@ pub struct IdentityWatch {
 
 fn mtime(file: &str) -> Option<String> {
     let m = std::fs::metadata(file).ok()?;
-    xenonet_base::fs::mtime_ms_of(&m).ok().map(xenonet_base::json::number_string)
+    xenonet_os::fs::mtime_ms_of(&m).ok().map(xenonet_text::json::number_string)
 }
 
 // JSON.parse for another app's file, whose error says where the text goes
 // wrong and never quotes it (it can hold a token).
 fn parse_json(text: &str) -> Result<Value, String> {
-    xenonet_base::json::parse(text).map_err(|_| match xenonet_schema::vendor::json_error_at(text) {
+    xenonet_text::json::parse(text).map_err(|_| match xenonet_schema::vendor::json_error_at(text) {
         Some((line, column)) => format!("isn't valid JSON (line {line}, column {column})"),
         None => "isn't valid JSON".into(),
     })
@@ -171,7 +171,7 @@ impl IdentityWatch {
         let global = self.global_stamp();
         let ssh: Vec<(String, String)> =
             crate::util::items(self.accounts().get("ssh")).iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect();
-        let repos: Vec<&Value> = projects.iter().filter(|p| xenonet_base::text::truthy(p.get("git")) && s(p, "role") != Some("group")).collect();
+        let repos: Vec<&Value> = projects.iter().filter(|p| xenonet_text::text::truthy(p.get("git")) && s(p, "role") != Some("group")).collect();
         let mut changed = false;
         // Four at a time in the JS; one after another here, which reads the
         // same: each is a git config of its own.
@@ -194,7 +194,7 @@ impl IdentityWatch {
                     }
                 }
             };
-            let stamp = format!("{global}|{}|{}", ids::repo_config_mtime(&path).map_or_else(|| "null".into(), xenonet_base::json::number_string), origin.as_str().unwrap_or(""));
+            let stamp = format!("{global}|{}|{}", ids::repo_config_mtime(&path).map_or_else(|| "null".into(), xenonet_text::json::number_string), origin.as_str().unwrap_or(""));
             // The guard goes before value() takes the same lock: in a block's
             // tail, as the guard was, it would last the whole statement.
             let good = lock(&source.state).good();
@@ -247,8 +247,8 @@ impl IdentityWatch {
             let mut g = lock(&self.inner);
             for n in &nodes {
                 let id = s(n, "id").unwrap_or_default();
-                let pinned = saved.get("pins").and_then(|p| p.get(id)).is_some_and(|p| xenonet_base::text::truthy(Some(p)));
-                if s(n, "kind") == Some("session") && s(n, "app") == Some("claude") && !xenonet_base::text::truthy(n.get("claudeAccount")) && !pinned {
+                let pinned = saved.get("pins").and_then(|p| p.get(id)).is_some_and(|p| xenonet_text::text::truthy(Some(p)));
+                if s(n, "kind") == Some("session") && s(n, "app") == Some("claude") && !xenonet_text::text::truthy(n.get("claudeAccount")) && !pinned {
                     owners.push((json!(id), g.owners.owner(id, now).unwrap_or(Value::Null)));
                 }
             }

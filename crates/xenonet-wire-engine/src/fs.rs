@@ -5,7 +5,7 @@
 
 use std::io::Write;
 use std::path::Path;
-pub use xenonet_base::fs::FsError;
+pub use xenonet_os::fs::FsError;
 
 fn of(e: std::io::Error, syscall: &str, path: &str) -> FsError {
     FsError::of(e, syscall, path)
@@ -86,7 +86,7 @@ pub fn remove_if_there(path: &str) -> Result<(), FsError> {
 
 /// The names in a folder, in Node's order.
 pub fn read_dir(dir: &str) -> Result<Vec<String>, FsError> {
-    let ents = xenonet_base::paths::read_dir_sorted(Path::new(dir)).map_err(|e| of(e, "scandir", dir))?;
+    let ents = xenonet_os::paths::read_dir_sorted(Path::new(dir)).map_err(|e| of(e, "scandir", dir))?;
     Ok(ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
 }
 

@@ -57,13 +57,13 @@ impl Rpc {
         while let Some(end) = self.buffer.find('\n') {
             let line: String = self.buffer.drain(..=end).collect();
             let line = &line[..line.len() - 1];
-            let Ok(message @ (Value::Object(_) | Value::Array(_))) = xenonet_base::json::parse(line) else {
+            let Ok(message @ (Value::Object(_) | Value::Array(_))) = xenonet_text::json::parse(line) else {
                 out.push(Incoming::Destroy);
                 break;
             };
             let get = |k: &str| message.get(k).cloned();
-            if let Some(id) = message.get("reply").filter(|r| xenonet_base::text::truthy(Some(r))) {
-                let error = message.get("error").filter(|e| xenonet_base::text::truthy(Some(e))).map(xenonet_base::text::js_string);
+            if let Some(id) = message.get("reply").filter(|r| xenonet_text::text::truthy(Some(r))) {
+                let error = message.get("error").filter(|e| xenonet_text::text::truthy(Some(e))).map(xenonet_text::text::display);
                 out.push(Incoming::Reply { id: id.clone(), result: get("result").unwrap_or(Value::Null), error });
             } else if let (Some(Value::String(method)), Some(id)) =
                 (message.get("method"), message.get("id").and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.abs() <= 9007199254740991.0))
@@ -84,7 +84,7 @@ impl Rpc {
         if gone {
             return Err("XenoNet disconnected; the action was not retried.");
         }
-        let line = format!("{}\n", xenonet_base::json::stringify(value, 0));
+        let line = format!("{}\n", xenonet_text::json::stringify(value, 0));
         if line.len() > self.max_line || writable > MAX_WRITABLE {
             return Err("XenoNet's connection is too busy.");
         }

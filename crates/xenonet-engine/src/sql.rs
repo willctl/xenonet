@@ -86,7 +86,7 @@ impl From<&serde_json::Value> for Bind {
     fn from(v: &serde_json::Value) -> Self {
         match v {
             serde_json::Value::Null => Bind::Null,
-            v => Bind::Text(xenonet_base::json::stringify(v, 0)),
+            v => Bind::Text(xenonet_text::json::stringify(v, 0)),
         }
     }
 }

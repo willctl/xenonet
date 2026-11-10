@@ -82,7 +82,7 @@ pub async fn connect_service(env: &Env, role: &str) -> Result<Client, Value> {
         Value::Object(m)
     })?;
     let socket = tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.map_err(|e| {
-        let code = xenonet_base::fs::code_of(&e).unwrap_or("ECONNREFUSED");
+        let code = xenonet_os::fs::code_of(&e).unwrap_or("ECONNREFUSED");
         coded(format!("connect {code} 127.0.0.1:{port}"), code)
     })?;
     // The service asks nothing of the command.
@@ -132,8 +132,8 @@ fn alive(pid: f64) -> Reply {
 /// Starts a program detached, its output appended to `log`, as the
 /// service is started: it goes on when the command ends.
 fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
-    let text = |k: &str| q.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
-    let log = q.get("log").or_else(|| q.get("logFile")).map(xenonet_base::text::js_string).unwrap_or_default();
+    let text = |k: &str| q.get(k).map(xenonet_text::text::display).unwrap_or_default();
+    let log = q.get("log").or_else(|| q.get("logFile")).map(xenonet_text::text::display).unwrap_or_default();
     let mut open = std::fs::OpenOptions::new();
     open.create(true).append(true);
     #[cfg(unix)]
@@ -141,17 +141,17 @@ fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
         use std::os::unix::fs::OpenOptionsExt;
         open.mode(0o600);
     }
-    let out = open.open(&log).map_err(|e| error(xenonet_base::fs::FsError::of(e, "open", &log).message))?;
+    let out = open.open(&log).map_err(|e| error(xenonet_os::fs::FsError::of(e, "open", &log).message))?;
     let err = out.try_clone().map_err(|e| error(e.to_string()))?;
     let mut cmd = std::process::Command::new(text("command"));
-    cmd.args(q.get("args").and_then(Value::as_array).into_iter().flatten().map(xenonet_base::text::js_string)).stdin(std::process::Stdio::null()).stdout(out).stderr(err);
+    cmd.args(q.get("args").and_then(Value::as_array).into_iter().flatten().map(xenonet_text::text::display)).stdin(std::process::Stdio::null()).stdout(out).stderr(err);
     if let Some(cwd) = q.get("cwd").and_then(Value::as_str) {
         cmd.current_dir(cwd);
     }
     if let Some(env) = q.get("env").and_then(Value::as_object) {
         cmd.env_clear();
         for (k, v) in env {
-            cmd.env(k, xenonet_base::text::js_string(v));
+            cmd.env(k, xenonet_text::text::display(v));
         }
     }
     #[cfg(unix)]
@@ -167,7 +167,7 @@ fn spawn_detached(q: &Value) -> Result<std::process::Child, Value> {
         cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
     }
     cmd.spawn().map_err(|e| {
-        let code = xenonet_base::fs::code_of(&e).unwrap_or("ENOENT");
+        let code = xenonet_os::fs::code_of(&e).unwrap_or("ENOENT");
         coded(format!("spawn {} {code}", text("command")), code)
     })
 }
@@ -192,7 +192,7 @@ impl Perform for Ensure {
             Some("spawn") => {
                 // A service registered to start at login is started by its
                 // supervisor, never beside the copy the supervisor keeps.
-                let port = q.get("env").and_then(|e| e.get("XENONET_PORT")).map(xenonet_base::text::js_string).filter(|p| !p.is_empty()).unwrap_or_else(|| "47840".into());
+                let port = q.get("env").and_then(|e| e.get("XENONET_PORT")).map(xenonet_text::text::display).filter(|p| !p.is_empty()).unwrap_or_else(|| "47840".into());
                 if let Some(place) = super::supervisor::registered_for(&port) {
                     xenonet_components::supervisor::start(&place, &xenonet_components::supervisor::Disk, &mut xenonet_components::supervisor::System).map_err(error)?;
                     return Ok(Value::Null);
@@ -212,8 +212,8 @@ impl Perform for Ensure {
 
 /// ensureService(runtime): "reused" or "started".
 async fn ensure(runtime: &Value) -> Result<Value, Failed> {
-    let root = runtime.get("root").map(xenonet_base::text::js_string).unwrap_or_default();
-    let exec = runtime.get("exec").map(xenonet_base::text::js_string).unwrap_or_default();
+    let root = runtime.get("root").map(xenonet_text::text::display).unwrap_or_default();
+    let exec = runtime.get("exec").map(xenonet_text::text::display).unwrap_or_default();
     let args = runtime::service_args(runtime.get("args"));
     let env: Env = runtime.get("env").and_then(Value::as_object).cloned().unwrap_or_default();
     let m = machine();
@@ -263,7 +263,7 @@ impl Perform for Lifecycle {
                 Value::Object(m)
             }),
             Some("check") => install::check_runtime(q.get("staged").unwrap_or(&Value::Null), sys::platform()).map(|()| Value::Null).map_err(|f| error(f.message())),
-            Some("now") => Ok(xenonet_base::json::number(super::native::now())),
+            Some("now") => Ok(xenonet_text::json::number(super::native::now())),
             Some("pause") => {
                 tokio::time::sleep(Duration::from_millis(q.get("ms").and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64)).await;
                 Ok(Value::Null)
@@ -291,7 +291,7 @@ impl Perform for Feed {
     async fn ask(&mut self, q: &Value) -> Reply {
         match q.get("op").and_then(Value::as_str) {
             Some("fetch") => {
-                let url = q.get("url").map(xenonet_base::text::js_string).unwrap_or_default();
+                let url = q.get("url").map(xenonet_text::text::display).unwrap_or_default();
                 let res = fetch("GET", &url, &[], None, q.get("timeoutMs").and_then(Value::as_f64)).await?;
                 let id = self.bodies.len() as u64 + 1;
                 let out = json!({ "ok": res.ok(), "status": res.status, "res": id });
@@ -300,7 +300,7 @@ impl Perform for Feed {
             }
             Some("json") => {
                 let body = self.bodies.get(&q.get("res").and_then(Value::as_u64).unwrap_or(0)).cloned().unwrap_or_default();
-                xenonet_base::json::parse(&String::from_utf8_lossy(&body)).map_err(|e| json!({ "message": e.to_string(), "name": "SyntaxError" }))
+                xenonet_text::json::parse(&String::from_utf8_lossy(&body)).map_err(|e| json!({ "message": e.to_string(), "name": "SyntaxError" }))
             }
             other => Err(error(format!("componentUpdates asked for {}", other.unwrap_or("undefined")))),
         }
@@ -372,7 +372,7 @@ pub fn stop_file(env: &Value) -> String {
 pub fn service_request(env: &Value, action: &str, body: &Value) -> Result<Value, Fail> {
     let env = env_with(env);
     block_on(async {
-        let c = connect_service(&env, "tools").await.map_err(|e| Fail::error(e.get("message").map(xenonet_base::text::js_string).unwrap_or_default()))?;
+        let c = connect_service(&env, "tools").await.map_err(|e| Fail::error(e.get("message").map(xenonet_text::text::display).unwrap_or_default()))?;
         let r = c.request(action, body.clone(), 150000.0).await.map_err(Fail::error);
         c.close();
         r
@@ -395,14 +395,14 @@ fn download(item: &Value) -> Result<String, Fail> {
     if have {
         return Ok(file);
     }
-    let url = item.get("url").map(xenonet_base::text::js_string).unwrap_or_default();
+    let url = item.get("url").map(xenonet_text::text::display).unwrap_or_default();
     let res = block_on(fetch("GET", &url, &[], None, Some(300000.0))).map_err(Fail::error)?;
     let res = match res {
         Ok(r) if r.ok() => r,
         _ => return Err(Fail::error("XenoNet could not download this component.")),
     };
     let size = item.get("size").and_then(Value::as_f64).unwrap_or(f64::NAN);
-    let sha = item.get("sha256").map(xenonet_base::text::js_string).unwrap_or_default();
+    let sha = item.get("sha256").map(xenonet_text::text::display).unwrap_or_default();
     let mut d = updates::Download::new(&file, size, &sha).map_err(super::fs_fail)?;
     let done = d.write(&res.body).and_then(|()| d.finish());
     d.discard();
@@ -412,7 +412,7 @@ fn download(item: &Value) -> Result<String, Fail> {
 /// updateComponent(item): { component, status: "current", version } for
 /// one that isn't newer, else what activating its download came to.
 pub fn update_component(item: &Value) -> Result<Value, Fail> {
-    if !xenonet_base::text::truthy(item.get("available")) {
+    if !xenonet_text::text::truthy(item.get("available")) {
         let mut o = Map::new();
         if let Some(c) = item.get("component") {
             o.insert("component".into(), c.clone());

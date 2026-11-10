@@ -39,7 +39,7 @@ pub mod state;
 
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_base::network::Net;
+use xenonet_model::ops::Net;
 use xenonet_net::sink::SinkSlot;
 
 pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
@@ -146,7 +146,7 @@ pub fn reason(v: &Value) -> String {
     match v.get("reason") {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Null) | None => "undefined".into(),
-        Some(other) => xenonet_base::text::js_string(other),
+        Some(other) => xenonet_text::text::display(other),
     }
 }
 

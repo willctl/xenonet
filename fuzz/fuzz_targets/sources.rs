@@ -9,7 +9,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
-use xenonet_base::json;
+use xenonet_text::json;
 use xenonet_sources::codex::{self, RolloutEntries, Stderr, Stdout};
 use xenonet_sources::refusals::query;
 use xenonet_sources::reported_runs::{self, ReportedRuns};

@@ -18,7 +18,7 @@
 
 use crate::runtime::{self, Env, Machine};
 use serde_json::{json, Map, Value};
-use xenonet_base::nodepath::{Style, NATIVE};
+use xenonet_os::nodepath::{Style, NATIVE};
 
 /// The launch agent's label, and the plist's name with `.plist`.
 pub const LABEL: &str = "dev.xenonet.service";
@@ -695,7 +695,7 @@ pub fn run_program(program: &str, args: &[&str], env: &[(&str, &str)], ms: u64) 
     use std::time::{Duration, Instant};
     let mut cmd = std::process::Command::new(program);
     cmd.args(args).envs(env.iter().copied()).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    xenonet_base::process::Background::no_window(&mut cmd);
+    xenonet_os::process::Background::no_window(&mut cmd);
     let Ok(mut child) = cmd.spawn() else { return Ran { code: None, out: String::new(), err: format!("{program} couldn't start") } };
     let reader = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
@@ -742,7 +742,7 @@ pub fn utf16(text: &str) -> Vec<u8> {
 /// A file's text, UTF-8, or UTF-16 after its byte order mark.
 pub fn text_of(bytes: &[u8]) -> Option<String> {
     match bytes {
-        [0xff, 0xfe, rest @ ..] => String::from_utf16(&rest.chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect::<Vec<_>>()).ok(),
+        [0xff, 0xfe, rest @ ..] => String::from_utf16(&rest.as_chunks::<2>().0.iter().map(|p| u16::from_le_bytes([p[0], p[1]])).collect::<Vec<_>>()).ok(),
         _ => String::from_utf8(bytes.to_vec()).ok(),
     }
 }
@@ -843,11 +843,11 @@ pub fn parse_query(ran: &Ran) -> Seen {
 /// What `service run` keeps in the pids file on Windows: its own process,
 /// the service's while one runs, and how the last one ended.
 pub fn pids_text(runner: u32, service: Option<u32>, last_exit: Option<i32>) -> String {
-    xenonet_base::json::stringify(&json!({ "runner": runner, "service": service, "lastExit": last_exit.map(|c| c.to_string()) }), 0)
+    xenonet_text::json::stringify(&json!({ "runner": runner, "service": service, "lastExit": last_exit.map(|c| c.to_string()) }), 0)
 }
 
 fn read_pids(text: Option<String>) -> (Option<u32>, Option<u32>, Option<String>) {
-    let v = text.and_then(|t| xenonet_base::json::parse(&t).ok()).unwrap_or(Value::Null);
+    let v = text.and_then(|t| xenonet_text::json::parse(&t).ok()).unwrap_or(Value::Null);
     let pid = |k: &str| v.get(k).and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()).filter(|p| *p > 0);
     (pid("runner"), pid("service"), v.get("lastExit").and_then(Value::as_str).map(str::to_string))
 }

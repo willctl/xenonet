@@ -6,16 +6,16 @@
 
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use xenonet_base::json;
-use xenonet_base::nodepath::NATIVE;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::text::{is_blank, js_trim, js_trim_start, truthy};
+use xenonet_os::nodepath::NATIVE;
 use xenonet_sources::native::files::Files;
 use xenonet_sources::native::{
     by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
     EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
 };
 use xenonet_sources::session::{RunSession, Via};
+use xenonet_text::json;
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::{is_blank, trim, trim_start, truthy};
 
 pub const SOURCE: &str = "google/gemini-cli/chat-record";
 /// The tools whose calls are edits, as the app registry has them.
@@ -79,7 +79,7 @@ fn merged(meta: Option<Map<String, Value>>, more: &Value) -> Map<String, Value> 
 /// A chat record file, or None when it isn't one. `check` sees the first
 /// records until the metadata, and the first with tool calls.
 pub fn read_chat(text: &str, check: &mut dyn FnMut(&Value) -> Result<Checked, Threw>) -> Result<Option<Chat>, Threw> {
-    let t = js_trim_start(text);
+    let t = trim_start(text);
     let records: Vec<Value> = if t.starts_with('{') && !t.contains("\n{") {
         // The older layout: one JSON object with its messages inside.
         let Ok(Value::Object(whole)) = json::parse(t) else { return Ok(None) };
@@ -222,7 +222,7 @@ impl GeminiCli {
         let mut out = Vec::new();
         for p in projects.into_iter().filter(|p| p.is_dir) {
             let dir = join(&[root, &p.name]);
-            let cwd = files.read_text(&join(&[&dir, ".project_root"])).ok().map(|t| js_trim(&t).to_string()).filter(|c| !c.is_empty());
+            let cwd = files.read_text(&join(&[&dir, ".project_root"])).ok().map(|t| trim(&t).to_string()).filter(|c| !c.is_empty());
             let chats = join(&[&dir, "chats"]);
             let mut take = |file: String, parent: Option<String>, files: &mut dyn Files| {
                 if let Ok(st) = files.stat(&file) {
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(c.id, "8f1d2c3b-1111");
         assert_eq!(c.summary.as_deref(), Some("Partial refunds"));
         assert_eq!(c.edits.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), ["/w/a.txt"]);
-        assert_eq!(c.updated_at, xenonet_base::time::parse_iso("2026-10-16T11:59:30Z"));
+        assert_eq!(c.updated_at, xenonet_text::time::parse_iso("2026-10-16T11:59:30Z"));
         let old = json!({ "sessionId": "8f1d2c3b-1111", "projectHash": "x", "messages": [{ "id": "g", "timestamp": "2026-10-16T11:58:00Z", "toolCalls": [call("write_file", "/a/b", "success")] }] }).to_string();
         assert_eq!(read_chat(&old, &mut same).unwrap().unwrap().edits[0].path, "/a/b");
         assert_eq!(read_chat("not json", &mut same).unwrap(), None);

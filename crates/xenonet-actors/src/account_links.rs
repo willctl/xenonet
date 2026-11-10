@@ -19,7 +19,7 @@
 use crate::store::{self, Tx};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 /// A link refused: a code a program tests, and a sentence; or what the
 /// store failed with.
@@ -62,7 +62,7 @@ pub fn new_id(prefix: &str) -> store::Result<String> {
 
 /// parts.join("\0"), hashed: null and a part not given join as nothing.
 fn hash_of(parts: &[Option<&Value>]) -> String {
-    let joined: Vec<String> = parts.iter().map(|p| p.filter(|v| !v.is_null()).map(js_string).unwrap_or_default()).collect();
+    let joined: Vec<String> = parts.iter().map(|p| p.filter(|v| !v.is_null()).map(display).unwrap_or_default()).collect();
     crate::tokens::hex(&Sha256::digest(joined.join("\0").as_bytes()))
 }
 
@@ -110,9 +110,9 @@ pub fn assert_link(store: &dyn Links, slug: &str, identity: &Value, provider: &s
         "proof_status": "owner_asserted",
         "proof_method": "owner_selected",
         "subject_binding": null,
-        "checked_at": xenonet_base::json::number(now),
+        "checked_at": xenonet_text::json::number(now),
         "expires_at": null,
-        "created_at": xenonet_base::json::number(now),
+        "created_at": xenonet_text::json::number(now),
     });
     store.add_account_link(&link)?;
     Ok(link)
@@ -127,9 +127,9 @@ pub fn record_verified(store: &dyn Links, slug: &str, facts: &Value, known: &[St
     if facts.get("state").and_then(Value::as_str) != Some("verified") {
         return refuse("unverified", "only a verified assertion is kept as verified");
     }
-    let workspace = facts.get("workspace").filter(|w| xenonet_base::text::truthy(Some(w)));
+    let workspace = facts.get("workspace").filter(|w| xenonet_text::text::truthy(Some(w)));
     let identity = if facts.get("provider").and_then(Value::as_str) == Some("openai") && workspace.is_some() {
-        let id = format!("chatgpt:{}", workspace.map(js_string).unwrap_or_default());
+        let id = format!("chatgpt:{}", workspace.map(display).unwrap_or_default());
         has(known, &id).then_some(id)
     } else {
         None
@@ -149,9 +149,9 @@ pub fn record_verified(store: &dyn Links, slug: &str, facts: &Value, known: &[St
         "proof_status": "verified",
         "proof_method": or_text("method", "provider_assertion"),
         "subject_binding": hash_of(&[issuer, facts.get("subject")]),
-        "checked_at": xenonet_base::json::number(now),
+        "checked_at": xenonet_text::json::number(now),
         "expires_at": col(facts, "expiresAt"),
-        "created_at": xenonet_base::json::number(now),
+        "created_at": xenonet_text::json::number(now),
     });
     store::transaction(store, || -> Result<()> {
         if switched {
@@ -183,7 +183,7 @@ pub fn link_state(store: &dyn Links, slug: &str, now: f64) -> store::Result<(&'s
 /// you to look at, and XenoNet never merges actors by it, nor by a name,
 /// an email or a product. The ref kept, or the one there was.
 pub fn add_external_ref(store: &dyn Links, slug: &str, adapter_id: &str, facts: &Value, now: f64) -> Result<Value> {
-    if facts.get("state").and_then(Value::as_str) != Some("verified") || !xenonet_base::text::truthy(facts.get("externalActorId")) {
+    if facts.get("state").and_then(Value::as_str) != Some("verified") || !xenonet_text::text::truthy(facts.get("externalActorId")) {
         return refuse("unverified", "an external id is kept only once its provider proved it");
     }
     let key = json!({
@@ -194,7 +194,7 @@ pub fn add_external_ref(store: &dyn Links, slug: &str, adapter_id: &str, facts: 
     });
     if let Some(had) = store.external_ref(&key)? {
         if had.get("actor_slug").and_then(Value::as_str) != Some(slug) {
-            let message = format!("that provider id already names actor:{}; review both in XenoNet's window", js_string(&col(&had, "actor_slug")));
+            let message = format!("that provider id already names actor:{}; review both in XenoNet's window", display(&col(&had, "actor_slug")));
             return Err(LinkFail::Link { code: "conflict", message });
         }
         return Ok(had);
@@ -205,7 +205,7 @@ pub fn add_external_ref(store: &dyn Links, slug: &str, adapter_id: &str, facts: 
     if let Value::Object(k) = key {
         r.extend(k);
     }
-    r.insert("verified_at".into(), xenonet_base::json::number(now));
+    r.insert("verified_at".into(), xenonet_text::json::number(now));
     let r = Value::Object(r);
     store.add_external_ref(&r)?;
     Ok(r)
@@ -245,7 +245,7 @@ mod tests {
         }
         fn expire_account_link(&self, link_id: &Value, at: f64) -> store::Result<()> {
             for l in self.links.lock().unwrap().iter_mut().filter(|l| l["link_id"] == *link_id) {
-                l["expires_at"] = xenonet_base::json::number(at);
+                l["expires_at"] = xenonet_text::json::number(at);
             }
             Ok(())
         }

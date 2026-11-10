@@ -3,10 +3,10 @@
 //! the JSON the service sends, the way JSON.stringify writes them.
 
 use serde_json::{Map, Value};
-use xenonet_base::json::number;
+use xenonet_text::json::number;
 
 /// Date.now().
-pub use xenonet_base::time::now_ms;
+pub use xenonet_text::time::now_ms;
 
 pub fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.as_object().and_then(|m| m.get(k))
@@ -112,9 +112,9 @@ pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static)
 /// The local date and time at `ms`: year, month, day, hour, minute, as
 /// JS's Date reads them in the system's time zone.
 pub fn local(ms: f64) -> [i64; 5] {
-    let t = ms + xenonet_base::jsstr::local_offset_ms(ms);
+    let t = ms + xenonet_text::utf16::local_offset_ms(ms);
     let days = (t / 86400e3).floor();
-    let (y, m, d) = xenonet_base::time::civil_from_days(days as i64);
+    let (y, m, d) = xenonet_text::time::civil_from_days(days as i64);
     let rest = t - days * 86400e3;
     let minutes = (rest / 60e3).floor() as i64;
     [y, i64::from(m), i64::from(d), minutes / 60, minutes % 60]

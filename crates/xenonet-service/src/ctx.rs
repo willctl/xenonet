@@ -15,8 +15,8 @@ use crate::window_key::{TrayKey, WindowKey};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::limits::Bucket;
-use xenonet_base::log::{ErrInfo, Log};
-use xenonet_base::sync::Locked;
+use xenonet_os::log::{ErrInfo, Log};
+use xenonet_os::sync::Locked;
 use xenonet_schema::drift::DriftLog;
 
 pub struct Ctx {

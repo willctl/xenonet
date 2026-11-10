@@ -17,8 +17,8 @@ use std::sync::Mutex;
 use xenonet_adapter::observe::attribution::census;
 use xenonet_adapter::observe::{known, AppBundle, Core, Keep, Observer, ObserverHost, Result, Say};
 use xenonet_adapter::products::Product;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::js_string;
+use xenonet_os::sync::Locked;
+use xenonet_text::text::display;
 
 pub const ID: &str = "actor:muse";
 const MAIN: &str = "/Muse.app/Contents/MacOS/Muse";
@@ -83,7 +83,7 @@ impl Observer for Muse {
         let census = census?;
         let open = census.table.iter().enumerate().any(|(i, p)| {
             let (product, role) = census.product_role(i);
-            product == Some("muse") && role == Some("app") && p.row.get("program").filter(|v| !v.is_null()).map_or(String::new(), js_string).ends_with(MAIN)
+            product == Some("muse") && role == Some("app") && p.row.get("program").filter(|v| !v.is_null()).map_or(String::new(), display).ends_with(MAIN)
         });
         let installed = open || self.app.installed(h);
         self.state.locked().was_installed = installed;

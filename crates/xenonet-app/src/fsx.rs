@@ -4,7 +4,7 @@
 
 use std::io::Write;
 use std::path::Path;
-pub use xenonet_base::fs::FsError;
+pub use xenonet_os::fs::FsError;
 
 /// An error that isn't the system's: a message, with a code when the JS
 /// gave its Error one.
@@ -96,17 +96,17 @@ pub fn rm_rf(p: &str) -> Result<(), FsError> {
 
 /// fs.realpathSync.
 pub fn realpath(p: &str) -> Result<String, FsError> {
-    xenonet_base::fs::realpath(p).map_err(|e| FsError::of(e, "realpath", p))
+    xenonet_os::fs::realpath(p).map_err(|e| FsError::of(e, "realpath", p))
 }
 
 /// fs.realpathSync.native.
 pub fn realpath_native(p: &str) -> Result<String, FsError> {
-    xenonet_base::fs::realpath_native(p).map_err(|e| FsError::of(e, "realpath", p))
+    xenonet_os::fs::realpath_native(p).map_err(|e| FsError::of(e, "realpath", p))
 }
 
 /// fs.readdirSync(p): names in Node's order.
 pub fn read_dir_names(p: &str) -> Result<Vec<String>, FsError> {
-    xenonet_base::paths::read_dir_sorted(Path::new(p))
+    xenonet_os::paths::read_dir_sorted(Path::new(p))
         .map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
         .map_err(|e| FsError::of(e, "scandir", p))
 }
@@ -115,7 +115,7 @@ pub fn read_dir_names(p: &str) -> Result<Vec<String>, FsError> {
 pub fn random_hex(n: usize) -> String {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).expect("the system's random numbers");
-    xenonet_base::jsstr::hex(&b)
+    xenonet_text::utf16::hex(&b)
 }
 
 /// fs.mkdtempSync(prefix): the prefix and six random letters and digits.

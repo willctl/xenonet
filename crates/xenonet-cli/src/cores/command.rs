@@ -25,13 +25,13 @@ pub fn state(dir: &str) -> Value {
 
 /// installCommand({ dir, bin, force }): a script that runs `bin`.
 pub fn install(opts: &Value) -> Result<Value, Fail> {
-    let t = |k: &str| opts.get(k).filter(|v| !v.is_null()).map(xenonet_base::text::js_string);
+    let t = |k: &str| opts.get(k).filter(|v| !v.is_null()).map(xenonet_text::text::display);
     let dir = match t("dir") {
         Some(d) => d,
         None => super::command_dir()?,
     };
     let bin = t("bin").unwrap_or_default();
-    let st = command::install_command(&dir, &bin, xenonet_base::text::truthy(opts.get("force")), path_var().as_deref(), sys::platform()).map_err(fs_fail)?;
+    let st = command::install_command(&dir, &bin, xenonet_text::text::truthy(opts.get("force")), path_var().as_deref(), sys::platform()).map_err(fs_fail)?;
     Ok(state_json(&st))
 }
 

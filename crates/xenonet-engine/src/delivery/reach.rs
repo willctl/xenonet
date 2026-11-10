@@ -63,7 +63,7 @@ impl Sender {
         if let Some((host, _)) = actor_of(id) {
             return make(Kind::Actor, host);
         }
-        let host = xenonet_base::ids::parse_qualified(id).and_then(|(h, _)| h).map(str::to_string);
+        let host = xenonet_model::ids::parse_qualified(id).and_then(|q| q.host).map(str::to_string);
         make(Kind::Session, host)
     }
 }

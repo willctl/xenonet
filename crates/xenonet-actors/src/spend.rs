@@ -24,8 +24,8 @@
 use serde_json::{json, Map, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use xenonet_base::sort::{locale_compare, utf16_cmp};
-use xenonet_base::text::template;
+use xenonet_text::sort::{locale_compare, utf16_cmp};
+use xenonet_text::text::template;
 
 pub const UNATTRIBUTED: &str = "unattributed";
 const LINEAGE_MAX: usize = 8;
@@ -58,7 +58,7 @@ pub fn attribute(sessions: &[Value], starts: &[Value], known: Option<&HashSet<St
     let mut by_id: HashMap<String, &Value> = HashMap::new();
     let mut order: Vec<Value> = Vec::new();
     for s in sessions {
-        if let Some(id) = s.get("id").filter(|v| xenonet_base::text::truthy(Some(v))) {
+        if let Some(id) = s.get("id").filter(|v| xenonet_text::text::truthy(Some(v))) {
             if by_id.insert(id_key(id), s).is_none() {
                 order.push(id.clone());
             }
@@ -94,7 +94,7 @@ pub fn attribute(sessions: &[Value], starts: &[Value], known: Option<&HashSet<St
         let mut seen: HashSet<String> = HashSet::new();
         let mut cur = Some(id.clone());
         let mut up = 0;
-        while let Some(c) = cur.filter(|c| xenonet_base::text::truthy(Some(c)) && up <= LINEAGE_MAX && !seen.contains(&id_key(c))) {
+        while let Some(c) = cur.filter(|c| xenonet_text::text::truthy(Some(c)) && up <= LINEAGE_MAX && !seen.contains(&id_key(c))) {
             seen.insert(id_key(&c));
             if let Some(o) = own(&c) {
                 let who = if up > 0 { Who { actor: o.actor, how: "parent" } } else { o };
@@ -153,17 +153,17 @@ fn plain(id: Option<(&str, &Value)>, p: &Part) -> Value {
         o.insert("id".into(), json!(id));
         o.insert("name".into(), name.clone());
     }
-    o.insert("cost".into(), xenonet_base::json::number(p.cost));
-    o.insert("tokens".into(), xenonet_base::json::number(p.tokens));
-    o.insert("sessions".into(), xenonet_base::json::number(p.sessions));
+    o.insert("cost".into(), xenonet_text::json::number(p.cost));
+    o.insert("tokens".into(), xenonet_text::json::number(p.tokens));
+    o.insert("sessions".into(), xenonet_text::json::number(p.sessions));
     if id.is_some() {
-        o.insert("elsewhere".into(), xenonet_base::json::number(p.elsewhere));
+        o.insert("elsewhere".into(), xenonet_text::json::number(p.elsewhere));
     }
     o.insert("unpriced".into(), Value::Array(p.unpriced.iter().map(|u| json!(u.0)).collect()));
     if p.reported {
-        let usd = if p.rep_usd > 0.0 { xenonet_base::json::number(p.rep_usd) } else { Value::Null };
+        let usd = if p.rep_usd > 0.0 { xenonet_text::json::number(p.rep_usd) } else { Value::Null };
         let source = p.rep_sources.iter().map(|u| u.0.as_str()).collect::<Vec<_>>().join(", ");
-        o.insert("reported".into(), json!({ "usd": usd, "tokens": xenonet_base::json::number(p.rep_tokens), "source": source }));
+        o.insert("reported".into(), json!({ "usd": usd, "tokens": xenonet_text::json::number(p.rep_tokens), "source": source }));
     }
     Value::Object(o)
 }
@@ -260,7 +260,7 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
         }
     }
     let mut actors: Vec<(String, Value, &Part)> = rows.iter().map(|(id, p)| (id.clone(), name_of(id), p)).collect();
-    xenonet_base::sort::sort_by(&mut actors, |(ai, an, a), (bi, bn, b)| {
+    xenonet_text::sort::sort_by(&mut actors, |(ai, an, a), (bi, bn, b)| {
         let by = |x: f64, y: f64| y.partial_cmp(&x).unwrap_or(Ordering::Equal);
         by(a.cost, b.cost)
             .then_with(|| by(a.sessions, b.sessions))
@@ -269,7 +269,7 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
             .then_with(|| locale_compare(ai, bi))
     });
     json!({
-        "total": xenonet_base::json::number(total),
+        "total": xenonet_text::json::number(total),
         "actors": actors.iter().map(|(id, name, p)| plain(Some((id, name)), p)).collect::<Vec<_>>(),
         "unattributed": plain(None, &none),
     })
@@ -343,7 +343,7 @@ pub fn reported_today(state: &Value, since: f64, usages: &[Value], sessions: &[V
     let mut today: Map<String, Value> = if same_day { state.get("today").and_then(Value::as_object).cloned().unwrap_or_default() } else { Map::new() };
     for r in readings {
         let usd = r.usd.unwrap_or(0.0);
-        let before = seen.insert(r.key.clone(), json!({ "usd": xenonet_base::json::number(usd), "tokens": xenonet_base::json::number(r.tokens) }));
+        let before = seen.insert(r.key.clone(), json!({ "usd": xenonet_text::json::number(usd), "tokens": xenonet_text::json::number(r.tokens) }));
         // First sight is the baseline: what came before today isn't today's.
         let Some(before) = before else { continue };
         let d_usd = (usd - finite(before.get("usd")).unwrap_or(0.0)).max(0.0);
@@ -352,7 +352,7 @@ pub fn reported_today(state: &Value, since: f64, usages: &[Value], sessions: &[V
             continue;
         }
         let was = today.get(&r.key);
-        let sum = |f: &str, d: f64| xenonet_base::json::number(was.and_then(|w| finite(w.get(f))).unwrap_or(0.0) + d);
+        let sum = |f: &str, d: f64| xenonet_text::json::number(was.and_then(|w| finite(w.get(f))).unwrap_or(0.0) + d);
         let mut item = Map::new();
         item.insert("key".into(), json!(r.key));
         item.insert("source".into(), json!(r.source));
@@ -367,7 +367,7 @@ pub fn reported_today(state: &Value, since: f64, usages: &[Value], sessions: &[V
         today.insert(r.key, Value::Object(item));
     }
     let mut items: Vec<Value> = today.values().cloned().collect();
-    xenonet_base::sort::sort_by(&mut items, |a, b| utf16_cmp(a["key"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or("")));
+    xenonet_text::sort::sort_by(&mut items, |a, b| utf16_cmp(a["key"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or("")));
     let out = items
         .iter()
         .map(|i| {
@@ -378,7 +378,7 @@ pub fn reported_today(state: &Value, since: f64, usages: &[Value], sessions: &[V
             i
         })
         .collect();
-    (json!({ "since": xenonet_base::json::number(since), "seen": seen, "today": today }), out)
+    (json!({ "since": xenonet_text::json::number(since), "seen": seen, "today": today }), out)
 }
 
 #[cfg(test)]

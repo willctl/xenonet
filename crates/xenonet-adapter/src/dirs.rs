@@ -1,61 +1,11 @@
-//! Where XenoNet keeps its own files and where the desktop apps it reads
-//! keep theirs (core/dirs.js). No side effects: whoever asks says the
-//! platform, the home folder and the environment, and how to look at disk.
+//! Where the desktop apps XenoNet reads keep their folders and binaries
+//! (core/dirs.js): Claude desktop's folder, the Claude Code it keeps, the
+//! codex the ChatGPT app ships, and the program to run for each app's CLI.
+//! The adapters and the core share these lookups. No side effects: whoever
+//! asks says the platform, the home folder and the environment, and how to
+//! look at disk.
 
-use crate::paths::join_all;
-
-/// XenoNet's own folder of a kind ("state" or "cache"), following the XDG
-/// base directories when they're set, otherwise the platform's standard
-/// places; it never adds a dot dir to ~.
-///
-/// ```text
-///   state (layout, dismissed alerts)          cache (search index, rebuildable)
-///   Windows: %LOCALAPPDATA%\XenoNet           %LOCALAPPDATA%\XenoNet\Cache
-///   macOS:   ~/Library/Application Support/XenoNet   ~/Library/Caches/XenoNet
-///   Linux:   ~/.local/state/xenonet           ~/.cache/xenonet
-/// ```
-///
-/// `xdg` is XDG_STATE_HOME for state and XDG_CACHE_HOME for the cache. A
-/// copy running from source passes name "XenoNet Dev" for folders of its
-/// own.
-pub fn app_dir(kind: &str, xdg: Option<&str>, local_app_data: Option<&str>, platform: &str, home: &str, name: &str) -> String {
-    let slug = slug_of(name);
-    let state = kind == "state";
-    if let Some(x) = xdg.filter(|x| !x.is_empty()) {
-        return join_all(&[x, &slug]);
-    }
-    match platform {
-        "win32" => {
-            let local = local_app_data.map_or_else(|| join_all(&[home, "AppData", "Local"]), str::to_string);
-            if state {
-                join_all(&[&local, name])
-            } else {
-                join_all(&[&local, name, "Cache"])
-            }
-        }
-        "darwin" => join_all(&[home, "Library", if state { "Application Support" } else { "Caches" }, name]),
-        _ => join_all(&[home, if state { ".local/state" } else { ".cache" }, &slug]),
-    }
-}
-
-// The name lowercased, each run of white space a dash.
-fn slug_of(name: &str) -> String {
-    let lower = name.to_lowercase();
-    let mut out = String::new();
-    let mut space = false;
-    for c in lower.chars() {
-        if crate::text::is_js_space(c) {
-            if !space {
-                out.push('-');
-            }
-            space = true;
-        } else {
-            out.push(c);
-            space = false;
-        }
-    }
-    out
-}
+use xenonet_os::paths::join_all;
 
 /// A folder that couldn't be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,13 +199,13 @@ pub fn find_cli(app: &str, env: &CliEnv, platform: &str, home: &str, look: &mut 
     let windows = platform == "win32";
     let set = |v: &Option<String>| v.clone().filter(|v| !v.is_empty());
     match app {
-        "claude" => crate::paths::on_path("claude", &env.path, env.pathext.as_deref(), windows, can_run)
+        "claude" => xenonet_os::paths::on_path("claude", &env.path, env.pathext.as_deref(), windows, can_run)
             .or_else(|| Some(installed_claude_code(platform, home)).filter(|f| look.exists(f)))
             .or_else(|| find_claude_desktop_dir(&env.dirs, platform, home, look).and_then(|d| bundled_claude_code(&d, platform, look).into_iter().next()))
             .or_else(|| set(&env.claude_bin)),
         "codex" => set(&env.codex_bin)
             .or_else(|| bundled_codex_binaries(&env.dirs, platform, home, look).into_iter().next())
-            .or_else(|| crate::paths::on_path("codex", &env.path, env.pathext.as_deref(), windows, can_run)),
+            .or_else(|| xenonet_os::paths::on_path("codex", &env.path, env.pathext.as_deref(), windows, can_run)),
         _ => None,
     }
 }
@@ -267,14 +217,6 @@ pub fn find_cli(app: &str, env: &CliEnv, platform: &str, home: &str, look: &mut 
 #[cfg(unix)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn app_dirs() {
-        assert_eq!(app_dir("state", None, None, "darwin", "/Users/me", "XenoNet"), "/Users/me/Library/Application Support/XenoNet");
-        assert_eq!(app_dir("cache", None, None, "linux", "/home/me", "XenoNet Dev"), "/home/me/.cache/xenonet-dev");
-        assert_eq!(app_dir("state", Some("/x"), None, "darwin", "/Users/me", "XenoNet"), "/x/xenonet");
-        assert_eq!(app_dir("cache", None, Some("L"), "win32", "/h", "XenoNet"), "L/XenoNet/Cache");
-    }
 
     /// Made-up folders: the files there, with their mtimes.
     struct Disk(Vec<(&'static str, f64)>);

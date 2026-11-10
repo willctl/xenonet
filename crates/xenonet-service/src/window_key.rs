@@ -85,7 +85,7 @@ pub fn same(a: &[u8], b: &[u8]) -> bool {
 pub fn random_hex(n: usize) -> String {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).expect("the system's random numbers");
-    xenonet_base::jsstr::hex(&b)
+    xenonet_text::utf16::hex(&b)
 }
 
 #[cfg(test)]

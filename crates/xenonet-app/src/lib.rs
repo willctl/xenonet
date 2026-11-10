@@ -1,7 +1,7 @@
 //! XenoNet's settings and the small pieces around them (core/config.js,
 //! instances.js, version.js, environments.js, demo-root.js and the rest of
 //! core/ that isn't a subsystem of its own). Node's `path` lives in
-//! xenonet-base and is here too, where the crates above first found it.
+//! xenonet-os and is here too, where the crates above first found it.
 
 pub mod command;
 pub mod config;
@@ -17,7 +17,7 @@ pub mod jstext;
 pub mod jsv;
 pub mod mcp_discovery;
 pub mod mcp_info;
-pub use xenonet_base::nodepath;
+pub use xenonet_os::nodepath;
 pub mod open;
 pub mod script;
 pub mod spotify;

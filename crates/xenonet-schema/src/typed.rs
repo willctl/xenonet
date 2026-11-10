@@ -68,7 +68,7 @@ fn whole_numbers(v: &mut Value) {
     match v {
         Value::Number(n) => {
             if let Some(f) = n.as_f64().filter(|_| !n.is_i64() && !n.is_u64()) {
-                *v = xenonet_base::json::number(f);
+                *v = xenonet_text::json::number(f);
             }
         }
         Value::Array(a) => a.iter_mut().for_each(whole_numbers),

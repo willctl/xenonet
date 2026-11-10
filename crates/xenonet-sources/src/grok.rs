@@ -5,7 +5,7 @@
 //! Grok Build's adapter.
 
 use serde_json::{Map, Value};
-use xenonet_base::time;
+use xenonet_text::time;
 
 /// A time as summary.json writes it (RFC 3339), or in Unix seconds or
 /// milliseconds; None when it isn't one.
@@ -84,7 +84,7 @@ pub fn usage_turns(usage: Option<&Value>, summary: Option<&Value>) -> Vec<UsageT
             continue;
         }
         let n = match field("turnNumber") {
-            Some(Value::Number(x)) => xenonet_base::json::number_string(x.as_f64().unwrap_or(f64::NAN)),
+            Some(Value::Number(x)) => xenonet_text::json::number_string(x.as_f64().unwrap_or(f64::NAN)),
             Some(Value::String(x)) => x.clone(),
             _ => String::new(),
         };

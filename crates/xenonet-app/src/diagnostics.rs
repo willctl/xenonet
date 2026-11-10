@@ -15,10 +15,10 @@ use crate::fsx::{self, FsError};
 use crate::jsv::{less, raw, truthy};
 use crate::nodepath::NATIVE;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::{number_string, stringify};
-use xenonet_base::log::{scrub, summarize, unsafe_text};
-use xenonet_base::text::{join, js_number, js_string};
-use xenonet_base::time::iso;
+use xenonet_os::log::{scrub, summarize, unsafe_text};
+use xenonet_text::json::{number_string, stringify};
+use xenonet_text::text::{display, join, to_number};
+use xenonet_text::time::iso;
 
 pub const SCHEMA: &str = "diagnostics/bundle/v1";
 
@@ -64,9 +64,9 @@ fn or_null(v: Option<&Value>) -> Value {
 // new Date(v).toISOString(), which throws for a time that isn't one.
 fn iso_of(v: Option<&Value>) -> Result<String, String> {
     let ms = match v {
-        Some(Value::String(s)) => xenonet_base::time::parse_iso(s).unwrap_or(f64::NAN),
+        Some(Value::String(s)) => xenonet_text::time::parse_iso(s).unwrap_or(f64::NAN),
         Some(Value::Null) => 0.0,
-        other => js_number(other),
+        other => to_number(other),
     };
     if !ms.is_finite() || ms.abs() > 8.64e15 {
         return Err("Invalid time value".into());
@@ -181,7 +181,7 @@ pub fn make_bundle(g: &Gathered<'_>) -> Result<Value, String> {
     let mut keys: Vec<&String> = g.env.keys().filter(|k| k.starts_with("XENONET_")).collect();
     keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
     let settings: Vec<String> =
-        keys.into_iter().map(|k| if SHOWN.contains(&k.as_str()) { format!("{k}={}", g.env.get(k).map_or_else(|| "undefined".into(), js_string)) } else { k.clone() }).collect();
+        keys.into_iter().map(|k| if SHOWN.contains(&k.as_str()) { format!("{k}={}", g.env.get(k).map_or_else(|| "undefined".into(), display)) } else { k.clone() }).collect();
     let bundle = json!({
         "schema": SCHEMA,
         "at": iso_of(Some(&json!(g.now)))?,
@@ -201,7 +201,7 @@ pub fn make_bundle(g: &Gathered<'_>) -> Result<Value, String> {
 
 // A value in a template literal: String(v), and "undefined" for one missing.
 fn t(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 fn at<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
@@ -222,10 +222,10 @@ fn items(v: Option<&Value>) -> Vec<Value> {
 /// The bundle as Markdown, for an issue or an agent.
 pub fn bundle_markdown(b: &Value) -> String {
     let mut lines: Vec<String> = vec!["# XenoNet diagnostics".into(), String::new()];
-    let version = at(b, &["xenonet", "version"]).filter(|v| !v.is_null()).map_or_else(|| "?".into(), js_string);
-    let instance = at(b, &["xenonet", "instance"]).filter(|v| truthy(Some(v))).map_or(String::new(), |i| format!(" ({})", js_string(i)));
+    let version = at(b, &["xenonet", "version"]).filter(|v| !v.is_null()).map_or_else(|| "?".into(), display);
+    let instance = at(b, &["xenonet", "instance"]).filter(|v| truthy(Some(v))).map_or(String::new(), |i| format!(" ({})", display(i)));
     let running = if at(b, &["xenonet", "running"]) == Some(&Value::Bool(false)) { ", not running" } else { "" };
-    let electron = at(b, &["system", "electron"]).filter(|v| truthy(Some(v))).map_or(String::new(), |e| format!(" · Electron {}", js_string(e)));
+    let electron = at(b, &["system", "electron"]).filter(|v| truthy(Some(v))).map_or(String::new(), |e| format!(" · Electron {}", display(e)));
     lines.push(format!(
         "{} · XenoNet {version}{instance}{running} · {} {} {} · Node {}{electron}",
         t(raw(Some(b), "at")),
@@ -247,7 +247,7 @@ pub fn bundle_markdown(b: &Value) -> String {
             }
             for p in &problems {
                 let p = Some(p);
-                let fix = raw(p, "fix").filter(|f| truthy(Some(f))).map_or(String::new(), |f| format!("\n  Fix: {}", js_string(f)));
+                let fix = raw(p, "fix").filter(|f| truthy(Some(f))).map_or(String::new(), |f| format!("\n  Fix: {}", display(f)));
                 lines.push(format!("- **{}** `{}` {}: {}{fix}", t(raw(p, "status")), t(raw(p, "id")), t(raw(p, "title")), t(raw(p, "detail"))));
             }
         }
@@ -261,8 +261,8 @@ pub fn bundle_markdown(b: &Value) -> String {
     }
     for e in &errors {
         let e = Some(e);
-        let version = raw(e, "version").filter(|v| truthy(Some(v))).map_or(String::new(), |v| format!(", XenoNet {}", js_string(v)));
-        let fix = raw(e, "fix").filter(|f| truthy(Some(f))).map_or(String::new(), |f| format!("\n  Fix: {}", js_string(f)));
+        let version = raw(e, "version").filter(|v| truthy(Some(v))).map_or(String::new(), |v| format!(", XenoNet {}", display(v)));
+        let fix = raw(e, "fix").filter(|f| truthy(Some(f))).map_or(String::new(), |f| format!("\n  Fix: {}", display(f)));
         lines.push(format!(
             "- **{}** `{}` ({}, {}×, last {}{version}): {}{fix}",
             t(raw(e, "level")),
@@ -295,7 +295,7 @@ pub fn bundle_markdown(b: &Value) -> String {
         if less(raw(l, "version"), raw(l, "ships")) {
             lines.push(format!("- launcher {}, older than this XenoNet's {}, which replaces it when it next starts", t(raw(l, "version")), t(raw(l, "ships"))));
         } else {
-            let or_word = |v: Option<&Value>, w: &str| v.filter(|x| !x.is_null()).map_or_else(|| w.to_string(), js_string);
+            let or_word = |v: Option<&Value>, w: &str| v.filter(|x| !x.is_null()).map_or_else(|| w.to_string(), display);
             lines.push(format!("- launcher {}, Tools {}, Node {}", t(raw(l, "version")), or_word(raw(l, "tools"), "missing"), or_word(raw(l, "node"), "?")));
         }
     }
@@ -303,7 +303,7 @@ pub fn bundle_markdown(b: &Value) -> String {
     lines.push("## Settings".into());
     lines.push(String::new());
     let settings = items(raw(Some(b), "settings"));
-    lines.push(if settings.is_empty() { "None of XENONET_ set.".into() } else { settings.iter().map(|s| format!("- `{}`", js_string(s))).collect::<Vec<_>>().join("\n") });
+    lines.push(if settings.is_empty() { "None of XENONET_ set.".into() } else { settings.iter().map(|s| format!("- `{}`", display(s))).collect::<Vec<_>>().join("\n") });
     lines.push(String::new());
     lines.join("\n")
 }

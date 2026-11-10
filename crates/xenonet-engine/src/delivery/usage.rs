@@ -16,7 +16,7 @@ fn num(v: Option<&Value>) -> f64 {
         Some(Value::Null) => 0.0,
         Some(Value::Bool(b)) => f64::from(u8::from(*b)),
         Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
-        Some(v @ Value::String(_)) => xenonet_base::text::js_number(Some(v)),
+        Some(v @ Value::String(_)) => xenonet_text::text::to_number(Some(v)),
         Some(_) => f64::NAN,
     }
 }

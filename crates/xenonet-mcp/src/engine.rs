@@ -1,5 +1,5 @@
 //! Calls to the XenoNet on this machine, as core/client.js makes them
-//! (xenonet_base::client is the same for the command), but on tokio: the
+//! (xenonet_api::client is the same for the command), but on tokio: the
 //! servers wait on XenoNet (inbox waits up to two minutes, a channel's
 //! poll 25 seconds) while they go on answering their client, and a call
 //! still waiting when the client goes is dropped with the process, not
@@ -9,9 +9,9 @@ use std::fmt::Write as _;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use xenonet_base::client::{Refused, Server};
-use xenonet_base::json::{self, number_string, Value};
-use xenonet_base::text::js_string;
+use xenonet_api::client::{Refused, Server};
+use xenonet_text::json::{self, number_string, Value};
+use xenonet_text::text::display;
 
 struct Answer {
     status: u16,
@@ -135,7 +135,7 @@ pub async fn request(port: f64, name: &str, method: &str, route: &str, body: Opt
     let message = data
         .get("error")
         .filter(|e| !e.is_null())
-        .map_or_else(|| format!("{route}: {} {}", answer.status, answer.reason), |e| e.as_str().map_or_else(|| js_string(e), str::to_string));
+        .map_or_else(|| format!("{route}: {} {}", answer.status, answer.reason), |e| e.as_str().map_or_else(|| display(e), str::to_string));
     Err(Refused { message, status: Some(answer.status) })
 }
 

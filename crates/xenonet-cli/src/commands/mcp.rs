@@ -6,7 +6,7 @@
 
 use crate::args::Flags;
 use crate::out::{Done, Fail};
-use xenonet_base::text::{js_number, js_string};
+use xenonet_text::text::{display, to_number};
 
 pub const HELP: &str = include_str!("help/mcp.txt");
 
@@ -26,7 +26,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             // --port, or --dev's or --demo's; the server's own choice otherwise.
             let port = match flags.get("port") {
                 Some(p) => {
-                    let n = if *p == serde_json::Value::Bool(true) { 1.0 } else { js_number(Some(&serde_json::Value::String(js_string(p)))) };
+                    let n = if *p == serde_json::Value::Bool(true) { 1.0 } else { to_number(Some(&serde_json::Value::String(display(p)))) };
                     if n.fract() != 0.0 || !(1.0..=65535.0).contains(&n) {
                         return Err(Fail::new("--port is a number from 1 to 65535", 2));
                     }

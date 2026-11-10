@@ -47,7 +47,7 @@ pub struct NetFile {
     /// unless the person turns it off.
     pub share_load: bool,
     /// Who may start sessions here, and wake them for a message
-    /// (`xenonet_base::network::STARTS`, `WAKES`): you and your consent
+    /// (`xenonet_model::ops::STARTS`, `WAKES`): you and your consent
     /// unless the person widens them.
     pub start: String,
     pub wake: String,
@@ -108,8 +108,8 @@ impl NetFile {
             lan: v.get("lan").and_then(Value::as_str).map(str::to_string),
             titles_only: v.get("titlesOnly").and_then(Value::as_bool).unwrap_or(false),
             share_load: v.get("shareLoad").and_then(Value::as_bool).unwrap_or(true),
-            start: v.get("start").and_then(Value::as_str).filter(|s| xenonet_base::network::STARTS.contains(s)).unwrap_or("you").to_string(),
-            wake: v.get("wake").and_then(Value::as_str).filter(|s| xenonet_base::network::WAKES.contains(s)).unwrap_or("consent").to_string(),
+            start: v.get("start").and_then(Value::as_str).filter(|s| xenonet_model::ops::STARTS.contains(s)).unwrap_or("you").to_string(),
+            wake: v.get("wake").and_then(Value::as_str).filter(|s| xenonet_model::ops::WAKES.contains(s)).unwrap_or("consent").to_string(),
             delegated: v.get("delegated").and_then(|d| Some(Delegated { by: d.get("by")?.as_str()?.to_string(), at: d.get("at")?.as_i64()? })),
             joined: v.get("joined").and_then(Value::as_i64).unwrap_or(0),
         })
@@ -228,7 +228,7 @@ pub fn write_json(file: &Path, v: &Value) -> R<()> {
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    xenonet_base::fs::write_atomic(file, format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())).as_bytes())?;
+    xenonet_os::fs::write_atomic(file, format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())).as_bytes())?;
     Ok(())
 }
 

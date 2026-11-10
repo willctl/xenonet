@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use xenonet_actors::tokens::token_in_url;
-use xenonet_base::ids::{parse_actor_id, YOU};
-use xenonet_base::sync::Locked;
+use xenonet_model::ids::{parse_actor_id, YOU};
+use xenonet_os::sync::Locked;
 
 const CONSOLE_BODY: usize = 8 << 10;
 const REGISTER_BODY: usize = 4 << 10;
@@ -54,7 +54,7 @@ fn since_of(req: &Req) -> Result<Option<f64>, ()> {
     match req.param("since") {
         None | Some("") => Ok(None),
         Some(raw) => {
-            let n = xenonet_base::text::js_number(Some(&Value::String(raw.to_string())));
+            let n = xenonet_text::text::to_number(Some(&Value::String(raw.to_string())));
             if n.is_finite() {
                 Ok(Some(n))
             } else {
@@ -65,7 +65,7 @@ fn since_of(req: &Req) -> Result<Option<f64>, ()> {
 }
 
 fn limit_of(req: &Req) -> f64 {
-    let n = xenonet_base::text::js_number(req.param("limit").map(|s| Value::String(s.to_string())).as_ref());
+    let n = xenonet_text::text::to_number(req.param("limit").map(|s| Value::String(s.to_string())).as_ref());
     if n.is_nan() || n == 0.0 {
         1000.0
     } else {
@@ -275,7 +275,7 @@ impl ActorRoutes<'_> {
         let slug = auth["slug"].as_str().unwrap_or("");
         let instance = match body.get("instance") {
             Some(Value::Null) | None => "main".to_string(),
-            Some(v) => xenonet_base::text::js_string(v),
+            Some(v) => xenonet_text::text::display(v),
         };
         let caller = self.caller();
         let mut wait = caller.take(&format!("a:{slug}|hb"), rates::HEARTBEATS, 1.0);
@@ -288,7 +288,7 @@ impl ActorRoutes<'_> {
         let line = self.ctx.cores.reports.status_line(body.get("status").unwrap_or(&Value::Null));
         let id = auth["id"].as_str().unwrap_or("");
         let current = self.actors().snapshot(id, None, false)?.and_then(|s| s.get("status").cloned());
-        if line["ok"] != json!(true) || !xenonet_base::text::truthy(line.get("status")) || Some(&line["status"]) == current.as_ref() {
+        if line["ok"] != json!(true) || !xenonet_text::text::truthy(line.get("status")) || Some(&line["status"]) == current.as_ref() {
             return Ok(None);
         }
         let busy = caller.take(&format!("a:{slug}|events"), rates::EVENTS, 1.0);
@@ -430,7 +430,7 @@ impl ActorRoutes<'_> {
         let mut out = self.registration().decide(&request, body.get("decision").unwrap_or(&Value::Null))?;
         // An allowed ask for a gateway token answers the window with the
         // token, once, and the gateway's address to go with it.
-        if xenonet_base::text::truthy(out.get("credentials")) {
+        if xenonet_text::text::truthy(out.get("credentials")) {
             out["credentials"]["url"] = self.ctx.gateway.get().map_or(Value::Null, |g| g.url());
         }
         Ok(Reply::json(200, out))
@@ -523,7 +523,7 @@ impl ActorRoutes<'_> {
         if let Some(r) = self.ctx.from_you(req).await {
             return Ok(fail(403, "yours", r, &[], &none()));
         }
-        Ok(Reply::json(200, json!({ "at": xenonet_base::json::number(self.ctx.now()), "wakes": wakes.list()? })))
+        Ok(Reply::json(200, json!({ "at": xenonet_text::json::number(self.ctx.now()), "wakes": wakes.list()? })))
     }
 
     async fn wake(&self, req: &mut Req, raw: &str, test: bool) -> Result<Reply, CoreError> {
@@ -556,7 +556,7 @@ impl ActorRoutes<'_> {
             return Ok(r);
         }
         let (tx, rx) = mpsc::unbounded_channel::<Bytes>();
-        let frame = |event: &str, data: &Value| Bytes::from(format!("event: {event}\ndata: {}\n\n", xenonet_base::json::stringify(data, 0)));
+        let frame = |event: &str, data: &Value| Bytes::from(format!("event: {event}\ndata: {}\n\n", xenonet_text::json::stringify(data, 0)));
         let _ = tx.send(Bytes::from_static(b"retry: 5000\n\n"));
         let headers = [("content-type", "text/event-stream; charset=utf-8"), ("cache-control", "no-store"), ("x-content-type-options", "nosniff")];
         let id = auth["id"].as_str().unwrap_or("").to_string();
@@ -678,7 +678,7 @@ impl ActorRoutes<'_> {
                     return Ok(r);
                 }
                 let t = self.ctx.now();
-                return Ok(Reply::json(200, json!({ "schema": "actor/tokens/v1", "at": xenonet_base::json::number(t), "tokens": self.actors().tokens(t)? })));
+                return Ok(Reply::json(200, json!({ "schema": "actor/tokens/v1", "at": xenonet_text::json::number(t), "tokens": self.actors().tokens(t)? })));
             }
             "/api/actors/observers" => {
                 return match m {

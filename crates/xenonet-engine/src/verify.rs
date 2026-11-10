@@ -36,8 +36,8 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_adapter::products;
-use xenonet_base::json::number;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number;
 
 /// What a check reads of the machine: procs' lookups and the clock.
 pub trait Host {
@@ -358,7 +358,7 @@ fn key_of(pid: f64) -> u64 {
 
 /// A number as a reason or a key writes it.
 fn num_text(n: f64) -> String {
-    xenonet_base::json::number_string(n)
+    xenonet_text::json::number_string(n)
 }
 
 impl Verifier {

@@ -6,11 +6,11 @@ use serde_json::Value;
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use xenonet_base::client::Refused;
-use xenonet_base::json::{self, number_string};
-use xenonet_base::units::js_round;
+use xenonet_api::client::Refused;
+use xenonet_text::json::{self, number_string};
+use xenonet_text::units::round;
 
-pub use xenonet_base::units::plural as plural_with;
+pub use xenonet_text::units::plural as plural_with;
 
 /// A failure the command explains itself: printed without a stack trace,
 /// and with its own exit code. `expected` is a JS Fail's: one that says how
@@ -346,15 +346,15 @@ pub fn plural(n: f64, word: &str) -> String {
 /// When something was, as a person says it: just now, 5 min ago, 2 h ago,
 /// 3 d ago. A time that isn't one is NaN days ago, as in JS.
 pub fn ago(ts: f64, now: f64) -> String {
-    let s = js_round((now - ts) / 1000.0);
+    let s = round((now - ts) / 1000.0);
     if s < 60.0 {
         "just now".into()
     } else if s < 3600.0 {
-        format!("{} min ago", number_string(js_round(s / 60.0)))
+        format!("{} min ago", number_string(round(s / 60.0)))
     } else if s < 86400.0 {
-        format!("{} h ago", number_string(js_round(s / 3600.0)))
+        format!("{} h ago", number_string(round(s / 3600.0)))
     } else {
-        format!("{} d ago", number_string(js_round(s / 86400.0)))
+        format!("{} d ago", number_string(round(s / 86400.0)))
     }
 }
 

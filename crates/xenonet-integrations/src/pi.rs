@@ -9,11 +9,11 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use xenonet_app::nodepath::NATIVE;
-use xenonet_base::json::number as num;
-use xenonet_base::text::js_number;
+use xenonet_text::json::number as num;
+use xenonet_text::text::to_number;
 
 fn number(v: Option<&Value>) -> f64 {
-    let n = js_number(v);
+    let n = to_number(v);
     if n.is_finite() && n >= 0.0 {
         n
     } else {
@@ -24,7 +24,7 @@ fn number(v: Option<&Value>) -> f64 {
 fn time(v: Option<&Value>) -> f64 {
     match v {
         Some(Value::String(s)) => {
-            let t = xenonet_base::time::parse_iso(s).unwrap_or(f64::NAN);
+            let t = xenonet_text::time::parse_iso(s).unwrap_or(f64::NAN);
             if t.is_finite() && t >= 0.0 {
                 t
             } else {
@@ -68,7 +68,7 @@ pub fn export_metadata(value: &Value) -> Result<Value, Fail> {
 
 // A key for a Set or Map of JS values: its JSON.
 fn key(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), |v| xenonet_base::json::stringify(v, 0))
+    v.map_or_else(|| "undefined".into(), |v| xenonet_text::json::stringify(v, 0))
 }
 
 fn truthy_or(a: Option<&Value>, b: String) -> Value {
@@ -82,10 +82,10 @@ pub fn session_metadata(content: &str, file: &str) -> Result<Value, Fail> {
     let mut skipped = 0;
     let mut entries: Vec<Value> = Vec::new();
     for line in content.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)) {
-        if xenonet_base::text::js_trim(line).is_empty() {
+        if xenonet_text::text::trim(line).is_empty() {
             continue;
         }
-        match xenonet_base::json::parse(line) {
+        match xenonet_text::json::parse(line) {
             Ok(e) if e.is_object() || e.is_array() => entries.push(e),
             Ok(_) => {}
             Err(_) => skipped += 1,

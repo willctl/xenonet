@@ -16,13 +16,13 @@ pub mod transcript;
 
 use serde_json::{Map, Value};
 use xenonet_adapter::reader::{Call, Classified, Emit, Run, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};
-use xenonet_base::json::number;
-use xenonet_base::text::{js_number, js_trim, truthy};
 use xenonet_sources::line_events::{self, broken_at, usage_of, End, Field, Kind, LineEvent, LineFile};
 use xenonet_sources::lines::{claude_kind_of, claude_version_of, opt_prop, prop, ClaudeLine};
 use xenonet_sources::live::js::{ev, index0, is_str, js_max, nn, num_of, nv, obj, obj_opt, pages_extra, sort_by_num, sv};
 use xenonet_sources::live::telemetry::{project_limit, refusals};
 use xenonet_sources::live::{categorize, claude_edits, clip, clip_value, files_of, mcp_server_of, mcp_tool_of, string_of, tool_detail, wiki_pages_of};
+use xenonet_text::json::number;
+use xenonet_text::text::{to_number, trim, truthy};
 
 pub const SOURCE: &str = "anthropic/claude-code/transcript-line";
 // Claude plan usage is asked of Anthropic every 5 minutes; a reading this
@@ -126,7 +126,7 @@ impl Tailed for Reader {
             return Vec::new();
         }
         let resets = c.get("resets");
-        let since = |resets_at: Option<&Value>, span: f64, lookback: f64| js_max(now - lookback, if truthy(resets_at) { js_number(resets_at) - span } else { 0.0 });
+        let since = |resets_at: Option<&Value>, span: f64, lookback: f64| js_max(now - lookback, if truthy(resets_at) { to_number(resets_at) - span } else { 0.0 });
         let points = |key: &str, from: f64| -> Vec<(f64, f64)> {
             self.samples.iter().filter(|x| nn(opt_prop(Some(x), key)).is_some() && num_of(Some(x), "ts") >= from).map(|x| (num_of(Some(x), "ts"), num_of(Some(x), key))).collect()
         };
@@ -219,7 +219,7 @@ pub fn claude_line(
             t.add_subagent(i, Some(&agent), m);
         }
         let a = t.subagent(i, Some(&agent)).expect("added above when missing");
-        let last = js_max(js_number(a.get("lastAt")), ts);
+        let last = js_max(to_number(a.get("lastAt")), ts);
         a.insert("lastAt".into(), number(last));
     }
     // The context's fill, where a line says it (Grok Build's usage
@@ -291,7 +291,7 @@ fn claude_assistant(t: &mut dyn Tail, i: usize, agent: &Value, events: &[LineEve
     if let Some(u) = u {
         t.mark_seen(i, id.as_ref());
         let tk = &u.tokens;
-        let ctx = tk.input.number() + tk.cache_read.number() + js_number(Some(&u.cache_write));
+        let ctx = tk.input.number() + tk.cache_read.number() + to_number(Some(&u.cache_write));
         let output = tk.output.number();
         t.add_output_tokens(i, output);
         t.add_tokens(i, ctx + output, ts, live);
@@ -331,7 +331,7 @@ fn claude_assistant(t: &mut dyn Tail, i: usize, agent: &Value, events: &[LineEve
             let text = prop(Some(b), "text")?;
             let said = match text {
                 None | Some(Value::Null) => false,
-                Some(Value::String(x)) => !js_trim(x).is_empty(),
+                Some(Value::String(x)) => !trim(x).is_empty(),
                 Some(_) => return Err(TypeError("b.text?.trim is not a function".into())),
             };
             if said && !has_agent {
@@ -379,7 +379,7 @@ fn claude_tool_use(t: &mut dyn Tail, i: usize, agent: &Value, b: &Value, ts: f64
     let itag = t.inflight_add(i, bid.as_ref(), name.as_ref(), ts);
     if has_agent {
         let a = t.subagent(i, Some(agent)).expect("a subagent is added when the first line that names it is read");
-        let tools = js_number(a.get("tools")) + 1.0;
+        let tools = to_number(a.get("tools")) + 1.0;
         a.insert("tools".into(), number(tools));
     }
     let name_s = string_of(name.as_ref());
@@ -488,7 +488,7 @@ fn claude_user(t: &mut dyn Tail, i: usize, agent: &Value, events: &[LineEvent<'_
         return Ok(());
     }
     let text = &p.text;
-    if js_trim(text).is_empty() || text.starts_with('<') {
+    if trim(text).is_empty() || text.starts_with('<') {
         return Ok(());
     }
     if has_agent {

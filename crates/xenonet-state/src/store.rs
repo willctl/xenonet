@@ -5,8 +5,8 @@
 //! document must hold, and what each change does to it.
 
 use serde_json::{json, Map, Value};
-use xenonet_base::paths::is_under;
-use xenonet_base::units::to_fixed;
+use xenonet_os::paths::is_under;
+use xenonet_text::units::to_fixed;
 
 fn is_object(v: &Value) -> bool {
     v.is_object()
@@ -55,14 +55,14 @@ pub fn prepare(state: &mut Map<String, Value>) -> Vec<String> {
 pub fn layout_changes(positions: Option<&Value>) -> Vec<(String, Option<Value>)> {
     let Some(Value::Object(m)) = positions else { return Vec::new() };
     let mut out = Vec::new();
-    for (id, p) in xenonet_base::jsstr::js_key_order(m.clone()) {
+    for (id, p) in xenonet_text::utf16::key_order(m.clone()) {
         if p.is_null() {
             out.push((id, None));
             continue;
         }
         let xyz: Vec<Option<f64>> = ["x", "y", "z"].iter().map(|k| p.get(*k).and_then(Value::as_f64).filter(|n| n.is_finite())).collect();
         if let [Some(x), Some(y), Some(z)] = xyz[..] {
-            let fixed = |n: f64| xenonet_base::json::number(to_fixed(n, 2).parse::<f64>().unwrap_or(f64::NAN) + 0.0);
+            let fixed = |n: f64| xenonet_text::json::number(to_fixed(n, 2).parse::<f64>().unwrap_or(f64::NAN) + 0.0);
             out.push((id, Some(json!({ "x": fixed(x), "y": fixed(y), "z": fixed(z) }))));
         }
     }

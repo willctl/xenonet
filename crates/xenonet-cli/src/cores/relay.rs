@@ -20,9 +20,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt};
 use tokio::sync::{mpsc, Notify};
-use xenonet_base::process::Background as _;
 use xenonet_hosts::frames::{encode, parse_frame, LineSplitter, FROM_CONSOLE, MAX_FRAME, MAX_REQUEST, PROTOCOL};
 use xenonet_hosts::relay::{self as core, Outbox, Producer, Shape, EXIT_DONE, EXIT_NO_XENONET, EXIT_XENONET_GONE};
+use xenonet_os::process::Background as _;
 
 const VERSION: &str = env!("XENONET_VERSION");
 const GET_MS: f64 = core::GET_TIMEOUT_MS;
@@ -46,13 +46,13 @@ struct GetError {
 /// given and no bigger than a frame: { status, body }.
 async fn get_json(port: u16, route: String, timeout_ms: f64) -> Result<(u16, Value), GetError> {
     let r = tokio::task::spawn_blocking(move || {
-        xenonet_base::http::request(port, "GET", &route, &[("accept".into(), "application/json".into())], None, Some(Duration::from_millis(timeout_ms as u64)))
+        xenonet_api::http::request(port, "GET", &route, &[("accept".into(), "application/json".into())], None, Some(Duration::from_millis(timeout_ms as u64)))
     })
     .await
     .map_err(|e| GetError { message: e.to_string(), status: None })?;
     let a = r.map_err(|e| match e.kind() {
         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
-            GetError { message: format!("no answer in {} s", xenonet_base::json::number_string(timeout_ms / 1000.0)), status: Some(504) }
+            GetError { message: format!("no answer in {} s", xenonet_text::json::number_string(timeout_ms / 1000.0)), status: Some(504) }
         }
         std::io::ErrorKind::ConnectionRefused => GetError { message: format!("connect ECONNREFUSED 127.0.0.1:{port}"), status: None },
         _ => GetError { message: e.to_string(), status: None },
@@ -65,7 +65,7 @@ async fn get_json(port: u16, route: String, timeout_ms: f64) -> Result<(u16, Val
     if text.is_empty() {
         return Ok((a.status, Value::Null));
     }
-    Ok(match xenonet_base::json::parse(&text) {
+    Ok(match xenonet_text::json::parse(&text) {
         Ok(v) => (a.status, v),
         Err(_) => (502, json!({ "error": "XenoNet answered with something that isn't JSON" })),
     })
@@ -85,7 +85,7 @@ enum Event {
 /// followEvents(port, route): the event stream, each event as it comes, on
 /// a thread of its own; Err when it doesn't start.
 fn follow_events(port: u16, route: &str, to: mpsc::UnboundedSender<Event>) -> Result<(), String> {
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("connect {} 127.0.0.1:{port}", xenonet_base::fs::code_of(&e).unwrap_or("ECONNREFUSED")))?;
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("connect {} 127.0.0.1:{port}", xenonet_os::fs::code_of(&e).unwrap_or("ECONNREFUSED")))?;
     let _ = s.set_nodelay(true);
     write!(s, "GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
@@ -135,7 +135,7 @@ fn follow_events(port: u16, route: &str, to: mpsc::UnboundedSender<Event>) -> Re
                 if data.is_empty() {
                     continue;
                 }
-                if let Ok(v) = xenonet_base::json::parse(&data.join("\n")) {
+                if let Ok(v) = xenonet_text::json::parse(&data.join("\n")) {
                     if to.send(Event::One(name, v)).is_err() {
                         return false;
                     }
@@ -284,7 +284,7 @@ impl Relay {
         }
         let text = encode(frame);
         if xenonet_app::jstext::utf16_len(&text) > MAX_FRAME {
-            let t = frame.get("t").map(xenonet_base::text::js_string).unwrap_or_default();
+            let t = frame.get("t").map(xenonet_text::text::display).unwrap_or_default();
             return log(&format!("left out a {t} too big to send ({} MB)", (text.len() as f64 / 1e6).round()));
         }
         if let Some(t) = self.out.send(text, coalesce, now()) {
@@ -362,7 +362,7 @@ impl Relay {
         }
         let id = f.get("id").and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_991.0).map(|n| n as i64);
         match (f.get("t").and_then(Value::as_str), id) {
-            (Some("time"), Some(id)) => self.send(&json!({ "t": "time", "id": id, "now": xenonet_base::json::number(now()) }), None),
+            (Some("time"), Some(id)) => self.send(&json!({ "t": "time", "id": id, "now": xenonet_text::json::number(now()) }), None),
             (Some("get"), Some(id)) => {
                 let (shape, read) = match core::allowed(f.get("path")) {
                     Ok((shape, path)) => {
@@ -492,7 +492,7 @@ async fn serve(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, up: Opti
         return r.code;
     };
     let me = get_json(port, "/api/hosts/self".into(), GET_MS).await.unwrap_or_else(|e| (0, json!({ "error": e.message })));
-    if me.0 != 200 || !xenonet_base::text::truthy(me.1.get("key")) {
+    if me.0 != 200 || !xenonet_text::text::truthy(me.1.get("key")) {
         let (code, bye) = core::self_bye(f64::from(me.0), &me.1, up.get("version"));
         r.stop(code, Some(bye));
         return r.code;
@@ -501,8 +501,8 @@ async fn serve(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, up: Opti
     let hello = json!({
         "t": "hello", "schema": "host/hello/v1", "protocol": PROTOCOL, "version": VERSION,
         "host": { "id": me.1.get("id").cloned().unwrap_or(Value::Null), "key": me.1["key"] },
-        "platform": sys::platform(), "demo": xenonet_base::text::truthy(up.get("demo")), "now": xenonet_base::json::number(now()),
-        "sinceMs": xenonet_base::json::number(r.since_ms), "detail": r.detail,
+        "platform": sys::platform(), "demo": xenonet_text::text::truthy(up.get("demo")), "now": xenonet_text::json::number(now()),
+        "sinceMs": xenonet_text::json::number(r.since_ms), "detail": r.detail,
     });
     r.send(&hello, None);
 
@@ -560,7 +560,7 @@ async fn serve(r: &mut Relay, read: &mut mpsc::UnboundedReceiver<Read>, up: Opti
             () = drained.notified() => r.drain(),
             _ = pinger.tick() => {
                 if r.out.ping_due(now()) {
-                    r.send(&json!({ "t": "ping", "now": xenonet_base::json::number(now()) }), None);
+                    r.send(&json!({ "t": "ping", "now": xenonet_text::json::number(now()) }), None);
                 }
             }
             () = &mut signals => r.stop(EXIT_DONE, None),

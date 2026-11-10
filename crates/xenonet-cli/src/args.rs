@@ -9,8 +9,8 @@
 //! repeat, under the flag's name in camelCase.
 
 use serde_json::{Map, Value};
-use xenonet_base::client::Pick;
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_api::client::Pick;
+use xenonet_text::text::{display, to_number, truthy};
 
 const TAKES_VALUE: &[&str] = &[
     "port",
@@ -128,20 +128,20 @@ impl Flags {
 
     /// `flags.key || null`, as text: what a template string makes of it.
     pub fn text(&self, key: &str) -> Option<String> {
-        self.get(key).filter(|v| truthy(Some(v))).map(js_string)
+        self.get(key).filter(|v| truthy(Some(v))).map(display)
     }
 
     /// `Number(flags.key)`, NaN when it isn't there.
     pub fn number(&self, key: &str) -> f64 {
-        js_number(self.get(key))
+        to_number(self.get(key))
     }
 
     /// `[].concat(flags.key ?? [])`, as text.
     pub fn list(&self, key: &str) -> Vec<String> {
         match self.get(key) {
             None | Some(Value::Null) => Vec::new(),
-            Some(Value::Array(a)) => a.iter().map(js_string).collect(),
-            Some(v) => vec![js_string(v)],
+            Some(Value::Array(a)) => a.iter().map(display).collect(),
+            Some(v) => vec![display(v)],
         }
     }
 

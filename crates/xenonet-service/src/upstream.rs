@@ -64,7 +64,7 @@ fn local(route: &str) -> bool {
 }
 
 fn answer(status: u16, body: serde_json::Value) -> Reply {
-    let mut r = Reply::raw(status, xenonet_base::json::stringify(&body, 0), &[]);
+    let mut r = Reply::raw(status, xenonet_text::json::stringify(&body, 0), &[]);
     r.headers = vec![("content-type".into(), "application/json".into())];
     r
 }

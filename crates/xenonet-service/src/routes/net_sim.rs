@@ -28,8 +28,8 @@ use crate::http::{Body, Reply, Req};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_base::ids::{is_host_id, parse_qualified};
-use xenonet_base::sync::Locked;
+use xenonet_model::ids::{is_host_id, parse_qualified};
+use xenonet_os::sync::Locked;
 
 /// The simulations, for the console tools' list.
 pub const KINDS: [&str; 8] = ["net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting", "net-approval"];
@@ -394,7 +394,7 @@ fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bo
         // rack runs an older XenoNet, which says neither: starts there are
         // refused as too old.
         "reach": if m.id == "rack" { Value::Null } else { json!({ "start": "you", "wake": "consent", "pending": [] }) },
-        "can": if m.id == "rack" { json!([]) } else { json!(xenonet_base::network::CAN) },
+        "can": if m.id == "rack" { json!([]) } else { json!(xenonet_model::ops::CAN) },
     })
 }
 
@@ -809,7 +809,7 @@ async fn asks(ctx: &Arc<Ctx>, req: &mut Req, answer: bool) -> Result<Option<Repl
         return Ok(Some(Reply::json(200, real)));
     }
     let bytes = req.bytes(4 << 10).await?;
-    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let body = xenonet_text::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
     let id = body.get("ask").and_then(Value::as_str).unwrap_or("").to_string();
     let decision = body.get("decision").and_then(Value::as_str).unwrap_or("").to_string();
     let made = sims().locked().get(&key(ctx)).is_some_and(|s| s.asks.iter().any(|a| a["id"] == id.as_str()));
@@ -838,7 +838,7 @@ async fn asks(ctx: &Arc<Ctx>, req: &mut Req, answer: bool) -> Result<Option<Repl
 /// back.
 async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     let bytes = req.bytes(64 << 10).await?;
-    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let body = xenonet_text::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
     let machine = body.get("machine").and_then(Value::as_str).unwrap_or("").to_string();
     let Some(state) = simulated_net_state(ctx) else { return Ok(None) };
     let row = state["hosts"].as_array().and_then(|l| l.iter().find(|h| h["id"] == machine.as_str() && h["self"] != true).cloned());
@@ -872,12 +872,12 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
             let words = xenonet_engine::delivery::starts::answer_words("started", &machine, &started);
             c.broadcast(
                 "start",
-                &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }),
+                &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_text::json::number(c.now()), "simulated": true }),
             );
             tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
             let ended = json!({ "session": session, "exit": 0, "minutes": 0 });
             let words = xenonet_engine::delivery::starts::answer_words("ended", &machine, &ended);
-            c.broadcast("start", &json!({ "state": "ended", "host": machine, "session": session, "exit": 0, "minutes": 0, "words": words, "at": xenonet_base::json::number(c.now()), "simulated": true }));
+            c.broadcast("start", &json!({ "state": "ended", "host": machine, "session": session, "exit": 0, "minutes": 0, "words": words, "at": xenonet_text::json::number(c.now()), "simulated": true }));
         });
     }
     Ok(Some(Reply::json(
@@ -896,7 +896,7 @@ fn set_reach(state: &mut Value, body: &Value, now: f64) -> Result<(), (u16, &'st
     let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     let me = state["self"]["id"].as_str().unwrap_or("").to_string();
     let bad = |k: &str, v: &str, allowed: &[&str]| (!allowed.contains(&v)).then(|| (400, "bad-request", format!("{k} is one of {}", allowed.join(", "))));
-    for (k, allowed) in [("start", &xenonet_base::network::STARTS[..]), ("wake", &xenonet_base::network::WAKES[..])] {
+    for (k, allowed) in [("start", &xenonet_model::ops::STARTS[..]), ("wake", &xenonet_model::ops::WAKES[..])] {
         if let Some(e) = text(k).and_then(|v| bad(k, &v, allowed)) {
             return Err(e);
         }
@@ -983,9 +983,9 @@ fn note_delegated(reach: &mut Value, start: &str, by: &str, now: f64) {
 // real route, with its body put back.
 async fn message(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
     let bytes = req.bytes(16 << 10).await?;
-    let body = xenonet_base::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
+    let body = xenonet_text::json::parse(&String::from_utf8_lossy(&bytes)).unwrap_or(Value::Null);
     let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
-    let host = parse_qualified(&to).and_then(|(h, _)| h).map(str::to_string);
+    let host = parse_qualified(&to).and_then(|q| q.host).map(str::to_string);
     let known = simulated_remote_agents(ctx).is_some_and(|l| l.iter().any(|a| a["id"] == to.as_str()));
     let Some(host) = host.filter(|_| known) else {
         req.body = Body::Bytes(bytes);
@@ -1080,7 +1080,7 @@ mod tests {
             well_formed(&s);
             let me = s["self"]["id"].as_str().unwrap_or("");
             for a in &agents {
-                let (host, local) = parse_qualified(a["id"].as_str().unwrap()).unwrap();
+                let xenonet_model::ids::Qualified { host, local } = parse_qualified(a["id"].as_str().unwrap()).unwrap();
                 assert_eq!(host, a["host"].as_str());
                 assert!(host != Some(me) && has_host(&s, host.unwrap()), "{kind}: {a}");
                 assert!(local.starts_with("claude:") || local.starts_with("codex:"));
@@ -1231,7 +1231,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("xenonet-net-sim-test-{}", std::process::id()));
         config.state_dir = tmp.join("state").to_string_lossy().into_owned();
         config.cache_dir = tmp.join("cache").to_string_lossy().into_owned();
-        Arc::new(Ctx::new(config, "0.0.0".into(), cores, xenonet_base::log::Log::new(None, "service", None, None, "/home/nova", 1 << 20)))
+        Arc::new(Ctx::new(config, "0.0.0".into(), cores, xenonet_os::log::Log::new(None, "service", None, None, "/home/nova", 1 << 20)))
     }
 
     #[tokio::test]

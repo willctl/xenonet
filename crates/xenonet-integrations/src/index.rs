@@ -10,7 +10,7 @@ use xenonet_app::nodepath::NATIVE;
 
 /// Whether settings.json says to read Pi's sessions.
 pub fn pi_on(settings_file: Option<&str>) -> bool {
-    settings_file.and_then(|f| fsx::read_text(f).ok()).and_then(|t| xenonet_base::json::parse(&t).ok()).is_some_and(|s| s.get("piOn") == Some(&json!(true)))
+    settings_file.and_then(|f| fsx::read_text(f).ok()).and_then(|t| xenonet_text::json::parse(&t).ok()).is_some_and(|s| s.get("piOn") == Some(&json!(true)))
 }
 
 /// Keeps whether to read Pi's sessions, readable by you alone.
@@ -18,7 +18,7 @@ pub fn set_pi(settings_file: Option<&str>, on: &Value) -> Result<Value, Fail> {
     let Some(on) = on.as_bool() else { return fail("Choose whether to read Pi sessions.") };
     if let Some(file) = settings_file {
         let tmp = format!("{file}.tmp");
-        fsx::write_file(&tmp, xenonet_base::json::stringify(&json!({ "piOn": on }), 0).as_bytes(), Some(0o600))?;
+        fsx::write_file(&tmp, xenonet_text::json::stringify(&json!({ "piOn": on }), 0).as_bytes(), Some(0o600))?;
         fsx::rename(&tmp, file)?;
     }
     Ok(json!({ "piOn": on }))
@@ -77,10 +77,10 @@ pub fn demo_run(args: &[Value]) -> Result<String, String> {
         }
         let problems = if has("demo-partial") { json!([{ "path": "image.png", "reason": "Binary file" }]) } else { json!([]) };
         let out = json!({ "files": [{ "path": "hello.txt", "content": crate::b64::encode(b"Hello from the sandbox.\n") }], "omissions": [], "problems": problems });
-        return Ok(xenonet_base::json::stringify(&out, 0));
+        return Ok(xenonet_text::json::stringify(&out, 0));
     }
     if has("get") && has("json") {
-        return Ok(xenonet_base::json::stringify(&json!({ "phase": "Ready" }), 0));
+        return Ok(xenonet_text::json::stringify(&json!({ "phase": "Ready" }), 0));
     }
     if has("policy") {
         return Ok("Demo policy: /workspace writable; network limited to the selected provider.".into());

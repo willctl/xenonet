@@ -23,7 +23,7 @@ pub async fn ask_codex(bin: &str, prompt: &str, schema: Option<Value>, codex_hom
         let schema_file = match schema {
             Some(s) => {
                 let f = dir.join("schema.json");
-                std::fs::write(&f, xenonet_base::json::stringify(&s, 0)).map_err(|e| e.to_string())?;
+                std::fs::write(&f, xenonet_text::json::stringify(&s, 0)).map_err(|e| e.to_string())?;
                 Some(f.to_string_lossy().into_owned())
             }
             None => None,
@@ -41,7 +41,7 @@ pub async fn ask_codex(bin: &str, prompt: &str, schema: Option<Value>, codex_hom
     let args = xenonet_state::digest::codex_exec_args(&dir.to_string_lossy(), &out.to_string_lossy(), schema_file.as_deref());
     let ran = async {
         let mut cmd = Command::new(bin);
-        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        xenonet_os::process::Background::no_window(cmd.as_std_mut());
         let mut child = cmd
             .args(&args)
             .env("CODEX_HOME", &home)
@@ -61,7 +61,7 @@ pub async fn ask_codex(bin: &str, prompt: &str, schema: Option<Value>, codex_hom
         Ok::<_, String>((done.status.code(), stderr))
     }
     .await;
-    let msg = std::fs::read_to_string(&out).map(|t| xenonet_base::text::js_trim(&t).to_string()).unwrap_or_default();
+    let msg = std::fs::read_to_string(&out).map(|t| xenonet_text::text::trim(&t).to_string()).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
     let (code, stderr) = ran?;
     if msg.is_empty() {

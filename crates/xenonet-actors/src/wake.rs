@@ -39,11 +39,11 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use xenonet_base::json::{number, stringify};
-use xenonet_base::jsstr::{base64, base64_bytes};
-use xenonet_base::sync::Locked;
-use xenonet_base::text::js_string;
-use xenonet_base::text::truthy;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::{number, stringify};
+use xenonet_text::text::display;
+use xenonet_text::text::truthy;
+use xenonet_text::utf16::{base64, base64_bytes};
 
 pub const WAKE_KINDS: [&str; 3] = ["webhook", "notify", "none"];
 const META: &str = "wakes";
@@ -188,7 +188,7 @@ fn unbracket(h: &str) -> &str {
 
 /// A number as JS writes it.
 fn num_text(n: f64) -> String {
-    js_string(&number(n))
+    display(&number(n))
 }
 
 /// A webhook URL as XenoNet takes it (`raw`: null or absent for none):
@@ -196,8 +196,8 @@ fn num_text(n: f64) -> String {
 /// (the key goes apart), not link-local, at most 2,048 characters. (url,
 /// host), or a 400.
 pub fn check_wake_url(host: &mut dyn Host, raw: &Value) -> Result<(String, String)> {
-    let s = if raw.is_null() { String::new() } else { js_string(raw) };
-    let s = xenonet_base::text::js_trim(&s);
+    let s = if raw.is_null() { String::new() } else { display(raw) };
+    let s = xenonet_text::text::trim(&s);
     if s.encode_utf16().count() > 2048 {
         return fail(400.0, "bad-request", "that URL is over 2,048 characters");
     }
@@ -256,7 +256,7 @@ pub fn wake_request(key: &str, actor: &str, unread: f64, version: &str, now: f64
     if !now.is_finite() || now.abs() > 8.64e15 {
         return Err(store::Error::new("Invalid time value"));
     }
-    let body = stringify(&json!({ "type": "xenonet.inbox", "timestamp": xenonet_base::time::iso(now), "data": { "actor": actor, "unread": number(unread) } }), 0);
+    let body = stringify(&json!({ "type": "xenonet.inbox", "timestamp": xenonet_text::time::iso(now), "data": { "actor": actor, "unread": number(unread) } }), 0);
     let stamp = num_text(timestamp);
     let mut headers = vec![
         ("content-type".to_string(), "application/json".to_string()),
@@ -441,7 +441,7 @@ impl Wakes {
         let text = match meta {
             Value::Null => "{}".to_string(),
             Value::String(s) => s,
-            other => js_string(&other),
+            other => display(&other),
         };
         Ok(match serde_json::from_str::<Value>(&text) {
             Ok(Value::Null) | Err(_) => json!({}),
@@ -639,7 +639,7 @@ impl Wakes {
         let set_host = |w: &Self| -> Result<Option<Value>> { Ok(w.config_of(slug)?.and_then(|c| c.get("host").cloned())) };
         let host = match set_host(self)? {
             None | Some(Value::Null) => "its webhook".to_string(),
-            Some(v) => js_string(&v),
+            Some(v) => display(&v),
         };
         let (Some(url), Some(key)) = (url.filter(|u| !u.is_empty()), key.filter(|k| !k.is_empty())) else {
             return Ok(out(
@@ -712,7 +712,7 @@ impl Wakes {
             }
         });
         if !ok {
-            Self::log(h, &format!("{id}: {}", xenonet_base::text::template(out.get("why"))));
+            Self::log(h, &format!("{id}: {}", xenonet_text::text::template(out.get("why"))));
         }
         out
     }
@@ -862,7 +862,7 @@ impl Wakes {
         };
         for r in self.store.actor_token_times()? {
             if truthy(r.get("hasToken")) || truthy(r.get("hasGateway")) {
-                add(format!("actor:{}", js_string(r.get("slug").unwrap_or(&Value::Null))));
+                add(format!("actor:{}", display(r.get("slug").unwrap_or(&Value::Null))));
             }
         }
         if let Value::Object(m) = self.configs()? {
@@ -902,9 +902,9 @@ impl Wakes {
             }
             let key = match ask.get("key") {
                 None | Some(Value::Null) => String::new(),
-                Some(k) => js_string(k),
+                Some(k) => display(k),
             };
-            let key = xenonet_base::text::js_trim(&key).to_string();
+            let key = xenonet_text::text::trim(&key).to_string();
             if !secret_ok(&key) {
                 return fail(400.0, "bad-request", "a webhook's key is 8 to 1,024 printable characters, without spaces, quotes or backslashes");
             }

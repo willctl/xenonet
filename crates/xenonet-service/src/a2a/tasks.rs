@@ -6,8 +6,8 @@
 use super::rpc::RpcError;
 use super::store::{ReplyRow, TaskRow, CANCELED, COMPLETED, FAILED, REJECTED, WORKING};
 use serde_json::{json, Map, Value};
-use xenonet_base::time::iso;
 use xenonet_engine::delivery::selector::KEYS as SELECTOR_KEYS;
+use xenonet_text::time::iso;
 
 /// The longest id XenoNet keeps of a client's (message ids, contexts).
 pub const ID_MAX: usize = 200;
@@ -74,7 +74,7 @@ pub fn incoming(params: &Value) -> Result<Incoming, RpcError> {
             _ => return Err(RpcError::invalid_params(&field, "a part holds exactly one of text, raw, url or data")),
         }
     }
-    let text = xenonet_base::text::js_trim(&texts.join("\n")).to_string();
+    let text = xenonet_text::text::trim(&texts.join("\n")).to_string();
     if text.is_empty() {
         return Err(RpcError::invalid_params("message.parts", "the text is empty"));
     }
@@ -96,7 +96,7 @@ pub fn incoming(params: &Value) -> Result<Incoming, RpcError> {
 
 fn target_of(metadata: Option<&Value>) -> Option<Result<String, RpcError>> {
     let t = metadata?.get("target")?;
-    Some(match t.as_str().map(xenonet_base::text::js_trim) {
+    Some(match t.as_str().map(xenonet_text::text::trim) {
         Some(s) if !s.is_empty() && s.len() <= TARGET_MAX => Ok(s.to_string()),
         Some("") | None => Err(RpcError::invalid_params("metadata.target", "a session's id (claude:…), repo:<name>, or a selector such as project:atlas")),
         Some(_) => Err(RpcError::invalid_params("metadata.target", &format!("must be at most {TARGET_MAX} bytes"))),

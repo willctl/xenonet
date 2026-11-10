@@ -19,7 +19,9 @@ serde_json.workspace = true
 # The app-server is a child process on the service's runtime.
 tokio.workspace = true
 xenonet-adapter.workspace = true
-xenonet-base.workspace = true
+xenonet-model.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
 # The app-server client's lifecycle, for its block.
 xenonet-blocks.workspace = true
 # Codex's version from its user agent, and a rollout's line sampling.

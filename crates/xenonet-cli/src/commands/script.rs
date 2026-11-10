@@ -18,7 +18,7 @@ pub fn brief(st: &Value) -> Value {
     let selection = st.get("selection").and_then(|s| crate::js::have(s, "id")).cloned().unwrap_or(Value::Null);
     let gathered = crate::js::some(st, "gathered").map_or(Value::Null, |g| json!(format!("{} around {}", list(g, "members").len(), t(g, "root"))));
     let overlays: Vec<Value> =
-        st.get("overlays").and_then(Value::as_object).into_iter().flatten().filter(|(_, v)| xenonet_base::text::truthy(Some(v))).map(|(k, _)| json!(k)).collect();
+        st.get("overlays").and_then(Value::as_object).into_iter().flatten().filter(|(_, v)| xenonet_text::text::truthy(Some(v))).map(|(k, _)| json!(k)).collect();
     let mut m = Map::new();
     m.insert("selection".into(), selection);
     m.insert("gathered".into(), gathered);
@@ -63,8 +63,8 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     if module {
         cores::run_module(&full, file, &instance, quiet, !crate::out::color())?;
     } else {
-        let text = std::fs::read_to_string(&full).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &full).message))?;
-        let steps = xenonet_base::json::parse(&text).map_err(|e| Fail::new(format!("{file} isn't JSON: {e}"), 1))?;
+        let text = std::fs::read_to_string(&full).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "open", &full).message))?;
+        let steps = xenonet_text::json::parse(&text).map_err(|e| Fail::new(format!("{file} isn't JSON: {e}"), 1))?;
         let Some(steps) = steps.as_array() else { return Err(Fail::new(format!("{file} should be a list of steps"), 1)) };
         cores::run_script(&instance, steps, &mut say)?;
     }
@@ -73,6 +73,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         json(&st);
         return Ok(0);
     }
-    print(format!("{} {} ran {}", c::green("✓"), sys::base_name(file), c::dim(xenonet_base::json::stringify(&st, 0))));
+    print(format!("{} {} ran {}", c::green("✓"), sys::base_name(file), c::dim(xenonet_text::json::stringify(&st, 0))));
     Ok(0)
 }

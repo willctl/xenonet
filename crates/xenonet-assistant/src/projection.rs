@@ -19,8 +19,8 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use xenonet_app::jsv::truthy;
-use xenonet_base::json::number as num;
-use xenonet_base::text::{js_string, JS_SPACE};
+use xenonet_text::json::number as num;
+use xenonet_text::text::{display, SPACE};
 
 pub const LABEL_MAX: usize = 240;
 pub const LIVE_MS: f64 = 30e3;
@@ -31,7 +31,7 @@ pub const SOURCE_NAMES: [&str; 3] = ["claude", "codex", "grok"];
 /// A time as an ISO string, or null for one that isn't a time after 1970.
 pub fn iso(v: Option<&Value>) -> Value {
     match v.and_then(Value::as_f64) {
-        Some(ms) if ms.is_finite() && ms > 0.0 => json!(xenonet_base::time::iso(ms)),
+        Some(ms) if ms.is_finite() && ms > 0.0 => json!(xenonet_text::time::iso(ms)),
         _ => Value::Null,
     }
 }
@@ -57,8 +57,7 @@ fn res() -> &'static Res {
     static R: OnceLock<Res> = OnceLock::new();
     R.get_or_init(|| Res {
         // \b and /i as JS has them without /u: ASCII words, ASCII case.
-        bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{JS_SPACE}]*[:=][{JS_SPACE}]*[^{JS_SPACE}]+"))
-            .expect("a fixed pattern"),
+        bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{SPACE}]*[:=][{SPACE}]*[^{SPACE}]+")).expect("a fixed pattern"),
         key: Regex::new(
             r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*",
         )
@@ -66,10 +65,10 @@ fn res() -> &'static Res {
         email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").expect("a fixed pattern"),
         // Followed by a separator or the end, checked after (a lookahead).
         user_folder: Regex::new(r#"(?:[A-Za-z]:)?[\\/](?i-u:Users|home)[\\/][^\\/"'`]+"#).expect("a fixed pattern"),
-        windows_path: Regex::new(&format!(r#"[A-Za-z]:[\\/][^{JS_SPACE}"'`<>|]*"#)).expect("a fixed pattern"),
+        windows_path: Regex::new(&format!(r#"[A-Za-z]:[\\/][^{SPACE}"'`<>|]*"#)).expect("a fixed pattern"),
         posix_path: Regex::new(r"/(?:[A-Za-z0-9_.@+-]+/)+[A-Za-z0-9_.@+-]*").expect("a fixed pattern"),
         run: Regex::new(r"[A-Za-z0-9+/=_-]{32,}").expect("a fixed pattern"),
-        spaces: Regex::new(&format!("[{JS_SPACE}]+")).expect("a fixed pattern"),
+        spaces: Regex::new(&format!("[{SPACE}]+")).expect("a fixed pattern"),
     })
 }
 
@@ -132,7 +131,7 @@ pub fn clean_label(text: &str) -> Option<String> {
         }
     });
     let s = r.spaces.replace_all(&s, " ");
-    let s = xenonet_base::text::js_trim(&s);
+    let s = xenonet_text::text::trim(&s);
     if s.is_empty() {
         return None;
     }
@@ -179,7 +178,7 @@ pub fn session_status(live: Option<&Value>, source_state: &str) -> (&'static str
 
 /// Why a session looks stuck, as a code: never the reason's words.
 pub fn stall_reason(reasons: Option<&Value>) -> &'static str {
-    let list: Vec<String> = reasons.and_then(Value::as_array).map(|r| r.iter().map(js_string).collect()).unwrap_or_default();
+    let list: Vec<String> = reasons.and_then(Value::as_array).map(|r| r.iter().map(display).collect()).unwrap_or_default();
     if list.iter().any(|r| r.contains("failed tool calls") || r.contains("times in a row")) {
         "repeated_failure"
     } else if list.iter().any(|r| r.starts_with("silent for")) {
@@ -198,7 +197,7 @@ pub fn is_session_id(s: &str) -> bool {
 
 // A key for a Map of JS values: its JSON.
 fn key(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), |v| xenonet_base::json::stringify(v, 0))
+    v.map_or_else(|| "undefined".into(), |v| xenonet_text::json::stringify(v, 0))
 }
 
 /// A view's or policy's pairs, by their first.
@@ -224,13 +223,13 @@ pub struct Visible<'a> {
 fn or0(v: Option<&Value>) -> f64 {
     match v {
         None | Some(Value::Null) => 0.0,
-        other => xenonet_base::text::js_number(other),
+        other => xenonet_text::text::to_number(other),
     }
 }
 
 /// The policy's lookback, at most LOOKBACK_MAX_MS.
 pub fn lookback(policy: &Value) -> f64 {
-    let l = policy.get("lookbackMs").filter(|v| !v.is_null()).map_or(LOOKBACK_MAX_MS, |v| xenonet_base::text::js_number(Some(v)));
+    let l = policy.get("lookbackMs").filter(|v| !v.is_null()).map_or(LOOKBACK_MAX_MS, |v| xenonet_text::text::to_number(Some(v)));
     if l.is_nan() {
         f64::NAN
     } else {
@@ -246,15 +245,15 @@ pub fn visible_sessions<'a>(view: &'a Value, policy: &Value, now: f64) -> Vec<Vi
     let mut out = Vec::new();
     for s in view.get("sessions").and_then(Value::as_array).into_iter().flatten() {
         let Some(project) = places.get(&key(s.get("place"))).filter(|p| truthy(Some(p))) else { continue };
-        if truthy(s.get("archived")) || !is_session_id(&s.get("id").map_or_else(|| "undefined".into(), js_string)) {
+        if truthy(s.get("archived")) || !is_session_id(&s.get("id").map_or_else(|| "undefined".into(), display)) {
             continue;
         }
         let updated = or0(s.get("updatedAt")).max(or0(s.get("live").and_then(|l| l.get("lastEventAt"))));
         if updated < oldest || updated.is_nan() {
             continue;
         }
-        let app = s.get("app").map_or_else(|| "undefined".into(), js_string);
-        let source = view.get("sources").and_then(|x| x.get(&app)).and_then(|x| x.get("state")).filter(|v| !v.is_null()).map_or_else(|| "unavailable".to_string(), js_string);
+        let app = s.get("app").map_or_else(|| "undefined".into(), display);
+        let source = view.get("sources").and_then(|x| x.get(&app)).and_then(|x| x.get("state")).filter(|v| !v.is_null()).map_or_else(|| "unavailable".to_string(), display);
         let (status, basis) = session_status(s.get("live"), &source);
         out.push(Visible { s, project: project.clone(), updated, source, status, basis });
     }
@@ -310,7 +309,7 @@ pub fn freshness_of(view: &Value, now: f64, names: &[String]) -> Freshness {
             _ => {}
         }
     }
-    let times: Vec<Option<f64>> = list.iter().map(|(_, s)| s.and_then(|s| s.get("observedAt")).filter(|v| !v.is_null()).map(|v| xenonet_base::text::js_number(Some(v)))).collect();
+    let times: Vec<Option<f64>> = list.iter().map(|(_, s)| s.and_then(|s| s.get("observedAt")).filter(|v| !v.is_null()).map(|v| xenonet_text::text::to_number(Some(v)))).collect();
     if times.iter().any(Option::is_none) {
         return Freshness { freshness: "unknown", observed_at: None, partial, warnings };
     }
@@ -400,7 +399,7 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
             continue;
         }
         let mut sessions = vec![c.get("a").cloned().unwrap_or(Value::Null), c.get("b").cloned().unwrap_or(Value::Null)];
-        sessions.sort_by(|x, y| js_string(x).encode_utf16().cmp(js_string(y).encode_utf16()));
+        sessions.sort_by(|x, y| display(x).encode_utf16().cmp(display(y).encode_utf16()));
         items.push(Item {
             kind: "collision",
             sessions,
@@ -414,8 +413,8 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
         .into_iter()
         .map(|i| {
             let mut parts: Vec<String> = vec![i.kind.into()];
-            parts.extend(i.sessions.iter().map(js_string));
-            parts.push(if i.first.is_null() { String::new() } else { js_string(&i.first) });
+            parts.extend(i.sessions.iter().map(display));
+            parts.push(if i.first.is_null() { String::new() } else { display(&i.first) });
             let mut m = Map::new();
             m.insert("attention_id".into(), json!(id_of(&parts.join("|"))));
             m.insert("kind".into(), json!(i.kind));
@@ -425,7 +424,7 @@ pub fn attention_items(view: &Value, policy: &Value, now: f64, id_of: &dyn Fn(&s
             m.insert("last_observed_at".into(), iso(Some(&at)));
             m.insert("reason_code".into(), json!(i.reason));
             if let Some(f) = i.files {
-                let n = if f.is_null() { 0.0 } else { xenonet_base::text::js_number(Some(&f)).floor() };
+                let n = if f.is_null() { 0.0 } else { xenonet_text::text::to_number(Some(&f)).floor() };
                 m.insert("file_count".into(), num(if n.is_nan() { f64::NAN } else { n.max(0.0) }));
             }
             m.insert("resolved".into(), json!(false));
@@ -524,7 +523,7 @@ pub fn stats_data(raw: &Value, now: f64) -> Value {
         "cached_input_tokens": t("cacheRead").map_or(Value::Null, num),
         "tool_call_count": tools.map_or(Value::Null, num),
         "turn_count": turns.map_or(Value::Null, |l| json!(l)),
-        "stats_observed_at": xenonet_base::time::iso(now),
+        "stats_observed_at": xenonet_text::time::iso(now),
         "complete": truthy(Some(raw)) && turns.is_some(),
     })
 }

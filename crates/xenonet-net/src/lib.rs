@@ -14,7 +14,7 @@
 //! - `link`: a host's link to its gateway, with backoff, the clock
 //!   offset, epochs and the long-poll fallback.
 //! - `node`: this machine in its network, behind
-//!   `xenonet_base::network::Net`, calling a `Sink`.
+//!   `xenonet_model::ops::Net`, calling a `Sink`.
 //! - `operator`: the person's actions from another host, and the rules
 //!   for changing who may start and wake sessions here.
 //! - `svc`: services a host publishes to the network, and requests to

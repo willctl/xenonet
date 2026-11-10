@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{Cores, Engine, State, R};
 use xenonet_api::wire::WireEnv;
-use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
 use xenonet_wire_engine::engine::EngineDriver;
 use xenonet_wire_engine::network;
 use xenonet_wire_engine::runtime::Runtime;
@@ -527,7 +527,7 @@ async fn a_handoff_works_on_one_machine_alone() {
     let n = net3("handoff-alone");
     let studio = n.e("studio");
     // Out of the network: this machine alone.
-    network::set_net(n.w("studio"), Arc::new(xenonet_base::network::NoNet));
+    network::set_net(n.w("studio"), Arc::new(xenonet_model::ops::NoNet));
     let made = studio.handoff(A, json!({ "goal": "Finish partial refunds", "next": "The API route" }), None).await.unwrap();
     let id = made["id"].as_str().unwrap().to_string();
     assert_eq!(made["toldNow"], json!([A2]));

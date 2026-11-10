@@ -36,7 +36,7 @@ use crate::keys::{HostKey, PublicKeys};
 use crate::{NetError, R};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use xenonet_base::ids::is_host_id;
+use xenonet_model::ids::is_host_id;
 
 pub const ROSTER_TAG: &str = "xenonet-roster/1";
 pub const MAX_SIGNERS: usize = 4;

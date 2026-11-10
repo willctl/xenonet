@@ -8,7 +8,7 @@ use serde_json::Value;
 /// "dev" when the file can't be read or isn't JSON.
 pub fn version_of(file: &std::path::Path) -> Option<Value> {
     let Ok(text) = std::fs::read_to_string(file) else { return Some(Value::String("dev".into())) };
-    match xenonet_base::json::parse(&text) {
+    match xenonet_text::json::parse(&text) {
         Ok(Value::Object(m)) => m.get("version").cloned(),
         // JSON.parse("null").version throws, which the JS catches.
         Ok(Value::Null) => Some(Value::String("dev".into())),

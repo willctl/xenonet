@@ -8,18 +8,18 @@ use xenonet_app::config::{config, Field, Finds};
 
 struct Disk;
 
-impl xenonet_base::dirs::Look for Disk {
+impl xenonet_adapter::dirs::Look for Disk {
     fn exists(&mut self, p: &str) -> bool {
         std::path::Path::new(p).exists()
     }
-    fn readdir(&mut self, p: &str) -> Result<Vec<String>, xenonet_base::dirs::Unreadable> {
-        let names = std::fs::read_dir(p).map_err(|_| xenonet_base::dirs::Unreadable)?;
+    fn readdir(&mut self, p: &str) -> Result<Vec<String>, xenonet_adapter::dirs::Unreadable> {
+        let names = std::fs::read_dir(p).map_err(|_| xenonet_adapter::dirs::Unreadable)?;
         let mut out: Vec<String> = names.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned())).collect();
         out.sort();
         Ok(out)
     }
     fn mtime(&mut self, p: &str) -> f64 {
-        std::fs::metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
+        std::fs::metadata(p).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
     }
 }
 
@@ -46,13 +46,13 @@ impl Finds for Found<'_> {
         dir.map_or(Value::Null, |d| json!(xenonet_sources::xenolith::context_server_of(d, &env, self.home, crate::fx::platform())))
     }
     fn claude_desktop_dir(&mut self) -> Option<String> {
-        let env = xenonet_base::dirs::Env {
+        let env = xenonet_adapter::dirs::Env {
             claude_desktop_dir: var(self.env, "XENONET_CLAUDE_DESKTOP_DIR").filter(|d| !d.is_empty()),
             local_app_data: var(self.env, "LOCALAPPDATA"),
             app_data: var(self.env, "APPDATA"),
             xdg_config_home: var(self.env, "XDG_CONFIG_HOME").filter(|d| !d.is_empty()),
         };
-        xenonet_base::dirs::find_claude_desktop_dir(&env, crate::fx::platform(), self.home, &mut Disk)
+        xenonet_adapter::dirs::find_claude_desktop_dir(&env, crate::fx::platform(), self.home, &mut Disk)
     }
 }
 
@@ -68,10 +68,10 @@ pub fn js_config(c: &Settings) -> Value {
     let mut out = Map::new();
     for (k, f) in made.fields {
         let v = match f {
-            Field::Num(n) => xenonet_base::json::number(n),
+            Field::Num(n) => xenonet_text::json::number(n),
             Field::Json(v) => v,
             Field::Set(items) => json!(items),
-            Field::Nums(nums) => Value::Object(nums.into_iter().map(|(k, n)| (k.to_string(), xenonet_base::json::number(n))).collect()),
+            Field::Nums(nums) => Value::Object(nums.into_iter().map(|(k, n)| (k.to_string(), xenonet_text::json::number(n))).collect()),
         };
         out.insert(k.to_string(), v);
     }

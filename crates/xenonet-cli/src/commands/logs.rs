@@ -9,19 +9,19 @@ use crate::out::{c, now, print, Done, Fail};
 use crate::sys;
 use serde_json::Value;
 use std::path::Path;
-use xenonet_base::json::stringify;
-use xenonet_base::log::{log_dir, read_logs, summarize, COMPONENTS, LEVELS};
-use xenonet_base::text::{is_js_space, js_string, js_trim};
+use xenonet_os::log::{log_dir, read_logs, summarize, COMPONENTS, LEVELS};
+use xenonet_text::json::stringify;
+use xenonet_text::text::{display, is_space, trim};
 
 pub const HELP: &str = include_str!("help/logs.txt");
 
 /// sinceOf(text, now): how far back --since says, as a time: 30m, 6h, 2d
 /// (24h when it's not given).
 pub fn since_of(text: Option<&Value>, now: f64) -> Result<f64, Fail> {
-    let said = text.filter(|v| !v.is_null()).map_or_else(|| "24h".to_string(), js_string);
-    let s = js_trim(&said);
+    let said = text.filter(|v| !v.is_null()).map_or_else(|| "24h".to_string(), display);
+    let s = trim(&said);
     let digits = s.bytes().take_while(u8::is_ascii_digit).count();
-    let unit = s[digits..].trim_start_matches(is_js_space);
+    let unit = s[digits..].trim_start_matches(is_space);
     let ms = match unit {
         "m" => 60e3,
         "h" => 3600e3,

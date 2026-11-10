@@ -5,9 +5,10 @@
 
 use serde_json::{Map, Value};
 use std::path::Path;
-use xenonet_base::text::truthy;
-use xenonet_base::{json, jsstr, paths};
+use xenonet_os::paths;
 use xenonet_sources::lines::{opt_prop, Js};
+use xenonet_text::text::truthy;
+use xenonet_text::{json, utf16};
 
 /// One of Claude desktop's session files: where it is, the folders it sits
 /// in below claude-code-sessions/, and what it says (None when it isn't
@@ -46,7 +47,7 @@ pub fn desktop_files(root: &str) -> Vec<DesktopFile> {
                 deeper.push(name);
                 walk(&full, &deeper, out)?;
             } else if t.is_file() && is_session_file(&name) {
-                let data = xenonet_base::fs::read_capped(Path::new(&full), SESSION_FILE_MAX).ok().and_then(|b| json::parse(&String::from_utf8_lossy(&b)).ok());
+                let data = xenonet_os::fs::read_capped(Path::new(&full), SESSION_FILE_MAX).ok().and_then(|b| json::parse(&String::from_utf8_lossy(&b)).ok());
                 out.push(DesktopFile { file: full, parts: parts.to_vec(), data });
             }
         }
@@ -156,7 +157,7 @@ pub fn renamed_record(record: Value, desktop_id: Js<'_>, cli_id: Js<'_>, title: 
 // An object's keys as a JS object lists them, all the way down.
 fn js_order(v: Value) -> Value {
     match v {
-        Value::Object(m) => Value::Object(jsstr::js_key_order(m.into_iter().map(|(k, v)| (k, js_order(v))).collect::<Map<_, _>>())),
+        Value::Object(m) => Value::Object(utf16::key_order(m.into_iter().map(|(k, v)| (k, js_order(v))).collect::<Map<_, _>>())),
         Value::Array(a) => Value::Array(a.into_iter().map(js_order).collect()),
         v => v,
     }

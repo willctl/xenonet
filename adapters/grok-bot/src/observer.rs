@@ -23,8 +23,8 @@ use std::sync::Mutex;
 use xenonet_adapter::observe::attribution::{self, census, spawned, Candidate, Census, Pending, SpawnsState};
 use xenonet_adapter::observe::{known, AppBundle, Core, Gather, Keep, Observer, ObserverHost, Result, Say};
 use xenonet_adapter::products::Product;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_os::sync::Locked;
+use xenonet_text::text::{display, truthy};
 
 pub const ID: &str = "actor:grok-bot";
 pub const POLL_MS: f64 = 3000.0;
@@ -39,7 +39,7 @@ const CAPABILITIES: [&str; 5] = ["run-commands", "browse", "message-people", "me
 fn in_bundle(program: &Value) -> bool {
     let p = match program {
         Value::Null => String::new(),
-        v => js_string(v),
+        v => display(v),
     };
     p.contains("/Grok Bot.app/")
 }
@@ -222,13 +222,13 @@ impl GrokBot {
             if !live.is_empty() {
                 s.busy_at = Some(s.busy_at.unwrap_or(0.0).max(at));
             }
-            xenonet_base::sort::sort_by(&mut live, |a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
+            xenonet_text::sort::sort_by(&mut live, |a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
             (app_runs, live.into_iter().next(), s.busy_at)
         };
         let (presence, status) = if app_runs && busy_at.is_some_and(|b| at - b < LINGER_MS) {
             let place = latest.as_ref().map_or(Value::Null, |e| e.place.clone());
             let name = h.actors().where_of(&place).get("name").cloned().unwrap_or(Value::Null);
-            let status = if truthy(Some(&name)) { format!("Running commands in {}", js_string(&name)) } else { "Running commands".into() };
+            let status = if truthy(Some(&name)) { format!("Running commands in {}", display(&name)) } else { "Running commands".into() };
             if truthy(Some(&place)) {
                 self.core.touch(h, ID, &place, "works-on", at)?;
             }
@@ -259,7 +259,7 @@ impl GrokBot {
             Agent::Unknown | Agent::None => Value::Null,
             Agent::Is(x) => json!(x),
         };
-        let num = xenonet_base::json::number;
+        let num = xenonet_text::json::number;
         let items = s
             .tracked
             .iter()
@@ -429,7 +429,7 @@ impl Observer for GrokBot {
         let mut rows: Vec<Value> = procs.describe(&children);
         let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
         // Parents before children, so a command's own children know it.
-        xenonet_base::sort::sort_by(&mut rows, |a, b| {
+        xenonet_text::sort::sort_by(&mut rows, |a, b| {
             let d = n(a, "start") - n(b, "start");
             let d = if d != 0.0 && !d.is_nan() { d } else { n(a, "pid") - n(b, "pid") };
             if d > 0.0 {
@@ -456,7 +456,7 @@ impl Observer for GrokBot {
                 // Node and Bun run Claude Code and Codex too, which only
                 // their arguments say: until the look's census reads those,
                 // such a process's agent isn't known.
-                let program = if program.is_null() { String::new() } else { js_string(&program) };
+                let program = if program.is_null() { String::new() } else { display(&program) };
                 let agent = match procs.agent_of(&program) {
                     Some(a) => Agent::Is(a),
                     None if procs.wants_args(&program) => Agent::Unknown,

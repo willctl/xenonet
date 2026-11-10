@@ -8,9 +8,9 @@
 
 use serde_json::Value;
 use std::sync::OnceLock;
-use xenonet_base::log::js_slice;
-use xenonet_base::text::js_trim;
-use xenonet_base::text::{template, truthy};
+use xenonet_text::text::trim;
+use xenonet_text::text::{template, truthy};
+use xenonet_text::utf16::whole_head;
 
 /// The agent apps by their id.
 pub fn app_name(app: &str) -> Option<&'static str> {
@@ -84,7 +84,7 @@ fn count(n: Option<&Value>) -> Value {
 /// A text cut to `n` UTF-16 units, the last of them an ellipsis.
 pub fn clip(s: &str, n: usize) -> String {
     if s.encode_utf16().count() > n {
-        format!("{}…", js_slice(s, n.saturating_sub(1)))
+        format!("{}…", whole_head(s, n.saturating_sub(1)))
     } else {
         s.to_string()
     }
@@ -240,7 +240,7 @@ pub fn one_line(s: &str) -> String {
     let mut out = String::with_capacity(b.len());
     let mut space = false;
     for c in b.chars() {
-        if xenonet_base::text::is_js_space(c) {
+        if xenonet_text::text::is_space(c) {
             if !space {
                 out.push(' ');
             }
@@ -250,7 +250,7 @@ pub fn one_line(s: &str) -> String {
             out.push(c);
         }
     }
-    js_trim(&out).to_string()
+    trim(&out).to_string()
 }
 
 fn key_prefix() -> &'static regex::Regex {

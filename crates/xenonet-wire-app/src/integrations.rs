@@ -45,7 +45,7 @@ fn thrown(e: Value) -> CoreError {
         return CoreError::of(Kind::Integration, status, e.get("code").and_then(Value::as_str).unwrap_or("failed"), message);
     }
     let mut c = CoreError::new(message);
-    c.code = e.get("code").map(xenonet_base::text::js_string);
+    c.code = e.get("code").map(xenonet_text::text::display);
     c
 }
 
@@ -154,7 +154,7 @@ impl Integrated {
                 }
                 let collect = Self::collect_text();
                 for pair in made["sandboxes"].as_array().cloned().unwrap_or_default() {
-                    let (name, options) = (xenonet_base::text::js_string(&pair[0]), pair[1].clone());
+                    let (name, options) = (xenonet_text::text::display(&pair[0]), pair[1].clone());
                     let shared = me.shared(collect.clone());
                     let o = options.clone();
                     let seed = fx::drive(
@@ -198,7 +198,7 @@ impl Integrated {
         let records = self.records.clone();
         let env = fx::env_map();
         match op.as_str() {
-            "now" => Ok(xenonet_base::json::number(now_ms())),
+            "now" => Ok(xenonet_text::json::number(now_ms())),
             "records.list" => records.locked().list().map(Value::Array).map_err(err),
             "records.add" => records.locked().add(&q["value"], now_ms()).map_err(err),
             "records.update" => records.locked().update(&q["id"], &q["fields"]).map_err(err),
@@ -207,8 +207,8 @@ impl Integrated {
                     let args = q["args"].as_array().cloned().unwrap_or_default();
                     return index::demo_run(&args).map(|out| json!({ "stdout": out })).map_err(|m| fx::error(m, None));
                 }
-                let file = xenonet_base::text::js_string(&q["file"]);
-                let args: Vec<String> = q["args"].as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default();
+                let file = xenonet_text::text::display(&q["file"]);
+                let args: Vec<String> = q["args"].as_array().map(|a| a.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
                 let timeout = q["options"]["timeout"].as_f64().unwrap_or(15000.0);
                 let mut env: Vec<(String, String)> = std::env::vars().collect();
                 env.push(("NO_COLOR".into(), "1".into()));
@@ -223,13 +223,13 @@ impl Integrated {
             }
             "git" => git(&q).await,
             "snapshot" => {
-                let source = xenonet_base::text::js_string(&q["source"]);
+                let source = xenonet_text::text::display(&q["source"]);
                 let perform: Perform = Arc::new(|q: Value| {
                     Box::pin(async move {
                         if q["op"] == "git" {
                             git(&q).await
                         } else {
-                            Err(fx::error(format!("no such request: {}", xenonet_base::text::js_string(&q["op"])), None))
+                            Err(fx::error(format!("no such request: {}", xenonet_text::text::display(&q["op"])), None))
                         }
                     })
                 });
@@ -293,11 +293,11 @@ impl Integrated {
     // A route: the preview's task to the decider, its answer checked and
     // made a decision by JevRouter's rules (jev.rs), and the record kept.
     async fn route(&self, ticket: &Value) -> R<Value> {
-        let held = self.tickets.locked().take(&xenonet_base::text::js_string(ticket), now_ms()).map_err(fail)?;
-        if xenonet_base::json::stringify(&held["candidates"], 0) != xenonet_base::json::stringify(&self.inventory(), 0) {
+        let held = self.tickets.locked().take(&xenonet_text::text::display(ticket), now_ms()).map_err(fail)?;
+        if xenonet_text::json::stringify(&held["candidates"], 0) != xenonet_text::json::stringify(&self.inventory(), 0) {
             return Err(CoreError::of(Kind::Integration, 409, "changed", "The available agents changed. Preview again."));
         }
-        let request = xenonet_base::text::js_string(&held["request"]);
+        let request = xenonet_text::text::display(&held["request"]);
         let candidates = held["candidates"].as_array().cloned().unwrap_or_default();
         let mut metrics = json!({ "model": self.model(), "cost": 0, "ms": 0 });
         let payload = routing::payload(&request, &candidates);
@@ -351,11 +351,11 @@ fn review_failure(f: Fail) -> Failure {
 // git as the reviews ask for it; `allowExit` is an exit code that still
 // answers (check-ignore's 1, for nothing ignored).
 async fn git(q: &Value) -> Result<Value, Value> {
-    let args: Vec<String> = q["args"].as_array().map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default();
+    let args: Vec<String> = q["args"].as_array().map(|a| a.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
     let o = &q["options"];
     let env = o["env"].as_object().map(fx::env_pairs);
     let timeout = o["timeout"].as_f64().unwrap_or(10000.0);
-    let input = q.get("input").filter(|i| !i.is_null()).map(xenonet_base::text::js_string);
+    let input = q.get("input").filter(|i| !i.is_null()).map(xenonet_text::text::display);
     let cwd = o["cwd"].as_str().map(str::to_string);
     let r = fx::exec_file("git", &args, timeout as u64, RunOptions { env, input, cwd, ..Default::default() }).await;
     if r.ok() || (q.get("allowExit").is_some_and(|a| !a.is_null() && *a == r.code)) {

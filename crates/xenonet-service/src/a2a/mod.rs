@@ -50,7 +50,7 @@ use store::{ReplyRow, Store, TaskRow};
 use tasks::Shown;
 use tokio::sync::{mpsc, watch};
 use xenonet_actors::limits::Buckets;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 /// The most of a body XenoNet reads, as the gateway's own limit.
 pub const BODY_MAX: usize = 64 << 10;
@@ -260,7 +260,7 @@ impl A2a {
     /// The target an actor's messages go to when they name none, set by
     /// the owner; None takes it away.
     pub fn set_default_target(&self, actor: &str, target: Option<&str>) -> Result<(), String> {
-        let target = target.map(xenonet_base::text::js_trim).filter(|t| !t.is_empty());
+        let target = target.map(xenonet_text::text::trim).filter(|t| !t.is_empty());
         if target.is_some_and(|t| t.len() > 300) {
             return Err("a target is at most 300 characters".into());
         }
@@ -440,7 +440,7 @@ impl A2a {
         };
         let after = match params.get("statusTimestampAfter") {
             None | Some(Value::Null) => None,
-            Some(Value::String(s)) => Some(xenonet_base::time::parse_iso(s).ok_or_else(|| RpcError::invalid_params("statusTimestampAfter", "must be an ISO 8601 time"))?),
+            Some(Value::String(s)) => Some(xenonet_text::time::parse_iso(s).ok_or_else(|| RpcError::invalid_params("statusTimestampAfter", "must be an ISO 8601 time"))?),
             Some(_) => return Err(RpcError::invalid_params("statusTimestampAfter", "must be an ISO 8601 time")),
         };
         let history = tasks::history_length(params.get("historyLength"), "historyLength")?;
@@ -792,7 +792,7 @@ impl A2a {
             let Some(message) = int(&m["id"]) else { continue };
             let sender = m["from"]["id"].as_str().or_else(|| m["from"].as_str()).map(str::to_string);
             let name = m["from"]["title"].as_str().or_else(|| m["from"]["name"].as_str()).filter(|n| !n.is_empty()).map(str::to_string);
-            let text = xenonet_base::text::js_string(&m["text"]);
+            let text = xenonet_text::text::display(&m["text"]);
             let at = m["at"].as_f64().unwrap_or(now);
             let found = (|| -> rusqlite::Result<Option<TaskRow>> {
                 if let Some(r) = int(&m["replyTo"]) {
@@ -833,7 +833,7 @@ enum Start {
 
 /// A page's token: where the last task shown sorts.
 fn token_of(at: f64, seq: i64) -> String {
-    xenonet_base::jsstr::hex(format!("{}:{seq}", at as i64).as_bytes())
+    xenonet_text::utf16::hex(format!("{}:{seq}", at as i64).as_bytes())
 }
 
 fn cursor_of(token: &str) -> Option<(f64, i64)> {

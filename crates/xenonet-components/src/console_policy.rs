@@ -21,7 +21,7 @@ pub fn console_policy(op: Option<&Value>, method: Option<&Value>, args: Option<&
     }
     if op == Some("driver") {
         // RegExp.test reads the method as a string.
-        let m = method.map_or_else(|| "undefined".to_string(), xenonet_base::text::js_string);
+        let m = method.map_or_else(|| "undefined".to_string(), xenonet_text::text::display);
         if !method_ok(&m) {
             return Err("Unknown console action.".into());
         }

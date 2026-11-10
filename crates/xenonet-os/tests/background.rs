@@ -1,5 +1,5 @@
 //! Every program XenoNet starts in the background shows no window on
-//! Windows (`xenonet_base::process::Background`): one started without it
+//! Windows (`xenonet_os::process::Background`): one started without it
 //! flashes a console window each time, and the service starts git every
 //! few seconds. This reads the crates' sources and names any place that
 //! starts a program without it.
@@ -71,7 +71,7 @@ fn every_program_xenonet_starts_shows_no_window_on_windows() {
             }
         }
     }
-    assert!(bare.is_empty(), "these start a program that would flash a window on Windows; call xenonet_base::process::Background::no_window on it:\n{}", bare.join("\n"));
+    assert!(bare.is_empty(), "these start a program that would flash a window on Windows; call xenonet_os::process::Background::no_window on it:\n{}", bare.join("\n"));
 }
 
 #[test]

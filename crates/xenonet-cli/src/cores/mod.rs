@@ -63,7 +63,7 @@ use xenonet_sources::refusals::store::{Refusals, StoreError};
 
 type Res<T> = Result<T, Fail>;
 
-fn fs_fail(e: xenonet_base::fs::FsError) -> Fail {
+fn fs_fail(e: xenonet_os::fs::FsError) -> Fail {
     Fail::error(e.message)
 }
 
@@ -286,7 +286,7 @@ pub fn refusals_context(dir: &str, id: &str) -> Res<Vec<u8>> {
     use std::io::Read;
     let file = with_store(dir, |s| s.context_file(id));
     let shown = file.to_string_lossy().into_owned();
-    let bytes = std::fs::read(&file).map_err(|e| fs_fail(xenonet_base::fs::FsError::of(e, "open", &shown)))?;
+    let bytes = std::fs::read(&file).map_err(|e| fs_fail(xenonet_os::fs::FsError::of(e, "open", &shown)))?;
     let mut out = Vec::new();
     flate2::read::GzDecoder::new(&bytes[..]).read_to_end(&mut out).map_err(|_| Fail::error("incorrect header check"))?;
     Ok(out)

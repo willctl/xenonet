@@ -10,7 +10,7 @@ use crate::jsv::{get, raw, truthy};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 pub const TIMEOUT_MS: u32 = 8000;
 pub const SIGNAL_MS: u32 = 12000;
@@ -25,8 +25,8 @@ fn var_ref() -> &'static Regex {
 /// A configured value with ${VAR}s filled in from this process's
 /// environment ("" for one that isn't set).
 pub fn env_value(v: &Value, env: &Map<String, Value>) -> String {
-    let s = js_string(v);
-    var_ref().replace_all(&s, |c: &regex::Captures<'_>| env.get(&c[1]).filter(|v| !v.is_null()).map(js_string).unwrap_or_default()).into_owned()
+    let s = display(v);
+    var_ref().replace_all(&s, |c: &regex::Captures<'_>| env.get(&c[1]).filter(|v| !v.is_null()).map(display).unwrap_or_default()).into_owned()
 }
 
 /// How to reach a server: by URL (Server-Sent Events for type "sse",
@@ -38,7 +38,7 @@ pub fn transport(spec: &Value, env: &Map<String, Value>) -> Value {
     let fill = |m: Option<&Value>| -> Map<String, Value> { crate::jsv::object(m).iter().map(|(k, v)| (k.clone(), Value::String(env_value(v, env)))).collect() };
     if truthy(url.as_ref()) {
         let kind = if raw(s, "type").and_then(Value::as_str) == Some("sse") { "sse" } else { "http" };
-        return json!({ "kind": kind, "url": url.map(|u| js_string(&u)), "headers": fill(raw(s, "headers")) });
+        return json!({ "kind": kind, "url": url.map(|u| display(&u)), "headers": fill(raw(s, "headers")) });
     }
     let args = match raw(s, "args") {
         None | Some(Value::Null) => json!([]),

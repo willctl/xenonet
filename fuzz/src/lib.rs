@@ -3,7 +3,7 @@
 //! the service.
 
 use serde_json::Value;
-use xenonet_base::json;
+use xenonet_text::json;
 
 pub mod net;
 

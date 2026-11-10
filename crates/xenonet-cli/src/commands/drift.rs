@@ -14,7 +14,7 @@ use crate::out::{c, json, now, print, Done, Fail};
 use crate::reach::find;
 use crate::report::{drift_report, report_lines, schemas_dir};
 use serde_json::{json, Value};
-use xenonet_base::client::name_of;
+use xenonet_api::client::name_of;
 use xenonet_schema::drift::{DriftLog, DRIFT_FILE};
 
 pub const HELP: &str = include_str!("help/drift.txt");
@@ -88,7 +88,7 @@ fn from_file(all: bool, flags: &Flags, mark: bool) -> Result<Value, Fail> {
         None => cfg.cache_dir.clone(),
     };
     let mut log = DriftLog::default();
-    log.open(&xenonet_base::paths::join(&dir, DRIFT_FILE));
+    log.open(&xenonet_os::paths::join(&dir, DRIFT_FILE));
     let mut report = drift_report(&mut log, all, schemas_dir().as_deref(), Some(&cfg.home_dir), now());
     if mark {
         log.looked(report["at"].as_f64().unwrap_or(0.0));

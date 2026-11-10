@@ -9,10 +9,10 @@ use crate::exec::{self, Spec};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
-use xenonet_base::json::number;
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_engine::procs::{Call, Failure, Io, Link, PidMap, Procs, Product, Row};
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number;
+use xenonet_text::time::now_ms;
 
 pub type Answer = Result<String, Failure>;
 
@@ -133,7 +133,7 @@ fn num_of(o: &Value, k: &str) -> f64 {
 fn text_of(o: &Value, k: &str) -> String {
     match o.get(k) {
         None | Some(Value::Null) => String::new(),
-        Some(v) => xenonet_base::text::js_string(v),
+        Some(v) => xenonet_text::text::display(v),
     }
 }
 

@@ -27,8 +27,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use xenonet_app::jstext::{slice16, utf16_len};
 use xenonet_app::jsv::truthy;
-use xenonet_base::ids::is_host_id;
-use xenonet_base::text::{js_string, JS_DOT};
+use xenonet_model::ids::is_host_id;
+use xenonet_text::text::{display, DOT};
 
 pub const HELLO_MS: f64 = 20e3;
 pub const STALE_MS: f64 = 45e3;
@@ -106,11 +106,11 @@ pub fn transport(entry: &Value, o: &Options) -> Result<Command, String> {
     let id = entry.get("id").and_then(Value::as_str).filter(|i| is_host_id(i)).ok_or_else(|| format!("not a host id: {}", show(entry.get("id"))))?;
     let port =
         entry.get("port").and_then(Value::as_f64).filter(|p| p.fract() == 0.0 && (1.0..=65535.0).contains(p)).ok_or_else(|| format!("not a port: {}", show(entry.get("port"))))?;
-    let since = entry.get("since").map_or_else(|| "undefined".into(), js_string);
+    let since = entry.get("since").map_or_else(|| "undefined".into(), display);
     if !crate::config::since_ok(&since) {
         return Err(format!("not a time: {}", show(entry.get("since"))));
     }
-    let mut relay = vec!["relay".to_string(), "--port".into(), xenonet_base::json::number_string(port), "--since".into(), since];
+    let mut relay = vec!["relay".to_string(), "--port".into(), xenonet_text::json::number_string(port), "--since".into(), since];
     if entry.get("detail") == Some(&json!(true)) {
         relay.push("--detail".into());
     }
@@ -123,7 +123,7 @@ pub fn transport(entry: &Value, o: &Options) -> Result<Command, String> {
             Ok((o.bin.clone(), o.entry.iter().cloned().chain(relay).collect(), env))
         }
         Some("ssh") => {
-            let command = entry.get("command").map_or_else(|| "undefined".into(), js_string);
+            let command = entry.get("command").map_or_else(|| "undefined".into(), display);
             if !crate::config::command_ok(&command) {
                 return Err(format!("not a xenonet command: {}", show(entry.get("command"))));
             }
@@ -146,7 +146,7 @@ pub fn transport(entry: &Value, o: &Options) -> Result<Command, String> {
 
 // JSON.stringify(v), with undefined as JS writes it in a template.
 fn show(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), |v| xenonet_base::json::stringify(v, 0))
+    v.map_or_else(|| "undefined".into(), |v| xenonet_text::json::stringify(v, 0))
 }
 
 fn quote(s: &str) -> String {
@@ -191,7 +191,7 @@ fn why(state: &'static str, code: &'static str, message: String, fix: Option<Str
 fn res() -> &'static [Regex; 3] {
     static R: OnceLock<[Regex; 3]> = OnceLock::new();
     R.get_or_init(|| {
-        let any = format!("{JS_DOT}*");
+        let any = format!("{DOT}*");
         [
             Regex::new(&format!(r"(?i)host key verification failed|remote host identification has changed|no \S+ host key is known|host key for {any} has changed"))
                 .expect("a fixed pattern"),
@@ -221,8 +221,8 @@ fn why_network(id: &str, e: &Ended<'_>) -> Why {
     if let Some(err) = e.spawn_error {
         return why("offline", "no-network", format!("this machine can't reach {id} over the network: {err}"), None);
     }
-    let bye_code = e.bye.and_then(|b| b.get("code")).map(js_string).filter(|c| !c.is_empty());
-    let message = || e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(String::new, |m| slice16(&js_string(m), 200));
+    let bye_code = e.bye.and_then(|b| b.get("code")).map(display).filter(|c| !c.is_empty());
+    let message = || e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(String::new, |m| slice16(&display(m), 200));
     match bye_code.as_deref() {
         Some("not-window") => {
             return why(
@@ -249,15 +249,15 @@ fn why_network(id: &str, e: &Ended<'_>) -> Why {
 }
 
 pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: &dyn Fn(&str) -> String) -> Why {
-    let id = entry.get("id").map(js_string).unwrap_or_default();
+    let id = entry.get("id").map(display).unwrap_or_default();
     if entry.get("transport") == Some(&json!("network")) {
         return why_network(&id, e);
     }
     let ssh = entry.get("transport") == Some(&json!("ssh"));
     let named = |text: &str| -> String {
         let mut out = text.to_string();
-        let user = entry.get("ssh").and_then(|s| s.get("user")).filter(|u| truthy(Some(u))).map(|u| format!("{}@", js_string(u)));
-        let host = entry.get("ssh").and_then(|s| s.get("hostname")).filter(|h| truthy(Some(h))).map(js_string);
+        let user = entry.get("ssh").and_then(|s| s.get("user")).filter(|u| truthy(Some(u))).map(|u| format!("{}@", display(u)));
+        let host = entry.get("ssh").and_then(|s| s.get("hostname")).filter(|h| truthy(Some(h))).map(display);
         for (name, to) in [(user, String::new()), (host, id.clone())] {
             if let Some(n) = name.filter(|n| !n.is_empty()) {
                 out = out.split(n.as_str()).collect::<Vec<_>>().join(&to);
@@ -265,7 +265,7 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
         }
         out
     };
-    let lines: Vec<&str> = xenonet_base::text::js_trim(e.stderr).split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = xenonet_text::text::trim(e.stderr).split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).filter(|l| !l.is_empty()).collect();
     let said = named(&lines.last().map_or_else(String::new, |l| slice16(l, 200)));
     let try_it = trust_command(&id, ssh_config, tilde);
     if let Some(err) = e.spawn_error {
@@ -277,7 +277,7 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
             Some(if ssh { "Install OpenSSH's client, or put ssh on XenoNet's PATH." } else { "Restart XenoNet." }.into()),
         );
     }
-    let bye_code = e.bye.and_then(|b| b.get("code")).map(js_string).filter(|c| !c.is_empty());
+    let bye_code = e.bye.and_then(|b| b.get("code")).map(display).filter(|c| !c.is_empty());
     match bye_code.as_deref() {
         Some("no-xenonet") => {
             return why(
@@ -290,7 +290,7 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
         Some("xenonet-gone") => return why("offline", "xenonet-gone", format!("the XenoNet on {id} stopped"), None),
         Some("old-xenonet") => return why("error", "old-xenonet", format!("the XenoNet on {id} is too old to be a host"), Some(format!("Update XenoNet on {id}."))),
         Some(code) => {
-            let m = e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(|| code.to_string(), js_string);
+            let m = e.bye.and_then(|b| b.get("message")).filter(|m| !m.is_null()).map_or_else(|| code.to_string(), display);
             return why("offline", "relay", format!("the relay on {id} stopped: {}", named(&slice16(&m, 200))), None);
         }
         None => {}
@@ -314,7 +314,7 @@ pub fn why_ended(entry: &Value, e: &Ended<'_>, ssh_config: Option<&str>, tilde: 
         );
     }
     let how = match (&e.exit_code, &e.signal) {
-        (Some(c), _) => format!(" (exit {})", xenonet_base::json::number_string(*c)),
+        (Some(c), _) => format!(" (exit {})", xenonet_text::json::number_string(*c)),
         (None, Some(s)) if !s.is_empty() => format!(" ({s})"),
         _ => String::new(),
     };
@@ -453,7 +453,7 @@ impl Link {
     }
 
     fn id(&self) -> String {
-        self.entry.get("id").map(js_string).unwrap_or_default()
+        self.entry.get("id").map(display).unwrap_or_default()
     }
 
     fn take(&mut self) -> Vec<Effect> {
@@ -536,7 +536,7 @@ impl Link {
             }
         }
         let _ = found;
-        let message = format!("{} didn't answer in {} s", self.id(), xenonet_base::json::number_string(xenonet_base::units::js_round(timeout_ms / 1000.0)));
+        let message = format!("{} didn't answer in {} s", self.id(), xenonet_text::json::number_string(xenonet_text::units::round(timeout_ms / 1000.0)));
         self.fx.push(Effect::Reject { id, message, status: 504 });
         self.take()
     }
@@ -546,12 +546,12 @@ impl Link {
         let e = &self.entry;
         let local = e.get("transport") == Some(&json!("local"));
         let target = if local {
-            format!("this machine, port {}", e.get("port").map_or_else(|| "undefined".into(), js_string))
+            format!("this machine, port {}", e.get("port").map_or_else(|| "undefined".into(), display))
         } else {
             let ssh = e.get("ssh");
-            let user = ssh.and_then(|s| s.get("user")).filter(|u| truthy(Some(u))).map_or(String::new(), |u| format!("{}@", js_string(u)));
-            let host = ssh.and_then(|s| s.get("hostname")).filter(|h| !h.is_null()).map_or_else(|| self.id(), js_string);
-            let port = ssh.and_then(|s| s.get("port")).filter(|p| truthy(Some(p))).map_or(String::new(), |p| format!(":{}", js_string(p)));
+            let user = ssh.and_then(|s| s.get("user")).filter(|u| truthy(Some(u))).map_or(String::new(), |u| format!("{}@", display(u)));
+            let host = ssh.and_then(|s| s.get("hostname")).filter(|h| !h.is_null()).map_or_else(|| self.id(), display);
+            let port = ssh.and_then(|s| s.get("port")).filter(|p| truthy(Some(p))).map_or(String::new(), |p| format!(":{}", display(p)));
             format!("{user}{host}{port}")
         };
         let mut m = Map::new();
@@ -564,13 +564,13 @@ impl Link {
             m.insert("port".into(), p.clone());
         }
         m.insert("state".into(), json!(self.state));
-        m.insert("since".into(), xenonet_base::json::number(self.since));
-        m.insert("lastHeard".into(), self.last_heard.map_or(Value::Null, xenonet_base::json::number));
-        m.insert("offsetMs".into(), if self.rtt_ms.is_none() { Value::Null } else { xenonet_base::json::number(self.offset_ms) });
-        m.insert("rttMs".into(), self.rtt_ms.map_or(Value::Null, xenonet_base::json::number));
+        m.insert("since".into(), xenonet_text::json::number(self.since));
+        m.insert("lastHeard".into(), self.last_heard.map_or(Value::Null, xenonet_text::json::number));
+        m.insert("offsetMs".into(), if self.rtt_ms.is_none() { Value::Null } else { xenonet_text::json::number(self.offset_ms) });
+        m.insert("rttMs".into(), self.rtt_ms.map_or(Value::Null, xenonet_text::json::number));
         m.insert("hello".into(), self.hello.clone());
         m.insert("error".into(), self.error.clone());
-        m.insert("nextTryAt".into(), if matches!(self.state, "offline" | "error") { self.next_try_at.map_or(Value::Null, xenonet_base::json::number) } else { Value::Null });
+        m.insert("nextTryAt".into(), if matches!(self.state, "offline" | "error") { self.next_try_at.map_or(Value::Null, xenonet_text::json::number) } else { Value::Null });
         m.insert("counts".into(), json!({ "connects": self.connects, "frames": self.frames, "dropped": self.dropped }));
         m.insert("lastDrop".into(), self.last_drop.clone());
         Value::Object(m)
@@ -611,9 +611,9 @@ impl Link {
         if let Some(r) = self.current(run) {
             if !r.snapshot {
                 let w = if r.hello {
-                    why("offline", "no-snapshot", format!("{id} said hello but sent no map in {} s", xenonet_base::json::number_string(hello_ms / 1000.0)), None)
+                    why("offline", "no-snapshot", format!("{id} said hello but sent no map in {} s", xenonet_text::json::number_string(hello_ms / 1000.0)), None)
                 } else {
-                    why("offline", "no-hello", format!("{id} didn't answer in {} s", xenonet_base::json::number_string(hello_ms / 1000.0)), None)
+                    why("offline", "no-hello", format!("{id} didn't answer in {} s", xenonet_text::json::number_string(hello_ms / 1000.0)), None)
                 };
                 self.fail(run, w, now, a);
             }
@@ -696,8 +696,8 @@ impl Link {
             "time" => self.timed(run, &frame, now),
             "ping" => self.heard(now),
             "bye" => {
-                let code = slice16(&frame.get("code").filter(|v| !v.is_null()).map_or_else(String::new, js_string), 40);
-                let message = slice16(&frame.get("message").filter(|v| !v.is_null()).map_or_else(String::new, js_string), 300);
+                let code = slice16(&frame.get("code").filter(|v| !v.is_null()).map_or_else(String::new, display), 40);
+                let message = slice16(&frame.get("message").filter(|v| !v.is_null()).map_or_else(String::new, display), 300);
                 if let Some(r) = self.run.as_mut() {
                     r.bye = Some(json!({ "code": code, "message": message }));
                 }
@@ -728,16 +728,13 @@ impl Link {
         }
         let protocol = f.get("protocol").and_then(Value::as_f64);
         if protocol != Some(PROTOCOL as f64) {
-            let p = f.get("protocol").map_or_else(|| "undefined".into(), js_string);
+            let p = f.get("protocol").map_or_else(|| "undefined".into(), display);
             return self.fail(
                 run,
                 why(
                     "error",
                     "protocol",
-                    format!(
-                        "{id} runs XenoNet {}, whose relay speaks protocol {p}; this XenoNet speaks {PROTOCOL}",
-                        f.get("version").map_or_else(|| "undefined".into(), js_string)
-                    ),
+                    format!("{id} runs XenoNet {}, whose relay speaks protocol {p}; this XenoNet speaks {PROTOCOL}", f.get("version").map_or_else(|| "undefined".into(), display)),
                     Some("Update the older of the two.".into()),
                 ),
                 now,
@@ -817,7 +814,7 @@ impl Link {
         self.attempt = 0;
         self.error = Value::Null;
         self.set("live", now);
-        let at = f.get("at").and_then(Value::as_f64).map_or(Value::Null, xenonet_base::json::number);
+        let at = f.get("at").and_then(Value::as_f64).map_or(Value::Null, xenonet_text::json::number);
         self.emit(
             "snapshot",
             json!({ "graph": f["graph"], "live": f["live"], "engine": f.get("engine").filter(|e| !e.is_null()).cloned().unwrap_or(Value::Null), "at": at, "first": first }),
@@ -853,10 +850,10 @@ impl Link {
         }
         let rtt = now - sent;
         if self.rtt_ms.is_none_or(|r| rtt <= (r * 2.0).max(250.0)) {
-            self.offset_ms = xenonet_base::units::js_round(host_now - f64::midpoint(sent, now));
+            self.offset_ms = xenonet_text::units::round(host_now - f64::midpoint(sent, now));
             self.rtt_ms = Some(self.rtt_ms.map_or(rtt, |r| r.min(rtt)));
             let o = self.offset_ms;
-            self.emit("offset", xenonet_base::json::number(o));
+            self.emit("offset", xenonet_text::json::number(o));
         }
         self.heard(now);
     }
@@ -877,7 +874,7 @@ impl Link {
 
     fn drop_frame(&mut self, why: &str, now: f64) {
         self.dropped += 1.0;
-        self.last_drop = json!({ "at": xenonet_base::json::number(now), "why": slice16(why, 120) });
+        self.last_drop = json!({ "at": xenonet_text::json::number(now), "why": slice16(why, 120) });
     }
 
     // Ends this connection for a reason found here (a bad hello, silence).
@@ -945,7 +942,7 @@ impl Link {
             let (min, max) = self.backoff;
             let delay = if w.state == "error" { max } else { (min * 2f64.powi(self.attempt as i32)).min(max) * (0.75 + a.random() * 0.5) };
             self.attempt = (self.attempt + 1).min(16);
-            self.next_try_at = Some(now + xenonet_base::units::js_round(delay));
+            self.next_try_at = Some(now + xenonet_text::units::round(delay));
             self.fx.push(Effect::Timer { name: "retry".into(), ms: delay });
         }
         self.set(w.state, now);

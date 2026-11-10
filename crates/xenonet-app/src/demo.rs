@@ -13,9 +13,9 @@ use crate::jstext::encode_uri_component;
 use crate::nodepath::NATIVE;
 use crate::spotify::b64url;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::stringify;
-use xenonet_base::process::Background as _;
-use xenonet_base::time::iso;
+use xenonet_os::process::Background as _;
+use xenonet_text::json::stringify;
+use xenonet_text::time::iso;
 
 const MIN: f64 = 60e3;
 
@@ -264,7 +264,7 @@ fn line(o: &Value) -> String {
 }
 
 fn n(x: f64) -> Value {
-    xenonet_base::json::number(x)
+    xenonet_text::json::number(x)
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -391,8 +391,8 @@ impl Writer {
         let reset = (ts / 1000.0).floor() + 2.4 * 3600.0;
         let out = u["output_tokens"].as_f64().unwrap_or(0.0);
         // As Codex writes it: cached input is part of input_tokens.
-        let last = json!({ "input_tokens": n(self.ctx), "cached_input_tokens": u["cache_read_input_tokens"], "output_tokens": n(out), "reasoning_output_tokens": n(xenonet_base::units::js_round(out * 0.4)), "total_tokens": n(self.ctx + out) });
-        self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "token_count", "info": { "total_token_usage": { "total_tokens": n(self.tokens), "output_tokens": n(out) }, "last_token_usage": last, "model_context_window": 258400 }, "rate_limits": { "primary": { "used_percent": n(xenonet_base::units::js_round(used)), "window_minutes": 300, "resets_at": n(reset) }, "secondary": { "used_percent": 58, "window_minutes": 10080, "resets_at": n(reset + 3.0 * 86400.0) } } } })]);
+        let last = json!({ "input_tokens": n(self.ctx), "cached_input_tokens": u["cache_read_input_tokens"], "output_tokens": n(out), "reasoning_output_tokens": n(xenonet_text::units::round(out * 0.4)), "total_tokens": n(self.ctx + out) });
+        self.write(&[json!({ "type": "event_msg", "timestamp": iso(ts), "payload": { "type": "token_count", "info": { "total_token_usage": { "total_tokens": n(self.tokens), "output_tokens": n(out) }, "last_token_usage": last, "model_context_window": 258400 }, "rate_limits": { "primary": { "used_percent": n(xenonet_text::units::round(used)), "window_minutes": 300, "resets_at": n(reset) }, "secondary": { "used_percent": 58, "window_minutes": 10080, "resets_at": n(reset + 3.0 * 86400.0) } } } })]);
     }
 
     fn turns(&self) -> Vec<Value> {
@@ -478,11 +478,11 @@ impl Writer {
         let at = |i: usize| step.get(i).cloned();
         let kind = at(0).and_then(|k| k.as_str().map(String::from)).unwrap_or_default();
         let a = at(1);
-        let a_s = a.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
+        let a_s = a.as_ref().map_or_else(|| "undefined".into(), xenonet_text::text::display);
         let b = at(2);
-        let b_s = b.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
+        let b_s = b.as_ref().map_or_else(|| "undefined".into(), xenonet_text::text::display);
         let c = at(3);
-        let c_s = c.as_ref().map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
+        let c_s = c.as_ref().map_or_else(|| "undefined".into(), xenonet_text::text::display);
         let file = matches!(kind.as_str(), "read" | "edit").then(|| NATIVE.join(&[&self.cwd, &a_s]));
         let title = match kind.as_str() {
             "read" => format!("Read {a_s}"),
@@ -531,9 +531,7 @@ impl Writer {
             "read" => ("Read".to_string(), json!({ "file_path": file })),
             "edit" => ("Edit".to_string(), json!({ "file_path": file, "old_string": b, "new_string": c })),
             "run" => ("Bash".to_string(), json!({ "command": a })),
-            "mcp" => {
-                (format!("mcp__{a}__{}", b.map_or_else(|| "undefined".into(), xenonet_base::text::js_string)), c.filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!({})))
-            }
+            "mcp" => (format!("mcp__{a}__{}", b.map_or_else(|| "undefined".into(), xenonet_text::text::display)), c.filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!({}))),
             "agent" => ("Task".to_string(), json!({ "description": a, "prompt": a })),
             _ => ("AskUserQuestion".to_string(), json!({ "questions": [{ "question": a }] })),
         };
@@ -694,7 +692,7 @@ fn s_of(v: &Value, k: &str) -> String {
 fn cwd_of(s: &Value, home: &str) -> String {
     match s.get("cwd").and_then(Value::as_array) {
         Some(parts) => {
-            let parts: Vec<String> = parts.iter().map(xenonet_base::text::js_string).collect();
+            let parts: Vec<String> = parts.iter().map(xenonet_text::text::display).collect();
             let mut all = vec![home];
             all.extend(parts.iter().map(String::as_str));
             NATIVE.join(&all)
@@ -961,7 +959,7 @@ impl Demo {
             }
             let Some(w) = self.writers.get(i) else { return Err(fsx::said("Cannot read properties of undefined (reading 'file')")) };
             let meta = std::fs::metadata(&w.file).map_err(|e| fsx::FsError::of(e, "stat", &w.file))?;
-            let updated = xenonet_base::fs::mtime_ms_of(&meta).unwrap_or(0.0);
+            let updated = xenonet_os::fs::mtime_ms_of(&meta).unwrap_or(0.0);
             let parent = s.get("parent").and_then(Value::as_u64).map(|p| format!("{}:{}", s_of(&self.sessions[p as usize], "app"), id_of(p as usize)));
             let subagent = flag(s, "subagent");
             let desktop = flag(s, "desktop");
@@ -1091,7 +1089,7 @@ mod tests {
             format!("git:{e}")
         }
         fn local(&mut self, ms: f64) -> [i64; 5] {
-            let (y, m, d) = xenonet_base::time::civil_from_days((ms / 86400e3).floor() as i64);
+            let (y, m, d) = xenonet_text::time::civil_from_days((ms / 86400e3).floor() as i64);
             [y, i64::from(m), i64::from(d), 12, 5]
         }
         fn random(&mut self) -> f64 {

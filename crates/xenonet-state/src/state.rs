@@ -6,9 +6,9 @@
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
-use xenonet_base::json::{number, stringify};
-use xenonet_base::paths::{is_under, path_key};
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_os::paths::{is_under, path_key};
+use xenonet_text::json::{number, stringify};
+use xenonet_text::text::{display, to_number, truthy};
 
 fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.as_object().and_then(|m| m.get(k))
@@ -54,7 +54,7 @@ pub fn visible_resource(server: &str, hidden: &HashSet<String>) -> bool {
 /// Background runs (codex exec, subagents), which never wait for you.
 pub fn automated(n: Option<&Value>) -> bool {
     let Some(n) = n else { return false };
-    let source = get(n, "source").filter(|v| !v.is_null()).map(js_string).unwrap_or_default();
+    let source = get(n, "source").filter(|v| !v.is_null()).map(display).unwrap_or_default();
     s(n, "source") == Some("exec") || source.starts_with("subAgent") || s(n, "originator") == Some("codex_exec") || s(n, "parentKind") == Some("subagent")
 }
 
@@ -72,7 +72,7 @@ pub fn merge_sessions(prev: &[Value], lists: &[(&str, bool, &[Value])], observed
             sessions.extend(prev.iter().filter(|n| s(n, "app") == Some(app)).cloned());
         }
     }
-    let id = |v: &Value| get(v, "id").map_or_else(|| "\u{0}undefined".into(), js_string);
+    let id = |v: &Value| get(v, "id").map_or_else(|| "\u{0}undefined".into(), display);
     let read: HashSet<String> = sessions.iter().map(id).collect();
     for o in observed {
         if !read.contains(&id(o)) {
@@ -96,8 +96,8 @@ pub fn session_dirs(sessions: &[Value]) -> Vec<Value> {
 
 /// What the projects scan's status says of it.
 pub fn projects_note(scan: &Value) -> String {
-    let n = |k: &str| get(scan, k).map_or_else(|| "undefined".into(), js_string);
-    let groups = js_number(get(scan, "groups"));
+    let n = |k: &str| get(scan, k).map_or_else(|| "undefined".into(), display);
+    let groups = to_number(get(scan, "groups"));
     format!(
         "{} projects in {} group{}, {} folders read{}",
         n("projects"),
@@ -116,7 +116,7 @@ pub fn project_rules(codex: bool, root: &str, picks: Option<&Value>, yours: &Val
         for p in items(picks.and_then(|c| get(c, "picks"))) {
             let rel = s(p, "path").unwrap_or("");
             let parts: Vec<&str> = std::iter::once(root).chain(rel.split('/')).collect();
-            let dir = xenonet_base::paths::join_all(&parts);
+            let dir = xenonet_os::paths::join_all(&parts);
             let Some(key) = path_key(&dir) else { continue };
             rules
                 .insert(key, json!({ "path": dir, "as": get(p, "as").cloned().unwrap_or(Value::Null), "by": "codex", "reason": get(p, "reason").cloned().unwrap_or(Value::Null) }));
@@ -127,7 +127,7 @@ pub fn project_rules(codex: bool, root: &str, picks: Option<&Value>, yours: &Val
         rule.insert("by".into(), Value::String("you".into()));
         rules.insert(key.clone(), Value::Object(rule));
     }
-    Value::Object(xenonet_base::jsstr::js_key_order(rules))
+    Value::Object(xenonet_text::utf16::key_order(rules))
 }
 
 /// Why a rule for a folder can't be set, or None. `is_dir` says whether the
@@ -148,7 +148,7 @@ pub fn rule_problem(as_: Option<&Value>, full: &str, projects_dir: &str, is_dir:
         _ => false,
     };
     if !inside {
-        return Some(format!("Only folders inside {} can have rules", xenonet_base::paths::base_name(projects_dir)));
+        return Some(format!("Only folders inside {} can have rules", xenonet_os::paths::base_name(projects_dir)));
     }
     if !is_dir {
         return Some("That folder doesn't exist".into());
@@ -166,7 +166,7 @@ pub fn project_detection(root: &str, scan: Option<&Value>, rules: &Value, codex:
         .into_iter()
         .flatten()
         .map(|(_, r)| {
-            let key = get(r, "path").filter(|p| truthy(Some(p))).and_then(|p| path_key(&js_string(p)));
+            let key = get(r, "path").filter(|p| truthy(Some(p))).and_then(|p| path_key(&display(p)));
             let in_root = match (&key, &root_key) {
                 (Some(k), Some(rk)) => is_under(k, rk) && k != rk,
                 _ => false,
@@ -176,7 +176,7 @@ pub fn project_detection(root: &str, scan: Option<&Value>, rules: &Value, codex:
             Value::Object(m)
         })
         .collect();
-    xenonet_base::sort::sort_by(&mut list, |a, b| js_number(get(b, "at")).partial_cmp(&js_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut list, |a, b| to_number(get(b, "at")).partial_cmp(&to_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
     let codex = nn(codex).filter(|c| truthy(Some(c))).map_or(Value::Null, |c| {
         let mut m = c.as_object().cloned().unwrap_or_default();
         m.insert("stale".into(), Value::Bool(current.unwrap_or(&Value::Null) != get(c, "fingerprint").unwrap_or(&Value::Null)));
@@ -210,7 +210,7 @@ pub fn title_of(title: Option<&Value>, name: Option<&Value>, id: &Value) -> Valu
 pub fn clean_identity_name(name: Option<&Value>) -> Option<String> {
     let name = name.and_then(Value::as_str)?;
     let no_controls: String = name.chars().filter(|c| !matches!(*c as u32, 0..=0x1f | 0x7f)).collect();
-    let clean = xenonet_base::jsstr::head(xenonet_base::text::js_trim(&no_controls), 40);
+    let clean = xenonet_text::utf16::head(xenonet_text::text::trim(&no_controls), 40);
     (!clean.is_empty()).then_some(clean)
 }
 
@@ -240,7 +240,7 @@ pub fn identity_detection(enabled: bool, at: Option<&Value>, identities: Option<
             Value::Object(m)
         })
         .collect();
-    xenonet_base::sort::sort_by(&mut pins, |a, b| js_number(get(b, "at")).partial_cmp(&js_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut pins, |a, b| to_number(get(b, "at")).partial_cmp(&to_number(get(a, "at"))).unwrap_or(std::cmp::Ordering::Equal));
     let signins: Map<String, Value> = get(saved, "signins")
         .and_then(Value::as_object)
         .into_iter()
@@ -274,8 +274,8 @@ pub fn live_snapshot(mut snap: Value, hidden: &HashSet<String>, acks: &Value, si
                 let id = s(sess, "id").unwrap_or("").to_string();
                 let n = node(&id);
                 let gone = n.as_ref().is_none_or(|n| truthy(get(n, "archived")));
-                let since = js_number(sess.get("needsYou").and_then(|w| get(w, "since")));
-                let acked = nn(get(acks, &id)).map_or(0.0, |v| js_number(Some(v)));
+                let since = to_number(sess.get("needsYou").and_then(|w| get(w, "since")));
+                let acked = nn(get(acks, &id)).map_or(0.0, |v| to_number(Some(v)));
                 // The tailer's sessions are objects; anything else has
                 // nothing to clean.
                 let Some(o) = sess.as_object_mut() else { continue };
@@ -407,7 +407,7 @@ impl Memory {
     pub fn updated(&mut self, sessions: &[Value]) -> Vec<Value> {
         let mut out = Vec::new();
         for s in sessions {
-            let id = get(s, "id").map_or_else(|| "\u{0}undefined".into(), js_string);
+            let id = get(s, "id").map_or_else(|| "\u{0}undefined".into(), display);
             // A session last seen without a time (undefined) can't have
             // been written to since.
             let now = get(s, "updatedAt").cloned();
@@ -435,9 +435,9 @@ impl Memory {
                             .map(|x| {
                                 format!(
                                     "{}:{}:{}",
-                                    get(x, "role").map_or("undefined".into(), js_string),
-                                    get(x, "id").map_or("undefined".into(), js_string),
-                                    get(x, "confidence").map_or("undefined".into(), js_string)
+                                    get(x, "role").map_or("undefined".into(), display),
+                                    get(x, "id").map_or("undefined".into(), display),
+                                    get(x, "confidence").map_or("undefined".into(), display)
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -484,8 +484,8 @@ impl Memory {
         current.insert("claude".into(), id_of("claude"));
         current.insert("chatgpt".into(), id_of("chatgpt"));
         for h in items(get(accounts, "gh")) {
-            let host = get(h, "host").map_or_else(|| "undefined".into(), js_string);
-            let active = get(h, "active").filter(|a| truthy(Some(a))).map(|a| Value::String(format!("github:{host}/{}", js_string(a).to_lowercase())));
+            let host = get(h, "host").map_or_else(|| "undefined".into(), display);
+            let active = get(h, "active").filter(|a| truthy(Some(a))).map(|a| Value::String(format!("github:{host}/{}", display(a).to_lowercase())));
             current.insert(format!("gh:{host}"), active.unwrap_or(Value::Null));
         }
         let mut events = Vec::new();
@@ -520,12 +520,12 @@ impl Memory {
             return None;
         }
         self.ship_it_at.insert(home.to_string(), now);
-        let n = js_number(Some(dirty));
+        let n = to_number(Some(dirty));
         Some(json!({
             "sessionId": get(ev, "sessionId").cloned().unwrap_or(Value::Null),
             "app": get(ev, "app").cloned().unwrap_or(Value::Null),
             "kind": "ship-it",
-            "detail": format!("{} uncommitted file{} in {}", js_string(dirty), if n == 1.0 { "" } else { "s" }, js_string(name)),
+            "detail": format!("{} uncommitted file{} in {}", display(dirty), if n == 1.0 { "" } else { "s" }, display(name)),
             "projectId": home,
             "ts": number(now),
         }))
@@ -536,7 +536,7 @@ impl Memory {
 pub fn identities_note(identities: &[Value]) -> String {
     let mut kinds: Vec<(String, usize)> = Vec::new();
     for i in identities {
-        let k = get(i, "kind").map_or_else(|| "undefined".into(), js_string);
+        let k = get(i, "kind").map_or_else(|| "undefined".into(), display);
         match kinds.iter_mut().find(|(x, _)| *x == k) {
             Some((_, n)) => *n += 1,
             None => kinds.push((k, 1)),
@@ -564,7 +564,7 @@ pub fn reader_status(name: &str, state: &str, runs: usize, what: &str) -> Value 
 
 /// The tray's address for this instance.
 pub fn url(host: &str, port: &Value) -> String {
-    format!("http://{host}:{}/", js_string(port))
+    format!("http://{host}:{}/", display(port))
 }
 
 /// When a renamed session's name went somewhere it says so: Claude desktop
@@ -574,7 +574,7 @@ pub fn rename_note(desktop: bool, desktop_error: Option<&Value>) -> Value {
         return Value::String("Claude desktop shows it the next time it starts.".into());
     }
     match desktop_error.filter(|e| truthy(Some(e))) {
-        Some(e) => Value::String(format!("Claude desktop kept its old name: {}", js_string(e))),
+        Some(e) => Value::String(format!("Claude desktop kept its old name: {}", display(e))),
         None => Value::Null,
     }
 }

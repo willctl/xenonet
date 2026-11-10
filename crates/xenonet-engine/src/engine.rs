@@ -37,11 +37,11 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_adapter::apps::is_session_id;
 use xenonet_adapter::products::product_of;
-use xenonet_base::ids::{parse_actor_id, YOU};
-use xenonet_base::json::number;
-use xenonet_base::nodepath::{style_of, NATIVE};
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_number, js_string, js_trim, truthy};
+use xenonet_model::ids::{parse_actor_id, YOU};
+use xenonet_os::nodepath::{style_of, NATIVE};
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number;
+use xenonet_text::text::{display, to_number, trim, truthy};
 
 pub const ACTIVE_MS: f64 = 2.0 * 3600e3;
 const EDIT_HOLD_MS: f64 = 30.0 * 60e3;
@@ -147,7 +147,7 @@ fn as_str(v: Option<&Value>) -> Option<&str> {
 
 /// A value as a template literal writes it (undefined for none).
 fn text(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 /// `x ?? ""` as text.
@@ -161,7 +161,7 @@ fn text_or_empty(v: Option<&Value>) -> String {
 
 /// Number(x).
 fn num(v: Option<&Value>) -> f64 {
-    js_number(v)
+    to_number(v)
 }
 
 /// `x ?? 0`, as a number.
@@ -356,7 +356,7 @@ pub fn edit_paths(tool_name: &str, input: &Value, cwd: Option<&str>) -> Vec<Stri
         match v {
             // The files it adds, updates and deletes, and the names it
             // moves them to.
-            Value::String(s) => found.extend(xenonet_base::patch::paths(s, true)),
+            Value::String(s) => found.extend(xenonet_adapter::formats::patch::paths(s, true)),
             Value::Array(l) => l.iter().for_each(|x| scan(x, found)),
             Value::Object(o) => o.values().for_each(|x| scan(x, found)),
             _ => {}
@@ -375,7 +375,7 @@ pub fn edit_paths(tool_name: &str, input: &Value, cwd: Option<&str>) -> Vec<Stri
 /// What git printed for `rev-parse`, as a repo, or None when it didn't print
 /// a top and a common dir.
 pub fn parse_repo(stdout: &str) -> Option<Repo> {
-    let t = js_trim(stdout);
+    let t = trim(stdout);
     let mut lines = t.split('\n');
     let top = lines.next().filter(|s| !s.is_empty())?;
     let common = lines.next().filter(|s| !s.is_empty())?;
@@ -383,7 +383,7 @@ pub fn parse_repo(stdout: &str) -> Option<Repo> {
         None | Some("HEAD") => None,
         Some(b) => Some(b.to_string()),
     };
-    Some(Repo { top: top.to_string(), common: xenonet_base::paths::resolve(common), branch })
+    Some(Repo { top: top.to_string(), common: xenonet_os::paths::resolve(common), branch })
 }
 
 /// Two agents share a repo if their working trees share a git dir. Outside
@@ -505,7 +505,7 @@ fn line(a: &Value, me: &Value, kind: &str, reads: bool) -> String {
 /// The method a stored envelope names, or null.
 fn envelope_method(raw: Option<&Value>) -> Value {
     let text = if nullish(raw) { "null".to_string() } else { text(raw) };
-    match xenonet_base::json::parse(&text) {
+    match xenonet_text::json::parse(&text) {
         Ok(v) => match v.get("auth").and_then(|a| a.get("method")) {
             Some(m) if !m.is_null() => m.clone(),
             _ => Value::Null,
@@ -520,7 +520,7 @@ fn envelope_of(m: &Value) -> Value {
     if !truthy(e) {
         return Value::Null;
     }
-    xenonet_base::json::parse(&text(e)).unwrap_or(Value::Null)
+    xenonet_text::json::parse(&text(e)).unwrap_or(Value::Null)
 }
 
 /// What view() read first, before the sessions' own apps are asked.
@@ -592,7 +592,7 @@ fn in_clone(a: &Value, key: Option<&str>) -> bool {
 
 impl Engine {
     /// Puts the network's link behind the engine.
-    pub fn set_net(&self, net: std::sync::Arc<dyn xenonet_base::network::Net>) {
+    pub fn set_net(&self, net: std::sync::Arc<dyn xenonet_model::ops::Net>) {
         self.net.set(net);
     }
 
@@ -663,7 +663,7 @@ impl Engine {
             }
             kept.push(v);
         }
-        xenonet_base::sort::sort_by(&mut kept, |a, b| {
+        xenonet_text::sort::sort_by(&mut kept, |a, b| {
             let w = |x: &Value| f64::from(u8::from(as_str(get(x, "status")) == Some("working")));
             let d = w(b) - w(a);
             let d = if d == 0.0 { num(get(b, "lastActive")) - num(get(a, "lastActive")) } else { d };
@@ -850,7 +850,7 @@ impl Engine {
         let app = id.split(':').next().unwrap_or("").to_string();
         let place = self.place_of(c, &id, &cwd)?;
         let mut edits: Vec<&Value> = items(get(&live, "edits")).iter().filter(|e| now - num(get(e, "ts")) < EDIT_HOLD_MS).collect();
-        xenonet_base::sort::sort_by(&mut edits, |a, b| (num(get(b, "ts")) - num(get(a, "ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_text::sort::sort_by(&mut edits, |a, b| (num(get(b, "ts")) - num(get(a, "ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         let base = if nullish(Some(&cwd)) { None } else { Some(text(Some(&cwd))) };
         let editing: Vec<Value> = edits
             .iter()
@@ -1188,7 +1188,7 @@ impl Engine {
     /// `envelope`: how XenoNet knows who sent it, from the route's own
     /// checks, or null.
     pub fn send(&self, c: &Collaborators<'_>, me: &str, ask: &Value, envelope: &Value) -> Result<Value> {
-        let mut body = js_trim(&text_or_empty(get(ask, "text"))).to_string();
+        let mut body = trim(&text_or_empty(get(ask, "text"))).to_string();
         if body.is_empty() {
             return err("the message is empty");
         }
@@ -1380,7 +1380,7 @@ impl Engine {
         }
         let key = Self::net_repo_key(c, me)?;
         let near = |a: &Value| in_clone(a, key.as_deref());
-        xenonet_base::sort::sort_by(&mut far, |a, b| {
+        xenonet_text::sort::sort_by(&mut far, |a, b| {
             let d = f64::from(u8::from(near(b))) - f64::from(u8::from(near(a)));
             let d = if d == 0.0 { num(get(b, "lastActive")) - num(get(a, "lastActive")) } else { d };
             d.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
@@ -1729,7 +1729,7 @@ impl Engine {
     /// What an agent says it's doing. An actor's focus is its status line,
     /// held to the same rules.
     pub fn set_focus(&self, c: &Collaborators<'_>, me: &str, text: &Value) -> Result<Value> {
-        let t = js_trim(&text_or_empty(Some(text))).to_string();
+        let t = trim(&text_or_empty(Some(text))).to_string();
         if let (true, Some(actors)) = (is_actor_agent(me), c.actors) {
             return match actors.set_status(me, &t)? {
                 StatusSet::Ok(status) => Ok(obj(vec![("focus", status)])),

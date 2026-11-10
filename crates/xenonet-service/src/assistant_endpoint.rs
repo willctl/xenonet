@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use xenonet_actors::limits::Bucket;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 const HELLO: Duration = Duration::from_secs(5);
 const SWEEP: Duration = Duration::from_secs(2);
@@ -168,7 +168,7 @@ impl Endpoint {
         let s = self.inner.connections.authenticate(&params["grant_id"], &params["token"]);
         if s["ok"] != json!(true) {
             let code = s["code"].as_str().filter(|c| ERROR_CODES.contains(c)).unwrap_or("NOT_AUTHORIZED");
-            return Err(refused(code, &xenonet_base::text::js_string(&s["reason"])));
+            return Err(refused(code, &xenonet_text::text::display(&s["reason"])));
         }
         let grant = s["grant"]["grant_id"].as_str().unwrap_or("").to_string();
         let connection = s["connection"]["connection_id"].as_str().unwrap_or("").to_string();
@@ -250,10 +250,10 @@ impl Endpoint {
                 opts.mode(0o600);
             }
             drop(opts.open(&tmp)?);
-            let mut run = |f: &str, a: &[&str]| xenonet_base::private_file::run_private(f, a);
-            xenonet_base::private_file::protect_file(&tmp.to_string_lossy(), cfg!(windows), &mut run).map_err(|e| std::io::Error::other(e.message().to_string()))?;
+            let mut run = |f: &str, a: &[&str]| xenonet_os::private_file::run_private(f, a);
+            xenonet_os::private_file::protect_file(&tmp.to_string_lossy(), cfg!(windows), &mut run).map_err(|e| std::io::Error::other(e.message().to_string()))?;
             let doc = json!({ "port": port, "pid": std::process::id(), "api": { "min": ASSISTANT_API.0, "max": ASSISTANT_API.1 }, "state": self.inner.connections.dir() });
-            std::fs::write(&tmp, xenonet_base::json::stringify(&doc, 0))?;
+            std::fs::write(&tmp, xenonet_text::json::stringify(&doc, 0))?;
             std::fs::rename(&tmp, file)
         })();
         if wrote.is_err() {
@@ -264,7 +264,7 @@ impl Endpoint {
 
     fn remove_descriptor(&self) {
         let mine =
-            std::fs::read_to_string(&self.inner.file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(u64::from(std::process::id()));
+            std::fs::read_to_string(&self.inner.file).ok().and_then(|t| xenonet_text::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(u64::from(std::process::id()));
         if mine {
             let _ = std::fs::remove_file(&self.inner.file);
         }

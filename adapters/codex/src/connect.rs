@@ -4,7 +4,7 @@
 use serde_json::{json, Map, Value};
 use xenonet_adapter::apps::App;
 use xenonet_adapter::connect::{cli_json, event_list, events_of, hook_set, join, list_strings, Format, Found, Machine, Result, Shared, EARLIER};
-use xenonet_base::paths::tilde;
+use xenonet_os::paths::tilde;
 
 /// The app's config format, for a connect.
 pub fn format(app: &App, shared: &Shared) -> Box<dyn Format> {
@@ -55,7 +55,7 @@ impl Format for CodexHooks {
         if r.is_empty() {
             return Ok(None);
         }
-        Ok(Some(match xenonet_base::json::parse(&r) {
+        Ok(Some(match xenonet_text::json::parse(&r) {
             Ok(Value::Null) | Err(_) => json!({ "command": null }),
             Ok(s) => match s.get("transport").filter(|t| !t.is_null()) {
                 Some(t) => t.clone(),
@@ -160,7 +160,7 @@ mod tests {
         let k = Shared::new(options());
         let f = CodexHooks::new(app("codex").unwrap(), &k);
         // Joined as this machine joins paths, so the test holds on Windows too.
-        assert_eq!(f.hooks_file, xenonet_base::nodepath::join(&["/h", ".codex", "hooks.json"]));
+        assert_eq!(f.hooks_file, xenonet_os::nodepath::join(&["/h", ".codex", "hooks.json"]));
         assert_eq!(f.hooks["SessionEnd"]["hooks"][0]["timeout"], json!(3));
         let mut m = FakeMachine { clis: vec!["codex".into()], ..FakeMachine::default() };
         let before = c.preview(&mut m).unwrap();

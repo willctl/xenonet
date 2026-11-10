@@ -139,7 +139,7 @@ pub fn judge(tool: &str, input: &Value, folder: &str, home: &str, windows: bool)
         if secretive(&p) {
             return ask("its path looks like a secret");
         }
-        return if within(&p, folder, home, windows) { Verdict::Allow } else { ask(format!("it changes a file outside {}", xenonet_base::paths::tilde(folder, home))) };
+        return if within(&p, folder, home, windows) { Verdict::Allow } else { ask(format!("it changes a file outside {}", xenonet_os::paths::tilde(folder, home))) };
     }
     if matches!(tool, "Bash" | "PowerShell") {
         return command(input.get("command").and_then(Value::as_str).unwrap_or(""));

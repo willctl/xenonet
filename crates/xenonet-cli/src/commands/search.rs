@@ -6,7 +6,7 @@ use crate::js::{encode, have, list, num, on, slice_to, str, t};
 use crate::out::{ago, c, clip, json, now, plural, print, width, Done, Fail};
 use crate::reach::need;
 use serde_json::{Map, Value};
-use xenonet_base::jsstr::collapse_space;
+use xenonet_text::utf16::collapse_space;
 
 pub const HELP: &str = include_str!("help/search.txt");
 
@@ -32,7 +32,7 @@ fn marked(text: &str) -> String {
 
 pub fn run(words: &[String], flags: &Flags) -> Done {
     let q = words.join(" ");
-    let q = xenonet_base::text::js_trim(&q).to_string();
+    let q = xenonet_text::text::trim(&q).to_string();
     if q.is_empty() {
         return Err(Fail::new("say what to look for: xenonet search <words>", 2));
     }
@@ -51,8 +51,8 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
         return Ok(0);
     }
     if top.is_empty() {
-        let docs = answer.get("status").and_then(|st| st.get("docs")).filter(|d| xenonet_base::text::truthy(Some(d)));
-        print(c::dim(format!("Nothing in {} matches \"{q}\".", docs.map_or("the transcripts".into(), |d| plural(xenonet_base::text::js_number(Some(d)), "indexed message")))));
+        let docs = answer.get("status").and_then(|st| st.get("docs")).filter(|d| xenonet_text::text::truthy(Some(d)));
+        print(c::dim(format!("Nothing in {} matches \"{q}\".", docs.map_or("the transcripts".into(), |d| plural(xenonet_text::text::to_number(Some(d)), "indexed message")))));
         return Ok(0);
     }
     let room = width() as i64 - 4;

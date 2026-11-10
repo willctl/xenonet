@@ -11,7 +11,7 @@ use crate::js::str;
 use crate::out::{c, print, Done, Fail};
 use crate::prompt::confirm;
 use serde_json::Value;
-use xenonet_base::json::stringify;
+use xenonet_text::json::stringify;
 
 pub const HELP: &str = include_str!("help/update.txt");
 

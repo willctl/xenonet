@@ -211,7 +211,7 @@ Grok also runs Claude Code's hooks (`[compat.claude] hooks`, on unless you
 turn it off), with its own payload. XenoNet's Claude Code routes pass over
 an event with Grok's camelCase keys (`hookEventName`, or `sessionId`
 without `session_id`), unchecked, so a Grok session is heard once, on its
-own route (`hook_written_by` in `xenonet-base`'s apps, `hookWrittenBy` in
+own route (`hook_written_by` in `xenonet-adapter`'s apps, `hookWrittenBy` in
 `core/apps.js`).
 
 ### Which session is calling

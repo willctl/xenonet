@@ -9,8 +9,8 @@ use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use xenonet_adapter::apps::is_session_id;
-use xenonet_base::text::{js_number, js_string, truthy};
 use xenonet_engine::delivery::opencode::xenonet_id;
+use xenonet_text::text::{display, to_number, truthy};
 
 pub struct DeliveryRoutes {
     pub policy: Arc<dyn Policy>,
@@ -25,13 +25,13 @@ pub struct DeliveryRoutes {
 // ever read it.
 // XenoNet's id for a session named as the request names it, null as none.
 fn open_code_id(text: &Value) -> String {
-    xenonet_id(&if text.is_null() { String::new() } else { js_string(text) })
+    xenonet_id(&if text.is_null() { String::new() } else { display(text) })
 }
 
 fn session_of(text: &Value) -> Result<String, CoreError> {
     let id = open_code_id(text);
     if !is_session_id(&id) {
-        let shown = if text.is_null() { String::new() } else { js_string(text) };
+        let shown = if text.is_null() { String::new() } else { display(text) };
         return Err(CoreError::new(format!("\"{shown}\" isn't a session's id: give its id, such as opencode:ses-… or claude:…, which xenonet agents --json lists")));
     }
     Ok(id)
@@ -41,13 +41,13 @@ fn str_of(v: &Value) -> String {
     if v.is_null() {
         String::new()
     } else {
-        js_string(v)
+        display(v)
     }
 }
 
 /// Hours as milliseconds, a minute to 90 days, `d` when it isn't one.
 fn hours(h: Option<&Value>, d: f64) -> f64 {
-    let n = js_number(h);
+    let n = to_number(h);
     let n = if n.is_nan() || n == 0.0 { d } else { n };
     (1.0 / 60.0f64).max(n.min(24.0 * 90.0)) * 3600e3
 }
@@ -69,7 +69,7 @@ impl DeliveryRoutes {
         if req.method == "GET" && route == "/api/delivery" {
             let usage: serde_json::Map<String, Value> = ["claude", "codex"].iter().map(|app| (app.to_string(), self.router.usage(app).unwrap_or(Value::Null))).collect();
             let listening: Vec<Value> = self.engine.listening().unwrap_or_default().into_iter().map(|(agent, until)| json!({ "agent": agent, "until": until })).collect();
-            let audit = js_number(req.param("audit").map(|s| Value::String(s.to_string())).as_ref());
+            let audit = to_number(req.param("audit").map(|s| Value::String(s.to_string())).as_ref());
             let audit = if audit.is_nan() || audit == 0.0 { 50.0 } else { audit };
             return Ok(Reply::json(
                 200,

@@ -17,11 +17,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use xenonet_api::cores::{CoreError, Engine, Kind, R};
 use xenonet_api::From;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_number, js_string};
-use xenonet_base::time::now_ms;
 use xenonet_engine::engine::{Fail, ACTIVE_MS};
 use xenonet_engine::host::{self, Collaborators, IndexEntry, Repo, StatusSet};
+use xenonet_os::sync::Locked;
+use xenonet_text::text::{display, to_number};
+use xenonet_text::time::now_ms;
 
 const CLAIM_MINUTES: f64 = 60.0;
 
@@ -115,7 +115,7 @@ impl Mail {
     }
 
     pub fn listening(&self) -> Vec<(String, Value)> {
-        self.listening.locked().iter().map(|(a, u)| (a.clone(), xenonet_base::json::number(*u))).collect()
+        self.listening.locked().iter().map(|(a, u)| (a.clone(), xenonet_text::json::number(*u))).collect()
     }
 
     fn set_listening(&self, id: &str, until: f64) {
@@ -439,40 +439,40 @@ pub fn event(w: &Runtime, name: &str, payload: &Value) {
             w.emit(From::Engine, "message", payload.clone());
             // A message from another machine to a session that holds them
             // waits until the session asks.
-            if xenonet_base::text::truthy(Some(&payload["held"])) {
+            if xenonet_text::text::truthy(Some(&payload["held"])) {
                 return;
             }
             // Agents on other hosts get it there, through the network.
             let to: Vec<Value> = payload["to"].as_array().cloned().unwrap_or_default();
             let mut m = payload.clone();
-            if to.iter().any(|r| xenonet_engine::network::is_remote(&js_string(r))) {
+            if to.iter().any(|r| xenonet_engine::network::is_remote(&display(r))) {
                 if let Value::Object(f) = &mut m {
                     f.retain(|k, _| k != "to");
-                    f.insert("to".into(), Value::Array(to.iter().filter(|r| !xenonet_engine::network::is_remote(&js_string(r))).cloned().collect()));
+                    f.insert("to".into(), Value::Array(to.iter().filter(|r| !xenonet_engine::network::is_remote(&display(r))).cloned().collect()));
                 }
             }
             // Who is listening now, before the route below runs.
             let here: Vec<Value> = m["to"].as_array().cloned().unwrap_or_default();
-            let listening: Vec<String> = here.iter().map(js_string).filter(|id| w.mail.listening_has(id)).collect();
+            let listening: Vec<String> = here.iter().map(display).filter(|id| w.mail.listening_has(id)).collect();
             w.spawn_blocking(move |w| {
                 delivery::route(w, &m, &listening);
                 crate::network::delivered(w, &m);
             });
             if let Some(wakes) = &w.wakes {
                 for r in here {
-                    wakes.arrived(w, &js_string(&r));
+                    wakes.arrived(w, &display(&r));
                 }
             }
         }
         "seen" => {
             let ids: Vec<Value> = payload["ids"].as_array().cloned().unwrap_or_default();
-            let me = js_string(&payload["agent"]);
+            let me = display(&payload["agent"]);
             w.mail.seen(&me);
             delivery::seen(w, &me, &ids);
             crate::network::seen(w, &me, &ids);
         }
         "contact" if payload["via"].as_str() == Some("hook") => {
-            delivery::contact(w, &js_string(&payload["agent"]));
+            delivery::contact(w, &display(&payload["agent"]));
         }
         _ => {}
     }
@@ -550,7 +550,7 @@ impl Engine for EngineDriver {
     }
     async fn claim(&self, me: &str, args: Value) -> R<Value> {
         let me = me.to_string();
-        let minutes = args.get("minutes").cloned().unwrap_or_else(|| xenonet_base::json::number(CLAIM_MINUTES));
+        let minutes = args.get("minutes").cloned().unwrap_or_else(|| xenonet_text::json::number(CLAIM_MINUTES));
         let ask = fields(vec![("paths", args.get("paths").cloned()), ("note", Some(or_null(args.get("note")))), ("minutes", Some(minutes))]);
         self.run(None, move |e, c| e.claim(c, &me, &ask)).await
     }
@@ -631,8 +631,8 @@ impl Engine for EngineDriver {
     fn mark_unseen(&self, me: &str, ids: &Value) -> R<()> {
         // The ids listed, or a text's characters.
         let ids: Vec<f64> = match ids {
-            Value::Array(a) => a.iter().map(|id| js_number(Some(id))).collect(),
-            Value::String(s) => s.chars().map(|c| js_number(Some(&Value::String(c.to_string())))).collect(),
+            Value::Array(a) => a.iter().map(|id| to_number(Some(id))).collect(),
+            Value::String(s) => s.chars().map(|c| to_number(Some(&Value::String(c.to_string())))).collect(),
             _ => return Err(CoreError::new("that isn't a list")),
         };
         self.0.store.with(|s| s.mark_unseen(me, &ids)).map_err(|e| CoreError::new(e.message().to_string()))

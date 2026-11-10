@@ -129,21 +129,21 @@ async fn answer(world: World, version: String, cursor_key: Vec<u8>, a: Asked) ->
         Box::pin(async move {
             let op = q.get("op").and_then(Value::as_str).unwrap_or("");
             match (op, &w) {
-                ("now" | "cursorNow", _) => Ok(xenonet_base::json::number(now_ms())),
+                ("now" | "cursorNow", _) => Ok(xenonet_text::json::number(now_ms())),
                 ("check", _) => Ok(json!(result_ok(q.get("envelope").unwrap_or(&Value::Null)))),
                 ("view", World::Fixture) => Ok(fixtures::fixture_view(now_ms())),
                 ("actor", World::Fixture) => Ok(Value::Null),
-                ("stats", World::Fixture) => Ok(fixtures::fixture_stats(&q.get("id").map(xenonet_base::text::js_string).unwrap_or_default())),
+                ("stats", World::Fixture) => Ok(fixtures::fixture_stats(&q.get("id").map(xenonet_text::text::display).unwrap_or_default())),
                 ("idKey", World::Fixture) => Ok(json!("fixture".as_bytes())),
                 ("view", World::Real(r)) => r.view().map_err(|e| fx::error(e.message, None)),
                 ("actor", World::Real(r)) => Ok(r.actor(&q["id"])),
                 ("stats", World::Real(r)) => {
-                    let id = q.get("id").map(xenonet_base::text::js_string).unwrap_or_default();
+                    let id = q.get("id").map(xenonet_text::text::display).unwrap_or_default();
                     r.state.session_stats(&id).await.map(|s| s.unwrap_or(Value::Null)).map_err(|e| fx::error(e.message, None))
                 }
                 ("idKey", World::Real(r)) => {
                     let k = r.remote.as_ref().map(|c| c.id_key()).transpose().map_err(|e| fx::error(e.message, None))?.unwrap_or(Value::Null);
-                    Ok(json!(xenonet_base::text::js_string(&k).as_bytes()))
+                    Ok(json!(xenonet_text::text::display(&k).as_bytes()))
                 }
                 (other, _) => Err(fx::error(format!("no such request: {other}"), None)),
             }
@@ -162,7 +162,7 @@ async fn answer(world: World, version: String, cursor_key: Vec<u8>, a: Asked) ->
 
 /// What a read refused for: its code, and the log's reason.
 fn refusal(e: &Value) -> Option<(String, String)> {
-    (e.get("refused") == Some(&json!(true))).then(|| (xenonet_base::text::js_string(&e["code"]), e.get("reason").map(xenonet_base::text::js_string).unwrap_or_default()))
+    (e.get("refused") == Some(&json!(true))).then(|| (xenonet_text::text::display(&e["code"]), e.get("reason").map(xenonet_text::text::display).unwrap_or_default()))
 }
 
 /// The reads: the source's view, the grants' reads, their audit.
@@ -203,7 +203,7 @@ impl remote_presence::Host for Presence<'_> {
         self.r.actors.as_ref().map_or(Ok(()), |a| a.target_at(id, node, relation, at).map_err(actor_error))
     }
     fn on_read(&mut self, read: Value) {
-        let connection = xenonet_base::text::js_string(&read["connection"]);
+        let connection = xenonet_text::text::display(&read["connection"]);
         let transport = self.r.engine_store.connection(&connection).ok().flatten().and_then(|c| c.get("transport_kind").cloned()).unwrap_or(Value::Null);
         if let Some(sink) = self.r.emitter.sink() {
             sink.broadcast("remote-read", &json!({ "actor": read["actor"], "transport": transport, "reach": read["reach"], "at": read["at"] }));
@@ -218,13 +218,13 @@ struct Around<'a> {
 
 impl source::Around for Around<'_> {
     fn home_of(&mut self, id: &Value) -> Value {
-        self.state.home_of(&xenonet_base::text::js_string(id)).unwrap_or(Value::Null)
+        self.state.home_of(&xenonet_text::text::display(id)).unwrap_or(Value::Null)
     }
     fn product_of(&mut self, id: Option<&Value>) -> Value {
         product(id)
     }
     fn registered(&mut self, id: &Value) -> bool {
-        self.actors.is_some_and(|a| a.is_registered(&xenonet_base::text::js_string(id)))
+        self.actors.is_some_and(|a| a.is_registered(&xenonet_text::text::display(id)))
     }
 }
 
@@ -293,7 +293,7 @@ impl Reads {
 
     fn actor(&self, id: &Value) -> Value {
         let Some(a) = &self.actors else { return Value::Null };
-        match a.snapshot(&xenonet_base::text::js_string(id), None, false) {
+        match a.snapshot(&xenonet_text::text::display(id), None, false) {
             Ok(Some(snap)) => {
                 let p = product(snap.get("product").and_then(|p| p.get("id")));
                 source::actor(&snap, p)
@@ -314,11 +314,11 @@ impl Reads {
         let started = now_ms();
         let cfg = config(&self.version);
         let b = service::begin(&cfg, request);
-        let grant = xenonet_base::text::js_string(&session["grantId"]);
+        let grant = xenonet_text::text::display(&session["grantId"]);
         let request_id = b.request_id.clone();
         let op = b.op.clone().unwrap_or_else(|| "unknown".into());
         let log = |result: &str, extra: Map<String, Value>| {
-            let mut rec = json!({ "requestId": request_id, "grant": session["grantId"], "revision": extra.get("revision").cloned().unwrap_or(Value::Null), "actor": session["actorId"], "connection": session["connectionId"], "operation": op, "result": result, "latencyMs": xenonet_base::json::number(now_ms() - started) });
+            let mut rec = json!({ "requestId": request_id, "grant": session["grantId"], "revision": extra.get("revision").cloned().unwrap_or(Value::Null), "actor": session["actorId"], "connection": session["connectionId"], "operation": op, "result": result, "latencyMs": xenonet_text::json::number(now_ms() - started) });
             if let Value::Object(m) = &mut rec {
                 for (k, v) in extra {
                     m.insert(k, v);
@@ -339,11 +339,11 @@ impl Reads {
         let Some(remote) = self.remote.clone() else { return no("SERVICE_UNAVAILABLE", "no-connections", Map::new()) };
         let mut standing = remote.recheck_at(&session["grantId"], &json!(-1));
         if standing["ok"] != json!(true) {
-            return no(&xenonet_base::text::js_string(&standing["code"]), &xenonet_base::text::js_string(&standing["reason"]), Map::new());
+            return no(&xenonet_text::text::display(&standing["code"]), &xenonet_text::text::display(&standing["reason"]), Map::new());
         }
         let wait = self.buckets.locked().take(&grant, RATE.0, RATE.1, 1.0, now_ms());
         if wait != 0.0 {
-            return no("RATE_LIMITED", "rate", extra(&[("retryAfterMs", xenonet_base::json::number(wait))]));
+            return no("RATE_LIMITED", "rate", extra(&[("retryAfterMs", xenonet_text::json::number(wait))]));
         }
         if !self.inflight.locked().enter(&grant, cfg.limits.concurrent) {
             return no("RATE_LIMITED", "concurrency", extra(&[("retryAfterMs", json!(1000))]));
@@ -387,11 +387,7 @@ impl Reads {
                 // again.
                 let again = remote.recheck_at(&session["grantId"], &policy["revision"]);
                 if again["ok"] != json!(true) {
-                    return no(
-                        &xenonet_base::text::js_string(&again["code"]),
-                        &xenonet_base::text::js_string(&again["reason"]),
-                        extra(&[("revision", policy["revision"].clone())]),
-                    );
+                    return no(&xenonet_text::text::display(&again["code"]), &xenonet_text::text::display(&again["reason"]), extra(&[("revision", policy["revision"].clone())]));
                 }
                 if again["changed"] == json!(true) {
                     standing = again;
@@ -400,7 +396,7 @@ impl Reads {
                 remote.used(&grant);
                 let targets: Vec<Value> = out["targets"].as_array().cloned().unwrap_or_default();
                 let reach: Vec<Value> = out["reach"].as_array().cloned().unwrap_or_default();
-                let (actor, connection) = (xenonet_base::text::js_string(&session["actorId"]), xenonet_base::text::js_string(&session["connectionId"]));
+                let (actor, connection) = (xenonet_text::text::display(&session["actorId"]), xenonet_text::text::display(&session["connectionId"]));
                 let _ = self.presence.locked().read(&mut Presence { r: self }, &actor, &connection, &targets, &reach, now_ms(), true);
                 log("ok", extra(&[("revision", policy["revision"].clone()), ("bytes", out["bytes"].clone()), ("projects", out["projects"].clone())]));
                 return json!({ "ok": true, "result": out["envelope"] });
@@ -459,10 +455,10 @@ impl Reads {
         let mut visible = projection::visible_sessions(&view, &policy, t);
         let mut counts: Vec<(String, Map<String, Value>)> = places.iter().map(|(p, _)| (p.clone(), projection::empty_counts())).collect();
         for v in &visible {
-            let project = xenonet_base::text::js_string(&v.project);
+            let project = xenonet_text::text::display(&v.project);
             if let Some((_, c)) = counts.iter_mut().find(|(p, _)| *p == project) {
                 let n = c.get(v.status).and_then(Value::as_f64).unwrap_or(0.0) + 1.0;
-                c.insert(v.status.into(), xenonet_base::json::number(n));
+                c.insert(v.status.into(), xenonet_text::json::number(n));
             }
         }
         let place_name = |place: &str| -> Option<String> {
@@ -490,7 +486,7 @@ impl Reads {
             .iter()
             .map(|(p, place)| json!({ "project_id": p, "place": place, "name": known.get(place).and_then(|k| k.get("name")).cloned().unwrap_or(Value::Null) }))
             .collect();
-        Ok(json!({ "at": xenonet_base::time::iso(t), "labels": labels, "synthetic": synthetic, "real": { "projects": projects, "sessions": sessions }, "yours": yours }))
+        Ok(json!({ "at": xenonet_text::time::iso(t), "labels": labels, "synthetic": synthetic, "real": { "projects": projects, "sessions": sessions }, "yours": yours }))
     }
 }
 

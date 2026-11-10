@@ -11,7 +11,7 @@ use crate::ctx::{fail, pending_reply, Ctx};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 const BODY: usize = 16 << 10;
 const WINDOW_MS: f64 = 7.0 * 24.0 * 3600e3;
@@ -58,8 +58,8 @@ impl AssistantRoutes<'_> {
         let mut counts: Vec<(Value, f64)> = Vec::new();
         for n in &nodes {
             if n["kind"] != "session"
-                || xenonet_base::text::truthy(n.get("host"))
-                || xenonet_base::text::truthy(n.get("archived"))
+                || xenonet_text::text::truthy(n.get("host"))
+                || xenonet_text::text::truthy(n.get("archived"))
                 || n["updatedAt"].as_f64().unwrap_or(0.0) < t - WINDOW_MS
             {
                 continue;
@@ -72,13 +72,13 @@ impl AssistantRoutes<'_> {
         }
         let mut places: Vec<Value> = nodes
             .iter()
-            .filter(|n| (n["kind"] == "project" || n["kind"] == "zone") && !xenonet_base::text::truthy(n.get("host")))
+            .filter(|n| (n["kind"] == "project" || n["kind"] == "zone") && !xenonet_text::text::truthy(n.get("host")))
             .map(|n| {
                 let count = counts.iter().find(|(h, _)| *h == n["id"]).map_or(0.0, |c| c.1);
-                json!({ "place": n["id"], "name": n.get("name").cloned().unwrap_or(Value::Null), "kind": n["kind"], "sessions7d": xenonet_base::json::number(count), "lastActivity": n.get("lastActivity").cloned().unwrap_or(Value::Null) })
+                json!({ "place": n["id"], "name": n.get("name").cloned().unwrap_or(Value::Null), "kind": n["kind"], "sessions7d": xenonet_text::json::number(count), "lastActivity": n.get("lastActivity").cloned().unwrap_or(Value::Null) })
             })
             .collect();
-        let name = |v: &Value| xenonet_base::text::js_string(&v["name"]);
+        let name = |v: &Value| xenonet_text::text::display(&v["name"]);
         places.sort_by(|a, b| {
             let n = |v: &Value, k: &str| v[k].as_f64().unwrap_or(0.0);
             n(b, "sessions7d").total_cmp(&n(a, "sessions7d")).then(n(b, "lastActivity").total_cmp(&n(a, "lastActivity"))).then_with(|| name(a).cmp(&name(b)))
@@ -87,7 +87,7 @@ impl AssistantRoutes<'_> {
     }
 
     fn place_map(&self) -> Result<Value, CoreError> {
-        Ok(Value::Object(self.places()?.into_iter().map(|p| (xenonet_base::text::js_string(&p["place"]), p)).collect()))
+        Ok(Value::Object(self.places()?.into_iter().map(|p| (xenonet_text::text::display(&p["place"]), p)).collect()))
     }
 
     fn identities(&self) -> Result<Vec<Value>, CoreError> {
@@ -144,7 +144,7 @@ impl AssistantRoutes<'_> {
             let ids: Vec<Value> = self
                 .identities()?
                 .into_iter()
-                .filter(|i| !xenonet_base::text::truthy(i.get("hidden")))
+                .filter(|i| !xenonet_text::text::truthy(i.get("hidden")))
                 .map(|i| json!({ "id": i["id"], "kind": i["kind"], "name": i.get("name").cloned().unwrap_or(Value::Null) }))
                 .collect();
             return Ok(Reply::json(200, json!({ "places": self.places()?, "identities": ids })));
@@ -157,7 +157,7 @@ impl AssistantRoutes<'_> {
             if grant.as_deref().is_some_and(|g| !grant_id(g)) {
                 return Ok(fail(400, "bad-request", "grant is a grant's id", &[], &none()));
             }
-            let limit = xenonet_base::text::js_number(req.param("limit").map(|s| Value::String(s.into())).as_ref());
+            let limit = xenonet_text::text::to_number(req.param("limit").map(|s| Value::String(s.into())).as_ref());
             let limit = if limit.is_nan() || limit == 0.0 { 100.0 } else { limit };
             let audit = self.ctx.cores.audit.clone().ok_or_else(|| CoreError::pending("core/assistant/audit.js"))?;
             return Ok(Reply::json(200, json!({ "records": audit.recent(grant.as_deref(), limit)? })));
@@ -189,7 +189,7 @@ impl AssistantRoutes<'_> {
                 return Ok(r);
             }
             let body = self.object_of(req).await?;
-            let ids: Vec<String> = self.identities()?.iter().map(|i| xenonet_base::text::js_string(&i["id"])).collect();
+            let ids: Vec<String> = self.identities()?.iter().map(|i| xenonet_text::text::display(&i["id"])).collect();
             return Ok(Reply::json(201, connections.pair(&body, &self.place_map()?, &ids)?));
         }
         if p == "/api/assistant/tunnels" && m == "GET" {

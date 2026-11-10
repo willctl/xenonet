@@ -24,9 +24,9 @@ use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 use xenonet_api::From;
-use xenonet_base::network::{Kind as FrameKind, To};
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
+use xenonet_model::ops::{Kind as FrameKind, To};
+use xenonet_os::sync::Locked;
+use xenonet_text::time::now_ms;
 
 /// The reserved target an ask crosses to window hosts as.
 pub const TARGET: &str = "xenonet:ask";
@@ -112,7 +112,7 @@ pub struct AskSide {
 pub fn input_words(input: &Value, home: &str) -> String {
     let pick = ["command", "file_path", "path", "url", "pattern", "query"].iter().find_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_string));
     let text = pick.unwrap_or_else(|| input.to_string());
-    let text = xenonet_base::paths::tilde(&text, home);
+    let text = xenonet_os::paths::tilde(&text, home);
     clip(&xenonet_engine::delivery::policy::sanitize(&text, true, 300.0), 300)
 }
 

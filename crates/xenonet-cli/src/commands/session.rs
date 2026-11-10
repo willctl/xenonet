@@ -9,7 +9,7 @@ use crate::out::{c, clip, json, plural, print, table, width, Done, Fail, Layout}
 use crate::reach::need;
 use crate::sys;
 use serde_json::Value;
-use xenonet_base::units::{duration, money, share, tokens};
+use xenonet_text::units::{duration, money, share, tokens};
 
 pub const HELP: &str = include_str!("help/session.txt");
 
@@ -27,7 +27,7 @@ pub fn tool_name(name: &str) -> String {
 pub fn run(words: &[String], flags: &Flags) -> Done {
     let s = need(flags)?;
     let q = words.join(" ");
-    let q = xenonet_base::text::js_trim(&q).to_string();
+    let q = xenonet_text::text::trim(&q).to_string();
     let by = if q.is_empty() { format!("cwd={}", encode(&sys::cwd())) } else { format!("q={}", encode(&q)) };
     let found = s.get(&format!("/api/sessions?limit=5&{by}"))?;
     let found = found.as_array().cloned().unwrap_or_default();
@@ -52,7 +52,7 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
         meta.push(t(&st, "app"));
     }
     if on(&st, "cwd") {
-        meta.push(xenonet_base::paths::tilde(&t(&st, "cwd"), &home));
+        meta.push(xenonet_os::paths::tilde(&t(&st, "cwd"), &home));
     }
     if on(&st, "branch") {
         meta.push(t(&st, "branch"));
@@ -150,7 +150,7 @@ pub fn run(words: &[String], flags: &Flags) -> Done {
                     tool_name(str(x, "name").unwrap_or_default()),
                     c::dim(plural(num(x, "calls"), "call")),
                     errors,
-                    c::dim(have(x, "ms").map_or(String::new(), |ms| duration(Some(xenonet_base::text::js_number(Some(ms)))))),
+                    c::dim(have(x, "ms").map_or(String::new(), |ms| duration(Some(xenonet_text::text::to_number(Some(ms)))))),
                 ]
             })
             .collect();

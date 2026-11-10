@@ -7,7 +7,7 @@
 
 use super::files::Files;
 use serde_json::Value;
-use xenonet_base::ordered::OrderedMap;
+use xenonet_text::ordered::OrderedMap;
 
 /// A check of a record against its vendor's schema threw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

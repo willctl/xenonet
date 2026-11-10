@@ -133,11 +133,11 @@ mod tests {
     fn at(year: i64, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> f64 {
         // Near enough to find the local moment: step from UTC by the offset
         // localtime gives, which settles in two steps away from a change.
-        let utc = xenonet_base::time::day_ms(year, month, day) + f64::from(hour * 3600 + minute * 60 + second) * 1000.0;
+        let utc = xenonet_text::time::day_ms(year, month, day) + f64::from(hour * 3600 + minute * 60 + second) * 1000.0;
         let mut ms = utc;
         for _ in 0..3 {
             let l = local(ms).unwrap();
-            let shown = xenonet_base::time::day_ms(l.year, l.month, l.day) + f64::from(l.hour * 3600 + l.minute * 60 + l.second) * 1000.0;
+            let shown = xenonet_text::time::day_ms(l.year, l.month, l.day) + f64::from(l.hour * 3600 + l.minute * 60 + l.second) * 1000.0;
             ms += utc - shown;
         }
         ms

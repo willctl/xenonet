@@ -8,7 +8,7 @@ use serde_json::Value;
 /// Whether JS's trim() takes a character off: its white space and line
 /// terminators. (Rust's own white space differs: it has U+0085 and not
 /// U+FEFF.)
-pub fn is_js_space(c: char) -> bool {
+pub fn is_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
@@ -16,37 +16,37 @@ pub fn is_js_space(c: char) -> bool {
     )
 }
 
-/// JS's `\s` for the regex crate, as the inside of a class: `[{JS_SPACE}]`
-/// is `\s` and `[^{JS_SPACE}]` is `\S`. The characters is_js_space takes
+/// JS's `\s` for the regex crate, as the inside of a class: `[{SPACE}]`
+/// is `\s` and `[^{SPACE}]` is `\S`. The characters is_space takes
 /// (the crate's own `\s` is Unicode's).
-pub const JS_SPACE: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
+pub const SPACE: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
 
 /// JS's `.` without the s flag, for the regex crate: anything but a line
 /// terminator (the crate's own stops at `\n` alone).
-pub const JS_DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
+pub const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
 
 /// A JS line terminator: where `.` stops, and `^` and `$` match with the m
 /// flag.
-pub fn is_js_line_terminator(c: char) -> bool {
+pub fn is_line_terminator(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
-pub fn js_trim(s: &str) -> &str {
-    s.trim_matches(is_js_space)
+pub fn trim(s: &str) -> &str {
+    s.trim_matches(is_space)
 }
 
-pub fn js_trim_start(s: &str) -> &str {
-    s.trim_start_matches(is_js_space)
+pub fn trim_start(s: &str) -> &str {
+    s.trim_start_matches(is_space)
 }
 
 /// Whether a line is blank as `!line.trim()` says.
 pub fn is_blank(s: &str) -> bool {
-    js_trim(s).is_empty()
+    trim(s).is_empty()
 }
 
 /// A value as String(value) writes it; for null, "null". (Array.join
 /// writes null and a missing value as "", which `join_item` does.)
-pub fn js_string(v: &Value) -> String {
+pub fn display(v: &Value) -> String {
     match v {
         Value::Null => "null".into(),
         Value::Bool(b) => b.to_string(),
@@ -60,14 +60,14 @@ pub fn js_string(v: &Value) -> String {
 /// A value as `${value}` writes it: String(value), and "undefined" for a
 /// value that isn't there.
 pub fn template(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 /// An item as Array.prototype.join writes it: null and missing as "".
 pub fn join_item(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => String::new(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -76,14 +76,14 @@ pub fn join<'a>(items: impl Iterator<Item = Option<&'a Value>>, sep: &str) -> St
 }
 
 /// A value as Number(value) reads it.
-pub fn js_number(v: Option<&Value>) -> f64 {
+pub fn to_number(v: Option<&Value>) -> f64 {
     match v {
         None => f64::NAN,
         Some(Value::Null) => 0.0,
         Some(Value::Bool(b)) => f64::from(u8::from(*b)),
         Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
         Some(Value::String(s)) => string_number(s),
-        Some(Value::Array(a)) => string_number(&js_string(&Value::Array(a.clone()))),
+        Some(Value::Array(a)) => string_number(&display(&Value::Array(a.clone()))),
         Some(Value::Object(_)) => f64::NAN,
     }
 }
@@ -91,7 +91,7 @@ pub fn js_number(v: Option<&Value>) -> f64 {
 // StringToNumber: white space around it, "" as 0, hex, octal and binary
 // literals, Infinity, and otherwise a decimal or NaN.
 fn string_number(s: &str) -> f64 {
-    let t = js_trim(s);
+    let t = trim(s);
     if t.is_empty() {
         return 0.0;
     }
@@ -175,8 +175,8 @@ mod tests {
 
     #[test]
     fn as_js_reads_it() {
-        assert_eq!(js_trim("\u{feff} a \u{2028}"), "a");
-        assert_eq!(js_trim("\u{85}a"), "\u{85}a");
+        assert_eq!(trim("\u{feff} a \u{2028}"), "a");
+        assert_eq!(trim("\u{85}a"), "\u{85}a");
         assert_eq!(
             join([Some(&json!("a")), None, Some(&json!(null)), Some(&json!(1.5)), Some(&json!([1, [2, null]])), Some(&json!({}))].into_iter(), " "),
             "a   1.5 1,2, [object Object]"
@@ -191,10 +191,10 @@ mod tests {
             (json!([7]), 7.0),
             (json!([]), 0.0),
         ] {
-            assert_eq!(js_number(Some(&v)), n, "{v}");
+            assert_eq!(to_number(Some(&v)), n, "{v}");
         }
         for v in [json!("1_0"), json!("inf"), json!("."), json!("1e"), json!({}), json!([1, 2])] {
-            assert!(js_number(Some(&v)).is_nan(), "{v}");
+            assert!(to_number(Some(&v)).is_nan(), "{v}");
         }
         assert!(!truthy(Some(&json!(0))) && truthy(Some(&json!("0"))) && truthy(Some(&json!([]))) && !truthy(None));
     }

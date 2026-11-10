@@ -6,14 +6,14 @@ use crate::checks::STATUSES;
 use serde_json::{json, Map, Value};
 use xenonet_app::fsx;
 use xenonet_app::jsv::truthy;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 const SKEW_MS: f64 = 120e3;
 
 fn span(ms: f64) -> String {
     let s = ms.abs() / 1000.0;
-    let r = xenonet_base::units::js_round;
-    let n = xenonet_base::json::number_string;
+    let r = xenonet_text::units::round;
+    let n = xenonet_text::json::number_string;
     if s < 90.0 {
         format!("{} s", n(r(s)))
     } else if s < 5400.0 {
@@ -36,7 +36,7 @@ fn verdict(status: &str, detail: String, fix: Option<String>) -> Value {
 /// A host's check: reachable, speaking a protocol this XenoNet speaks, and
 /// its clock within two minutes of this one's. `h` is how the hub lists it.
 pub fn host_check(h: &Value, now: f64) -> Value {
-    let s = |v: Option<&Value>| v.filter(|x| !x.is_null()).map(js_string);
+    let s = |v: Option<&Value>| v.filter(|x| !x.is_null()).map(display);
     let id = s(h.get("id")).unwrap_or_else(|| "undefined".into());
     let error = h.get("error").filter(|e| truthy(Some(e)));
     let fix = error.and_then(|e| s(e.get("fix")));
@@ -118,7 +118,7 @@ pub fn new_problems(prev: &Value, next: &Value) -> Vec<Value> {
 
 /// The last run, from its file; None when there's none to read.
 pub fn read_run(file: Option<&str>) -> Option<Value> {
-    xenonet_base::json::parse(&fsx::read_text(file?).ok()?).ok()
+    xenonet_text::json::parse(&fsx::read_text(file?).ok()?).ok()
 }
 
 /// Keeps a run, saying what it is (contracts, section 1); quietly, as the
@@ -132,7 +132,7 @@ pub fn write_run(file: Option<&str>, result: &Value) {
     }
     let tmp = format!("{file}.tmp");
     let _ = fsx::mkdir_p(&xenonet_app::nodepath::NATIVE.dirname(file), None)
-        .and_then(|()| fsx::write_file(&tmp, xenonet_base::json::stringify(&Value::Object(m), 0).as_bytes(), None))
+        .and_then(|()| fsx::write_file(&tmp, xenonet_text::json::stringify(&Value::Object(m), 0).as_bytes(), None))
         .and_then(|()| fsx::rename(&tmp, file));
 }
 

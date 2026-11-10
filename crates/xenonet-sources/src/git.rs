@@ -229,16 +229,16 @@ pub const CONFIG_TTL_MS: f64 = 600_000.0;
 /// (the same for a plain repo): `.git`, or where a `.git` file's gitdir
 /// points, and its commondir. None when there's neither.
 pub fn git_dirs(dir: &str) -> Option<(String, String)> {
-    use xenonet_base::nodepath::NATIVE;
+    use xenonet_os::nodepath::NATIVE;
     let mut git_dir = NATIVE.join(&[dir, ".git"]);
     let meta = std::fs::metadata(&git_dir).ok()?;
     if meta.is_file() {
         let text = String::from_utf8_lossy(&std::fs::read(&git_dir).ok()?).into_owned();
         let to = text.split_once("gitdir:")?.1.lines().next()?.trim().to_string();
-        git_dir = xenonet_base::nodepath::resolve(&[dir, &to]);
+        git_dir = xenonet_os::nodepath::resolve(&[dir, &to]);
     }
     let common = std::fs::read(NATIVE.join(&[&git_dir, "commondir"])).ok().map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|c| !c.is_empty());
-    let common = common.map_or_else(|| git_dir.clone(), |c| xenonet_base::nodepath::resolve(&[&git_dir, &c]));
+    let common = common.map_or_else(|| git_dir.clone(), |c| xenonet_os::nodepath::resolve(&[&git_dir, &c]));
     Some((git_dir, common))
 }
 
@@ -256,7 +256,7 @@ pub struct Stamps {
 }
 
 fn mtime_of(p: &std::path::Path) -> Option<f64> {
-    std::fs::symlink_metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok())
+    std::fs::symlink_metadata(p).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok())
 }
 
 /// The newest mtime of a folder and everything in it (a few levels and a
@@ -279,13 +279,13 @@ fn tree_mtime(dir: &str) -> String {
     }
     let mut newest = None;
     walk(std::path::Path::new(dir), 8, &mut 4096, &mut newest);
-    newest.map_or_else(String::new, xenonet_base::json::number_string)
+    newest.map_or_else(String::new, xenonet_text::json::number_string)
 }
 
 fn mtimes(files: &[String]) -> String {
     files
         .iter()
-        .map(|f| std::fs::metadata(f).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).map_or_else(String::new, xenonet_base::json::number_string))
+        .map(|f| std::fs::metadata(f).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).map_or_else(String::new, xenonet_text::json::number_string))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -293,7 +293,7 @@ fn mtimes(files: &[String]) -> String {
 /// A repo's stamps, or None when its git folder can't be found: then its
 /// status and drivers are read every time.
 pub fn repo_stamps(dir: &str, home: &str, xdg_config_home: Option<&str>) -> Option<Stamps> {
-    use xenonet_base::nodepath::NATIVE;
+    use xenonet_os::nodepath::NATIVE;
     let (git, common) = git_dirs(dir)?;
     let at = |base: &str, parts: &[&str]| NATIVE.join(&std::iter::once(base).chain(parts.iter().copied()).collect::<Vec<_>>());
     let status = [at(&git, &["index"]), at(&git, &["HEAD"]), at(&git, &["logs", "HEAD"]), at(&git, &["ORIG_HEAD"]), at(&common, &["FETCH_HEAD"]), at(&common, &["packed-refs"])];

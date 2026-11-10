@@ -11,8 +11,8 @@ pub mod toml;
 use serde_json::{json, Map, Value};
 use xenonet_adapter::apps::App;
 use xenonet_adapter::connect::{cli_json, event_list, events_of, hook_set, join, list_strings, Format, Found, Machine, Problem, Result, Shared};
-use xenonet_base::nodepath::NATIVE;
-use xenonet_base::paths::tilde;
+use xenonet_os::nodepath::NATIVE;
+use xenonet_os::paths::tilde;
 
 /// The app's config format, for a connect.
 pub fn format(app: &App, shared: &Shared) -> Box<dyn Format> {
@@ -218,7 +218,7 @@ mod tests {
         let before = c.preview(&mut m).unwrap();
         let entry = &before["apps"][0];
         assert_eq!((entry["installed"].as_bool(), entry["cli"].as_str()), (Some(false), None));
-        assert_eq!(entry["changes"][0]["where"], json!(xenonet_base::nodepath::join(&["~", ".grok", "config.toml"])));
+        assert_eq!(entry["changes"][0]["where"], json!(xenonet_os::nodepath::join(&["~", ".grok", "config.toml"])));
         assert_eq!(entry["notes"][0], json!("XenoNet can't find the grok command. Connecting writes Grok Build's settings all the same, for when you install it."));
 
         // Its folder is here (the fake machine knows paths, folders too).

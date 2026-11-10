@@ -2,8 +2,8 @@
 //! saved in the session's own app.
 
 use serde_json::Value;
-use xenonet_base::jsstr;
-use xenonet_base::text::{js_trim, truthy};
+use xenonet_text::text::{trim, truthy};
+use xenonet_text::utf16;
 
 /// Long enough for any title the apps make, short enough to show whole.
 pub const MAX_TITLE: usize = 120;
@@ -24,8 +24,8 @@ pub fn clean_title(title: &str) -> String {
             in_run = false;
         }
     }
-    let one_line = jsstr::collapse_space(&no_controls);
-    js_trim(&jsstr::head(js_trim(&one_line), MAX_TITLE)).to_string()
+    let one_line = utf16::collapse_space(&no_controls);
+    trim(&utf16::head(trim(&one_line), MAX_TITLE)).to_string()
 }
 
 /// Whether a node is a session XenoNet can rename: one of this machine's,

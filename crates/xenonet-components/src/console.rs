@@ -133,7 +133,7 @@ impl Console {
         let file = NATIVE.join(&[&runtime_dir(&self.env, &self.machine), "desktop.json"]);
         let desktop = xenonet_app::fsx::read_text(&file)
             .ok()
-            .and_then(|t| xenonet_base::json::parse(&t).ok())
+            .and_then(|t| xenonet_text::json::parse(&t).ok())
             .ok_or_else(|| Failure::msg("Open XenoNet once to register Desktop, or install the XenoNet bundle."))?;
         let mut env = self.env.clone();
         env.insert("XENONET_SHOW".into(), json!(show));

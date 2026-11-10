@@ -18,7 +18,7 @@ schemas and the design docs. Sizes are lines of Rust under `crates/*/src`.
   roster with signer rules; one-time tickets with HMAC proofs both ways;
   replay windows; a gateway that relays and can neither read nor forge.
   Known answers in `test/fixtures/net/` and about fifty tests. The seam to the
-  engine (`xenonet_base::network::{Net, Sink}`) is small and typed. This is
+  engine (`xenonet_model::ops::{Net, Sink}`) is small and typed. This is
   the one part of the core that is close to standalone.
 - **Three services in one process** as the network's test harness
   (`crates/xenonet-service/tests/net_*.rs`), and 23 fuzz targets.

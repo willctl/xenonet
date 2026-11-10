@@ -17,9 +17,9 @@
 
 use serde_json::{json, Map, Value};
 use xenonet_adapter::observe::{Fail, ObserverHost, Result};
-use xenonet_base::json::number;
-use xenonet_base::text::{js_string, js_trim, JS_SPACE};
 use xenonet_schema::drift::clean_version;
+use xenonet_text::json::number;
+use xenonet_text::text::{display, trim, SPACE};
 
 /// A pattern compiled once.
 macro_rules! re {
@@ -66,9 +66,9 @@ pub fn ms_of(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => {
             let f = n.as_f64()?;
-            (f.is_finite() && f > 0.0).then(|| if f > 1e11 { xenonet_base::units::js_round(f) } else { xenonet_base::units::js_round(f * 1000.0) })
+            (f.is_finite() && f > 0.0).then(|| if f > 1e11 { xenonet_text::units::round(f) } else { xenonet_text::units::round(f * 1000.0) })
         }
-        Value::String(s) if !s.is_empty() => xenonet_base::time::parse_iso(s).filter(|t| t.is_finite()),
+        Value::String(s) if !s.is_empty() => xenonet_text::time::parse_iso(s).filter(|t| t.is_finite()),
         _ => None,
     }
 }
@@ -111,7 +111,7 @@ fn read_json(h: &dyn ObserverHost, file: &str, src: &str, version: Option<&str>,
         Read::Failed(state, code) => return Err((state, code)),
     };
     // Hermes reads its files as utf-8-sig, so one may start with a BOM.
-    let Ok(value) = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)) else {
+    let Ok(value) = xenonet_text::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)) else {
         h.vendor().unparsable(src, version);
         return Err(("unreadable", json!("not JSON")));
     };
@@ -146,7 +146,7 @@ pub fn list_profiles(h: &dyn ObserverHost, root: &str) -> Value {
     let mut out = vec![json!({ "name": "default", "home": root })];
     let profiles = join(root, "profiles");
     let mut names: Vec<String> = h.files().dirs(&profiles).unwrap_or_default();
-    names.sort_by(|a, b| xenonet_base::jsstr::cmp_units(a, b));
+    names.sort_by(|a, b| xenonet_text::utf16::cmp_units(a, b));
     for name in names {
         if name != "default" && !name.starts_with('.') {
             out.push(json!({ "name": name, "home": join(&profiles, &name) }));
@@ -156,7 +156,7 @@ pub fn list_profiles(h: &dyn ObserverHost, root: &str) -> Value {
 }
 
 fn join(a: &str, b: &str) -> String {
-    xenonet_base::paths::join(a, b)
+    xenonet_os::paths::join(a, b)
 }
 
 /// Whether Hermes is installed here: its root, with its checkout or its
@@ -168,7 +168,7 @@ pub fn installed(h: &dyn ObserverHost, root: &str) -> bool {
 /// The build stamp: the release this build is of (baseVersion).
 pub fn read_stamp(h: &dyn ObserverHost, root: &str) -> Value {
     let file = join(&join(root, "hermes-agent"), "install-stamp.json");
-    let of = |v: &Value| v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&js_string(s)).map(str::to_string));
+    let of = |v: &Value| v.get("schemaVersion").filter(|s| s.as_f64().is_some_and(f64::is_finite)).and_then(|s| clean_version(&display(s)).map(str::to_string));
     match read_json(h, &file, source("stamp"), None, Some(&of)) {
         Ok(v) => json!({ "state": "ok", "version": v.get("baseVersion").and_then(Value::as_str).filter(|s| !s.is_empty()).and_then(clean_version) }),
         Err((state, _)) => json!({ "state": state, "version": null }),
@@ -230,7 +230,7 @@ pub fn read_ticker(h: &dyn ObserverHost, home: &str, version: Option<&str>) -> V
     // "<epoch seconds> <pid>" and "<epoch seconds>".
     let words = |r: &Read| -> Vec<String> {
         match r {
-            Read::Ok(t) => re!(format!("[{JS_SPACE}]+")).split(js_trim(t)).map(str::to_string).collect(),
+            Read::Ok(t) => re!(format!("[{SPACE}]+")).split(trim(t)).map(str::to_string).collect(),
             Read::Failed(..) => Vec::new(),
         }
     };
@@ -443,7 +443,7 @@ pub fn read_state_db(h: &dyn ObserverHost, file: &str, after_id: &Value, since_m
         let has_col = |t: &str, col: &str| cols(t).iter().any(|c| c == col);
         let version = if has_col("schema_version", "version") {
             let v = row("SELECT max(version) AS v FROM schema_version", vec![])?;
-            let v = v.get("v").filter(|v| !v.is_null()).map(js_string).unwrap_or_default();
+            let v = v.get("v").filter(|v| !v.is_null()).map(display).unwrap_or_default();
             clean_version(&v).map(str::to_string)
         } else {
             None
@@ -520,7 +520,7 @@ pub fn read_state_db(h: &dyn ObserverHost, file: &str, after_id: &Value, since_m
         } else {
             wheres.push(format!("{active} > ?"));
         }
-        let mut args = vec![json!(xenonet_base::json::stringify(&Value::Array(ids), 0)), number(since)];
+        let mut args = vec![json!(xenonet_text::json::stringify(&Value::Array(ids), 0)), number(since)];
         if ended {
             args.push(number(since));
         }
@@ -529,7 +529,7 @@ pub fn read_state_db(h: &dyn ObserverHost, file: &str, after_id: &Value, since_m
         // Each of those sessions' use by model and provider, summed over its tasks.
         let model_usage = if !sessions.is_empty() && has_col("session_model_usage", "session_id") && has_col("session_model_usage", "model") {
             let ids: Vec<Value> = sessions.iter().map(|s| s.get("id").cloned().unwrap_or(Value::Null)).collect();
-            rows(&model_usage_sql(&cols("session_model_usage")), vec![json!(xenonet_base::json::stringify(&Value::Array(ids), 0))])?
+            rows(&model_usage_sql(&cols("session_model_usage")), vec![json!(xenonet_text::json::stringify(&Value::Array(ids), 0))])?
         } else {
             Vec::new()
         };
@@ -539,7 +539,7 @@ pub fn read_state_db(h: &dyn ObserverHost, file: &str, after_id: &Value, since_m
             Vec::new()
         };
         let schema_version = match &version {
-            Some(v) => json!([{ "version": xenonet_base::text::js_number(Some(&Value::String(v.clone()))) }]),
+            Some(v) => json!([{ "version": xenonet_text::text::to_number(Some(&Value::String(v.clone()))) }]),
             None => json!([]),
         };
         let record = json!({ "schema_version": schema_version, "sessions": sessions, "messages": messages, "tool_paths": tool_paths, "gateway_heartbeats": heartbeats, "session_model_usage": model_usage });

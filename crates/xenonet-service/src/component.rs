@@ -32,7 +32,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 const HELLO: Duration = Duration::from_secs(5);
 // Desktop's answers to the service's requests: rpc.js's default.
@@ -135,7 +135,7 @@ impl Components {
         }
         self.hooks.terminals.kill_all();
         // Its descriptor, if it's still this process's.
-        let mine = std::fs::read_to_string(&self.file).ok().and_then(|t| xenonet_base::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(u64::from(std::process::id()));
+        let mine = std::fs::read_to_string(&self.file).ok().and_then(|t| xenonet_text::json::parse(&t).ok()).and_then(|v| v["pid"].as_u64()) == Some(u64::from(std::process::id()));
         if mine {
             let _ = std::fs::remove_file(&self.file);
         }
@@ -186,8 +186,8 @@ impl Components {
             // starting the service at login, asks here first.
             "yours" => return Ok((self.hooks.on_person)(conn.peer).await),
             "stop" => {
-                let running = self.hooks.terminals.list().as_array().is_some_and(|l| l.iter().any(|t| !xenonet_base::text::truthy(t.get("exited"))));
-                if running && !xenonet_base::text::truthy(params.get("force")) {
+                let running = self.hooks.terminals.list().as_array().is_some_and(|l| l.iter().any(|t| !xenonet_text::text::truthy(t.get("exited"))));
+                if running && !xenonet_text::text::truthy(params.get("force")) {
                     return Err("XenoNet has running terminals. Close them first, or use --force.".into());
                 }
                 let shutdown = self.hooks.shutdown.clone();
@@ -274,9 +274,9 @@ fn write_descriptor(file: &Path, port: u16, token: &str, version: &str) -> std::
             opts.mode(0o600);
         }
         drop(opts.open(&tmp)?);
-        let mut run = |f: &str, a: &[&str]| xenonet_base::private_file::run_private(f, a);
-        xenonet_base::private_file::protect_file(&tmp.to_string_lossy(), cfg!(windows), &mut run).map_err(|e| std::io::Error::other(e.message().to_string()))?;
-        std::fs::write(&tmp, xenonet_base::json::stringify(&json!({ "port": port, "token": token, "pid": std::process::id(), "version": version }), 0))?;
+        let mut run = |f: &str, a: &[&str]| xenonet_os::private_file::run_private(f, a);
+        xenonet_os::private_file::protect_file(&tmp.to_string_lossy(), cfg!(windows), &mut run).map_err(|e| std::io::Error::other(e.message().to_string()))?;
+        std::fs::write(&tmp, xenonet_text::json::stringify(&json!({ "port": port, "token": token, "pid": std::process::id(), "version": version }), 0))?;
         std::fs::rename(&tmp, file)
     })();
     if wrote.is_err() {
@@ -402,7 +402,7 @@ mod tests {
         }
         async fn next(&mut self) -> Value {
             let line = tokio::time::timeout(Duration::from_secs(5), self.lines.next_line()).await.unwrap().unwrap().unwrap();
-            xenonet_base::json::parse(&line).unwrap()
+            xenonet_text::json::parse(&line).unwrap()
         }
     }
 

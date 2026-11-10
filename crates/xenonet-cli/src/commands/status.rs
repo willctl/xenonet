@@ -7,7 +7,7 @@ use crate::js::{have, list, num, on, str, t};
 use crate::out::{ago, c, json, now, plural, print, table, Done, Layout};
 use crate::reach::{find, where_};
 use serde_json::{json, Map, Value};
-use xenonet_base::client::name_of;
+use xenonet_api::client::name_of;
 use xenonet_state::needs_you::{queue_of_summary, waits_words};
 
 pub const HELP: &str = include_str!("help/status.txt");
@@ -83,7 +83,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     }
 
     let count = |name: &str| {
-        list(health, "sources").iter().find(|x| str(x, "name") == Some(name) && on(x, "ok")).and_then(|x| have(x, "count")).map(|n| xenonet_base::text::js_number(Some(n)))
+        list(health, "sources").iter().find(|x| str(x, "name") == Some(name) && on(x, "ok")).and_then(|x| have(x, "count")).map(|n| xenonet_text::text::to_number(Some(n)))
     };
     let reads: Vec<String> =
         [("projects", "project"), ("claude", "Claude session"), ("codex", "Codex thread")].iter().filter_map(|(k, word)| count(k).map(|n| plural(n, word))).collect();

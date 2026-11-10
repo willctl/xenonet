@@ -30,11 +30,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
-use xenonet_base::text::{js_number, js_trim, truthy};
-use xenonet_base::{fs as xfs, json, jsstr};
+use xenonet_os::fs as xfs;
 use xenonet_sources::line_events::{self, Broken, Field, Kind, LineEvent, LineFile, OpenRun};
 use xenonet_sources::lines::{prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
 use xenonet_sources::wiki::{to_str_or_empty, Out};
+use xenonet_text::text::{to_number, trim, truthy};
+use xenonet_text::{json, utf16};
 
 const MAX_TEXT: usize = 6000;
 const VERSION: i64 = 2;
@@ -118,7 +119,7 @@ fn text_of(content: Js<'_>) -> Result<String, TypeError> {
 }
 
 fn skippable(t: &str) -> bool {
-    js_trim(t).is_empty() || t.starts_with('<') || t.starts_with("# AGENTS.md")
+    trim(t).is_empty() || t.starts_with('<') || t.starts_with("# AGENTS.md")
 }
 
 // A record, unless there's nothing worth searching in it, or the line
@@ -179,7 +180,7 @@ pub fn docs_of(events: &[LineEvent<'_>]) -> Result<Vec<Doc>, TypeError> {
                         }
                     }
                     let t = join(&texts, "\n")?;
-                    if js_trim(&t).is_empty() {
+                    if trim(&t).is_empty() {
                         return Ok(Vec::new());
                     }
                     let role = if truthy(*sidechain) { "subagent" } else { "assistant" };
@@ -304,12 +305,12 @@ pub fn session_of(file: &str, app: &str) -> Option<String> {
 /// *.jsonl.zst, six folders down.
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "the JS's endsWith is case-sensitive, and so is this")]
 pub fn list_transcripts(dir: &str) -> Vec<String> {
-    xenonet_base::paths::list_files(dir, &mut |name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"), 6)
+    xenonet_os::paths::list_files(dir, &mut |name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"), 6)
 }
 
 /// `text.split("\n")`, without the blank lines.
 pub fn lines_of(text: &str) -> Vec<&str> {
-    text.split('\n').filter(|l| !js_trim(l).is_empty()).collect()
+    text.split('\n').filter(|l| !trim(l).is_empty()).collect()
 }
 
 // ---------- SQLite's values ----------
@@ -331,7 +332,7 @@ fn sql_number(v: &Sql) -> f64 {
         Sql::Null => 0.0,
         Sql::Integer(i) => *i as f64,
         Sql::Real(r) => *r,
-        Sql::Text(s) => js_number(Some(&Value::String(s.clone()))),
+        Sql::Text(s) => to_number(Some(&Value::String(s.clone()))),
         Sql::Blob(_) => f64::NAN,
     }
 }
@@ -564,7 +565,7 @@ impl Search {
         for r in self.roots.iter().filter(|r| r.app == app) {
             let sep = std::path::MAIN_SEPARATOR;
             let prefix = if r.dir.ends_with(sep) { r.dir.clone() } else { format!("{}{sep}", r.dir) };
-            under.execute((jsstr::len(&prefix) as f64, prefix))?;
+            under.execute((utf16::len(&prefix) as f64, prefix))?;
         }
         Ok(())
     }
@@ -710,8 +711,8 @@ impl Search {
             run.open = None;
         }
         for d in docs {
-            let body = jsstr::head(&d.text, MAX_TEXT);
-            let key = jsstr::head(&body, 200);
+            let body = utf16::head(&d.text, MAX_TEXT);
+            let key = utf16::head(&body, 200);
             // The same text in a file is indexed once, as far as it's gone.
             if let (true, Some(doc)) = (d.more, run.open) {
                 self.ready("run")?.prepare_cached("update docs set text = ? where rowid = ?")?.execute((body, doc))?;
@@ -802,7 +803,7 @@ impl Search {
                 s.snippets.push(Out::obj(vec![("role", sql_out(&role)), ("ts", Out::Num(sql_number(&ts))), ("text", sql_out(&snip))]));
             }
         }
-        xenonet_base::sort::sort_by(&mut by, |a, b| {
+        xenonet_text::sort::sort_by(&mut by, |a, b| {
             let d = a.score - b.score;
             let r = if d != 0.0 && !d.is_nan() { d } else { b.hits - a.hits };
             r.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)

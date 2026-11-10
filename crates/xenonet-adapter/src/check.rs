@@ -7,8 +7,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use xenonet_base::text::{js_string, truthy};
 pub use xenonet_model::doctor::Status;
+use xenonet_text::text::{display, truthy};
 
 /// Where an adapter's rows go in the doctor's list, which keeps one order
 /// for everyone: the app's own checks (installed, signed in, readable)
@@ -122,20 +122,20 @@ impl Facts<'_> {
         self.0.get(k).filter(|v| !v.is_null())
     }
     pub fn home(&self) -> String {
-        self.get("home").map(js_string).unwrap_or_default()
+        self.get("home").map(display).unwrap_or_default()
     }
     pub fn platform(&self) -> String {
-        self.get("platform").map(js_string).unwrap_or_default()
+        self.get("platform").map(display).unwrap_or_default()
     }
     /// One of the doctor's paths, when it's set.
     pub fn path(&self, k: &str) -> Option<String> {
-        self.get("paths").and_then(|p| p.get(k)).filter(|v| truthy(Some(v))).map(js_string)
+        self.get("paths").and_then(|p| p.get(k)).filter(|v| truthy(Some(v))).map(display)
     }
 }
 
 /// A value as `String(v)` writes it, "undefined" for a missing one.
 pub fn s(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 /// An array's items, or none.
@@ -211,7 +211,7 @@ pub fn connected(c: &dyn CheckCtx, app: &str, name: &str) -> Verdict {
     let broken = list(a.get("broken"));
     if !broken.is_empty() {
         let fix = if plugin { "Install XenoNet, or put its xenonet command on your PATH." } else { "Run xenonet connect again." };
-        return Verdict::fail(format!("connected, but {}", broken.iter().map(js_string).collect::<Vec<_>>().join("; ")), Some(fix));
+        return Verdict::fail(format!("connected, but {}", broken.iter().map(display).collect::<Vec<_>>().join("; ")), Some(fix));
     }
     let through = if plugin { ", through its plugin for Claude Code" } else { "" };
     Verdict::ok(format!("connected to XenoNet on port {}{through}", s(connect.and_then(|cn| cn.get("port")))))
@@ -320,10 +320,10 @@ pub mod fake {
             Ok(self.now)
         }
         async fn local_time(&self, ms: &Value) -> Result<String, Stop> {
-            Ok(format!("local time {}", xenonet_base::text::js_string(ms)))
+            Ok(format!("local time {}", xenonet_text::text::display(ms)))
         }
         fn tilde(&self, path: &str) -> String {
-            xenonet_base::paths::tilde(path, &Facts(&self.facts).home())
+            xenonet_os::paths::tilde(path, &Facts(&self.facts).home())
         }
     }
 }

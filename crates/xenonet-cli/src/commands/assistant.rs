@@ -14,9 +14,9 @@ use crate::out::{ago, c, json, json_at, now, print, table, Done, Fail, Layout};
 use crate::reach::find;
 use crate::sys;
 use serde_json::{json, Value};
+use xenonet_api::client::{name_of, Server};
 use xenonet_assistant::credentials::is_grant;
-use xenonet_base::client::{name_of, Server};
-use xenonet_base::json::number_string;
+use xenonet_text::json::number_string;
 
 pub const HELP: &str = include_str!("help/assistant.txt");
 
@@ -46,7 +46,7 @@ fn state_words(state: &str) -> String {
 
 // The first ten characters, a date.
 fn day(v: &Value, k: &str) -> String {
-    xenonet_base::log::js_slice(&t(v, k), 10).to_string()
+    xenonet_text::utf16::whole_head(&t(v, k), 10).to_string()
 }
 
 fn show(data: &Value, s: &Server) {
@@ -91,7 +91,7 @@ fn show(data: &Value, s: &Server) {
                 String::new()
             };
             let used =
-                if on(x, "last_used_at") { format!("used {}", ago(xenonet_base::time::parse_iso(&t(x, "last_used_at")).unwrap_or(f64::NAN), now())) } else { c::dim("never used") };
+                if on(x, "last_used_at") { format!("used {}", ago(xenonet_text::time::parse_iso(&t(x, "last_used_at")).unwrap_or(f64::NAN), now())) } else { c::dim("never used") };
             vec![state_words(&t(x, "state")), t(x, "grant_id"), t(x, "actor_id"), t(x, "label"), what, until, used]
         })
         .collect();
@@ -156,7 +156,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let rows: Vec<Vec<String>> = records
                 .iter()
                 .map(|r| {
-                    let at = xenonet_base::log::js_slice(&t(r, "at"), 19).replacen('T', " ", 1);
+                    let at = xenonet_text::utf16::whole_head(&t(r, "at"), 19).replacen('T', " ", 1);
                     let who = if str(r, "kind") == Some("owner") { c::cyan("you") } else { have(r, "actor").map_or(String::new(), |a| crate::js::text(Some(a))) };
                     let result = if str(r, "result") == Some("ok") { c::green("ok") } else { c::yellow(t(r, "result")) };
                     let bytes = have(r, "bytes").map_or(String::new(), |b| format!("{} B", crate::js::text(Some(b))));

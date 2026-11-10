@@ -17,7 +17,7 @@ tokio.workspace = true
 # The adapters, put in place as the world is made.
 xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 xenonet-api.workspace = true
 # Home, platform, random ids, fetch and output lines.
 xenonet-os.workspace = true
@@ -41,7 +41,6 @@ regex.workspace = true
 # The relay's scrubber, for the detail presence carries to other machines:
 # the home folder as ~, as the relay writes it.
 xenonet-hosts.workspace = true
-
 
 [lints]
 workspace = true

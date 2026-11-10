@@ -6,9 +6,13 @@
 //! default, where None counts as 0). The transcript readers keep each figure
 //! as the line wrote it (`Figure`), since JS adds a count written as a string
 //! by joining it on, and each reader turns figures into numbers its own way.
+//!
+//! What the tokens cost at API prices is `pricing`.
 
-use crate::text::js_number;
+pub mod pricing;
+
 use serde_json::Value;
+use xenonet_text::text::to_number;
 
 /// How fast a call ran, as its price reads it: Anthropic's fast mode, OpenAI's
 /// priority tier, or neither (the standard tier). The JS takes these as two
@@ -56,7 +60,7 @@ impl Figure {
     /// `Number(v)`.
     pub fn number(&self) -> f64 {
         match self {
-            Figure::Written(v) => js_number(v.as_ref()),
+            Figure::Written(v) => to_number(v.as_ref()),
             Figure::Worked(n) => *n,
         }
     }

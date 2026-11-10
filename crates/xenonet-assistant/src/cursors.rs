@@ -13,7 +13,7 @@ pub const CURSOR_MS: f64 = 5.0 * 60e3;
 
 // A short digest of the filters, as JSON writes them.
 fn digest(filters: Option<&Value>) -> String {
-    let text = xenonet_base::json::stringify(filters.unwrap_or(&Value::Null), 0);
+    let text = xenonet_text::json::stringify(filters.unwrap_or(&Value::Null), 0);
     b64url(&sha256(text.as_bytes()))[..16].to_string()
 }
 
@@ -52,8 +52,8 @@ impl Cursors {
         if let Some(a) = after {
             p.insert("a".into(), a.clone());
         }
-        p.insert("t".into(), xenonet_base::json::number(now));
-        let payload = b64url(xenonet_base::json::stringify(&Value::Object(p), 0).as_bytes());
+        p.insert("t".into(), xenonet_text::json::number(now));
+        let payload = b64url(xenonet_text::json::stringify(&Value::Object(p), 0).as_bytes());
         let mac = self.sign(&payload);
         format!("{payload}.{mac}")
     }
@@ -73,7 +73,7 @@ impl Cursors {
             return bad;
         }
         let text = String::from_utf8_lossy(&b64url_decode(payload)).into_owned();
-        let Ok(p) = xenonet_base::json::parse(&text) else { return bad };
+        let Ok(p) = xenonet_text::json::parse(&text) else { return bad };
         let field = |k: &str| match &p {
             Value::Object(m) => m.get(k),
             _ => None,

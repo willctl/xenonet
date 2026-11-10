@@ -11,12 +11,12 @@ use std::sync::Arc;
 use xenonet_actors::registration::Fail;
 use xenonet_actors::reports;
 use xenonet_api::cores::{CoreError, Reports, R};
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::sql::Bind;
 use xenonet_model::actor::{ReportEvent, ReportTarget};
+use xenonet_os::sync::Locked;
 use xenonet_schema::typed;
+use xenonet_text::time::now_ms;
 
 /// What a report reads besides the registry: the actor's processes as
 /// given, how to read a process's lineage, the indexes already dropped,
@@ -86,7 +86,7 @@ impl reports::Host for ReportHost<'_> {
         let r = match Bind::scalar(r) {
             Some(Bind::Text(t)) => t,
             Some(Bind::Null) => return Ok(false),
-            _ => xenonet_base::text::js_string(r),
+            _ => xenonet_text::text::display(r),
         };
         self.store(|s| s.has_actor_ref(id, &r, since))
     }
@@ -105,7 +105,7 @@ impl reports::Host for ReportHost<'_> {
     }
     fn lineage(&mut self, pid: &Value) -> Option<Vec<Value>> {
         let line = self.w.checks.lineage(pid.as_f64())?;
-        Some(line.into_iter().map(xenonet_base::json::number).collect())
+        Some(line.into_iter().map(xenonet_text::json::number).collect())
     }
     fn skipped(&mut self, index: usize) -> bool {
         self.skip.contains(&index)
@@ -113,7 +113,7 @@ impl reports::Host for ReportHost<'_> {
     fn await_session(&mut self, id: &str, app: &Value, place: &Value, at: &Value) -> Result<(), Fail> {
         let a = self.actors("awaitSession")?;
         let own: Vec<f64> = self.own.clone().unwrap_or_default().into_iter().map(f64::from).collect();
-        let at = xenonet_base::text::js_number(Some(at));
+        let at = xenonet_text::text::to_number(Some(at));
         a.reg.locked().await_session(id, app.clone(), place.clone(), own, at, now_ms());
         Ok(())
     }

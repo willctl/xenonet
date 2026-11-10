@@ -30,8 +30,8 @@ use crate::wiki::to_str;
 use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use xenonet_base::text::{join, js_number, js_trim, js_trim_start, truthy, type_of};
-use xenonet_base::usage::{Figure, Speed, TokenUsage};
+use xenonet_model::usage::{Figure, Speed, TokenUsage};
+use xenonet_text::text::{join, to_number, trim, trim_start, truthy, type_of};
 
 /// A field a line's events couldn't be read past.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,7 +348,7 @@ fn refusal(out: &mut Out<'_>, signal: Option<Value>) -> Option<Value> {
 /// trimmed text (`\/?([^<]+)</command-name>`, the slash taken first when
 /// that leaves a name), and the first `<command-args>…</command-args>`.
 pub fn command_of(text: &str) -> Option<Command> {
-    let t = js_trim(text);
+    let t = trim(text);
     let rest = t.strip_prefix("<command-name>")?;
     let name_at = |from: usize| -> Option<&str> {
         let run = rest[from..].find('<').map_or(rest.len(), |i| from + i);
@@ -460,7 +460,7 @@ fn claude_user<'a>(o: &'a ClaudeLine, out: &mut Out<'a>) {
         Ok(text) => text,
         Err(why) => return out.broken(Broken { meta, sidechain, compact_summary, results: results > 0, ..Broken::at(Field::Text, why) }),
     };
-    let interruption = js_trim_start(&text).starts_with("[Request interrupted");
+    let interruption = trim_start(&text).starts_with("[Request interrupted");
     if results == 0 {
         let claude = ClaudePrompt { command: command_of(&text), meta, sidechain, compact_summary, interruption };
         out.push(Kind::Prompt(Prompt { text, parts: content, claude: Some(claude) }));
@@ -486,8 +486,8 @@ fn max0(x: f64) -> f64 {
 fn number(f: &Figure) -> Result<f64, TypeError> {
     match f {
         Figure::Worked(n) => Ok(*n),
-        Figure::Written(v @ Some(Value::Array(_) | Value::Object(_))) => Ok(js_number(Some(&Value::String(to_str(v.as_ref())?)))),
-        Figure::Written(v) => Ok(js_number(v.as_ref())),
+        Figure::Written(v @ Some(Value::Array(_) | Value::Object(_))) => Ok(to_number(Some(&Value::String(to_str(v.as_ref())?)))),
+        Figure::Written(v) => Ok(to_number(v.as_ref())),
     }
 }
 
@@ -717,7 +717,7 @@ const GROK_QUIET: [&str; 4] = ["usage_update", "plan", "current_mode_update", "a
 fn grok_run_key(o: &GrokLine) -> String {
     let m = o.update().get("_meta");
     let p = match opt_prop(m, "promptIndex") {
-        Some(Value::Number(n)) => xenonet_base::json::number_string(n.as_f64().unwrap_or(f64::NAN)),
+        Some(Value::Number(n)) => xenonet_text::json::number_string(n.as_f64().unwrap_or(f64::NAN)),
         Some(Value::String(s)) => s.clone(),
         _ => String::new(),
     };

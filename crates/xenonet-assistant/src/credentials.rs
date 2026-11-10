@@ -17,7 +17,7 @@ use crate::crypto::{hex, random_bytes, sha256_hex};
 use serde_json::{json, Map, Value};
 use xenonet_app::fsx::{self, FsError};
 use xenonet_app::nodepath::NATIVE;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 pub const TOKEN_PREFIX: &str = "xenonet_assistant_";
 
@@ -48,7 +48,7 @@ pub fn assistant_dir(state_dir: &str) -> String {
 
 /// The grant as the file names take it, or "not a grant id".
 pub fn check_grant(grant: &Value) -> Result<String, FsError> {
-    let g = js_string(grant);
+    let g = display(grant);
     if is_grant(&g) {
         Ok(g)
     } else {
@@ -102,7 +102,7 @@ pub fn write_credential(dir: &str, grant: &Value, token: &Value, device: Option<
         }
         doc.insert("expires_at".into(), expires_at.clone());
         doc.insert("token".into(), token.clone());
-        fsx::write_file(&file, format!("{}\n", xenonet_base::json::stringify(&Value::Object(doc), 0)).as_bytes(), None).map_err(|e| e.message)?;
+        fsx::write_file(&file, format!("{}\n", xenonet_text::json::stringify(&Value::Object(doc), 0)).as_bytes(), None).map_err(|e| e.message)?;
         let others = private.readers(&file)?;
         if !others.is_empty() {
             return Err(format!("others could read it ({})", others.iter().take(3).cloned().collect::<Vec<_>>().join(", ")));
@@ -120,13 +120,13 @@ pub fn write_credential(dir: &str, grant: &Value, token: &Value, device: Option<
 /// none (revoked, or never written on this computer).
 pub fn read_credential(dir: &str, grant: &Value) -> Option<Value> {
     let g = check_grant(grant).ok()?;
-    let c = xenonet_base::json::parse(&fsx::read_text(&credential_file(dir, &g)).ok()?).ok()?;
+    let c = xenonet_text::json::parse(&fsx::read_text(&credential_file(dir, &g)).ok()?).ok()?;
     let token = c.get("token").and_then(Value::as_str).filter(|t| is_token(t))?;
     if !xenonet_app::jsv::strict_eq(c.get("grant_id"), Some(grant)) {
         return None;
     }
     let expires = c.get("expires_at").and_then(Value::as_f64).filter(|n| n.is_finite());
-    Some(json!({ "token": token, "device": c.get("device_id").cloned().unwrap_or(Value::Null), "expiresAt": expires.map_or(Value::Null, xenonet_base::json::number) }))
+    Some(json!({ "token": token, "device": c.get("device_id").cloned().unwrap_or(Value::Null), "expiresAt": expires.map_or(Value::Null, xenonet_text::json::number) }))
 }
 
 pub fn delete_credential(dir: &str, grant: &Value) -> Result<(), FsError> {
@@ -139,14 +139,14 @@ pub fn mark_revision(dir: &str, grant: &Value, revision: &Value) -> Result<(), F
     let g = check_grant(grant)?;
     let file = NATIVE.join(&[dir, "revisions", &g]);
     fsx::mkdir_p(&NATIVE.dirname(&file), Some(0o700))?;
-    fsx::write_file(&file, format!("{}\n", js_string(revision)).as_bytes(), Some(0o600))
+    fsx::write_file(&file, format!("{}\n", display(revision)).as_bytes(), Some(0o600))
 }
 
 /// A grant's revision, or None when there's no record of it.
 pub fn revision_of(dir: &str, grant: &Value) -> Option<f64> {
     let g = check_grant(grant).ok()?;
     let text = fsx::read_text(&NATIVE.join(&[dir, "revisions", &g])).ok()?;
-    let n = xenonet_base::text::js_number(Some(&Value::String(xenonet_base::text::js_trim(&text).to_string())));
+    let n = xenonet_text::text::to_number(Some(&Value::String(xenonet_text::text::trim(&text).to_string())));
     (n.fract() == 0.0 && n > 0.0 && n.is_finite()).then_some(n)
 }
 
@@ -156,14 +156,14 @@ pub fn mark_revoked(dir: &str, grant: &Value, at: f64) -> Result<(), FsError> {
     let g = check_grant(grant)?;
     let file = NATIVE.join(&[dir, "revoked", &g]);
     fsx::mkdir_p(&NATIVE.dirname(&file), Some(0o700))?;
-    match write_new(&file, format!("{}\n", xenonet_base::json::stringify(&json!({ "at": xenonet_base::json::number(at) }), 0)).as_bytes(), 0o600) {
+    match write_new(&file, format!("{}\n", xenonet_text::json::stringify(&json!({ "at": xenonet_text::json::number(at) }), 0)).as_bytes(), 0o600) {
         Err(e) if !e.is("EEXIST") => Err(e),
         _ => Ok(()),
     }
 }
 
 pub fn is_marked_revoked(dir: &str, grant: &Value) -> bool {
-    let g = js_string(grant);
+    let g = display(grant);
     is_grant(&g) && fsx::exists(&NATIVE.join(&[dir, "revoked", &g]))
 }
 
@@ -173,7 +173,7 @@ pub fn marked_revoked(dir: &str) -> Vec<String> {
 
 pub fn mark_disabled(dir: &str, at: f64) -> Result<(), FsError> {
     fsx::mkdir_p(dir, Some(0o700))?;
-    fsx::write_file(&NATIVE.join(&[dir, "disabled"]), format!("{}\n", xenonet_base::json::stringify(&json!({ "at": xenonet_base::json::number(at) }), 0)).as_bytes(), Some(0o600))
+    fsx::write_file(&NATIVE.join(&[dir, "disabled"]), format!("{}\n", xenonet_text::json::stringify(&json!({ "at": xenonet_text::json::number(at) }), 0)).as_bytes(), Some(0o600))
 }
 
 pub fn is_disabled(dir: &str) -> bool {

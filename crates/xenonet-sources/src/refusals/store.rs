@@ -13,10 +13,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use xenonet_base::json::{number, parse, stringify};
-use xenonet_base::jsstr;
-use xenonet_base::text::{is_blank, js_string, truthy};
-use xenonet_base::{log, paths, time};
+use xenonet_os::{log, paths};
+use xenonet_text::json::{number, parse, stringify};
+use xenonet_text::text::{display, is_blank, truthy};
+use xenonet_text::time;
+use xenonet_text::utf16;
 
 pub const SCHEMA: &str = "refusal/record/v1";
 const CONTEXT_MAX: usize = 16 << 20;
@@ -32,7 +33,7 @@ pub struct StoreError {
 
 impl StoreError {
     fn io(e: std::io::Error, syscall: &str, path: &Path) -> Self {
-        let f = xenonet_base::fs::FsError::of(e, syscall, &path.to_string_lossy());
+        let f = xenonet_os::fs::FsError::of(e, syscall, &path.to_string_lossy());
         StoreError { message: f.message.clone(), code: f.code }
     }
 }
@@ -47,7 +48,7 @@ fn nn(v: Option<&Value>) -> Option<&Value> {
 
 // detect.js's keyOf, with the session's id as a template writes it.
 fn key_of(sig: &Value, session_id: Option<&Value>) -> String {
-    super::detect::key_of(sig, &session_id.map_or_else(|| "undefined".to_string(), js_string))
+    super::detect::key_of(sig, &session_id.map_or_else(|| "undefined".to_string(), display))
 }
 
 /// A transcript's lines as JSON, what doesn't read as JSON left out.
@@ -61,10 +62,10 @@ fn read_jsonl(file: &Path) -> std::io::Result<Vec<Value>> {
 fn trimmed(lines: Vec<Value>) -> (Vec<Value>, bool) {
     fn trim(v: Value, cut: &mut bool) -> Value {
         match v {
-            Value::String(s) if jsstr::len(&s) > LONG => {
+            Value::String(s) if utf16::len(&s) > LONG => {
                 *cut = true;
-                let n = jsstr::len(&s);
-                Value::String(format!("{}\n[… {} characters cut by XenoNet …]\n{}", jsstr::head(&s, LONG / 2), n - LONG, jsstr::last(&s, LONG / 2)))
+                let n = utf16::len(&s);
+                Value::String(format!("{}\n[… {} characters cut by XenoNet …]\n{}", utf16::head(&s, LONG / 2), n - LONG, utf16::last(&s, LONG / 2)))
             }
             Value::Array(a) => Value::Array(a.into_iter().map(|x| trim(x, cut)).collect()),
             Value::Object(m) => Value::Object(m.into_iter().map(|(k, x)| (k, trim(x, cut))).collect()),
@@ -100,10 +101,10 @@ pub fn claude_context(all: &[Value], sig: &Value) -> Option<Context> {
     let mut by_uuid: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (i, l) in all.iter().enumerate() {
         if truthy(get(l, "uuid")) {
-            by_uuid.insert(js_string(&l["uuid"]), i);
+            by_uuid.insert(display(&l["uuid"]), i);
         }
     }
-    let lookup = |v: Option<&Value>| v.and_then(|u| by_uuid.get(&js_string(u)).copied());
+    let lookup = |v: Option<&Value>| v.and_then(|u| by_uuid.get(&display(u)).copied());
     let sig_uuid = get(sig, "uuid").filter(|v| truthy(Some(v)));
     let request_id = get(sig, "requestId").filter(|v| truthy(Some(v)));
     let message_id = get(sig, "messageId").filter(|v| truthy(Some(v)));
@@ -115,7 +116,7 @@ pub fn claude_context(all: &[Value], sig: &Value) -> Option<Context> {
     let mut at = Some(end);
     while let Some(i) = at {
         let l = &all[i];
-        let uuid = get(l, "uuid").map(js_string);
+        let uuid = get(l, "uuid").map(display);
         if !seen.insert(uuid) {
             break;
         }
@@ -267,7 +268,7 @@ fn random_hex4() -> String {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
         bytes = (t as u32).to_le_bytes();
     }
-    jsstr::hex(&bytes)
+    utf16::hex(&bytes)
 }
 
 impl Refusals {
@@ -297,7 +298,7 @@ impl Refusals {
                     if let Ok(v) = parse(line) {
                         // JSON.parse(line).key, as a Set keeps it: undefined
                         // for a line without one.
-                        keys.insert(get(&v, "key").map_or_else(|| "\u{0}undefined".to_string(), js_string));
+                        keys.insert(get(&v, "key").map_or_else(|| "\u{0}undefined".to_string(), display));
                     }
                 }
             }
@@ -317,7 +318,7 @@ impl Refusals {
 
     fn add_context(&self, rec: &mut Map<String, Value>) -> Result<Value, StoreError> {
         let no = |why: &str| Ok(json!({ "ok": false, "why": why }));
-        let file = rec.get("source").and_then(|s| get(s, "path")).filter(|p| truthy(Some(p))).map(js_string);
+        let file = rec.get("source").and_then(|s| get(s, "path")).filter(|p| truthy(Some(p))).map(display);
         let Some(file) = file.filter(|f| Path::new(f).exists()) else { return no("its transcript isn't there any more") };
         let all = read_jsonl(Path::new(&file)).map_err(|e| StoreError::io(e, "open", Path::new(&file)))?;
         let sig = rec.get("signal").cloned().unwrap_or(Value::Null);
@@ -348,7 +349,7 @@ impl Refusals {
         }
         let req_file = folder.join("request.json");
         write_private(&req_file, format!("{}\n", stringify(&Value::Object(request), 1)).as_bytes(), false).map_err(|e| StoreError::io(e, "open", &req_file))?;
-        let digest = jsstr::hex(&Sha256::digest(text.as_bytes()));
+        let digest = utf16::hex(&Sha256::digest(text.as_bytes()));
         rec.insert(
             "context".into(),
             json!({ "file": "context.jsonl.gz", "request": "request.json", "lines": lines.len(), "bytes": text.len(), "sha256": digest, "truncated": cut }),
@@ -381,9 +382,9 @@ impl Refusals {
         let folder = self.folder_of(&id);
         create_private_dir(&folder, false).map_err(|e| StoreError::io(e, "mkdir", &folder))?;
         let field = |v: &Value, k: &str| nn(get(v, k)).cloned().unwrap_or(Value::Null);
-        let cwd = nn(get(at, "cwd")).filter(|v| truthy(Some(v))).map_or(Value::Null, |c| Value::String(self.tilde(&js_string(c))));
+        let cwd = nn(get(at, "cwd")).filter(|v| truthy(Some(v))).map_or(Value::Null, |c| Value::String(self.tilde(&display(c))));
         let model = nn(get(sig, "model")).or(nn(get(at, "model"))).cloned().unwrap_or(Value::Null);
-        let source = nn(get(at, "file")).filter(|v| truthy(Some(v))).map_or(Value::Null, |f| json!({ "file": self.tilde(&js_string(f)), "path": f }));
+        let source = nn(get(at, "file")).filter(|v| truthy(Some(v))).map_or(Value::Null, |f| json!({ "file": self.tilde(&display(f)), "path": f }));
         let mut rec = Map::new();
         rec.insert("schema".into(), Value::String(SCHEMA.into()));
         rec.insert("id".into(), Value::String(id.clone()));
@@ -462,7 +463,7 @@ impl Refusals {
                     && kind.is_none_or(|k| is(r, "kind", k))
             })
             .collect();
-        xenonet_base::sort::sort_by(&mut out, |a, b| {
+        xenonet_text::sort::sort_by(&mut out, |a, b| {
             let t = |r: &Value| get(r, "at").and_then(Value::as_f64).unwrap_or(f64::NAN);
             t(b).partial_cmp(&t(a)).unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -500,7 +501,7 @@ impl Refusals {
             .map(|r| {
                 let mut request = Value::Null;
                 if with_context && truthy(get(&r, "context")) {
-                    let id = get(&r, "id").map(js_string).unwrap_or_default();
+                    let id = get(&r, "id").map(display).unwrap_or_default();
                     if let Ok(b) = fs::read(self.folder_of(&id).join("request.json")) {
                         request = parse(&String::from_utf8_lossy(&b)).unwrap_or(Value::Null);
                     }

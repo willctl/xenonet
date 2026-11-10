@@ -12,7 +12,7 @@
 use serde_json::{json, Map, Value};
 use xenonet_adapter::apps::App;
 use xenonet_adapter::connect::{cli_json, event_list, events_of, hook_set, hooks_of, join, json_text, text_of, Format, Found, Machine, Result, Shared, EARLIER};
-use xenonet_base::paths::tilde;
+use xenonet_os::paths::tilde;
 
 /// A pattern compiled once.
 macro_rules! re {

@@ -19,7 +19,7 @@ impl Trait for Store {
         Ok(match v {
             Value::Null => None,
             Value::String(s) => Some(s),
-            other => Some(xenonet_base::text::js_string(&other)),
+            other => Some(xenonet_text::text::display(&other)),
         })
     }
     fn set_meta(&self, key: &str, value: &str) -> R<()> {
@@ -45,7 +45,7 @@ impl Trait for Store {
 /// A building block's health, as /api/health lists it: its name and kind,
 /// then what its lifecycle says.
 pub fn block_health(name: &str, kind: &str, l: &xenonet_blocks::lifecycle::Lifecycle) -> Value {
-    let n = xenonet_base::json::number;
+    let n = xenonet_text::json::number;
     let counters: serde_json::Map<String, Value> = l.counters.iter().map(|(k, v)| (k.to_string(), n(v))).collect();
     serde_json::json!({
         "name": name,

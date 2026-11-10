@@ -120,12 +120,12 @@ impl Io {
     /// The message of the last error a request threw, as `err.message`
     /// reads it, for logic that words its own error around it.
     pub fn last_message(&self) -> String {
-        self.last_error.borrow().as_ref().and_then(|e| e.get("message")).map(xenonet_base::text::js_string).unwrap_or_default()
+        self.last_error.borrow().as_ref().and_then(|e| e.get("message")).map(xenonet_text::text::display).unwrap_or_default()
     }
 
     /// Waits this long (setTimeout's ms).
     pub async fn sleep(&self, ms: f64) {
-        let _ = self.ask(json!({ "op": "sleep", "ms": xenonet_base::json::number(ms) })).await;
+        let _ = self.ask(json!({ "op": "sleep", "ms": xenonet_text::json::number(ms) })).await;
     }
 }
 
@@ -190,7 +190,7 @@ pub fn run_with(mut task: Task, mut answer: impl FnMut(&Value) -> Reply) -> Done
 }
 
 /// The time now in ms, as Date.now() gives it.
-pub use xenonet_base::time::now_ms;
+pub use xenonet_text::time::now_ms;
 
 #[cfg(test)]
 mod tests {

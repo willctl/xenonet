@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_base::network::{Incoming, Sink};
+use xenonet_model::ops::{Incoming, Sink};
 use xenonet_net::codec::b64;
 use xenonet_net::files::{Dir, NetFile, Pin, GATEWAY_DB, KEY};
 use xenonet_net::frame::{gateway_frame, host_frame, Draft, Frame};

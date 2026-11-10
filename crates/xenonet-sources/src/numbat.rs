@@ -15,13 +15,13 @@ use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use xenonet_adapter::apps::{is_session_app, session_apps};
-use xenonet_base::fs::FsError;
-use xenonet_base::json::{self, number_string};
-use xenonet_base::jsstr;
-use xenonet_base::nodepath::Style;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::paths::path_style;
-use xenonet_base::text::{is_blank, js_string};
+use xenonet_os::fs::FsError;
+use xenonet_os::nodepath::Style;
+use xenonet_os::paths::path_style;
+use xenonet_text::json::{self, number_string};
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::{display, is_blank};
+use xenonet_text::utf16;
 
 pub const SCHEMA_VERSIONS: [&str; 4] = ["0.2.0", "0.3.0", "0.4.0", "0.5.0"];
 /// Apps XenoNet reads itself, and numbat's names that aren't a run's app.
@@ -43,11 +43,11 @@ pub fn run_id(sid: &str) -> String {
 }
 
 /// A run's session id. OpenCode's runs take the id its own reader gives
-/// them (ses_… as ses-…, xenonet_base::opencode) when that fits, so a run both
+/// them (ses_… as ses-…, xenonet_adapter::formats::opencode) when that fits, so a run both
 /// read is one session, and delivery finds it.
 pub fn session_id_of(app: &str, sid: &str) -> String {
     if app == "opencode" {
-        let own = xenonet_base::opencode::local_id(sid);
+        let own = xenonet_adapter::formats::opencode::local_id(sid);
         if fits_id(&own, 128) {
             return format!("opencode:{own}");
         }
@@ -94,8 +94,8 @@ pub fn read_record(line: &str) -> Result<Event, &'static str> {
     let Some(session) = nonempty(r.get("session_id")) else { return Err("no-session") };
     let at = match r.get("timestamp") {
         None | Some(Value::Null) => None,
-        Some(Value::String(s)) => xenonet_base::time::parse_iso(s),
-        Some(other) => xenonet_base::time::parse_iso(&js_string(other)),
+        Some(Value::String(s)) => xenonet_text::time::parse_iso(s),
+        Some(other) => xenonet_text::time::parse_iso(&display(other)),
     };
     let project = nonempty(r.get("project_path"));
     let mut file = if EDITS.contains(&kind.as_str()) { nonempty(r.get("file_path")) } else { None };
@@ -202,13 +202,13 @@ impl Numbat {
         let text = format!("{}{}", self.partial, String::from_utf8_lossy(&buf));
         let mut lines: Vec<&str> = text.split('\n').collect();
         self.partial = lines.pop().unwrap_or_default().to_string();
-        if jsstr::len(&self.partial) > LINE_MAX {
+        if utf16::len(&self.partial) > LINE_MAX {
             self.partial.clear();
         }
         if skip_first && !lines.is_empty() {
             lines.remove(0);
         }
-        Ok(lines.into_iter().filter(|l| !is_blank(l) && jsstr::len(l) <= LINE_MAX).map(str::to_string).collect())
+        Ok(lines.into_iter().filter(|l| !is_blank(l) && utf16::len(l) <= LINE_MAX).map(str::to_string).collect())
     }
 
     /// Reads what's new. Err with the message of a read that failed; a
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn an_opencode_run_has_the_id_its_reader_gives_it() {
         for sid in ["ses_eb95b1836ffexD4vYDGuLeJDCy", "ses_ab_cd", "ses_ab-cd", "ses-abcdef"] {
-            assert_eq!(session_id_of("opencode", sid), format!("opencode:{}", xenonet_base::opencode::local_id(sid)), "{sid}");
+            assert_eq!(session_id_of("opencode", sid), format!("opencode:{}", xenonet_adapter::formats::opencode::local_id(sid)), "{sid}");
         }
         assert_eq!(session_id_of("opencode", "ses_eb95b1836ffexD4vYDGuLeJDCy"), "opencode:ses-eb95b1836ffexD4vYDGuLeJDCy");
         assert_eq!(session_id_of("opencode", "abcdefg"), "opencode:abcdefg");
@@ -407,7 +407,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-numbat-rs-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("records.ndjson").to_string_lossy().into_owned();
-        let now = xenonet_base::time::parse_iso("2026-10-16T12:00:00Z").unwrap();
+        let now = xenonet_text::time::parse_iso("2026-10-16T12:00:00Z").unwrap();
         let line = |f: &str| {
             event(
                 json!({ "event_type": "file.write", "session_id": "g-0000002", "project_path": "/w/atlas", "file_path": format!("/w/atlas/{f}"), "timestamp": "2026-10-16T12:00:00.000Z" }),

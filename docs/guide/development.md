@@ -117,7 +117,6 @@ On 2026-11-08 the tests ran this share of each crate's lines:
 | xenonet-actors | 9,427 | 44.5% |
 | xenonet-app | 5,304 | 72.2% |
 | xenonet-assistant | 2,157 | 58.6% |
-| xenonet-base | 4,957 | 91.0% |
 | xenonet-blocks | 1,046 | 86.3% |
 | xenonet-cli | 8,278 | 25.0% |
 | xenonet-components | 3,684 | 85.9% |
@@ -135,6 +134,8 @@ On 2026-11-08 the tests ran this share of each crate's lines:
 | xenonet-wire-engine | 6,708 | 72.5% |
 | xenonet-wire-map | 6,465 | 82.0% |
 | All | 114,572 | 70.0% |
+
+The run came before xenonet-text, xenonet-os's files, paths, processes and log, and xenonet-api's client were their own crates: those lines, 91.0% run, count in All but have no row yet.
 
 The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-actors`, `xenonet-integrations`, `xenonet-doctor`, `xenonet-mcp` and `xenonet-assistant`.
 

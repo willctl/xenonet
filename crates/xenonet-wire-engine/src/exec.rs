@@ -85,7 +85,7 @@ pub fn run_full(spec: &Spec) -> Result<(String, String), Failed> {
         cmd.creation_flags(0x0800_0000);
     }
     let mut child = cmd.spawn().map_err(|e| {
-        let code = xenonet_base::fs::code_of(&e);
+        let code = xenonet_os::fs::code_of(&e);
         Failed {
             message: format!("spawn {} {}", spec.file, code.unwrap_or("EUNKNOWN")),
             code: code.map(|c| Value::String(c.into())),

@@ -161,7 +161,7 @@ pub fn write_private(file: &Path, data: &[u8]) -> R<()> {
     #[cfg(not(unix))]
     {
         let name = tmp.to_string_lossy().into_owned();
-        let protected = xenonet_base::private_file::protect_file(&name, true, &mut |cmd: &str, args: &[&str]| xenonet_base::private_file::run_private(cmd, args));
+        let protected = xenonet_os::private_file::protect_file(&name, true, &mut |cmd: &str, args: &[&str]| xenonet_os::private_file::run_private(cmd, args));
         if let Err(e) = protected {
             drop(f);
             let _ = std::fs::remove_file(&tmp);

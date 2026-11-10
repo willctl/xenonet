@@ -42,7 +42,7 @@ pub async fn drive(mut task: Task, p: &mut impl Perform) -> Result<Value, Failed
             Outcome::Failed(Failure::Rethrow) => {
                 let e = last.unwrap_or_else(|| error("a request failed"));
                 let mut fields = e.as_object().cloned().unwrap_or_default();
-                let message = fields.shift_remove("message").map(|m| xenonet_base::text::js_string(&m)).unwrap_or_default();
+                let message = fields.shift_remove("message").map(|m| xenonet_text::text::display(&m)).unwrap_or_default();
                 return Err(Failed { message, fields });
             }
             Outcome::Ask(q) => {
@@ -100,7 +100,7 @@ pub async fn fetch(method: &str, url: &str, headers: &[(String, String)], body: 
         };
         let (method, headers) = (method.to_string(), headers.to_vec());
         let answer =
-            tokio::task::spawn_blocking(move || xenonet_base::http::request(port, &method, &path, &headers, body.as_deref(), timeout)).await.map_err(|e| error(e.to_string()))?;
+            tokio::task::spawn_blocking(move || xenonet_api::http::request(port, &method, &path, &headers, body.as_deref(), timeout)).await.map_err(|e| error(e.to_string()))?;
         return match answer {
             Ok(a) => {
                 let body = a.body.map_err(|e| json!({ "message": "fetch failed", "name": "TypeError", "causeMessage": e.to_string() }))?;
@@ -134,13 +134,13 @@ pub async fn fetch(method: &str, url: &str, headers: &[(String, String)], body: 
 /// "json" (a body that isn't JSON said so, as bodyError) or "json!" (one
 /// that isn't throws).
 pub async fn fetch_asked(q: &Value) -> Reply {
-    let url = q.get("url").map(xenonet_base::text::js_string).unwrap_or_default();
+    let url = q.get("url").map(xenonet_text::text::display).unwrap_or_default();
     let method = q.get("method").and_then(Value::as_str).unwrap_or("GET");
-    let headers: Vec<(String, String)> = q.get("headers").and_then(Value::as_object).into_iter().flatten().map(|(k, v)| (k.clone(), xenonet_base::text::js_string(v))).collect();
-    let body = q.get("body").filter(|b| !b.is_null()).map(|b| xenonet_base::text::js_string(b).into_bytes());
+    let headers: Vec<(String, String)> = q.get("headers").and_then(Value::as_object).into_iter().flatten().map(|(k, v)| (k.clone(), xenonet_text::text::display(v))).collect();
+    let body = q.get("body").filter(|b| !b.is_null()).map(|b| xenonet_text::text::display(b).into_bytes());
     let res = fetch(method, &url, &headers, body, q.get("timeoutMs").and_then(Value::as_f64)).await?;
     let mut out = json!({ "ok": res.ok(), "status": res.status, "statusText": res.status_text });
-    let parse = || xenonet_base::json::parse(&String::from_utf8_lossy(&res.body));
+    let parse = || xenonet_text::json::parse(&String::from_utf8_lossy(&res.body));
     match q.get("read").and_then(Value::as_str) {
         Some("json") => match parse() {
             Ok(v) => out["body"] = v,

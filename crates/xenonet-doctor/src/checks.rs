@@ -12,8 +12,8 @@ use xenonet_adapter::Check;
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::{Style, NATIVE};
 use xenonet_app::task::{Failure, Io};
-use xenonet_base::text::js_string;
-use xenonet_base::units::{duration, plural};
+use xenonet_text::text::display;
+use xenonet_text::units::{duration, plural};
 
 pub const STATUSES: [&str; 5] = ["ok", "info", "warn", "fail", "skip"];
 const MIN_NODE: (f64, f64) = (22.0, 13.0);
@@ -117,7 +117,7 @@ fn value(v: Verdict) -> Value {
 /// error's code travel, a TypeError's kind doesn't.
 fn stop(f: Failure) -> Stop {
     match f {
-        Failure::Error { message, fields, .. } => Stop::Error { message, code: fields.get("code").filter(|v| !v.is_null()).map(js_string) },
+        Failure::Error { message, fields, .. } => Stop::Error { message, code: fields.get("code").filter(|v| !v.is_null()).map(display) },
         Failure::Rethrow => Stop::Rethrow,
     }
 }
@@ -140,13 +140,13 @@ impl Facts {
         self.data.get(k).filter(|v| !v.is_null())
     }
     fn home(&self) -> String {
-        self.get("home").map(js_string).unwrap_or_default()
+        self.get("home").map(display).unwrap_or_default()
     }
     pub(crate) fn platform(&self) -> String {
-        self.get("platform").map(js_string).unwrap_or_default()
+        self.get("platform").map(display).unwrap_or_default()
     }
     fn path(&self, k: &str) -> Option<String> {
-        self.get("paths").and_then(|p| p.get(k)).filter(|v| truthy(Some(v))).map(js_string)
+        self.get("paths").and_then(|p| p.get(k)).filter(|v| truthy(Some(v))).map(display)
     }
     // ctx.actors: "off" (null), "none" (missing), or "on".
     fn actors(&self) -> &str {
@@ -175,7 +175,7 @@ impl Ctx<'_> {
         }
     }
     async fn which(&self, cmd: &str) -> Result<Option<String>, Failure> {
-        Ok(Some(self.must("which", json!([cmd])).await?).filter(|v| truthy(Some(v))).map(|v| js_string(&v)))
+        Ok(Some(self.must("which", json!([cmd])).await?).filter(|v| truthy(Some(v))).map(|v| display(&v)))
     }
     async fn exists(&self, p: &str) -> Result<bool, Failure> {
         Ok(truthy(Some(&self.must("exists", json!([p])).await?)))
@@ -186,15 +186,15 @@ impl Ctx<'_> {
     // ctx.readText?.(p) ?? "": a small settings file's text.
     async fn read_text(&self, p: &str) -> String {
         match self.call("readText", json!([p])).await {
-            Ok(Some(v)) if !v.is_null() => js_string(&v),
+            Ok(Some(v)) if !v.is_null() => display(&v),
             _ => String::new(),
         }
     }
     pub(crate) fn tilde(&self, p: &str) -> String {
-        xenonet_base::paths::tilde(p, &self.f.home())
+        xenonet_os::paths::tilde(p, &self.f.home())
     }
     async fn now(&self) -> Result<f64, Failure> {
-        self.io.ask(json!({ "op": "now" })).await.map(|v| xenonet_base::text::js_number(Some(&v))).map_err(|_| Failure::Rethrow)
+        self.io.ask(json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v))).map_err(|_| Failure::Rethrow)
     }
 }
 
@@ -218,18 +218,18 @@ impl check::CheckCtx for Ctx<'_> {
     }
     async fn readdir(&self, path: &str) -> Result<Option<Vec<String>>, Option<String>> {
         match self.call("readdir", json!([path])).await {
-            Ok(Some(Value::Array(entries))) => Ok(Some(entries.iter().map(js_string).collect())),
+            Ok(Some(Value::Array(entries))) => Ok(Some(entries.iter().map(display).collect())),
             Ok(Some(Value::Object(m))) => Ok(Some(m.keys().cloned().collect())),
             Ok(Some(_)) => Ok(Some(Vec::new())),
             Ok(None) => Ok(None),
-            Err(e) => Err(e.get("code").filter(|v| !v.is_null()).map(js_string)),
+            Err(e) => Err(e.get("code").filter(|v| !v.is_null()).map(display)),
         }
     }
     async fn now(&self) -> Result<f64, Stop> {
         Ctx::now(self).await.map_err(stop)
     }
     async fn local_time(&self, ms: &Value) -> Result<String, Stop> {
-        self.io.ask(json!({ "op": "localTime", "ms": ms })).await.map(|v| js_string(&v)).map_err(|_| Stop::Rethrow)
+        self.io.ask(json!({ "op": "localTime", "ms": ms })).await.map(|v| display(&v)).map_err(|_| Stop::Rethrow)
     }
     fn tilde(&self, path: &str) -> String {
         Ctx::tilde(self, path)
@@ -268,7 +268,7 @@ fn failed_sources(health: Option<&Value>, absent: &[&str]) -> Vec<Value> {
 async fn codex_bin(c: &Ctx<'_>) -> Result<Option<String>, Failure> {
     let mut bins: Vec<String> = Vec::new();
     if let Some(b) = c.f.get("codexBin").filter(|v| truthy(Some(v))) {
-        bins.push(js_string(b));
+        bins.push(display(b));
     }
     if let Some(b) = c.which("codex").await? {
         bins.push(b);
@@ -294,11 +294,11 @@ async fn absent_sources(c: &Ctx<'_>) -> Result<Vec<&'static str>, Failure> {
 }
 
 fn n(v: Option<&Value>) -> f64 {
-    xenonet_base::text::js_number(v)
+    xenonet_text::text::to_number(v)
 }
 
 fn s(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 /// One check's verdict: XenoNet's own here, an app's through its adapter.
@@ -313,14 +313,14 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
     match id.as_str() {
         "xenonet.server" => {
             if let Some(me) = f.get("self").filter(|v| truthy(Some(v))) {
-                let name = me.get("name").filter(|v| !v.is_null()).map_or_else(|| "XenoNet".into(), js_string);
+                let name = me.get("name").filter(|v| !v.is_null()).map_or_else(|| "XenoNet".into(), display);
                 return Ok(ok(format!("{name} on port {}", s(me.get("port")))));
             }
             let Some(base) = f.get("base").filter(|v| truthy(Some(v))) else {
                 return Ok(warn("XenoNet isn't running, so the map, its alerts and the tools sessions use are off", Some("Open XenoNet, or run xenonet service start.")));
             };
-            let name = f.get("baseName").map_or_else(|| "XenoNet".into(), js_string);
-            let b = js_string(base);
+            let name = f.get("baseName").map_or_else(|| "XenoNet".into(), display);
+            let b = display(base);
             Ok(ok(format!("{name} on {}", b.strip_prefix("http://").unwrap_or(&b))))
         }
         "xenonet.sources" => {
@@ -329,7 +329,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             let bad = failed_sources(Some(health), &absent);
             if !bad.is_empty() {
                 let said: Vec<String> =
-                    bad.iter().map(|x| format!("{}: {}", s(x.get("name")), x.get("error").filter(|v| !v.is_null()).map_or_else(|| "failed".into(), js_string))).collect();
+                    bad.iter().map(|x| format!("{}: {}", s(x.get("name")), x.get("error").filter(|v| !v.is_null()).map_or_else(|| "failed".into(), display))).collect();
                 return Ok(fail(said.join("; "), Some("Run xenonet doctor again after fixing the checks below; if it stays, xenonet logs --errors says more.")));
             }
             let mut counts: Map<String, Value> = Map::new();
@@ -411,7 +411,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                 shown.iter().take(2).map(|r| format!("{}: {}", xenonet_schema::drift::source_name(&s(r.get("source"))), xenonet_schema::drift::describe(r))).collect();
             let more = if shown.len() > 2 { format!("; and {} more", shown.len() - 2) } else { String::new() };
             let say = format!("{}{more}", named.join("; "));
-            let file = d.get("file").filter(|v| !v.is_null()).map_or_else(|| xenonet_schema::drift::DRIFT_FILE.to_string(), js_string);
+            let file = d.get("file").filter(|v| !v.is_null()).map_or_else(|| xenonet_schema::drift::DRIFT_FILE.to_string(), display);
             let fix = format!("xenonet drift lists them by source and marks them seen. XenoNet keeps them in {}.", c.tilde(&file));
             if !changes.is_empty() {
                 return Ok(warn(format!("{} to what XenoNet reads since you last looked: {say}", plural(changes.len() as f64, "change", None)), Some(&fix)));
@@ -431,7 +431,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                     }),
                 ),
                 check::Folder::Denied(code) => fail(format!("can't read {shown} ({code})"), Some(&check::privacy_fix(&c, &shown))),
-                check::Folder::Ok(count) => ok(format!("{shown}, {} {}", xenonet_base::units::locale(count as f64, 0, 3), if count == 1 { "entry" } else { "entries" })),
+                check::Folder::Ok(count) => ok(format!("{shown}, {} {}", xenonet_text::units::locale(count as f64, 0, 3), if count == 1 { "entry" } else { "entries" })),
             })
         }
         "system.git" => {
@@ -455,10 +455,10 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
         "system.command" => command(&c).await,
         "system.runtime" => {
             if let Some(e) = f.get("electron").filter(|v| truthy(Some(v))) {
-                return Ok(ok(format!("Electron {} (Node {})", js_string(e), s(f.get("node")))));
+                return Ok(ok(format!("Electron {} (Node {})", display(e), s(f.get("node")))));
             }
             let node = s(f.get("node"));
-            let mut parts = node.split('.').map(|p| xenonet_base::text::js_number(Some(&json!(p))));
+            let mut parts = node.split('.').map(|p| xenonet_text::text::to_number(Some(&json!(p))));
             let (major, minor) = (parts.next().unwrap_or(f64::NAN), parts.next().unwrap_or(f64::NAN));
             if major < MIN_NODE.0 || (major == MIN_NODE.0 && minor < MIN_NODE.1) {
                 return Ok(fail(format!("Node {node}; XenoNet needs 22.13 or later"), Some("Update Node.js.")));
@@ -469,7 +469,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
             let entries = c.call("errors", json!([])).await.map_err(|_| Failure::Rethrow)?;
             let Some(entries) = entries.filter(|e| truthy(Some(e))) else { return Ok(skip("needs XenoNet's state folder")) };
             let kept: Vec<Value> = list(Some(&entries)).into_iter().filter(|e| !s(e.get("code")).starts_with("doctor.")).collect();
-            let rows = xenonet_base::log::summarize(&kept);
+            let rows = xenonet_os::log::summarize(&kept);
             if rows.is_empty() {
                 return Ok(ok("none in the last day"));
             }
@@ -556,7 +556,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                 .iter()
                 .filter(|w| w.get("last").is_some_and(|l| truthy(Some(l)) && !truthy(l.get("ok"))))
                 .map(|w| {
-                    format!("{}'s last wake failed: {}", s(w.get("actor")), w["last"].get("reason").filter(|v| !v.is_null()).map_or_else(|| "it didn't answer".into(), js_string))
+                    format!("{}'s last wake failed: {}", s(w.get("actor")), w["last"].get("reason").filter(|v| !v.is_null()).map_or_else(|| "it didn't answer".into(), display))
                 })
                 .collect();
             if !failing.is_empty() {
@@ -600,7 +600,7 @@ pub async fn run_with(io: Io, id: String, facts: Facts, adapters: Vec<Box<dyn Ch
                     format!(
                         "{} runs {} processes XenoNet doesn't know as {}'s, so its actor's token would be refused from under them",
                         s(o.get("name")),
-                        list(o["recognized"].get("purposes")).iter().map(js_string).collect::<Vec<_>>().join(", "),
+                        list(o["recognized"].get("purposes")).iter().map(display).collect::<Vec<_>>().join(", "),
                         s(o.get("name"))
                     )
                 })
@@ -644,12 +644,12 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     let broken = list(file_get("broken"));
     if let Some(last) = broken.last() {
         return Ok(warn(
-            format!("{} is a state.json XenoNet couldn't read, so it moved it aside and started afresh", c.tilde(&js_string(last))),
+            format!("{} is a state.json XenoNet couldn't read, so it moved it aside and started afresh", c.tilde(&display(last))),
             Some("To get back what was in it, fix it and put it back as state.json while XenoNet is closed; delete it once you don't need it."),
         ));
     }
     if let Some(u) = file_get("unreadable").filter(|v| truthy(Some(v))) {
-        return Ok(warn(format!("state.json {}, so XenoNet will move it aside and start afresh", js_string(u)), Some("To keep what's in it, fix it before XenoNet next starts.")));
+        return Ok(warn(format!("state.json {}, so XenoNet will move it aside and start afresh", display(u)), Some("To keep what's in it, fix it before XenoNet next starts.")));
     }
     if file.is_some() && xenonet_app::jsv::less(file_get("known"), file_get("version")) && file_get("version").is_some() && file_get("known").is_some() {
         return Ok(warn(
@@ -662,7 +662,7 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     let issues = list(file_get("issues"));
     if let Some(first) = issues.first() {
-        let path = c.tilde(&first.get("path").map(js_string).unwrap_or_default());
+        let path = c.tilde(&first.get("path").map(display).unwrap_or_default());
         let message = s(first.get("message"));
         return Ok(warn(
             format!(
@@ -678,7 +678,7 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
         let free = n(st.get("bavail")) * n(st.get("bsize"));
         if free < 1e9 {
             return Ok(warn(
-                format!("{} GB free where XenoNet keeps its state", xenonet_base::units::to_fixed(free / 1e9, 1)),
+                format!("{} GB free where XenoNet keeps its state", xenonet_text::units::to_fixed(free / 1e9, 1)),
                 Some("Free some disk space; posters and replay clips need room too."),
             ));
         }
@@ -689,7 +689,7 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
 async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
     let f = c.f;
     let st = c.must("command", json!([])).await?;
-    let Some(file) = st.get("file").filter(|v| truthy(Some(v))).map(js_string) else { return Ok(skip("not on Windows yet")) };
+    let Some(file) = st.get("file").filter(|v| truthy(Some(v))).map(display) else { return Ok(skip("not on Windows yet")) };
     let place = c.tilde(&file);
     if !truthy(st.get("installed")) {
         return Ok(info(
@@ -701,7 +701,7 @@ async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
         return Ok(info(format!("{place} is another program's"), None));
     }
     if truthy(st.get("broken")) {
-        let runs: Vec<String> = list(st.get("runs")).iter().map(|r| c.tilde(&js_string(r))).collect();
+        let runs: Vec<String> = list(st.get("runs")).iter().map(|r| c.tilde(&display(r))).collect();
         return Ok(warn(format!("{place} runs {}, which is gone", runs.join(" ")), Some("Install it again from the palette (Install the xenonet command).")));
     }
     let dir = c.tilde(&NATIVE.dirname(&file));
@@ -709,7 +709,7 @@ async fn command(c: &Ctx<'_>) -> Result<Value, Failure> {
     if !truthy(st.get("onPath")) && win {
         let saved = c.call("savedPath", json!([])).await.map_err(|_| Failure::Rethrow)?;
         let target = Style::Win32.dirname(&file);
-        if list(saved.as_ref()).iter().any(|d| xenonet_app::command::same_place(&js_string(d), &target, "win32")) {
+        if list(saved.as_ref()).iter().any(|d| xenonet_app::command::same_place(&display(d), &target, "win32")) {
             return Ok(ok(format!("{place}, on your Path for new terminals")));
         }
     }
@@ -759,7 +759,7 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     let files = list(found.get("files"));
     if !files.is_empty() {
-        let shown: Vec<String> = files.iter().take(3).map(|x| c.tilde(&js_string(x))).collect();
+        let shown: Vec<String> = files.iter().take(3).map(|x| c.tilde(&display(x))).collect();
         let more = if files.len() > 3 { format!(" and {} more", files.len() - 3) } else { String::new() };
         let one = files.len() == 1;
         // Only a token XenoNet issued counts. When it couldn't read its own
@@ -775,7 +775,7 @@ async fn repos(c: &Ctx<'_>) -> Result<Value, Failure> {
     let checked = n(found.get("checked"));
     if checked < count {
         return Ok(info(
-            format!("none in the {} looked in; the other {} didn't answer in time{when}", plural(checked, "repo", None), xenonet_base::json::number_string(count - checked)),
+            format!("none in the {} looked in; the other {} didn't answer in time{when}", plural(checked, "repo", None), xenonet_text::json::number_string(count - checked)),
             None,
         ));
     }
@@ -793,13 +793,13 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     let fix = "In XenoNet's Actors panel, Repair sets the tunnel up again and Change… picks another; xenonet gateway check checks again from a terminal.";
     if let Some(p) = st.get("problem").filter(|v| truthy(Some(v))) {
-        return Ok(warn(js_string(p), Some(fix)));
+        return Ok(warn(display(p), Some(fix)));
     }
     // Funnel publishes /mcp alone: any other path it puts on the internet
     // is a warning.
     let tunnel = st.get("tunnel").cloned().unwrap_or(Value::Null);
     let funnel = tunnel.get("kind").and_then(Value::as_str) == Some("tailscale");
-    let public: Vec<String> = list(tunnel.get("public")).iter().map(js_string).collect();
+    let public: Vec<String> = list(tunnel.get("public")).iter().map(display).collect();
     if funnel && public.iter().any(|p| p != "/mcp") {
         return Ok(warn(
             format!("Tailscale Funnel puts more than the gateway's /mcp on the internet: {}", public.join(", ")),
@@ -808,7 +808,7 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     if st.get("reach").and_then(|r| r.get("state")).and_then(Value::as_str) != Some("ok") {
         return Ok(info(
-            format!("it's on, at {}; XenoNet hasn't checked that address yet", st.get("host").filter(|v| !v.is_null()).map_or_else(|| "no address yet".into(), js_string)),
+            format!("it's on, at {}; XenoNet hasn't checked that address yet", st.get("host").filter(|v| !v.is_null()).map_or_else(|| "no address yet".into(), display)),
             None,
         ));
     }
@@ -832,13 +832,13 @@ async fn gateway(c: &Ctx<'_>) -> Result<Value, Failure> {
             if !t.is_finite() {
                 return Err(Failure::with("Invalid time value", Map::new()));
             }
-            said.push(format!("{name}'s gateway token stops working on {} unless it calls before then", &xenonet_base::time::iso(t)[..10]));
+            said.push(format!("{name}'s gateway token stops working on {} unless it calls before then", &xenonet_text::time::iso(t)[..10]));
         }
     }
     if !said.is_empty() {
         return Ok(warn(said.join("; "), Some("In XenoNet's Actors panel, Connect… on the actor gives its app the address and a token again.")));
     }
-    let through = st.get("tunnel").and_then(|t| t.get("through")).filter(|v| truthy(Some(v))).map_or(String::new(), |t| format!(" through {}", js_string(t)));
+    let through = st.get("tunnel").and_then(|t| t.get("through")).filter(|v| truthy(Some(v))).map_or(String::new(), |t| format!(" through {}", display(t)));
     let local = if truthy(st["reach"].get("local")) { ", checked on this computer alone" } else { "" };
     // What's public: Funnel's /mcp alone, or a port tunnel's everything.
     let public = match tunnel.get("kind").and_then(Value::as_str) {
@@ -893,7 +893,7 @@ async fn observers(c: &Ctx<'_>) -> Result<Value, Failure> {
     for o in &on {
         for src in list(o.get("sources")) {
             if let Some(w) = word(&s(src.get("state"))) {
-                let file = src.get("file").filter(|v| truthy(Some(v))).map_or(String::new(), |x| format!(" ({})", js_string(x)));
+                let file = src.get("file").filter(|v| truthy(Some(v))).map_or(String::new(), |x| format!(" ({})", display(x)));
                 bad.push(format!("{}'s {}{file} {w}", s(o.get("name")), s(src.get("name"))));
             }
         }

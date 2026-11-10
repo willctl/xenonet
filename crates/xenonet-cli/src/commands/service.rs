@@ -10,8 +10,8 @@ use crate::cores::supervisor as login;
 use crate::out::{c, json as print_json, print, Done, Fail};
 use crate::sys;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::stringify;
 use xenonet_components::supervisor::{self, Disk, Files, System, UNSUPPORTED};
+use xenonet_text::json::stringify;
 
 pub const HELP: &str = include_str!("help/service.txt");
 
@@ -20,7 +20,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     // The environment's XENONET_PORT, or the one --port names.
     let mut env = Map::new();
     if flags.on("port") {
-        env.insert("XENONET_PORT".into(), json!(xenonet_base::text::js_string(&flags.get("port").cloned().unwrap_or(Value::Null))));
+        env.insert("XENONET_PORT".into(), json!(xenonet_text::text::display(&flags.get("port").cloned().unwrap_or(Value::Null))));
     }
     let env = Value::Object(env);
     match action {

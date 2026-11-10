@@ -5,9 +5,9 @@
 
 use serde_json::{Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use xenonet_base::json::{number, number_string};
-use xenonet_base::jsstr;
-use xenonet_base::text::{js_number, js_string};
+use xenonet_text::json::{number, number_string};
+use xenonet_text::text::{display, to_number};
+use xenonet_text::utf16;
 
 use crate::lines::opt_prop;
 /// An event's fields as JS has them, in order: a field that's there with
@@ -61,7 +61,7 @@ pub fn nn(v: Option<&Value>) -> Option<&Value> {
 pub fn tpl(v: Option<&Value>) -> String {
     match v {
         None => "undefined".into(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -95,9 +95,9 @@ pub fn index0(v: Option<&Value>) -> Option<Value> {
 /// `Object.keys(v ?? {})`.
 pub fn object_keys(v: Option<&Value>) -> Vec<String> {
     match v {
-        Some(Value::Object(m)) => jsstr::js_key_order(m.clone()).keys().cloned().collect(),
+        Some(Value::Object(m)) => utf16::key_order(m.clone()).keys().cloned().collect(),
         Some(Value::Array(a)) => (0..a.len()).map(|i| i.to_string()).collect(),
-        Some(Value::String(s)) => (0..jsstr::len(s)).map(|i| i.to_string()).collect(),
+        Some(Value::String(s)) => (0..utf16::len(s)).map(|i| i.to_string()).collect(),
         _ => Vec::new(),
     }
 }
@@ -203,10 +203,10 @@ pub fn sort_by_num<T>(v: &mut Vec<T>, cmp: impl Fn(&T, &T) -> f64) {
 }
 
 pub fn num_of(v: Option<&Value>, key: &str) -> f64 {
-    js_number(opt_prop(v, key))
+    to_number(opt_prop(v, key))
 }
 
 /// `(v ?? 0)` as a number.
 pub fn or0(v: Option<&Value>) -> f64 {
-    nn(v).map_or(0.0, |v| js_number(Some(v)))
+    nn(v).map_or(0.0, |v| to_number(Some(v)))
 }

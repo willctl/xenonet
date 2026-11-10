@@ -40,7 +40,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 use tokio::sync::{mpsc, Notify};
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 pub const UP_LIMIT: usize = 1 << 20;
 pub const RELAY_LIMIT: usize = 16 << 20;
@@ -983,7 +983,7 @@ impl Gateway {
         if !view.is_window(&signed.host) {
             return Err(NetError::new(403, "not-window", "a ticket is made on a window host"));
         }
-        let host = body.get("host").and_then(Value::as_str).filter(|h| xenonet_base::ids::is_host_id(h)).ok_or_else(|| NetError::bad("a ticket names a host id"))?;
+        let host = body.get("host").and_then(Value::as_str).filter(|h| xenonet_model::ids::is_host_id(h)).ok_or_else(|| NetError::bad("a ticket names a host id"))?;
         if view.member(host).is_some() {
             return Err(NetError::new(409, "taken", format!("{host} is in the network already: Replace it to add a reinstalled machine")));
         }

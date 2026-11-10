@@ -22,13 +22,15 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
-use xenonet_base::text::{js_number, js_trim, truthy};
-use xenonet_base::usage::{Figure, Speed, TokenUsage};
-use xenonet_base::{fs as xfs, json, jsstr, paths, pricing};
+use xenonet_model::usage::pricing;
+use xenonet_model::usage::{Figure, Speed, TokenUsage};
+use xenonet_os::{fs as xfs, paths};
 use xenonet_sources::line_events::{self as le, command_of, usage_of, Broken, Command, End, Field, LineEvent, LineFile};
 use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
 use xenonet_sources::live::{categorize, clip, mcp_server_of};
 use xenonet_sources::wiki::{to_str, to_str_or_empty, Out};
+use xenonet_text::text::{to_number, trim, truthy};
+use xenonet_text::{json, utf16};
 
 const CONTEXT_POINTS: usize = 400;
 
@@ -79,7 +81,7 @@ impl Prim {
             Prim::Null => 0.0,
             Prim::Bool(b) => f64::from(u8::from(*b)),
             Prim::Num(n) => *n,
-            Prim::Str(s) => js_number(Some(&Value::String(s.clone()))),
+            Prim::Str(s) => to_number(Some(&Value::String(s.clone()))),
         }
     }
 
@@ -116,7 +118,7 @@ impl Prim {
 // a < b: None where JS's comparison is undefined (a NaN).
 fn less(a: &Prim, b: &Prim) -> Option<bool> {
     if let (Prim::Str(x), Prim::Str(y)) = (a, b) {
-        return Some(jsstr::cmp_units(x, y) == Ordering::Less);
+        return Some(utf16::cmp_units(x, y) == Ordering::Less);
     }
     let (x, y) = (a.num(), b.num());
     if x.is_nan() || y.is_nan() {
@@ -369,7 +371,7 @@ impl Event {
             Some("context") => Kind::Context,
             _ => Kind::Other,
         };
-        let mut ev = Event::new(kind, js_number(prop(e, "t")?));
+        let mut ev = Event::new(kind, to_number(prop(e, "t")?));
         let ids = &mut ids.0;
         ev.agent = ids.val(prop(e, "agentId")?);
         ev.model = ids.val(prop(e, "model")?);
@@ -390,8 +392,8 @@ impl Event {
         ev.name = ids.val(prop(e, "name")?);
         ev.text = prop(e, "text")?.cloned();
         ev.error = prop(e, "error")?.cloned();
-        ev.cost = prop(e, "cost")?.map(|c| nn(Some(c)).map(|c| js_number(Some(c))));
-        ev.calls = nn(prop(e, "calls")?).map(|c| js_number(Some(c)));
+        ev.cost = prop(e, "cost")?.map(|c| nn(Some(c)).map(|c| to_number(Some(c))));
+        ev.calls = nn(prop(e, "calls")?).map(|c| to_number(Some(c)));
         ev.turn = truthy(prop(e, "turn")?);
         ev.used = prop(e, "used")?.cloned();
         Ok(ev)
@@ -428,9 +430,9 @@ pub fn prompt_text(text: &str) -> Option<String> {
 
 fn prompt_form(text: &str, command: Option<&Command>) -> Option<String> {
     if let Some(c) = command {
-        return Some(js_trim(&format!("/{} {}", c.name, c.args.as_deref().unwrap_or(""))).to_string());
+        return Some(trim(&format!("/{} {}", c.name, c.args.as_deref().unwrap_or(""))).to_string());
     }
-    let t = js_trim(text);
+    let t = trim(text);
     (!t.is_empty() && !t.starts_with('<')).then(|| t.to_string())
 }
 
@@ -497,7 +499,7 @@ pub fn session_events(app: &str, files: Vec<File>, ids: &mut EventIds) -> Result
         }
     }
     if app == "claude" {
-        xenonet_base::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
+        xenonet_text::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
     }
     Ok(events)
 }
@@ -636,7 +638,7 @@ fn line_events(evs: &[LineEvent<'_>], agent: &Val, seen: &mut HashSet<Key>, said
                 };
                 // A subagent's first prompt is its task.
                 if sub {
-                    if !js_trim(&p.text).is_empty() {
+                    if !trim(&p.text).is_empty() {
                         let mut ev = Event::new(Kind::Task, t);
                         ev.agent = agent.clone();
                         ev.text = Some(Value::String(p.text.clone()));
@@ -977,7 +979,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
 
     let mut model_list: Vec<&ModelSum> = models.items.iter().collect();
     let cost_of = |m: &ModelSum| if m.priced { m.cost } else { -1.0 };
-    xenonet_base::sort::sort_by(&mut model_list, |a, b| {
+    xenonet_text::sort::sort_by(&mut model_list, |a, b| {
         let by_cost = cost_of(b) - cost_of(a);
         order(if by_cost != 0.0 && !by_cost.is_nan() { by_cost } else { b.tokens.num() - a.tokens.num() })
     });
@@ -1015,7 +1017,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
         .collect();
 
     let mut tool_list: Vec<&ToolSum> = tools.items.iter().collect();
-    xenonet_base::sort::sort_by(&mut tool_list, |a, b| order(b.calls - a.calls));
+    xenonet_text::sort::sort_by(&mut tool_list, |a, b| order(b.calls - a.calls));
     let tools_out = tool_list
         .into_iter()
         .map(|t| {
@@ -1031,7 +1033,7 @@ pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
         .collect();
 
     let mut subs: Vec<&SubSum> = subagents.items.iter().collect();
-    xenonet_base::sort::sort_by(&mut subs, |a, b| order(a.from - b.from));
+    xenonet_text::sort::sort_by(&mut subs, |a, b| order(a.from - b.from));
     let subagents_out = name_subagents(&subs, &spawns, &labels)?;
 
     Ok(Out::obj(vec![
@@ -1135,9 +1137,9 @@ impl Transcripts {
     /// in its own folder, under the one for its working directory.
     pub fn files(&mut self, session_id: &str, claude_root: Option<&str>, codex_roots: &[String], grok_root: Option<&str>, now: f64) -> Vec<(String, Option<String>)> {
         // sessionId.slice(0, i) and .slice(i + 1), i its first colon (or -1).
-        let colon = session_id.find(':').map_or(-1, |i| jsstr::len(&session_id[..i]) as i64);
-        let app = jsstr::slice(session_id, 0, Some(colon));
-        let raw = jsstr::slice(session_id, colon + 1, None);
+        let colon = session_id.find(':').map_or(-1, |i| utf16::len(&session_id[..i]) as i64);
+        let app = utf16::slice(session_id, 0, Some(colon));
+        let raw = utf16::slice(session_id, colon + 1, None);
         if uuid_in(&raw).is_none() {
             return Vec::new();
         }
@@ -1187,7 +1189,7 @@ impl Transcripts {
         self.listed_at = now;
         for root in codex_roots {
             for file in paths::list_files(root, &mut |name| is_rollout(name), 4) {
-                if let Some(id) = uuid_in(&xenonet_base::nodepath::basename(&file)) {
+                if let Some(id) = uuid_in(&xenonet_os::nodepath::basename(&file)) {
                     match self.rollouts.iter_mut().find(|(k, _)| *k == id) {
                         Some(r) => r.1 = file,
                         None => self.rollouts.push((id, file)),
@@ -1244,7 +1246,7 @@ pub struct GrokFiles<'a> {
 
 /// The files beside a Grok Build session's updates that its stats read.
 pub fn grok_files(updates: &str) -> [String; 2] {
-    let dir = xenonet_base::nodepath::dirname(updates);
+    let dir = xenonet_os::nodepath::dirname(updates);
     ["usage.json", "summary.json"].map(|name| paths::join(&dir, name))
 }
 
@@ -1274,7 +1276,7 @@ pub fn with_turns(events: Vec<Event>, turns: &[xenonet_sources::grok::UsageTurn]
             ev
         })
         .collect();
-    xenonet_base::sort::sort_by(&mut calls, |a, b| order(a.t - b.t));
+    xenonet_text::sort::sort_by(&mut calls, |a, b| order(a.t - b.t));
     let mut out = Vec::with_capacity(events.len() + calls.len());
     let mut calls = calls.into_iter().peekable();
     for e in events {
@@ -1343,8 +1345,8 @@ mod tests {
     }
 
     fn at(min: f64) -> Value {
-        let noon = xenonet_base::time::parse_iso("2026-10-01T12:00:00Z").unwrap();
-        json!(xenonet_base::time::iso(noon + min * 60e3))
+        let noon = xenonet_text::time::parse_iso("2026-10-01T12:00:00Z").unwrap();
+        json!(xenonet_text::time::iso(noon + min * 60e3))
     }
 
     #[test]

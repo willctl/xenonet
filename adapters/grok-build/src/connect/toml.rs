@@ -11,8 +11,8 @@
 //! written another way is one XenoNet doesn't edit.
 
 use serde_json::{Map, Value};
-use xenonet_base::json::stringify;
-use xenonet_base::text::{is_js_space, js_trim, JS_DOT, JS_SPACE};
+use xenonet_text::json::stringify;
+use xenonet_text::text::{is_space, trim, DOT, SPACE};
 
 /// A pattern compiled once. A settings file's white space and line ends
 /// are JS's, not Unicode's, so `\s` and `.` are spelled out.
@@ -35,7 +35,7 @@ fn toml_key(k: &str) -> String {
 /// The dotted parts of a header or a key (mcp_servers."xenonet-dev".env),
 /// unquoted, or None when they don't read as one.
 pub fn key_parts(text: &str) -> Option<Vec<String>> {
-    let s = js_trim(text);
+    let s = trim(text);
     let b = s.as_bytes();
     let mut parts = Vec::new();
     let mut i = 0;
@@ -89,8 +89,8 @@ pub struct Line {
 /// The file's lines. A line inside a multi-line string (""" or ''') is one
 /// of its value's.
 pub fn toml_lines(text: &str) -> Vec<Line> {
-    let header = re!(format!(r"^[{JS_SPACE}]*\[\[?([^\[\]#]+)\]\]?[{JS_SPACE}]*(#{JS_DOT}*)?$"));
-    let pair = re!(format!(r"^[{JS_SPACE}]*([^=#{JS_SPACE}][^=#]*?)[{JS_SPACE}]*=[{JS_SPACE}]*({JS_DOT}*)$"));
+    let header = re!(format!(r"^[{SPACE}]*\[\[?([^\[\]#]+)\]\]?[{SPACE}]*(#{DOT}*)?$"));
+    let pair = re!(format!(r"^[{SPACE}]*([^=#{SPACE}][^=#]*?)[{SPACE}]*=[{SPACE}]*({DOT}*)$"));
     let mut out = Vec::new();
     let mut path: Vec<String> = Vec::new();
     let mut open: Option<&str> = None;
@@ -172,7 +172,7 @@ pub fn with_server(text: &str, name: &str, command: &str, args: &[String], env: 
         return Err(format!("it names mcp_servers.{name} in a form XenoNet doesn't edit"));
     }
     let without = without_server(text, name);
-    let rest = without.trim_end_matches(is_js_space);
+    let rest = without.trim_end_matches(is_space);
     let gap = if rest.is_empty() { String::new() } else { format!("{rest}\n\n") };
     Ok(format!("{gap}{}\n", server_toml(name, command, args, env)))
 }
@@ -180,7 +180,7 @@ pub fn with_server(text: &str, name: &str, command: &str, args: &[String], env: 
 // A value as XenoNet writes them: a string, or a list of strings, as JSON
 // reads them; None for any other.
 fn value(text: &str) -> Option<Value> {
-    match xenonet_base::json::parse(js_trim(text)).ok()? {
+    match xenonet_text::json::parse(trim(text)).ok()? {
         v @ Value::String(_) => Some(v),
         Value::Array(a) if a.iter().all(Value::is_string) => Some(Value::Array(a)),
         _ => None,
@@ -208,7 +208,7 @@ pub fn mcp_servers(text: &str) -> Value {
                     server.insert((*k).into(), v);
                 }
             }
-            ["enabled"] => match js_trim(v) {
+            ["enabled"] => match trim(v) {
                 "true" => {
                     server.insert("enabled".into(), Value::Bool(true));
                 }
@@ -241,7 +241,7 @@ pub fn read_settings(file: Option<&str>) -> Value {
     if file.is_some_and(|f| std::path::Path::new(f).extension().is_some_and(|e| e == "toml")) {
         return mcp_servers(&text);
     }
-    xenonet_base::json::parse(&text).unwrap_or_else(|_| Value::Object(Map::new()))
+    xenonet_text::json::parse(&text).unwrap_or_else(|_| Value::Object(Map::new()))
 }
 
 /// Server `name` as the file has it: { command, args, env } from its

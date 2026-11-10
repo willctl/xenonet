@@ -14,10 +14,10 @@ use crate::out::Done;
 use crate::sys;
 use std::io::{Read, Write};
 use std::time::Duration;
-use xenonet_base::http;
-use xenonet_base::json::Value;
-use xenonet_base::log::{log_dir, Log, MAX_BYTES};
-use xenonet_base::text::js_number;
+use xenonet_api::http;
+use xenonet_os::log::{log_dir, Log, MAX_BYTES};
+use xenonet_text::json::Value;
+use xenonet_text::text::to_number;
 
 pub const HELP: &str = include_str!("help/hook.txt");
 
@@ -26,7 +26,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(4);
 /// The port a flag or XENONET_PORT names, as JS's `Number(x) ||` reads
 /// them: the first that's a number other than 0, else 47840.
 pub fn port(flag: Option<&str>, env: Option<&str>) -> Option<u16> {
-    let n = [flag, env].into_iter().flatten().map(|s| js_number(Some(&Value::String(s.to_string())))).find(|n| *n != 0.0 && !n.is_nan()).unwrap_or(47840.0);
+    let n = [flag, env].into_iter().flatten().map(|s| to_number(Some(&Value::String(s.to_string())))).find(|n| *n != 0.0 && !n.is_nan()).unwrap_or(47840.0);
     // A port that isn't one makes no request at all, as fetch refuses its URL.
     (n.fract() == 0.0 && (1.0..=65535.0).contains(&n)).then_some(n as u16)
 }
@@ -34,7 +34,7 @@ pub fn port(flag: Option<&str>, env: Option<&str>) -> Option<u16> {
 #[expect(clippy::unnecessary_wraps, reason = "every command's run has the dispatcher's signature, and a hook never fails")]
 pub fn run(args: &[String], flags: &Flags) -> Done {
     // --port as JS's Number() reads the flag: on its own, it's 1.
-    let port_flag = flags.get("port").map(|v| if *v == Value::Bool(true) { "1".to_string() } else { xenonet_base::text::js_string(v) });
+    let port_flag = flags.get("port").map(|v| if *v == Value::Bool(true) { "1".to_string() } else { xenonet_text::text::display(v) });
     let plugin = flags.get("via").and_then(Value::as_str) == Some("plugin");
     Ok(hook(args.first().map(String::as_str), port_flag.as_deref(), plugin))
 }

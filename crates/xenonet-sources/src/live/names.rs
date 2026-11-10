@@ -6,8 +6,8 @@
 
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use xenonet_base::jsstr;
-use xenonet_base::text::{is_js_space, js_trim};
+use xenonet_text::text::{is_space, trim};
+use xenonet_text::utf16;
 
 const MIN_PROSE: usize = 3;
 const MAX_LABELS: usize = 24;
@@ -109,9 +109,9 @@ fn words_before_colon(line: &str) -> Vec<&str> {
             }
         }
     }
-    let mut chars = rest.trim_start_matches(is_js_space).chars();
+    let mut chars = rest.trim_start_matches(is_space).chars();
     match (chars.next(), chars.next()) {
-        (Some(':' | '\u{2014}' | '\u{2013}' | '-'), Some(c)) if is_js_space(c) => words,
+        (Some(':' | '\u{2014}' | '\u{2013}' | '-'), Some(c)) if is_space(c) => words,
         _ => Vec::new(),
     }
 }
@@ -120,11 +120,11 @@ fn words_before_colon(line: &str) -> Vec<&str> {
 /// covers"), or the words before a colon ("Claude Docs: living docs...").
 /// None when it opens with a sentence, which says what to do, not who it is.
 pub fn lead_of(text: &str) -> Option<String> {
-    let line = text.split('\n').find(|l| !js_trim(l).is_empty()).map_or("", js_trim);
+    let line = text.split('\n').find(|l| !trim(l).is_empty()).map_or("", trim);
     let mut words: Vec<&str> = if line.starts_with('#') {
-        let heading = line.trim_start_matches('#').trim_start_matches(is_js_space);
+        let heading = line.trim_start_matches('#').trim_start_matches(is_space);
         let mut words = Vec::new();
-        for w in heading.split(is_js_space).filter(|w| !w.is_empty()) {
+        for w in heading.split(is_space).filter(|w| !w.is_empty()) {
             if !is_word(w) || words.len() == 3 {
                 break;
             }
@@ -174,7 +174,7 @@ pub struct Name {
 /// only in links, so a domain counts only when its label is also a word in
 /// the text around the links.
 pub fn detect(ev: &Evidence) -> Option<Name> {
-    let lead = ev.lead.iter().reduce(|best, e| if e.1 > best.1 || (e.1 == best.1 && jsstr::cmp_units(&e.0, &best.0).is_lt()) { e } else { best });
+    let lead = ev.lead.iter().reduce(|best, e| if e.1 > best.1 || (e.1 == best.1 && utf16::cmp_units(&e.0, &best.0).is_lt()) { e } else { best });
     if let Some((name, _)) = lead {
         return Some(Name { name: name.clone(), source: "instructions" });
     }
@@ -184,14 +184,14 @@ pub fn detect(ev: &Evidence) -> Option<Name> {
             continue;
         }
         let score = c.prose + c.urls;
-        if best.is_none_or(|(l, _, s)| score > s || (score == s && jsstr::cmp_units(label, l).is_lt())) {
+        if best.is_none_or(|(l, _, s)| score > s || (score == s && utf16::cmp_units(label, l).is_lt())) {
             best = Some((label, c, score));
         }
     }
     let (label, c, _) = best?;
     // The spelling it was written with, when it has capitals inside ("PostHog").
     let form = c.forms.iter().filter(|(f, _)| *f != f.to_lowercase() && *f != f.to_uppercase()).reduce(|best, e| {
-        if e.1 > best.1 || (e.1 == best.1 && jsstr::cmp_units(&e.0, &best.0).is_lt()) {
+        if e.1 > best.1 || (e.1 == best.1 && utf16::cmp_units(&e.0, &best.0).is_lt()) {
             e
         } else {
             best
@@ -232,7 +232,7 @@ fn links_in(text: &str) -> Vec<Link<'_>> {
             continue;
         }
         let tail = &after[host_len..];
-        let tail_len = tail.find(|c: char| is_js_space(c) || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']' | '\\')).unwrap_or(tail.len());
+        let tail_len = tail.find(|c: char| is_space(c) || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']' | '\\')).unwrap_or(tail.len());
         let end = text.len() - tail.len() + tail_len;
         out.push(Link { start, end, host: &after[..host_len] });
         at = end;
@@ -281,7 +281,7 @@ impl ServerNames {
             for block in attachment.and_then(|a| a.get("addedBlocks")).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
                 // /^## (.+)\n([\s\S]*)$/: a header without line breaks, then the text.
                 let Some((header, body)) = block.strip_prefix("## ").and_then(|b| b.split_once('\n')) else { continue };
-                let server = js_trim(header);
+                let server = trim(header);
                 if header.is_empty() || header.contains(['\r', '\u{2028}', '\u{2029}']) || !is_opaque(server) {
                     continue;
                 }
@@ -316,7 +316,7 @@ impl ServerNames {
                         Some(Value::Array(items)) => items.iter().map(|x| x.get("text").and_then(Value::as_str).unwrap_or("")).collect::<Vec<_>>().join("\n"),
                         _ => String::new(),
                     };
-                    self.results(&server, &jsstr::head(&text, MAX_RESULT));
+                    self.results(&server, &utf16::head(&text, MAX_RESULT));
                 }
                 _ => {}
             }

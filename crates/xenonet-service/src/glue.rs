@@ -8,7 +8,7 @@ use crate::ctx::Ctx;
 use crate::events::Local;
 use serde_json::{json, Value};
 use xenonet_api::wire::EventSink;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 // Who an event is from is xenonet-api's, which the drivers name it with.
 pub use xenonet_api::From;
@@ -36,7 +36,7 @@ fn first_upper(s: &str) -> String {
 
 /// The first `n` UTF-16 units of a string, as JS's slice(0, n) takes them.
 fn cut(s: &str, n: usize) -> String {
-    xenonet_base::log::js_slice(s, n).to_string()
+    xenonet_text::utf16::whole_head(s, n).to_string()
 }
 
 pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
@@ -89,7 +89,7 @@ pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
             }
         }
         (From::Delivery, "delivery") => ctx.broadcast("delivery", &data),
-        (From::Delivery, "error") => eprintln!("[xenonet] delivery: {}", xenonet_base::text::js_string(&data["message"])),
+        (From::Delivery, "error") => eprintln!("[xenonet] delivery: {}", xenonet_text::text::display(&data["message"])),
         // A message for an actor nothing can wake: a notification for you.
         (From::Delivery, "notify") => {
             if ctx.config.demo {
@@ -121,13 +121,13 @@ pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
             }
             let name = js(&data["name"]);
             let unread = data["unread"].as_f64().unwrap_or(0.0);
-            let n = if unread == 1.0 { "a message".to_string() } else { format!("{} messages", xenonet_base::json::number_string(unread)) };
+            let n = if unread == 1.0 { "a message".to_string() } else { format!("{} messages", xenonet_text::json::number_string(unread)) };
             ctx.notify_desktop(json!({ "type": "notify", "key": format!("actor-mail:{}", js(&data["actor"])), "command": "actors", "title": format!("{name} has {n} waiting"), "subtitle": format!("Nothing can wake {name}, so it reads them when it next checks"), "body": "Ask it to check its XenoNet inbox, or set up a wake in the Actors panel." }));
         }
         (From::Hub, _) => ctx.events.broadcast(name, &data, Local::None),
         // The window reads how they stand with its key; this says only that
         // it changed.
-        (From::Tunnels, "changed") => ctx.broadcast("assistant", &json!({ "at": xenonet_base::json::number(ctx.now()) })),
+        (From::Tunnels, "changed") => ctx.broadcast("assistant", &json!({ "at": xenonet_text::json::number(ctx.now()) })),
         (From::Doctor, "result") => ctx.broadcast("doctor", &data),
         (From::Doctor, "problems") => {
             let fresh = data.as_array().cloned().unwrap_or_default();
@@ -147,7 +147,7 @@ pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
 fn js(v: &Value) -> String {
     match v {
         Value::Null => "null".into(),
-        v => xenonet_base::text::js_string(v),
+        v => xenonet_text::text::display(v),
     }
 }
 
@@ -181,13 +181,13 @@ fn refusal(ctx: &Ctx, ev: Value) {
             return;
         }
     };
-    if !xenonet_base::text::truthy(ev.get("live")) {
+    if !xenonet_text::text::truthy(ev.get("live")) {
         return;
     }
     let session = js(&ev["sessionId"]);
     let category = rec["signal"]["category"].as_str().map(|c| format!(" ({c})")).unwrap_or_default();
     ctx.log("info", "refusals.seen", &format!("{} {}{category} in {session}", js(&rec["provider"]), js(&rec["kind"])), None, None);
-    ctx.broadcast("refusal", &json!({ "id": rec["id"], "at": rec["at"], "provider": rec["provider"], "kind": rec["kind"], "category": rec["signal"]["category"], "session": ev["sessionId"], "context": xenonet_base::text::truthy(rec.get("context")) }));
+    ctx.broadcast("refusal", &json!({ "id": rec["id"], "at": rec["at"], "provider": rec["provider"], "kind": rec["kind"], "category": rec["signal"]["category"], "session": ev["sessionId"], "context": xenonet_text::text::truthy(rec.get("context")) }));
     let t = ctx.now();
     let mut notes = ctx.refusal_notes.locked();
     notes.at.retain(|x| t - x < 3600e3);

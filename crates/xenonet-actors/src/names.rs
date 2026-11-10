@@ -19,10 +19,10 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use unicode_normalization::UnicodeNormalization;
 use xenonet_adapter::products::{product_of, product_of_slug};
-use xenonet_base::ids::is_actor_slug;
-use xenonet_base::log::js_slice;
-use xenonet_base::text::js_trim;
-use xenonet_base::text::{template, truthy};
+use xenonet_model::ids::is_actor_slug;
+use xenonet_text::text::trim;
+use xenonet_text::text::{template, truthy};
+use xenonet_text::utf16::whole_head;
 
 fn re(p: &str) -> Regex {
     Regex::new(p).expect("a fixed pattern")
@@ -260,7 +260,7 @@ fn product_name(id: &str) -> &'static str {
 /// what was given isn't text.
 pub fn check_name(raw: Option<&str>, product: Option<&str>) -> Result<String, String> {
     let Some(raw) = raw else { return Err("a name is text".into()) };
-    let name = js_trim(raw);
+    let name = trim(raw);
     if name.chars().any(not_one_line) {
         return Err("a name is one line of plain text".into());
     }
@@ -361,7 +361,7 @@ pub fn slug_from(name: &str) -> String {
             run = true;
         }
     }
-    let cut = js_slice(dashed.trim_start_matches('-'), 32).trim_end_matches('-');
+    let cut = whole_head(dashed.trim_start_matches('-'), 32).trim_end_matches('-');
     if cut.is_empty() {
         "actor".into()
     } else {
@@ -397,7 +397,7 @@ pub fn slug_refusal(slug: Option<&str>, product: Option<&str>) -> Option<String>
 pub fn suggest_slug<E>(base: &str, product: Option<&str>, taken: &mut dyn FnMut(&str) -> Result<bool, E>) -> Result<Option<String>, E> {
     for n in 2..1000 {
         let tail = format!("-{n}");
-        let s = format!("{}{tail}", js_slice(base, 32 - tail.len()).trim_end_matches('-'));
+        let s = format!("{}{tail}", whole_head(base, 32 - tail.len()).trim_end_matches('-'));
         if slug_refusal(Some(&s), product).is_none() && !taken(&s)? {
             return Ok(Some(s));
         }
@@ -423,7 +423,7 @@ pub fn hermes_slug(profile: Option<&Value>) -> String {
         return full;
     }
     let tag = &hex(&Sha256::digest(text.as_bytes()))[..4];
-    format!("{}-{tag}", js_slice(&full, 27).trim_end_matches('-'))
+    format!("{}-{tag}", whole_head(&full, 27).trim_end_matches('-'))
 }
 
 #[cfg(test)]

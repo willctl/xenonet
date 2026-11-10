@@ -7,7 +7,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
-use xenonet_base::fs::FsError;
+use xenonet_os::fs::FsError;
 use xenonet_sources::native::files::{Entry, Files, Stat};
 use xenonet_sources::native::opencode::{self, Db, OpenCode};
 use xenonet_sources::native::{copilot_cli, cursor, gemini_cli, no_check, Checked, NativeReader, Threw, Vendor};

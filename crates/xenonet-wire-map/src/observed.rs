@@ -187,9 +187,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-wire-numbat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("a folder");
         let file = dir.join("events.ndjson");
-        let now = xenonet_base::time::iso(now_ms());
+        let now = xenonet_text::time::iso(now_ms());
         let ev = |kind: &str, file: Option<&str>| json!({ "schema_version": "0.5.0", "record_type": "event", "source_agent": "gemini-cli", "event_type": kind, "session_id": "g-0000001", "project_path": "/w/atlas", "file_path": file, "timestamp": now });
-        let text: String = [ev("session.start", None), ev("file.write", Some("/w/atlas/src/a.js"))].iter().map(|e| xenonet_base::json::stringify(e, 0) + "\n").collect();
+        let text: String = [ev("session.start", None), ev("file.write", Some("/w/atlas/src/a.js"))].iter().map(|e| xenonet_text::json::stringify(e, 0) + "\n").collect();
         std::fs::write(&file, text).expect("its records");
         let o = Observed::make(NUMBAT, file.to_string_lossy().into_owned(), Box::new(Numbat::new()), vendor());
         o.read();

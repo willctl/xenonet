@@ -23,8 +23,8 @@ use std::net::TcpStream;
 use std::time::Duration;
 use xenonet_actors::token_file::{run_token_command, token_file_refusal, token_from_env, write_token_file};
 use xenonet_adapter::products::product_of;
-use xenonet_base::client::{name_of, Server};
-use xenonet_base::json::{number, stringify};
+use xenonet_api::client::{name_of, Server};
+use xenonet_text::json::{number, stringify};
 
 pub const HELP: &str = include_str!("help/actor.txt");
 
@@ -72,8 +72,8 @@ pub fn is_shell(program: &str) -> bool {
 // The program a process runs, as ps names it, or None where that can't be
 // told (no ps, as on Windows, or a process that's gone).
 fn program_of(pid: u32) -> Option<String> {
-    let out = xenonet_base::private_file::run_command("ps", &["-o", "comm=", "-p", &pid.to_string()], Duration::from_secs(3)).ok()?;
-    Some(xenonet_base::text::js_trim(&out).to_string()).filter(|p| !p.is_empty())
+    let out = xenonet_os::private_file::run_command("ps", &["-o", "comm=", "-p", &pid.to_string()], Duration::from_secs(3)).ok()?;
+    Some(xenonet_text::text::trim(&out).to_string()).filter(|p| !p.is_empty())
 }
 
 // None where there's no parent to ask for (Windows), which is why it's
@@ -210,7 +210,7 @@ fn show(args: &[String], flags: &Flags) -> Done {
     print(format!("{} {}  {}", dot(&t(&a, "presence")), c::bold(t(&a, "name")), c::dim(t(&a, "id"))));
     let since = if on(&a, "presenceSince") { c::dim(format!(" since {}", ago(num(&a, "presenceSince"), now()))) } else { String::new() };
     let heard = if on(&a, "lastSeen") { c::dim(format!(" · last heard {}", ago(num(&a, "lastSeen"), now()))) } else { String::new() };
-    let join = |k: &str| xenonet_base::text::join(list(&a, k).iter().map(Some), ", ");
+    let join = |k: &str| xenonet_text::text::join(list(&a, k).iter().map(Some), ", ");
     let mut facts: Vec<(&str, String)> = vec![
         ("Presence", format!("{}{since}{heard}", t(&a, "presence"))),
         ("Status", have(&a, "status").map_or_else(|| c::dim("none"), |st| crate::js::text(Some(st)))),
@@ -221,7 +221,7 @@ fn show(args: &[String], flags: &Flags) -> Done {
     }
     facts.push(("Allowed", if list(&a, "capabilities").is_empty() { c::dim("nothing beyond reporting itself") } else { join("capabilities") }));
     if on(&a, "heartbeatMs") {
-        facts.push(("Heartbeat", format!("every {} s", xenonet_base::json::number_string(xenonet_base::units::js_round(num(&a, "heartbeatMs") / 1000.0)))));
+        facts.push(("Heartbeat", format!("every {} s", xenonet_text::json::number_string(xenonet_text::units::round(num(&a, "heartbeatMs") / 1000.0)))));
     }
     let targets = list(&a, "targets");
     facts.push((
@@ -274,7 +274,7 @@ fn observe(args: &[String], flags: &Flags) -> Done {
 // ---------- registering ----------
 
 fn register(_args: &[String], flags: &Flags) -> Done {
-    let Some(name) = flags.str("name").filter(|n| !xenonet_base::text::js_trim(n).is_empty()) else {
+    let Some(name) = flags.str("name").filter(|n| !xenonet_text::text::trim(n).is_empty()) else {
         return Err(Fail::new("say what it's called: xenonet actor register --name <name>", 2));
     };
     let mut body = Map::new();
@@ -284,7 +284,7 @@ fn register(_args: &[String], flags: &Flags) -> Done {
         body.insert("slug".into(), json!(slug));
     }
     if let Some(caps) = flags.str("capabilities") {
-        let caps: Vec<&str> = caps.split(',').map(xenonet_base::text::js_trim).filter(|x| !x.is_empty()).collect();
+        let caps: Vec<&str> = caps.split(',').map(xenonet_text::text::trim).filter(|x| !x.is_empty()).collect();
         body.insert("capabilities".into(), json!(caps));
     }
     if flags.has("heartbeat") {
@@ -292,7 +292,7 @@ fn register(_args: &[String], flags: &Flags) -> Done {
         if seconds.is_nan() || seconds <= 0.0 {
             return Err(Fail::new("--heartbeat is a number of seconds", 2));
         }
-        body.insert("heartbeatMs".into(), number(xenonet_base::units::js_round(seconds * 1000.0)));
+        body.insert("heartbeatMs".into(), number(xenonet_text::units::round(seconds * 1000.0)));
     }
     if let Some(product) = flags.str("product") {
         body.insert("product".into(), json!({ "id": product }));
@@ -311,8 +311,8 @@ fn register(_args: &[String], flags: &Flags) -> Done {
         print(format!("Waiting for you to allow \"{name}\" in {}'s window (it asks for 10 minutes)…", name_of(&s)));
     }
     // How often to ask whether you've answered; tests ask faster.
-    let every = sys::var("XENONET_ACTOR_WAIT_MS").map(|v| xenonet_base::text::js_number(Some(&Value::String(v)))).filter(|n| *n != 0.0 && !n.is_nan()).unwrap_or(2000.0);
-    let until = have(&creds, "expiresAt").map_or(now() + 10.0 * 60e3, |e| xenonet_base::text::js_number(Some(e))) + 5000.0;
+    let every = sys::var("XENONET_ACTOR_WAIT_MS").map(|v| xenonet_text::text::to_number(Some(&Value::String(v)))).filter(|n| *n != 0.0 && !n.is_nan()).unwrap_or(2000.0);
+    let until = have(&creds, "expiresAt").map_or(now() + 10.0 * 60e3, |e| xenonet_text::text::to_number(Some(e))) + 5000.0;
     let token = t(&creds, "token");
     loop {
         std::thread::sleep(Duration::from_millis(every.max(0.0) as u64));
@@ -717,7 +717,7 @@ const EXEC_MS: u64 = 10 * 60 * 1000;
 fn run_for(exec: &str, m: &Value, note: &dyn Fn(&str)) {
     let name = sys::base_name(exec);
     let mut cmd = std::process::Command::new(exec);
-    xenonet_base::process::Background::no_window(&mut cmd);
+    xenonet_os::process::Background::no_window(&mut cmd);
     cmd.env_remove("XENONET_ACTOR_TOKEN").env_remove("XENONET_ACTOR_TOKEN_FILE");
     cmd.env("XENONET_MESSAGE_ID", t(m, "id")).env("XENONET_MESSAGE_FROM", m.get("from").and_then(|f| have(f, "id")).map_or(String::new(), |id| crate::js::text(Some(id))));
     cmd.stdin(std::process::Stdio::piped());
@@ -758,7 +758,7 @@ fn listen(_args: &[String], flags: &Flags) -> Done {
     if flags.has("exec") {
         let Some(program) = flags.str("exec").filter(|p| !p.is_empty()) else { return Err(Fail::new("say which program: xenonet actor listen --exec <program>", 2)) };
         let full = sys::resolve(program);
-        if !xenonet_base::paths::can_run(&full) {
+        if !xenonet_os::paths::can_run(&full) {
             return Err(Fail::new(format!("{} isn't a program you can run", sys::tilde(&full)), 2));
         }
         exec = Some(full);
@@ -793,7 +793,7 @@ fn listen(_args: &[String], flags: &Flags) -> Done {
                 let mut text = Vec::new();
                 let _ = res.body.read_to_end(&mut text);
                 let said =
-                    xenonet_base::json::parse(String::from_utf8_lossy(&text).trim_start_matches('\u{feff}')).ok().and_then(|v| have(&v, "error").map(|e| crate::js::text(Some(e))));
+                    xenonet_text::json::parse(String::from_utf8_lossy(&text).trim_start_matches('\u{feff}')).ok().and_then(|v| have(&v, "error").map(|e| crate::js::text(Some(e))));
                 return Err(Fail::new(said.unwrap_or_else(|| format!("{} refused this actor's stream", name_of(&s))), 1));
             }
             if (200..300).contains(&res.status) {
@@ -804,7 +804,7 @@ fn listen(_args: &[String], flags: &Flags) -> Done {
                         drain()?;
                     }
                     if ev.event == "closed" {
-                        let why = xenonet_base::json::parse(&ev.data).ok().map_or("undefined".into(), |d| t(&d, "error"));
+                        let why = xenonet_text::json::parse(&ev.data).ok().map_or("undefined".into(), |d| t(&d, "error"));
                         return Err(Fail::new(format!("{} closed the stream: {why}", name_of(&s)), 1));
                     }
                     Ok(true)

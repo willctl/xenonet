@@ -20,9 +20,9 @@ use xenonet_actors::wake::{self, Fail, Fetched, Request, Wakes as Core, TIMEOUT_
 use xenonet_api::cores::actors::WakeStream;
 use xenonet_api::cores::{CoreError, Kind, Wakes, R};
 use xenonet_api::From;
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_engine::store::Shared;
+use xenonet_os::sync::Locked;
+use xenonet_text::time::now_ms;
 
 /// Your computer's credential store, or the demo's memory.
 pub enum Secrets {
@@ -48,7 +48,7 @@ impl Secrets {
         if demo {
             return Secrets::Memory(Mutex::new(MemorySecrets::default()));
         }
-        let tool = std::env::var("PATH").ok().and_then(|p| xenonet_base::paths::on_path("secret-tool", &p, None, false, &mut |f: &str| xenonet_base::paths::can_run(f)));
+        let tool = std::env::var("PATH").ok().and_then(|p| xenonet_os::paths::on_path("secret-tool", &p, None, false, &mut |f: &str| xenonet_os::paths::can_run(f)));
         Secrets::System(SecretStore::new(crate::runtime::platform(), tool))
     }
 

@@ -2,11 +2,11 @@
 //! thread's items from the app-server as the console shows them.
 
 use serde_json::{Map, Value};
-use xenonet_base::text::{js_number, js_string, truthy};
-use xenonet_base::{json, time};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_sources::record::{excerpt, excerpt_json, nn, tpl, Obj, F};
 use xenonet_sources::session::{CodexSession, Parent, ParentKind};
+use xenonet_text::text::{display, to_number, truthy};
+use xenonet_text::{json, time};
 
 /// `Object.keys(v)[0]`: an object's first key, an array's first index.
 fn first_key(v: &Value) -> Option<String> {
@@ -32,7 +32,7 @@ fn to_ms(t: Js<'_>) -> F {
             _ => F::null(),
         },
         Some(v) => {
-            let n = js_number(Some(v));
+            let n = to_number(Some(v));
             if n < 1e12 {
                 let ms = n * 1000.0;
                 if ms.is_finite() {
@@ -107,7 +107,7 @@ pub fn thread_to_session(t: Js<'_>, archived: bool) -> Result<Obj, TypeError> {
     let parent = if truthy(forked) {
         Some(Parent { id: format!("codex:{}", tpl(forked)), kind: ParentKind::Fork })
     } else if truthy(Some(&parent_thread)) {
-        Some(Parent { id: format!("codex:{}", js_string(&parent_thread)), kind: ParentKind::Subagent })
+        Some(Parent { id: format!("codex:{}", display(&parent_thread)), kind: ParentKind::Subagent })
     } else {
         None
     };
@@ -152,7 +152,7 @@ pub(super) fn text_of(content: Js<'_>) -> String {
             for c in parts {
                 let text = nn(opt_prop(Some(c), "text"));
                 out.push(match text {
-                    Some(t) => js_string(t),
+                    Some(t) => display(t),
                     None => {
                         let ty = opt_prop(Some(c), "type").and_then(Value::as_str);
                         (if matches!(ty, Some("image" | "localImage" | "local_image")) { "[image]" } else { "" }).to_string()
@@ -162,7 +162,7 @@ pub(super) fn text_of(content: Js<'_>) -> String {
             out.join("\n")
         }
         None | Some(Value::Null) => String::new(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -184,7 +184,7 @@ pub(super) fn reasoning(parts: Vec<Value>, optional: bool) -> Result<String, Typ
             Value::String(s) => s.clone(),
             _ => {
                 let t = if optional { opt_prop(Some(x), "text") } else { prop(Some(x), "text")? };
-                nn(t).map_or_else(String::new, js_string)
+                nn(t).map_or_else(String::new, display)
             }
         });
     }
@@ -226,7 +226,7 @@ pub fn normalize_item(entry: Js<'_>) -> Result<Obj, TypeError> {
         Some("plan") => with(b, vec![("role", F::s("assistant")), ("title", F::s("plan")), ("text", F::V(nn(get("text")?).cloned().unwrap_or(Value::String(String::new()))))]),
         Some("commandExecution") => {
             let code = get("exitCode")?;
-            let meta = nn(code).map_or(F::null(), |c| F::s(format!("exit {}", js_string(c))));
+            let meta = nn(code).map_or(F::null(), |c| F::s(format!("exit {}", display(c))));
             with(
                 b,
                 vec![
@@ -256,17 +256,17 @@ pub fn normalize_item(entry: Js<'_>) -> Result<Obj, TypeError> {
             let mut lines = Vec::new();
             for c in nn(changes).and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
                 let kind = prop(Some(c), "kind")?;
-                let k = nn(opt_prop(kind, "type")).or(nn(kind)).map_or_else(String::new, js_string);
+                let k = nn(opt_prop(kind, "type")).or(nn(kind)).map_or_else(String::new, display);
                 lines.push(format!("{k} {}", tpl(prop(Some(c), "path")?)));
             }
             let count = match n {
-                F::V(v) => js_string(&v),
+                F::V(v) => display(&v),
                 _ => "0".into(),
             };
             with(b, vec![("role", F::s("tool")), ("title", F::s(format!("edit {count} file(s)"))), ("status", F::of(get("status")?)), ("text", F::s(lines.join("\n")))])
         }
         Some("webSearch") => {
-            let q = nn(get("query")?).map_or_else(String::new, js_string);
+            let q = nn(get("query")?).map_or_else(String::new, display);
             with(b, vec![("role", F::s("tool")), ("title", F::s(format!("search: {q}"))), ("text", F::s(""))])
         }
         Some("contextCompaction") => with(b, vec![("role", F::s("system")), ("text", F::s("context compacted"))]),

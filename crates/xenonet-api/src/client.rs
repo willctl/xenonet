@@ -5,9 +5,9 @@
 //! XenoNet and XenoNet Dev that answers.
 
 use crate::http;
-use crate::json::{self, number_string, Value};
-use crate::text::{js_number, js_string};
 use std::time::Duration;
+use xenonet_text::json::{self, number_string, Value};
+use xenonet_text::text::{display, to_number};
 
 pub const XENONET_PORT: u16 = 47840;
 pub const DEMO_PORT: u16 = 47841;
@@ -46,7 +46,7 @@ pub fn candidates(p: &Pick) -> Vec<f64> {
         return vec![DEV_PORT.into()];
     }
     if let Some(e) = &p.env_port {
-        return vec![js_number(Some(&Value::String(e.clone())))];
+        return vec![to_number(Some(&Value::String(e.clone())))];
     }
     vec![XENONET_PORT.into(), DEV_PORT.into()]
 }
@@ -125,7 +125,7 @@ pub fn default_name(port: f64) -> &'static str {
 }
 
 fn health_name(health: &Value) -> Option<String> {
-    health.get("name").filter(|n| !n.is_null()).map(|n| n.as_str().map_or_else(|| js_string(n), str::to_string))
+    health.get("name").filter(|n| !n.is_null()).map(|n| n.as_str().map_or_else(|| display(n), str::to_string))
 }
 
 /// What a XenoNet calls itself.
@@ -165,7 +165,7 @@ pub fn request(port: f64, name: &str, method: &str, route: &str, body: Option<&V
     let message = data
         .get("error")
         .filter(|e| !e.is_null())
-        .map_or_else(|| format!("{route}: {} {}", answer.status, answer.reason), |e| e.as_str().map_or_else(|| js_string(e), str::to_string));
+        .map_or_else(|| format!("{route}: {} {}", answer.status, answer.reason), |e| e.as_str().map_or_else(|| display(e), str::to_string));
     Err(Refused { message, status: Some(answer.status) })
 }
 

@@ -6,7 +6,7 @@
 //! credential, a path or an account.
 
 use serde_json::{json, Map, Value};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 const OPERATIONS: [&str; 8] = ["status", "projects", "sessions", "attention", "session", "actors", "hello", "unknown"];
 
@@ -19,7 +19,7 @@ fn finite(v: Option<&Value>) -> Option<f64> {
 }
 
 fn integer(v: Option<&Value>) -> Value {
-    finite(v).filter(|n| n.fract() == 0.0).map_or(Value::Null, xenonet_base::json::number)
+    finite(v).filter(|n| n.fract() == 0.0).map_or(Value::Null, xenonet_text::json::number)
 }
 
 /// The record store.addAudit gets for a read, or a refusal, through a
@@ -27,9 +27,9 @@ fn integer(v: Option<&Value>) -> Value {
 pub fn access(a: &Value, now: f64) -> Value {
     let field = |k: &str| a.get(k).cloned().unwrap_or(Value::Null);
     let op = a.get("operation").and_then(Value::as_str).filter(|o| OPERATIONS.contains(o)).unwrap_or("unknown");
-    let result = a.get("result").map_or_else(|| "undefined".to_string(), js_string);
+    let result = a.get("result").map_or_else(|| "undefined".to_string(), display);
     json!({
-        "at": xenonet_base::json::number(now),
+        "at": xenonet_text::json::number(now),
         "kind": "access",
         "request_id": field("requestId"),
         "grant_id": field("grant"),
@@ -38,8 +38,8 @@ pub fn access(a: &Value, now: f64) -> Value {
         "connection_id": field("connection"),
         "operation": op,
         "result": if code_ok(&result) { result } else { "unknown".into() },
-        "latency_ms": finite(a.get("latencyMs")).map_or(Value::Null, |l| xenonet_base::json::number(xenonet_base::units::js_round(l))),
-        "bytes": finite(a.get("bytes")).map_or(Value::Null, xenonet_base::json::number),
+        "latency_ms": finite(a.get("latencyMs")).map_or(Value::Null, |l| xenonet_text::json::number(xenonet_text::units::round(l))),
+        "bytes": finite(a.get("bytes")).map_or(Value::Null, xenonet_text::json::number),
         "projects": integer(a.get("projects")),
     })
 }
@@ -57,8 +57,8 @@ pub fn recent(rows: &[Value]) -> Vec<Value> {
         .map(|r| {
             let mut m: Map<String, Value> = r.as_object().cloned().unwrap_or_default();
             m.shift_remove("id");
-            let at = xenonet_base::text::js_number(m.get("at"));
-            m.insert("at".into(), json!(xenonet_base::time::iso(at)));
+            let at = xenonet_text::text::to_number(m.get("at"));
+            m.insert("at".into(), json!(xenonet_text::time::iso(at)));
             Value::Object(m)
         })
         .collect()

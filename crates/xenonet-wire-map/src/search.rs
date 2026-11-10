@@ -258,13 +258,13 @@ mod tests {
         std::fs::create_dir_all(&claude).expect("a folder");
         let id = "0190d3e0-0000-7000-8000-000000000001";
         let line = json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": "Add partial refunds to the orders API" } });
-        std::fs::write(claude.join(format!("{id}.jsonl")), format!("{}\n", xenonet_base::json::stringify(&line, 0))).expect("a transcript");
+        std::fs::write(claude.join(format!("{id}.jsonl")), format!("{}\n", xenonet_text::json::stringify(&line, 0))).expect("a transcript");
         // An archived Codex rollout, compressed.
         let archived = dir.join("codex").join("2026").join("10").join("05");
         std::fs::create_dir_all(&archived).expect("a folder");
         let thread = "0190d3e0-0000-7000-8000-000000000006";
         let said = json!({ "type": "event_msg", "timestamp": "2026-10-05T13:00:00Z", "payload": { "type": "user_message", "message": "Archive the nightly reports" } });
-        let packed = ruzstd::encoding::compress_to_vec(format!("{}\n", xenonet_base::json::stringify(&said, 0)).as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
+        let packed = ruzstd::encoding::compress_to_vec(format!("{}\n", xenonet_text::json::stringify(&said, 0)).as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
         std::fs::write(archived.join(format!("rollout-2026-10-05T13-00-00-{thread}.jsonl.zst")), packed).expect("an archive");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
         let codex = [dir.join("codex").to_string_lossy().into_owned()];
@@ -294,7 +294,7 @@ mod tests {
         for i in 0..40 {
             let words = format!("marker{i}x {}", "word ".repeat(1 + i * 3));
             let line = json!({ "type": "user", "timestamp": "2026-10-17T10:00:00.000Z", "message": { "role": "user", "content": words } });
-            text.push_str(&xenonet_base::json::stringify(&line, 0));
+            text.push_str(&xenonet_text::json::stringify(&line, 0));
             text.push('\n');
         }
         text.push_str("{\"type\":\"user\",\"timestamp\"");

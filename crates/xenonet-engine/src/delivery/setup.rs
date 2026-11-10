@@ -26,7 +26,7 @@ pub const LISTEN_SECONDS: f64 = 300.0;
 pub fn newer(v: Option<&str>, min: &[f64]) -> bool {
     let Some(m) = crate::re!(r"([0-9]+)\.([0-9]+)\.([0-9]+)").captures(v.unwrap_or("")) else { return false };
     for i in 0..3 {
-        let p = xenonet_base::text::js_number(Some(&Value::String(m[i + 1].to_string())));
+        let p = xenonet_text::text::to_number(Some(&Value::String(m[i + 1].to_string())));
         let want = min.get(i).copied().unwrap_or(f64::NAN);
         if p != want {
             return p > want;
@@ -53,14 +53,14 @@ pub fn mcp_server_name(port: f64) -> String {
 /// once a turn ends, and hands it over.
 pub fn listen_settings(port: f64, seconds: f64) -> Value {
     let url = format!("http://127.0.0.1:{}/api/hook/claude/listen?seconds={}", number_text(port), number_text(seconds));
-    json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": url, "timeout": xenonet_base::json::number(seconds + 30.0) }] }] } })
+    json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": url, "timeout": xenonet_text::json::number(seconds + 30.0) }] }] } })
 }
 
 /// The settings file for this XenoNet, written into `dir` when it's
 /// missing or out of date. Its path.
 pub fn write_listen_settings(files: &mut dyn Files, dir: &str, port: f64, seconds: f64) -> Result<String> {
-    let file = xenonet_base::paths::join_all(&[dir, &format!("listen-{}.json", number_text(port))]);
-    let text = format!("{}\n", xenonet_base::json::stringify(&listen_settings(port, seconds), 2));
+    let file = xenonet_os::paths::join_all(&[dir, &format!("listen-{}.json", number_text(port))]);
+    let text = format!("{}\n", xenonet_text::json::stringify(&listen_settings(port, seconds), 2));
     if files.read_file(&file).ok().as_deref() != Some(text.as_str()) {
         files.mkdir_all(dir)?;
         files.write_file(&file, &text, None)?;

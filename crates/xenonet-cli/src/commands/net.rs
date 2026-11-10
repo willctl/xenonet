@@ -10,7 +10,7 @@ use crate::js::{list, num, on, str, t};
 use crate::out::{ago, c, json, now, pad, print, Done, Fail};
 use crate::reach::need;
 use serde_json::{json, Map, Value};
-use xenonet_base::client::{Refused, Server};
+use xenonet_api::client::{Refused, Server};
 
 pub const HELP: &str = include_str!("help/net.txt");
 
@@ -67,7 +67,7 @@ fn show_status(st: &Value) {
             "  {}  delegated by {} on {}: what its sessions and actors start here runs on your standing delegation",
             c::dim("        "),
             t(d, "by"),
-            xenonet_base::time::iso(num(d, "at")).chars().take(10).collect::<String>()
+            xenonet_text::time::iso(num(d, "at")).chars().take(10).collect::<String>()
         ));
     }
     for p in list(st, "proposals") {

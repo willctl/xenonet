@@ -9,10 +9,10 @@
 //! one it would read as null is `Some(Value::Null)`.
 
 use serde_json::{Map, Value};
-use xenonet_base::json;
-use xenonet_base::text::{is_blank, join, js_number, js_trim, js_trim_start, truthy, type_of};
-use xenonet_base::time::parse_iso;
-use xenonet_base::usage::{Figure, Speed, TokenUsage};
+use xenonet_model::usage::{Figure, Speed, TokenUsage};
+use xenonet_text::json;
+use xenonet_text::text::{is_blank, join, to_number, trim, trim_start, truthy, type_of};
+use xenonet_text::time::parse_iso;
 
 /// What JS would throw reading a record.
 pub use xenonet_adapter::reader::TypeError;
@@ -169,7 +169,7 @@ impl ClaudeLine {
     }
     /// Whether it's Claude Code's note that you stopped it: no prompt either.
     pub fn interruption(&self) -> Result<bool, TypeError> {
-        Ok(js_trim_start(&self.text()?).starts_with("[Request interrupted"))
+        Ok(trim_start(&self.text()?).starts_with("[Request interrupted"))
     }
 
     // ----- an assistant line -----
@@ -198,7 +198,7 @@ impl ClaudeLine {
             Some(v) => Figure::of(Some(v)),
             // Math.max(0, written - write1h), with JS's arithmetic.
             None => {
-                let d = js_number(Some(&or0(prop(u, "cache_creation_input_tokens")?))) - js_number(Some(&write1h));
+                let d = to_number(Some(&or0(prop(u, "cache_creation_input_tokens")?))) - to_number(Some(&write1h));
                 Figure::Worked(if d.is_nan() { f64::NAN } else { d.max(0.0) })
             }
         };
@@ -439,7 +439,7 @@ pub fn has_user_messages(lines: &[CodexLine]) -> Result<bool, TypeError> {
 /// alone), and not starting with "<" (a delegation envelope, or a note
 /// Codex wrote for itself).
 pub fn is_codex_prompt(text: Js<'_>) -> bool {
-    matches!(text, Some(Value::String(s)) if !js_trim(s).is_empty() && !s.starts_with('<'))
+    matches!(text, Some(Value::String(s)) if !trim(s).is_empty() && !s.starts_with('<'))
 }
 
 // ----- the drift hooks' sorting -----

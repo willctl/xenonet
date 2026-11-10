@@ -14,8 +14,8 @@ use crate::tunnel_client::{is_runtime_key, is_tunnel_id, log_line, mask_keys};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use xenonet_app::jsv::truthy;
-use xenonet_base::json::number as num;
-use xenonet_base::text::js_string;
+use xenonet_text::json::number as num;
+use xenonet_text::text::display;
 
 pub const TUNNEL_TRANSPORT: &str = "openai-secure-mcp-tunnel";
 pub const GUIDE: &str = "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels";
@@ -57,8 +57,8 @@ pub struct Binding {
 /// A connection's transport_binding, as kept (JSON text, or none);
 /// `target_ok` is the credential store's check of an item's name.
 pub fn binding_of(text: Option<&str>, target_ok: &dyn Fn(&str) -> bool) -> Binding {
-    let b = text.filter(|t| !t.is_empty()).and_then(|t| xenonet_base::json::parse(t).ok()).unwrap_or_else(|| json!({}));
-    let s = |k: &str| b.get(k).filter(|v| !v.is_null()).map_or_else(String::new, js_string);
+    let b = text.filter(|t| !t.is_empty()).and_then(|t| xenonet_text::json::parse(t).ok()).unwrap_or_else(|| json!({}));
+    let s = |k: &str| b.get(k).filter(|v| !v.is_null()).map_or_else(String::new, display);
     let t = s("tunnel_id");
     let k = s("key_target");
     Binding { tunnel_id: is_tunnel_id(&t).then_some(t), key_target: target_ok(&k).then_some(k), autostart: b.get("autostart") == Some(&json!(true)) }
@@ -71,7 +71,7 @@ pub fn key_target_of(b: &Binding) -> Option<String> {
 impl Binding {
     /// As transport_binding keeps it.
     pub fn text(&self) -> String {
-        xenonet_base::json::stringify(&json!({ "tunnel_id": self.tunnel_id, "key_target": self.key_target, "autostart": self.autostart }), 0)
+        xenonet_text::json::stringify(&json!({ "tunnel_id": self.tunnel_id, "key_target": self.key_target, "autostart": self.autostart }), 0)
     }
 }
 
@@ -80,17 +80,17 @@ impl Binding {
 pub fn configure(b: &Binding, tunnel_id: Option<&Value>, key_target: Option<&Value>, autostart: Option<&Value>, target_ok: &dyn Fn(&str) -> bool) -> Result<Binding, Refused> {
     let mut next = b.clone();
     if let Some(t) = tunnel_id {
-        let s = if t.is_null() { String::new() } else { js_string(t) };
+        let s = if t.is_null() { String::new() } else { display(t) };
         if !is_tunnel_id(&s) {
             return fail(400, "bad-request", "a tunnel's id starts tunnel_, as OpenAI's Tunnels page shows it");
         }
         next.tunnel_id = Some(s);
     }
     if let Some(k) = key_target {
-        if !k.is_null() && k != &json!("") && !target_ok(&js_string(k)) {
+        if !k.is_null() && k != &json!("") && !target_ok(&display(k)) {
             return fail(400, "bad-request", "a credential's name is printable text, without quotes or backslashes");
         }
-        next.key_target = if truthy(Some(k)) { Some(js_string(k)) } else { None };
+        next.key_target = if truthy(Some(k)) { Some(display(k)) } else { None };
     }
     if let Some(a) = autostart {
         next.autostart = a == &json!(true);
@@ -103,8 +103,8 @@ pub fn runtime_key(b: &Binding, key: Option<&Value>) -> Result<String, Refused> 
     if b.tunnel_id.is_none() {
         return fail(409, "no-tunnel", "say which tunnel it is first");
     }
-    let k = key.filter(|v| !v.is_null()).map_or_else(String::new, js_string);
-    let k = xenonet_base::text::js_trim(&k).to_string();
+    let k = key.filter(|v| !v.is_null()).map_or_else(String::new, display);
+    let k = xenonet_text::text::trim(&k).to_string();
     if !is_runtime_key(&k) {
         return fail(400, "bad-request", "that isn't an OpenAI API key (sk-…)");
     }
@@ -117,7 +117,7 @@ pub fn runtime_key(b: &Binding, key: Option<&Value>) -> Result<String, Refused> 
 pub fn child_env(env: &Map<String, Value>, key: &str, port: &Value, run: bool) -> Map<String, Value> {
     let mut e = env.clone();
     e.insert("CONTROL_PLANE_API_KEY".into(), json!(key));
-    e.insert("XENONET_PORT".into(), json!(js_string(port)));
+    e.insert("XENONET_PORT".into(), json!(display(port)));
     if run {
         e.shift_remove("OPENAI_API_KEY");
     }
@@ -138,7 +138,7 @@ pub fn readyz_of(health: Option<&str>) -> Option<String> {
 /// The health address a run wrote, as the URL to poll, or None for one
 /// that isn't on this machine.
 pub fn health_url(written: &str) -> Option<String> {
-    let u = xenonet_base::text::js_trim(written);
+    let u = xenonet_text::text::trim(written);
     let rest = u.strip_prefix("http://")?;
     let rest = rest.strip_suffix('/').unwrap_or(rest);
     let (host, port) = rest.rsplit_once(':')?;
@@ -155,9 +155,9 @@ pub fn check_lines(text: &str, home: &str) -> Vec<String> {
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .map(|l| {
             let l: String = mask_keys(l).chars().filter(|c| !matches!(*c as u32, 0..=8 | 0x0b..=0x1f)).collect();
-            xenonet_base::paths::tilde(&l, home).trim_end_matches(xenonet_base::text::is_js_space).to_string()
+            xenonet_os::paths::tilde(&l, home).trim_end_matches(xenonet_text::text::is_space).to_string()
         })
-        .filter(|l| !xenonet_base::text::js_trim(l).is_empty())
+        .filter(|l| !xenonet_text::text::trim(l).is_empty())
         .take(80)
         .collect()
 }
@@ -249,11 +249,11 @@ impl Tunnels {
     /// A line of the run's log, kept as XenoNet shows it; what to log of
     /// it (its errors and warnings).
     pub fn line(&mut self, grant: &str, raw: &str, now: f64, home: &str) -> Option<String> {
-        let line = log_line(xenonet_base::text::js_trim(raw))?;
+        let line = log_line(xenonet_text::text::trim(raw))?;
         let r = self.runs.get_mut(grant)?;
-        let level = js_string(&line["level"]);
-        let msg = js_string(&line["msg"]);
-        r.lines.push(json!({ "at": num(now), "level": level, "msg": xenonet_base::paths::tilde(&msg, home) }));
+        let level = display(&line["level"]);
+        let msg = display(&line["msg"]);
+        r.lines.push(json!({ "at": num(now), "level": level, "msg": xenonet_os::paths::tilde(&msg, home) }));
         if r.lines.len() > LINES {
             let extra = r.lines.len() - LINES;
             r.lines.drain(..extra);
@@ -272,8 +272,8 @@ impl Tunnels {
                 r.polled_at = p.clone();
             }
         }
-        let why = s.get("why").filter(|v| !v.is_null()).map(js_string);
-        self.set(grant, &js_string(&s["state"]), why, now)
+        let why = s.get("why").filter(|v| !v.is_null()).map(display);
+        self.set(grant, &display(&s["state"]), why, now)
     }
 
     /// Its program ended (or couldn't start): off when it was stopped,
@@ -285,7 +285,7 @@ impl Tunnels {
         }
         r.exits.retain(|at| now - at < WINDOW_MS);
         r.exits.push(now);
-        let last = r.lines.iter().rev().find(|l| l["level"] == json!("error")).map(|l| js_string(&l["msg"]));
+        let last = r.lines.iter().rev().find(|l| l["level"] == json!("error")).map(|l| display(&l["msg"]));
         let said = match last {
             Some(m) if !m.is_empty() => format!("{why}: {m}"),
             _ => why.to_string(),
@@ -296,7 +296,7 @@ impl Tunnels {
             return After { changed: self.set(grant, "failed", Some(said), now), retry_ms: None, log };
         }
         let wait = BACKOFF_MS[n - 1];
-        let changed = self.set(grant, "failed", Some(format!("{said}; trying again in {} s", xenonet_base::units::js_round(wait / 1000.0))), now);
+        let changed = self.set(grant, "failed", Some(format!("{said}; trying again in {} s", xenonet_text::units::round(wait / 1000.0))), now);
         After { changed, retry_ms: Some(wait), log }
     }
 

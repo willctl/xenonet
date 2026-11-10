@@ -6,7 +6,7 @@ use crate::jstext::{encode_uri_component, search_params, slice16};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_text::text::{display, truthy};
 
 fn uuid() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
@@ -20,7 +20,7 @@ fn desktop_id() -> &'static Regex {
 
 // RegExp.test reads its argument as a string: a missing one as "undefined".
 fn as_text(v: Option<&Value>) -> String {
-    v.map_or_else(|| "undefined".into(), js_string)
+    v.map_or_else(|| "undefined".into(), display)
 }
 
 fn is(node: &Value, key: &str, want: &str) -> bool {
@@ -199,7 +199,7 @@ pub fn url_for(node: &Value, action: &str) -> Option<Value> {
     } else {
         node.get("path").cloned()
     };
-    let folder_text = || folder.as_ref().filter(|f| truthy(Some(f))).map(js_string);
+    let folder_text = || folder.as_ref().filter(|f| truthy(Some(f))).map(display);
     let null = Some(Value::Null);
     match action {
         "open-app" => Some(opener(node.get("app").and_then(Value::as_str)).and_then(|o| (o.url)(node)).map_or(Value::Null, Value::String)),

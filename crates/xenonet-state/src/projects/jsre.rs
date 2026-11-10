@@ -5,14 +5,14 @@
 
 use std::fs::File;
 use std::io::Read;
-use xenonet_base::text::{is_js_line_terminator, is_js_space};
+use xenonet_text::text::{is_line_terminator, is_space};
 
 fn at(chars: &[char], i: usize, lit: &str) -> bool {
     lit.chars().enumerate().all(|(k, c)| chars.get(i + k) == Some(&c))
 }
 
 fn skip_space(chars: &[char], mut i: usize) -> usize {
-    while i < chars.len() && is_js_space(chars[i]) {
+    while i < chars.len() && is_space(chars[i]) {
         i += 1;
     }
     i
@@ -30,7 +30,7 @@ fn space_to_line_end(chars: &[char], q: usize) -> Option<usize> {
     if run == chars.len() {
         return Some(run);
     }
-    (q..run).rev().find(|&r| is_js_line_terminator(chars[r]))
+    (q..run).rev().find(|&r| is_line_terminator(chars[r]))
 }
 
 // /^\s*KEY\s*=\s*(.+?)\s*$/m at a line start p: the value and where the
@@ -55,7 +55,7 @@ fn assignment_at(chars: &[char], p: usize, key: &str) -> Option<(String, usize)>
             if let Some(end) = space_to_line_end(chars, q) {
                 return Some((text_of(chars, j, q), end));
             }
-            if q >= n || is_js_line_terminator(chars[q]) {
+            if q >= n || is_line_terminator(chars[q]) {
                 return None;
             }
             q += 1;
@@ -63,7 +63,7 @@ fn assignment_at(chars: &[char], p: usize, key: &str) -> Option<(String, usize)>
     }
     // White space to the end of the text: the greedy \s* gives back its
     // last character that isn't a line terminator, which is the value.
-    let s = (s0..n).rev().find(|&s| !is_js_line_terminator(chars[s]))?;
+    let s = (s0..n).rev().find(|&s| !is_line_terminator(chars[s]))?;
     Some((text_of(chars, s, s + 1), n))
 }
 
@@ -76,7 +76,7 @@ pub(crate) fn assignments(text: &str, key: &str) -> Vec<String> {
     // Each match is searched for from where the last one ended.
     let mut p = 0;
     while p <= n {
-        if p == 0 || is_js_line_terminator(chars[p - 1]) {
+        if p == 0 || is_line_terminator(chars[p - 1]) {
             if let Some((value, end)) = assignment_at(&chars, p, key) {
                 out.push(value);
                 p = if end == p { end + 1 } else { end };
@@ -93,7 +93,7 @@ pub(crate) fn assignments(text: &str, key: &str) -> Vec<String> {
 pub(crate) fn rest_after(text: &str, prefix: &str) -> Option<String> {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
-    let line_end = |from: usize| (from..n).find(|&e| is_js_line_terminator(chars[e])).unwrap_or(n);
+    let line_end = |from: usize| (from..n).find(|&e| is_line_terminator(chars[e])).unwrap_or(n);
     for start in 0..n {
         if !at(&chars, start, prefix) {
             continue;
@@ -103,7 +103,7 @@ pub(crate) fn rest_after(text: &str, prefix: &str) -> Option<String> {
         if j < n {
             return Some(text_of(&chars, j, line_end(j)));
         }
-        if let Some(s) = (i..n).rev().find(|&s| !is_js_line_terminator(chars[s])) {
+        if let Some(s) = (i..n).rev().find(|&s| !is_line_terminator(chars[s])) {
             return Some(text_of(&chars, s, line_end(s)));
         }
     }
@@ -124,7 +124,7 @@ pub(crate) fn rest_after_both(text: &str, prefix: &str, literal: &str) -> Option
             continue;
         }
         let k = i + literal.chars().count();
-        let e = (k..n).find(|&e| is_js_line_terminator(chars[e])).unwrap_or(n);
+        let e = (k..n).find(|&e| is_line_terminator(chars[e])).unwrap_or(n);
         if e > k {
             return Some(text_of(&chars, k, e));
         }
@@ -149,7 +149,7 @@ pub(crate) fn origin_url(text: &str) -> Option<String> {
                 if chars.get(j) == Some(&'=') {
                     let k = skip_space(&chars, j + 1);
                     let mut e = k;
-                    while e < n && !is_js_space(chars[e]) {
+                    while e < n && !is_space(chars[e]) {
                         e += 1;
                     }
                     if e > k {
@@ -177,10 +177,10 @@ pub(crate) fn line_starts_with(text: &str, literal: &str) -> bool {
                 return true;
             }
             let c = chars[j - 1];
-            if is_js_line_terminator(c) {
+            if is_line_terminator(c) {
                 return true;
             }
-            if !is_js_space(c) {
+            if !is_space(c) {
                 break;
             }
             j -= 1;

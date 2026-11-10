@@ -2231,7 +2231,9 @@ dependencies = [
  "sha2 0.10.9",
  "unicode-normalization",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-model",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2244,10 +2246,11 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
- "xenonet-base",
  "xenonet-blocks",
  "xenonet-model",
+ "xenonet-os",
  "xenonet-schema",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2258,9 +2261,10 @@ dependencies = [
  "bytes",
  "serde_json",
  "tokio",
- "xenonet-base",
+ "xenonet-model",
  "xenonet-net",
  "xenonet-schema",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2273,7 +2277,8 @@ dependencies = [
  "sha2 0.10.9",
  "url",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2286,18 +2291,9 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-app",
- "xenonet-base",
  "xenonet-components",
-]
-
-[[package]]
-name = "xenonet-base"
-version = "0.2.0"
-dependencies = [
- "libc",
- "regex",
- "serde_json",
- "windows-sys 0.61.2",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2306,7 +2302,8 @@ version = "0.2.0"
 dependencies = [
  "rusqlite",
  "serde_json",
- "xenonet-base",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2317,8 +2314,9 @@ dependencies = [
  "regex",
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2337,7 +2335,6 @@ dependencies = [
  "xenonet-api",
  "xenonet-app",
  "xenonet-assistant",
- "xenonet-base",
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
@@ -2350,6 +2347,7 @@ dependencies = [
  "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
+ "xenonet-text",
  "xenonet-wire-app",
  "xenonet-wire-engine",
  "xenonet-wire-map",
@@ -2366,10 +2364,12 @@ dependencies = [
  "serde_json",
  "tokio",
  "xenonet-adapter",
- "xenonet-base",
  "xenonet-blocks",
+ "xenonet-model",
+ "xenonet-os",
  "xenonet-schema",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2383,7 +2383,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-app",
- "xenonet-base",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2392,8 +2393,9 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2402,9 +2404,10 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-schema",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2416,8 +2419,9 @@ dependencies = [
  "serde_json",
  "xenonet-adapter",
  "xenonet-app",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-schema",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2430,9 +2434,11 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-adapter",
- "xenonet-base",
  "xenonet-blocks",
+ "xenonet-model",
+ "xenonet-os",
  "xenonet-platforms",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2441,8 +2447,9 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2451,7 +2458,8 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2462,9 +2470,11 @@ dependencies = [
  "regex",
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
  "xenonet-claude-code",
+ "xenonet-model",
+ "xenonet-os",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2476,8 +2486,9 @@ dependencies = [
  "serde_json",
  "xenonet-actors",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-schema",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2489,7 +2500,9 @@ dependencies = [
  "url",
  "xenonet-adapter",
  "xenonet-app",
- "xenonet-base",
+ "xenonet-model",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2502,7 +2515,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-app",
- "xenonet-base",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2517,17 +2530,19 @@ dependencies = [
  "tokio",
  "xenonet-actors",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-app",
  "xenonet-assistant",
- "xenonet-base",
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
  "xenonet-model",
+ "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2538,6 +2553,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2546,7 +2562,8 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2562,7 +2579,9 @@ dependencies = [
  "serde_json",
  "tokio",
  "x25519-dalek",
- "xenonet-base",
+ "xenonet-model",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2572,9 +2591,10 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-os",
  "xenonet-schema",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2582,10 +2602,14 @@ name = "xenonet-os"
 version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
+ "libc",
+ "regex",
  "reqwest",
  "rustls",
+ "serde_json",
  "tokio",
- "xenonet-base",
+ "windows-sys 0.61.2",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2595,7 +2619,6 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "xenonet-adapter",
- "xenonet-base",
  "xenonet-claude-code",
  "xenonet-codex",
  "xenonet-copilot",
@@ -2607,6 +2630,7 @@ dependencies = [
  "xenonet-muse",
  "xenonet-opencode",
  "xenonet-sources",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2616,7 +2640,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
- "xenonet-base",
+ "xenonet-os",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2638,7 +2663,6 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-api",
  "xenonet-app",
- "xenonet-base",
  "xenonet-engine",
  "xenonet-model",
  "xenonet-net",
@@ -2646,6 +2670,7 @@ dependencies = [
  "xenonet-platforms",
  "xenonet-schema",
  "xenonet-state",
+ "xenonet-text",
  "xenonet-wire-app",
  "xenonet-wire-engine",
 ]
@@ -2661,9 +2686,11 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-model",
+ "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2676,8 +2703,18 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "xenonet-adapter",
- "xenonet-base",
+ "xenonet-model",
+ "xenonet-os",
  "xenonet-sources",
+ "xenonet-text",
+]
+
+[[package]]
+name = "xenonet-text"
+version = "0.2.0"
+dependencies = [
+ "libc",
+ "serde_json",
 ]
 
 [[package]]
@@ -2694,7 +2731,6 @@ dependencies = [
  "xenonet-api",
  "xenonet-app",
  "xenonet-assistant",
- "xenonet-base",
  "xenonet-blocks",
  "xenonet-components",
  "xenonet-doctor",
@@ -2708,6 +2744,7 @@ dependencies = [
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2725,7 +2762,6 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-api",
  "xenonet-app",
- "xenonet-base",
  "xenonet-blocks",
  "xenonet-components",
  "xenonet-engine",
@@ -2734,6 +2770,7 @@ dependencies = [
  "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
+ "xenonet-text",
 ]
 
 [[package]]
@@ -2749,7 +2786,6 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-api",
  "xenonet-app",
- "xenonet-base",
  "xenonet-blocks",
  "xenonet-model",
  "xenonet-os",
@@ -2757,6 +2793,7 @@ dependencies = [
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",
+ "xenonet-text",
 ]
 
 [[package]]

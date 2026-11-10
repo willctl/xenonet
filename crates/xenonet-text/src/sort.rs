@@ -126,7 +126,7 @@ mod tests {
                 *seed ^= *seed << 13;
                 *seed ^= *seed >> 7;
                 *seed ^= *seed << 17;
-                if nan && *seed % 4 == 0 {
+                if nan && seed.is_multiple_of(4) {
                     f64::NAN
                 } else {
                     (*seed % 50) as f64

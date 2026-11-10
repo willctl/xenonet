@@ -16,9 +16,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 use xenonet_api::cores::{Channels, CoreError, Policy, Router, R};
 use xenonet_api::From;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::js_number;
-use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::channel::{Channels as ChannelCore, Push};
 use xenonet_engine::delivery::opencode::{self as oc, OpenCode, Posted};
 use xenonet_engine::delivery::policy::{self, Fail, Policy as PolicyCore, WakeAllowed};
@@ -28,6 +25,9 @@ use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
 use xenonet_engine::delivery::usage::plan_usage;
 use xenonet_engine::delivery::{Delivered, Error, Files};
+use xenonet_os::sync::Locked;
+use xenonet_text::text::to_number;
+use xenonet_text::time::now_ms;
 
 // ---------- files ----------
 
@@ -361,7 +361,7 @@ impl oc::System for Ps {
         std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
     }
     fn readdir(&mut self, path: &str) -> Option<Vec<String>> {
-        xenonet_base::paths::read_dir_sorted(std::path::Path::new(path)).ok().map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        xenonet_os::paths::read_dir_sorted(std::path::Path::new(path)).ok().map(|ents| ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
     }
     fn readlink(&mut self, path: &str) -> Option<String> {
         std::fs::read_link(path).ok().map(|t| t.to_string_lossy().into_owned())
@@ -393,7 +393,7 @@ impl oc::Host for OpenCodeHost<'_> {
     }
     fn get(&mut self, url: &str, ms: f64) -> Option<Value> {
         let r = self.fetch("GET", url, None, ms).ok().filter(xenonet_os::net::Fetched::ok)?;
-        xenonet_base::json::parse(&r.text()).ok()
+        xenonet_text::json::parse(&r.text()).ok()
     }
     fn post(&mut self, url: &str, body: &str) -> Result<Posted, String> {
         let r = self.fetch("POST", url, Some(body.to_string()), 3000.0)?;
@@ -453,11 +453,11 @@ impl router::Host for RouterHost<'_> {
         self.w.store.with(|s| s.contact(agent)).ok().flatten().and_then(|r| r.num("pid"))
     }
     fn mark_seen(&mut self, agent: &str, ids: &[Value], now: f64) -> xenonet_engine::delivery::Result<()> {
-        let ids: Vec<f64> = ids.iter().map(|id| js_number(Some(id))).collect();
+        let ids: Vec<f64> = ids.iter().map(|id| to_number(Some(id))).collect();
         self.w.store.with(|s| s.mark_seen(agent, &ids, now)).map_err(store_error)
     }
     fn mark_unseen(&mut self, agent: &str, ids: &[Value]) -> xenonet_engine::delivery::Result<()> {
-        let ids: Vec<f64> = ids.iter().map(|id| js_number(Some(id))).collect();
+        let ids: Vec<f64> = ids.iter().map(|id| to_number(Some(id))).collect();
         self.w.store.with(|s| s.mark_unseen(agent, &ids)).map_err(store_error)
     }
 
@@ -528,7 +528,7 @@ pub struct RouterDriver(pub std::sync::Arc<Runtime>);
 
 impl Router for RouterDriver {
     fn usage(&self, app: &str) -> R<Value> {
-        Ok(usage(&self.0, app).map_or(Value::Null, xenonet_base::json::number))
+        Ok(usage(&self.0, app).map_or(Value::Null, xenonet_text::json::number))
     }
     fn list(&self, n: usize) -> R<Value> {
         Ok(Value::Array(self.0.router.core.list(n)))

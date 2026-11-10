@@ -5,8 +5,8 @@ use crate::plugin as hp;
 use async_trait::async_trait;
 use xenonet_adapter::check::Facts;
 use xenonet_adapter::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
-use xenonet_base::text::js_string;
-use xenonet_base::units::duration;
+use xenonet_text::text::display;
+use xenonet_text::units::duration;
 
 /// The checks, in the order they show.
 pub fn all() -> Vec<Box<dyn Check>> {
@@ -24,13 +24,13 @@ impl Check for Plugin {
     /// It reads files, not XenoNet, so it answers with actors off too.
     async fn run(&self, c: &dyn CheckCtx) -> Result<Verdict, Stop> {
         let f = Facts(c.facts());
-        let (home, given) = (f.home(), f.get("hermesHome").map(js_string));
+        let (home, given) = (f.home(), f.get("hermesHome").map(display));
         if !c.exists(&hp::root(&home, given.as_deref()).display().to_string()).await? {
             return Ok(Verdict::ok("Hermes Agent isn't on this computer, so its plugin has nothing to do"));
         }
         let now = c.now().await?;
         let st = hp::inspect(&home, given.as_deref(), now);
-        let shown = |p: &std::path::Path| xenonet_base::paths::tilde(&p.display().to_string(), &home);
+        let shown = |p: &std::path::Path| xenonet_os::paths::tilde(&p.display().to_string(), &home);
         if !st.installed {
             return Ok(Verdict::info("XenoNet's plugin for Hermes isn't installed, so Hermes is only observed", Some("xenonet connect hermes adds it. It's optional.")));
         }

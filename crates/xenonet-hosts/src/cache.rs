@@ -28,7 +28,7 @@ pub fn read_cache(dir: Option<&str>, key: &str) -> Option<Value> {
     if !host_key().is_match(key) {
         return None;
     }
-    let data = xenonet_base::json::parse(&fsx::read_text(&file_of(dir, key)).ok()?).ok()?;
+    let data = xenonet_text::json::parse(&fsx::read_text(&file_of(dir, key)).ok()?).ok()?;
     let ok = data.get("key").and_then(Value::as_str) == Some(key)
         && data.get("savedAt").and_then(Value::as_f64).is_some()
         && data.get("graph").and_then(|g| g.get("nodes")).is_some_and(Value::is_array)
@@ -51,7 +51,7 @@ pub fn write_cache(dir: Option<&str>, key: &str, id: &Value, saved_at: &Value, h
     let tmp = format!("{file}.tmp");
     let doc = json!({ "key": key, "id": id, "savedAt": saved_at, "hello": hello, "graph": graph, "live": live, "engine": engine });
     fsx::mkdir_p(&NATIVE.dirname(&file), Some(0o700))
-        .and_then(|()| fsx::write_file(&tmp, xenonet_base::json::stringify(&doc, 0).as_bytes(), Some(0o600)))
+        .and_then(|()| fsx::write_file(&tmp, xenonet_text::json::stringify(&doc, 0).as_bytes(), Some(0o600)))
         .and_then(|()| fsx::rename(&tmp, &file))
         .is_ok()
 }

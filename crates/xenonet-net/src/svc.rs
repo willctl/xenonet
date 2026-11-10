@@ -39,7 +39,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
-use xenonet_base::sync::{Locked, ReadWrite};
+use xenonet_os::sync::{Locked, ReadWrite};
 
 pub const SCHEMA: &str = "network/svc/v1";
 /// A request's body, at most.
@@ -84,7 +84,7 @@ pub const REFUSED_HEADER: &str = "x-xenonet-refused";
 /// A service's name: 2 to 32 lowercase letters, digits and dashes,
 /// starting with a letter, as a host id is.
 pub fn is_name(name: &str) -> bool {
-    xenonet_base::ids::is_host_id(name)
+    xenonet_model::ids::is_host_id(name)
 }
 
 fn is_request_id(id: &str) -> bool {
@@ -519,7 +519,7 @@ impl Published {
         if hosts.len() > MAX_HOSTS {
             return Err(format!("at most {MAX_HOSTS} hosts"));
         }
-        if let Some(h) = hosts.iter().find(|h| !xenonet_base::ids::is_host_id(h)) {
+        if let Some(h) = hosts.iter().find(|h| !xenonet_model::ids::is_host_id(h)) {
             return Err(format!("{h} isn't a host id"));
         }
         let mut paths = paths.to_vec();

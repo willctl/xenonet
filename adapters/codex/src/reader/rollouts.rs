@@ -7,12 +7,12 @@ use super::threads::{base, is_object, mcp_text, reasoning, spread, text_of, with
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_adapter::reader::VendorCheck;
-use xenonet_base::text::{js_string, truthy};
-use xenonet_base::{json as js, units};
 use xenonet_sources::archive;
 use xenonet_sources::lines::{opt_prop, prop, CodexLine, Js, TypeError};
 use xenonet_sources::live::command_text;
 use xenonet_sources::record::{excerpt, excerpt_json, js_max0, nn, obj_json, slice_index, tpl, Obj, F};
+use xenonet_text::text::{display, truthy};
+use xenonet_text::{json as js, units};
 
 fn lock<T: ?Sized>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -39,7 +39,7 @@ fn rollout_item(it: &Value, ts: F, n: usize) -> Result<Obj, TypeError> {
         }
         Some("CommandExecution") => {
             let code = get("exit_code")?;
-            let meta = nn(code).map_or(F::null(), |c| F::s(format!("exit {}", js_string(c))));
+            let meta = nn(code).map_or(F::null(), |c| F::s(format!("exit {}", display(c))));
             with(
                 b,
                 vec![
@@ -64,7 +64,7 @@ fn rollout_item(it: &Value, ts: F, n: usize) -> Result<Obj, TypeError> {
                 Some(Value::String(s)) => s.chars().enumerate().map(|(i, c)| (i.to_string(), Value::String(c.to_string()))).collect(),
                 _ => Vec::new(),
             };
-            let text: Vec<String> = entries.iter().map(|(p, c)| format!("{} {p}", nn(opt_prop(Some(c), "type")).map_or_else(String::new, js_string))).collect();
+            let text: Vec<String> = entries.iter().map(|(p, c)| format!("{} {p}", nn(opt_prop(Some(c), "type")).map_or_else(String::new, display))).collect();
             with(b, vec![("role", F::s("tool")), ("title", F::s(format!("edit {} file(s)", entries.len()))), ("status", F::of(get("status")?)), ("text", F::s(text.join("\n")))])
         }
         // An extension's web search is a web search; its other kinds (an
@@ -82,7 +82,7 @@ fn rollout_item(it: &Value, ts: F, n: usize) -> Result<Obj, TypeError> {
 /// query is no query, and the action's says what was searched.
 fn web_search(b: Obj, it: Js<'_>) -> Result<Obj, TypeError> {
     let q = prop(it, "query")?.filter(|q| truthy(Some(q))).or_else(|| opt_prop(prop(it, "action").ok().flatten(), "query").filter(|q| truthy(Some(q))));
-    let q = q.map_or_else(String::new, js_string);
+    let q = q.map_or_else(String::new, display);
     Ok(with(b, vec![("role", F::s("tool")), ("title", F::s(format!("search: {q}"))), ("text", F::s(""))]))
 }
 
@@ -149,7 +149,7 @@ impl RolloutEntries {
         let b = base(id, at, ptype);
         let pt = tpl(ptype);
         if is("event_msg") && (pt == "user_message" || pt == "agent_message") && ptype.is_some_and(Value::is_string) {
-            let text = nn(prop(p, "message")?).map_or_else(String::new, js_string);
+            let text = nn(prop(p, "message")?).map_or_else(String::new, display);
             self.older.push(with(b, vec![("role", F::s(if pt == "user_message" { "user" } else { "assistant" })), ("text", F::s(text))]));
         } else if is("response_item") && tool_call(&pt, false) {
             let input = nn(prop(p, "input")?).or(nn(prop(p, "arguments")?)).or(nn(prop(p, "action")?));
@@ -176,7 +176,7 @@ impl RolloutEntries {
 /// shown from the end.
 pub fn rollout_page(len: usize, cursor: Js<'_>, limit: f64) -> (usize, usize, Option<String>) {
     let c = match nn(cursor) {
-        Some(v) => js_string(v),
+        Some(v) => display(v),
         None => String::new(),
     };
     let shown = c.strip_prefix("rollout:").filter(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())).map_or(0.0, |d| d.parse::<f64>().unwrap_or(0.0));
@@ -224,7 +224,7 @@ impl Rollouts {
             // A compressed archive is read whole, and again only when it
             // changes.
             let meta = std::fs::metadata(file).map_err(|e| e.to_string())?;
-            let stamp = format!("{}:{}", meta.len(), xenonet_base::fs::mtime_ms_of(&meta).unwrap_or(f64::NAN));
+            let stamp = format!("{}:{}", meta.len(), xenonet_os::fs::mtime_ms_of(&meta).unwrap_or(f64::NAN));
             if r.stamp.as_deref() != Some(stamp.as_str()) {
                 let data = archive::read(file).map_err(|e| e.to_string())?;
                 *r = Rollout::new(file, 0);

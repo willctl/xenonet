@@ -89,7 +89,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
     if let Err(e) = std::fs::create_dir_all(&setup.state_dir) {
         log_later(env, "error", "engine.store", format!("the state folder can't be made: {e}"));
     }
-    let store = match EngineStore::open(&file.to_string_lossy(), xenonet_base::time::now_ms()) {
+    let store = match EngineStore::open(&file.to_string_lossy(), xenonet_text::time::now_ms()) {
         Ok(s) => Shared::new(s),
         Err(e) => {
             log_later(env, "error", "engine.store", format!("engine.sqlite can't be opened: {e}"));

@@ -21,10 +21,10 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use xenonet_api::cores::{self, Cores};
-use xenonet_base::log::Log;
-use xenonet_base::network::{Incoming, Kind, Net, Outgoing, Sink, To};
+use xenonet_model::ops::{Incoming, Kind, Net, Outgoing, Sink, To};
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_os::log::Log;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
 use xenonet_service::gateway::network::NetService;
@@ -699,7 +699,7 @@ struct Relays {
     removed: Mutex<Vec<String>>,
 }
 
-impl xenonet_base::network::RelaySink for Relays {
+impl xenonet_model::ops::RelaySink for Relays {
     fn relay(&self, i: Incoming) {
         assert_eq!(i.kind, Kind::Relay);
         self.got.lock().unwrap().push((i.from, i.from_window_host, i.body));

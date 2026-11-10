@@ -11,14 +11,15 @@
 //! kept; the same code with the same words is written at most every ten
 //! seconds, with how many times it happened meanwhile.
 
-use crate::json;
-use crate::ordered::{Cursor, OrderedMap};
 use crate::paths::{read_dir_sorted, replace_unless, tilde};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use xenonet_text::json;
+use xenonet_text::ordered::{Cursor, OrderedMap};
+use xenonet_text::utf16::whole_head;
 
 pub const LEVELS: [&str; 3] = ["error", "warn", "info"];
 pub const COMPONENTS: [&str; 3] = ["service", "desktop", "cli"];
@@ -41,19 +42,6 @@ fn secrets() -> &'static Regex {
         ))
         .expect("the key patterns")
     })
-}
-
-/// The first `n` UTF-16 units of a text, as JS's slice(0, n) takes them
-/// (a character that would be cut in half is left out).
-pub fn js_slice(s: &str, n: usize) -> &str {
-    let mut units = 0;
-    for (i, c) in s.char_indices() {
-        units += c.len_utf16();
-        if units > n {
-            return &s[..i];
-        }
-    }
-    s
 }
 
 fn trimmed_home(home: &str) -> &str {
@@ -93,7 +81,7 @@ pub fn unsafe_text(text: &str, home: &str) -> Option<&'static str> {
 
 fn scrub_all(v: &Value, home: &str, depth: usize) -> Value {
     match v {
-        Value::String(s) => Value::String(js_slice(&scrub(s, home), 500).to_string()),
+        Value::String(s) => Value::String(whole_head(&scrub(s, home), 500).to_string()),
         Value::Array(a) => Value::Array(if depth > 3 { Vec::new() } else { a.iter().take(20).map(|x| scrub_all(x, home, depth + 1)).collect() }),
         Value::Object(m) => Value::Object(if depth > 3 { Map::new() } else { m.iter().take(30).map(|(k, x)| (k.clone(), scrub_all(x, home, depth + 1))).collect() }),
         other => other.clone(),
@@ -151,7 +139,7 @@ impl Log {
     #[expect(clippy::too_many_arguments, reason = "an entry's fields as log.js's write takes them, and the clock; the crates that log call it so")]
     pub fn write(&mut self, level: &str, code: &str, message: Option<&str>, err: Option<&ErrInfo>, fix: Option<&str>, ctx: Option<&Value>, now: f64) -> Option<Value> {
         let raw = message.map(str::to_string).or_else(|| err.and_then(|e| e.message.clone())).unwrap_or_else(|| code.to_string());
-        let text = js_slice(&scrub(&raw, &self.home), MESSAGE_MAX).to_string();
+        let text = whole_head(&scrub(&raw, &self.home), MESSAGE_MAX).to_string();
         let key = format!("{code}|{text}");
         let had = self.seen.get(&key).copied();
         if let Some((at, repeats)) = had {
@@ -184,10 +172,10 @@ impl Log {
             e.insert("repeats".into(), Value::from(repeats));
         }
         if let Some(f) = fix.filter(|f| !f.is_empty()) {
-            e.insert("fix".into(), Value::String(js_slice(&scrub(f, &self.home), 500).to_string()));
+            e.insert("fix".into(), Value::String(whole_head(&scrub(f, &self.home), 500).to_string()));
         }
         if let Some(stack) = err.and_then(|e| e.stack.as_ref()).filter(|s| !s.is_empty() && level == "error") {
-            e.insert("stack".into(), Value::String(js_slice(&scrub(stack, &self.home), STACK_MAX).to_string()));
+            e.insert("stack".into(), Value::String(whole_head(&scrub(stack, &self.home), STACK_MAX).to_string()));
         }
         if let Some(c) = err.and_then(|e| e.code.as_ref()).filter(|c| !c.is_empty()) {
             e.insert("errno".into(), Value::String(c.clone()));
@@ -283,14 +271,14 @@ pub fn read_logs(dir: &Path, since: f64, level: &str, component: Option<&str>, c
             if level_rank(e.get("level").and_then(Value::as_str).unwrap_or("")) > worst {
                 continue;
             }
-            if code.is_some_and(|c| !e.get("code").map_or("undefined".to_string(), crate::text::js_string).starts_with(c)) {
+            if code.is_some_and(|c| !e.get("code").map_or("undefined".to_string(), xenonet_text::text::display).starts_with(c)) {
                 continue;
             }
             out.push(e);
         }
     }
     let at = |e: &Value| e.get("at").and_then(Value::as_f64).unwrap_or(f64::NAN);
-    crate::sort::sort_by(&mut out, |a, b| at(b).partial_cmp(&at(a)).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut out, |a, b| at(b).partial_cmp(&at(a)).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(limit);
     out
 }
@@ -302,7 +290,7 @@ pub fn summarize(entries: &[Value]) -> Vec<Value> {
     let s = |e: &Value, k: &str| e.get(k).cloned().unwrap_or(Value::Null);
     let n = |e: &Value, k: &str| e.get(k).and_then(Value::as_f64).unwrap_or(0.0);
     for e in entries {
-        let key = format!("{}|{}", crate::text::js_string(&s(e, "component")), crate::text::js_string(&s(e, "code")));
+        let key = format!("{}|{}", xenonet_text::text::display(&s(e, "component")), xenonet_text::text::display(&s(e, "code")));
         let count = 1.0 + n(e, "repeats");
         match by.get_mut(&key) {
             None => {
@@ -362,7 +350,6 @@ mod tests {
         assert_eq!(unsafe_text(&json::stringify(&serde_json::json!({ "x": "C:\\Users\\Nova\\x" }), 0), HOME), Some("the home folder"));
         assert_eq!(unsafe_text("{\"x\":\"/home/nova/x\"}", "/home/nova"), Some("the home folder"));
         assert_eq!(unsafe_text("{\"x\":\"~\\\\x\"}", HOME), None);
-        assert_eq!(js_slice("a😀b", 2), "a", "half a pair is left out");
     }
     #[test]
     fn entries_without_a_time_are_read_in_any_order() {

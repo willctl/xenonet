@@ -155,12 +155,12 @@ pub fn json_reply(status: u16, body: &Value, extra: &[(&str, &str)]) -> Reply {
     for (k, v) in extra {
         headers.push(((*k).to_string(), (*v).to_string()));
     }
-    Reply { status, headers, body: ReplyBody::Full(Bytes::from(xenonet_base::json::stringify(body, 0))) }
+    Reply { status, headers, body: ReplyBody::Full(Bytes::from(xenonet_text::json::stringify(body, 0))) }
 }
 
 /// One server-sent event carrying a JSON-RPC answer.
 pub fn sse_frame(body: &Value) -> Bytes {
-    Bytes::from(format!("data: {}\n\n", xenonet_base::json::stringify(body, 0)))
+    Bytes::from(format!("data: {}\n\n", xenonet_text::json::stringify(body, 0)))
 }
 
 /// The headers of an event stream.

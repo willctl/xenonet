@@ -66,7 +66,7 @@ pub trait Files {
 
 /// A number as JS writes it in text: 20, 1.5, NaN.
 pub fn number_text(n: f64) -> String {
-    xenonet_base::json::number_string(n)
+    xenonet_text::json::number_string(n)
 }
 
 /// A JSON value as text, as a template literal writes it ("" for what's
@@ -74,17 +74,17 @@ pub fn number_text(n: f64) -> String {
 pub fn text_of(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => String::new(),
-        Some(v) => xenonet_base::text::js_string(v),
+        Some(v) => xenonet_text::text::display(v),
     }
 }
 
 /// A JSON value as `${v}` writes it: null for null, [object Object] for an
 /// object.
 pub fn template(v: &Value) -> String {
-    xenonet_base::text::js_string(v)
+    xenonet_text::text::display(v)
 }
 
 /// JS's truthiness of a JSON value, a missing one false.
 pub fn truthy(v: Option<&Value>) -> bool {
-    xenonet_base::text::truthy(v)
+    xenonet_text::text::truthy(v)
 }

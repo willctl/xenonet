@@ -26,7 +26,7 @@ xenonet-muse.workspace = true
 # tests/native.rs makes an OpenCode database to read.
 rusqlite.workspace = true
 serde_json.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 xenonet-sources.workspace = true
 xenonet-adapter = { workspace = true, features = ["testing"] }
 

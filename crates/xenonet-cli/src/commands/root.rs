@@ -8,7 +8,7 @@ use crate::out::{ago, c, json, now, plural, print, Done, Fail};
 use crate::reach::need;
 use crate::sys;
 use serde_json::{json, Value};
-use xenonet_base::text::truthy;
+use xenonet_text::text::truthy;
 
 pub const HELP: &str = include_str!("help/root.txt");
 
@@ -49,7 +49,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     let info = s.get("/api/workspace/root")?;
     let home = str(&info, "home").unwrap_or("").to_string();
     let shown = |v: &Value, k: &str| match v.get(k) {
-        Some(Value::String(p)) => xenonet_base::paths::tilde(p, &home),
+        Some(Value::String(p)) => xenonet_os::paths::tilde(p, &home),
         other => crate::js::text(other),
     };
 

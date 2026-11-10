@@ -21,8 +21,8 @@ pub fn keyed(hosts: &[Value]) -> Vec<Value> {
 pub fn key_check(hosts: &[Value]) -> Value {
     let mut by_key: Vec<(String, Vec<String>)> = Vec::new();
     for h in keyed(hosts) {
-        let key = xenonet_base::text::js_string(&h["key"]);
-        let id = h.get("id").map_or_else(|| "undefined".into(), xenonet_base::text::js_string);
+        let key = xenonet_text::text::display(&h["key"]);
+        let id = h.get("id").map_or_else(|| "undefined".into(), xenonet_text::text::display);
         match by_key.iter_mut().find(|(k, _)| *k == key) {
             Some((_, ids)) => ids.push(id),
             None => by_key.push((key, vec![id])),

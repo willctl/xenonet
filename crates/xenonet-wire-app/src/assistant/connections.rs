@@ -18,9 +18,9 @@ use xenonet_actors::store::{self, Tx};
 use xenonet_api::cores::assistant::ConnectionEvents;
 use xenonet_api::cores::{Actors, Connections, EngineStore, State, R};
 use xenonet_assistant::credentials as disk;
-use xenonet_base::text::js_string;
 use xenonet_engine::sql::SqlError;
 use xenonet_engine::store::Shared;
+use xenonet_text::text::display;
 
 pub struct Remote {
     core: Core,
@@ -45,7 +45,7 @@ struct Base<'a> {
 }
 
 /// What a file of the credentials couldn't do, as the core hears it.
-fn fs(e: xenonet_base::fs::FsError) -> core::Fail {
+fn fs(e: xenonet_os::fs::FsError) -> core::Fail {
     core::Fail::Error(store::Error { message: e.message, code: e.code })
 }
 
@@ -58,12 +58,12 @@ struct Private;
 
 impl disk::Private for Private {
     fn protect(&mut self, file: &str) -> Result<(), String> {
-        let mut run = |f: &str, a: &[&str]| xenonet_base::private_file::run_private(f, a);
-        xenonet_base::private_file::protect_file(file, cfg!(windows), &mut run).map_err(|e| e.message().to_string())
+        let mut run = |f: &str, a: &[&str]| xenonet_os::private_file::run_private(f, a);
+        xenonet_os::private_file::protect_file(file, cfg!(windows), &mut run).map_err(|e| e.message().to_string())
     }
     fn readers(&mut self, file: &str) -> Result<Vec<String>, String> {
-        let mut run = |f: &str, a: &[&str]| xenonet_base::private_file::run_private(f, a);
-        xenonet_base::private_file::other_readers(file, cfg!(windows), &mut run).map_err(|e| e.message().to_string())
+        let mut run = |f: &str, a: &[&str]| xenonet_os::private_file::run_private(f, a);
+        xenonet_os::private_file::other_readers(file, cfg!(windows), &mut run).map_err(|e| e.message().to_string())
     }
 }
 
@@ -136,10 +136,10 @@ impl Host for Base<'_> {
         disk::clear_disabled(&self.r.dir).map_err(fs)
     }
     fn is_token(&mut self, token: &Value) -> bool {
-        disk::is_token(&js_string(token))
+        disk::is_token(&display(token))
     }
     fn hash_token(&mut self, token: &Value) -> String {
-        disk::hash_token(&js_string(token))
+        disk::hash_token(&display(token))
     }
     fn ids(&mut self) -> Vec<String> {
         self.r.actors.ids()
@@ -176,7 +176,7 @@ fn sql(e: SqlError) -> store::Error {
 
 /// An id or a place as the requests name it.
 fn text(v: &Value) -> String {
-    js_string(v)
+    display(v)
 }
 
 /// Rows answered, as JSON.
@@ -363,7 +363,7 @@ impl Remote {
     }
 
     pub fn recheck_at(&self, grant: &Value, revision: &Value) -> Value {
-        match self.core.recheck(&mut self.base(), &js_string(grant), revision) {
+        match self.core.recheck(&mut self.base(), &display(grant), revision) {
             Ok(a) => a,
             Err(e) => json!({ "ok": false, "code": "SERVICE_UNAVAILABLE", "reason": connection_error(e).message }),
         }
@@ -501,7 +501,7 @@ mod tests {
             Ok(())
         }
         fn upsert(&self, def: &Value) -> R<()> {
-            let id = js_string(&def["id"]);
+            let id = display(&def["id"]);
             let mut a = def.clone();
             a["via"] = json!([def.get("via").cloned().unwrap_or(json!("remote"))]);
             // The actor's row, which its connections refer to.

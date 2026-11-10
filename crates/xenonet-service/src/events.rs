@@ -9,8 +9,8 @@ use serde_json::Value;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use xenonet_base::json;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
+use xenonet_text::json;
 
 pub const PING: Duration = Duration::from_secs(25);
 

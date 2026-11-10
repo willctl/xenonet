@@ -15,7 +15,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 use url::Url;
-use xenonet_base::text::{js_number, js_string};
+use xenonet_text::text::{display, to_number};
 
 /// The settings collecting reads: claudeConfigFile, claudeDesktopDir and
 /// homeDir, as core/config.js has them.
@@ -75,7 +75,7 @@ fn public_url_of(v: Option<&Value>, origin_only: bool) -> Value {
     let s = match v {
         None | Some(Value::Null) => return Value::Null,
         Some(Value::String(s)) => s.clone(),
-        Some(other) => js_string(other),
+        Some(other) => display(other),
     };
     public_url(Some(&s), origin_only).map_or(Value::Null, Value::String)
 }
@@ -92,7 +92,7 @@ pub fn display_schema(value: Option<&Value>, depth: usize) -> Value {
     let mut out = Map::new();
     for k in SCHEMA_KEYS {
         if let Some(x) = v.get(k) {
-            if crate::jstext::utf16_len(&xenonet_base::json::stringify(x, 0)) < 8000 {
+            if crate::jstext::utf16_len(&xenonet_text::json::stringify(x, 0)) < 8000 {
                 out.insert(k.into(), x.clone());
             }
         }
@@ -346,12 +346,12 @@ impl Collect {
         for s in &using {
             for m in list(raw(Some(s), "mcp")) {
                 if raw(Some(&m), "server").and_then(Value::as_str) == Some(server.as_str()) {
-                    let ts = js_number(Some(&or(raw(Some(&m), "ts"), json!(0))));
+                    let ts = to_number(Some(&or(raw(Some(&m), "ts"), json!(0))));
                     latest = if ts.is_nan() || latest.is_nan() { f64::NAN } else { latest.max(ts) };
                 }
             }
         }
-        r.insert("lastCall".into(), if latest == 0.0 || latest.is_nan() { Value::Null } else { xenonet_base::json::number(latest) });
+        r.insert("lastCall".into(), if latest == 0.0 || latest.is_nan() { Value::Null } else { xenonet_text::json::number(latest) });
         let sessions: Vec<Value> = using
             .iter()
             .map(|s| {
@@ -428,20 +428,20 @@ pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, re
         c.add("Claude Code", "project", raw(Some(&m), "mcpServers"));
     }
     if let Some(dir) = get(st, "claudeDesktopDir").filter(|d| truthy(Some(d))) {
-        let m = read(Some(&NATIVE.join(&[&js_string(dir), "claude_desktop_config.json"])));
+        let m = read(Some(&NATIVE.join(&[&display(dir), "claude_desktop_config.json"])));
         c.add("Claude Desktop", "user", raw(Some(&m), "mcpServers"));
     }
     // Grok Build's: its config.toml's [mcp_servers.<name>] tables, yours and
     // those in the folders where the server is used.
     if let Some(dir) = get(st, "grokHome").filter(|d| truthy(Some(d))) {
-        let m = read(Some(&NATIVE.join(&[&js_string(dir), "config.toml"])));
+        let m = read(Some(&NATIVE.join(&[&display(dir), "config.toml"])));
         c.add("Grok Build", "user", raw(Some(&m), "mcp_servers"));
     }
     for cwd in &cwds {
         let m = read(Some(&NATIVE.join(&[cwd, ".grok", "config.toml"])));
         c.add("Grok Build", "project", raw(Some(&m), "mcp_servers"));
     }
-    let home = raw(st, "homeDir").map(js_string).unwrap_or_default();
+    let home = raw(st, "homeDir").map(display).unwrap_or_default();
     let installed = read(Some(&NATIVE.join(&[&home, ".claude", "plugins", "installed_plugins.json"])));
     if let Some(name) = plugin_name(server) {
         for (key, entries) in object(raw(Some(&installed), "plugins")) {
@@ -449,7 +449,7 @@ pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, re
                 continue;
             }
             for entry in list(Some(entries)) {
-                let Some(install) = raw(Some(&entry), "installPath").filter(|p| truthy(Some(p))).map(js_string) else { continue };
+                let Some(install) = raw(Some(&entry), "installPath").filter(|p| truthy(Some(p))).map(display) else { continue };
                 let manifest = read(Some(&NATIVE.join(&[&install, ".claude-plugin", "plugin.json"])));
                 let mr = Some(&manifest);
                 let author = match raw(mr, "author") {
@@ -470,7 +470,7 @@ pub fn begin(server: &str, sessions: &[Value], settings: &Settings, now: f64, re
                 // `args: spec.args?.map(…)`: undefined, so left out, unless
                 // it's a list.
                 if let Some(Value::Array(args)) = spec_m.get("args") {
-                    let args: Vec<Value> = args.iter().map(|a| Value::String(js_string(a).replace("${CLAUDE_PLUGIN_ROOT}", &install))).collect();
+                    let args: Vec<Value> = args.iter().map(|a| Value::String(display(a).replace("${CLAUDE_PLUGIN_ROOT}", &install))).collect();
                     spec_m.insert("args".into(), Value::Array(args));
                 } else {
                     spec_m.shift_remove("args");

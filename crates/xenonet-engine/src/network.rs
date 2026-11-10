@@ -6,8 +6,8 @@
 
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
-use xenonet_base::network::{Me, Net, NoNet};
-use xenonet_base::sync::ReadWrite;
+use xenonet_model::ops::{Me, Net, NoNet};
+use xenonet_os::sync::ReadWrite;
 
 /// The network as the engine holds it: `NoNet` until the service puts its
 /// link here.
@@ -39,8 +39,8 @@ impl NetHandle {
 /// repoKey has it without SSH aliases. None for a remote that's a folder,
 /// which means something only on its own machine.
 pub fn repo_key_of(url: &str) -> Option<String> {
-    let (host, repo) = xenonet_base::ids::remote_parts(url)?;
-    let key = xenonet_base::ids::normalize_remote(&format!("{host}/{repo}"));
+    let (host, repo) = xenonet_model::ids::remote_parts(url)?;
+    let key = xenonet_model::ids::normalize_remote(&format!("{host}/{repo}"));
     (!key.is_empty()).then_some(key)
 }
 
@@ -85,17 +85,17 @@ pub fn network_host(envelope: &Value) -> Option<String> {
 
 /// Whether an id names an agent on another host (`@<host>:<id>`).
 pub fn is_remote(id: &str) -> bool {
-    xenonet_base::ids::parse_qualified(id).is_some_and(|(h, _)| h.is_some())
+    xenonet_model::ids::parse_qualified(id).is_some_and(|q| q.host.is_some())
 }
 
 /// The host of a qualified id.
 pub fn host_of(id: &str) -> Option<&str> {
-    xenonet_base::ids::parse_qualified(id).and_then(|(h, _)| h)
+    xenonet_model::ids::parse_qualified(id).and_then(|q| q.host)
 }
 
 /// An id on its own host, without the `@<host>:` before it.
 pub fn local_of(id: &str) -> &str {
-    xenonet_base::ids::parse_qualified(id).map_or(id, |(_, l)| l)
+    xenonet_model::ids::parse_qualified(id).map_or(id, |q| q.local)
 }
 
 /// A fresh id across the network: `<prefix>_<uuid v4>` (msg_, hof_).
@@ -104,7 +104,7 @@ pub fn new_id(prefix: &str) -> Result<String, crate::engine::Thrown> {
     getrandom::fill(&mut b).map_err(|e| crate::engine::Thrown::new(format!("no random bytes: {e}")))?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h = xenonet_base::jsstr::hex(&b);
+    let h = xenonet_text::utf16::hex(&b);
     Ok(format!("{prefix}_{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
 }
 

@@ -28,9 +28,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
 use xenonet_assistant::credentials::{is_grant, is_token};
-use xenonet_base::json as js;
-use xenonet_base::paths::join_all;
-use xenonet_base::text::{js_number, js_string, js_trim, truthy};
+use xenonet_os::paths::join_all;
+use xenonet_text::json as js;
+use xenonet_text::text::{display, to_number, trim, truthy};
 
 /// How long a read may take, the service's ten seconds and some.
 pub const CALL_MS: u64 = 12_000;
@@ -60,7 +60,7 @@ fn platform() -> &'static str {
 /// The runtime folder (core/components/runtime.js).
 fn runtime_dir() -> String {
     process::set("XENONET_RUNTIME_DIR").unwrap_or_else(|| {
-        let state = xenonet_base::dirs::app_dir("state", process::set("XDG_STATE_HOME").as_deref(), process::var("LOCALAPPDATA").as_deref(), platform(), &home(), "XenoNet");
+        let state = xenonet_os::dirs::app_dir("state", process::set("XDG_STATE_HOME").as_deref(), process::var("LOCALAPPDATA").as_deref(), platform(), &home(), "XenoNet");
         join_all(&[&state, "runtime"])
     })
 }
@@ -102,7 +102,7 @@ pub fn revision_of(dir: &str, grant: &str) -> Option<f64> {
         return None;
     }
     let raw = std::fs::read(join_all(&[dir, "revisions", grant])).ok()?;
-    let n = js_number(Some(&Value::String(js_trim(&String::from_utf8_lossy(&raw)).to_string())));
+    let n = to_number(Some(&Value::String(trim(&String::from_utf8_lossy(&raw)).to_string())));
     (n.fract() == 0.0 && n > 0.0 && n.is_finite()).then_some(n)
 }
 
@@ -199,7 +199,7 @@ impl Conn {
                                     .and_then(|r| pending.lock().expect("pending").remove(&(r as u64)));
                                 if let Some(p) = waiting {
                                     let _ = p.send(match m.get("error").filter(|e| truthy(Some(e))) {
-                                        Some(e) => Err(js_string(e)),
+                                        Some(e) => Err(display(e)),
                                         None => Ok(m.get("result").cloned()),
                                     });
                                 }
@@ -445,7 +445,7 @@ impl Client {
             Ok(Some(Value::Object(r))) => match r.get("ok") {
                 Some(Value::Bool(true)) => Read { ok: true, envelope: r.get("result").cloned().unwrap_or(Value::Null), detail: None },
                 Some(Value::Bool(false)) => {
-                    Read { ok: false, envelope: r.get("error").cloned().unwrap_or(Value::Null), detail: r.get("detail").filter(|d| truthy(Some(d))).map(js_string) }
+                    Read { ok: false, envelope: r.get("error").cloned().unwrap_or(Value::Null), detail: r.get("detail").filter(|d| truthy(Some(d))).map(display) }
                 }
                 _ => Read { ok: false, envelope: error_envelope(request_id, "INTERNAL_ERROR", None), detail: None },
             },

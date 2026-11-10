@@ -9,7 +9,7 @@ use crate::ctx::Ctx;
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Reply, CoreError> {
     if req.method == "GET" && req.path == "/api/drift" {

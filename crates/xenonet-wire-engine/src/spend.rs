@@ -8,9 +8,9 @@ use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::spend::{reported_today, spend_by_actor};
 use xenonet_api::cores::{Spend, R};
-use xenonet_base::json::number;
-use xenonet_base::pricing::PRICES_CHECKED;
-use xenonet_base::time::now_ms;
+use xenonet_model::usage::pricing::PRICES_CHECKED;
+use xenonet_text::json::number;
+use xenonet_text::time::now_ms;
 
 pub struct SpendDriver {
     world: Arc<Runtime>,

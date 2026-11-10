@@ -10,11 +10,11 @@
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
-use xenonet_base::ids::normalize_remote;
-use xenonet_base::json::number;
-use xenonet_base::paths::{base_name, is_under, path_key, scratch_zone, tilde};
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_model::ids::normalize_remote;
+use xenonet_os::paths::{base_name, is_under, path_key, scratch_zone, tilde};
 use xenonet_sources::live::names::{is_opaque, short_name};
+use xenonet_text::json::number;
+use xenonet_text::text::{display, to_number, truthy};
 
 fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.as_object().and_then(|m| m.get(k))
@@ -26,12 +26,12 @@ fn str_of<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
 
 // pathKey(p): a key for a truthy path, as the paths twin gives it.
 fn key_of(p: Option<&Value>) -> Option<String> {
-    p.filter(|v| truthy(Some(v))).and_then(|v| path_key(&js_string(v)))
+    p.filter(|v| truthy(Some(v))).and_then(|v| path_key(&display(v)))
 }
 
 // normalizeRemote(url): null for no url.
 fn remote_of(url: Option<&Value>) -> Option<String> {
-    url.filter(|v| truthy(Some(v))).map(|v| normalize_remote(&js_string(v))).filter(|r| !r.is_empty())
+    url.filter(|v| truthy(Some(v))).map(|v| normalize_remote(&display(v))).filter(|r| !r.is_empty())
 }
 
 /// How lately a session was written to: active, recent or idle.
@@ -39,8 +39,8 @@ pub fn activity_of(updated_at: Option<&Value>, now: f64, windows: Option<&Value>
     if !truthy(updated_at) {
         return "idle";
     }
-    let age = now - js_number(updated_at);
-    let w = |k: &str| js_number(windows.and_then(|w| get(w, k)));
+    let age = now - to_number(updated_at);
+    let w = |k: &str| to_number(windows.and_then(|w| get(w, k)));
     if age <= w("activeWindowMs") {
         "active"
     } else if age <= w("recentWindowMs") {
@@ -99,18 +99,18 @@ fn items(v: Option<&Value>) -> &[Value] {
 /// takes, with `repos` as [[key, status], …].
 pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value {
     let field = |k: &str| get(input, k).filter(|v| !v.is_null());
-    let projects_dir = field("projectsDir").map(js_string).unwrap_or_default();
-    let home_dir = field("homeDir").filter(|v| truthy(Some(v))).map(js_string);
+    let projects_dir = field("projectsDir").map(display).unwrap_or_default();
+    let home_dir = field("homeDir").filter(|v| truthy(Some(v))).map(display);
     let projects = items(field("projects"));
     let sessions = items(field("sessions"));
     let native_projects = items(field("nativeProjects"));
     let resources = items(field("resources"));
     let wiki = field("wiki");
-    let repos: Vec<(String, Value)> = items(field("repos")).iter().filter_map(|p| Some((js_string(p.get(0)?), p.get(1).cloned().unwrap_or(Value::Null)))).collect();
+    let repos: Vec<(String, Value)> = items(field("repos")).iter().filter_map(|p| Some((display(p.get(0)?), p.get(1).cloned().unwrap_or(Value::Null)))).collect();
     let repo_of = |k: &str| repos.iter().rev().find(|(r, _)| r == k).map(|(_, v)| v.clone());
     let empty = Value::Object(Map::new());
     let layout = field("layout").unwrap_or(&empty);
-    let now = field("now").map_or(f64::NAN, |v| js_number(Some(v)));
+    let now = field("now").map_or(f64::NAN, |v| to_number(Some(v)));
     let windows = field("windows");
 
     let mut g = Graph { nodes: Vec::new(), at: HashMap::new(), links: Vec::new(), parent_of_node: HashMap::new() };
@@ -123,7 +123,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     };
     g.set("core", obj(json!({ "id": "core", "kind": "core", "name": root_name, "path": projects_dir, "home": home_dir })));
 
-    let pkey = |p: &Value| get(p, "key").map_or_else(|| "undefined".into(), js_string);
+    let pkey = |p: &Value| get(p, "key").map_or_else(|| "undefined".into(), display);
     for p in projects {
         let k = pkey(p);
         let id = format!("project:{k}");
@@ -143,7 +143,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         let id = format!("project:{k}");
         if let Some(sat) = parent_of.get(&k) {
             g.link(&format!("project:{sat}"), &id, "satellite");
-        } else if let Some(parent) = get(p, "parent").filter(|v| truthy(Some(v))).map(js_string).filter(|pp| g.has(&format!("project:{pp}"))) {
+        } else if let Some(parent) = get(p, "parent").filter(|v| truthy(Some(v))).map(display).filter(|pp| g.has(&format!("project:{pp}"))) {
             g.link(&format!("project:{parent}"), &id, "nested");
         } else {
             g.link("core", &id, "contains");
@@ -174,7 +174,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     // Codex desktop projects sit inside the project that holds their root.
     let mut native_ids: HashSet<String> = HashSet::new();
     for np in native_projects {
-        let raw = get(np, "id").map_or_else(|| "undefined".into(), js_string);
+        let raw = get(np, "id").map_or_else(|| "undefined".into(), display);
         let id = format!("native:codex:{raw}");
         let home = items(get(np, "roots")).iter().find_map(|r| key_of(Some(r)).and_then(|k| project_for_key(&k)));
         let home_id = home.map(|h| format!("project:{}", pkey(h)));
@@ -216,7 +216,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             }
             return "zone:elsewhere".into();
         }
-        if let Some(np) = get(s, "nativeProjectId").filter(|v| truthy(Some(v))).map(js_string).filter(|np| native_ids.contains(np)) {
+        if let Some(np) = get(s, "nativeProjectId").filter(|v| truthy(Some(v))).map(display).filter(|np| native_ids.contains(np)) {
             return format!("native:codex:{np}");
         }
         let key = key_of(get(s, "cwd"));
@@ -230,7 +230,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         zone_for(g, key.as_deref(), get(s, "cwd"))
     };
 
-    let sid = |s: &Value| get(s, "id").map_or_else(|| "undefined".into(), js_string);
+    let sid = |s: &Value| get(s, "id").map_or_else(|| "undefined".into(), display);
     let mut by_id: HashMap<String, &Value> = HashMap::new();
     for s in sessions {
         by_id.insert(sid(s), s);
@@ -251,7 +251,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     }
     for s in sessions {
         let id = sid(s);
-        let parent = get(s, "parentId").filter(|v| truthy(Some(v))).map(js_string).filter(|p| *p != id).and_then(|p| by_id.get(&p).copied());
+        let parent = get(s, "parentId").filter(|v| truthy(Some(v))).map(display).filter(|p| *p != id).and_then(|p| by_id.get(&p).copied());
         // Spawned or forked sessions nest under their parent when they share
         // a home; otherwise they stay in their own, with a cross-link.
         if let Some(parent) = parent {
@@ -272,7 +272,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     // server's resource id, so beams from calls to that server land on it.
     let mut relations: Vec<Value> = Vec::new();
     if let Some(w) = wiki.filter(|w| truthy(Some(w))) {
-        let server = get(w, "server").filter(|v| !v.is_null()).map_or_else(|| "agent-wiki".to_string(), js_string);
+        let server = get(w, "server").filter(|v| !v.is_null()).map_or_else(|| "agent-wiki".to_string(), display);
         let root = format!("resource:{server}");
         let pages = items(get(w, "pages"));
         let last_log = items(get(w, "log")).last().and_then(|l| get(l, "ts")).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
@@ -289,12 +289,12 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         // A page of another space than this machine's (Xenolith's spaces)
         // is wiki:<space>/<slug>, and its [[links]] are to pages of its own
         // space.
-        let space_of = |p: &Value| get(p, "space").filter(|v| truthy(Some(v))).map(js_string);
+        let space_of = |p: &Value| get(p, "space").filter(|v| truthy(Some(v))).map(display);
         let id_of = |space: Option<&str>, slug: &str| match space {
             Some(s) => format!("wiki:{s}/{slug}"),
             None => format!("wiki:{slug}"),
         };
-        let slug_of = |p: &Value| get(p, "slug").map_or_else(|| "undefined".into(), js_string);
+        let slug_of = |p: &Value| get(p, "slug").map_or_else(|| "undefined".into(), display);
         let ids: HashSet<String> = pages.iter().map(|p| id_of(space_of(p).as_deref(), &slug_of(p))).collect();
         let mut seen: HashSet<String> = HashSet::new();
         for p in pages {
@@ -316,9 +316,9 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             g.set(&id, node);
             g.link(&root, &id, "page");
             for l in items(get(p, "links")) {
-                let to = id_of(space.as_deref(), &js_string(l));
+                let to = id_of(space.as_deref(), &display(l));
                 let mut pair = [id.clone(), to.clone()];
-                pair.sort_by(|a, b| xenonet_base::jsstr::cmp_units(a, b));
+                pair.sort_by(|a, b| xenonet_text::utf16::cmp_units(a, b));
                 let k = pair.join("|");
                 if ids.contains(&to) && !seen.contains(&k) {
                     seen.insert(k);
@@ -326,14 +326,14 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
                 }
             }
             for key in items(get(p, "projects")) {
-                relations.push(json!({ "a": id, "b": format!("project:{}", js_string(key)), "kind": "mentions" }));
+                relations.push(json!({ "a": id, "b": format!("project:{}", display(key)), "kind": "mentions" }));
             }
         }
     }
 
     // Shared systems sessions reach through MCP (a browser, …).
     for r in resources {
-        let id = format!("resource:{}", get(r, "server").map_or_else(|| "undefined".into(), js_string));
+        let id = format!("resource:{}", get(r, "server").map_or_else(|| "undefined".into(), display));
         if g.has(&id) {
             continue;
         }
@@ -386,13 +386,13 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     for s in sessions {
         let id = sid(s);
         let active = g.get(&id).and_then(|n| n.get("activity")).and_then(Value::as_str) == Some("active");
-        let updated = get(s, "updatedAt").filter(|v| truthy(Some(v))).map(|v| (v, js_number(Some(v))));
+        let updated = get(s, "updatedAt").filter(|v| truthy(Some(v))).map(|v| (v, to_number(Some(v))));
         let mut cur = g.parent_of_node.get(&id).cloned();
         let mut seen: HashSet<String> = HashSet::new();
         while let Some(c) = cur.filter(|c| !seen.contains(c)) {
             seen.insert(c.clone());
             if let Some(n) = g.get_mut(&c).filter(|n| n.get("kind").and_then(Value::as_str) != Some("session")) {
-                let count = |n: &Map<String, Value>, k: &str| js_number(n.get(k));
+                let count = |n: &Map<String, Value>, k: &str| to_number(n.get(k));
                 let sc = count(n, "sessionCount") + 1.0;
                 n.insert("sessionCount".into(), number(sc));
                 if active {
@@ -401,7 +401,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
                 }
                 if let Some((at, u)) = updated {
                     for k in ["lastActivity", "lastSessionAt"] {
-                        let was = n.get(k).filter(|v| !v.is_null()).map_or(0.0, |v| js_number(Some(v)));
+                        let was = n.get(k).filter(|v| !v.is_null()).map_or(0.0, |v| to_number(Some(v)));
                         if u > was {
                             n.insert(k.into(), at.clone());
                         }
@@ -412,10 +412,10 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         }
     }
     // Places where a session ran lately are active.
-    let active_ms = windows.and_then(|w| get(w, "projectActiveMs")).filter(|v| !v.is_null()).map_or(3600e3, |v| js_number(Some(v)));
+    let active_ms = windows.and_then(|w| get(w, "projectActiveMs")).filter(|v| !v.is_null()).map_or(3600e3, |v| to_number(Some(v)));
     for (_, n) in &mut g.nodes {
         if matches!(n.get("kind").and_then(Value::as_str), Some("project" | "native" | "zone")) {
-            let last = n.get("lastSessionAt").filter(|v| !v.is_null()).map(|v| js_number(Some(v)));
+            let last = n.get("lastSessionAt").filter(|v| !v.is_null()).map(|v| to_number(Some(v)));
             n.insert("active".into(), Value::Bool(last.is_some_and(|l| now - l <= active_ms)));
         }
     }
@@ -423,7 +423,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     let count = |f: &dyn Fn(&Map<String, Value>) -> bool| g.nodes.iter().filter(|(_, n)| n.get("kind").and_then(Value::as_str) == Some("session") && f(n)).count();
     let stats = json!({
         "wikiPages": wiki.filter(|w| truthy(Some(w))).map_or(0, |w| items(get(w, "pages")).len()),
-        "dirtyRepos": repos.iter().filter(|(_, r)| js_number(get(r, "dirty")) > 0.0).count(),
+        "dirtyRepos": repos.iter().filter(|(_, r)| to_number(get(r, "dirty")) > 0.0).count(),
         "projects": projects.iter().filter(|p| str_of(p, "role") != Some("group")).count(),
         "groups": projects.iter().filter(|p| str_of(p, "role") == Some("group")).count(),
         "sessions": count(&|_| true),

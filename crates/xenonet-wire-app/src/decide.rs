@@ -60,7 +60,7 @@ impl Decisions {
                 return Err(decision_error(e));
             }
         };
-        let body = xenonet_base::json::parse(&res.text()).ok();
+        let body = xenonet_text::json::parse(&res.text()).ok();
         if !res.ok() {
             let (line, e) = decide::refused(res.status, body.as_ref(), kind);
             self.say(&line);
@@ -95,7 +95,7 @@ impl Decider for Decisions {
     async fn store_key(&self, key: &Value) -> R<Value> {
         let given = match key {
             Value::Null => String::new(),
-            v => xenonet_base::text::js_string(v),
+            v => xenonet_text::text::display(v),
         };
         let checked = decide::check_key(&given).map_err(decision_error)?;
         self.secrets.set(decide::KEY_TARGET, &checked, decide::KEY_COMMENT).await.map_err(CoreError::new)?;
@@ -110,7 +110,7 @@ impl Decider for Decisions {
     }
 
     async fn decide(&self, request: Value) -> R<Value> {
-        let kind = request.get("kind").map(xenonet_base::text::js_string).unwrap_or_default();
+        let kind = request.get("kind").map(xenonet_text::text::display).unwrap_or_default();
         self.decide_on(&kind, request.get("state").unwrap_or(&Value::Null), request.get("questions").unwrap_or(&Value::Null)).await
     }
 }
@@ -139,7 +139,7 @@ impl Spent {
             }
         };
         let refused = res.status == 401 || res.status == 403;
-        let body = if refused || !res.ok() { None } else { xenonet_base::json::parse(&res.text()).ok() };
+        let body = if refused || !res.ok() { None } else { xenonet_text::json::parse(&res.text()).ok() };
         let status = json!(res.status);
         usage::reading(true, Some((&status, res.ok())), body.as_ref(), if refused || !res.ok() { 0.0 } else { now_ms() })
     }

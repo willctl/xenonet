@@ -6,10 +6,10 @@
 //! limits, the poll, the identities…) are theirs to read.
 
 use std::path::{Path, PathBuf};
-use xenonet_base::dirs::app_dir;
-use xenonet_base::json::Value;
-use xenonet_base::nodepath;
-use xenonet_base::text::js_number;
+use xenonet_os::dirs::app_dir;
+use xenonet_os::nodepath;
+use xenonet_text::json::Value;
+use xenonet_text::text::to_number;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -121,7 +121,7 @@ impl Config {
         let dev_dir = |kind: &str| server_dev.then(|| dir_of(kind, "XenoNet Dev"));
         // Number(XENONET_PORT ?? default): "" is 0, as in JS.
         let port = match env("XENONET_PORT") {
-            Some(p) => js_number(Some(&Value::String(p))),
+            Some(p) => to_number(Some(&Value::String(p))),
             None => {
                 if demo {
                     47841.0
@@ -151,7 +151,7 @@ impl Config {
         let runtime_dir = set("XENONET_RUNTIME_DIR").unwrap_or_else(|| Path::new(&dir_of("state", "XenoNet")).join("runtime").to_string_lossy().into_owned());
         let projects_dir = nodepath::resolve(&[&set("XENONET_PROJECTS_DIR").unwrap_or_else(|| Path::new(&home).join("Projects").to_string_lossy().into_owned())]);
         let gateway_port =
-            set("XENONET_GATEWAY_PORT").map(|p| js_number(Some(&Value::String(p)))).filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n)).map(|n| n as u16);
+            set("XENONET_GATEWAY_PORT").map(|p| to_number(Some(&Value::String(p)))).filter(|n| *n != 0.0 && n.fract() == 0.0 && (1.0..=65535.0).contains(n)).map(|n| n as u16);
         Config {
             demo,
             dev,
@@ -214,7 +214,7 @@ impl Config {
     /// would be in, in the temp folder, so a demo never writes to your own
     /// state.
     pub fn demo_folders(&mut self) {
-        let tmp = xenonet_base::paths::real_path(&std::env::temp_dir());
+        let tmp = xenonet_os::paths::real_path(&std::env::temp_dir());
         let root = tmp.join(format!("xenonet-demo-{}", self.port));
         self.home = root.join("home").to_string_lossy().into_owned();
         self.projects_dir = root.join("home").join("Projects").to_string_lossy().into_owned();
@@ -243,7 +243,7 @@ impl Config {
     pub fn version(&self, built: &str) -> String {
         std::fs::read_to_string(self.root.join("package.json"))
             .ok()
-            .and_then(|t| xenonet_base::json::parse(&t).ok())
+            .and_then(|t| xenonet_text::json::parse(&t).ok())
             .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_string))
             .unwrap_or_else(|| built.to_string())
     }

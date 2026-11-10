@@ -35,10 +35,10 @@ use crate::tokens::{hash_token, is_gateway_token, is_token, new_gateway_token, n
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use xenonet_adapter::products::{product_of, PRODUCTS, WHY_NOT};
-use xenonet_base::ids::YOU;
-use xenonet_base::paths::tilde;
-use xenonet_base::text::js_string;
-use xenonet_base::text::truthy;
+use xenonet_model::ids::YOU;
+use xenonet_os::paths::tilde;
+use xenonet_text::text::display;
+use xenonet_text::text::truthy;
 
 pub const REQUEST_MS: f64 = 10.0 * 60e3;
 /// A token unused for 30 days stops working.
@@ -176,7 +176,7 @@ fn id_of(slug: &str) -> String {
 }
 
 fn parse(s: Option<&str>) -> Value {
-    s.and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null)
+    s.and_then(|s| xenonet_text::json::parse(s).ok()).unwrap_or(Value::Null)
 }
 
 /// A column of a row, as text.
@@ -196,12 +196,12 @@ fn col(r: &Value, k: &str) -> Value {
 
 /// `${v}` of a field, undefined when it isn't there.
 fn template(v: Option<&Value>) -> String {
-    xenonet_base::text::template(v)
+    xenonet_text::text::template(v)
 }
 
 // Number(v), as a value compares with a number.
 pub fn to_number(v: &Value) -> f64 {
-    xenonet_base::text::js_number(Some(v))
+    xenonet_text::text::to_number(Some(v))
 }
 
 const B64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -341,7 +341,7 @@ impl Registration {
         let slug = slug.as_str().expect("slug_refusal refuses anything but a text").to_string();
         let mut asked: Vec<String> = Vec::new();
         for c in body.get("capabilities").and_then(Value::as_array).cloned().unwrap_or_default() {
-            let c = js_string(&c);
+            let c = display(&c);
             if !asked.contains(&c) {
                 asked.push(c);
             }
@@ -485,7 +485,7 @@ impl Registration {
             let waiting = me.store.waiting_actor_requests(t)?;
             // The same program asking again with the same name takes its old
             // request's place, and the old token stops working.
-            let program_of = |who: &Value| if truthy(Some(who)) { Some(xenonet_base::json::stringify(&json!([who.get("program"), who.get("parents")]), 0)) } else { None };
+            let program_of = |who: &Value| if truthy(Some(who)) { Some(xenonet_text::json::stringify(&json!([who.get("program"), who.get("parents")]), 0)) } else { None };
             let mine = program_of(asker);
             let same = waiting.iter().position(|r| {
                 text(r, "slug") == Some(ask.slug.as_str())
@@ -518,9 +518,9 @@ impl Registration {
             let row = json!({
                 "id": id,
                 "slug": ask.slug,
-                "ask": xenonet_base::json::stringify(&ask.json(), 0),
+                "ask": xenonet_text::json::stringify(&ask.json(), 0),
                 "token_hash": hash,
-                "asker": if asker.is_null() { Value::Null } else { Value::String(xenonet_base::json::stringify(asker, 0)) },
+                "asker": if asker.is_null() { Value::Null } else { Value::String(xenonet_text::json::stringify(asker, 0)) },
                 "created_at": num(t),
                 "expires_at": num(t + REQUEST_MS),
             });
@@ -1100,7 +1100,7 @@ impl Registration {
         }
         let t = c.now();
         let made = (|| -> Result<Value> {
-            let raw = a.filter(|s| !xenonet_base::text::js_trim(s).is_empty()).unwrap_or("Heron");
+            let raw = a.filter(|s| !xenonet_text::text::trim(s).is_empty()).unwrap_or("Heron");
             let name = check_name(Some(raw), None).or_else(bad)?;
             let base = slug_from(&name);
             let slug = if slug_refusal(Some(&base), None).is_none() && !self.taken_by(c, &base, None, None, Some(t))? {
@@ -1153,7 +1153,7 @@ fn with_registered(there: &Value) -> Vec<Value> {
 }
 
 fn num(n: f64) -> Value {
-    xenonet_base::json::number(n)
+    xenonet_text::json::number(n)
 }
 
 #[cfg(test)]

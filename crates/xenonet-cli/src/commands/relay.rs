@@ -8,7 +8,7 @@ use crate::cores;
 use crate::out::{Done, Fail};
 use crate::reach::candidates;
 use serde_json::json;
-use xenonet_base::json::number;
+use xenonet_text::json::number;
 
 pub const HELP: &str = include_str!("help/relay.txt");
 
@@ -33,7 +33,7 @@ pub fn parse_since(text: &str) -> Option<f64> {
 /// runs that command whatever the console asked for, and ssh puts what it
 /// asked for in SSH_ORIGINAL_COMMAND. Only --since is taken from there.
 pub fn from_original_command(text: &str) -> Option<f64> {
-    let words: Vec<&str> = text.split(xenonet_base::text::is_js_space).filter(|w| !w.is_empty()).collect();
+    let words: Vec<&str> = text.split(xenonet_text::text::is_space).filter(|w| !w.is_empty()).collect();
     let at = words.iter().position(|w| *w == "--since")?;
     words.get(at + 1).and_then(|w| parse_since(w)).filter(|n| *n != 0.0)
 }
@@ -41,7 +41,7 @@ pub fn from_original_command(text: &str) -> Option<f64> {
 pub fn run(_args: &[String], flags: &Flags) -> Done {
     let forced = crate::sys::var("SSH_ORIGINAL_COMMAND").and_then(|c| from_original_command(&c));
     let since = match flags.get("since") {
-        Some(v) => parse_since(&xenonet_base::text::js_string(v)),
+        Some(v) => parse_since(&xenonet_text::text::display(v)),
         None => Some(forced.unwrap_or(DEFAULT_SINCE_MS)),
     };
     let Some(since) = since.filter(|n| *n != 0.0) else {

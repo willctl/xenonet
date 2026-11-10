@@ -17,7 +17,7 @@
 
 use super::template;
 use serde_json::{json, Value};
-use xenonet_base::text::is_js_space;
+use xenonet_text::text::is_space;
 
 pub const KEYS: [&str; 6] = ["project", "identity", "app", "machine", "status", "by"];
 
@@ -38,7 +38,7 @@ pub struct Selector {
 fn term(p: &str) -> Option<Term> {
     let (key, value) = p.split_once(':')?;
     let key = KEYS.iter().find(|k| k.eq_ignore_ascii_case(key))?;
-    if value.is_empty() || value.chars().any(|c| is_js_space(c) || c == '+') {
+    if value.is_empty() || value.chars().any(|c| is_space(c) || c == '+') {
         return None;
     }
     Some(Term { key: (*key).to_string(), value: value.to_lowercase() })
@@ -56,7 +56,7 @@ fn like(value: Option<&Value>, want: &str) -> bool {
 impl Selector {
     /// The selector `text` spells, or None for what isn't one.
     pub fn parse(text: &str) -> Option<Selector> {
-        let s = xenonet_base::text::js_trim(text);
+        let s = xenonet_text::text::trim(text);
         if s.is_empty() {
             return None;
         }
@@ -64,7 +64,7 @@ impl Selector {
             return Some(Selector { terms: Vec::new() });
         }
         let mut terms = Vec::new();
-        for p in s.split(|c: char| is_js_space(c) || c == '+').filter(|p| !p.is_empty()) {
+        for p in s.split(|c: char| is_space(c) || c == '+').filter(|p| !p.is_empty()) {
             terms.push(term(p)?);
         }
         Some(Selector { terms })
@@ -73,7 +73,7 @@ impl Selector {
     /// Whether `text` is a selector with terms: "all" and what isn't a
     /// selector are not.
     pub fn is_selector(text: &str) -> bool {
-        Selector::parse(text).is_some() && xenonet_base::text::js_trim(text) != "all"
+        Selector::parse(text).is_some() && xenonet_text::text::trim(text) != "all"
     }
 
     /// The selector's text: its terms, or "all" for none.

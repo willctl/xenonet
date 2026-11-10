@@ -38,7 +38,7 @@ pub fn text(v: Option<&Value>, max: usize) -> Value {
 }
 
 pub fn truthy(v: Option<&Value>) -> bool {
-    xenonet_base::text::truthy(v)
+    xenonet_text::text::truthy(v)
 }
 
 /// `a ?? b`.
@@ -76,8 +76,8 @@ pub fn less(a: Option<&Value>, b: Option<&Value>) -> bool {
         (Some(Value::String(x)), Some(Value::String(y))) => x.encode_utf16().lt(y.encode_utf16()),
         _ => {
             let n = |v: Option<&Value>| match v {
-                Some(Value::Array(_) | Value::Object(_)) => xenonet_base::text::js_number(Some(&Value::String(v.map(xenonet_base::text::js_string).unwrap_or_default()))),
-                other => xenonet_base::text::js_number(other),
+                Some(Value::Array(_) | Value::Object(_)) => xenonet_text::text::to_number(Some(&Value::String(v.map(xenonet_text::text::display).unwrap_or_default()))),
+                other => xenonet_text::text::to_number(other),
             };
             n(a) < n(b)
         }
@@ -86,5 +86,5 @@ pub fn less(a: Option<&Value>, b: Option<&Value>) -> bool {
 
 /// `typeof v` for a JSON value.
 pub fn type_name(v: &Value) -> &'static str {
-    xenonet_base::text::type_of(Some(v))
+    xenonet_text::text::type_of(Some(v))
 }

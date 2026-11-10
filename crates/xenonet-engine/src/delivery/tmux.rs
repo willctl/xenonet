@@ -33,13 +33,13 @@ pub struct Pane {
 
 /// tmux list-panes' lines, as the JS split them.
 pub fn parse_panes(out: &str) -> Vec<Pane> {
-    xenonet_base::text::js_trim(out)
+    xenonet_text::text::trim(out)
         .split('\n')
         .filter(|l| !l.is_empty())
         .map(|l| {
             let mut parts = l.split('\t');
             let pane = parts.next().unwrap_or_default().to_string();
-            let pid = parts.next().map_or(f64::NAN, |p| xenonet_base::text::js_number(Some(&serde_json::Value::String(p.to_string()))));
+            let pid = parts.next().map_or(f64::NAN, |p| xenonet_text::text::to_number(Some(&serde_json::Value::String(p.to_string()))));
             let tty = parts.next().map(str::to_string);
             let command = parts.next().map(str::to_string);
             Pane { pane, pid, tty, command }
@@ -64,7 +64,7 @@ impl Tmux {
     /// process group (a + in its state).
     fn proc(sh: &mut dyn Shell, pid: f64) -> Result<Option<(String, bool)>> {
         let Some(out) = sh.exec("ps", &["-o", "tty=,stat=", "-p", &number_text(pid)]) else { return Ok(None) };
-        let out = xenonet_base::text::js_trim(&out).to_string();
+        let out = xenonet_text::text::trim(&out).to_string();
         if out.is_empty() {
             return Ok(None);
         }

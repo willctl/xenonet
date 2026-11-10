@@ -9,9 +9,9 @@ use crate::util::{blocking, lock, now_ms, num};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use xenonet_base::fs::{DirEntry, Fs, StdFs};
 use xenonet_blocks::scanner::{Limits, Rules, Scanner};
 use xenonet_blocks::Halt;
+use xenonet_os::fs::{DirEntry, Fs, StdFs};
 use xenonet_state::projects::{FactsCache, Scan, SCAN_DEPTH, SCAN_MAX_DIRS, SCAN_MAX_SUBMODULES};
 
 /// What a scan found: the projects, the scan's status, and the folders

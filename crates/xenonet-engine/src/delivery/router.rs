@@ -24,7 +24,7 @@ use super::{template, text_of, truthy, Delivered, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 pub const ACK_MS: f64 = 60e3;
 const KEEP: usize = 500;
@@ -134,8 +134,8 @@ impl Rec {
         m.insert("from".into(), Value::String(self.from.clone()));
         m.insert("state".into(), Value::String(self.state.into()));
         m.insert("how".into(), self.how.map_or(Value::Null, |h| Value::String(h.into())));
-        m.insert("at".into(), xenonet_base::json::number(self.at));
-        m.insert("ackedAt".into(), self.acked_at.map_or(Value::Null, xenonet_base::json::number));
+        m.insert("at".into(), xenonet_text::json::number(self.at));
+        m.insert("ackedAt".into(), self.acked_at.map_or(Value::Null, xenonet_text::json::number));
         m.insert("why".into(), self.why.clone().map_or(Value::Null, Value::String));
         if let Some(n) = &self.from_name {
             m.insert("fromName".into(), Value::String(n.clone()));

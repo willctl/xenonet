@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use xenonet_app::fsx::{self, FsError};
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{now_ms, Failure, Io};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 pub const COMPONENTS: [&str; 2] = ["service", "tools"];
 /// The macOS tray (XenoNet Tray.app) is a component too, though not one
@@ -51,7 +51,7 @@ pub fn sha_re() -> &'static Regex {
 
 // RegExp.test reads its argument as a string.
 fn test(re: &Regex, v: Option<&Value>) -> bool {
-    re.is_match(&v.map_or_else(|| "undefined".to_string(), js_string))
+    re.is_match(&v.map_or_else(|| "undefined".to_string(), display))
 }
 
 pub fn is_semver(v: Option<&Value>) -> bool {
@@ -64,7 +64,7 @@ pub fn is_sha(v: Option<&Value>) -> bool {
 
 /// The SHA-256 of bytes, in hex.
 pub fn digest(data: &[u8]) -> String {
-    xenonet_base::jsstr::hex(&Sha256::digest(data))
+    xenonet_text::utf16::hex(&Sha256::digest(data))
 }
 
 /// Whether version a is newer than b.
@@ -72,7 +72,7 @@ pub fn newer(a: Option<&Value>, b: Option<&Value>) -> Result<bool, String> {
     let (Some(a), Some(b)) = (a.filter(|v| is_semver(Some(v))), b.filter(|v| is_semver(Some(v)))) else {
         return Err("Invalid component version.".into());
     };
-    let parts = |v: &Value| -> Vec<f64> { js_string(v).split('.').map(|p| p.parse::<f64>().unwrap_or(f64::NAN)).collect() };
+    let parts = |v: &Value| -> Vec<f64> { display(v).split('.').map(|p| p.parse::<f64>().unwrap_or(f64::NAN)).collect() };
     let (x, y) = (parts(a), parts(b));
     for i in 0..3 {
         if x[i] != y[i] {
@@ -110,15 +110,15 @@ pub fn current_component(component: &str, env: &Env, m: &Machine) -> Result<Opti
         Err(e) if e.is("ENOENT") => return Ok(None),
         Err(e) => return Err(e),
     };
-    let current = xenonet_base::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
+    let current = xenonet_text::json::parse(&text).map_err(|e| fsx::said(e.to_string()))?;
     if current.is_null() {
         return Err(fsx::said("Cannot read properties of null (reading 'sha256')"));
     }
     if !is_sha(current.get("sha256")) || !is_semver(current.get("version")) {
         return Err(fsx::said("Invalid installed component pointer."));
     }
-    let version = js_string(&current["version"]);
-    let sha = js_string(&current["sha256"]);
+    let version = display(&current["version"]);
+    let sha = display(&current["sha256"]);
     let mut out = match current {
         Value::Object(m) => m,
         _ => Map::new(),
@@ -132,7 +132,7 @@ fn random_uuid() -> String {
     getrandom::fill(&mut b).expect("the system's random numbers");
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h = xenonet_base::jsstr::hex(&b);
+    let h = xenonet_text::utf16::hex(&b);
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
@@ -149,7 +149,7 @@ pub fn select_component(component: &str, value: &Value, env: &Env, m: &Machine) 
             pointer.insert(k.into(), v.clone());
         }
     }
-    fsx::write_file(&tmp, xenonet_base::json::stringify(&Value::Object(pointer), 0).as_bytes(), Some(0o600))?;
+    fsx::write_file(&tmp, xenonet_text::json::stringify(&Value::Object(pointer), 0).as_bytes(), Some(0o600))?;
     fsx::rename(&tmp, &file)
 }
 
@@ -165,7 +165,7 @@ fn with_root(manifest: Value, root: &str, sha256: &Value) -> Value {
 
 fn read_json(file: &str) -> Result<Value, Failure> {
     let text = fsx::read_text(file)?;
-    xenonet_base::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))
+    xenonet_text::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))
 }
 
 /// Checks and unpacks a downloaded package beside the other versions of
@@ -178,8 +178,8 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
     let (Some(component), true, true) = (component, is_semver(expected.get("version")), is_sha(expected.get("sha256"))) else {
         return Err(Failure::msg("Invalid component release manifest."));
     };
-    let version = js_string(&expected["version"]);
-    let sha = js_string(&expected["sha256"]);
+    let version = display(&expected["version"]);
+    let sha = display(&expected["sha256"]);
     let bytes = std::fs::read(file).map_err(|e| FsError::of(e, "open", file))?;
     let size_ok = expected.get("size").and_then(Value::as_f64) == Some(bytes.len() as f64);
     if bytes.len() > MAX_PACKAGE || !size_ok || digest(&bytes) != sha {
@@ -190,7 +190,7 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
     let dest = NATIVE.join(&[&parent, &format!("{version}-{}", &sha[..16])]);
     let existing = current_component(component, env, m)?;
     if let Some(e) = &existing {
-        if e.get("version").map(js_string).as_deref() == Some(version.as_str()) && e.get("sha256").map(js_string).as_deref() != Some(sha.as_str()) {
+        if e.get("version").map(display).as_deref() == Some(version.as_str()) && e.get("sha256").map(display).as_deref() != Some(sha.as_str()) {
             return Err(Failure::msg("A published component version cannot be replaced. Release a new version."));
         }
     }
@@ -206,7 +206,7 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
         Err(Unpack::Write(e)) => return Err(e.into()),
     }
     let manifest = package_info(Some(&read_json(&NATIVE.join(&[&staging, "component.json"]))?), &m.platform, &m.arch).map_err(Failure::msg)?;
-    if manifest.get("component").and_then(Value::as_str) != Some(component) || manifest.get("version").map(js_string).as_deref() != Some(version.as_str()) {
+    if manifest.get("component").and_then(Value::as_str) != Some(component) || manifest.get("version").map(display).as_deref() != Some(version.as_str()) {
         return Err(Failure::msg("Component archive differs from its release manifest."));
     }
     // Service and Tools are each the xenonet binary, in bin/; the tray is
@@ -225,7 +225,7 @@ pub async fn stage_package(io: &Io, file: &str, expected: &Value, env: &Env, m: 
                 if fsx::exists(&dest) {
                     break;
                 }
-                let code = xenonet_base::fs::code_of(&e);
+                let code = xenonet_os::fs::code_of(&e);
                 let mut err = FsError::of(e, "rename", &staging);
                 if err.code.is_some() {
                     err.message = format!("{} -> '{dest}'", err.message);
@@ -253,7 +253,7 @@ pub async fn lock(io: &Io, env: &Env, m: &Machine) -> Result<String, Failure> {
             return Err(e.into());
         }
         let text = fsx::read_text(&file)?;
-        let pid = xenonet_base::text::js_number(Some(&Value::String(text)));
+        let pid = xenonet_text::text::to_number(Some(&Value::String(text)));
         if pid > 0.0 {
             // process.kill(pid, 0): there, or not (ESRCH); anything else is
             // passed on.

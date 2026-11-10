@@ -18,7 +18,7 @@ pub use core::{Core, Gather, Keep, Say, CAPABILITIES, KEEPALIVE_MS, LOOK_MS};
 use crate::apps::App;
 use crate::products::Product;
 use serde_json::Value;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 /// What a call on the host threw: its message and, for a file or a
 /// database, the error's code (ENOENT, EACCES, SQLITE_BUSY).
@@ -227,7 +227,7 @@ pub fn product_app(p: &Product) -> App {
 
 /// A value as `${v}` writes it.
 pub(crate) fn text(v: &Value) -> String {
-    js_string(v)
+    display(v)
 }
 
 /// `${v}`, or "" for null.
@@ -235,6 +235,6 @@ pub(crate) fn text_or_empty(v: &Value) -> String {
     if v.is_null() {
         String::new()
     } else {
-        js_string(v)
+        display(v)
     }
 }

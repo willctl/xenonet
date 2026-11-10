@@ -13,14 +13,14 @@ use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_adapter::observe::{self, Actors, Census, Db, Fail, Files, Observer, ObserverHost, Pins, Procs, SpawnsState, Stat, Vendor, LOOK_MS};
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_blocks::lifecycle::Lifecycle;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::sql::{self, Bind};
 use xenonet_engine::store::row_json;
+use xenonet_os::sync::Locked;
 use xenonet_schema::drift::{DriftLog, Piece};
 use xenonet_schema::vendor::{Checked, Readers};
+use xenonet_text::time::now_ms;
 
 /// One observer: a building block with its lifecycle.
 pub struct One {
@@ -106,7 +106,7 @@ impl Host<'_> {
     }
 
     fn waiting_json(list: &[xenonet_actors::registry::Waiting]) -> Vec<Value> {
-        list.iter().map(|w| json!({ "actor": w.actor, "app": w.app, "place": w.place, "own": w.own.iter().map(|p| xenonet_base::json::number(*p)).collect::<Vec<_>>(), "at": xenonet_base::json::number(w.at), "until": xenonet_base::json::number(w.until) })).collect()
+        list.iter().map(|w| json!({ "actor": w.actor, "app": w.app, "place": w.place, "own": w.own.iter().map(|p| xenonet_text::json::number(*p)).collect::<Vec<_>>(), "at": xenonet_text::json::number(w.at), "until": xenonet_text::json::number(w.until) })).collect()
     }
 
     fn sql(e: sql::SqlError) -> Fail {
@@ -114,12 +114,12 @@ impl Host<'_> {
     }
 }
 
-fn fs_fail(e: xenonet_base::fs::FsError) -> Fail {
+fn fs_fail(e: xenonet_os::fs::FsError) -> Fail {
     Fail { message: e.message, code: e.code }
 }
 
 fn io_fail(e: std::io::Error, syscall: &str, path: &str) -> Fail {
-    fs_fail(xenonet_base::fs::FsError::of(e, syscall, path))
+    fs_fail(xenonet_os::fs::FsError::of(e, syscall, path))
 }
 
 impl Files for Host<'_> {
@@ -133,16 +133,16 @@ impl Files for Host<'_> {
         self.read(path).map(|b| String::from_utf8_lossy(&b).into_owned())
     }
     fn readdir(&self, path: &str) -> observe::Result<Vec<String>> {
-        let ents = xenonet_base::paths::read_dir_sorted(std::path::Path::new(path)).map_err(|e| io_fail(e, "scandir", path))?;
+        let ents = xenonet_os::paths::read_dir_sorted(std::path::Path::new(path)).map_err(|e| io_fail(e, "scandir", path))?;
         Ok(ents.into_iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
     }
     fn dirs(&self, path: &str) -> observe::Result<Vec<String>> {
-        let ents = xenonet_base::paths::read_dir_sorted(std::path::Path::new(path)).map_err(|e| io_fail(e, "scandir", path))?;
+        let ents = xenonet_os::paths::read_dir_sorted(std::path::Path::new(path)).map_err(|e| io_fail(e, "scandir", path))?;
         Ok(ents.into_iter().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
     }
     fn stat(&self, path: &str) -> observe::Result<Stat> {
         let m = std::fs::metadata(path).map_err(|e| io_fail(e, "stat", path))?;
-        Ok(Stat { mtime_ms: xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), size: m.len() as f64 })
+        Ok(Stat { mtime_ms: xenonet_os::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), size: m.len() as f64 })
     }
 }
 
@@ -345,7 +345,7 @@ impl ObserverHost for Host<'_> {
     // A key of a binary Info.plist, through plutil.
     fn plist_key(&self, file: &str, key: &str) -> Option<String> {
         let a = ["-extract".to_string(), key.to_string(), "raw".into(), "-o".into(), "-".into(), file.to_string()];
-        crate::exec::run(&crate::exec::Spec::new("plutil", &a, 3000)).ok().map(|out| xenonet_base::text::js_trim(&out).to_string())
+        crate::exec::run(&crate::exec::Spec::new("plutil", &a, 3000)).ok().map(|out| xenonet_text::text::trim(&out).to_string())
     }
 }
 

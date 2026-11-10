@@ -23,8 +23,8 @@
 //! `plan_take` and `took` for each read.
 
 use crate::lifecycle::Lifecycle;
-use xenonet_base::ordered::{Cursor, OrderedMap};
-use xenonet_base::text::is_blank;
+use xenonet_text::ordered::{Cursor, OrderedMap};
+use xenonet_text::text::is_blank;
 
 /// Where a file it follows is: how far it's read, and the half line after.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

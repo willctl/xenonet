@@ -12,10 +12,10 @@
 
 use crate::tokens::is_token;
 use std::path::Path;
-use xenonet_base::fs::FsError;
-use xenonet_base::paths::{is_under, path_key, resolve};
-use xenonet_base::private_file::{acl_of, chmod_600, mode_of, others_in, protect_file, run_command, user_sid, Error, Run};
-use xenonet_base::text::js_trim;
+use xenonet_os::fs::FsError;
+use xenonet_os::paths::{is_under, path_key, resolve};
+use xenonet_os::private_file::{acl_of, chmod_600, mode_of, others_in, protect_file, run_command, user_sid, Error, Run};
+use xenonet_text::text::trim;
 
 /// Folders of dependencies, builds and caches, whose ignored files are many
 /// and none of them yours: the doctor's look past .gitignore leaves them
@@ -58,7 +58,7 @@ pub fn read_token_file(file: &str, windows: bool, run: &mut Run<'_>) -> Result<S
         return Err(said(format!("other users can read {file}, so XenoNet won't use the token in it; make it yours alone with chmod 600")));
     }
     let raw = std::fs::read(file).map_err(|e| Error::Fs(FsError::of(e, "open", file)))?;
-    let token = js_trim(&String::from_utf8_lossy(&raw)).to_string();
+    let token = trim(&String::from_utf8_lossy(&raw)).to_string();
     if !is_token(&token) {
         return Err(said(format!("{file} doesn't hold an actor's token")));
     }
@@ -73,7 +73,7 @@ pub fn token_from_env(env: &dyn Fn(&str) -> Option<String>, windows: bool, run: 
         return Ok(Some((read_token_file(&file, windows, run)?, Some(file))));
     }
     if let Some(token) = env("XENONET_ACTOR_TOKEN").filter(|t| !t.is_empty()) {
-        let token = js_trim(&token).to_string();
+        let token = trim(&token).to_string();
         if !is_token(&token) {
             return Err(said("XENONET_ACTOR_TOKEN doesn't hold an actor's token".into()));
         }
@@ -102,7 +102,7 @@ pub fn token_file_refusal(file: &str, force: bool, projects_dir: Option<&str>) -
         return None;
     }
     let full = resolve(file);
-    if let Some(tree) = git_tree_of(&xenonet_base::nodepath::dirname(&full)) {
+    if let Some(tree) = git_tree_of(&xenonet_os::nodepath::dirname(&full)) {
         return Some(format!("{full} is inside a git working tree ({tree}), where agents read freely and tokens get committed. Pick a file elsewhere, such as ~/.config/<name>/xenonet.token, or pass --force"));
     }
     let projects = projects_dir.filter(|p| !p.is_empty()).and_then(path_key);
@@ -139,7 +139,7 @@ pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_
         return Err(said(why));
     }
     let full = resolve(file);
-    let dir = xenonet_base::nodepath::dirname(&full);
+    let dir = xenonet_os::nodepath::dirname(&full);
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]

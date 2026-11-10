@@ -77,7 +77,7 @@ impl LineSplitter {
 pub fn parse_frame(line: &str, known: Option<&[&str]>) -> Result<Value, String> {
     // JSON.parse takes any depth; this parser stops past 512 levels, far
     // deeper than any frame (MAX_DEPTH), so such a line is one too deep.
-    let frame = match xenonet_base::json::parse(line) {
+    let frame = match xenonet_text::json::parse(line) {
         Ok(f) => f,
         Err(e) if e.message == "Nested too deeply" => return Err("a frame nested too deep".into()),
         Err(_) => return Err("not JSON".into()),
@@ -92,7 +92,7 @@ pub fn parse_frame(line: &str, known: Option<&[&str]>) -> Result<Value, String> 
 }
 
 pub fn encode(frame: &Value) -> String {
-    format!("{}\n", xenonet_base::json::stringify(frame, 0))
+    format!("{}\n", xenonet_text::json::stringify(frame, 0))
 }
 
 /// Whether a value nests no deeper than `max` arrays and objects, checked
@@ -139,7 +139,7 @@ mod tests {
     fn frames_and_depth() {
         assert!(parse_frame("[1,2]", None).is_err());
         assert!(parse_frame("{\"t\":\"exec\"}", Some(&FROM_RELAY)).unwrap_err().contains("doesn't know (exec)"));
-        let deep = xenonet_base::json::parse(&format!("{}{}", "[".repeat(100), "]".repeat(100))).unwrap();
+        let deep = xenonet_text::json::parse(&format!("{}{}", "[".repeat(100), "]".repeat(100))).unwrap();
         assert!(!shallow(&deep, MAX_DEPTH));
     }
 }

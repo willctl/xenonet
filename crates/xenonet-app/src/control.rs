@@ -16,8 +16,8 @@ use crate::jsv::{raw, truthy};
 use crate::nodepath::NATIVE;
 use crate::task::{now_ms, Failure, Io};
 use serde_json::{json, Map, Value};
-use xenonet_base::json::{number_string, stringify};
-use xenonet_base::text::js_string;
+use xenonet_text::json::{number_string, stringify};
+use xenonet_text::text::display;
 
 /// Where an instance keeps its Electron data, its single-instance lock
 /// among it: a folder of its name in the system's app data folder.
@@ -90,7 +90,7 @@ pub async fn lock_holder(io: &Io, dir: &str) -> Result<Value, Failure> {
     // enough for a socket, where the data folder's might not be.
     let socket = NATIVE.join(&[dir, "SingletonSocket"]);
     let socket = fsx::realpath(&socket).unwrap_or(socket);
-    Ok(if connects(&socket) { xenonet_base::json::number(pid) } else { Value::Null })
+    Ok(if connects(&socket) { xenonet_text::json::number(pid) } else { Value::Null })
 }
 
 /// A process of the machine's: its pid, its parent's, and when it started,
@@ -144,7 +144,7 @@ fn descendants(table: &[Proc], pid: f64) -> Vec<Proc> {
 /// instance's only, and never on the ports of the installed XenoNet or of
 /// XenoNet Dev's demo and dev instances (47840 to 47842), which are yours.
 pub fn owns_tree(id: &str, port: &Value) -> bool {
-    id == "test" && !(47840.0..=47842.0).contains(&xenonet_base::text::js_number(Some(port)))
+    id == "test" && !(47840.0..=47842.0).contains(&xenonet_text::text::to_number(Some(port)))
 }
 
 /// One instance of XenoNet Dev, and how to reach it.
@@ -184,10 +184,10 @@ impl Instance {
             return Err(format!("no instance \"{id}\"; there's {}", ids.join(", ")));
         };
         let port = o.port.clone().filter(|p| !p.is_null()).unwrap_or(json!(i.port));
-        let base = format!("http://127.0.0.1:{}", js_string(&port));
+        let base = format!("http://127.0.0.1:{}", display(&port));
         let lock_dir = match o.user_data {
             Some(d) => d.to_string(),
-            None if id == "test" => NATIVE.join(&[o.tmpdir, &format!("xenonet-demo-{}", js_string(&port)), "electron"]),
+            None if id == "test" => NATIVE.join(&[o.tmpdir, &format!("xenonet-demo-{}", display(&port)), "electron"]),
             None => user_data_dir(i.name, o.platform, o.appdata, o.xdg_config_home, o.home),
         };
         Ok(Instance {
@@ -205,7 +205,7 @@ impl Instance {
     }
 
     fn port_text(&self) -> String {
-        js_string(&self.port)
+        display(&self.port)
     }
 
     // What's on the port: "up" (a XenoNet answers), "down" (nothing
@@ -250,7 +250,7 @@ impl Instance {
 
     // What's said of a copy that holds the lock without answering here.
     fn held(&self, pid: &Value) -> String {
-        let (pid, name, port) = (js_string(pid), &self.name, self.port_text());
+        let (pid, name, port) = (display(pid), &self.name, self.port_text());
         format!("process {pid} holds {name}'s single-instance lock but doesn't answer on port {port}: it's stuck (on its way out, or on an error page) or running on another port, and a new copy would quit at once. Launch with restart to end it, or end it yourself: kill {pid}, then kill -9 {pid} if it stays.")
     }
 
@@ -273,15 +273,15 @@ impl Instance {
                     return Err(Failure::msg(if refused {
                         format!("{} isn't running (nothing on port {}); launch it first", self.name, self.port_text())
                     } else {
-                        let why = raw(Some(&e), "causeMessage").filter(|m| !m.is_null()).or_else(|| raw(Some(&e), "message")).map(js_string).unwrap_or_default();
+                        let why = raw(Some(&e), "causeMessage").filter(|m| !m.is_null()).or_else(|| raw(Some(&e), "message")).map(display).unwrap_or_default();
                         format!("lost the connection to {} mid-request (its server restarted?): {why}", self.name)
                     }));
                 }
             };
-            let status_line = format!("{} {}", js_string(&res["status"]), res.get("statusText").map(js_string).unwrap_or_default());
+            let status_line = format!("{} {}", display(&res["status"]), res.get("statusText").map(display).unwrap_or_default());
             let data = if res.get("bodyError").is_some() { json!({ "error": status_line }) } else { res.get("body").cloned().unwrap_or(Value::Null) };
             if res["ok"] != json!(true) {
-                let why = raw(Some(&data), "error").filter(|e| !e.is_null()).map_or(status_line, js_string);
+                let why = raw(Some(&data), "error").filter(|e| !e.is_null()).map_or(status_line, display);
                 return Err(Failure::msg(why));
             }
             return Ok(data);
@@ -311,7 +311,7 @@ impl Instance {
                 return Err(Failure::msg(format!(
                     "port {} has a XenoNet server with no window to control ({})",
                     self.port_text(),
-                    raw(Some(&last), "error").map_or_else(|| "undefined".into(), js_string)
+                    raw(Some(&last), "error").map_or_else(|| "undefined".into(), display)
                 )));
             }
             io.sleep(500.0).await;
@@ -326,7 +326,7 @@ impl Instance {
     /// first, and ends a copy stuck holding its lock. What it returns says
     /// what it ended on the way, if anything.
     pub async fn launch(&self, io: &Io, show: Option<&Value>, restart: bool, timeout: f64) -> Result<Value, Failure> {
-        let show = show.filter(|s| !s.is_null()).map_or_else(|| if self.id == "test" { "hidden".to_string() } else { "inactive".to_string() }, js_string);
+        let show = show.filter(|s| !s.is_null()).map_or_else(|| if self.id == "test" { "hidden".to_string() } else { "inactive".to_string() }, display);
         // An unknown word would reach the window as XENONET_SHOW, which shows
         // it in front: refused here instead.
         if !["inactive", "front", "hidden"].contains(&show.as_str()) {
@@ -402,9 +402,9 @@ impl Instance {
                     return Err(Failure::msg(format!("{} quit at once: {}", self.name, self.held(&holder))));
                 }
                 let text = fsx::read_text(&log_file)?;
-                let lines: Vec<&str> = xenonet_base::text::js_trim(&text).split('\n').collect();
+                let lines: Vec<&str> = xenonet_text::text::trim(&text).split('\n').collect();
                 let tail = lines[lines.len().saturating_sub(12)..].join("\n");
-                return Err(Failure::msg(format!("{} exited ({}) before it was ready. The end of {relative}:\n{tail}", self.name, js_string(&exited))));
+                return Err(Failure::msg(format!("{} exited ({}) before it was ready. The end of {relative}:\n{tail}", self.name, display(&exited))));
             }
             io.sleep(500.0).await;
         }
@@ -537,7 +537,7 @@ impl Instance {
         let tree = self.tree_of(io, pid).await?;
         let _ = self.call(io, &json!({ "op": "quit" }), 0.0).await;
         let until = now_ms() + timeout;
-        let pids = |l: &[f64]| Value::Array(l.iter().map(|p| xenonet_base::json::number(*p)).collect());
+        let pids = |l: &[f64]| Value::Array(l.iter().map(|p| xenonet_text::json::number(*p)).collect());
         loop {
             let state = self.probe(io).await;
             let alive = match pid {
@@ -566,7 +566,7 @@ impl Instance {
                 let pid = pid.unwrap_or(f64::NAN);
                 let all: Vec<f64> = std::iter::once(pid).chain(left.iter().copied()).collect();
                 if self.killed(io, &all).await? {
-                    let mut out = json!({ "quit": true, "killed": xenonet_base::json::number(pid) });
+                    let mut out = json!({ "quit": true, "killed": xenonet_text::json::number(pid) });
                     if !left.is_empty() {
                         out["ended"] = pids(&left);
                     }
@@ -619,7 +619,7 @@ impl Instance {
         if res["ok"] != json!(true) {
             let why = match &data {
                 Value::Null => return Err(Failure::type_error("Cannot read properties of null (reading 'error')")),
-                d => raw(Some(d), "error").filter(|e| !e.is_null()).map_or_else(|| res.get("statusText").map(js_string).unwrap_or_default(), js_string),
+                d => raw(Some(d), "error").filter(|e| !e.is_null()).map_or_else(|| res.get("statusText").map(display).unwrap_or_default(), display),
             };
             return Err(Failure::msg(why));
         }

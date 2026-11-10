@@ -15,9 +15,11 @@ use jsre::{line_starts_with, read_text};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use xenonet_base::nodepath::{self, NATIVE};
-use xenonet_base::{ids, json as js_json, jsstr, paths, text};
+use xenonet_model::ids;
+use xenonet_os::nodepath::{self, NATIVE};
+use xenonet_os::paths;
 use xenonet_sources::lines::{prop, TypeError};
+use xenonet_text::{json as js_json, text, utf16};
 
 const STACK_MARKERS: [(&str, &str); 12] = [
     ("package.json", "node"),
@@ -203,7 +205,7 @@ impl GitInfo {
 // /^(.*)[\\/]\.git[\\/]modules[\\/]/: what comes before a git dir's
 // .git/modules/, the last on its first line.
 fn superproject(git_dir: &str) -> Option<String> {
-    let line: &str = git_dir.split(text::is_js_line_terminator).next().unwrap_or("");
+    let line: &str = git_dir.split(text::is_line_terminator).next().unwrap_or("");
     let b = line.as_bytes();
     let sep = |c: u8| c == b'/' || c == b'\\';
     (0..b.len())
@@ -219,16 +221,16 @@ pub fn git_info(dir: &str) -> Option<GitInfo> {
     if st.is_file() {
         // A worktree or submodule: `.git` is a file pointing at the git dir.
         let to = jsre::rest_after(&read_text(&git_dir, 4096).unwrap_or_default(), "gitdir:")?;
-        git_dir = nodepath::resolve(&[dir, text::js_trim(&to)]);
+        git_dir = nodepath::resolve(&[dir, text::trim(&to)]);
     }
     // A linked worktree's git dir names the main repo's .git in commondir.
-    let common = read_text(&paths::join(&git_dir, "commondir"), 4096).map(|c| text::js_trim(&c).to_string());
+    let common = read_text(&paths::join(&git_dir, "commondir"), 4096).map(|c| text::trim(&c).to_string());
     let common = common.filter(|c| !c.is_empty());
     let common_dir = common.as_ref().map_or_else(|| git_dir.clone(), |c| nodepath::resolve(&[git_dir.as_str(), c.as_str()]));
     let head = read_text(&paths::join(&git_dir, "HEAD"), 4096).unwrap_or_default();
     let branch = match jsre::rest_after_both(&head, "ref:", "refs/heads/") {
-        Some(b) => Some(text::js_trim(&b).to_string()),
-        None => Some(jsstr::head(text::js_trim(&head), 12)).filter(|b| !b.is_empty()),
+        Some(b) => Some(text::trim(&b).to_string()),
+        None => Some(utf16::head(text::trim(&head), 12)).filter(|b| !b.is_empty()),
     };
     let cfg = read_text(&paths::join(&common_dir, "config"), 16384).unwrap_or_default();
     Some(GitInfo {
@@ -245,12 +247,12 @@ fn first_paragraph(md: Option<&str>) -> Option<String> {
     let md = md.filter(|m| !m.is_empty())?;
     for raw in md.split('\n') {
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
-        let line = text::js_trim(raw);
+        let line = text::trim(raw);
         if line.is_empty() || line.starts_with('#') || line.starts_with('<') || line.starts_with("![") || line.starts_with("[!") {
             continue;
         }
         let plain: String = line.chars().filter(|c| !matches!(c, '*' | '_' | '`')).collect();
-        return Some(jsstr::head(&plain, 180));
+        return Some(utf16::head(&plain, 180));
     }
     None
 }
@@ -318,7 +320,7 @@ fn outline(f: &Facts, out: &mut Map<String, Value>) {
     }
     kinds.sort_by_key(|k| std::cmp::Reverse(k.1));
     let mut markers: Vec<String> = f.names.iter().filter(|n| known_file(n) || is_readme(n, true)).cloned().collect();
-    markers.sort_by(|a, b| jsstr::cmp_units(a, b));
+    markers.sort_by(|a, b| utf16::cmp_units(a, b));
     out.insert("markers".into(), json!(markers));
     out.insert("files".into(), json!(files.len()));
     out.insert("folders".into(), json!(f.subdirs.iter().filter(|n| !n.starts_with('.')).count()));
@@ -343,14 +345,14 @@ fn stops(f: &Folder) -> bool {
 }
 
 fn len16(s: &str) -> usize {
-    jsstr::len(s)
+    utf16::len(s)
 }
 
 // key.slice(0, key.lastIndexOf("/")).
 fn parent_key(key: &str) -> String {
     match key.rfind('/') {
         Some(i) => key[..i].to_string(),
-        None => jsstr::slice(key, 0, Some(-1)),
+        None => utf16::slice(key, 0, Some(-1)),
     }
 }
 
@@ -496,7 +498,7 @@ impl Scan {
 
     fn depth_of(&self, key: &str) -> f64 {
         let rl = self.root_key.as_deref().map_or(0, len16);
-        jsstr::slice(key, rl as i64, None).matches('/').count() as f64
+        utf16::slice(key, rl as i64, None).matches('/').count() as f64
     }
 
     // The nearest folder at or above `key` (or above it only) that `test`
@@ -549,7 +551,7 @@ impl Scan {
             if by_codex && self.yours_above(key) {
                 continue;
             }
-            let path = prop(Some(r), "path")?.filter(|p| text::truthy(Some(p))).map(text::js_string);
+            let path = prop(Some(r), "path")?.filter(|p| text::truthy(Some(p))).map(text::display);
             self.add(path.as_deref(), "rule", None)?;
         }
 
@@ -576,7 +578,7 @@ impl Scan {
             if !text::truthy(Some(d)) {
                 continue;
             }
-            let dir = text::js_string(d);
+            let dir = text::display(d);
             let Some(key) = paths::path_key(&dir) else { continue };
             if !paths::is_under(&key, &root_key) || key == root_key || self.ignored(&key)? {
                 continue;
@@ -678,7 +680,7 @@ impl Scan {
             let group = groups.contains(key);
             let git = if f.facts.vcs == Some(".git") { git_info(&f.path).map(|g| g.to_json()) } else { None };
             let (stack, description) = describe(&f.path, &f.facts);
-            let modified = std::fs::metadata(&f.path).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok());
+            let modified = std::fs::metadata(&f.path).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok());
             let detected =
                 if group { Value::String((if self.rule_is(key, "group") { "rule" } else { "contains" }).into()) } else { f.why.map_or(Value::Null, |w| Value::String(w.into())) };
             let parent = self.nearest(key, false, &|x| kept.contains(&x.key));
@@ -697,14 +699,14 @@ impl Scan {
             p.insert("modifiedAt".into(), modified.map_or(Value::Null, js_json::number));
             projects.push((key.clone(), Value::Object(p)));
         }
-        projects.sort_by(|a, b| jsstr::locale_compare(&a.0, &b.0));
+        projects.sort_by(|a, b| utf16::locale_compare(&a.0, &b.0));
         let groups_count = projects.iter().filter(|(_, p)| p["role"] == "group").count();
         let count = projects.len() - groups_count;
 
         // Every folder the scan looked at, as names and counts only, for
         // the optional Codex pass (see classify.js) to judge.
         let mut all: Vec<&Folder> = self.values().into_iter().map(|i| &self.folders[i]).collect();
-        all.sort_by(|a, b| jsstr::locale_compare(&a.key, &b.key));
+        all.sort_by(|a, b| utf16::locale_compare(&a.key, &b.key));
         let folders = all
             .into_iter()
             .map(|f| {
@@ -791,7 +793,7 @@ fn rel_of(root: &str, p: &str) -> String {
 // `xs.slice(0, end)`'s end, as JS reads it from a value.
 fn slice_end(len: usize, end: Option<&Value>) -> usize {
     let Some(v) = end else { return len };
-    let n = text::js_number(Some(v));
+    let n = text::to_number(Some(v));
     if n.is_nan() {
         return 0;
     }
@@ -815,11 +817,11 @@ pub type KeyPairs = Vec<(String, String)>;
 /// a remote.
 pub fn relations(projects: &[Value]) -> Result<(KeyPairs, KeyPairs), TypeError> {
     let real: Vec<&Value> = projects.iter().filter(|p| p.get("role").and_then(Value::as_str) != Some("group")).collect();
-    let key_of = |p: &Value| -> String { p.get("key").map_or_else(|| "undefined".into(), text::js_string) };
+    let key_of = |p: &Value| -> String { p.get("key").map_or_else(|| "undefined".into(), text::display) };
     let parent_of = |p: &Value| -> String {
         match p.get("parent") {
             None | Some(Value::Null) => String::new(),
-            Some(v) => text::js_string(v),
+            Some(v) => text::display(v),
         }
     };
     let name_of = |p: &Value| -> Result<String, TypeError> {
@@ -846,7 +848,7 @@ pub fn relations(projects: &[Value]) -> Result<(KeyPairs, KeyPairs), TypeError> 
     for (i, p) in real.iter().enumerate() {
         let wt = p.get("git").and_then(|g| g.get("worktreeOf")).filter(|w| text::truthy(Some(w)));
         let main = wt.and_then(|w| {
-            let s = text::js_string(w);
+            let s = text::display(w);
             paths::path_key(&s).and_then(|k| by_key.get(&k).copied())
         });
         if let Some(m) = main.filter(|&m| m != i) {

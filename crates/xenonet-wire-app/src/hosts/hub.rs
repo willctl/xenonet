@@ -38,9 +38,9 @@ use xenonet_api::cores::hosts::HubAnswer;
 use xenonet_api::cores::{CoreError, Hub, HubNet, State, Store, R};
 use xenonet_api::wire::Emitter;
 use xenonet_api::From;
-use xenonet_base::network::{Incoming, Net, RelaySink};
 use xenonet_hosts::network::{self as wire, Order};
 use xenonet_hosts::{aliases, cache, frames, hub as core, link, merge};
+use xenonet_model::ops::{Incoming, Net, RelaySink};
 
 /// What the page sees on a network host drawn from its relay's snapshot,
 /// as `network`; one drawn from its presence has `true` there.
@@ -228,7 +228,7 @@ impl link::Asks for Asks<'_> {
         if self.home.is_empty() {
             p.to_string()
         } else {
-            xenonet_base::paths::tilde(p, self.home)
+            xenonet_os::paths::tilde(p, self.home)
         }
     }
 }
@@ -238,7 +238,7 @@ fn fail(message: impl Into<String>, status: u16) -> CoreError {
 }
 
 fn s(v: Option<&Value>) -> Option<String> {
-    v.filter(|x| !x.is_null()).map(xenonet_base::text::js_string)
+    v.filter(|x| !x.is_null()).map(xenonet_text::text::display)
 }
 
 /// Why a network host's link waits.
@@ -473,7 +473,7 @@ impl HostHub {
 
     fn spawn(&self, l: &mut LinkRt, r: &LinkRef, run: u64, file: &str, args: &[String], env: &serde_json::Map<String, Value>) -> Vec<link::Effect> {
         let mut cmd = tokio::process::Command::new(file);
-        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        xenonet_os::process::Background::no_window(cmd.as_std_mut());
         cmd.args(args)
             .env_clear()
             .envs(crate::fx::env_pairs(env))
@@ -485,7 +485,7 @@ impl HostHub {
             Ok(c) => c,
             Err(e) => {
                 l.unstarted.insert(run);
-                let code = xenonet_base::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string);
+                let code = xenonet_os::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string);
                 return self.end(l, run, None, None, Some(&code), None);
             }
         };
@@ -696,7 +696,7 @@ impl HostHub {
         let _ = probe.link.core.stop(now_ms());
         probe.link.abandon(None);
         let out = json!({
-            "id": probe.id, "ok": ok, "ms": xenonet_base::json::number(now_ms() - probe.started), "state": info["state"], "error": info["error"], "hello": info["hello"],
+            "id": probe.id, "ok": ok, "ms": xenonet_text::json::number(now_ms() - probe.started), "state": info["state"], "error": info["error"], "hello": info["hello"],
             "offsetMs": info["offsetMs"], "rttMs": info["rttMs"], "target": info["target"], "snapshot": probe.got, "dropped": info["counts"]["dropped"],
         });
         if let Some(done) = probe.done.take() {
@@ -863,7 +863,7 @@ impl HostHub {
             Some(&self.parts.cache_dir),
             &key,
             &json!(id),
-            &xenonet_base::json::number(saved_at),
+            &xenonet_text::json::number(saved_at),
             &rt.link.core.hello,
             snap.get("graph").filter(|g| !g.is_null()),
             snap.get("live").filter(|l| !l.is_null()),
@@ -1183,7 +1183,7 @@ impl HostHub {
     /// relay of this machine's own map served as if it were that host's,
     /// over a network inside this process. `off` takes it away.
     fn simulate_net(&self, id: Option<&str>, off: bool) -> Value {
-        let id = id.filter(|i| xenonet_base::ids::is_host_id(i)).unwrap_or("laptop").to_string();
+        let id = id.filter(|i| xenonet_model::ids::is_host_id(i)).unwrap_or("laptop").to_string();
         let mut st = self.st.locked();
         let had = st.runtimes.iter().position(|(k, rt)| *k == id && rt.network && rt.simulated);
         if let Some(at) = had {
@@ -1638,7 +1638,7 @@ mod tests {
     }
 
     fn from(host: &str, sub: &str, seq: u64, frames: &[Value]) -> Incoming {
-        Incoming { from: host.into(), kind: xenonet_base::network::Kind::Relay, body: wire::batch(sub, seq, frames), at: now_ms(), from_window_host: true }
+        Incoming { from: host.into(), kind: xenonet_model::ops::Kind::Relay, body: wire::batch(sub, seq, frames), at: now_ms(), from_window_host: true }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1716,18 +1716,18 @@ mod tests {
     /// studio's network, as its hub sees it: laptop online, a window host;
     /// what it sends is kept.
     struct Roster {
-        hosts: Mutex<Vec<xenonet_base::network::Host>>,
-        sent: Mutex<Vec<xenonet_base::network::Outgoing>>,
+        hosts: Mutex<Vec<xenonet_model::ops::Host>>,
+        sent: Mutex<Vec<xenonet_model::ops::Outgoing>>,
     }
 
     impl Net for Roster {
-        fn me(&self) -> Option<xenonet_base::network::Me> {
-            Some(xenonet_base::network::Me { network: NETWORK.into(), name: "home".into(), host: "studio".into() })
+        fn me(&self) -> Option<xenonet_model::ops::Me> {
+            Some(xenonet_model::ops::Me { network: NETWORK.into(), name: "home".into(), host: "studio".into() })
         }
-        fn hosts(&self) -> Vec<xenonet_base::network::Host> {
+        fn hosts(&self) -> Vec<xenonet_model::ops::Host> {
             self.hosts.locked().clone()
         }
-        fn send(&self, out: xenonet_base::network::Outgoing) -> Result<(), String> {
+        fn send(&self, out: xenonet_model::ops::Outgoing) -> Result<(), String> {
             self.sent.locked().push(out);
             Ok(())
         }
@@ -1750,7 +1750,7 @@ mod tests {
         let (h, dir) = hub("roster");
         let core = HubCore(h.clone());
         let net =
-            Arc::new(Roster { hosts: Mutex::new(vec![xenonet_base::network::Host { id: "laptop".into(), window: true, online: true, seen: None }]), sent: Mutex::new(Vec::new()) });
+            Arc::new(Roster { hosts: Mutex::new(vec![xenonet_model::ops::Host { id: "laptop".into(), window: true, online: true, seen: None }]), sent: Mutex::new(Vec::new()) });
         let sinks = Arc::new(xenonet_net::sink::SinkSlot::new(Arc::new(xenonet_net::sink::LogSink::new(Arc::new(|_: &str, _: &str| {})))));
         core.plug_net(HubNet {
             net: net.clone(),

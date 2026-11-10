@@ -120,7 +120,7 @@ fn entry(out: &mut impl Write, root: &Path, rel: &str) -> io::Result<()> {
         pad(out, data.len())?;
     }
     if kind.is_dir() {
-        for e in xenonet_base::paths::read_dir_sorted(&path)? {
+        for e in xenonet_os::paths::read_dir_sorted(&path)? {
             entry(out, root, &format!("{rel}/{}", e.file_name().to_string_lossy()))?;
         }
     }

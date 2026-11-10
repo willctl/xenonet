@@ -13,8 +13,8 @@ use crate::jstext::{slice16, url_host};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
-use xenonet_base::text::js_number;
-use xenonet_base::units::to_fixed;
+use xenonet_text::text::to_number;
+use xenonet_text::units::to_fixed;
 
 pub const DECISIONS_URL: &str = "https://openrouter.ai/api/alpha/decisions";
 pub const DEFAULT_MODEL: &str = "~typesafe/jev-latest";
@@ -57,7 +57,7 @@ pub fn settings(url: Option<&str>, model: Option<&str>) -> (String, String) {
 
 /// A key as given, trimmed, if it's an OpenRouter one.
 pub fn check_key(k: &str) -> Result<String, DecisionError> {
-    let k = xenonet_base::text::js_trim(k);
+    let k = xenonet_text::text::trim(k);
     if !key_re().is_match(k) {
         return Err(fail(400, "bad-request", "that isn't an OpenRouter key (sk-or-…)"));
     }
@@ -84,7 +84,7 @@ pub fn request(model: &str, key: &str, state: Option<&Value>, questions: Option<
         body.insert("questions".into(), q.clone());
     }
     body.insert("provider".into(), json!({ "zdr": true }));
-    (headers, xenonet_base::json::stringify(&Value::Object(body), 0))
+    (headers, xenonet_text::json::stringify(&Value::Object(body), 0))
 }
 
 /// OpenRouter couldn't be reached: what's logged and the error.
@@ -114,25 +114,25 @@ pub fn refused(status: u16, body: Option<&Value>, kind: &str) -> (LogLine, Decis
 /// OpenRouter answered: what's logged and the decision.
 pub fn answered(body: Option<&Value>, model: &str, kind: &str, questions: usize, ms: f64) -> (LogLine, Value) {
     let field = |k: &str| body.and_then(|b| b.get(k)).filter(|v| !v.is_null());
-    let cost = js_number(body.and_then(|b| b.get("usage")).and_then(|u| u.get("cost")));
+    let cost = to_number(body.and_then(|b| b.get("usage")).and_then(|u| u.get("cost")));
     let cost = if cost.is_nan() || cost == 0.0 { 0.0 } else { cost };
     let answered_by = field("model").cloned().unwrap_or_else(|| json!(model));
     let by = match &answered_by {
         Value::String(s) => s.clone(),
-        v => xenonet_base::text::js_string(v),
+        v => xenonet_text::text::display(v),
     };
     let plural = if questions == 1 { "" } else { "s" };
     let line = LogLine {
         level: "info",
         code: format!("decide.{kind}"),
-        message: format!("{by} answered {questions} question{plural} in {} ms, ${}", xenonet_base::json::number_string(ms), to_fixed(cost, 5)),
+        message: format!("{by} answered {questions} question{plural} in {} ms, ${}", xenonet_text::json::number_string(ms), to_fixed(cost, 5)),
     };
     let mut out = Map::new();
     out.insert("answers".into(), field("answers").cloned().unwrap_or_else(|| json!({})));
     out.insert("model".into(), answered_by);
     out.insert("provider".into(), field("provider").cloned().unwrap_or(Value::Null));
-    out.insert("cost".into(), xenonet_base::json::number(cost));
-    out.insert("ms".into(), xenonet_base::json::number(ms));
+    out.insert("cost".into(), xenonet_text::json::number(cost));
+    out.insert("ms".into(), xenonet_text::json::number(ms));
     (line, Value::Object(out))
 }
 

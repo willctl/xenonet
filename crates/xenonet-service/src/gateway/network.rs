@@ -2,7 +2,7 @@
 //! node (xenonet-net), its link to the gateway, and, when this host is a
 //! LAN-only gateway, the listener on the address the person picked.
 //!
-//! The engine reaches the network through `net()` (`xenonet_base::network::
+//! The engine reaches the network through `net()` (`xenonet_model::ops::
 //! Net`) and plugs its `Sink` in with `sinks().set(…)`. Until it does, a
 //! sink that logs takes what arrives.
 
@@ -11,11 +11,11 @@ use serde_json::Value;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use xenonet_base::network::Net;
-use xenonet_base::sync::Locked;
+use xenonet_model::ops::Net;
 use xenonet_net::node::{Node, Options};
 use xenonet_net::sink::{LogFn, LogSink, SinkSlot};
 use xenonet_net::{NetError, R};
+use xenonet_os::sync::Locked;
 
 pub struct NetService {
     node: Arc<Node>,

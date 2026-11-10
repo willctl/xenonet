@@ -29,12 +29,12 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use xenonet_adapter::products;
-use xenonet_base::json::number_string;
-use xenonet_base::nodepath::Style;
-use xenonet_base::paths::normalize_posix;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_number, js_trim};
-use xenonet_base::text::{template, truthy};
+use xenonet_os::nodepath::Style;
+use xenonet_os::paths::normalize_posix;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number_string;
+use xenonet_text::text::{template, truthy};
+use xenonet_text::text::{to_number, trim};
 
 const TABLE_MS: f64 = 1500.0;
 // New vouched app bundles a census reads the ids of, at most.
@@ -117,9 +117,9 @@ impl Row {
     /// they are.
     pub fn json(&self) -> serde_json::Map<String, Value> {
         let mut o = serde_json::Map::new();
-        o.insert("pid".into(), xenonet_base::json::number(self.pid));
-        o.insert("ppid".into(), xenonet_base::json::number(self.ppid));
-        o.insert("start".into(), xenonet_base::json::number(self.start));
+        o.insert("pid".into(), xenonet_text::json::number(self.pid));
+        o.insert("ppid".into(), xenonet_text::json::number(self.ppid));
+        o.insert("start".into(), xenonet_text::json::number(self.start));
         o.insert("program".into(), Value::String(self.program.clone()));
         o
     }
@@ -296,7 +296,7 @@ fn vouch(product: Option<Product>, program: &str, id: Option<&str>) -> Option<Pr
 }
 
 fn js_num(s: &str) -> f64 {
-    js_number(Some(&Value::String(s.to_string())))
+    to_number(Some(&Value::String(s.to_string())))
 }
 
 // Number(s) || null: what the "p" lines of lsof's answers name.
@@ -375,7 +375,7 @@ fn date_utc(year: f64, month: f64, day: f64, h: f64, m: f64, s: f64) -> f64 {
     if !ym.is_finite() || ym.abs() > 400_000.0 {
         return f64::NAN;
     }
-    let days = xenonet_base::time::days_from_civil(ym as i64, mn as u32 + 1, 1) as f64 + day - 1.0;
+    let days = xenonet_text::time::days_from_civil(ym as i64, mn as u32 + 1, 1) as f64 + day - 1.0;
     let t = days * 86_400_000.0 + h * 3_600_000.0 + m * 60_000.0 + s * 1000.0;
     if t.abs() > 8.64e15 {
         f64::NAN
@@ -398,7 +398,7 @@ pub fn parse_ps(text: &str) -> Table {
             None => 0.0,
         };
         let pid = js_num(&m[1]);
-        table.set(pid, Row { pid, ppid: js_num(&m[2]), start, program: js_trim(&m[9]).to_string() });
+        table.set(pid, Row { pid, ppid: js_num(&m[2]), start, program: trim(&m[9]).to_string() });
     }
     table
 }
@@ -629,11 +629,11 @@ impl Procs {
         let (local, remote) = (template(local_port), template(remote_port));
         let found = match self.platform.as_str() {
             "win32" => parse_netstat_windows(&io.exec(Call::new("netstat", &["-ano", "-p", "TCP"])).unwrap_or_default(), &local, &remote),
-            "linux" => io.exec(Call::new(TCP_PEER, &[&local, &remote])).ok().map(|t| js_num(js_trim(&t))).filter(|p| p.is_finite() && *p > 0.0),
+            "linux" => io.exec(Call::new(TCP_PEER, &[&local, &remote])).ok().map(|t| js_num(trim(&t))).filter(|p| p.is_finite() && *p > 0.0),
             _ => parse_netstat(&io.exec(Call::new("netstat", &["-anv", "-p", "tcp"])).unwrap_or_default(), &local, &remote),
         };
         match found {
-            Some(pid) => (xenonet_base::json::number(pid), true),
+            Some(pid) => (xenonet_text::json::number(pid), true),
             None => (Value::Null, false),
         }
     }
@@ -761,7 +761,7 @@ impl Procs {
     }
 
     fn settle_bundle(&self, bundle: &str, answer: Result<String, Failure>) -> Option<String> {
-        let id = answer.ok().map(|out| js_trim(&out).to_string()).filter(|s| !s.is_empty());
+        let id = answer.ok().map(|out| trim(&out).to_string()).filter(|s| !s.is_empty());
         let mut s = self.s();
         if let Some(slot) = s.bundle_reads.get_mut(bundle) {
             *slot = BundleRead::Settled(id.clone());

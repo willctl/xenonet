@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 const KEEP: usize = 1 << 20;
 const MAX: usize = 64;
@@ -48,7 +48,7 @@ const POSIX_DIRS: [&str; 4] = ["/bin", "/opt/homebrew/bin", "/usr/local/bin", "/
 pub fn posix_profiles(login_shell: Option<&str>, exists: &dyn Fn(&str) -> bool) -> Vec<Profile> {
     let mut out: Vec<Profile> = Vec::new();
     let mut add = |file: &str| {
-        let name = xenonet_base::paths::base_name(file);
+        let name = xenonet_os::paths::base_name(file);
         if out.iter().any(|p| p.id == name) || !exists(file) {
             return;
         }
@@ -71,7 +71,7 @@ pub fn posix_profiles(login_shell: Option<&str>, exists: &dyn Fn(&str) -> bool) 
 
 #[cfg(windows)]
 fn windows_profiles() -> Vec<Profile> {
-    use xenonet_base::process::Background as _;
+    use xenonet_os::process::Background as _;
     let run = |cmd: &str, args: &[&str]| std::process::Command::new(cmd).no_window().args(args).output().ok().filter(|o| o.status.success());
     let which = |cmd: &str| run("where.exe", &[cmd]).and_then(|o| String::from_utf8_lossy(&o.stdout).lines().find(|l| !l.is_empty()).map(str::to_string));
     let sys = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
@@ -265,7 +265,7 @@ fn int(v: Option<&Value>, d: f64) -> f64 {
         None | Some(Value::Null) => d,
         // JS's `x | 0`.
         Some(v) => {
-            let n = xenonet_base::text::js_number(Some(v));
+            let n = xenonet_text::text::to_number(Some(v));
             if n.is_finite() {
                 n.trunc()
             } else {

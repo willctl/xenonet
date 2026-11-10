@@ -12,11 +12,11 @@ use xenonet_actors::registration::{Fail, Host, Registration as Core, Store};
 use xenonet_actors::store as rows;
 use xenonet_api::cores::{CoreError, Kind, Registration, R};
 use xenonet_api::From;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::js_string;
-use xenonet_base::time::now_ms;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::store::Shared;
+use xenonet_os::sync::Locked;
+use xenonet_text::text::display;
+use xenonet_text::time::now_ms;
 
 /// What registering asks of the world: the registry, the clock, and its
 /// own observing().
@@ -118,7 +118,7 @@ impl Store for Rows {
         self.direct(|s| s.add_actor_request(r))
     }
     fn decide_actor_request(&self, id: &Value, decision: &str, at: f64) -> rows::Result<bool> {
-        self.direct(|s| s.decide_actor_request(&js_string(id), decision, at))
+        self.direct(|s| s.decide_actor_request(&display(id), decision, at))
     }
     fn actor_request_times(&self, since: f64) -> rows::Result<Vec<Value>> {
         self.direct(|s| s.actor_request_times(since))
@@ -127,7 +127,7 @@ impl Store for Rows {
         self.direct(|s| s.revoke_actor_token(r))
     }
     fn set_actor_token(&self, slug: &str, hash: &Value, at: f64) -> rows::Result<()> {
-        self.direct(|s| s.set_actor_token(slug, &js_string(hash), at))
+        self.direct(|s| s.set_actor_token(slug, &display(hash), at))
     }
     fn drop_actor_token(&self, slug: &str) -> rows::Result<()> {
         self.direct(|s| s.drop_actor_token(slug))
@@ -225,7 +225,7 @@ impl RegSide {
 
 /// `{ checked = false, chain = null, cwd = null }` of a verdict.
 fn verdict_parts(v: &Value) -> (bool, Vec<Value>, Value) {
-    let checked = xenonet_base::text::truthy(v.get("checked"));
+    let checked = xenonet_text::text::truthy(v.get("checked"));
     let chain = v.get("chain").and_then(Value::as_array).cloned().unwrap_or_default();
     let cwd = v.get("cwd").cloned().unwrap_or(Value::Null);
     (checked, chain, cwd)
@@ -246,7 +246,7 @@ impl RegistrationDriver {
 /// What authenticate gives for a call that failed: a refusal, never a pass.
 fn refusal(f: Fail) -> Value {
     match f {
-        Fail::Actor(e) => json!({ "ok": false, "status": xenonet_base::json::number(e.status), "code": e.code, "error": e.message }),
+        Fail::Actor(e) => json!({ "ok": false, "status": xenonet_text::json::number(e.status), "code": e.code, "error": e.message }),
         Fail::Error(e) => json!({ "ok": false, "status": 500, "code": "error", "error": e.message }),
     }
 }

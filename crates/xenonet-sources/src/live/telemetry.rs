@@ -26,10 +26,12 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use xenonet_adapter::apps;
 pub use xenonet_adapter::reader::{Call, Classified, Emit, Fields, Run, Tail, Tailed, ToolCall, ToolRecord, TypeError, VendorCheck, Where};
-use xenonet_base::json::{number, number_string};
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::text::{js_number, js_string, js_trim, truthy};
-use xenonet_base::{jsstr, paths, pricing};
+use xenonet_model::usage::pricing;
+use xenonet_os::paths;
+use xenonet_text::json::{number, number_string};
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::{display, to_number, trim, truthy};
+use xenonet_text::utf16;
 
 pub const PRIME_WINDOW_MS: f64 = 24.0 * 3600e3;
 const RATE_WINDOW_S: f64 = 300.0;
@@ -274,7 +276,7 @@ impl Session {
                 let unpriced = if !plain.is_empty() {
                     plain
                 } else if truthy(Some(model)) {
-                    js_string(model)
+                    display(model)
                 } else {
                     "unknown".into()
                 };
@@ -316,7 +318,7 @@ impl Session {
             Some(Value::String(t)) => t,
             Some(_) => return Err(TypeError("text?.trim is not a function".into())),
         };
-        if js_trim(t).is_empty() {
+        if trim(t).is_empty() {
             return Ok(());
         }
         self.messages.push(Message { text: Value::String(tail(t, 1500)), ts: number(ts) });
@@ -356,7 +358,7 @@ impl Session {
         }
         self.last_turn_end_at = js_max(self.last_turn_end_at, ts);
         if truthy(Some(&self.context_used)) {
-            self.turn_contexts.push(js_number(Some(&self.context_used)));
+            self.turn_contexts.push(to_number(Some(&self.context_used)));
             if self.turn_contexts.len() > 12 {
                 self.turn_contexts.remove(0);
             }
@@ -506,7 +508,7 @@ impl Session {
         if let Some(lt) = last {
             for t in self.recent_tools.iter().rev() {
                 let same = t.uid == lt.uid || strict_eq(t.rec.get("key"), lt.rec.get("key"));
-                if !same || t.rec.get("ok") != Some(&Value::Bool(false)) || now - js_number(t.rec.get("ts")) > 10.0 * 60e3 {
+                if !same || t.rec.get("ok") != Some(&Value::Bool(false)) || now - to_number(t.rec.get("ts")) > 10.0 * 60e3 {
                     break;
                 }
                 run += 1;
@@ -542,11 +544,11 @@ impl Session {
     /// The context's fill, its growth a turn, and the turns left before
     /// it's 90% full.
     pub fn forecast(&self) -> Value {
-        let window = if truthy(Some(&self.context_window)) { js_number(Some(&self.context_window)) } else { 1.0 };
+        let window = if truthy(Some(&self.context_window)) { to_number(Some(&self.context_window)) } else { 1.0 };
         let growths: Vec<f64> = self.turn_contexts.windows(2).map(|w| w[1] - w[0]).filter(|d| *d > 0.0).collect();
         let growth = median(&growths);
         let threshold = window * 0.9;
-        let used = js_number(Some(&self.context_used));
+        let used = to_number(Some(&self.context_used));
         let turns_left = if growth > 0.0 { number(js_max(0.0, ((threshold - used) / growth).floor())) } else { Value::Null };
         let growth_value = if growth != 0.0 && !growth.is_nan() { number(growth) } else { Value::Null };
         obj(vec![("pct", number(used / window)), ("growthPerTurn", growth_value), ("turnsLeft", turns_left)])
@@ -564,7 +566,7 @@ impl Session {
     /// minutes ago are forgotten.
     pub fn snapshot(&mut self, now: f64) -> Value {
         self.files.retain(|_, (_, ts)| {
-            let age = now - js_number(Some(ts));
+            let age = now - to_number(Some(ts));
             age.is_nan() || age <= FILE_MEMORY_MS
         });
         let mut subs: Vec<Value> = self
@@ -572,15 +574,15 @@ impl Session {
             .iter()
             .map(|(_, (_, a))| {
                 let mut m: Map<String, Value> = a.iter().filter(|(k, _)| k.as_str() != "announced").map(|(k, v)| (k.clone(), v.clone())).collect();
-                let active = !truthy(a.get("done")) && now - js_number(a.get("lastAt")) < SUBAGENT_IDLE_MS;
+                let active = !truthy(a.get("done")) && now - to_number(a.get("lastAt")) < SUBAGENT_IDLE_MS;
                 m.insert("active".into(), Value::Bool(active));
                 Value::Object(m)
             })
             .collect();
-        sort_by_num(&mut subs, |a, b| js_number(b.get("lastAt")) - js_number(a.get("lastAt")));
+        sort_by_num(&mut subs, |a, b| to_number(b.get("lastAt")) - to_number(a.get("lastAt")));
         subs.truncate(12);
         let mut files: Vec<(Value, Value)> = self.files.iter().map(|(_, (k, ts))| (k.clone().unwrap_or(Value::Null), ts.clone())).collect();
-        sort_by_num(&mut files, |a, b| js_number(Some(&b.1)) - js_number(Some(&a.1)));
+        sort_by_num(&mut files, |a, b| to_number(Some(&b.1)) - to_number(Some(&a.1)));
         files.truncate(10);
         let files: Vec<Value> = files.into_iter().map(|(path, ts)| obj(vec![("path", path), ("ts", ts)])).collect();
         let mcp: Vec<Value> = self.mcp.iter().map(|(_, (k, ts))| obj(vec![("server", k.clone().unwrap_or(Value::Null)), ("ts", ts.clone())])).collect();
@@ -781,7 +783,7 @@ impl Telemetry {
     }
 
     fn activity(&mut self, i: usize, ev: Fields, live: bool, now: f64, out: &mut Vec<Emit>) {
-        let ts = field(&ev, "ts").map_or(f64::NAN, |v| js_number(Some(v)));
+        let ts = field(&ev, "ts").map_or(f64::NAN, |v| to_number(Some(v)));
         let s = &mut self.sessions[i];
         s.last_event_at = js_max(s.last_event_at, ts);
         let mut full: Fields = vec![("sessionId".into(), Some(Value::String(s.id.clone()))), ("app".into(), Some(Value::String(s.app.clone())))];
@@ -1022,7 +1024,7 @@ impl Telemetry {
                     s.extend_message(whole);
                     return Ok(());
                 }
-                if js_trim(whole).is_empty() {
+                if trim(whole).is_empty() {
                     return Ok(());
                 }
                 let text = Value::String(whole.to_string());
@@ -1035,7 +1037,7 @@ impl Telemetry {
                     s.extend_prompt(whole);
                     return Ok(());
                 }
-                if meta || js_trim(whole).is_empty() || whole.starts_with('<') {
+                if meta || trim(whole).is_empty() || whole.starts_with('<') {
                     return Ok(());
                 }
                 self.prompted(i, whole, ts, live, now, out);
@@ -1084,9 +1086,9 @@ impl Telemetry {
             }
             for i in 0..ids.len() {
                 for j in i + 1..ids.len() {
-                    let (a, b) = (js_string(&ids[i].1), js_string(&ids[j].1));
+                    let (a, b) = (display(&ids[i].1), display(&ids[j].1));
                     let mut pair = [a, b];
-                    pair.sort_by(|x, y| jsstr::cmp_units(x, y));
+                    pair.sort_by(|x, y| utf16::cmp_units(x, y));
                     let k = pair.join("|");
                     let e = edges.get_or_insert_with(&k, || {
                         [("a", ids[i].1.clone()), ("b", ids[j].1.clone()), ("kind", "file".into()), ("files", Value::Array(Vec::new()))]
@@ -1125,7 +1127,7 @@ impl Telemetry {
             }
             for i in 0..list.len() {
                 for j in i + 1..list.len() {
-                    let (a, b) = if jsstr::cmp_units(&list[j].0, &list[i].0) == Ordering::Less { (&list[j], &list[i]) } else { (&list[i], &list[j]) };
+                    let (a, b) = if utf16::cmp_units(&list[j].0, &list[i].0) == Ordering::Less { (&list[j], &list[i]) } else { (&list[i], &list[j]) };
                     let key = format!("{}|{}", a.0, b.0);
                     let c = out.get_or_insert_with(&key, || {
                         [
@@ -1145,7 +1147,7 @@ impl Telemetry {
                     if let Some(Value::Array(paths)) = c.get_mut("paths") {
                         paths.push(Value::String(k.clone()));
                     }
-                    let ts = js_max(js_max(js_number(c.get("ts")), a.1), b.1);
+                    let ts = js_max(js_max(to_number(c.get("ts")), a.1), b.1);
                     c.insert("ts".into(), number(ts));
                 }
             }
@@ -1226,7 +1228,7 @@ impl Telemetry {
                 per_hour += tpm * 60.0 * (cost / tokens);
             }
         }
-        unpriced.sort_by(|a, b| jsstr::cmp_units(a, b));
+        unpriced.sort_by(|a, b| utf16::cmp_units(a, b));
         let unknown = |i: usize, app: &str| i < tailed && called.contains(&app) && !priced.contains(&app);
         let by_app_value: Map<String, Value> =
             by_app.iter().enumerate().map(|(i, (app, cost, _))| (app.clone(), if unknown(i, app) { Value::Null } else { number(*cost) })).collect();
@@ -1254,7 +1256,7 @@ impl Telemetry {
                 .filter_map(|s| {
                     let (_, d) = s.spend.get(&day)?;
                     let mut unpriced = d.unpriced.clone();
-                    unpriced.sort_by(|a, b| jsstr::cmp_units(a, b));
+                    unpriced.sort_by(|a, b| utf16::cmp_units(a, b));
                     Some(obj(vec![
                         ("id", Value::String(s.id.clone())),
                         ("app", Value::String(s.app.clone())),
@@ -1557,10 +1559,10 @@ pub fn project_limit(now: f64, points: &[(f64, f64)], pct: Option<&Value>, reset
     if nn(pct).is_none() {
         return Value::Null;
     }
-    let p = js_number(pct);
+    let p = to_number(pct);
     let eta = (per_hour > 0.05).then(|| now + ((100.0 - p) / per_hour) * 3600e3);
     let limit = match nn(resets_at.as_ref()) {
-        Some(r) => js_number(Some(r)),
+        Some(r) => to_number(Some(r)),
         None => now + horizon,
     };
     obj_opt(vec![
@@ -1614,8 +1616,8 @@ impl Session {
     /// Sets a field from JS (None: undefined). Says whether it has one by
     /// that name.
     pub fn set(&mut self, name: &str, v: Option<Value>) -> bool {
-        let num = |v: &Option<Value>| js_number(v.as_ref());
-        let opt_num = |v: &Option<Value>| v.as_ref().filter(|x| !x.is_null()).map(|x| js_number(Some(x)));
+        let num = |v: &Option<Value>| to_number(v.as_ref());
+        let opt_num = |v: &Option<Value>| v.as_ref().filter(|x| !x.is_null()).map(|x| to_number(Some(x)));
         let or_null = |v: Option<Value>| v.unwrap_or(Value::Null);
         match name {
             "tokens" => {
@@ -1628,11 +1630,11 @@ impl Session {
                 self.context_used = or_null(opt_prop(v.as_ref(), "used").cloned());
                 self.context_window = or_null(opt_prop(v.as_ref(), "window").cloned());
             }
-            "turnContexts" => self.turn_contexts = list_of(v.as_ref()).iter().map(|x| js_number(Some(x))).collect(),
+            "turnContexts" => self.turn_contexts = list_of(v.as_ref()).iter().map(|x| to_number(Some(x))).collect(),
             "model" => self.model = or_null(v),
             "turn" => {
                 self.turn_active = truthy(opt_prop(v.as_ref(), "active"));
-                self.turn_started_at = opt_prop(v.as_ref(), "startedAt").filter(|x| !x.is_null()).map(|x| js_number(Some(x)));
+                self.turn_started_at = opt_prop(v.as_ref(), "startedAt").filter(|x| !x.is_null()).map(|x| to_number(Some(x)));
             }
             "toolCounts" => {
                 self.tool_counts = match v {
@@ -1641,7 +1643,7 @@ impl Session {
                 }
             }
             "lastTool" => self.last_tool = v.filter(|x| !x.is_null()),
-            "rate" => self.rate = list_of(v.as_ref()).iter().map(|r| (js_number(index0(Some(r)).as_ref()), js_number(list_of(Some(r)).get(1)))).collect(),
+            "rate" => self.rate = list_of(v.as_ref()).iter().map(|r| (to_number(index0(Some(r)).as_ref()), to_number(list_of(Some(r)).get(1)))).collect(),
             "lastEventAt" => self.last_event_at = num(&v),
             "prompts" => {
                 let list = list_of(v.as_ref());
@@ -1777,7 +1779,7 @@ impl Session {
         let value = |v: &Value| v.clone();
         let value_of = |v: Option<Value>| v.unwrap_or(Value::Null);
         let num = |v: &f64| number(*v);
-        let num_of_v = |v: Option<Value>| js_number(v.as_ref());
+        let num_of_v = |v: Option<Value>| to_number(v.as_ref());
         let list = |v: &Vec<Value>| Value::Array(v.clone());
         let list_of_v = |v: Option<Value>| list_of(v.as_ref());
         let sub = |v: &Map<String, Value>| Value::Object(v.clone());
@@ -1796,7 +1798,7 @@ impl Session {
         let spend_of = |v: Option<Value>| Spend {
             cost: num_of(v.as_ref(), "cost"),
             tokens: num_of(v.as_ref(), "tokens"),
-            unpriced: list_of(opt_prop(v.as_ref(), "unpriced")).iter().map(js_string).collect(),
+            unpriced: list_of(opt_prop(v.as_ref(), "unpriced")).iter().map(display).collect(),
             priced: truthy(opt_prop(v.as_ref(), "priced")),
         };
         let seen = |(): &()| Value::Bool(true);
@@ -1824,7 +1826,7 @@ mod tests {
     const NOW: f64 = 1_791_000_000_000.0;
 
     fn at(ms: f64) -> Value {
-        Value::String(xenonet_base::time::iso(ms))
+        Value::String(xenonet_text::time::iso(ms))
     }
 
     // A telemetry with the adapters' readers in place.

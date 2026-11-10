@@ -3,16 +3,16 @@
 //! long ones cut.
 
 use serde_json::Value;
-use xenonet_base::text::{js_number, js_string, truthy};
-use xenonet_base::{json, time};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_sources::record::{excerpt, excerpt_json, js_max0, nn, slice_index, tpl, Obj, F};
+use xenonet_text::text::{display, to_number, truthy};
+use xenonet_text::{json, time};
 
 /// The page of `len` messages to show, newest first: (start, end, cursor
 /// further back). `cursor` is the count of messages already shown from
 /// the end.
 pub fn page(len: usize, cursor: Js<'_>, limit: f64) -> (usize, usize, Option<String>) {
-    let shown = js_number(Some(nn(cursor).unwrap_or(&Value::from(0))));
+    let shown = to_number(Some(nn(cursor).unwrap_or(&Value::from(0))));
     let end = len as f64 - shown;
     let start = js_max0(end - limit);
     let (a, b) = (slice_index(start, len), slice_index(end, len));
@@ -29,7 +29,7 @@ fn block_text(content: Js<'_>) -> Result<String, TypeError> {
             for c in parts {
                 let ty = prop(Some(c), "type")?;
                 out.push(match ty.and_then(Value::as_str) {
-                    Some("text") => nn(prop(Some(c), "text")?).map_or_else(String::new, js_string),
+                    Some("text") => nn(prop(Some(c), "text")?).map_or_else(String::new, display),
                     Some("image") => "[image]".into(),
                     _ => String::new(),
                 });
@@ -45,7 +45,7 @@ fn message_entries(m: &Value, out: &mut Vec<Obj>) -> Result<(), TypeError> {
     let m = Some(m);
     let stamp = prop(m, "timestamp")?;
     let ts = if let Some(stamp) = stamp.filter(|s| truthy(Some(s))) {
-        match time::parse_iso(&js_string(stamp)) {
+        match time::parse_iso(&display(stamp)) {
             Some(t) => F::V(json::number(t)),
             None => F::Num(f64::NAN),
         }

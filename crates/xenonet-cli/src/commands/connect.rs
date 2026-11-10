@@ -12,7 +12,7 @@ use crate::out::{c, json, print, Done, Fail};
 use crate::prompt::confirm;
 use crate::reach::{candidates, need};
 use serde_json::{json, Value};
-use xenonet_base::client::name_of;
+use xenonet_api::client::name_of;
 
 pub const HELP: &str = include_str!("help/connect.txt");
 
@@ -93,7 +93,7 @@ fn left(after: &Value, apps: &[&str]) -> Vec<String> {
 /// installed XenoNet's launcher, which never moves, else this binary
 /// (cores::xenonet_bin).
 pub fn local_options(port: f64) -> Value {
-    json!({ "port": xenonet_base::json::number(port), "bin": cores::xenonet_bin() })
+    json!({ "port": xenonet_text::json::number(port), "bin": cores::xenonet_bin() })
 }
 
 // The XenoNet on that port runs elsewhere, so it can't write this
@@ -113,7 +113,7 @@ fn here(words: &[String], flags: &Flags) -> Done {
     }
     let apps = &chosen(words, &preview);
     let todo = todo(&preview, apps);
-    let who = format!("the XenoNet on port {}", xenonet_base::json::number_string(port));
+    let who = format!("the XenoNet on port {}", xenonet_text::json::number_string(port));
     render(&preview, apps);
     if todo.is_empty() {
         print(c::green(format!("Already connected to {who}.")));
@@ -146,7 +146,7 @@ fn hermes(flags: &Flags) -> Done {
     let home = crate::sys::home();
     let hh = std::env::var("HERMES_HOME").ok();
     let before = hp::inspect(&home, hh.as_deref(), crate::out::now());
-    let shown = |p: &std::path::Path| xenonet_base::paths::tilde(&p.display().to_string(), &home);
+    let shown = |p: &std::path::Path| xenonet_os::paths::tilde(&p.display().to_string(), &home);
     if flags.on("json") {
         json(&json!({ "dir": shown(&before.dir), "installed": before.installed, "current": before.current, "enabled": before.enabled, "token": before.token }));
         return Ok(0);

@@ -35,7 +35,7 @@ impl Asks for Ask {
         schemas().check_hello(frame)
     }
     fn tilde(&self, p: &str) -> String {
-        xenonet_base::paths::tilde(p, "/home/nova")
+        xenonet_os::paths::tilde(p, "/home/nova")
     }
 }
 

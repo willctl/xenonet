@@ -20,7 +20,7 @@ pub fn git_available() -> bool {
     static OK: OnceLock<bool> = OnceLock::new();
     *OK.get_or_init(|| {
         let path = std::env::var("PATH").unwrap_or_default();
-        let found = xenonet_base::paths::on_path("git", &path, std::env::var("PATHEXT").ok().as_deref(), cfg!(windows), &mut xenonet_base::paths::can_run);
+        let found = xenonet_os::paths::on_path("git", &path, std::env::var("PATHEXT").ok().as_deref(), cfg!(windows), &mut xenonet_os::paths::can_run);
         let mut ok = found.is_some();
         if git::needs_dev_tools(crate::config::platform(), found.as_deref()) {
             let tools = std::process::Command::new("/usr/bin/xcode-select")
@@ -51,7 +51,7 @@ pub async fn run_git(args: &[String], env: &[(String, String)], clear: bool, tim
     #[cfg(test)]
     tests::RAN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(args.join(" "));
     let mut cmd = Command::new("git");
-    xenonet_base::process::Background::no_window(cmd.as_std_mut());
+    xenonet_os::process::Background::no_window(cmd.as_std_mut());
     cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
     if clear {
         cmd.env_clear();
@@ -174,7 +174,7 @@ impl RepoWatch {
         let stamps = Arc::new(stamps);
         let queue: Vec<(String, String)> = projects
             .iter()
-            .filter(|p| xenonet_base::text::truthy(p.get("git")))
+            .filter(|p| xenonet_text::text::truthy(p.get("git")))
             .map(|p| (crate::util::s(p, "key").unwrap_or_default().to_string(), crate::util::s(p, "path").unwrap_or_default().to_string()))
             .collect();
         {

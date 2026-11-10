@@ -20,9 +20,9 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use xenonet_base::fs::StdFs;
 use xenonet_blocks::scanner::{FnRules, Limits, Scanner};
 use xenonet_blocks::tailer::{Listed, Swept, Tailer};
+use xenonet_os::fs::StdFs;
 use xenonet_schema::vendor::Sampling;
 use xenonet_sources::claude_usage;
 use xenonet_sources::desktop_connectors::Connectors;
@@ -110,7 +110,7 @@ fn emits(out: Vec<Emit>) -> Vec<Event> {
 
 fn stat(file: &str) -> Option<(f64, u64)> {
     let m = std::fs::metadata(file).ok()?;
-    Some((xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), m.len()))
+    Some((xenonet_os::fs::mtime_ms_of(&m).unwrap_or(f64::NAN), m.len()))
 }
 
 #[expect(clippy::case_sensitive_file_extension_comparisons, reason = "as the JS's endsWith, which tells .jsonl from .JSONL")]
@@ -128,7 +128,7 @@ impl Live {
         let roots: Vec<(String, String)> = [(claude_root, "claude"), (codex_root, "codex"), (grok_root, "grok")]
             .into_iter()
             .filter(|(d, _)| !d.is_empty() && std::path::Path::new(d).exists())
-            .map(|(d, app)| (xenonet_base::fs::realpath_native(d).unwrap_or_else(|_| d.to_string()), app.to_string()))
+            .map(|(d, app)| (xenonet_os::fs::realpath_native(d).unwrap_or_else(|_| d.to_string()), app.to_string()))
             .collect();
         let now = now_ms();
         let scanners = roots.iter().map(|(dir, _)| Scanner::new(&format!("transcripts:{dir}"), dir, Limits { depth: DEPTH, ..Limits::default() }, true, now)).collect();
@@ -330,7 +330,7 @@ impl Live {
         if count {
             t.tailer.life.count("sweeps", 1.0);
         }
-        let mut cursor = xenonet_base::ordered::Cursor::of(None);
+        let mut cursor = xenonet_text::ordered::Cursor::of(None);
         while let Some((c, file)) = t.tailer.next_followed(cursor) {
             cursor = c;
             let size = stat(&file).map(|s| s.1);
@@ -471,7 +471,7 @@ impl Live {
             let file = std::path::Path::new(dir).join("plan-usage-history.json");
             let vendor = self.vendor.clone();
             let samples = d.get(false, None, move || desktop_samples(&vendor, &file));
-            if xenonet_base::text::truthy(Some(&samples)) {
+            if xenonet_text::text::truthy(Some(&samples)) {
                 lock(&self.telemetry).usage_samples("claude", &samples);
             }
         }
@@ -572,7 +572,7 @@ impl Live {
     /// Whether a live session waits on you now.
     pub fn someone_waits(&self, now: f64) -> bool {
         let t = lock(&self.telemetry);
-        t.ids().iter().filter_map(|id| t.find(id)).any(|i| xenonet_base::text::truthy(Some(&t.at(i).needs_you(now))))
+        t.ids().iter().filter_map(|id| t.find(id)).any(|i| xenonet_text::text::truthy(Some(&t.at(i).needs_you(now))))
     }
 
     /// The tailer's health, as a block.
@@ -657,7 +657,7 @@ async fn fetch_claude_usage(vendor: &Vendor, now: f64) -> Value {
     if let Some(p) = claude_usage::status_problem(Some(&json!(res.status)), res.ok(), pause.as_ref()) {
         return p;
     }
-    let body = xenonet_base::json::parse(&res.text()).ok();
+    let body = xenonet_text::json::parse(&res.text()).ok();
     if body.is_none() {
         vendor.unparsable("anthropic/oauth/usage", None);
     }
@@ -672,7 +672,7 @@ fn desktop_samples(vendor: &Vendor, file: &std::path::Path) -> Result<Value, Str
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(e) => return Err(e.to_string()),
     };
-    let raw = xenonet_base::json::parse(&text).map_err(|e| e.to_string())?;
+    let raw = xenonet_text::json::parse(&text).map_err(|e| e.to_string())?;
     let version = claude_usage::desktop_version(Some(&raw));
     let checked = vendor.check("anthropic/claude-desktop/plan-usage", raw.clone(), version.as_deref(), None);
     claude_usage::desktop_samples(Some(&raw), checked.as_ref()).map_err(|e| match e {
@@ -694,7 +694,7 @@ mod tests {
     const ID: &str = "0190d3e0-0000-7000-8000-000000000001";
 
     fn line(o: Value) -> String {
-        format!("{}\n", xenonet_base::json::stringify(&o, 0))
+        format!("{}\n", xenonet_text::json::stringify(&o, 0))
     }
 
     #[tokio::test]
@@ -704,7 +704,7 @@ mod tests {
         let root = home.join(".claude").join("projects").join("demo-x");
         std::fs::create_dir_all(&root).unwrap();
         let file = root.join(format!("{ID}.jsonl"));
-        let ts = |ago: f64| xenonet_base::time::iso(now_ms() - ago);
+        let ts = |ago: f64| xenonet_text::time::iso(now_ms() - ago);
         std::fs::write(&file, line(json!({ "type": "user", "timestamp": ts(60e3), "message": { "role": "user", "content": "Add a test" } }))).unwrap();
         let live = Live::new(&home.join(".claude").join("projects").to_string_lossy(), "", "", None, false, &home.to_string_lossy(), vendor());
         let heard: Arc<Mutex<Vec<Event>>> = Arc::default();
@@ -760,7 +760,7 @@ mod tests {
             if let Some(t) = ticks {
                 row["costUsdTicks"] = json!(t);
             }
-            json!({ "turnNumber": n, "endedAt": xenonet_base::time::iso(ended), "modelUsage": { "grok-build": row } })
+            json!({ "turnNumber": n, "endedAt": xenonet_text::time::iso(ended), "modelUsage": { "grok-build": row } })
         };
         std::fs::write(dir.join("usage.json"), json!({ "turns": [turn(1, now_ms() - 50e3, 3000, None)] }).to_string()).unwrap();
         let live = Live::new("", "", &sessions.to_string_lossy(), None, false, &home.to_string_lossy(), vendor());

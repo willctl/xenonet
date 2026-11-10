@@ -28,7 +28,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
         return Ok(0);
     }
     let home = sys::home();
-    let runs = xenonet_base::text::join(crate::js::list(&st, "runs").iter().map(Some), " ");
+    let runs = xenonet_text::text::join(crate::js::list(&st, "runs").iter().map(Some), " ");
     print(format!("{} {} runs {}", c::green("✓"), sys::tilde(&t(&st, "file")), sys::tilde(&runs)));
     if !on(&st, "onPath") {
         let shown = sys::tilde(&dir);

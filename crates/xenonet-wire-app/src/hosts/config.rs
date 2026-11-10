@@ -118,7 +118,7 @@ impl HostsStore {
         if d.report.read_only {
             return Err(CoreError::status(409, format!("XenoNet can't change {file}: {}", d.report.problem.clone().unwrap_or_default())));
         }
-        let wrote = write_atomic(file, &xenonet_base::json::stringify(&d.doc, 2));
+        let wrote = write_atomic(file, &xenonet_text::json::stringify(&d.doc, 2));
         let mut life = self.life.locked();
         match wrote {
             Ok(()) => {
@@ -137,14 +137,14 @@ impl HostsStore {
     /// name and kind.
     pub fn health(&self) -> Value {
         let life = self.life.locked();
-        let counters: serde_json::Map<String, Value> = life.counters.iter().map(|(k, n)| (k.to_string(), xenonet_base::json::number(n))).collect();
+        let counters: serde_json::Map<String, Value> = life.counters.iter().map(|(k, n)| (k.to_string(), xenonet_text::json::number(n))).collect();
         json!({
             "name": "hosts",
             "kind": "store",
             "state": life.state.as_str(),
-            "since": xenonet_base::json::number(life.since),
-            "lastOk": life.last_ok.map(xenonet_base::json::number),
-            "lastError": life.last_error.as_ref().map(|e| json!({ "at": xenonet_base::json::number(e.at), "message": e.message })),
+            "since": xenonet_text::json::number(life.since),
+            "lastOk": life.last_ok.map(xenonet_text::json::number),
+            "lastError": life.last_error.as_ref().map(|e| json!({ "at": xenonet_text::json::number(e.at), "message": e.message })),
             "counters": counters,
             "budget": null,
         })
@@ -161,7 +161,7 @@ impl HostsStore {
         let file = self.file();
         self.with(|d| {
             if d.doc.get("self").is_none_or(Value::is_null) {
-                d.doc["self"] = json!({ "id": null, "key": new_key(), "createdAt": xenonet_base::json::number(now_ms()) });
+                d.doc["self"] = json!({ "id": null, "key": new_key(), "createdAt": xenonet_text::json::number(now_ms()) });
                 // A read-only file: the key lasts until XenoNet quits.
                 let _ = self.save(d, &file);
             }
@@ -238,8 +238,8 @@ impl HostsStore {
         }
         let tmp = format!("{file}.tmp");
         std::fs::write(&tmp, text).map_err(|e| fail(e, "couldn't write"))?;
-        let mut run = |f: &str, a: &[&str]| xenonet_base::private_file::run_private(f, a);
-        xenonet_base::private_file::protect_file(&tmp, cfg!(windows), &mut run).map_err(|e| CoreError::new(e.message().to_string()))?;
+        let mut run = |f: &str, a: &[&str]| xenonet_os::private_file::run_private(f, a);
+        xenonet_os::private_file::protect_file(&tmp, cfg!(windows), &mut run).map_err(|e| CoreError::new(e.message().to_string()))?;
         std::fs::rename(&tmp, &file).map_err(|e| fail(e, "couldn't put in place"))?;
         Ok(file)
     }

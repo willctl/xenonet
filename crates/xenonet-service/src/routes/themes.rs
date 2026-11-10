@@ -24,7 +24,7 @@ pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError>
         let id = req.json_body().await.unwrap_or_else(|_| json!({})).get("id").cloned().unwrap_or(Value::Null);
         let shown = match &id {
             Value::Null => "undefined".to_string(),
-            v => xenonet_base::text::js_string(v),
+            v => xenonet_text::text::display(v),
         };
         let file = id.as_str().filter(|i| theme_id(i)).map(|i| Path::new(&ctx.themes_dir).join(format!("{i}.json")));
         let Some(file) = file.filter(|f| f.exists()) else {

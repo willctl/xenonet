@@ -628,7 +628,7 @@ A network is one gateway and the hosts that joined it (design:
 - Ids (§2): a network is `net_<32 hex>`, a frame `frm_<uuid>`, a handoff
   `hof_<uuid>`, and a host's key id `xnk1_<32 base32>`. Remote agents keep
   the `@<host>:<id>` form, and are targets and senders, never callers.
-- The engine reaches the network through `xenonet_base::network` (`Net`
+- The engine reaches the network through `xenonet_model::ops` (`Net`
   and `Sink`). With no network nothing is behind it, and local behaviour
   and the JS twins are unchanged.
 

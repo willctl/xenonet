@@ -14,7 +14,7 @@ use crate::js::{have, num, on, str, t};
 use crate::out::{c, now, print, write, write_bytes, Done, Fail};
 use crate::sys;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::stringify;
+use xenonet_text::json::stringify;
 
 pub const HELP: &str = include_str!("help/refusals.txt");
 
@@ -54,9 +54,9 @@ fn scan(dir: &str, flags: &Flags) -> Done {
     let roots = [("claude", config::claude_projects_dir()), ("codex", sys::join(&config::codex_home(), "sessions"))];
     let (mut files, mut found) = (0usize, 0usize);
     for (app, root) in &roots {
-        for file in xenonet_base::paths::list_files(root, &mut |n: &str| n.ends_with(".jsonl"), 6) {
+        for file in xenonet_os::paths::list_files(root, &mut |n: &str| n.ends_with(".jsonl"), 6) {
             let Ok(st) = std::fs::metadata(&file) else { continue };
-            if xenonet_base::fs::mtime_ms_of(&st).unwrap_or(0.0) < from {
+            if xenonet_os::fs::mtime_ms_of(&st).unwrap_or(0.0) < from {
                 continue;
             }
             files += 1;
@@ -67,7 +67,7 @@ fn scan(dir: &str, flags: &Flags) -> Done {
                 continue;
             }
             for line in text.split('\n').filter(|l| may_hold(l)) {
-                let Ok(raw) = xenonet_base::json::parse(line) else { continue };
+                let Ok(raw) = xenonet_text::json::parse(line) else { continue };
                 let Some(sig) = cores::refusal_signal(app, &raw)?.filter(|s| !s.is_null()) else { continue };
                 if on(&sig, "at") && num(&sig, "at") < from {
                     continue;
@@ -124,7 +124,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                         m.shift_remove("key");
                         m.insert(
                             "source".into(),
-                            source.filter(|s| xenonet_base::text::truthy(Some(s))).map_or(Value::Null, |s| json!({ "file": s.get("file").cloned().unwrap_or(Value::Null) })),
+                            source.filter(|s| xenonet_text::text::truthy(Some(s))).map_or(Value::Null, |s| json!({ "file": s.get("file").cloned().unwrap_or(Value::Null) })),
                         );
                         stringify(&Value::Object(m), 0)
                     })
@@ -154,7 +154,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
         }
         "show" => {
             let r = match id {
-                Some(id) => cores::refusals_get(&dir, id)?.filter(|r| xenonet_base::text::truthy(Some(r))),
+                Some(id) => cores::refusals_get(&dir, id)?.filter(|r| xenonet_text::text::truthy(Some(r))),
                 None => None,
             };
             let Some(r) = r else { return Err(Fail::error(format!("no refusal {}; xenonet refusals lists them", id.map_or("", String::as_str)))) };
@@ -178,7 +178,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 write(&text);
                 return Ok(0);
             };
-            std::fs::write(&out, &text).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &out).message))?;
+            std::fs::write(&out, &text).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "open", &out).message))?;
             print(format!("{} Wrote {} to {out}{}.", c::green("✓"), plural_s(lines.len(), "refusal"), if flags.on("scrub") { ", scrubbed" } else { "" }));
             Ok(0)
         }

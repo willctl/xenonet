@@ -11,7 +11,7 @@ use super::{number_text, template, truthy, Delivered, Result};
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::sync::Mutex;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 /// Commands and files, as finding OpenCode's servers reads them.
 pub trait System {
@@ -46,18 +46,18 @@ pub trait Host {
     fn post(&mut self, url: &str, body: &str) -> std::result::Result<Posted, String>;
 }
 
-/// OpenCode's own id for XenoNet's (xenonet_base::opencode, as its reader
+/// OpenCode's own id for XenoNet's (xenonet_adapter::formats::opencode, as its reader
 /// wrote it).
 pub fn open_code_id(id: &str) -> String {
-    xenonet_base::opencode::open_code_id(id)
+    xenonet_adapter::formats::opencode::open_code_id(id)
 }
 
 /// XenoNet's id for a session named the way OpenCode shows it (ses_…, or
 /// opencode:ses_…). Any other id comes back as it was.
 pub fn xenonet_id(id: &str) -> String {
-    let s = xenonet_base::text::js_trim(id);
+    let s = xenonet_text::text::trim(id);
     match crate::re!(r"^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$").captures(s) {
-        Some(m) => format!("opencode:{}", xenonet_base::opencode::local_id(&m[1])),
+        Some(m) => format!("opencode:{}", xenonet_adapter::formats::opencode::local_id(&m[1])),
         None => s.to_string(),
     }
 }
@@ -107,16 +107,16 @@ fn unique(v: Vec<f64>) -> Vec<f64> {
 }
 
 fn words(s: &str) -> Vec<&str> {
-    crate::re!(r"[\s\x{FEFF}--\x{85}]+").split(xenonet_base::text::js_trim(s)).collect()
+    crate::re!(r"[\s\x{FEFF}--\x{85}]+").split(xenonet_text::text::trim(s)).collect()
 }
 
 fn number(s: &str) -> f64 {
-    xenonet_base::text::js_number(Some(&Value::String(s.to_string())))
+    xenonet_text::text::to_number(Some(&Value::String(s.to_string())))
 }
 
 /// parseInt(s, 16).
 fn parse_hex(s: &str) -> f64 {
-    let t = xenonet_base::text::js_trim(s);
+    let t = xenonet_text::text::trim(s);
     let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
     let digits: String = t.chars().take_while(char::is_ascii_hexdigit).collect();
     if digits.is_empty() {
@@ -172,7 +172,7 @@ pub fn listening_ports(sys: &mut dyn System, pid: f64, platform: &str) -> Vec<f6
 /// /^n.*:(\d+)$/gm, with \r a line's end as JS's m flag has it.
 fn regex_lsof() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(&format!(r"(?mR)^n{}*:([0-9]+)$", xenonet_base::text::JS_DOT)).expect("a fixed pattern"))
+    RE.get_or_init(|| regex::Regex::new(&format!(r"(?mR)^n{}*:([0-9]+)$", xenonet_text::text::DOT)).expect("a fixed pattern"))
 }
 
 /// One folder, as OpenCode spells it in two places: the same once a
@@ -320,11 +320,11 @@ impl OpenCode {
                 let updated = match updated {
                     None => Value::Null,
                     Some(u) => {
-                        let n = xenonet_base::text::js_number(Some(u));
+                        let n = xenonet_text::text::to_number(Some(u));
                         if n == 0.0 || n.is_nan() {
                             Value::Null
                         } else {
-                            xenonet_base::json::number(n)
+                            xenonet_text::json::number(n)
                         }
                     }
                 };
@@ -359,7 +359,7 @@ impl OpenCode {
             return Ok(Err("no running OpenCode has this session".into()));
         };
         let url = format!("{}/session/{}/prompt_async", s.base, encode_uri_component(&open_code_id(id)));
-        let body = xenonet_base::json::stringify(&json!({ "parts": [{ "type": "text", "text": text }] }), 0);
+        let body = xenonet_text::json::stringify(&json!({ "parts": [{ "type": "text", "text": text }] }), 0);
         let r = h.post(&url, &body)?;
         if r.status == 204.0 || r.ok {
             return Ok(Ok(s.base));

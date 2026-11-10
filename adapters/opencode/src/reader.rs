@@ -6,18 +6,18 @@
 //! apply_patch's text, whose file headers are kept and the rest dropped.
 
 use serde_json::{json, Map, Value};
-use xenonet_base::json;
-use xenonet_base::nodepath::Style;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::patch;
-use xenonet_base::paths::path_style;
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_adapter::formats::patch;
+use xenonet_os::nodepath::Style;
+use xenonet_os::paths::path_style;
 use xenonet_schema::drift::clean_version;
 use xenonet_sources::native::files::Files;
 use xenonet_sources::native::{
     edit_file, edits_out, js_max, js_min, push_edit, str_of, titled, Checked, Edits, NativeReader, Out, Threw, Vendor, DAY_MS, EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
 };
 use xenonet_sources::session::{RunSession, Via};
+use xenonet_text::json;
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::{display, to_number, truthy};
 
 pub const SOURCE: &str = "anomaly/opencode/db";
 /// The tools whose calls are edits, as the app registry has them.
@@ -46,9 +46,9 @@ const TOOL_NAME: &str = "COALESCE(json_extract(data, '$.tool'), json_extract(dat
 
 /// OpenCode's ids (ses_…) as XenoNet's session ids take them: a dash for
 /// each underscore, or for an id OpenCode doesn't make, its bytes in hex
-/// (xenonet_base::opencode). Delivery reads either back.
+/// (xenonet_adapter::formats::opencode). Delivery reads either back.
 pub fn local_id(id: &str) -> String {
-    xenonet_base::opencode::local_id(id)
+    xenonet_adapter::formats::opencode::local_id(id)
 }
 
 pub fn session_id_of(id: &str) -> String {
@@ -355,7 +355,7 @@ pub enum Stamp {
 impl Stamp {
     fn number(&self) -> f64 {
         match self {
-            Stamp::Raw(v) => js_number(v.as_ref()),
+            Stamp::Raw(v) => to_number(v.as_ref()),
             Stamp::Num(n) => *n,
         }
     }
@@ -479,12 +479,12 @@ impl OpenCode {
         }
         for e in items(&got.edits, "edits")? {
             let sid = match field(&e, "session_id") {
-                Some(v) => js_string(v),
+                Some(v) => display(v),
                 None => "undefined".into(),
             };
             let Some(run) = runs.get_mut(&session_id_of(&sid)) else { continue };
             let Some(path) = str_of(field(&e, "path")) else { continue };
-            let at = js_number(field(&e, "time_created"));
+            let at = to_number(field(&e, "time_created"));
             if now - at > EDIT_KEEP_MS {
                 continue;
             }

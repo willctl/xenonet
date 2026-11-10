@@ -49,8 +49,8 @@ mod tests {
         let ns = re!(r"^[^\s\x{FEFF}--\x{85}]$");
         for c in (0..=0x10ffff_u32).filter_map(char::from_u32) {
             let one = c.to_string();
-            assert_eq!(s.is_match(&one), xenonet_base::text::is_js_space(c), "{c:?}");
-            assert_eq!(ns.is_match(&one), !xenonet_base::text::is_js_space(c), "{c:?}");
+            assert_eq!(s.is_match(&one), xenonet_text::text::is_space(c), "{c:?}");
+            assert_eq!(ns.is_match(&one), !xenonet_text::text::is_space(c), "{c:?}");
         }
         let dot = re!(r"^[^\n\r\x{2028}\x{2029}]$");
         assert!(!dot.is_match("\r") && !dot.is_match("\u{2028}") && dot.is_match("\u{85}"));

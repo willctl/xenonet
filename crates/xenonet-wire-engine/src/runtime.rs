@@ -148,7 +148,7 @@ pub fn platform() -> &'static str {
 
 /// Whether a process still runs, a process of another user's included.
 pub fn alive(pid: f64) -> bool {
-    pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= f64::from(i32::MAX) && xenonet_base::process::running(pid as u32, true)
+    pid.is_finite() && pid.fract() == 0.0 && pid > 0.0 && pid <= f64::from(i32::MAX) && xenonet_os::process::running(pid as u32, true)
 }
 
 /// A time in epoch ms as the console's notices write it in an English
@@ -157,7 +157,7 @@ pub fn time_of(ms: f64) -> String {
     if !ms.is_finite() {
         return "Invalid Date".into();
     }
-    let local = ms + xenonet_base::jsstr::local_offset_ms(ms);
+    let local = ms + xenonet_text::utf16::local_offset_ms(ms);
     let minutes = (local / 60e3).floor() as i64;
     let (h, m) = (minutes.div_euclid(60).rem_euclid(24), minutes.rem_euclid(60));
     let (h12, half) = (if h % 12 == 0 { 12 } else { h % 12 }, if h < 12 { "AM" } else { "PM" });
@@ -166,10 +166,10 @@ pub fn time_of(ms: f64) -> String {
 
 /// The start of a time's local day, in epoch ms.
 pub fn day_start(ms: f64) -> f64 {
-    let off = xenonet_base::jsstr::local_offset_ms(ms);
+    let off = xenonet_text::utf16::local_offset_ms(ms);
     let start = ((ms + off) / 86400e3).floor() * 86400e3;
     // Midnight's own offset, which differs on a day the clocks change.
-    start - xenonet_base::jsstr::local_offset_ms(start - off)
+    start - xenonet_text::utf16::local_offset_ms(start - off)
 }
 
 #[cfg(test)]

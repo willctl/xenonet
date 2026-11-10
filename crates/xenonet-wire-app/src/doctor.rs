@@ -106,7 +106,7 @@ fn statfs(_: &str) -> Option<Value> {
     None
 }
 
-fn fs_error(e: xenonet_base::fs::FsError) -> Value {
+fn fs_error(e: xenonet_os::fs::FsError) -> Value {
     let mut m = Map::new();
     m.insert("message".into(), json!(e.message));
     if let Some(c) = e.code {
@@ -137,17 +137,17 @@ async fn git_available() -> bool {
 
 struct Disk;
 
-impl xenonet_base::dirs::Look for Disk {
+impl xenonet_adapter::dirs::Look for Disk {
     fn exists(&mut self, p: &str) -> bool {
         std::fs::metadata(p).is_ok()
     }
-    fn readdir(&mut self, p: &str) -> Result<Vec<String>, xenonet_base::dirs::Unreadable> {
-        xenonet_base::paths::read_dir_sorted(std::path::Path::new(p))
+    fn readdir(&mut self, p: &str) -> Result<Vec<String>, xenonet_adapter::dirs::Unreadable> {
+        xenonet_os::paths::read_dir_sorted(std::path::Path::new(p))
             .map(|v| v.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
-            .map_err(|_| xenonet_base::dirs::Unreadable)
+            .map_err(|_| xenonet_adapter::dirs::Unreadable)
     }
     fn mtime(&mut self, p: &str) -> f64 {
-        std::fs::metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).unwrap_or(0.0)
+        std::fs::metadata(p).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).unwrap_or(0.0)
     }
 }
 
@@ -157,13 +157,13 @@ pub fn codex_bin(home: &str) -> String {
     if let Ok(b) = std::env::var("XENONET_CODEX_BIN") {
         return b;
     }
-    let env = xenonet_base::dirs::Env {
+    let env = xenonet_adapter::dirs::Env {
         claude_desktop_dir: None,
         local_app_data: fx::env_set("LOCALAPPDATA"),
         app_data: fx::env_set("APPDATA"),
         xdg_config_home: fx::env_set("XDG_CONFIG_HOME"),
     };
-    xenonet_base::dirs::bundled_codex_binaries(&env, fx::platform(), home, &mut Disk).into_iter().next().unwrap_or_else(|| "codex".into())
+    xenonet_adapter::dirs::bundled_codex_binaries(&env, fx::platform(), home, &mut Disk).into_iter().next().unwrap_or_else(|| "codex".into())
 }
 
 /// machine().launcher(): the launcher hooks and MCP servers run, when
@@ -173,28 +173,28 @@ pub async fn launcher() -> Result<Value, Value> {
     let env = fx::env_map();
     let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
     let m = xenonet_components::runtime::Machine { platform: fx::platform().into(), arch: String::new(), home };
-    let dir = xenonet_base::paths::join(&xenonet_components::runtime::runtime_dir(&env, &m), "launcher");
+    let dir = xenonet_os::paths::join(&xenonet_components::runtime::runtime_dir(&env, &m), "launcher");
     // The xenonet binary first, which entries run now; it's a copy of the
     // Tools' own, so it's as new as they are.
-    let bin = xenonet_base::paths::join(&dir, if cfg!(windows) { "xenonet.exe" } else { "xenonet" });
+    let bin = xenonet_os::paths::join(&dir, if cfg!(windows) { "xenonet.exe" } else { "xenonet" });
     if std::fs::metadata(&bin).is_ok() {
         let r = run_program(&bin, &["--launcher".into()], 8000.0).await;
-        let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
+        let said = r["stdout"].as_str().and_then(|s| xenonet_text::json::parse(s).ok()).unwrap_or(Value::Null);
         let ships = xenonet_components::install::launcher_version(Some(xenonet_components::install::LAUNCHER_SCRIPT));
-        let version = said.get("launcher").cloned().unwrap_or_else(|| xenonet_base::json::number(ships));
-        return Ok(json!({ "dir": dir, "said": said, "version": version, "ships": xenonet_base::json::number(ships) }));
+        let version = said.get("launcher").cloned().unwrap_or_else(|| xenonet_text::json::number(ships));
+        return Ok(json!({ "dir": dir, "said": said, "version": version, "ships": xenonet_text::json::number(ships) }));
     }
-    let node = xenonet_base::paths::join(&dir, if cfg!(windows) { "node.exe" } else { "node" });
-    let entry = xenonet_base::paths::join_all(&[&dir, "cli", "xenonet.js"]);
+    let node = xenonet_os::paths::join(&dir, if cfg!(windows) { "node.exe" } else { "node" });
+    let entry = xenonet_os::paths::join_all(&[&dir, "cli", "xenonet.js"]);
     if std::fs::metadata(&node).is_err() || std::fs::metadata(&entry).is_err() {
         return Ok(Value::Null);
     }
     let r = run_program(&node, &[entry.clone(), "--launcher".into()], 8000.0).await;
-    let said = r["stdout"].as_str().and_then(|s| xenonet_base::json::parse(s).ok()).unwrap_or(Value::Null);
-    let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| fs_error(xenonet_base::fs::FsError::of(e, "open", f)));
+    let said = r["stdout"].as_str().and_then(|s| xenonet_text::json::parse(s).ok()).unwrap_or(Value::Null);
+    let read = |f: &str| std::fs::read(f).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| fs_error(xenonet_os::fs::FsError::of(e, "open", f)));
     let version = xenonet_components::install::launcher_version(Some(&read(&entry)?));
     let ships = xenonet_components::install::launcher_version(Some(xenonet_components::install::LAUNCHER_SCRIPT));
-    Ok(json!({ "dir": dir, "said": said, "version": xenonet_base::json::number(version), "ships": xenonet_base::json::number(ships) }))
+    Ok(json!({ "dir": dir, "said": said, "version": xenonet_text::json::number(version), "ships": xenonet_text::json::number(ships) }))
 }
 
 /// The program a restart of the service runs (installed_runtime's
@@ -206,8 +206,8 @@ pub fn restart_exe() -> Value {
     let env = fx::env_map();
     let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
     let m = runtime::Machine { platform: fx::platform().into(), arch: String::new(), home };
-    let dir = xenonet_base::paths::join(&packages::components_dir(&env, &m), "service");
-    let (Some(me), Ok(dir)) = (xenonet_base::fs::running_exe(), xenonet_base::fs::realpath_native(&dir)) else { return Value::Null };
+    let dir = xenonet_os::paths::join(&packages::components_dir(&env, &m), "service");
+    let (Some(me), Ok(dir)) = (xenonet_os::fs::running_exe(), xenonet_os::fs::realpath_native(&dir)) else { return Value::Null };
     if !std::path::Path::new(&me).starts_with(&dir) {
         return Value::Null;
     }
@@ -216,42 +216,42 @@ pub fn restart_exe() -> Value {
         return Value::Null;
     }
     let (root, _) = install::service_root(&service, &env, &m);
-    let exe = xenonet_base::paths::join_all(&[&root, "bin", runtime::bin_name(&m.platform)]);
-    xenonet_base::fs::realpath_native(&exe).map_or(Value::Null, Value::String)
+    let exe = xenonet_os::paths::join_all(&[&root, "bin", runtime::bin_name(&m.platform)]);
+    xenonet_os::fs::realpath_native(&exe).map_or(Value::Null, Value::String)
 }
 
 /// inspectState(dir) (core/statefile.js): state.json's version and
 /// whether it fits its schema, and the files XenoNet moved aside.
 pub fn inspect_state(dir: &str) -> Value {
-    let file = xenonet_base::paths::join(dir, "state.json");
+    let file = xenonet_os::paths::join(dir, "state.json");
     let names: Vec<String> =
-        xenonet_base::paths::read_dir_sorted(std::path::Path::new(dir)).map(|v| v.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        xenonet_os::paths::read_dir_sorted(std::path::Path::new(dir)).map(|v| v.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
     let (mut broken, mut backups) = (Vec::new(), Vec::new());
     for name in &names {
         let mid = |prefix: &str| name.strip_prefix(prefix).and_then(|r| r.strip_suffix(".json"));
         if mid("state.broken-").is_some_and(|m| !m.is_empty()) {
-            broken.push(xenonet_base::paths::join(dir, name));
+            broken.push(xenonet_os::paths::join(dir, name));
         } else if let Some(m) = mid("state.v") {
             let digits = m.bytes().take_while(u8::is_ascii_digit).count();
             if digits > 0 && (digits == m.len() || (m.as_bytes()[digits] == b'-' && m.len() > digits + 1)) {
-                backups.push(xenonet_base::paths::join(dir, name));
+                backups.push(xenonet_os::paths::join(dir, name));
             }
         }
     }
     let exists = names.iter().any(|n| n == "state.json");
-    let mut out = json!({ "file": file, "exists": exists, "known": xenonet_base::json::number(STATE_VERSION), "version": null, "unreadable": null, "issues": [], "broken": broken, "backups": backups });
+    let mut out = json!({ "file": file, "exists": exists, "known": xenonet_text::json::number(STATE_VERSION), "version": null, "unreadable": null, "issues": [], "broken": broken, "backups": backups });
     if !exists {
         return out;
     }
     let text = match std::fs::read(&file) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),
         Err(e) => {
-            let f = xenonet_base::fs::FsError::of(e, "open", &file);
+            let f = xenonet_os::fs::FsError::of(e, "open", &file);
             out["unreadable"] = json!(format!("can't be read ({})", f.code.unwrap_or(f.message)));
             return out;
         }
     };
-    let Ok(data) = xenonet_base::json::parse(&text) else {
+    let Ok(data) = xenonet_text::json::parse(&text) else {
         out["unreadable"] = json!("isn't valid JSON");
         return out;
     };
@@ -281,7 +281,7 @@ fn procs_self_test() -> Value {
     impl xenonet_engine::procs::Io for Run {
         fn exec(&mut self, call: xenonet_engine::procs::Call) -> Result<String, xenonet_engine::procs::Failure> {
             let mut cmd = std::process::Command::new(&call.file);
-            xenonet_base::process::Background::no_window(&mut cmd);
+            xenonet_os::process::Background::no_window(&mut cmd);
             // Start times in English and UTC, and text as UTF-8.
             cmd.args(&call.args)
                 .env("LC_TIME", "C")
@@ -371,7 +371,7 @@ struct Machine {
 }
 
 fn text(v: Option<&Value>) -> String {
-    v.map(xenonet_base::text::js_string).unwrap_or_default()
+    v.map(xenonet_text::text::display).unwrap_or_default()
 }
 
 fn missing() -> fx::BoxFuture<Result<Value, Value>> {
@@ -380,7 +380,7 @@ fn missing() -> fx::BoxFuture<Result<Value, Value>> {
 
 impl Machine {
     fn path(&self, k: &str) -> Option<String> {
-        self.paths.get(k).filter(|v| xenonet_base::text::truthy(Some(v))).map(xenonet_base::text::js_string)
+        self.paths.get(k).filter(|v| xenonet_text::text::truthy(Some(v))).map(xenonet_text::text::display)
     }
 
     /// ctx[fn](...args): { value } or { missing }, or what it threw.
@@ -392,9 +392,9 @@ impl Machine {
             "readText" => std::fs::read_to_string(a(0)).map_or(Value::Null, Value::String),
             "readdir" => {
                 let dir = a(0);
-                match xenonet_base::paths::read_dir_sorted(std::path::Path::new(&dir)) {
+                match xenonet_os::paths::read_dir_sorted(std::path::Path::new(&dir)) {
                     Ok(v) => Value::Array(v.iter().map(|e| json!(e.file_name().to_string_lossy())).collect()),
-                    Err(e) => return Err(fs_error(xenonet_base::fs::FsError::of(e, "scandir", &dir))),
+                    Err(e) => return Err(fs_error(xenonet_os::fs::FsError::of(e, "scandir", &dir))),
                 }
             }
             "access" => {
@@ -409,7 +409,7 @@ impl Machine {
             },
             "which" => fx::on_path(&a(0)).map_or(Value::Null, Value::String),
             "run" => {
-                let argv: Vec<String> = args.get(1).and_then(Value::as_array).map(|l| l.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default();
+                let argv: Vec<String> = args.get(1).and_then(Value::as_array).map(|l| l.iter().map(xenonet_text::text::display).collect()).unwrap_or_default();
                 run_program(&a(0), &argv, args.get(2).and_then(Value::as_f64).unwrap_or(5000.0)).await
             }
             "command" => {
@@ -441,7 +441,7 @@ impl Machine {
             }
             "procs" => tokio::task::spawn_blocking(procs_self_test).await.unwrap_or_else(|_| json!({ "supported": false })),
             "errors" => match self.path("stateDir") {
-                Some(dir) => Value::Array(xenonet_base::log::read_logs(std::path::Path::new(&xenonet_base::log::log_dir(&dir)), now_ms() - DAY_MS, "error", None, None, 500)),
+                Some(dir) => Value::Array(xenonet_os::log::read_logs(std::path::Path::new(&xenonet_os::log::log_dir(&dir)), now_ms() - DAY_MS, "error", None, None, 500)),
                 None => Value::Null,
             },
             "launcher" => launcher().await?,
@@ -450,10 +450,10 @@ impl Machine {
             // this machine, and its address.
             "network" => xenonet_net::doctor::standing(&std::path::Path::new(&self.parts.config.state_dir).join("network")),
             "restartExe" => restart_exe(),
-            "realpath" => xenonet_base::fs::realpath_native(&a(0)).map_or(Value::Null, Value::String),
+            "realpath" => xenonet_os::fs::realpath_native(&a(0)).map_or(Value::Null, Value::String),
             "drift" => {
                 let (file, looked, records) = self.parts.drift.locked().view();
-                json!({ "file": file, "lookedAt": looked.map_or(Value::Null, xenonet_base::json::number), "records": records })
+                json!({ "file": file, "lookedAt": looked.map_or(Value::Null, xenonet_text::json::number), "records": records })
             }
             "verify" => cores.verify.state(),
             "gitAvailable" => json!(git_available().await),
@@ -491,7 +491,7 @@ impl Machine {
         Arc::new(move |q: Value| {
             let me = me.clone();
             match q.get("op").and_then(Value::as_str) {
-                Some("now") => Box::pin(async { Ok(xenonet_base::json::number(now_ms())) }),
+                Some("now") => Box::pin(async { Ok(xenonet_text::json::number(now_ms())) }),
                 Some("localTime") => {
                     let ms = q.get("ms").and_then(Value::as_f64).unwrap_or(f64::NAN);
                     Box::pin(async move { Ok(json!(local_time(ms))) })
@@ -528,7 +528,7 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
     let connect = if parts.config.demo { Value::Null } else { c.connect.preview().await.unwrap_or(Value::Null) };
     let state_load = c.store.load_report().unwrap_or(Value::Null);
     json!({
-        "self": { "port": parts.config.port, "name": parts.config.name, "exe": xenonet_base::fs::running_exe() },
+        "self": { "port": parts.config.port, "name": parts.config.name, "exe": xenonet_os::fs::running_exe() },
         "base": null,
         "baseName": null,
         "health": health,
@@ -615,12 +615,12 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
             for (k, v) in r.as_object().into_iter().flatten() {
                 out.insert(k.clone(), v.clone());
             }
-            out.insert("ms".into(), xenonet_base::json::number((now_ms() - t0).max(0.0)));
+            out.insert("ms".into(), xenonet_text::json::number((now_ms() - t0).max(0.0)));
             Value::Object(out)
         }
     });
     let results: Vec<Value> = join_all(runs.collect()).await;
-    json!({ "at": xenonet_base::json::number(started), "ms": xenonet_base::json::number(now_ms() - started), "results": results, "summary": run::summarize(&results) })
+    json!({ "at": xenonet_text::json::number(started), "ms": xenonet_text::json::number(now_ms() - started), "results": results, "summary": run::summarize(&results) })
 }
 
 // Promise.all: each started at once, the answers in order.
@@ -834,11 +834,8 @@ impl Diagnostics for Diagnose {
         let packaged = c.launcher_exec.is_some() || fx::env_set("XENONET_LAUNCHER_BIN").is_some();
         let xenonet = json!({ "version": p.version, "instance": c.instance, "packaged": packaged, "running": true });
         let doctor = self.doctor.st.locked().last.clone();
-        let errors = if c.demo {
-            Vec::new()
-        } else {
-            xenonet_base::log::read_logs(std::path::Path::new(&xenonet_base::log::log_dir(&c.state_dir)), now_ms() - DAY_MS, "warn", None, None, 500)
-        };
+        let errors =
+            if c.demo { Vec::new() } else { xenonet_os::log::read_logs(std::path::Path::new(&xenonet_os::log::log_dir(&c.state_dir)), now_ms() - DAY_MS, "warn", None, None, 500) };
         let connect = if c.demo { None } else { p.cores.connect.preview().await.ok() };
         let launcher = launcher().await.ok().filter(|l| !l.is_null());
         let env = fx::env_map();

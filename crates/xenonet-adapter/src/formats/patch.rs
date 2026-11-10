@@ -9,7 +9,7 @@
 //! it: a line ends at \n, \r, U+2028 or U+2029, a header with nothing after
 //! it isn't one, and the path is trimmed as String.prototype.trim does.
 
-use crate::text::js_trim;
+use xenonet_text::text::trim;
 
 /// What a header says is done to its file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,9 +45,9 @@ const HEADS: [(&str, Kind); 4] = [("*** Add File: ", Kind::Add), ("*** Update Fi
 
 /// The headers of an apply_patch text, in the order they come.
 pub fn headers(text: &str) -> Vec<Header> {
-    text.split(crate::text::is_js_line_terminator)
+    text.split(xenonet_text::text::is_line_terminator)
         .filter_map(|line| {
-            HEADS.iter().find_map(|(head, kind)| line.strip_prefix(head).filter(|rest| !rest.is_empty()).map(|rest| Header { kind: *kind, path: js_trim(rest).to_string() }))
+            HEADS.iter().find_map(|(head, kind)| line.strip_prefix(head).filter(|rest| !rest.is_empty()).map(|rest| Header { kind: *kind, path: trim(rest).to_string() }))
         })
         .collect()
 }

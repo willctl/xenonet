@@ -2,8 +2,8 @@
 //! by the page, the desktop app and the xenonet film command.
 
 use serde_json::{json, Value};
-use xenonet_base::text::js_number;
-use xenonet_base::units::js_round;
+use xenonet_text::text::to_number;
+use xenonet_text::units::round;
 
 /// A poster's sizes, in pixels: a story (9:16), a portrait (4:5), a link
 /// card and a wide frame (16:9).
@@ -39,7 +39,7 @@ pub const FILM_CARDS_MS: f64 = 8000.0;
 /// to 30, 20 when it isn't said (or rounds to nothing).
 pub fn film_seconds(total: f64) -> f64 {
     let (min, max, default) = FILM_SECONDS;
-    let r = js_round(total);
+    let r = round(total);
     let r = if r == 0.0 || r.is_nan() { default } else { r };
     min.max(max.min(r))
 }
@@ -60,11 +60,11 @@ fn to_int32(x: f64) -> i32 {
 /// The largest size in a frame's shape that fits an area, in even numbers
 /// of pixels, which the video's pixel format needs.
 pub fn fit_frame(frame: &Value, area: &Value) -> Value {
-    let get = |v: &Value, k: &str| js_number(v.get(k));
+    let get = |v: &Value, k: &str| to_number(v.get(k));
     let (fw, fh) = (get(frame, "width"), get(frame, "height"));
     let k = [1.0, get(area, "width") / fw, get(area, "height") / fh].into_iter().fold(f64::INFINITY, |a, b| if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) });
-    let even = |n: f64| 2.0f64.max(f64::from(to_int32(js_round(n)) & !1));
-    json!({ "width": xenonet_base::json::number(even(fw * k)), "height": xenonet_base::json::number(even(fh * k)) })
+    let even = |n: f64| 2.0f64.max(f64::from(to_int32(round(n)) & !1));
+    json!({ "width": xenonet_text::json::number(even(fw * k)), "height": xenonet_text::json::number(even(fh * k)) })
 }
 
 #[cfg(test)]

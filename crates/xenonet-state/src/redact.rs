@@ -7,10 +7,10 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Mutex;
-use xenonet_base::json::number;
-use xenonet_base::jsstr;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number;
+use xenonet_text::text::{display, truthy};
+use xenonet_text::utf16;
 
 const ONSETS: [&str; 20] = ["b", "d", "f", "g", "h", "k", "l", "m", "n", "p", "r", "s", "t", "v", "z", "th", "sh", "kr", "dr", "vr"];
 const VOWELS: [&str; 10] = ["a", "e", "i", "o", "u", "ae", "ai", "ei", "io", "ou"];
@@ -18,7 +18,7 @@ const CODAS: [&str; 8] = ["", "", "n", "r", "s", "l", "th", "x"];
 
 /// The day a name holds for, as the local date.
 pub fn day_key(now: f64) -> String {
-    jsstr::local_day(now)
+    utf16::local_day(now)
 }
 
 fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
@@ -72,7 +72,7 @@ pub fn star_names(ids: &[Value], salt: &str, day: &str) -> Vec<(Value, String)> 
             unique.push(id);
         }
     }
-    let mut hashed: Vec<(&Value, [u8; 32])> = unique.into_iter().map(|id| (id, digest(salt, day, &js_string(id)))).collect();
+    let mut hashed: Vec<(&Value, [u8; 32])> = unique.into_iter().map(|id| (id, digest(salt, day, &display(id)))).collect();
     hashed.sort_by_key(|a| a.1);
     let mut taken = std::collections::HashSet::new();
     let mut names = Vec::new();
@@ -100,7 +100,7 @@ static RUN_SALT: Mutex<Option<String>> = Mutex::new(None);
 fn new_salt() -> String {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("the system's randomness");
-    jsstr::hex(&bytes)
+    utf16::hex(&bytes)
 }
 
 /// The salt, kept in the state folder as poster-salt: made the first time
@@ -113,7 +113,7 @@ pub fn poster_salt(dir: Option<&str>) -> std::io::Result<String> {
     let file = Path::new(dir).join("poster-salt");
     if let Ok(b) = std::fs::read(&file) {
         let kept = String::from_utf8_lossy(&b);
-        let kept = xenonet_base::text::js_trim(&kept);
+        let kept = xenonet_text::text::trim(&kept);
         if kept.len() == 64 && kept.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) {
             return Ok(kept.to_string());
         }
@@ -192,7 +192,7 @@ pub fn constellation_of(day: Option<&Value>, salt: &str, now: f64, names: bool, 
     let stars = star_names(&named_ids(day, nodes), salt, &day_key(now));
     let mut apps: Map<String, Value> = Map::new();
     for s in field("sessions").and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
-        let app = s.get("app").filter(|a| truthy(Some(a))).map_or_else(|| "other".to_string(), js_string);
+        let app = s.get("app").filter(|a| truthy(Some(a))).map_or_else(|| "other".to_string(), display);
         let n = apps.get(&app).and_then(Value::as_f64).unwrap_or(0.0) + 1.0;
         apps.insert(app, number(n));
     }
@@ -216,7 +216,7 @@ pub fn constellation_of(day: Option<&Value>, salt: &str, now: f64, names: bool, 
         "totals": { "sessions": total("sessions"), "turns": total("turns"), "toolCalls": total("toolCalls"), "files": total("files") },
         "tokens": or0(field("tokens")),
         "stars": stars,
-        "apps": Value::Object(jsstr::js_key_order(apps)),
+        "apps": Value::Object(utf16::key_order(apps)),
     })
 }
 
@@ -226,10 +226,10 @@ pub fn labels_of(nodes: &[Value], day: Option<&Value>, salt: &str, now: f64) -> 
     let stars = star_names(&named_ids(day.filter(|d| !d.is_null()), nodes), salt, &day_key(now));
     let mut labels = Map::new();
     for n in nodes.iter().filter(|n| is_labelled(n.get("kind"))) {
-        let key = n.get("id").map_or_else(|| "undefined".into(), js_string);
+        let key = n.get("id").map_or_else(|| "undefined".into(), display);
         labels.insert(key, lookup(&stars, n.get("id")).map_or(Value::Null, |s| Value::String(s.into())));
     }
-    Value::Object(jsstr::js_key_order(labels))
+    Value::Object(utf16::key_order(labels))
 }
 
 #[cfg(test)]
@@ -240,7 +240,7 @@ mod tests {
     fn hmac_is_rfc_4231s() {
         // RFC 4231, test case 2.
         let mac = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
-        assert_eq!(jsstr::hex(&mac), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        assert_eq!(utf16::hex(&mac), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
 
     #[test]

@@ -24,8 +24,8 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
-use xenonet_base::text::{js_number, js_string, js_trim};
-use xenonet_base::units::js_round;
+use xenonet_text::text::{display, to_number, trim};
+use xenonet_text::units::round;
 
 pub const SCOPES: [&str; 3] = ["user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing"];
 pub const REFRESH_TARGET: &str = "XenoNet/Spotify/refresh";
@@ -103,12 +103,12 @@ pub fn now_playing(p: Option<&Value>) -> Value {
         Some(Value::Array(a)) if !a.is_empty() => a.iter().map(|x| raw(Some(x), "name").cloned().unwrap_or(Value::Null)).collect(),
         _ => vec![raw(raw(item, "show"), "name").cloned().unwrap_or(Value::Null)],
     };
-    let artists = names.iter().filter(|n| truthy(Some(n))).map(js_string).collect::<Vec<_>>().join(", ");
+    let artists = names.iter().filter(|n| truthy(Some(n))).map(display).collect::<Vec<_>>().join(", ");
     let artists = slice16(&artists, 200);
     let link = raw(raw(item, "external_urls"), "spotify").and_then(Value::as_str).filter(|u| spotify_link().is_match(u));
     json!({
         "playing": truthy(raw(p, "is_playing")),
-        "title": slice16(&get(item, "name").map(js_string).unwrap_or_default(), 200),
+        "title": slice16(&get(item, "name").map(display).unwrap_or_default(), 200),
         "artists": if artists.is_empty() { Value::Null } else { Value::String(artists) },
         "url": link,
         "device": device_of(raw(p, "device")),
@@ -138,15 +138,15 @@ pub fn duck_plan(waiting: bool, player: Option<&Value>, device: Option<&Value>, 
     if !here || !truthy(raw(player, "playing")) || volume.is_none_or(Value::is_null) {
         return if waiting { keep(held) } else { keep(Some(&Value::Null)) };
     }
-    let v = js_number(volume);
+    let v = to_number(volume);
     let held_on = truthy(held);
     if waiting && !held_on {
-        let to = js_round(v * dip).max(5.0);
-        return if to < v { Duck { volume: Some(to), held: Some(json!({ "from": volume, "to": xenonet_base::json::number(to) })) } } else { keep(held) };
+        let to = round(v * dip).max(5.0);
+        return if to < v { Duck { volume: Some(to), held: Some(json!({ "from": volume, "to": xenonet_text::json::number(to) })) } } else { keep(held) };
     }
     let to = raw(held, "to");
     if !waiting && held_on {
-        return if strict_eq(volume, to) { Duck { volume: Some(js_number(raw(held, "from"))), held: Some(Value::Null) } } else { keep(Some(&Value::Null)) };
+        return if strict_eq(volume, to) { Duck { volume: Some(to_number(raw(held, "from"))), held: Some(Value::Null) } } else { keep(Some(&Value::Null)) };
     }
     // You changed it while it was dipped: yours stands.
     if waiting && held_on && !strict_eq(volume, to) {
@@ -173,12 +173,12 @@ impl Settings {
 fn read_settings(file: &str) -> Settings {
     let none = Settings { client_id: None, device: None, duck: false };
     let Ok(text) = std::fs::read_to_string(file) else { return none };
-    match xenonet_base::json::parse(&text) {
+    match xenonet_text::json::parse(&text) {
         Ok(s @ Value::Object(_)) => {
             let s = Some(&s);
-            let id = get(s, "clientId").map_or_else(String::new, js_string);
+            let id = get(s, "clientId").map_or_else(String::new, display);
             Settings {
-                client_id: client_id_re().is_match(&id).then(|| raw(s, "clientId").map(js_string).unwrap_or_default()),
+                client_id: client_id_re().is_match(&id).then(|| raw(s, "clientId").map(display).unwrap_or_default()),
                 device: raw(s, "device").and_then(Value::as_str).map(String::from),
                 duck: raw(s, "duck") == Some(&Value::Bool(true)),
             }
@@ -266,7 +266,7 @@ impl Spotify {
     }
 
     fn redirect(&self) -> String {
-        format!("http://127.0.0.1:{}/api/spotify/callback", js_string(&self.port))
+        format!("http://127.0.0.1:{}/api/spotify/callback", display(&self.port))
     }
 
     pub fn settings(&self) -> Value {
@@ -275,12 +275,12 @@ impl Spotify {
 
     fn save(&self) -> Result<(), fsx::FsError> {
         fsx::mkdir_p(&NATIVE.dirname(&self.file), None)?;
-        fsx::write_file(&self.file, format!("{}\n", xenonet_base::json::stringify(&self.settings.to_value(), 0)).as_bytes(), Some(0o600))
+        fsx::write_file(&self.file, format!("{}\n", xenonet_text::json::stringify(&self.settings.to_value(), 0)).as_bytes(), Some(0o600))
     }
 
     /// Your app's client id, from its page on Spotify's dashboard.
     pub fn set_app(&mut self, client_id: &str) -> Result<Value, Failed> {
-        let id = js_trim(client_id);
+        let id = trim(client_id);
         if !client_id_re().is_match(id) {
             return Err(Failed::Spotify(err(400, "bad-request", "a Spotify app's client id is 32 letters and digits, from its page on Spotify's developer dashboard")));
         }
@@ -351,7 +351,7 @@ impl Spotify {
                     return Ok(body);
                 }
                 let b = Some(&body);
-                let why = get(b, "error_description").or_else(|| get(b, "error")).map_or_else(|| status.to_string(), js_string);
+                let why = get(b, "error_description").or_else(|| get(b, "error")).map_or_else(|| status.to_string(), display);
                 let code = if raw(b, "error").and_then(Value::as_str) == Some("invalid_grant") { "reconnect" } else { "refused" };
                 Err(err(if status == 400 || status == 401 { 409 } else { 502 }, code, format!("Spotify said: {}", slice16(&why, 160))))
             }
@@ -362,11 +362,11 @@ impl Spotify {
     // one came, in the credential store.
     fn keep(&mut self, body: &Value, now: f64) -> Option<Ask> {
         let b = Some(body);
-        let expires = get(b, "expires_in").map_or(3600.0, |e| js_number(Some(e)));
+        let expires = get(b, "expires_in").map_or(3600.0, |e| to_number(Some(e)));
         self.access = Some(Access { token: raw(b, "access_token").cloned().unwrap_or(Value::Null), until: now + expires * 1000.0 });
         // A refresh may come back without a new refresh token: the one
         // there is stays.
-        raw(b, "refresh_token").filter(|r| truthy(Some(r))).map(|r| Ask::SecretSet { target: REFRESH_TARGET, value: js_string(r), comment: REFRESH_COMMENT })
+        raw(b, "refresh_token").filter(|r| truthy(Some(r))).map(|r| Ask::SecretSet { target: REFRESH_TARGET, value: display(r), comment: REFRESH_COMMENT })
     }
 
     /// Starts a job: "status", "callback" (with { code, state, error }),
@@ -395,9 +395,9 @@ impl Spotify {
                     return (Value::Object(job), Ask::Fail(err(400, "expired", "this sign-in took too long; start again from XenoNet")));
                 }
                 if let Some(e) = raw(a, "error").filter(|e| truthy(Some(e))) {
-                    return (Value::Object(job), Ask::Fail(err(400, "declined", format!("Spotify said: {}", slice16(&js_string(e), 80)))));
+                    return (Value::Object(job), Ask::Fail(err(400, "declined", format!("Spotify said: {}", slice16(&display(e), 80)))));
                 }
-                let Some(code) = raw(a, "code").filter(|c| truthy(Some(c))).map(js_string) else {
+                let Some(code) = raw(a, "code").filter(|c| truthy(Some(c))).map(display) else {
                     return (Value::Object(job), Ask::Fail(err(400, "bad-request", "Spotify sent no code")));
                 };
                 job.insert("stage".into(), json!("exchanged"));
@@ -453,12 +453,12 @@ impl Spotify {
             Some("next") => Ok(("POST", format!("/me/player/next{device}"))),
             Some("previous") => Ok(("POST", format!("/me/player/previous{device}"))),
             Some("volume") => {
-                let v = js_round(js_number(Some(value.unwrap_or(&Value::Null))));
+                let v = round(to_number(Some(value.unwrap_or(&Value::Null))));
                 if !(0.0..=100.0).contains(&v) {
                     return Err(err(400, "bad-request", "volume is 0 to 100"));
                 }
                 let and = if device.is_empty() { String::new() } else { format!("&{}", &device[1..]) };
-                Ok(("PUT", format!("/me/player/volume?volume_percent={}{and}", xenonet_base::json::number_string(v + 0.0))))
+                Ok(("PUT", format!("/me/player/volume?volume_percent={}{and}", xenonet_text::json::number_string(v + 0.0))))
             }
             _ => Err(err(400, "bad-request", "play, pause, next, previous or volume")),
         }
@@ -502,7 +502,7 @@ impl Spotify {
             Ask::Fetch {
                 url: format!("{API}{route}"),
                 method,
-                headers: vec![("authorization", format!("Bearer {}", js_string(token)))],
+                headers: vec![("authorization", format!("Bearer {}", display(token)))],
                 body: None,
                 timeout_ms: 10000.0,
                 fallback: Value::Null,
@@ -560,7 +560,7 @@ impl Spotify {
             "refresh" => {
                 // secrets.get(…).catch(() => null)
                 let refresh = match got {
-                    Got::Value(v) if truthy(Some(&v)) => js_string(&v),
+                    Got::Value(v) if truthy(Some(&v)) => display(&v),
                     _ => return fail(job, err(409, "not-connected", "Spotify isn't connected")),
                 };
                 job.insert("stage".into(), json!("refreshed"));
@@ -606,7 +606,7 @@ impl Spotify {
                     return self.call_start(job, now);
                 }
                 if status == 429 {
-                    let after = js_number(Some(&retry_after.map_or(Value::Null, Value::String)));
+                    let after = to_number(Some(&retry_after.map_or(Value::Null, Value::String)));
                     let after = if after == 0.0 || after.is_nan() { 5.0 } else { after };
                     self.retry_at = now + after.min(30.0) * 1000.0;
                     return fail(job, err(429, "busy", "Spotify asked XenoNet to wait a moment"));
@@ -619,7 +619,7 @@ impl Spotify {
                     if status == 403 {
                         return fail(job, err(409, "premium", "Spotify's player needs Premium"));
                     }
-                    let why = get(get(Some(&body), "error"), "message").map_or_else(|| status.to_string(), js_string);
+                    let why = get(get(Some(&body), "error"), "message").map_or_else(|| status.to_string(), display);
                     return fail(job, err(502, "refused", format!("Spotify said: {}", slice16(&why, 160))));
                 }
                 if player {
@@ -651,7 +651,7 @@ pub fn demo_command(p: &mut Value, op: Option<&str>, value: Option<&Value>) {
             let next = if p["title"] == "Night Drive" { "Low Orbit" } else { "Night Drive" };
             p["title"] = json!(next);
         }
-        Some("volume") => p["device"]["volume"] = xenonet_base::json::number(js_round(js_number(value))),
+        Some("volume") => p["device"]["volume"] = xenonet_text::json::number(round(to_number(value))),
         _ => {}
     }
 }

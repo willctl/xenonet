@@ -27,10 +27,10 @@
 //! clock may move each time it's read.
 
 use crate::lifecycle::Lifecycle;
-use xenonet_base::fs::{DirEntry, Fs, FsError};
-use xenonet_base::json::number_string;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::paths::join;
+use xenonet_os::fs::{DirEntry, Fs, FsError};
+use xenonet_os::paths::join;
+use xenonet_text::json::number_string;
+use xenonet_text::ordered::OrderedMap;
 
 /// How close to a folder's mtime a read of it is racy: wide enough for the
 /// coarsest clocks, FAT's 2 s, and either side, for a filesystem whose
@@ -427,7 +427,7 @@ impl Breadth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xenonet_base::fs::StdFs;
+    use xenonet_os::fs::StdFs;
 
     #[test]
     fn walks_depth_and_breadth_first_alike() {

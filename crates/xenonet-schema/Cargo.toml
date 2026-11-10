@@ -14,7 +14,8 @@ serde.workspace = true
 serde_json.workspace = true
 # The path to the first problem a document has against its type.
 serde_path_to_error.workspace = true
-xenonet-base.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
 
 [lints]
 workspace = true

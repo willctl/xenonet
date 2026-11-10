@@ -4,12 +4,9 @@
 //! afterFileEdit files as its edits, ended at its sessionEnd.
 
 use serde_json::Value;
-use xenonet_base::fs::FsError;
-use xenonet_base::json::{self, number_string};
-use xenonet_base::nodepath::{Style, NATIVE};
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::paths::path_style;
-use xenonet_base::text::{is_blank, js_string};
+use xenonet_os::fs::FsError;
+use xenonet_os::nodepath::{Style, NATIVE};
+use xenonet_os::paths::path_style;
 use xenonet_schema::drift::clean_version;
 use xenonet_sources::native::files::Files;
 use xenonet_sources::native::{
@@ -17,6 +14,9 @@ use xenonet_sources::native::{
     VENDOR_FAILED,
 };
 use xenonet_sources::session::{RunSession, Via};
+use xenonet_text::json::{self, number_string};
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::{display, is_blank};
 
 pub const SOURCE: &str = "anysphere/cursor/hook-input";
 const READ_MAX: f64 = (4u64 << 20) as f64;
@@ -34,8 +34,8 @@ fn field<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
 fn date_of(v: Option<&Value>) -> Option<f64> {
     match v {
         None | Some(Value::Null) => None,
-        Some(Value::String(s)) => xenonet_base::time::parse_iso(s),
-        Some(other) => xenonet_base::time::parse_iso(&js_string(other)),
+        Some(Value::String(s)) => xenonet_text::time::parse_iso(s),
+        Some(other) => xenonet_text::time::parse_iso(&display(other)),
     }
 }
 
@@ -311,7 +311,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("cursor-hooks.ndjson").to_string_lossy().into_owned();
         let at = "2026-10-16T12:00:00.000Z";
-        let now = xenonet_base::time::parse_iso(at).unwrap();
+        let now = xenonet_text::time::parse_iso(at).unwrap();
         let line = |hook: &str, extra: &str| {
             format!("{{\"hook_event_name\":\"{hook}\",\"conversation_id\":\"6b0e5f1c-1111\",\"workspace_roots\":[\"/w/atlas\"],\"at\":\"{at}\"{extra}}}\n")
         };

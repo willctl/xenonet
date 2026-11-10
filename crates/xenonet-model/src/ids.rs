@@ -187,6 +187,13 @@ pub enum QualifyError {
     NotAHost,
 }
 
+/// `actor:<slug>` or `@<host>:actor:<slug>` → (host, slug); None for any other id.
+pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
+    let q = parse_qualified(id)?;
+    let slug = q.local.strip_prefix("actor:")?;
+    is_actor_slug(slug).then_some((q.host, slug))
+}
+
 /// A harness session: `<app>:<run>`, on this host or another.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AgentId {
@@ -355,6 +362,90 @@ pub fn normalize_remote(url: &str) -> String {
     s.strip_suffix(".git").map(str::to_string).unwrap_or(s)
 }
 
+/// A remote's host and the repo's path, as repoKey reads them: a URL
+/// (`scheme://[user@]host[:port][/path]`) or the scp form (`[user@]host:path`).
+/// None for a remote that's a folder on disk (file://, /srv/git/x), which
+/// means something only on its own machine, or that has no path.
+pub fn remote_parts(url: &str) -> Option<(String, String)> {
+    let s = xenonet_text::text::trim(url);
+    let (host, rest) = match url_form(s) {
+        UrlForm::Remote(host, rest) => (host, rest),
+        UrlForm::File => return None,
+        UrlForm::No => scp_form(s)?,
+    };
+    let repo = rest.trim_start_matches('/').trim_end_matches('/');
+    // The last four bytes, when they're whole characters: a repo whose name
+    // ends inside one (gh:éabc) has no ".git" to take off.
+    let repo = match repo.len().checked_sub(4).and_then(|i| Some((i, repo.get(i..)?))) {
+        Some((i, end)) if end.eq_ignore_ascii_case(".git") => &repo[..i],
+        _ => repo,
+    };
+    (!repo.is_empty()).then(|| (host.to_lowercase(), repo.to_string()))
+}
+
+// What url_form makes of a remote: no URL, a file:// URL, which is no
+// remote, or a URL's host and path.
+enum UrlForm<'a> {
+    No,
+    File,
+    Remote(&'a str, &'a str),
+}
+
+// /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?(\[[^\]/]+\]|[^/:]+)(?::\d*)?(\/.*)?$/i
+fn url_form(s: &str) -> UrlForm<'_> {
+    let Some((scheme, after)) = s.split_once("://") else {
+        return UrlForm::No;
+    };
+    let b = scheme.as_bytes();
+    if b.is_empty() || !b[0].is_ascii_alphabetic() || !b.iter().all(|c| c.is_ascii_alphanumeric() || b"+.-".contains(c)) {
+        return UrlForm::No;
+    }
+    // The user part, when there's an @ before the first /; else none.
+    let tries: Vec<&str> = match after.find(['@', '/']) {
+        Some(i) if after.as_bytes()[i] == b'@' => vec![&after[i + 1..], after],
+        _ => vec![after],
+    };
+    for t in tries {
+        let host_end =
+            if t.starts_with('[') { t.find(']').map(|i| i + 1).filter(|&i| !t[1..i - 1].contains('/') && i > 2) } else { t.find(['/', ':']).or(Some(t.len())).filter(|&i| i > 0) };
+        let Some(h) = host_end else { continue };
+        let (host, mut rest) = t.split_at(h);
+        if let Some(port) = rest.strip_prefix(':') {
+            let digits = port.len() - port.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            rest = &port[digits..];
+        }
+        if !(rest.is_empty() || rest.starts_with('/')) || rest.contains(xenonet_text::text::is_line_terminator) {
+            continue;
+        }
+        if scheme.eq_ignore_ascii_case("file") {
+            return UrlForm::File;
+        }
+        return UrlForm::Remote(host, rest);
+    }
+    UrlForm::No
+}
+
+// /^(?:[^@/]+@)?([^:/\\]{2,}):(?!\/\/)(.+)$/
+fn scp_form(s: &str) -> Option<(&str, &str)> {
+    let mut tries = Vec::new();
+    if let Some(i) = s.find(['@', '/']).filter(|&i| i > 0 && s.as_bytes()[i] == b'@') {
+        tries.push(&s[i + 1..]);
+    }
+    tries.push(s);
+    for t in tries {
+        let end = t.find([':', '/', '\\']).unwrap_or(t.len());
+        if end < 2 || t.as_bytes().get(end) != Some(&b':') || t[..end].chars().count() < 2 {
+            continue;
+        }
+        let rest = &t[end + 1..];
+        if rest.starts_with("//") || rest.is_empty() || rest.contains(xenonet_text::text::is_line_terminator) {
+            continue;
+        }
+        return Some((&t[..end], rest));
+    }
+    None
+}
+
 /// A project merged across hosts by its git remote: `repo:github.com/willctl/xenonet`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RepoId(String);
@@ -506,5 +597,19 @@ mod tests {
         assert_eq!(SchemaId::parse("live/snapshot/v1").unwrap().uri(), "https://xenonet.dev/schemas/live/snapshot/v1.json");
         assert!(SchemaId::parse("session/v0").is_err() && SchemaId::parse("Session/v1").is_err() && SchemaId::parse("v1/v2").is_err());
         assert!(is_schema_path("a/v2/b"), "only the last segment can't be a version");
+    }
+
+    #[test]
+    fn actors_and_remotes() {
+        assert_eq!(parse_actor_id("@vm1:actor:grok-bot"), Some((Some("vm1"), "grok-bot")));
+        assert_eq!(parse_actor_id("actor:you"), Some((None, "you")));
+        assert_eq!(parse_actor_id("claude:4f1c-000"), None);
+        assert_eq!(remote_parts("ssh://git@github.com:22/willctl/xenonet.git"), Some(("github.com".into(), "willctl/xenonet".into())));
+        assert_eq!(remote_parts("git@gh-work:willctl/xenonet"), Some(("gh-work".into(), "willctl/xenonet".into())));
+        assert_eq!(remote_parts("file:///srv/git/x"), None);
+        assert_eq!(remote_parts("/srv/git/x"), None);
+        assert_eq!(remote_parts("C:/x"), None, "a drive letter is no host");
+        assert_eq!(remote_parts("gh:éabc"), Some(("gh".into(), "éabc".into())), "a name that ends inside a character has no .git");
+        assert_eq!(remote_parts("gh:dépôt.GIT"), Some(("gh".into(), "dépôt".into())));
     }
 }

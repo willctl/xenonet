@@ -25,9 +25,9 @@ use std::time::Duration;
 use xenonet_api::cores::NetLink;
 use xenonet_api::cores::{self, Cores, State, R};
 use xenonet_api::wire::WireEnv;
-use xenonet_base::log::Log;
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
+use xenonet_os::log::Log;
 use xenonet_service::a2a::{A2a, A2aCores, A2aParts, Limits};
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
@@ -1152,9 +1152,9 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let _ = studio.next("start", 15, |d| d["state"] == "started").await;
     xenonet_wire_engine::network::receive(
         &a.world,
-        xenonet_base::network::Incoming {
+        xenonet_model::ops::Incoming {
             from: "laptop".into(),
-            kind: xenonet_base::network::Kind::Receipt,
+            kind: xenonet_model::ops::Kind::Receipt,
             body: json!({ "schema": "network/receipt/v1", "mid": mid, "agent": "xenonet:start", "state": "refused", "reason": "no session or actor here has that id", "at": now_ms() as i64 }),
             at: now_ms(),
             from_window_host: true,
@@ -1371,7 +1371,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     let (s, v) = as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: update XenoNet", "delegate": true })).await;
     assert_eq!((s, v["state"].clone()), (200, json!("sent")), "{v}");
     let (args, prompt) = ran(&c, 1).await;
-    let day = xenonet_base::time::iso(now_ms()).chars().take(10).collect::<String>();
+    let day = xenonet_text::time::iso(now_ms()).chars().take(10).collect::<String>();
     assert_eq!(
         prompt,
         format!(

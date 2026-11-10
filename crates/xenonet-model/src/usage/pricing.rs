@@ -8,11 +8,10 @@
 //! Not counted: batch (half price), data residency (1.1x), and Codex models
 //! OpenAI doesn't price (codex-auto-review, gpt-5.3-codex-spark).
 
-use crate::sync::Locked;
-use crate::time::{now_ms, parse_iso};
 use crate::usage::TokenUsage;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use xenonet_text::time::{now_ms, parse_iso};
 
 pub const PRICES_CHECKED: &str = "2026-10-03";
 
@@ -262,11 +261,17 @@ pub fn plain_model(model: &str) -> String {
 // The rows of a plain id, oldest first: those of the longest id it is or
 // starts with, followed by "-". Worked out once per id, since the tailer
 // prices a few models over and over; 500 ids at most, then it starts over.
+// The caches below are plain data each call leaves whole, so a lock whose
+// holder panicked is taken as it is (as xenonet-os's `sync` does).
+fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn price_rows(id: &str) -> Option<&'static [usize]> {
     type Kept = Mutex<HashMap<String, Option<&'static [usize]>>>;
     static KEPT: OnceLock<Kept> = OnceLock::new();
     let kept = KEPT.get_or_init(Default::default);
-    if let Some(v) = kept.locked().get(id) {
+    if let Some(v) = locked(kept).get(id) {
         return *v;
     }
     let mut best: Option<(&str, &'static str)> = None;
@@ -279,7 +284,7 @@ fn price_rows(id: &str) -> Option<&'static [usize]> {
         }
     }
     let found = best.map(|(_, key)| rows_of(key));
-    let mut kept = kept.locked();
+    let mut kept = locked(kept);
     if kept.len() >= 500 {
         kept.clear();
     }
@@ -293,7 +298,7 @@ fn price_rows(id: &str) -> Option<&'static [usize]> {
 fn rows_of(key: &'static str) -> &'static [usize] {
     type Kept = Mutex<HashMap<&'static str, &'static [usize]>>;
     static KEPT: OnceLock<Kept> = OnceLock::new();
-    let mut kept = KEPT.get_or_init(Default::default).locked();
+    let mut kept = locked(KEPT.get_or_init(Default::default));
     if let Some(v) = kept.get(key) {
         return v;
     }

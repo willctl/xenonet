@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use xenonet_base::network::Net;
+use xenonet_model::ops::Net;
 use xenonet_net::sink::SinkSlot;
 
 const CONFIG: &str = "core/hosts/config.js";
@@ -63,7 +63,7 @@ impl SelfApi for HttpApi {
     async fn get(&self, path: &str) -> Result<(u16, Value), (String, u16)> {
         let (port, route, timeout, max) = (self.port, path.to_string(), self.timeout, self.max_bytes);
         let headers: Vec<(String, String)> = Self::HEADERS.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
-        let r = tokio::task::spawn_blocking(move || xenonet_base::http::request(port, "GET", &route, &headers, None, Some(timeout))).await.map_err(|e| (e.to_string(), 502))?;
+        let r = tokio::task::spawn_blocking(move || crate::http::request(port, "GET", &route, &headers, None, Some(timeout))).await.map_err(|e| (e.to_string(), 502))?;
         let a = r.map_err(|e| match e.kind() {
             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => (format!("no answer in {} s", timeout.as_secs()), 504),
             _ => (e.to_string(), 502),
@@ -76,7 +76,7 @@ impl SelfApi for HttpApi {
         if text.is_empty() {
             return Ok((a.status, Value::Null));
         }
-        Ok(match xenonet_base::json::parse(&text) {
+        Ok(match xenonet_text::json::parse(&text) {
             Ok(v) => (a.status, v),
             Err(_) => (502, serde_json::json!({ "error": "XenoNet answered with something that isn't JSON" })),
         })

@@ -29,7 +29,7 @@ impl Opener for Open {
     }
 
     fn handoff_url(&self, target: &str, folder: &Value, brief: &str) -> R<String> {
-        let folder = xenonet_base::text::truthy(Some(folder)).then(|| xenonet_base::text::js_string(folder));
+        let folder = xenonet_text::text::truthy(Some(folder)).then(|| xenonet_text::text::display(folder));
         xenonet_app::open::handoff_url(target, folder.as_deref(), brief).ok_or_else(|| CoreError::status(400, "bad handoff"))
     }
 

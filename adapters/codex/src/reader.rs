@@ -16,16 +16,16 @@ pub mod threads;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use xenonet_adapter::reader::{Call, Classified, Emit, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};
-use xenonet_base::json::number;
-use xenonet_base::paths;
-use xenonet_base::pricing;
-use xenonet_base::text::{join, js_number, js_string, js_trim, truthy};
-use xenonet_base::usage::{Speed, TokenUsage};
+use xenonet_model::usage::pricing;
+use xenonet_model::usage::{Speed, TokenUsage};
+use xenonet_os::paths;
 use xenonet_sources::line_events::{self, broken_at, user_text, End, Field, Kind, LineEvent, LineFile};
 use xenonet_sources::lines::{codex_kind_of, codex_version_of, opt_prop, prop, CodexLine};
 use xenonet_sources::live::js::{ev, index0, is_str, js_max, map_opt, nn, num_of, nv, obj, object_keys, or0, pages_extra, strict_eq, sv, tpl};
 use xenonet_sources::live::telemetry::{project_limit, refusals};
 use xenonet_sources::live::{clip, clip_value, codex_edits, command_text, patch_files, string_of, wiki_pages_of};
+use xenonet_text::json::number;
+use xenonet_text::text::{display, join, to_number, trim, truthy};
 
 pub const SOURCE: &str = "openai/codex/rollout-line";
 
@@ -186,7 +186,7 @@ impl Reader {
                 let empty = Value::Object(Map::new());
                 let last = Some(nn(last).unwrap_or(&empty));
                 let input = match nn(opt_prop(last, "input_tokens")) {
-                    Some(v) => js_number(Some(v)),
+                    Some(v) => to_number(Some(v)),
                     None => js_max(0.0, or0(opt_prop(last, "total_tokens")) - or0(opt_prop(last, "output_tokens"))),
                 };
                 let cached = or0(opt_prop(last, "cached_input_tokens"));
@@ -195,7 +195,7 @@ impl Reader {
                 let model = nn(Some(&session_model)).cloned().unwrap_or_else(|| "unknown".into());
                 let provider = t.provider(i);
                 let call_model =
-                    if truthy(Some(&provider)) && !is_str(Some(&provider), "openai") { Value::String(format!("{}/{}", js_string(&provider), js_string(&model))) } else { model };
+                    if truthy(Some(&provider)) && !is_str(Some(&provider), "openai") { Value::String(format!("{}/{}", display(&provider), display(&model))) } else { model };
                 let call = Call {
                     tokens: TokenUsage {
                         input: Some(js_max(0.0, input - cached - write)),
@@ -306,14 +306,14 @@ impl Reader {
                     parts.push(prop(Some(c), "text")?);
                 }
                 let text = join(parts.into_iter(), " ");
-                if !js_trim(&text).is_empty() {
+                if !trim(&text).is_empty() {
                     t.add_message(i, Some(&Value::String(text.clone())), ts)?;
                     t.activity(i, ev(vec![("kind", sv("message")), ("detail", Some(Value::String(clip(&text, 72)))), ("ts", nv(ts))]), live, now, out);
                 }
             }
             Some("CommandExecution") => {
                 let code = get("exit_code");
-                let ok = nn(code).is_none() || js_number(code) == 0.0;
+                let ok = nn(code).is_none() || to_number(code) == 0.0;
                 let done = ok && !is_str(get("status"), "failed");
                 t.note_tool_result(i, done, ts, None);
                 let cmd = command_text(get("command"));
@@ -472,7 +472,7 @@ impl Tailed for Reader {
             .filter(|x| nn(opt_prop(Some(x), "primary")).is_some() && strict_eq(opt_prop(Some(x), "resets"), resets_at) && now - num_of(Some(x), "ts") < 24.0 * 3600e3)
             .map(|x| (num_of(Some(x), "ts"), num_of(Some(x), "primary")))
             .collect();
-        let horizon = nn(minutes).map_or(300.0, |m| js_number(Some(m))) * 60e3;
+        let horizon = nn(minutes).map_or(300.0, |m| to_number(Some(m))) * 60e3;
         let mut m = match project_limit(now, &points, pct, resets_at.cloned(), horizon) {
             Value::Object(m) => m,
             _ => Map::new(),

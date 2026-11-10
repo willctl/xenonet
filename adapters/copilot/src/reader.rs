@@ -5,18 +5,18 @@
 
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use xenonet_base::json::{self, number_string};
-use xenonet_base::jsstr::is_array_index;
-use xenonet_base::nodepath::NATIVE;
-use xenonet_base::ordered::OrderedMap;
-use xenonet_base::patch;
-use xenonet_base::text::{is_blank, truthy};
+use xenonet_adapter::formats::patch;
+use xenonet_os::nodepath::NATIVE;
 use xenonet_sources::native::files::Files;
 use xenonet_sources::native::{
     by_num, edit_file, edits_out, fits_id, js_max, js_min, ms_of, push_edit, str_of, titled, Check, Checked, Edits, FileCache, NativeReader, Out, Threw, Vendor, DAY_MS,
     EDIT_KEEP_MS, SESSIONS_MAX, VENDOR_FAILED,
 };
 use xenonet_sources::session::{RunSession, Via};
+use xenonet_text::json::{self, number_string};
+use xenonet_text::ordered::OrderedMap;
+use xenonet_text::text::{is_blank, truthy};
+use xenonet_text::utf16::is_array_index;
 
 pub const SOURCE: &str = "github/copilot-cli/session-event";
 /// Copilot CLI's built-in file tools, as the app registry has them;
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(l.version, Some(serde_json::json!(1)));
         assert_eq!((l.title.as_deref(), l.cwd.as_deref(), l.branch.as_deref()), (Some("Partial refunds"), Some("/w/atlas"), Some("main")));
         assert_eq!(l.edits.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), ["src/app.ts", "/w/atlas/notes.txt"]);
-        assert_eq!(l.ended_at, xenonet_base::time::parse_iso("2026-10-16T11:59:00Z"));
+        assert_eq!(l.ended_at, xenonet_text::time::parse_iso("2026-10-16T11:59:00Z"));
         assert_eq!(read_events("{\"type\":\"user.message\"}\n", &mut |_| Ok(Checked::Same)).unwrap(), None);
         assert_eq!(read_events(&text, &mut |_| Err(Threw)), Err(Threw));
     }
@@ -457,7 +457,7 @@ mod tests {
             lines(&[serde_json::json!({ "type": "session.start", "data": { "sessionId": "0f3c2b1a-1111", "context": { "cwd": "/w/atlas" } } })]),
         )
         .unwrap();
-        let now = xenonet_base::fs::mtime_ms_of(&std::fs::metadata(format!("{root}/0f3c2b1a-1111/events.jsonl")).unwrap()).unwrap();
+        let now = xenonet_os::fs::mtime_ms_of(&std::fs::metadata(format!("{root}/0f3c2b1a-1111/events.jsonl")).unwrap()).unwrap();
         let mut c = CopilotCli::new();
         c.read(Some(&root), now, &mut StdFiles, &mut no_check);
         assert_eq!(c.root_state, "ok");

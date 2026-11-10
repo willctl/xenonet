@@ -7,6 +7,11 @@
 //! stale, and `XENONET_SCHEMAS_WRITE=1 cargo test -p xenonet-model` writes
 //! them again.
 //!
+//! Beside the documents: the seam between the engine and the network
+//! (`ops`: the bodies, and the `Net` and `Sink` traits each side
+//! implements), and a call's tokens and what they cost at API prices
+//! (`usage`, `usage::pricing`).
+//!
 //! The crate knows no vendor and no surface: a platform's name is a value
 //! here, never a branch.
 
@@ -36,6 +41,7 @@ pub mod state;
 pub mod system;
 pub mod theme;
 pub mod tray;
+pub mod usage;
 
 pub use schema::{Any, Bounded, Document, Nullable, Opt, Record, Ref, Text, True};
 

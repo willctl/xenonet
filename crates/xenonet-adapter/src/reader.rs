@@ -24,10 +24,10 @@ pub mod files;
 pub mod native;
 
 use serde_json::{Map, Value};
-use xenonet_base::json::number;
-use xenonet_base::usage::TokenUsage;
 use xenonet_blocks::lifecycle::Lifecycle;
+use xenonet_model::usage::TokenUsage;
 use xenonet_schema::vendor::Sampling;
+use xenonet_text::json::number;
 
 /// What JS would throw reading a record: the error every reader of
 /// transcripts gives where a line isn't shaped as its app writes it.
@@ -126,7 +126,7 @@ pub trait VendorCheck: Sync {
     /// read, or None for a line that isn't JSON or is dropped. `sampling`
     /// is the file's: which of its lines are checked whole.
     fn line(&self, _app: &str, text: &str, _sampling: &mut Sampling) -> Option<Value> {
-        xenonet_base::json::parse(text).ok()
+        xenonet_text::json::parse(text).ok()
     }
     /// A record already parsed, through the normalizer, as the last line
     /// of a file without a newline is read.

@@ -4,8 +4,8 @@
 use crate::args::Flags;
 use crate::out::Fail;
 use std::time::Duration;
-use xenonet_base::client::{self, Server};
-use xenonet_base::json::number_string;
+use xenonet_api::client::{self, Server};
+use xenonet_text::json::number_string;
 
 /// The first XenoNet the flags name that answers, or None.
 pub fn find(flags: &Flags) -> Option<Server> {

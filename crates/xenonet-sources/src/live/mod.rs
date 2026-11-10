@@ -16,14 +16,14 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
-use xenonet_base::jsstr;
-use xenonet_base::text::{is_js_line_terminator, is_js_space, js_string, js_trim, truthy};
+use xenonet_text::text::{display, is_line_terminator, is_space, trim, truthy};
+use xenonet_text::utf16;
 
 /// `String(v ?? "")`.
 pub fn string_of(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => String::new(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -52,7 +52,7 @@ fn mcp_parts(tool_name: &str) -> Option<(&str, &str)> {
     let rest = tool_name.strip_prefix("mcp__")?;
     let chars: Vec<(usize, char)> = rest.char_indices().collect();
     for i in 1..chars.len() {
-        if is_js_line_terminator(chars[i - 1].1) {
+        if is_line_terminator(chars[i - 1].1) {
             return None;
         }
         let at = chars[i].0;
@@ -63,7 +63,7 @@ fn mcp_parts(tool_name: &str) -> Option<(&str, &str)> {
         if next == '_' {
             continue;
         }
-        if chars[i + 3..].iter().any(|&(_, c)| is_js_line_terminator(c)) {
+        if chars[i + 3..].iter().any(|&(_, c)| is_line_terminator(c)) {
             continue;
         }
         return Some((&rest[..at], &rest[at + 2..]));
@@ -108,9 +108,9 @@ pub fn categorize(name: &str) -> &'static str {
 /// Text as one line of at most n characters (UTF-16 units), with "…" in
 /// place of what's cut.
 pub fn clip(s: &str, n: usize) -> String {
-    let t = js_trim(&jsstr::collapse_space(s)).to_string();
-    if jsstr::len(&t) > n {
-        format!("{}…", jsstr::head(&t, n.saturating_sub(1)))
+    let t = trim(&utf16::collapse_space(s)).to_string();
+    if utf16::len(&t) > n {
+        format!("{}…", utf16::head(&t, n.saturating_sub(1)))
     } else {
         t
     }
@@ -123,9 +123,9 @@ pub fn clip_value(v: Option<&Value>, n: usize) -> String {
 
 /// The end of a text, at most n units, with "…" in place of what's cut.
 pub fn tail(s: &str, n: usize) -> String {
-    let t = js_trim(s);
-    if jsstr::len(t) > n {
-        format!("…{}", jsstr::last(t, n.saturating_sub(1)))
+    let t = trim(s);
+    if utf16::len(t) > n {
+        format!("…{}", utf16::last(t, n.saturating_sub(1)))
     } else {
         t.to_string()
     }
@@ -133,7 +133,7 @@ pub fn tail(s: &str, n: usize) -> String {
 
 /// The local day a time falls on, as YYYY-MM-DD.
 pub fn day_key(ts: f64) -> String {
-    jsstr::local_day(ts)
+    utf16::local_day(ts)
 }
 
 /// A file's key for telling two sessions touched the same one: without
@@ -150,13 +150,13 @@ static ASKS: LazyLock<Regex> = LazyLock::new(|| {
 /// Whether the agent's last words before handing the turn back read like
 /// a question.
 pub fn looks_like_question(text: &str) -> bool {
-    let t = js_trim(text);
+    let t = trim(text);
     if t.is_empty() {
         return false;
     }
-    let end = jsstr::last(t, 400);
+    let end = utf16::last(t, 400);
     // /\?["'`*_)\]]*\s*$/
-    let bare = end.trim_end_matches(is_js_space).trim_end_matches(|c| "\"'`*_)]".contains(c));
+    let bare = end.trim_end_matches(is_space).trim_end_matches(|c| "\"'`*_)]".contains(c));
     if bare.ends_with('?') {
         return true;
     }
@@ -165,7 +165,7 @@ pub fn looks_like_question(text: &str) -> bool {
     let mut from = 0;
     let mut run_newlines = 0;
     for (i, c) in end.char_indices() {
-        if is_js_space(c) {
+        if is_space(c) {
             if c == '\n' {
                 run_newlines += 1;
                 if run_newlines >= 2 {
@@ -184,7 +184,7 @@ pub fn looks_like_question(text: &str) -> bool {
 /// home as "~".
 fn tilde_value(v: Option<&Value>, home: Option<&str>) -> Option<Value> {
     match (home.filter(|h| !h.is_empty()), v.filter(|v| truthy(Some(v)))) {
-        (Some(h), Some(value)) => Some(Value::String(xenonet_base::paths::tilde(&js_string(value), h))),
+        (Some(h), Some(value)) => Some(Value::String(xenonet_os::paths::tilde(&display(value), h))),
         _ => v.cloned(),
     }
 }
@@ -212,8 +212,8 @@ pub fn tool_detail(input: Option<&Value>, home: Option<&str>) -> String {
 pub fn command_text(command: Option<&Value>) -> String {
     let argv: Vec<String> = match command {
         None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) => a.iter().map(js_string).collect(),
-        Some(v) => vec![js_string(v)],
+        Some(Value::Array(a)) => a.iter().map(display).collect(),
+        Some(v) => vec![display(v)],
     };
     if argv.len() >= 2 {
         let first = argv[0].to_ascii_lowercase();
@@ -236,7 +236,7 @@ pub fn files_of(input: Option<&Value>) -> Vec<String> {
 /// read it: a session that moves a file onto one another session works on
 /// shares it.
 pub fn patch_files(text: Option<&Value>) -> Vec<String> {
-    xenonet_base::patch::paths(&string_of(text), true)
+    xenonet_adapter::formats::patch::paths(&string_of(text), true)
 }
 
 /// A text's lines, each after `prefix`, at most `max` of them, with how
@@ -301,7 +301,7 @@ pub fn claude_edits(name: &str, input: Option<&Value>, app: &str) -> Result<Vec<
 /// `Object.entries(v ?? {})`, for the values JSON has.
 fn entries(v: Option<&Value>) -> Vec<(String, Value)> {
     match v {
-        Some(Value::Object(m)) => jsstr::js_key_order(m.clone()).into_iter().collect(),
+        Some(Value::Object(m)) => utf16::key_order(m.clone()).into_iter().collect(),
         Some(Value::Array(a)) => a.iter().enumerate().map(|(i, x)| (i.to_string(), x.clone())).collect(),
         Some(Value::String(s)) => s.encode_utf16().enumerate().map(|(i, u)| (i.to_string(), Value::String(String::from_utf16_lossy(&[u])))).collect(),
         _ => Vec::new(),
@@ -338,7 +338,7 @@ pub fn codex_edits(changes: Option<&Value>) -> Vec<Value> {
 /// 0 for none.
 pub fn median(xs: &[f64]) -> f64 {
     let mut s = xs.to_vec();
-    xenonet_base::sort::sort_by(&mut s, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(&mut s, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     if s.is_empty() {
         0.0
     } else {
@@ -373,8 +373,8 @@ fn ordered(v: &Value) -> Value {
         Value::Array(a) => Value::Array(a.iter().map(ordered).collect()),
         Value::Object(m) => {
             let mut keys: Vec<&String> = m.keys().collect();
-            keys.sort_by(|a, b| jsstr::cmp_units(a, b));
-            Value::Object(jsstr::js_key_order(keys.into_iter().map(|k| (k.clone(), ordered(&m[k]))).collect()))
+            keys.sort_by(|a, b| utf16::cmp_units(a, b));
+            Value::Object(utf16::key_order(keys.into_iter().map(|k| (k.clone(), ordered(&m[k]))).collect()))
         }
         v => v.clone(),
     }
@@ -383,9 +383,9 @@ fn ordered(v: &Value) -> Value {
 /// What tells one tool call from another: its name and a digest of its
 /// whole input, so no other copy of the input is kept.
 pub fn tool_key(name: &str, input: Option<&Value>) -> String {
-    let text = xenonet_base::json::stringify(&ordered(input.unwrap_or(&Value::Null)), 0);
+    let text = xenonet_text::json::stringify(&ordered(input.unwrap_or(&Value::Null)), 0);
     let digest = Sha256::digest(text.as_bytes());
-    format!("{name}|{}", jsstr::hex(&digest))
+    format!("{name}|{}", utf16::hex(&digest))
 }
 
 /// The pages a write to the shared context names, for the map to beam to.

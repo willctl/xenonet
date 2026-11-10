@@ -17,13 +17,14 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
+use xenonet_adapter::dirs;
 use xenonet_adapter::reader::{BlockHealth, Failed, Lister, ListerEnv, Renamed, VendorCheck};
-use xenonet_base::text::{js_string, js_trim, truthy};
-use xenonet_base::time::now_ms;
-use xenonet_base::{dirs, json as js};
 use xenonet_blocks::lifecycle::{Lifecycle, State};
 use xenonet_sources::lines::{opt_prop, Js};
 use xenonet_sources::record::{nn, obj_json, tpl, F};
+use xenonet_text::json as js;
+use xenonet_text::text::{display, trim, truthy};
+use xenonet_text::time::now_ms;
 
 /// The kinds of thread the listing asks for.
 pub const SOURCE_KINDS: [&str; 9] = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther"];
@@ -47,7 +48,7 @@ pub fn says_unsupported(rpc: Js<'_>) -> bool {
     if matches!(opt_prop(rpc, "code"), Some(Value::Number(n)) if n.as_f64() == Some(-32601.0)) {
         return true;
     }
-    let m = nn(opt_prop(rpc, "message")).map_or_else(String::new, js_string).to_ascii_lowercase();
+    let m = nn(opt_prop(rpc, "message")).map_or_else(String::new, display).to_ascii_lowercase();
     ["not supported", "not yet supported", "unsupported", "not implemented", "unknown method", "method not found"].iter().any(|w| m.contains(w))
 }
 
@@ -76,7 +77,7 @@ impl Stdout {
         self.buf.push_str(chunk);
         let mut out = Vec::new();
         while let Some(nl) = self.buf.find('\n') {
-            let line = js_trim(&self.buf[..nl]).to_string();
+            let line = trim(&self.buf[..nl]).to_string();
             self.buf.drain(..=nl);
             if !line.is_empty() {
                 out.push(message(&line));
@@ -126,7 +127,7 @@ pub fn message(line: &str) -> Message {
     }
     let error = opt_prop(m, "error");
     if truthy(error) {
-        let message = nn(opt_prop(error, "message")).map_or_else(|| "app-server error".to_string(), js_string);
+        let message = nn(opt_prop(error, "message")).map_or_else(|| "app-server error".to_string(), display);
         return Message::Answer { id: id.clone(), result: Box::new(F::Undef), error: Some(Box::new((message, error.cloned().unwrap_or(Value::Null)))) };
     }
     Message::Answer { id: id.clone(), result: Box::new(F::of(opt_prop(m, "result"))), error: None }
@@ -166,7 +167,7 @@ impl dirs::Look for Disk {
         Ok(out)
     }
     fn mtime(&mut self, p: &str) -> f64 {
-        std::fs::metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
+        std::fs::metadata(p).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
     }
 }
 
@@ -256,7 +257,7 @@ impl Client {
         // start that fails fails too.
         lock(&self.inner).life.count("starts", 1.0);
         let mut cmd = Command::new(&self.bin);
-        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        xenonet_os::process::Background::no_window(cmd.as_std_mut());
         let spawned =
             cmd.arg("app-server").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn();
         let mut child = match spawned {
@@ -264,7 +265,7 @@ impl Client {
             Err(e) => {
                 lock(&self.inner).life.count("requests", 1.0);
                 // As Node words it: spawn <file> <code>.
-                let code = xenonet_base::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string);
+                let code = xenonet_os::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string);
                 return Err(Failed::said(format!("spawn {} {code}", self.bin)));
             }
         };

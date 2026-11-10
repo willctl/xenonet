@@ -10,7 +10,7 @@
 
 use serde_json::{json, Map, Value};
 use xenonet_app::jsv::truthy;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 pub const GRAPH_EVERY_MS: f64 = 1000.0;
 pub const LIVE_EVERY_MS: f64 = 500.0;
@@ -39,7 +39,7 @@ pub fn info_of(link_info: &Value, cached: bool, cached_hello: &Value, skew_ms: f
     }
     if skew_ms != 0.0 {
         let o = info.get("offsetMs").and_then(Value::as_f64).unwrap_or(0.0);
-        info.insert("offsetMs".into(), xenonet_base::json::number(o + skew_ms));
+        info.insert("offsetMs".into(), xenonet_text::json::number(o + skew_ms));
     }
     Value::Object(info)
 }
@@ -107,13 +107,13 @@ pub fn doctor_of(data: &Value) -> Value {
             let mut m = Map::new();
             for k in ["ok", "info", "warn", "fail", "skip"] {
                 let v = s.get(k).and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && *n >= 0.0 && n.abs() <= 9007199254740991.0).unwrap_or(0.0);
-                m.insert(k.into(), xenonet_base::json::number(v));
+                m.insert(k.into(), xenonet_text::json::number(v));
             }
             Value::Object(m)
         }
         _ => Value::Null,
     };
-    let text = |p: &Value, k: &str, max: usize| xenonet_app::jstext::slice16(&p.get(k).filter(|v| !v.is_null()).map_or_else(String::new, js_string), max);
+    let text = |p: &Value, k: &str, max: usize| xenonet_app::jstext::slice16(&p.get(k).filter(|v| !v.is_null()).map_or_else(String::new, display), max);
     let problems: Vec<Value> = data
         .get("problems")
         .and_then(Value::as_array)
@@ -125,7 +125,7 @@ pub fn doctor_of(data: &Value) -> Value {
                 .collect()
         })
         .unwrap_or_default();
-    json!({ "at": data.get("at").and_then(Value::as_f64).map_or(Value::Null, xenonet_base::json::number), "summary": summary, "problems": problems })
+    json!({ "at": data.get("at").and_then(Value::as_f64).map_or(Value::Null, xenonet_text::json::number), "summary": summary, "problems": problems })
 }
 
 /// What host-skew moves a host's clock by: ms (or b) as a number, three
@@ -135,7 +135,7 @@ pub fn skew_of(ms: &Value, b: &Value) -> f64 {
         return 180e3;
     }
     let v = if ms.is_null() { b } else { ms };
-    let n = xenonet_base::text::js_number(Some(v));
+    let n = xenonet_text::text::to_number(Some(v));
     if n.is_finite() {
         n
     } else {

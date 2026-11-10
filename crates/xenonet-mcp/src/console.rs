@@ -24,7 +24,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_app::instances::INSTANCES;
-use xenonet_base::text::truthy;
+use xenonet_text::text::truthy;
 
 const NAME: &str = "xenonet-console";
 
@@ -570,7 +570,7 @@ fn defs(installed: bool) -> Vec<Def> {
 /// A tool's result: its JSON as text, which every client reads, and any
 /// images after it.
 fn reply(value: &Value, extra: Vec<ContentBlock>) -> CallToolResult {
-    let mut content = vec![ContentBlock::text(xenonet_base::json::stringify(value, 1))];
+    let mut content = vec![ContentBlock::text(xenonet_text::json::stringify(value, 1))];
     content.extend(extra);
     let mut r = CallToolResult::success(content);
     r.is_error = None;
@@ -877,7 +877,7 @@ impl Console {
                 out.insert("instance".into(), json!(s));
                 spread(&mut out, &shot);
                 let extra = match image.filter(|i| truthy(Some(i))) {
-                    Some(i) => vec![ContentBlock::image(xenonet_base::text::js_string(&arg(&i, "data")), xenonet_base::text::js_string(&arg(&i, "mimeType")))],
+                    Some(i) => vec![ContentBlock::image(xenonet_text::text::display(&arg(&i, "data")), xenonet_text::text::display(&arg(&i, "mimeType")))],
                     None => vec![],
                 };
                 Ok(reply(&Value::Object(out), extra))

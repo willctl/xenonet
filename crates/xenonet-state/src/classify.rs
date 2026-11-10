@@ -7,8 +7,8 @@
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use xenonet_base::jsstr;
-use xenonet_base::text::{js_string, js_trim, js_trim_start};
+use xenonet_text::text::{display, trim, trim_start};
+use xenonet_text::utf16;
 
 /// The shape Codex answers in (--output-schema).
 pub fn picks_schema() -> Value {
@@ -51,7 +51,7 @@ pub fn outline_folders(folders: &[Value]) -> Vec<Value> {
                     m.insert(k.into(), v.clone());
                 }
             };
-            if xenonet_base::text::truthy(get(f, "repo")) {
+            if xenonet_text::text::truthy(get(f, "repo")) {
                 put(&mut m, "path", get(f, "rel"));
                 m.insert("xenonet".into(), Value::String("repo".into()));
                 m.insert("markers".into(), json!([]));
@@ -77,8 +77,8 @@ pub fn outline_folders(folders: &[Value]) -> Vec<Value> {
 /// markers. File counts and sessions change all the time and don't count.
 pub fn fingerprint(outline: &[Value]) -> String {
     let shape: Vec<Value> = outline.iter().map(|f| json!([field(f, "path"), get(f, "xenonet").and_then(Value::as_str) == Some("repo"), field(f, "markers")])).collect();
-    let text = xenonet_base::json::stringify(&Value::Array(shape), 0);
-    let hex = jsstr::hex(&Sha256::digest(text.as_bytes()));
+    let text = xenonet_text::json::stringify(&Value::Array(shape), 0);
+    let hex = utf16::hex(&Sha256::digest(text.as_bytes()));
     hex[..16].to_string()
 }
 
@@ -99,22 +99,22 @@ Folders:
 ";
 
 pub fn picks_prompt(outline: &[Value]) -> String {
-    format!("{PROMPT}{}", xenonet_base::json::stringify(&Value::Array(outline.to_vec()), 0))
+    format!("{PROMPT}{}", xenonet_text::json::stringify(&Value::Array(outline.to_vec()), 0))
 }
 
 // String(text).trim() without a fence around it: ```json … ```.
 fn unfenced(text: &str) -> &str {
-    let mut s = js_trim(text);
+    let mut s = trim(text);
     if let Some(rest) = s.strip_prefix("```") {
         let rest = rest.strip_prefix("json").unwrap_or(rest);
-        s = js_trim_start(rest);
+        s = trim_start(rest);
         if let Some(body) = s.strip_suffix("```") {
-            return body.trim_end_matches(xenonet_base::text::is_js_space);
+            return body.trim_end_matches(xenonet_text::text::is_space);
         }
         return s;
     }
     if let Some(body) = s.strip_suffix("```") {
-        return body.trim_end_matches(xenonet_base::text::is_js_space);
+        return body.trim_end_matches(xenonet_text::text::is_space);
     }
     s
 }
@@ -122,7 +122,7 @@ fn unfenced(text: &str) -> &str {
 /// Codex's answer, keeping only picks for folders it was sent that would
 /// change something.
 pub fn parse_picks(text: &str, outline: &[Value]) -> Result<Vec<Value>, String> {
-    let data = xenonet_base::json::parse(unfenced(text)).map_err(|_| "Codex didn't answer in the expected shape".to_string())?;
+    let data = xenonet_text::json::parse(unfenced(text)).map_err(|_| "Codex didn't answer in the expected shape".to_string())?;
     let mut by_path: Vec<(Value, &Value)> = Vec::new();
     for f in outline {
         let p = field(f, "path");
@@ -141,8 +141,8 @@ pub fn parse_picks(text: &str, outline: &[Value]) -> Result<Vec<Value>, String> 
         if call == Some("repo") || !matches!(as_, Some("project" | "group")) || call == as_ || picks.iter().any(|(k, _)| *k == fpath) {
             continue;
         }
-        let reason = get(p, "reason").filter(|v| !v.is_null()).map_or_else(String::new, js_string);
-        let reason = jsstr::head(js_trim(&reason), 200);
+        let reason = get(p, "reason").filter(|v| !v.is_null()).map_or_else(String::new, display);
+        let reason = utf16::head(trim(&reason), 200);
         picks.push((fpath.clone(), json!({ "path": fpath, "as": as_, "reason": reason })));
     }
     Ok(picks.into_iter().map(|(_, v)| v).collect())
@@ -175,8 +175,8 @@ pub fn jev_questions(outline: &[Value]) -> Vec<Value> {
             for (j, f) in part.iter().enumerate() {
                 let instructions = format!(
                     "For a map of a developer's projects folder, what is the folder \"{}\"? The tool sees it now as \"{}\". Most folders are what the tool sees; answer otherwise only when the folder clearly is.",
-                    get(f, "path").map_or_else(|| "undefined".into(), js_string),
-                    get(f, "xenonet").map_or_else(|| "undefined".into(), js_string)
+                    get(f, "path").map_or_else(|| "undefined".into(), display),
+                    get(f, "xenonet").map_or_else(|| "undefined".into(), display)
                 );
                 questions.insert(format!("f{}", b * PER_REQUEST + j), json!({ "type": "choice", "instructions": instructions, "criteria": criteria() }));
             }
@@ -190,15 +190,15 @@ pub fn jev_questions(outline: &[Value]) -> Vec<Value> {
 pub fn picks_from_answers(answers: &Value, folders: &[Value], offset: f64) -> Vec<Value> {
     let mut picks = Vec::new();
     for (j, f) in folders.iter().enumerate() {
-        let key = format!("f{}", xenonet_base::json::number_string(offset + j as f64));
-        let Some(a) = get(answers, &key).filter(|a| xenonet_base::text::truthy(Some(a))) else { continue };
+        let key = format!("f{}", xenonet_text::json::number_string(offset + j as f64));
+        let Some(a) = get(answers, &key).filter(|a| xenonet_text::text::truthy(Some(a))) else { continue };
         let choice = get(a, "choice").and_then(Value::as_str);
         let Some(confidence) = get(a, "confidence").and_then(Value::as_f64).filter(|c| *c >= CONFIDENT) else { continue };
         if !matches!(choice, Some("project" | "group")) || choice == get(f, "xenonet").and_then(Value::as_str) {
             continue;
         }
-        let pct = xenonet_base::units::js_round(confidence * 100.0);
-        picks.push(json!({ "path": field(f, "path"), "as": choice, "reason": format!("the decision model was {}% sure", xenonet_base::json::number_string(pct)) }));
+        let pct = xenonet_text::units::round(confidence * 100.0);
+        picks.push(json!({ "path": field(f, "path"), "as": choice, "reason": format!("the decision model was {}% sure", xenonet_text::json::number_string(pct)) }));
     }
     picks
 }

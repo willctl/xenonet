@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 /// Milliseconds since the epoch, as Date.now() gives them.
-pub use xenonet_base::time::now_ms;
+pub use xenonet_text::time::now_ms;
 // crypto.randomUUID() and process.platform are xenonet-os's, which the
 // drivers use too.
 pub use xenonet_os::{platform, random_uuid};

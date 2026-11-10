@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-os"
-description = "What XenoNet reads of the system it runs on (its home folder, platform, random ids), and fetch() and a program's output lines, shared by the service and the drivers."
+description = "The machine XenoNet runs on: files, paths, processes, locks, the error log, its own folders, the home folder, platform and random ids, fetch() and a program's output lines."
 version.workspace = true
 edition.workspace = true
 # reqwest and tokio, as the service (Rust 1.88+).
@@ -18,7 +18,18 @@ reqwest.workspace = true
 rustls.workspace = true
 # Lines of a program's output (lines.rs).
 tokio.workspace = true
-xenonet-base.workspace = true
+# The log's key patterns and what private_file reads of an ACL.
+regex.workspace = true
+serde_json.workspace = true
+xenonet-text.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+# Windows's job objects, so a headless turn and every process it starts
+# stop together (process.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

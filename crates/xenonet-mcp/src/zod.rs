@@ -11,7 +11,7 @@
 
 use regex::Regex;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::number_string;
+use xenonet_text::json::number_string;
 
 const MAX_SAFE: f64 = 9_007_199_254_740_991.0;
 const SCHEMA: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -218,10 +218,10 @@ impl Z {
                 m.insert("type".into(), json!(if *int { "integer" } else { "number" }));
                 let (min, max) = if *int { (Some(min.unwrap_or(-MAX_SAFE)), Some(max.unwrap_or(MAX_SAFE))) } else { (*min, *max) };
                 if let Some(n) = min {
-                    m.insert("minimum".into(), xenonet_base::json::number(n));
+                    m.insert("minimum".into(), xenonet_text::json::number(n));
                 }
                 if let Some(n) = max {
-                    m.insert("maximum".into(), xenonet_base::json::number(n));
+                    m.insert("maximum".into(), xenonet_text::json::number(n));
                 }
             }
             Kind::Bool => {
@@ -394,7 +394,7 @@ impl Z {
             }
             Kind::Lit(lit) => {
                 if !v.is_some_and(|v| same(v, lit)) {
-                    say(issues, path, format!("Invalid input: expected {}", xenonet_base::json::stringify(lit, 0)));
+                    say(issues, path, format!("Invalid input: expected {}", xenonet_text::json::stringify(lit, 0)));
                 }
                 v.cloned()
             }

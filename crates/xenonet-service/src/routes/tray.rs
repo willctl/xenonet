@@ -22,10 +22,10 @@ use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::truthy;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id};
+use xenonet_os::sync::Locked;
 use xenonet_state::needs_you;
+use xenonet_text::text::truthy;
 
 /// The most items a status lists (core/schema/tray.js's TRAY_ITEMS).
 pub const ITEMS: usize = 20;
@@ -67,10 +67,10 @@ fn item(it: &Value) -> Value {
     m.insert("key".into(), json!(clip(it.get("key").and_then(Value::as_str).unwrap_or(""), 300)));
     m.insert("kind".into(), it.get("kind").cloned().unwrap_or(Value::Null));
     m.insert("id".into(), text_or_null(it.get("id"), 300));
-    m.insert("title".into(), json!(clip(&it.get("title").map(xenonet_base::text::js_string).unwrap_or_default(), 200)));
+    m.insert("title".into(), json!(clip(&it.get("title").map(xenonet_text::text::display).unwrap_or_default(), 200)));
     m.insert("words".into(), json!(needs_you::waits_words(it)));
     m.insert("app".into(), text_or_null(it.get("app"), 32));
-    if let Some(h) = it.get("host").and_then(Value::as_str).filter(|h| xenonet_base::ids::is_host_id(h)) {
+    if let Some(h) = it.get("host").and_then(Value::as_str).filter(|h| xenonet_model::ids::is_host_id(h)) {
         m.insert("host".into(), json!(h));
     }
     m.insert("text".into(), text_or_null(it.get("text"), 500));
@@ -97,7 +97,7 @@ fn network(ctx: &Ctx) -> Value {
     let others: Vec<&Value> = s["hosts"].as_array().map(|h| h.iter().filter(|x| x["self"] != json!(true)).collect()).unwrap_or_default();
     json!({
         "name": text_or_null(s["network"].get("name"), 64),
-        "host": s["self"]["id"].as_str().filter(|h| xenonet_base::ids::is_host_id(h)),
+        "host": s["self"]["id"].as_str().filter(|h| xenonet_model::ids::is_host_id(h)),
         "link": link,
         "hosts": others.len(),
         "online": others.iter().filter(|x| x["online"] == json!(true)).count(),
@@ -131,10 +131,10 @@ fn look(ctx: &Ctx) -> Result<(Value, Vec<Value>), crate::cores::CoreError> {
         "url": format!("http://127.0.0.1:{}/", ctx.config.port),
         "desktop": desktop,
         "working": summary.get("working").filter(|w| w.is_u64()).cloned().unwrap_or(json!(0)),
-        "needsYou": { "count": xenonet_base::json::number(needs_you::count_of(&queue)), "items": queue.iter().take(ITEMS).cloned().collect::<Vec<_>>() },
+        "needsYou": { "count": xenonet_text::json::number(needs_you::count_of(&queue)), "items": queue.iter().take(ITEMS).cloned().collect::<Vec<_>>() },
         "gateway": gateway(ctx),
         "network": network(ctx),
-        "at": xenonet_base::json::number(ctx.now().floor()),
+        "at": xenonet_text::json::number(ctx.now().floor()),
     });
     Ok((status, queue))
 }
@@ -145,7 +145,7 @@ pub fn status(ctx: &Ctx) -> Result<Value, crate::cores::CoreError> {
 }
 
 fn alert(kind: &str, item: &Value, at: f64) -> Bytes {
-    crate::events::frame("alert", &json!({ "schema": "tray/event/v1", "kind": kind, "item": item, "at": xenonet_base::json::number(at.floor()) }))
+    crate::events::frame("alert", &json!({ "schema": "tray/event/v1", "kind": kind, "item": item, "at": xenonet_text::json::number(at.floor()) }))
 }
 
 /// The alerts between two looks at the queue: what started waiting (not a
@@ -181,7 +181,7 @@ fn events(ctx: &Arc<Ctx>) -> mpsc::UnboundedReceiver<Bytes> {
             let Ok((status, queue)) = look(&ctx) else { continue };
             let mut same = status.clone();
             same["at"] = Value::Null;
-            let shape = xenonet_base::json::stringify(&same, 0);
+            let shape = xenonet_text::json::stringify(&same, 0);
             if let Some((was, before)) = &last {
                 for a in alerts(before, &queue, ctx.now()) {
                     if tx.send(a).is_err() {
@@ -205,7 +205,7 @@ fn events(ctx: &Arc<Ctx>) -> mpsc::UnboundedReceiver<Bytes> {
 /// A session's or an actor's id, here or on another machine of the network.
 fn selectable(id: &str) -> bool {
     let local = |id: &str| is_agent_id(id) || is_actor_agent(id);
-    id.len() <= 300 && (local(id) || xenonet_base::ids::parse_qualified(id).is_some_and(|(h, l)| h.is_some() && local(l)))
+    id.len() <= 300 && (local(id) || xenonet_model::ids::parse_qualified(id).is_some_and(|q| q.host.is_some() && local(q.local)))
 }
 
 fn refused(error: &str) -> Reply {
@@ -257,8 +257,8 @@ mod tests {
 
     #[test]
     fn the_fixtures_the_tray_reads_are_what_the_schemas_say() {
-        let status = xenonet_base::json::parse(include_str!("../../../../test/fixtures/tray/status.json")).unwrap();
-        let event = xenonet_base::json::parse(include_str!("../../../../test/fixtures/tray/event.json")).unwrap();
+        let status = xenonet_text::json::parse(include_str!("../../../../test/fixtures/tray/status.json")).unwrap();
+        let event = xenonet_text::json::parse(include_str!("../../../../test/fixtures/tray/event.json")).unwrap();
         assert!(fits::<Status>(&status));
         assert!(fits::<Event>(&event));
         assert!(!fits::<Status>(&event), "an alert isn't a status");
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(said.len(), 2);
         assert!(said[0].starts_with("event: alert\ndata: {") && said[0].contains("\"kind\":\"needs-you\"") && said[0].contains("\"key\":\"c\""), "{}", said[0]);
         assert!(said[1].contains("\"kind\":\"resolved\"") && said[1].contains("\"key\":\"a\""), "{}", said[1]);
-        let event = xenonet_base::json::parse(said[0].trim_start_matches("event: alert\ndata: ").trim()).unwrap();
+        let event = xenonet_text::json::parse(said[0].trim_start_matches("event: alert\ndata: ").trim()).unwrap();
         assert!(fits::<Event>(&event));
     }
 

@@ -35,7 +35,7 @@ use crate::{NetError, R};
 use ring::{aead, hkdf};
 use serde_json::{json, Map, Value};
 use x25519_dalek::{PublicKey as SealPublic, StaticSecret};
-use xenonet_base::ids::is_host_id;
+use xenonet_model::ids::is_host_id;
 
 /// Every kind a frame can be.
 pub const FRAME_KINDS: [&str; 13] = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];

@@ -4,11 +4,11 @@
 
 use serde_json::Value;
 use std::fmt::Write as _;
-use xenonet_base::text::{js_number, js_string, truthy};
+use xenonet_text::text::{display, to_number, truthy};
 
 /// `${v}`, for a value that may not be there.
 pub fn text(v: Option<&Value>) -> String {
-    v.map_or("undefined".into(), js_string)
+    v.map_or("undefined".into(), display)
 }
 
 /// `${a[k]}`.
@@ -18,7 +18,7 @@ pub fn t(a: &Value, k: &str) -> String {
 
 /// `String(a[k] ?? "")`.
 pub fn or_empty(a: &Value, k: &str) -> String {
-    a.get(k).filter(|v| !v.is_null()).map(js_string).unwrap_or_default()
+    a.get(k).filter(|v| !v.is_null()).map(display).unwrap_or_default()
 }
 
 /// `!!a[k]`.
@@ -28,7 +28,7 @@ pub fn on(a: &Value, k: &str) -> bool {
 
 /// `Number(a[k])`: NaN when it isn't there.
 pub fn num(a: &Value, k: &str) -> f64 {
-    js_number(a.get(k))
+    to_number(a.get(k))
 }
 
 /// `a[k]` when it's a string.
@@ -39,7 +39,7 @@ pub fn str<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
 /// `a[k]` as a number, None when it's null or not there: what money() and
 /// tokens() take.
 pub fn amount(a: &Value, k: &str) -> Option<f64> {
-    have(a, k).map(|v| js_number(Some(v)))
+    have(a, k).map(|v| to_number(Some(v)))
 }
 
 /// `a[k]` as a list; empty when it's anything else.

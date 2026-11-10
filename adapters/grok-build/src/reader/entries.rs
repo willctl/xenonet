@@ -3,10 +3,10 @@
 //! and each tool call with how it went, a page at a time.
 
 use serde_json::{Map, Value};
-use xenonet_base::text::{js_string, js_trim};
-use xenonet_base::units;
 use xenonet_sources::line_events::{self, Kind, LineFile};
 use xenonet_sources::lines::GrokLine;
+use xenonet_text::text::{display, trim};
+use xenonet_text::units;
 
 fn nonempty(v: Option<&Value>) -> Option<&str> {
     v.and_then(Value::as_str).filter(|s| !s.is_empty())
@@ -20,7 +20,7 @@ fn nonempty(v: Option<&Value>) -> Option<&str> {
 pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
     let mut out: Vec<Map<String, Value>> = Vec::new();
     let file = LineFile::default();
-    let at = |o: &GrokLine| o.ts().ok().filter(|t| t.is_finite()).map_or(Value::Null, xenonet_base::json::number);
+    let at = |o: &GrokLine| o.ts().ok().filter(|t| t.is_finite()).map_or(Value::Null, xenonet_text::json::number);
     // Where the entry of the run of chunks still open is, which its later
     // chunks carry on.
     let mut open: Option<usize> = None;
@@ -50,7 +50,7 @@ pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
             match &e.kind {
                 Kind::Prompt(p) => {
                     let asked = p.claude.as_ref().is_none_or(|c| c.meta != Some(&Value::Bool(true)));
-                    if asked && !js_trim(&p.text).is_empty() {
+                    if asked && !trim(&p.text).is_empty() {
                         push(&mut out, &mut open, entry("user", &p.text));
                     }
                 }
@@ -59,10 +59,10 @@ pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
                         blocks.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some(kind)).filter_map(|b| b.get(field).and_then(Value::as_str)).collect()
                     };
                     let (said, thought) = (of("text", "text"), of("thinking", "thinking"));
-                    if !js_trim(&said).is_empty() {
+                    if !trim(&said).is_empty() {
                         push(&mut out, &mut open, entry("assistant", &said));
                     }
-                    if !js_trim(&thought).is_empty() {
+                    if !trim(&thought).is_empty() {
                         push(&mut out, &mut open, entry("reasoning", &thought));
                     }
                 }
@@ -70,7 +70,7 @@ pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
                     Some(at) => {
                         out[at].insert("text".into(), Value::String(units::excerpt(whole, 2500)));
                     }
-                    None if !meta && !js_trim(whole).is_empty() => {
+                    None if !meta && !trim(whole).is_empty() => {
                         let role = match *of {
                             "prompt" => "user",
                             "thinking" => "reasoning",
@@ -81,9 +81,9 @@ pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
                     None => {}
                 },
                 Kind::Tool { id, name, .. } => {
-                    let title = nonempty(o.update().get("title")).map_or_else(|| name.map(js_string).unwrap_or_default(), str::to_string);
+                    let title = nonempty(o.update().get("title")).map_or_else(|| name.map(display).unwrap_or_default(), str::to_string);
                     let mut m = Map::new();
-                    m.insert("id".into(), Value::String(id.filter(|v| !v.is_null()).map_or_else(|| format!("call-{n}"), js_string)));
+                    m.insert("id".into(), Value::String(id.filter(|v| !v.is_null()).map_or_else(|| format!("call-{n}"), display)));
                     m.insert("ts".into(), ts.clone());
                     m.insert("role".into(), "tool".into());
                     m.insert("kind".into(), "tool_use".into());
@@ -93,7 +93,7 @@ pub fn entries(lines: &[GrokLine]) -> Vec<Value> {
                     out.push(m);
                 }
                 Kind::Result { id, error, .. } => {
-                    let id = id.map_or_else(|| "undefined".into(), js_string);
+                    let id = id.map_or_else(|| "undefined".into(), display);
                     if let Some(m) = out.iter_mut().rev().find(|m| m.get("kind").is_some() && m.get("id").and_then(Value::as_str) == Some(&id)) {
                         m.insert("status".into(), if *error == Some(true) { "failed" } else { "completed" }.into());
                     }

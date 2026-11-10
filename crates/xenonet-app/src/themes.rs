@@ -19,7 +19,7 @@ pub const DEFAULT_THEME: &str = "xenonet";
 /// The built-in themes, as core/themes.js has them.
 pub fn built_ins() -> &'static Map<String, Value> {
     static T: OnceLock<Map<String, Value>> = OnceLock::new();
-    T.get_or_init(|| match xenonet_base::json::parse(include_str!("themes.json")) {
+    T.get_or_init(|| match xenonet_text::json::parse(include_str!("themes.json")) {
         Ok(Value::Object(m)) => m,
         _ => Map::new(),
     })
@@ -165,7 +165,7 @@ const FONTS: [&str; 3] = ["fonts.display", "fonts.mono", "fonts.body"];
 fn is_font_list(v: &Value) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
     let re = R.get_or_init(|| Regex::new(r#"^[\p{L}\p{M}\p{N} ,'"._+&-]+$"#).expect("a fixed pattern"));
-    v.as_str().is_some_and(|s| !xenonet_base::text::js_trim(s).is_empty() && re.is_match(s))
+    v.as_str().is_some_and(|s| !xenonet_text::text::trim(s).is_empty() && re.is_match(s))
 }
 
 /// The names every JS object has, which are never a theme's field.
@@ -314,7 +314,7 @@ pub fn themes(custom: &Map<String, Value>) -> Map<String, Value> {
 
 // parseInt(s, 16), as far as the hex digits go.
 fn parse_hex(s: &str) -> f64 {
-    let t = xenonet_base::text::js_trim_start(s);
+    let t = xenonet_text::text::trim_start(s);
     let (neg, t) = match t.as_bytes().first() {
         Some(b'-') => (true, &t[1..]),
         Some(b'+') => (false, &t[1..]),

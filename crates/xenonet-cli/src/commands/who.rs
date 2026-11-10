@@ -7,7 +7,7 @@ use crate::js::{encode, num, on, str, t};
 use crate::out::{ago, c, json, now, print, table, Done, Fail, Layout};
 use crate::reach::need;
 use serde_json::Value;
-use xenonet_base::nodepath::style_of;
+use xenonet_os::nodepath::style_of;
 
 pub const HELP: &str = include_str!("help/who.txt");
 

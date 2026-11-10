@@ -4,7 +4,7 @@
 // whatever it reads, it writes back as JSON that reads as the same value.
 
 use libfuzzer_sys::fuzz_target;
-use xenonet_base::json;
+use xenonet_text::json;
 
 fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(data) else { return };

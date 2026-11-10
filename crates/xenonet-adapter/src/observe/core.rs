@@ -20,10 +20,10 @@ use crate::products::Product;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
-use xenonet_base::json::{number, number_string, stringify};
-use xenonet_base::jsstr::hex;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::truthy;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::{number, number_string, stringify};
+use xenonet_text::text::truthy;
+use xenonet_text::utf16::hex;
 
 pub const LOOK_MS: f64 = 5000.0;
 pub const KEEPALIVE_MS: f64 = 30e3;

@@ -7,7 +7,7 @@
 //! none do, in the JS's words; whoever has the steps runs them, on a copy.
 
 use serde_json::Value;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 /// A step's versions: from, to.
 pub type Step = (f64, f64);
@@ -17,7 +17,7 @@ fn whole(v: Option<&Value>) -> Option<f64> {
 }
 
 fn shown(v: Option<&Value>) -> String {
-    v.map_or("undefined".into(), js_string)
+    v.map_or("undefined".into(), display)
 }
 
 /// The steps to run, by their place in `steps`, from `from` to `to`.
@@ -37,7 +37,7 @@ pub fn plan(steps: &[Step], from: Option<&Value>, to: Option<&Value>) -> Result<
                 out.push(i);
                 v = steps[i].1;
             }
-            _ => return Err(format!("there's no way from version {} to {}", js_string(&xenonet_base::json::number(v)), shown(to))),
+            _ => return Err(format!("there's no way from version {} to {}", display(&xenonet_text::json::number(v)), shown(to))),
         }
     }
     Ok(out)

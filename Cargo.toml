@@ -9,7 +9,7 @@ exclude = ["xenolith"]
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 authors = ["willctl"]
 repository = "https://github.com/willctl/xenonet"
@@ -17,7 +17,8 @@ publish = false
 
 [workspace.dependencies]
 xenonet-actors = { path = "crates/xenonet-actors" }
-xenonet-base = { path = "crates/xenonet-base" }
+# The formats XenoNet writes: JSON, text, times, units, orderings.
+xenonet-text = { path = "crates/xenonet-text" }
 xenonet-blocks = { path = "crates/xenonet-blocks" }
 xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }

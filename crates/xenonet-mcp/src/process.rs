@@ -53,7 +53,7 @@ fn alive_pid(pid: i32) -> bool {
 
 #[cfg(windows)]
 fn alive_pid(pid: i32) -> bool {
-    u32::try_from(pid).is_ok_and(|pid| xenonet_base::process::running(pid, false))
+    u32::try_from(pid).is_ok_and(|pid| xenonet_os::process::running(pid, false))
 }
 
 /// A process's command line, as mcp/xenonet.js reads it: /proc on Linux,
@@ -62,7 +62,7 @@ fn alive_pid(pid: i32) -> bool {
 pub fn cmdline(pid: f64) -> String {
     #[cfg(target_os = "linux")]
     {
-        std::fs::read(format!("/proc/{}/cmdline", xenonet_base::json::number_string(pid))).map(|b| String::from_utf8_lossy(&b).replace('\0', " ")).unwrap_or_default()
+        std::fs::read(format!("/proc/{}/cmdline", xenonet_text::json::number_string(pid))).map(|b| String::from_utf8_lossy(&b).replace('\0', " ")).unwrap_or_default()
     }
     #[cfg(target_os = "macos")]
     {
@@ -82,7 +82,7 @@ fn ps_args(pid: f64) -> Option<String> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     let mut child =
-        Command::new("ps").args(["-o", "args=", "-p", &xenonet_base::json::number_string(pid)]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+        Command::new("ps").args(["-o", "args=", "-p", &xenonet_text::json::number_string(pid)]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     let until = Instant::now() + Duration::from_secs(2);
     loop {
         match child.try_wait().ok()? {

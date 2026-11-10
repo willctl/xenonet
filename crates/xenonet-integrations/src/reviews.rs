@@ -23,7 +23,7 @@ use xenonet_app::fsx;
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{Failure, Io};
-use xenonet_base::text::{js_string, JS_DOT};
+use xenonet_text::text::{display, DOT};
 
 pub const FILES: usize = 512;
 pub const FILE_BYTES: usize = 256 * 1024;
@@ -53,9 +53,9 @@ fn hash(s: &str) -> String {
 
 /// The files' digest: [path, content] pairs, sorted by path.
 pub fn digest(files: &[Value]) -> String {
-    let mut pairs: Vec<(String, Value)> = files.iter().map(|f| (f.get("path").map(js_string).unwrap_or_default(), json!([f.get("path"), f.get("content")]))).collect();
+    let mut pairs: Vec<(String, Value)> = files.iter().map(|f| (f.get("path").map(display).unwrap_or_default(), json!([f.get("path"), f.get("content")]))).collect();
     pairs.sort_by(|a, b| xenonet_app::jstext::locale_compare(&a.0, &b.0));
-    hash(&xenonet_base::json::stringify(&Value::Array(pairs.into_iter().map(|(_, p)| p).collect()), 0))
+    hash(&xenonet_text::json::stringify(&Value::Array(pairs.into_iter().map(|(_, p)| p).collect()), 0))
 }
 
 fn excluded_res() -> &'static [Regex; 4] {
@@ -63,8 +63,8 @@ fn excluded_res() -> &'static [Regex; 4] {
     R.get_or_init(|| {
         [
             Regex::new(r"^(?i-u:\.git|node_modules|\.ssh|\.aws|\.azure|\.gnupg|\.venv|venv|__pycache__|\.cache|\.xenonet)$").expect("a fixed pattern"),
-            Regex::new(&format!(r"^(?i-u:\.env)(?:\.{JS_DOT}*)?$")).expect("a fixed pattern"),
-            Regex::new(&format!(r"^(?:(?i-u:\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|id_rsa|id_ed25519)|(?i-u:secrets?)(?:\.{JS_DOT}*)?)$"))
+            Regex::new(&format!(r"^(?i-u:\.env)(?:\.{DOT}*)?$")).expect("a fixed pattern"),
+            Regex::new(&format!(r"^(?:(?i-u:\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|id_rsa|id_ed25519)|(?i-u:secrets?)(?:\.{DOT}*)?)$"))
                 .expect("a fixed pattern"),
             Regex::new(r"\.(?i-u:pem|key|p12|pfx|keystore)$").expect("a fixed pattern"),
         ]
@@ -167,7 +167,7 @@ fn realpath_native(p: &str) -> Result<String, Failure> {
 
 async fn git(io: &Io, args: Vec<String>, env: &Map<String, Value>, max_buffer: usize) -> Result<String, Failure> {
     let out = io.ask(json!({ "op": "git", "args": args, "options": { "env": env, "timeout": 10000, "maxBuffer": max_buffer } })).await.map_err(|_| Failure::Rethrow)?;
-    Ok(out.get("stdout").map(js_string).unwrap_or_default())
+    Ok(out.get("stdout").map(display).unwrap_or_default())
 }
 
 fn open_nofollow(file: &str) -> std::io::Result<std::fs::File> {
@@ -190,7 +190,7 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
     let base: Vec<String> = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "-C", &source].iter().map(ToString::to_string).collect();
     let with = |more: &[&str]| -> Vec<String> { base.iter().cloned().chain(more.iter().map(ToString::to_string)).collect() };
     let root = git(&io, with(&["rev-parse", "--show-toplevel"]), &env, 4096).await?;
-    if realpath_native(xenonet_base::text::js_trim(&root))? != source {
+    if realpath_native(xenonet_text::text::trim(&root))? != source {
         return Err(refused(Fail { status: 400, code: "bad-request".into(), message: "Change review needs the root of a Git working tree.".into() }));
     }
     let listed = git(&io, with(&["ls-files", "--cached", "--others", "--exclude-standard", "-z"]), &env, 1024 * 1024).await?;
@@ -295,7 +295,7 @@ pub async fn source_snapshot(io: Io, source: String, env: Map<String, Value>) ->
     if files.is_empty() {
         return Err(f("No supported text files remain in this Git project."));
     }
-    let paths: Vec<String> = files.iter().map(|x| js_string(&x["path"])).collect();
+    let paths: Vec<String> = files.iter().map(|x| display(&x["path"])).collect();
     if !portable_set(&paths) {
         return Err(f("The project has paths that collide on another platform. Rename them before preparing a review."));
     }
@@ -324,7 +324,7 @@ pub fn validate_result(value: &Value) -> Result<Value, Fail> {
     if !truthy(Some(value)) || files.len() > FILES || problems.len() > 30 || omissions.len() > FILES {
         return invalid("The gateway returned an invalid text snapshot.");
     }
-    let paths: Vec<String> = files.iter().map(|f| f.get("path").map(js_string).unwrap_or_default()).collect();
+    let paths: Vec<String> = files.iter().map(|f| f.get("path").map(display).unwrap_or_default()).collect();
     if !files.iter().all(|f| truthy(Some(f)) && review_path(f.get("path").unwrap_or(&Value::Null))) || !portable_set(&paths) {
         return invalid("The gateway returned colliding or unsupported file paths.");
     }
@@ -374,7 +374,7 @@ pub fn validate_result(value: &Value) -> Result<Value, Fail> {
 // ---------- the patch ----------
 
 fn quote(name: &str) -> String {
-    xenonet_base::json::stringify(&json!(name), 0)
+    xenonet_text::json::stringify(&json!(name), 0)
 }
 
 fn lines(content: &str, prefix: &str) -> String {
@@ -408,7 +408,7 @@ pub fn text_patch(before: &[Value], after: &[Value]) -> Value {
     let map = |list: &[Value]| -> Vec<(String, Value)> {
         let mut m: Vec<(String, Value)> = Vec::new();
         for f in list {
-            let p = f.get("path").map(js_string).unwrap_or_default();
+            let p = f.get("path").map(display).unwrap_or_default();
             let c = f.get("content").cloned().unwrap_or(Value::Null);
             match m.iter_mut().find(|(k, _)| *k == p) {
                 Some(slot) => slot.1 = c,
@@ -433,7 +433,7 @@ pub fn text_patch(before: &[Value], after: &[Value]) -> Value {
         if a0 == b0 {
             continue;
         }
-        let text = |c: &Option<Value>| c.as_ref().map_or_else(String::new, |c| String::from_utf8_lossy(&b64::decode(&js_string(c))).into_owned());
+        let text = |c: &Option<Value>| c.as_ref().map_or_else(String::new, |c| String::from_utf8_lossy(&b64::decode(&display(c))).into_owned());
         let (a, b) = (text(&a0), text(&b0));
         let (removed, added) = (line_count(&a), line_count(&b));
         let status = if a0.is_none() {
@@ -544,7 +544,7 @@ impl Reviews {
         let mut m: Map<String, Value> = value.as_object().cloned().unwrap_or_default();
         m.insert("generation".into(), json!(b64::uuid()));
         let value = Value::Object(m);
-        let serialized = xenonet_base::json::stringify(&value, 0);
+        let serialized = xenonet_text::json::stringify(&value, 0);
         let bytes = serialized.len() as u64;
         let folder = self.location(&value["id"])?;
         if bytes > RECORD_BYTES as u64 {
@@ -576,7 +576,7 @@ impl Reviews {
             if !st.is_file() || st.file_type().is_symlink() || st.len() > RECORD_BYTES as u64 {
                 return None;
             }
-            let v = xenonet_base::json::parse(&fsx::read_text(&file).ok()?).ok()?;
+            let v = xenonet_text::json::parse(&fsx::read_text(&file).ok()?).ok()?;
             xenonet_app::jsv::strict_eq(v.get("id"), Some(id)).then_some(v)
         };
         match read() {
@@ -591,7 +591,7 @@ impl Reviews {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .map(|f| json!({ "path": f.get("path"), "bytes": b64::byte_length(&f.get("content").map(js_string).unwrap_or_default()) }))
+            .map(|f| json!({ "path": f.get("path"), "bytes": b64::byte_length(&f.get("content").map(display).unwrap_or_default()) }))
             .collect();
         json!({ "id": v.get("id"), "digest": v.get("digest"), "at": v.get("at"), "bytes": v.get("bytes"), "files": files, "excluded": v.get("excluded"), "omittedPaths": v.get("omittedPaths").filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!([])), "scopeNote": SCOPE_NOTE, "limits": limits() })
     }
@@ -629,7 +629,7 @@ impl Reviews {
             return fail("Synthetic reviews belong to the demo instance.");
         }
         let encode = |v: Option<&Value>| -> Vec<Value> {
-            v.and_then(Value::as_object).into_iter().flatten().map(|(p, t)| json!({ "path": p, "content": b64::encode(js_string(t).as_bytes()) })).collect()
+            v.and_then(Value::as_object).into_iter().flatten().map(|(p, t)| json!({ "path": p, "content": b64::encode(display(t).as_bytes()) })).collect()
         };
         let files = encode(options.get("before"));
         let comparison = text_patch(&files, &encode(options.get("after")));
@@ -639,18 +639,18 @@ impl Reviews {
         } else {
             let mut m: Map<String, Value> = comparison.as_object().cloned().unwrap_or_default();
             m.insert("revision".into(), json!(b64::uuid()));
-            m.insert("at".into(), xenonet_base::json::number(now));
+            m.insert("at".into(), xenonet_text::json::number(now));
             m.insert("sourceState".into(), options.get("sourceState").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!("unchanged")));
             m.insert("complete".into(), json!(problems.as_array().is_some_and(Vec::is_empty)));
             m.insert("problems".into(), problems);
             m.insert("omissions".into(), json!([]));
             m.insert("execution".into(), json!("unknown"));
-            m.insert("patchHash".into(), json!(hash(&js_string(&comparison["patch"]))));
+            m.insert("patchHash".into(), json!(hash(&display(&comparison["patch"]))));
             Value::Object(m)
         };
-        let bytes: usize = files.iter().map(|f| b64::byte_length(&js_string(&f["content"]))).sum();
+        let bytes: usize = files.iter().map(|f| b64::byte_length(&display(&f["content"]))).sum();
         let d = digest(&files);
-        let saved = self.save(&json!({ "id": b64::uuid(), "at": xenonet_base::json::number(now), "launched": true, "source": "", "files": files, "excluded": [], "bytes": bytes, "digest": d, "result": result }))?;
+        let saved = self.save(&json!({ "id": b64::uuid(), "at": xenonet_text::json::number(now), "launched": true, "source": "", "files": files, "excluded": [], "bytes": bytes, "digest": d, "result": result }))?;
         Ok(saved["id"].clone())
     }
 
@@ -663,7 +663,7 @@ impl Reviews {
         let value = validate_result(input)?;
         let v = self.load(id)?;
         let empty = |k: &str| value.get(k).and_then(Value::as_array).is_none_or(Vec::is_empty);
-        if !empty("problems") || !empty("omissions") || digest(value["files"].as_array().map_or(&[][..], Vec::as_slice)) != js_string(&v["digest"]) {
+        if !empty("problems") || !empty("omissions") || digest(value["files"].as_array().map_or(&[][..], Vec::as_slice)) != display(&v["digest"]) {
             return failed("The uploaded files do not match the frozen manifest. The agent was not released.", "upload-mismatch", 409);
         }
         Ok(())
@@ -686,7 +686,7 @@ impl Reviews {
             "sourceStateAtRetrieval": r.get("sourceState"), "execution": "unknown", "scope": format!("Selected UTF-8 text only; file modes are not reviewed. {SCOPE_NOTE}"),
             "excluded": v.get("excluded"), "omittedPaths": v.get("omittedPaths").filter(|x| !x.is_null()).cloned().unwrap_or_else(|| json!([])), "omissions": r.get("omissions"),
         });
-        let short: String = js_string(id).chars().take(8).collect();
+        let short: String = display(id).chars().take(8).collect();
         Ok(json!({ "filename": format!("xenonet-{short}.patch"), "patch": r.get("patch"), "receipt": receipt }))
     }
 }
@@ -716,7 +716,7 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
     for id in fsx::read_dir_names(&root).map_err(fs_fail)?.into_iter().filter(|n| is_uuid(n)) {
         let mut rv = r.borrow_mut();
         if let Ok(v) = rv.load(&json!(id)) {
-            if !truthy(v.get("launched")) && xenonet_base::text::js_number(v.get("at")) + PREVIEW_MS <= now {
+            if !truthy(v.get("launched")) && xenonet_text::text::to_number(v.get("at")) + PREVIEW_MS <= now {
                 let _ = rv.forget(&json!(id));
             }
         }
@@ -725,7 +725,7 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
         return Err(fail_of(Fail { status: 409, code: "review-capacity".into(), message: "Local review storage is full. Forget an old review before preparing another.".into() }));
     }
     let selected = snapshot(&io, &source).await?;
-    let sel_bytes = xenonet_base::text::js_number(selected.get("bytes"));
+    let sel_bytes = xenonet_text::text::to_number(selected.get("bytes"));
     if (r.borrow_mut().disk_bytes(None).map_err(fail_of)? as f64) + sel_bytes * 3.0 > STORE_BYTES as f64 {
         return Err(fail_of(Fail { status: 409, code: "review-capacity".into(), message: "Local review storage is full. Forget an old review before preparing another.".into() }));
     }
@@ -733,7 +733,7 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
     let mut m: Map<String, Value> = selected.as_object().cloned().unwrap_or_default();
     m.insert("id".into(), json!(b64::uuid()));
     m.insert("source".into(), source.clone());
-    m.insert("at".into(), xenonet_base::json::number(now));
+    m.insert("at".into(), xenonet_text::json::number(now));
     m.insert("launched".into(), json!(false));
     m.insert("result".into(), Value::Null);
     let value = r.borrow_mut().save(&Value::Object(m)).map_err(fail_of)?;
@@ -741,12 +741,12 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
     let upload = NATIVE.join(&[&folder, "project"]);
     fsx::mkdir(&upload, Some(0o700)).map_err(fs_fail)?;
     for f in value["files"].as_array().into_iter().flatten() {
-        let p = js_string(&f["path"]);
+        let p = display(&f["path"]);
         let mut parts: Vec<&str> = vec![&upload];
         parts.extend(p.split('/'));
         let target = NATIVE.join(&parts);
         fsx::mkdir_p(&NATIVE.dirname(&target), Some(0o700)).map_err(fs_fail)?;
-        write_new(&target, &b64::decode(&js_string(&f["content"])), 0o600).map_err(fs_fail)?;
+        write_new(&target, &b64::decode(&display(&f["content"])), 0o600).map_err(fs_fail)?;
     }
     if let Err(e) = prepare_ignores(&io, &r, &value, &env).await {
         let _ = r.borrow_mut().forget(&value["id"]);
@@ -758,14 +758,14 @@ pub async fn prepare(io: Io, r: Shared, source: Value, env: Map<String, Value>) 
 }
 
 async fn now_of(io: &Io) -> Result<f64, Failure> {
-    io.ask(json!({ "op": "now" })).await.map(|v| xenonet_base::text::js_number(Some(&v))).map_err(|_| Failure::Rethrow)
+    io.ask(json!({ "op": "now" })).await.map(|v| xenonet_text::text::to_number(Some(&v))).map_err(|_| Failure::Rethrow)
 }
 
 async fn prepare_ignores(io: &Io, r: &Shared, v: &Value, env: &Map<String, Value>) -> Result<(), Failure> {
     let folder = NATIVE.join(&[&r.borrow_mut().location(&v["id"]).map_err(fail_of)?, "ignore"]);
     fsx::mkdir(&folder, Some(0o700)).map_err(fs_fail)?;
     for f in v["files"].as_array().into_iter().flatten() {
-        let p = js_string(&f["path"]);
+        let p = display(&f["path"]);
         if xenonet_app::nodepath::Style::Posix.basename(&p, None) != ".gitignore" {
             continue;
         }
@@ -773,7 +773,7 @@ async fn prepare_ignores(io: &Io, r: &Shared, v: &Value, env: &Map<String, Value
         parts.extend(p.split('/'));
         let dest = NATIVE.join(&parts);
         fsx::mkdir_p(&NATIVE.dirname(&dest), Some(0o700)).map_err(fs_fail)?;
-        fsx::write_file(&dest, &b64::decode(&js_string(&f["content"])), Some(0o600)).map_err(fs_fail)?;
+        fsx::write_file(&dest, &b64::decode(&display(&f["content"])), Some(0o600)).map_err(fs_fail)?;
     }
     let g = r.borrow_mut().isolated_git(&folder, &["init", "--quiet", "--template="], env).map_err(fail_of)?;
     io.ask(json!({ "op": "git", "args": g["args"], "options": g["options"] })).await.map_err(|_| Failure::Rethrow)?;
@@ -785,7 +785,7 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
     let v = r.borrow_mut().load(&id).map_err(fail_of)?;
     let now = now_of(&io).await?;
     let changed = |m: &str| fail_of(Fail { status: 409, code: "changed".into(), message: m.into() });
-    if truthy(v.get("launched")) || now >= xenonet_base::text::js_number(v.get("at")) + PREVIEW_MS {
+    if truthy(v.get("launched")) || now >= xenonet_text::text::to_number(v.get("at")) + PREVIEW_MS {
         return Err(fail_of(Fail { status: 409, code: "expired".into(), message: "The snapshot preview expired or was already launched.".into() }));
     }
     let fresh = snapshot(&io, v.get("source").unwrap_or(&Value::Null)).await?;
@@ -799,14 +799,13 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
     let project = NATIVE.join(&[&r.borrow_mut().location(&id).map_err(fail_of)?, "project"]);
     let files: Vec<Value> = v["files"].as_array().cloned().unwrap_or_default();
     for f in &files {
-        let p = js_string(&f["path"]);
+        let p = display(&f["path"]);
         let mut parts: Vec<&str> = vec![&project];
         parts.extend(p.split('/'));
         let file = NATIVE.join(&parts);
         let st = std::fs::symlink_metadata(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "lstat", &file)))?;
-        let same = st.is_file()
-            && !st.file_type().is_symlink()
-            && b64::encode(&std::fs::read(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "open", &file)))?) == js_string(&f["content"]);
+        let same =
+            st.is_file() && !st.file_type().is_symlink() && b64::encode(&std::fs::read(&file).map_err(|e| fs_fail(fsx::FsError::of(e, "open", &file)))?) == display(&f["content"]);
         if !same {
             return Err(changed("The frozen upload changed. Preview again."));
         }
@@ -821,7 +820,7 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
                 return Err(changed("The frozen upload contains an unexpected file or link. Preview again."));
             }
             if m.is_dir() {
-                if !files.iter().any(|f| js_string(&f["path"]).starts_with(&format!("{rel}/"))) {
+                if !files.iter().any(|f| display(&f["path"]).starts_with(&format!("{rel}/"))) {
                     return Err(changed("The frozen upload contains an unexpected directory. Preview again."));
                 }
                 walk(&full, &rel, files, staged)?;
@@ -834,7 +833,7 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
     let mut staged = Vec::new();
     walk(&project, "", &files, &mut staged)?;
     staged.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-    let mut want: Vec<String> = files.iter().map(|f| js_string(&f["path"])).collect();
+    let mut want: Vec<String> = files.iter().map(|f| display(&f["path"])).collect();
     want.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
     if staged != want {
         return Err(changed("The frozen upload manifest changed. Preview again."));
@@ -849,9 +848,9 @@ pub async fn launch(io: Io, r: Shared, id: Value) -> Result<Value, Failure> {
 // repository's own ignore rules, the omitted paths or the exclusions
 // cover are left out, and said so.
 async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<String, Value>) -> Result<Value, Failure> {
-    let baseline: Vec<String> = v["files"].as_array().into_iter().flatten().map(|f| js_string(&f["path"])).collect();
+    let baseline: Vec<String> = v["files"].as_array().into_iter().flatten().map(|f| display(&f["path"])).collect();
     let mut candidates: Vec<String> = Vec::new();
-    for p in value["files"].as_array().into_iter().flatten().chain(value["problems"].as_array().into_iter().flatten()).map(|f| js_string(&f["path"])) {
+    for p in value["files"].as_array().into_iter().flatten().chain(value["problems"].as_array().into_iter().flatten()).map(|f| display(&f["path"])) {
         if !baseline.contains(&p) && !candidates.contains(&p) {
             candidates.push(p);
         }
@@ -859,8 +858,8 @@ async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<S
     if candidates.is_empty() {
         return Ok(value.clone());
     }
-    let excluded: Vec<String> = v["excluded"].as_array().into_iter().flatten().map(|e| js_string(&e["path"]).to_lowercase()).collect();
-    let omitted_paths: Vec<String> = v.get("omittedPaths").and_then(Value::as_array).into_iter().flatten().map(js_string).collect();
+    let excluded: Vec<String> = v["excluded"].as_array().into_iter().flatten().map(|e| display(&e["path"]).to_lowercase()).collect();
+    let omitted_paths: Vec<String> = v.get("omittedPaths").and_then(Value::as_array).into_iter().flatten().map(display).collect();
     let omitted = |name: &str| {
         let n = name.to_lowercase();
         omitted_paths.iter().any(|p| if p.ends_with('/') { n.starts_with(&p.to_lowercase()) } else { n == p.to_lowercase() })
@@ -873,10 +872,10 @@ async fn filter_scope(io: &Io, r: &Shared, v: &Value, value: &Value, env: &Map<S
         let input = format!("{}\0", candidates.join("\0"));
         // check-ignore exits 1 when nothing matches.
         let out = io.ask(json!({ "op": "git", "args": g["args"], "options": g["options"], "input": input, "allowExit": 1 })).await.map_err(|_| Failure::Rethrow)?;
-        ignored = js_string(&out["stdout"]).split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
+        ignored = display(&out["stdout"]).split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
     }
     let blocked = |name: &str| !baseline.iter().any(|b| b == name) && (ignored.iter().any(|i| i == name) || omitted(name));
-    let keep = |list: &Value| -> Vec<Value> { list.as_array().into_iter().flatten().filter(|f| !blocked(&js_string(&f["path"]))).cloned().collect() };
+    let keep = |list: &Value| -> Vec<Value> { list.as_array().into_iter().flatten().filter(|f| !blocked(&display(&f["path"]))).cloned().collect() };
     let mut omissions: Vec<Value> = value["omissions"].as_array().cloned().unwrap_or_default();
     omissions.extend(candidates.iter().filter(|c| blocked(c)).map(|p| json!({ "path": p, "reason": "Outside the frozen upload scope" })));
     if omissions.len() > FILES {
@@ -904,7 +903,7 @@ pub async fn accept(io: Io, r: Shared, id: Value, input: Value, env: Map<String,
     let now = now_of(&io).await?;
     let mut res = Map::new();
     res.insert("revision".into(), json!(b64::uuid()));
-    res.insert("at".into(), xenonet_base::json::number(now));
+    res.insert("at".into(), xenonet_text::json::number(now));
     res.insert("sourceState".into(), json!(state));
     res.insert("complete".into(), json!(complete));
     res.insert("omissions".into(), value["omissions"].clone());
@@ -912,7 +911,7 @@ pub async fn accept(io: Io, r: Shared, id: Value, input: Value, env: Map<String,
     for (k, x) in comparison.as_object().into_iter().flatten() {
         res.insert(k.clone(), x.clone());
     }
-    res.insert("patchHash".into(), json!(hash(&js_string(&comparison["patch"]))));
+    res.insert("patchHash".into(), json!(hash(&display(&comparison["patch"]))));
     res.insert("execution".into(), json!("unknown"));
     let result = Value::Object(res);
     let mut m: Map<String, Value> = v.as_object().cloned().unwrap_or_default();
@@ -1128,7 +1127,7 @@ mod tests {
         let listed = ["src/a.txt", ".env", "data.bin", "big.txt", "CON.txt", "gone.txt", "src/a.txt"];
         let s = snapshot(&source, &source, &listed, &[]).unwrap();
         assert_eq!(s["files"], json!([file("src/a.txt", b"text\n")]));
-        let reasons: Vec<(String, String)> = s["excluded"].as_array().unwrap().iter().map(|e| (js_string(&e["path"]), js_string(&e["reason"]))).collect();
+        let reasons: Vec<(String, String)> = s["excluded"].as_array().unwrap().iter().map(|e| (display(&e["path"]), display(&e["reason"]))).collect();
         let want = [
             (".env", "Excluded from upload and review scope"),
             ("CON.txt", "Unsupported portable path"),
@@ -1179,7 +1178,7 @@ mod tests {
         std::os::unix::fs::symlink(at("src"), at("alias")).unwrap();
         let s = snapshot(&source, &source, &["src/a.txt", "link.txt", "linked/notes.txt", "inside-link.txt", "alias/a.txt"], &[]).unwrap();
         assert_eq!(s["files"], json!([file("src/a.txt", b"text\n")]));
-        let reasons: Vec<String> = s["excluded"].as_array().unwrap().iter().map(|e| format!("{} {}", js_string(&e["path"]), js_string(&e["reason"]))).collect();
+        let reasons: Vec<String> = s["excluded"].as_array().unwrap().iter().map(|e| format!("{} {}", display(&e["path"]), display(&e["reason"]))).collect();
         assert_eq!(
             reasons,
             [
@@ -1189,7 +1188,7 @@ mod tests {
                 "linked/notes.txt Links and non-regular files are excluded"
             ]
         );
-        assert!(!xenonet_base::json::stringify(&s, 0).contains(&b64::encode(b"not the project's")));
+        assert!(!xenonet_text::json::stringify(&s, 0).contains(&b64::encode(b"not the project's")));
         // A .gitignore that's a link can't have its rules frozen.
         std::os::unix::fs::symlink(dir.join("outside/notes.txt"), at(".gitignore")).unwrap();
         assert_eq!(

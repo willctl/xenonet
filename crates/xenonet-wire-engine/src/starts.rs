@@ -26,12 +26,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::From;
-use xenonet_base::ids::YOU;
-use xenonet_base::network::{Kind as FrameKind, To};
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::reach::{self, Action, Decision, Kind, Sender, Settings, Start, Wake};
 use xenonet_engine::delivery::starts::{self, Request, TARGET};
+use xenonet_model::ids::YOU;
+use xenonet_model::ops::{Kind as FrameKind, To};
+use xenonet_os::sync::Locked;
+use xenonet_text::time::now_ms;
 
 /// How long Claude Code waits on an MCP tool: a minute past the permission
 /// tool's hold, so a prompt waiting for you isn't cut short.
@@ -179,7 +179,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, sender: &Sender, r:
     // Under a standing delegation, a session or actor asking is told it was
     // your user's delegation, set where and when, as this machine keeps it.
     let delegation = (settings.start == Start::Delegate && sender.kind != Kind::You).then(|| reach.delegated.clone()).flatten();
-    let on = delegation.as_ref().map(|(_, at)| xenonet_base::time::iso(*at as f64).chars().take(10).collect::<String>());
+    let on = delegation.as_ref().map(|(_, at)| xenonet_text::time::iso(*at as f64).chars().take(10).collect::<String>());
     let text = starts::framed(by, from, &r.prompt, delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()));
     // An app that reads its prompt from a file (Grok Build) gets one only
     // its owner can read, taken away when the run ends.
@@ -221,7 +221,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, sender: &Sender, r:
     if let (Some(session), Some(_)) = (&session, &delegation) {
         w.starts.delegations.locked().insert(session.clone(), cwd.clone());
     }
-    let folder = xenonet_base::paths::tilde(&cwd, &w.setup.home);
+    let folder = xenonet_os::paths::tilde(&cwd, &w.setup.home);
     w.log(
         "info",
         "start",

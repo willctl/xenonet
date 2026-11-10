@@ -24,7 +24,7 @@ use xenonet_app::fsx::{self, FsError};
 use xenonet_app::jsv::truthy;
 use xenonet_app::nodepath::NATIVE;
 use xenonet_app::task::{Failure, Io};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 /// What installing needs to know of the machine besides an env: where the
 /// xenonet command goes.
@@ -142,7 +142,7 @@ fn tmp_of(entry: &str, name: &str) -> Option<u32> {
 pub fn sweep_aside(to: &str) {
     let (dir, name) = (NATIVE.dirname(to), NATIVE.basename(to, None));
     for entry in fsx::read_dir_names(&dir).unwrap_or_default() {
-        let stale = tmp_of(&entry, &name).is_some_and(|pid| !xenonet_base::process::running(pid, true));
+        let stale = tmp_of(&entry, &name).is_some_and(|pid| !xenonet_os::process::running(pid, true));
         if is_aside(&entry, &name) || stale {
             let _ = fsx::unlink(&NATIVE.join(&[&dir, &entry]));
         }
@@ -157,11 +157,11 @@ pub fn sweep_aside(to: &str) {
 /// nothing to do, and why not when it couldn't be.
 pub fn write_launcher_bin(tools: &Value, to: &str, platform: &str) -> Result<bool, String> {
     sweep_aside(to);
-    let from = NATIVE.join(&[&js_string(&tools["root"]), "bin", bin_name(platform)]);
+    let from = NATIVE.join(&[&display(&tools["root"]), "bin", bin_name(platform)]);
     if !fsx::exists(&from) {
         return Ok(false);
     }
-    let source = format!("{}-{}", js_string(&tools["version"]), js_string(&tools["sha256"]));
+    let source = format!("{}-{}", display(&tools["version"]), display(&tools["sha256"]));
     let marker = format!("{to}.from");
     if fsx::read_text(&marker).is_ok_and(|had| had == source) && fsx::exists(to) {
         return Ok(false);
@@ -213,7 +213,7 @@ pub fn install_launcher(env: &Env, ctx: &Ctx) -> Result<Option<Value>, Failure> 
 fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Option<i32>, String) {
     use std::io::Read;
     let mut command = std::process::Command::new(file);
-    xenonet_base::process::Background::no_window(&mut command);
+    xenonet_os::process::Background::no_window(&mut command);
     command
         .args(args)
         .current_dir(cwd)
@@ -262,17 +262,17 @@ fn run_sync(file: &str, args: &[String], cwd: &str, timeout: Duration) -> (Optio
 /// except to bring back a service that couldn't be replaced
 /// (installed_runtime).
 pub fn has_binary(selected: &Value, platform: &str) -> bool {
-    let root = js_string(selected.get("root").unwrap_or(&Value::Null));
+    let root = display(selected.get("root").unwrap_or(&Value::Null));
     std::fs::metadata(NATIVE.join(&[&root, "bin", bin_name(platform)])).is_ok_and(|meta| meta.is_file())
 }
 
 /// The startup check of a staged component: its xenonet binary runs,
 /// without ELECTRON_RUN_AS_NODE, and says the version it was promised.
 pub fn check_runtime(staged: &Value, platform: &str) -> Result<(), Failure> {
-    let root = js_string(staged.get("root").unwrap_or(&Value::Null));
+    let root = display(staged.get("root").unwrap_or(&Value::Null));
     let bin = NATIVE.join(&[&root, "bin", bin_name(platform)]);
     let (status, out) = run_sync(&bin, &["--version".into(), "--json".into()], &root, Duration::from_secs(15));
-    let version = xenonet_base::json::parse(&out).ok().and_then(|v| v.get("version").cloned()).filter(|v| !v.is_null());
+    let version = xenonet_text::json::parse(&out).ok().and_then(|v| v.get("version").cloned()).filter(|v| !v.is_null());
     if status != Some(0) || version.is_none() {
         return Err(Failure::msg("The new component runtime did not pass its startup check."));
     }
@@ -295,7 +295,7 @@ fn service_dir(env: &Env, m: &Machine) -> String {
 
 // What active/.from says of a copy of `selected`: its version and sha256.
 fn active_mark(selected: &Value) -> String {
-    format!("{}-{}", js_string(&selected["version"]), js_string(&selected["sha256"]))
+    format!("{}-{}", display(&selected["version"]), display(&selected["sha256"]))
 }
 
 /// Where the selected Service runs from: `active` when it's a copy of that
@@ -303,7 +303,7 @@ fn active_mark(selected: &Value) -> String {
 /// unless there's no `active` at all, as before this version's first
 /// activation.
 pub fn service_root(service: &Value, env: &Env, m: &Machine) -> (String, Option<String>) {
-    let own = js_string(&service["root"]);
+    let own = display(&service["root"]);
     let active = NATIVE.join(&[&service_dir(env, m), ACTIVE]);
     if !fsx::exists(&active) {
         return (own, None);
@@ -329,7 +329,7 @@ async fn rename_dir(io: &Io, from: &str, to: &str) -> Result<(), FsError> {
         match std::fs::rename(from, to) {
             Ok(()) => return Ok(()),
             Err(e) => {
-                let code = xenonet_base::fs::code_of(&e);
+                let code = xenonet_os::fs::code_of(&e);
                 if !cfg!(windows) || !matches!(code, Some("EPERM" | "EACCES" | "EBUSY")) || xenonet_app::task::now_ms() >= until {
                     return Err(FsError::of(e, "rename", from));
                 }
@@ -356,7 +356,7 @@ pub async fn activate_service(io: &Io, env: &Env, m: &Machine) -> Result<(), FsE
     if service_root(&selected, env, m).0 == active {
         return Ok(());
     }
-    let from = js_string(&selected["root"]);
+    let from = display(&selected["root"]);
     crate::tray::copy_tree(std::path::Path::new(&from), std::path::Path::new(&next)).map_err(|e| FsError::of(e, "copy", &from))?;
     fsx::write_file(&NATIVE.join(&[&next, ".from"]), active_mark(&selected).as_bytes(), None)?;
     if fsx::exists(&active) {
@@ -388,7 +388,7 @@ pub fn installed_runtime(env: &Env, ctx: &Ctx) -> Result<Value, Failure> {
     let m = &ctx.machine;
     let Some(service) = current_component("service", env, m)? else { return Err(Failure::msg("XenoNet Service is not installed. Use the bundle installer.")) };
     let launcher = install_launcher(env, ctx)?;
-    let root = js_string(&service["root"]);
+    let root = display(&service["root"]);
     let mut run_env = env.clone();
     run_env.insert("XENONET_RUNTIME_DIR".into(), json!(runtime_dir(env, m)));
     if let Some(bin) = launcher.as_ref().map(|l| &l["bin"]).filter(|b| !b.is_null()) {
@@ -437,7 +437,7 @@ fn pointer(v: Option<&Value>) -> Value {
 fn write_journal(env: &Env, m: &Machine, previous: Option<&Value>, next: &Value) -> Result<(), FsError> {
     let file = journal_file(env, m);
     let tmp = format!("{file}.{}.tmp", std::process::id());
-    fsx::write_file(&tmp, xenonet_base::json::stringify(&json!({ "previous": pointer(previous), "next": pointer(Some(next)) }), 0).as_bytes(), Some(0o600))?;
+    fsx::write_file(&tmp, xenonet_text::json::stringify(&json!({ "previous": pointer(previous), "next": pointer(Some(next)) }), 0).as_bytes(), Some(0o600))?;
     fsx::rename(&tmp, &file)
 }
 
@@ -486,7 +486,7 @@ async fn running(io: &Io, env: &Env) -> Result<Value, Failure> {
 
 async fn now(io: &Io) -> Result<f64, Failure> {
     let n = io.ask(json!({ "op": "now" })).await.map_err(|_| Failure::Rethrow)?;
-    Ok(xenonet_base::text::js_number(Some(&n)))
+    Ok(xenonet_text::text::to_number(Some(&n)))
 }
 
 // The service answers `stop` and shuts down a moment later, so on a busy
@@ -525,8 +525,8 @@ async fn start_version(io: &Io, version: &Value, env: &Env, ctx: &Ctx) -> Result
     let state = running(io, env).await?;
     let is = state.get("version");
     if is != Some(version) {
-        let said = is.filter(|v| !v.is_null()).map_or_else(|| "no service".to_string(), js_string);
-        return Err(Failure::msg(format!("Expected XenoNet Service {}, but {said} is running.", js_string(version))));
+        let said = is.filter(|v| !v.is_null()).map_or_else(|| "no service".to_string(), display);
+        return Err(Failure::msg(format!("Expected XenoNet Service {}, but {said} is running.", display(version))));
     }
     Ok(())
 }
@@ -547,7 +547,7 @@ async fn recover(io: &Io, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Fa
         Err(e) if e.is("ENOENT") => return Ok(Value::Null),
         Err(e) => return Err(e.into()),
     };
-    let record = xenonet_base::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))?;
+    let record = xenonet_text::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))?;
     let valid = |v: Option<&Value>| truthy(v) && crate::packages::is_semver(v.and_then(|v| v.get("version"))) && crate::packages::is_sha(v.and_then(|v| v.get("sha256")));
     let previous = record.get("previous");
     let next = match record.get("next") {
@@ -603,14 +603,14 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
     let m = &ctx.machine;
     recover(io, env, ctx, life).await?;
     let text = fsx::read_text(&NATIVE.join(&[bundle, "components.json"]))?;
-    let manifest = xenonet_base::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))?;
+    let manifest = xenonet_text::json::parse(&text).map_err(|e| Failure::msg(e.to_string()))?;
     let Some(Value::Array(items)) = manifest.get("packages") else { return Err(Failure::type_error("manifest.packages is not iterable")) };
     let mut earlier = None;
     for item in items {
         if !crate::packages::fits_here(item, &m.platform, &m.arch) {
             continue;
         }
-        let component = item.get("component").map(js_string).unwrap_or_default();
+        let component = item.get("component").map(display).unwrap_or_default();
         let old = current_component(&component, env, m)?;
         // The tray, on a Mac: installed when it's missing or this one is
         // newer. Nothing runs it from here; xenonet service install puts it
@@ -621,7 +621,7 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
                 Some(o) => newer(item.get("version"), o.get("version")).map_err(Failure::msg)?,
             };
             if wanted {
-                let file = NATIVE.join(&[bundle, &item.get("file").map(js_string).unwrap_or_default()]);
+                let file = NATIVE.join(&[bundle, &item.get("file").map(display).unwrap_or_default()]);
                 let staged = stage_package(io, &file, item, env, m).await?;
                 select_component(&component, &staged, env, m)?;
             }
@@ -630,7 +630,7 @@ async fn install_bundle_locked(io: &Io, bundle: &str, env: &Env, command: bool, 
         if old.as_ref().is_some_and(|o| has_binary(o, &m.platform)) {
             continue;
         }
-        let file = NATIVE.join(&[bundle, &item.get("file").map(js_string).unwrap_or_default()]);
+        let file = NATIVE.join(&[bundle, &item.get("file").map(display).unwrap_or_default()]);
         let staged = stage_package(io, &file, item, env, m).await?;
         check_runtime(&staged, &m.platform)?;
         // A service from before 0.4.0 may be running: it's switched as an
@@ -672,7 +672,7 @@ pub async fn activate_package(io: &Io, file: &str, item: &Value, env: &Env, ctx:
 async fn activate_locked(io: &Io, file: &str, item: &Value, env: &Env, ctx: &Ctx, life: &Life) -> Result<Value, Failure> {
     let m = &ctx.machine;
     recover(io, env, ctx, life).await?;
-    let component = item.get("component").map(js_string).unwrap_or_default();
+    let component = item.get("component").map(display).unwrap_or_default();
     let old = current_component(&component, env, m)?;
     if let Some(o) = &old {
         if !newer(item.get("version"), o.get("version")).map_err(Failure::msg)? {
@@ -1031,7 +1031,7 @@ mod from_earlier {
         assert_eq!((runtime["root"].clone(), runtime["exec"].clone()), (json!(active.to_string_lossy()), json!(active.join("bin/xenonet").to_string_lossy())));
         assert_eq!(s.starts[0]["exec"], runtime["exec"], "started from its copy");
         assert!(launcher_version(std::fs::read_to_string(launcher.join("cli/xenonet.js")).ok().as_deref()) >= 3.0, "0.3.0's entries now run the binary");
-        assert_eq!(std::fs::read_to_string(PathBuf::from(js_string(&old["root"])).join("node")).unwrap(), "0.3.0's node", "the old files kept");
+        assert_eq!(std::fs::read_to_string(PathBuf::from(display(&old["root"])).join("node")).unwrap(), "0.3.0's node", "the old files kept");
         assert!(!p.runtime().join("service-update.json").exists());
     }
 
@@ -1045,7 +1045,7 @@ mod from_earlier {
         let runtime = run(&p, &svc, "", bundle_task(&p, &bundle)).unwrap();
         assert_eq!((version(&p.selected("service")), version(&p.selected("tools"))), ("0.3.0", "0.4.0"), "the Tools switch; the service waits");
         assert_eq!((svc.borrow().stops, svc.borrow().starts.len()), (0, 0));
-        let root = PathBuf::from(js_string(&old["root"]));
+        let root = PathBuf::from(display(&old["root"]));
         let launcher = p.runtime().join("launcher");
         assert_eq!(runtime["exec"], json!(root.join("node").to_string_lossy()));
         assert_eq!(runtime["args"], json!([root.join("server/index.js").to_string_lossy()]));
@@ -1071,7 +1071,7 @@ mod from_earlier {
         assert_eq!(version(&p.selected("service")), "0.3.0");
         let s = svc.borrow();
         assert_eq!((s.stops, s.starts.len(), s.state.as_ref().map(|v| v["version"].clone())), (1, 2, Some(json!("0.3.0"))));
-        let root = PathBuf::from(js_string(&old["root"]));
+        let root = PathBuf::from(display(&old["root"]));
         assert_eq!(
             (s.starts[1]["exec"].clone(), s.starts[1]["args"].clone()),
             (json!(root.join("node").to_string_lossy()), json!([root.join("server/index.js").to_string_lossy()]))
@@ -1087,7 +1087,7 @@ mod from_earlier {
         run(&p, &svc, "", bundle_task(&p, &p.bundle("0.4.0"))).unwrap();
         let dir = p.runtime().join("components/service");
         let mark = || std::fs::read_to_string(dir.join("active/.from")).unwrap();
-        assert_eq!(mark(), format!("0.4.0-{}", js_string(&p.selected("service")["sha256"])));
+        assert_eq!(mark(), format!("0.4.0-{}", display(&p.selected("service")["sha256"])));
         let update = |version: &str, failing: &str| {
             let (file, item) = p.package("service", version);
             let (env, ctx) = (p.env.clone(), p.ctx.clone());

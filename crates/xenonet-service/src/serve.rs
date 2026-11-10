@@ -27,8 +27,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use xenonet_base::log::{log_dir, ErrInfo, Log, MAX_BYTES};
-use xenonet_base::sync::Locked;
+use xenonet_os::log::{log_dir, ErrInfo, Log, MAX_BYTES};
+use xenonet_os::sync::Locked;
 use xenonet_schema::drift::DRIFT_FILE;
 
 pub use crate::glue::notify_doctor;
@@ -155,9 +155,9 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
         wait = if ctx.events.count() > 0 { 5000 } else { 30000 };
         let looked: Result<(), CoreError> = async {
             let st = s.status().await?;
-            if xenonet_base::text::truthy(st.get("connected")) {
+            if xenonet_text::text::truthy(st.get("connected")) {
                 let now = s.player().await?;
-                let text = xenonet_base::json::stringify(&now, 0);
+                let text = xenonet_text::json::stringify(&now, 0);
                 let changed = {
                     let mut m = ctx.music.locked();
                     let changed = m.last != text;
@@ -167,7 +167,7 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
                 if changed {
                     ctx.broadcast("spotify", &now);
                 }
-                if xenonet_base::text::truthy(st.get("duck")) {
+                if xenonet_text::text::truthy(st.get("duck")) {
                     let waiting = ctx.cores.state.someone_waits(now_ms()).unwrap_or(false);
                     let held = ctx.music.locked().held.clone();
                     let plan = s.duck_plan(waiting, &now, st.get("device").unwrap_or(&Value::Null), &held)?;
@@ -201,12 +201,12 @@ async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
 
 /// Who holds a port, when it's another XenoNet.
 fn holder(port: u16) -> String {
-    match xenonet_base::http::request(port, "GET", "/api/health", &[], None, Some(Duration::from_millis(1500))) {
+    match xenonet_api::http::request(port, "GET", "/api/health", &[], None, Some(Duration::from_millis(1500))) {
         Ok(a) if a.status < 300 => {
-            let h = a.body.ok().and_then(|b| xenonet_base::json::parse(&String::from_utf8_lossy(&b)).ok()).unwrap_or(Value::Null);
+            let h = a.body.ok().and_then(|b| xenonet_text::json::parse(&String::from_utf8_lossy(&b)).ok()).unwrap_or(Value::Null);
             let name = h.get("name").and_then(Value::as_str).unwrap_or("another XenoNet");
             let instance = h.get("instance").and_then(Value::as_str).filter(|i| !i.is_empty()).map(|i| format!(" ({i})")).unwrap_or_default();
-            let pid = h.get("pid").filter(|p| xenonet_base::text::truthy(Some(p))).map(|p| format!(", pid {}", xenonet_base::text::js_string(p))).unwrap_or_default();
+            let pid = h.get("pid").filter(|p| xenonet_text::text::truthy(Some(p))).map(|p| format!(", pid {}", xenonet_text::text::display(p))).unwrap_or_default();
             format!(" by {name}{instance}{pid}")
         }
         _ => " by a program that isn't XenoNet".into(),

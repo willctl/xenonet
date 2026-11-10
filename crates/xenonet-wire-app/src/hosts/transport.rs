@@ -11,9 +11,9 @@
 
 use serde_json::Value;
 use std::sync::{Arc, Weak};
-use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink, To};
 use xenonet_hosts::frames::{parse_frame, FROM_CONSOLE};
 use xenonet_hosts::network::{self as wire, Op};
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink, To};
 
 /// A link's way to a host's map.
 pub trait Transport: Send + Sync {
@@ -30,7 +30,7 @@ pub trait Transport: Send + Sync {
 /// A new subscription's id.
 pub fn new_sub() -> Result<String, String> {
     let b = xenonet_net::codec::random::<16>().map_err(|e| e.message)?;
-    Ok(format!("sub_{}", xenonet_base::jsstr::hex(&b)))
+    Ok(format!("sub_{}", xenonet_text::utf16::hex(&b)))
 }
 
 /// What a link wrote, as the ask that carries it: a get or the time, and

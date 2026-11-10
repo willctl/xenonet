@@ -7,16 +7,16 @@
 
 use serde_json::{json, Value};
 use std::path::Path;
-use xenonet_base::json::number_string;
-use xenonet_base::nodepath::NATIVE;
-use xenonet_base::paths::{self, is_under, path_key};
-use xenonet_base::text::{js_string, js_trim, truthy};
+use xenonet_os::nodepath::NATIVE;
+use xenonet_os::paths::{self, is_under, path_key};
+use xenonet_text::json::number_string;
+use xenonet_text::text::{display, trim, truthy};
 
 /// The folder state.json says you chose, read as the file is (nothing moved
 /// up, set aside or written); None without one.
 pub fn saved_root(file: &str) -> Option<String> {
     let b = std::fs::read(file).ok()?;
-    let v = xenonet_base::json::parse(&String::from_utf8_lossy(&b)).ok()?;
+    let v = xenonet_text::json::parse(&String::from_utf8_lossy(&b)).ok()?;
     v.get("workspace")?.get("root")?.as_str().map(String::from)
 }
 
@@ -84,7 +84,7 @@ pub fn chosen(dir: Option<&str>, default: &str) -> Option<String> {
 /// A folder as someone typed it: ~ and ~/… are the home folder; anything
 /// else has to be a full path. None when it isn't one.
 pub fn resolve_folder(input: Option<&Value>, home: &str) -> Option<String> {
-    let s = input.and_then(Value::as_str).map_or("", js_trim);
+    let s = input.and_then(Value::as_str).map_or("", trim);
     if s == "~" {
         return Some(paths::resolve(home));
     }
@@ -103,7 +103,7 @@ fn privacy(shown: &str, platform: &str) -> String {
 }
 
 fn code_of(e: &std::io::Error) -> String {
-    xenonet_base::fs::code_of(e).map_or_else(|| "undefined".into(), String::from)
+    xenonet_os::fs::code_of(e).map_or_else(|| "undefined".into(), String::from)
 }
 
 /// Whether XenoNet can read a folder as its projects folder: { ok, path,
@@ -115,7 +115,7 @@ pub fn validate(input: Option<&Value>, home: &str, platform: &str) -> Value {
     let shown = tilde(&d, home);
     let st = match std::fs::metadata(&d) {
         Ok(m) => Some(m),
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) || xenonet_base::fs::code_of(&e) == Some("ENOTDIR") => None,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) || xenonet_os::fs::code_of(&e) == Some("ENOTDIR") => None,
         Err(e) => return no(format!("XenoNet can't reach {shown} ({}).{}", code_of(&e), privacy(&shown, platform))),
     };
     let Some(st) = st else { return no(format!("{shown} doesn't exist.")) };
@@ -195,7 +195,7 @@ pub fn check_finish(start: &Value, sc: Option<&Value>, time_ms: f64) -> Value {
     if let Some(s) = sc.filter(|s| truthy(s.get("truncated"))) {
         warnings.push(json!(format!(
             "The scan stopped at its {}-folder limit, so some projects may be missing. XENONET_PROJECTS_MAX_DIRS raises it.",
-            s.get("maxDirs").map_or_else(|| "undefined".into(), js_string)
+            s.get("maxDirs").map_or_else(|| "undefined".into(), display)
         )));
     }
     let scan = sc.map_or(Value::Null, |s| {

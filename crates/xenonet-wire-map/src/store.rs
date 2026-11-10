@@ -105,7 +105,7 @@ impl StateStore {
         Arc::new_cyclic(|me| StateStore {
             me: me.clone(),
             file,
-            root_key: xenonet_base::paths::path_key(projects_dir),
+            root_key: xenonet_os::paths::path_key(projects_dir),
             inner: Mutex::new(Inner { doc: None, report: None, unsaved: false, life: Lifecycle::new(now_ms()) }),
             saves: AtomicU64::new(0),
         })
@@ -210,7 +210,7 @@ impl StateStore {
             return;
         }
         let Some(doc) = g.doc.clone() else { return };
-        let text = xenonet_base::json::stringify(&Value::Object(doc), 2);
+        let text = xenonet_text::json::stringify(&Value::Object(doc), 2);
         match write_atomic(&self.file, &text) {
             Ok(()) => {
                 g.unsaved = false;

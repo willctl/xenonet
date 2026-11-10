@@ -190,7 +190,7 @@ struct Transcript<'a> {
 
 impl Hooks<Value, Value, ()> for Transcript<'_> {
     fn parse(&mut self, text: &str) -> Result<Value, String> {
-        xenonet_base::json::parse(text).map_err(|e| e.to_string())
+        xenonet_text::json::parse(text).map_err(|e| e.to_string())
     }
 
     fn inspect(&mut self, raw: Value, (): &()) -> Result<Option<Value>, String> {

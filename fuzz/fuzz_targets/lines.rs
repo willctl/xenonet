@@ -6,7 +6,7 @@
 // its events.
 
 use libfuzzer_sys::fuzz_target;
-use xenonet_base::json;
+use xenonet_text::json;
 use xenonet_sources::line_events::{self, LineFile};
 use xenonet_sources::lines::{self, ClaudeLine, CodexLine};
 

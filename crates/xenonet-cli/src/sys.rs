@@ -2,7 +2,7 @@
 //! core/dirs.js tell it: the home folder, the platform, XenoNet's own
 //! folders and where the command runs.
 
-use xenonet_base::paths;
+use xenonet_os::paths;
 
 /// An environment variable, unless it's empty (`process.env.X || …`).
 pub fn var(name: &str) -> Option<String> {
@@ -34,7 +34,7 @@ pub const SEP: &str = if cfg!(windows) { "\\" } else { "/" };
 pub fn app_dir(kind: &str, name: &str) -> String {
     let xdg = std::env::var(if kind == "state" { "XDG_STATE_HOME" } else { "XDG_CACHE_HOME" }).ok();
     let local = std::env::var("LOCALAPPDATA").ok();
-    xenonet_base::dirs::app_dir(kind, xdg.as_deref(), local.as_deref(), platform(), &home(), name)
+    xenonet_os::dirs::app_dir(kind, xdg.as_deref(), local.as_deref(), platform(), &home(), name)
 }
 
 /// XENONET_STATE_DIR, or the state folder of XenoNet (or XenoNet Dev, with
@@ -55,7 +55,7 @@ pub fn resolve(p: &str) -> String {
 
 /// path.basename(p).
 pub fn base_name(p: &str) -> String {
-    xenonet_base::nodepath::basename(p)
+    xenonet_os::nodepath::basename(p)
 }
 
 /// path.join(a, b).
@@ -101,7 +101,7 @@ pub fn installed_tools() -> bool {
     }
     std::fs::read_to_string(std::path::Path::new(&xenonet_root()).join("package.json"))
         .ok()
-        .and_then(|t| xenonet_base::json::parse(&t).ok())
+        .and_then(|t| xenonet_text::json::parse(&t).ok())
         .is_some_and(|p| p.get("xenonetComponent").and_then(serde_json::Value::as_str) == Some("tools"))
 }
 
@@ -111,7 +111,7 @@ pub fn installed_tools() -> bool {
 pub fn version(built: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(&xenonet_root()).join("package.json"))
         .ok()
-        .and_then(|t| xenonet_base::json::parse(&t).ok())
+        .and_then(|t| xenonet_text::json::parse(&t).ok())
         .and_then(|p| p.get("version").and_then(serde_json::Value::as_str).map(str::to_string))
         .unwrap_or_else(|| built.to_string())
 }

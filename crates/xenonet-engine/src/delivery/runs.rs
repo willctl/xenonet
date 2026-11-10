@@ -92,13 +92,13 @@ pub struct Run {
 }
 
 fn opt(v: Option<f64>) -> Value {
-    v.map_or(Value::Null, xenonet_base::json::number)
+    v.map_or(Value::Null, xenonet_text::json::number)
 }
 
 impl Run {
     /// As the file keeps it: `timedOut` only on a run the cap stopped.
     pub fn to_json(&self) -> Value {
-        let mut v = json!({ "id": self.id, "key": self.key, "app": self.app, "pid": opt(self.pid), "at": xenonet_base::json::number(self.at), "end": opt(self.end), "exit": opt(self.exit), "ms": opt(self.ms) });
+        let mut v = json!({ "id": self.id, "key": self.key, "app": self.app, "pid": opt(self.pid), "at": xenonet_text::json::number(self.at), "end": opt(self.end), "exit": opt(self.exit), "ms": opt(self.ms) });
         if self.timed_out {
             v["timedOut"] = Value::Bool(true);
         }

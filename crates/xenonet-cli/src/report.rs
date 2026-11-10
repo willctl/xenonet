@@ -6,11 +6,11 @@ use crate::clock;
 use crate::out::{c, plural};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
-use xenonet_base::json::number;
-use xenonet_base::text::{js_string, truthy};
-use xenonet_base::units::locale;
 use xenonet_schema::drift::{describe, source_name, DriftLog, ADDITIONS};
 use xenonet_schema::lenient::{load_vendor, vendor_sources};
+use xenonet_text::json::number;
+use xenonet_text::text::{display, truthy};
+use xenonet_text::units::locale;
 
 /// XenoNet's schemas/ folder, beside the command: the first of the folders
 /// the binary is in, and those above it, that has one (a checkout's, for
@@ -56,7 +56,7 @@ pub fn drift_report(log: &mut DriftLog, all: bool, dir: Option<&Path>, home: Opt
     let known: u64 = sources.iter().map(|s| s["known"].as_u64().unwrap_or(0)).sum();
     let mut out = Map::new();
     out.insert("at".into(), number(now));
-    out.insert("file".into(), file.map_or(Value::Null, |f| Value::String(home.filter(|h| !h.is_empty()).map_or_else(|| f.clone(), |h| xenonet_base::paths::tilde(&f, h)))));
+    out.insert("file".into(), file.map_or(Value::Null, |f| Value::String(home.filter(|h| !h.is_empty()).map_or_else(|| f.clone(), |h| xenonet_os::paths::tilde(&f, h)))));
     out.insert("since".into(), looked_at.map_or(Value::Null, number));
     out.insert("all".into(), Value::Bool(all));
     out.insert("sources".into(), Value::Array(sources));
@@ -67,11 +67,11 @@ pub fn drift_report(log: &mut DriftLog, all: bool, dir: Option<&Path>, home: Opt
 }
 
 fn n(v: Option<&Value>) -> f64 {
-    xenonet_base::text::js_number(v)
+    xenonet_text::text::to_number(v)
 }
 
 fn s(v: Option<&Value>) -> String {
-    v.map_or("undefined".into(), js_string)
+    v.map_or("undefined".into(), display)
 }
 
 fn list(v: Option<&Value>) -> &[Value] {
@@ -80,7 +80,7 @@ fn list(v: Option<&Value>) -> &[Value] {
 
 // The versions a source's records said, briefly.
 fn versions_of(versions: &[Value]) -> String {
-    let all: Vec<String> = versions.iter().map(js_string).collect();
+    let all: Vec<String> = versions.iter().map(display).collect();
     match all.len() {
         0 => "no version in the data".into(),
         1..=3 => format!("version{} {}", if all.len() == 1 { "" } else { "s" }, all.join(", ")),

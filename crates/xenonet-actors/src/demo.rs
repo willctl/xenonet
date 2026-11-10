@@ -18,9 +18,9 @@
 
 use crate::registry::{Actors, Host, Result};
 use serde_json::{json, Map, Value};
-use xenonet_base::ids::YOU;
-use xenonet_base::json::number;
-use xenonet_base::units::js_round;
+use xenonet_model::ids::YOU;
+use xenonet_text::json::number;
+use xenonet_text::units::round;
 
 const WREN: &str = "actor:wren";
 const KESTREL: &str = "actor:kestrel";
@@ -187,8 +187,8 @@ impl Demo {
             actors.report(id, &Value::Object(o), host)?;
         }
         for t in step.get("targets").and_then(Value::as_array).cloned().unwrap_or_default() {
-            let node = xenonet_base::text::template(t.get(0));
-            let relation = xenonet_base::text::template(t.get(1));
+            let node = xenonet_text::text::template(t.get(0));
+            let relation = xenonet_text::text::template(t.get(1));
             actors.target(id, &node, &relation, when)?;
         }
         if let Some(e) = step.get("event") {
@@ -233,7 +233,7 @@ impl Demo {
             let longest = demo.scripts.as_object().map_or(0, |o| o.values().map(|s| s.as_array().map_or(0, Vec::len)).max().unwrap_or(0));
             let turns = ((longest * 2 * TURNS.len()) as f64 / 3.0).ceil() as usize;
             for k in 0..turns {
-                let when = js_round(now - history + ((history - MIN) * k as f64) / (turns as f64 - 1.0));
+                let when = round(now - history + ((history - MIN) * k as f64) / (turns as f64 - 1.0));
                 Self::beat(actors, when, host)?;
                 demo.play(actors, TURNS[k % TURNS.len()], when, host)?;
             }

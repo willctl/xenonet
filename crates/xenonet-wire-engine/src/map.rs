@@ -9,9 +9,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use xenonet_api::cores::{CoreError, State, R};
-use xenonet_base::sync::Locked;
 use xenonet_engine::engine::{Fail, Thrown};
 use xenonet_engine::host::IndexEntry;
+use xenonet_os::sync::Locked;
 
 type Result<T> = std::result::Result<T, Thrown>;
 
@@ -70,7 +70,7 @@ impl Map {
     /// Each live session's id and when its transcript last moved.
     pub fn live_ids(&self) -> xenonet_engine::engine::Result<Vec<(String, f64)>> {
         let ids = engine(read(self.state.live_ids(), Vec::new))?;
-        Ok(ids.into_iter().map(|(id, at)| (id, xenonet_base::text::js_number(Some(&at)))).collect())
+        Ok(ids.into_iter().map(|(id, at)| (id, xenonet_text::text::to_number(Some(&at)))).collect())
     }
 
     /// The map's version, which its refresh moves: None before the first
@@ -88,7 +88,7 @@ impl Map {
             .map(|n| IndexEntry {
                 id: s(n, "id").unwrap_or_default(),
                 kind: s(n, "kind"),
-                archived: xenonet_base::text::truthy(Some(&n["archived"])),
+                archived: xenonet_text::text::truthy(Some(&n["archived"])),
                 updated_at: n.get("updatedAt").and_then(Value::as_f64),
                 name: s(n, "name"),
                 path: s(n, "path"),
@@ -137,7 +137,7 @@ impl Map {
             for n in &nodes {
                 let kind = n.get("kind").and_then(Value::as_str);
                 if matches!(kind, Some("project" | "zone")) {
-                    if let Some(k) = n.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()).and_then(xenonet_base::paths::path_key) {
+                    if let Some(k) = n.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()).and_then(xenonet_os::paths::path_key) {
                         places.insert(k, n.get("id").cloned().unwrap_or(Value::Null));
                     }
                 }
@@ -188,9 +188,9 @@ impl Map {
     /// null.
     pub fn place_of(&self, p: &str) -> Result<Value> {
         let kept = self.kept()?;
-        let mut k = xenonet_base::paths::path_key(p).unwrap_or_default();
+        let mut k = xenonet_os::paths::path_key(p).unwrap_or_default();
         while !k.is_empty() {
-            if let Some(id) = kept.places.get(&k).filter(|v| xenonet_base::text::truthy(Some(v))) {
+            if let Some(id) = kept.places.get(&k).filter(|v| xenonet_text::text::truthy(Some(v))) {
                 return Ok(id.clone());
             }
             k = match k.rfind('/') {

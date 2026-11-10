@@ -372,12 +372,12 @@ async fn a_home_folders_own_sessions_and_projects() {
     let id = "0190d3e0-0000-7000-8000-00000000aaaa";
     let folder = home.join(".claude").join("projects").join(cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
     std::fs::create_dir_all(&folder).expect("Claude Code's folder");
-    let ts = |ago: f64| xenonet_base::time::iso(now_ms() - ago);
+    let ts = |ago: f64| xenonet_text::time::iso(now_ms() - ago);
     let lines = [
         json!({ "type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": cwd, "gitBranch": "main", "version": "2.0.1", "timestamp": ts(60e3), "message": { "role": "user", "content": "Add a health check route" } }),
         json!({ "type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": id, "cwd": cwd, "version": "2.0.1", "timestamp": ts(50e3), "message": { "id": "m1", "role": "assistant", "model": "claude-sonnet-4-5", "stop_reason": "end_turn", "usage": { "input_tokens": 10, "output_tokens": 20 }, "content": [{ "type": "text", "text": "Added GET /health." }] } }),
     ];
-    let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
+    let text: String = lines.iter().map(|l| xenonet_text::json::stringify(l, 0) + "\n").collect();
     std::fs::write(folder.join(format!("{id}.jsonl")), text).expect("a transcript");
     let mut env = process_env();
     env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));

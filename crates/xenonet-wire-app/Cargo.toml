@@ -15,7 +15,7 @@ async-trait.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 xenonet-adapter.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 xenonet-api.workspace = true
 # Home, platform, random ids, fetch and output lines.
 xenonet-os.workspace = true
@@ -50,6 +50,7 @@ regex.workspace = true
 # os.cpus(), os.totalmem() and os.freemem(), as Node reads them: the mach
 # calls on macOS (and /proc on Linux, read as files). Windows' few calls
 # are declared in src/system.rs.
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 

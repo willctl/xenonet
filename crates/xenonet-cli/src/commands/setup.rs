@@ -15,18 +15,18 @@ pub fn run(_args: &[String], _flags: &Flags) -> Done {
     // binary.
     let root = sys::xenonet_root();
     let file = sys::join(&root, "component.json");
-    let text = std::fs::read_to_string(&file).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &file).message))?;
-    let manifest = xenonet_base::json::parse(&text).map_err(|e| Fail::error(e.to_string()))?;
+    let text = std::fs::read_to_string(&file).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "open", &file).message))?;
+    let manifest = xenonet_text::json::parse(&text).map_err(|e| Fail::error(e.to_string()))?;
     let dir = sys::join(&cores::runtime_dir()?, "downloads");
-    std::fs::create_dir_all(&dir).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "mkdir", &dir).message))?;
+    std::fs::create_dir_all(&dir).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "mkdir", &dir).message))?;
     let package = sys::join(&dir, &format!("setup-{}-{}-{}.tar.gz", t(&manifest, "component"), t(&manifest, "version"), std::process::id()));
-    let entries: Vec<String> = xenonet_base::paths::read_dir_sorted(std::path::Path::new(&root))
+    let entries: Vec<String> = xenonet_os::paths::read_dir_sorted(std::path::Path::new(&root))
         .map_err(|e| Fail::error(e.to_string()))?
         .iter()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     cores::tar_create(&package, &root, &entries)?;
-    let bytes = std::fs::read(&package).map_err(|e| Fail::error(xenonet_base::fs::FsError::of(e, "open", &package).message))?;
+    let bytes = std::fs::read(&package).map_err(|e| Fail::error(xenonet_os::fs::FsError::of(e, "open", &package).message))?;
     let mut item = manifest.as_object().cloned().unwrap_or_default();
     item.insert("size".into(), Value::from(bytes.len()));
     item.insert("sha256".into(), Value::String(cores::digest(&bytes)?));
@@ -34,6 +34,6 @@ pub fn run(_args: &[String], _flags: &Flags) -> Done {
     if let Some(bin) = cores::install_launcher()?.and_then(|l| l["bin"].as_str().map(str::to_string)) {
         cores::install_command(&serde_json::json!({ "bin": bin }))?;
     }
-    print(xenonet_base::json::stringify(&result, 0));
+    print(xenonet_text::json::stringify(&result, 0));
     Ok(0)
 }

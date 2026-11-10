@@ -39,7 +39,7 @@ pub fn phase_at(t: f64) -> (i64, f64) {
 
 pub fn fixture_view(t: f64) -> Value {
     let (phase, since) = phase_at(t);
-    let num = xenonet_base::json::number;
+    let num = xenonet_text::json::number;
     let (work, codex, quiet) = (format!("claude:{}", session(1)), format!("codex:{}", session(2)), format!("claude:{}", session(3)));
     let work_live = json!({
         "status": if phase == 0 { "tool" } else { "idle" },
@@ -106,7 +106,7 @@ pub fn standalone_policy(labels: bool) -> Value {
         "productId": null,
         "accountLink": "unverified",
         "labels": labels,
-        "lookbackMs": xenonet_base::json::number(30.0 * 24.0 * 3600e3),
+        "lookbackMs": xenonet_text::json::number(30.0 * 24.0 * 3600e3),
         "transportScope": "other_approved_scope",
         "audienceLabel": "fixture",
         "permissions": ["read"],

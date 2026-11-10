@@ -1,6 +1,6 @@
 //! The engine across machines (docs/design/network.md, sections 5, 6, 8,
 //! 10 and 11): what this host tells the others through the seam
-//! (`xenonet_base::network`), and what it does with what they tell it.
+//! (`xenonet_model::ops`), and what it does with what they tell it.
 //!
 //! - **Presence.** Every 2 seconds, if its agents changed, this host sends
 //!   them to every other host; a full set when its link comes up or after
@@ -34,10 +34,6 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_adapter::apps::is_session_id;
 use xenonet_api::From;
-use xenonet_base::ids::{parse_actor_id, qualify, YOU};
-use xenonet_base::network::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
-use xenonet_base::sync::Locked;
-use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::policy::Guard;
 use xenonet_engine::delivery::reach::{self, Action, Decision, Sender, Settings};
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
@@ -45,6 +41,10 @@ use xenonet_engine::host::Collaborators;
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
 use xenonet_engine::sql::Row;
 use xenonet_engine::store::EngineStore;
+use xenonet_model::ids::{parse_actor_id, qualify, YOU};
+use xenonet_model::ops::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
+use xenonet_os::sync::Locked;
+use xenonet_text::time::now_ms;
 
 /// How often presence and claims go out when they changed.
 pub const PRESENCE_MS: f64 = 2000.0;
@@ -235,12 +235,12 @@ fn n(v: &Value, k: &str) -> Option<f64> {
 
 /// A number as JS writes it: an integer when it is one.
 fn number(x: f64) -> Value {
-    xenonet_base::json::number(x)
+    xenonet_text::json::number(x)
 }
 
 /// `Number(x)`, as JS reads a field: NaN for one that isn't there.
 fn num_of(v: &Value, k: &str) -> f64 {
-    v.get(k).map_or(f64::NAN, |x| xenonet_base::text::js_number(Some(x)))
+    v.get(k).map_or(f64::NAN, |x| xenonet_text::text::to_number(Some(x)))
 }
 
 fn items(v: &Value, k: &str) -> Vec<Value> {
@@ -356,7 +356,7 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
 // ---------- presence ----------
 
 fn tilde(w: &Runtime, p: &str) -> String {
-    xenonet_base::paths::tilde(p, &w.setup.home)
+    xenonet_os::paths::tilde(p, &w.setup.home)
 }
 
 /// This host's agents as presence lists them: with their detail, unless
@@ -385,7 +385,7 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
             continue;
         }
         let key = remote_key(w, a.get("cwd"));
-        let waits = a.get("needsYou").is_some_and(|v| xenonet_base::text::truthy(Some(v)));
+        let waits = a.get("needsYou").is_some_and(|v| xenonet_text::text::truthy(Some(v)));
         let state = if waits { "waiting".to_string() } else { a.get("status").and_then(Value::as_str).unwrap_or("idle").to_string() };
         out.insert(
             id.clone(),
@@ -516,7 +516,7 @@ pub fn presence(w: &Runtime, full: bool) -> Option<Value> {
         out.you_at = you_at;
         out.roster.clone_from(&roster);
         out.reach = reach.clone();
-        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster, "reach": reach, "can": xenonet_base::network::CAN })
+        json!({ "schema": "network/presence/v1", "counter": out.counter, "full": full, "agents": agents, "removed": removed, "you": you, "youAt": you_at.map_or(Value::Null, ms), "roster": roster, "reach": reach, "can": xenonet_model::ops::CAN })
     };
     send(w, To::All, Kind::Presence, body.clone());
     Some(body)
@@ -677,7 +677,7 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
         None => None,
     };
     let text = s(a, "text").unwrap_or_default();
-    let scope = a.get("scope").map_or(Value::Null, |v| Value::String(xenonet_base::text::js_string(v)));
+    let scope = a.get("scope").map_or(Value::Null, |v| Value::String(xenonet_text::text::display(v)));
     for r in items(a, "recipients") {
         let rid = s(&r, "id").unwrap_or_default();
         let Some(host) = host_of(&rid).map(str::to_string) else { continue };
@@ -937,7 +937,7 @@ pub fn seen(w: &Runtime, agent: &str, ids: &[Value]) {
         return;
     }
     for id in ids {
-        let Ok(Some(m)) = store(w, |s| s.message(xenonet_base::text::js_number(Some(id)))) else { continue };
+        let Ok(Some(m)) = store(w, |s| s.message(xenonet_text::text::to_number(Some(id)))) else { continue };
         if let (Some(host), Some(mid)) = (m.text("host"), m.text("mid")) {
             receipt(w, host, mid, agent, "seen", None);
         }
@@ -1258,7 +1258,7 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
         let first = items(&sent, "to").first().and_then(|t| s(t, "id")).unwrap_or(to);
         (Some(first.clone()), host_of(&first).map(str::to_string), Some(sent))
     };
-    if to_agent.is_none() && key.is_none() && !xenonet_base::text::truthy(Some(&scope)) {
+    if to_agent.is_none() && key.is_none() && !xenonet_text::text::truthy(Some(&scope)) {
         return Err(Fail::Bad("a handoff to the repo needs a repo: this session isn't in one".into()));
     }
     let row = obj(vec![
@@ -1487,7 +1487,7 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
                 ("to_agent", json!(to_agent)),
                 ("to_repo", json!(s(&to, "repoKey").map(|k| clip(&k, 300)))),
                 ("to_scope", Value::Null),
-                ("to_host", json!(s(&to, "host").filter(|h| xenonet_base::ids::is_host_id(h)))),
+                ("to_host", json!(s(&to, "host").filter(|h| xenonet_model::ids::is_host_id(h)))),
                 ("goal", json!(field("goal", 2000))),
                 ("done", json!(field("done", 8000))),
                 ("next", json!(field("next", 8000))),

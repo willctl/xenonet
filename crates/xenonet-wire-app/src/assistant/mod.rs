@@ -22,8 +22,8 @@ use xenonet_engine::sql::{Cell, Row};
 pub fn row_json(r: &Row) -> Value {
     let cell = |c: &Cell| match c {
         Cell::Null => Value::Null,
-        Cell::Int(i) => xenonet_base::json::number(*i as f64),
-        Cell::Real(f) => xenonet_base::json::number(*f),
+        Cell::Int(i) => xenonet_text::json::number(*i as f64),
+        Cell::Real(f) => xenonet_text::json::number(*f),
         Cell::Text(s) => Value::String(s.clone()),
         Cell::Blob(b) => Value::Array(b.iter().map(|x| Value::from(*x)).collect()),
     };

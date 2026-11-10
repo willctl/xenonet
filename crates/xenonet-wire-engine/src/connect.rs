@@ -12,7 +12,7 @@ use serde_json::Value;
 use xenonet_adapter::connect::{Connect as Core, Instance, Machine, Options, Problem};
 use xenonet_api::cores::{Connect, CoreError, R};
 use xenonet_app::instances::INSTANCES;
-use xenonet_base::fs::FsError;
+use xenonet_os::fs::FsError;
 
 /// This machine: its files, and the agents' CLIs on PATH.
 struct Here;
@@ -46,14 +46,14 @@ impl Machine for Here {
     /// A CLI on PATH (XenoNet's PATH is your login shell's).
     fn cli(&mut self, name: &str) -> Option<String> {
         let path = std::env::var("PATH").unwrap_or_default();
-        xenonet_base::paths::on_path(name, &path, std::env::var("PATHEXT").ok().as_deref(), cfg!(windows), &mut |f: &str| std::path::Path::new(f).exists())
+        xenonet_os::paths::on_path(name, &path, std::env::var("PATHEXT").ok().as_deref(), cfg!(windows), &mut |f: &str| std::path::Path::new(f).exists())
     }
     /// A CLI's output, or what it said went wrong.
     fn run(&mut self, bin: &str, args: &[String]) -> Result<String, Problem> {
         let mut s = Spec::new(bin, args, 20000);
         s.env = vec![("ELECTRON_RUN_AS_NODE".into(), None)];
         crate::exec::run_full(&s).map(|(out, _)| out).map_err(|f| {
-            let said = xenonet_base::text::js_trim(&f.stderr).to_string();
+            let said = xenonet_text::text::trim(&f.stderr).to_string();
             Problem::new(if said.is_empty() { f.message } else { said })
         })
     }

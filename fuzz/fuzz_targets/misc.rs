@@ -85,7 +85,7 @@ fuzz_target!(|data: &[u8]| {
             let (a, b) = text.split_once('\0').unwrap_or((&text, ""));
             let _ = (xenonet_actors::tokens::is_token(a), xenonet_actors::tokens::is_gateway_token(a), xenonet_actors::tokens::bearer_of(a));
             let _ = (xenonet_actors::secret_store::is_target(a), xenonet_actors::secret_store::is_secret(a));
-            let _ = xenonet_base::private_file::others_in(a, b);
+            let _ = xenonet_os::private_file::others_in(a, b);
             let _ = xenonet_actors::token_file::token_file_refusal(a, false, Some("/home/nova/Projects"));
         }
         _ => {

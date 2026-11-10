@@ -8,7 +8,7 @@
 use crate::common::{clean, fail, failed, has_credential, text, Fail};
 use serde_json::{json, Map, Value};
 use xenonet_app::jsv::truthy;
-use xenonet_base::text::js_number;
+use xenonet_text::text::to_number;
 
 /// The agents a task could go to, from the sessions on the map.
 pub fn inventory(nodes: &[Value]) -> Value {
@@ -36,7 +36,7 @@ pub fn inventory(nodes: &[Value]) -> Value {
 pub fn payload(request: &str, candidates: &[Value]) -> Value {
     let criteria: Map<String, Value> = candidates
         .iter()
-        .map(|c| (xenonet_base::text::js_string(&c["id"]), json!({ "description": c.get("description"), "available": c.get("availability").and_then(|a| a.get("available")) })))
+        .map(|c| (xenonet_text::text::display(&c["id"]), json!({ "description": c.get("description"), "available": c.get("availability").and_then(|a| a.get("available")) })))
         .collect();
     json!({ "state": { "request": request }, "questions": { "tool": { "type": "choice", "instructions": "Which single candidate should handle this task? Prefer human review if none fits. This is a suggestion only.", "criteria": criteria } } })
 }
@@ -79,17 +79,17 @@ pub fn answer_ok(answers: &Value, candidates: &[Value]) -> bool {
         return false;
     }
     let Some(probs) = a.get("probabilities").and_then(Value::as_object).filter(|p| p.len() == candidates.len()) else { return false };
-    if candidates.iter().any(|c| prob(probs.get(&xenonet_base::text::js_string(&c["id"]))).is_none()) {
+    if candidates.iter().any(|c| prob(probs.get(&xenonet_text::text::display(&c["id"]))).is_none()) {
         return false;
     }
-    let sum: f64 = probs.values().map(|p| js_number(Some(p))).sum();
+    let sum: f64 = probs.values().map(|p| to_number(Some(p))).sum();
     (sum - 1.0).abs() <= 0.02
 }
 
 /// The record a routing decision leaves: its hash, scores and outcome.
 pub fn decision_record(result: &Value, request: &str, metrics: &Value) -> Value {
     let n = |k: &str| {
-        let v = js_number(metrics.get(k));
+        let v = to_number(metrics.get(k));
         if v.is_nan() || v == 0.0 {
             0.0
         } else {
@@ -120,8 +120,8 @@ pub fn decision_record(result: &Value, request: &str, metrics: &Value) -> Value 
         ("selected", decision.and_then(|d| d.get("selected")).cloned()),
         ("taskHash", Some(json!(crate::b64::sha256_hex(request.as_bytes())))),
         ("model", Some(json!(clean(metrics.get("model"), 160)))),
-        ("cost", Some(xenonet_base::json::number(n("cost")))),
-        ("ms", Some(xenonet_base::json::number(n("ms")))),
+        ("cost", Some(xenonet_text::json::number(n("cost")))),
+        ("ms", Some(xenonet_text::json::number(n("ms")))),
         ("reason", Some(result.get("fallback").and_then(|f| f.get("type")).filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null))),
         ("candidates", Some(Value::Array(candidates))),
         ("outcome", Some(json!("unreviewed"))),

@@ -12,7 +12,7 @@
 use crate::packages::TRAY_APP;
 use crate::supervisor::{parse_print, Files, Job, Kind, Place, Ran, Runner};
 use serde_json::{json, Value};
-use xenonet_base::nodepath::Style;
+use xenonet_os::nodepath::Style;
 
 /// The tray's launch agent's label, and its plist's name with `.plist`.
 pub const LABEL: &str = "dev.xenonet.tray";

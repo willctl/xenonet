@@ -37,9 +37,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
-use xenonet_base::sync::Locked;
 use xenonet_net::gateway::{NetBody, NetReply, NetRequest, RELAY_LIMIT, SMALL_LIMIT, UP_LIMIT};
 use xenonet_net::node::Node;
+use xenonet_os::sync::Locked;
 
 pub const NET_PREFIX: &str = "/net/v1/";
 pub const A2A_PATH: &str = "/a2a";

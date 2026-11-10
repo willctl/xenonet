@@ -22,10 +22,10 @@ use serde_json::Value;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use xenonet_base::fs::FsError;
-use xenonet_base::json::{self, number_string};
-use xenonet_base::nodepath;
-use xenonet_base::time::iso;
+use xenonet_os::fs::FsError;
+use xenonet_os::nodepath;
+use xenonet_text::json::{self, number_string};
+use xenonet_text::time::iso;
 
 pub use crate::Halt;
 
@@ -194,7 +194,7 @@ pub fn write_atomic(file: &str, text: &str) -> Result<(), FsError> {
     if let Some(dir) = Path::new(file).parent() {
         fs::create_dir_all(dir).map_err(|e| FsError::of(e, "mkdir", &dir.to_string_lossy()))?;
     }
-    xenonet_base::fs::write_atomic(Path::new(file), text.as_bytes()).map_err(|e| FsError::of(e, "rename", file))?;
+    xenonet_os::fs::write_atomic(Path::new(file), text.as_bytes()).map_err(|e| FsError::of(e, "rename", file))?;
     Ok(())
 }
 

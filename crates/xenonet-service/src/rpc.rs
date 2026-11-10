@@ -15,8 +15,8 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
-use xenonet_base::json;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
+use xenonet_text::json;
 
 pub const MAX_LINE: usize = 16 << 20;
 const BUSY: usize = 16 << 20;
@@ -124,11 +124,11 @@ impl Rpc {
     }
 
     fn take(&self, message: Value, handle: &Handler, incoming: &[&str], events: &mpsc::UnboundedSender<(String, Value)>) {
-        if xenonet_base::text::truthy(message.get("reply")) {
+        if xenonet_text::text::truthy(message.get("reply")) {
             let id = message["reply"].as_i64().unwrap_or(-1);
             if let Some(p) = self.shared.pending.locked().remove(&id) {
-                let _ = p.send(if xenonet_base::text::truthy(message.get("error")) {
-                    Err(xenonet_base::text::js_string(&message["error"]))
+                let _ = p.send(if xenonet_text::text::truthy(message.get("error")) {
+                    Err(xenonet_text::text::display(&message["error"]))
                 } else {
                     Ok(message.get("result").cloned().unwrap_or(Value::Null))
                 });

@@ -20,8 +20,8 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use xenonet_base::json;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
+use xenonet_text::json;
 
 const KEY: &str = "gateway";
 const SEEN: &str = "gateway.seen";
@@ -269,7 +269,7 @@ impl GatewayControl {
         let ok_at = if ok { json::number(t) } else { r["okAt"].clone() };
         *r = json!({ "state": if ok { "ok" } else { "failing" }, "stage": got["stage"], "why": got["why"], "at": json::number(t), "okAt": ok_at, "local": self.probe_local });
         if before != r["state"] {
-            let words = if ok { format!("the gateway is reachable at {}", s.host.unwrap_or_default()) } else { xenonet_base::text::js_string(&got["why"]) };
+            let words = if ok { format!("the gateway is reachable at {}", s.host.unwrap_or_default()) } else { xenonet_text::text::display(&got["why"]) };
             (self.log)("gateway.reach", &words);
         }
     }
@@ -398,7 +398,7 @@ impl GatewayControl {
             if r["hasGateway"] != json!(true) {
                 continue;
             }
-            let id = format!("actor:{}", xenonet_base::text::js_string(&r["slug"]));
+            let id = format!("actor:{}", xenonet_text::text::display(&r["slug"]));
             ids.push(id.clone());
             let expires = r["gatewayAt"].as_f64().map(|g| g + TOKEN_UNUSED_MS);
             out.push(row(&id, json!({ "token": true, "expiresAt": expires.map(json::number), "expiring": expires.is_some_and(|e| e - t < EXPIRING_MS) })));
@@ -449,13 +449,13 @@ impl GatewayControl {
             } else {
                 let k_id = match pick.get("kind") {
                     Some(Value::Null) | None => String::new(),
-                    Some(v) => xenonet_base::text::js_string(v),
+                    Some(v) => xenonet_text::text::display(v),
                 };
                 let Some(k) = kind(&k_id) else { return Err(bad(&format!("a tunnel is one of {}", kind_ids().join(", ")))) };
                 let text = |key: &str| match pick.get(key) {
                     None | Some(Value::Null) => None,
                     Some(Value::String(s)) if s.is_empty() => None,
-                    Some(v) => Some(xenonet_base::text::js_trim(&xenonet_base::text::js_string(v)).to_string()),
+                    Some(v) => Some(xenonet_text::text::trim(&xenonet_text::text::display(v)).to_string()),
                 };
                 let name = text("name");
                 if k.asks_name.is_some() && name.as_deref().is_some_and(|n| !tunnel_name(n)) {

@@ -18,7 +18,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use xenonet_base::text::{js_trim, truthy};
+use xenonet_text::text::{trim, truthy};
 
 /// The Agent SDK release whose readings these are, as the lenient
 /// readers pick their schema by it.
@@ -28,7 +28,7 @@ const CHUNK: u64 = 65536;
 const SCAN_MAX: u64 = 16 * 1024 * 1024;
 
 fn sorted_names(dir: &Path) -> Vec<std::fs::DirEntry> {
-    xenonet_base::paths::read_dir_sorted(dir).unwrap_or_default()
+    xenonet_os::paths::read_dir_sorted(dir).unwrap_or_default()
 }
 
 // ---------- the head and tail of a file ----------
@@ -87,7 +87,7 @@ fn head_tail(file: &Path) -> Option<HeadTail> {
     if head.is_empty() {
         return None;
     }
-    let mtime = xenonet_base::fs::mtime_ms_of(&meta).map_or(0.0, f64::floor);
+    let mtime = xenonet_os::fs::mtime_ms_of(&meta).map_or(0.0, f64::floor);
     let head_text = String::from_utf8_lossy(&head).into_owned();
     let tail = if size > CHUNK { String::from_utf8_lossy(&read_at(&mut f, size - CHUNK, CHUNK).ok()?).into_owned() } else { head_text.clone() };
     Some(HeadTail { mtime, size, stamp: Stamp::of(&meta), head: head_text, tail })
@@ -106,7 +106,7 @@ fn value_at(text: &str, from: usize) -> Option<String> {
             b'"' => {
                 let raw = &text[from..i];
                 if raw.contains('\\') {
-                    return Some(xenonet_base::json::parse(&format!("\"{raw}\"")).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| raw.to_string()));
+                    return Some(xenonet_text::json::parse(&format!("\"{raw}\"")).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| raw.to_string()));
                 }
                 return Some(raw.to_string());
             }
@@ -162,7 +162,7 @@ fn nonempty(s: Option<String>) -> Option<String> {
 // The cwd a relocated session moved to: the last relocated line's.
 fn relocated(tail: &str) -> Option<String> {
     tail.split('\n').rev().find(|l| l.contains("\"relocatedCwd\":") && l.contains("\"type\":\"relocated\"")).and_then(|l| {
-        let v = xenonet_base::json::parse(l).ok()?;
+        let v = xenonet_text::json::parse(l).ok()?;
         (v.get("type").and_then(Value::as_str) == Some("relocated")).then(|| v.get("relocatedCwd").and_then(Value::as_str).map(str::to_string)).flatten()
     })
 }
@@ -247,7 +247,7 @@ fn cut_200(text: &str) -> String {
     if keep.last().is_some_and(|u| (0xD800..0xDC00).contains(u)) {
         keep.pop();
     }
-    format!("{}…", js_trim(&String::from_utf16_lossy(&keep)))
+    format!("{}…", trim(&String::from_utf16_lossy(&keep)))
 }
 
 // What someone typed in a user line, or the command it ran.
@@ -267,7 +267,7 @@ fn prompt_of(obj: &Value, command: &mut Option<String>) -> Option<String> {
         _ => return None,
     };
     for t in texts {
-        let text = js_trim(&unwrap_pastes(&t).replace('\n', " ")).to_string();
+        let text = trim(&unwrap_pastes(&t).replace('\n', " ")).to_string();
         if text.is_empty() {
             continue;
         }
@@ -276,7 +276,7 @@ fn prompt_of(obj: &Value, command: &mut Option<String>) -> Option<String> {
             continue;
         }
         if let Some(input) = between(&text, "<bash-input>", "</bash-input>") {
-            return Some(format!("! {}", js_trim(input)));
+            return Some(format!("! {}", trim(input)));
         }
         if is_markup(&text) {
             continue;
@@ -295,7 +295,7 @@ fn first_prompt(head: &str) -> String {
         if ["\"isMeta\":true", "\"isMeta\": true", "\"isCompactSummary\":true", "\"isCompactSummary\": true"].iter().any(|m| line.contains(m)) {
             continue;
         }
-        let Ok(obj) = xenonet_base::json::parse(line) else { continue };
+        let Ok(obj) = xenonet_text::json::parse(line) else { continue };
         if let Some(p) = prompt_of(&obj, &mut command) {
             return p;
         }
@@ -323,7 +323,7 @@ fn continued_in(tail: &str) -> Option<String> {
         if !(line.contains("\"type\":\"continued-in\"") || line.contains("\"type\":\"user\"") || line.contains("\"type\":\"assistant\"")) {
             continue;
         }
-        let Ok(v) = xenonet_base::json::parse(line) else { continue };
+        let Ok(v) = xenonet_text::json::parse(line) else { continue };
         match v.get("type").and_then(Value::as_str) {
             Some("continued-in") => return v.get("continuedInSessionId").and_then(Value::as_str).filter(|i| is_uuid(i)).map(str::to_string),
             Some("assistant") if !truthy(v.get("isApiErrorMessage")) && v.get("message").and_then(|m| m.get("stop_reason")).is_some_and(Value::is_string) => return None,
@@ -370,12 +370,12 @@ fn continued_elsewhere(file: &Path, id: &str) -> bool {
 // A name you gave a session in its sidecar, cleaned as the SDK cleans it.
 fn sidecar_title(file: &Path, id: &str) -> Option<String> {
     let text = std::fs::read_to_string(file.parent()?.join(id).join("custom-title.json")).ok()?;
-    let v = xenonet_base::json::parse(&text).ok()?;
+    let v = xenonet_text::json::parse(&text).ok()?;
     let raw = v.get("customTitle")?.as_str()?;
     let format = |c: char| matches!(c as u32, 0xAD | 0x600..=0x605 | 0x61C | 0x6DD | 0x70F | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB | 0xE0001 | 0xE0020..=0xE007F);
     let mut spaced = String::new();
     let mut run = false;
-    for c in js_trim(raw).chars() {
+    for c in trim(raw).chars() {
         if c.is_control() || format(c) || c == '\u{2028}' || c == '\u{2029}' {
             if !run {
                 spaced.push(' ');
@@ -387,7 +387,7 @@ fn sidecar_title(file: &Path, id: &str) -> Option<String> {
         }
     }
     let clean: String = spaced.chars().filter(|c| !matches!(*c as u32, 0..=0x1f | 0x7f..=0x9f)).take(200).collect();
-    nonempty(Some(js_trim(&clean).to_string()))
+    nonempty(Some(trim(&clean).to_string()))
 }
 
 // ---------- listSessions ----------
@@ -432,7 +432,7 @@ impl Seen {
             sidechain,
             tail_title: last_value(&t.tail, "customTitle"),
             later_title: nonempty(last_value(&t.head, "customTitle")).or_else(|| nonempty(last_value(&t.tail, "aiTitle"))).or_else(|| nonempty(last_value(&t.head, "aiTitle"))),
-            created: first_value(&t.head, "timestamp").and_then(|s| xenonet_base::time::parse_iso(&s)),
+            created: first_value(&t.head, "timestamp").and_then(|s| xenonet_text::time::parse_iso(&s)),
             later_summary: nonempty(last_value(&t.tail, "lastPrompt"))
                 .or_else(|| nonempty(last_value(&t.tail, "summary")))
                 .or_else(|| first.clone())
@@ -456,7 +456,7 @@ fn listing(id: &str, file: &Path, t: &Seen) -> Option<Value> {
     let mut m = Map::new();
     m.insert("sessionId".into(), json!(id));
     m.insert("summary".into(), json!(summary));
-    m.insert("lastModified".into(), xenonet_base::json::number(t.mtime));
+    m.insert("lastModified".into(), xenonet_text::json::number(t.mtime));
     m.insert("fileSize".into(), json!(t.size));
     let mut put = |k: &str, v: Option<Value>| {
         if let Some(v) = v {
@@ -468,7 +468,7 @@ fn listing(id: &str, file: &Path, t: &Seen) -> Option<Value> {
     put("gitBranch", branch.map(Value::String));
     put("cwd", cwd.map(Value::String));
     put("tag", tag.map(Value::String));
-    put("createdAt", created.map(xenonet_base::json::number));
+    put("createdAt", created.map(xenonet_text::json::number));
     Some(Value::Object(m))
 }
 
@@ -850,7 +850,7 @@ fn last_text(e: &Value) -> String {
 // A line's entry, if it's JSON.
 fn parse_line(l: &[u8]) -> Option<Value> {
     let start = l.iter().position(|b| *b > 0x20)?;
-    xenonet_base::json::parse(&String::from_utf8_lossy(&l[start..])).ok()
+    xenonet_text::json::parse(&String::from_utf8_lossy(&l[start..])).ok()
 }
 
 // The fields of an entry that finding its session's messages reads, with
@@ -1115,17 +1115,17 @@ pub fn rename_session(projects_dir: &str, id: &str, title: &str) -> Result<(), S
     if !is_uuid(id) {
         return Err(format!("Invalid sessionId: {id}"));
     }
-    let title = js_trim(title);
+    let title = trim(title);
     if title.is_empty() {
         return Err("title must be non-empty".into());
     }
-    let line = format!("{}\n", xenonet_base::json::stringify(&json!({ "type": "custom-title", "customTitle": title, "sessionId": id }), 0));
-    let folders = xenonet_base::paths::read_dir_sorted(Path::new(projects_dir)).map_err(|_| format!("Session {id} not found (no projects directory)"))?;
+    let line = format!("{}\n", xenonet_text::json::stringify(&json!({ "type": "custom-title", "customTitle": title, "sessionId": id }), 0));
+    let folders = xenonet_os::paths::read_dir_sorted(Path::new(projects_dir)).map_err(|_| format!("Session {id} not found (no projects directory)"))?;
     for d in folders {
         let file = d.path().join(format!("{id}.jsonl"));
         let mut f = match std::fs::OpenOptions::new().append(true).open(&file) {
             Ok(f) => f,
-            Err(e) if matches!(xenonet_base::fs::code_of(&e), Some("ENOENT" | "ENOTDIR")) => continue,
+            Err(e) if matches!(xenonet_os::fs::code_of(&e), Some("ENOENT" | "ENOTDIR")) => continue,
             Err(e) => return Err(e.to_string()),
         };
         if f.metadata().map_err(|e| e.to_string())?.len() == 0 {
@@ -1145,7 +1145,7 @@ mod tests {
 
     fn write(dir: &Path, id: &str, lines: &[Value]) {
         std::fs::create_dir_all(dir).expect("a folder");
-        let text: String = lines.iter().map(|l| xenonet_base::json::stringify(l, 0) + "\n").collect();
+        let text: String = lines.iter().map(|l| xenonet_text::json::stringify(l, 0) + "\n").collect();
         std::fs::write(dir.join(format!("{id}.jsonl")), text).expect("a transcript");
     }
 
@@ -1561,7 +1561,7 @@ mod tests {
                     1 => text.push_str("\n  "),
                     _ => {}
                 }
-                text.push_str(&xenonet_base::json::stringify(&e, 0));
+                text.push_str(&xenonet_text::json::stringify(&e, 0));
                 text.push('\n');
             }
             std::fs::write(p.join(format!("{A}.jsonl")), &text).expect("a transcript");

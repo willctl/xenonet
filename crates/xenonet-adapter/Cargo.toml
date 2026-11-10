@@ -20,7 +20,8 @@ sha2.workspace = true
 # A lister that keeps a client running (Codex's app-server) runs it on the
 # service's runtime.
 tokio.workspace = true
-xenonet-base.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
 # A lister's block reports its lifecycle.
 xenonet-blocks.workspace = true
 xenonet-model.workspace = true

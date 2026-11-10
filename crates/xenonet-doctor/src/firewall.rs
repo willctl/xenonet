@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use std::sync::OnceLock;
 use xenonet_app::jsv::truthy;
 use xenonet_app::task::Failure;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 /// The checks, in order: id, group and title.
 pub const CHECKS: [(&str, &str, &str); 1] = [("network.firewall", "Network", "Other machines can reach this gateway")];
@@ -178,8 +178,8 @@ pub fn windows_verdict(seen: Option<&Value>, paths: &[String], shown: &str, afte
             Some(&format!("If other machines can't reach this gateway, let {shown} in. {}", fix(&["Private"]))),
         );
     };
-    let field = |v: &Value, k: &str| v.get(k).map_or_else(|| "undefined".to_string(), js_string);
-    let profile = |name: &str, k: &str| profiles.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(name)).and_then(|p| p.get(k)).map(js_string);
+    let field = |v: &Value, k: &str| v.get(k).map_or_else(|| "undefined".to_string(), display);
+    let profile = |name: &str, k: &str| profiles.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(name)).and_then(|p| p.get(k)).map(display);
     // The profiles of the networks this computer is on (all three when it
     // can't tell), and those the firewall is on for.
     let networks = list(seen.get("networks"));
@@ -238,7 +238,7 @@ async fn listing(c: &Ctx<'_>, apps: &[(String, bool)], path: &str) -> Result<Opt
     let name = path.rsplit('/').next().unwrap_or(path);
     for (p, allow) in apps.iter().filter(|(p, _)| p.rsplit('/').next() == Some(name)) {
         let real = c.call("realpath", json!([p])).await.map_err(|_| Failure::Rethrow)?;
-        if real.filter(|v| !v.is_null()).map(|v| js_string(&v)).as_deref() == Some(path) {
+        if real.filter(|v| !v.is_null()).map(|v| display(&v)).as_deref() == Some(path) {
             return Ok(Some(*allow));
         }
     }
@@ -251,7 +251,7 @@ async fn said(c: &Ctx<'_>, args: &[&str]) -> Result<Option<String>, Failure> {
     if r.get("code").and_then(Value::as_f64) != Some(0.0) || truthy(r.get("timedOut")) {
         return Ok(None);
     }
-    Ok(Some(r.get("stdout").filter(|v| !v.is_null()).map(js_string).unwrap_or_default()))
+    Ok(Some(r.get("stdout").filter(|v| !v.is_null()).map(display).unwrap_or_default()))
 }
 
 /// The check's verdict.
@@ -277,19 +277,19 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
     if platform != "darwin" && platform != "win32" {
         return Ok(skip("for macOS and Windows, whose firewalls let programs in by their path"));
     }
-    let exe = c.f.data.get("self").and_then(|s| s.get("exe")).filter(|v| truthy(Some(v))).map(js_string);
+    let exe = c.f.data.get("self").and_then(|s| s.get("exe")).filter(|v| truthy(Some(v))).map(display);
     let Some(exe) = exe else { return Ok(info("XenoNet couldn't tell which program its service runs as", None)) };
-    let next = c.call("restartExe", json!([])).await.map_err(|_| Failure::Rethrow)?.filter(|v| truthy(Some(v))).map(|v| js_string(&v)).filter(|n| *n != exe);
+    let next = c.call("restartExe", json!([])).await.map_err(|_| Failure::Rethrow)?.filter(|v| truthy(Some(v))).map(|v| display(&v)).filter(|n| *n != exe);
     if platform == "win32" {
         let mut paths = vec![exe.clone()];
         paths.extend(next.clone());
         let r = c.run(POWERSHELL, &["-NoProfile", "-NonInteractive", "-Command", &windows_script(&paths)], 30000.0).await?;
         let read = r.get("code").and_then(Value::as_f64) == Some(0.0) && !truthy(r.get("timedOut"));
-        let seen = if read { xenonet_base::json::parse(&r.get("stdout").filter(|v| !v.is_null()).map(js_string).unwrap_or_default()).ok() } else { None };
+        let seen = if read { xenonet_text::json::parse(&r.get("stdout").filter(|v| !v.is_null()).map(display).unwrap_or_default()).ok() } else { None };
         let after = next.as_deref().map(|n| c.tilde(n));
         return Ok(windows_verdict(seen.as_ref(), &paths, &c.tilde(&exe), after.as_deref()));
     }
-    let home = c.f.data.get("home").filter(|v| !v.is_null()).map(js_string).unwrap_or_default();
+    let home = c.f.data.get("home").filter(|v| !v.is_null()).map(display).unwrap_or_default();
     let Some(state) = said(c, &["--getglobalstate"]).await?.as_deref().and_then(global_state) else {
         return Ok(info("XenoNet couldn't read whether the firewall is on", Some(&unreadable("socketfilterfw"))));
     };

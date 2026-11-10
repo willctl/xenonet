@@ -8,7 +8,7 @@ use crate::out::Fail;
 use crate::sys;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect, Instance, Machine, Options, Problem};
-use xenonet_base::fs::FsError;
+use xenonet_os::fs::FsError;
 use xenonet_wire_engine::fs;
 
 /// This computer: its files, and the agents' CLIs on PATH.
@@ -49,7 +49,7 @@ impl Machine for Here {
         match r.error {
             None => Ok(r.stdout),
             Some(message) => {
-                let said = xenonet_base::text::js_trim(&r.stderr).to_string();
+                let said = xenonet_text::text::trim(&r.stderr).to_string();
                 Err(Problem::new(if said.is_empty() { message } else { said }))
             }
         }
@@ -60,9 +60,9 @@ impl Machine for Here {
 /// the command was given: its home folder, CLAUDE_CONFIG_DIR, CODEX_HOME,
 /// GROK_HOME and the instances XenoNet Dev runs as.
 fn core(opts: &Value) -> Connect {
-    let t = |k: &str| opts.get(k).map(xenonet_base::text::js_string).unwrap_or_default();
+    let t = |k: &str| opts.get(k).map(xenonet_text::text::display).unwrap_or_default();
     Connect::new(Options {
-        port: xenonet_base::text::js_number(opts.get("port")),
+        port: xenonet_text::text::to_number(opts.get("port")),
         demo: false,
         bin: t("bin"),
         home: sys::home(),

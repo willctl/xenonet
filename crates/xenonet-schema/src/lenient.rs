@@ -26,7 +26,7 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
-use xenonet_base::json;
+use xenonet_text::json;
 
 /// `typeof`, as JSON sees a value: null, array, object, boolean, number,
 /// string.
@@ -143,9 +143,9 @@ impl<'a> Compiler<'a> {
         }
         let mut types: Option<Vec<String>> = match node.get("type") {
             Some(Value::String(t)) => Some(vec![t.clone()]),
-            Some(Value::Array(a)) => Some(a.iter().map(|t| t.as_str().map_or_else(|| xenonet_base::text::js_string(t), str::to_string)).collect()),
+            Some(Value::Array(a)) => Some(a.iter().map(|t| t.as_str().map_or_else(|| xenonet_text::text::display(t), str::to_string)).collect()),
             Some(Value::Null) | None => None,
-            Some(other) => Some(vec![xenonet_base::text::js_string(other)]),
+            Some(other) => Some(vec![xenonet_text::text::display(other)]),
         };
         if types.is_none() {
             if let Some(c) = node.get("const") {
@@ -175,7 +175,7 @@ impl<'a> Compiler<'a> {
                 let props: Vec<(String, usize, bool)> =
                     props.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), self.go(v), required.contains(k))).collect()).unwrap_or_default();
                 let known = xs.get("known").and_then(Value::as_array).map(|k| k.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
-                let closed = xenonet_base::text::truthy(xs.get("closed"));
+                let closed = xenonet_text::text::truthy(xs.get("closed"));
                 return Node::Object { props, closed, known };
             }
             // A record (z.record): keyed by data, whatever its values are,
@@ -248,7 +248,7 @@ pub fn load_vendor(source: &str, dir: &Path) -> Vec<Major> {
 /// `<vendor>/<product>/<source>`, sorted.
 pub fn vendor_sources(dir: &Path) -> Vec<String> {
     fn walk(base: &Path, rel: &mut Vec<String>, out: &mut BTreeSet<String>) {
-        let Ok(ents) = xenonet_base::paths::read_dir_sorted(&rel.iter().fold(base.to_path_buf(), |p, s| p.join(s))) else { return };
+        let Ok(ents) = xenonet_os::paths::read_dir_sorted(&rel.iter().fold(base.to_path_buf(), |p, s| p.join(s))) else { return };
         for e in ents {
             let name = e.file_name().to_string_lossy().into_owned();
             if e.file_type().is_ok_and(|t| t.is_dir()) {
@@ -345,7 +345,7 @@ pub fn sample_of(length: usize) -> Vec<usize> {
         out.push(i);
         i += if i < 16 { 1 } else { 8 };
     }
-    if length > 16 && (length - 1 - 16) % 8 != 0 {
+    if length > 16 && !(length - 1 - 16).is_multiple_of(8) {
         out.push(length - 1);
     }
     out

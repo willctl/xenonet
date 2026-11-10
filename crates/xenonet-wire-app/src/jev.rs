@@ -47,7 +47,7 @@ fn stable(v: &Value) -> Value {
 }
 
 fn sha256(v: &Value) -> String {
-    format!("sha256:{}", xenonet_integrations::b64::sha256_hex(xenonet_base::json::stringify(&stable(v), 0).as_bytes()))
+    format!("sha256:{}", xenonet_integrations::b64::sha256_hex(xenonet_text::json::stringify(&stable(v), 0).as_bytes()))
 }
 
 fn request_id(prefix: &str) -> String {
@@ -55,7 +55,7 @@ fn request_id(prefix: &str) -> String {
 }
 
 fn strs(v: Option<&Value>) -> Vec<String> {
-    v.and_then(Value::as_array).map(|a| a.iter().map(xenonet_base::text::js_string).collect()).unwrap_or_default()
+    v.and_then(Value::as_array).map(|a| a.iter().map(xenonet_text::text::display).collect()).unwrap_or_default()
 }
 
 fn candidate_view(c: &Value, probability: Option<f64>, confidence: Option<f64>, stage: Option<&str>, actor_permissions: &[String], policy: &Value) -> Value {
@@ -85,7 +85,7 @@ fn candidate_view(c: &Value, probability: Option<f64>, confidence: Option<f64>, 
         reasons.push(format!("capability_not_verified:{verification}"));
     }
     let confirmation = c.get("policy").and_then(|p| p.get("requires_confirmation")) == Some(&json!(true)) || strs(policy.get("confirmation_risk_levels")).iter().any(|r| r == risk);
-    let num = |n: Option<f64>| n.map_or(Value::Null, xenonet_base::json::number);
+    let num = |n: Option<f64>| n.map_or(Value::Null, xenonet_text::json::number);
     json!({
         "id": c.get("id"),
         "type": c.get("type"),
@@ -156,7 +156,7 @@ fn no_decision(mut b: Map<String, Value>, ordered: &[Value], actor: &[String], p
 pub fn route(candidates: &[Value], actor_permissions: &[String], raw: Result<Value, JevError>) -> Value {
     let policy = policy();
     let mut ordered = candidates.to_vec();
-    ordered.sort_by(|a, b| xenonet_app::jstext::locale_compare(&xenonet_base::text::js_string(&a["id"]), &xenonet_base::text::js_string(&b["id"])));
+    ordered.sort_by(|a, b| xenonet_app::jstext::locale_compare(&xenonet_text::text::display(&a["id"]), &xenonet_text::text::display(&b["id"])));
     let mut b = base(&ordered, &policy);
     if ordered.is_empty() {
         b.insert("status".into(), json!("no_decision"));
@@ -173,7 +173,7 @@ pub fn route(candidates: &[Value], actor_permissions: &[String], raw: Result<Val
         Ok(a) => a,
         Err(e) => return no_decision(b, &ordered, actor_permissions, &policy, &e, Value::Null),
     };
-    let id_of = |c: &Value| xenonet_base::text::js_string(&c["id"]);
+    let id_of = |c: &Value| xenonet_text::text::display(&c["id"]);
     // finalize()
     if !ordered.iter().any(|c| id_of(c) == choice) {
         return no_decision(b, &ordered, actor_permissions, &policy, &JevError::malformed(format!("Jev selected unknown capability {choice}")), raw);
@@ -207,7 +207,7 @@ pub fn route(candidates: &[Value], actor_permissions: &[String], raw: Result<Val
         Some(_) if confidence < threshold => {
             selected = None;
             status = "no_decision";
-            let fixed = |n: f64| xenonet_base::units::to_fixed(n, 3);
+            let fixed = |n: f64| xenonet_text::units::to_fixed(n, 3);
             fallback = json!({ "type": "low_confidence", "reason": format!("Jev confidence {} is below {}", fixed(confidence), fixed(threshold)) });
         }
         Some(t) if id_of(t) != choice => {

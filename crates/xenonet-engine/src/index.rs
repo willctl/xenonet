@@ -30,8 +30,8 @@ use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_os::sync::Locked;
+use xenonet_text::text::{display, truthy};
 
 /// How often the index is rebuilt from the scans, whatever was pushed.
 pub const RECONCILE_MS: f64 = 60e3;
@@ -139,7 +139,7 @@ impl Column {
 
 /// A contact's agent, as the engine writes it in a template.
 fn agent_of(contact: &Value) -> String {
-    contact.get("agent").map_or_else(|| "undefined".into(), js_string)
+    contact.get("agent").map_or_else(|| "undefined".into(), display)
 }
 
 /// How often the index went back to its sources, for the measurements.

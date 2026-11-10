@@ -80,7 +80,7 @@ pub fn instance_dir(kind: &str, name: &str) -> String {
 /// standsFor(flags): the instance a command that finds no XenoNet running
 /// stands in for, when it isn't the installed XenoNet: XenoNet Dev, when
 /// it's the one asked about (core/workspace.js).
-pub fn stands_for(pick: &xenonet_base::client::Pick) -> Option<&'static str> {
-    let asked = xenonet_base::client::candidates(pick);
-    (asked.len() == 1 && asked[0] == f64::from(xenonet_base::client::DEV_PORT)).then_some("XenoNet Dev")
+pub fn stands_for(pick: &xenonet_api::client::Pick) -> Option<&'static str> {
+    let asked = xenonet_api::client::candidates(pick);
+    (asked.len() == 1 && asked[0] == f64::from(xenonet_api::client::DEV_PORT)).then_some("XenoNet Dev")
 }

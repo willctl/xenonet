@@ -7,7 +7,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use xenonet_app::config::{config, Field, Finds};
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 #[derive(Clone, Debug)]
 pub struct MapConfig {
@@ -56,18 +56,18 @@ struct Found<'a> {
 }
 
 struct Disk;
-impl xenonet_base::dirs::Look for Disk {
+impl xenonet_adapter::dirs::Look for Disk {
     fn exists(&mut self, p: &str) -> bool {
         std::path::Path::new(p).exists()
     }
-    fn readdir(&mut self, p: &str) -> Result<Vec<String>, xenonet_base::dirs::Unreadable> {
-        let names = std::fs::read_dir(p).map_err(|_| xenonet_base::dirs::Unreadable)?;
+    fn readdir(&mut self, p: &str) -> Result<Vec<String>, xenonet_adapter::dirs::Unreadable> {
+        let names = std::fs::read_dir(p).map_err(|_| xenonet_adapter::dirs::Unreadable)?;
         let mut out: Vec<String> = names.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned())).collect();
         out.sort();
         Ok(out)
     }
     fn mtime(&mut self, p: &str) -> f64 {
-        std::fs::metadata(p).ok().and_then(|m| xenonet_base::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
+        std::fs::metadata(p).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok()).unwrap_or(f64::NAN)
     }
 }
 
@@ -76,8 +76,8 @@ fn var(env: &Map<String, Value>, k: &str) -> Option<String> {
 }
 
 /// The environment the desktop apps' folders depend on (dirs.js's envOf).
-pub fn dirs_env(env: &Map<String, Value>) -> xenonet_base::dirs::Env {
-    xenonet_base::dirs::Env {
+pub fn dirs_env(env: &Map<String, Value>) -> xenonet_adapter::dirs::Env {
+    xenonet_adapter::dirs::Env {
         claude_desktop_dir: var(env, "XENONET_CLAUDE_DESKTOP_DIR").filter(|d| !d.is_empty()),
         local_app_data: var(env, "LOCALAPPDATA"),
         app_data: var(env, "APPDATA"),
@@ -102,7 +102,7 @@ impl Finds for Found<'_> {
         dir.map_or(Value::Null, |d| Value::String(xenonet_sources::xenolith::context_server_of(d, &self.context_env(), self.home, self.platform)))
     }
     fn claude_desktop_dir(&mut self) -> Option<String> {
-        xenonet_base::dirs::find_claude_desktop_dir(&dirs_env(self.env), self.platform, self.home, &mut Disk)
+        xenonet_adapter::dirs::find_claude_desktop_dir(&dirs_env(self.env), self.platform, self.home, &mut Disk)
     }
 }
 
@@ -138,15 +138,15 @@ impl MapConfig {
         let c = config(&argv, &env, home, platform, &mut finds);
         let json = |k: &str| match c.get(k) {
             Some(Field::Json(v)) => v.clone(),
-            Some(Field::Num(n)) => xenonet_base::json::number(*n),
+            Some(Field::Num(n)) => xenonet_text::json::number(*n),
             Some(Field::Set(list)) => json!(list),
-            Some(Field::Nums(ns)) => Value::Object(ns.iter().map(|(k, v)| (k.to_string(), xenonet_base::json::number(*v))).collect()),
+            Some(Field::Nums(ns)) => Value::Object(ns.iter().map(|(k, v)| (k.to_string(), xenonet_text::json::number(*v))).collect()),
             None => Value::Null,
         };
         let text = |k: &str| match json(k) {
             Value::String(s) => s,
             Value::Null => String::new(),
-            v => js_string(&v),
+            v => display(&v),
         };
         let maybe = |k: &str| match json(k) {
             Value::String(s) => Some(s),
@@ -204,7 +204,7 @@ impl MapConfig {
             return b;
         }
         let home = std::env::var("HOME").unwrap_or_default();
-        xenonet_base::dirs::bundled_codex_binaries(&dirs_env(&self.env), &self.platform, &home, &mut Disk).into_iter().next().unwrap_or_else(|| "codex".into())
+        xenonet_adapter::dirs::bundled_codex_binaries(&dirs_env(&self.env), &self.platform, &home, &mut Disk).into_iter().next().unwrap_or_else(|| "codex".into())
     }
 
     /// The poll's period: XENONET_POLL_MS, 8 seconds by default; never

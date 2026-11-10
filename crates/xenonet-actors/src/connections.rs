@@ -33,10 +33,10 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use xenonet_adapter::products::{product_of, Product};
-use xenonet_base::ids::YOU;
-use xenonet_base::json::{number, stringify};
-use xenonet_base::sync::Locked;
-use xenonet_base::text::{js_string, truthy};
+use xenonet_model::ids::YOU;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::{number, stringify};
+use xenonet_text::text::{display, truthy};
 
 const DAY_MS: f64 = 24.0 * 3600e3;
 pub const GRANT_DAYS: [f64; 6] = [1.0, 7.0, 14.0, 30.0, 60.0, 90.0];
@@ -203,7 +203,7 @@ fn col(r: &Value, k: &str) -> Value {
 
 /// A column of a row as text (`${column}`).
 fn text(r: &Value, k: &str) -> String {
-    js_string(&col(r, k))
+    display(&col(r, k))
 }
 
 fn is_null(r: &Value, k: &str) -> bool {
@@ -215,7 +215,7 @@ fn num(v: &Value) -> f64 {
     match v {
         Value::Null => 0.0,
         Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
-        Value::String(_) => xenonet_base::text::js_number(Some(v)),
+        Value::String(_) => xenonet_text::text::to_number(Some(v)),
         _ => f64::NAN,
     }
 }
@@ -234,7 +234,7 @@ fn parse(c: &Value, fallback: Value) -> Value {
     let text = match c {
         Value::Null => return fallback,
         Value::String(s) => s.clone(),
-        other => js_string(other),
+        other => display(other),
     };
     serde_json::from_str(&text).unwrap_or(fallback)
 }
@@ -243,7 +243,7 @@ fn parse(c: &Value, fallback: Value) -> Value {
 fn iso(c: &Value) -> Value {
     match c {
         Value::Null => Value::Null,
-        c => Value::String(xenonet_base::time::iso(num(c))),
+        c => Value::String(xenonet_text::time::iso(num(c))),
     }
 }
 
@@ -263,7 +263,7 @@ fn hex_bytes(s: &str) -> Vec<u8> {
     let b = s.as_bytes();
     let digit = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
     let mut out = Vec::new();
-    for pair in b.chunks_exact(2) {
+    for pair in b.as_chunks::<2>().0 {
         match (digit(pair[0]), digit(pair[1])) {
             (Some(h), Some(l)) => out.push(h << 4 | l),
             _ => break,
@@ -292,7 +292,7 @@ fn words(value: Option<&Value>, what: &str, max: usize) -> Result<Option<String>
     };
     let blanked = re!(r"[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]").replace_all(text, " ");
     let line = re!(r"[\s\x{FEFF}--\x{85}]+").replace_all(&blanked, " ");
-    let line = xenonet_base::text::js_trim(&line);
+    let line = xenonet_text::text::trim(&line);
     if line.is_empty() {
         return Ok(None);
     }
@@ -318,7 +318,7 @@ pub fn launch_for(grant: &str, port: f64) -> Value {
     let mut args = vec![json!("mcp"), json!("assistant"), json!("--grant"), json!(grant)];
     if port != DEFAULT_PORT {
         args.push(json!("--port"));
-        args.push(Value::String(js_string(&number(port))));
+        args.push(Value::String(display(&number(port))));
     }
     json!({ "command": "xenonet", "args": args })
 }
@@ -418,7 +418,7 @@ impl Connections {
     }
 
     fn bridged(&self, connection: &Value) -> bool {
-        let id = js_string(connection);
+        let id = display(connection);
         self.bridges.locked().iter().any(|(k, n)| *k == id && *n > 0.0)
     }
 
@@ -559,7 +559,7 @@ impl Connections {
             self.store.end_connection(&connection, t)?;
             let slug = self.store.connection(&connection)?.map_or("?".to_string(), |r| match r.get("actor_slug") {
                 None | Some(Value::Null) => "?".to_string(),
-                Some(c) => js_string(c),
+                Some(c) => display(c),
             });
             let audit = json!({
                 "at": number(t),
@@ -624,7 +624,7 @@ impl Connections {
     /// never picks one.
     fn plan_actor(h: &mut dyn Host, ask: &Value, adapter: &Adapter) -> Result<Plan> {
         if let Some(given) = ask.get("actor").filter(|v| !v.is_null()) {
-            let id = js_string(given);
+            let id = display(given);
             let info = h.info(&id);
             let demo = info.get("via").and_then(Value::as_array).is_some_and(|v| v.iter().any(|x| x.as_str() == Some("demo")));
             if !truthy(Some(&info)) || id == YOU || demo {
@@ -641,7 +641,7 @@ impl Connections {
                     Some(p) => product_of(p).map_or("undefined", |p| p.name).to_string(),
                     None => "an actor of your own".to_string(),
                 };
-                return fail(400.0, "bad-request", format!("{} isn't {wanted}", xenonet_base::text::template(info.get("name"))));
+                return fail(400.0, "bad-request", format!("{} isn't {wanted}", xenonet_text::text::template(info.get("name"))));
             }
             return Ok(Plan { id, create: None });
         }
@@ -688,7 +688,7 @@ impl Connections {
             if let Some(why) = slug_refusal(slug.as_str(), None) {
                 return fail(400.0, "bad-request", why);
             }
-            let slug = js_string(&slug);
+            let slug = display(&slug);
             if Self::is_taken(h, &slug) {
                 let suggest = suggest_slug(&slug, None, &mut |s| Ok::<bool, Fail>(Self::is_taken(&mut *h, s)))?;
                 return Err(Fail::Connection { status: 409.0, code: "taken", message: format!("actor:{slug} is taken"), extra: json!({ "suggest": suggest }) });
@@ -751,7 +751,7 @@ impl Connections {
             return fail(400.0, "bad-request", format!("a grant names at most {PROJECTS_MAX} projects"));
         }
         for p in &chosen {
-            if !h.places_has(&js_string(p)) {
+            if !h.places_has(&display(p)) {
                 return fail(400.0, "bad-request", "pick projects from the map as it is now");
             }
         }
@@ -765,7 +765,7 @@ impl Connections {
         }
         let asserted = link.as_str() == Some("owner_asserted");
         let identity = account_link.and_then(|a| a.get("identity"));
-        if asserted && !h.identities_has(&xenonet_base::text::template(identity)) {
+        if asserted && !h.identities_has(&xenonet_text::text::template(identity)) {
             return fail(400.0, "bad-request", "pick one of the identities XenoNet knows");
         }
         if self.active_grants(h, t)? >= CONNECTIONS_MAX {
@@ -893,7 +893,7 @@ impl Connections {
             // A place the grant names already may stay, on the map or not.
             let had = items(parse(&col(&g, "project_allowlist"), json!([])));
             for p in &chosen {
-                if !h.places_has(&js_string(p)) {
+                if !h.places_has(&display(p)) {
                     let id = self.store.project_id_for(p)?;
                     let kept = had.iter().any(|h| match (h, &id) {
                         (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
@@ -1053,10 +1053,10 @@ impl Connections {
     /// that's right hears how its grant stands.
     pub fn authenticate(&self, h: &mut dyn Host, ask: &Value) -> Result<Standing> {
         let (grant, token) = (col(ask, "grant"), col(ask, "token"));
-        if !is_grant_id(&js_string(&grant)) || !h.is_token(&token) {
+        if !is_grant_id(&display(&grant)) || !h.is_token(&token) {
             return Ok(Standing::no("NOT_AUTHORIZED", "malformed"));
         }
-        let Some(g) = self.store.grant(&js_string(&grant))? else {
+        let Some(g) = self.store.grant(&display(&grant))? else {
             return Ok(Standing::no("NOT_AUTHORIZED", "unknown-grant"));
         };
         let theirs = hex_bytes(&h.hash_token(&token));
@@ -1088,11 +1088,11 @@ impl Connections {
     pub fn policy(&self, h: &mut dyn Host, s: &Value) -> Result<Value> {
         let (g, conn) = (col(s, "grant"), col(s, "connection"));
         let actor_id = col(s, "actorId");
-        let info = h.info(&js_string(&actor_id));
+        let info = h.info(&display(&actor_id));
         let parse_col = |v: &Value, fallback: Value| -> Value {
             match v {
                 Value::Null => fallback,
-                v => serde_json::from_str(&js_string(v)).unwrap_or(fallback),
+                v => serde_json::from_str(&display(v)).unwrap_or(fallback),
             }
         };
         let projects = parse_col(&col(&g, "project_allowlist"), json!([]));
@@ -1173,7 +1173,7 @@ impl Connections {
         let mut projects = Vec::new();
         for p in items(parse(&col(g, "project_allowlist"), json!([]))) {
             let place = self.store.place_of_project(&p)?;
-            let name = if truthy(Some(&place)) { h.describe(&js_string(&place)) } else { Value::Null };
+            let name = if truthy(Some(&place)) { h.describe(&display(&place)) } else { Value::Null };
             projects.push(json!({ "project_id": p, "place": place, "name": name }));
         }
         let state = Self::state_of(h, g, t);

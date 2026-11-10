@@ -10,7 +10,7 @@ fn asked(question: &str) -> bool {
     write(&format!("{question} {} ", c::dim("[y/N]")));
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
-    let a = xenonet_base::text::js_trim(&line).to_ascii_lowercase();
+    let a = xenonet_text::text::trim(&line).to_ascii_lowercase();
     a == "y" || a == "yes"
 }
 

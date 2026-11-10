@@ -7,8 +7,8 @@ use crate::js::{amount, have, list, num, on, t};
 use crate::out::{c, json, plural, print, table, Done, Layout};
 use crate::reach::need;
 use serde_json::{json, Value};
-use xenonet_base::text::js_string;
-use xenonet_base::units::{money, tokens};
+use xenonet_text::text::display;
+use xenonet_text::units::{money, tokens};
 
 pub const HELP: &str = include_str!("help/spend.txt");
 
@@ -108,7 +108,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
     let un_unpriced = by_actor.as_ref().and_then(|b| b.get("unattributed")).map(|u| list(u, "unpriced").to_vec()).unwrap_or_default();
     let actors_unpriced: Vec<Value> = by_actor.as_ref().map(|b| list(b, "actors").iter().flat_map(|r| list(r, "unpriced").to_vec()).collect()).unwrap_or_default();
     for v in costs_unpriced.iter().chain(&un_unpriced).chain(&actors_unpriced) {
-        let name = js_string(v);
+        let name = display(v);
         if !unpriced.contains(&name) {
             unpriced.push(name);
         }

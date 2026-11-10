@@ -24,9 +24,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-use xenonet_base::json;
-use xenonet_base::paths::tilde;
-use xenonet_base::sync::Locked;
+use xenonet_os::paths::tilde;
+use xenonet_os::sync::Locked;
+use xenonet_text::json;
 
 pub struct Kind {
     pub id: &'static str,
@@ -152,7 +152,7 @@ const LINES: usize = 20;
 /// Every copy of a tool on this computer: on PATH, then the usual places.
 pub fn find_tools(tool: &str, path_var: &str, pathext: Option<&str>, platform: &str, exists: &dyn Fn(&str) -> bool) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let on = xenonet_base::paths::on_path(tool, path_var, pathext, platform == "win32", &mut |f| exists(f));
+    let on = xenonet_os::paths::on_path(tool, path_var, pathext, platform == "win32", &mut |f| exists(f));
     for f in on.into_iter().chain(places(tool, platform).iter().map(ToString::to_string)) {
         if exists(&f) && !out.contains(&f) {
             out.push(f);
@@ -196,7 +196,7 @@ pub fn version_in(text: &str) -> Option<String> {
 pub fn tailscale_self(text: &str) -> Value {
     let Ok(s) = json::parse(text) else { return json!({ "up": false, "why": "Tailscale's status isn't JSON" }) };
     let state = s.get("BackendState").and_then(Value::as_str);
-    let version = s.get("Version").map(xenonet_base::text::js_string).and_then(|v| version_in(&v));
+    let version = s.get("Version").map(xenonet_text::text::display).and_then(|v| version_in(&v));
     if state != Some("Running") {
         let why = match state {
             Some("NeedsLogin") => "Tailscale isn't signed in on this computer".to_string(),
@@ -208,7 +208,7 @@ pub fn tailscale_self(text: &str) -> Value {
     }
     let me = &s["Self"];
     let mut caps: Vec<String> = me["CapMap"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default();
-    caps.extend(me["Capabilities"].as_array().cloned().unwrap_or_default().iter().map(xenonet_base::text::js_string));
+    caps.extend(me["Capabilities"].as_array().cloned().unwrap_or_default().iter().map(xenonet_text::text::display));
     let funnel = caps.iter().any(|c| c == "funnel" || c.starts_with("https://tailscale.com/cap/funnel"));
     json!({ "up": true, "version": version, "host": super::actor_gateway::normal_host(me["DNSName"].as_str()), "funnel": funnel })
 }
@@ -238,7 +238,7 @@ pub fn funnel_of(conf: &Value, host: &str, port: u16) -> Value {
     if handlers.is_empty() {
         return json!({ "state": "none", "public": public });
     }
-    let proxy = |m: &str| handlers.get(m).and_then(|h| h.get("Proxy")).filter(|p| !p.is_null()).map(xenonet_base::text::js_string);
+    let proxy = |m: &str| handlers.get(m).and_then(|h| h.get("Proxy")).filter(|p| !p.is_null()).map(xenonet_text::text::display);
     let to_us = |m: &str, path: &str| proxy(m).is_some_and(|p| p.replacen("localhost", "127.0.0.1", 1).trim_end_matches('/') == format!("http://127.0.0.1:{port}{path}"));
     let ours = |m: &str| (m == FUNNEL_PATH && to_us(m, FUNNEL_PATH)) || (m == "/" && to_us(m, ""));
     if mounts.iter().any(|m| !ours(m)) {
@@ -267,16 +267,16 @@ pub struct Line {
 }
 
 pub fn read_line(kind: &str, raw: &str) -> Option<Line> {
-    let line = xenonet_base::text::js_trim(raw);
+    let line = xenonet_text::text::trim(raw);
     if line.is_empty() {
         return None;
     }
     if kind == "ngrok" {
         let Ok(o) = json::parse(line) else { return Some(Line { msg: line.into(), ..Default::default() }) };
-        let err = o.get("err").filter(|e| xenonet_base::text::truthy(Some(e)) && *e != "<nil>").map(xenonet_base::text::js_string);
-        let msg = || o.get("msg").filter(|m| !m.is_null()).map_or_else(|| line.to_string(), xenonet_base::text::js_string);
-        if o["msg"] == "started tunnel" && xenonet_base::text::truthy(o.get("url")) {
-            let url = xenonet_base::text::js_string(&o["url"]);
+        let err = o.get("err").filter(|e| xenonet_text::text::truthy(Some(e)) && *e != "<nil>").map(xenonet_text::text::display);
+        let msg = || o.get("msg").filter(|m| !m.is_null()).map_or_else(|| line.to_string(), xenonet_text::text::display);
+        if o["msg"] == "started tunnel" && xenonet_text::text::truthy(o.get("url")) {
+            let url = xenonet_text::text::display(&o["url"]);
             return Some(Line { msg: format!("started {url}"), host: super::actor_gateway::normal_host(Some(&url)), ready: true, error: false });
         }
         if err.is_some() || o["lvl"] == "eror" || o["lvl"] == "crit" {
@@ -365,7 +365,7 @@ impl TunnelHost for SystemHost {
     async fn run(&self, file: &str, args: &[String], timeout: Duration) -> RunOut {
         let mut cmd = tokio::process::Command::new(file);
         cmd.args(args).stdin(std::process::Stdio::null()).kill_on_drop(true);
-        xenonet_base::process::Background::no_window(cmd.as_std_mut());
+        xenonet_os::process::Background::no_window(cmd.as_std_mut());
         match tokio::time::timeout(timeout, cmd.output()).await {
             Err(_) => RunOut { ok: false, stdout: String::new(), stderr: String::new(), timed_out: true },
             Ok(Err(e)) => RunOut { ok: false, stdout: String::new(), stderr: e.to_string(), timed_out: false },
@@ -380,8 +380,8 @@ impl TunnelHost for SystemHost {
     fn spawn(&self, file: &str, args: &[String]) -> Result<Spawned, String> {
         let mut cmd = tokio::process::Command::new(file);
         cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-        xenonet_base::process::Background::no_window(cmd.as_std_mut());
-        let mut child = cmd.spawn().map_err(|e| xenonet_base::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string))?;
+        xenonet_os::process::Background::no_window(cmd.as_std_mut());
+        let mut child = cmd.spawn().map_err(|e| xenonet_os::fs::code_of(&e).map_or_else(|| e.to_string(), str::to_string))?;
         let pid = child.id();
         let (tx, lines) = mpsc::unbounded_channel();
         for out in [
@@ -591,7 +591,7 @@ impl Tunnel {
         let mut me = None;
         for t in &found {
             let out = self.host.run(&t.path, &["status".into(), "--json".into()], Duration::from_secs(5)).await;
-            if xenonet_base::text::js_trim(&out.stdout).is_empty() {
+            if xenonet_text::text::trim(&out.stdout).is_empty() {
                 continue;
             }
             me = Some(tailscale_self(&out.stdout));
@@ -602,7 +602,7 @@ impl Tunnel {
         let bin = found.iter().find(|t| t.version.is_some() && t.version.as_deref() == version).cloned().unwrap_or_else(|| found[0].clone());
         self.inner.locked().tailscale_bin = Some((self.host.now(), bin.clone()));
         if me["up"] != json!(true) {
-            let why = xenonet_base::text::js_string(&me["why"]);
+            let why = xenonet_text::text::display(&me["why"]);
             return (Some(bin), Some(me), Some(why));
         }
         if !me["host"].is_string() {
@@ -649,14 +649,14 @@ impl Tunnel {
         }
         let mut f = self.funnel_now(&bin, &host).await;
         if f["state"] == "shared" {
-            return self.set_state("failed", Some(format!("Tailscale already serves other paths on this computer's port 443 ({}), and Funnel would put them on the internet with the gateway: pick another tunnel, or move them", xenonet_base::text::js_string(&f["target"]))));
+            return self.set_state("failed", Some(format!("Tailscale already serves other paths on this computer's port 443 ({}), and Funnel would put them on the internet with the gateway: pick another tunnel, or move them", xenonet_text::text::display(&f["target"]))));
         }
         if f["state"] == "elsewhere" && !take_over {
             return self.set_state(
                 "failed",
                 Some(format!(
                     "Tailscale Funnel on this computer already forwards to {}, not to this XenoNet's gateway: Repair points it here instead",
-                    xenonet_base::text::js_string(&f["target"])
+                    xenonet_text::text::display(&f["target"])
                 )),
             );
         }
@@ -674,7 +674,7 @@ impl Tunnel {
             }
             f = self.funnel_now(&bin, &host).await;
             if f["state"] != "ours" {
-                let last = xenonet_base::text::js_trim(&said).split('\n').next_back().filter(|l| !l.is_empty()).unwrap_or("it said nothing").to_string();
+                let last = xenonet_text::text::trim(&said).split('\n').next_back().filter(|l| !l.is_empty()).unwrap_or("it said nothing").to_string();
                 return self.set_state("failed", Some(format!("tailscale funnel didn't take: {last}")));
             }
             (self.hooks.log)("gateway.tunnel", &format!("Tailscale Funnel forwards {host}{FUNNEL_PATH} alone to port {}", self.port));
@@ -709,7 +709,7 @@ impl Tunnel {
             return;
         }
         let out = self.host.run("ps", &["-o".into(), "comm=".into(), "-p".into(), pid.to_string()], Duration::from_secs(3)).await;
-        let comm = xenonet_base::paths::base_name(out.stdout.trim()).to_lowercase();
+        let comm = xenonet_os::paths::base_name(out.stdout.trim()).to_lowercase();
         if !out.ok || !comm.starts_with(tool) {
             return;
         }
@@ -768,7 +768,7 @@ impl Tunnel {
                                 let Some(got) = read_line(&kind_id, &raw) else { continue };
                                 {
                                     let mut i = me.inner.locked();
-                                    let msg = xenonet_base::log::js_slice(&tilde(&got.msg, &me.home), 300).to_string();
+                                    let msg = xenonet_text::utf16::whole_head(&tilde(&got.msg, &me.home), 300).to_string();
                                     i.lines.push(json!({ "at": json::number(me.host.now()), "error": got.error, "msg": msg }));
                                     let n = i.lines.len();
                                     if n > LINES {
@@ -794,7 +794,7 @@ impl Tunnel {
                             while let Ok(raw) = lines.try_recv() {
                                 if let Some(got) = read_line(&kind_id, &raw) {
                                     let mut i = me.inner.locked();
-                                    i.lines.push(json!({ "at": json::number(me.host.now()), "error": got.error, "msg": xenonet_base::log::js_slice(&tilde(&got.msg, &me.home), 300) }));
+                                    i.lines.push(json!({ "at": json::number(me.host.now()), "error": got.error, "msg": xenonet_text::utf16::whole_head(&tilde(&got.msg, &me.home), 300) }));
                                 }
                             }
                             me.exited(Some(gen), why.unwrap_or_else(|_| "it exited".into()));

@@ -8,7 +8,7 @@
 //! and never has two dashes together. Any other id is x-- and its UTF-8
 //! bytes in hex, which always has.
 
-use crate::jsstr::hex;
+use xenonet_text::utf16::hex;
 
 // Letters and digits in runs, joined by single underscores.
 fn plain(id: &str) -> bool {
@@ -42,7 +42,7 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
         _ => None,
     };
     let b = s.as_bytes();
-    if b.len() % 2 != 0 {
+    if !b.len().is_multiple_of(2) {
         return None;
     }
     b.chunks(2).map(|p| Some(digit(p[0])? << 4 | digit(p[1])?)).collect()

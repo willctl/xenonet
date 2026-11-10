@@ -14,7 +14,7 @@ use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::sync::Arc;
-use xenonet_base::ids::{is_host_id, parse_qualified};
+use xenonet_model::ids::{is_host_id, parse_qualified, Qualified};
 
 const OFF: &str = "hosts are off in this XenoNet: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype)";
 
@@ -42,7 +42,7 @@ fn is_session(local: &str) -> bool {
 }
 
 fn remote_session(id: Option<&str>) -> Option<(String, String)> {
-    let (host, local) = parse_qualified(id?)?;
+    let Qualified { host, local } = parse_qualified(id?)?;
     let host = host?;
     is_session(local).then(|| (host.to_string(), local.to_string()))
 }

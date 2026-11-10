@@ -14,7 +14,7 @@ use crate::out::{c, print, Done};
 use crate::prompt::confirm;
 use crate::reach::{candidates, find};
 use serde_json::{json, Map, Value};
-use xenonet_base::client::name_of;
+use xenonet_api::client::name_of;
 
 pub const HELP: &str = include_str!("help/disconnect.txt");
 
@@ -23,7 +23,7 @@ fn hermes(flags: &Flags) -> Done {
     let home = crate::sys::home();
     let hh = std::env::var("HERMES_HOME").ok();
     let st = hp::inspect(&home, hh.as_deref(), crate::out::now());
-    let dir = xenonet_base::paths::tilde(&st.dir.display().to_string(), &home);
+    let dir = xenonet_os::paths::tilde(&st.dir.display().to_string(), &home);
     if !st.installed && st.token == "none" {
         print(c::dim("XenoNet's plugin isn't in Hermes's plugins folder; nothing to take out."));
         return Ok(0);

@@ -10,7 +10,7 @@ use crate::checks::{fail, info, ok, skip, warn, Ctx};
 use serde_json::{json, Value};
 use xenonet_app::jsv::truthy;
 use xenonet_app::task::Failure;
-use xenonet_base::text::js_string;
+use xenonet_text::text::display;
 
 /// The checks, in order: id, group and title.
 pub const CHECKS: [(&str, &str, &str); 4] = [
@@ -36,7 +36,7 @@ async fn registration(c: &Ctx<'_>) -> Result<Result<Value, &'static str>, Failur
 }
 
 fn text(l: &Value, k: &str) -> String {
-    l.get(k).filter(|v| !v.is_null()).map(js_string).unwrap_or_default()
+    l.get(k).filter(|v| !v.is_null()).map(display).unwrap_or_default()
 }
 
 // Where each supervisor says more, and what loads the service again.
@@ -81,7 +81,7 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
             let me = f.data.get("self").filter(|v| truthy(Some(v)));
             let port = l.get("port").filter(|p| !p.is_null());
             let other = match (me, port) {
-                (Some(me), Some(p)) if js_string(p) != me.get("port").map_or_else(|| "undefined".into(), js_string) => format!(", for the service on port {}", js_string(p)),
+                (Some(me), Some(p)) if display(p) != me.get("port").map_or_else(|| "undefined".into(), display) => format!(", for the service on port {}", display(p)),
                 _ => String::new(),
             };
             Ok(ok(format!("on, through {by}: {file}{other}")))
@@ -100,14 +100,14 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
                 )),
                 Some(Value::Bool(true)) => Ok(ok(format!("{file} is what xenonet service install writes"))),
                 _ => {
-                    let why = l.get("expected").filter(|v| !v.is_null()).map_or_else(|| "it couldn't work out what install writes here".into(), js_string);
+                    let why = l.get("expected").filter(|v| !v.is_null()).map_or_else(|| "it couldn't work out what install writes here".into(), display);
                     Ok(info(format!("XenoNet couldn't tell whether {file} is current: {why}"), None))
                 }
             }
         }
         "service.loaded" => {
             if let Some(e) = l.get("error").filter(|v| truthy(Some(v))) {
-                return Ok(warn(format!("XenoNet couldn't ask {by} about it: {}", js_string(e)), look(&by)));
+                return Ok(warn(format!("XenoNet couldn't ask {by} about it: {}", display(e)), look(&by)));
             }
             let state = text(&l, "state");
             if state == "disabled" {
@@ -119,7 +119,7 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
             if !truthy(l.get("loaded")) {
                 return Ok(warn(format!("{by} doesn't have it, so it doesn't start at login"), Some(unloaded(&by))));
             }
-            let last = l.get("lastExit").filter(|v| truthy(Some(v))).map(js_string);
+            let last = l.get("lastExit").filter(|v| truthy(Some(v))).map(display);
             let exited = last.filter(|e| e != "0" && e != "(never exited)").map_or(String::new(), |e| format!(" (it last exited with {e})"));
             if state == "failed" {
                 return Ok(warn(
@@ -128,7 +128,7 @@ pub(crate) async fn run(c: &Ctx<'_>, id: &str) -> Result<Value, Failure> {
                 ));
             }
             if let Some(pid) = l.get("pid").filter(|v| truthy(Some(v))) {
-                return Ok(ok(format!("{by} has it, running as process {}", js_string(pid))));
+                return Ok(ok(format!("{by} has it, running as process {}", display(pid))));
             }
             Ok(info(
                 format!("{by} has it, but it isn't running now{exited}"),

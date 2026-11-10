@@ -73,7 +73,7 @@ fn fill(text: &str, home: &str, now: f64) -> String {
         let at = i + k;
         out.push_str(&text[i..at]);
         if let Some((n, end)) = placeholder(&text, at, "iso") {
-            out.push_str(&xenonet_base::time::iso(now + n as f64 * 1000.0));
+            out.push_str(&xenonet_text::time::iso(now + n as f64 * 1000.0));
             i = end;
         } else if let Some((n, end)) = placeholder(&text, at, "unix") {
             out.push_str(&(((now + n as f64 * 1000.0) / 1000.0).floor() as i64).to_string());
@@ -632,5 +632,5 @@ fn what_differs_from_run_to_run_is_set_aside_as_rust_diff_sets_it_aside() {
     let v = serde_json::json!({ "pid": 12, "at": 1_786_000_100_000_u64, "old": 1_000_000_000_000_u64, "list": { "ms": [1, 2] }, "n": 3 });
     assert_eq!(n.walk(&v, None), serde_json::json!({ "pid": "<pid>", "at": "<time>", "old": 1_000_000_000_000_u64, "list": { "ms": ["<ms>", "<ms>"] }, "n": 3 }));
     let filled = fill("{{home}}/a {{iso:-60}} {{unix:-60}} {{other}}", "/h", 1_786_000_000_000.0);
-    assert_eq!(filled, format!("/h/a {} 1785999940 {{{{other}}}}", xenonet_base::time::iso(1_785_999_940_000.0)));
+    assert_eq!(filled, format!("/h/a {} 1785999940 {{{{other}}}}", xenonet_text::time::iso(1_785_999_940_000.0)));
 }

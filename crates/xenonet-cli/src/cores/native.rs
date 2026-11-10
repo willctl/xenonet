@@ -44,7 +44,7 @@ pub fn run_in(file: &str, args: &[String], timeout_ms: f64, input: Option<&str>,
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let code = xenonet_base::fs::code_of(&e).unwrap_or("ENOENT");
+            let code = xenonet_os::fs::code_of(&e).unwrap_or("ENOENT");
             return Ran { code: None, stdout: String::new(), stderr: String::new(), error: Some(format!("spawn {file} {code}")) };
         }
     };
@@ -103,14 +103,14 @@ fn hide_window(_: &mut Command) {}
 pub fn on_path(cmd: &str) -> Option<String> {
     let path = std::env::var("PATH").unwrap_or_default();
     let pathext = std::env::var("PATHEXT").ok();
-    xenonet_base::paths::on_path(cmd, &path, pathext.as_deref(), cfg!(windows), &mut xenonet_base::paths::can_run)
+    xenonet_os::paths::on_path(cmd, &path, pathext.as_deref(), cfg!(windows), &mut xenonet_os::paths::can_run)
 }
 
 /// onPath(cmd) with `canRun` as fs.accessSync(f): any file that's there.
 pub fn on_path_existing(cmd: &str) -> Option<String> {
     let path = std::env::var("PATH").unwrap_or_default();
     let pathext = std::env::var("PATHEXT").ok();
-    xenonet_base::paths::on_path(cmd, &path, pathext.as_deref(), cfg!(windows), &mut |f| std::fs::metadata(f).is_ok())
+    xenonet_os::paths::on_path(cmd, &path, pathext.as_deref(), cfg!(windows), &mut |f| std::fs::metadata(f).is_ok())
 }
 
 /// Date.now().
@@ -131,7 +131,7 @@ pub fn local_get(url: &str, ms: f64) -> Result<(u16, Vec<u8>), String> {
         Some(q) => format!("{}?{q}", parsed.path()),
         None => parsed.path().to_string(),
     };
-    let a = xenonet_base::http::request(port, "GET", &path, &[], None, Some(Duration::from_millis(ms.max(1.0) as u64))).map_err(|e| {
+    let a = xenonet_api::http::request(port, "GET", &path, &[], None, Some(Duration::from_millis(ms.max(1.0) as u64))).map_err(|e| {
         if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock {
             "The operation was aborted due to timeout".to_string()
         } else {

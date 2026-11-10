@@ -3,9 +3,9 @@
 
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
-use xenonet_base::json::number;
-use xenonet_base::jsstr::{collapse_space, locale_compare};
-use xenonet_base::text::{js_number, js_string, js_trim, truthy};
+use xenonet_text::json::number;
+use xenonet_text::text::{display, to_number, trim, truthy};
+use xenonet_text::utf16::{collapse_space, locale_compare};
 
 pub const REFUSAL_SORTS: [&str; 6] = ["newest", "oldest", "provider", "model", "category", "kind"];
 
@@ -13,7 +13,7 @@ pub const REFUSAL_SORTS: [&str; 6] = ["newest", "oldest", "provider", "model", "
 fn text(v: Option<&Value>) -> String {
     match v {
         None | Some(Value::Null) => String::new(),
-        Some(v) => js_string(v),
+        Some(v) => display(v),
     }
 }
 
@@ -61,7 +61,7 @@ fn facet(all: &[&Value], f: impl Fn(&Value) -> Value) -> Value {
             seen.push(v);
         }
     }
-    seen.sort_by(|a, b| locale_compare(&js_string(a), &js_string(b)));
+    seen.sort_by(|a, b| locale_compare(&display(a), &display(b)));
     Value::Array(seen)
 }
 
@@ -77,10 +77,10 @@ pub fn query_refusals(records: &[Value], q: &Value) -> Value {
     facets.insert("model".into(), facet(&all, model_of));
     facets.insert("category".into(), facet(&all, category_of));
     facets.insert("kind".into(), facet(&all, |r| field(r, "kind").unwrap_or(Value::Null)));
-    let words: Vec<String> = collapse_space(&js_trim(&text(qv("q"))).to_lowercase()).split(' ').filter(|w| !w.is_empty()).map(String::from).collect();
+    let words: Vec<String> = collapse_space(&trim(&text(qv("q"))).to_lowercase()).split(' ').filter(|w| !w.is_empty()).map(String::from).collect();
     let or0 = |n: f64| if n.is_nan() || n == 0.0 { 0.0 } else { n };
-    let since = or0(js_number(qv("since")));
-    let until = match js_number(qv("until")) {
+    let since = or0(to_number(qv("since")));
+    let until = match to_number(qv("until")) {
         n if n.is_nan() || n == 0.0 => f64::INFINITY,
         n => n,
     };
@@ -142,7 +142,7 @@ pub fn query_refusals(records: &[Value], q: &Value) -> Value {
         .collect();
     let sort = qv("sort").and_then(Value::as_str).filter(|s| REFUSAL_SORTS.contains(s)).unwrap_or("newest");
     let id = |r: &Value| r["id"].as_str().unwrap_or("").to_string();
-    xenonet_base::sort::sort_by(&mut found, |a, b| {
+    xenonet_text::sort::sort_by(&mut found, |a, b| {
         let by_field = if sort == "newest" || sort == "oldest" {
             Ordering::Equal
         } else {
@@ -157,9 +157,9 @@ pub fn query_refusals(records: &[Value], q: &Value) -> Value {
         let by_time = if sort == "oldest" { ta.partial_cmp(&tb) } else { tb.partial_cmp(&ta) }.unwrap_or(Ordering::Equal);
         by_field.then(by_time).then_with(|| locale_compare(&id(a), &id(b)))
     });
-    let limit_n = js_number(qv("limit"));
+    let limit_n = to_number(qv("limit"));
     let limit = if limit_n.is_finite() { 500f64.min(1f64.max((if limit_n == 0.0 { 500.0 } else { limit_n }).floor())) } else { 500.0 };
-    let offset_n = js_number(qv("offset"));
+    let offset_n = to_number(qv("offset"));
     let offset = if offset_n.is_finite() { 0f64.max(offset_n.floor()) } else { 0.0 };
     let page: Vec<Value> = found.iter().skip(offset as usize).take(limit as usize).map(|r| public_record(r)).collect();
     let mut out = Map::new();

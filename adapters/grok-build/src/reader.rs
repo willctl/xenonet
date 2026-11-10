@@ -16,8 +16,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 use xenonet_adapter::reader::{Call, Classified, Emit, Tail, Tailed, TypeError, VendorCheck, Where};
-use xenonet_base::usage::{Speed, TokenUsage};
 use xenonet_claude_code::reader::claude_line;
+use xenonet_model::usage::{Speed, TokenUsage};
 use xenonet_sources::grok::{usage_subagent, usage_turns};
 use xenonet_sources::line_events::{self, LineFile, OpenRun};
 use xenonet_sources::lines::{grok_kind_of, GrokLine};
@@ -71,14 +71,14 @@ impl Reader {
     fn usage(&mut self, t: &mut dyn Tail, vendor: &dyn VendorCheck, at: &Where, live: bool, out: &mut Vec<Emit>) {
         let Some(dir) = at.file.as_str().and_then(|f| Path::new(f).parent()) else { return };
         let Ok(m) = std::fs::metadata(dir.join("usage.json")) else { return };
-        let stamp = format!("{}:{}", m.len(), xenonet_base::fs::mtime_ms_of(&m).unwrap_or(f64::NAN));
+        let stamp = format!("{}:{}", m.len(), xenonet_os::fs::mtime_ms_of(&m).unwrap_or(f64::NAN));
         let Some(i) = t.find(&at.session_id) else { return };
         let s = self.sessions.entry(at.session_id.clone()).or_default();
         if s.usage_stamp.as_deref() == Some(stamp.as_str()) {
             return;
         }
         s.usage_stamp = Some(stamp);
-        let json = |name: &str| std::fs::read_to_string(dir.join(name)).ok().and_then(|t| xenonet_base::json::parse(&t).ok());
+        let json = |name: &str| std::fs::read_to_string(dir.join(name)).ok().and_then(|t| xenonet_text::json::parse(&t).ok());
         let usage = json("usage.json").and_then(|raw| vendor.sample(USAGE, raw, None, None, 16));
         let summary = json("summary.json");
         if usage_subagent(summary.as_ref()) {

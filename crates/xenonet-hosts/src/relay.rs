@@ -24,8 +24,8 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use xenonet_app::jstext::utf16_len;
 use xenonet_app::jsv::truthy;
-use xenonet_base::paths::path_key;
-use xenonet_base::text::{js_number, js_string};
+use xenonet_os::paths::path_key;
+use xenonet_text::text::{display, to_number};
 
 pub const PING_MS: f64 = 15e3;
 pub const DEFAULT_SINCE_MS: f64 = 7.0 * 86400e3;
@@ -61,7 +61,7 @@ pub fn parse_since(text: &str) -> Option<f64> {
 /// whatever the console asked for, and ssh puts what it asked for in
 /// SSH_ORIGINAL_COMMAND. Only --since is taken from there.
 pub fn from_original_command(text: &str) -> Option<f64> {
-    let words: Vec<&str> = xenonet_base::text::js_trim(text).split(|c: char| xenonet_base::text::is_js_space(c)).filter(|w| !w.is_empty()).collect();
+    let words: Vec<&str> = xenonet_text::text::trim(text).split(|c: char| xenonet_text::text::is_space(c)).filter(|w| !w.is_empty()).collect();
     let at = words.iter().position(|w| *w == "--since")?;
     parse_since(words.get(at + 1).copied().unwrap_or("")).filter(|s| *s != 0.0)
 }
@@ -331,7 +331,7 @@ const SUBAGENT: &str = "subagent";
 
 // A stuck reason without the command in it.
 fn plain_reason(r: &Value) -> Value {
-    let s = js_string(r);
+    let s = display(r);
     if let Some(rest) = s.strip_prefix("ran ") {
         if let Some(tail) = rest.strip_suffix(" times in a row") {
             if let Some(sp) = tail.rfind(' ') {
@@ -464,7 +464,7 @@ fn list(v: Option<&Value>) -> Vec<Value> {
 }
 
 fn id_of(v: Option<&Value>) -> String {
-    v.map(js_string).unwrap_or_default()
+    v.map(display).unwrap_or_default()
 }
 
 /// The map as it leaves: without another host's nodes, without sessions
@@ -490,7 +490,7 @@ pub fn shape_graph(
         if qualified(x.get("id")) || x.get("kind") == Some(&json!("host")) {
             gone.insert(id);
         } else if x.get("kind") == Some(&json!("session")) {
-            let updated = x.get("updatedAt").filter(|v| !v.is_null()).map_or(0.0, |v| js_number(Some(v)));
+            let updated = x.get("updatedAt").filter(|v| !v.is_null()).map_or(0.0, |v| to_number(Some(v)));
             if truthy(x.get("archived")) || updated < cutoff {
                 dropped.insert(id);
             }
@@ -519,12 +519,12 @@ pub fn shape_graph(
         let mut up = l.get("source").cloned();
         for _ in 0..64 {
             match &up {
-                Some(u) if truthy(Some(u)) && out(Some(u)) => up = parent.get(&js_string(u)).cloned(),
+                Some(u) if truthy(Some(u)) && out(Some(u)) => up = parent.get(&display(u)).cloned(),
                 _ => break,
             }
         }
         if let Some(u) = up.filter(|u| truthy(Some(u)) && !out(Some(u))) {
-            let kind = if by_id.get(&js_string(&u)).and_then(|x| x.get("kind")) == Some(&json!("session")) { "lineage" } else { "session" };
+            let kind = if by_id.get(&display(&u)).and_then(|x| x.get("kind")) == Some(&json!("session")) { "lineage" } else { "session" };
             links.push(json!({ "source": u, "target": l.get("target"), "kind": kind }));
         }
     }
@@ -959,7 +959,7 @@ impl Producer {
         let graph = self.graph(&g.1, now);
         let live = self.live(&l.1);
         let engine = if e.0 == 200 { self.engine(&e.1) } else { Value::Null };
-        Ok(json!({ "t": "snapshot", "at": xenonet_base::json::number(now), "graph": graph, "live": live, "engine": engine }))
+        Ok(json!({ "t": "snapshot", "at": xenonet_text::json::number(now), "graph": graph, "live": live, "engine": engine }))
     }
 
     /// One of this XenoNet's events as a frame, with what it replaces while
@@ -994,10 +994,10 @@ impl Producer {
 /// that can't say which host it is.
 pub fn self_bye(status: f64, body: &Value, up_version: Option<&Value>) -> (i32, Value) {
     if status == 404.0 {
-        let v = up_version.filter(|v| !v.is_null()).map_or_else(|| "an older version".to_string(), js_string);
+        let v = up_version.filter(|v| !v.is_null()).map_or_else(|| "an older version".to_string(), display);
         return (EXIT_OLD_XENONET, json!({ "code": "old-xenonet", "message": format!("the XenoNet here ({v}) can't be a host yet; update it") }));
     }
-    let why = body.get("error").filter(|e| !e.is_null()).map_or_else(|| xenonet_base::json::number_string(status), js_string);
+    let why = body.get("error").filter(|e| !e.is_null()).map_or_else(|| xenonet_text::json::number_string(status), display);
     (EXIT_FAILED, json!({ "code": "no-self", "message": format!("the XenoNet here couldn't say which host it is ({why})") }))
 }
 

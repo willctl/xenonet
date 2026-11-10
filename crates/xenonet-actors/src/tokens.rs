@@ -15,7 +15,7 @@
 //! process checks here.
 
 use sha2::{Digest, Sha256};
-use xenonet_base::text::is_js_space;
+use xenonet_text::text::is_space;
 
 pub const TOKEN_PREFIX: &str = "xenonet_actor_";
 pub const GATEWAY_PREFIX: &str = "xenonet_gateway_";
@@ -74,7 +74,7 @@ pub fn bearer_of(raw: &str) -> Option<&str> {
     if after.len() == rest.len() {
         return None;
     }
-    let end = after.find(is_js_space).unwrap_or(after.len());
+    let end = after.find(is_space).unwrap_or(after.len());
     let (token, tail) = after.split_at(end);
     (!token.is_empty() && tail.chars().all(|c| c == ' ' || c == '\t')).then_some(token)
 }

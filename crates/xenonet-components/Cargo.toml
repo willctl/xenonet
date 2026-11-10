@@ -16,10 +16,12 @@ regex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 xenonet-app.workspace = true
-xenonet-base.workspace = true
+xenonet-os.workspace = true
+xenonet-text.workspace = true
 
 # The account's uid, for the launch agent's domain (supervisor.rs), which
 # the doctor asks for as well as the xenonet command.
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 

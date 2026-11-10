@@ -6,7 +6,7 @@
 //! xenonet-adapter's reader module), the files they read (`files`), the
 //! vendor checks of their records (`Vendor`), a run's edits, what each made
 //! of a file (`FileCache`), and the answers as JS values (`Out`). Paths keep
-//! the syntax of the machine that wrote them, through xenonet_base::nodepath.
+//! the syntax of the machine that wrote them, through xenonet_os::nodepath.
 
 pub mod opencode_events;
 
@@ -15,8 +15,8 @@ pub use xenonet_adapter::reader::native::{edits_out, no_check, Check, Checked, E
 
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use xenonet_base::nodepath::Style;
-use xenonet_base::paths::path_style;
+use xenonet_os::nodepath::Style;
+use xenonet_os::paths::path_style;
 
 // A run stays on the map for a day after it was last at work, its edits
 // count for half an hour, and a reader keeps its newest runs up to
@@ -152,13 +152,13 @@ pub fn str_of(v: Option<&Value>) -> Option<&str> {
 
 /// `Date.parse(v)` of a string, finite, else None (the readers' `ms`).
 pub fn ms_of(v: Option<&Value>) -> Option<f64> {
-    str_of(v).and_then(xenonet_base::time::parse_iso)
+    str_of(v).and_then(xenonet_text::time::parse_iso)
 }
 
 /// A JS sort by a number, ascending, stable, as `(a, b) => a.n - b.n`
 /// sorts (NaN as equal).
 pub fn by_num<T>(items: &mut [T], key: impl Fn(&T) -> f64) {
-    xenonet_base::sort::sort_by(items, |a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
+    xenonet_text::sort::sort_by(items, |a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
 }
 
 #[cfg(test)]

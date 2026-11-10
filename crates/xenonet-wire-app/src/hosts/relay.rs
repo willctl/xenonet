@@ -36,10 +36,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use xenonet_api::cores::SelfApi;
 use xenonet_api::events::EventStream;
-use xenonet_base::network::{Incoming, Kind, Net, Outgoing, RelaySink, To};
 use xenonet_hosts::frames::{encode, MAX_DEPTH, PROTOCOL};
 use xenonet_hosts::network::{self as wire, Op};
 use xenonet_hosts::relay::{self as core, Producer, Shape};
+use xenonet_model::ops::{Incoming, Kind, Net, Outgoing, RelaySink, To};
 use xenonet_net::sink::LogFn;
 
 use crate::fx::{now_ms, Locked};
@@ -131,7 +131,7 @@ pub struct RelayServer {
 /// and keeps the host's last snapshot under it.
 pub fn net_key(network: &str, host: &str) -> String {
     let digest = xenonet_net::codec::sha256(format!("xenonet-net-relay\n{network}\n{host}").as_bytes());
-    xenonet_base::jsstr::hex(&digest[..16])
+    xenonet_text::utf16::hex(&digest[..16])
 }
 
 impl RelayServer {
@@ -341,8 +341,8 @@ impl Session {
         let key = me.as_ref().map(|m| net_key(&m.network, &m.host)).unwrap_or_default();
         let hello = json!({
             "t": "hello", "schema": "host/hello/v1", "protocol": PROTOCOL, "version": p.version,
-            "host": { "id": id, "key": key }, "platform": p.platform, "demo": p.demo, "now": xenonet_base::json::number(now_ms()),
-            "sinceMs": xenonet_base::json::number(core::DEFAULT_SINCE_MS), "detail": !titles_only,
+            "host": { "id": id, "key": key }, "platform": p.platform, "demo": p.demo, "now": xenonet_text::json::number(now_ms()),
+            "sinceMs": xenonet_text::json::number(core::DEFAULT_SINCE_MS), "detail": !titles_only,
         });
         Session {
             host: host.to_string(),
@@ -439,7 +439,7 @@ impl Session {
 
     fn cmd(&mut self, c: Cmd, reads: &mpsc::UnboundedSender<Read>) {
         match c {
-            Cmd::Time { id } => self.wait(json!({ "t": "time", "id": id, "now": xenonet_base::json::number(now_ms()) })),
+            Cmd::Time { id } => self.wait(json!({ "t": "time", "id": id, "now": xenonet_text::json::number(now_ms()) })),
             Cmd::Fresh => self.snapshot(reads),
             Cmd::Get { id, path } => {
                 let (shape, read) = match self.allowed(&path) {
@@ -554,7 +554,7 @@ impl Session {
             }
         }
         if self.frames.is_empty() && now - self.last_sent >= self.timing.ping_ms {
-            self.frames.push(json!({ "t": "ping", "now": xenonet_base::json::number(now) }));
+            self.frames.push(json!({ "t": "ping", "now": xenonet_text::json::number(now) }));
         }
         if self.frames.is_empty() {
             return;
@@ -639,7 +639,7 @@ fn sse(bytes: &[u8]) -> Vec<(String, Value)> {
         if data.is_empty() {
             continue;
         }
-        if let Ok(v) = xenonet_base::json::parse(&data.join("\n")) {
+        if let Ok(v) = xenonet_text::json::parse(&data.join("\n")) {
             out.push((name, v));
         }
     }
@@ -655,7 +655,7 @@ pub(crate) struct TestEvents(Mutex<Vec<mpsc::UnboundedSender<xenonet_api::events
 #[cfg(test)]
 impl TestEvents {
     pub(crate) fn send(&self, event: &str, data: &Value) {
-        let frame = xenonet_api::events::Bytes::from(format!("event: {event}\ndata: {}\n\n", xenonet_base::json::stringify(data, 0)));
+        let frame = xenonet_api::events::Bytes::from(format!("event: {event}\ndata: {}\n\n", xenonet_text::json::stringify(data, 0)));
         self.0.locked().retain(|tx| tx.send(frame.clone()).is_ok());
     }
 }
@@ -674,7 +674,7 @@ impl EventStream for TestEvents {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use xenonet_base::network::{Host, Me};
+    use xenonet_model::ops::{Host, Me};
 
     const SUB: &str = "sub_0123456789abcdef0123456789abcdef";
 

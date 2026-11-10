@@ -2,7 +2,7 @@
 //! the tests use them; no one's transcripts.
 
 use serde_json::{json, Map, Value};
-use xenonet_base::json::number;
+use xenonet_text::json::number;
 
 pub fn demo_refusals(now: f64) -> Vec<Value> {
     let rows = [

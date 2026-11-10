@@ -11,9 +11,9 @@
 
 use crate::lines::opt_prop;
 use serde_json::{json, Map, Value};
-use xenonet_base::json::{self, number};
-use xenonet_base::text::{js_number, js_string, truthy};
-use xenonet_base::time::parse_iso;
+use xenonet_text::json::{self, number};
+use xenonet_text::text::{display, to_number, truthy};
+use xenonet_text::time::parse_iso;
 
 /// Where usage is asked.
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -33,21 +33,21 @@ pub fn token_of(text: Option<&str>) -> Option<(String, Option<f64>)> {
     let oauth = opt_prop(Some(&v), "claudeAiOauth");
     let token = opt_prop(oauth, "accessToken").and_then(Value::as_str).filter(|t| !t.is_empty())?;
     // Number(expiresAt) || null: none said, or none that's a time.
-    let expires = js_number(opt_prop(oauth, "expiresAt"));
+    let expires = to_number(opt_prop(oauth, "expiresAt"));
     Some((token.to_string(), (expires != 0.0 && !expires.is_nan()).then_some(expires)))
 }
 
 /// A window's use in percent and when it resets: (null, null) when it
 /// says no number.
 fn window(w: Option<&Value>) -> (Value, Value) {
-    let pct = js_number(opt_prop(w, "utilization"));
+    let pct = to_number(opt_prop(w, "utilization"));
     if !pct.is_finite() {
         return (Value::Null, Value::Null);
     }
     let resets = opt_prop(w, "resets_at");
     let at = if let Some(resets) = resets.filter(|r| truthy(Some(r))) {
         // Date.parse(String(resets_at)).
-        parse_iso(&js_string(resets)).unwrap_or(f64::NAN)
+        parse_iso(&display(resets)).unwrap_or(f64::NAN)
     } else {
         f64::NAN
     };
@@ -78,7 +78,7 @@ pub fn sign_in_problem(cred: Option<&Value>, now: f64) -> Option<Value> {
         return Some(reason("no Claude Code sign-in found"));
     }
     let expires = opt_prop(cred, "expiresAt");
-    if truthy(expires) && js_number(expires) <= now {
+    if truthy(expires) && to_number(expires) <= now {
         return Some(reason("Claude Code's sign-in has expired; it refreshes on its next request"));
     }
     None
@@ -86,7 +86,7 @@ pub fn sign_in_problem(cred: Option<&Value>, now: f64) -> Option<Value> {
 
 /// Why the request got no answer: `name` and `message` are the error's.
 pub fn unreachable(name: Option<&Value>, message: Option<&Value>) -> Value {
-    let why = if name.and_then(Value::as_str) == Some("TimeoutError") { "timed out".to_string() } else { message.map_or_else(|| "undefined".to_string(), js_string) };
+    let why = if name.and_then(Value::as_str) == Some("TimeoutError") { "timed out".to_string() } else { message.map_or_else(|| "undefined".to_string(), display) };
     reason(&format!("couldn't reach Anthropic ({why})"))
 }
 
@@ -96,9 +96,9 @@ pub fn unreachable(name: Option<&Value>, message: Option<&Value>) -> Value {
 /// the body.
 pub fn status_problem(status: Option<&Value>, ok: bool, retry_after: Option<&Value>) -> Option<Value> {
     let code = status.and_then(Value::as_f64);
-    let shown = status.map_or_else(|| "undefined".to_string(), js_string);
+    let shown = status.map_or_else(|| "undefined".to_string(), display);
     if code == Some(429.0) || code == Some(403.0) {
-        let after = js_number(retry_after);
+        let after = to_number(retry_after);
         let wait = if after.is_finite() && after > 0.0 { after * 1000.0 } else { PAUSE_MS };
         return Some(json!({ "reason": format!("Anthropic asked to wait ({shown})"), "retryAfterMs": number(wait) }));
     }
@@ -131,7 +131,7 @@ pub fn next_in(r: Option<&Value>) -> Option<Value> {
 
 /// The version a desktop file says its format is, which picks the schema.
 pub fn desktop_version(raw: Option<&Value>) -> Option<String> {
-    opt_prop(raw, "version").filter(|v| !v.is_null()).map(js_string)
+    opt_prop(raw, "version").filter(|v| !v.is_null()).map(display)
 }
 
 /// Why a desktop file's samples can't be read: a file with nothing to read

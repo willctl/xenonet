@@ -27,7 +27,7 @@ url.workspace = true
 xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
-xenonet-base.workspace = true
+xenonet-text.workspace = true
 # XenoNet's plugin for Hermes, which xenonet connect hermes puts in place.
 xenonet-hermes.workspace = true
 # The doctor's groups of checks, which xenonet doctor --help lists.
@@ -52,6 +52,7 @@ xenonet-wire-map.workspace = true
 
 # The local time zone, as JS's Date shows a time (localtime_r), and the
 # terminal's width (TIOCGWINSZ), as Node's process.stdout.columns reads it.
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

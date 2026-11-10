@@ -4,8 +4,8 @@
 //! fetch); here is what an answer means.
 
 use serde_json::{json, Map, Value};
-use xenonet_base::json::number;
-use xenonet_base::text::js_number;
+use xenonet_text::json::number;
+use xenonet_text::text::to_number;
 
 pub const KEY_URL: &str = "https://openrouter.ai/api/v1/key";
 /// How long a reading is kept before OpenRouter is asked again.
@@ -17,7 +17,7 @@ fn dollars(v: Option<&Value>) -> Value {
         None | Some(Value::Null) => Value::Null,
         Some(Value::String(s)) if s.is_empty() => Value::Null,
         v => {
-            let n = js_number(v);
+            let n = to_number(v);
             if n.is_finite() {
                 number(n)
             } else {
@@ -56,7 +56,7 @@ pub fn reading(has_key: bool, answer: Option<(&Value, bool)>, body: Option<&Valu
         return json!({ "key": "rejected", "error": "OpenRouter didn't take the key" });
     }
     if !ok {
-        return json!({ "key": "stored", "error": format!("OpenRouter answered {}", xenonet_base::text::js_string(status)) });
+        return json!({ "key": "stored", "error": format!("OpenRouter answered {}", xenonet_text::text::display(status)) });
     }
     let mut out = Map::new();
     out.insert("key".into(), Value::String("stored".into()));

@@ -16,9 +16,9 @@ use crate::jsv::{raw, truthy};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
-use xenonet_base::json::number as num_v;
-use xenonet_base::text::{js_number, js_string, js_trim, JS_SPACE};
-use xenonet_base::units::js_round;
+use xenonet_text::json::number as num_v;
+use xenonet_text::text::{display, to_number, trim, SPACE};
+use xenonet_text::units::round;
 
 /// Samples kept for the traces: three minutes at 2 s.
 pub const HISTORY: usize = 90;
@@ -39,11 +39,11 @@ pub fn frac(part: f64, whole: f64) -> f64 {
 
 // A figure as the JS's num() reads it: a finite number, or None.
 fn num(s: Option<&str>) -> Option<f64> {
-    let t = js_trim(s.unwrap_or(""));
+    let t = trim(s.unwrap_or(""));
     if t.is_empty() {
         return None;
     }
-    Some(js_number(Some(&Value::String(t.into())))).filter(|n| n.is_finite())
+    Some(to_number(Some(&Value::String(t.into())))).filter(|n| n.is_finite())
 }
 
 fn opt(n: Option<f64>) -> Value {
@@ -57,10 +57,10 @@ pub fn cpu_model(model: &str) -> Option<String> {
         [
             Regex::new(r"(?i)\((?:R|TM|C)\)").expect("a fixed pattern"),
             Regex::new(r"(?-u:\b)CPU(?-u:\b)").expect("a fixed pattern"),
-            Regex::new(&format!(r"(?i)@[{JS_SPACE}]*[0-9.]+[{JS_SPACE}]*GHz")).expect("a fixed pattern"),
+            Regex::new(&format!(r"(?i)@[{SPACE}]*[0-9.]+[{SPACE}]*GHz")).expect("a fixed pattern"),
             Regex::new(r"(?i)(?-u:\b)[0-9]+-Core Processor(?-u:\b)").expect("a fixed pattern"),
             Regex::new(r"(?i)(?-u:\b)Processor(?-u:\b)").expect("a fixed pattern"),
-            Regex::new(&format!("[{JS_SPACE}]+")).expect("a fixed pattern"),
+            Regex::new(&format!("[{SPACE}]+")).expect("a fixed pattern"),
         ]
     });
     let s = r[0].replace_all(model, "");
@@ -69,7 +69,7 @@ pub fn cpu_model(model: &str) -> Option<String> {
     let s = r[3].replace(&s, "");
     let s = r[4].replace(&s, "");
     let s = r[5].replace_all(&s, " ");
-    let t = js_trim(&s);
+    let t = trim(&s);
     (!t.is_empty()).then(|| t.to_string())
 }
 
@@ -97,7 +97,7 @@ fn gpu(index: f64, name: &str, usage: Option<f64>, mem_used: Option<f64>, mem_to
 /// One line of nvidia-smi's CSV ("0, NVIDIA RTX A4500, 41, 6000, 20470,
 /// 58"). A figure the card doesn't report reads [N/A] or [Not Supported].
 pub fn parse_nvidia(line: &str) -> Option<Value> {
-    let parts: Vec<&str> = line.split(',').map(js_trim).collect();
+    let parts: Vec<&str> = line.split(',').map(trim).collect();
     if parts.len() < 6 {
         return None;
     }
@@ -120,7 +120,7 @@ pub fn parse_ioreg(text: &str, total_mem: Option<f64>) -> Option<Value> {
     }
     let stat = |key: &str| -> Option<f64> {
         let re = Regex::new(&format!("\"{}\"=([0-9]+)", regex::escape(key))).ok()?;
-        re.captures(text).map(|c| js_number(Some(&Value::String(c[1].to_string()))))
+        re.captures(text).map(|c| to_number(Some(&Value::String(c[1].to_string()))))
     };
     let usage = stat("Device Utilization %").or_else(|| stat("GPU Activity(%)"));
     let vram_used = stat("vramUsedBytes");
@@ -162,7 +162,7 @@ pub enum WindowsLine {
 }
 
 fn n_or0(v: Option<&Value>) -> f64 {
-    let n = js_number(v);
+    let n = to_number(v);
     if n.is_nan() {
         0.0
     } else {
@@ -177,15 +177,15 @@ fn n_or0(v: Option<&Value>) -> f64 {
 /// is taken for the one with the most.
 pub fn parse_windows_gpu(line: &str, adapters: &[(String, f64)]) -> WindowsLine {
     let (kind, rest) = if line.starts_with("A ") || line.starts_with("S ") { (&line[..2], &line[2..]) } else { ("", line.get(2..).unwrap_or("")) };
-    let Ok(body) = xenonet_base::json::parse(rest) else { return WindowsLine::Nothing };
+    let Ok(body) = xenonet_text::json::parse(rest) else { return WindowsLine::Nothing };
     match kind {
         "A " => {
             let list: Vec<Value> = match body {
                 Value::Array(a) => a,
                 other => vec![other],
             };
-            let mut out: Vec<(String, f64)> = list.iter().filter(|a| truthy(raw(Some(a), "name"))).map(|a| (js_string(&a["name"]), n_or0(raw(Some(a), "mem")))).collect();
-            xenonet_base::sort::sort_by(&mut out, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let mut out: Vec<(String, f64)> = list.iter().filter(|a| truthy(raw(Some(a), "name"))).map(|a| (display(&a["name"]), n_or0(raw(Some(a), "mem")))).collect();
+            xenonet_text::sort::sort_by(&mut out, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             WindowsLine::Adapters(out)
         }
         "S " => {
@@ -248,7 +248,7 @@ pub fn find_nvidia_smi(
     program_files: Option<&str>,
     exists: &mut dyn FnMut(&str) -> bool,
 ) -> Option<String> {
-    if let Some(f) = xenonet_base::paths::on_path("nvidia-smi", path_var, pathext, platform == "win32", exists) {
+    if let Some(f) = xenonet_os::paths::on_path("nvidia-smi", path_var, pathext, platform == "win32", exists) {
         return Some(f);
     }
     if platform != "win32" {
@@ -322,7 +322,7 @@ impl Streamed {
         self.buf.push_str(chunk);
         let mut lines = Vec::new();
         while let Some(i) = self.buf.find('\n') {
-            let line = js_trim(&self.buf[..i]).to_string();
+            let line = trim(&self.buf[..i]).to_string();
             self.buf.drain(..=i);
             if line.is_empty() {
                 continue;
@@ -381,7 +381,7 @@ impl NvidiaCards {
     /// The fresh readings, by index.
     pub fn read(&self, now: f64) -> Vec<Value> {
         let mut fresh: Vec<&(f64, Value, f64)> = self.cards.iter().filter(|c| now - c.2 < STALE_MS).collect();
-        xenonet_base::sort::sort_by(&mut fresh, |a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        xenonet_text::sort::sort_by(&mut fresh, |a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         fresh.into_iter().map(|c| c.1.clone()).collect()
     }
 }
@@ -508,7 +508,7 @@ impl Stats {
         let total: f64 = now.iter().enumerate().fold(0.0, |s, (i, t)| s + t.total - prev.get(i).map_or(t.total, |p| p.total));
         self.prev = Some(now);
         let mhz = speed.filter(|s| *s != 0.0 && !s.is_nan());
-        json!({ "model": model.and_then(cpu_model), "threads": threads, "ghz": mhz.map(|m| num_v(js_round(m / 100.0) / 10.0)), "usage": num_v(frac(busy, total)), "cores": cores })
+        json!({ "model": model.and_then(cpu_model), "threads": threads, "ghz": mhz.map(|m| num_v(round(m / 100.0) / 10.0)), "usage": num_v(frac(busy, total)), "cores": cores })
     }
 
     /// The reading: the CPU, memory, the GPUs (None when the reader had
@@ -543,7 +543,7 @@ impl Stats {
         };
         self.last_at = at;
         self.has_last = true;
-        let mut r = json!({ "at": num_v(at), "platform": platform, "arch": arch, "uptime": num_v(js_round(uptime)), "cpu": cpu, "memory": { "total": num_v(total), "used": num_v(used) }, "gpus": gpus.unwrap_or_default(), "gpu": gpu, "history": self.history });
+        let mut r = json!({ "at": num_v(at), "platform": platform, "arch": arch, "uptime": num_v(round(uptime)), "cpu": cpu, "memory": { "total": num_v(total), "used": num_v(used) }, "gpus": gpus.unwrap_or_default(), "gpu": gpu, "history": self.history });
         r["hardware"] = hardware_of(&r);
         r
     }
@@ -581,8 +581,8 @@ pub fn demo_reading(at: f64) -> Value {
         "arch": "x64",
         "uptime": 3 * 86400 + 4 * 3600 + 12 * 60,
         "cpu": { "model": "AMD Ryzen 7 7700X", "threads": 16, "ghz": 4.5, "usage": num_v(cpu), "cores": cores },
-        "memory": { "total": num_v(64.0 * GB), "used": num_v(js_round(mem * 64.0 * GB)) },
-        "gpus": [{ "index": 0, "name": "NVIDIA GeForce RTX 4080", "usage": num_v(gpu_u), "memUsed": num_v(js_round((7.4 + 1.2 * wave(at, 30e3, 0.0)) * GB)), "memTotal": num_v(16.0 * GB), "temp": num_v(js_round(56.0 + 9.0 * gpu_u)), "shared": false }],
+        "memory": { "total": num_v(64.0 * GB), "used": num_v(round(mem * 64.0 * GB)) },
+        "gpus": [{ "index": 0, "name": "NVIDIA GeForce RTX 4080", "usage": num_v(gpu_u), "memUsed": num_v(round((7.4 + 1.2 * wave(at, 30e3, 0.0)) * GB)), "memTotal": num_v(16.0 * GB), "temp": num_v(round(56.0 + 9.0 * gpu_u)), "shared": false }],
         "gpu": "demo",
         "history": history,
     });

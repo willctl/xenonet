@@ -9,16 +9,16 @@
 use super::{Fail, ObserverHost, Result};
 use serde_json::{json, Value};
 use std::sync::Mutex;
-use xenonet_base::json::number_string;
-use xenonet_base::nodepath::style_of;
-use xenonet_base::paths::tilde;
-use xenonet_base::sync::Locked;
-use xenonet_base::text::JS_SPACE;
+use xenonet_os::nodepath::style_of;
+use xenonet_os::paths::tilde;
+use xenonet_os::sync::Locked;
+use xenonet_text::json::number_string;
+use xenonet_text::text::SPACE;
 
 /// A key's string from an Info.plist written as XML, that key alone, or
 /// None.
 pub fn plist_string(text: &str, key: &str) -> Option<String> {
-    let r = regex::Regex::new(&format!(r"<key>[{JS_SPACE}]*{key}[{JS_SPACE}]*</key>[{JS_SPACE}]*<string>[{JS_SPACE}]*([^<]*?)[{JS_SPACE}]*</string>")).ok()?;
+    let r = regex::Regex::new(&format!(r"<key>[{SPACE}]*{key}[{SPACE}]*</key>[{SPACE}]*<string>[{SPACE}]*([^<]*?)[{SPACE}]*</string>")).ok()?;
     r.captures(text).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
 }
 
@@ -79,7 +79,7 @@ impl AppBundle {
 
     /// Where the app would be: /Applications, then ~/Applications.
     pub fn apps(&self, h: &dyn ObserverHost) -> Vec<String> {
-        ["/Applications".to_string(), xenonet_base::paths::join(h.home(), "Applications")].iter().map(|d| xenonet_base::paths::join(d, self.bundle)).collect()
+        ["/Applications".to_string(), xenonet_os::paths::join(h.home(), "Applications")].iter().map(|d| xenonet_os::paths::join(d, self.bundle)).collect()
     }
 
     /// Where the app is, or None.

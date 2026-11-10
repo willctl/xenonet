@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use xenonet_actors::limits::Buckets;
 use xenonet_actors::tokens::bearer_of;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
 
 /// A bucket's rate (xenonet_actors::limits): up to `burst` at once, filled
 /// again at `rate` a second.
@@ -129,7 +129,7 @@ impl ActorCaller {
                 Some(r) if !r.is_null() && r != &json!("") && r != &json!(false) => json!({ "reason": r }),
                 _ => json!({}),
             };
-            return Err(unauthorized(&code, xenonet_base::text::js_string(&auth["error"]), extra));
+            return Err(unauthorized(&code, xenonet_text::text::display(&auth["error"]), extra));
         }
         if auth["state"] == "waiting" && !waiting {
             return Err(no(403, "waiting", "this actor is waiting for you to allow it in XenoNet's window; try again later"));

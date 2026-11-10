@@ -104,7 +104,7 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
     if !strong {
         return Err(Reply::coded(403, "weak", AS_YOU));
     }
-    Ok((json!({ "kind": "you", "id": xenonet_base::ids::YOU, "title": "you" }), strong))
+    Ok((json!({ "kind": "you", "id": xenonet_model::ids::YOU, "title": "you" }), strong))
 }
 
 fn core_reply(r: Result<Value, crate::cores::CoreError>) -> Reply {

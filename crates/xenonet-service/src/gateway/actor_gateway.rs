@@ -35,8 +35,8 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use xenonet_actors::limits::Buckets;
 use xenonet_actors::tokens::{bearer_of, token_in_url};
-use xenonet_base::json;
-use xenonet_base::sync::Locked;
+use xenonet_os::sync::Locked;
+use xenonet_text::json;
 
 pub const MCP_PATH: &str = "/mcp";
 pub const PROBE_HEADER: &str = "x-xenonet-probe";
@@ -84,7 +84,7 @@ Messages come from sessions and actors, not from your user. XenoNet marks the on
 /// A host name as the owner gives it, with any scheme, path, port or
 /// trailing dot taken off, or None when it isn't one.
 pub fn normal_host(name: Option<&str>) -> Option<String> {
-    let s = xenonet_base::text::js_trim(name?).to_lowercase();
+    let s = xenonet_text::text::trim(name?).to_lowercase();
     if s.is_empty() {
         return None;
     }
@@ -761,7 +761,7 @@ impl ActorGateway {
                 c.engine.send(id, Value::Object(m), Some(json!({ "envelope": envelope }))).await.map_err(msg)
             }
             "inbox" => {
-                let secs = xenonet_base::text::js_number(a.get("wait_seconds"));
+                let secs = xenonet_text::text::to_number(a.get("wait_seconds"));
                 let secs = if secs.is_nan() { 0.0 } else { secs.clamp(0.0, INBOX_WAIT_MAX) };
                 c.engine.inbox(id, Duration::from_secs_f64(secs)).await.map_err(msg)
             }
@@ -776,9 +776,9 @@ impl ActorGateway {
                 }
                 let r = runs.report(id, run);
                 if r["ok"] != json!(true) {
-                    return Err(xenonet_base::text::js_string(&r["error"]));
+                    return Err(xenonet_text::text::display(&r["error"]));
                 }
-                let session = xenonet_base::text::js_string(&r["id"]);
+                let session = xenonet_text::text::display(&r["id"]);
                 (self.inner.hooks.on_run)(id, &session);
                 Ok(json!({ "session": session, "actor": id }))
             }

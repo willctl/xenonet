@@ -6,7 +6,7 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
-use xenonet_base::paths;
+use xenonet_os::paths;
 
 /// The MCP servers whose calls write to the shared context, by the names
 /// Xenolith and Agent Wiki install them under. A folder's marker can name
@@ -64,7 +64,7 @@ pub fn read_marker(dir: &str) -> Option<Marker> {
         return None;
     }
     let text = String::from_utf8_lossy(&std::fs::read(&file).ok()?).into_owned();
-    let v = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
+    let v = xenonet_text::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
     let m = v.as_object()?;
     let format = m.get("format").and_then(Value::as_i64).filter(|n| (1..=9_007_199_254_740_991).contains(n))?;
     let server = m.get("server").and_then(Value::as_str).filter(|s| server_name(s)).map(String::from);
@@ -157,10 +157,10 @@ fn config_file(p: &Product, env: &Env, home: &str, platform: &str) -> String {
 
 // The wikiDir a config file names, there or not.
 fn named_in(file: &str) -> Option<String> {
-    let text = String::from_utf8_lossy(&xenonet_base::fs::read_capped(Path::new(file), MARKER_MAX).ok()?).into_owned();
-    let v = xenonet_base::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
+    let text = String::from_utf8_lossy(&xenonet_os::fs::read_capped(Path::new(file), MARKER_MAX).ok()?).into_owned();
+    let v = xenonet_text::json::parse(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()?;
     let dir = v.get("wikiDir")?.as_str()?;
-    (!xenonet_base::text::js_trim(dir).is_empty()).then(|| dir.to_string())
+    (!xenonet_text::text::trim(dir).is_empty()).then(|| dir.to_string())
 }
 
 /// The shared context's folder and the server that owns it: Xenolith's
@@ -194,7 +194,7 @@ fn same_dir(a: &str, b: &str) -> bool {
     if paths::resolve(a) == paths::resolve(b) {
         return true;
     }
-    matches!((xenonet_base::fs::realpath_native(a), xenonet_base::fs::realpath_native(b)), (Ok(ra), Ok(rb)) if ra == rb)
+    matches!((xenonet_os::fs::realpath_native(a), xenonet_os::fs::realpath_native(b)), (Ok(ra), Ok(rb)) if ra == rb)
 }
 
 /// Which server a wiki folder belongs to (one XENONET_WIKI_DIR names,
@@ -220,12 +220,12 @@ fn guessed_server_of(dir: &str, env: &Env, home: &str, platform: &str) -> &'stat
         }
     }
     if let Ok(bytes) = std::fs::read(paths::join(dir, "PROTOCOL.md")) {
-        let head = xenonet_base::jsstr::head(&String::from_utf8_lossy(&bytes), 200);
+        let head = xenonet_text::utf16::head(&String::from_utf8_lossy(&bytes), 200);
         // /^#\s*Xenolith protocol/m: a "#" at a line's start, then any
         // white space (line breaks too), then the words.
         let starts = std::iter::once(0).chain(head.char_indices().filter(|(_, c)| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')).map(|(i, c)| i + c.len_utf8()));
         let protocol =
-            starts.collect::<Vec<_>>().into_iter().any(|i| head[i..].strip_prefix('#').is_some_and(|r| xenonet_base::text::js_trim_start(r).starts_with("Xenolith protocol")));
+            starts.collect::<Vec<_>>().into_iter().any(|i| head[i..].strip_prefix('#').is_some_and(|r| xenonet_text::text::trim_start(r).starts_with("Xenolith protocol")));
         if protocol {
             return "xenolith";
         }
@@ -272,8 +272,8 @@ fn space_name(name: &str) -> bool {
 /// The space a context_* call works in, from its `space` as Xenolith's
 /// server reads it (SpaceId::parse).
 pub fn space_of(v: Option<&Value>) -> Space {
-    let Some(text) = v.and_then(Value::as_str).filter(|s| !xenonet_base::text::js_trim(s).is_empty()) else { return Space::Local };
-    let t = xenonet_base::text::js_trim(text).to_lowercase();
+    let Some(text) = v.and_then(Value::as_str).filter(|s| !xenonet_text::text::trim(s).is_empty()) else { return Space::Local };
+    let t = xenonet_text::text::trim(text).to_lowercase();
     let Some((kind, name)) = t.split_once(':') else { return Space::Refused };
     if !SPACE_KINDS.contains(&kind) || !space_name(name) {
         return Space::Refused;
