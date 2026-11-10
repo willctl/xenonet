@@ -1,0 +1,23 @@
+error: cannot construct `Authorized` with struct literal syntax due to private fields
+ --> tests/ui/authorized_cannot_be_built.rs:6:20
+  |
+6 |     let _allowed = Authorized { action: Action::Admit };
+  |                    ^^^^^^^^^^   --------------------- private field
+  |
+  = note: ...and other private fields `principal`, `resource`, `act_hash`, `network`, `authority` and `note` that were not provided
+
+error: cannot construct `PersonSigned` with struct literal syntax due to private fields
+ --> tests/ui/authorized_cannot_be_built.rs:7:19
+  |
+7 |     let _person = PersonSigned { act: [0; 32] };
+  |                   ^^^^^^^^^^^^   ------------ private field
+  |
+  = note: ...and other private fields `person` and `device` that were not provided
+
+error: cannot construct `VerifiedPresence` with struct literal syntax due to private fields
+ --> tests/ui/authorized_cannot_be_built.rs:8:20
+  |
+8 |     let _present = VerifiedPresence { act: [0; 32] };
+  |                    ^^^^^^^^^^^^^^^^   ------------ private field
+  |
+  = note: ...and other private fields `person`, `device` and `kind` that were not provided

@@ -1,0 +1,11 @@
+error[E0616]: field `action` of struct `Authorized` is private
+ --> tests/ui/authorized_cannot_be_changed.rs:6:13
+  |
+6 |     allowed.action = Action::Admit;
+  |             ^^^^^^ private field
+
+error[E0616]: field `action` of struct `xenonet_authz::Request` is private
+  --> tests/ui/authorized_cannot_be_changed.rs:10:13
+   |
+10 |     request.action = Action::Admit;
+   |             ^^^^^^ private field

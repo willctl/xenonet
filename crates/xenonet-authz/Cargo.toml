@@ -1,0 +1,27 @@
+[package]
+name = "xenonet-authz"
+description = "Who may do what, decided at the receiver: the request vocabulary, the ground facts it's judged on, Biscuit tokens rooted at a machine's signing key, presence-bound person acts, and one decide function. Usable alone: it knows only xenonet-id."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Authority as Biscuit tokens, and the Datalog their rights are checked in.
+biscuit-auth.workspace = true
+# The keys and signatures that root tokens and prove a person was there.
+xenonet-id.workspace = true
+# A token root's certificate travels as JSON.
+serde_json.workspace = true
+
+[dev-dependencies]
+# The compile-fail tests: what Information<T> and Authorized must not allow.
+trybuild = "1"
+# Attenuation and revocation, checked over many generated tokens.
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

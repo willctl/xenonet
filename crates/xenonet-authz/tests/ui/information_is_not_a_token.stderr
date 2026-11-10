@@ -1,0 +1,18 @@
+error[E0308]: mismatched types
+  --> tests/ui/information_is_not_a_token.rs:11:22
+   |
+11 |     let text: &str = &body;
+   |               ----   ^^^^^ expected `&str`, found `&Information<String>`
+   |               |
+   |               expected due to this
+   |
+   = note: expected reference `&str`
+              found reference `&Information<String>`
+
+error[E0277]: the trait bound `xenonet_authz::Token: From<Information<String>>` is not satisfied
+  --> tests/ui/information_is_not_a_token.rs:13:29
+   |
+13 |     let _also: Token = body.into();
+   |                             ^^^^ the trait `From<Information<String>>` is not implemented for `xenonet_authz::Token`
+   |
+   = note: required for `Information<String>` to implement `Into<xenonet_authz::Token>`

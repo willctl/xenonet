@@ -1,0 +1,23 @@
+error[E0277]: the trait bound `xenonet_authz::Request: From<Information<String>>` is not satisfied
+ --> tests/ui/information_is_not_a_request.rs:6:34
+  |
+6 |     let _request: Request = body.into();
+  |                                  ^^^^ the trait `From<Information<String>>` is not implemented for `xenonet_authz::Request`
+  |
+  = note: required for `Information<String>` to implement `Into<xenonet_authz::Request>`
+
+error[E0277]: the trait bound `Act: From<Information<String>>` is not satisfied
+ --> tests/ui/information_is_not_a_request.rs:8:26
+  |
+8 |     let _act: Act = body.into();
+  |                          ^^^^ the trait `From<Information<String>>` is not implemented for `Act`
+  |
+  = note: required for `Information<String>` to implement `Into<Act>`
+
+error[E0277]: the trait bound `Principal: From<Information<String>>` is not satisfied
+  --> tests/ui/information_is_not_a_request.rs:10:32
+   |
+10 |     let _who: Principal = body.into();
+   |                                ^^^^ the trait `From<Information<String>>` is not implemented for `Principal`
+   |
+   = note: required for `Information<String>` to implement `Into<Principal>`

@@ -18,7 +18,15 @@ targets = [
 unmaintained = "all"
 unsound = "all"
 yanked = "deny"
-ignore = []
+ignore = [
+  # crypto-bigint 0.5's constant-time bugs, through p256, which biscuit-auth
+  # always depends on. XenoNet holds no P-256 secret in biscuit: token roots
+  # and appended blocks are Ed25519, so p256 only verifies public data.
+  { id = "RUSTSEC-2026-0387", reason = "p256 in biscuit-auth only verifies public data here" },
+  # proc-macro-error2 is unmaintained; biscuit-auth 6.0.0 needs its
+  # datalog-macro feature to build at all, and the macro runs at build time.
+  { id = "RUSTSEC-2026-0173", reason = "a build-time proc macro biscuit-auth 6.0.0 can't build without" },
+]
 
 [licenses]
 confidence-threshold = 0.93
