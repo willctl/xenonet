@@ -589,7 +589,7 @@ impl Shared {
                 self.peers.locked().remove(&e.host.id);
                 let _ = self.with_store(|s| s.forget_host(&e.host.id));
                 if me.as_deref() == Some(e.host.id.as_str()) {
-                    let by = e.signers.iter().map(|s| s.host.clone()).collect::<Vec<_>>();
+                    let by = e.signers.iter().map(|s| s.by.clone()).collect::<Vec<_>>();
                     self.set_removed(json!({ "by": by, "at": e.at, "n": e.n }));
                 } else {
                     self.sink.removed(&e.host.id);
@@ -796,7 +796,7 @@ impl Shared {
             "roster" => {
                 let mut fetch = false;
                 for e in body.get("entries").and_then(Value::as_array).into_iter().flatten() {
-                    match Entry::parse(e).and_then(|e| self.append(e)) {
+                    match Entry::parse(e).map_err(NetError::from).and_then(|e| self.append(e)) {
                         Ok(_) => {}
                         Err(e) if e.code == "roster-gap" => fetch = true,
                         Err(e) => self.log("net.roster", &format!("a roster entry was refused: {}", e.message)),
@@ -2025,7 +2025,7 @@ impl Node {
                     "host": p.host.id,
                     "window": p.host.window,
                     "gateway": p.gateway.as_ref().map(|g| g.address.clone()),
-                    "signers": p.signers.iter().map(|s| s.host.clone()).collect::<Vec<_>>(),
+                    "signers": p.signers.iter().map(|s| s.by.clone()).collect::<Vec<_>>(),
                     "at": p.at,
                 })
             })
@@ -2079,7 +2079,7 @@ impl Node {
                 out["proposed"] = json!(true);
                 return Ok(out);
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.into()),
         }
         match self.submit(e.clone()).await {
             Ok(_) => {}

@@ -874,7 +874,7 @@ impl Gateway {
         };
         let body: Value = serde_json::from_slice(&req.body).map_err(|_| NetError::bad("the entry isn't JSON"))?;
         let mut entry = Entry::parse(body.get("entry").unwrap_or(&Value::Null))?;
-        if !entry.signers.iter().any(|s| s.host == signed.host) {
+        if !entry.signers.iter().any(|s| s.by == signed.host) {
             return Err(NetError::new(403, "roster-refused", "a host sends entries it signed"));
         }
         let now = Self::now(n);
@@ -916,7 +916,7 @@ impl Gateway {
         let view = n.roster().view();
         let caps = n.caps();
         let body = json!({ "proposals": [entry.to_json()] });
-        for host in view.members.keys().filter(|h| **h != me.host && view.is_window(h) && !entry.signers.iter().any(|s| s.host == **h)) {
+        for host in view.members.keys().filter(|h| **h != me.host && view.is_window(h) && !entry.signers.iter().any(|s| s.by == **h)) {
             let f = Self::frame(&me, "roster", host, now as i64, &body)?;
             self.store()?.enqueue(Item { host, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
             self.wake(host);
@@ -944,7 +944,7 @@ impl Gateway {
             let gone = &entry.host.id;
             let store = self.store()?;
             store.forget_host(gone)?;
-            let by: Vec<&str> = entry.signers.iter().map(|s| s.host.as_str()).collect();
+            let by: Vec<&str> = entry.signers.iter().map(|s| s.by.as_str()).collect();
             let f = Self::frame(&me, "removed", gone, now as i64, &json!({ "network": me.network, "host": gone, "by": by, "at": entry.at, "n": entry.n }))?;
             store.enqueue(Item { host: gone, id: &f.id, kind: "removed", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
             drop(store);

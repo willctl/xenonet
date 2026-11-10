@@ -184,7 +184,7 @@ impl Dir {
 
     pub fn read_roster(&self) -> R<Roster> {
         match read_json(&self.file(ROSTER))? {
-            Some(v) => Roster::from_json(&v),
+            Some(v) => Ok(Roster::from_json(&v)?),
             None => Ok(Roster::new()),
         }
     }

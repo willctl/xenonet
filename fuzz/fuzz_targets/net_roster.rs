@@ -26,8 +26,8 @@ fn rightly_signed(r: &Roster, e: &Entry) -> bool {
         return false;
     }
     match r.view_ref() {
-        None => e.signers.iter().all(|s| s.host == e.host.id && e.host.keys.verify(&bytes, &s.sig)),
-        Some(v) => e.signers.iter().all(|s| v.member(&s.host).is_some_and(|m| m.keys.verify(&bytes, &s.sig))),
+        None => e.signers.iter().all(|s| s.by == e.host.id && e.host.keys.verify(&bytes, &s.sig)),
+        Some(v) => e.signers.iter().all(|s| v.member(&s.by).is_some_and(|m| m.keys.verify(&bytes, &s.sig))),
     }
 }
 
@@ -98,7 +98,7 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
         e.sign_by(net::HOSTS[with], net::key(with));
         // Named for one host, signed with another's key.
         if let Some(s) = e.signers.last_mut() {
-            s.host = net::HOSTS[signer].into();
+            s.by = net::HOSTS[signer].into();
         }
     }
     if c.rarely(16) {

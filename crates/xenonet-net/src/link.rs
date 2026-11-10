@@ -395,7 +395,7 @@ pub async fn fetch_roster(n: &Arc<Shared>, t: &Transport) {
     }
     let v = reply.body_json();
     for e in v.get("entries").and_then(Value::as_array).into_iter().flatten() {
-        match Entry::parse(e).and_then(|e| n.append(e)) {
+        match Entry::parse(e).map_err(NetError::from).and_then(|e| n.append(e)) {
             Ok(_) => {}
             Err(e) => {
                 n.log("net.roster", &format!("an entry from the gateway didn't extend this host's roster: {}", e.message));

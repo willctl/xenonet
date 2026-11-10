@@ -90,6 +90,14 @@ impl From<xenonet_id::IdError> for NetError {
     }
 }
 
+// A roster entry's refusal keeps its status and code: `roster-gap`,
+// `needs-approval` and the rest are the routes' answers.
+impl From<xenonet_log::chain::ChainError> for NetError {
+    fn from(e: xenonet_log::chain::ChainError) -> Self {
+        NetError::new(e.status, e.code, e.message)
+    }
+}
+
 impl From<std::io::Error> for NetError {
     fn from(e: std::io::Error) -> Self {
         NetError::internal(format!("the network's files: {e}"))

@@ -1,0 +1,22 @@
+[package]
+name = "xenonet-log"
+description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster) and a person's chain of device keys. Usable alone."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+xenonet-id.workspace = true
+
+[dev-dependencies]
+# A P-256 key standing in for a secure element's, in the person chain's
+# tests.
+ring.workspace = true
+
+[lints]
+workspace = true

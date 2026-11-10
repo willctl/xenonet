@@ -2297,6 +2297,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-id"
+version = "0.2.0"
+dependencies = [
+ "base64",
+ "ring",
+ "serde_json",
+ "x25519-dalek",
+ "xenonet-os",
+]
+
+[[package]]
 name = "xenonet-integrations"
 version = "0.2.0"
 dependencies = [
@@ -2315,6 +2326,14 @@ dependencies = [
  "xenonet-sources",
  "xenonet-state",
  "xenonet-text",
+]
+
+[[package]]
+name = "xenonet-log"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "xenonet-id",
 ]
 
 [[package]]
@@ -2342,7 +2361,6 @@ dependencies = [
 name = "xenonet-net"
 version = "0.2.0"
 dependencies = [
- "base64",
  "bytes",
  "reqwest",
  "ring",
@@ -2351,6 +2369,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "x25519-dalek",
+ "xenonet-id",
+ "xenonet-log",
  "xenonet-model",
  "xenonet-os",
  "xenonet-text",
