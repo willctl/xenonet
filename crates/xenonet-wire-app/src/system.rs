@@ -12,8 +12,8 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
+use xenonet_api::cores::{SystemStats, R};
 use xenonet_app::system_stats::{self as stats, Times};
-use xenonet_service::cores::{SystemStats, R};
 
 /// os.cpus(), os.totalmem(), os.freemem(), os.uptime(), as Node reads them
 /// on macOS, Linux and Windows.

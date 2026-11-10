@@ -22,18 +22,19 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use xenonet_api::cores::NetLink;
+use xenonet_api::cores::{self, Cores, State, R};
+use xenonet_api::wire::WireEnv;
 use xenonet_base::log::Log;
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_service::a2a::{A2a, A2aCores, A2aParts, Limits};
 use xenonet_service::config::Config;
-use xenonet_service::cores::{self, Cores, State, R};
 use xenonet_service::ctx::Ctx;
 use xenonet_service::gateway::actor_gateway::{ActorGateway, GatewayCores, GatewayHooks};
 use xenonet_service::gateway::network::NetService;
 use xenonet_service::http::{Peer, Req};
 use xenonet_service::routes::api;
-use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
 use xenonet_wire_engine::runtime::Runtime;
 
 const S1: &str = "claude:aaaaaaaa-0001";
@@ -268,14 +269,28 @@ impl Host {
             ("XENONET_PERMISSION_HOLD_MS", "6000"),
         ];
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
-        let mut config = Config::from(&[], &get);
+        let config = Config::from(&[], &get);
         let mut cores = Cores::pending(on, false, false);
         cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone() });
-        let env = WireEnv { version: "0.0.0-test".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
-        let world = xenonet_wire_engine::wire(&mut cores, &mut config, &env).expect("the engine's parts");
+        let env = WireEnv::new("0.0.0-test");
+        // As the binary's serve closure gives the engine its settings.
+        let setup = xenonet_wire_engine::runtime::Setup {
+            demo: config.demo,
+            actors: config.actors,
+            port: config.port,
+            home: config.home.clone(),
+            state_dir: config.state_dir.clone(),
+            projects_dir: config.projects_dir.clone(),
+            version: env.version.clone(),
+            root: config.root.clone(),
+            runs_bin: config.runs_bin.clone(),
+            permission_hold_ms: config.permission_hold_ms,
+            launcher_exec: config.launcher_exec.clone(),
+        };
+        let world = xenonet_wire_engine::wire(&mut cores, setup, &env).expect("the engine's parts");
         // As the binary's serve closure plugs it.
         let plugged = world.clone();
-        cores.on_net = Some(Arc::new(move |svc: &NetService| {
+        cores.on_net = Some(Arc::new(move |svc: &dyn NetLink| {
             svc.sinks().set(xenonet_wire_engine::network::plug(&plugged, svc.net()));
         }));
         cores.verify = Arc::new(You);
@@ -285,7 +300,7 @@ impl Host {
         env.emitter.bind(&ctx);
         let svc = NetService::open(options(&dir, name)).unwrap();
         if let Some(plug) = &ctx.cores.on_net {
-            plug(&svc);
+            plug(&*svc);
         }
         let _ = ctx.net.set(svc.clone());
         // The gateway's host: its actor gateway, with A2A, on the port of

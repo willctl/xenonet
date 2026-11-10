@@ -31,10 +31,9 @@ pub mod wakes;
 use runtime::{Runtime, Setup};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
+use xenonet_api::cores::Cores;
+use xenonet_api::wire::WireEnv;
 use xenonet_engine::store::{EngineStore, Shared};
-use xenonet_service::config::Config;
-use xenonet_service::cores::Cores;
-use xenonet_service::wire::WireEnv;
 
 /// A line for the service's log once it's up: what went wrong while the
 /// cores were made, before there was a log to write it in.
@@ -42,7 +41,7 @@ fn log_later(env: &WireEnv, level: &'static str, code: &'static str, message: St
     let env = env.clone();
     tokio::spawn(async move {
         for _ in 0..600 {
-            if env.emitter.ctx().is_some() {
+            if env.emitter.sink().is_some() {
                 env.emitter.log(level, code, &message);
                 return;
             }
@@ -51,29 +50,17 @@ fn log_later(env: &WireEnv, level: &'static str, code: &'static str, message: St
     });
 }
 
-/// The demo's made-up folders, never your own: its world, made now if the
-/// map's driver didn't make it, or the folder it would be in.
-fn demo_folders(cores: &Cores, config: &mut Config) {
-    if !config.demo || config.world.is_some() {
-        return;
-    }
-    match cores.demo.create_world() {
-        Ok(world) => config.use_world(&world),
-        Err(_) => config.demo_folders(),
-    }
-}
-
 /// Puts this area's cores in place of the pending ones: the engine's
 /// store, the process checks, the engine and delivery, and with actors on,
 /// the actors, their registration, wakes, reports and observers (never in
 /// the demo). The runtime it made, for the network's link to plug into
 /// (`network::plug`), or None when engine.sqlite couldn't be opened.
-pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Runtime>> {
-    let w = runtime(cores, config, env)?;
+pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime>> {
+    let w = runtime(cores, setup, env)?;
     cores.engine_store = Arc::new(store::Store(w.store.clone()));
     cores.verify = w.checks.clone();
     cores.engine = Arc::new(engine::EngineDriver(w.clone()));
-    cores.connect = Arc::new(connect::ConnectDriver::new(config));
+    cores.connect = Arc::new(connect::ConnectDriver::new(&w.setup));
     cores.channels = Arc::new(delivery::ChannelsDriver(w.clone()));
     cores.policy = Arc::new(delivery::PolicyDriver(w.clone()));
     cores.router = Arc::new(delivery::RouterDriver(w.clone()));
@@ -93,14 +80,13 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) -> Option<Arc
 
 /// The runtime, made on the map the cores already have; None when
 /// engine.sqlite can't be opened, and the engine's routes stay pending.
-pub fn runtime(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<Runtime>> {
+pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime>> {
     // The adapters the engine's checks and delivery ask for, in place
     // before anything asks: the binary installs them at start, and a test
     // that makes a runtime here gets them too.
     xenonet_platforms::install();
-    demo_folders(cores, config);
-    let file = Path::new(&config.state_dir).join("engine.sqlite");
-    if let Err(e) = std::fs::create_dir_all(&config.state_dir) {
+    let file = Path::new(&setup.state_dir).join("engine.sqlite");
+    if let Err(e) = std::fs::create_dir_all(&setup.state_dir) {
         log_later(env, "error", "engine.store", format!("the state folder can't be made: {e}"));
     }
     let store = match EngineStore::open(&file.to_string_lossy(), xenonet_base::time::now_ms()) {
@@ -114,30 +100,19 @@ pub fn runtime(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<
     // the doctor.
     let held = store.clone();
     let _ = cores.state.add_block(Arc::new(move || held.with(|s| store::block_health("engine", "store", &s.block.life))), None);
-    let setup = Setup {
-        demo: config.demo,
-        port: config.port,
-        home: config.home.clone(),
-        state_dir: config.state_dir.clone(),
-        projects_dir: config.projects_dir.clone(),
-        version: env.version.clone(),
-        root: config.root.clone(),
-        runs_bin: config.runs_bin.clone(),
-        permission_hold_ms: config.permission_hold_ms,
-    };
     let map = map::Map::new(cores.state.clone());
     let sys = procs::System::new();
     let checks = Arc::new(verify::Checks::new(store.clone(), sys.clone()));
     // The settings a Claude Code session starts with to listen after its
     // turns, which a resumed turn gets too.
-    let listen_file = if config.demo {
+    let listen_file = if setup.demo {
         None
     } else {
-        delivery::listen_settings(&config.state_dir, config.port).map_err(|e| log_later(env, "warn", "delivery.listen", format!("listen settings: {e}"))).ok()
+        delivery::listen_settings(&setup.state_dir, setup.port).map_err(|e| log_later(env, "warn", "delivery.listen", format!("listen settings: {e}"))).ok()
     };
-    let actors = if config.actors {
-        let names = actors::DemoNames::new(&config.projects_dir);
-        match actors::ActorSide::new(store.clone(), config.demo, &map, names) {
+    let actors = if setup.actors {
+        let names = actors::DemoNames::new(&setup.projects_dir);
+        match actors::ActorSide::new(store.clone(), setup.demo, &map, names) {
             Ok(a) => Some(a),
             Err(e) => {
                 log_later(env, "error", "actors.start", format!("the actors couldn't be read: {e}"));
@@ -147,9 +122,10 @@ pub fn runtime(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<
     } else {
         None
     };
-    let registration = actors.as_ref().map(|_| registration::RegSide::new(store.clone(), &config.home));
-    let wakes = actors.as_ref().map(|_| wakes::WakeSide::new(store.clone(), config.demo, &env.version));
-    let state_dir = Path::new(&config.state_dir);
+    let registration = actors.as_ref().map(|_| registration::RegSide::new(store.clone(), &setup.home));
+    let wakes = actors.as_ref().map(|_| wakes::WakeSide::new(store.clone(), setup.demo, &env.version));
+    let (demo, state_dir) = (setup.demo, setup.state_dir.clone());
+    let state_dir = Path::new(&state_dir);
     let w = Arc::new(Runtime {
         setup,
         env: env.clone(),
@@ -165,7 +141,7 @@ pub fn runtime(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<
             Some(state_dir.join("delivery.json").to_string_lossy().into_owned()),
             Some(state_dir.join("delivery-audit.jsonl").to_string_lossy().into_owned()),
         ),
-        router: delivery::RouterSide::new(config.demo, listen_file, state_dir),
+        router: delivery::RouterSide::new(demo, listen_file, state_dir),
         channels: delivery::ChannelSide::default(),
         actors,
         registration,
@@ -177,7 +153,7 @@ pub fn runtime(cores: &Cores, config: &mut Config, env: &WireEnv) -> Option<Arc<
         asks: asks::AskSide::default(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
-    if w.actors.is_some() && !config.demo {
+    if w.actors.is_some() && !demo {
         observers::make(&w);
     }
     Some(w)

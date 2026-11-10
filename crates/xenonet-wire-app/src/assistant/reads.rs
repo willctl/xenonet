@@ -18,12 +18,12 @@ use std::time::Duration;
 use xenonet_actors::adapters::{ADAPTERS, TRANSPORTS};
 use xenonet_actors::limits::Buckets;
 use xenonet_actors::remote_presence::{self, RemotePresence};
+use xenonet_api::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, State, R};
+use xenonet_api::wire::Emitter;
 use xenonet_assistant::cursors::Cursors;
 use xenonet_assistant::service::{self, Config, Inflight, LIMITS};
 use xenonet_assistant::{audit, fixtures, projection, source};
 use xenonet_schema::typed;
-use xenonet_service::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, State, R};
-use xenonet_service::wire::Emitter;
 
 pub const RESULT_SCHEMA: &str = "xenonet.assistant.result.v1";
 pub const ERROR_SCHEMA: &str = "xenonet.assistant.error.v1";
@@ -205,8 +205,8 @@ impl remote_presence::Host for Presence<'_> {
     fn on_read(&mut self, read: Value) {
         let connection = xenonet_base::text::js_string(&read["connection"]);
         let transport = self.r.engine_store.connection(&connection).ok().flatten().and_then(|c| c.get("transport_kind").cloned()).unwrap_or(Value::Null);
-        if let Some(ctx) = self.r.emitter.ctx() {
-            ctx.broadcast("remote-read", &json!({ "actor": read["actor"], "transport": transport, "reach": read["reach"], "at": read["at"] }));
+        if let Some(sink) = self.r.emitter.sink() {
+            sink.broadcast("remote-read", &json!({ "actor": read["actor"], "transport": transport, "reach": read["reach"], "at": read["at"] }));
         }
     }
 }
@@ -424,7 +424,7 @@ impl Reads {
     /// The fixture service's read (createFixtureService): made-up data,
     /// for the pairing's preview.
     pub async fn fixture_read(&self, operation: &str, labels: bool) -> Value {
-        let request_id = json!(format!("r_{}", xenonet_service::borrowed::random_uuid()));
+        let request_id = json!(format!("r_{}", xenonet_os::random_uuid()));
         let cfg = config(&self.version);
         let b = service::begin(&cfg, &json!({ "request_id": request_id, "operation": operation, "arguments": {} }));
         let (Some(op), Some(tool), None) = (b.op.clone(), b.tool.clone(), b.no.as_ref()) else { return Value::Null };
@@ -452,7 +452,7 @@ impl Reads {
         for op in ["projects", "sessions", "attention"] {
             synthetic.insert(op.into(), self.fixture_read(op, labels).await);
         }
-        let places: Vec<(String, String)> = chosen.into_iter().map(|place| (format!("prj_{}", xenonet_service::borrowed::random_uuid()), place)).collect();
+        let places: Vec<(String, String)> = chosen.into_iter().map(|place| (format!("prj_{}", xenonet_os::random_uuid()), place)).collect();
         let policy = json!({ "labels": labels, "lookbackMs": projection::WINDOW_MS, "places": places.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>() });
         let t = now_ms();
         let view = self.view()?;
@@ -558,7 +558,7 @@ impl Audit for AuditCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xenonet_service::cores::Pending;
+    use xenonet_api::cores::Pending;
 
     // test/assistant-service.test.js's argument cases.
     #[test]

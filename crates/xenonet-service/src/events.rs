@@ -100,6 +100,13 @@ impl Events {
     }
 }
 
+/// The stream as the relay that serves this host's map follows it.
+impl xenonet_api::events::EventStream for Events {
+    fn subscribe(&self, own_only: bool) -> mpsc::UnboundedReceiver<Bytes> {
+        Events::subscribe(self, own_only)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

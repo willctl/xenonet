@@ -23,10 +23,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
+use xenonet_api::From;
 use xenonet_base::network::{Kind as FrameKind, To};
 use xenonet_base::sync::Locked;
 use xenonet_base::time::now_ms;
-use xenonet_service::glue::From;
 
 /// The reserved target an ask crosses to window hosts as.
 pub const TARGET: &str = "xenonet:ask";

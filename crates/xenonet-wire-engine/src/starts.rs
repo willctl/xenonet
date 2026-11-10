@@ -25,13 +25,13 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xenonet_api::From;
 use xenonet_base::ids::YOU;
 use xenonet_base::network::{Kind as FrameKind, To};
 use xenonet_base::sync::Locked;
 use xenonet_base::time::now_ms;
 use xenonet_engine::delivery::reach::{self, Action, Decision, Kind, Sender, Settings, Start, Wake};
 use xenonet_engine::delivery::starts::{self, Request, TARGET};
-use xenonet_service::glue::From;
 
 /// How long Claude Code waits on an MCP tool: a minute past the permission
 /// tool's hold, so a prompt waiting for you isn't cut short.

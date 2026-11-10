@@ -90,6 +90,10 @@ url = "2"
 # in the lock through url's idna.
 icu_normalizer = "2.1"
 xenonet-mcp = { path = "crates/xenonet-mcp" }
+# The typed protocol between the service and its cores' drivers.
+xenonet-api = { path = "crates/xenonet-api" }
+# The system as XenoNet reads it: home, platform, random ids, fetch, lines.
+xenonet-os = { path = "crates/xenonet-os" }
 xenonet-service = { path = "crates/xenonet-service" }
 # The binary's processes: the service's sockets, timers and children, its
 # HTTP API (hyper, with XenoNet's own router on top), and the MCP servers

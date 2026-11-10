@@ -1,6 +1,7 @@
 //! The engine: which process is on the other end of a connection
 //! (`procs`), whether a request made in an agent's or an actor's name
-//! comes from it (`verify`), messages, claims and views (`engine`),
+//! comes from it (`verify`), messages, claims and views (`engine`), the
+//! agents it knows of, kept current as they change (`index`),
 //! delivery (`delivery`), the network's side of them (`network`), and the
 //! store they keep (`store`, over `sql`).
 //!
@@ -12,6 +13,7 @@ pub mod attest;
 pub mod delivery;
 pub mod engine;
 pub mod host;
+pub mod index;
 pub mod network;
 pub mod processes;
 pub mod procs;

@@ -17,14 +17,11 @@ pub mod assistant_endpoint;
 pub mod borrowed;
 pub mod component;
 pub mod config;
-pub mod cores;
 pub mod ctx;
 pub mod events;
 pub mod gateway;
 pub mod glue;
 pub mod http;
-pub mod lines;
-pub mod net;
 pub mod routes;
 pub mod rpc;
 pub mod serve;
@@ -32,6 +29,11 @@ pub mod static_files;
 pub mod terminals;
 pub mod upstream;
 pub mod window_key;
-pub mod wire;
+
+// The cores' traits and what the drivers are given are xenonet-api's,
+// fetch and output lines xenonet-os's; the routes and the tests reach them
+// at their old paths here.
+pub use xenonet_api::{cores, wire};
+pub use xenonet_os::{lines, net};
 
 pub use serve::run;

@@ -11,9 +11,9 @@ use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+use xenonet_api::cores::{Store, R};
 use xenonet_blocks::lifecycle::Lifecycle;
 use xenonet_blocks::store::{read_versioned, write_atomic, DocHooks, Halt, Report};
-use xenonet_service::cores::{Store, R};
 use xenonet_state::{statefile, store};
 
 const DEBOUNCE_MS: u64 = 200;

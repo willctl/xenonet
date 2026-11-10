@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncWriteExt, BufReader};
+use xenonet_api::cores::{McpInfo, State, R};
 use xenonet_app::{mcp_discovery as discovery, mcp_info as info};
-use xenonet_service::cores::{McpInfo, State, R};
 
 pub struct Catalog {
     state: Arc<dyn State>,
@@ -131,7 +131,7 @@ impl Channel for Stdio {
         self.stdin.write_all(line.as_bytes()).await.map_err(|_| why("Error", None))?;
         let wait = async {
             loop {
-                let Some(l) = xenonet_service::lines::next_line(&mut self.out, &mut self.buf).await else { return Err(why("Error", Some(json!("ECONNRESET")))) };
+                let Some(l) = xenonet_os::lines::next_line(&mut self.out, &mut self.buf).await else { return Err(why("Error", Some(json!("ECONNRESET")))) };
                 let Ok(msg) = xenonet_base::json::parse(&l) else { continue };
                 // The server asking something of its own (roots, sampling):
                 // this client offers nothing.
@@ -183,7 +183,7 @@ impl Http {
         if let Some(s) = &self.session {
             headers.push(("mcp-session-id".into(), s.clone()));
         }
-        let res = xenonet_service::net::fetch(
+        let res = xenonet_os::net::fetch(
             "POST",
             &self.url,
             &headers,
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn the_demos_catalog_is_made_up() {
-        let c = Catalog::new(&json!({ "homeDir": "/nowhere" }), "0.0.0", Arc::new(xenonet_service::cores::Pending));
+        let c = Catalog::new(&json!({ "homeDir": "/nowhere" }), "0.0.0", Arc::new(xenonet_api::cores::Pending));
         let d = c.demo("agent-wiki").unwrap();
         assert_eq!(d["server"], "agent-wiki");
     }
@@ -363,7 +363,7 @@ done"#;
     #[tokio::test]
     async fn a_server_no_one_configured_is_from_what_the_sessions_show() {
         let home = std::env::temp_dir().join(format!("xenonet-wire-mcp-{}", std::process::id()));
-        let c = Catalog::new(&json!({ "homeDir": home, "claudeConfigFile": home.join(".claude.json") }), "0.0.0", Arc::new(xenonet_service::cores::Pending));
+        let c = Catalog::new(&json!({ "homeDir": home, "claudeConfigFile": home.join(".claude.json") }), "0.0.0", Arc::new(xenonet_api::cores::Pending));
         let sessions = json!([{ "id": "claude:a", "app": "claude", "title": "t", "status": "idle", "mcp": [{ "server": "nowhere", "ts": 5 }] }]);
         let r = c.get("nowhere", &sessions, false).await.unwrap();
         assert_eq!((r["server"].clone(), r["lastCall"].clone(), r["catalog"].clone()), (json!("nowhere"), json!(5), json!(false)));

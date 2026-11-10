@@ -153,6 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn repos_groups_and_a_folder_that_isnt_there() {
+        xenonet_platforms::install();
         let root = std::env::temp_dir().join(format!("xenonet-wire-projects-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for f in ["api/.git/HEAD", "api/package.json", "labs/geo/.git/HEAD", "labs/sim/.git/HEAD", "notes/todo.md"] {

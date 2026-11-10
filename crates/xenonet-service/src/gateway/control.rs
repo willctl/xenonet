@@ -572,3 +572,11 @@ impl GatewayControl {
         self.gateway().status()["url"].clone()
     }
 }
+
+/// The status as the doctor's driver reads it.
+#[async_trait::async_trait]
+impl xenonet_api::wire::GatewayStatus for GatewayControl {
+    async fn status(&self) -> R<Value> {
+        GatewayControl::status(self).await
+    }
+}

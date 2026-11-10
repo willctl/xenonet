@@ -10,13 +10,13 @@ use serde_json::{Map, Value};
 use std::sync::Arc;
 use xenonet_actors::registration::Fail;
 use xenonet_actors::reports;
+use xenonet_api::cores::{CoreError, Reports, R};
 use xenonet_base::sync::Locked;
 use xenonet_base::time::now_ms;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::sql::Bind;
 use xenonet_model::actor::{ReportEvent, ReportTarget};
 use xenonet_schema::typed;
-use xenonet_service::cores::{CoreError, Reports, R};
 
 /// What a report reads besides the registry: the actor's processes as
 /// given, how to read a process's lineage, the indexes already dropped,

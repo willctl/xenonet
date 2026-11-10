@@ -6,9 +6,10 @@
 
 use serde_json::{json, Value};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
-use xenonet_service::cores::{CoreError, Themes, R};
-use xenonet_service::wire::Emitter;
+use xenonet_api::cores::{CoreError, Store, Themes, R};
+use xenonet_api::wire::Emitter;
 
 pub struct ThemeFiles;
 
@@ -46,7 +47,7 @@ fn signature(dir: &Path) -> Vec<(String, u64, u128)> {
 /// fs.watch on the themes folder, as a look every half second: no
 /// dependency for it, and a theme's edit is a person's, not a stream. A
 /// change goes out 150 ms after the last one seen, as the JS's debounce.
-pub fn watch(dir: String, emitter: Emitter) {
+pub fn watch(dir: String, store: Arc<dyn Store>, emitter: Emitter) {
     let folder = Path::new(&dir).to_path_buf();
     if std::fs::create_dir_all(&folder).is_err() {
         return;
@@ -62,11 +63,11 @@ pub fn watch(dir: String, emitter: Emitter) {
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
             last = signature(&folder);
-            let Some(ctx) = emitter.ctx() else { continue };
-            if let Ok(theme) = xenonet_service::routes::current_theme(&ctx) {
-                ctx.broadcast("theme", &theme);
+            let Some(sink) = emitter.sink() else { continue };
+            if let Ok(theme) = ThemeFiles.current(&dir, &*store) {
+                sink.broadcast("theme", &theme);
             }
-            ctx.broadcast("themes", &json!({}));
+            sink.broadcast("themes", &json!({}));
         }
     });
 }

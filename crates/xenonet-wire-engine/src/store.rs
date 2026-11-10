@@ -2,9 +2,9 @@
 //! service reads it (the EngineStore trait), and its health as a block.
 
 use serde_json::Value;
+use xenonet_api::cores::{CoreError, EngineStore as Trait, R};
 use xenonet_engine::sql::SqlError;
 use xenonet_engine::store::{row_json, Shared};
-use xenonet_service::cores::{CoreError, EngineStore as Trait, R};
 
 fn core_error(e: SqlError) -> CoreError {
     CoreError::new(e.message().to_string())

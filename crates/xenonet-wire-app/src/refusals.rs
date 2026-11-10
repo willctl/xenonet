@@ -8,7 +8,7 @@ use crate::fx::Locked;
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Mutex;
-use xenonet_service::cores::{CoreError, Refusals, R};
+use xenonet_api::cores::{CoreError, Refusals, R};
 use xenonet_sources::refusals::{demo, query, store};
 
 pub struct RefusalStore {

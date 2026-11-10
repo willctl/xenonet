@@ -550,7 +550,7 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
   dispatches in the order `api()` does, through every check in its place.
 - **The cores behind traits.** The service's routes call each core
   through a trait shaped after the JS object `server/index.js` hands them
-  (`crates/xenonet-service/src/cores`: `State`, `Engine`, `Verify`,
+  (`crates/xenonet-api/src/cores`: `State`, `Engine`, `Verify`,
   `Actors`…), JSON in and out. A core not in Rust yet answers 501 with
   `{ error, code: "pending" }`, and a check that can't run refuses, until
   a driver puts the real core in its place.
@@ -561,11 +561,15 @@ Each step leaves `npm test` passing on JS, and adds to `parity.json`.
   world, the schema checks and drift), `xenonet-wire-engine` (the engine,
   delivery, verify and the actors) and `xenonet-wire-app` (hosts and the
   hub, the assistant, the doctor, integrations and the app's own parts).
-  `xenonet serve` runs them in that order, the map first, since the demo's
-  world moves the folders the rest read; they reach each other only
-  through the traits. A core's events go through an `Emitter` to
-  `server/index.js`'s handlers (`glue.rs`), fetch through one HTTPS client
-  (`net.rs`: reqwest on rustls, with the system's certificates), and a
+  They depend on `xenonet-api` and never on the service. `xenonet serve`
+  makes the demo's world first, since it moves the folders the rest read,
+  then runs them in that order, giving each the narrow settings it reads
+  (`Settings`, `Setup`); they reach each other only through the traits. A
+  core's events go through an `Emitter` to the service's `EventSink`
+  (`server/index.js`'s handlers, `glue.rs`), what a driver needs of the
+  service later (the decider, the gateway's status) comes through slots in
+  its `WireEnv`, fetch goes through one HTTPS client (`xenonet-os`'s
+  `net.rs`: reqwest on rustls, with the system's certificates), and a
   task of the hosts slice runs on a thread of its own, its requests
   answered on the service's runtime. The command's drivers
   (`crates/xenonet-cli/src/cores`) do the same for the commands.

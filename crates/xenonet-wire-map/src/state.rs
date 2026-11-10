@@ -30,11 +30,11 @@ use std::time::Duration;
 use tokio::sync::watch;
 use xenonet_adapter::apps::{tailed_or_text, untailed, App};
 use xenonet_adapter::reader::{Lister, ListerEnv};
+use xenonet_api::cores::{CoreError, Decider, Runs, State, R};
+use xenonet_api::wire::{Emitter, Slot, WireEnv};
+use xenonet_api::From;
 use xenonet_base::paths::path_key;
 use xenonet_base::text::{js_string, truthy};
-use xenonet_service::cores::{CoreError, Runs, State, R};
-use xenonet_service::glue::From;
-use xenonet_service::wire::Emitter;
 use xenonet_sources::reported_runs::ReportedRuns;
 use xenonet_state::state::{self as decide, Memory};
 use xenonet_state::{classify, digest, redact, rename, workspace};
@@ -91,6 +91,8 @@ pub struct MapState {
     store: Arc<StateStore>,
     vendor: Arc<Vendor>,
     emitter: Emitter,
+    /// The decider the project picks ask, once the service has it.
+    decider: Slot<Arc<dyn Decider>>,
     readers: Readers,
     pub live: Arc<Live>,
     /// The adapters' listers of their apps' sessions, in the registry's
@@ -155,8 +157,10 @@ fn root_of<'a>(cfg: &'a MapConfig, app: &App) -> &'a str {
 
 impl MapState {
     /// A state over `cfg`, with a lister for each app the adapters list
-    /// sessions of, made on the runtime this is called on.
-    pub fn new(cfg: MapConfig, store: Arc<StateStore>, vendor: Arc<Vendor>, emitter: Emitter, readers: Readers, live: Arc<Live>, version: &str) -> Arc<MapState> {
+    /// sessions of, made on the runtime this is called on: its events,
+    /// version and decider are `env`'s.
+    pub fn new(cfg: MapConfig, store: Arc<StateStore>, vendor: Arc<Vendor>, env: &WireEnv, readers: Readers, live: Arc<Live>) -> Arc<MapState> {
+        let (emitter, decider, version) = (env.emitter.clone(), env.decider.clone(), env.version.as_str());
         let codex_roots =
             [std::path::Path::new(&cfg.codex_home).join("sessions"), std::path::Path::new(&cfg.codex_home).join("archived_sessions")].map(|p| p.to_string_lossy().into_owned());
         let grok_root = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
@@ -209,6 +213,7 @@ impl MapState {
             store: store.clone(),
             vendor: vendor.clone(),
             emitter,
+            decider,
             readers,
             live: live.clone(),
             listers,
@@ -1261,8 +1266,8 @@ impl State for MapState {
             }
         };
         // Who sorted them: Codex, or the decision model by its name.
-        let by = match (decider, self.emitter.ctx()) {
-            (true, Some(ctx)) => ctx.cores.decider.status().await.ok().and_then(|s| s.get("model").cloned()).unwrap_or(Value::Null),
+        let by = match (decider, self.decider.get()) {
+            (true, Some(d)) => d.status().await.ok().and_then(|s| s.get("model").cloned()).unwrap_or(Value::Null),
             (true, None) => Value::Null,
             (false, _) => json!("codex"),
         };
@@ -1541,12 +1546,12 @@ impl MapState {
     // The decision model's picks (classify.js's askDeciderForPicks): the
     // outline as one choice a folder, a batch at a time.
     async fn decider_picks(&self, outline: &[Value]) -> R<Value> {
-        let Some(ctx) = self.emitter.ctx() else { return Err(CoreError::pending("core/decide.js")) };
+        let Some(decider) = self.decider.get().cloned() else { return Err(CoreError::pending("core/decide.js")) };
         let state = json!({ "about": classify::DECIDER_ABOUT, "folders": outline });
         let mut picks = Vec::new();
         let mut offset = 0.0;
         for batch in classify::jev_questions(outline) {
-            let r = ctx.cores.decider.decide(json!({ "kind": "projects", "state": state, "questions": batch.get("questions").cloned().unwrap_or(Value::Null) })).await?;
+            let r = decider.decide(json!({ "kind": "projects", "state": state, "questions": batch.get("questions").cloned().unwrap_or(Value::Null) })).await?;
             let folders = items(batch.get("folders")).to_vec();
             picks.extend(classify::picks_from_answers(r.get("answers").unwrap_or(&Value::Null), &folders, offset));
             offset += folders.len() as f64;

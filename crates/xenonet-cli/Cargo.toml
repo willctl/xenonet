@@ -35,6 +35,9 @@ xenonet-doctor.workspace = true
 xenonet-mcp.workspace = true
 xenonet-schema.workspace = true
 xenonet-service.workspace = true
+# The core traits, which the service shares with the drivers, and fetch.
+xenonet-api.workspace = true
+xenonet-os.workspace = true
 # The cores the commands call, run natively (src/cores).
 xenonet-app.workspace = true
 xenonet-assistant.workspace = true

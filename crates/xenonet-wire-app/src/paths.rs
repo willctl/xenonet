@@ -2,9 +2,9 @@
 //! `paths`, the MCP catalog's files), through xenonet-app's config: worked
 //! out once, after the demo's world has moved the folders.
 
+use crate::Settings;
 use serde_json::{json, Map, Value};
 use xenonet_app::config::{config, Field, Finds};
-use xenonet_service::config::Config;
 
 struct Disk;
 
@@ -57,12 +57,12 @@ impl Finds for Found<'_> {
 }
 
 /// config.js's object, as JSON: its Sets as lists.
-pub fn js_config(c: &Config) -> Value {
+pub fn js_config(c: &Settings) -> Value {
     let env = crate::fx::env_map();
     let argv: Vec<String> = [c.demo.then_some("--demo"), c.dev.then_some("--dev")].into_iter().flatten().map(String::from).collect();
     // Your own home, as os.homedir() reads it; the demo's world moves the
     // folders on top of it.
-    let home = xenonet_service::config::home_dir(&|k| std::env::var(k).ok());
+    let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
     let mut finds = Found { world: c.world.as_ref(), env: &env, home: &home };
     let made = config(&argv, &env, &home, crate::fx::platform(), &mut finds);
     let mut out = Map::new();

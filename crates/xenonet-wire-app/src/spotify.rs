@@ -12,9 +12,9 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xenonet_api::cores::{CoreError, Kind, Spotify, R};
+use xenonet_api::wire::Emitter;
 use xenonet_app::spotify::{self as core, Ask, Failed, Got, SpotifyError};
-use xenonet_service::cores::{CoreError, Kind, Spotify, R};
-use xenonet_service::wire::Emitter;
 
 fn spotify_error(e: SpotifyError) -> CoreError {
     CoreError::of(Kind::Spotify, e.status, e.code, e.message)
@@ -56,7 +56,7 @@ impl SpotifyRemote {
                 }
                 Ask::Fetch { url, method, headers, body, timeout_ms, fallback, skip } => {
                     let headers: Vec<(String, String)> = headers.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
-                    match xenonet_service::net::fetch(method, url, &headers, body.clone().map(String::into_bytes), Duration::from_millis(*timeout_ms as u64)).await {
+                    match xenonet_os::net::fetch(method, url, &headers, body.clone().map(String::into_bytes), Duration::from_millis(*timeout_ms as u64)).await {
                         Ok(res) => {
                             let body = if skip.contains(&res.status) { Value::Null } else { xenonet_base::json::parse(&res.text()).unwrap_or_else(|_| fallback.clone()) };
                             Got::Response { ok: res.ok(), status: res.status, body, retry_after: res.header("retry-after").map(str::to_string) }

@@ -10,13 +10,13 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::registration::{Fail, Host, Registration as Core, Store};
 use xenonet_actors::store as rows;
+use xenonet_api::cores::{CoreError, Kind, Registration, R};
+use xenonet_api::From;
 use xenonet_base::sync::Locked;
 use xenonet_base::text::js_string;
 use xenonet_base::time::now_ms;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::store::Shared;
-use xenonet_service::cores::{CoreError, Kind, Registration, R};
-use xenonet_service::glue::From;
 
 /// What registering asks of the world: the registry, the clock, and its
 /// own observing().

@@ -132,10 +132,10 @@ pub fn lock<T: ?Sized>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> 
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-static EMITTER: std::sync::OnceLock<xenonet_service::wire::Emitter> = std::sync::OnceLock::new();
+static EMITTER: std::sync::OnceLock<xenonet_api::wire::Emitter> = std::sync::OnceLock::new();
 
 /// Where the drivers' log lines go: the service's error log.
-pub fn set_log(emitter: &xenonet_service::wire::Emitter) {
+pub fn set_log(emitter: &xenonet_api::wire::Emitter) {
     let _ = EMITTER.set(emitter.clone());
 }
 

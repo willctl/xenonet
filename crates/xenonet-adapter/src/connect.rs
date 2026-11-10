@@ -845,33 +845,40 @@ pub struct FakeMachine {
     pub asked: Vec<String>,
 }
 
+/// A path as the fake keeps it: with / for \\, so a test's keys are the
+/// same on every system, though the code joins paths as the machine does.
+#[cfg(any(test, feature = "testing"))]
+fn key(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 #[cfg(any(test, feature = "testing"))]
 impl Machine for FakeMachine {
     fn read_text(&mut self, file: &str) -> Result<String> {
-        self.files.get(file).cloned().ok_or_else(|| Problem::coded("no such file", "ENOENT"))
+        self.files.get(&key(file)).cloned().ok_or_else(|| Problem::coded("no such file", "ENOENT"))
     }
     fn write_text(&mut self, file: &str, text: &str) -> Result<()> {
-        self.files.insert(file.into(), text.into());
+        self.files.insert(key(file), text.into());
         Ok(())
     }
     fn exists(&mut self, path: &str) -> bool {
-        self.files.contains_key(path)
+        self.files.contains_key(&key(path))
     }
     fn make_dir(&mut self, _dir: &str) -> Result<()> {
         Ok(())
     }
     fn copy(&mut self, from: &str, to: &str) -> Result<()> {
-        let text = self.files.get(from).cloned().unwrap_or_default();
-        self.files.insert(to.into(), text);
+        let text = self.files.get(&key(from)).cloned().unwrap_or_default();
+        self.files.insert(key(to), text);
         Ok(())
     }
     fn rename(&mut self, from: &str, to: &str) -> Result<()> {
-        let text = self.files.remove(from).unwrap_or_default();
-        self.files.insert(to.into(), text);
+        let text = self.files.remove(&key(from)).unwrap_or_default();
+        self.files.insert(key(to), text);
         Ok(())
     }
     fn remove(&mut self, file: &str) -> Result<()> {
-        self.files.remove(file);
+        self.files.remove(&key(file));
         Ok(())
     }
     fn cli(&mut self, name: &str) -> Option<String> {
@@ -901,6 +908,19 @@ mod tests {
             platform: "darwin".into(),
             instances: vec![Instance { id: "installed".into(), name: "XenoNet".into(), port: 47840.0 }, Instance { id: "dev".into(), name: "XenoNet Dev".into(), port: 47842.0 }],
         }
+    }
+
+    #[test]
+    fn the_fake_machine_takes_windows_paths_as_the_tests_write_them() {
+        // The code joins paths with \\ on Windows; the tests key files with /.
+        let mut m = FakeMachine::default();
+        m.files.insert("/h/.grok/config.toml".into(), "x".into());
+        assert!(m.exists("\\h\\.grok\\config.toml"));
+        assert_eq!(m.read_text("\\h\\.grok\\config.toml").unwrap(), "x");
+        m.write_text("\\h\\.codex\\hooks.json", "{}").unwrap();
+        assert_eq!(m.files["/h/.codex/hooks.json"], "{}");
+        m.rename("\\h\\.codex\\hooks.json", "/h/.codex/hooks.old").unwrap();
+        assert!(m.exists("/h/.codex/hooks.old") && !m.exists("\\h\\.codex\\hooks.json"));
     }
 
     #[test]

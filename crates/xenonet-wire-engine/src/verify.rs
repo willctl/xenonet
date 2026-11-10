@@ -8,13 +8,13 @@ use crate::procs::{self, System};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_api::cores::Verify;
+use xenonet_api::peer::Peer;
 use xenonet_base::json::number;
 use xenonet_base::time::now_ms;
 use xenonet_engine::procs::Link;
 use xenonet_engine::store::Shared;
 use xenonet_engine::verify::{Fail, Host, Verdict, Verifier};
-use xenonet_service::cores::Verify;
-use xenonet_service::http::Peer;
 
 /// What a check reads: procs, the clock, and the process on the other end
 /// of this request's socket.

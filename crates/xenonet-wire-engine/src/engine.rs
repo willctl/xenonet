@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
+use xenonet_api::cores::{CoreError, Engine, Kind, R};
+use xenonet_api::From;
 use xenonet_base::sync::Locked;
 use xenonet_base::text::{js_number, js_string};
 use xenonet_base::time::now_ms;
 use xenonet_engine::engine::{Fail, ACTIVE_MS};
 use xenonet_engine::host::{self, Collaborators, IndexEntry, Repo, StatusSet};
-use xenonet_service::cores::{CoreError, Engine, Kind, R};
-use xenonet_service::glue::From;
 
 const CLAIM_MINUTES: f64 = 60.0;
 
@@ -294,6 +294,9 @@ impl host::MapReader for Side<'_> {
     }
     fn index(&self) -> xenonet_engine::engine::Result<Vec<IndexEntry>> {
         self.w.map.index()
+    }
+    fn nodes_version(&self) -> Option<u64> {
+        self.w.map.version()
     }
     fn node(&self, id: &str) -> xenonet_engine::engine::Result<Option<Value>> {
         self.w.map.node(id)

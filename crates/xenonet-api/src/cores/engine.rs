@@ -4,7 +4,7 @@
 //! (core/delivery/channel.js), as the routes call them.
 
 use super::{pending, refused, Pending, R};
-use crate::http::Peer;
+use crate::peer::Peer;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::time::Duration;

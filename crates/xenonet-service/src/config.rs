@@ -76,11 +76,8 @@ pub fn old_gateway_port_of(port: u16) -> u16 {
     port.checked_add(OLD_GATEWAY_OFFSET).unwrap_or_else(|| gateway_port_of(port))
 }
 
-/// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.
-pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> String {
-    let named = if cfg!(windows) { env("USERPROFILE") } else { env("HOME") };
-    named.filter(|h| !h.is_empty()).unwrap_or_else(|| if cfg!(windows) { "C:\\".into() } else { "/".into() })
-}
+/// os.homedir(), which the drivers read too.
+pub use xenonet_os::home_dir;
 
 fn platform() -> &'static str {
     crate::borrowed::platform()
@@ -197,6 +194,20 @@ impl Config {
         take("stateDir", &mut self.state_dir);
         take("cacheDir", &mut self.cache_dir);
         self.world = Some(world.clone());
+    }
+
+    /// The demo's world, made by `demo` when it isn't yet, and its folders;
+    /// or, when it can't be made, the folders it would be in. Every driver
+    /// takes its folders after this, and the service again before it
+    /// starts.
+    pub fn take_world(&mut self, demo: &dyn crate::cores::Demo) {
+        if !self.demo || self.world.is_some() {
+            return;
+        }
+        match demo.create_world() {
+            Ok(world) => self.use_world(&world),
+            Err(_) => self.demo_folders(),
+        }
     }
 
     /// The demo's folders when its world can't be made yet: the folder it

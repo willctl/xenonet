@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use xenonet_api::cores::{self, R};
 use xenonet_service::assistant_endpoint::Endpoint;
-use xenonet_service::cores::{self, R};
 
 const GRANT: &str = "gr_0a1b2c3d4e5f60718293a4b5";
 

@@ -16,15 +16,18 @@ use crate::verify::Checks;
 use crate::wakes::WakeSide;
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
+use xenonet_api::cores::State;
+use xenonet_api::wire::WireEnv;
+use xenonet_api::From;
 use xenonet_engine::store::Shared;
-use xenonet_service::cores::State;
-use xenonet_service::glue::From;
-use xenonet_service::wire::WireEnv;
 
-/// What the area runs as.
+/// What the area runs as: the service's settings it reads, once the demo's
+/// world has moved their folders.
 #[derive(Clone, Debug)]
 pub struct Setup {
     pub demo: bool,
+    /// Actors on (XENONET_ACTORS isn't off).
+    pub actors: bool,
     pub port: u16,
     pub home: String,
     pub state_dir: String,
@@ -37,6 +40,8 @@ pub struct Setup {
     pub runs_bin: Option<String>,
     /// How long a run's permission prompt waits for you (asks.rs).
     pub permission_hold_ms: Option<f64>,
+    /// XENONET_LAUNCHER_EXEC: installed XenoNet's launcher started it.
+    pub launcher_exec: Option<String>,
 }
 
 pub struct Runtime {

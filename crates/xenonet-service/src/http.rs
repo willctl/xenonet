@@ -11,24 +11,7 @@ use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use xenonet_base::json;
 
-/// The two ends of a request's connection: what core/engine/verify.js reads
-/// off `req.socket` to find the process that sent it; and the connection
-/// itself (`conn`, never given to another), so what's found for it can be
-/// kept for its next requests, as verify.js keeps it on the socket.
-#[derive(Clone, Copy, Debug)]
-pub struct Peer {
-    pub remote: SocketAddr,
-    pub local: SocketAddr,
-    pub conn: u64,
-}
-
-impl Peer {
-    /// A new connection's two ends.
-    pub fn new(remote: SocketAddr, local: SocketAddr) -> Peer {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        Peer { remote, local, conn: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
-    }
-}
+pub use xenonet_api::peer::Peer;
 
 /// Why a body couldn't be read: too big (413) or not JSON (400), with the
 /// words readJson uses.

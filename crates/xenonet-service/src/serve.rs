@@ -11,7 +11,7 @@ use crate::cores::{CoreError, Cores};
 use crate::ctx::Ctx;
 use crate::http::{node_headers, parse_target, raw_query, Body, Peer, Reply, ReplyBody, Req};
 use crate::routes;
-use crate::wire::{Emitter, VendorReaders, WireEnv};
+use crate::wire::WireEnv;
 use bytes::Bytes;
 use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
@@ -29,7 +29,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use xenonet_base::log::{log_dir, ErrInfo, Log, MAX_BYTES};
 use xenonet_base::sync::Locked;
-use xenonet_schema::drift::{DriftLog, DRIFT_FILE};
+use xenonet_schema::drift::DRIFT_FILE;
 
 pub use crate::glue::notify_doctor;
 
@@ -241,7 +241,7 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
     let built = built.to_string();
     let code = rt.block_on(async move {
         let mut config = Config::from_env(&args);
-        let env = WireEnv { version: config.version(&built), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())), readers: VendorReaders::default() };
+        let env = WireEnv::new(&config.version(&built));
         // The drivers run on the runtime: some start tasks of their own.
         let cores = build(&mut config, &env);
         serve_with(&mut config, cores, &built, env).await
@@ -256,25 +256,14 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
 pub async fn main(args: Vec<String>, built: String) -> i32 {
     let mut config = Config::from_env(&args);
     let cores = Cores::pending(config.actors, config.assistant, config.hosts);
-    serve_with(
-        &mut config,
-        cores,
-        &built,
-        WireEnv { version: String::new(), emitter: Emitter::new(), drift: Arc::new(Mutex::new(DriftLog::default())), readers: VendorReaders::default() },
-    )
-    .await
+    serve_with(&mut config, cores, &built, WireEnv::default()).await
 }
 
 pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: WireEnv) -> i32 {
     let emitter = env.emitter.clone();
     // Demo mode swaps every source for a made-up workspace in a temp
     // folder, which the drivers made first when they could.
-    if config.demo && config.world.is_none() {
-        match cores.demo.create_world() {
-            Ok(world) => config.use_world(&world),
-            Err(_) => config.demo_folders(),
-        }
-    }
+    config.take_world(&*cores.demo);
     let version = config.version(built);
     // The service's error log, in the state folder; the demo's errors stay
     // in its console.
@@ -304,6 +293,8 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     ctx.music.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).again = Some(again_tx);
     ctx.drift = drift;
     let ctx = Arc::new(ctx);
+    // The map's project picks ask the decider the app's driver made.
+    let _ = env.decider.set(ctx.cores.decider.clone());
     emitter.bind(&ctx);
     // The actor gateway (gateway/), for actors outside this machine: off
     // until you turn it on, on a port of its own beside this one.
@@ -340,7 +331,10 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             network: Arc::new(crate::gateway::reach::SystemNetwork),
             now: Arc::new(now_ms),
         };
-        let _ = ctx.gateway.set(crate::gateway::control::GatewayControl::new(parts));
+        let g = crate::gateway::control::GatewayControl::new(parts);
+        // The doctor reads its status.
+        let _ = env.gateway.set(g.clone());
+        let _ = ctx.gateway.set(g);
     }
     // A2A agents, which reach the sessions as actors through the gateway
     // (a2a/): off until you turn it on in the Actors panel.
@@ -386,7 +380,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                 }
                 // The engine takes what arrives, and sends through it.
                 if let Some(plug) = &ctx.cores.on_net {
-                    plug(&svc);
+                    plug(&*svc);
                 }
                 let _ = ctx.net.set(svc);
             }

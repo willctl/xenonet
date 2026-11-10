@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use xenonet_service::cores::{self, R};
+use xenonet_api::cores::{self, R};
 use xenonet_service::gateway::actor_gateway::{ActorGateway, GatewayCores, GatewayHooks, GatewayRequest};
 use xenonet_service::http::ReplyBody;
 

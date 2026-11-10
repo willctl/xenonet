@@ -38,7 +38,7 @@ pub type Perform = Arc<dyn Fn(Value) -> BoxFuture<Reply> + Send + Sync>;
 
 /// process.platform.
 pub fn platform() -> &'static str {
-    xenonet_service::borrowed::platform()
+    xenonet_os::platform()
 }
 
 pub fn now_ms() -> f64 {
@@ -316,7 +316,7 @@ pub async fn fetch_asked(q: &Value) -> Reply {
         other => xenonet_base::json::stringify(other, 0).into_bytes(),
     });
     let timeout = q.get("timeoutMs").and_then(Value::as_f64).filter(|t| *t > 0.0).unwrap_or(300e3);
-    let res = xenonet_service::net::fetch(method, url, &headers, body, Duration::from_millis(timeout as u64)).await.map_err(|m| fetch_error(&m))?;
+    let res = xenonet_os::net::fetch(method, url, &headers, body, Duration::from_millis(timeout as u64)).await.map_err(|m| fetch_error(&m))?;
     let mut out = json!({ "ok": res.ok(), "status": res.status, "statusText": "" });
     match q.get("read").and_then(Value::as_str) {
         Some("json") => match xenonet_base::json::parse(&res.text()) {

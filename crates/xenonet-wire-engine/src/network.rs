@@ -33,6 +33,7 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_adapter::apps::is_session_id;
+use xenonet_api::From;
 use xenonet_base::ids::{parse_actor_id, qualify, YOU};
 use xenonet_base::network::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
 use xenonet_base::sync::Locked;
@@ -44,7 +45,6 @@ use xenonet_engine::host::Collaborators;
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
 use xenonet_engine::sql::Row;
 use xenonet_engine::store::EngineStore;
-use xenonet_service::glue::From;
 
 /// How often presence and claims go out when they changed.
 pub const PRESENCE_MS: f64 = 2000.0;

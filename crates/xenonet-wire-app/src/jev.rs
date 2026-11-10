@@ -51,7 +51,7 @@ fn sha256(v: &Value) -> String {
 }
 
 fn request_id(prefix: &str) -> String {
-    format!("{prefix}_{}", xenonet_service::borrowed::random_uuid())
+    format!("{prefix}_{}", xenonet_os::random_uuid())
 }
 
 fn strs(v: Option<&Value>) -> Vec<String> {

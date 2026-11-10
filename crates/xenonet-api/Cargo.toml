@@ -1,0 +1,27 @@
+[package]
+name = "xenonet-api"
+description = "The typed local protocol between XenoNet's service and the drivers of its cores: the core traits, the service's settings, the event sink and what the drivers share."
+version.workspace = true
+edition.workspace = true
+# The cores' traits are async on tokio, as the service (Rust 1.88+).
+rust-version = "1.88"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+# The event stream's frames (events.rs).
+bytes.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+xenonet-base.workspace = true
+# The slot the network's sinks go in, which the hub and the engine's plug
+# are given (cores/hosts.rs, cores/mod.rs).
+xenonet-net.workspace = true
+# The drift log and the vendor readers the drivers share (wire.rs).
+xenonet-schema.workspace = true
+
+[lints]
+workspace = true

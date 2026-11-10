@@ -17,12 +17,12 @@ use tokio::sync::mpsc;
 use xenonet_actors::secret_store::{self, MemorySecrets, SecretStore};
 use xenonet_actors::store as rows;
 use xenonet_actors::wake::{self, Fail, Fetched, Request, Wakes as Core, TIMEOUT_MS};
+use xenonet_api::cores::actors::WakeStream;
+use xenonet_api::cores::{CoreError, Kind, Wakes, R};
+use xenonet_api::From;
 use xenonet_base::sync::Locked;
 use xenonet_base::time::now_ms;
 use xenonet_engine::store::Shared;
-use xenonet_service::cores::actors::WakeStream;
-use xenonet_service::cores::{CoreError, Kind, Wakes, R};
-use xenonet_service::glue::From;
 
 /// Your computer's credential store, or the demo's memory.
 pub enum Secrets {
@@ -187,7 +187,7 @@ impl WakeHost<'_> {
 async fn fetch_once(method: &str, url: &str, headers: &[(String, String)], body: Option<Vec<u8>>) -> Result<u16, String> {
     static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
     let client = CLIENT.get_or_init(|| {
-        let _ = xenonet_service::net::client();
+        let _ = xenonet_os::net::client();
         reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().ok()
     });
     let Some(client) = client else { return Err("TypeError".into()) };

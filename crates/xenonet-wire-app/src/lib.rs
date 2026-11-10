@@ -30,29 +30,45 @@ pub mod system;
 pub mod themes;
 
 use secrets::Secrets;
-use std::path::Path;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use xenonet_service::config::Config;
-use xenonet_service::cores::Cores;
-use xenonet_service::wire::WireEnv;
+use xenonet_api::cores::Cores;
+use xenonet_api::wire::WireEnv;
+
+/// What this area runs with: the service's settings it reads, once the
+/// demo's world has moved their folders.
+#[derive(Clone, Debug)]
+pub struct Settings {
+    pub demo: bool,
+    pub dev: bool,
+    pub port: u16,
+    /// The app's name, which the desktop app passes on.
+    pub name: String,
+    /// installed, demo, dev, or the instance XenoNet Dev names.
+    pub instance: Option<String>,
+    /// XENONET_LAUNCHER_EXEC: installed XenoNet's launcher started it.
+    pub launcher_exec: Option<String>,
+    pub home: String,
+    pub projects_dir: String,
+    pub state_dir: String,
+    pub cache_dir: String,
+    /// Where XenoNet's files are.
+    pub root: PathBuf,
+    /// Hosts over SSH from hosts.json (XENONET_HOSTS=1).
+    pub hosts: bool,
+    /// The demo's world, when it was made.
+    pub world: Option<Value>,
+}
 
 /// Puts this area's cores in place of the pending ones.
-pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
-    // The demo's world moves every folder, so it's made before anything
-    // here takes one: the map's driver may have made it already; else it's
-    // made now, as the service would, and the service keeps it.
-    if config.demo && config.world.is_none() {
-        match cores.demo.create_world() {
-            Ok(world) => config.use_world(&world),
-            Err(_) => config.demo_folders(),
-        }
-    }
+pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
     let demo = config.demo;
     let state_dir = config.state_dir.clone();
     let js = paths::js_config(config);
 
     cores.themes = Arc::new(themes::ThemeFiles);
-    themes::watch(Path::new(&state_dir).join("themes").to_string_lossy().into_owned(), env.emitter.clone());
+    themes::watch(Path::new(&state_dir).join("themes").to_string_lossy().into_owned(), cores.store.clone(), env.emitter.clone());
     cores.opener = Arc::new(open::Open);
     cores.command = Arc::new(open::XenonetCommand::new());
     cores.refusals = Arc::new(refusals::RefusalStore::new(&state_dir, &config.home));
@@ -149,8 +165,15 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
 
     // The doctor last: its context is the other cores (the hub's hosts
     // among them), as server/index.js's doctorContext reads them.
-    let parts =
-        Arc::new(doctor::Parts { cores: cores.clone(), config: config.clone(), paths: js, version: env.version.clone(), drift: env.drift.clone(), emitter: env.emitter.clone() });
+    let parts = Arc::new(doctor::Parts {
+        cores: cores.clone(),
+        config: config.clone(),
+        paths: js,
+        version: env.version.clone(),
+        drift: env.drift.clone(),
+        emitter: env.emitter.clone(),
+        gateway: env.gateway.clone(),
+    });
     let service = doctor::DoctorService::new(parts.clone());
     cores.doctor = Arc::new(doctor::DoctorCore(service.clone()));
     cores.diagnostics = Arc::new(doctor::Diagnose { parts, doctor: service });

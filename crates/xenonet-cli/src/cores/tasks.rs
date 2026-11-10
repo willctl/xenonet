@@ -119,7 +119,7 @@ pub async fn fetch(method: &str, url: &str, headers: &[(String, String)], body: 
             }
         };
     }
-    let r = xenonet_service::net::fetch(method, url, headers, body, timeout.unwrap_or(Duration::from_secs(300))).await.map_err(|m| {
+    let r = xenonet_os::net::fetch(method, url, headers, body, timeout.unwrap_or(Duration::from_secs(300))).await.map_err(|m| {
         if m.contains("timeout") {
             json!({ "message": m, "name": "TimeoutError" })
         } else {

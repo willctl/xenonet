@@ -8,10 +8,10 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use xenonet_api::cores::{CoreError, State, R};
 use xenonet_base::sync::Locked;
 use xenonet_engine::engine::{Fail, Thrown};
 use xenonet_engine::host::IndexEntry;
-use xenonet_service::cores::{CoreError, State, R};
 
 type Result<T> = std::result::Result<T, Thrown>;
 
@@ -71,6 +71,13 @@ impl Map {
     pub fn live_ids(&self) -> xenonet_engine::engine::Result<Vec<(String, f64)>> {
         let ids = engine(read(self.state.live_ids(), Vec::new))?;
         Ok(ids.into_iter().map(|(id, at)| (id, xenonet_base::text::js_number(Some(&at)))).collect())
+    }
+
+    /// The map's version, which its refresh moves: None before the first
+    /// map (or from a State that doesn't count them), when the engine's
+    /// index reads the nodes on every call.
+    pub fn version(&self) -> Option<u64> {
+        Some(self.state.graph_version()).filter(|v| *v != 0)
     }
 
     /// Every node, as the engine indexes it.

@@ -4,12 +4,12 @@
 use crate::vendor::Vendor;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
+use xenonet_api::cores::{DriftReport, Schemas, R};
 use xenonet_base::json::number;
 use xenonet_model::actor;
 use xenonet_schema::drift::{source_name, DriftView, ADDITIONS};
 use xenonet_schema::lenient::{load_vendor, vendor_sources};
 use xenonet_schema::typed;
-use xenonet_service::cores::{DriftReport, Schemas, R};
 
 /// A body checked by reading it as its type (crates/xenonet-model): the
 /// schema's id names the type.
@@ -80,9 +80,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::Mutex;
+    use xenonet_api::wire::VendorReaders;
     use xenonet_schema::drift::DriftLog;
     use xenonet_schema::vendor::Readers;
-    use xenonet_service::wire::VendorReaders;
 
     fn checkout() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas")

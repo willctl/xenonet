@@ -23,10 +23,10 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::sync::OnceCell;
+use xenonet_api::cores::{CoreError, Decider, Integrations, Kind, State, R};
 use xenonet_app::task::Failure;
 use xenonet_integrations::common::{Fail, Records, Tickets};
 use xenonet_integrations::{index, openshell, pi, reviews, routing};
-use xenonet_service::cores::{CoreError, Decider, Integrations, Kind, State, R};
 
 fn fail(f: Fail) -> CoreError {
     if f.status == 0 {
@@ -457,8 +457,8 @@ impl Integrations for IntegrationsCore {
 mod tests {
     use super::*;
     use crate::secrets::Secrets;
-    use xenonet_service::cores::Pending;
-    use xenonet_service::wire::Emitter;
+    use xenonet_api::cores::Pending;
+    use xenonet_api::wire::Emitter;
 
     fn made(demo: bool, dir: Option<String>) -> IntegrationsCore {
         let decider = Arc::new(Decisions::new(Arc::new(Secrets::memory()), Emitter::new()));

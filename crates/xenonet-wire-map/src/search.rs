@@ -251,6 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn indexes_and_finds_a_prompt() {
+        xenonet_platforms::install();
         let dir = std::env::temp_dir().join(format!("xenonet-wire-search-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let claude = dir.join("claude").join("p");
@@ -281,6 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn pieces_cut_at_lines_and_miss_none() {
+        xenonet_platforms::install();
         let dir = std::env::temp_dir().join(format!("xenonet-wire-search-pieces-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let claude = dir.join("claude").join("p");

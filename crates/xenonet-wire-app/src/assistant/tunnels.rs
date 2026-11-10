@@ -19,11 +19,11 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use xenonet_api::cores::{CoreError, Kind, Tunnels, R};
+use xenonet_api::wire::Emitter;
+use xenonet_api::From;
 use xenonet_assistant::tunnel_client as client;
 use xenonet_assistant::tunnels::{self as core, Binding};
-use xenonet_service::cores::{CoreError, Kind, Tunnels, R};
-use xenonet_service::glue::From;
-use xenonet_service::wire::Emitter;
 
 fn fail(status: u16, code: &str, message: impl Into<String>) -> CoreError {
     CoreError::of(Kind::Tunnel, status, code, message)
@@ -220,7 +220,7 @@ impl Runner {
     }
 
     async fn probe(url: &str, ms: u64) -> Option<String> {
-        let r = xenonet_service::net::fetch("GET", url, &[], None, Duration::from_millis(ms)).await.ok()?;
+        let r = xenonet_os::net::fetch("GET", url, &[], None, Duration::from_millis(ms)).await.ok()?;
         r.ok().then(|| r.text())
     }
 
@@ -346,7 +346,7 @@ impl Runner {
             let (me, g) = (self.me.clone(), grant.to_string());
             tokio::spawn(async move {
                 let (mut r, mut buf) = (tokio::io::BufReader::new(stream), Vec::new());
-                while let Some(line) = xenonet_service::lines::next_line(&mut r, &mut buf).await {
+                while let Some(line) = xenonet_os::lines::next_line(&mut r, &mut buf).await {
                     let Some(t) = me.upgrade() else { return };
                     let said = t.core.locked().line(&g, &line, now_ms(), &t.home);
                     if let Some(s) = said {

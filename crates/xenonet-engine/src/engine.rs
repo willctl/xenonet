@@ -28,11 +28,12 @@ use crate::attest::quoted;
 use crate::delivery::policy;
 use crate::delivery::selector::{format_selector, Selector};
 use crate::host::{Collaborators, Repo, StatusSet};
+use crate::index::SessionIndex;
 use crate::network::{self, network_host, NetHandle};
 use crate::sql::{self, Row};
 use crate::store::row_json;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_adapter::apps::is_session_id;
 use xenonet_adapter::products::product_of;
@@ -546,6 +547,8 @@ struct Inner {
 #[derive(Default)]
 pub struct Engine {
     inner: Mutex<Inner>,
+    /// The agents the engine knows of, which `agents()` picks from.
+    pub index: SessionIndex,
     /// The network across machines: NoNet until the service puts its link
     /// here (`set_net`).
     pub net: NetHandle,
@@ -645,40 +648,9 @@ impl Engine {
     /// Everyone who worked in the last `within_ms`.
     pub fn agents(&self, c: &Collaborators<'_>, within_ms: f64) -> Result<Vec<Value>> {
         let since = c.clock.now() - within_ms;
-        let mut ids: Vec<String> = Vec::new();
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut add = |id: String| {
-            if seen.insert(id.clone()) {
-                ids.push(id);
-            }
-        };
-        for (id, at) in c.map.live_ids()? {
-            if at >= since {
-                add(id);
-            }
-        }
-        for n in c.map.index()? {
-            if n.kind.as_deref() == Some("session") && !n.archived && n.updated_at.unwrap_or(0.0) >= since {
-                add(n.id);
-            }
-        }
-        for contact in rows(c.store.with(|s| s.contacts(since)))? {
-            if !truthy(get(&contact, "ended_at")) {
-                add(text(get(&contact, "agent")));
-            }
-        }
-        if let Some(actors) = c.actors {
-            for id in actors.engine_ids(since)? {
-                add(id);
-            }
-        }
-        if let Some(delivery) = c.delivery {
-            for id in delivery.known() {
-                add(id);
-            }
-        }
+        let ids = self.index.candidates(c, since)?;
         let wanted: Vec<String> = ids.into_iter().filter(|id| is_agent_id(id) || is_actor_agent(id)).collect();
-        let views = Self::views(c, &wanted)?;
+        let views = self.views(c, &wanted)?;
         // Working agents first, then the most recent; sessions that ended
         // drop out, unless you allowed XenoNet to resume one for a message.
         let mut kept = Vec::new();
@@ -702,7 +674,7 @@ impl Engine {
 
     /// Several views at once: what each reads first, then the sessions' own
     /// apps asked, then their repos together.
-    fn views(c: &Collaborators<'_>, ids: &[String]) -> Result<Vec<Value>> {
+    fn views(&self, c: &Collaborators<'_>, ids: &[String]) -> Result<Vec<Value>> {
         enum Stage {
             Done(Value),
             Actor { id: String, a: Value, claims: Vec<Value>, cwd: Value },
@@ -769,7 +741,7 @@ impl Engine {
                 Stage::Session(p) => {
                     let t = told.remove(&i).unwrap_or(Value::Null);
                     let cwd = cwds[i].clone().unwrap_or(Value::Null);
-                    Self::view_end(c, p, &t, cwd, gone[&i], repos.remove(&i).flatten())?
+                    self.view_end(c, p, &t, cwd, gone[&i], repos.remove(&i).flatten())?
                 }
             });
         }
@@ -777,7 +749,7 @@ impl Engine {
     }
 
     pub fn view(&self, c: &Collaborators<'_>, id: &str) -> Result<Value> {
-        Ok(Self::views(c, std::slice::from_ref(&id.to_string()))?.remove(0))
+        Ok(self.views(c, std::slice::from_ref(&id.to_string()))?.remove(0))
     }
 
     fn you_view(now: f64) -> Value {
@@ -872,11 +844,11 @@ impl Engine {
         Ok(Pending { id: id.to_string(), now, node, live, contact, describe })
     }
 
-    fn view_end(c: &Collaborators<'_>, p: Pending, told: &Value, cwd: Value, gone: bool, repo: Option<Repo>) -> Result<Value> {
+    fn view_end(&self, c: &Collaborators<'_>, p: Pending, told: &Value, cwd: Value, gone: bool, repo: Option<Repo>) -> Result<Value> {
         let Pending { id, now, node, live, contact, .. } = p;
         let observed = truthy(get(&live, "observed"));
         let app = id.split(':').next().unwrap_or("").to_string();
-        let place = Self::place_of(c, &id, &cwd)?;
+        let place = self.place_of(c, &id, &cwd)?;
         let mut edits: Vec<&Value> = items(get(&live, "edits")).iter().filter(|e| now - num(get(e, "ts")) < EDIT_HOLD_MS).collect();
         xenonet_base::sort::sort_by(&mut edits, |a, b| (num(get(b, "ts")) - num(get(a, "ts"))).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         let base = if nullish(Some(&cwd)) { None } else { Some(text(Some(&cwd))) };
@@ -1016,7 +988,7 @@ impl Engine {
 
     /// The project (or folder) a session lives in, from the map, or for one
     /// the map hasn't seen yet, the project whose folder holds `cwd`.
-    fn place_of(c: &Collaborators<'_>, id: &str, cwd: &Value) -> Result<Value> {
+    fn place_of(&self, c: &Collaborators<'_>, id: &str, cwd: &Value) -> Result<Value> {
         let home = c.map.home_of(id)?;
         if truthy(home.as_ref()) {
             if let Some(node) = c.map.node(&text(home.as_ref()))?.filter(|n| truthy(Some(n))) {
@@ -1030,12 +1002,12 @@ impl Engine {
         let mut best: Option<crate::host::IndexEntry> = None;
         if truthy(Some(cwd)) {
             let key = key_of(&format!("{}/", text(Some(cwd))));
-            for n in c.map.index()? {
+            for n in self.index.places(c)?.iter() {
                 let Some(path) = n.path.as_deref().filter(|p| !p.is_empty()) else { continue };
                 if matches!(n.kind.as_deref(), Some("project" | "zone")) && key.starts_with(&key_of(&format!("{path}/"))) {
                     let len = path.encode_utf16().count();
                     if best.as_ref().is_none_or(|b| len > b.path.as_deref().unwrap_or("").encode_utf16().count()) {
-                        best = Some(n);
+                        best = Some(n.clone());
                     }
                 }
             }
@@ -1780,7 +1752,16 @@ impl Engine {
         let now = c.clock.now();
         let via = get(ask, "via").cloned();
         let contact = obj_some(vec![("app", get(ask, "app").cloned()), ("cwd", get(ask, "cwd").cloned()), ("via", via.clone()), ("pid", Some(pid))]);
-        c.store.with(|s| s.touch(me, &contact, now))?;
+        // The index hears of it under the store's lock, so pushes land in
+        // the store's order; a write that failed may have gone partway.
+        c.store.with(|s| {
+            let r = s.touch(me, &contact, now);
+            match &r {
+                Ok(()) => self.index.touched(me, now),
+                Err(_) => self.index.invalidate(),
+            }
+            r
+        })?;
         c.events.emit("contact", obj_some(vec![("agent", Some(string(me))), ("via", via)]));
         Ok(())
     }
@@ -1880,7 +1861,14 @@ impl Engine {
         let ev = event.unwrap_or("");
         if ev == "SessionEnd" {
             let now = c.clock.now();
-            c.store.with(|s| s.ended(me.as_str(), now))?;
+            c.store.with(|s| {
+                let r = s.ended(me.as_str(), now);
+                match &r {
+                    Ok(()) => self.index.ended(&me),
+                    Err(_) => self.index.invalidate(),
+                }
+                r
+            })?;
             return Ok(None);
         }
         // Whether the session bypasses its permission checks, as Claude

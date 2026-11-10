@@ -4,7 +4,7 @@
 
 use crate::fx::{self, platform};
 use serde_json::{json, Value};
-use xenonet_service::cores::{Command, CoreError, Opener, R};
+use xenonet_api::cores::{Command, CoreError, Opener, R};
 
 pub struct Open;
 
@@ -52,7 +52,7 @@ pub struct XenonetCommand {
 
 impl XenonetCommand {
     pub fn new() -> Self {
-        XenonetCommand { home: xenonet_service::config::home_dir(&|k| std::env::var(k).ok()) }
+        XenonetCommand { home: xenonet_os::home_dir(&|k| std::env::var(k).ok()) }
     }
 
     fn dir(&self) -> String {

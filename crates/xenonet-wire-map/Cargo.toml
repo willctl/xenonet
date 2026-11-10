@@ -17,7 +17,9 @@ serde_json.workspace = true
 tokio.workspace = true
 xenonet-adapter.workspace = true
 xenonet-base.workspace = true
-xenonet-service.workspace = true
+xenonet-api.workspace = true
+# Home, platform, random ids, fetch and output lines.
+xenonet-os.workspace = true
 xenonet-blocks.workspace = true
 xenonet-schema.workspace = true
 # The routes' bodies, read as their types.

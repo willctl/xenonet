@@ -60,6 +60,15 @@ pub trait Themes: Send + Sync {
     fn copy(&self, _dir: &str, _from: &str, _id: &str, _name: &Value) -> R<Value> {
         pending(THEMES)
     }
+    /// The theme in use: the one `store` names, else XenoNet's own, from
+    /// the themes in `dir`. The routes answer with it, and a theme's edit
+    /// sends it to the pages.
+    fn current(&self, dir: &str, store: &dyn Store) -> R<Value> {
+        let read = self.read(dir)?;
+        let id = store.theme()?;
+        let themes = &read["themes"];
+        Ok(id.as_str().and_then(|i| themes.get(i)).or_else(|| themes.get("xenonet")).cloned().unwrap_or(Value::Null))
+    }
 }
 
 pub trait Command: Send + Sync {

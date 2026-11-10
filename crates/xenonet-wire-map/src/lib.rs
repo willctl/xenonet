@@ -24,42 +24,50 @@ pub mod store;
 pub mod util;
 pub mod vendor;
 
+use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Arc;
 use util::lock;
-use xenonet_service::config::Config;
-use xenonet_service::cores::{Cores, Runs};
-use xenonet_service::wire::WireEnv;
+use xenonet_api::cores::{Cores, Runs};
+use xenonet_api::wire::WireEnv;
 
-/// Puts this area's cores in place of the pending ones: the demo's world
-/// first, which moves the folders everything else reads.
-pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
+/// What the map's driver runs with, from the service's settings, once the
+/// demo's world has moved their folders.
+pub struct Settings {
+    pub demo: bool,
+    pub dev: bool,
+    /// Your own home, as it was before the demo's world.
+    pub home: String,
+    pub cache_dir: String,
+    /// Where XenoNet's files are: schemas/ among them.
+    pub root: PathBuf,
+    /// The demo's world, when it was made.
+    pub world: Option<Value>,
+}
+
+/// The demo's made-up world, in the cores as their Demo, when the demo is
+/// on: the service makes its world first, which moves every folder the
+/// drivers take, then gives it to `wire`.
+pub fn demo_world(cores: &mut Cores, on: bool, port: u16) -> Option<Arc<demo::DemoWorld>> {
+    let d = on.then(|| Arc::new(demo::DemoWorld::new(port)))?;
+    cores.demo = Arc::new(demo::DemoCore(d.clone()));
+    Some(d)
+}
+
+/// Puts this area's cores in place of the pending ones, over the demo's
+/// world when there is one (`demo`).
+pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoWorld>>, env: &WireEnv) {
     util::set_log(&env.emitter);
-    let home = config.home.clone();
-    let demo = config.demo.then(|| Arc::new(demo::DemoWorld::new(config.port)));
-    let world = match &demo {
-        Some(d) => match d.create() {
-            Ok(w) => {
-                config.use_world(&w);
-                Some(w)
-            }
-            Err(e) => {
-                util::log("error", "demo.world", &format!("the demo's world couldn't be made: {}", e.message));
-                config.demo_folders();
-                None
-            }
-        },
-        None => None,
-    };
     // The service's one drift log, where the readers record what they
     // find, in the cache folder the demo may have moved.
     {
         let mut d = lock(&env.drift);
         if d.view().0.is_none() {
-            d.open(&std::path::Path::new(&config.cache_dir).join(xenonet_schema::drift::DRIFT_FILE).to_string_lossy());
+            d.open(&std::path::Path::new(&settings.cache_dir).join(xenonet_schema::drift::DRIFT_FILE).to_string_lossy());
         }
     }
-    let cfg = config::MapConfig::new(config.demo, config.dev, config::process_env(), &home, world.as_ref());
-    let dir = vendor::schemas_dir(&config.root);
+    let cfg = config::MapConfig::new(settings.demo, settings.dev, config::process_env(), &settings.home, settings.world.as_ref());
+    let dir = vendor::schemas_dir(&settings.root);
     // The service's one set of vendor readers, which the actors' observers
     // check their records through too.
     let readers = env.readers.get_or_make(|| xenonet_schema::vendor::Readers::new(dir.clone(), env.drift.clone()));
@@ -73,14 +81,11 @@ pub fn wire(cores: &mut Cores, config: &mut Config, env: &WireEnv) {
         Some(d) => state::Readers::Demo(d.clone()),
         None => state::Readers::Real,
     };
-    let map = state::MapState::new(cfg, store.clone(), vendor.clone(), env.emitter.clone(), readers, live, &env.version);
+    let map = state::MapState::new(cfg, store.clone(), vendor.clone(), env, readers, live);
     cores.state = map.clone();
     cores.store = Arc::new(store::StoreCore(store));
     cores.schemas = Arc::new(schemas::SchemaCore);
     cores.drift = Arc::new(schemas::Drift { vendor });
-    if let Some(d) = demo {
-        cores.demo = Arc::new(demo::DemoCore(d));
-    }
     // Runs actors report, when there are actors.
     if cores.runs.is_some() {
         cores.runs = Some(Arc::new(state::RunsCore(map)) as Arc<dyn Runs>);

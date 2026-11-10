@@ -1,0 +1,24 @@
+[package]
+name = "xenonet-os"
+description = "What XenoNet reads of the system it runs on (its home folder, platform, random ids), and fetch() and a program's output lines, shared by the service and the drivers."
+version.workspace = true
+edition.workspace = true
+# reqwest and tokio, as the service (Rust 1.88+).
+rust-version = "1.88"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# crypto.randomUUID().
+getrandom.workspace = true
+# fetch() (net.rs): HTTPS with rustls on ring and the system's certificates.
+reqwest.workspace = true
+rustls.workspace = true
+# Lines of a program's output (lines.rs).
+tokio.workspace = true
+xenonet-base.workspace = true
+
+[lints]
+workspace = true

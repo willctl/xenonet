@@ -50,6 +50,13 @@ pub trait MapReader {
     fn live_ids(&self) -> Result<Vec<(String, f64)>>;
     /// Every node, in the map's order.
     fn index(&self) -> Result<Vec<IndexEntry>>;
+    /// A number that changes whenever `index()` would answer differently
+    /// (the map's refresh moves it), for the engine's session index to read
+    /// the nodes again only then; None when the reader can't say, and the
+    /// index reads them on every call.
+    fn nodes_version(&self) -> Option<u64> {
+        None
+    }
     /// A node as the engine reads it: id, kind, title, name, worktree, cwd,
     /// updatedAt, branch, reader, observed, path, archived and its
     /// identities ({ id }), each as the map has it.

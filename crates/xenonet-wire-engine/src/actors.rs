@@ -13,13 +13,13 @@ use std::sync::{Arc, Mutex};
 use xenonet_actors::demo::{Demo, Resolve, STEP_MS};
 use xenonet_actors::registry::{self, Actors as Registry, Fail, Host, CLOCK_MS, LIST_THROTTLE_MS, PRUNE_MS};
 use xenonet_actors::store::{self as rows, Tx};
+use xenonet_api::cores::{Actors, CoreError, R};
+use xenonet_api::From;
 use xenonet_base::sync::Locked;
 use xenonet_base::time::now_ms;
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::sql::{self, Row, SqlError};
 use xenonet_engine::store::{row_json, EngineStore, Shared};
-use xenonet_service::cores::{Actors, CoreError, R};
-use xenonet_service::glue::From;
 
 type Result<T> = std::result::Result<T, Thrown>;
 

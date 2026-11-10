@@ -102,6 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_sessions_calls_and_turns() {
+        xenonet_platforms::install();
         let dir = std::env::temp_dir().join(format!("xenonet-wire-stats-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let p = dir.join("p");
@@ -124,6 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_archived_rollouts_stats() {
+        xenonet_platforms::install();
         let dir = std::env::temp_dir().join(format!("xenonet-wire-stats-zst-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let day = dir.join("archived_sessions");

@@ -8,8 +8,8 @@ use crate::util::{local, local_day, lock, now_ms};
 use serde_json::Value;
 use std::sync::Mutex;
 use tokio::sync::OnceCell;
+use xenonet_api::cores::{CoreError, R};
 use xenonet_app::demo::{repo_steps, Around, Demo};
-use xenonet_service::cores::{CoreError, R};
 use xenonet_state::identities;
 
 /// What the demo asks of the rest of XenoNet.
@@ -149,7 +149,7 @@ impl DemoWorld {
 /// The Demo core: createWorld, for the service.
 pub struct DemoCore(pub std::sync::Arc<DemoWorld>);
 
-impl xenonet_service::cores::Demo for DemoCore {
+impl xenonet_api::cores::Demo for DemoCore {
     fn create_world(&self) -> R<Value> {
         self.0.create()
     }
@@ -161,6 +161,7 @@ mod tests {
 
     #[test]
     fn ids_and_times_as_the_js_makes_them() {
+        xenonet_platforms::install();
         let u = Here.uuid();
         assert_eq!((u.len(), &u[14..15]), (36, "4"));
         let r = Here.random();

@@ -15,12 +15,12 @@ use xenonet_actors::account_links::Links;
 use xenonet_actors::adapters::ADAPTERS;
 use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Host, Store};
 use xenonet_actors::store::{self, Tx};
+use xenonet_api::cores::assistant::ConnectionEvents;
+use xenonet_api::cores::{Actors, Connections, EngineStore, State, R};
 use xenonet_assistant::credentials as disk;
 use xenonet_base::text::js_string;
 use xenonet_engine::sql::SqlError;
 use xenonet_engine::store::Shared;
-use xenonet_service::cores::assistant::ConnectionEvents;
-use xenonet_service::cores::{Actors, Connections, EngineStore, State, R};
 
 pub struct Remote {
     core: Core,
@@ -50,7 +50,7 @@ fn fs(e: xenonet_base::fs::FsError) -> core::Fail {
 }
 
 /// What the actors' registry failed with, as the core hears it.
-fn failed(e: xenonet_service::cores::CoreError) -> core::Fail {
+fn failed(e: xenonet_api::cores::CoreError) -> core::Fail {
     core::Fail::Error(store::Error { message: e.message, code: e.code })
 }
 
@@ -456,7 +456,7 @@ impl Connections for ConnectionsCore {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use xenonet_service::cores::Pending;
+    use xenonet_api::cores::Pending;
 
     const ATLAS: &str = "project:/users/nova/projects/atlas-api";
 
@@ -507,7 +507,7 @@ mod tests {
             // The actor's row, which its connections refer to.
             let slug = id.trim_start_matches("actor:").to_string();
             let row = json!({ "slug": slug, "kind": "agent", "name": def["name"], "via": "[\"remote\"]", "capabilities": "[]", "created_at": now_ms() });
-            self.store.with(|s| s.save_actor(&row)).map_err(|e| xenonet_service::cores::CoreError::new(e.to_string()))?;
+            self.store.with(|s| s.save_actor(&row)).map_err(|e| xenonet_api::cores::CoreError::new(e.to_string()))?;
             self.known.locked().insert(id, a);
             Ok(())
         }
@@ -550,15 +550,8 @@ mod tests {
         let w = c.pair(&unverified, &places, &[]).unwrap();
         assert_eq!(w["data_mode"], "fixture");
         let st = store.clone();
-        let reads = super::super::reads::Reads::new(
-            Some(remote.clone()),
-            Arc::new(Pending),
-            Some(actors.clone()),
-            Arc::new(Pending),
-            Some(st),
-            "0.0.0",
-            xenonet_service::wire::Emitter::new(),
-        );
+        let reads =
+            super::super::reads::Reads::new(Some(remote.clone()), Arc::new(Pending), Some(actors.clone()), Arc::new(Pending), Some(st), "0.0.0", xenonet_api::wire::Emitter::new());
         let session = json!({ "grantId": w["grant_id"], "actorId": w["actor_id"], "connectionId": w["connection_id"] });
         let read = reads.read(&session, &json!({ "request_id": "r_00000000-0000-4000-8000-000000000000", "operation": "status", "arguments": {} })).await;
         assert_eq!(read["ok"], true, "{read}");
@@ -566,14 +559,14 @@ mod tests {
         let bad = reads.read(&session, &json!({ "request_id": "r_00000000-0000-4000-8000-000000000001", "operation": "sessions", "arguments": { "path": "/etc" } })).await;
         assert_eq!(bad["error"]["code"], "INVALID_ARGUMENT");
         let audit = super::super::reads::AuditCore(reads.clone());
-        use xenonet_service::cores::Audit;
+        use xenonet_api::cores::Audit;
         let recent = audit.recent(w["grant_id"].as_str(), 10.0).unwrap();
         assert_eq!(recent.as_array().unwrap().iter().filter(|r| r["kind"] == "access").count(), 2, "both reads are in the audit: {recent}");
         let mut events = c.subscribe().unwrap();
         c.revoke(&grant).unwrap();
         assert_eq!(c.recheck(&grant)["ok"], false);
         assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|(name, _)| name == "revoked"));
-        assert!(c.pair(&json!({ "label": "" }), &places, &[]).unwrap_err().is(xenonet_service::cores::Kind::Connection));
+        assert!(c.pair(&json!({ "label": "" }), &places, &[]).unwrap_err().is(xenonet_api::cores::Kind::Connection));
         let _ = std::fs::remove_dir_all(&dir); // Windows keeps a folder whose files are still open.
     }
 }

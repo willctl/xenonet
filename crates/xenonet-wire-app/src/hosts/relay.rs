@@ -34,13 +34,13 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use xenonet_api::cores::SelfApi;
+use xenonet_api::events::EventStream;
 use xenonet_base::network::{Incoming, Kind, Net, Outgoing, RelaySink, To};
 use xenonet_hosts::frames::{encode, MAX_DEPTH, PROTOCOL};
 use xenonet_hosts::network::{self as wire, Op};
 use xenonet_hosts::relay::{self as core, Producer, Shape};
 use xenonet_net::sink::LogFn;
-use xenonet_service::cores::SelfApi;
-use xenonet_service::events::Events;
 
 use crate::fx::{now_ms, Locked};
 
@@ -92,7 +92,7 @@ impl Default for Timing {
 /// What a relay needs of this machine.
 pub struct Parts {
     pub net: Arc<dyn Net>,
-    pub events: Arc<Events>,
+    pub events: Arc<dyn EventStream>,
     pub api: Arc<dyn SelfApi>,
     pub home: String,
     pub version: String,
@@ -308,7 +308,7 @@ struct Session {
     sub: String,
     net: Arc<dyn Net>,
     api: Arc<dyn SelfApi>,
-    events: Arc<Events>,
+    events: Arc<dyn EventStream>,
     p: Producer,
     titles_only: bool,
     hello: Value,
@@ -646,6 +646,30 @@ fn sse(bytes: &[u8]) -> Vec<(String, Value)> {
     out
 }
 
+/// This machine's event stream for the tests, framed as the service's
+/// own stream frames each event (its events.rs).
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestEvents(Mutex<Vec<mpsc::UnboundedSender<xenonet_api::events::Bytes>>>);
+
+#[cfg(test)]
+impl TestEvents {
+    pub(crate) fn send(&self, event: &str, data: &Value) {
+        let frame = xenonet_api::events::Bytes::from(format!("event: {event}\ndata: {}\n\n", xenonet_base::json::stringify(data, 0)));
+        self.0.locked().retain(|tx| tx.send(frame.clone()).is_ok());
+    }
+}
+
+#[cfg(test)]
+impl EventStream for TestEvents {
+    fn subscribe(&self, _own_only: bool) -> mpsc::UnboundedReceiver<xenonet_api::events::Bytes> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = tx.send(xenonet_api::events::Bytes::from_static(b"retry: 3000\n\n"));
+        self.0.locked().push(tx);
+        rx
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,12 +733,12 @@ mod tests {
         }
     }
 
-    fn server(titles_only: bool) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<Events>) {
+    fn server(titles_only: bool) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<TestEvents>) {
         server_with(titles_only, f64::INFINITY)
     }
 
     /// The same, sending its load every `system_ms`.
-    fn server_with(titles_only: bool, system_ms: f64) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<Events>) {
+    fn server_with(titles_only: bool, system_ms: f64) -> (Arc<RelayServer>, Arc<FakeNet>, Arc<FakeApi>, Arc<TestEvents>) {
         let net = Arc::new(FakeNet {
             sent: Mutex::new(Vec::new()),
             hosts: Mutex::new(vec![Host { id: "studio".into(), window: true, online: true, seen: None }, Host { id: "desk".into(), window: false, online: true, seen: None }]),
@@ -722,7 +746,7 @@ mod tests {
             share_load: Mutex::new(true),
         });
         let api = Arc::new(FakeApi::default());
-        let events = Arc::new(Events::new());
+        let events = Arc::new(TestEvents::default());
         let timing =
             Timing { frame_ms: 20.0, graph_ms: 40.0, live_ms: 20.0, lapse_ms: 300.0, ping_ms: 200.0, watch_ms: 50, get_ms: 2000.0, renew_ms: 100.0, roster_ms: 100, system_ms };
         let parts = Parts {

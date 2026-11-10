@@ -1,34 +1,32 @@
 //! What server/index.js does when its cores say something: each event to
 //! the pages, and the notifications the desktop app shows. A core in Rust
-//! is given `Glue::event` to call with its events, as the JS cores' emitters
-//! are listened to.
+//! is given an emitter whose events reach `event` through the service's
+//! sink (xenonet-api's EventSink), as the JS cores' emitters are listened
+//! to.
 
 use crate::ctx::Ctx;
 use crate::events::Local;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use xenonet_api::wire::EventSink;
 use xenonet_base::sync::Locked;
 
-/// The events the cores send, by where they come from.
-pub enum From {
-    /// XenoNetState: pulse, activity, refusal, tokens, graph, live.
-    State,
-    /// The engine: message.
-    Engine,
-    /// The delivery router: delivery, error.
-    Delivery,
-    /// Actors: actors, event.
-    Actors,
-    /// Registration: requests, asked, asked-gateway.
-    Registration,
-    /// Wakes: mail (a message for an actor nothing can wake).
-    Wakes,
-    /// The hub: graph, live, activity, tokens, pulse, agent-message, hosts.
-    Hub,
-    /// The assistant's tunnels: changed.
-    Tunnels,
-    /// The doctor: result, problems.
-    Doctor,
+// Who an event is from is xenonet-api's, which the drivers name it with.
+pub use xenonet_api::From;
+
+/// The service as the drivers reach it (crates/xenonet-wire-*): their
+/// events and their log lines.
+impl EventSink for Ctx {
+    fn event(&self, from: From, name: &str, data: Value) {
+        event(self, from, name, data);
+    }
+
+    fn log(&self, level: &str, code: &str, message: &str) {
+        Ctx::log(self, level, code, message, None, None);
+    }
+
+    fn broadcast(&self, event: &str, data: &Value) {
+        Ctx::broadcast(self, event, data);
+    }
 }
 
 fn first_upper(s: &str) -> String {
@@ -41,7 +39,7 @@ fn cut(s: &str, n: usize) -> String {
     xenonet_base::log::js_slice(s, n).to_string()
 }
 
-pub fn event(ctx: &Arc<Ctx>, from: From, name: &str, data: Value) {
+pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
     let cores = &ctx.cores;
     match (from, name) {
         (From::State, "pulse" | "activity" | "tokens") => ctx.broadcast(name, &data),
@@ -173,7 +171,7 @@ pub fn notify_doctor(ctx: &Ctx, fresh: &[Value]) {
 
 // Every provider refusal XenoNet sees, kept; a new one seen live is a line
 // in the log and, a few an hour at most, a notification.
-fn refusal(ctx: &Arc<Ctx>, ev: Value) {
+fn refusal(ctx: &Ctx, ev: Value) {
     let rec = match ctx.cores.refusals.record(&ev["signal"], &ev) {
         Ok(Some(r)) => r,
         Ok(None) => return,

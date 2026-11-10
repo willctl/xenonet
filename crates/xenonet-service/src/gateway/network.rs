@@ -139,6 +139,17 @@ impl NetService {
     }
 }
 
+/// The link as the engine's plug takes it (xenonet-api's `Cores::on_net`).
+impl xenonet_api::cores::NetLink for NetService {
+    fn net(&self) -> Arc<dyn Net> {
+        NetService::net(self)
+    }
+
+    fn sinks(&self) -> &Arc<SinkSlot> {
+        NetService::sinks(self)
+    }
+}
+
 impl Drop for NetService {
     fn drop(&mut self) {
         if let Some(t) = self.watcher.locked().take() {

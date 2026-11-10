@@ -8,7 +8,7 @@
 //! `{ error, code: "pending" }`, and a check that can't run refuses (the
 //! process check, the schema checks), never lets through. When a core
 //! lands, an adapter implements its trait for the core's own type, and
-//! `Cores::pending()` in serve.rs takes it instead.
+//! `Cores::pending()` in the service's serve.rs takes it instead.
 //!
 //! Waiting on the readers, map and schemas: State (core/state.js, live.js,
 //! graph.js, search.js, stats.js, digest.js), Store (core/store.js), Demo
@@ -39,6 +39,8 @@ pub mod state;
 
 use serde_json::{json, Value};
 use std::sync::Arc;
+use xenonet_base::network::Net;
+use xenonet_net::sink::SinkSlot;
 
 pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
 pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Tunnels};
@@ -193,15 +195,22 @@ pub struct Cores {
     pub terminals: Arc<dyn Terminals>,
     pub demo: Arc<dyn Demo>,
     /// What plugs the engine into the network's link once the service has
-    /// made it (gateway/network.rs): the engine's driver sets it, and the
-    /// service calls it once, before the link starts. The link reads the
-    /// network as it stands, so a network created or joined later reaches
-    /// the engine through the same plug.
+    /// made it (the service's gateway/network.rs): the engine's driver sets
+    /// it, and the service calls it once, before the link starts. The link
+    /// reads the network as it stands, so a network created or joined later
+    /// reaches the engine through the same plug.
     pub on_net: Option<NetPlug>,
 }
 
+/// This machine's link to its network, as the service makes it: the
+/// network itself, and the slot where what arrives from it goes.
+pub trait NetLink {
+    fn net(&self) -> Arc<dyn Net>;
+    fn sinks(&self) -> &Arc<SinkSlot>;
+}
+
 /// See `Cores::on_net`.
-pub type NetPlug = Arc<dyn Fn(&crate::gateway::network::NetService) + Send + Sync>;
+pub type NetPlug = Arc<dyn Fn(&dyn NetLink) + Send + Sync>;
 
 /// The stand-in for every core that isn't in Rust yet.
 #[derive(Clone, Copy, Default)]

@@ -4,7 +4,7 @@
 //! through its gateway (docs/design/network.md, section 7).
 
 use super::{pending, Pending, R};
-use crate::events::Events;
+use crate::events::EventStream;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -90,7 +90,7 @@ impl SelfApi for HttpApi {
 pub struct HubNet {
     pub net: Arc<dyn Net>,
     pub sinks: Arc<SinkSlot>,
-    pub events: Arc<Events>,
+    pub events: Arc<dyn EventStream>,
     pub api: Arc<dyn SelfApi>,
     pub home: String,
     pub version: String,

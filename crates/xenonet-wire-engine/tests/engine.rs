@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use xenonet_service::config::Config;
-use xenonet_service::cores::{Channels, Cores, Engine, State, R};
-use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
+use xenonet_api::cores::{Channels, Cores, Engine, State, R};
+use xenonet_api::wire::WireEnv;
 use xenonet_wire_engine::runtime::Runtime;
+use xenonet_wire_engine::runtime::Setup;
 
 const A: &str = "claude:aaaaaaaa-0001";
 const B: &str = "codex:bbbbbbbb-0002";
@@ -95,13 +95,23 @@ fn world(name: &str) -> (Arc<Runtime>, std::path::PathBuf) {
     std::fs::create_dir_all(&dir).expect("a temp folder");
     let home = dir.to_string_lossy().into_owned();
     let state = dir.join("state").to_string_lossy().into_owned();
-    let vars = [("HOME", home.as_str()), ("XENONET_STATE_DIR", state.as_str()), ("XENONET_CACHE_DIR", state.as_str()), ("XENONET_ACTORS", "off"), ("XENONET_PORT", "47998")];
-    let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
-    let mut config = Config::from(&[], &get);
+    let setup = Setup {
+        demo: false,
+        actors: false,
+        port: 47998,
+        home: home.clone(),
+        state_dir: state.clone(),
+        projects_dir: dir.join("Projects").to_string_lossy().into_owned(),
+        version: "0.0.0".into(),
+        root: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).expect("the checkout").to_path_buf(),
+        runs_bin: None,
+        permission_hold_ms: None,
+        launcher_exec: None,
+    };
     let mut cores = Cores::pending(false, false, false);
     cores.state = Arc::new(Fake { at: now() });
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
-    let w = xenonet_wire_engine::runtime(&cores, &mut config, &env).expect("the engine's parts");
+    let env = WireEnv::new("0.0.0");
+    let w = xenonet_wire_engine::runtime(&cores, setup, &env).expect("the engine's parts");
     (w, dir)
 }
 
@@ -215,7 +225,7 @@ async fn delivery_records_a_message_handed_to_a_listening_hook_and_the_pause_swi
     }
     assert_eq!((recent[0]["agent"].clone(), recent[0]["state"].clone(), recent[0]["how"].clone()), (json!(C), json!("live"), json!("listen")), "{recent}");
     // Paused: kept in delivery.json, and a session's message refused.
-    use xenonet_service::cores::{Policy, Router};
+    use xenonet_api::cores::{Policy, Router};
     policy.set_paused(true).unwrap();
     assert!(policy.paused().unwrap());
     let kept = std::fs::read_to_string(dir.join("state").join("delivery.json")).unwrap();

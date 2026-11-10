@@ -164,7 +164,7 @@ impl RepoWatch {
         if !git_available() {
             return;
         }
-        let home = xenonet_service::config::home_dir(&|k| std::env::var(k).ok());
+        let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
         let xdg = std::env::var("XDG_CONFIG_HOME").ok();
         self.refresh_with(projects, move |dir| git::repo_stamps(dir, &home, xdg.as_deref()), now_ms).await;
     }

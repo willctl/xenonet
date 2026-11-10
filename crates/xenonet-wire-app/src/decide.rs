@@ -12,9 +12,9 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xenonet_api::cores::{CoreError, Decider, Kind, OpenRouter, R};
+use xenonet_api::wire::Emitter;
 use xenonet_app::decide;
-use xenonet_service::cores::{CoreError, Decider, Kind, OpenRouter, R};
-use xenonet_service::wire::Emitter;
 use xenonet_sources::openrouter_usage as usage;
 
 fn decision_error(e: decide::DecisionError) -> CoreError {
@@ -52,7 +52,7 @@ impl Decisions {
         let started = now_ms();
         let (headers, body) = decide::request(&self.model, &k, Some(state), Some(questions));
         let headers: Vec<(String, String)> = headers.into_iter().map(|(h, v)| (h.to_string(), v)).collect();
-        let res = match xenonet_service::net::fetch("POST", &self.url, &headers, Some(body.into_bytes()), Duration::from_millis(decide::TIMEOUT_MS as u64)).await {
+        let res = match xenonet_os::net::fetch("POST", &self.url, &headers, Some(body.into_bytes()), Duration::from_millis(decide::TIMEOUT_MS as u64)).await {
             Ok(r) => r,
             Err(m) => {
                 let (line, e) = decide::unreachable(&self.url, kind, m.contains("aborted due to timeout"), &m);
@@ -131,7 +131,7 @@ impl Spent {
     async fn read(&self) -> Value {
         let Some(key) = self.secrets.get(decide::KEY_TARGET).await.ok().flatten() else { return usage::reading(false, None, None, 0.0) };
         let headers = vec![("authorization".to_string(), format!("Bearer {key}")), ("accept".to_string(), "application/json".to_string())];
-        let res = match xenonet_service::net::fetch("GET", usage::KEY_URL, &headers, None, Duration::from_secs(10)).await {
+        let res = match xenonet_os::net::fetch("GET", usage::KEY_URL, &headers, None, Duration::from_secs(10)).await {
             Ok(r) => r,
             Err(m) => {
                 self.emitter.log("warn", "openrouter.usage", &format!("Couldn't reach OpenRouter for the key's usage: {m}"));

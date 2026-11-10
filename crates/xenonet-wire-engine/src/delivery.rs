@@ -14,6 +14,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
+use xenonet_api::cores::{Channels, CoreError, Policy, Router, R};
+use xenonet_api::From;
 use xenonet_base::sync::Locked;
 use xenonet_base::text::js_number;
 use xenonet_base::time::now_ms;
@@ -26,8 +28,6 @@ use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
 use xenonet_engine::delivery::usage::plan_usage;
 use xenonet_engine::delivery::{Delivered, Error, Files};
-use xenonet_service::cores::{Channels, CoreError, Policy, Router, R};
-use xenonet_service::glue::From;
 
 // ---------- files ----------
 
@@ -73,7 +73,7 @@ fn fail_message(f: Fail) -> String {
 
 fn core_error(f: Fail) -> CoreError {
     match f {
-        Fail::Refused { why, code } => CoreError::of(xenonet_service::cores::Kind::Error, 429, code, why),
+        Fail::Refused { why, code } => CoreError::of(xenonet_api::cores::Kind::Error, 429, code, why),
         Fail::Error(m) => CoreError::new(m),
     }
 }
@@ -374,10 +374,10 @@ struct OpenCodeHost<'a> {
 }
 
 impl OpenCodeHost<'_> {
-    fn fetch(&self, method: &str, url: &str, body: Option<String>, ms: f64) -> Result<xenonet_service::net::Fetched, String> {
+    fn fetch(&self, method: &str, url: &str, body: Option<String>, ms: f64) -> Result<xenonet_os::net::Fetched, String> {
         let headers = if body.is_some() { vec![("content-type".to_string(), "application/json".to_string())] } else { Vec::new() };
         let timeout = Duration::from_secs_f64(ms.max(0.0) / 1000.0);
-        self.w.block_on(xenonet_service::net::fetch(method, url, &headers, body.map(String::into_bytes), timeout))
+        self.w.block_on(xenonet_os::net::fetch(method, url, &headers, body.map(String::into_bytes), timeout))
     }
 }
 
@@ -392,7 +392,7 @@ impl oc::Host for OpenCodeHost<'_> {
         oc::listening_ports(&mut Ps, pid, crate::runtime::platform())
     }
     fn get(&mut self, url: &str, ms: f64) -> Option<Value> {
-        let r = self.fetch("GET", url, None, ms).ok().filter(xenonet_service::net::Fetched::ok)?;
+        let r = self.fetch("GET", url, None, ms).ok().filter(xenonet_os::net::Fetched::ok)?;
         xenonet_base::json::parse(&r.text()).ok()
     }
     fn post(&mut self, url: &str, body: &str) -> Result<Posted, String> {

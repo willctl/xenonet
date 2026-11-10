@@ -29,9 +29,12 @@ portable-pty = "0.9"
 reqwest.workspace = true
 # A2A's task table, <state>/a2a.sqlite (a2a/store.rs).
 rusqlite.workspace = true
-rustls.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# The core traits, settings and event sink it shares with the drivers.
+xenonet-api.workspace = true
+# Home, platform, random ids, fetch and output lines.
+xenonet-os.workspace = true
 # The adapters the binary runs with (adapters/*), put in place at start.
 xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true

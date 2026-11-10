@@ -917,11 +917,8 @@ fn base64_decode(s: &str) -> Vec<u8> {
 }
 
 /// The theme in use, or the default.
-pub fn current_theme(ctx: &Ctx) -> Result<Value, CoreError> {
-    let read = ctx.cores.themes.read(&ctx.themes_dir)?;
-    let id = ctx.cores.store.theme()?;
-    let themes = &read["themes"];
-    Ok(id.as_str().and_then(|i| themes.get(i)).or_else(|| themes.get("xenonet")).cloned().unwrap_or(Value::Null))
+pub(crate) fn current_theme(ctx: &Ctx) -> Result<Value, CoreError> {
+    ctx.cores.themes.current(&ctx.themes_dir, &*ctx.cores.store)
 }
 
 /// What waits on you apart from sessions: the actors waiting on you, and

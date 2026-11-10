@@ -14,17 +14,17 @@
 
 use crate::fx::Locked;
 use crate::fx::{self, now_ms, Perform, RunOptions};
+use crate::Settings;
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
+use xenonet_api::cores::{CoreError, Cores, Diagnostics, Doctor, R};
+use xenonet_api::wire::{Emitter, GatewayStatus, Slot};
+use xenonet_api::From;
 use xenonet_doctor::{checks, run};
 use xenonet_schema::drift::DriftLog;
-use xenonet_service::config::Config;
-use xenonet_service::cores::{CoreError, Cores, Diagnostics, Doctor, R};
-use xenonet_service::glue::From;
-use xenonet_service::wire::Emitter;
 
 const CHECK_MS: u64 = 8000;
 const DAY_MS: f64 = 24.0 * 3600e3;
@@ -50,12 +50,14 @@ const STATE_VERSION: f64 = 2.0;
 /// What the doctor reads XenoNet's own state through.
 pub struct Parts {
     pub cores: Cores,
-    pub config: Config,
+    pub config: Settings,
     /// config.js's settings, for `paths`.
     pub paths: Value,
     pub version: String,
     pub drift: Arc<Mutex<DriftLog>>,
     pub emitter: Emitter,
+    /// The actor gateway, once the service has made it.
+    pub gateway: Slot<Arc<dyn GatewayStatus>>,
 }
 
 impl Parts {
@@ -169,7 +171,7 @@ pub fn codex_bin(home: &str) -> String {
 /// XenoNet ships, the launcher script built in.
 pub async fn launcher() -> Result<Value, Value> {
     let env = fx::env_map();
-    let home = xenonet_service::config::home_dir(&|k| std::env::var(k).ok());
+    let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
     let m = xenonet_components::runtime::Machine { platform: fx::platform().into(), arch: String::new(), home };
     let dir = xenonet_base::paths::join(&xenonet_components::runtime::runtime_dir(&env, &m), "launcher");
     // The xenonet binary first, which entries run now; it's a copy of the
@@ -202,7 +204,7 @@ pub async fn launcher() -> Result<Value, Value> {
 pub fn restart_exe() -> Value {
     use xenonet_components::{install, packages, runtime};
     let env = fx::env_map();
-    let home = xenonet_service::config::home_dir(&|k| std::env::var(k).ok());
+    let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
     let m = runtime::Machine { platform: fx::platform().into(), arch: String::new(), home };
     let dir = xenonet_base::paths::join(&packages::components_dir(&env, &m), "service");
     let (Some(me), Ok(dir)) = (xenonet_base::fs::running_exe(), xenonet_base::fs::realpath_native(&dir)) else { return Value::Null };
@@ -469,7 +471,7 @@ impl Machine {
                         actors.token_files(fresh).await.map_err(|e| fx::error(e.message, None))?
                     }
                     "gateway" => {
-                        let Some(g) = self.parts.emitter.ctx().and_then(|c| c.gateway.get().cloned()) else { return Ok(json!({ "missing": true })) };
+                        let Some(g) = self.parts.gateway.get().cloned() else { return Ok(json!({ "missing": true })) };
                         g.status().await.map_err(|e| fx::error(e.message, None))?
                     }
                     "wakes" => {
@@ -881,10 +883,22 @@ mod tests {
     use super::*;
 
     fn parts(demo: bool, state: &str) -> Arc<Parts> {
-        let args: Vec<String> = if demo { vec!["--demo".into()] } else { Vec::new() };
-        let mut config = Config::from(&args, &|k: &str| (k == "HOME").then(|| "/home/nova".to_string()));
-        config.state_dir = state.into();
-        config.cache_dir = format!("{state}/cache");
+        // The service's settings for HOME=/home/nova, with the state folder given.
+        let config = Settings {
+            demo,
+            dev: false,
+            port: if demo { 47841 } else { 47840 },
+            name: if demo { "XenoNet (demo)" } else { "XenoNet" }.into(),
+            instance: demo.then(|| "demo".into()),
+            launcher_exec: None,
+            home: "/home/nova".into(),
+            projects_dir: "/home/nova/Projects".into(),
+            state_dir: state.into(),
+            cache_dir: format!("{state}/cache"),
+            root: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf(),
+            hosts: false,
+            world: None,
+        };
         let paths = json!({ "stateDir": state, "cacheDir": config.cache_dir, "projectsDir": state, "claudeProjectsDir": "/nowhere/claude", "codexHome": "/nowhere/codex", "homeDir": "/home/nova" });
         Arc::new(Parts {
             cores: Cores::pending(false, false, false),
@@ -893,6 +907,7 @@ mod tests {
             version: "0.0.0".into(),
             drift: Arc::new(Mutex::new(DriftLog::default())),
             emitter: Emitter::new(),
+            gateway: Slot::default(),
         })
     }
 

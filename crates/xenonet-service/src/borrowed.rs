@@ -6,16 +6,9 @@ use serde_json::Value;
 
 /// Milliseconds since the epoch, as Date.now() gives them.
 pub use xenonet_base::time::now_ms;
-
-/// crypto.randomUUID(): a version 4 UUID.
-pub fn random_uuid() -> String {
-    let mut b = [0u8; 16];
-    getrandom::fill(&mut b).expect("the system's random numbers");
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    let h = xenonet_base::jsstr::hex(&b);
-    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
-}
+// crypto.randomUUID() and process.platform are xenonet-os's, which the
+// drivers use too.
+pub use xenonet_os::{platform, random_uuid};
 
 /// Who sent a message, for attest().
 pub struct Sender<'a> {
@@ -32,17 +25,6 @@ pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now
     let sender = xenonet_engine::attest::Sender { id: sender.id, kind: sender.kind, name: sender.name.as_deref(), product: sender.product.as_deref() };
     // It fails only when the system has no random numbers for the id.
     xenonet_engine::attest::attest(sender, method, verdict, home, now, platform).expect("the system's random numbers")
-}
-
-/// process.platform's name for this one.
-pub fn platform() -> &'static str {
-    if cfg!(windows) {
-        "win32"
-    } else if cfg!(target_os = "macos") {
-        "darwin"
-    } else {
-        "linux"
-    }
 }
 
 #[cfg(test)]

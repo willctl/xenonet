@@ -646,7 +646,7 @@ async fn fetch_claude_usage(vendor: &Vendor, now: f64) -> Value {
         ("content-type".to_string(), "application/json".to_string()),
         ("user-agent".to_string(), format!("xenonet/{}", env!("CARGO_PKG_VERSION"))),
     ];
-    let res = match xenonet_service::net::fetch("GET", claude_usage::USAGE_URL, &headers, None, Duration::from_secs(8)).await {
+    let res = match xenonet_os::net::fetch("GET", claude_usage::USAGE_URL, &headers, None, Duration::from_secs(8)).await {
         Ok(r) => r,
         Err(e) => {
             let name = if e.contains("timeout") { json!("TimeoutError") } else { json!("TypeError") };

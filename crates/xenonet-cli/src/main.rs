@@ -21,6 +21,7 @@ use args::{parse, Flags, Parsed};
 use commands::{alias, find, COMMANDS};
 use out::{c, print, Done, Fail};
 use serde_json::{json, Value};
+use xenonet_api::cores::NetLink;
 use xenonet_base::log::{log_dir, ErrInfo, Log, MAX_BYTES};
 
 const VERSION: &str = env!("XENONET_VERSION");
@@ -136,23 +137,63 @@ fn log_error(fail: &Fail, argv: &[String]) {
 }
 
 /// `xenonet serve`: the service, with each core the binary's own driver
-/// for it (crates/xenonet-wire-*): the map first, whose demo world moves the
-/// folders the rest use, then the engine and actors, then the app's parts.
+/// for it (crates/xenonet-wire-*): the demo's world first, which moves the
+/// folders the rest use, then the map, the engine and actors, then the
+/// app's parts, each given the settings it reads.
 fn serve(args: &[String]) -> i32 {
     xenonet_service::serve::run_with(
         args,
         VERSION,
         Box::new(|config, env| {
-            let mut cores = xenonet_service::cores::Cores::pending(config.actors, config.assistant, config.hosts);
-            xenonet_wire_map::wire(&mut cores, config, env);
+            let mut cores = xenonet_api::cores::Cores::pending(config.actors, config.assistant, config.hosts);
+            let home = config.home.clone();
+            let demo = xenonet_wire_map::demo_world(&mut cores, config.demo, config.port);
+            config.take_world(&*cores.demo);
+            let map = xenonet_wire_map::Settings {
+                demo: config.demo,
+                dev: config.dev,
+                home,
+                cache_dir: config.cache_dir.clone(),
+                root: config.root.clone(),
+                world: config.world.clone(),
+            };
+            xenonet_wire_map::wire(&mut cores, &map, demo, env);
+            let setup = xenonet_wire_engine::runtime::Setup {
+                demo: config.demo,
+                actors: config.actors,
+                port: config.port,
+                home: config.home.clone(),
+                state_dir: config.state_dir.clone(),
+                projects_dir: config.projects_dir.clone(),
+                version: env.version.clone(),
+                root: config.root.clone(),
+                runs_bin: config.runs_bin.clone(),
+                permission_hold_ms: config.permission_hold_ms,
+                launcher_exec: config.launcher_exec.clone(),
+            };
             // The engine's world, which the network's link plugs into once
             // the service has made it.
-            if let Some(world) = xenonet_wire_engine::wire(&mut cores, config, env) {
-                cores.on_net = Some(std::sync::Arc::new(move |svc: &xenonet_service::gateway::network::NetService| {
+            if let Some(world) = xenonet_wire_engine::wire(&mut cores, setup, env) {
+                cores.on_net = Some(std::sync::Arc::new(move |svc: &dyn NetLink| {
                     svc.sinks().set(xenonet_wire_engine::network::plug(&world, svc.net()));
                 }));
             }
-            xenonet_wire_app::wire(&mut cores, config, env);
+            let app = xenonet_wire_app::Settings {
+                demo: config.demo,
+                dev: config.dev,
+                port: config.port,
+                name: config.name.clone(),
+                instance: config.instance.clone(),
+                launcher_exec: config.launcher_exec.clone(),
+                home: config.home.clone(),
+                projects_dir: config.projects_dir.clone(),
+                state_dir: config.state_dir.clone(),
+                cache_dir: config.cache_dir.clone(),
+                root: config.root.clone(),
+                hosts: config.hosts,
+                world: config.world.clone(),
+            };
+            xenonet_wire_app::wire(&mut cores, &app, env);
             // The terminal drawer's shells live in the service.
             cores.terminals = std::sync::Arc::new(xenonet_service::terminals::Shells::new());
             cores

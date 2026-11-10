@@ -17,13 +17,13 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use xenonet_api::cores::{Cores, Engine, State, R};
+use xenonet_api::wire::WireEnv;
 use xenonet_base::network::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
-use xenonet_service::config::Config;
-use xenonet_service::cores::{Cores, Engine, State, R};
-use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
 use xenonet_wire_engine::engine::EngineDriver;
 use xenonet_wire_engine::network;
 use xenonet_wire_engine::runtime::Runtime;
+use xenonet_wire_engine::runtime::Setup;
 
 const A: &str = "claude:aaaaaaaa-0001";
 const A2: &str = "codex:aaaaaaaa-0002";
@@ -243,13 +243,23 @@ fn net3(name: &str) -> Net3 {
     ] {
         let home = dir.join(host).to_string_lossy().into_owned();
         let state = dir.join(host).join("state").to_string_lossy().into_owned();
-        let vars = [("HOME", home.as_str()), ("XENONET_STATE_DIR", state.as_str()), ("XENONET_CACHE_DIR", state.as_str()), ("XENONET_ACTORS", "off"), ("XENONET_PORT", "47997")];
-        let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
-        let mut config = Config::from(&[], &get);
+        let setup = Setup {
+            demo: false,
+            actors: false,
+            port: 47997,
+            home: home.clone(),
+            state_dir: state.clone(),
+            projects_dir: dir.join(host).join("Projects").to_string_lossy().into_owned(),
+            version: "0.0.0".into(),
+            root: Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).expect("the checkout").to_path_buf(),
+            runs_bin: None,
+            permission_hold_ms: None,
+            launcher_exec: None,
+        };
         let mut cores = Cores::pending(false, false, false);
         cores.state = Arc::new(Fake { at, sessions, detail: detail.clone() });
-        let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
-        let w = xenonet_wire_engine::runtime(&cores, &mut config, &env).expect("the engine's parts");
+        let env = WireEnv::new("0.0.0");
+        let w = xenonet_wire_engine::runtime(&cores, setup, &env).expect("the engine's parts");
         network::set_net(&w, Arc::new(FakeNet { host: host.into(), hub: hub.clone() }));
         worlds.insert(host.to_string(), w);
     }

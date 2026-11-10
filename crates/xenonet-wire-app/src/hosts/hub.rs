@@ -34,13 +34,13 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use xenonet_api::cores::hosts::HubAnswer;
+use xenonet_api::cores::{CoreError, Hub, HubNet, State, Store, R};
+use xenonet_api::wire::Emitter;
+use xenonet_api::From;
 use xenonet_base::network::{Incoming, Net, RelaySink};
 use xenonet_hosts::network::{self as wire, Order};
 use xenonet_hosts::{aliases, cache, frames, hub as core, link, merge};
-use xenonet_service::cores::hosts::HubAnswer;
-use xenonet_service::cores::{CoreError, Hub, HubNet, State, Store, R};
-use xenonet_service::glue::From;
-use xenonet_service::wire::Emitter;
 
 /// What the page sees on a network host drawn from its relay's snapshot,
 /// as `network`; one drawn from its presence has `true` there.
@@ -1540,7 +1540,7 @@ impl Hub for HubCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xenonet_service::cores::Pending;
+    use xenonet_api::cores::Pending;
 
     fn hub(name: &str) -> (Arc<HostHub>, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("xenonet-wire-hub-{name}-{}", std::process::id()));
@@ -1739,7 +1739,7 @@ mod tests {
     struct NoApi;
 
     #[async_trait]
-    impl xenonet_service::cores::SelfApi for NoApi {
+    impl xenonet_api::cores::SelfApi for NoApi {
         async fn get(&self, _path: &str) -> Result<(u16, Value), (String, u16)> {
             Err(("nothing here".into(), 502))
         }
@@ -1755,7 +1755,7 @@ mod tests {
         core.plug_net(HubNet {
             net: net.clone(),
             sinks,
-            events: Arc::new(xenonet_service::events::Events::new()),
+            events: Arc::new(crate::hosts::relay::TestEvents::default()),
             api: Arc::new(NoApi),
             home: "/home/nova".into(),
             version: "0.0.0-test".into(),

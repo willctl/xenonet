@@ -10,11 +10,11 @@ use crate::fx::{now_ms, Locked};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use xenonet_api::cores::{CoreError, HostsConfig, R};
 use xenonet_blocks::lifecycle::Lifecycle;
 use xenonet_blocks::store::{read_versioned, write_atomic, DocHooks, Report};
 use xenonet_blocks::Halt;
 use xenonet_hosts::config::{self, Refused};
-use xenonet_service::cores::{CoreError, HostsConfig, R};
 
 fn refused(r: Refused) -> CoreError {
     CoreError::status(r.status, r.message)

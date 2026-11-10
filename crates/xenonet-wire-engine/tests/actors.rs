@@ -7,10 +7,10 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use xenonet_service::config::Config;
-use xenonet_service::cores::{Actors, Cores, Engine, Registration, Reports, State, Wakes, R};
-use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
+use xenonet_api::cores::{Actors, Cores, Engine, Registration, Reports, State, Wakes, R};
+use xenonet_api::wire::WireEnv;
 use xenonet_wire_engine::runtime::Runtime;
+use xenonet_wire_engine::runtime::Setup;
 
 /// A map with nothing on it yet, and the blocks the drivers list in it.
 #[derive(Default)]
@@ -42,26 +42,26 @@ fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBu
     let home = dir.to_string_lossy().into_owned();
     let state = dir.join("state").to_string_lossy().into_owned();
     let projects = dir.join("Projects").to_string_lossy().into_owned();
-    let vars = [
-        ("HOME", home.as_str()),
-        ("XENONET_STATE_DIR", state.as_str()),
-        ("XENONET_CACHE_DIR", state.as_str()),
-        ("XENONET_PROJECTS_DIR", projects.as_str()),
-        ("XENONET_PORT", "47997"),
-        ("HERMES_HOME", home.as_str()),
-    ];
-    let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
-    let args: Vec<String> = if demo { vec!["--demo".into()] } else { Vec::new() };
-    let mut config = Config::from(&args, &get);
-    // The demo's world is the map's to make: here, its folders.
-    if demo {
-        config.use_world(&json!({ "home": home, "projectsDir": projects, "stateDir": state, "cacheDir": state }));
-    }
+    // The demo's world is the map's to make: here, its folders are these
+    // either way.
+    let setup = Setup {
+        demo,
+        actors: true,
+        port: 47997,
+        home: home.clone(),
+        state_dir: state.clone(),
+        projects_dir: projects.clone(),
+        version: "0.0.0".into(),
+        root: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).expect("the checkout").to_path_buf(),
+        runs_bin: None,
+        permission_hold_ms: None,
+        launcher_exec: None,
+    };
     let empty = Arc::new(Empty::default());
     let mut cores = Cores::pending(true, false, false);
     cores.state = empty.clone();
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
-    let w = xenonet_wire_engine::runtime(&cores, &mut config, &env).expect("the area's parts");
+    let env = WireEnv::new("0.0.0");
+    let w = xenonet_wire_engine::runtime(&cores, setup, &env).expect("the area's parts");
     (w, empty, dir)
 }
 

@@ -2251,6 +2251,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-api"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "serde_json",
+ "tokio",
+ "xenonet-base",
+ "xenonet-net",
+ "xenonet-schema",
+]
+
+[[package]]
 name = "xenonet-app"
 version = "0.2.0"
 dependencies = [
@@ -2321,6 +2334,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "xenonet-actors",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-app",
  "xenonet-assistant",
  "xenonet-base",
@@ -2330,6 +2344,7 @@ dependencies = [
  "xenonet-hermes",
  "xenonet-hosts",
  "xenonet-mcp",
+ "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
  "xenonet-service",
@@ -2563,6 +2578,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-os"
+version = "0.2.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "reqwest",
+ "rustls",
+ "tokio",
+ "xenonet-base",
+]
+
+[[package]]
 name = "xenonet-platforms"
 version = "0.2.0"
 dependencies = [
@@ -2606,16 +2632,17 @@ dependencies = [
  "portable-pty",
  "reqwest",
  "rusqlite",
- "rustls",
  "serde_json",
  "tokio",
  "xenonet-actors",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-app",
  "xenonet-base",
  "xenonet-engine",
  "xenonet-model",
  "xenonet-net",
+ "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
  "xenonet-state",
@@ -2664,6 +2691,7 @@ dependencies = [
  "tokio",
  "xenonet-actors",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-app",
  "xenonet-assistant",
  "xenonet-base",
@@ -2676,8 +2704,8 @@ dependencies = [
  "xenonet-integrations",
  "xenonet-model",
  "xenonet-net",
+ "xenonet-os",
  "xenonet-schema",
- "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
 ]
@@ -2695,6 +2723,7 @@ dependencies = [
  "url",
  "xenonet-actors",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-app",
  "xenonet-base",
  "xenonet-blocks",
@@ -2702,9 +2731,9 @@ dependencies = [
  "xenonet-engine",
  "xenonet-hosts",
  "xenonet-model",
+ "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
- "xenonet-service",
 ]
 
 [[package]]
@@ -2718,13 +2747,14 @@ dependencies = [
  "serde_json",
  "tokio",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-app",
  "xenonet-base",
  "xenonet-blocks",
  "xenonet-model",
+ "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
- "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
 ]

@@ -6,13 +6,13 @@
 //! xenonet command the launcher names.
 
 use crate::exec::Spec;
+use crate::runtime::Setup;
 use async_trait::async_trait;
 use serde_json::Value;
 use xenonet_adapter::connect::{Connect as Core, Instance, Machine, Options, Problem};
+use xenonet_api::cores::{Connect, CoreError, R};
 use xenonet_app::instances::INSTANCES;
 use xenonet_base::fs::FsError;
-use xenonet_service::config::Config;
-use xenonet_service::cores::{Connect, CoreError, R};
 
 /// This machine: its files, and the agents' CLIs on PATH.
 struct Here;
@@ -70,9 +70,9 @@ fn platform() -> &'static str {
 
 /// The xenonet binary the hooks and servers run: XENONET_BIN, installed
 /// XenoNet's launcher, which never moves, else this one.
-fn bin(config: &Config) -> String {
+fn bin(setup: &Setup) -> String {
     let env: xenonet_components::runtime::Env = std::env::vars().map(|(k, v)| (k, Value::String(v))).collect();
-    let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: std::env::consts::ARCH.into(), home: config.home.clone() };
+    let m = xenonet_components::runtime::Machine { platform: platform().into(), arch: std::env::consts::ARCH.into(), home: setup.home.clone() };
     let this = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     xenonet_components::runtime::xenonet_bin(&env, &m, &this)
 }
@@ -80,18 +80,18 @@ fn bin(config: &Config) -> String {
 pub struct ConnectDriver(std::sync::Arc<Core>);
 
 impl ConnectDriver {
-    pub fn new(config: &Config) -> ConnectDriver {
+    pub fn new(setup: &Setup) -> ConnectDriver {
         let env = |k: &str| std::env::var(k).ok();
         let options = Options {
-            port: f64::from(config.port),
-            demo: config.demo,
-            bin: bin(config),
-            home: config.home.clone(),
+            port: f64::from(setup.port),
+            demo: setup.demo,
+            bin: bin(setup),
+            home: setup.home.clone(),
             claude_config_dir: env("CLAUDE_CONFIG_DIR"),
             codex_home: env("CODEX_HOME"),
             grok_home: env("GROK_HOME"),
             // Installed XenoNet's console operator, which Desktop registers.
-            console_mcp: env("XENONET_LAUNCHER_BIN").is_some_and(|b| !b.is_empty()) || config.launcher_exec.is_some(),
+            console_mcp: env("XENONET_LAUNCHER_BIN").is_some_and(|b| !b.is_empty()) || setup.launcher_exec.is_some(),
             platform: platform().into(),
             instances: INSTANCES.iter().map(|i| Instance { id: i.id.into(), name: i.name.into(), port: f64::from(i.port) }).collect(),
         };
