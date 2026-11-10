@@ -11,7 +11,7 @@
 
 use crate::runtime::blocks::{health_of, Block};
 use crate::runtime::gatherer::{Gather, Options};
-use crate::runtime::util::{fields, lock, now_ms, num, obj};
+use crate::runtime::util::{fields, lock, num, obj, Clock};
 use crate::runtime::vendor::Vendor;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -94,6 +94,7 @@ pub struct Live {
     // The sweeps' and the limits' tasks, stopped with it.
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     sweeping: tokio::sync::Mutex<()>,
+    clock: Clock,
 }
 
 fn emits(out: Vec<Emit>) -> Vec<Event> {
@@ -120,6 +121,11 @@ impl Live {
     /// `roots`: the folders the apps write transcripts in, each with its
     /// app; `usage`: whether to ask Anthropic for plan usage.
     pub fn new(roots: &[(String, String)], claude_desktop_dir: Option<&str>, usage: bool, home: &str, vendor: Arc<Vendor>) -> Arc<Live> {
+        Live::with_clock(roots, claude_desktop_dir, usage, home, vendor, Clock::system())
+    }
+
+    /// The same, reading `clock`.
+    pub fn with_clock(roots: &[(String, String)], claude_desktop_dir: Option<&str>, usage: bool, home: &str, vendor: Arc<Vendor>, clock: Clock) -> Arc<Live> {
         // Watch canonical long paths: an 8.3 short name on Windows names
         // the same folder another way.
         let roots: Vec<(String, String)> = roots
@@ -127,13 +133,17 @@ impl Live {
             .filter(|(d, _)| !d.is_empty() && std::path::Path::new(d).exists())
             .map(|(d, app)| (xenonet_os::fs::realpath_native(d).unwrap_or_else(|_| d.clone()), app.clone()))
             .collect();
-        let now = now_ms();
+        let now = clock.now();
         let scanners = roots.iter().map(|(dir, _)| Scanner::new(&format!("transcripts:{dir}"), dir, Limits { depth: DEPTH, ..Limits::default() }, true, now)).collect();
         let telemetry = Telemetry::new(Some(home.to_string()).filter(|h| !h.is_empty()), roots.clone());
-        let anthropic = usage
-            .then(|| Arc::new(Gather::new("claude-usage", Options { every_ms: Some(claude_usage::USAGE_EVERY_MS), next_in: true, fallback: Value::Null, ..Default::default() })));
-        let desktop =
-            claude_desktop_dir.map(|d| (Arc::new(Gather::new("claude-desktop-usage", Options { keep: true, fallback: Value::Null, ..Default::default() })), d.to_string()));
+        let anthropic = usage.then(|| {
+            Arc::new(Gather::new(
+                "claude-usage",
+                Options { every_ms: Some(claude_usage::USAGE_EVERY_MS), next_in: true, fallback: Value::Null, clock: clock.clone(), ..Default::default() },
+            ))
+        });
+        let desktop = claude_desktop_dir
+            .map(|d| (Arc::new(Gather::new("claude-desktop-usage", Options { keep: true, fallback: Value::Null, clock: clock.clone(), ..Default::default() })), d.to_string()));
         Arc::new(Live {
             connectors: Mutex::new(Connectors::new(claude_desktop_dir)),
             roots,
@@ -146,6 +156,7 @@ impl Live {
             listener: OnceLock::new(),
             tasks: Mutex::new(Vec::new()),
             sweeping: tokio::sync::Mutex::new(()),
+            clock,
         })
     }
 
@@ -179,7 +190,7 @@ impl Live {
         lock(&self.status).lines += 1;
         let f = Where { session_id: e.session_id.clone(), agent_id: e.agent_id.clone(), file: Value::String(file.into()) };
         let mut emitted = Vec::new();
-        let r = lock(&self.telemetry).line(e.app, &*self.vendor, &f, raw, !prime, now_ms(), &mut emitted);
+        let r = lock(&self.telemetry).line(e.app, &*self.vendor, &f, raw, !prime, self.clock.now(), &mut emitted);
         out.extend(emits(emitted));
         if r.is_err() {
             lock(&self.status).errors += 1;
@@ -222,7 +233,7 @@ impl Live {
         // The sweep stands in for the watches, so every root counts as
         // watched once it has started.
         if t.tailer.ok_after_read(self.roots.len(), self.roots.len()) {
-            t.tailer.life.ok(now_ms());
+            t.tailer.life.ok(self.clock.now());
         }
         Ok(())
     }
@@ -268,14 +279,14 @@ impl Live {
 
     fn error(&self, t: &mut Tail, e: &std::io::Error) {
         lock(&self.status).errors += 1;
-        t.tailer.life.problem(&e.to_string(), now_ms());
+        t.tailer.life.problem(&e.to_string(), self.clock.now());
     }
 
-    fn walk(t: &mut Tail) -> Vec<String> {
+    fn walk(&self, t: &mut Tail) -> Vec<String> {
         let mut files = Vec::new();
         let mut rules = FnRules(|name: &str, _: &str| transcript(name), |_: &str, _: &str, _: u32| true);
         for s in &mut t.scanners {
-            if let Ok(found) = s.scan(&mut StdFs, &mut rules, &mut now_ms) {
+            if let Ok(found) = s.scan(&mut StdFs, &mut rules, &mut || self.clock.now()) {
                 files.extend(found);
             }
         }
@@ -286,10 +297,10 @@ impl Live {
     fn prime(&self) -> Vec<Event> {
         let mut out = Vec::new();
         let mut t = lock(&self.tail);
-        let now = now_ms();
+        let now = self.clock.now();
         let Some(_run) = t.tailer.life.begin_start(now) else { return out };
         let mut failed = false;
-        for file in Self::walk(&mut t) {
+        for file in self.walk(&mut t) {
             if !t.tailer.listed_at_start(&file) {
                 continue;
             }
@@ -304,7 +315,7 @@ impl Live {
             }
         }
         // History is read file by file, so it's put in time order once.
-        lock(&self.telemetry).primed(now_ms());
+        lock(&self.telemetry).primed(self.clock.now());
         if !failed {
             t.tailer.life.ok(now);
         }
@@ -359,11 +370,11 @@ impl Live {
             if walk {
                 t.tailer.life.count("walks", 1.0);
             }
-            for file in Self::walk(&mut t) {
+            for file in self.walk(&mut t) {
                 if !t.tailer.may_discover(&file) || lock(&self.telemetry).classify(&file).is_none() {
                     continue;
                 }
-                if t.tailer.discovered(&file, stat(&file), now_ms) == Listed::Track {
+                if t.tailer.discovered(&file, stat(&file), || self.clock.now()) == Listed::Track {
                     if let Err(e) = self.read(&mut t, &file, false, &mut out) {
                         self.error(&mut t, &e);
                     }
@@ -439,7 +450,7 @@ impl Live {
         }
         let mut t = lock(&self.tail);
         t.tailer.life.begin_stop();
-        t.tailer.life.set_state(xenonet_blocks::lifecycle::State::Stopped, now_ms());
+        t.tailer.life.set_state(xenonet_blocks::lifecycle::State::Stopped, self.clock.now());
         lock(&self.status).watching = false;
     }
 
@@ -448,16 +459,16 @@ impl Live {
     /// Anthropic's answer every 5 minutes (later when it asks for a
     /// pause), and Claude desktop's own samples; the newer reading wins.
     pub async fn read_claude_limits(&self) {
-        let now = now_ms();
+        let now = self.clock.now();
         if let Some(a) = &self.anthropic {
             let before = a.last().map(|l| l.at);
             let vendor = self.vendor.clone();
-            let at = now_ms();
+            let at = self.clock.now();
             let r = if a.begin(false, at, None).is_ok() {
-                let t0 = now_ms();
+                let t0 = self.clock.now();
                 let r = fetch_claude_usage(&vendor, now).await;
                 let wait = claude_usage::next_in(Some(&r)).and_then(|w| w.as_f64());
-                a.done(r, at, now_ms() - t0, None, wait)
+                a.done(r, at, self.clock.now() - t0, None, wait)
             } else {
                 a.value()
             };
@@ -480,11 +491,11 @@ impl Live {
 
     /// The snapshot, with the tailer's status.
     pub fn snapshot(&self) -> Value {
-        let mut snap = lock(&self.telemetry).snapshot(now_ms());
+        let mut snap = lock(&self.telemetry).snapshot(self.clock.now());
         let st = lock(&self.status).clone();
         snap["status"] = json!({ "watching": st.watching, "files": st.files, "lines": st.lines, "errors": st.errors });
         // What Claude desktop calls its connectors beats what the lines suggest.
-        let declared = lock(&self.connectors).get(now_ms()).to_vec();
+        let declared = lock(&self.connectors).get(self.clock.now()).to_vec();
         with_declared(&mut snap["resources"], &declared);
         snap
     }
@@ -500,7 +511,7 @@ impl Live {
     /// A Claude Code hook's event.
     pub fn note_hook(&self, id: &str, body: &Value) -> Result<(), String> {
         let mut out = Vec::new();
-        let r = lock(&self.telemetry).note_hook(id, Some(body), now_ms(), &mut out);
+        let r = lock(&self.telemetry).note_hook(id, Some(body), self.clock.now(), &mut out);
         self.tell(emits(out));
         r.map_err(|e| e.0)
     }
@@ -511,13 +522,13 @@ impl Live {
         {
             let mut t = lock(&self.telemetry);
             let Some(i) = t.find(id) else { return };
-            t.note_activity(i, ev, true, now_ms(), &mut out);
+            t.note_activity(i, ev, true, self.clock.now(), &mut out);
         }
         self.tell(emits(out));
     }
 
     pub fn session_notes(&self, id: &str) -> Value {
-        lock(&self.telemetry).session_notes(id, now_ms())
+        lock(&self.telemetry).session_notes(id, self.clock.now())
     }
 
     pub fn collision_diffs(&self, a: &str, b: &str) -> Value {
@@ -681,6 +692,7 @@ fn desktop_samples(vendor: &Vendor, file: &std::path::Path) -> Result<Value, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::util::now_ms;
     use std::io::Write;
     use xenonet_schema::drift::DriftLog;
 

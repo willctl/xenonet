@@ -1,9 +1,10 @@
 # Direction: from the prototype to the system
 
 Status: analysis and target shape, 2026-11-08. Written for the goals in
-[goals.md](goals.md). Phase 1 of the order of work is done; phase 2 is
-next. Will decides the open questions at the end as each phase reaches
-them.
+[goals.md](goals.md). Phases 1 and 2 of the order of work are done;
+phase 3 is next. "Where the code stands" is the measure taken before
+phase 1; the order of work says what each phase changed. Will decides the
+open questions at the end as each phase reaches them.
 
 ## Where the code stands
 
@@ -399,16 +400,38 @@ service runs a local build.
    import moved to `src/shared/` and `electron/lib/`. Desktop installs and
    updates its components through the binary (`xenonet components`, over
    `crates/xenonet-components`), and `launcher.cjs` lives in that crate.
-   Left for later, and not blocking phase 2: `state.json` in the golden
-   world isn't replayed until the map's driver takes a clock, and the
+   Left for later: the
    routes and help texts where the JS and the Rust already differed
    weren't frozen (the commit that froze them lists them).
-2. **A typed core, no more string dispatch.** Add `xenonet-model` and
-   `xenonet-adapter`. Delete `Calls`, `Arg`, `peer.rs`, `world.rs`, the
-   JS emulation and the runtime schema checker. Dissolve the three
-   `wire-*` crates (29k lines) and the `base` and `app` grab-bags; move
-   vendor code to `adapters/*` and doctor rows with it. A session index
-   replaces the O(n²) pass. Widest phase; the golden files hold it.
+2. **A typed core, no more string dispatch. Done (2026-11-09).** The
+   data model is `xenonet-model`: typed ids, every document as a serde
+   type, the operations' kinds and the action vocabulary; `schemas/` is
+   written from its types, and its types enforce the bounds the schemas
+   declare when untrusted input is read. `xenonet-adapter` holds the
+   registry and the `Platform` trait; each platform is a crate in
+   `adapters/` (Claude Code, Codex, Grok Build, OpenCode, Cursor, Gemini
+   CLI, Copilot CLI, Hermes Agent, Grok Bot, Muse) with its process rules,
+   ways in, connect, readers, observers and doctor checks, and
+   `xenonet-platforms` installs them at the binary's start. `Calls`,
+   `Arg`, `peer.rs`, `world.rs`, the JS emulation and the runtime schema
+   checker are gone: every collaborator is a typed trait. The engine keeps
+   a session index in place of the rebuild per call. The three `wire-*`
+   crates and the `base` and `app` grab-bags are gone too, their code in
+   `xenonet-text`, `xenonet-os`, `xenonet-api`, `xenonet-demo`,
+   `xenonet-console`, `xenonet-runtime`, `xenonet-state`'s runtime and the
+   domain crates, with the composition root in the service. No core crate
+   depends on a surface or an adapter crate or names a platform, and
+   `npm run lint:rust` fails if one does (`scripts/rust-layers.mjs`).
+   Left for later: the core traits in `xenonet-api` still pass JSON (typed
+   requests come with the local protocol); the "no core crate has more
+   than three internal dependencies" and "surfaces import only
+   `xenonet-api`" rules wait for phase 3; the session index takes the map
+   and the store's contacts by push but still reads the live tailer and
+   the actors' list on each call; the per-app line views stay in
+   `xenonet-sources` as types the adapters name by format; the Pi
+   integration's session reading is still in `xenonet-integrations`; and
+   `xenonet-hosts` still tells Claude Code's plan readings from the
+   registry's limits kind rather than through its adapter.
 3. **One authorization.** Add `xenonet-log::chain` with today's
    `roster.rs` as its first `Policy`, so the network chain *is* the roster
    and one implementation runs the old transport and the new rules; add

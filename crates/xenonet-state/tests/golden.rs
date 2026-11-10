@@ -1,8 +1,9 @@
 //! What XenoNet makes of a fixed world: the demo's world and the odd transcripts it adds, frozen in
 //! tests/fixtures/golden-world, read with the clock fixed at 2026-10-03
 //! 12:00 UTC by the live tailer (its state and history, and lines as they
-//! come), each session's stats, the search index and the projects scan,
-//! and compared with tests/golden/*.json: the world's root as <world>, and search scores to 12 digits.
+//! come), each session's stats, the search index, the map's refresh and
+//! the projects scan, and compared with tests/golden/*.json: the world's
+//! root as <world>, and search scores to 12 digits.
 //!
 //! The fixture's manifest.json lists every folder, file and link of the
 //! world with its mtime: "start", the world the live tailer reads first;
@@ -15,15 +16,21 @@
 //! it encodeURIComponent'd). Of the git folders only what
 //! the readers read is kept: HEAD, config, commondir and gitdir.
 //!
-//! The runtime in src/runtime/ reads the system clock, so this drives the same
-//! cores they drive (the telemetry, the tailer and the scanner, xenonet-
-//! state's projects scan) with the fixed clock, as they do; stats and
-//! search, whose output doesn't depend on the clock, go through the
-//! drivers themselves.
+//! The live tailer and the projects scan are driven here as the cores
+//! src/runtime/ drives (the telemetry, the tailer and the scanner,
+//! xenonet-state's projects scan), with the fixed clock; stats and search,
+//! whose output doesn't depend on the clock, go through the drivers
+//! themselves.
 //!
-//! What the map's refresh makes of it (test/golden/state.json: the graph,
-//! identities, repos and state.json) isn't replayed here: MapState reads
-//! the clock throughout and the repos' status runs git on real repos.
+//! The map's refresh (tests/golden/state.json: the graph, identities,
+//! projects, repos and state.json as it's saved) runs through MapState
+//! itself, in the demo, over the laid-out world (`Demo::over` names its
+//! sessions' files without writing them), with MapConfig's clock fixed 30
+//! seconds on, where the live tailer's test left it. Git goes through
+//! MapConfig's git, which `FixtureGit` answers from the fixture's HEAD and
+//! config files, since the fixture's repos have nothing else for a real git
+//! to read. As the recording did, each source's ms is set to 0. Nothing
+//! else in state.json is set aside.
 //!
 //! XENONET_GOLDEN_OUT=<dir> writes what came out to <dir>/golden-<name>.json,
 //! to diff with tests/golden/<name>.json.
@@ -39,6 +46,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
+use xenonet_api::cores::State as _;
 use xenonet_blocks::scanner::{FnRules, Limits, Rules, Scanner};
 use xenonet_blocks::tailer::{Listed, Tailer};
 use xenonet_blocks::Halt;
@@ -48,9 +56,14 @@ use xenonet_schema::vendor::Sampling;
 use xenonet_sources::claude_usage;
 use xenonet_sources::live::telemetry::{Emit, Telemetry, Where};
 use xenonet_state::projects::{FactsCache, Scan, SCAN_DEPTH, SCAN_MAX_DIRS, SCAN_MAX_SUBMODULES};
+use xenonet_state::runtime::config::MapConfig;
+use xenonet_state::runtime::demo::DemoWorld;
+use xenonet_state::runtime::git::{Git, GitHost, Ran};
 use xenonet_state::runtime::search::TranscriptSearch;
+use xenonet_state::runtime::state::{transcript_dirs, MapState, Readers};
 use xenonet_state::runtime::stats::Stats;
-use xenonet_state::runtime::util::{fields, num};
+use xenonet_state::runtime::store::StateStore;
+use xenonet_state::runtime::util::{fields, num, Clock};
 use xenonet_state::runtime::vendor::Vendor;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/golden-world");
@@ -594,6 +607,160 @@ async fn search(w: &World, c: &mut Check) {
     c.golden("search", &json!({ "status": status, "docs": docs, "found": found }));
 }
 
+// ---------- the map ----------
+
+// What the demo asks of the rest of XenoNet while it names its sessions'
+// files: the time the world was made, in UTC.
+struct Made(f64);
+
+impl xenonet_demo::Around for Made {
+    fn git_available(&mut self) -> bool {
+        false
+    }
+    fn claude_id(&mut self, account: &str, org: &str) -> String {
+        format!("claude:{account}:{org}")
+    }
+    fn github_id(&mut self, host: &str, login: &str) -> String {
+        format!("github:{host}/{login}")
+    }
+    fn git_id(&mut self, email: &str) -> String {
+        format!("git:{email}")
+    }
+    fn local(&mut self, ms: f64) -> [i64; 5] {
+        xenonet_state::runtime::util::local(ms)
+    }
+    fn random(&mut self) -> f64 {
+        0.5
+    }
+    fn uuid(&mut self) -> String {
+        "00000000-0000-4000-8000-000000000000".into()
+    }
+    fn now(&mut self) -> f64 {
+        self.0
+    }
+}
+
+// The edits the demo leaves uncommitted in its repos, as git status saw
+// them when the golden was recorded.
+const UNCOMMITTED: [(&str, &str); 3] = [("atlas-api", "src/orders/routes.ts"), ("labs/geofence", "src/zones.ts"), ("ledger", "ledger/reconcile.py")];
+
+// git config's lines for the identities' regexp from one config file, as
+// `git config --get-regexp` prints them ("key value"), with the files an
+// includeIf whose gitdir holds `gitdir` brings in, where they are.
+fn config_lines(file: &Path, gitdir: &str, home: &str, out: &mut Vec<String>) {
+    let Ok(text) = std::fs::read_to_string(file) else { return };
+    let mut section = String::new();
+    for line in text.lines().map(str::trim) {
+        if let Some(head) = line.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+            section = match head.split_once(' ') {
+                Some((name, sub)) => format!("{}.{}", name.to_lowercase(), sub.trim_matches('"')),
+                None => head.to_lowercase(),
+            };
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim().to_lowercase(), v.trim());
+        if let Some(pattern) = section.strip_prefix("includeif.gitdir:") {
+            if k == "path" && gitdir.starts_with(pattern) {
+                config_lines(Path::new(&v.replacen('~', home, 1)), gitdir, home, out);
+            }
+            continue;
+        }
+        let key = format!("{section}.{k}");
+        if key == "user.name" || key == "user.email" || section.starts_with("credential.") {
+            out.push(format!("{key} {v}"));
+        }
+    }
+}
+
+// git, as it answered in the demo's repos: the fixture keeps only their
+// HEAD and config, so this answers from those. No filter drivers; a
+// status on HEAD's branch, with no upstream and the demo's uncommitted
+// edits; and the identities' git config from your config (the world's
+// home's) and then the repo's.
+struct FixtureGit {
+    home: String,
+}
+
+#[async_trait::async_trait]
+impl GitHost for FixtureGit {
+    fn available(&self) -> bool {
+        true
+    }
+    async fn run(&self, args: &[String], _: &[(String, String)], _: bool, _: Duration) -> Ran {
+        let none = Ran { ok: false, code: Some(1), stdout: String::new() };
+        let (Some("-C"), Some(dir)) = (args.first().map(String::as_str), args.get(1)) else { return Ran { code: None, ..none } };
+        let gitdir = format!("{dir}/.git");
+        if args.iter().any(|a| a == "status") {
+            let Ok(head) = std::fs::read_to_string(format!("{gitdir}/HEAD")) else { return Ran { code: Some(128), ..none } };
+            let mut out = format!("## {}\n", head.trim().trim_start_matches("ref: refs/heads/"));
+            for (_, file) in UNCOMMITTED.iter().filter(|(rel, _)| dir.ends_with(&format!("/Projects/{rel}"))) {
+                out += &[" M ", file, "\n"].concat();
+            }
+            return Ran { ok: true, code: Some(0), stdout: out };
+        }
+        if args.iter().any(|a| a.starts_with("^(user")) {
+            let mut lines = Vec::new();
+            config_lines(&Path::new(&self.home).join(".gitconfig"), &gitdir, &self.home, &mut lines);
+            config_lines(&Path::new(&gitdir).join("config"), &gitdir, &self.home, &mut lines);
+            if lines.is_empty() {
+                return none;
+            }
+            return Ran { ok: true, code: Some(0), stdout: lines.iter().map(|l| [l.as_str(), "\n"].concat()).collect() };
+        }
+        // The filter drivers' listing: none.
+        none
+    }
+}
+
+// What the map's refresh makes of the world, as the service's state does
+// it in the demo, read with the clock where the live tailer's test left
+// it: refresh, the repos' pass, and refresh again; then the map, the
+// identities, the projects, the repos, and state.json as it's saved.
+async fn map(w: &World, c: &mut Check) {
+    let made = w.clock();
+    let clock = Clock::fixed(made + 30e3);
+    let demo = xenonet_demo::Demo::over(&w.root, &xenonet_state::runtime::util::local_day(made), &mut Made(made)).expect("the demo over the world");
+    let demo = Arc::new(DemoWorld::over(demo));
+    let world = demo.create().expect("the demo's world");
+    let mut cfg = MapConfig::new(true, false, Map::new(), &w.dir("home"), Some(&world));
+    cfg.clock = clock.clone();
+    cfg.git = Git::new(FixtureGit { home: w.dir("home") });
+    let vendor = vendor();
+    let store = StateStore::with_clock(&cfg.state_dir, &cfg.projects_dir, clock.clone());
+    let roots: Vec<(String, String)> = xenonet_adapter::platforms().iter().filter_map(|p| Some((transcript_dirs(&cfg, p.id()).into_iter().next()?, p.id().to_string()))).collect();
+    let live = xenonet_state::runtime::live::Live::with_clock(&roots, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone(), clock);
+    let state_dir = cfg.state_dir.clone();
+    let state = MapState::new(cfg, store.clone(), vendor, &xenonet_api::wire::WireEnv::new("0.0.0"), Readers::Demo(demo), live);
+    state.refresh_map().await.expect("a map");
+    state.refresh_repos().await;
+    let mut graph = state.refresh_map().await.expect("a map");
+    // How long each source took is the machine's.
+    if let Some(Value::Array(sources)) = graph.get_mut("sources") {
+        for s in sources.iter_mut().filter(|s| s.get("ms").is_some_and(|ms| !ms.is_null())) {
+            s["ms"] = json!(0);
+        }
+    }
+    let mut repos = state.repo_status();
+    repos.sort_by(|a, b| a.0.cmp(&b.0));
+    let out = json!({
+        "graph": graph,
+        "identities": state.identity_detection().expect("the identities"),
+        "projects": state.project_detection().await.expect("the projects"),
+        "repos": Value::Object(repos.into_iter().collect()),
+        "stateLoad": store.load_report(),
+    });
+    state.end();
+    let read = |name: &str| xenonet_text::json::parse(&std::fs::read_to_string(Path::new(&state_dir).join(name)).expect(name)).expect(name);
+    let mut files: Vec<String> = std::fs::read_dir(&state_dir).expect("the state folder").filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    files.sort();
+    let mut out = out;
+    out["stateFile"] = read("state.json");
+    out["stateBackup"] = read("state.v1.json");
+    out["stateFiles"] = json!(files);
+    c.golden("state", &out);
+}
+
 // ---------- the projects scan ----------
 
 struct Enter<'a>(&'a Scan);
@@ -818,6 +985,7 @@ async fn the_golden_world_reads_as_pinned() {
     after_live(&w);
     stats(&w, &mut c).await;
     search(&w, &mut c).await;
+    map(&w, &mut c).await;
     projects(&w, &mut c);
     assert!(c.failed.is_empty(), "{}", c.failed.join("\n\n"));
 }

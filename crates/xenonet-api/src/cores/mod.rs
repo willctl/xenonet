@@ -1,32 +1,14 @@
-//! The cores the service's routes call, each behind a trait named and
-//! shaped after the JS object server/index.js hands its routes (`state`,
-//! `engine`, `verify`, `actors`…): the same method names, JSON in and out.
+//! The cores the service's routes call, each behind a trait: the map's
+//! state, the engine and delivery, the actors, the other machines, the
+//! assistant, the doctor and the console's services, JSON in and out. The
+//! composition root (the service's `compose` and the command's `serve`)
+//! fills `Cores` with each crate's implementation.
 //!
-//! The cores are other crates' work (docs/design/rust-core.md, "The order of
-//! the port"). Until one is in Rust, its trait's methods keep their default
-//! bodies, which say so: a route that reaches one answers 501 with
-//! `{ error, code: "pending" }`, and a check that can't run refuses (the
-//! process check, the schema checks), never lets through. When a core
-//! lands, an adapter implements its trait for the core's own type, and
-//! `Cores::pending()` in the service's serve.rs takes it instead.
-//!
-//! Waiting on the readers, map and schemas: State (core/state.js, live.js,
-//! graph.js, search.js, stats.js, digest.js), Store (core/store.js), Demo
-//! (core/demo.js), Schemas (core/schema/index.js), DriftReport
-//! (core/vendor.js driftReport).
-//! Waiting on the engine, delivery and actors: Engine, Connect, Verify,
-//! Channels (core/engine/, core/delivery/channel.js, core/procs.js),
-//! Actors, Registration, Wakes, Reports (core/actors/), Policy, Router
-//! (core/delivery/), Spend (core/actors/spend.js), Runs (state.reportedRuns).
-//! Waiting on the assistant, hosts, components and the rest: HostsConfig,
-//! Hub (core/hosts/), Connections, Tunnels, Audit, AssistantSource,
-//! AssistantService (core/actors/connections.js, core/assistant/), Doctor,
-//! Diagnostics (core/doctor/, core/diagnostics.js), Themes
-//! (core/themefiles.js), Opener (core/open.js), Spotify, Decider,
-//! OpenRouter, SystemStats, Refusals, Integrations, McpInfo, Command
-//! (core/spotify.js, decide.js, openrouter-usage.js, system-stats.js,
-//! refusals/, integrations/, mcp-info.js, command.js), Terminals
-//! (server/terminals.js's pty).
+//! A trait's methods have default bodies for a XenoNet started without
+//! that part (the actors off, no hosts, a test that wires only one core):
+//! a route that reaches one answers 501 with `{ error, code: "pending" }`,
+//! and a check that can't run refuses (the process check, the schema
+//! checks), never lets through. `Cores::pending()` starts every core so.
 
 pub mod actors;
 pub mod assistant;

@@ -136,8 +136,8 @@ fn log_error(fail: &Fail, argv: &[String]) {
     Log::new(Some(&dir), "cli", None, None, &sys::home(), MAX_BYTES).write("error", &code, Some(&fail.message), Some(&err), None, None, out::now());
 }
 
-/// `xenonet serve`: the service, with each core the binary's own driver
-/// for it (crates/xenonet-wire-*): the demo's world first, which moves the
+/// `xenonet serve`: the service, with each core its crate's
+/// implementation: the demo's world first, which moves the
 /// folders the rest use, then the map, the engine and actors, then the
 /// app's parts and the console's, each given the settings it reads.
 fn serve(args: &[String]) -> i32 {

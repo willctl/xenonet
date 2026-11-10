@@ -2,13 +2,18 @@
 
 XenoNet maps the Claude Code, Codex and Grok Build sessions on this
 machine, and on the other machines of its network. It runs as one Rust
-binary, `xenonet` (`crates/`): the core, the service, the command, the
-hooks and the MCP servers. Desktop is Electron (`electron/`) around a
-three.js page (`src/`), with the modules both use in `src/shared/`. Golden
-files under the crates' `tests/` folders hold the contract of the HTTP API,
-the command and the MCP servers. The README's Development section has the
-commands, and `docs/guide/development.md` has the layout, the golden files
-and how to drive XenoNet Dev.
+binary, `xenonet` (`crates/`, with a crate per platform in `adapters/`):
+the core, the service, the command, the hooks and the MCP servers.
+Desktop is Electron (`electron/`) around a three.js page (`src/`), with
+the modules both use in `src/shared/`. Golden files hold the contract of
+the HTTP API and the command (`crates/xenonet-cli/tests/golden/`), the MCP
+servers (`crates/xenonet-mcp/tests/golden/`), the actor gateway
+(`crates/xenonet-service/tests/fixtures/gateway.json`), the map
+(`crates/xenonet-state/tests/golden/`) and the network
+(`test/fixtures/net/`). The README's Development section has the
+commands, `docs/guide/development.md` has the layout, the golden files
+and how to drive XenoNet Dev, and `docs/design/rust-core.md` has the
+crates and which may depend on which.
 
 ## The goals come first
 
@@ -23,7 +28,10 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   files included, on the pinned toolchain (a plain `cargo` may be an older
   Rust). `npm test` runs the page's, Desktop's and the scripts' unit tests.
   Run both after every change, and `npm run lint:rust` before a commit
-  that touches `crates/`.
+  that touches `crates/` or `adapters/`. It runs the layering check first
+  (`scripts/rust-layers.mjs`), which fails when a core crate depends on a
+  surface or an adapter crate or names a platform by its id: what a core
+  crate knows of a platform comes through `xenonet_adapter::platforms()`.
 - A golden file changes only when the behaviour should: say why in the
   commit, never re-record one to make a test pass.
 - To see a change the way a person would, use the `xenonet-console` MCP tools
@@ -56,7 +64,8 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   `npm run test:e2e` before you finish.
 - XenoNet Dev reloads as you save: `src/` reloads the page and
   `electron/` relaunches the app. The service is the `xenonet` binary:
-  after a change under `crates/`, `npm run rust:bin` rebuilds it, and
+  after a change under `crates/` or `adapters/`, `npm run rust:bin`
+  rebuilds it, and
   XenoNet Dev restarts its service on the new build. The tools wait for
   it.
 - When you add something to the UI that a test or an agent should be able

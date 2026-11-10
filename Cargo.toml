@@ -139,8 +139,8 @@ codegen-units = 4
 # whole program optimized as one unit, with no debug info or symbol table.
 # Measured against `release` on the same Mac, the service came out about a
 # third smaller (34.5 MB to 22.1 MB) and 5-10% quicker to scan and search,
-# for a build about three times as long, so local release builds and the
-# test addon stay on `release`. Panic messages keep their file and line
+# for a build about three times as long, so local release builds stay on
+# `release`. Panic messages keep their file and line
 # without symbols.
 [profile.dist]
 inherits = "release"
@@ -154,8 +154,7 @@ strip = "symbols"
 # and CI fails on any warning. Code that needs an exception says why where it
 # makes it, with #[expect(lint, reason = "...")].
 [workspace.lints.rust]
-# unsafe only where a crate or module says why: the Node-API addon, a libc
-# call.
+# unsafe only where a crate or module says why: a libc call, an OS call.
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }

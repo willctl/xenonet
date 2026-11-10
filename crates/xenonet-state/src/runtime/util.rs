@@ -8,6 +8,46 @@ use xenonet_text::json::number;
 /// Date.now().
 pub use xenonet_text::time::now_ms;
 
+/// The clock the map's runtime reads: the system's, or one a test
+/// gives it, so what a refresh makes of a fixed world comes out the same
+/// every run.
+#[derive(Clone)]
+pub struct Clock(std::sync::Arc<dyn Fn() -> f64 + Send + Sync>);
+
+impl Clock {
+    /// Date.now().
+    pub fn system() -> Clock {
+        Clock(std::sync::Arc::new(now_ms))
+    }
+
+    /// A clock that reads `f`.
+    pub fn new(f: impl Fn() -> f64 + Send + Sync + 'static) -> Clock {
+        Clock(std::sync::Arc::new(f))
+    }
+
+    /// A clock stopped at `ms`.
+    pub fn fixed(ms: f64) -> Clock {
+        Clock::new(move || ms)
+    }
+
+    /// The time, in ms since 1970.
+    pub fn now(&self) -> f64 {
+        (self.0)()
+    }
+}
+
+impl Default for Clock {
+    fn default() -> Self {
+        Clock::system()
+    }
+}
+
+impl std::fmt::Debug for Clock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Clock")
+    }
+}
+
 pub fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.as_object().and_then(|m| m.get(k))
 }

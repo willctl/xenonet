@@ -1,11 +1,13 @@
 //! Git's runtime: whether git is there, a repo's status through
 //! git (xenonet-sources' git.rs says what to run and what each answer
 //! means), and the watch that reads every repo's status, three at a time,
-//! each a gatherer that keeps what it had when git can't answer.
+//! each a gatherer that keeps what it had when git can't answer. Git runs
+//! through a `GitHost`: this machine's git, or what a test answers in its
+//! place.
 
 use crate::runtime::blocks::{health_of, Block};
 use crate::runtime::gatherer::{Gather, Options};
-use crate::runtime::util::{lock, now_ms, num};
+use crate::runtime::util::{lock, num, Clock};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -46,6 +48,54 @@ pub struct Ran {
     pub stdout: String,
 }
 
+/// Where git runs: this machine's git (`SystemGit`), or a stand-in that
+/// answers as git would, for a test whose repos are only their HEAD and
+/// config.
+#[async_trait::async_trait]
+pub trait GitHost: Send + Sync {
+    /// Whether git can run.
+    fn available(&self) -> bool;
+    /// git with `args`, within `timeout`, in `env` added to this one's (or
+    /// in `env` alone, with `clear`).
+    async fn run(&self, args: &[String], env: &[(String, String)], clear: bool, timeout: Duration) -> Ran;
+}
+
+/// This machine's git.
+pub struct SystemGit;
+
+#[async_trait::async_trait]
+impl GitHost for SystemGit {
+    fn available(&self) -> bool {
+        git_available()
+    }
+    async fn run(&self, args: &[String], env: &[(String, String)], clear: bool, timeout: Duration) -> Ran {
+        run_git(args, env, clear, timeout).await
+    }
+}
+
+/// The git the map's runtime runs: this machine's unless a test gives
+/// another.
+#[derive(Clone)]
+pub struct Git(pub Arc<dyn GitHost>);
+
+impl Git {
+    pub fn new(host: impl GitHost + 'static) -> Git {
+        Git(Arc::new(host))
+    }
+}
+
+impl Default for Git {
+    fn default() -> Self {
+        Git::new(SystemGit)
+    }
+}
+
+impl std::fmt::Debug for Git {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Git")
+    }
+}
+
 /// git with `args`, within `timeout`, in `env` added to this one's.
 pub async fn run_git(args: &[String], env: &[(String, String)], clear: bool, timeout: Duration) -> Ran {
     #[cfg(test)]
@@ -71,26 +121,26 @@ fn status_json(s: &git::Status) -> Value {
 }
 
 // git in a repo, with what a status needs: no lazy fetches.
-async fn git_in(dir: &str, args: Vec<String>) -> Ran {
+async fn git_in(git: &dyn GitHost, dir: &str, args: Vec<String>) -> Ran {
     let env = [("GIT_NO_LAZY_FETCH".to_string(), "1".to_string())];
     let mut all = vec!["-C".to_string(), dir.to_string()];
     all.extend(args);
-    run_git(&all, &env, false, Duration::from_secs(8)).await
+    git.run(&all, &env, false, Duration::from_secs(8)).await
 }
 
 /// The arguments a status in `dir` runs with: the filter drivers its
 /// config lists turned off, so a status runs nothing of the repo's. None
 /// when git can't list them, or one can't be turned off.
-pub async fn status_args(dir: &str) -> Option<Vec<String>> {
+pub async fn status_args(git: &dyn GitHost, dir: &str) -> Option<Vec<String>> {
     let strings = |a: Vec<&str>| a.into_iter().map(str::to_string).collect::<Vec<_>>();
     let mut scoped = true;
-    let mut drivers = git_in(dir, strings(git::drivers_args(true))).await;
+    let mut drivers = git_in(git, dir, strings(git::drivers_args(true))).await;
     loop {
         let code = drivers.code.map(f64::from);
         match git::after_drivers(code, !drivers.ok, &drivers.stdout, scoped) {
             git::AfterDrivers::Unscoped => {
                 scoped = false;
-                drivers = git_in(dir, strings(git::drivers_args(false))).await;
+                drivers = git_in(git, dir, strings(git::drivers_args(false))).await;
             }
             git::AfterDrivers::Nothing => return None,
             git::AfterDrivers::Status(args) => return Some(args),
@@ -98,21 +148,23 @@ pub async fn status_args(dir: &str) -> Option<Vec<String>> {
     }
 }
 
-/// A repo's status with these arguments, or None when git can't give it.
-async fn status_with(dir: &str, args: Vec<String>) -> Option<Value> {
-    let out = git_in(dir, args).await;
+/// A repo's status with these arguments, read at `now`, or None when git
+/// can't give it.
+async fn status_with(git: &dyn GitHost, dir: &str, args: Vec<String>, now: f64) -> Option<Value> {
+    let out = git_in(git, dir, args).await;
     if !out.ok {
         return None;
     }
     let mut v = status_json(&git::parse_status(&out.stdout));
-    v["checkedAt"] = num(now_ms());
+    v["checkedAt"] = num(now);
     Some(v)
 }
 
 /// A repo's status, or None when git can't give it: the filter drivers its
 /// config lists turned off first, so a status runs nothing of the repo's.
-pub async fn git_status(dir: &str) -> Option<Value> {
-    status_with(dir, status_args(dir).await?).await
+pub async fn git_status(git: &dyn GitHost, dir: &str, clock: &Clock) -> Option<Value> {
+    let args = status_args(git, dir).await?;
+    status_with(git, dir, args, clock.now()).await
 }
 
 /// What the watch keeps of a repo between passes, so it runs git only when
@@ -138,15 +190,23 @@ struct Inner {
 /// The watch: every git project's status, refreshed a few at a time.
 pub struct RepoWatch {
     inner: Mutex<Inner>,
+    clock: Clock,
+    git: Git,
 }
 
 impl Default for RepoWatch {
     fn default() -> Self {
-        RepoWatch { inner: Mutex::new(Inner { life: Lifecycle::new(now_ms()), status: Vec::new(), sources: HashMap::new(), seen: HashMap::new() }) }
+        RepoWatch::new(Clock::system(), Git::default())
     }
 }
 
 impl RepoWatch {
+    /// A watch that reads `clock` and runs `git`.
+    pub fn new(clock: Clock, git: Git) -> RepoWatch {
+        let life = Lifecycle::new(clock.now());
+        RepoWatch { inner: Mutex::new(Inner { life, status: Vec::new(), sources: HashMap::new(), seen: HashMap::new() }), clock, git }
+    }
+
     /// Each repo's status, by project key, in the order they were read.
     pub fn status(&self) -> Vec<(String, Value)> {
         lock(&self.inner).status.clone()
@@ -161,16 +221,16 @@ impl RepoWatch {
     /// a while (git::status_due), and its drivers only when its config may
     /// have (git::drivers_fresh); otherwise what was read stands.
     pub async fn refresh(self: &Arc<Self>, projects: &[Value]) {
-        if !git_available() {
+        if !self.git.0.available() {
             return;
         }
         let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
         let xdg = std::env::var("XDG_CONFIG_HOME").ok();
-        self.refresh_with(projects, move |dir| git::repo_stamps(dir, &home, xdg.as_deref()), now_ms).await;
+        self.refresh_with(projects, move |dir| git::repo_stamps(dir, &home, xdg.as_deref())).await;
     }
 
-    /// The pass, with the stamps and the clock given (a test's own).
-    pub async fn refresh_with(self: &Arc<Self>, projects: &[Value], stamps: impl Fn(&str) -> Option<git::Stamps> + Send + Sync + 'static, now: fn() -> f64) {
+    /// The pass, with the stamps given (a test's own).
+    pub async fn refresh_with(self: &Arc<Self>, projects: &[Value], stamps: impl Fn(&str) -> Option<git::Stamps> + Send + Sync + 'static) {
         let stamps = Arc::new(stamps);
         let queue: Vec<(String, String)> = projects
             .iter()
@@ -183,7 +243,9 @@ impl RepoWatch {
             g.sources.retain(|k, _| queue.iter().any(|(q, _)| q == k));
             g.seen.retain(|k, _| queue.iter().any(|(q, _)| q == k));
             for (key, path) in &queue {
-                let entry = g.sources.entry(key.clone()).or_insert_with(|| (path.clone(), Arc::new(Gather::new("git-status:repo", Options { keep: true, ..Default::default() }))));
+                let clock = self.clock.clone();
+                let entry =
+                    g.sources.entry(key.clone()).or_insert_with(|| (path.clone(), Arc::new(Gather::new("git-status:repo", Options { keep: true, clock, ..Default::default() }))));
                 if entry.0 != *path {
                     // Another folder under the same key: nothing kept of the
                     // old one stands for it.
@@ -207,7 +269,7 @@ impl RepoWatch {
                     move || stamps(&p)
                 })
                 .await;
-                let at = now();
+                let at = me.clock.now();
                 let (due, cached) = {
                     let g = lock(&me.inner);
                     let seen = g.seen.get(&key);
@@ -221,19 +283,21 @@ impl RepoWatch {
                     continue;
                 }
                 let (me2, key2, config) = (me.clone(), key.clone(), st.as_ref().map(|s| s.config.clone()));
+                let git = me.git.clone();
                 let value = source
                     .run(false, None, || async move {
                         let args = match cached {
                             Some(args) => args,
                             None => {
-                                let args = status_args(&p).await.ok_or_else(|| git::unreadable(&p))?;
+                                let args = status_args(&*git.0, &p).await.ok_or_else(|| git::unreadable(&p))?;
                                 if let Some(config) = config {
                                     lock(&me2.inner).seen.entry(key2).or_default().drivers = Some((config, at, args.clone()));
                                 }
                                 args
                             }
                         };
-                        status_with(&p, args).await.ok_or_else(|| git::unreadable(&p))
+                        let now = me2.clock.now();
+                        status_with(&*git.0, &p, args, now).await.ok_or_else(|| git::unreadable(&p))
                     })
                     .await;
                 match source.last() {
@@ -264,9 +328,10 @@ impl RepoWatch {
         let failed = lock(&failed).clone();
         let mut g = lock(&self.inner);
         g.life.count("passes", 1.0);
+        let now = self.clock.now();
         match git::problem_of(&failed) {
-            Some(p) => g.life.problem(&p, now_ms()),
-            None => g.life.ok(now_ms()),
+            Some(p) => g.life.problem(&p, now),
+            None => g.life.ok(now),
         }
     }
 }
@@ -308,7 +373,7 @@ mod tests {
         git(&["add", "-A"]);
         git(&["commit", "-q", "-m", "first"]);
         let home = dir.join("home").to_string_lossy().into_owned();
-        let watch = Arc::new(RepoWatch::default());
+        let watch = Arc::new(RepoWatch::new(Clock::new(clock), Git::default()));
         let projects = [json!({ "key": "/seen", "path": d, "git": { "origin": null } })];
         let mine = || RAN.lock().unwrap().iter().filter(|a| a.contains(d.as_str())).count();
         let pass = |ms: u64| {
@@ -316,7 +381,7 @@ mod tests {
             let (watch, home, projects) = (watch.clone(), home.clone(), projects.clone());
             async move {
                 let before = mine();
-                watch.refresh_with(&projects, move |p| git::repo_stamps(p, &home, None), clock).await;
+                watch.refresh_with(&projects, move |p| git::repo_stamps(p, &home, None)).await;
                 mine() - before
             }
         };
@@ -348,7 +413,7 @@ mod tests {
         git(&["add", "-A"]);
         git(&["commit", "-q", "-m", "first"]);
         std::fs::write(dir.join("a.txt"), "b").unwrap();
-        let s = git_status(&d).await.unwrap();
+        let s = git_status(&SystemGit, &d, &Clock::system()).await.unwrap();
         assert_eq!((s["branch"].as_str(), s["dirty"].as_f64()), (Some("main"), Some(1.0)));
         let watch = Arc::new(RepoWatch::default());
         watch.refresh(&[json!({ "key": "/r", "path": d, "git": { "origin": null } }), json!({ "key": "/x", "path": "/nowhere/at/all", "git": {} })]).await;

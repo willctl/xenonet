@@ -1,5 +1,5 @@
 // The service Desktop runs: the Rust binary, `xenonet serve` (docs/design/
-// rust-core.md, "The switch"), or for a while after an update from 0.3.0
+// rust-core.md, "The processes"), or for a while after an update from 0.3.0
 // the node service that XenoNet had. A binary can't be a utility process,
 // so Desktop runs it standalone and connects to it over the component
 // service's socket, as it does to an installed service.

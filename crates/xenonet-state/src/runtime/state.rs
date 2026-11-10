@@ -18,7 +18,7 @@ use crate::runtime::projects::Projects;
 use crate::runtime::search::TranscriptSearch;
 use crate::runtime::stats::Stats;
 use crate::runtime::store::StateStore;
-use crate::runtime::util::{get, items, lock, log, now_ms, num, obj, s};
+use crate::runtime::util::{get, items, lock, log, num, obj, s};
 use crate::runtime::vendor::Vendor;
 use crate::state::{self as decide, Memory};
 use crate::{classify, digest, redact, rename, workspace};
@@ -222,9 +222,11 @@ impl MapState {
                 },
                 vendor.clone(),
                 &cfg.env,
+                cfg.clock.clone(),
+                cfg.git.clone(),
             )
         });
-        let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), ..Default::default() }));
+        let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), clock: cfg.clock.clone(), ..Default::default() }));
         // The projects folder you chose, if you did (`crate::workspace`), as
         // state.json has it: the store itself is read at the first refresh,
         // with the rest of what it saves then.
@@ -261,8 +263,8 @@ impl MapState {
             readers,
             live: live.clone(),
             listers,
-            projects_scan: Arc::new(Projects::default()),
-            repos: Arc::new(RepoWatch::default()),
+            projects_scan: Arc::new(Projects::new(cfg.clock.clone())),
+            repos: Arc::new(RepoWatch::new(cfg.clock.clone(), cfg.git.clone())),
             identities,
             search,
             stats,
@@ -318,6 +320,11 @@ impl MapState {
         let _ = b.add(state.repos.clone(), None);
         let _ = b.add(state.projects_scan.clone(), Some("projects"));
         state
+    }
+
+    // The time, as the map's clock gives it.
+    fn now(&self) -> f64 {
+        self.cfg.clock.now()
     }
 
     fn arc(&self) -> Option<Arc<MapState>> {
@@ -517,14 +524,14 @@ impl MapState {
         let session_dirs = decide::session_dirs(&sessions);
         lock(&self.inner).map.session_dirs.clone_from(&session_dirs);
         let rules = self.project_rules(true, &root);
-        let t0 = now_ms();
+        let t0 = self.now();
         let scanned = self.projects_scan.scan(&root, session_dirs, rules.clone(), self.cfg.project_limits.clone(), false, None).await;
         let (mut projects, scan, mut projects_st) = match scanned {
             Ok(found) => {
                 let list = Value::Array(found.projects.clone());
-                (found.projects, Some(found.scan), decide::source_status("projects", true, Some(&num(now_ms() - t0)), Some(&list), None))
+                (found.projects, Some(found.scan), decide::source_status("projects", true, Some(&num(self.now() - t0)), Some(&list), None))
             }
-            Err(e) => (Vec::new(), None, decide::source_status("projects", false, Some(&num(now_ms() - t0)), None, Some(&json!(e)))),
+            Err(e) => (Vec::new(), None, decide::source_status("projects", false, Some(&num(self.now() - t0)), None, Some(&json!(e)))),
         };
         for p in &mut projects {
             let key = p.get("key").map(display).unwrap_or_default();
@@ -554,9 +561,9 @@ impl MapState {
         }
         let wiki = match &self.cfg.wiki_dir {
             Some(dir) => {
-                let (dir, list, rootv, server) = (dir.clone(), Value::Array(projects.clone()), json!(root), self.cfg.wiki_server.clone());
+                let (dir, list, rootv, server, now) = (dir.clone(), Value::Array(projects.clone()), json!(root), self.cfg.wiki_server.clone(), self.now());
                 crate::runtime::util::blocking(move || {
-                    xenonet_sources::wiki::read_wiki(&dir, Some(&list), Some(&rootv), now_ms(), xenonet_sources::wiki::Out::Json(server))
+                    xenonet_sources::wiki::read_wiki(&dir, Some(&list), Some(&rootv), now, xenonet_sources::wiki::Out::Json(server))
                         .ok()
                         .and_then(|o| crate::runtime::util::wiki_out(&o))
                 })
@@ -581,7 +588,7 @@ impl MapState {
             "wiki": wiki,
             "repos": self.repos.status().into_iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
             "layout": self.store.layout(),
-            "now": num(now_ms()),
+            "now": num(self.now()),
             "windows": self.cfg.windows,
         });
         let parent_of = crate::projects::relations(&projects).map_err(|e| e.0)?.0;
@@ -598,7 +605,7 @@ impl MapState {
         let identities_st = match &self.identities {
             None => None,
             Some(w) => {
-                let t0 = now_ms();
+                let t0 = self.now();
                 let linked = w.link(&mut graph, &self.store);
                 if linked.is_ok() {
                     self.note_signins();
@@ -606,11 +613,11 @@ impl MapState {
                 Some(match linked {
                     Ok(list) => {
                         let v = Value::Array(list.clone());
-                        let mut st = decide::source_status("identities", true, Some(&num(now_ms() - t0)), Some(&v), None);
+                        let mut st = decide::source_status("identities", true, Some(&num(self.now() - t0)), Some(&v), None);
                         st["note"] = json!(decide::identities_note(&list));
                         st
                     }
-                    Err(e) => decide::source_status("identities", false, Some(&num(now_ms() - t0)), None, Some(&json!(e))),
+                    Err(e) => decide::source_status("identities", false, Some(&num(self.now() - t0)), None, Some(&json!(e))),
                 })
             }
         };
@@ -670,11 +677,11 @@ impl MapState {
     /// runs actors report.
     fn observed_sessions(&self) -> Vec<Value> {
         let mut all: Vec<Value> = self.observed.iter().flat_map(|o| o.sessions()).collect();
-        all.extend(lock(&self.runs).sessions(now_ms()).iter().filter_map(crate::runtime::util::native_out));
+        all.extend(lock(&self.runs).sessions(self.now()).iter().filter_map(crate::runtime::util::native_out));
         // One session per id: the first source to list it wins.
         let ids: Vec<Option<Value>> = all.iter().map(|x| x.get("id").cloned()).collect();
         let first = xenonet_sources::reported_runs::firsts(&ids);
-        let now = now_ms();
+        let now = self.now();
         let mut events = lock(&self.opencode);
         all.into_iter()
             .zip(first)
@@ -702,7 +709,7 @@ impl MapState {
     fn note_signins(&self) {
         let Some(w) = &self.identities else { return };
         let accounts = w.accounts();
-        let events = lock(&self.inner).memory.note_signins(&accounts, now_ms());
+        let events = lock(&self.inner).memory.note_signins(&accounts, self.now());
         for ev in events {
             self.emit("activity", ev);
         }
@@ -726,7 +733,8 @@ impl MapState {
         before != sig(&self.repos) || ids
     }
 
-    async fn refresh_repos(&self) {
+    /// The repos' pass, and a refresh when it changed something.
+    pub async fn refresh_repos(&self) {
         if self.repo_pass().await {
             let _ = self.refresh_map().await;
         } else {
@@ -739,6 +747,11 @@ impl MapState {
                 }
             }
         }
+    }
+
+    /// Each repo's status, by project key, as the last pass read it.
+    pub fn repo_status(&self) -> Vec<(String, Value)> {
+        self.repos.status()
     }
 
     // ---------- live ----------
@@ -754,7 +767,7 @@ impl MapState {
         let mut node = |id: &str| g.map.index.get(id).and_then(|&i| nodes.get(i)).cloned();
         // OpenCode sessions whose plugin speaks for them (working, waiting
         // on a permission) are live sessions like the tailer's.
-        let extra = lock(&self.opencode).snapshot(now_ms(), &|id| g.map.index.contains_key(id));
+        let extra = lock(&self.opencode).snapshot(self.now(), &|id| g.map.index.contains_key(id));
         if let Some(Value::Array(list)) = snap.get_mut("sessions") {
             list.extend(extra);
         }
@@ -789,7 +802,7 @@ impl MapState {
                 (Some(h), Some(n)) if truthy(n.get("repo")) => Some((h.as_str(), n.get("name").cloned().unwrap_or(Value::Null), n.get("repo").cloned().unwrap_or(Value::Null))),
                 _ => None,
             };
-            g.memory.ship_it(ev, target.as_ref().map(|(h, n, r)| (*h, n, r)), now_ms())
+            g.memory.ship_it(ev, target.as_ref().map(|(h, n, r)| (*h, n, r)), self.now())
         };
         if let Some(n) = nudge {
             self.emit("activity", n);
@@ -1008,7 +1021,7 @@ impl MapState {
             Ok::<Value, Infallible>(id.as_str().and_then(|i| self.node_of(i)).and_then(|n| n.get("name").cloned().filter(|v| !v.is_null())).unwrap_or_else(|| id.clone()))
         };
         let hooks = digest::DayHooks { title_of: Some(&mut title), home_of: Some(&mut home), name_of: Some(&mut name) };
-        match digest::day_log(&history, now_ms(), hooks, Some(&live), &repos) {
+        match digest::day_log(&history, self.now(), hooks, Some(&live), &repos) {
             Ok(v) => v,
             Err(never) => match never {},
         }
@@ -1021,7 +1034,7 @@ impl MapState {
     /// The live state's own simulations (the simulate route's).
     fn simulate_live(&self, kind: &str, a: Option<String>, b: Option<String>) -> Option<Value> {
         use xenonet_sources::live::telemetry::MapOp;
-        let now = now_ms();
+        let now = self.now();
         let (mut a, mut b) = (a, b);
         // Without sessions named, the most recently active ones on the map.
         if kind != "clear" && (a.is_none() || (kind == "collision" && b.is_none())) {
@@ -1207,7 +1220,7 @@ impl State for MapState {
             let st = lock(&self.search.status);
             (st.last_index_at, st.indexing)
         };
-        if now_ms() - last > 15000.0 && !indexing {
+        if self.now() - last > 15000.0 && !indexing {
             self.search.index().await;
         }
         let hits = self.search.search(q, 30.0).await.map_err(err)?;
@@ -1262,7 +1275,7 @@ impl State for MapState {
         let events = self.live.history_since(since);
         let live = self.snapshot();
         let mut title = |id: &Value| Ok::<Value, Infallible>(self.title(id));
-        match digest::summarize(items(Some(&events)), since, now_ms(), &mut title, Some(&live)) {
+        match digest::summarize(items(Some(&events)), since, self.now(), &mut title, Some(&live)) {
             Ok(v) => Ok(v),
             Err(never) => match never {},
         }
@@ -1272,11 +1285,11 @@ impl State for MapState {
     }
     fn constellation(&self, names: bool) -> R<Value> {
         let day = self.day();
-        Ok(redact::constellation_of(Some(&day), &self.salt(), now_ms(), names, &self.all_nodes()))
+        Ok(redact::constellation_of(Some(&day), &self.salt(), self.now(), names, &self.all_nodes()))
     }
     fn export_labels(&self) -> R<Value> {
         let day = self.day();
-        Ok(redact::labels_of(&self.all_nodes(), Some(&day), &self.salt(), now_ms()))
+        Ok(redact::labels_of(&self.all_nodes(), Some(&day), &self.salt(), self.now()))
     }
     async fn narrate(&self, kind: &str, since: f64) -> R<Value> {
         if self.cfg.demo {
@@ -1298,7 +1311,7 @@ impl State for MapState {
             return Err(err(problem));
         }
         let key = path_key(&full).unwrap_or_default();
-        self.store.set_project_rule(&key, truthy(Some(&as_)).then(|| json!({ "path": full, "as": as_, "at": num(now_ms()) })));
+        self.store.set_project_rule(&key, truthy(Some(&as_)).then(|| json!({ "path": full, "as": as_, "at": num(self.now()) })));
         self.after_change().await?;
         self.detection().await
     }
@@ -1323,7 +1336,7 @@ impl State for MapState {
         if truthy(Some(&expected)) && expected != json!(fp) {
             return Err(status(409, "The folders changed since you looked. Look again before sending."));
         }
-        let started = now_ms();
+        let started = self.now();
         let picks = if self.cfg.demo {
             crate::runtime::demo::picks(&Value::Array(outline.clone()))
         } else if decider {
@@ -1347,7 +1360,7 @@ impl State for MapState {
             (true, None) => Value::Null,
             (false, _) => json!(xenonet_adapter::apps::sorter().map(|a| a.id.as_str())),
         };
-        let at = now_ms();
+        let at = self.now();
         self.store
             .set_codex_picks(
                 path_key(&root).as_deref(),
@@ -1471,7 +1484,7 @@ impl State for MapState {
         self.live.note_hook(id, body).map_err(err)
     }
     fn opencode_event(&self, id: &str, events: &Value, cwd: Option<&str>) -> R<usize> {
-        Ok(lock(&self.opencode).ingest(id, events, cwd, now_ms()))
+        Ok(lock(&self.opencode).ingest(id, events, cwd, self.now()))
     }
     fn root_info(&self) -> R<Value> {
         let mut r = workspace::root(self.cfg.env_projects_dir.as_deref(), Some(&self.store.workspace_root()), &self.cfg.home_dir);
@@ -1562,7 +1575,7 @@ impl State for MapState {
         Ok(Some(merge_opencode(read, ev)))
     }
     fn observed_live(&self, id: &str) -> R<bool> {
-        Ok(self.observed(id, now_ms()).is_some())
+        Ok(self.observed(id, self.now()).is_some())
     }
     fn identities(&self) -> R<Vec<Value>> {
         Ok(lock(&self.inner).map.graph.as_ref().map(|g| items(g.get("identities")).to_vec()).unwrap_or_default())
@@ -1695,7 +1708,8 @@ impl Runs for RunsCore {
             None => Some("working".to_string()),
             Some(p) => p.as_str().map(str::to_string),
         };
-        let mut now = now_ms;
+        let clock = self.0.cfg.clock.clone();
+        let mut now = || clock.now();
         match lock(&self.0.runs).report(actor, text("run").as_deref(), &app, text("title").as_deref(), presence.as_deref(), &mut now) {
             Ok(id) => json!({ "ok": true, "id": id }),
             Err(error) => json!({ "ok": false, "error": error }),

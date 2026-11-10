@@ -75,12 +75,12 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
     // check their records through too.
     let readers = env.readers.get_or_make(|| xenonet_schema::vendor::Readers::new(dir.clone(), env.drift.clone()));
     let vendor = vendor::Vendor::with_readers(readers);
-    let store = store::StateStore::new(&cfg.state_dir, &cfg.projects_dir);
+    let store = store::StateStore::with_clock(&cfg.state_dir, &cfg.projects_dir, cfg.clock.clone());
     // The folder each app writes its transcripts in now, which the tailer
     // follows.
     let roots: Vec<(String, String)> =
         xenonet_adapter::platforms().iter().filter_map(|p| Some((state::transcript_dirs(&cfg, p.id()).into_iter().next()?, p.id().to_string()))).collect();
-    let live = live::Live::new(&roots, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone());
+    let live = live::Live::with_clock(&roots, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone(), cfg.clock.clone());
     live.context_server(cfg.wiki_server.as_str());
     let readers = match &demo {
         Some(d) => state::Readers::Demo(d.clone()),

@@ -750,6 +750,17 @@ impl Demo {
         Demo { world: World::at(&root), today: today.into(), sessions: sessions(today), writers: Vec::new(), client_repos: Vec::new() }
     }
 
+    /// The demo over a world `create_world` wrote at `root` before (a
+    /// test's copy of one): its sessions and the files they're in, named as
+    /// they were at `around.now()`, without writing a file.
+    pub fn over(root: &str, today: &str, around: &mut dyn Around) -> Result<Self, files::FsError> {
+        let mut demo = Demo { world: World::at(root), today: today.into(), sessions: sessions(today), writers: Vec::new(), client_repos: Vec::new() };
+        for (i, s) in demo.sessions.iter().enumerate() {
+            demo.writers.push(Writer::new(s, i, &demo.world, around)?);
+        }
+        Ok(demo)
+    }
+
     fn p(&self, rel: &str) -> String {
         NATIVE.join(&[&self.world.home, "Projects", rel])
     }

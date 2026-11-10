@@ -7,7 +7,7 @@
 
 use crate::runtime::blocks::{health_of, Block};
 use crate::runtime::config::MapConfig;
-use crate::runtime::util::{lock, native_out, now_ms, obj};
+use crate::runtime::util::{lock, native_out, obj, Clock};
 use crate::runtime::vendor::Vendor;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -49,6 +49,7 @@ pub struct Observed {
     path: String,
     vendor: Arc<Vendor>,
     inner: Mutex<(Box<dyn NativeReader>, Lifecycle)>,
+    clock: Clock,
 }
 
 // A record checked against its vendor's schema, as the native readers ask.
@@ -78,8 +79,8 @@ impl native::Vendor for Schema<'_> {
 }
 
 impl Observed {
-    fn make(kind: Kind, path: String, reader: Box<dyn NativeReader>, vendor: Arc<Vendor>) -> Arc<Observed> {
-        Arc::new(Observed { kind, source: kind.source, path, vendor, inner: Mutex::new((reader, Lifecycle::new(now_ms()))) })
+    fn make(kind: Kind, path: String, reader: Box<dyn NativeReader>, vendor: Arc<Vendor>, clock: Clock) -> Arc<Observed> {
+        Arc::new(Observed { kind, source: kind.source, path, vendor, inner: Mutex::new((reader, Lifecycle::new(clock.now()))), clock })
     }
 
     /// The native readers that are on, in the registry's order, and
@@ -88,7 +89,7 @@ impl Observed {
     pub fn all(cfg: &MapConfig, vendor: &Arc<Vendor>) -> Vec<Arc<Observed>> {
         let mut out = Self::native(cfg, vendor, xenonet_adapter::platforms().native());
         if let Some(file) = cfg.numbat_file.clone() {
-            out.push(Observed::make(NUMBAT, file, Box::new(Numbat::new()), vendor.clone()));
+            out.push(Observed::make(NUMBAT, file, Box::new(Numbat::new()), vendor.clone(), cfg.clock.clone()));
         }
         out
     }
@@ -100,13 +101,13 @@ impl Observed {
         let paths = Paths { home_dir: &cfg.home_dir, state_dir: &cfg.state_dir, env: &cfg.env };
         rows.into_iter()
             .filter(|(app, _)| app.has("native") && cfg.readers.contains(&app.id))
-            .map(|(_, row)| Observed::make(Kind::of(&*row), row.at(&paths), row.make(), vendor.clone()))
+            .map(|(_, row)| Observed::make(Kind::of(&*row), row.at(&paths), row.make(), vendor.clone(), cfg.clock.clone()))
             .collect()
     }
 
     /// Reads what's new; a problem is the block's to say, never thrown.
     pub fn read(&self) {
-        let now = now_ms();
+        let now = self.clock.now();
         let mut g = lock(&self.inner);
         let (reader, life) = &mut *g;
         let mut vendor = Schema { vendor: &self.vendor, schema: self.kind.schema };
@@ -186,11 +187,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-state-numbat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("a folder");
         let file = dir.join("events.ndjson");
-        let now = xenonet_text::time::iso(now_ms());
+        let now = xenonet_text::time::iso(xenonet_text::time::now_ms());
         let ev = |kind: &str, file: Option<&str>| json!({ "schema_version": "0.5.0", "record_type": "event", "source_agent": "gemini-cli", "event_type": kind, "session_id": "g-0000001", "project_path": "/w/atlas", "file_path": file, "timestamp": now });
         let text: String = [ev("session.start", None), ev("file.write", Some("/w/atlas/src/a.js"))].iter().map(|e| xenonet_text::json::stringify(e, 0) + "\n").collect();
         std::fs::write(&file, text).expect("its records");
-        let o = Observed::make(NUMBAT, file.to_string_lossy().into_owned(), Box::new(Numbat::new()), vendor());
+        let o = Observed::make(NUMBAT, file.to_string_lossy().into_owned(), Box::new(Numbat::new()), vendor(), Clock::system());
         o.read();
         assert_eq!((o.status()["name"].as_str(), o.status()["ok"].as_bool(), o.status()["count"].as_u64()), (Some("numbat"), Some(true), Some(1)));
         let sessions = o.sessions();

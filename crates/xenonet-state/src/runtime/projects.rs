@@ -6,7 +6,7 @@
 
 use crate::projects::{FactsCache, Scan, SCAN_DEPTH, SCAN_MAX_DIRS, SCAN_MAX_SUBMODULES};
 use crate::runtime::blocks::{health_of, Block};
-use crate::runtime::util::{blocking, lock, now_ms, num};
+use crate::runtime::util::{blocking, lock, num, Clock};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,11 +39,12 @@ impl Rules for Enter<'_> {
 pub struct Projects {
     scanner: Mutex<Scanner>,
     facts: Mutex<FactsCache>,
+    clock: Clock,
 }
 
 impl Default for Projects {
     fn default() -> Self {
-        Projects { scanner: Mutex::new(Scanner::new("projects", "", Limits::default(), false, now_ms())), facts: Mutex::new(FactsCache::default()) }
+        Projects::new(Clock::system())
     }
 }
 
@@ -52,6 +53,11 @@ fn limit(limits: &Value, k: &str, fallback: f64) -> f64 {
 }
 
 impl Projects {
+    /// The scans, timed by `clock`.
+    pub fn new(clock: Clock) -> Projects {
+        Projects { scanner: Mutex::new(Scanner::new("projects", "", Limits::default(), false, clock.now())), facts: Mutex::new(FactsCache::default()), clock }
+    }
+
     /// "Detect projects again": nothing the bottom-up pass kept.
     pub fn forget(&self) {
         lock(&self.facts).clear();
@@ -79,7 +85,7 @@ impl Projects {
         let depth = limit(limits, "depth", SCAN_DEPTH);
         let max_dirs = limit(limits, "maxDirs", SCAN_MAX_DIRS);
         let max_submodules = limits.get("maxSubmodules").cloned().unwrap_or(json!(SCAN_MAX_SUBMODULES));
-        let started = now_ms();
+        let started = self.clock.now();
         let mut scan = Scan::new(root, rules);
         let mut own;
         let mut shared;
@@ -91,7 +97,7 @@ impl Projects {
             &mut shared
         };
         let aborted = || stop.is_some_and(|s| s.load(Ordering::SeqCst));
-        let mut now = now_ms;
+        let mut now = || self.clock.now();
         let mut w = scanner.begin_breadth(root, Limits { depth, folders: max_dirs, ms: f64::INFINITY }, &mut now);
         while w.more() {
             let level = w.n;
@@ -122,12 +128,12 @@ impl Projects {
             return Err("This operation was aborted".into());
         }
         if !scan.root_read {
-            return Ok(Scanned { projects: Vec::new(), scan: json!({ "ok": false, "ms": num(now_ms() - started) }), folders: Vec::new() });
+            return Ok(Scanned { projects: Vec::new(), scan: json!({ "ok": false, "ms": num(self.clock.now() - started) }), folders: Vec::new() });
         }
         let last = scanner.last.clone();
         let (dirs_read, truncated) = last.map_or((0, false), |l| (l.read, l.truncated.is_some()));
-        let found = scan.finish(session_dirs, Some(&max_submodules), &mut lock(&self.facts), now_ms()).map_err(|e| e.0)?;
-        let at = now_ms();
+        let found = scan.finish(session_dirs, Some(&max_submodules), &mut lock(&self.facts), self.clock.now()).map_err(|e| e.0)?;
+        let at = self.clock.now();
         Ok(Scanned {
             projects: found.projects,
             scan: json!({ "ok": true, "at": num(at), "ms": num(at - started), "dirsRead": dirs_read, "truncated": truncated, "depth": num(depth), "maxDirs": num(max_dirs), "groups": found.groups, "projects": found.count }),

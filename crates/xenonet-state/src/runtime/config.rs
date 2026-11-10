@@ -1,7 +1,8 @@
 //! The settings the map reads (through xenonet-components' config): its folders, the projects scan's limits, the poll, the
 //! readers that are on, identities and the windows a session counts as
 //! active in. Worked out once, after the demo's world has moved the
-//! folders.
+//! folders. With them, what the map's runtime reads from outside: the
+//! clock and git, the system's unless a test gives its own.
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -48,6 +49,10 @@ pub struct MapConfig {
     /// The settings the adapters name (an app's folder, its sign-in's
     /// file), by name.
     pub named: HashMap<String, String>,
+    /// The clock the map's runtime reads (the system's).
+    pub clock: crate::runtime::util::Clock,
+    /// Where it runs git (this machine's).
+    pub git: crate::runtime::git::Git,
 }
 
 struct Found<'a> {
@@ -195,6 +200,8 @@ impl MapConfig {
             env_projects_dir,
             env,
             named,
+            clock: crate::runtime::util::Clock::system(),
+            git: crate::runtime::git::Git::default(),
         }
     }
 

@@ -1,4 +1,4 @@
-//! What the binary's drivers for the cores are given (crates/xenonet-wire-*):
+//! What the crates that implement the cores are given at composition:
 //! the service's settings, its version, the drift log and vendor readers
 //! they share, and the way their events and log lines reach the service,
 //! which exists only once the cores do.

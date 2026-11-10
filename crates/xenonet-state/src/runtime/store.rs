@@ -5,7 +5,7 @@
 //! each change does are `crate::store`; the save is debounced on tokio.
 
 use crate::runtime::blocks::{health_of, Block};
-use crate::runtime::util::{lock, now_ms, num};
+use crate::runtime::util::{lock, num, Clock};
 use crate::{statefile, store};
 use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,17 +96,24 @@ pub struct StateStore {
     inner: Mutex<Inner>,
     /// Each save moves this on; a debounced flush runs only for the last.
     saves: AtomicU64,
+    clock: Clock,
 }
 
 impl StateStore {
     pub fn new(state_dir: &str, projects_dir: &str) -> Arc<StateStore> {
+        StateStore::with_clock(state_dir, projects_dir, Clock::system())
+    }
+
+    /// The store, reading `clock` for what it stamps.
+    pub fn with_clock(state_dir: &str, projects_dir: &str, clock: Clock) -> Arc<StateStore> {
         let file = std::path::Path::new(state_dir).join("state.json").to_string_lossy().into_owned();
         Arc::new_cyclic(|me| StateStore {
             me: me.clone(),
             file,
             root_key: xenonet_os::paths::path_key(projects_dir),
-            inner: Mutex::new(Inner { doc: None, report: None, unsaved: false, life: Lifecycle::new(now_ms()) }),
+            inner: Mutex::new(Inner { doc: None, report: None, unsaved: false, life: Lifecycle::new(clock.now()) }),
             saves: AtomicU64::new(0),
+            clock,
         })
     }
 
@@ -115,7 +122,7 @@ impl StateStore {
     fn loaded(&self, g: &mut Inner) -> bool {
         let mut migrated = false;
         if g.doc.is_none() {
-            let now = now_ms();
+            let now = self.clock.now();
             let read = read_versioned(&self.file, statefile::STATE_VERSION, now, &mut Hooks { root_key: self.root_key.clone() });
             let (doc, report) = read.unwrap_or_else(|_| {
                 let mut d = Map::new();
@@ -214,12 +221,12 @@ impl StateStore {
             Ok(()) => {
                 g.unsaved = false;
                 g.life.count("saves", 1.0);
-                g.life.ok(now_ms());
+                g.life.ok(self.clock.now());
             }
             Err(e) => {
                 let message = e.message;
                 crate::runtime::util::log("error", "store.save", &format!("couldn't save its state to {}: {message}", self.file));
-                g.life.problem(&message, now_ms());
+                g.life.problem(&message, self.clock.now());
             }
         }
     }
@@ -334,7 +341,7 @@ impl StateStore {
             let pins = obj_at(d, &["identities", "pins"]);
             match identity {
                 Some(i) => {
-                    pins.insert(node.into(), json!({ "identity": i, "at": num(now_ms()) }));
+                    pins.insert(node.into(), json!({ "identity": i, "at": num(self.clock.now()) }));
                 }
                 None => {
                     pins.shift_remove(node);
@@ -371,7 +378,7 @@ pub struct StoreCore(pub Arc<StateStore>);
 
 impl Store for StoreCore {
     fn ack(&self, session: &str) -> R<()> {
-        self.0.ack(session, now_ms());
+        self.0.ack(session, self.0.clock.now());
         Ok(())
     }
     fn layout(&self) -> R<Value> {

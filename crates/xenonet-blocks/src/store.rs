@@ -15,8 +15,7 @@
 //!   document in memory, and the file left alone (read only).
 //!
 //! The document itself, its migrations and what fills it in (`prepare`)
-//! are the caller's, through `DocHooks`: Rust values in the service, JS
-//! objects and functions in the twin.
+//! are the caller's, through `DocHooks`.
 
 use serde_json::Value;
 use std::fs;

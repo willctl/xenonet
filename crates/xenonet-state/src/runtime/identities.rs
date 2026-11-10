@@ -8,8 +8,9 @@
 use crate::identities::{self as ids, LinkInput, Signin, TranscriptOwners};
 use crate::runtime::blocks::{health_of, Block};
 use crate::runtime::gatherer::{Gather, Options};
+use crate::runtime::git::Git;
 use crate::runtime::store::{obj_at, StateStore};
-use crate::runtime::util::{lock, now_ms, s};
+use crate::runtime::util::{lock, s, Clock};
 use crate::runtime::vendor::Vendor;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -63,6 +64,8 @@ pub struct IdentityWatch {
     inner: Mutex<Inner>,
     /// One pass over the repos at a time.
     pass: tokio::sync::Mutex<()>,
+    clock: Clock,
+    git: Git,
 }
 
 fn mtime(file: &str) -> Option<String> {
@@ -80,7 +83,8 @@ fn parse_json(text: &str) -> Result<Value, String> {
 }
 
 impl IdentityWatch {
-    pub fn new(at: Files, vendor: Arc<Vendor>, env: &Map<String, Value>) -> Arc<IdentityWatch> {
+    /// A watch over `at`'s files, that reads `clock` and runs `git`.
+    pub fn new(at: Files, vendor: Arc<Vendor>, env: &Map<String, Value>, clock: Clock, git: Git) -> Arc<IdentityWatch> {
         let yours = std::env::var("HOME").unwrap_or_default();
         let git_env = ids::git_env(env, &at.home, &yours);
         let owners = TranscriptOwners::new(at.owners.as_ref().map_or("", |(_, d)| d.as_str()));
@@ -88,8 +92,10 @@ impl IdentityWatch {
             at,
             vendor,
             git_env,
-            inner: Mutex::new(Inner { life: Lifecycle::new(now_ms()), files: Vec::new(), repos: Vec::new(), owners }),
+            inner: Mutex::new(Inner { life: Lifecycle::new(clock.now()), files: Vec::new(), repos: Vec::new(), owners }),
             pass: tokio::sync::Mutex::new(()),
+            clock,
+            git,
         })
     }
 
@@ -111,7 +117,7 @@ impl IdentityWatch {
                 Some((_, s)) => s.clone(),
                 None => {
                     let name = Path::new(file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    let s = Arc::new(Gather::new(&format!("identities:{name}"), Options { stamped: true, fallback: Value::Null, ..Default::default() }));
+                    let s = Arc::new(Gather::new(&format!("identities:{name}"), Options { stamped: true, fallback: Value::Null, clock: self.clock.clone(), ..Default::default() }));
                     g.files.push((file.to_string(), s.clone()));
                     s
                 }
@@ -166,7 +172,7 @@ impl IdentityWatch {
             Some(e) => (e.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string()))).collect(), true),
             None => (Vec::new(), false),
         };
-        let ran = crate::runtime::git::run_git(&args, &env, clear, Duration::from_secs(8)).await;
+        let ran = self.git.0.run(&args, &env, clear, Duration::from_secs(8)).await;
         // Exit status 1 just means nothing matched.
         (ran.ok || ran.code == Some(1)).then(|| ids::parse_git_config(&ran.stdout))
     }
@@ -174,7 +180,7 @@ impl IdentityWatch {
     /// Each repo's git identity, read again when its config or yours
     /// changes. Says whether anything changed.
     pub async fn refresh_repos(&self, projects: &[Value]) -> bool {
-        if !crate::runtime::git::git_available() {
+        if !self.git.0.available() {
             return false;
         }
         let _one = self.pass.lock().await;
@@ -198,7 +204,7 @@ impl IdentityWatch {
                         r.source.clone()
                     }
                     None => {
-                        let source = Arc::new(Gather::new("identities:repo", Options { stamped: true, retry: true, keep: true, ..Default::default() }));
+                        let source = Arc::new(Gather::new("identities:repo", Options { stamped: true, retry: true, keep: true, clock: self.clock.clone(), ..Default::default() }));
                         g.repos.push((key.clone(), Repo { path: path.clone(), origin: origin.clone(), source: source.clone() }));
                         source
                     }
@@ -238,9 +244,10 @@ impl IdentityWatch {
         let state = g.life.state.as_str().to_string();
         let last = g.life.last_error.as_ref().map(|e| e.message.clone());
         let (say, problem) = ids::report(file.as_ref().map(|(f, e)| (f.as_str(), e.as_str())), repo.as_deref(), &self.at.home, &state, last.as_deref());
+        let now = self.clock.now();
         match say {
-            "ok" => g.life.ok(now_ms()),
-            "problem" => g.life.problem(problem.as_deref().unwrap_or_default(), now_ms()),
+            "ok" => g.life.ok(now),
+            "problem" => g.life.problem(problem.as_deref().unwrap_or_default(), now),
             _ => {}
         }
     }
@@ -249,7 +256,7 @@ impl IdentityWatch {
     /// that changes of the saved state. Gives the identities, and whether
     /// the saved state changed.
     pub fn link(&self, graph: &mut Value, store: &StateStore) -> Result<Vec<Value>, String> {
-        let now = now_ms();
+        let now = self.clock.now();
         let saved = store.identities();
         let nodes = crate::runtime::util::items(graph.get("nodes")).to_vec();
         let mut owners: Vec<(Value, Value)> = Vec::new();

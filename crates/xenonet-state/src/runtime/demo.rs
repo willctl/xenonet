@@ -68,6 +68,12 @@ impl DemoWorld {
         DemoWorld { demo: Mutex::new(Demo::new(&tmp.to_string_lossy(), &port.to_string(), &local_day(now_ms()))), world: Mutex::new(None), clients: OnceCell::new() }
     }
 
+    /// The demo over a world already written (`Demo::over`), as made.
+    pub fn over(demo: Demo) -> DemoWorld {
+        let world = demo.world.to_value();
+        DemoWorld { demo: Mutex::new(demo), world: Mutex::new(Some(world)), clients: OnceCell::new() }
+    }
+
     /// Builds the demo workspace from scratch (once).
     pub fn create(&self) -> R<Value> {
         let mut made = lock(&self.world);

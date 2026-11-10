@@ -5,7 +5,7 @@
 //! gather, and `done` or `failed` says how it went.
 
 use crate::runtime::blocks::{health_of, Block};
-use crate::runtime::util::{lock, now_ms, num};
+use crate::runtime::util::{lock, num, Clock};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_blocks::gatherer::{Backoff, Gatherer};
@@ -78,18 +78,26 @@ pub struct Options {
     pub retry: bool,
     pub keep: bool,
     pub fallback: Value,
+    /// The clock its runs are timed and scheduled by.
+    pub clock: Clock,
 }
 
 pub struct Gather {
     pub name: String,
     kind: &'static str,
     pub state: Mutex<State>,
+    clock: Clock,
 }
 
 impl Gather {
     pub fn new(name: &str, o: Options) -> Gather {
-        let core = Gatherer::new(name, o.every_ms, o.next_in, o.backoff, o.stamped, o.keep, now_ms());
-        Gather { name: name.into(), kind: "gatherer", state: Mutex::new(State { core, value: o.fallback.clone(), last: None, fallback: o.fallback, retry: o.retry }) }
+        let core = Gatherer::new(name, o.every_ms, o.next_in, o.backoff, o.stamped, o.keep, o.clock.now());
+        Gather {
+            name: name.into(),
+            kind: "gatherer",
+            state: Mutex::new(State { core, value: o.fallback.clone(), last: None, fallback: o.fallback, retry: o.retry }),
+            clock: o.clock,
+        }
     }
 
     /// Whether to gather now (with `force`, always); a run that isn't due
@@ -117,27 +125,27 @@ impl Gather {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<Value, String>>,
     {
-        let at = now_ms();
+        let at = self.clock.now();
         if let Err(v) = self.begin(force, at, stamp.as_deref()) {
             return v;
         }
-        let t0 = now_ms();
+        let t0 = self.clock.now();
         match gather().await {
-            Ok(v) => self.done(v, at, now_ms() - t0, stamp, None),
-            Err(e) => self.failed(&e, at, now_ms() - t0, stamp),
+            Ok(v) => self.done(v, at, self.clock.now() - t0, stamp, None),
+            Err(e) => self.failed(&e, at, self.clock.now() - t0, stamp),
         }
     }
 
     /// The same for a source that answers at once.
     pub fn get(&self, force: bool, stamp: Option<String>, gather: impl FnOnce() -> Result<Value, String>) -> Value {
-        let at = now_ms();
+        let at = self.clock.now();
         if let Err(v) = self.begin(force, at, stamp.as_deref()) {
             return v;
         }
-        let t0 = now_ms();
+        let t0 = self.clock.now();
         match gather() {
-            Ok(v) => self.done(v, at, now_ms() - t0, stamp, None),
-            Err(e) => self.failed(&e, at, now_ms() - t0, stamp),
+            Ok(v) => self.done(v, at, self.clock.now() - t0, stamp, None),
+            Err(e) => self.failed(&e, at, self.clock.now() - t0, stamp),
         }
     }
 
