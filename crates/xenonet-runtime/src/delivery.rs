@@ -291,13 +291,17 @@ fn resume_deliver(w: &Runtime, agent: &str, cwd: Option<&str>, input: &str, fork
     let plan = if fork { resume::plan_fork(&mut plans, agent, settings, cwd) } else { resume::plan(&mut plans, agent, settings, cwd) };
     let (app, args) = plan.map_err(str::to_string)?;
     let mut env: Vec<(String, String)> = resume::resume_env(std::env::vars().collect());
-    // Claude Code signs in with the token you gave XenoNet's runs, and
-    // asks its permission prompts of you through this XenoNet's server,
-    // waiting a minute past the hold for your answer, as a start does.
-    if app == "claude" {
-        crate::starts::signed_env(w, &mut env);
-        env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
-        env.push(("MCP_TOOL_TIMEOUT".into(), crate::starts::mcp_tool_timeout_ms(w).to_string()));
+    // An app whose runs sign in (Claude Code) does with the token you gave
+    // XenoNet's runs, and asks its permission prompts of you through this
+    // XenoNet's server, waiting a minute past the hold for your answer, as
+    // a start does.
+    let ways = xenonet_engine::delivery::apps::of(&app).unwrap_or_default();
+    if let Some(s) = ways.sign_in {
+        crate::starts::signed_env(w, s.variable, &mut env);
+    }
+    if let Some(v) = ways.tool_timeout {
+        env.retain(|(k, _)| k != v);
+        env.push((v.into(), crate::starts::mcp_tool_timeout_ms(w).to_string()));
     }
     let server = xenonet_engine::delivery::setup::mcp_server_name(f64::from(w.setup.port));
     let mut args = resume::with_permission_tool(&app, args, &server);

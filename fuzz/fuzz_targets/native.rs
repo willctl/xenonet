@@ -7,10 +7,13 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
+use xenonet_copilot::reader as copilot_cli;
+use xenonet_cursor::reader as cursor;
+use xenonet_gemini_cli::reader as gemini_cli;
+use xenonet_opencode::reader::{self as opencode, Db, OpenCode};
 use xenonet_os::fs::FsError;
 use xenonet_sources::native::files::{Entry, Files, Stat};
-use xenonet_sources::native::opencode::{self, Db, OpenCode};
-use xenonet_sources::native::{copilot_cli, cursor, gemini_cli, no_check, Checked, NativeReader, Threw, Vendor};
+use xenonet_sources::native::{no_check, Checked, NativeReader, Threw, Vendor};
 use xenonet_sources::numbat::{self, Numbat};
 
 const NOW: f64 = 1_791_230_000_000.0;

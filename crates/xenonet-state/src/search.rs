@@ -30,9 +30,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
+use xenonet_adapter::reader::LineFormat;
 use xenonet_os::fs as xfs;
-use xenonet_sources::line_events::{self, Broken, Field, Kind, LineEvent, LineFile, OpenRun};
-use xenonet_sources::lines::{prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
+use xenonet_sources::line_events::{self, Broken, Field, Kind, Line, LineEvent, LineFile, OpenRun};
+use xenonet_sources::lines::{prop, CodexLine, Js, TypeError};
 use xenonet_sources::wiki::{to_str_or_empty, Out};
 use xenonet_text::text::{to_number, trim, truthy};
 use xenonet_text::{json, utf16};
@@ -231,21 +232,25 @@ pub fn docs_from_line(raw: Value, app: &str, user_events: bool) -> Result<Vec<Do
 /// are read in order (`file`, what the mapper keeps for it). An app XenoNet
 /// doesn't tail is refused.
 pub fn docs_in(raw: Value, app: &str, file: &LineFile) -> Result<Vec<Doc>, TypeError> {
-    let Some(tailed) = xenonet_adapter::apps::tailed_or_text(Some(app), None) else {
+    let Some(line) = xenonet_adapter::apps::tailed_or_text(Some(app), None).and_then(|tailed| Line::of(tailed, raw)) else {
         return Err(TypeError(xenonet_adapter::apps::untailed(app)));
     };
-    if tailed == "grok" {
-        return docs_of(&line_events::grok(&GrokLine::new(raw), file));
-    }
-    // A record that isn't an object fails where search read it first.
-    if tailed == "claude" {
-        let o = ClaudeLine { raw };
-        o.kind()?;
-        return docs_of(&line_events::claude(&o, file));
-    }
-    let o = CodexLine { raw };
-    o.payload()?;
-    docs_of(&line_events::codex(&o, file))
+    // A record that isn't shaped as its app writes one fails where search
+    // read it first.
+    line.checked()?;
+    docs_of(&line.events(file))
+}
+
+/// Whether an app's lines are a Codex rollout's, whose prompts are its
+/// completed user messages, or in one with none at all its user_message
+/// events.
+pub fn rollout_lines(app: &str) -> bool {
+    line_events::format_of(app) == Some(LineFormat::Codex)
+}
+
+// The tailed apps whose lines are of a format, in the registry's order.
+fn apps_in(format: LineFormat) -> Vec<&'static str> {
+    xenonet_adapter::apps::with("lines").map(|a| a.id.as_str()).filter(|a| line_events::format_of(a) == Some(format)).collect()
 }
 
 /// Whether a rollout's text has a completed user message: only the lines
@@ -283,17 +288,18 @@ static UUID_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([0-9a-f]{8}-[
 pub fn session_of(file: &str, app: &str) -> Option<String> {
     let norm = file.replace('\\', "/");
     let tailed = xenonet_adapter::apps::tailed_or_text(Some(app), None)?;
+    let format = line_events::format_of(tailed)?;
     // A Grok Build session's updates are in its folder, which is named for
     // it; its other files aren't read.
-    if tailed == "grok" {
+    if format == LineFormat::Grok {
         let rest = norm.strip_suffix("/updates.jsonl")?;
         let id = &rest[rest.rfind('/')? + 1..];
-        return (!id.is_empty()).then(|| format!("grok:{id}"));
+        return (!id.is_empty()).then(|| format!("{tailed}:{id}"));
     }
     let low = norm.to_ascii_lowercase();
-    if tailed == "claude" {
+    if format == LineFormat::Claude {
         if let Some(m) = SUBAGENT.captures(&low).and_then(|c| c.get(1)) {
-            return Some(format!("claude:{}", &norm[m.range()]));
+            return Some(format!("{tailed}:{}", &norm[m.range()]));
         }
     } else if !norm.contains("rollout-") {
         return None;
@@ -462,18 +468,9 @@ const NOT_OPEN: &str = "database is not open";
 
 impl Search {
     /// The index in `db_file`, of the transcripts under the folders that
-    /// are there.
-    pub fn new(db_file: Option<&str>, claude_root: Option<&str>, codex_roots: &[Option<String>], grok_root: Option<&str>) -> Search {
-        let mut roots = Vec::new();
-        if let Some(dir) = claude_root.filter(|d| !d.is_empty()) {
-            roots.push(Root { dir: dir.to_string(), app: "claude".into() });
-        }
-        for dir in codex_roots {
-            roots.push(Root { dir: dir.clone().unwrap_or_default(), app: "codex".into() });
-        }
-        if let Some(dir) = grok_root.filter(|d| !d.is_empty()) {
-            roots.push(Root { dir: dir.to_string(), app: "grok".into() });
-        }
+    /// are there (`roots`: each folder, with its app).
+    pub fn new(db_file: Option<&str>, roots: &[(String, String)]) -> Search {
+        let mut roots: Vec<Root> = roots.iter().map(|(dir, app)| Root { dir: dir.clone(), app: app.clone() }).collect();
         roots.retain(|r| !r.dir.is_empty() && Path::new(&r.dir).exists());
         Search { db_file: db_file.map(String::from), roots, db: None, prepared: false, generation: 0 }
     }
@@ -536,10 +533,14 @@ impl Search {
                 db.execute_batch("alter table files add column run text")?;
             }
             if version < 1.0 {
-                self.again(db, "codex")?;
+                for app in apps_in(LineFormat::Codex) {
+                    self.again(db, app)?;
+                }
             }
             if version < 2.0 {
-                self.again(db, "grok")?;
+                for app in apps_in(LineFormat::Grok) {
+                    self.again(db, app)?;
+                }
             }
             db.execute_batch(&format!("pragma user_version = {VERSION}"))?;
             db.execute_batch("commit")
@@ -607,7 +608,7 @@ impl Search {
         // one with none at all its user_message events (see lines.rs). One
         // indexed so far by its events that has a completed user message now
         // is indexed again, whole, by those.
-        let items = app == "codex" && !whole && row.as_ref().is_some_and(|r| sql_is(&r[3], 1.0));
+        let items = rollout_lines(app) && !whole && row.as_ref().is_some_and(|r| sql_is(&r[3], 1.0));
         let known = row.is_some();
         // A run of chunks the last read left open goes on where it ended.
         let open = match row.as_ref().map(|r| &r[4]) {
@@ -629,7 +630,7 @@ impl Search {
                 text.rfind('\n').map_or(0, |i| i + 1)
             }
         };
-        if plan.app == "codex" && !plan.items && !plan.checked {
+        if rollout_lines(&plan.app) && !plan.items && !plan.checked {
             plan.checked = true;
             plan.items = holds_user_messages(&text[..body(text)]);
             if plan.items && !plan.whole {
@@ -697,7 +698,7 @@ impl Search {
     /// The documents of a file's text, as `plan` reads it: from where the
     /// last read left off, with the run of chunks it left open.
     pub fn run_for(plan: &Plan) -> Run {
-        let mut run = Search::run(&plan.file, &plan.app, &plan.session_id, plan.app == "codex" && !plan.items);
+        let mut run = Search::run(&plan.file, &plan.app, &plan.session_id, rollout_lines(&plan.app) && !plan.items);
         run.resume(plan.open.as_ref());
         run
     }
@@ -966,7 +967,7 @@ mod tests {
         let file = claude.join("proj").join("11111111-1111-1111-1111-111111111111.jsonl");
         let line = |text: &str| format!("{}\n", json!({ "type": "user", "timestamp": "2026-10-02T10:00:00Z", "message": { "content": text } }));
         std::fs::write(&file, line("Should we use SendGrid for email?") + "{\"half").unwrap();
-        let mut s = Search::new(Some(&d.join("cache").join("search.sqlite").to_string_lossy()), Some(&claude.to_string_lossy()), &[], None);
+        let mut s = Search::new(Some(&d.join("cache").join("search.sqlite").to_string_lossy()), &[(claude.to_string_lossy().into_owned(), "claude".into())]);
         assert_eq!(s.roots.len(), 1);
         s.connect().unwrap();
         s.prepare().unwrap();
@@ -1018,7 +1019,7 @@ mod tests {
             )
         };
         std::fs::write(&file, chunk("user_message_chunk", "Add refunds ") + &chunk("user_message_chunk", "to the API.") + &chunk("agent_message_chunk", "Refunds")).unwrap();
-        let mut s = Search::new(Some(&d.join("search.sqlite").to_string_lossy()), None, &[], Some(&root.to_string_lossy()));
+        let mut s = Search::new(Some(&d.join("search.sqlite").to_string_lossy()), &[(root.to_string_lossy().into_owned(), "grok".into())]);
         s.connect().unwrap();
         s.prepare().unwrap();
         let f = file.to_string_lossy().into_owned();

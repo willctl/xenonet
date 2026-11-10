@@ -6,10 +6,10 @@
 //! the sessions as the map lists them, and a page of a conversation.
 
 use super::entries;
+use super::usage::grok_time;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use xenonet_adapter::reader::{Lister, VendorCheck};
-use xenonet_sources::grok::grok_time;
 use xenonet_sources::lines::GrokLine;
 use xenonet_text::text::trim;
 use xenonet_text::utf16;

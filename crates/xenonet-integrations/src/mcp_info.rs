@@ -297,10 +297,15 @@ impl Collect {
         }
     }
 
+    // Whether a session using the server is one of an app whose own
+    // server lists MCP servers' status (the registry's `mcpStatus`).
     fn codex_used(&self) -> bool {
-        self.using()
-            .iter()
-            .any(|s| raw(Some(s), "app").and_then(Value::as_str) == Some("codex") || raw(Some(s), "id").and_then(Value::as_str).is_some_and(|id| id.starts_with("codex:")))
+        let of = |s: &Value, app: &str| {
+            raw(Some(s), "app").and_then(Value::as_str) == Some(app)
+                || raw(Some(s), "id").and_then(Value::as_str).is_some_and(|id| id.strip_prefix(app).is_some_and(|rest| rest.starts_with(':')))
+        };
+        let listing: Vec<&str> = xenonet_adapter::apps::apps().iter().filter(|a| a.mcp_status).map(|a| a.id.as_str()).collect();
+        self.using().iter().any(|s| listing.iter().any(|app| of(s, app)))
     }
 
     fn status_request(&self) -> Next {

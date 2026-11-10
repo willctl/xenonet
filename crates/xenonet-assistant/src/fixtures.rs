@@ -8,11 +8,26 @@
 
 use crate::crypto::sha256;
 use serde_json::{json, Map, Value};
+use std::sync::OnceLock;
 
 pub const PHASE_MS: f64 = 2.0 * 60e3;
 
-fn session(n: u32) -> String {
+fn session(n: u64) -> String {
     format!("0190fa00-0000-7000-8000-{n:012}")
+}
+
+// The made-up sessions' apps and the sources, as fixture.json has them:
+// data, so the code names no app.
+fn data() -> &'static Value {
+    static D: OnceLock<Value> = OnceLock::new();
+    D.get_or_init(|| serde_json::from_str(include_str!("fixture.json")).unwrap_or(Value::Null))
+}
+
+// A made-up session's app and id, by its part in the fixture.
+fn part(role: &str) -> (Value, String) {
+    let s = &data()["sessions"][role];
+    let app = s["app"].as_str().unwrap_or_default();
+    (json!(app), format!("{app}:{}", session(s["n"].as_u64().unwrap_or_default())))
 }
 
 pub const ATLAS: &str = "fixture:atlas-api";
@@ -26,7 +41,7 @@ pub fn fixture() -> Value {
     json!({
         "places": { "atlas": ATLAS, "ledger": LEDGER },
         "projects": { "atlas": ATLAS_PROJECT, "ledger": LEDGER_PROJECT },
-        "sessions": { "work": format!("claude:{}", session(1)), "codex": format!("codex:{}", session(2)), "quiet": format!("claude:{}", session(3)) },
+        "sessions": data()["sessions"].as_object().into_iter().flatten().map(|(role, _)| (role.clone(), json!(part(role).1))).collect::<Map<String, Value>>(),
         "watcher": WATCHER,
     })
 }
@@ -40,7 +55,10 @@ pub fn phase_at(t: f64) -> (i64, f64) {
 pub fn fixture_view(t: f64) -> Value {
     let (phase, since) = phase_at(t);
     let num = xenonet_text::json::number;
-    let (work, codex, quiet) = (format!("claude:{}", session(1)), format!("codex:{}", session(2)), format!("claude:{}", session(3)));
+    // The work session, the second app's, and the quiet one, in
+    // fixture.json's order.
+    let mut parts = data()["sessions"].as_object().into_iter().flatten().map(|(role, _)| part(role));
+    let ((work_app, work), (codex_app, codex), (quiet_app, quiet)) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
     let work_live = json!({
         "status": if phase == 0 { "tool" } else { "idle" },
         "needsYou": match phase { 1 => json!({ "kind": "question", "since": num(since + 5e3) }), 2 => json!({ "kind": "review", "since": num(since + 5e3) }), _ => Value::Null },
@@ -63,12 +81,12 @@ pub fn fixture_view(t: f64) -> Value {
     json!({
         "at": num(t),
         "fixture": true,
-        "sources": { "claude": ready, "codex": ready, "grok": ready },
+        "sources": data()["sources"].as_array().into_iter().flatten().map(|app| (xenonet_text::text::display(app), ready.clone())).collect::<Map<String, Value>>(),
         "places": [[ATLAS, { "name": "atlas-api (made up)" }], [LEDGER, { "name": "ledger (made up)" }]],
         "sessions": [
-            { "id": work, "app": "claude", "place": ATLAS, "title": "Add partial refunds (made up)", "updatedAt": num(since + 5e3), "archived": false, "live": work_live },
-            { "id": codex, "app": "codex", "place": ATLAS, "title": "Fix the flaky orders test (made up)", "updatedAt": num(since + 20e3), "archived": false, "live": codex_live },
-            { "id": quiet, "app": "claude", "place": LEDGER, "title": "Tidy the ledger exports (made up)", "updatedAt": num(t - 3.0 * 3600e3), "archived": false, "live": null },
+            { "id": work, "app": work_app, "place": ATLAS, "title": "Add partial refunds (made up)", "updatedAt": num(since + 5e3), "archived": false, "live": work_live },
+            { "id": codex, "app": codex_app, "place": ATLAS, "title": "Fix the flaky orders test (made up)", "updatedAt": num(since + 20e3), "archived": false, "live": codex_live },
+            { "id": quiet, "app": quiet_app, "place": LEDGER, "title": "Tidy the ledger exports (made up)", "updatedAt": num(t - 3.0 * 3600e3), "archived": false, "live": null },
         ],
         "collisions": if phase == 1 { json!([{ "a": work, "b": codex, "files": 2, "ts": num(since + 30e3) }]) } else { json!([]) },
         "actors": [{ "id": WATCHER, "kind": "agent", "productId": null, "name": "Fixture watcher (made up)", "presence": "idle", "via": ["observed"], "remote": null, "reachable": false, "targets": [{ "id": ATLAS, "relation": "watches" }] }],

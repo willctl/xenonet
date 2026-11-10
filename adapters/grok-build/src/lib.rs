@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
-use xenonet_adapter::delivery::{Start, Ways};
+use xenonet_adapter::delivery::{self, Finish, Start, Ways};
 use xenonet_adapter::processes::Rules;
 use xenonet_adapter::reader::{Lister, ListerEnv, Tailed};
 use xenonet_adapter::{Check, Platform};
@@ -44,8 +44,20 @@ fn start(s: &Start<'_>) -> (String, Vec<String>) {
     ("grok".into(), args)
 }
 
+// Its session_id, as Claude Code's stream names one.
+fn session_of(log: &str) -> Option<String> {
+    delivery::id_under("session_id", log)
+}
+
+// A result event, or the line with a result in text that Grok Build prints.
+fn finish(log: &str) -> Option<Finish> {
+    delivery::finish_claude_style(log, true)
+}
+
+mod asked;
 pub mod checks;
 pub mod connect;
+pub mod map;
 pub mod reader;
 
 /// The adapter.
@@ -72,7 +84,16 @@ impl Platform for Adapter {
     }
 
     fn delivery(&self) -> Option<Ways> {
-        Some(Ways { resume: Some(resume), start: Some(start), prompt_file: true, marks: Some("GROK_"), ..Ways::default() })
+        Some(Ways {
+            resume: Some(resume),
+            start: Some(start),
+            prompt_file: true,
+            marks: Some("GROK_"),
+            session_of: Some(session_of),
+            finish: Some(finish),
+            reported: Some(delivery::reported_claude_style),
+            ..Ways::default()
+        })
     }
 
     fn connect(&self, app: &App, shared: &Shared) -> Option<Box<dyn Format>> {
@@ -85,5 +106,23 @@ impl Platform for Adapter {
 
     fn lister(&self, env: &ListerEnv<'_>) -> Option<Box<dyn Lister>> {
         Some(Box::new(reader::listing::Grok::new(env.root)))
+    }
+
+    fn counted_words(&self, count: &serde_json::Value) -> Option<String> {
+        asked::counted(count)
+    }
+
+    // The map's folder and transcripts.
+
+    fn folder_setting(&self) -> Option<&'static str> {
+        Some("grokHome")
+    }
+
+    fn transcript_dirs(&self, folder: &str) -> Vec<String> {
+        vec![std::path::Path::new(folder).join("sessions").to_string_lossy().into_owned()]
+    }
+
+    fn session_files(&self) -> Option<Box<dyn xenonet_adapter::platform::SessionFiles>> {
+        Some(Box::new(map::Files))
     }
 }

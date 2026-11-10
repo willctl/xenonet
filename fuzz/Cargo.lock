@@ -37,7 +37,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -226,7 +226,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -653,9 +653,9 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "itoa"
-version = "1.0.18"
+version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "jni"
@@ -924,7 +924,7 @@ checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1102,9 +1102,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -1166,7 +1166,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1225,7 +1225,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1236,7 +1236,7 @@ checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1400,9 +1400,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.9"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1426,7 +1426,7 @@ checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1487,7 +1487,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1508,9 +1508,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.54.0"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0c168a474b95bfecfe908a65d4bdffc523144b649a74c09c286afb35d53e0bc"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -1530,7 +1530,7 @@ checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1759,7 +1759,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "wasm-bindgen-shared",
 ]
 
@@ -1985,6 +1985,7 @@ dependencies = [
  "regex",
  "serde_json",
  "sha2",
+ "tokio",
  "unicode-normalization",
  "xenonet-adapter",
  "xenonet-model",
@@ -2030,11 +2031,19 @@ dependencies = [
  "async-trait",
  "getrandom 0.3.4",
  "icu_normalizer",
+ "libc",
  "regex",
  "serde_json",
  "sha2",
+ "tokio",
+ "xenonet-actors",
+ "xenonet-adapter",
+ "xenonet-api",
  "xenonet-components",
+ "xenonet-engine",
+ "xenonet-model",
  "xenonet-os",
+ "xenonet-schema",
  "xenonet-text",
 ]
 
@@ -2104,11 +2113,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "xenonet-actors",
+ "xenonet-adapter",
  "xenonet-api",
  "xenonet-components",
  "xenonet-os",
  "xenonet-text",
- "xenonet-wire-app",
 ]
 
 [[package]]
@@ -2138,8 +2148,6 @@ dependencies = [
 name = "xenonet-demo"
 version = "0.2.0"
 dependencies = [
- "getrandom 0.3.4",
- "regex",
  "serde_json",
  "xenonet-os",
  "xenonet-text",
@@ -2150,12 +2158,20 @@ name = "xenonet-doctor"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "libc",
  "regex",
  "serde_json",
+ "tokio",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-components",
+ "xenonet-engine",
+ "xenonet-hosts",
+ "xenonet-model",
+ "xenonet-net",
  "xenonet-os",
  "xenonet-schema",
+ "xenonet-sources",
  "xenonet-text",
 ]
 
@@ -2187,22 +2203,27 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-assistant",
  "xenonet-blocks",
+ "xenonet-claude-code",
+ "xenonet-codex",
  "xenonet-components",
  "xenonet-console",
+ "xenonet-copilot",
+ "xenonet-cursor",
  "xenonet-engine",
+ "xenonet-gemini-cli",
  "xenonet-hosts",
  "xenonet-integrations",
  "xenonet-model",
  "xenonet-net",
+ "xenonet-opencode",
  "xenonet-os",
+ "xenonet-platforms",
+ "xenonet-runtime",
  "xenonet-schema",
  "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
  "xenonet-text",
- "xenonet-wire-app",
- "xenonet-wire-engine",
- "xenonet-wire-map",
 ]
 
 [[package]]
@@ -2259,12 +2280,19 @@ dependencies = [
 name = "xenonet-hosts"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "regex",
  "serde_json",
+ "tokio",
  "url",
  "xenonet-adapter",
+ "xenonet-api",
+ "xenonet-blocks",
  "xenonet-model",
+ "xenonet-net",
  "xenonet-os",
+ "xenonet-schema",
+ "xenonet-state",
  "xenonet-text",
 ]
 
@@ -2278,8 +2306,14 @@ dependencies = [
  "regex",
  "serde_json",
  "sha2",
+ "tokio",
  "url",
+ "xenonet-actors",
+ "xenonet-adapter",
+ "xenonet-api",
  "xenonet-os",
+ "xenonet-sources",
+ "xenonet-state",
  "xenonet-text",
 ]
 
@@ -2368,6 +2402,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-runtime"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "url",
+ "xenonet-actors",
+ "xenonet-adapter",
+ "xenonet-api",
+ "xenonet-blocks",
+ "xenonet-engine",
+ "xenonet-hosts",
+ "xenonet-model",
+ "xenonet-os",
+ "xenonet-schema",
+ "xenonet-text",
+]
+
+[[package]]
 name = "xenonet-schema"
 version = "0.2.0"
 dependencies = [
@@ -2396,13 +2453,21 @@ dependencies = [
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",
+ "xenonet-assistant",
+ "xenonet-components",
  "xenonet-console",
+ "xenonet-doctor",
  "xenonet-engine",
+ "xenonet-grok-build",
+ "xenonet-hosts",
+ "xenonet-integrations",
  "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-platforms",
+ "xenonet-runtime",
  "xenonet-schema",
+ "xenonet-sources",
  "xenonet-state",
  "xenonet-text",
 ]
@@ -2418,6 +2483,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-model",
  "xenonet-os",
  "xenonet-schema",
@@ -2428,87 +2494,12 @@ dependencies = [
 name = "xenonet-state"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "getrandom 0.3.4",
  "regex",
  "rusqlite",
  "serde_json",
  "sha2",
- "xenonet-adapter",
- "xenonet-model",
- "xenonet-os",
- "xenonet-sources",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-text"
-version = "0.2.0"
-dependencies = [
- "libc",
- "serde_json",
-]
-
-[[package]]
-name = "xenonet-wire-app"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "libc",
- "regex",
- "serde_json",
- "tokio",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-assistant",
- "xenonet-blocks",
- "xenonet-components",
- "xenonet-doctor",
- "xenonet-engine",
- "xenonet-grok-build",
- "xenonet-hosts",
- "xenonet-integrations",
- "xenonet-model",
- "xenonet-net",
- "xenonet-os",
- "xenonet-schema",
- "xenonet-sources",
- "xenonet-state",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-wire-engine"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "regex",
- "reqwest",
- "rusqlite",
- "serde_json",
- "tokio",
- "url",
- "xenonet-actors",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-blocks",
- "xenonet-components",
- "xenonet-engine",
- "xenonet-hosts",
- "xenonet-model",
- "xenonet-os",
- "xenonet-platforms",
- "xenonet-schema",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-wire-map"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "getrandom 0.3.4",
- "serde_json",
  "tokio",
  "xenonet-adapter",
  "xenonet-api",
@@ -2519,8 +2510,15 @@ dependencies = [
  "xenonet-os",
  "xenonet-schema",
  "xenonet-sources",
- "xenonet-state",
  "xenonet-text",
+]
+
+[[package]]
+name = "xenonet-text"
+version = "0.2.0"
+dependencies = [
+ "libc",
+ "serde_json",
 ]
 
 [[package]]
@@ -2542,7 +2540,7 @@ checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "synstructure",
 ]
 
@@ -2563,7 +2561,7 @@ checksum = "f75b4683f6c7f45248d4d64056a24298c6281e0993356d7d1b4a1a962ef10d4a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
  "synstructure",
 ]
 
@@ -2603,7 +2601,7 @@ checksum = "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]

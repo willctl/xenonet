@@ -14,10 +14,28 @@
 
 use super::apps::{self, Start};
 use serde_json::{json, Value};
+pub use xenonet_adapter::delivery::Finish;
 
 /// The reserved target a start request goes to on another machine.
 pub const TARGET: &str = "xenonet:start";
-pub const APPS: [&str; 3] = ["claude", "codex", "grok"];
+
+/// The apps XenoNet starts sessions of: those whose adapter has a start,
+/// in the registry's order. The first is the one a request that names no
+/// app gets.
+pub fn apps() -> Vec<&'static xenonet_adapter::apps::App> {
+    apps::apps().into_iter().filter(|(_, w)| w.start.is_some()).map(|(a, _)| a).collect()
+}
+
+/// Them as a person reads the list: "Claude Code (claude), Codex (codex)
+/// or Grok Build (grok)".
+fn apps_words(started: &[&xenonet_adapter::apps::App]) -> String {
+    let each: Vec<String> = started.iter().map(|a| format!("{} ({})", a.name, a.id)).collect();
+    match each.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => each.join(""),
+    }
+}
+
 /// Permission modes a request may ask for; manual is the person's own
 /// settings. bypassPermissions is never taken.
 pub const MODES: [&str; 5] = ["manual", "plan", "acceptEdits", "auto", "dontAsk"];
@@ -62,9 +80,10 @@ fn text(v: &Value, k: &str) -> Option<String> {
 /// A request as it came (`{ folder?, app?, mode?, prompt, delegate? }`), or why it
 /// can't be started anywhere.
 pub fn request(v: &Value) -> Result<Request, String> {
-    let app = text(v, "app").filter(|a| !a.is_empty()).unwrap_or_else(|| "claude".into());
-    if !APPS.contains(&app.as_str()) {
-        return Err(format!("XenoNet starts Claude Code (claude), Codex (codex) or Grok Build (grok), not {app}"));
+    let started = apps();
+    let app = text(v, "app").filter(|a| !a.is_empty()).or_else(|| started.first().map(|a| a.id.clone())).unwrap_or_default();
+    if !started.iter().any(|a| a.id == app) {
+        return Err(format!("XenoNet starts {}, not {app}", apps_words(&started)));
     }
     let mode = text(v, "mode").filter(|m| !m.is_empty() && m != "manual" && m != "default");
     if let Some(m) = &mode {
@@ -74,8 +93,8 @@ pub fn request(v: &Value) -> Result<Request, String> {
         if !MODES.contains(&m.as_str()) {
             return Err(format!("the mode is one of {}, not {m}", MODES.join(", ")));
         }
-        if app == "codex" {
-            return Err("Codex runs with its own config.toml's sandbox and approvals: leave the mode out".into());
+        if let Some(why) = apps::of(&app).and_then(|w| w.no_mode) {
+            return Err(why.into());
         }
     }
     let prompt = text(v, "prompt").map(|p| p.trim().to_string()).unwrap_or_default();
@@ -234,86 +253,31 @@ pub fn folder(asked: &str, home: &str, known: &[(String, String)], reported: &[S
     Err(format!("{asked} isn't a project or folder on this machine's map: name one by its id or path, or ~"))
 }
 
-/// Whether a run's output says Claude Code isn't signed in.
-pub fn signed_out(log: &str) -> bool {
-    crate::re!(r"(?i)not logged in|oauth (session|token) (has )?expired|please run /login|invalid api key|authentication_error|token has expired|login required").is_match(log)
+/// Whether a run's output says the app isn't signed in, for an app whose
+/// runs sign in with the token you gave them (Claude Code).
+pub fn signed_out(app: &str, log: &str) -> bool {
+    apps::of(app).and_then(|w| w.sign_in).is_some_and(|s| (s.signed_out)(log))
 }
 
-fn uuid(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() == 36 && b.iter().enumerate().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { *c == b'-' } else { c.is_ascii_hexdigit() })
-}
-
-/// The session a run's output names: Claude Code's session_id (its first
-/// stream-json event, or its result), Codex's thread_id (thread.started).
+/// The session a run's output names, as the app's adapter reads it:
+/// Claude Code's session_id (its first stream-json event, or its result),
+/// Codex's thread_id (thread.started).
 pub fn session_of(app: &str, log: &str) -> Option<String> {
-    let key = if app == "codex" { "thread_id" } else { "session_id" };
-    for line in log.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
-        if let Some(id) = v.get(key).and_then(Value::as_str).filter(|id| uuid(id)) {
-            return Some(format!("{app}:{id}"));
-        }
-    }
-    None
-}
-
-/// How the end of one turn of a started run reads in its output: what the
-/// session said last, whether it failed, and the tools it was denied.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Finish {
-    pub text: String,
-    pub error: bool,
-    pub denied: Vec<String>,
-}
-
-fn clean(v: &Value) -> String {
-    v.as_str().unwrap_or("").trim().to_string()
+    let id = (apps::of(app)?.session_of?)(log)?;
+    Some(format!("{app}:{id}"))
 }
 
 /// The last turn that ended in these lines of a run's output (a Claude Code
 /// stream's result, Codex's last message at a turn.completed, or the
-/// result Grok Build prints), if any ended.
+/// result Grok Build prints), if any ended, as the app's adapter reads it.
 pub fn finish(app: &str, log: &str) -> Option<Finish> {
-    let mut last_message = String::new();
-    let mut out = None;
-    for line in log.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
-        let kind = v.get("type").and_then(Value::as_str).unwrap_or("");
-        if app == "codex" {
-            match kind {
-                "item.completed" if v["item"]["type"] == "agent_message" => last_message = clean(&v["item"]["text"]),
-                "turn.completed" => out = Some(Finish { text: std::mem::take(&mut last_message), error: false, denied: Vec::new() }),
-                "turn.failed" | "error" => {
-                    let why = v.pointer("/error/message").or_else(|| v.get("message")).map(clean).unwrap_or_default();
-                    out = Some(Finish { text: if why.is_empty() { std::mem::take(&mut last_message) } else { why }, error: true, denied: Vec::new() });
-                }
-                _ => {}
-            }
-        } else if kind == "result" || (app == "grok" && v.get("result").is_some_and(Value::is_string)) {
-            let denied = v
-                .get("permission_denials")
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|d| d.get("tool_name").and_then(Value::as_str)).map(str::to_string).collect())
-                .unwrap_or_default();
-            let error = v.get("is_error").and_then(Value::as_bool).unwrap_or(false) || v.get("subtype").and_then(Value::as_str).is_some_and(|t| t.starts_with("error"));
-            out = Some(Finish { text: clean(&v["result"]), error, denied });
-        }
-    }
-    out
+    (apps::of(app)?.finish?)(log)
 }
 
 /// Whether the session called XenoNet's send tool in these lines of its
 /// output: it told someone what it found itself.
 pub fn reported(app: &str, log: &str) -> bool {
-    log.lines().any(|line| {
-        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return false };
-        if app == "codex" {
-            return v["item"]["type"] == "mcp_tool_call" && v["item"]["tool"] == "send" && v["item"]["server"].as_str().is_some_and(|s| s.starts_with("xenonet"));
-        }
-        v["message"]["content"]
-            .as_array()
-            .is_some_and(|c| c.iter().any(|b| b["type"] == "tool_use" && b["name"].as_str().is_some_and(|n| n.starts_with("mcp__xenonet") && n.ends_with("__send"))))
-    })
+    apps::of(app).and_then(|w| w.reported).is_some_and(|r| r(log))
 }
 
 /// Whether a final message asks something and waits: a question in its last
@@ -433,6 +397,7 @@ mod tests {
 
     #[test]
     fn a_request_says_its_app_mode_folder_and_prompt() {
+        xenonet_platforms::install();
         let r = request(&json!({ "prompt": "  Fix the login form  " })).unwrap();
         assert_eq!(r, Request { folder: "~".into(), app: "claude".into(), mode: None, prompt: "Fix the login form".into(), delegate: false });
         assert_eq!(request(&json!({ "app": "grok", "mode": "plan", "folder": "project:atlas", "prompt": "x" })).unwrap().mode.as_deref(), Some("plan"));
@@ -440,7 +405,11 @@ mod tests {
         assert_eq!(request(&json!({ "mode": "bypassPermissions", "prompt": "x" })), Err("XenoNet never starts a session that bypasses its permission checks".into()));
         assert!(request(&json!({ "mode": "yolo", "prompt": "x" })).is_err());
         assert!(request(&json!({ "app": "codex", "mode": "plan", "prompt": "x" })).is_err(), "Codex takes its own config's");
-        assert!(request(&json!({ "app": "opencode", "prompt": "x" })).is_err());
+        assert_eq!(request(&json!({ "app": "opencode", "prompt": "x" })), Err("XenoNet starts Claude Code (claude), Codex (codex) or Grok Build (grok), not opencode".into()));
+        assert_eq!(
+            request(&json!({ "app": "codex", "mode": "plan", "prompt": "x" })),
+            Err("Codex runs with its own config.toml's sandbox and approvals: leave the mode out".into())
+        );
         assert_eq!(request(&json!({ "prompt": " " })), Err("say what the new session should do: a prompt".into()));
         assert!(request(&json!({ "prompt": "x".repeat(PROMPT_MAX + 1) })).is_err());
         let back = request(&r.to_json()).unwrap();
@@ -511,7 +480,7 @@ mod tests {
             command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).unwrap().1,
             ["--prompt-file", "/s/runs/p.txt", "-s", id, "--output-format", "json", "--permission-mode", "default"]
         );
-        for app in APPS {
+        for app in apps().iter().map(|a| a.id.as_str()) {
             assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p")).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
         }
         assert!(prompt_in_file("grok") && !prompt_in_file("claude") && !prompt_in_file("codex"));
@@ -566,14 +535,16 @@ mod tests {
 
     #[test]
     fn a_run_says_its_session_and_whether_claude_code_is_signed_out() {
+        xenonet_platforms::install();
         let claude = "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"0190d3e0-0000-7000-8000-00000000ab02\"}\n{\"type\":\"result\"}";
         assert_eq!(session_of("claude", claude).as_deref(), Some("claude:0190d3e0-0000-7000-8000-00000000ab02"));
         let codex = "{\"type\":\"thread.started\",\"thread_id\":\"019a0000-aaaa-bbbb-cccc-000000000001\"}";
         assert_eq!(session_of("codex", codex).as_deref(), Some("codex:019a0000-aaaa-bbbb-cccc-000000000001"));
         assert_eq!(session_of("claude", "not json\n{\"session_id\":\"../x\"}"), None);
-        assert!(signed_out("Error: OAuth session expired. Please run /login"));
-        assert!(signed_out("Not logged in · Please run /login"));
-        assert!(!signed_out("{\"type\":\"result\",\"subtype\":\"success\"}"));
+        assert!(signed_out("claude", "Error: OAuth session expired. Please run /login"));
+        assert!(signed_out("claude", "Not logged in · Please run /login"));
+        assert!(!signed_out("claude", "{\"type\":\"result\",\"subtype\":\"success\"}"));
+        assert!(!signed_out("codex", "Not logged in"), "only an app whose runs XenoNet signs in");
     }
 
     #[test]
@@ -623,6 +594,7 @@ mod tests {
 
     #[test]
     fn a_turns_end_is_read_from_the_runs_output() {
+        xenonet_platforms::install();
         let claude = r#"{"type":"system","subtype":"init","session_id":"s"}
 {"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"Want me to go ahead? I'll stop here.","permission_denials":[]}
@@ -631,6 +603,7 @@ mod tests {
         assert_eq!(f, Finish { text: "Want me to go ahead? I'll stop here.".into(), error: false, denied: vec![] });
         assert_eq!(outcome(Some(&f), false), "asked");
         assert!(finish("claude", "{\"type\":\"assistant\"}\n").is_none(), "no end yet");
+        assert!(finish("claude", r#"{"result":"bare"}"#).is_none() && finish("grok", r#"{"result":"bare"}"#).is_some_and(|f| f.text == "bare"), "Grok Build prints a bare result");
         let denied = r#"{"type":"result","subtype":"success","is_error":false,"result":"I could not run it.","permission_denials":[{"tool_name":"Bash"},{"tool_name":"Edit"}]}"#;
         let d = finish("claude", denied).unwrap();
         assert_eq!((d.denied.clone(), outcome(Some(&d), true)), (vec!["Bash".to_string(), "Edit".to_string()], "denied"));
@@ -648,6 +621,7 @@ mod tests {
 
     #[test]
     fn codex_ends_a_turn_with_its_last_message() {
+        xenonet_platforms::install();
         let log = r#"{"type":"thread.started","thread_id":"t"}
 {"type":"item.completed","item":{"id":"1","type":"agent_message","text":"Which folder?"}}
 {"type":"turn.completed"}
@@ -658,6 +632,7 @@ mod tests {
 
     #[test]
     fn reporting_back_means_calling_the_send_tool() {
+        xenonet_platforms::install();
         let sent = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__xenonet__send","input":{"to":"claude:a","text":"done"}}]}}"#;
         assert!(reported("claude", sent));
         assert!(reported("claude", &sent.replace("mcp__xenonet__send", "mcp__xenonet-dev__send")));

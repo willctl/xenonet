@@ -14,7 +14,7 @@ use crate::native::{by_num, edits_out, fits_id, js_max, js_min, older, prune_edi
 use crate::session::{RunSession, Via};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use xenonet_adapter::apps::{is_session_app, session_apps};
+use xenonet_adapter::apps::{is_session_app, session_apps, with};
 use xenonet_os::fs::FsError;
 use xenonet_os::nodepath::Style;
 use xenonet_os::paths::path_style;
@@ -24,8 +24,8 @@ use xenonet_text::text::{display, is_blank};
 use xenonet_text::utf16;
 
 pub const SCHEMA_VERSIONS: [&str; 4] = ["0.2.0", "0.3.0", "0.4.0", "0.5.0"];
-/// Apps XenoNet reads itself, and numbat's names that aren't a run's app.
-pub const LEFT_OUT: [&str; 5] = ["claude-code", "codex", "hermes", "grok", "unknown"];
+/// numbat's names that aren't a run's app.
+const NOT_RUNS: [&str; 2] = ["hermes", "unknown"];
 const EDITS: [&str; 2] = ["file.write", "file.delete"];
 // A first read takes at most the last MiB, and each read at most 4 MiB.
 const START_BACK: f64 = (1u64 << 20) as f64;
@@ -42,17 +42,23 @@ pub fn run_id(sid: &str) -> String {
     format!("n{}", &hex[..31])
 }
 
-/// A run's session id. OpenCode's runs take the id its own reader gives
-/// them (ses_… as ses-…, xenonet_adapter::formats::opencode) when that fits, so a run both
-/// read is one session, and delivery finds it.
+/// A run's session id. A run of an app with a reader of its own takes the
+/// id that reader gives it (`Native::run_id`: OpenCode's ses_… as ses-…)
+/// when that fits, so a run both read is one session, and delivery finds
+/// it.
 pub fn session_id_of(app: &str, sid: &str) -> String {
-    if app == "opencode" {
-        let own = xenonet_adapter::formats::opencode::local_id(sid);
-        if fits_id(&own, 128) {
-            return format!("opencode:{own}");
-        }
+    let own = xenonet_adapter::platforms().get(app).and_then(|p| p.native()).and_then(|n| n.run_id(sid));
+    if let Some(own) = own.filter(|own| fits_id(own, 128)) {
+        return format!("{app}:{own}");
     }
     format!("{app}:{}", run_id(sid))
+}
+
+/// Whether numbat's records under `name` are left out: those of an app
+/// XenoNet reads itself (one whose lines it tails, by the registry's
+/// numbat names), and of a name that isn't a run's app.
+pub fn left_out(name: &str) -> bool {
+    NOT_RUNS.contains(&name) || with("lines").any(|a| a.numbat.iter().any(|n| n == name)) || !is_session_app(name)
 }
 
 /// One event, as XenoNet keeps it.
@@ -88,7 +94,7 @@ pub fn read_record(line: &str) -> Result<Event, &'static str> {
         return Err("unsupported-version");
     }
     let (Some(app), Some(kind)) = (nonempty(r.get("source_agent")), nonempty(r.get("event_type"))) else { return Err("malformed") };
-    if LEFT_OUT.contains(&app.as_str()) || !is_session_app(&app) {
+    if left_out(&app) {
         return Err("left-out");
     }
     let Some(session) = nonempty(r.get("session_id")) else { return Err("no-session") };
@@ -391,6 +397,7 @@ mod tests {
 
     #[test]
     fn an_opencode_run_has_the_id_its_reader_gives_it() {
+        xenonet_platforms::install();
         for sid in ["ses_eb95b1836ffexD4vYDGuLeJDCy", "ses_ab_cd", "ses_ab-cd", "ses-abcdef"] {
             assert_eq!(session_id_of("opencode", sid), format!("opencode:{}", xenonet_adapter::formats::opencode::local_id(sid)), "{sid}");
         }

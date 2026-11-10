@@ -16,9 +16,9 @@ use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use unicode_normalization::UnicodeNormalization;
-use xenonet_adapter::products::{product_of, product_of_slug};
+use xenonet_adapter::products::{product_of, product_of_slug, PRODUCTS};
 use xenonet_model::ids::is_actor_slug;
 use xenonet_text::text::trim;
 use xenonet_text::text::{template, truthy};
@@ -224,26 +224,38 @@ fn invisible() -> &'static Regex {
 
 // Names that read as you or as XenoNet.
 const YOURS: [&str; 8] = ["you", "me", "user", "youruser", "owner", "xenonet", "system", "admin"];
-// Apps no actor is, by their keys.
-const APPS: [(&str, &str); 4] = [("claude", "Claude"), ("claudecode", "Claude Code"), ("codex", "Codex"), ("chatgpt", "ChatGPT")];
-// Names a product goes by, which only its own actor may take.
-const PRODUCT_NAMES: [(&str, &str); 5] = [("hermes", "hermes-agent"), ("hermesagent", "hermes-agent"), ("grokbot", "grok-bot"), ("muse", "muse"), ("dots", "dots")];
-// The makers of those apps and products, and XenoNet's: Anysphere (Cursor)
-// builds and runs Grok Bot for SpaceXAI.
-const MAKERS: [(&str, &str); 9] = [
-    ("anthropic", "Anthropic"),
-    ("openai", "OpenAI"),
-    ("nousresearch", "Nous Research"),
-    ("spacexai", "SpaceXAI"),
-    ("xai", "xAI"),
-    ("anysphere", "Anysphere"),
-    ("cursor", "Cursor"),
-    ("meta", "Meta"),
-    ("willctl", "willctl"),
-];
+// Apps no actor is, by their keys: the names each goes by (the registry's
+// `reserved`).
+fn apps_by_key() -> &'static [(String, &'static str)] {
+    static T: OnceLock<Vec<(String, &'static str)>> = OnceLock::new();
+    T.get_or_init(|| reserved().flat_map(|r| r.names.iter()).map(|n| (name_key(n), n.as_str())).collect())
+}
 
-fn lookup<'a>(table: &'a [(&'a str, &'a str)], key: &str) -> Option<&'a str> {
-    table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+// Names a product goes by, by their keys, which only its own actor may
+// take: its name and its short name.
+fn product_names() -> &'static [(String, &'static str)] {
+    static T: OnceLock<Vec<(String, &'static str)>> = OnceLock::new();
+    T.get_or_init(|| PRODUCTS.iter().flat_map(|p| [(name_key(p.short), p.id), (name_key(p.name), p.id)]).collect())
+}
+
+// The makers of those apps and products, and XenoNet's (willctl), by
+// their keys.
+fn makers() -> &'static [(String, &'static str)] {
+    static T: OnceLock<Vec<(String, &'static str)>> = OnceLock::new();
+    T.get_or_init(|| {
+        let apps = reserved().flat_map(|r| r.makers.iter().map(String::as_str));
+        let products = PRODUCTS.iter().flat_map(|p| p.makers.iter().copied());
+        apps.chain(products).chain(["willctl"]).map(|m| (name_key(m), m)).collect()
+    })
+}
+
+// What the registry's apps keep from actors.
+fn reserved() -> impl Iterator<Item = &'static xenonet_adapter::apps::Reserved> {
+    xenonet_adapter::apps::apps().iter().filter_map(|a| a.reserved.as_ref())
+}
+
+fn lookup(table: &[(String, &'static str)], key: &str) -> Option<&'static str> {
+    table.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
 }
 
 // Characters that break a line or reorder text, which a name can't hold.
@@ -282,10 +294,10 @@ pub fn check_name(raw: Option<&str>, product: Option<&str>) -> Result<String, St
     if keys.iter().any(|k| YOURS.contains(&k.as_str())) {
         return Err("that name reads as you or as XenoNet, which no actor may".into());
     }
-    if let Some(app) = keys.iter().find_map(|k| lookup(&APPS, k)) {
+    if let Some(app) = keys.iter().find_map(|k| lookup(apps_by_key(), k)) {
         return Err(format!("that name reads as {app}, which an actor isn't"));
     }
-    if let Some(owner) = keys.iter().filter_map(|k| lookup(&PRODUCT_NAMES, k)).find(|p| Some(*p) != product) {
+    if let Some(owner) = keys.iter().filter_map(|k| lookup(product_names(), k)).find(|p| Some(*p) != product) {
         let n = product_name(owner);
         return Err(format!("that name is {n}'s, and this actor isn't {n}"));
     }
@@ -307,44 +319,28 @@ pub fn product_word_refusal(text: &str, what: &str) -> Option<String> {
     if keys.iter().any(|k| YOURS.contains(&k.as_str())) {
         return Some(format!("the product's {what} reads as you or as XenoNet"));
     }
-    if let Some(app) = keys.iter().find_map(|k| lookup(&APPS, k)) {
+    if let Some(app) = keys.iter().find_map(|k| lookup(apps_by_key(), k)) {
         return Some(format!("the product's {what} reads as {app}, which this actor isn't"));
     }
-    if let Some(p) = keys.iter().find_map(|k| lookup(&PRODUCT_NAMES, k)) {
+    if let Some(p) = keys.iter().find_map(|k| lookup(product_names(), k)) {
         return Some(format!("the product's {what} reads as {}, which this actor isn't", product_name(p)));
     }
-    if let Some(maker) = keys.iter().find_map(|k| lookup(&MAKERS, k)) {
+    if let Some(maker) = keys.iter().find_map(|k| lookup(makers(), k)) {
         return Some(format!("the product's {what} reads as {maker}, who doesn't make this actor"));
     }
     None
 }
 
-/// Slugs that are XenoNet's own words, or its routes' (/api/actors/me…): a
-/// route is matched before `/api/actors/<slug>`, so an actor with its word
-/// for a slug couldn't be read there.
-pub const RESERVED_SLUGS: [&str; 21] = [
-    "you",
-    "me",
-    "user",
-    "owner",
-    "xenonet",
-    "system",
-    "admin",
-    "root",
-    "claude",
-    "codex",
-    "chatgpt",
-    "anthropic",
-    "openai",
-    "events",
-    "requests",
-    "register",
-    "heartbeat",
-    "targets",
-    "observers",
-    "tokens",
-    "gateway",
-];
+/// Slugs that are XenoNet's own words, the registry's apps' (their names
+/// and makers: claude, codex, chatgpt, anthropic, openai), or its routes'
+/// (/api/actors/me…): a route is matched before `/api/actors/<slug>`, so an
+/// actor with its word for a slug couldn't be read there.
+pub static RESERVED_SLUGS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    const OWN: [&str; 8] = ["you", "me", "user", "owner", "xenonet", "system", "admin", "root"];
+    const ROUTES: [&str; 8] = ["events", "requests", "register", "heartbeat", "targets", "observers", "tokens", "gateway"];
+    let apps = reserved().flat_map(|r| r.slugs.iter().map(String::as_str));
+    OWN.into_iter().chain(apps).chain(ROUTES).collect()
+});
 
 /// A slug made from a name: lowercase, accents dropped, other characters
 /// made dashes (one for a run of them, none at the ends), cut to 32.
@@ -386,7 +382,7 @@ pub fn slug_refusal(slug: Option<&str>, product: Option<&str>) -> Option<String>
     }
     if let Some(p) = product.and_then(product_of) {
         if owner != Some(p.id) {
-            let profile = if p.id == "hermes-agent" { ", or hermes-<profile> for a profile" } else { "" };
+            let profile = if p.profiles { format!(", or {}-<profile> for a profile", p.slug) } else { String::new() };
             return Some(format!("{}'s actor has a slug of its own: {}{profile}", p.name, p.slug));
         }
     }

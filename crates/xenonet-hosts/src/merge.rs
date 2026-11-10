@@ -17,6 +17,7 @@
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
+use xenonet_model::app::Limits;
 use xenonet_text::text::truthy;
 use xenonet_text::text::{display, to_number};
 
@@ -489,8 +490,10 @@ pub fn qualify_graph(graph: &Value, host: &Value, layout: &Value, now: f64, wind
     stats.insert("projects".into(), json!(projects.iter().filter(|x| !truthy(x.get("group"))).count()));
     stats.insert("groups".into(), json!(projects.iter().filter(|x| truthy(x.get("group"))).count()));
     stats.insert("sessions".into(), json!(sessions.len()));
-    stats.insert("claude".into(), json!(sessions.iter().filter(|x| x.get("app") == Some(&json!("claude"))).count()));
-    stats.insert("codex".into(), json!(sessions.iter().filter(|x| x.get("app") == Some(&json!("codex"))).count()));
+    // Each app the registry counts, under its id.
+    for a in xenonet_adapter::apps::apps().iter().filter(|a| a.counted) {
+        stats.insert(a.id.clone(), json!(sessions.iter().filter(|x| x.get("app").and_then(Value::as_str) == Some(a.id.as_str())).count()));
+    }
     stats.insert("active".into(), json!(sessions.iter().filter(|x| x.get("activity") == Some(&json!("active"))).count()));
     stats.insert("archived".into(), json!(sessions.iter().filter(|x| truthy(x.get("archived"))).count()));
     let mut out_nodes = vec![Value::Object(host_node)];
@@ -788,13 +791,17 @@ fn reading_of(app: &str, r: &Value, shift: &Shift) -> Option<Value> {
     }
     let nn = |v: Option<&Value>| finite(v).map_or(Value::Null, n);
     let observed = shift.at(r.get("observedAt"));
-    if app == "claude" && r.get("stale") == Some(&json!(true)) {
+    // The reading's shape is the one the registry names for the app's
+    // plan limits (live/snapshot/v1's): five-hour and seven-day windows,
+    // or a primary and a secondary one.
+    let windows = xenonet_adapter::apps::app(app).and_then(|a| a.limits.clone()).and_then(|l| serde_json::from_value::<Limits>(Value::String(l)).ok()) == Some(Limits::Claude);
+    if windows && r.get("stale") == Some(&json!(true)) {
         return Some(json!({ "fiveHour": null, "sevenDay": null, "observedAt": observed, "stale": true, "reason": str_of(r.get("reason"), 200) }));
     }
     if observed.is_null() {
         return None;
     }
-    if app == "claude" {
+    if windows {
         let resets = r.get("resets");
         let source = if r.get("source") == Some(&json!("claude-desktop")) { "claude-desktop" } else { "anthropic" };
         return Some(

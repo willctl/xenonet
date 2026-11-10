@@ -303,6 +303,61 @@ pub trait Tailed: Send + Sync {
     fn usage_samples(&mut self, _samples: &Value) {}
     /// The readings settled: what the limits are now.
     fn settle_usage(&mut self) {}
+
+    // ----- what the core asks of its lines -----
+
+    /// Whether its lines say when a turn ends. An app whose lines don't
+    /// (Grok Build's) says it in its hooks, and the telemetry ends a turn
+    /// gone quiet.
+    fn lines_end_turns(&self) -> bool {
+        true
+    }
+    /// Whether this reader reads the transcripts of an app no reader is
+    /// for: Claude Code's does, as the live tailer always has.
+    fn reads_untailed(&self) -> bool {
+        false
+    }
+    /// A session's turns as its app's usage ledger counts them (Grok
+    /// Build's usage.json, with the summary.json beside it), for its
+    /// stats; None for an app whose transcripts alone count its calls.
+    fn usage_turns(&self, _usage: Option<&Value>, _summary: Option<&Value>) -> Option<Vec<UsageTurn>> {
+        None
+    }
+    /// Which shared mapper reads its lines into the event stream, for the
+    /// core's readers of whole transcripts (stats, search); None for an app
+    /// whose lines none reads.
+    fn line_format(&self) -> Option<LineFormat> {
+        None
+    }
+}
+
+/// The shapes of transcript line the event stream's mappers read
+/// (xenonet-sources' line_events), as a tailed app's reader names its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineFormat {
+    /// Claude Code's transcript lines.
+    Claude,
+    /// A Codex rollout's lines.
+    Codex,
+    /// Grok Build's session updates.
+    Grok,
+}
+
+/// A turn's call on one model, as an app's usage ledger has it: when the
+/// turn ended, what names it (its turn and model), its model calls, its
+/// tokens as XenoNet counts a call's, and what the app said it cost (None
+/// when that isn't known).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsageTurn {
+    pub t: f64,
+    pub key: String,
+    pub model: String,
+    pub calls: f64,
+    pub input: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+    pub output: f64,
+    pub cost: Option<f64>,
 }
 
 /// Where a native reader reads from: the map's folders and the service's
@@ -335,6 +390,47 @@ pub trait Native: Send + Sync {
     fn at(&self, paths: &Paths<'_>) -> String;
     /// A new reader.
     fn make(&self) -> Box<dyn native::NativeReader>;
+    /// The id its reader gives a run another source recorded (numbat's),
+    /// so a run both read is one session; None to take the other source's.
+    fn run_id(&self, _sid: &str) -> Option<String> {
+        None
+    }
+    /// What the app's plugin tells XenoNet as it happens, kept in memory,
+    /// for an app whose plugin reports (OpenCode's).
+    fn plugin_events(&self) -> Option<Box<dyn PluginEvents>> {
+        None
+    }
+}
+
+/// A session as its app's plugin last said it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PluginState {
+    pub last_event_at: f64,
+    pub working: bool,
+    /// What it waits on: the words and when it began.
+    pub needs: Option<(String, f64)>,
+    /// Each edited file's last edit: path and time.
+    pub edits: Vec<(String, f64)>,
+    pub model: Option<String>,
+    /// As session/v1's `usage`.
+    pub usage: Option<Value>,
+}
+
+/// What an app's plugin tells XenoNet as it happens, per session (by its
+/// session id on the map), which the map prefers to the app's records
+/// for as long as it's fresh.
+pub trait PluginEvents: Send {
+    /// Takes a request's events for session `id`, run in `cwd`. Returns
+    /// how many it used.
+    fn ingest(&mut self, id: &str, events: &Value, cwd: Option<&str>, now: f64) -> usize;
+    /// The session as the plugin last said it, or None when it hasn't been
+    /// heard from lately enough to go by.
+    fn state(&mut self, id: &str, now: f64) -> Option<PluginState>;
+    /// The session as the engine reads a live one.
+    fn live(&mut self, id: &str, now: f64) -> Option<Value>;
+    /// The live view's session snapshots, for the sessions the plugin has
+    /// spoken for and `has` says are on the map.
+    fn snapshot(&mut self, now: f64, has: &dyn Fn(&str) -> bool) -> Vec<Value>;
 }
 
 /// Where an app's lister reads: the map's folders, the service's

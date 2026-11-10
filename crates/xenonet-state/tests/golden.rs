@@ -540,8 +540,13 @@ fn codex_roots(w: &World) -> Vec<String> {
     vec![format!("{home}/sessions"), format!("{home}/archived_sessions")]
 }
 
+// Each app's transcript folders, as the map has them.
+fn app_dirs(w: &World) -> Vec<(String, Vec<String>)> {
+    vec![("claude".into(), vec![w.dir("claudeRoot")]), ("codex".into(), codex_roots(w)), ("grok".into(), vec![format!("{}/sessions", w.dir("grokHome"))])]
+}
+
 async fn stats(w: &World, c: &mut Check) {
-    let s = Stats::new(&w.dir("claudeRoot"), &codex_roots(w), &format!("{}/sessions", w.dir("grokHome")), vendor());
+    let s = Stats::new(app_dirs(w), vendor());
     let mut out = Map::new();
     for id in w.list("sessionIds").iter().filter_map(Value::as_str) {
         let v = match s.stats(id).await {
@@ -555,7 +560,8 @@ async fn stats(w: &World, c: &mut Check) {
 
 async fn search(w: &World, c: &mut Check) {
     let db = format!("{}/golden-search.sqlite", w.dir("cacheDir"));
-    let s = TranscriptSearch::new(&db, &w.dir("claudeRoot"), &codex_roots(w), &format!("{}/sessions", w.dir("grokHome")), vendor());
+    let roots: Vec<(String, String)> = app_dirs(w).into_iter().flat_map(|(app, ds)| ds.into_iter().map(move |d| (d, app.clone()))).collect();
+    let s = TranscriptSearch::new(&db, &roots, vendor());
     s.index().await;
     let mut found = Map::new();
     for q in ["refunds", "rounding solver", "make", "invoices", "Why is the build"] {

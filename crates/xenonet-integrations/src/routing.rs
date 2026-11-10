@@ -10,14 +10,15 @@ use serde_json::{json, Map, Value};
 use xenonet_text::text::to_number;
 use xenonet_text::text::truthy;
 
-/// The agents a task could go to, from the sessions on the map.
+/// The agents a task could go to: the apps the registry makes routing
+/// candidates, in their order, each available while a session of it is on
+/// the map; then human review.
 pub fn inventory(nodes: &[Value]) -> Value {
     let has = |app: &str| nodes.iter().any(|n| n.get("kind").and_then(Value::as_str) == Some("session") && n.get("app").and_then(Value::as_str) == Some(app));
-    let list = [
-        ("codex", "Codex", "Coding, repository inspection and tool-assisted research in Codex.", has("codex")),
-        ("claude", "Claude Code", "Coding and repository work in Claude Code.", has("claude")),
-        ("review", "Human review", "Keep the task for human review when requirements, permissions or evidence are unclear.", true),
-    ];
+    let mut apps: Vec<_> = xenonet_adapter::apps::apps().iter().filter_map(|a| Some((a, a.routing.as_ref()?))).collect();
+    apps.sort_by_key(|(_, r)| r.order);
+    let mut list: Vec<(&str, &str, &str, bool)> = apps.iter().map(|(a, r)| (a.id.as_str(), a.name.as_str(), r.description.as_str(), has(&a.id))).collect();
+    list.push(("review", "Human review", "Keep the task for human review when requirements, permissions or evidence are unclear.", true));
     Value::Array(
         list.iter()
             .map(|(id, name, description, available)| {

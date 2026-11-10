@@ -5,6 +5,8 @@
 //! changed and the app's token still works. Shared by XenoNet's window and
 //! the xenonet command.
 
+use xenonet_adapter::products::{handoff_of, product_of};
+
 /// A step, and what it copies: "message", "token", "url", "wake" (a way to
 /// set up its wake) or None.
 pub type Step = (&'static str, Option<&'static str>);
@@ -19,6 +21,11 @@ pub struct Handoff {
 /// none (a new address alone). For an agent that speaks A2A (product
 /// "a2a"), `url` is XenoNet's Agent Card, and the token goes as A2A's bearer.
 pub fn handoff(product: Option<&str>, url: &str, host: &str, token: Option<&str>) -> Handoff {
+    // A product's own steps, as the products table has them.
+    if let Some(h) = product.and_then(handoff_of) {
+        let steps = if token.is_some() { h.token } else { h.address };
+        return Handoff { app: product_of(h.product).map(|p| p.name), steps: steps.steps.to_vec(), message: steps.message.map(|m| filled(m, url, host)) };
+    }
     match (product, token) {
         (Some("a2a"), Some(_)) => Handoff {
             app: Some("A2A agent"),
@@ -26,46 +33,44 @@ pub fn handoff(product: Option<&str>, url: &str, host: &str, token: Option<&str>
             message: None,
         },
         (Some("a2a"), None) => Handoff { app: Some("A2A agent"), steps: vec![("Give the agent XenoNet's new Agent Card URL. Its token still works.", Some("url"))], message: None },
-        // The token goes into Grok Bot's secure secret card, which its
-        // model never sees, never into its chat.
-        (Some("grok-bot"), Some(_)) => Handoff {
-            app: Some("Grok Bot"),
-            steps: vec![
-                ("Paste this into a Grok Bot chat.", Some("message")),
-                ("When Grok Bot asks for the token, paste it into its secret card, not the chat, and save it.", Some("token")),
-                ("For answers within seconds, give XenoNet a way to wake it.", Some("wake")),
-            ],
-            message: Some(format!("Add an MCP server named \"xenonet\" by URL: {url}. Ask me for its token with your secure secret card, named XENONET_GATEWAY_TOKEN, never in chat, and send it in the header Authorization: Bearer <the token>. Then call its whoami tool and tell me what it says.")),
+        (_, Some(_)) => Handoff {
+            app: None,
+            steps: vec![("In the app, add an MCP server with this URL.", Some("url")), ("Send the token in the header Authorization: Bearer <token>.", Some("token"))],
+            message: None,
         },
-        (Some("grok-bot"), None) => Handoff {
-            app: Some("Grok Bot"),
-            steps: vec![("Paste this into a Grok Bot chat.", Some("message"))],
-            message: Some(format!("XenoNet's address changed. Change the URL of your MCP server \"xenonet\" to {url} and keep its Authorization header as it is. Then call its whoami tool and tell me what it says.")),
-        },
-        (Some("muse"), Some(_)) => Handoff {
-            app: Some("Muse"),
-            steps: vec![("Paste this into a Muse chat, then approve the connector card.", Some("message")), ("When Muse asks for the key, paste the token into the card, not the chat.", Some("token"))],
-            message: Some(format!("Create a custom connector named \"XenoNet\" that uses an API key, for the host {host}, sending the key as a bearer token in the Authorization header. I'll paste the key into the key field when you ask. Then call {url} with JSON-RPC (method tools/call, tool whoami) and tell me what it says.")),
-        },
-        (Some("muse"), None) => Handoff {
-            app: Some("Muse"),
-            steps: vec![("Paste this into a Muse chat.", Some("message")), ("If Muse can't change the connector, reconnect Muse for a new token.", None)],
-            message: Some(format!("XenoNet's address changed to {url}. Change your \"XenoNet\" connector's host to {host} and keep its key. Then call whoami at the new address and tell me what it says.")),
-        },
-        (_, Some(_)) => Handoff { app: None, steps: vec![("In the app, add an MCP server with this URL.", Some("url")), ("Send the token in the header Authorization: Bearer <token>.", Some("token"))], message: None },
         (_, None) => Handoff { app: None, steps: vec![("Change the URL of its XenoNet MCP server to this.", Some("url"))], message: None },
     }
 }
 
-/// How to give XenoNet a way to wake an app's agent (core/actors/wake.js):
-/// for Grok Bot, a routine that starts from a webhook, made from its chat,
-/// whose URL and key go into XenoNet's window. None for an app XenoNet
-/// knows no way for.
+/// How to give XenoNet a way to wake an app's agent (core/actors/wake.js),
+/// as the products table has it: for Grok Bot, a routine that starts from
+/// a webhook, made from its chat, whose URL and key go into XenoNet's
+/// window. None for an app XenoNet knows no way for.
 pub fn wake_help(product: Option<&str>) -> Option<([&'static str; 2], &'static str)> {
-    (product == Some("grok-bot")).then_some((
-        ["Paste this into a Grok Bot chat to make the routine.", "Open the routine's settings and copy its Webhook URL and Webhook key below."],
-        "Create a routine named \"XenoNet inbox\" that starts from a webhook. Its instruction: read your XenoNet inbox with your xenonet tools and answer anything that needs an answer. Tell me when it's made.",
-    ))
+    handoff_of(product?)?.wake
+}
+
+/// A handoff's message with the gateway's `{url}` and `{host}` in it, in
+/// one pass, so neither is read for the other.
+fn filled(message: &str, url: &str, host: &str) -> String {
+    let mut out = String::with_capacity(message.len() + url.len());
+    let mut rest = message;
+    while let Some(i) = rest.find('{') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        if let Some(after) = tail.strip_prefix("{url}") {
+            out.push_str(url);
+            rest = after;
+        } else if let Some(after) = tail.strip_prefix("{host}") {
+            out.push_str(host);
+            rest = after;
+        } else {
+            out.push('{');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -87,5 +92,19 @@ mod tests {
         let message = h.message.unwrap();
         assert!(!message.contains("xenonet_gateway_x"), "the token never goes in Grok Bot's chat");
         assert!(message.starts_with("Add an MCP server named \"xenonet\" by URL: https://x.example/mcp. Ask me for its token with your secure secret card"));
+        assert!(wake_help(Some("grok-bot")).is_some() && wake_help(Some("muse")).is_none() && wake_help(None).is_none());
+    }
+
+    #[test]
+    fn muse_gets_the_host_and_the_url_and_another_app_the_plain_steps() {
+        let h = handoff(Some("muse"), "https://x.example/{host}", "x.example", Some("t"));
+        assert_eq!(h.app, Some("Muse"));
+        assert_eq!(
+            h.message.as_deref(),
+            Some("Create a custom connector named \"XenoNet\" that uses an API key, for the host x.example, sending the key as a bearer token in the Authorization header. I'll paste the key into the key field when you ask. Then call https://x.example/{host} with JSON-RPC (method tools/call, tool whoami) and tell me what it says.")
+        );
+        let h = handoff(Some("hermes-agent"), "https://x.example/mcp", "x.example", None);
+        assert_eq!((h.app, h.steps.len(), h.message), (None, 1, None));
+        assert_eq!(filled("{a} {url}{", "U", "H"), "{a} U{");
     }
 }

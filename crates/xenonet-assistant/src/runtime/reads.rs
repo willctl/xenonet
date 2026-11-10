@@ -312,9 +312,13 @@ impl Reads {
             &live,
             &list,
             self.actors.is_some(),
-            sources.get("claude").cloned().unwrap_or(Value::Null),
-            sources.get("codex").cloned().unwrap_or(Value::Null),
-            sources.get("grok").cloned().unwrap_or(Value::Null),
+            projection::all_sources()
+                .into_iter()
+                .map(|app| {
+                    let s = sources.get(&app).cloned().unwrap_or(Value::Null);
+                    (app, s)
+                })
+                .collect(),
             &mut around,
         );
         *self.view.locked() = Some((t, v.clone()));

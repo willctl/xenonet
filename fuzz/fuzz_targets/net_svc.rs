@@ -62,7 +62,22 @@ fn target(text: &str) {
 }
 
 fn headers(c: &mut Choices<'_>) {
-    let names = ["authorization", "Authorization", "content-type", "accept", "user-agent", "host", "forwarded", "x-forwarded-for", "via", "cookie", "set-cookie", "connection", "keep-alive", "x-kept"];
+    let names = [
+        "authorization",
+        "Authorization",
+        "content-type",
+        "accept",
+        "user-agent",
+        "host",
+        "forwarded",
+        "x-forwarded-for",
+        "via",
+        "cookie",
+        "set-cookie",
+        "connection",
+        "keep-alive",
+        "x-kept",
+    ];
     let mut given = Vec::new();
     while !c.is_empty() && given.len() < 32 {
         let k = if c.bool() { (*c.pick(&names)).to_string() } else { String::from_utf8_lossy(c.chunk()).into_owned() };

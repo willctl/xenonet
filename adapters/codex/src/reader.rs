@@ -10,17 +10,18 @@
 
 pub mod app_server;
 pub mod rollouts;
+pub mod session;
 pub mod state_db;
 pub mod threads;
 
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use xenonet_adapter::reader::{Call, Classified, Emit, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};
+use xenonet_adapter::reader::{Call, Classified, Emit, LineFormat, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};
 use xenonet_model::usage::pricing;
 use xenonet_model::usage::{Speed, TokenUsage};
 use xenonet_os::paths;
 use xenonet_sources::line_events::{self, broken_at, user_text, End, Field, Kind, LineEvent, LineFile};
-use xenonet_sources::lines::{codex_kind_of, codex_version_of, opt_prop, prop, CodexLine};
+use xenonet_sources::lines::{codex_kind_of, opt_prop, prop, CodexLine};
 use xenonet_sources::live::js::{ev, index0, is_str, js_max, map_opt, nn, num_of, nv, obj, object_keys, or0, pages_extra, strict_eq, sv, tpl};
 use xenonet_sources::live::telemetry::{project_limit, refusals};
 use xenonet_sources::live::{clip, clip_value, codex_edits, command_text, patch_files, string_of, wiki_pages_of};
@@ -426,8 +427,16 @@ impl Tailed for Reader {
         "codex-lines"
     }
 
+    /// A rollout says its version once, in its first line (session_meta).
     fn version_of(&self, raw: &Value, current: Option<String>) -> Option<String> {
-        codex_version_of(raw.get("type"), raw.get("payload").and_then(|p| p.get("cli_version")), current)
+        match (raw.get("type"), raw.get("payload").and_then(|p| p.get("cli_version"))) {
+            (Some(Value::String(k)), Some(Value::String(v))) if k == "session_meta" => Some(v.clone()),
+            _ => current,
+        }
+    }
+
+    fn line_format(&self) -> Option<LineFormat> {
+        Some(LineFormat::Codex)
     }
 
     fn kind_of(&self, raw: &Value) -> String {

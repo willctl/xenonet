@@ -1,10 +1,11 @@
 //! Codex's threads as the map lists them (a thread as a session), and a
 //! thread's items from the app-server as the console shows them.
 
+use super::session::CodexSession;
 use serde_json::{Map, Value};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_sources::record::{excerpt, excerpt_json, nn, tpl, Obj, F};
-use xenonet_sources::session::{CodexSession, Parent, ParentKind};
+use xenonet_sources::session::{Parent, ParentKind};
 use xenonet_text::text::{display, to_number, truthy};
 use xenonet_text::{json, time};
 

@@ -650,14 +650,16 @@ impl Connections {
         }
         let made = adapter.product.as_deref().and_then(product_of);
         let (slug, name) = if let Some(p) = made {
-            let slug = if p.id == "dots" {
-                let mut slug = "dots".to_string();
+            // A product with an actor per pairing (OpenAI's dots) takes its
+            // slug, then the slug with a suffix.
+            let slug = if p.per_pair {
+                let mut slug = p.slug.to_string();
                 let mut i = 0;
                 while Self::is_taken(h, &slug) {
                     if i > 50 {
                         return fail(409.0, "taken", "XenoNet couldn't find a free slug for another dot");
                     }
-                    slug = format!("dots-{}", random_hex(2)?);
+                    slug = format!("{}-{}", p.slug, random_hex(2)?);
                     i += 1;
                 }
                 slug

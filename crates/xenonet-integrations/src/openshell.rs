@@ -258,8 +258,10 @@ pub async fn preview(host: &dyn ShellHost, s: &Shared, body: &Value) -> Result<V
         command(&profile, &[], &o.platform, o.system_root.as_deref()).map_err(failure)?;
     }
     let f = |m: &str| failure(Fail { status: 400, code: "bad-request".into(), message: m.into() });
-    let agent =
-        body.get("agent").and_then(Value::as_str).filter(|a| ["pi", "codex", "claude"].contains(a)).map(String::from).ok_or_else(|| f("Choose Pi, Codex or Claude Code."))?;
+    // The agents a sandbox runs: the apps the registry gives the arguments
+    // of a headless turn.
+    let headless = body.get("agent").and_then(Value::as_str).and_then(xenonet_adapter::apps::app).and_then(|a| Some((a.id.clone(), a.headless.as_ref()?)));
+    let (agent, headless) = headless.ok_or_else(|| f("Choose Pi, Codex or Claude Code."))?;
     let request = text(body.get("request"), "Task", 2000).map_err(failure)?;
     if has_credential(&request) {
         return Err(f("Attach credentials through an OpenShell provider, not the task."));
@@ -294,11 +296,7 @@ pub async fn preview(host: &dyn ShellHost, s: &Shared, body: &Value) -> Result<V
         args.extend(strs(&["--policy", &p]));
     }
     let mut agent_args = vec![json!(agent)];
-    agent_args.extend(strs(match agent.as_str() {
-        "codex" => &["exec"],
-        "claude" => &["-p"],
-        _ => &["--print"],
-    }));
+    agent_args.extend(headless.iter().map(|a| json!(a)));
     agent_args.push(json!(request));
     let collect = s.borrow().collect_text.clone();
     let mut rest: Vec<Vec<Value>> = Vec::new();

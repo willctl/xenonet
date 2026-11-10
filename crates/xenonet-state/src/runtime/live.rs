@@ -117,16 +117,15 @@ fn transcript(name: &str) -> bool {
 }
 
 impl Live {
-    /// `claude_root`, `codex_root` and `grok_root`: the folders the apps
-    /// write transcripts in; `usage`: whether to ask Anthropic for plan
-    /// usage.
-    pub fn new(claude_root: &str, codex_root: &str, grok_root: &str, claude_desktop_dir: Option<&str>, usage: bool, home: &str, vendor: Arc<Vendor>) -> Arc<Live> {
+    /// `roots`: the folders the apps write transcripts in, each with its
+    /// app; `usage`: whether to ask Anthropic for plan usage.
+    pub fn new(roots: &[(String, String)], claude_desktop_dir: Option<&str>, usage: bool, home: &str, vendor: Arc<Vendor>) -> Arc<Live> {
         // Watch canonical long paths: an 8.3 short name on Windows names
         // the same folder another way.
-        let roots: Vec<(String, String)> = [(claude_root, "claude"), (codex_root, "codex"), (grok_root, "grok")]
-            .into_iter()
+        let roots: Vec<(String, String)> = roots
+            .iter()
             .filter(|(d, _)| !d.is_empty() && std::path::Path::new(d).exists())
-            .map(|(d, app)| (xenonet_os::fs::realpath_native(d).unwrap_or_else(|_| d.to_string()), app.to_string()))
+            .map(|(d, app)| (xenonet_os::fs::realpath_native(d).unwrap_or_else(|_| d.clone()), app.clone()))
             .collect();
         let now = now_ms();
         let scanners = roots.iter().map(|(dir, _)| Scanner::new(&format!("transcripts:{dir}"), dir, Limits { depth: DEPTH, ..Limits::default() }, true, now)).collect();
@@ -235,8 +234,9 @@ impl Live {
         if !t.tailer.files.contains(file) {
             let Some(kind) = lock(&self.telemetry).classify(file) else { return Ok(()) };
             let entry = Entry {
-                // Any app that isn't tailed is read as Claude Code.
-                app: xenonet_adapter::apps::tailed_app(kind.get("app").and_then(Value::as_str).unwrap_or_default(), "claude"),
+                // Any app that isn't tailed is read as the one whose reader
+                // reads the others (Claude Code).
+                app: crate::apps::read_as(kind.get("app").and_then(Value::as_str).unwrap_or_default()).unwrap_or_default(),
                 session_id: kind.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_string(),
                 agent_id: kind.get("agentId").cloned().unwrap_or(Value::Null),
                 sampling: Sampling::default(),
@@ -462,7 +462,7 @@ impl Live {
                 a.value()
             };
             if a.last().map(|l| l.at) != before {
-                let _ = lock(&self.telemetry).usage_reading("claude", Some(&r), now);
+                let _ = lock(&self.telemetry).usage_reading(crate::apps::anthropic_usage_app(), Some(&r), now);
             }
         }
         if let Some((d, dir)) = &self.desktop {
@@ -470,10 +470,10 @@ impl Live {
             let vendor = self.vendor.clone();
             let samples = d.get(false, None, move || desktop_samples(&vendor, &file));
             if xenonet_text::text::truthy(Some(&samples)) {
-                lock(&self.telemetry).usage_samples("claude", &samples);
+                lock(&self.telemetry).usage_samples(crate::apps::anthropic_usage_app(), &samples);
             }
         }
-        lock(&self.telemetry).settle_usage("claude");
+        lock(&self.telemetry).settle_usage(crate::apps::anthropic_usage_app());
     }
 
     // ---------- what the state reads ----------
@@ -704,7 +704,7 @@ mod tests {
         let file = root.join(format!("{ID}.jsonl"));
         let ts = |ago: f64| xenonet_text::time::iso(now_ms() - ago);
         std::fs::write(&file, line(json!({ "type": "user", "timestamp": ts(60e3), "message": { "role": "user", "content": "Add a test" } }))).unwrap();
-        let live = Live::new(&home.join(".claude").join("projects").to_string_lossy(), "", "", None, false, &home.to_string_lossy(), vendor());
+        let live = Live::new(&[(home.join(".claude").join("projects").to_string_lossy().into_owned(), "claude".into())], None, false, &home.to_string_lossy(), vendor());
         let heard: Arc<Mutex<Vec<Event>>> = Arc::default();
         let h = heard.clone();
         live.listen(Arc::new(move |e| lock(&h).extend(e)));
@@ -761,7 +761,7 @@ mod tests {
             json!({ "turnNumber": n, "endedAt": xenonet_text::time::iso(ended), "modelUsage": { "grok-build": row } })
         };
         std::fs::write(dir.join("usage.json"), json!({ "turns": [turn(1, now_ms() - 50e3, 3000, None)] }).to_string()).unwrap();
-        let live = Live::new("", "", &sessions.to_string_lossy(), None, false, &home.to_string_lossy(), vendor());
+        let live = Live::new(&[(sessions.to_string_lossy().into_owned(), "grok".into())], None, false, &home.to_string_lossy(), vendor());
         live.start().await;
         let grok = |live: &Arc<Live>| live.snapshot()["sessions"].as_array().unwrap().iter().find(|s| s["app"] == "grok").cloned().unwrap();
         assert_eq!((grok(&live)["tokens"]["processed"].as_f64(), grok(&live)["model"].as_str()), (Some(3100.0), Some("grok-build")));

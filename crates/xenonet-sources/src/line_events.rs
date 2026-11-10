@@ -30,6 +30,8 @@ use crate::wiki::to_str;
 use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::OnceLock;
+use xenonet_adapter::reader::LineFormat;
 use xenonet_model::usage::{Figure, Speed, TokenUsage};
 use xenonet_text::text::{join, to_number, trim, trim_start, truthy, type_of};
 
@@ -693,13 +695,89 @@ pub fn codex_item<'a>(it: &'a Value, t: f64, file: &LineFile) -> Vec<LineEvent<'
     out.events
 }
 
-// ---------- Grok Build ----------
+// ---------- by app ----------
 
-/// Whether an app's lines say when a turn ends (events.js's mapper's
-/// turnEnds): Grok Build's don't, and its hooks do.
-pub fn lines_end_turns(app: &str) -> bool {
-    app != "grok"
+/// The mapper `app`'s reader names (`Tailed::line_format`), from the
+/// adapters in place; None for an app no reader is for, or when none are
+/// in place.
+pub fn format_of(app: &str) -> Option<LineFormat> {
+    static FORMATS: OnceLock<Vec<(&'static str, LineFormat)>> = OnceLock::new();
+    let platforms = xenonet_adapter::platforms();
+    // Nothing in place yet: nothing to keep.
+    platforms.iter().next()?;
+    let formats = FORMATS.get_or_init(|| platforms.tailed().iter().filter_map(|t| Some((t.id(), t.line_format()?))).collect());
+    formats.iter().find(|(a, _)| *a == app).map(|(_, f)| *f)
 }
+
+/// A transcript line as its app's mapper reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Line {
+    Claude(ClaudeLine),
+    Codex(CodexLine),
+    Grok(GrokLine),
+}
+
+impl Line {
+    /// `raw` as a line of `app`'s, by the mapper its reader names; None for
+    /// an app no reader is for.
+    pub fn of(app: &str, raw: Value) -> Option<Line> {
+        Some(Line::in_format(format_of(app)?, raw))
+    }
+
+    /// `raw` as a line of `format`.
+    pub fn in_format(format: LineFormat, raw: Value) -> Line {
+        match format {
+            LineFormat::Claude => Line::Claude(ClaudeLine { raw }),
+            LineFormat::Codex => Line::Codex(CodexLine { raw }),
+            LineFormat::Grok => Line::Grok(GrokLine::new(raw)),
+        }
+    }
+
+    /// The record.
+    pub fn raw(&self) -> &Value {
+        match self {
+            Line::Claude(o) => &o.raw,
+            Line::Codex(o) => &o.raw,
+            Line::Grok(o) => &o.raw,
+        }
+    }
+
+    /// The line's events, through its mapper.
+    pub fn events<'a>(&'a self, file: &LineFile) -> Vec<LineEvent<'a>> {
+        match self {
+            Line::Claude(o) => claude(o, file),
+            Line::Codex(o) => codex(o, file),
+            Line::Grok(o) => grok(o, file),
+        }
+    }
+
+    /// Fails where a reader that reads the line's shape first would: a
+    /// Claude Code record that isn't an object, a rollout line without a
+    /// payload.
+    pub fn checked(&self) -> Result<(), TypeError> {
+        match self {
+            Line::Claude(o) => o.kind().map(|_| ()),
+            Line::Codex(o) => o.payload().map(|_| ()),
+            Line::Grok(_) => Ok(()),
+        }
+    }
+}
+
+/// A file's prompt mode (`LineFile::items`) from its lines: whether a
+/// rollout's have a completed user message (lines.rs's
+/// has_user_messages); false for lines of a shape without the mode.
+pub fn items_of(lines: &[Line]) -> Result<bool, TypeError> {
+    for l in lines {
+        if let Line::Codex(o) = l {
+            if o.user_message()?.is_some() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+// ---------- Grok Build ----------
 
 static TRUE: Value = Value::Bool(true);
 static FALSE: Value = Value::Bool(false);
@@ -924,7 +1002,6 @@ mod tests {
         assert!(matches!(&evs[9][0].kind, Kind::Context { used: Some(u), .. } if **u == json!(10)) && &*evs[9][0].origin == "usage_update");
         assert_eq!(file.run.borrow().as_ref().map(|r| (r.kind, r.text.as_str())), Some((Run::User, "Then")), "the run left open");
         assert_eq!(OpenRun::from_value(&file.run.borrow().as_ref().unwrap().to_value()).as_ref(), file.run.borrow().as_ref());
-        assert!(!lines_end_turns("grok") && lines_end_turns("claude"));
     }
 
     #[test]

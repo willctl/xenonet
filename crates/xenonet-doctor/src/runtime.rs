@@ -170,19 +170,16 @@ impl xenonet_adapter::dirs::Look for Disk {
     }
 }
 
-/// findCodexBinary() (core/dirs.js): XENONET_CODEX_BIN, the ChatGPT app's
-/// own codex, or "codex".
-pub fn codex_bin(home: &str) -> String {
-    if let Ok(b) = std::env::var("XENONET_CODEX_BIN") {
-        return b;
-    }
+/// The facts the adapters' checks read that the doctor gathers here
+/// (Codex's command, `codexBin`), in the adapters' order.
+fn adapter_facts(home: &str) -> Vec<(&'static str, Value)> {
     let env = xenonet_adapter::dirs::Env {
         claude_desktop_dir: None,
         local_app_data: fx::env_set("LOCALAPPDATA"),
         app_data: fx::env_set("APPDATA"),
         xdg_config_home: fx::env_set("XDG_CONFIG_HOME"),
     };
-    xenonet_adapter::dirs::bundled_codex_binaries(&env, xenonet_os::platform(), home, &mut Disk).into_iter().next().unwrap_or_else(|| "codex".into())
+    xenonet_adapter::platforms().iter().flat_map(|p| p.doctor_facts(home, &env, &mut Disk)).collect()
 }
 
 /// machine().launcher(): the launcher hooks and MCP servers run, when
@@ -519,19 +516,25 @@ impl DoctorHost for Here {
 }
 
 /// What the checks read of the service as data (factsOf): of the live
-/// state only its Claude plan reading, and of the health its sources and
-/// parts.
+/// state only the apps' plan readings (the registry's `limits`), and of
+/// the health its sources and parts.
 async fn facts(parts: &Parts, by_hand: bool) -> Value {
     let c = &parts.cores;
     let health = match (c.state.sources(), c.state.blocks()) {
         (Ok(sources), Ok(blocks)) => json!({ "sources": sources, "blocks": blocks }),
         _ => Value::Null,
     };
-    let live =
-        c.state.live_snapshot().ok().map_or(Value::Null, |l| json!({ "limits": { "claude": l.get("limits").and_then(|x| x.get("claude")).cloned().unwrap_or(Value::Null) } }));
+    let live = c.state.live_snapshot().ok().map_or(Value::Null, |l| {
+        let limits: Map<String, Value> = xenonet_adapter::apps::apps()
+            .iter()
+            .filter_map(|a| a.limits.as_deref())
+            .map(|k| (k.to_string(), l.get("limits").and_then(|x| x.get(k)).cloned().unwrap_or(Value::Null)))
+            .collect();
+        json!({ "limits": limits })
+    });
     let connect = if parts.config.demo { Value::Null } else { c.connect.preview().await.unwrap_or(Value::Null) };
     let state_load = c.store.load_report().unwrap_or(Value::Null);
-    json!({
+    let mut facts = json!({
         "self": { "port": parts.config.port, "name": parts.config.name, "exe": xenonet_os::fs::running_exe() },
         "base": null,
         "baseName": null,
@@ -543,13 +546,23 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
         "platform": xenonet_os::platform(),
         "electron": null,
         "node": null,
-        "codexBin": codex_bin(&parts.home()),
-        "byHand": by_hand,
-        "stateLoad": state_load,
-        "projectsDirSet": fx::env_set("XENONET_PROJECTS_DIR").is_some(),
-        "grokKeySet": fx::env_set("XAI_API_KEY").is_some(),
-        "actors": if c.actors.is_some() { "on" } else { "off" },
-    })
+    });
+    if let Value::Object(m) = &mut facts {
+        m.extend(adapter_facts(&parts.home()).into_iter().map(|(k, v)| (k.to_string(), v)));
+        m.extend(
+            json!({
+                "byHand": by_hand,
+                "stateLoad": state_load,
+                "projectsDirSet": fx::env_set("XENONET_PROJECTS_DIR").is_some(),
+                "grokKeySet": fx::env_set("XAI_API_KEY").is_some(),
+                "actors": if c.actors.is_some() { "on" } else { "off" },
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        );
+    }
+    facts
 }
 
 /// The runtime check, for a binary that needs no Node: it is the runtime.

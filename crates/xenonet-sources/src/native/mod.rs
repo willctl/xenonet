@@ -8,7 +8,7 @@
 //! of a file (`FileCache`), and the answers as JS values (`Out`). Paths keep
 //! the syntax of the machine that wrote them, through xenonet_os::nodepath.
 
-pub mod opencode_events;
+pub mod plugins;
 
 pub use xenonet_adapter::reader::files;
 pub use xenonet_adapter::reader::native::{edits_out, no_check, Check, Checked, Edit, Edits, NativeReader, Out, Threw, Vendor};

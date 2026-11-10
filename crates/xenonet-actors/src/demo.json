@@ -1,0 +1,66 @@
+{
+ "actors": [
+  {
+   "id": "actor:wren",
+   "name": "Wren",
+   "product": { "id": "hermes-agent", "vendor": "Nous Research", "version": "0.21.5" },
+   "via": ["demo", "observed", "attributed"],
+   "heartbeatMs": 60000,
+   "capabilities": ["spawn-sessions", "edit-repos", "run-commands", "message-people", "schedule"],
+   "identity": { "$": ["identity", "ledger"] }
+  },
+  {
+   "id": "actor:kestrel",
+   "name": "Kestrel",
+   "product": { "id": "grok-bot", "vendor": "SpaceXAI", "version": null },
+   "via": ["demo", "observed"],
+   "heartbeatMs": null,
+   "capabilities": ["run-commands", "browse", "message-people"]
+  },
+  {
+   "id": "actor:moth",
+   "name": "Moth",
+   "via": ["demo", "registered"],
+   "heartbeatMs": 30000,
+   "capabilities": ["message-agents", "message-people"]
+  }
+ ],
+ "scripts": {
+  "actor:wren": [
+   { "presence": "working" },
+   { "status": "Triaging issues in atlas-api", "targets": [[{ "$": ["project", "atlas-api"] }, "works-on"]] },
+   { "event": { "kind": "spawned", "target": { "$": ["session", "Add partial refunds to the orders API"] }, "via": "attributed" } },
+   { "event": { "kind": "edited", "target": { "$": ["project", "atlas-api"] }, "paths": [{ "$": ["file", "atlas-api/src/orders/refunds.ts"] }], "via": "attributed" } },
+   { "event": { "kind": "ran", "target": { "$": ["project", "atlas-api"] }, "count": 3, "via": "attributed" } },
+   { "event": { "kind": "finished", "target": { "$": ["project", "atlas-api"] }, "subject": "session" } },
+   { "status": "Closing the month in ledger", "targets": [[{ "$": ["project", "ledger"] }, "works-on"]] },
+   { "event": { "kind": "spawned", "target": { "$": ["session", "Draft the Q4 close checklist"] }, "via": "attributed" } },
+   { "event": { "kind": "messaged", "platform": "telegram" } },
+   { "presence": "idle", "status": "" }
+  ],
+  "actor:kestrel": [
+   { "presence": "idle" },
+   { "presence": "working", "status": "Benchmarking the route solver", "targets": [[{ "$": ["project", "pathfinder"] }, "works-on"]] },
+   { "event": { "kind": "ran", "target": { "$": ["project", "pathfinder"] }, "count": 1 } },
+   { "event": { "kind": "ran", "target": { "$": ["project", "pathfinder"] }, "count": 4 } },
+   { "event": { "kind": "failed", "target": { "$": ["project", "pathfinder"] }, "subject": "command" } },
+   { "event": { "kind": "ran", "target": { "$": ["project", "pathfinder"] }, "count": 2 } },
+   { "event": { "kind": "finished", "target": { "$": ["project", "pathfinder"] }, "subject": "task" } },
+   { "presence": "unknown", "status": "" }
+  ],
+  "actor:moth": [
+   { "presence": "working" },
+   { "status": "Watching geofence", "targets": [[{ "$": ["project", "labs/geofence"] }, "watches"]] },
+   { "event": { "kind": "said", "target": { "$": ["session", "Draw delivery zones from postcodes"] }, "count": 1 } },
+   { "event": { "kind": "messaged", "platform": "email" } },
+   { "presence": "idle" }
+  ],
+  "actor:you": [
+   { "console": { "presence": "working", "did": [{ "what": "looked", "node": { "$": ["project", "atlas-api"] } }] } },
+   { "console": { "did": [{ "what": "read", "node": { "$": ["session", "Review the partial refunds change"] } }] } },
+   { "console": { "did": [{ "what": "started", "node": { "$": ["project", "atlas-api"] }, "app": "claude" }] } },
+   { "console": { "did": [{ "what": "terminal", "node": { "$": ["project", "ledger"] } }] } },
+   { "console": { "presence": "idle" } }
+  ]
+ }
+}

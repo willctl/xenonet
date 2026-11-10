@@ -38,7 +38,13 @@ fn world() -> World {
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
-    let live = Live::new(&cfg.claude_projects_dir, &codex_sessions, "", cfg.claude_desktop_dir.as_deref(), false, &cfg.home_dir, vendor.clone());
+    let live = Live::new(
+        &[(cfg.claude_projects_dir.clone(), "claude".into()), (codex_sessions.clone(), "codex".into())],
+        cfg.claude_desktop_dir.as_deref(),
+        false,
+        &cfg.home_dir,
+        vendor.clone(),
+    );
     let state = MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Demo(demo), live);
     let root = w["root"].as_str().unwrap_or_default().to_string();
     World { state, root, home: w["home"].as_str().unwrap_or_default().to_string() }
@@ -92,11 +98,11 @@ async fn refreshes_asked_for_together_are_one() {
     let s = &w.state;
     let (a, b) = tokio::join!(s.refresh_map(), s.refresh_map());
     assert_eq!(a.expect("a map")["generatedAt"], b.expect("a map")["generatedAt"], "the same refresh");
-    assert_eq!(lock(&s.claude_sessions.state).runs(), 1.0);
+    assert_eq!(lock(&s.sessions_gather("claude").state).runs(), 1.0);
     // One after a change sees it, whatever was running.
     let (_, c) = tokio::join!(s.refresh_map(), s.refresh_after());
     c.expect("a map");
-    assert_eq!(lock(&s.claude_sessions.state).runs(), 3.0);
+    assert_eq!(lock(&s.sessions_gather("claude").state).runs(), 3.0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -395,7 +401,7 @@ async fn a_home_folders_own_sessions_and_projects() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
     let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
-    let live = Live::new(&cfg.claude_projects_dir, "", "", None, false, &cfg.home_dir, vendor.clone());
+    let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
     let s = MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Real, live);
     let g = s.refresh_map().await.expect("a map");
     let session = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(&format!("claude:{id}"))).cloned().expect("the session, on the map");

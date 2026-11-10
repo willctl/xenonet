@@ -10,15 +10,16 @@
 
 pub mod entries;
 pub mod listing;
+pub mod usage;
 
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
-use xenonet_adapter::reader::{Call, Classified, Emit, Tail, Tailed, TypeError, VendorCheck, Where};
+use usage::{usage_subagent, usage_turns};
+use xenonet_adapter::reader::{Call, Classified, Emit, LineFormat, Tail, Tailed, TypeError, UsageTurn, VendorCheck, Where};
 use xenonet_claude_code::reader::claude_line;
 use xenonet_model::usage::{Speed, TokenUsage};
-use xenonet_sources::grok::{usage_subagent, usage_turns};
 use xenonet_sources::line_events::{self, LineFile, OpenRun};
 use xenonet_sources::lines::{grok_kind_of, GrokLine};
 use xenonet_sources::live::telemetry::refusals;
@@ -65,7 +66,7 @@ impl Reader {
     /// didn't say; and what a turn written again adds (Grok folds what
     /// you send during a turn into it). A subagent's are its parent's,
     /// whose turns count them, and a fork's turns from before it are the
-    /// session's it came from (grok.rs's usage_turns). Grok writes the
+    /// session's it came from (usage.rs's usage_turns). Grok writes the
     /// file as each turn ends, before the update that ends the turn, so
     /// it's asked after each of a session's lines.
     fn usage(&mut self, t: &mut dyn Tail, vendor: &dyn VendorCheck, at: &Where, live: bool, out: &mut Vec<Emit>) {
@@ -161,6 +162,19 @@ impl Tailed for Reader {
         let read = claude_line(t, at, "grok", o.ts(), &events, live, now, out);
         self.usage(t, vendor, at, live, out);
         read
+    }
+
+    /// Grok Build's lines don't say when a turn ends; its hooks do.
+    fn lines_end_turns(&self) -> bool {
+        false
+    }
+
+    fn usage_turns(&self, usage: Option<&Value>, summary: Option<&Value>) -> Option<Vec<UsageTurn>> {
+        Some(usage_turns(usage, summary))
+    }
+
+    fn line_format(&self) -> Option<LineFormat> {
+        Some(LineFormat::Grok)
     }
 }
 

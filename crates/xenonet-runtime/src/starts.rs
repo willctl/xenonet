@@ -173,7 +173,8 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, sender: &Sender, r:
         Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
     }
     let id = uuid()?;
-    let session = (r.app != "codex").then(|| format!("{}:{id}", r.app));
+    let ways = xenonet_engine::delivery::apps::of(&r.app).unwrap_or_default();
+    let session = (!ways.picks_id).then(|| format!("{}:{id}", r.app));
     let key = session.clone().unwrap_or_else(|| format!("start:{id}"));
     let runs = std::path::Path::new(&w.setup.state_dir).join("runs");
     // Under a standing delegation, a session or actor asking is told it was
@@ -202,10 +203,12 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, sender: &Sender, r:
         }
     };
     let mut env: Vec<(String, String)> = xenonet_engine::delivery::resume::resume_env(std::env::vars().collect());
-    if app == "claude" {
-        env.retain(|(k, _)| k != "MCP_TOOL_TIMEOUT");
-        env.push(("MCP_TOOL_TIMEOUT".into(), mcp_tool_timeout_ms(w).to_string()));
-        signed_env(w, &mut env);
+    if let Some(v) = ways.tool_timeout {
+        env.retain(|(k, _)| k != v);
+        env.push((v.into(), mcp_tool_timeout_ms(w).to_string()));
+    }
+    if let Some(s) = ways.sign_in {
+        signed_env(w, s.variable, &mut env);
     }
     let turn = Turn { key: &key, app: &app, args: &args, cwd: &cwd, env: &env, text: if prompt_file.is_some() { String::new() } else { text } };
     let pid = match run_turn(w, &resumes.runner, turn) {
@@ -249,12 +252,13 @@ pub fn run_token(w: &Runtime) -> Option<String> {
     secrets(w).get(starts::SIGN_IN_TARGET).ok().flatten().filter(|t| !t.is_empty())
 }
 
-/// The environment of a Claude Code run with XenoNet's sign-in, when you
-/// gave it one: CLAUDE_CODE_OAUTH_TOKEN.
-pub fn signed_env(w: &Runtime, env: &mut Vec<(String, String)>) {
+/// The environment of a run with XenoNet's sign-in, when you gave it one,
+/// in the variable the app's adapter names (Claude Code's
+/// CLAUDE_CODE_OAUTH_TOKEN).
+pub fn signed_env(w: &Runtime, variable: &str, env: &mut Vec<(String, String)>) {
     if let Some(t) = run_token(w) {
-        env.retain(|(k, _)| k != "CLAUDE_CODE_OAUTH_TOKEN");
-        env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), t));
+        env.retain(|(k, _)| k != variable);
+        env.push((variable.into(), t));
     }
 }
 
@@ -352,12 +356,14 @@ impl Tail {
 /// prompt file taken away when the turn ends; and a hint for you when
 /// Claude Code couldn't sign in for it.
 pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid: u32, fork_of: Option<&str>, prompt_file: Option<String>) {
-    let claude = app == "claude";
-    if fork_of.is_none() && prompt_file.is_none() && !claude {
+    // Whether the app's runs sign in, so a turn it couldn't sign in for
+    // gets you a hint.
+    let signs_in = xenonet_engine::delivery::apps::of(app).is_some_and(|w| w.sign_in.is_some());
+    if fork_of.is_none() && prompt_file.is_none() && !signs_in {
         return;
     }
     let Some(world) = w.arc() else { return };
-    let (runner, key, parent) = (runner.clone(), key.to_string(), fork_of.map(str::to_string));
+    let (runner, key, parent, app) = (runner.clone(), key.to_string(), fork_of.map(str::to_string), app.to_string());
     let logs = std::path::Path::new(&w.setup.state_dir).join("runs");
     std::thread::spawn(move || {
         let mut named = parent.is_none();
@@ -368,9 +374,9 @@ pub fn after_resume(w: &Runtime, runner: &Arc<Runner>, app: &str, key: &str, pid
             let Some(rec) = runner.list().into_iter().rev().find(|r| r.key == key && r.pid == Some(f64::from(pid))) else { break };
             let log = tail.get_or_insert_with(|| Tail::new(logs.join(format!("{}.log", rec.id))));
             let new = if rec.end.is_some() { log.rest() } else { log.lines() };
-            out = out || (claude && starts::signed_out(&new));
+            out = out || starts::signed_out(&app, &new);
             if !named {
-                if let (Some(child), Some(parent)) = (starts::session_of("claude", &new), parent.as_deref()) {
+                if let (Some(child), Some(parent)) = (starts::session_of(&app, &new), parent.as_deref()) {
                     named = true;
                     {
                         let mut f = world.starts.forks.locked();
@@ -469,7 +475,7 @@ fn watch(
         let Some(rec) = runner.list().into_iter().rev().find(|r| mine(r)) else { break None };
         let log = tail.get_or_insert_with(|| Tail::new(logs.join(format!("{}.log", rec.id))));
         let new = if rec.end.is_some() { log.rest() } else { log.lines() };
-        out = out || starts::signed_out(&new);
+        out = out || starts::signed_out(app, &new);
         said = said || starts::reported(app, &new);
         if let Some(line) = new.lines().map(str::trim).rfind(|l| !l.is_empty() && serde_json::from_str::<Value>(l).is_err()) {
             plain = line.chars().take(400).collect();
@@ -484,7 +490,7 @@ fn watch(
             turns += 1;
             open = rec.end.is_none();
             let minutes = (rec.ms.unwrap_or_else(|| now_ms() - rec.at) / 60e3).round();
-            answer(w, "ended", end_body(w, app, session.as_ref(), Some(&f), "", said, app == "claude" && out, minutes, open));
+            answer(w, "ended", end_body(w, app, session.as_ref(), Some(&f), "", said, out, minutes, open));
             said = false;
         }
         if rec.end.is_some() {
@@ -504,7 +510,7 @@ fn watch(
         }
         return;
     }
-    let mut body = end_body(w, app, session.as_ref(), None, &plain, said, app == "claude" && out, minutes, false);
+    let mut body = end_body(w, app, session.as_ref(), None, &plain, said, out, minutes, false);
     body["exit"] = json!(rec.exit);
     if rec.timed_out {
         body["outcome"] = json!("failed");
@@ -705,7 +711,10 @@ pub fn answer_in(w: &Runtime, from: &str, mid: &str, b: &Value) -> bool {
 /// Claude Code on `host` needs a sign-in for XenoNet's runs: a Needs-you
 /// hint in the console.
 pub fn sign_in_hint(w: &Runtime, host: &str) {
-    w.emit(From::Engine, "sign-in", json!({ "host": host, "app": "claude", "words": format!("Claude Code on {host} needs a sign-in for XenoNet's runs"), "fix": starts::sign_in_words(host), "at": ms(now_ms()) }));
+    // The app whose runs sign in with the token you gave them.
+    let Some(app) = xenonet_engine::delivery::apps::apps().into_iter().find(|(_, w)| w.sign_in.is_some()).map(|(a, _)| a) else { return };
+    let words = format!("{} on {host} needs a sign-in for XenoNet's runs", app.name);
+    w.emit(From::Engine, "sign-in", json!({ "host": host, "app": app.id, "words": words, "fix": starts::sign_in_words(host), "at": ms(now_ms()) }));
 }
 
 #[cfg(test)]

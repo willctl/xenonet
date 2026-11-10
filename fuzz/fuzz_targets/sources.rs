@@ -9,11 +9,14 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
-use xenonet_text::json;
-use xenonet_sources::codex::{self, RolloutEntries, Stderr, Stdout};
+use xenonet_claude_code::reader::{desktop, listing, transcript};
+use xenonet_codex::reader::app_server::{self, Stderr, Stdout};
+use xenonet_codex::reader::rollouts::{self, RolloutEntries};
+use xenonet_codex::reader::{state_db, threads};
 use xenonet_sources::refusals::query;
 use xenonet_sources::reported_runs::{self, ReportedRuns};
-use xenonet_sources::{claude, claude_usage, git, live, openrouter_usage, xenolith};
+use xenonet_sources::{claude_usage, git, live, openrouter_usage, xenolith};
+use xenonet_text::json;
 
 const NOW: f64 = 1_791_230_000_000.0;
 
@@ -41,16 +44,16 @@ fuzz_target!(|data: &[u8]| {
             let mut err = Stderr::default();
             err.push(b);
             let _ = err.exited(vb.as_ref());
-            let _ = codex::says_unsupported(va.as_ref());
+            let _ = app_server::says_unsupported(va.as_ref());
         }
         1 => {
-            let _ = codex::sub_agent_of(va.as_ref());
-            let _ = codex::thread_to_session(va.as_ref(), pick & 16 != 0);
-            let _ = codex::normalize_item(va.as_ref());
-            let _ = codex::normalize_items(va.as_ref());
-            let _ = codex::native_projects(va.as_ref());
-            let _ = codex::rollout_page(usize::from(pick), vb.as_ref(), 20.0);
-            let _ = codex::other_state_dbs(&b.split('/').map(str::to_string).collect::<Vec<_>>());
+            let _ = threads::sub_agent_of(va.as_ref());
+            let _ = threads::thread_to_session(va.as_ref(), pick & 16 != 0);
+            let _ = threads::normalize_item(va.as_ref());
+            let _ = threads::normalize_items(va.as_ref());
+            let _ = state_db::native_projects(va.as_ref());
+            let _ = rollouts::rollout_page(usize::from(pick), vb.as_ref(), 20.0);
+            let _ = state_db::other_state_dbs(&b.split('/').map(str::to_string).collect::<Vec<_>>());
         }
         2 => {
             let mut entries = RolloutEntries::default();
@@ -62,15 +65,15 @@ fuzz_target!(|data: &[u8]| {
         3 => {
             let listed = values(a);
             let desktop = values(b);
-            let _ = claude::sessions(&listed, &desktop);
-            let _ = claude::entries(&listed);
+            let _ = listing::sessions(&listed, &desktop);
+            let _ = transcript::entries(&listed);
             let records =
                 desktop.iter().enumerate().map(|(i, v)| (format!("/home/nova/claude-desktop/local_{i}.json"), vec!["acct".to_string(), "org".to_string()], v.clone())).collect();
-            let _ = claude::desktop_index(records);
+            let _ = desktop::desktop_index(records);
             if let Some(v) = va.clone() {
-                let _ = claude::renamed_record(v, vb.as_ref(), vb.as_ref(), Some(&json!("Fix it")));
+                let _ = desktop::renamed_record(v, vb.as_ref(), vb.as_ref(), Some(&json!("Fix it")));
             }
-            let _ = claude::page(listed.len(), vb.as_ref(), 10.0);
+            let _ = transcript::page(listed.len(), vb.as_ref(), 10.0);
         }
         4 => {
             let _ = git::parse_status(a);
@@ -96,7 +99,12 @@ fuzz_target!(|data: &[u8]| {
             let _ = (live::string_of(input), live::mcp_server_of(b), live::categorize(b), live::clip(a, 40), live::clip_value(input, 40));
             let _ = (live::tail(a, 40), live::day_key(NOW), live::file_key(a), live::looks_like_question(a));
             let _ = (live::tool_detail(input, Some("/home/nova")), live::command_text(input), live::files_of(input), live::patch_files(input));
-            let _ = (live::diff_lines("+", input, 20), live::claude_edits(b, input), live::codex_edits(input), live::tool_key(b, input));
+            let _ = (
+                live::diff_lines("+", input, 20),
+                live::claude_edits(b, input, if pick & 32 != 0 { "grok" } else { "claude" }),
+                live::codex_edits(input),
+                live::tool_key(b, input),
+            );
             let _ = (live::mcp_tool_of(b), live::wiki_pages_of(Some(b), Some(a), Some(b), input));
         }
         7 => {

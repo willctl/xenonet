@@ -303,11 +303,8 @@ fn last_text(list: Option<&Value>) -> Option<&Value> {
 
 /// A brief for carrying a session's work on in another one.
 pub fn handoff_brief(node: &Value, notes: &Value, target: Option<&str>) -> String {
-    let from = match get(node, "app").and_then(Value::as_str) {
-        Some("codex") => "a Codex session",
-        Some("grok") => "a Grok Build session",
-        _ => "a Claude Code session",
-    };
+    // An app XenoNet doesn't tail is named as the one it's read as.
+    let from = format!("a {} session", crate::apps::read_as_name(get(node, "app").and_then(Value::as_str)));
     let goal = get(notes, "firstPrompt").and_then(|p| get(p, "text"));
     let latest = last_text(get(notes, "prompts"));
     let last = last_text(get(notes, "messages"));
@@ -331,7 +328,11 @@ pub fn handoff_brief(node: &Value, notes: &Value, target: Option<&str>) -> Strin
         parts.extend([String::new(), format!("Most recent request: {}", clip_text(latest, 600))]);
     }
     if truthy(last) {
-        parts.extend([String::new(), "Where it left off:".into(), clip_text(last, if target == Some("codex") { 900 } else { 1500 })]);
+        parts.extend([
+            String::new(),
+            "Where it left off:".into(),
+            clip_text(last, target.and_then(xenonet_adapter::apps::app).map_or_else(|| xenonet_adapter::apps::Handoff::default().clip, |a| a.handoff.clip)),
+        ]);
     }
     if !files.is_empty() {
         parts.extend([String::new(), "Files it worked on:".into()]);

@@ -28,6 +28,13 @@ xenonet-actors = { path = "../crates/xenonet-actors" }
 xenonet-console = { path = "../crates/xenonet-console" }
 xenonet-assistant = { path = "../crates/xenonet-assistant" }
 xenonet-adapter = { path = "../crates/xenonet-adapter" }
+xenonet-claude-code = { path = "../adapters/claude-code" }
+xenonet-codex = { path = "../adapters/codex" }
+xenonet-copilot = { path = "../adapters/copilot" }
+xenonet-cursor = { path = "../adapters/cursor" }
+xenonet-gemini-cli = { path = "../adapters/gemini-cli" }
+xenonet-opencode = { path = "../adapters/opencode" }
+xenonet-platforms = { path = "../adapters/all" }
 xenonet-os = { path = "../crates/xenonet-os" }
 xenonet-text = { path = "../crates/xenonet-text" }
 xenonet-blocks = { path = "../crates/xenonet-blocks" }

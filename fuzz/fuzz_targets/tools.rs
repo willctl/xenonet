@@ -8,8 +8,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::json;
-use xenonet_engine::delivery::{opencode, selector, tmux};
-use xenonet_engine::sql::Arg;
+use xenonet_engine::delivery::selector::Selector;
+use xenonet_engine::delivery::{opencode, tmux};
 use xenonet_engine::{engine, procs};
 use xenonet_state::{classify, identities};
 
@@ -27,7 +27,7 @@ fuzz_target!(|data: &[u8]| {
         }
         1 => {
             let _ = (procs::parse_texts(&text), procs::parse_cwd(&text), procs::parse_cwds(&text), procs::parse_commands(&text), procs::parse_ps(&text));
-            let _ = procs::parse_netstat(&text, "47840", "51234");
+            let _ = (procs::parse_netstat(&text, "47840", "51234"), procs::parse_netstat_windows(&text, "47840", "51234"));
             let _ = engine::parse_repo(&text);
         }
         2 => {
@@ -35,11 +35,18 @@ fuzz_target!(|data: &[u8]| {
             let _ = opencode::parse_ps(&text);
         }
         3 => {
-            let outline = [json!({ "path": "labs/snippets", "xenonet": "folder", "markers": [] }), json!({ "path": "atlas-api", "xenonet": "repo", "markers": [] }), json!({ "path": "labs", "xenonet": "group" })];
+            let outline = [
+                json!({ "path": "labs/snippets", "xenonet": "folder", "markers": [] }),
+                json!({ "path": "atlas-api", "xenonet": "repo", "markers": [] }),
+                json!({ "path": "labs", "xenonet": "group" }),
+            ];
             let _ = classify::parse_picks(&text, &outline);
         }
         4 => {
-            let _ = selector::parse_selector(&Arg::text(text.clone()));
+            if let Some(sel) = Selector::parse(&text) {
+                let _ = Selector::format(Some(&sel));
+            }
+            let _ = Selector::is_selector(&text);
         }
         _ => {
             for line in text.lines() {

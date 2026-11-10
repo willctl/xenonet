@@ -4,16 +4,19 @@
 use serde_json::{json, Map, Value};
 use xenonet_text::json::number;
 
+// The made-up rows (provider, the app it ran in, kind, model, category,
+// explanation), kept as data.
+fn rows() -> &'static [Map<String, Value>] {
+    static R: std::sync::OnceLock<Vec<Map<String, Value>>> = std::sync::OnceLock::new();
+    R.get_or_init(|| serde_json::from_str(include_str!("demo.json")).unwrap_or_default())
+}
+
 pub fn demo_refusals(now: f64) -> Vec<Value> {
-    let rows = [
-        ("anthropic", "refusal", "claude-sonnet", "safety", "The provider declined this request."),
-        ("anthropic", "refusal-recovered", "claude-opus", "policy", "The request was answered by a fallback model."),
-        ("openai", "reroute", "gpt-example", "safety", "The provider routed this request to another model."),
-        ("openai", "possible-refusal", "gpt-example", "invalid_prompt", "The provider returned invalid_prompt; a refusal is not confirmed."),
-    ];
+    let text = |r: &'static Map<String, Value>, k: &str| r.get(k).and_then(Value::as_str).unwrap_or_default();
+    let rows: Vec<_> = rows().iter().map(|r| (text(r, "provider"), text(r, "app"), text(r, "kind"), text(r, "model"), text(r, "category"), text(r, "explanation"))).collect();
     rows.iter()
         .enumerate()
-        .map(|(i, &(provider, kind, model, category, explanation))| {
+        .map(|(i, &(provider, app, kind, model, category, explanation))| {
             let mut signal = Map::new();
             for (k, v) in [("kind", kind), ("model", model), ("category", category), ("explanation", explanation)] {
                 signal.insert(k.into(), Value::String(v.into()));
@@ -27,7 +30,7 @@ pub fn demo_refusals(now: f64) -> Vec<Value> {
                 "at": number(now - i as f64 * 3600e3),
                 "recordedAt": number(now),
                 "provider": provider,
-                "app": if provider == "openai" { "codex" } else { "claude-code" },
+                "app": app,
                 "kind": kind,
                 "session": { "id": format!("demo-session-{}", i + 1), "cwd": "~/Projects/demo", "model": model },
                 "signal": signal,

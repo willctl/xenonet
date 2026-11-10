@@ -35,6 +35,60 @@ pub struct App {
     /// What XenoNet can do with it at most: lines, sessions, native,
     /// connect, delivery, processes, caller, open.
     pub has: Vec<String>,
+    /// The map's stats count its sessions, under its id.
+    pub counted: bool,
+    /// The arguments that run one turn with the prompt after them, for an
+    /// agent an OpenShell sandbox runs.
+    pub headless: Option<Vec<String>>,
+    /// As a candidate for a routing suggestion: its place among the
+    /// candidates and what it's good for.
+    pub routing: Option<Routing>,
+    /// Its own server lists the MCP servers it runs and their catalogs.
+    pub mcp_status: bool,
+    /// What no actor may pass for.
+    pub reserved: Option<Reserved>,
+    /// Its sessions report what they spent, which the spend view shows
+    /// under its name.
+    pub reports_spend: bool,
+    /// XenoNet runs turns of its own with it (the narration, the sort of
+    /// the projects folder), whose picks name it as theirs.
+    pub sorts: bool,
+    /// How a handoff carries a session of it or to it, where it isn't as
+    /// for any other app.
+    pub handoff: Handoff,
+}
+
+/// How a handoff carries a session: the entries of its transcript read
+/// for one of the app's sessions, and the characters of where the work
+/// left off that a brief for the app keeps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Handoff {
+    pub entries: f64,
+    pub clip: usize,
+}
+
+impl Default for Handoff {
+    fn default() -> Self {
+        Handoff { entries: 80.0, clip: 1500 }
+    }
+}
+
+/// What no actor may pass for of an app: the names it goes by and its
+/// makers, which no actor's name or product reads as, and the actor slugs
+/// kept for it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reserved {
+    pub names: Vec<String>,
+    pub makers: Vec<String>,
+    pub slugs: Vec<String>,
+}
+
+/// An app as a candidate for a routing suggestion: where it goes among
+/// the candidates (from 1), and what it's good for, as the decider reads.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Routing {
+    pub order: u32,
+    pub description: String,
 }
 
 /// The variable that moves an app's folder, and the folder otherwise (~
@@ -87,6 +141,12 @@ fn connect(v: &Map<String, Value>) -> Connect {
     Connect { format: text(v.get("format")).unwrap_or_default(), events, unheard: texts(v.get("unheard")) }
 }
 
+fn handoff(v: Option<&Value>) -> Handoff {
+    let d = Handoff::default();
+    let n = |k: &str| v.and_then(|h| h.get(k)).and_then(Value::as_f64);
+    Handoff { entries: n("entries").unwrap_or(d.entries), clip: n("clip").map_or(d.clip, |c| c as usize) }
+}
+
 fn entry(v: &Value) -> Option<App> {
     let o = v.as_object()?;
     Some(App {
@@ -102,6 +162,17 @@ fn entry(v: &Value) -> Option<App> {
         connect: o.get("connect").and_then(Value::as_object).map(connect),
         edit_tools: texts(o.get("editTools")),
         has: texts(o.get("has")),
+        counted: o.get("counted").and_then(Value::as_bool).unwrap_or(false),
+        headless: o.get("headless").and_then(Value::as_array).map(|_| texts(o.get("headless"))),
+        routing: o.get("routing").and_then(Value::as_object).map(|r| Routing {
+            order: r.get("order").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+            description: text(r.get("description")).unwrap_or_default(),
+        }),
+        mcp_status: o.get("mcpStatus").and_then(Value::as_bool).unwrap_or(false),
+        reserved: o.get("reserved").and_then(Value::as_object).map(|r| Reserved { names: texts(r.get("names")), makers: texts(r.get("makers")), slugs: texts(r.get("slugs")) }),
+        reports_spend: o.get("reportsSpend").and_then(Value::as_bool).unwrap_or(false),
+        sorts: o.get("sorts").and_then(Value::as_bool).unwrap_or(false),
+        handoff: handoff(o.get("handoff")),
     })
 }
 
@@ -117,6 +188,20 @@ pub fn apps() -> &'static [App] {
 /// The app with this id.
 pub fn app(id: &str) -> Option<&'static App> {
     apps().iter().find(|a| a.id == id)
+}
+
+/// The app XenoNet runs turns of its own with (the registry's `sorts`).
+pub fn sorter() -> Option<&'static App> {
+    apps().iter().find(|a| a.sorts)
+}
+
+/// The kinds of account the apps run under (the registry's `identity`),
+/// each once, in order, each with the first app that runs under it.
+pub fn identities() -> impl Iterator<Item = (&'static str, &'static App)> {
+    apps().iter().enumerate().filter_map(|(i, a)| {
+        let kind = a.identity.as_deref()?;
+        (!apps()[..i].iter().any(|b| b.identity.as_deref() == Some(kind))).then_some((kind, a))
+    })
 }
 
 /// The apps that have a capability, in order.
@@ -325,6 +410,14 @@ mod tests {
         assert_eq!(edit_tools("grok"), ["search_replace", "write", "edit", "hashline_edit", "apply_patch"]);
         let observed = app("amp").unwrap();
         assert_eq!((observed.numbat.as_slice(), observed.has.is_empty()), (["amp".to_string()].as_slice(), true));
+        let counted: Vec<&str> = apps().iter().filter(|a| a.counted).map(|a| a.id.as_str()).collect();
+        assert_eq!(counted, ["claude", "codex"]);
+        assert_eq!((app("pi").unwrap().headless.as_deref(), app("grok").unwrap().headless.as_deref()), (Some(&["--print".to_string()][..]), None));
+        assert_eq!(app("codex").unwrap().routing.as_ref().map(|r| r.order), Some(1));
+        assert!(app("codex").unwrap().mcp_status && !claude.mcp_status);
+        assert_eq!(claude.reserved.as_ref().map(|r| (r.names.len(), r.makers.as_slice(), r.slugs.len())), Some((2, &["Anthropic".to_string()][..], 2)));
+        let spends: Vec<&str> = apps().iter().filter(|a| a.reports_spend).map(|a| a.id.as_str()).collect();
+        assert_eq!(spends, ["opencode"]);
     }
 
     #[test]

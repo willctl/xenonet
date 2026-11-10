@@ -1,19 +1,20 @@
 #![no_main]
 
-// The text, OS, model and adapter helpers over text another program wrote: JS's string
-// functions, apply_patch texts, times, paths (XenoNet's and Node's, for both
-// platforms), ids and git remotes, model names and prices, the log's
-// scrubbing, and the numbers the page shows. The first byte picks a group;
-// NULs split the rest into arguments.
+// The text, OS, model and adapter helpers over text another program
+// wrote: JS's string functions, apply_patch texts, times, paths (XenoNet's
+// and Node's, for both platforms, and the adapters' scratch zones), ids
+// and git remotes, model names and prices, the log's scrubbing, and the
+// numbers the page shows. The first byte picks a group; NULs split the
+// rest into arguments.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
-use xenonet_os::nodepath::Style;
+use xenonet_adapter::{apps, formats::patch, platform};
 use xenonet_model::usage::{Speed, TokenUsage};
-use xenonet_adapter::formats::patch;
 use xenonet_model::{ids, usage::pricing};
+use xenonet_os::nodepath::Style;
 use xenonet_os::{log, paths};
-use xenonet_text::{utf16, text, time, units};
+use xenonet_text::{text, time, units, utf16};
 
 fn num(s: &str) -> f64 {
     text::to_number(Some(&Value::String(s.to_string())))
@@ -26,6 +27,7 @@ fn small(s: &str) -> usize {
 }
 
 fuzz_target!(|data: &[u8]| {
+    xenonet_fuzz::adapters();
     let Some((&pick, rest)) = data.split_first() else { return };
     let input = xenonet_fuzz::text(rest);
     let mut args = input.split('\0');
@@ -63,9 +65,11 @@ fuzz_target!(|data: &[u8]| {
         }
         2 => {
             let _ = (paths::path_key(a), paths::is_under(a, b), paths::tilde(a, b), paths::base_name(a), paths::path_style(a));
-            let _ = (paths::join_all(&[a, b, c]), paths::join(a, b), paths::normalize_posix(a), paths::scratch_zone(a));
-            if let Some(key) = paths::path_key(a) {
-                let _ = paths::in_scratch_zone(small(b), &key);
+            let _ = (paths::join_all(&[a, b, c]), paths::join(a, b), paths::normalize_posix(a));
+            // The throwaway folders' zones: each adapter's, then the temp
+            // folders'.
+            for key in [Some(a.to_string()), paths::path_key(a)].into_iter().flatten() {
+                let _ = (platform::scratch_zone(&key), paths::temp_zone(&key));
             }
             let _ = paths::on_path(a, b, Some(c), pick & 8 != 0, &mut |f| f.len() % 3 == 0);
         }
@@ -79,7 +83,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = (ids::normalize_remote(a), ids::RepoId::of_remote(a), ids::remote_parts(a), ids::RepoId::parse(a));
             let _ = (ids::is_schema_path(a), ids::SchemaId::parse(a).map(|s| (s.short(), s.uri())));
             let _ = (ids::is_host_id(a), ids::parse_qualified(a), ids::qualify(a, Some(b), Some(c)), ids::qualify(a, None, None));
-            let _ = (ids::is_session_id(a), ids::app_of_session(a), ids::is_actor_slug(a), ids::parse_actor_id(a));
+            let _ = (apps::is_session_id(a), apps::app_of_session(a), ids::is_actor_slug(a), ids::parse_actor_id(a));
         }
         5 => {
             let at = Some(1_791_230_000_000.0);

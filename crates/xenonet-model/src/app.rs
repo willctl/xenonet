@@ -81,6 +81,41 @@ pub struct Connect {
     pub unheard: Opt<Vec<String>>,
 }
 
+// An app as a candidate for a routing suggestion.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
+pub struct Routing {
+    /// Where it goes among the candidates, from 1
+    #[schemars(range(min = 1))]
+    pub order: Uint,
+    /// What it's good for, as the decider reads it
+    pub description: String,
+}
+
+// What no actor may pass for of an app.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
+pub struct Reserved {
+    /// The names it goes by, which no actor's name or product reads as
+    pub names: Vec<String>,
+    /// Its makers, which no actor's product reads as
+    pub makers: Vec<String>,
+    /// The actor slugs kept for it
+    pub slugs: Vec<String>,
+}
+
+// How a handoff carries a session of an app or to it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
+pub struct Handoff {
+    /// The entries of one of its sessions' transcripts a handoff reads
+    #[schemars(range(min = 1))]
+    pub entries: Uint,
+    /// The characters of where the work left off that a brief for it keeps
+    #[schemars(range(min = 1))]
+    pub clip: Uint,
+}
+
 // What XenoNet can do with an app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -133,6 +168,30 @@ pub struct App {
     /// What XenoNet can do with it at most; what it can do with a session is the session's own
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub has: Opt<Vec<Capability>>,
+    /// The map's stats count its sessions, under its id
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub counted: Opt<bool>,
+    /// The arguments that run one turn with the prompt after them, for an agent an OpenShell sandbox runs
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub headless: Opt<Vec<String>>,
+    /// As a candidate for a routing suggestion: its place among the candidates and what it's good for
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub routing: Opt<Routing>,
+    /// Its own server lists the MCP servers it runs and their catalogs, which XenoNet asks when one of its sessions uses a server
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub mcp_status: Opt<bool>,
+    /// What no actor may pass for: the names it goes by and its makers, and the actor slugs kept for it
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub reserved: Opt<Reserved>,
+    /// Its sessions report what they spent, which the spend view shows under its name
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub reports_spend: Opt<bool>,
+    /// XenoNet runs turns of its own with it: the narration, and the sort of the projects folder into projects, whose picks name it as theirs
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub sorts: Opt<bool>,
+    /// How a handoff carries a session of it or to it, where that isn't 80 transcript entries read and 1500 characters kept of where the work left off
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub handoff: Opt<Handoff>,
 }
 
 impl Document for App {

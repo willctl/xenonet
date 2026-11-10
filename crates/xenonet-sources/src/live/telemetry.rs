@@ -19,7 +19,7 @@
 use super::js::{ev, field, index0, is_str, js_max, js_round, key_tag, nn, num_of, nv, obj, obj_opt, or0, put, sort_by_num, str_tag, strict_eq, sv, tpl};
 use super::names::ServerNames;
 use super::{categorize, clip, clip_value, day_key, file_key, looks_like_question, mcp_server_of, median, slope, string_of, tail, tool_key};
-use crate::line_events::{self, Kind, LineEvent};
+use crate::line_events::{Kind, LineEvent};
 use crate::lines::{opt_prop, prop};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
@@ -175,7 +175,8 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(id: &str, app: &str) -> Self {
+    /// `window`: the app's context window until a line says otherwise.
+    pub fn new(id: &str, app: &str, window: f64) -> Self {
         Session {
             id: id.into(),
             app: app.into(),
@@ -186,9 +187,7 @@ impl Session {
             provider: Value::Null,
             priority: false,
             context_used: number(0.0),
-            // The app's context window until a line says otherwise; any app
-            // but Codex has Claude Code's.
-            context_window: number(apps::app(apps::tailed_app(app, "claude")).and_then(|a| a.context).unwrap_or_default()),
+            context_window: number(window),
             turn_contexts: Vec::new(),
             model: Value::Null,
             turn_active: false,
@@ -652,11 +651,21 @@ pub struct Telemetry {
     // The tailed apps' readers, from the adapters in place, in the
     // registry's order; one is out of its place while it reads a line.
     apps: Vec<Option<Box<dyn Tailed>>>,
+    // The app whose reader reads an app no reader is for.
+    untailed: Option<&'static str>,
+}
+
+// Whether `app`'s lines say when its turns end: an app without a reader's
+// are read as if they did.
+fn lines_end_turns(apps: &[Option<Box<dyn Tailed>>], app: &str) -> bool {
+    apps.iter().flatten().find(|a| a.id() == app).is_none_or(|a| a.lines_end_turns())
 }
 
 impl Telemetry {
     /// `roots`: [(dir, app)], the folders it reads, as real paths.
     pub fn new(home: Option<String>, roots: Vec<(String, String)>) -> Self {
+        let apps: Vec<Option<Box<dyn Tailed>>> = xenonet_adapter::platforms().tailed().into_iter().map(Some).collect();
+        let untailed = apps.iter().flatten().find(|a| a.reads_untailed()).map(|a| a.id());
         Telemetry {
             home,
             context_server: None,
@@ -666,16 +675,22 @@ impl Telemetry {
             history: Vec::new(),
             pending_label: None,
             server_names: ServerNames::new(),
-            apps: xenonet_adapter::platforms().tailed().into_iter().map(Some).collect(),
+            apps,
+            untailed,
         }
     }
 
     // ----- the apps -----
 
-    // The reader of `app`'s transcripts: any app that isn't tailed is read
-    // as Claude Code.
+    // The tailed app `app` is read as: itself when it's tailed, else the
+    // one whose reader reads the others (Claude Code).
+    fn read_as(&self, app: &str) -> &'static str {
+        apps::tailed_or_text(Some(app), None).or(self.untailed).unwrap_or_default()
+    }
+
+    // The reader of `app`'s transcripts.
     fn app_index(&self, app: &str) -> Option<usize> {
-        let id = apps::tailed_app(app, "claude");
+        let id = self.read_as(app);
         self.apps.iter().position(|a| a.as_ref().is_some_and(|a| a.id() == id))
     }
 
@@ -717,7 +732,8 @@ impl Telemetry {
         if let Some(&i) = self.index.get(id) {
             return i;
         }
-        self.sessions.push(Session::new(id, app));
+        let window = apps::app(self.read_as(app)).and_then(|a| a.context).unwrap_or_default();
+        self.sessions.push(Session::new(id, app, window));
         self.index.insert(id.into(), self.sessions.len() - 1);
         self.sessions.len() - 1
     }
@@ -929,7 +945,7 @@ impl Telemetry {
     /// Claude Code's Notification hooks carry permission prompts the
     /// transcript doesn't.
     pub fn note_hook(&mut self, id: &str, body: Option<&Value>, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {
-        let i = self.session(id, apps::tailed_app(id.split(':').next().unwrap_or_default(), "claude"));
+        let i = self.session(id, self.read_as(id.split(':').next().unwrap_or_default()));
         let name = prop(body, "hook_event_name")?.cloned();
         let s = &mut self.sessions[i];
         if is_str(name.as_ref(), "Notification") {
@@ -952,7 +968,7 @@ impl Telemetry {
         // it in its hooks: Stop, and StopCancelled (you stopped it) and
         // StopFailure, where Stop doesn't run. A subagent's end isn't the
         // turn's.
-        if !line_events::lines_end_turns(&self.sessions[i].app) && !truthy(opt_prop(body, "subagentType")) {
+        if !lines_end_turns(&self.apps, &self.sessions[i].app) && !truthy(opt_prop(body, "subagentType")) {
             self.sessions[i].hook_at = now;
             let event = name.as_ref().and_then(Value::as_str).unwrap_or_default();
             if ["Stop", "StopCancelled", "StopFailure"].contains(&event) && self.sessions[i].turn_active {
@@ -975,7 +991,7 @@ impl Telemetry {
     /// each ended when its last line was written.
     pub fn settle(&mut self, now: f64) {
         for s in &mut self.sessions {
-            if line_events::lines_end_turns(&s.app) || !s.turn_active || !s.inflight.is_empty() || now - s.hook_at < HOOKS_HEARD_MS || now - s.last_event_at < QUIET_TURN_MS {
+            if lines_end_turns(&self.apps, &s.app) || !s.turn_active || !s.inflight.is_empty() || now - s.hook_at < HOOKS_HEARD_MS || now - s.last_event_at < QUIET_TURN_MS {
                 continue;
             }
             let at = s.last_event_at;

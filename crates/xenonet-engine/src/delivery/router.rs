@@ -451,16 +451,18 @@ impl Router {
                     tried.push("channel closed".into());
                 }
                 // 2. OpenCode's own server, with your consent for that session.
-                if ways.is_some_and(|w| w.server) {
+                // The way is called by the app's id.
+                let served = super::apps::apps().into_iter().find(|(a, w)| w.server && a.id == app).map(|(a, _)| a.id.as_str());
+                if let Some(served) = served {
                     if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
-                        tried.push(format!("opencode: {why}"));
+                        tried.push(format!("{served}: {why}"));
                     } else {
                         match h.opencode_deliver(&agent, &text) {
                             Ok(location) => {
                                 let t = h.now();
-                                return success(self, h, "opencode", Some(t), Some(location));
+                                return success(self, h, served, Some(t), Some(location));
                             }
-                            Err(why) => tried.push(format!("opencode: {why}")),
+                            Err(why) => tried.push(format!("{served}: {why}")),
                         }
                     }
                 }

@@ -50,87 +50,39 @@ pub trait Resolve {
     fn resolve(&mut self, kind: &str, what: &str) -> Value;
 }
 
+// The demo's actors and their scripts are data (demo.json), where a node
+// of the demo's world is `{ "$": [kind, what] }`, which `Resolve` says.
+// Kestrel, a cloud agent, sends no heartbeat, so it never turns away; at
+// its script's end its app closed, and nothing here can say whether it
+// stopped.
+fn demo_data(part: &str, r: &mut dyn Resolve) -> Value {
+    static DATA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let data = DATA.get_or_init(|| serde_json::from_str(include_str!("demo.json")).expect("the demo's actors are JSON"));
+    resolved(&data[part], r)
+}
+
+// A value with each node of the demo's world in it resolved.
+fn resolved(v: &Value, r: &mut dyn Resolve) -> Value {
+    match v {
+        Value::Object(o) => match o.get("$").and_then(Value::as_array).map(Vec::as_slice) {
+            Some([Value::String(kind), Value::String(what)]) if o.len() == 1 => r.resolve(kind, what),
+            _ => Value::Object(o.iter().map(|(k, x)| (k.clone(), resolved(x, r))).collect()),
+        },
+        Value::Array(a) => Value::Array(a.iter().map(|x| resolved(x, r)).collect()),
+        other => other.clone(),
+    }
+}
+
 /// The demo's actors, as upsert takes them.
 pub fn demo_actors(r: &mut dyn Resolve) -> Value {
-    json!([
-        {
-            "id": WREN,
-            "name": "Wren",
-            "product": { "id": "hermes-agent", "vendor": "Nous Research", "version": "0.21.5" },
-            "via": ["demo", "observed", "attributed"],
-            "heartbeatMs": 60000,
-            "capabilities": ["spawn-sessions", "edit-repos", "run-commands", "message-people", "schedule"],
-            "identity": r.resolve("identity", "ledger"),
-        },
-        {
-            "id": KESTREL,
-            "name": "Kestrel",
-            "product": { "id": "grok-bot", "vendor": "SpaceXAI", "version": null },
-            "via": ["demo", "observed"],
-            // A cloud agent sends no heartbeat, so it never turns away.
-            "heartbeatMs": null,
-            "capabilities": ["run-commands", "browse", "message-people"],
-        },
-        {
-            "id": MOTH,
-            "name": "Moth",
-            "via": ["demo", "registered"],
-            "heartbeatMs": 30000,
-            "capabilities": ["message-agents", "message-people"],
-        },
-    ])
+    demo_data("actors", r)
 }
 
 /// Each actor's script, looped. An agent's step is what its source would
 /// say: `presence` and `status`, `targets` it acts on, or an `event` as
 /// facts. Yours is what the window reports.
 pub fn demo_scripts(r: &mut dyn Resolve) -> Value {
-    let mut p = |rel: &str| r.resolve("project", rel);
-    let (atlas, ledger, pathfinder, geofence) = (p("atlas-api"), p("ledger"), p("pathfinder"), p("labs/geofence"));
-    let refunds = r.resolve("session", "Add partial refunds to the orders API");
-    let close = r.resolve("session", "Draft the Q4 close checklist");
-    let zones = r.resolve("session", "Draw delivery zones from postcodes");
-    let review = r.resolve("session", "Review the partial refunds change");
-    let file = r.resolve("file", "atlas-api/src/orders/refunds.ts");
-    json!({
-        WREN: [
-            { "presence": "working" },
-            { "status": "Triaging issues in atlas-api", "targets": [[atlas, "works-on"]] },
-            { "event": { "kind": "spawned", "target": refunds, "via": "attributed" } },
-            { "event": { "kind": "edited", "target": atlas, "paths": [file], "via": "attributed" } },
-            { "event": { "kind": "ran", "target": atlas, "count": 3, "via": "attributed" } },
-            { "event": { "kind": "finished", "target": atlas, "subject": "session" } },
-            { "status": "Closing the month in ledger", "targets": [[ledger, "works-on"]] },
-            { "event": { "kind": "spawned", "target": close, "via": "attributed" } },
-            { "event": { "kind": "messaged", "platform": "telegram" } },
-            { "presence": "idle", "status": "" },
-        ],
-        KESTREL: [
-            { "presence": "idle" },
-            { "presence": "working", "status": "Benchmarking the route solver", "targets": [[pathfinder, "works-on"]] },
-            { "event": { "kind": "ran", "target": pathfinder, "count": 1 } },
-            { "event": { "kind": "ran", "target": pathfinder, "count": 4 } },
-            { "event": { "kind": "failed", "target": pathfinder, "subject": "command" } },
-            { "event": { "kind": "ran", "target": pathfinder, "count": 2 } },
-            { "event": { "kind": "finished", "target": pathfinder, "subject": "task" } },
-            // Its app closed: nothing here can say whether it stopped.
-            { "presence": "unknown", "status": "" },
-        ],
-        MOTH: [
-            { "presence": "working" },
-            { "status": "Watching geofence", "targets": [[geofence, "watches"]] },
-            { "event": { "kind": "said", "target": zones, "count": 1 } },
-            { "event": { "kind": "messaged", "platform": "email" } },
-            { "presence": "idle" },
-        ],
-        YOU: [
-            { "console": { "presence": "working", "did": [{ "what": "looked", "node": atlas }] } },
-            { "console": { "did": [{ "what": "read", "node": review }] } },
-            { "console": { "did": [{ "what": "started", "node": atlas, "app": "claude" }] } },
-            { "console": { "did": [{ "what": "terminal", "node": ledger }] } },
-            { "console": { "presence": "idle" } },
-        ],
-    })
+    demo_data("scripts", r)
 }
 
 /// The demo's scripts at play.

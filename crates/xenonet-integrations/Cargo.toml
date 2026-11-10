@@ -13,6 +13,9 @@ publish.workspace = true
 async-trait.workspace = true
 url.workspace = true
 xenonet-os.workspace = true
+# The app registry: which apps a sandbox runs, which are routing
+# candidates, and which list their MCP servers' status.
+xenonet-adapter.workspace = true
 getrandom.workspace = true
 libc.workspace = true
 regex.workspace = true

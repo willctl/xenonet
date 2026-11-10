@@ -101,6 +101,9 @@ pub struct Choices<'a> {
 
 impl<'a> Choices<'a> {
     pub fn new(data: &'a [u8]) -> Choices<'a> {
+        // Each network target starts here: the adapters go in place first,
+        // as in the service.
+        crate::adapters();
         Choices { data, at: 0 }
     }
 
@@ -337,7 +340,7 @@ pub fn now() -> i64 {
 
 /// Short waits, so a stream or a join that waits ends within a run.
 pub fn timing() -> Timing {
-    Timing { ping_ms: 5, stream_ms: 20, idle_ms: 20, poll_ms: 20, backoff_min_ms: 1.0, backoff_max_ms: 5.0, handover_ms: 10 }
+    Timing { ping_ms: 5, stream_ms: 20, idle_ms: 20, poll_ms: 20, answer_ms: 40, backoff_min_ms: 1.0, backoff_max_ms: 5.0, handover_ms: 10 }
 }
 
 /// One host of the network on this machine, with its own folder: its
@@ -368,6 +371,10 @@ impl Machine {
             gateway: Pin { host: "studio".into(), key_id: gw.key_id(), sign: gw.sign_b64(), seal: gw.seal_b64(), address: Some("gw.example.net".into()) },
             lan: None,
             titles_only: false,
+            share_load: true,
+            start: "you".into(),
+            wake: "consent".into(),
+            delegated: None,
             joined: T0,
         };
         files.write_network(&net).expect("network.json");

@@ -57,7 +57,28 @@
    "processes",
    "caller",
    "open"
-  ]
+  ],
+  "counted": true,
+  "headless": [
+   "-p"
+  ],
+  "routing": {
+   "order": 2,
+   "description": "Coding and repository work in Claude Code."
+  },
+  "reserved": {
+   "names": [
+    "Claude",
+    "Claude Code"
+   ],
+   "makers": [
+    "Anthropic"
+   ],
+   "slugs": [
+    "claude",
+    "anthropic"
+   ]
+  }
  },
  {
   "id": "codex",
@@ -108,7 +129,35 @@
    "processes",
    "caller",
    "open"
-  ]
+  ],
+  "counted": true,
+  "headless": [
+   "exec"
+  ],
+  "routing": {
+   "order": 1,
+   "description": "Coding, repository inspection and tool-assisted research in Codex."
+  },
+  "reserved": {
+   "names": [
+    "Codex",
+    "ChatGPT"
+   ],
+   "makers": [
+    "OpenAI"
+   ],
+   "slugs": [
+    "codex",
+    "chatgpt",
+    "openai"
+   ]
+  },
+  "mcpStatus": true,
+  "sorts": true,
+  "handoff": {
+   "entries": 60,
+   "clip": 900
+  }
  },
  {
   "id": "grok",
@@ -257,7 +306,8 @@
    "native",
    "delivery",
    "processes"
-  ]
+  ],
+  "reportsSpend": true
  },
  {
   "id": "openclaw",
@@ -299,6 +349,9 @@
   "name": "Pi",
   "numbat": [
    "pi"
+  ],
+  "headless": [
+   "--print"
   ]
  },
  {

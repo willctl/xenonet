@@ -20,13 +20,13 @@ use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::LazyLock;
+use xenonet_adapter::reader::LineFormat;
 use xenonet_model::usage::pricing;
 use xenonet_model::usage::{Figure, Speed, TokenUsage};
 use xenonet_os::{fs as xfs, paths};
-use xenonet_sources::line_events::{self as le, command_of, usage_of, Broken, Command, End, Field, LineEvent, LineFile};
-use xenonet_sources::lines::{has_user_messages, opt_prop, prop, ClaudeLine, CodexLine, GrokLine, Js, TypeError};
+use xenonet_sources::line_events::{self as le, command_of, usage_of, Broken, Command, End, Field, Line, LineEvent, LineFile};
+use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_sources::live::{categorize, clip, mcp_server_of};
 use xenonet_sources::wiki::{to_str, to_str_or_empty, Out};
 use xenonet_text::text::{to_number, trim, truthy};
@@ -405,10 +405,6 @@ impl Event {
 #[derive(Default)]
 pub struct EventIds(Ids);
 
-fn is_str(v: Js<'_>, s: &str) -> bool {
-    v.and_then(Value::as_str) == Some(s)
-}
-
 // `v ?? fallback`.
 fn nn(v: Js<'_>) -> Js<'_> {
     v.filter(|x| !x.is_null())
@@ -458,11 +454,10 @@ struct Rollout {
 /// from a session's files (Claude Code's main file and its subagents', a
 /// Codex rollout, a Grok Build session's updates), as stats counts each
 /// line's events (line_events.rs). `app` picks the app's mapper: an app
-/// that isn't tailed reads as Claude Code, whose events are put in time
-/// order.
+/// that isn't tailed reads as the one whose reader reads the others
+/// (Claude Code), whose events are put in time order.
 pub fn session_events(app: &str, files: Vec<File>, ids: &mut EventIds) -> Result<Vec<Event>, TypeError> {
-    let app = xenonet_adapter::apps::tailed_app(app, "claude");
-    let codex = app == "codex";
+    let Some(format) = crate::apps::read_as(app).and_then(le::format_of) else { return Ok(Vec::new()) };
     let ids = &mut ids.0;
     let mut events = Vec::new();
     let mut seen: HashSet<Key> = HashSet::new();
@@ -476,29 +471,16 @@ pub fn session_events(app: &str, files: Vec<File>, ids: &mut EventIds) -> Result
     };
     for f in files {
         let agent = ids.val(f.agent.as_ref());
-        if codex {
-            let lines: Vec<CodexLine> = f.lines.into_iter().map(|raw| CodexLine { raw }).collect();
-            // A rollout's prompts are its completed user messages, or in one
-            // with none at all, its user_message events (see lines.rs).
-            let file = LineFile { items: has_user_messages(&lines)?, ..LineFile::new(f.agent) };
-            for o in &lines {
-                line_events(&le::codex(o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
-            }
-        } else if app == "grok" {
-            let file = LineFile::new(f.agent);
-            for raw in f.lines {
-                let o = GrokLine::new(raw);
-                line_events(&le::grok(&o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
-            }
-        } else {
-            let file = LineFile::new(f.agent);
-            for raw in f.lines {
-                let o = ClaudeLine { raw };
-                line_events(&le::claude(&o, &file), &agent, &mut seen, &mut said, ids, &mut events)?;
-            }
+        let lines: Vec<Line> = f.lines.into_iter().map(|raw| Line::in_format(format, raw)).collect();
+        // A rollout's prompts are its completed user messages, or in one
+        // with none at all, its user_message events (see lines.rs).
+        let file = LineFile { items: le::items_of(&lines)?, ..LineFile::new(f.agent) };
+        for o in &lines {
+            line_events(&o.events(&file), &agent, &mut seen, &mut said, ids, &mut events)?;
         }
     }
-    if app == "claude" {
+    // Claude Code's lines, its subagents' among them, are put in time order.
+    if format == LineFormat::Claude {
         xenonet_text::sort::sort_by(&mut events, |a, b| order(a.t - b.t));
     }
     Ok(events)
@@ -741,9 +723,10 @@ fn clipped(v: Js<'_>, n: usize) -> Result<String, TypeError> {
 }
 
 /// What a session's events add up to, as the stats panel shows it. `app`
-/// is the app's name ("claude" counts output tokens into the context).
+/// is the app's name (Claude Code's lines count output tokens into the
+/// context).
 pub fn summarize(events: &[Event], app: Js<'_>) -> Result<Out, TypeError> {
-    let claude = is_str(app, "claude");
+    let claude = app.and_then(Value::as_str).and_then(le::format_of) == Some(LineFormat::Claude);
     let (mut calls, mut unpriced_calls, mut cost) = (0.0, 0.0, 0.0);
     let mut kind_tokens = [Prim::Num(0.0), Prim::Num(0.0), Prim::Num(0.0), Prim::Num(0.0)];
     let mut total_tokens = Prim::Num(0.0);
@@ -1110,32 +1093,18 @@ fn uuid_in(text: &str) -> Option<String> {
     UUID.find(&text.to_ascii_lowercase()).map(|m| m.as_str().to_string())
 }
 
-// /^rollout-.*\.jsonl(\.zst)?$/.
-fn is_rollout(name: &str) -> bool {
-    let Some(rest) = name.strip_prefix("rollout-") else { return false };
-    let middle = rest.strip_suffix(".jsonl").or_else(|| rest.strip_suffix(".jsonl.zst"));
-    middle.is_some_and(|m| !m.contains(['\n', '\r', '\u{2028}', '\u{2029}']))
-}
-
-fn dir_names(dir: &str) -> Option<Vec<(String, bool)>> {
-    let ents = paths::read_dir_sorted(Path::new(dir)).ok()?;
-    Some(ents.into_iter().map(|e| (e.file_name().to_string_lossy().into_owned(), e.file_type().is_ok_and(|t| t.is_dir()))).collect())
-}
-
-/// Where sessions' transcripts are. Codex rollouts are found by their
-/// thread id, from a listing of the rollout folders made once and again
-/// when an id isn't in it (at most every 10 seconds).
+/// Where sessions' transcripts are: each app's finder (its adapter's
+/// `session_files`), made when first asked, which keeps what it lists.
 #[derive(Default)]
 pub struct Transcripts {
-    pub rollouts: Vec<(String, String)>,
-    pub listed_at: f64,
+    finders: Vec<(String, Option<Box<dyn xenonet_adapter::platform::SessionFiles>>)>,
 }
 
 impl Transcripts {
     /// A session's files (its own, then its subagents'), each with the
-    /// subagent it's from, as of `now`. A Grok Build session's updates are
-    /// in its own folder, under the one for its working directory.
-    pub fn files(&mut self, session_id: &str, claude_root: Option<&str>, codex_roots: &[String], grok_root: Option<&str>, now: f64) -> Vec<(String, Option<String>)> {
+    /// subagent it's from, as of `now`, under its app's transcript folders
+    /// (`dirs`, by app).
+    pub fn files(&mut self, session_id: &str, dirs: &[(String, Vec<String>)], now: f64) -> Vec<(String, Option<String>)> {
         // sessionId.slice(0, i) and .slice(i + 1), i its first colon (or -1).
         let colon = session_id.find(':').map_or(-1, |i| utf16::len(&session_id[..i]) as i64);
         let app = utf16::slice(session_id, 0, Some(colon));
@@ -1143,60 +1112,16 @@ impl Transcripts {
         if uuid_in(&raw).is_none() {
             return Vec::new();
         }
-        if app == "claude" {
-            let root = claude_root.unwrap_or("");
-            for (name, is_dir) in dir_names(root).unwrap_or_default() {
-                if !is_dir {
-                    continue;
-                }
-                let main = paths::join_all(&[root, &name, &format!("{raw}.jsonl")]);
-                if !Path::new(&main).exists() {
-                    continue;
-                }
-                let sub_dir = paths::join_all(&[root, &name, &raw, "subagents"]);
-                let mut out = vec![(main, None)];
-                for (f, _) in dir_names(&sub_dir).unwrap_or_default() {
-                    if let Some(stem) = f.strip_suffix(".jsonl") {
-                        let agent = stem.strip_prefix("agent-").unwrap_or(stem).to_string();
-                        out.push((paths::join(&sub_dir, &f), Some(agent)));
-                    }
-                }
-                return out;
+        let Some((_, at)) = dirs.iter().find(|(a, _)| *a == app) else { return Vec::new() };
+        let i = match self.finders.iter().position(|(a, _)| *a == app) {
+            Some(i) => i,
+            None => {
+                let finder = xenonet_adapter::platforms().get(&app).and_then(|p| p.session_files());
+                self.finders.push((app.clone(), finder));
+                self.finders.len() - 1
             }
-            return Vec::new();
-        }
-        if app == "codex" {
-            if !self.rollouts.iter().any(|(k, _)| *k == raw) && now - self.listed_at > 10e3 {
-                self.list(codex_roots, now);
-            }
-            return self.rollouts.iter().find(|(k, _)| *k == raw).map(|(_, f)| vec![(f.clone(), None)]).unwrap_or_default();
-        }
-        if app == "grok" {
-            let root = grok_root.unwrap_or("");
-            for (name, is_dir) in dir_names(root).unwrap_or_default() {
-                let file = paths::join_all(&[root, &name, &raw, "updates.jsonl"]);
-                if is_dir && Path::new(&file).exists() {
-                    return vec![(file, None)];
-                }
-            }
-            return Vec::new();
-        }
-        Vec::new()
-    }
-
-    /// Lists the rollout folders again.
-    pub fn list(&mut self, codex_roots: &[String], now: f64) {
-        self.listed_at = now;
-        for root in codex_roots {
-            for file in paths::list_files(root, &mut |name| is_rollout(name), 4) {
-                if let Some(id) = uuid_in(&xenonet_os::nodepath::basename(&file)) {
-                    match self.rollouts.iter_mut().find(|(k, _)| *k == id) {
-                        Some(r) => r.1 = file,
-                        None => self.rollouts.push((id, file)),
-                    }
-                }
-            }
-        }
+        };
+        self.finders[i].1.as_mut().map(|f| f.files(at, &raw, now)).unwrap_or_default()
     }
 }
 
@@ -1251,9 +1176,9 @@ pub fn grok_files(updates: &str) -> [String; 2] {
 }
 
 /// A session's events with its turns' calls among them (Grok Build's, from
-/// its usage.json: grok.rs's usage_turns), each when its turn ended, after
+/// its usage.json: its reader's usage_turns), each when its turn ended, after
 /// the lines written by then (stats.js's withTurns).
-pub fn with_turns(events: Vec<Event>, turns: &[xenonet_sources::grok::UsageTurn], ids: &mut EventIds) -> Vec<Event> {
+pub fn with_turns(events: Vec<Event>, turns: &[xenonet_adapter::reader::UsageTurn], ids: &mut EventIds) -> Vec<Event> {
     let ids = &mut ids.0;
     let mut calls: Vec<Event> = turns
         .iter()
@@ -1298,8 +1223,8 @@ pub fn session_stats(session_id: &str, files: Vec<File>, grok: GrokFiles<'_>) ->
         return Err(TypeError(xenonet_adapter::apps::untailed(app)));
     };
     let mut events = session_events(tailed, files, &mut ids)?;
-    if app == "grok" {
-        events = with_turns(events, &xenonet_sources::grok::usage_turns(grok.usage, grok.summary), &mut ids);
+    if let Some(turns) = xenonet_adapter::platforms().get(app).and_then(|p| p.tailed()).and_then(|t| t.usage_turns(grok.usage, grok.summary)) {
+        events = with_turns(events, &turns, &mut ids);
     }
     let Out::Obj(mut fields) = summarize(&events, Some(&Value::String(app.to_string())))? else { unreachable!() };
     fields.insert(0, ("id".into(), Out::Str(session_id.to_string())));
@@ -1401,8 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn rollout_names() {
-        assert!(is_rollout("rollout-2026-10-01T12-00-00-019a.jsonl.zst") && is_rollout("rollout-.jsonl") && !is_rollout("rollout-a\nb.jsonl") && !is_rollout("x-rollout-a.jsonl"));
+    fn session_ids_name_a_uuid() {
         assert_eq!(uuid_in("rollout-x-019A0000-AAAA-bbbb-cccc-000000000001.jsonl").as_deref(), Some("019a0000-aaaa-bbbb-cccc-000000000001"));
     }
 

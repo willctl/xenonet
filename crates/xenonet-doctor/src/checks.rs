@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
+use std::fmt::Write as _;
 use xenonet_adapter::check::{self, CheckRow, Slot, Status, Stop, Verdict};
 use xenonet_adapter::Check;
 use xenonet_os::error::Failure;
@@ -315,39 +316,25 @@ fn failed_sources(health: Option<&Value>, absent: &[&str]) -> Vec<Value> {
         .collect()
 }
 
-/// Codex's command: the ChatGPT app's codex (`codexBin`, when it's there)
-/// or a codex on PATH, or None when there's neither. That's Codex not
-/// installed, which is no problem: XenoNet shows its threads once it is.
-async fn codex_bin(c: &Ctx<'_>) -> Option<String> {
-    let mut bins: Vec<String> = Vec::new();
-    if let Some(b) = c.f.get("codexBin").filter(|v| truthy(Some(v))) {
-        bins.push(display(b));
-    }
-    if let Some(b) = c.which("codex").await {
-        bins.push(b);
-    }
-    let mut bin = None;
-    for b in &bins {
-        if NATIVE.is_absolute(b) && c.exists(b).await {
-            bin = Some(b.clone());
-            break;
+/// The map's sources for apps that aren't installed, by app id: what
+/// they can't read isn't a failure. Only an app whose source runs a
+/// program of the app's own (its adapter's `presence`) can be absent.
+async fn absent_sources(c: &Ctx<'_>) -> Vec<&'static str> {
+    let mut absent = Vec::new();
+    for p in xenonet_adapter::platforms().iter() {
+        let Some(presence) = p.presence() else { continue };
+        // The doctor's machine answers every ask, so there's no error to
+        // pass on.
+        if !presence.installed(c).await.unwrap_or(false) {
+            absent.push(p.id());
         }
     }
-    match bin.or_else(|| bins.first().cloned()) {
-        Some(b) if NATIVE.is_absolute(&b) => c.exists(&b).await.then_some(b),
-        Some(b) => c.which(&b).await.is_some().then_some(b),
-        None => None,
-    }
+    absent
 }
 
-/// The map's sources for apps that aren't installed: what they can't read
-/// isn't a failure. Only Codex's runs a program of the app's own.
-async fn absent_sources(c: &Ctx<'_>) -> Vec<&'static str> {
-    if codex_bin(c).await.is_some() {
-        Vec::new()
-    } else {
-        vec!["codex"]
-    }
+/// The names of these apps, as the registry has them.
+fn names(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|id| xenonet_adapter::apps::app(id).map_or_else(|| (*id).to_string(), |a| a.name.clone())).collect()
 }
 
 fn n(v: Option<&Value>) -> f64 {
@@ -393,10 +380,13 @@ pub async fn run_with(host: &dyn DoctorHost, id: String, facts: Facts, adapters:
             for x in list(health.get("sources")).into_iter().filter(|x| truthy(x.get("ok")) && !x.get("name").and_then(Value::as_str).is_some_and(|n| absent.contains(&n))) {
                 counts.insert(s(x.get("name")), x.get("count").cloned().unwrap_or(Value::Null));
             }
-            let part = |k: &str, word: &str| counts.get(k).filter(|v| !v.is_null()).map(|v| plural(n(Some(v)), word, None));
-            let grok = counts.get("grok").filter(|v| truthy(Some(v))).map(|v| plural(n(Some(v)), "Grok Build session", None));
-            let parts: Vec<String> = [part("projects", "project"), part("claude", "Claude session"), part("codex", "Codex thread"), grok].into_iter().flatten().collect();
-            let missing = if absent.contains(&"codex") { "; Codex isn't installed" } else { "" };
+            let projects = counts.get("projects").filter(|v| !v.is_null()).map(|v| plural(n(Some(v)), "project", None));
+            let apps = xenonet_adapter::platforms().iter().filter_map(|p| counts.get(p.id()).and_then(|v| p.counted_words(v)));
+            let parts: Vec<String> = projects.into_iter().chain(apps).collect();
+            let missing: String = names(&absent).iter().fold(String::new(), |mut out, name| {
+                let _ = write!(out, "; {name} isn't installed");
+                out
+            });
             Ok(ok(format!("reading {}{missing}", parts.join(", "))))
         }
         "xenonet.blocks" => {
@@ -424,8 +414,10 @@ pub async fn run_with(host: &dyn DoctorHost, id: String, facts: Facts, adapters:
                 if !left.is_empty() {
                     besides.push(format!("those reading for {}, which XenoNet can't read", left.join(" and ")));
                 }
-                if wrong.iter().any(|b| gone(b)) {
-                    besides.push("those reading for Codex, which isn't installed".into());
+                let missing: Vec<&str> = absent.iter().copied().filter(|id| wrong.iter().any(|b| gone(b) && b.get("source").and_then(Value::as_str) == Some(*id))).collect();
+                if !missing.is_empty() {
+                    let which = if missing.len() == 1 { "isn't" } else { "aren't" };
+                    besides.push(format!("those reading for {}, which {which} installed", names(&missing).join(" and ")));
                 }
                 let besides = if besides.is_empty() { String::new() } else { format!(" besides {}", besides.join(", and ")) };
                 return Ok(ok(format!("{}, none with a problem{besides}", plural(blocks.len() as f64, "part", None))));

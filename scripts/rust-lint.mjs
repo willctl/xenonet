@@ -1,6 +1,6 @@
 // The Rust core's static analysis (docs/design/rust-core.md, "Static
-// analysis"), each check in turn, as CI runs them. Stops at the end, not at
-// the first failure, and exits 1 if any failed.
+// analysis") and its layering, each check in turn, as CI runs them. Stops
+// at the end, not at the first failure, and exits 1 if any failed.
 //
 //   npm run lint:rust            every check
 //   npm run lint:rust -- --fix   cargo fmt and cargo shear --fix first
@@ -18,6 +18,13 @@ const checks = [
 ];
 
 let failed = 0;
+// The core's layering (scripts/rust-layers.mjs): no core crate depends on a
+// surface or an adapter crate, or names a platform by its id.
+{
+  process.stderr.write("\n== layering: node scripts/rust-layers.mjs\n");
+  const run = spawnSync(process.execPath, [new URL("./rust-layers.mjs", import.meta.url).pathname], { stdio: "inherit", windowsHide: true });
+  if (run.status !== 0) failed++;
+}
 for (const [name, args, env = {}, install] of checks) {
   const [file, argv, environment] = cargoCommand(args, { ...process.env, CARGO_PROFILE_DEV_DEBUG: "0", ...env });
   process.stderr.write(`\n== ${name}: cargo ${args.join(" ")}\n`);
@@ -26,5 +33,6 @@ for (const [name, args, env = {}, install] of checks) {
   failed++;
   if (install && run.status === 101) process.stderr.write(`(if cargo ${args[0]} isn't installed: ${install})\n`);
 }
-process.stderr.write(failed ? `\n${failed} of ${checks.length} checks failed.\n` : `\nAll ${checks.length} checks pass.\n`);
+const total = checks.length + 1;
+process.stderr.write(failed ? `\n${failed} of ${total} checks failed.\n` : `\nAll ${total} checks pass.\n`);
 process.exitCode = failed ? 1 : 0;

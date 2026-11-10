@@ -555,8 +555,10 @@ pub fn shape_graph(
         let sessions: Vec<&Value> = ns.iter().filter(|x| x.get("kind") == Some(&json!("session"))).collect();
         let mut st = stats.clone();
         st.insert("sessions".into(), json!(sessions.len()));
-        st.insert("claude".into(), json!(sessions.iter().filter(|x| x.get("app") == Some(&json!("claude"))).count()));
-        st.insert("codex".into(), json!(sessions.iter().filter(|x| x.get("app") == Some(&json!("codex"))).count()));
+        // Each app the registry counts, under its id.
+        for a in xenonet_adapter::apps::apps().iter().filter(|a| a.counted) {
+            st.insert(a.id.clone(), json!(sessions.iter().filter(|x| x.get("app").and_then(Value::as_str) == Some(a.id.as_str())).count()));
+        }
         st.insert("active".into(), json!(sessions.iter().filter(|x| x.get("activity") == Some(&json!("active"))).count()));
         st.insert("archived".into(), json!(0));
         g["stats"] = Value::Object(st);

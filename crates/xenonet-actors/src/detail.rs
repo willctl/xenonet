@@ -12,16 +12,12 @@ use xenonet_text::text::trim;
 use xenonet_text::text::{template, truthy};
 use xenonet_text::utf16::whole_head;
 
-/// The agent apps by their id.
+/// The agent apps an actor's events name (those XenoNet hands sessions
+/// to: Claude Code and Codex), by their id.
 pub fn app_name(app: &str) -> Option<&'static str> {
-    match app {
-        "claude" => Some("Claude Code"),
-        "codex" => Some("Codex"),
-        _ => None,
-    }
+    let id = xenonet_adapter::apps::asked_or_text(Some(app), None)?;
+    xenonet_adapter::apps::app(id).map(|a| a.name.as_str())
 }
-
-pub const APPS: [(&str, &str); 2] = [("claude", "Claude Code"), ("codex", "Codex")];
 
 // How a message left, by the fixed list of platforms a report may name, so
 // no free text gets in.

@@ -15,11 +15,12 @@ use libfuzzer_sys::fuzz_target;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use xenonet_blocks::tailer::Tailer;
+use xenonet_claude_code::reader::sdk;
+use xenonet_codex::reader::rollouts::Rollouts;
 use xenonet_schema::drift::DriftLog;
-use xenonet_state::stats::{session_stats, File};
-use xenonet_state::runtime::codex::CodexClient;
-use xenonet_state::runtime::vendor::{Tailed, Vendor};
-use xenonet_state::runtime::{sdk, stats};
+use xenonet_state::runtime::stats;
+use xenonet_state::runtime::vendor::Vendor;
+use xenonet_state::stats::{session_stats, File, GrokFiles};
 
 const ID: &str = "0190d3e0-0000-7000-8000-000000000001";
 
@@ -87,21 +88,21 @@ fuzz_target!(|data: &[u8]| {
         }
         assert_eq!(found, at_once, "the same lines, however the reads were cut");
         let vendor = vendor();
-        if let Ok(lines) = stats::read_lines(&vendor, &file, if codex { Tailed::Codex } else { Tailed::Claude }) {
-            let id = if codex { format!("codex:{ID}") } else { format!("claude:{ID}") };
-            let _ = session_stats(&id, vec![File { agent: None, lines }]);
+        let app = if codex { "codex" } else { "claude" };
+        if let Ok(lines) = stats::read_lines(&vendor, &file, app) {
+            let _ = session_stats(&format!("{app}:{ID}"), vec![File { agent: None, lines }], GrokFiles::default());
         }
         if codex {
-            let client = CodexClient::new("codex".into(), "0.0.0".into(), vendor);
-            if let Ok(page) = client.rollout_page(&file, None, 20.0) {
+            let rollouts = Rollouts::default();
+            if let Ok(page) = rollouts.page(&*vendor, &file, None, 20.0) {
                 if let Some(cursor) = page.get("nextCursor").and_then(|c| c.as_str()) {
-                    let _ = client.rollout_page(&file, Some(cursor), 20.0);
+                    let _ = rollouts.page(&*vendor, &file, Some(cursor), 20.0);
                 }
             }
-            let _ = client.rollout_page(&file, Some("rollout:3"), 1.0);
+            let _ = rollouts.page(&*vendor, &file, Some("rollout:3"), 1.0);
             // The same bytes as an archived rollout's (.jsonl.zst): the
             // decoder says what's wrong with them rather than panic.
-            let _ = xenonet_state::runtime::archive::unzstd(transcript, 1 << 24);
+            let _ = xenonet_sources::archive::unzstd(transcript, 1 << 24);
         }
         // The file grows by a line, and is listed again from what the
         // first listing kept.

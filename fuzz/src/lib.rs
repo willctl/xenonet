@@ -30,9 +30,19 @@ pub fn nesting(text: &[u8]) -> usize {
     most
 }
 
-/// Runs `f` as the service would: on the main thread, and, when the input
-/// nests deeply, again on a thread with the service's stack.
+/// Puts every adapter in place, as the service's main does before
+/// anything asks the registry: without them the readers, the apps and
+/// the processes' rules are empty. Once; later calls do nothing.
+pub fn adapters() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(xenonet_platforms::install);
+}
+
+/// Runs `f` as the service would, with the adapters in place: on the main
+/// thread, and, when the input nests deeply, again on a thread with the
+/// service's stack.
 pub fn run(data: &[u8], f: impl Fn() + Send + Sync) {
+    adapters();
     f();
     if nesting(data) > 64 {
         std::thread::scope(|s| {

@@ -112,14 +112,15 @@ pub fn projects_note(scan: &Value) -> String {
 /// yours on top.
 pub fn project_rules(codex: bool, root: &str, picks: Option<&Value>, yours: &Value) -> Value {
     let mut rules = Map::new();
+    // The picks are the sorter's (the registry's `sorts`).
+    let sorter = xenonet_adapter::apps::sorter().map(|a| a.id.as_str());
     if codex {
         for p in items(picks.and_then(|c| get(c, "picks"))) {
             let rel = s(p, "path").unwrap_or("");
             let parts: Vec<&str> = std::iter::once(root).chain(rel.split('/')).collect();
             let dir = xenonet_os::paths::join_all(&parts);
             let Some(key) = path_key(&dir) else { continue };
-            rules
-                .insert(key, json!({ "path": dir, "as": get(p, "as").cloned().unwrap_or(Value::Null), "by": "codex", "reason": get(p, "reason").cloned().unwrap_or(Value::Null) }));
+            rules.insert(key, json!({ "path": dir, "as": get(p, "as").cloned().unwrap_or(Value::Null), "by": sorter, "reason": get(p, "reason").cloned().unwrap_or(Value::Null) }));
         }
     }
     for (key, r) in yours.as_object().into_iter().flatten() {
@@ -319,10 +320,15 @@ pub fn live_snapshot(mut snap: Value, hidden: &HashSet<String>, acks: &Value, si
                 None => reading.cloned().unwrap_or(Value::Null),
             }
         };
+        // Each app's limits (the registry's `limits`), named for the
+        // account of its kind (its `identity`).
         let limits = m.get("limits").cloned().unwrap_or(Value::Null);
         let mut l = limits.as_object().cloned().unwrap_or_default();
-        l.insert("claude".into(), named(get(&limits, "claude"), signed_in.and_then(|s| get(s, "claude"))));
-        l.insert("codex".into(), named(get(&limits, "codex"), signed_in.and_then(|s| get(s, "chatgpt"))));
+        for a in xenonet_adapter::apps::apps() {
+            let Some(name) = a.limits.as_deref() else { continue };
+            let identity = a.identity.as_deref().and_then(|k| signed_in.and_then(|s| get(s, k)));
+            l.insert(name.into(), named(get(&limits, name), identity));
+        }
         m.insert("limits".into(), Value::Object(l));
     }
     snap
@@ -481,8 +487,9 @@ impl Memory {
     pub fn note_signins(&mut self, accounts: &Value, now: f64) -> Vec<Value> {
         let mut current = Map::new();
         let id_of = |k: &str| get(accounts, k).and_then(|a| nn(get(a, "id"))).cloned().unwrap_or(Value::Null);
-        current.insert("claude".into(), id_of("claude"));
-        current.insert("chatgpt".into(), id_of("chatgpt"));
+        for (kind, _) in xenonet_adapter::apps::identities() {
+            current.insert(kind.into(), id_of(kind));
+        }
         for h in items(get(accounts, "gh")) {
             let host = get(h, "host").map_or_else(|| "undefined".into(), display);
             let active = get(h, "active").filter(|a| truthy(Some(a))).map(|a| Value::String(format!("github:{host}/{}", display(a).to_lowercase())));

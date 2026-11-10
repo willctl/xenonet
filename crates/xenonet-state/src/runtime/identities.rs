@@ -21,10 +21,22 @@ use xenonet_blocks::lifecycle::Lifecycle;
 #[derive(Clone, Debug)]
 pub struct Files {
     pub home: String,
-    pub claude_config_file: String,
-    pub codex_home: String,
+    /// The apps' sign-ins, one per kind of account, in the registry's
+    /// order.
+    pub signins: Vec<SigninFile>,
     pub gh_config_dir: String,
-    pub claude_projects_dir: String,
+    /// The app whose transcripts name the account each of its sessions ran
+    /// as, and the folder they're in.
+    pub owners: Option<(String, String)>,
+}
+
+/// A kind of account (identity/v1's), the file an app keeps its sign-in
+/// in, and how its adapter reads it.
+#[derive(Clone, Debug)]
+pub struct SigninFile {
+    pub kind: &'static str,
+    pub file: String,
+    pub read: fn(&Value, &dyn xenonet_adapter::reader::VendorCheck) -> Value,
 }
 
 struct Repo {
@@ -71,7 +83,7 @@ impl IdentityWatch {
     pub fn new(at: Files, vendor: Arc<Vendor>, env: &Map<String, Value>) -> Arc<IdentityWatch> {
         let yours = std::env::var("HOME").unwrap_or_default();
         let git_env = ids::git_env(env, &at.home, &yours);
-        let owners = TranscriptOwners::new(&at.claude_projects_dir);
+        let owners = TranscriptOwners::new(at.owners.as_ref().map_or("", |(_, d)| d.as_str()));
         Arc::new(IdentityWatch {
             at,
             vendor,
@@ -86,7 +98,7 @@ impl IdentityWatch {
         let mut g = lock(&self.inner);
         g.files.clear();
         g.repos.clear();
-        g.owners = TranscriptOwners::new(&self.at.claude_projects_dir);
+        g.owners = TranscriptOwners::new(self.at.owners.as_ref().map_or("", |(_, d)| d.as_str()));
     }
 
     // What a file says, parsed again only when its mtime changes. A file
@@ -115,34 +127,32 @@ impl IdentityWatch {
         value
     }
 
-    /// What each app says: { claude, chatgpt, gh, ssh, claudeFile,
-    /// chatgptFile }, with ssh's aliases as [[alias, host]…].
+    /// What each app says: each kind of account's sign-in (`claude`,
+    /// `chatgpt`), gh, ssh, then the file each sign-in was read from
+    /// (`claudeFile`, `chatgptFile`), with ssh's aliases as [[alias,
+    /// host]…].
     pub fn accounts(&self) -> Value {
-        let chatgpt_file = Path::new(&self.at.codex_home).join("auth.json").to_string_lossy().into_owned();
         let v = &self.vendor;
-        let claude = self.file(&self.at.claude_config_file, |t| {
-            let data = parse_json(t)?;
-            Ok(ids::claude_account(v.check("anthropic/claude-code/config", data, None, None).as_ref()))
-        });
-        let chatgpt = self.file(&chatgpt_file, |t| {
-            let auth = parse_json(t)?;
-            let claims = ids::id_token_claims(Some(&auth));
-            let claims = if claims.is_null() { claims } else { v.check("openai/codex/auth-claims", claims, None, None).unwrap_or(Value::Null) };
-            Ok(ids::chatgpt_account(Some(&auth), Some(&claims)))
-        });
+        let mut out = Map::new();
+        for f in &self.at.signins {
+            let read = f.read;
+            let account = self.file(&f.file, |t| {
+                let data = parse_json(t)?;
+                Ok(read(&data, &**v))
+            });
+            out.insert(f.kind.into(), account);
+        }
         let gh = self.file(&Path::new(&self.at.gh_config_dir).join("hosts.yml").to_string_lossy(), |t| {
             v.check("github/gh/hosts", ids::gh_hosts_shape(t), None, None);
             Ok(Value::Array(ids::parse_gh_hosts(t)))
         });
         let ssh = self.file(&Path::new(&self.at.home).join(".ssh").join("config").to_string_lossy(), |t| Ok(json!(ids::parse_ssh_aliases(t))));
-        json!({
-            "claude": claude,
-            "chatgpt": chatgpt,
-            "gh": if gh.is_null() { json!([]) } else { gh },
-            "ssh": if ssh.is_null() { json!([]) } else { ssh },
-            "claudeFile": self.at.claude_config_file,
-            "chatgptFile": chatgpt_file,
-        })
+        out.insert("gh".into(), if gh.is_null() { json!([]) } else { gh });
+        out.insert("ssh".into(), if ssh.is_null() { json!([]) } else { ssh });
+        for f in &self.at.signins {
+            out.insert(format!("{}File", f.kind), json!(f.file));
+        }
+        Value::Object(out)
     }
 
     fn global_stamp(&self) -> String {
@@ -248,7 +258,8 @@ impl IdentityWatch {
             for n in &nodes {
                 let id = s(n, "id").unwrap_or_default();
                 let pinned = saved.get("pins").and_then(|p| p.get(id)).is_some_and(|p| xenonet_text::text::truthy(Some(p)));
-                if s(n, "kind") == Some("session") && s(n, "app") == Some("claude") && !xenonet_text::text::truthy(n.get("claudeAccount")) && !pinned {
+                let owned = self.at.owners.as_ref().is_some_and(|(app, _)| s(n, "app") == Some(app.as_str()));
+                if s(n, "kind") == Some("session") && owned && !xenonet_text::text::truthy(n.get("claudeAccount")) && !pinned {
                     owners.push((json!(id), g.owners.owner(id, now).unwrap_or(Value::Null)));
                 }
             }
@@ -284,7 +295,16 @@ impl IdentityWatch {
             .iter()
             .map(|l| (l.get("source").cloned().unwrap_or(Value::Null), l.get("target").cloned().unwrap_or(Value::Null), l.get("kind").cloned().unwrap_or(Value::Null)))
             .collect();
-        let account_input = json!({ "claude": accounts["claude"], "chatgpt": accounts["chatgpt"], "gh": accounts["gh"], "claudeFile": accounts["claudeFile"], "chatgptFile": accounts["chatgptFile"] });
+        let mut account_input = Map::new();
+        for f in &self.at.signins {
+            account_input.insert(f.kind.into(), accounts[f.kind].clone());
+        }
+        account_input.insert("gh".into(), accounts["gh"].clone());
+        for f in &self.at.signins {
+            let k = format!("{}File", f.kind);
+            account_input.insert(k.clone(), accounts[k.as_str()].clone());
+        }
+        let account_input = Value::Object(account_input);
         let home = Some(self.at.home.as_str()).filter(|h| !h.is_empty());
         let out =
             ids::link_identities(LinkInput { nodes: &node_input, links: &links, accounts: &account_input, ssh: &ssh, repos: &repos, owners: &owners, saved: &saved, home, now })

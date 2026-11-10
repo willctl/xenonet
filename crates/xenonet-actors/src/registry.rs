@@ -1897,9 +1897,12 @@ impl Actors {
             let k = at_where.get("kind").filter(|k| !k.is_null()).map_or_else(|| "node like that".into(), |k| template(Some(k)));
             return Ok(Some(format!("you can't do that to a {k}")));
         }
-        let apps = |v: Option<&Value>| matches!(v.and_then(Value::as_str), Some("claude" | "codex"));
+        // The apps you start and hand sessions to from the window: those
+        // XenoNet hands sessions to, the first when it doesn't say.
+        let asked = xenonet_adapter::apps::ASKED;
+        let apps = |v: Option<&Value>| v.and_then(Value::as_str).is_some_and(|a| asked.contains(&a));
         if what == "started" {
-            let app = if apps(d.get("app")) { col(d, "app") } else { json!("claude") };
+            let app = if apps(d.get("app")) { col(d, "app") } else { json!(asked[0]) };
             let o = json!({ "kind": "spawned", "target": node, "relation": "works-on", "app": app, "via": "observed", "at": number(at) });
             self.record(YOU, &o, host)?;
             return Ok(None);

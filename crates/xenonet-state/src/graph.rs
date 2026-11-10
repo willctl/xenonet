@@ -10,8 +10,9 @@
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
+use xenonet_adapter::platform::scratch_zone;
 use xenonet_model::ids::normalize_remote;
-use xenonet_os::paths::{base_name, is_under, path_key, scratch_zone, tilde};
+use xenonet_os::paths::{base_name, is_under, path_key, tilde};
 use xenonet_sources::live::names::{is_opaque, short_name};
 use xenonet_text::json::number;
 use xenonet_text::text::{display, to_number, truthy};
@@ -171,14 +172,16 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         }
     }
 
-    // Codex desktop projects sit inside the project that holds their root.
+    // An app's own projects (Codex desktop's), each naming its app, sit
+    // inside the project that holds their root.
     let mut native_ids: HashSet<String> = HashSet::new();
     for np in native_projects {
         let raw = get(np, "id").map_or_else(|| "undefined".into(), display);
-        let id = format!("native:codex:{raw}");
+        let app = get(np, "app").cloned().unwrap_or(Value::Null);
+        let id = format!("native:{}:{raw}", display(&app));
         let home = items(get(np, "roots")).iter().find_map(|r| key_of(Some(r)).and_then(|k| project_for_key(&k)));
         let home_id = home.map(|h| format!("project:{}", pkey(h)));
-        g.set(&id, obj(json!({ "id": id, "kind": "native", "app": "codex", "name": get(np, "name").cloned().unwrap_or(Value::Null), "roots": get(np, "roots").cloned().unwrap_or(Value::Null) })));
+        g.set(&id, obj(json!({ "id": id, "kind": "native", "app": app, "name": get(np, "name").cloned().unwrap_or(Value::Null), "roots": get(np, "roots").cloned().unwrap_or(Value::Null) })));
         g.link(home_id.as_deref().unwrap_or("core"), &id, "native");
         native_ids.insert(raw);
     }
@@ -421,17 +424,19 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     }
 
     let count = |f: &dyn Fn(&Map<String, Value>) -> bool| g.nodes.iter().filter(|(_, n)| n.get("kind").and_then(Value::as_str) == Some("session") && f(n)).count();
-    let stats = json!({
+    let mut stats = json!({
         "wikiPages": wiki.filter(|w| truthy(Some(w))).map_or(0, |w| items(get(w, "pages")).len()),
         "dirtyRepos": repos.iter().filter(|(_, r)| to_number(get(r, "dirty")) > 0.0).count(),
         "projects": projects.iter().filter(|p| str_of(p, "role") != Some("group")).count(),
         "groups": projects.iter().filter(|p| str_of(p, "role") == Some("group")).count(),
         "sessions": count(&|_| true),
-        "claude": count(&|n| n.get("app").and_then(Value::as_str) == Some("claude")),
-        "codex": count(&|n| n.get("app").and_then(Value::as_str) == Some("codex")),
-        "active": count(&|n| n.get("activity").and_then(Value::as_str) == Some("active")),
-        "archived": count(&|n| truthy(n.get("archived"))),
     });
+    // The sessions of each app the registry counts, under its id.
+    for a in xenonet_adapter::apps::apps().iter().filter(|a| a.counted) {
+        stats[a.id.as_str()] = json!(count(&|n| n.get("app").and_then(Value::as_str) == Some(a.id.as_str())));
+    }
+    stats["active"] = json!(count(&|n| n.get("activity").and_then(Value::as_str) == Some("active")));
+    stats["archived"] = json!(count(&|n| truthy(n.get("archived"))));
     let relations: Vec<Value> = relations.into_iter().filter(|r| r["a"].as_str().is_some_and(|a| g.has(a)) && r["b"].as_str().is_some_and(|b| g.has(b))).collect();
     let nodes: Vec<Value> = g.nodes.into_iter().map(|(_, n)| Value::Object(n)).collect();
     json!({ "generatedAt": number(now), "nodes": nodes, "links": g.links, "relations": relations, "stats": stats })
@@ -443,6 +448,8 @@ mod tests {
 
     #[test]
     fn sessions_find_their_projects_and_zones() {
+        // The apps' scratch zones come from their adapters.
+        xenonet_platforms::install();
         let input = json!({
             "projectsDir": "/home/me/Projects",
             "homeDir": "/home/me",

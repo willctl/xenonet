@@ -14,9 +14,10 @@
 //! field of the wrong kind, is ignored, so a plugin newer than this XenoNet
 //! does no harm.
 
-use super::{edit_file, older, push_edit, Edits, EDIT_KEEP_MS};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use xenonet_adapter::reader::{PluginEvents, PluginState};
+use xenonet_sources::native::{edit_file, older, push_edit, Edits, EDIT_KEEP_MS};
 
 pub const WORKING_MS: f64 = 5.0 * 60e3;
 pub const WAIT_MS: f64 = 30.0 * 60e3;
@@ -65,19 +66,6 @@ struct Session {
     cwd: Option<String>,
 }
 
-/// A session as the plugin last said it.
-pub struct State {
-    pub last_event_at: f64,
-    pub working: bool,
-    /// What it waits on: the words and when it began.
-    pub needs: Option<(String, f64)>,
-    /// Each edited file's last edit: path and time.
-    pub edits: Vec<(String, f64)>,
-    pub model: Option<String>,
-    /// As session/v1's `usage`.
-    pub usage: Option<Value>,
-}
-
 #[derive(Default)]
 pub struct OpenCodeEvents {
     sessions: HashMap<String, Session>,
@@ -108,10 +96,12 @@ impl OpenCodeEvents {
             cwd: None,
         })
     }
+}
 
+impl PluginEvents for OpenCodeEvents {
     /// Takes a request's events for session `id` (opencode:ses-…), run in
     /// `cwd`. Returns how many it used.
-    pub fn ingest(&mut self, id: &str, events: &Value, cwd: Option<&str>, now: f64) -> usize {
+    fn ingest(&mut self, id: &str, events: &Value, cwd: Option<&str>, now: f64) -> usize {
         let Some(list) = events.as_array() else { return 0 };
         let mut used = 0;
         for e in list.iter().take(EVENTS_MAX) {
@@ -132,7 +122,7 @@ impl OpenCodeEvents {
 
     /// The session as the plugin last said it, or None when it hasn't been
     /// heard from lately enough to go by (the database decides then).
-    pub fn state(&mut self, id: &str, now: f64) -> Option<State> {
+    fn state(&mut self, id: &str, now: f64) -> Option<PluginState> {
         let s = self.sessions.get_mut(id)?;
         s.edits.retain(|_, list| !list.last().is_some_and(|e| older(now, e.ts, EDIT_KEEP_MS)));
         let heard = now - s.at < WORKING_MS;
@@ -145,7 +135,7 @@ impl OpenCodeEvents {
             let tokens: serde_json::Map<String, Value> = TOKENS.iter().zip(t).map(|(k, v)| ((*k).to_string(), v.map_or(Value::Null, |n| json!(n)))).collect();
             json!({ "costUsd": s.cost, "tokens": tokens, "provider": s.provider, "model": s.model })
         });
-        Some(State {
+        Some(PluginState {
             last_event_at: s.at,
             working: s.working && now - s.working_at < WORKING_MS,
             needs: wait.map(|w| (w.tool.as_ref().map_or_else(|| "Permission needed".to_string(), |t| format!("Permission to use {t}")), w.since)),
@@ -157,7 +147,7 @@ impl OpenCodeEvents {
 
     /// The session as the engine reads a live one: `{ observed, lastEventAt,
     /// status, needsYou (its kind), edits: [{ path, ts }] }`.
-    pub fn live(&mut self, id: &str, now: f64) -> Option<Value> {
+    fn live(&mut self, id: &str, now: f64) -> Option<Value> {
         let st = self.state(id, now)?;
         Some(json!({
             "observed": false,
@@ -170,7 +160,7 @@ impl OpenCodeEvents {
 
     /// The live view's session snapshots, in the shape the tailer's have, for
     /// the sessions the plugin has spoken for and `has` says are on the map.
-    pub fn snapshot(&mut self, now: f64, has: &dyn Fn(&str) -> bool) -> Vec<Value> {
+    fn snapshot(&mut self, now: f64, has: &dyn Fn(&str) -> bool) -> Vec<Value> {
         let mut ids: Vec<String> = self.sessions.keys().cloned().collect();
         ids.sort();
         let mut out = Vec::new();

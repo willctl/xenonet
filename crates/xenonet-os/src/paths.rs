@@ -105,28 +105,14 @@ pub fn base_name(p: &str) -> String {
     }
 }
 
-/// A zone that groups the throwaway folders an app makes per session.
+/// A zone of the map that groups throwaway folders: the temp folders'
+/// here, and an app's own from its adapter
+/// (`xenonet_adapter::platform::scratch_zone`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Zone {
     pub id: &'static str,
     pub name: &'static str,
     pub app: Option<&'static str>,
-}
-
-pub const SCRATCH_ZONES: [Zone; 3] = [
-    Zone { id: "zone:claude-scratch", name: "Claude scratch", app: Some("claude") },
-    Zone { id: "zone:codex-projectless", name: "Codex without a project", app: Some("codex") },
-    Zone { id: "zone:temp", name: "Temp", app: None },
-];
-
-// /documents/codex/\d{4}-\d{2}-\d{2}(\/|$)
-fn codex_day_folder(k: &str) -> bool {
-    const AT: &str = "/documents/codex/";
-    k.match_indices(AT).any(|(i, _)| {
-        let d = &k.as_bytes()[i + AT.len()..];
-        let digits = |r: std::ops::Range<usize>| d.len() >= r.end && d[r].iter().all(u8::is_ascii_digit);
-        digits(0..4) && d.get(4) == Some(&b'-') && digits(5..7) && d.get(7) == Some(&b'-') && digits(8..10) && matches!(d.get(10), None | Some(b'/'))
-    })
 }
 
 // ^/var/folders/[^/]+/[^/]+/t(/|$): macOS's $TMPDIR.
@@ -137,28 +123,14 @@ fn mac_tmpdir(k: &str) -> bool {
     matches!((a, b, t), (Some(a), Some(b), Some("t")) if !a.is_empty() && !b.is_empty())
 }
 
-/// Whether a key falls in zone `i` of SCRATCH_ZONES, whatever the zones
-/// before it say.
-pub fn in_scratch_zone(i: usize, key: &str) -> bool {
-    match i {
-        0 => key.contains("/claude/scratch-workspaces/"),
-        1 => codex_day_folder(key),
-        // %TEMP% on Windows, $TMPDIR (/var/folders/xx/…/T) on macOS, /tmp anywhere.
-        2 => {
-            let slashed = format!("{key}/");
-            slashed.contains("/appdata/local/temp/") || slashed.starts_with("/tmp/") || mac_tmpdir(key)
-        }
-        _ => false,
-    }
-}
+/// The zone of the temp folders.
+pub const TEMP_ZONE: Zone = Zone { id: "zone:temp", name: "Temp", app: None };
 
-/// The zone a folder's key belongs to, for both desktop apps' throwaway
-/// folders and the temp folders, or None.
-pub fn scratch_zone(key: &str) -> Option<&'static Zone> {
-    if key.is_empty() {
-        return None;
-    }
-    (0..SCRATCH_ZONES.len()).find(|&i| in_scratch_zone(i, key)).map(|i| &SCRATCH_ZONES[i])
+/// The temp folders' zone, for a key in one: %TEMP% on Windows, $TMPDIR
+/// (/var/folders/xx/…/T) on macOS, /tmp anywhere.
+pub fn temp_zone(key: &str) -> Option<&'static Zone> {
+    let slashed = format!("{key}/");
+    (!key.is_empty() && (slashed.contains("/appdata/local/temp/") || slashed.starts_with("/tmp/") || mac_tmpdir(key))).then_some(&TEMP_ZONE)
 }
 
 /// Which syntax a path keeps. Paths read from another machine keep that
@@ -319,9 +291,10 @@ mod tests {
 
     #[test]
     fn zones_and_names() {
-        assert_eq!(scratch_zone("/private/var/folders/ab/xyz/t/x").map(|z| z.id), None, "keys come through path_key first");
-        assert_eq!(scratch_zone("/var/folders/ab/xyz/t/claude-run/x").map(|z| z.id), Some("zone:temp"));
-        assert_eq!(scratch_zone("/users/me/documents/codex/2026-10-02/regex").map(|z| z.id), Some("zone:codex-projectless"));
+        assert_eq!(temp_zone("/private/var/folders/ab/xyz/t/x").map(|z| z.id), None, "keys come through path_key first");
+        assert_eq!(temp_zone("/var/folders/ab/xyz/t/claude-run/x").map(|z| z.id), Some("zone:temp"));
+        assert_eq!(temp_zone("/tmp").map(|z| z.id), Some("zone:temp"));
+        assert_eq!((temp_zone("/users/me/documents/codex/2026-10-02/regex"), temp_zone("")), (None, None));
         assert_eq!(base_name("/a/b/"), "b");
         assert_eq!(base_name("/"), "/");
         assert_eq!(normalize_posix("/a/../b//c/"), "/b/c/");

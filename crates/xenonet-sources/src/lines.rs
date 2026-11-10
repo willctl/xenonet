@@ -457,11 +457,6 @@ pub fn claude_kind_of(kind: Js<'_>) -> String {
     kind_part(kind)
 }
 
-/// Claude Code writes its version on each line.
-pub fn claude_version_of(version: Js<'_>, current: Option<String>) -> Option<String> {
-    version.and_then(Value::as_str).map(str::to_string).or(current)
-}
-
 /// Codex's lines by type and payload type (and an item's type).
 pub fn codex_kind_of(kind: Js<'_>, payload_type: Js<'_>, item_type: Js<'_>) -> String {
     let t = kind_part(kind);
@@ -473,14 +468,6 @@ pub fn codex_kind_of(kind: Js<'_>, payload_type: Js<'_>, item_type: Js<'_>) -> S
         format!("{t}:{p}:{}", kind_part(item_type))
     } else {
         format!("{t}:{p}")
-    }
-}
-
-/// A Codex rollout says its version once, in its first line (session_meta).
-pub fn codex_version_of(kind: Js<'_>, cli_version: Js<'_>, current: Option<String>) -> Option<String> {
-    match (kind, cli_version) {
-        (Some(Value::String(k)), Some(Value::String(v))) if k == "session_meta" => Some(v.clone()),
-        _ => current,
     }
 }
 

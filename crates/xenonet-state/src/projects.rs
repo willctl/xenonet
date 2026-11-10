@@ -74,6 +74,12 @@ const KNOWN_FILES: &[&str] = &[
     "LICENSE",
 ];
 
+// Whether a rule's `by` names the sorter (the registry's `sorts`): one of
+// its picks, not yours.
+fn sorted(by: Option<&Value>) -> bool {
+    by.and_then(Value::as_str).is_some_and(|b| xenonet_adapter::apps::sorter().is_some_and(|a| a.id == b))
+}
+
 // The well-known files: those above, the VCS markers, the workspace files
 // and the stack markers.
 fn known_file(name: &str) -> bool {
@@ -547,7 +553,7 @@ impl Scan {
             if as_.and_then(Value::as_str) != Some("project") || !paths::is_under(key, &root_key) || *key == root_key || self.get(key).is_some_and(|f| f.why.is_some()) {
                 continue;
             }
-            let by_codex = prop(Some(r), "by")?.and_then(Value::as_str) == Some("codex");
+            let by_codex = sorted(prop(Some(r), "by")?);
             if by_codex && self.yours_above(key) {
                 continue;
             }
@@ -744,7 +750,7 @@ impl Scan {
         let mut k = parent_key(key);
         while len16(&k) > rl {
             if let Some(Value::Object(r)) = self.rules.get(&k) {
-                if r.get("as").and_then(Value::as_str) == Some("project") && r.get("by").and_then(Value::as_str) != Some("codex") {
+                if r.get("as").and_then(Value::as_str) == Some("project") && !sorted(r.get("by")) {
                     return true;
                 }
             }

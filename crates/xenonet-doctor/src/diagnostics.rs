@@ -12,6 +12,7 @@
 //! anything: what it can do for anyone else is write issue-draft.md.
 
 use serde_json::{json, Map, Value};
+use xenonet_adapter::platform::Ask;
 use xenonet_os::files::{self, FsError};
 use xenonet_os::log::{scrub, summarize, unsafe_text};
 use xenonet_os::nodepath::NATIVE;
@@ -369,29 +370,17 @@ pub fn write_look(state_dir: &str, bundle: &Value, sources: &[String], now: f64)
     Ok(dir)
 }
 
-/// The command that starts the agent in that folder: Codex read-only and
-/// asking before it does anything, or Claude Code in plan mode; with the
-/// model chosen, and XenoNet's docs and code to read.
+/// The command that starts the agent in that folder, as the app's adapter
+/// makes it (Codex read-only and asking before it does anything, or
+/// Claude Code in plan mode), with the model chosen, and XenoNet's docs
+/// and code to read; null for an app XenoNet doesn't ask.
 pub fn ask_command(app: &str, model: Option<&str>, dir: &Value, sources: &[String]) -> Value {
     let prompt = "Read bundle.md and AGENTS.md here, then tell me what's wrong with XenoNet and how to fix it.";
-    let model = model.filter(|m| !m.is_empty());
-    let add_dirs = sources.iter().flat_map(|s| ["--add-dir".to_string(), s.clone()]);
-    if app == "claude" {
-        let mut args: Vec<Value> = vec![json!("--permission-mode"), json!("plan")];
-        if let Some(m) = model {
-            args.extend([json!("--model"), json!(m)]);
-        }
-        args.extend(add_dirs.map(Value::String));
-        args.push(json!(prompt.replace("AGENTS.md", "CLAUDE.md")));
-        return json!({ "file": "claude", "args": args, "cwd": dir });
+    let ask = Ask { model: model.filter(|m| !m.is_empty()), dir: dir.as_str().unwrap_or_default(), sources, prompt };
+    match xenonet_adapter::platforms().get(app).and_then(|p| p.ask(&ask)) {
+        Some((file, args)) => json!({ "file": file, "args": args, "cwd": dir }),
+        None => Value::Null,
     }
-    let mut args: Vec<Value> = vec![json!("-C"), dir.clone(), json!("-s"), json!("read-only"), json!("-a"), json!("on-request")];
-    if let Some(m) = model {
-        args.extend([json!("-m"), json!(m)]);
-    }
-    args.extend(add_dirs.map(Value::String));
-    args.push(json!(prompt));
-    json!({ "file": "codex", "args": args, "cwd": dir })
 }
 
 #[cfg(test)]
@@ -466,6 +455,7 @@ mod tests {
 
     #[test]
     fn asks_read_only() {
+        xenonet_platforms::install();
         let c = ask_command("codex", Some("gpt-5.1-codex"), &json!("/d"), &["/opt/x".into()]);
         assert_eq!(
             c["args"].as_array().unwrap()[..8],

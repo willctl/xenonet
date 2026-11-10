@@ -12,12 +12,13 @@
 pub mod desktop;
 pub mod listing;
 pub mod sdk;
+pub mod session;
 pub mod transcript;
 
 use serde_json::{Map, Value};
-use xenonet_adapter::reader::{Call, Classified, Emit, Run, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};
+use xenonet_adapter::reader::{Call, Classified, Emit, LineFormat, Run, Tail, Tailed, ToolCall, TypeError, VendorCheck, Where};
 use xenonet_sources::line_events::{self, broken_at, usage_of, End, Field, Kind, LineEvent, LineFile};
-use xenonet_sources::lines::{claude_kind_of, claude_version_of, opt_prop, prop, ClaudeLine};
+use xenonet_sources::lines::{claude_kind_of, opt_prop, prop, ClaudeLine};
 use xenonet_sources::live::js::{ev, index0, is_str, js_max, nn, num_of, nv, obj, obj_opt, pages_extra, sort_by_num, sv};
 use xenonet_sources::live::telemetry::{project_limit, refusals};
 use xenonet_sources::live::{categorize, claude_edits, clip, clip_value, files_of, mcp_server_of, mcp_tool_of, string_of, tool_detail, wiki_pages_of};
@@ -87,8 +88,19 @@ impl Tailed for Reader {
         "claude-lines"
     }
 
+    /// Claude Code writes its version on each line.
     fn version_of(&self, raw: &Value, current: Option<String>) -> Option<String> {
-        claude_version_of(raw.get("version"), current)
+        raw.get("version").and_then(Value::as_str).map(str::to_string).or(current)
+    }
+
+    /// Claude Code's reader reads the transcripts of an app no reader is
+    /// for.
+    fn reads_untailed(&self) -> bool {
+        true
+    }
+
+    fn line_format(&self) -> Option<LineFormat> {
+        Some(LineFormat::Claude)
     }
 
     fn kind_of(&self, raw: &Value) -> String {

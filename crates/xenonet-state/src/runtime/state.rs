@@ -104,13 +104,12 @@ pub struct MapState {
     search: Arc<TranscriptSearch>,
     stats: Arc<Stats>,
     pub blocks: Blocks,
-    claude_sessions: Arc<Gather>,
-    codex_threads: Arc<Gather>,
-    codex_projects: Arc<Gather>,
-    grok_sessions: Arc<Gather>,
+    /// The gatherers of the listed apps' sessions, and of their own
+    /// projects for the apps that keep some, in the registry's order.
+    gathers: Vec<Gathers>,
     pub runs: Mutex<ReportedRuns>,
     /// What OpenCode's XenoNet plugin says as it happens (state.opencodeEvents).
-    pub opencode: Mutex<xenonet_sources::native::opencode_events::OpenCodeEvents>,
+    pub opencode: Mutex<xenonet_sources::native::plugins::Plugins>,
     /// The native readers and numbat's, when they're on.
     observed: Vec<Arc<crate::runtime::observed::Observed>>,
     inner: Mutex<Inner>,
@@ -124,6 +123,38 @@ pub struct MapState {
     /// The events it sent, for the tests to read.
     #[cfg(test)]
     pub sent: Mutex<Vec<(String, Value)>>,
+}
+
+/// What a refresh gathers for an app the map lists: its sessions, and its
+/// own projects when it keeps some.
+struct Gathers {
+    app: &'static App,
+    sessions: Arc<Gather>,
+    projects: Option<Arc<Gather>>,
+}
+
+/// Polls futures of one output together until each is done: a refresh
+/// gathers every app's sessions at once.
+async fn all<T>(mut futs: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + '_>>>) -> Vec<T> {
+    let mut out: Vec<Option<T>> = futs.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (f, o) in futs.iter_mut().zip(out.iter_mut()) {
+            if o.is_none() {
+                match f.as_mut().poll(cx) {
+                    std::task::Poll::Ready(v) => *o = Some(v),
+                    std::task::Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    })
+    .await;
+    out.into_iter().flatten().collect()
 }
 
 fn err(m: impl Into<String>) -> CoreError {
@@ -145,14 +176,28 @@ fn gathered(name: &str, g: &Gather, value: Value) -> (Value, Value) {
     (value, st)
 }
 
-/// The folder an app's sessions are read from, as the settings have it.
-fn root_of<'a>(cfg: &'a MapConfig, app: &App) -> &'a str {
-    match app.id.as_str() {
-        "claude" => &cfg.claude_projects_dir,
-        "codex" => &cfg.codex_home,
-        "grok" => &cfg.grok_home,
-        _ => "",
-    }
+/// The folders an app's transcripts are in, under its folder as the
+/// settings have it.
+pub fn transcript_dirs(cfg: &MapConfig, app: &str) -> Vec<String> {
+    xenonet_adapter::platforms().get(app).map(|p| p.transcript_dirs(cfg.folder(app))).unwrap_or_default()
+}
+
+/// The apps' sign-ins, one for each kind of account (the registry's
+/// `identity`), in its order: each in the file its adapter names.
+fn signin_files(cfg: &MapConfig) -> Vec<crate::runtime::identities::SigninFile> {
+    xenonet_adapter::apps::identities()
+        .filter_map(|(kind, a)| {
+            let s = xenonet_adapter::platforms().get(&a.id)?.signin()?;
+            let at = cfg.setting(Some(s.setting));
+            let file = s.file.map_or_else(|| at.to_string(), |f| std::path::Path::new(at).join(f).to_string_lossy().into_owned());
+            Some(crate::runtime::identities::SigninFile { kind, file, read: s.read })
+        })
+        .collect()
+}
+
+/// Whether an app's lister keeps projects of its own.
+fn keeps_projects(app: &str) -> bool {
+    xenonet_adapter::platforms().get(app).is_some_and(|p| p.keeps_projects())
 }
 
 impl MapState {
@@ -161,33 +206,25 @@ impl MapState {
     /// version and decider are `env`'s.
     pub fn new(cfg: MapConfig, store: Arc<StateStore>, vendor: Arc<Vendor>, env: &WireEnv, readers: Readers, live: Arc<Live>) -> Arc<MapState> {
         let (emitter, decider, version) = (env.emitter.clone(), env.decider.clone(), env.version.as_str());
-        let codex_roots =
-            [std::path::Path::new(&cfg.codex_home).join("sessions"), std::path::Path::new(&cfg.codex_home).join("archived_sessions")].map(|p| p.to_string_lossy().into_owned());
-        let grok_root = std::path::Path::new(&cfg.grok_home).join("sessions").to_string_lossy().into_owned();
-        let search = TranscriptSearch::new(
-            &std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(),
-            &cfg.claude_projects_dir,
-            &codex_roots,
-            &grok_root,
-            vendor.clone(),
-        );
-        let stats = Stats::new(&cfg.claude_projects_dir, &codex_roots, &grok_root, vendor.clone());
+        // Each app's transcript folders, in the registry's order.
+        let dirs: Vec<(String, Vec<String>)> =
+            xenonet_adapter::platforms().iter().map(|p| (p.id().to_string(), transcript_dirs(&cfg, p.id()))).filter(|(_, d)| !d.is_empty()).collect();
+        let roots: Vec<(String, String)> = dirs.iter().flat_map(|(app, ds)| ds.iter().map(move |d| (d.clone(), app.clone()))).collect();
+        let search = TranscriptSearch::new(&std::path::Path::new(&cfg.cache_dir).join("search.sqlite").to_string_lossy(), &roots, vendor.clone());
+        let stats = Stats::new(dirs, vendor.clone());
         let identities = cfg.identities.then(|| {
             IdentityWatch::new(
                 crate::runtime::identities::Files {
                     home: cfg.home_dir.clone(),
-                    claude_config_file: cfg.claude_config_file.clone(),
-                    codex_home: cfg.codex_home.clone(),
+                    signins: signin_files(&cfg),
                     gh_config_dir: cfg.gh_config_dir.clone(),
-                    claude_projects_dir: cfg.claude_projects_dir.clone(),
+                    owners: xenonet_adapter::platforms().iter().find(|p| p.signin().is_some_and(|s| s.owners)).map(|p| (p.id().to_string(), cfg.folder(p.id()).to_string())),
                 },
                 vendor.clone(),
                 &cfg.env,
             )
         });
         let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), ..Default::default() }));
-        let (claude_sessions, codex_threads, codex_projects, grok_sessions) =
-            (gatherer("claude-sessions"), gatherer("codex-threads"), gatherer("codex-projects"), gatherer("grok-sessions"));
         // The projects folder you chose, if you did (`crate::workspace`), as
         // state.json has it: the store itself is read at the first refresh,
         // with the rest of what it saves then.
@@ -198,7 +235,7 @@ impl MapState {
         let listers: Vec<(&'static App, Arc<dyn Lister>)> = xenonet_adapter::platforms()
             .listers(|app| ListerEnv {
                 home_dir: &cfg.home_dir,
-                root: root_of(&cfg, app),
+                root: cfg.folder(&app.id),
                 desktop_dir: cfg.claude_desktop_dir.as_deref(),
                 state_dir: &cfg.state_dir,
                 env: &cfg.env,
@@ -207,6 +244,13 @@ impl MapState {
             })
             .into_iter()
             .map(|(app, l)| (app, Arc::from(l)))
+            .collect();
+        let gathers = listers
+            .iter()
+            .filter_map(|(app, _)| {
+                let p = xenonet_adapter::platforms().get(&app.id)?;
+                Some(Gathers { app, sessions: gatherer(&p.sessions_gatherer()), projects: p.keeps_projects().then(|| gatherer(&format!("{}-projects", app.id))) })
+            })
             .collect();
         let state = Arc::new_cyclic(|me| MapState {
             me: me.clone(),
@@ -223,12 +267,9 @@ impl MapState {
             search,
             stats,
             blocks: Blocks::default(),
-            claude_sessions,
-            codex_threads,
-            codex_projects,
-            grok_sessions,
+            gathers,
             runs: Mutex::new(ReportedRuns::new()),
-            opencode: Mutex::new(xenonet_sources::native::opencode_events::OpenCodeEvents::new()),
+            opencode: Mutex::new(xenonet_sources::native::plugins::Plugins::new()),
             observed: crate::runtime::observed::Observed::all(&cfg, &vendor),
             inner: Mutex::new(Inner { map: Map_ { sources: json!([]), ..Default::default() }, memory: Memory::new(), projects_dir, demo_titles: Vec::new(), repo_pass_for: None }),
             refreshing: Mutex::new(None),
@@ -246,16 +287,18 @@ impl MapState {
         // The ones that read for a source of the map say which.
         let b = &state.blocks;
         let _ = b.add(store, None);
-        let _ = b.add(state.claude_sessions.clone(), Some("claude"));
-        let _ = b.add(state.codex_threads.clone(), Some("codex"));
-        let _ = b.add(state.codex_projects.clone(), Some("codex-projects"));
-        for (app, l) in &state.listers {
-            if l.block().is_some() {
-                let l = l.clone();
-                let _ = b.add(Arc::new(Reported(Arc::new(move || l.block().map_or(Value::Null, |h| health_of(h.name, h.kind, &h.life, &[], Value::Null))))), Some(app.id.as_str()));
+        // Each listed app's: its sessions' gatherer, its own projects', and
+        // the block of a client its lister keeps running.
+        for g in &state.gathers {
+            let _ = b.add(g.sessions.clone(), Some(g.app.id.as_str()));
+            if let Some(p) = &g.projects {
+                let _ = b.add(p.clone(), Some(format!("{}-projects", g.app.id).as_str()));
+            }
+            if let Some(l) = state.lister(&g.app.id).filter(|l| l.block().is_some()) {
+                let _ =
+                    b.add(Arc::new(Reported(Arc::new(move || l.block().map_or(Value::Null, |h| health_of(h.name, h.kind, &h.life, &[], Value::Null))))), Some(g.app.id.as_str()));
             }
         }
-        let _ = b.add(state.grok_sessions.clone(), Some("grok"));
         let _ = b.add(live.block(), Some("live"));
         for l in vendor.blocks() {
             let _ = b.add(l, None);
@@ -292,6 +335,12 @@ impl MapState {
             Readers::Demo(d) => Some(d),
             Readers::Real => None,
         }
+    }
+
+    /// The gatherer of `app`'s sessions, for the tests to read.
+    #[cfg(test)]
+    pub fn sessions_gather(&self, app: &str) -> &Arc<Gather> {
+        &self.gathers.iter().find(|g| g.app.id == app).expect("a listed app").sessions
     }
 
     /// The lister of `app`'s sessions, when an adapter brings one.
@@ -390,15 +439,26 @@ impl MapState {
         }
     }
 
-    // The apps' own projects (Codex desktop's), from the listers that
-    // keep some.
-    async fn gather_native(&self) -> Result<Value, String> {
+    // An app's own projects (Codex desktop's), each naming the app, from
+    // its lister.
+    async fn gather_native(&self, app: &str) -> Result<Value, String> {
         match &self.readers {
-            Readers::Demo(d) => Ok(d.native_projects()),
+            Readers::Demo(d) => Ok(Value::Array(items(Some(&d.native_projects())).iter().filter(|p| s(p, "app") == Some(app)).cloned().collect())),
             Readers::Real => {
-                let listers: Vec<Arc<dyn Lister>> = self.listers.iter().map(|(_, l)| l.clone()).collect();
-                let vendor = self.vendor.clone();
-                Ok(Value::Array(crate::runtime::util::blocking(move || listers.iter().filter_map(|l| l.projects(&*vendor)).flatten().collect()).await))
+                let Some(l) = self.lister(app) else { return Ok(json!([])) };
+                let (vendor, app) = (self.vendor.clone(), app.to_string());
+                let found = crate::runtime::util::blocking(move || l.projects(&*vendor)).await.unwrap_or_default();
+                Ok(Value::Array(
+                    found
+                        .into_iter()
+                        .map(|mut p| {
+                            if let Some(o) = p.as_object_mut() {
+                                o.entry("app").or_insert_with(|| json!(app));
+                            }
+                            p
+                        })
+                        .collect(),
+                ))
             }
         }
     }
@@ -413,16 +473,34 @@ impl MapState {
     async fn refresh_now(&self) -> Result<Value, String> {
         // The projects folder as this refresh found it, for all of it.
         let root = self.projects_dir();
-        let (codex, native, claude, grok) = tokio::join!(
-            self.codex_threads.run(false, None, || self.gather_sessions("codex")),
-            self.codex_projects.run(false, None, || self.gather_native()),
-            self.claude_sessions.run(false, None, || self.gather_sessions("claude")),
-            self.grok_sessions.run(false, None, || self.gather_sessions("grok")),
-        );
-        let (codex, codex_st) = gathered("codex", &self.codex_threads, codex);
-        let (native, native_st) = gathered("codex-projects", &self.codex_projects, native);
-        let (claude, claude_st) = gathered("claude", &self.claude_sessions, claude);
-        let (grok, grok_st) = gathered("grok", &self.grok_sessions, grok);
+        // The apps that keep projects of their own come first, each with its
+        // projects after its sessions, as the map has always listed them.
+        let mut order: Vec<&Gathers> = self.gathers.iter().collect();
+        order.sort_by_key(|g| !keeps_projects(&g.app.id));
+        let mut runs: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = Value> + Send + '_>>> = Vec::new();
+        for g in &order {
+            let id = g.app.id.as_str();
+            runs.push(Box::pin(g.sessions.run(false, None, move || self.gather_sessions(id))));
+            if let Some(p) = &g.projects {
+                runs.push(Box::pin(p.run(false, None, move || self.gather_native(id))));
+            }
+        }
+        let mut found = all(runs).await.into_iter();
+        // Each app's sessions and their source, then its projects' and theirs.
+        let mut lists_found: Vec<(&str, Value, Value)> = Vec::new();
+        let mut native = Vec::new();
+        let mut gather_st = Vec::new();
+        for g in &order {
+            let (list, st) = gathered(&g.app.id, &g.sessions, found.next().unwrap_or(Value::Null));
+            gather_st.push(st.clone());
+            lists_found.push((g.app.id.as_str(), list, st));
+            if let Some(p) = &g.projects {
+                let (v, st) = gathered(&format!("{}-projects", g.app.id), p, found.next().unwrap_or(Value::Null));
+                native.extend(items(Some(&v)).iter().cloned());
+                gather_st.push(st);
+            }
+        }
+        let native = Value::Array(native);
         // Keep the previous sessions for a source that failed this round, so
         // a transient error doesn't make half the graph vanish.
         let prev: Vec<Value> = self.all_nodes().into_iter().filter(|n| s(n, "kind") == Some("session")).collect();
@@ -432,7 +510,7 @@ impl MapState {
         let observed = self.observed_sessions();
         let titles: HashMap<String, Value> = lock(&self.inner).demo_titles.iter().cloned().collect();
         let ok = |st: &Value| st.get("ok") == Some(&Value::Bool(true));
-        let lists = [("codex", ok(&codex_st), items(Some(&codex))), ("claude", ok(&claude_st), items(Some(&claude))), ("grok", ok(&grok_st), items(Some(&grok)))];
+        let lists: Vec<(&str, bool, &[Value])> = lists_found.iter().map(|(app, list, st)| (*app, ok(st), items(Some(list)))).collect();
         let sessions = decide::merge_sessions(&prev, &lists, &observed, &titles);
         // Where sessions ran is evidence of where the projects are, so the
         // scan comes after the session lists.
@@ -544,7 +622,8 @@ impl MapState {
         }
         let live = lock(&self.live.status).clone();
         let search = self.search.status_json();
-        let mut sources = vec![projects_st, codex_st, native_st, claude_st, grok_st];
+        let mut sources = vec![projects_st];
+        sources.extend(gather_st);
         sources.extend(self.observed.iter().map(|o| o.status()));
         sources.push(json!({ "name": "live", "ok": live.watching, "count": live.files }));
         // A folder in a format XenoNet doesn't read is there, but not read.
@@ -601,17 +680,16 @@ impl MapState {
             .zip(first)
             .filter(|(_, f)| *f)
             .map(|(mut x, _)| {
-                // The plugin's model is the newest; its usage stands in for a
-                // row's that has none.
-                if x.get("app").and_then(Value::as_str) == Some("opencode") {
-                    let st = x.get("id").and_then(Value::as_str).and_then(|id| events.state(id, now));
-                    if let (Some(st), Some(o)) = (st, x.as_object_mut()) {
-                        if let Some(m) = st.model {
-                            o.insert("model".into(), json!(m));
-                        }
-                        if let Some(u) = st.usage.filter(|_| o.get("usage").is_none_or(Value::is_null)) {
-                            o.insert("usage".into(), u);
-                        }
+                // For an app whose plugin reports (OpenCode's), the plugin's
+                // model is the newest, and its usage stands in for a row's
+                // that has none.
+                let st = x.get("id").and_then(Value::as_str).and_then(|id| events.state(id, now));
+                if let (Some(st), Some(o)) = (st, x.as_object_mut()) {
+                    if let Some(m) = st.model {
+                        o.insert("model".into(), json!(m));
+                    }
+                    if let Some(u) = st.usage.filter(|_| o.get("usage").is_none_or(Value::is_null)) {
+                        o.insert("usage".into(), u);
                     }
                 }
                 x
@@ -1173,7 +1251,7 @@ impl State for MapState {
         // handed off with what the tailer saw of it.
         let app = if matches!(self.readers, Readers::Demo(_)) { s(&n, "app") } else { tailed_or_text(s(&n, "app"), None) };
         if let Some(app) = app.filter(|_| decide::handoff_needs_transcript(&notes)) {
-            let limit = if app == "codex" { 60.0 } else { 80.0 };
+            let limit = xenonet_adapter::apps::app(app).map_or_else(|| xenonet_adapter::apps::Handoff::default().entries, |a| a.handoff.entries);
             let page = self.transcript(&n, None, limit).await.map_err(err)?;
             notes = decide::handoff_notes(&notes, Some(&page));
         }
@@ -1205,7 +1283,7 @@ impl State for MapState {
             return Ok(json!(crate::runtime::demo::narration()));
         }
         let text = if kind == "day" { digest::summary_text(&self.day(), "Today so far") } else { digest::summary_text(&self.digest(since)?, "While the user was away") };
-        crate::runtime::narrate::ask_codex(&self.cfg.codex_binary(), &digest::narrate_prompt(&text), None, &self.cfg.codex_home).await.map(Value::String).map_err(err)
+        crate::runtime::narrate::ask_codex(&self.cfg.sorter_program(), &digest::narrate_prompt(&text), None, &self.cfg.codex_home).await.map(Value::String).map_err(err)
     }
     async fn project_detection(&self) -> R<Value> {
         self.detection().await
@@ -1255,7 +1333,7 @@ impl State for MapState {
                 Err(e) => return Err(status(if e.status == Some(409) { 409 } else { 502 }, format!("The decision model couldn't sort the folders: {}", e.message))),
             }
         } else {
-            match crate::runtime::narrate::ask_codex(&self.cfg.codex_binary(), &classify::picks_prompt(&outline), Some(classify::picks_schema()), &self.cfg.codex_home)
+            match crate::runtime::narrate::ask_codex(&self.cfg.sorter_program(), &classify::picks_prompt(&outline), Some(classify::picks_schema()), &self.cfg.codex_home)
                 .await
                 .and_then(|text| classify::parse_picks(&text, &outline))
             {
@@ -1267,7 +1345,7 @@ impl State for MapState {
         let by = match (decider, self.decider.get()) {
             (true, Some(d)) => d.status().await.ok().and_then(|s| s.get("model").cloned()).unwrap_or(Value::Null),
             (true, None) => Value::Null,
-            (false, _) => json!("codex"),
+            (false, _) => json!(xenonet_adapter::apps::sorter().map(|a| a.id.as_str())),
         };
         let at = now_ms();
         self.store
@@ -1500,9 +1578,7 @@ impl State for MapState {
     fn assistant_sources(&self, now: f64) -> R<Value> {
         use crate::runtime::blocks::Block;
         let tail = self.live.block().health();
-        Ok(
-            json!({ "claude": source_of(&self.claude_sessions.health(), &tail, now), "codex": source_of(&self.codex_threads.health(), &tail, now), "grok": source_of(&self.grok_sessions.health(), &tail, now) }),
-        )
+        Ok(Value::Object(self.gathers.iter().map(|g| (g.app.id.clone(), source_of(&g.sessions.health(), &tail, now))).collect()))
     }
     fn graph_version(&self) -> u64 {
         self.version.load(Ordering::SeqCst)
@@ -1529,7 +1605,10 @@ impl State for MapState {
         Ok(items(Some(&lock(&self.live.telemetry).session_costs(now))).to_vec())
     }
     async fn codex_request(&self, method: &str, params: Value) -> R<Value> {
-        let Some(l) = self.lister("codex") else { return Err(err("XenoNet has no Codex to ask")) };
+        // The app whose own server lists its MCP servers (the registry's
+        // mcpStatus) is the one asked.
+        let asked = xenonet_adapter::apps::apps().iter().find(|a| a.mcp_status);
+        let Some(l) = asked.and_then(|a| self.lister(&a.id)) else { return Err(err(format!("XenoNet has no {} to ask", asked.map_or("app's server", |a| a.name.as_str())))) };
         let (vendor, method, params) = (self.vendor.clone(), method.to_string(), params);
         crate::runtime::util::blocking(move || l.request(&*vendor, &method, params))
             .await

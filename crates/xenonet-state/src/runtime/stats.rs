@@ -20,32 +20,22 @@ pub fn read_lines(vendor: &Vendor, file: &str, app: &str) -> std::io::Result<Vec
 }
 
 pub struct Stats {
-    claude_root: String,
-    codex_roots: Vec<String>,
-    grok_root: String,
+    /// Each app's transcript folders, by app.
+    dirs: Vec<(String, Vec<String>)>,
     vendor: Arc<Vendor>,
     transcripts: Mutex<Transcripts>,
     kept: Mutex<(Kept, HashMap<String, Value>)>,
 }
 
 impl Stats {
-    pub fn new(claude_root: &str, codex_roots: &[String], grok_root: &str, vendor: Arc<Vendor>) -> Arc<Stats> {
-        Arc::new(Stats {
-            claude_root: claude_root.into(),
-            codex_roots: codex_roots.to_vec(),
-            grok_root: grok_root.into(),
-            vendor,
-            transcripts: Mutex::default(),
-            kept: Mutex::default(),
-        })
+    pub fn new(dirs: Vec<(String, Vec<String>)>, vendor: Arc<Vendor>) -> Arc<Stats> {
+        Arc::new(Stats { dirs, vendor, transcripts: Mutex::default(), kept: Mutex::default() })
     }
 
     /// A session's files (its own, then its subagents'), each with the
     /// subagent it's from.
     pub fn files(&self, session_id: &str) -> Vec<(String, Option<String>)> {
-        let root = Some(self.claude_root.as_str()).filter(|r| !r.is_empty());
-        let grok = Some(self.grok_root.as_str()).filter(|r| !r.is_empty());
-        lock(&self.transcripts).files(session_id, root, &self.codex_roots, grok, now_ms())
+        lock(&self.transcripts).files(session_id, &self.dirs, now_ms())
     }
 
     fn stats_now(&self, session_id: &str) -> Result<Option<Value>, String> {
@@ -114,7 +104,7 @@ mod tests {
         let text: String = lines.iter().map(|l| xenonet_text::json::stringify(l, 0) + "\n").collect();
         std::fs::write(p.join(format!("{id}.jsonl")), text).expect("a transcript");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let s = Stats::new(&dir.to_string_lossy(), &[], "", vendor);
+        let s = Stats::new(vec![("claude".into(), vec![dir.to_string_lossy().into_owned()])], vendor);
         let st = s.stats(&format!("claude:{id}")).await.expect("stats").expect("its transcript");
         assert_eq!(st["id"], format!("claude:{id}"));
         assert!(st["totals"]["calls"].as_f64() > Some(0.0), "{st}");
@@ -139,7 +129,7 @@ mod tests {
         let packed = ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
         std::fs::write(day.join(format!("rollout-2026-10-05T13-00-00-{id}.jsonl.zst")), packed).expect("an archive");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let s = Stats::new("", &[day.to_string_lossy().into_owned()], "", vendor);
+        let s = Stats::new(vec![("codex".into(), vec![day.to_string_lossy().into_owned()])], vendor);
         let st = s.stats(&format!("codex:{id}")).await.expect("stats").expect("its archive");
         assert_eq!(st["totals"]["calls"], 1, "{st}");
         std::fs::remove_dir_all(&dir).expect("cleaned up");

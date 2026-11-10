@@ -277,16 +277,14 @@ pub fn spend_by_actor(spend: &[Value], sessions: &[Value], starts: &[Value], nam
 
 const TOKEN_FIELDS: [&str; 5] = ["input", "output", "reasoning", "cacheRead", "cacheWrite"];
 
-// The name the figure carries for an app or an actor's product.
+// The name the figure carries for an app or an actor's product: of the
+// products and apps that report what they spent (Hermes, OpenCode), the
+// first whose slug or id it holds, by its name; any other as it is.
 fn source_label(raw: &str) -> String {
     let lower = raw.to_lowercase();
-    if lower.contains("hermes") {
-        "Hermes".into()
-    } else if lower.contains("opencode") {
-        "OpenCode".into()
-    } else {
-        raw.to_string()
-    }
+    let product = xenonet_adapter::products::PRODUCTS.iter().filter(|p| p.reports_spend).find(|p| lower.contains(p.slug)).map(|p| p.short);
+    let app = || xenonet_adapter::apps::apps().iter().filter(|a| a.reports_spend).find(|a| lower.contains(a.id.as_str())).map(|a| a.name.as_str());
+    product.or_else(app).map_or_else(|| raw.to_string(), str::to_string)
 }
 
 // One cumulative reading: its key, where it came from, whose it is, and

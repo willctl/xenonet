@@ -34,5 +34,9 @@ xenonet-sources.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+# The tests check the apps' rows and commands, which their adapters bring.
+[dev-dependencies]
+xenonet-platforms.workspace = true
+
 [lints]
 workspace = true

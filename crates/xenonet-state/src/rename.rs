@@ -29,10 +29,12 @@ pub fn clean_title(title: &str) -> String {
 }
 
 /// Whether a node is a session XenoNet can rename: one of this machine's,
-/// of Claude Code or Codex.
+/// of an app whose adapter renames its sessions (Claude Code, Codex).
 pub fn renamable(n: Option<&Value>) -> bool {
     let Some(Value::Object(m)) = n else { return false };
-    m.get("kind").and_then(Value::as_str) == Some("session") && !truthy(m.get("host")) && matches!(m.get("app").and_then(Value::as_str), Some("claude" | "codex"))
+    m.get("kind").and_then(Value::as_str) == Some("session")
+        && !truthy(m.get("host"))
+        && m.get("app").and_then(Value::as_str).and_then(|a| xenonet_adapter::platforms().get(a)).is_some_and(|p| p.renames())
 }
 
 #[cfg(test)]
@@ -41,6 +43,7 @@ mod tests {
 
     #[test]
     fn titles_on_one_line() {
+        xenonet_platforms::install();
         assert_eq!(clean_title("  Fix\n\tthe\u{0}\u{1}tests \u{2028} now "), "Fix the tests now");
         assert_eq!(clean_title(&"x".repeat(200)).len(), 120);
         assert_eq!(clean_title(&format!("{} y", "x".repeat(119))), "x".repeat(119));

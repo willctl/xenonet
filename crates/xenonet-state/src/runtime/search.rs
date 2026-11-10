@@ -63,10 +63,10 @@ fn message(e: crate::search::Error) -> String {
 }
 
 impl TranscriptSearch {
-    pub fn new(db_file: &str, claude_root: &str, codex_roots: &[String], grok_root: &str, vendor: Arc<Vendor>) -> Arc<TranscriptSearch> {
-        let codex: Vec<Option<String>> = codex_roots.iter().map(|d| Some(d.clone())).collect();
+    /// `roots`: the folders the apps' transcripts are in, each with its app.
+    pub fn new(db_file: &str, roots: &[(String, String)], vendor: Arc<Vendor>) -> Arc<TranscriptSearch> {
         Arc::new(TranscriptSearch {
-            core: Mutex::new(Search::new(Some(db_file), Some(claude_root).filter(|r| !r.is_empty()), &codex, Some(grok_root).filter(|r| !r.is_empty()))),
+            core: Mutex::new(Search::new(Some(db_file), roots)),
             status: Mutex::new(Status::default()),
             vendor,
             one: tokio::sync::Mutex::new(()),
@@ -92,7 +92,7 @@ impl TranscriptSearch {
         // a time: a transcript can be hundreds of megabytes, and held whole
         // it was the service's largest allocation, kept by the allocator
         // long after.
-        if app != "codex" && !plan.zst {
+        if !crate::search::rollout_lines(app) && !plan.zst {
             return Self::index_pieces(&core, tailed, plan, &self.vendor, self.piece.load(std::sync::atomic::Ordering::Relaxed));
         }
         let text = if plan.whole { read_whole(file) } else { read_from(file, plan.offset, plan.size) }.map_err(|e| e.to_string())?;
@@ -267,8 +267,8 @@ mod tests {
         let packed = ruzstd::encoding::compress_to_vec(format!("{}\n", xenonet_text::json::stringify(&said, 0)).as_bytes(), ruzstd::encoding::CompressionLevel::Fastest);
         std::fs::write(archived.join(format!("rollout-2026-10-05T13-00-00-{thread}.jsonl.zst")), packed).expect("an archive");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let codex = [dir.join("codex").to_string_lossy().into_owned()];
-        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &codex, "", vendor);
+        let roots = [(dir.join("claude").to_string_lossy().into_owned(), "claude".to_string()), (dir.join("codex").to_string_lossy().into_owned(), "codex".to_string())];
+        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &roots, vendor);
         s.index().await;
         assert!(s.status_json()["docs"].as_f64() >= Some(2.0), "{}", s.status_json());
         assert_eq!(s.status_json().get("errors"), None, "{}", s.status_json());
@@ -300,7 +300,7 @@ mod tests {
         text.push_str("{\"type\":\"user\",\"timestamp\"");
         std::fs::write(claude.join(format!("{id}.jsonl")), &text).expect("a transcript");
         let vendor = Vendor::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas"), Arc::new(Mutex::new(DriftLog::default())));
-        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &dir.join("claude").to_string_lossy(), &[], "", vendor);
+        let s = TranscriptSearch::new(&dir.join("search.sqlite").to_string_lossy(), &[(dir.join("claude").to_string_lossy().into_owned(), "claude".to_string())], vendor);
         s.piece.store(97, std::sync::atomic::Ordering::Relaxed);
         s.index().await;
         assert_eq!(s.status_json().get("errors"), None, "{}", s.status_json());

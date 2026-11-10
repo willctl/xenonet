@@ -4,6 +4,7 @@
 //! written where Claude keeps a session's name.
 
 use super::desktop::{self, key_of};
+use super::session::ClaudeSession;
 use super::{sdk, transcript};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::sync::Mutex;
 use xenonet_adapter::reader::{Lister, Renamed, VendorCheck};
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_sources::record::{nn, obj_json, Obj, F};
-use xenonet_sources::session::{ClaudeSession, Parent, ParentKind};
+use xenonet_sources::session::{Parent, ParentKind};
 use xenonet_text::text::{display, to_number, truthy};
 use xenonet_text::{json as js, utf16};
 

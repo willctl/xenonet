@@ -1,10 +1,11 @@
 //! Grok Build's usage ledger: a session's usage.json, which its folder
 //! (`~/.grok/sessions/<encoded cwd>/<session id>/`) keeps beside its
 //! summary.json, read as the turns and model calls a session's stats
-//! count. The sessions themselves, and their conversations, are read by
-//! Grok Build's adapter.
+//! count (`Tailed::usage_turns`) and the live tailer adds up; and the times
+//! its files write.
 
 use serde_json::{Map, Value};
+pub use xenonet_adapter::reader::UsageTurn;
 use xenonet_text::time;
 
 /// A time as summary.json writes it (RFC 3339), or in Unix seconds or
@@ -24,23 +25,6 @@ fn text(v: Option<&Value>) -> Option<&str> {
 
 fn nonempty(v: Option<&Value>) -> Option<&str> {
     text(v).filter(|s| !s.is_empty())
-}
-
-/// A turn's call on one model, from usage.json: when the turn ended, what
-/// names it (its turn and model), its model calls, its tokens as XenoNet
-/// counts a call's, and what Grok said it cost (None when that isn't
-/// known).
-#[derive(Clone, Debug, PartialEq)]
-pub struct UsageTurn {
-    pub t: f64,
-    pub key: String,
-    pub model: String,
-    pub calls: f64,
-    pub input: f64,
-    pub cache_read: f64,
-    pub cache_write: f64,
-    pub output: f64,
-    pub cost: Option<f64>,
 }
 
 fn object(v: Option<&Value>) -> Option<&Map<String, Value>> {

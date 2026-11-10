@@ -1,0 +1,9 @@
+{
+  "about": "The fixture's made-up sessions, by their part in it: the app each is of and its number; and the apps whose sources it shows.",
+  "sessions": {
+    "work": { "app": "claude", "n": 1 },
+    "codex": { "app": "codex", "n": 2 },
+    "quiet": { "app": "claude", "n": 3 }
+  },
+  "sources": ["claude", "codex", "grok"]
+}

@@ -6,9 +6,11 @@
 // frame checked and opened, through `network::receive` on a real engine
 // with its own state folder. Each run takes a few bodies, each one of the
 // schemas' own with the input's fields over it, or the input's JSON
-// alone, and then reads them back as the engine does: other hosts' agents
-// for peers and the console, their claims on this host's files, and the
-// handoffs open to a session.
+// alone, and then reads them back as the engine does, through its driver
+// as the routes call it: other hosts' agents for peers and the console, a
+// view of one by id, their claims on a file a session here is about to
+// edit (its PreToolUse hook), and the handoffs open to a session (its
+// SessionStart briefing).
 //
 // Nothing may panic. What another host says lands as that host's: its
 // agents and messages are qualified with its id, and a message from you
@@ -19,15 +21,15 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing};
-use xenonet_engine::sql::Arg;
 use xenonet_fuzz::net::{body_for, overlay, Choices};
-use xenonet_service::config::Config;
-use xenonet_service::cores::{Cores, State, R};
-use xenonet_service::wire::{Emitter, VendorReaders, WireEnv};
-use xenonet_runtime::engine::EngineCalls;
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing};
+use xenonet_runtime::engine::EngineDriver;
 use xenonet_runtime::network;
-use xenonet_runtime::world::World;
+use xenonet_runtime::runtime::{Runtime, Setup};
+use xenonet_service::config::Config;
+use xenonet_service::cores::{Cores, Engine as _, State, R};
+use xenonet_service::wire::WireEnv;
+use xenonet_text::time::now_ms;
 
 const A: &str = "claude:aaaaaaaa-0001";
 const B: &str = "codex:cccccccc-0001";
@@ -82,10 +84,10 @@ impl State for Map {
         Ok(Value::Null)
     }
     fn live_ids(&self) -> R<Vec<(String, Value)>> {
-        Ok([A, B].iter().map(|id| ((*id).to_string(), json!(xenonet_runtime::js::now_ms()))).collect())
+        Ok([A, B].iter().map(|id| ((*id).to_string(), json!(now_ms()))).collect())
     }
     fn live_info(&self, id: &str, _now: f64) -> R<Option<Value>> {
-        Ok([A, B].contains(&id).then(|| json!({ "lastEventAt": xenonet_runtime::js::now_ms(), "endedAt": null, "status": "tool", "needsYou": null, "edits": [] })))
+        Ok([A, B].contains(&id).then(|| json!({ "lastEventAt": now_ms(), "endedAt": null, "status": "tool", "needsYou": null, "edits": [] })))
     }
     fn observed_live(&self, _id: &str) -> R<bool> {
         Ok(false)
@@ -97,7 +99,7 @@ impl State for Map {
 
 struct Engine {
     dir: PathBuf,
-    w: Arc<World>,
+    w: Arc<Runtime>,
     net: Arc<FakeNet>,
     runs: u64,
     /// The last message id the checks read.
@@ -124,12 +126,28 @@ fn engine() -> Engine {
     let state = dir.join("state").to_string_lossy().into_owned();
     let vars = [("HOME", home.as_str()), ("XENONET_STATE_DIR", state.as_str()), ("XENONET_CACHE_DIR", state.as_str()), ("XENONET_ACTORS", "off"), ("XENONET_PORT", "47996")];
     let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_string());
-    let mut config = Config::from(&[], &get);
+    let config = Config::from(&[], &get);
     let mut cores = Cores::pending(false, false, false);
     cores.state = Arc::new(Map { cwd: dir.join("home/atlas").to_string_lossy().into_owned() });
-    let env = WireEnv { version: "0.0.0".into(), emitter: Emitter::new(), drift: Arc::default(), readers: VendorReaders::default() };
+    let env = WireEnv::new("0.0.0");
+    // As the binary's serve closure gives the engine its settings.
+    let setup = Setup {
+        demo: config.demo,
+        actors: config.actors,
+        port: config.port,
+        home: config.home.clone(),
+        state_dir: config.state_dir.clone(),
+        projects_dir: config.projects_dir.clone(),
+        version: env.version.clone(),
+        root: config.root.clone(),
+        runs_bin: config.runs_bin.clone(),
+        permission_hold_ms: config.permission_hold_ms,
+        launcher_exec: config.launcher_exec.clone(),
+        made_up: xenonet_runtime::actors::MadeUp::none(),
+    };
+    xenonet_fuzz::adapters();
     let _in = runtime().enter();
-    let w = xenonet_runtime::world(&cores, &mut config, &env).expect("the engine's parts");
+    let w = xenonet_runtime::runtime(&cores, setup, &env).expect("the engine's parts");
     let net = Arc::new(FakeNet::default());
     network::set_net(&w, net.clone());
     Engine { dir, w, net, runs: 0, last: 0.0 }
@@ -160,7 +178,7 @@ fn body(kind: Kind, c: &mut Choices<'_>) -> Value {
         Kind::Presence => {
             let agents: Vec<Value> = (0..c.below(4)).map(|_| json!({ "id": *c.pick(&["claude:bbbbbbbb-0001", "actor:wren", "@studio:claude:aaaaaaaa-0001", "actor:you", "codex:x", "claude:"]), "title": String::from_utf8_lossy(c.chunk()), "repoKey": "github.com/acme/atlas", "cwd": "~/atlas", "state": "working" })).collect();
             b["agents"] = Value::Array(agents);
-            b["counter"] = json!(xenonet_runtime::js::now_ms() + f64::from(c.u16()));
+            b["counter"] = json!(now_ms() + f64::from(c.u16()));
         }
         _ => {}
     }
@@ -171,8 +189,8 @@ fn body(kind: Kind, c: &mut Choices<'_>) -> Value {
 /// Every message stored after message `last`: a host's own are qualified
 /// with its id, and one as you came from a window host's console,
 /// strongly.
-fn landed_as_theirs(w: &World, last: &mut f64, from: &str, window: bool, b: &Value) {
-    while let Ok(Some(m)) = w.store.with(|s| s.message(Arg::Num(*last + 1.0))) {
+fn landed_as_theirs(w: &Runtime, last: &mut f64, from: &str, window: bool, b: &Value) {
+    while let Ok(Some(m)) = w.store.with(|s| s.message(*last + 1.0)) {
         *last += 1.0;
         let sender = m.text("sender").unwrap_or("").to_string();
         if sender == "actor:you" {
@@ -186,7 +204,7 @@ fn landed_as_theirs(w: &World, last: &mut f64, from: &str, window: bool, b: &Val
 
 /// Other hosts' agents, as peers and the console see them: each its own
 /// host's, under that host's id, never you or this host's.
-fn views_are_theirs(w: &World) {
+fn views_are_theirs(w: &Runtime) {
     for detail in [false, true] {
         for v in network::remote_views(w, detail) {
             let id = v["id"].as_str().unwrap_or("");
@@ -214,7 +232,7 @@ fuzz_target!(|data: &[u8]| {
         let from = *c.pick(&["laptop", "laptop", "desk", "vm1"]);
         let window = HOSTS.iter().find(|(h, _)| *h == from).is_some_and(|(_, win)| *win) || c.rarely(16);
         let b = body(kind, &mut c);
-        let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: xenonet_runtime::js::now_ms(), from_window_host: window };
+        let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: now_ms(), from_window_host: window };
         xenonet_fuzz::run(data, || network::receive(w, incoming.clone()));
         landed_as_theirs(w, &mut e.last, from, window, &b);
         if c.is_empty() {
@@ -224,14 +242,18 @@ fuzz_target!(|data: &[u8]| {
     views_are_theirs(w);
     // What the engine reads back of it: a view by id, claims on this host's
     // files, and the handoffs open to a session.
-    let mut calls = EngineCalls::new(w, None);
-    let me = Arg::text(A);
-    let file = Arg::text(format!("{}/home/atlas/src/a.ts", e.dir.to_string_lossy()));
-    let _ = network::call(w, &mut calls, "view", &[Arg::text(format!("@laptop:{}", String::from_utf8_lossy(c.chunk())))]);
-    let _ = network::call(w, &mut calls, "claimHits", &[me.clone(), Arg::List(vec![file])]);
-    if let Ok(view) = calls.view(&me) {
-        let _ = network::call(w, &mut calls, "handoffs", &[view]);
-    }
+    let driver = EngineDriver(w.clone());
+    let (_, session) = A.split_once(':').unwrap_or_default();
+    let cwd = e.dir.join("home/atlas").to_string_lossy().into_owned();
+    let file = format!("{cwd}/src/a.ts");
+    let edit = json!({ "session_id": session, "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": { "file_path": file }, "cwd": cwd });
+    let start = json!({ "session_id": session, "hook_event_name": "SessionStart", "source": "startup", "cwd": cwd });
+    let remote = format!("@laptop:{}", String::from_utf8_lossy(c.chunk()));
+    runtime().block_on(async {
+        let _ = driver.view(&remote).await;
+        let _ = driver.hook("claude", Some("PreToolUse"), &edit).await;
+        let _ = driver.hook("claude", Some("SessionStart"), &start).await;
+    });
     if let Ok(mut s) = e.net.sent.lock() {
         s.clear();
     };

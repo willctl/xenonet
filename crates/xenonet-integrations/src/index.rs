@@ -5,6 +5,7 @@
 
 use crate::common::{clean, fail, query, Fail};
 use serde_json::{json, Map, Value};
+use std::sync::OnceLock;
 use xenonet_os::files;
 use xenonet_os::nodepath::NATIVE;
 
@@ -63,8 +64,15 @@ pub fn import_plan(records: &[Value], value: &Value) -> Result<Value, Fail> {
     })
 }
 
+// The demo's made-up data, as demo.json has it: data, so the code names
+// no app.
+fn demo() -> &'static Value {
+    static D: OnceLock<Value> = OnceLock::new();
+    D.get_or_init(|| serde_json::from_str(include_str!("demo.json")).unwrap_or(Value::Null))
+}
+
 pub fn demo_decision() -> Value {
-    json!({ "answers": { "tool": { "type": "choice", "choice": "codex", "confidence": 0.93, "probabilities": { "codex": 0.8, "claude": 0.15, "review": 0.05 } } }, "model": "demo/jev", "cost": 0, "ms": 12 })
+    demo()["decision"].clone()
 }
 
 /// What the demo's made-up OpenShell prints for these args, or the error
@@ -94,17 +102,7 @@ pub fn demo_run(args: &[Value]) -> Result<String, String> {
 /// The demo's records: a decision, an export, and a sandbox job for each
 /// way a review can come out (each with the review seeded from `options`).
 pub fn demo_records() -> Value {
-    json!({
-        "decision": { "kind": "decision", "status": "needs_confirmation", "selected": "codex", "model": "demo/jev", "taskHash": "demo", "cost": 0, "ms": 12, "reason": null, "candidates": [{ "id": "codex", "name": "Codex", "probability": 0.8, "filtered": false, "confirmation": true }], "outcome": "useful" },
-        "export": { "kind": "pi-export", "sourceId": "pi-export:demo", "externalId": "demo-pi-run", "status": "completed", "model": "demo-model", "provider": "demo", "tokens": 420, "cost": 0, "artifacts": 2, "checkpoints": 1, "diagnostics": 0 },
-        "sandboxes": [
-            ["changes", { "before": { "hello.txt": "Hello.\n", "removed.txt": "Old example.\n" }, "after": { "hello.txt": "Hello from the sandbox.\n", "new.txt": "New example.\n" } }],
-            ["no-changes", { "before": { "hello.txt": "Hello.\n" }, "after": { "hello.txt": "Hello.\n" } }],
-            ["source-drift", { "before": { "hello.txt": "Hello.\n" }, "after": { "hello.txt": "Hello from the sandbox.\n" }, "sourceState": "changed" }],
-            ["partial", { "before": { "hello.txt": "Hello.\n" }, "after": { "hello.txt": "Hello from the sandbox.\n" }, "problems": [{ "path": "image.png", "reason": "Binary file" }] }],
-            ["unavailable", { "before": { "hello.txt": "Hello.\n" }, "after": {}, "unavailable": true }],
-        ],
-    })
+    demo()["records"].clone()
 }
 
 /// A demo sandbox job's record, its review seeded.
@@ -116,5 +114,9 @@ pub fn demo_sandbox(name: &str, options: &Value, review_id: &Value) -> Value {
     } else {
         "retrieved"
     };
-    json!({ "kind": "sandbox", "status": "created", "name": format!("demo-{name}"), "agent": "pi", "image": "demo/pi", "profile": { "backend": "native", "distro": "" }, "reviewId": review_id, "execution": "unknown", "completedSteps": 5, "launchSteps": 5, "retrieval": retrieval })
+    let mut job = demo()["sandbox"].clone();
+    job["name"] = json!(format!("demo-{name}"));
+    job["reviewId"] = review_id.clone();
+    job["retrieval"] = json!(retrieval);
+    job
 }

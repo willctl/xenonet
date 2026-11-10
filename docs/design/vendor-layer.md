@@ -118,6 +118,10 @@ against it.
 | `connect` | its config format, and the hook events with their matchers | `connect.js` `CLAUDE_EVENTS`, `CODEX_EVENTS` |
 | `editTools` | for a native reader, the tools whose calls are edits | each reader's `EDIT_TOOLS` |
 | `has` | the capabilities it has (section 4) | spread across the code |
+| `counted` | the map's stats count its sessions under its id (Claude Code, Codex) | the graph's and the hosts' stats |
+| `headless` | the arguments of one turn with the prompt after them, for an agent an OpenShell sandbox runs (`-p`, `exec`, `--print`) | `integrations/openshell` |
+| `routing` | as a routing candidate: its place among them and what it's good for | `integrations/routing` |
+| `mcpStatus` | its own server lists its MCP servers and their catalogs (Codex's app-server) | `mcp_info` |
 
 For example, Codex:
 

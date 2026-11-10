@@ -1,0 +1,34 @@
+[
+  {
+    "provider": "anthropic",
+    "app": "claude-code",
+    "kind": "refusal",
+    "model": "claude-sonnet",
+    "category": "safety",
+    "explanation": "The provider declined this request."
+  },
+  {
+    "provider": "anthropic",
+    "app": "claude-code",
+    "kind": "refusal-recovered",
+    "model": "claude-opus",
+    "category": "policy",
+    "explanation": "The request was answered by a fallback model."
+  },
+  {
+    "provider": "openai",
+    "app": "codex",
+    "kind": "reroute",
+    "model": "gpt-example",
+    "category": "safety",
+    "explanation": "The provider routed this request to another model."
+  },
+  {
+    "provider": "openai",
+    "app": "codex",
+    "kind": "possible-refusal",
+    "model": "gpt-example",
+    "category": "invalid_prompt",
+    "explanation": "The provider returned invalid_prompt; a refusal is not confirmed."
+  }
+]

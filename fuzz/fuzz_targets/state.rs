@@ -9,8 +9,8 @@
 use libfuzzer_sys::fuzz_target;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use xenonet_state::{migrate, statefile, store};
 use xenonet_state::runtime::store::StateStore;
+use xenonet_state::{migrate, statefile, store};
 
 fn dir() -> &'static PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();

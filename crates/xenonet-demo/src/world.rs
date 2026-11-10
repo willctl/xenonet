@@ -1000,7 +1000,7 @@ impl Demo {
     }
 
     pub fn native_projects(&self) -> Value {
-        json!([{ "id": "demo-atlas", "name": "Atlas", "roots": [self.p("atlas-api"), self.p("atlas-web")] }])
+        json!([{ "id": "demo-atlas", "app": "codex", "name": "Atlas", "roots": [self.p("atlas-api"), self.p("atlas-web")] }])
     }
 
     /// A session's transcript as its preview shows it: the last 120 entries.

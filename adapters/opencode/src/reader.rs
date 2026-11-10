@@ -4,6 +4,9 @@
 //! opened read only for each read and closed after it, and SQLite takes the
 //! edits out: a part's other fields never leave the database, apart from
 //! apply_patch's text, whose file headers are kept and the rest dropped.
+//! What its XenoNet plugin says as it happens is `events`.
+
+pub mod events;
 
 use serde_json::{json, Map, Value};
 use xenonet_adapter::formats::patch;
@@ -587,6 +590,14 @@ impl xenonet_adapter::reader::Native for Row {
     }
     fn make(&self) -> Box<dyn NativeReader> {
         Box::new(OpenCode::new())
+    }
+    /// A run numbat recorded takes the id this reader gives it (ses_… as
+    /// ses-…) when that fits.
+    fn run_id(&self, sid: &str) -> Option<String> {
+        Some(xenonet_adapter::formats::opencode::local_id(sid))
+    }
+    fn plugin_events(&self) -> Option<Box<dyn xenonet_adapter::reader::PluginEvents>> {
+        Some(Box::new(events::OpenCodeEvents::new()))
     }
 }
 

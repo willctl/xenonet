@@ -2,15 +2,27 @@
 
 // A transcript's bytes as a read hands them over (a read can end anywhere,
 // inside a line or a character), then every line through the views Claude
-// Code's and Codex's readers take of it, and through each app's mapper to
-// its events.
+// Code's and Codex's readers take of it, through each app's mapper to its
+// events, and through what each tailed app's reader (from its adapter)
+// says of a line: its kind and the app's version.
 
 use libfuzzer_sys::fuzz_target;
-use xenonet_text::json;
+use xenonet_adapter::reader::Tailed;
 use xenonet_sources::line_events::{self, LineFile};
 use xenonet_sources::lines::{self, ClaudeLine, CodexLine};
+use xenonet_text::json;
+
+// The tailed apps' readers, made once: what they say of a line doesn't
+// change them.
+fn readers() -> &'static [Box<dyn Tailed>] {
+    static R: std::sync::OnceLock<Vec<Box<dyn Tailed>>> = std::sync::OnceLock::new();
+    R.get_or_init(|| xenonet_adapter::platforms().tailed())
+}
 
 fn view(raw: serde_json::Value) {
+    for r in readers() {
+        let _ = (r.kind_of(&raw), r.version_of(&raw, None), r.version_of(&raw, Some("1.0.0".into())));
+    }
     let c = ClaudeLine { raw: raw.clone() };
     let _ = (c.kind(), c.ts(), c.meta(), c.sidechain(), c.compact_summary(), c.effort());
     let _ = (c.content(), c.has_results(), c.results(), c.text(), c.interruption());
@@ -31,7 +43,6 @@ fn view(raw: serde_json::Value) {
         let pt = lines::opt_prop(Some(p), "type");
         let it = lines::opt_prop(lines::opt_prop(Some(p), "item"), "type");
         let _ = lines::codex_kind_of(k, pt, it);
-        let _ = lines::codex_version_of(k, lines::opt_prop(Some(p), "cli_version"), None);
         let _ = lines::is_codex_prompt(lines::opt_prop(Some(p), "message"));
     }
     let _ = lines::has_user_messages(&[x]);

@@ -19,6 +19,7 @@
 
 use super::apps::{self, Ways};
 use xenonet_adapter::apps::App;
+use xenonet_adapter::delivery::is_uuid;
 
 /// What a plan asks before a turn starts.
 pub trait Host {
@@ -31,11 +32,6 @@ pub trait Host {
 /// A turn's command: the app whose CLI the runner starts, and its
 /// arguments as they are (the runner quotes them once for the platform).
 pub type Command = (String, Vec<String>);
-
-fn is_uuid(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() == 36 && b.iter().enumerate().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { *c == b'-' } else { c.is_ascii_hexdigit() })
-}
 
 /// The apps whose sessions can be resumed, each with its command
 /// (`apps`).
@@ -67,31 +63,28 @@ pub fn resume_command(agent: &str, settings: Option<&str>) -> Option<Command> {
     Some(resume(id, settings))
 }
 
-/// The command for a copy of a Claude Code session that a process holds:
-/// its whole context under a new id, which the stream's first event
-/// names. None for any other app or id.
+/// The command for a copy of a session that a process holds, for an app
+/// whose adapter copies one (Claude Code): its whole context under a new
+/// id, which the stream's first event names. None for any other app or
+/// id.
 ///
 /// ```text
 /// claude -p --resume <id> --fork-session --output-format stream-json --verbose [--settings <listen file>]
 /// ```
 pub fn fork_command(agent: &str, settings: Option<&str>) -> Option<Command> {
-    let id = agent.strip_prefix("claude:").filter(|id| is_uuid(id))?;
-    let mut args: Vec<String> = ["-p", "--resume", id, "--fork-session", "--output-format", "stream-json", "--verbose"].into_iter().map(str::to_string).collect();
-    if let Some(s) = settings.filter(|s| !s.is_empty()) {
-        args.push("--settings".into());
-        args.push(s.to_string());
-    }
-    Some(("claude".into(), args))
+    let (app, id) = agent.split_once(':')?;
+    let fork = apps::of(app)?.fork.filter(|_| is_uuid(id))?;
+    Some(fork(id, settings))
 }
 
-/// A Claude Code turn XenoNet runs asks its permission prompts of you,
-/// through the xenonet MCP server (`server`, its name in the session's
-/// settings) and its `permission` tool, as a started session does. Other
-/// apps' arguments are as they are.
+/// A turn XenoNet runs of an app that takes a permission prompt tool
+/// (Claude Code) asks its permission prompts of you, through the xenonet
+/// MCP server (`server`, its name in the session's settings) and its
+/// `permission` tool, as a started session does. Other apps' arguments
+/// are as they are.
 pub fn with_permission_tool(app: &str, mut args: Vec<String>, server: &str) -> Vec<String> {
-    if app == "claude" {
-        args.push("--permission-prompt-tool".into());
-        args.push(format!("mcp__{server}__permission"));
+    if let Some(tool) = apps::of(app).and_then(|w| w.permission_tool) {
+        args.extend(tool(server));
     }
     args
 }

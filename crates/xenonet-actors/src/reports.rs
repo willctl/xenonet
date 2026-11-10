@@ -31,7 +31,6 @@ const AHEAD_MS: f64 = 60e3;
 const KINDS: [&str; 6] = ["spawned", "edited", "ran", "messaged", "finished", "failed"];
 const PLATFORMS: [&str; 12] = ["telegram", "discord", "slack", "whatsapp", "signal", "matrix", "mattermost", "email", "sms", "imessage", "teams", "other"];
 const SUBJECTS: [&str; 5] = ["session", "task", "job", "turn", "command"];
-const APPS: [&str; 3] = ["claude", "codex", "other"];
 
 /// What a report asks of the world: the registry, the map, the engine's
 /// pins, and the actor's own processes.
@@ -394,7 +393,9 @@ pub fn take_events(host: &mut dyn Host, id: &str, events: &[Value], now: f64) ->
         }
         let app_given = e.get("app");
         let app = if kind == "spawned" && !nullish(app_given) {
-            if one_of(&APPS, app_given) {
+            // The apps an actor's events name are those XenoNet hands
+            // sessions to; any other is "other".
+            if app_given.and_then(Value::as_str).is_some_and(|a| xenonet_adapter::apps::asked_or_text(Some(a), None).is_some()) {
                 app_given.cloned()
             } else {
                 Some(json!("other"))

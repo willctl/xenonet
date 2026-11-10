@@ -15,23 +15,12 @@ const MAX_FORMS: usize = 4;
 const MAX_CALLS: usize = 200;
 const MAX_RESULT: usize = 40000;
 
-// Hosts that name a platform, not the service on it.
-const INFRA: [&str; 14] = [
-    "amazonaws",
-    "cloudfront",
-    "cloudflare",
-    "googleusercontent",
-    "googleapis",
-    "gstatic",
-    "githubusercontent",
-    "azureedge",
-    "example",
-    "w3",
-    "schema",
-    "claude",
-    "anthropic",
-    "modelcontextprotocol",
-];
+// Hosts that name a platform, not the service on it (a vendor's own
+// domains among them), kept as data.
+fn infra() -> &'static [String] {
+    static I: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    I.get_or_init(|| serde_json::from_str(include_str!("infra_hosts.json")).unwrap_or_default())
+}
 const SECOND_LEVEL: [&str; 7] = ["co", "com", "org", "net", "gov", "edu", "ac"];
 const GENERIC_LEAD: [&str; 15] = ["Note", "Notes", "Important", "Usage", "Tool", "Tools", "Use", "Warning", "Instructions", "Rules", "Overview", "Server", "You", "This", "The"];
 const GENERIC_TAIL: [&str; 8] = ["Tool", "Tools", "MCP", "Server", "Connector", "Integration", "API", "Plugin"];
@@ -81,7 +70,7 @@ pub fn label_of(host: &str) -> Option<String> {
     let label = *parts.get(i)?;
     let b = label.as_bytes();
     let fits = b.first().is_some_and(u8::is_ascii_lowercase) && (3..=24).contains(&b.len()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-    (fits && !INFRA.contains(&label)).then(|| label.to_string())
+    (fits && !infra().iter().any(|h| h == label)).then(|| label.to_string())
 }
 
 // /^[A-Z][A-Za-z0-9]*$/

@@ -26,7 +26,6 @@ pub const LABEL_MAX: usize = 240;
 pub const LIVE_MS: f64 = 30e3;
 pub const WINDOW_MS: f64 = 7.0 * 24.0 * 3600e3;
 pub const LOOKBACK_MAX_MS: f64 = 30.0 * 24.0 * 3600e3;
-pub const SOURCE_NAMES: [&str; 3] = ["claude", "codex", "grok"];
 
 /// A time as an ISO string, or null for one that isn't a time after 1970.
 pub fn iso(v: Option<&Value>) -> Value {
@@ -317,8 +316,10 @@ pub fn freshness_of(view: &Value, now: f64, names: &[String]) -> Freshness {
     Freshness { freshness: if now - oldest <= LIVE_MS { "live" } else { "stale" }, observed_at: Some(oldest), partial, warnings }
 }
 
+/// The sources a view has: the apps whose sessions XenoNet tails (the
+/// registry's `lines`), by id, in its order.
 pub fn all_sources() -> Vec<String> {
-    SOURCE_NAMES.iter().map(ToString::to_string).collect()
+    xenonet_adapter::apps::with("lines").map(|a| a.id.clone()).collect()
 }
 
 fn put(m: &mut Map<String, Value>, k: &str, v: Option<&Value>) {
@@ -329,9 +330,9 @@ fn put(m: &mut Map<String, Value>, k: &str, v: Option<&Value>) {
 
 pub fn sources_data(view: &Value) -> Value {
     Value::Array(
-        SOURCE_NAMES
+        all_sources()
             .iter()
-            .map(|name| match view.get("sources").and_then(|s| s.get(*name)).filter(|s| truthy(Some(s))) {
+            .map(|name| match view.get("sources").and_then(|s| s.get(name)).filter(|s| truthy(Some(s))) {
                 Some(s) => {
                     let mut m = Map::new();
                     m.insert("source".into(), json!(name));

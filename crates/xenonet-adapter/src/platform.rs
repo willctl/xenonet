@@ -9,9 +9,10 @@
 //! connect its app.
 
 use crate::apps::App;
-use crate::check::{Check, CheckRow};
+use crate::check::{Check, CheckCtx, CheckRow, Stop};
 use crate::connect::{Format, Shared};
 use crate::delivery::Ways;
+use crate::dirs;
 use crate::observe::Observer;
 use crate::open::Opener;
 use crate::processes::Rules;
@@ -19,6 +20,7 @@ use crate::reader::{Lister, ListerEnv, Native, Tailed};
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_model::actions::HookEvent;
+use xenonet_os::paths::Zone;
 
 /// A hook an app sent, read into what the engine acts on.
 #[derive(Clone, Debug, PartialEq)]
@@ -114,6 +116,165 @@ pub trait Platform: Send + Sync {
     fn opener(&self) -> Option<Opener> {
         None
     }
+
+    // ----- the doctor, the integrations and the map's zones -----
+
+    /// The command `xenonet diagnose --ask` starts in the bundle's folder,
+    /// for an app it asks (the registry's `ASKED`): the program and its
+    /// arguments.
+    fn ask(&self, _ask: &Ask<'_>) -> Option<(String, Vec<String>)> {
+        None
+    }
+
+    /// The facts this adapter's doctor checks read that the doctor gathers
+    /// on the machine they run on (`home` its home folder, `env` where
+    /// desktop apps keep their folders, `look` its disk): each key and its
+    /// value, in order.
+    fn doctor_facts(&self, _home: &str, _env: &dirs::Env, _look: &mut dyn dirs::Look) -> Vec<(&'static str, Value)> {
+        Vec::new()
+    }
+
+    /// Whether the app is installed, for an app whose session source runs
+    /// a program of the app's own: where it isn't, what that source can't
+    /// read is no failure.
+    fn presence(&self) -> Option<Box<dyn Presence>> {
+        None
+    }
+
+    /// The doctor's words for how many of its sessions the map reads
+    /// (`count`, as the source's health has it), or None to leave it out.
+    fn counted_words(&self, _count: &Value) -> Option<String> {
+        None
+    }
+
+    /// The zone that groups the throwaway folders the app makes, for an
+    /// app that makes them.
+    fn scratch(&self) -> Option<Scratch> {
+        None
+    }
+
+    // ----- the map's lists, folders and sign-ins (xenonet-state) -----
+
+    /// The map's setting that names the app's folder (Claude Code's
+    /// projects folder, Codex's home, Grok Build's home), for an app whose
+    /// sessions the map lists or whose transcripts it reads.
+    fn folder_setting(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// The folders its transcripts are in, under its folder (`folder`):
+    /// where it writes them now first, which the live tailer follows, then
+    /// where it archives them, which search and stats read too.
+    fn transcript_dirs(&self, _folder: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// A finder of its sessions' transcript files for stats, new for each
+    /// map.
+    fn session_files(&self) -> Option<Box<dyn SessionFiles>> {
+        None
+    }
+
+    /// The name of the gatherer that lists its sessions for the map.
+    fn sessions_gatherer(&self) -> String {
+        format!("{}-sessions", self.id())
+    }
+
+    /// Whether its lister keeps projects of its own (Codex desktop's),
+    /// which the map gathers as the source `<id>-projects`. The map lists
+    /// such an app's sessions and sources before the others'.
+    fn keeps_projects(&self) -> bool {
+        false
+    }
+
+    /// Whether XenoNet renames its sessions where the app keeps their
+    /// names (its lister's `rename`).
+    fn renames(&self) -> bool {
+        false
+    }
+
+    /// The program that runs the app on this machine, for an app XenoNet
+    /// runs turns of its own with (the registry's `sorts`), when the
+    /// adapter finds one; the app's id on the PATH otherwise.
+    fn program(&self, _env: &dirs::Env, _platform: &str, _home: &str, _look: &mut dyn dirs::Look) -> Option<String> {
+        None
+    }
+
+    /// How XenoNet reads the account the app is signed in to, for an app
+    /// with an identity (the registry's `identity`).
+    fn signin(&self) -> Option<Signin> {
+        None
+    }
+}
+
+/// Finds a session's transcript files, for stats.
+pub trait SessionFiles: Send {
+    /// A session's files (its own, then its subagents', each with the
+    /// subagent it's from), by the run's own id (`raw`), under the app's
+    /// transcript folders (`dirs`), as of `now`.
+    fn files(&mut self, dirs: &[String], raw: &str, now: f64) -> Vec<(String, Option<String>)>;
+}
+
+/// Where an app keeps the account it's signed in to, and how XenoNet
+/// reads it.
+#[derive(Clone, Copy, Debug)]
+pub struct Signin {
+    /// The map's setting that names the file, or with `file`, the folder
+    /// it's in.
+    pub setting: &'static str,
+    /// The file's name in that folder, when the setting names a folder.
+    pub file: Option<&'static str>,
+    /// The file's JSON read into identity/v1's account, or null for none,
+    /// its records checked through the vendor's schemas.
+    pub read: fn(&Value, &dyn crate::reader::VendorCheck) -> Value,
+    /// The kinds its accounts were saved under before (Codex's `openai`).
+    pub aliases: &'static [&'static str],
+    /// The provider a session must name, or name none, to run under this
+    /// account (Codex's `openai`); None for a session of any.
+    pub provider: Option<&'static str>,
+    /// Whether its transcripts name the account each session ran as
+    /// (Claude Code's), read under its folder.
+    pub owners: bool,
+}
+
+/// What `xenonet diagnose --ask` gives the app it starts: the model
+/// chosen, the bundle's folder, the folders of XenoNet's docs and code it
+/// may read, and the prompt, which names AGENTS.md (the brief beside the
+/// bundle, written as CLAUDE.md too).
+#[derive(Clone, Copy, Debug)]
+pub struct Ask<'a> {
+    pub model: Option<&'a str>,
+    pub dir: &'a str,
+    pub sources: &'a [String],
+    pub prompt: &'a str,
+}
+
+/// Whether an app is installed here, as the doctor's checks see the
+/// machine.
+#[async_trait::async_trait(?Send)]
+pub trait Presence {
+    async fn installed(&self, c: &dyn CheckCtx) -> Result<bool, Stop>;
+}
+
+/// A zone of the map that groups the throwaway folders an app makes: its
+/// id, its name, and whether a folder's key (`xenonet_os::paths::path_key`)
+/// is one of them.
+#[derive(Clone, Copy, Debug)]
+pub struct Scratch {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub holds: fn(&str) -> bool,
+}
+
+/// The zone a folder's key belongs to: the first adapter's scratch zone
+/// that holds it, in the registry's order, then the temp folders', or
+/// None.
+pub fn scratch_zone(key: &str) -> Option<Zone> {
+    if key.is_empty() {
+        return None;
+    }
+    let apps = platforms().iter().find_map(|p| p.scratch().filter(|s| (s.holds)(key)).map(|s| Zone { id: s.id, name: s.name, app: Some(p.id()) }));
+    apps.or_else(|| xenonet_os::paths::temp_zone(key).copied())
 }
 
 /// A hook in Claude Code's shape (`session_id`, `cwd`, `tool_name`,

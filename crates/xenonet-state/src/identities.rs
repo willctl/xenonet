@@ -13,6 +13,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::LazyLock;
+use xenonet_adapter::apps::App;
 use xenonet_os::paths;
 use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_text::text::{display, is_line_terminator, to_number, trim, trim_start, truthy, DOT, SPACE};
@@ -61,10 +62,6 @@ fn tpl(v: Js<'_>) -> String {
     v.map_or_else(|| "undefined".into(), display)
 }
 
-fn opt_str(v: Option<String>) -> Value {
-    v.map_or(Value::Null, Value::String)
-}
-
 // raw.length - raw.trimStart().length
 fn indent_of(raw: &str) -> usize {
     utf16::len(raw) - utf16::len(trim_start(raw))
@@ -87,99 +84,9 @@ fn unquote(v: &str) -> String {
 }
 
 // ---------- what each app says ----------
-
-fn plan_of(t: Js<'_>) -> Value {
-    match t.and_then(Value::as_str) {
-        Some("claude_max") => "Max".into(),
-        Some("claude_pro") => "Pro".into(),
-        Some("claude_team") => "Team".into(),
-        Some("claude_enterprise") => "Enterprise".into(),
-        _ => Value::Null,
-    }
-}
-
-/// The account Claude Code is signed in to, from ~/.claude.json's
-/// oauthAccount. Never the name fields.
-pub fn claude_account(data: Js<'_>) -> Value {
-    let a = opt_prop(data, "oauthAccount");
-    let get = |k: &str| opt_prop(a, k);
-    if str_of(get("accountUuid")).is_none() || str_of(get("organizationUuid")).is_none() {
-        return Value::Null;
-    }
-    let ty = nn(get("organizationType")).map_or_else(String::new, display).to_ascii_lowercase();
-    let team = ty.contains("team") || ty.contains("enterprise");
-    json!({
-        "id": format!("claude:{}:{}", tpl(get("accountUuid")), tpl(get("organizationUuid"))),
-        "kind": "claude",
-        "handle": opt_str(str_of(get("emailAddress"))),
-        // A personal organization is named after the email, so only a team's name says anything.
-        "detail": { "plan": plan_of(get("organizationType")), "org": if team { opt_str(str_of(get("organizationName"))) } else { Value::Null } },
-    })
-}
-
-// Buffer.from(s, "base64url"): both alphabets, other characters passed
-// over, and the end at the first "=".
-fn base64url(s: &str) -> Vec<u8> {
-    let mut bits = 0u32;
-    let mut n = 0;
-    let mut out = Vec::new();
-    for c in s.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            b'=' => break,
-            _ => continue,
-        };
-        bits = (bits << 6) | u32::from(v);
-        n += 6;
-        if n >= 8 {
-            n -= 8;
-            out.push((bits >> n) as u8);
-            bits &= (1 << n) - 1;
-        }
-    }
-    out
-}
-
-/// The claims in Codex's ID token (~/.codex/auth.json), decoded without
-/// verifying; null when there are none to read. Nothing else in the file
-/// is read.
-pub fn id_token_claims(auth: Js<'_>) -> Value {
-    if !truthy(auth) || !matches!(auth, Some(Value::Object(_) | Value::Array(_))) {
-        return Value::Null;
-    }
-    let token = tpl(opt_prop(opt_prop(auth, "tokens"), "id_token"));
-    let Some(part) = token.split('.').nth(1) else { return Value::Null };
-    js_json::parse(&String::from_utf8_lossy(&base64url(part))).unwrap_or(Value::Null)
-}
-
-/// Codex's sign-in, from auth.json and its ID token's claims (as the lenient
-/// reader left them). An API key sign-in says nothing about who.
-pub fn chatgpt_account(auth: Js<'_>, claims: Js<'_>) -> Value {
-    if !truthy(auth) || !matches!(auth, Some(Value::Object(_) | Value::Array(_))) {
-        return Value::Null;
-    }
-    let empty = Value::Object(Map::new());
-    let oa = nn(opt_prop(claims, "https://api.openai.com/auth")).unwrap_or(&empty);
-    let oa = Some(oa);
-    let tokens = opt_prop(auth, "tokens");
-    let workspace = str_of(opt_prop(oa, "chatgpt_account_id")).or_else(|| str_of(opt_prop(tokens, "account_id")));
-    let mode = nn(opt_prop(auth, "auth_mode"));
-    if let Some(w) = workspace {
-        if mode.is_none() || mode.and_then(Value::as_str) == Some("chatgpt") {
-            let since = to_number(opt_prop(claims, "auth_time")) * 1000.0;
-            let since = if since == 0.0 || since.is_nan() { Value::Null } else { js_json::number(since) };
-            return json!({ "id": format!("chatgpt:{w}"), "kind": "chatgpt", "handle": opt_str(str_of(opt_prop(claims, "email"))), "detail": { "plan": opt_str(str_of(opt_prop(oa, "chatgpt_plan_type"))) }, "since": since });
-        }
-    }
-    if truthy(opt_prop(auth, "OPENAI_API_KEY")) || mode.and_then(Value::as_str) == Some("apikey") {
-        return json!({ "id": "openai:api-key", "kind": "openai", "handle": null, "detail": { "plan": null } });
-    }
-    Value::Null
-}
+//
+// Claude Code's and Codex's sign-ins are read by their adapters
+// (`Platform::signin`).
 
 /// gh's hosts.yml: each host's signed-in users and the active one. A
 /// line-by-line read of the little YAML gh writes; values other than user
@@ -797,12 +704,14 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         Some(Value::Array(a)) => a,
         Some(_) => return Err(TypeError("gh is not iterable".into())),
     };
-    let file_of = |k: &str, dflt: &str| nn(acc(k)).map_or_else(|| dflt.to_string(), display);
-    if let Some(claude) = acc("claude").filter(|v| truthy(Some(v))) {
-        recs.record(claude, Some(&source(file_of("claudeFile", "~/.claude.json"))), &[("signedIn", Value::Bool(true))]);
-    }
-    if let Some(chatgpt) = acc("chatgpt").filter(|v| truthy(Some(v))) {
-        recs.record(chatgpt, Some(&source(file_of("chatgptFile", "~/.codex/auth.json"))), &[("signedIn", Value::Bool(true))]);
+    // The kinds of account the apps run under (the registry's `identity`):
+    // each one's sign-in, in `<kind>`, read from the file in `<kind>File`.
+    let kinds: Vec<(&'static str, &'static App)> = xenonet_adapter::apps::identities().collect();
+    for (kind, _) in &kinds {
+        if let Some(a) = acc(kind).filter(|v| truthy(Some(v))) {
+            let file = nn(acc(&format!("{kind}File"))).map(|f| source(display(f)));
+            recs.record(a, file.as_deref(), &[("signedIn", Value::Bool(true))]);
+        }
     }
     let lower = |v: Js<'_>, what: &str| -> Result<String, TypeError> {
         match v {
@@ -836,7 +745,7 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
     let empty = Value::Object(Map::new());
     let saved_signins = nn(opt_prop(Some(saved), "signins")).unwrap_or(&empty);
     let mut signins: HashMap<&'static str, Vec<Value>> = HashMap::new();
-    for app in ["claude", "chatgpt"] {
+    for &(app, _) in &kinds {
         let spans = match nn(opt_prop(Some(saved_signins), app)) {
             None => Vec::new(),
             Some(Value::Array(a)) => a.clone(),
@@ -844,12 +753,12 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         };
         signins.insert(app, spans);
     }
-    for app in ["claude", "chatgpt"] {
+    for &(app, _) in &kinds {
         let a = acc(app);
         if !truthy(a) {
             continue;
         }
-        let spans = signins.get_mut(app).expect("both apps' timelines are read above");
+        let spans = signins.get_mut(app).expect("every kind's timeline is read above");
         let op = note_signin(spans, a.and_then(|x| x.get("id")).unwrap_or(&Value::Null), now, opt_prop(a, "since"));
         if op != Signin::Same {
             out.dirty = true;
@@ -873,8 +782,14 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         }
     }
     let is = |n: &Value, k: &str, v: &str| n.get(k).and_then(Value::as_str) == Some(v);
+    // The kind of account a session's app runs under, and how its adapter
+    // reads it.
+    let kind_of = |n: &Value| -> Option<(&'static str, Option<xenonet_adapter::platform::Signin>)> {
+        let a = xenonet_adapter::apps::app(n.get("app").and_then(Value::as_str)?)?;
+        Some((a.identity.as_deref()?, xenonet_adapter::platforms().get(&a.id).and_then(|p| p.signin())))
+    };
     for n in nodes {
-        if is(n, "kind", "session") && is(n, "app", "claude") && truthy(n.get("claudeAccount")) {
+        if is(n, "kind", "session") && kind_of(n).is_some() && truthy(n.get("claudeAccount")) {
             recorded.push(claude_of(&n["claudeAccount"])?);
         }
     }
@@ -890,10 +805,17 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         }
         Ok(ids)
     };
-    let mut claude_known = known_of("claude")?;
-    claude_known.extend(recorded.into_iter().map(Value::String));
-    let mut chatgpt_known = known_of("chatgpt")?;
-    chatgpt_known.extend(known_of("openai")?);
+    // The accounts of each kind XenoNet has seen: saved under the kind or
+    // one it had before, and those the sessions' records name.
+    let mut known: HashMap<&'static str, Vec<Value>> = HashMap::new();
+    for &(kind, a) in &kinds {
+        let mut ids = known_of(kind)?;
+        ids.extend(recorded.iter().filter(|id| id.split(':').next() == Some(kind)).map(|id| Value::String(id.clone())));
+        for alias in xenonet_adapter::platforms().get(&a.id).and_then(|p| p.signin()).map_or(&[][..], |s| s.aliases) {
+            ids.extend(known_of(alias)?);
+        }
+        known.insert(kind, ids);
+    }
     let current = |a: Js<'_>| -> Value {
         if truthy(a) {
             json!({ "id": opt_prop(a, "id").cloned().unwrap_or(Value::Null), "since": nn(opt_prop(a, "since")).cloned().unwrap_or(Value::Null) })
@@ -910,16 +832,19 @@ pub fn link_identities(input: LinkInput<'_>) -> Result<LinkOutput, TypeError> {
         let when = nn(n.get("updatedAt")).or(n.get("createdAt"));
         let l = if truthy(pin) {
             link(prop(pin, "identity")?.cloned().unwrap_or(Value::Null), "yours", "your pin")
-        } else if is(n, "app", "claude") {
+        } else if let Some((kind, signin)) = kind_of(n) {
+            // A session runs under its app's account when it names the
+            // provider that account is for, or none.
+            let provider = signin.and_then(|s| s.provider);
             if truthy(n.get("claudeAccount")) {
                 link(Value::String(claude_of(&n["claudeAccount"])?), "exact", "Claude desktop's session folder")
             } else if let Some(o) = owners_by.get(&key_of(n.get("id"))).filter(|o| truthy(Some(o))) {
                 link(Value::String(claude_of(o)?), "exact", "its transcript")
+            } else if provider.is_none_or(|p| !truthy(n.get("provider")) || is(n, "provider", p)) {
+                account_at(&signins[kind], Some(&current(acc(kind))), when, &known[kind])
             } else {
-                account_at(&signins["claude"], Some(&current(acc("claude"))), when, &claude_known)
+                Value::Null
             }
-        } else if is(n, "app", "codex") && (!truthy(n.get("provider")) || is(n, "provider", "openai")) {
-            account_at(&signins["chatgpt"], Some(&current(acc("chatgpt"))), when, &chatgpt_known)
         } else {
             Value::Null
         };
@@ -1400,23 +1325,6 @@ fn owner_in(file: &str, len: u64) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reads_the_apps_files() {
-        let a = claude_account(Some(
-            &json!({ "oauthAccount": { "accountUuid": "a", "organizationUuid": "o", "emailAddress": " n@x ", "organizationType": "claude_team", "organizationName": "Atlas" } }),
-        ));
-        assert_eq!(a, json!({ "id": "claude:a:o", "kind": "claude", "handle": "n@x", "detail": { "plan": "Team", "org": "Atlas" } }));
-        assert_eq!(claude_account(Some(&json!({}))), Value::Null);
-        let claims = json!({ "email": "n@x", "auth_time": 1_700_000_000, "https://api.openai.com/auth": { "chatgpt_account_id": "ws", "chatgpt_plan_type": "plus" } });
-        let token = format!("e30.{}.sig", "eyJhIjoxfQ");
-        assert_eq!(id_token_claims(Some(&json!({ "tokens": { "id_token": token } }))), json!({ "a": 1 }));
-        let auth = json!({ "auth_mode": "chatgpt", "tokens": {} });
-        assert_eq!(chatgpt_account(Some(&auth), Some(&claims))["since"], json!(1_700_000_000_000u64));
-        assert_eq!(chatgpt_account(Some(&json!({ "auth_mode": "apikey" })), None)["id"], "openai:api-key");
-        assert_eq!(base64url("e30=xyz"), b"{}");
-        assert_eq!(base64url("e3$0"), b"{}");
-    }
 
     #[test]
     fn reads_gh_and_ssh() {

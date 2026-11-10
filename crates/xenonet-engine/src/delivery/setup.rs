@@ -6,7 +6,7 @@
 
 use super::opencode::Server;
 use super::{number_text, Files, Result};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 /// Commands and the OpenCode servers, as the doctor's live check reads
 /// them.
@@ -79,33 +79,48 @@ fn shell_path(file: &str, home: &str) -> String {
     }
 }
 
-/// What live delivery needs here: Claude Code's version and whether it has
-/// channels, the commands to start a session with them and listening, tmux,
-/// and the OpenCode servers found.
+/// What live delivery needs here: the version of the app with channels
+/// (Claude Code) and whether it has them, the commands to start a session
+/// with them and listening, tmux, the alias that starts the app whose own
+/// server takes messages (OpenCode), and its servers found. Each app's
+/// part is keyed by its id, and its commands are its adapter's.
 pub fn live_setup(h: &mut dyn Host, port: f64, listen_file: Option<&str>, home: &str) -> Value {
     let name = mcp_server_name(port);
-    let claude = h.exec("claude", &["--version"]);
+    let ways = super::apps::apps();
+    let channeled = ways.iter().find(|(_, w)| w.channel_command.is_some());
+    let served = ways.iter().find(|(_, w)| w.server_alias.is_some());
+    // The commands run in the order they always have: the version, tmux,
+    // then the servers.
+    let asked = channeled.and_then(|(_, w)| w.version).and_then(|(program, args)| h.exec(program, args));
     let tmux = h.exec("tmux", &["-V"]);
+    let mut out = Map::new();
+    if let Some((app, w)) = channeled {
+        let version = match &asked {
+            None => Value::Null,
+            Some(text) => Value::String(crate::re!(r"[0-9]+\.[0-9]+\.[0-9]+").find(text).map_or_else(|| text.clone(), |m| m.as_str().to_string())),
+        };
+        let command = w.channel_command.map(|c| c(&name)).unwrap_or_default();
+        let listen = match (listen_file.filter(|f| !f.is_empty()), w.listen_command) {
+            (Some(f), Some(l)) => Value::String(l(&shell_path(f, home))),
+            _ => Value::Null,
+        };
+        out.insert(app.id.clone(), json!({ "version": version, "channels": newer(asked.as_deref(), &CHANNELS_FROM) }));
+        out.insert("command".into(), json!(command));
+        if let Some((program, _)) = w.version {
+            out.insert("alias".into(), json!(format!("alias {program}='{command}'")));
+        }
+        out.insert("listen".into(), listen);
+    }
     let servers = h.servers();
-    let command = format!("claude --dangerously-load-development-channels server:{name}");
-    let version = match &claude {
-        None => Value::Null,
-        Some(text) => Value::String(crate::re!(r"[0-9]+\.[0-9]+\.[0-9]+").find(text).map_or_else(|| text.clone(), |m| m.as_str().to_string())),
-    };
-    let listen = match listen_file.filter(|f| !f.is_empty()) {
-        Some(f) => Value::String(format!("claude --settings {}", shell_path(f, home))),
-        None => Value::Null,
-    };
+    if let Some((app, w)) = served {
+        out.insert(format!("{}Alias", app.id), json!(w.server_alias));
+    }
     let tmux = tmux.map_or(Value::Null, |t| Value::String(crate::re!(r"^tmux[\s\x{FEFF}--\x{85}]+").replace(&t, "").into_owned()));
-    json!({
-        "claude": { "version": version, "channels": newer(claude.as_deref(), &CHANNELS_FROM) },
-        "command": command,
-        "alias": format!("alias claude='{command}'"),
-        "listen": listen,
-        "opencodeAlias": "alias opencode='opencode --hostname 127.0.0.1'",
-        "tmux": tmux,
-        "opencode": servers.iter().map(|s| s.base.clone()).collect::<Vec<_>>(),
-    })
+    out.insert("tmux".into(), tmux);
+    if let Some((app, _)) = served {
+        out.insert(app.id.clone(), json!(servers.iter().map(|s| s.base.clone()).collect::<Vec<_>>()));
+    }
+    Value::Object(out)
 }
 
 #[cfg(test)]
@@ -141,8 +156,15 @@ mod tests {
 
     #[test]
     fn the_live_setup_says_what_is_here() {
+        xenonet_platforms::install();
         let v = live_setup(&mut Machine, 47842.0, Some("/home/me/.xenonet/listen-47842.json"), "/home/me");
         assert_eq!(v["claude"], json!({ "version": "2.1.90", "channels": true }));
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["claude", "command", "alias", "listen", "opencodeAlias", "tmux", "opencode"]);
+        assert_eq!(
+            (&v["alias"], &v["opencodeAlias"]),
+            (&json!("alias claude='claude --dangerously-load-development-channels server:xenonet-dev'"), &json!("alias opencode='opencode --hostname 127.0.0.1'"))
+        );
         assert_eq!(v["command"], "claude --dangerously-load-development-channels server:xenonet-dev");
         assert_eq!(v["tmux"], "3.4");
         assert_eq!(v["opencode"], json!(["http://127.0.0.1:4096"]));

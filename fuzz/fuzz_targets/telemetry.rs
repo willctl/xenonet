@@ -1,17 +1,19 @@
 #![no_main]
 
 // The live reader: a transcript's lines, one after another, into one
-// Telemetry, as the tailer hands them over, then everything the map asks
-// of it. The first byte picks Claude Code or Codex, a subagent's file or
-// the session's own, and whether each line also comes as a hook's body,
-// Anthropic's answer and Claude desktop's samples.
+// Telemetry, as the tailer hands them over (each app's reader comes from
+// its adapter, as in the service), then everything the map asks of it.
+// The first byte picks Claude Code or Codex, a subagent's file or the
+// session's own, and whether each line also comes as a hook's body, a
+// plan usage answer and Claude desktop's samples.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
-use xenonet_text::json;
+use xenonet_adapter::reader::{Tail, Unchecked, Where};
 use xenonet_sources::lines;
-use xenonet_sources::live::telemetry::{Telemetry, Where};
+use xenonet_sources::live::telemetry::Telemetry;
 use xenonet_sources::refusals::{detect, store};
+use xenonet_text::json;
 
 const NOW: f64 = 1_791_230_000_000.0;
 
@@ -38,11 +40,11 @@ fuzz_target!(|data: &[u8]| {
             let mut out = Vec::new();
             if how & 4 != 0 {
                 let _ = t.note_hook(id, Some(&v), now, &mut out);
-                let _ = t.claude_asked(Some(&v), now);
-                t.desktop_read(&v);
-                t.note_codex_limits(&v, now);
+                let _ = t.usage_reading("claude", Some(&v), now);
+                t.usage_samples("claude", &v);
+                let _ = t.usage_reading("codex", Some(&v), now);
             }
-            let _ = t.line(if codex { "codex" } else { "claude" }, &f, v.clone(), n % 3 != 0, now, &mut out);
+            let _ = t.line(if codex { "codex" } else { "claude" }, &Unchecked, &f, v.clone(), n % 3 != 0, now, &mut out);
             all.push(v);
         }
         for v in &all {
@@ -62,22 +64,18 @@ fuzz_target!(|data: &[u8]| {
         if let Some(l) = taken.lines.first() {
             let _ = t.classify(l);
         }
-        t.settle_claude();
+        t.settle_usage("claude");
+        t.settle_usage("codex");
+        t.settle(now + 3_600_000.0);
         for later in [now, now + 60_000.0, now + 8.0 * 86_400_000.0] {
             let snap = t.snapshot(later);
             let _ = Telemetry::collab(&[snap.clone(), snap]);
             let _ = t.collisions(later);
-            let _ = t.limit_forecast(later);
-            let _ = t.claude_limits(later);
             let _ = t.costs(later, &all);
             let _ = t.session_costs(later);
             let _ = t.session_notes(id, later);
         }
         let _ = t.collision_diffs(id, "claude:0190d3e0-0000-7000-8000-000000000003");
         let _ = t.pending_label();
-        for which in ["codex", "claude"] {
-            let _ = t.limits(which);
-            let _ = t.limit_samples(which);
-        }
     });
 });

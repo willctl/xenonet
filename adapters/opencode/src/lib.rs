@@ -36,7 +36,7 @@ impl Platform for Adapter {
     }
 
     fn delivery(&self) -> Option<Ways> {
-        Some(Ways { server: true, ..Ways::default() })
+        Some(Ways { server: true, server_alias: Some("alias opencode='opencode --hostname 127.0.0.1'"), ..Ways::default() })
     }
 
     fn native(&self) -> Option<Box<dyn Native>> {

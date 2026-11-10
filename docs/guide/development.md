@@ -154,16 +154,16 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | Target | What it reads |
 | --- | --- |
 | `json` | JSON as XenoNet parses and writes it |
-| `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, into the live map |
+| `lines`, `telemetry` | Claude Code transcripts and Codex rollouts, line by line, through each adapter's reader into the live map |
 | `transcript_files` | Transcript files on disk: the session listing, the lenient normalizers, rollout pages, archived rollouts' Zstandard, stats |
 | `schema` | Records checked against the vendor schemas, and read as XenoNet's own types |
 | `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context (`wiki`) |
-| `base` | Strings, times, paths, git remotes and model names |
-| `http`, `hooks` | The service's routes, hook payloads and the actor gateway |
+| `base` | Strings, times, paths and the adapters' scratch zones, git remotes and model names |
+| `http`, `hooks` | The service's routes, Claude Code's, Codex's and Grok Build's hook payloads, and the actor gateway |
 | `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
 | `tools` | What other tools print or keep: gh's and ssh's config, git's, ps, lsof, netstat, tmux, Codex's picks |
 | `net_frame`, `net_roster` | The network's frames and roster entries, checked against a roster and opened |
-| `net_request`, `net_bodies` | The gateway's routes, the answers a host reads from it, and the bodies the engine takes from other machines |
+| `net_request`, `net_bodies` | The gateway's routes, the answers a host reads from it, and the bodies the engine takes from other machines, read back through the engine's driver |
 | `net_relay` | The map between machines: a console's asks at a host's relay, the paths it serves, and the relay's answers at the console's hub |
 | `net_svc` | Services through the network: the paths, requests, answers, addresses and headers a host checks before it passes a request to a service it published, and before a program gets the answer |
 | `a2a_rpc` | A2A's JSON-RPC requests and its event streams |

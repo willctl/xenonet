@@ -4,7 +4,7 @@
 //! folders.
 
 use serde_json::{json, Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use xenonet_components::config::{config, Field, Finds};
 use xenonet_text::text::display;
 
@@ -45,6 +45,9 @@ pub struct MapConfig {
     pub env_projects_dir: Option<String>,
     /// The environment the service runs in.
     pub env: Map<String, Value>,
+    /// The settings the adapters name (an app's folder, its sign-in's
+    /// file), by name.
+    pub named: HashMap<String, String>,
 }
 
 struct Found<'a> {
@@ -161,6 +164,8 @@ impl MapConfig {
         };
         let flag = |k: &str| json(k) == Value::Bool(true);
         let env_projects_dir = if demo { None } else { var(&env, "XENONET_PROJECTS_DIR").filter(|d| !d.is_empty()) };
+        let named =
+            xenonet_adapter::platforms().iter().flat_map(|p| p.folder_setting().into_iter().chain(p.signin().map(|s| s.setting))).map(|k| (k.to_string(), text(k))).collect();
         MapConfig {
             demo: flag("demo"),
             host: text("host"),
@@ -189,6 +194,7 @@ impl MapConfig {
             platform: platform.into(),
             env_projects_dir,
             env,
+            named,
         }
     }
 
@@ -196,14 +202,27 @@ impl MapConfig {
         self.hidden_resources.iter().cloned().collect()
     }
 
-    /// The codex binary XenoNet runs: the
-    /// one XENONET_CODEX_BIN names, else ChatGPT's own, else codex.
-    pub fn codex_binary(&self) -> String {
+    /// A setting an adapter names (`named`), "" when none is.
+    pub fn setting(&self, name: Option<&str>) -> &str {
+        name.and_then(|n| self.named.get(n)).map_or("", String::as_str)
+    }
+
+    /// The folder an app's sessions are read from, as the settings have it
+    /// (its adapter's `folder_setting`); "" for an app without one.
+    pub fn folder(&self, app: &str) -> &str {
+        self.setting(xenonet_adapter::platforms().get(app).and_then(|p| p.folder_setting()))
+    }
+
+    /// The program XenoNet runs its own turns with (the registry's
+    /// `sorts`): the one XENONET_CODEX_BIN names, else the one its adapter
+    /// finds, else its id on the PATH.
+    pub fn sorter_program(&self) -> String {
         if let Some(b) = var(&self.env, "XENONET_CODEX_BIN").filter(|b| !b.is_empty()) {
             return b;
         }
         let home = std::env::var("HOME").unwrap_or_default();
-        xenonet_adapter::dirs::bundled_codex_binaries(&dirs_env(&self.env), &self.platform, &home, &mut Disk).into_iter().next().unwrap_or_else(|| "codex".into())
+        let id = xenonet_adapter::apps::sorter().map_or("", |a| a.id.as_str());
+        xenonet_adapter::platforms().get(id).and_then(|p| p.program(&dirs_env(&self.env), &self.platform, &home, &mut Disk)).unwrap_or_else(|| id.to_string())
     }
 
     /// The poll's period: XENONET_POLL_MS, 8 seconds by default; never

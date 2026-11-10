@@ -11,6 +11,8 @@
 //! actor; only your choice in XenoNet's window does.
 
 use serde_json::{json, Value};
+use std::sync::LazyLock;
+use xenonet_adapter::products::PAIRINGS;
 
 pub struct Transport {
     pub id: &'static str,
@@ -38,50 +40,34 @@ pub struct Adapter {
     pub capabilities: &'static [&'static str],
 }
 
-pub const ADAPTERS: [Adapter; 4] = [
-    // The tunnel forwards an MCP call to the local adapter; it passes no
-    // assertion of the ChatGPT user or the dot that XenoNet could validate.
-    Adapter {
-        key: "dots",
-        id: "openai-dots",
-        product: Some("dots"),
-        provider: "openai",
-        transports: &["openai-secure-mcp-tunnel", "local-stdio"],
-        support: "experimental",
-        unavailable: "transport-has-no-assertion",
-        capabilities: &["read"],
-    },
-    Adapter {
-        key: "grok-bot",
-        id: "grok-bot",
-        product: Some("grok-bot"),
-        provider: "spacexai",
-        transports: &["local-stdio"],
-        support: "fixture",
-        unavailable: "no-supported-route",
-        capabilities: &["read"],
-    },
-    Adapter {
-        key: "hermes-agent",
-        id: "hermes-agent",
-        product: Some("hermes-agent"),
-        provider: "nous",
-        transports: &["local-stdio"],
-        support: "fixture",
-        unavailable: "no-supported-route",
-        capabilities: &["read"],
-    },
-    Adapter {
-        key: "custom",
-        id: "custom",
-        product: None,
-        provider: "local",
-        transports: &["openai-secure-mcp-tunnel", "local-stdio"],
-        support: "experimental",
-        unavailable: "no-provider",
-        capabilities: &["read"],
-    },
-];
+/// The adapters: one for each product you may pair, as the products
+/// table has its pairing, in its order, then the one for a program of
+/// your own.
+pub static ADAPTERS: LazyLock<Vec<Adapter>> = LazyLock::new(|| {
+    PAIRINGS
+        .iter()
+        .map(|p| Adapter {
+            key: p.product,
+            id: p.adapter,
+            product: Some(p.product),
+            provider: p.provider,
+            transports: p.transports,
+            support: p.support,
+            unavailable: p.unavailable,
+            capabilities: p.capabilities,
+        })
+        .chain([Adapter {
+            key: "custom",
+            id: "custom",
+            product: None,
+            provider: "local",
+            transports: &["openai-secure-mcp-tunnel", "local-stdio"],
+            support: "experimental",
+            unavailable: "no-provider",
+            capabilities: &["read"],
+        }])
+        .collect()
+});
 
 /// The adapter for a product (by its id), or for a program of your own
 /// (None), among adapters by their products (`products`, with whether a
@@ -113,4 +99,18 @@ pub fn verified(out: Option<&Value>, failed: bool) -> Option<Value> {
         return Some(json!({ "state": "unavailable", "reason": "incomplete" }));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_adapters_are_the_pairings_then_your_own() {
+        let keys: Vec<&str> = ADAPTERS.iter().map(|a| a.key).collect();
+        assert_eq!(keys, ["dots", "grok-bot", "hermes-agent", "custom"]);
+        let dots = &ADAPTERS[0];
+        assert_eq!((dots.id, dots.provider, dots.transports.len(), dots.support, dots.unavailable), ("openai-dots", "openai", 2, "experimental", "transport-has-no-assertion"));
+        assert_eq!((ADAPTERS[2].provider, ADAPTERS[3].product), ("nous", None));
+    }
 }

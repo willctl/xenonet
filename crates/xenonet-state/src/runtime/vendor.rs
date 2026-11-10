@@ -62,10 +62,10 @@ impl Vendor {
         Arc::new(Vendor { drift: readers.drift().clone(), readers, apps })
     }
 
-    /// The lines of the tailed app `app` names: any
-    /// app that isn't tailed reads as Claude Code's.
+    /// The lines of the tailed app `app` names: any app that isn't tailed
+    /// reads as the one whose reader reads the others (Claude Code's).
     fn app(&self, app: &str) -> Option<&Lines> {
-        let id = xenonet_adapter::apps::tailed_app(app, "claude");
+        let id = crate::apps::read_as(app)?;
         self.apps.iter().find(|l| l.tailed.id() == id)
     }
 

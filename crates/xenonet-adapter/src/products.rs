@@ -15,13 +15,78 @@ pub struct Product {
     pub observed: bool,
     pub registers: bool,
     pub remote: bool,
+    /// One actor per profile of the product's: its slug, or
+    /// `<slug>-<profile>`.
+    pub profiles: bool,
+    /// One actor per pairing: its slug, then `<slug>-<suffix>` for each
+    /// one paired after.
+    pub per_pair: bool,
+    /// Who makes it, its vendor first: no actor of another product may
+    /// pass for one of them.
+    pub makers: &'static [&'static str],
+    /// Its actor reports what it spent, which the spend view shows under
+    /// the product's short name.
+    pub reports_spend: bool,
 }
 
 pub const PRODUCTS: [Product; 4] = [
-    Product { id: "hermes-agent", slug: "hermes", name: "Hermes Agent", short: "Hermes", vendor: "Nous Research", observed: true, registers: true, remote: true },
-    Product { id: "grok-bot", slug: "grok-bot", name: "Grok Bot", short: "Grok Bot", vendor: "SpaceXAI", observed: true, registers: true, remote: true },
-    Product { id: "muse", slug: "muse", name: "Muse", short: "Muse", vendor: "Meta", observed: true, registers: true, remote: false },
-    Product { id: "dots", slug: "dots", name: "dots", short: "dots", vendor: "OpenAI", observed: false, registers: false, remote: true },
+    Product {
+        id: "hermes-agent",
+        slug: "hermes",
+        name: "Hermes Agent",
+        short: "Hermes",
+        vendor: "Nous Research",
+        observed: true,
+        registers: true,
+        remote: true,
+        profiles: true,
+        per_pair: false,
+        makers: &["Nous Research"],
+        reports_spend: true,
+    },
+    // Anysphere (Cursor) builds and runs Grok Bot for SpaceXAI.
+    Product {
+        id: "grok-bot",
+        slug: "grok-bot",
+        name: "Grok Bot",
+        short: "Grok Bot",
+        vendor: "SpaceXAI",
+        observed: true,
+        registers: true,
+        remote: true,
+        profiles: false,
+        per_pair: false,
+        makers: &["SpaceXAI", "xAI", "Anysphere", "Cursor"],
+        reports_spend: false,
+    },
+    Product {
+        id: "muse",
+        slug: "muse",
+        name: "Muse",
+        short: "Muse",
+        vendor: "Meta",
+        observed: true,
+        registers: true,
+        remote: false,
+        profiles: false,
+        per_pair: false,
+        makers: &["Meta"],
+        reports_spend: false,
+    },
+    Product {
+        id: "dots",
+        slug: "dots",
+        name: "dots",
+        short: "dots",
+        vendor: "OpenAI",
+        observed: false,
+        registers: false,
+        remote: true,
+        profiles: false,
+        per_pair: true,
+        makers: &["OpenAI"],
+        reports_spend: false,
+    },
 ];
 
 /// A product by its id, or None.
@@ -36,13 +101,126 @@ pub const WHY_NOT: [(&str, &str); 1] = [("dots", "OpenAI's dots don't report the
 /// Hermes's (one actor per profile), dots and `dots-<suffix>` OpenAI's dots
 /// (one actor per dot you pair), the others their own slug.
 pub fn product_of_slug(slug: &str) -> Option<&'static str> {
-    if slug == "hermes" || slug.starts_with("hermes-") {
-        return Some("hermes-agent");
-    }
-    if slug == "dots" || slug.starts_with("dots-") {
-        return Some("dots");
-    }
-    PRODUCTS.iter().find(|p| p.slug == slug).map(|p| p.id)
+    let suffixed = |p: &Product| (p.profiles || p.per_pair) && slug.strip_prefix(p.slug).is_some_and(|rest| rest.starts_with('-'));
+    PRODUCTS.iter().find(|p| p.slug == slug || suffixed(p)).map(|p| p.id)
+}
+
+// ---------- pairing a product as a remote actor ----------
+
+/// How a product you may pair as a remote actor (`remote`) reaches
+/// XenoNet: its remote adapter's id, its provider, the transports it comes
+/// through, how far that's tested ("experimental": its route is meant for
+/// real use and untested end to end; "fixture": only its common code is
+/// tested), why neither the account nor the actor can be verified through
+/// it, and what it may do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pairing {
+    pub product: &'static str,
+    pub adapter: &'static str,
+    pub provider: &'static str,
+    pub transports: &'static [&'static str],
+    pub support: &'static str,
+    pub unavailable: &'static str,
+    pub capabilities: &'static [&'static str],
+}
+
+/// The products' pairings, in the order the pairing dialog lists them.
+pub const PAIRINGS: [Pairing; 3] = [
+    // The tunnel forwards an MCP call to the local adapter; it passes no
+    // assertion of the ChatGPT user or the dot that XenoNet could validate.
+    Pairing {
+        product: "dots",
+        adapter: "openai-dots",
+        provider: "openai",
+        transports: &["openai-secure-mcp-tunnel", "local-stdio"],
+        support: "experimental",
+        unavailable: "transport-has-no-assertion",
+        capabilities: &["read"],
+    },
+    Pairing {
+        product: "grok-bot",
+        adapter: "grok-bot",
+        provider: "spacexai",
+        transports: &["local-stdio"],
+        support: "fixture",
+        unavailable: "no-supported-route",
+        capabilities: &["read"],
+    },
+    Pairing {
+        product: "hermes-agent",
+        adapter: "hermes-agent",
+        provider: "nous",
+        transports: &["local-stdio"],
+        support: "fixture",
+        unavailable: "no-supported-route",
+        capabilities: &["read"],
+    },
+];
+
+// ---------- handing a product's agent the actor gateway ----------
+
+/// What a product's agent is given to reach XenoNet's actor gateway, for a
+/// new token (`token`) or a new address alone (`address`): the steps, each
+/// with what it copies ("message", "token", "url", "wake" or None), and
+/// the message to paste into its chat, where `{url}` is the gateway's
+/// address and `{host}` its host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Handoff {
+    pub product: &'static str,
+    pub token: Steps,
+    pub address: Steps,
+    /// How to give XenoNet a way to wake its agent, when there's one: the
+    /// steps, and the message to paste.
+    pub wake: Option<([&'static str; 2], &'static str)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Steps {
+    pub steps: &'static [(&'static str, Option<&'static str>)],
+    pub message: Option<&'static str>,
+}
+
+pub const HANDOFFS: [Handoff; 2] = [
+    // The token goes into Grok Bot's secure secret card, which its model
+    // never sees, never into its chat. Its wake is a routine that starts
+    // from a webhook, made from its chat, whose URL and key go into
+    // XenoNet's window.
+    Handoff {
+        product: "grok-bot",
+        token: Steps {
+            steps: &[
+                ("Paste this into a Grok Bot chat.", Some("message")),
+                ("When Grok Bot asks for the token, paste it into its secret card, not the chat, and save it.", Some("token")),
+                ("For answers within seconds, give XenoNet a way to wake it.", Some("wake")),
+            ],
+            message: Some("Add an MCP server named \"xenonet\" by URL: {url}. Ask me for its token with your secure secret card, named XENONET_GATEWAY_TOKEN, never in chat, and send it in the header Authorization: Bearer <the token>. Then call its whoami tool and tell me what it says."),
+        },
+        address: Steps {
+            steps: &[("Paste this into a Grok Bot chat.", Some("message"))],
+            message: Some("XenoNet's address changed. Change the URL of your MCP server \"xenonet\" to {url} and keep its Authorization header as it is. Then call its whoami tool and tell me what it says."),
+        },
+        wake: Some((
+            ["Paste this into a Grok Bot chat to make the routine.", "Open the routine's settings and copy its Webhook URL and Webhook key below."],
+            "Create a routine named \"XenoNet inbox\" that starts from a webhook. Its instruction: read your XenoNet inbox with your xenonet tools and answer anything that needs an answer. Tell me when it's made.",
+        )),
+    },
+    Handoff {
+        product: "muse",
+        token: Steps {
+            steps: &[("Paste this into a Muse chat, then approve the connector card.", Some("message")), ("When Muse asks for the key, paste the token into the card, not the chat.", Some("token"))],
+            message: Some("Create a custom connector named \"XenoNet\" that uses an API key, for the host {host}, sending the key as a bearer token in the Authorization header. I'll paste the key into the key field when you ask. Then call {url} with JSON-RPC (method tools/call, tool whoami) and tell me what it says."),
+        },
+        address: Steps {
+            steps: &[("Paste this into a Muse chat.", Some("message")), ("If Muse can't change the connector, reconnect Muse for a new token.", None)],
+            message: Some("XenoNet's address changed to {url}. Change your \"XenoNet\" connector's host to {host} and keep its key. Then call whoami at the new address and tell me what it says."),
+        },
+        wake: None,
+    },
+];
+
+/// The handoff of a product, by its id.
+pub fn handoff_of(id: &str) -> Option<&'static Handoff> {
+    HANDOFFS.iter().find(|h| h.product == id)
 }
 
 // ---------- how a product's processes are told apart ----------
@@ -192,5 +370,27 @@ mod tests {
         assert_eq!((called("dots"), called("grok-bot"), called("nobody")), (Some("the ChatGPT app"), Some("Grok Bot"), None));
         assert_eq!((signer("grok-bot"), team("muse"), signer("hermes-agent")), (Some("Cursor"), Some("V9WTTPBFK9"), None));
         assert_eq!((own_role("hermes-agent"), own_role("muse")), ("host", "app"));
+    }
+
+    #[test]
+    fn a_slug_is_its_products_own() {
+        for (slug, product) in [
+            ("hermes", Some("hermes-agent")),
+            ("hermes-work", Some("hermes-agent")),
+            ("hermesx", None),
+            ("dots", Some("dots")),
+            ("dots-1a2b", Some("dots")),
+            ("grok-bot", Some("grok-bot")),
+            ("grok-bot-2", None),
+            ("muse", Some("muse")),
+            ("muse-x", None),
+            ("wren", None),
+        ] {
+            assert_eq!(product_of_slug(slug), product, "{slug}");
+        }
+        // The products you may pair, and only those, have a pairing.
+        let paired: Vec<&str> = PAIRINGS.iter().map(|p| p.product).collect();
+        assert!(PRODUCTS.iter().all(|p| p.remote == paired.contains(&p.id)));
+        assert!(HANDOFFS.iter().all(|h| product_of(h.product).is_some()) && PRODUCTS.iter().all(|p| p.makers.first() == Some(&p.vendor)));
     }
 }

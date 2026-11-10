@@ -16,24 +16,25 @@
 //   laptop or from desk.
 //
 // Nothing may panic. Only a window host gets a subscription; nothing but
-// the allowlist's reads, as GET, and never a transcript with titles only;
+// the allowlist's reads (and the relay's own read of its load), as GET,
+// and never a transcript with titles only;
 // and what's drawn of another host is that host's, under its own id.
 
 use async_trait::async_trait;
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink};
 use xenonet_fuzz::net::{overlay, Choices};
 use xenonet_hosts::network::{self as wire, Op};
-use xenonet_service::cores::{Hub, Pending, SelfApi};
-use xenonet_service::events::Events;
-use xenonet_service::wire::Emitter;
 use xenonet_hosts::runtime::config::HostsStore;
 use xenonet_hosts::runtime::hub::{HostHub, HubCore, HubParts};
 use xenonet_hosts::runtime::relay::{net_allowed, net_key, Parts, RelayServer, Timing};
 use xenonet_hosts::runtime::schemas::HostSchemas;
 use xenonet_hosts::runtime::transport::{new_sub, Transport};
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink};
+use xenonet_service::cores::{Hub, Pending, SelfApi};
+use xenonet_service::events::Events;
+use xenonet_service::wire::Emitter;
 
 const NETWORK: &str = "net_0123456789abcdef0123456789abcdef";
 const SUBS: [&str; 2] = ["sub_0123456789abcdef0123456789abcdef", "sub_fedcba9876543210fedcba9876543210"];
@@ -179,7 +180,9 @@ fn ask(c: &mut Choices<'_>) -> Value {
 fn frame(c: &mut Choices<'_>) -> Value {
     let at = xenonet_net::node::now_ms();
     let base = match c.below(7) {
-        0 => json!({ "t": "hello", "schema": "host/hello/v1", "protocol": 1, "version": "0.0.0", "host": { "id": "laptop", "key": net_key(NETWORK, "laptop") }, "platform": "linux", "demo": false, "now": at, "sinceMs": 604_800_000, "detail": true }),
+        0 => {
+            json!({ "t": "hello", "schema": "host/hello/v1", "protocol": 1, "version": "0.0.0", "host": { "id": "laptop", "key": net_key(NETWORK, "laptop") }, "platform": "linux", "demo": false, "now": at, "sinceMs": 604_800_000, "detail": true })
+        }
         1 => json!({ "t": "snapshot", "at": at, "graph": { "nodes": [
             { "id": "core", "kind": "core", "name": "laptop", "path": "~" },
             { "id": "claude:abc", "kind": "session", "app": "claude", "rawId": "abc", "title": "Fix the form", "preview": null, "cwd": "~/atlas", "createdAt": at, "updatedAt": at, "archived": false, "model": null, "branch": null, "parentId": null, "parentKind": null, "activity": "active", "fx": null, "fy": null, "fz": null, "pinned": false, "actions": [] },
@@ -250,11 +253,15 @@ fuzz_target!(|data: &[u8]| {
         let subs = w.server.subscribed();
         assert!(subs.iter().all(|(h, _)| h == "studio"), "only a window host subscribes: {subs:?}");
     }
-    // What laptop's relay read of its own API is the allowlist's.
+    // What laptop's relay read of its own API is the allowlist's, and its
+    // own load (GET /api/system), which it reads by itself every few
+    // seconds while it shares it, for the subscriber's `system` events.
     if let Ok(read) = w.api.read.lock() {
         for p in read.iter() {
             let route = p.split('?').next().unwrap_or("");
-            let ok = ["/api/graph", "/api/live", "/api/engine/state"].contains(&route) || (route.starts_with("/api/session/") && (route.ends_with("/stats") || route.ends_with("/transcript")));
+            let ok = p == "/api/system"
+                || ["/api/graph", "/api/live", "/api/engine/state"].contains(&route)
+                || (route.starts_with("/api/session/") && (route.ends_with("/stats") || route.ends_with("/transcript")));
             assert!(ok, "the relay read {p}");
         }
     }

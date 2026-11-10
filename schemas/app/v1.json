@@ -169,6 +169,106 @@
         ]
       },
       "description": "What XenoNet can do with it at most; what it can do with a session is the session's own"
+    },
+    "counted": {
+      "type": "boolean",
+      "description": "The map's stats count its sessions, under its id"
+    },
+    "headless": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The arguments that run one turn with the prompt after them, for an agent an OpenShell sandbox runs"
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "order": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Where it goes among the candidates, from 1"
+        },
+        "description": {
+          "type": "string",
+          "description": "What it's good for, as the decider reads it"
+        }
+      },
+      "required": [
+        "order",
+        "description"
+      ],
+      "description": "As a candidate for a routing suggestion: its place among the candidates and what it's good for",
+      "additionalProperties": {}
+    },
+    "mcpStatus": {
+      "type": "boolean",
+      "description": "Its own server lists the MCP servers it runs and their catalogs, which XenoNet asks when one of its sessions uses a server"
+    },
+    "reserved": {
+      "type": "object",
+      "properties": {
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The names it goes by, which no actor's name or product reads as"
+        },
+        "makers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Its makers, which no actor's product reads as"
+        },
+        "slugs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The actor slugs kept for it"
+        }
+      },
+      "required": [
+        "names",
+        "makers",
+        "slugs"
+      ],
+      "description": "What no actor may pass for: the names it goes by and its makers, and the actor slugs kept for it",
+      "additionalProperties": {}
+    },
+    "reportsSpend": {
+      "type": "boolean",
+      "description": "Its sessions report what they spent, which the spend view shows under its name"
+    },
+    "sorts": {
+      "type": "boolean",
+      "description": "XenoNet runs turns of its own with it: the narration, and the sort of the projects folder into projects, whose picks name it as theirs"
+    },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "The entries of one of its sessions' transcripts a handoff reads"
+        },
+        "clip": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "The characters of where the work left off that a brief for it keeps"
+        }
+      },
+      "required": [
+        "entries",
+        "clip"
+      ],
+      "description": "How a handoff carries a session of it or to it, where that isn't 80 transcript entries read and 1500 characters kept of where the work left off",
+      "additionalProperties": {}
     }
   },
   "required": [
