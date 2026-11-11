@@ -2,6 +2,8 @@
 
 XenoNet ships a first-install bundle and a Desktop-only update, plus separate Service and Tools archives. Desktop runs on Windows x64 and macOS arm64/x64. Service and Tools also ship for Linux x64. See [components](components.md) for installation and migration. GitHub Releases holds the installers, ZIP update payloads, blockmaps and update manifests. The app reads published stable releases from `willctl/xenonet`. It ignores drafts and prereleases and does not downgrade.
 
+During the rewrite, a release is cut at the end of a phase or when Will asks, not for each change. Between releases the installed service runs a local build. A release that changes the store, the chains or the tokens doesn't read what an earlier one made, so its notes say to set each machine up again.
+
 ## Prepare a version
 
 1. Choose a new version. Use a patch for fixes and a minor version for new behavior while XenoNet is below 1.0.

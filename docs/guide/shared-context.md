@@ -3,9 +3,14 @@
 Xenolith is XenoNet's shared context: one folder of plain-Markdown pages
 that every session on your machine reads and writes through a local MCP
 server, with a curator that files the notes sessions leave into pages. It
-lives in [`xenolith/`](../../xenolith/README.md) in this repository and also
-runs on its own. Its README covers installing it, its tools, spaces, access,
-tokens, sync between machines and the audit chain.
+lives in [`xenolith/`](../../xenolith/README.md) in this repository and runs
+on its own, with or without XenoNet. It builds on XenoNet's library crates
+(`xenonet-id`, `-log`, `-authz`, `-net`, `-model` and `-os`, with `-text`
+beneath them) and never on the app: not the service, the runtime, the
+surfaces or the adapters. Its README covers installing it, its tools,
+spaces, access, tokens, sync between machines and the audit chain.
+[direction.md](../design/direction.md) says what is left of moving
+Xenolith onto XenoNet's identities, grants and network.
 
 ## On XenoNet's map
 
