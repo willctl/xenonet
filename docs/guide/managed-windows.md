@@ -118,10 +118,10 @@ Windows app through Installed apps. Keep its data for diagnosis unless the
 owner chooses removal. `/PURGE` deletes saved state and preferences and is
 not the default rollback procedure.
 
-Keep the private preflight backup until the pilot is accepted. Reinstalling
-an older binary does not prove that it can read state a newer version
-wrote. Restore the matching backup only after stopping the candidate and
-reviewing the exact restore paths with the owner.
+Keep the private preflight backup until the pilot is accepted. A XenoNet
+build refuses a store another build wrote, so going back to the previous
+binary needs its matching backup. Restore it only after stopping the
+candidate and reviewing the exact restore paths with the owner.
 
 An installation is ready for use only after it works under the intended
 endpoint policy and resumes collection after the agreed startup test.
