@@ -1027,7 +1027,10 @@ XenoNet too, it does two things with Xenolith:
   host's Xenolith sync routes (`/sync/v1/`) to another host, which then follows
   the curator at a loopback address XenoNet gives it, with a path prefix
   XenoNet strips before it passes a request on. To Xenolith that is an ordinary
-  [peer](#sync-between-machines): the request carries Xenolith's own token, a
+  [peer](#sync-between-machines), with one more header: to a `/api/svc/`
+  address on 127.0.0.1 or localhost, Xenolith sends that XenoNet's local API
+  credential, read from XenoNet's runtime folder (or `XENONET_RUNTIME_DIR`) at
+  each request. The request carries Xenolith's own token, a
   forwarded request is never this machine's own, and the curator's grants
   decide what the other machine may do. XenoNet's own docs say how to publish
   the service. A tunnel or reverse proxy of your own works the same way.

@@ -29,7 +29,9 @@
 //! the token for each peer is peers/<name>.token there, readable by you alone. The peers' URLs are
 //! the base of their Xenolith service, with or without a path: http://127.0.0.1:<port> on one
 //! machine, or an https:// address that forwards to it (a tunnel or a gateway), which must strip
-//! its own path prefix before the request reaches the curator.
+//! its own path prefix before the request reaches the curator. A peer reached through a XenoNet on
+//! this machine (http://127.0.0.1:<port>/api/svc/…) also gets that XenoNet's local API credential,
+//! read from its runtime folder at each request.
 
 use crate::access::{Level, Principal};
 use crate::curator::{HeldOp, PageWrite};
@@ -616,15 +618,25 @@ pub fn accept(dir: &Path, who: &Principal, entries: &[Value], can: &dyn Fn(Level
 
 // ---------------------------------------------------------------- the follower's side
 
+/// What curl reads on its stdin for one request: the token, a local XenoNet's credential when the
+/// URL goes through one (`runtime` is XenoNet's runtime folder), and the body.
+fn curl_config(url: &str, token: &str, body: Option<&Value>, runtime: &Path) -> String {
+    let mut config = if token.is_empty() { String::new() } else { format!("header = \"Authorization: Bearer {token}\"\n") };
+    if let Some(cred) = xenonet_credential(url, runtime) {
+        config.push_str(&format!("header = \"{XENONET_CREDENTIAL_HEADER}: {cred}\"\n"));
+    }
+    if let Some(b) = body {
+        config.push_str(&format!("data-binary = \"{}\"\n", b.to_string().replace('\\', "\\\\").replace('"', "\\\"")));
+    }
+    config
+}
+
 /// One HTTP request to a peer through the system's curl (embed.rs says why), the token and body
 /// on curl's stdin, never in its arguments. Ok((status, JSON body)).
 fn request(method: &str, url: &str, token: &str, body: Option<&Value>, timeout: Duration) -> std::result::Result<(u16, Value), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let mut config = if token.is_empty() { String::new() } else { format!("header = \"Authorization: Bearer {token}\"\n") };
-    if let Some(b) = body {
-        config.push_str(&format!("data-binary = \"{}\"\n", b.to_string().replace('\\', "\\\\").replace('"', "\\\"")));
-    }
+    let config = curl_config(url, token, body, &xenonet_runtime_dir(&|k| std::env::var(k).ok()));
     let mut cmd = Command::new(crate::embed::curl());
     cmd.args(["-q", "-sS", "-X", method, "--max-time", &format!("{:.1}", timeout.as_secs_f64()), "-H", "Content-Type: application/json", "-H", "Accept: application/json", "-A"])
         .arg(format!("xenolith/{}", crate::VERSION))
@@ -654,6 +666,60 @@ fn request(method: &str, url: &str, token: &str, body: Option<&Value>, timeout: 
         return Err(one_line(&String::from_utf8_lossy(&out.stderr)));
     }
     Ok((status, serde_json::from_str(json_text).unwrap_or(Value::Null)))
+}
+
+// ---------------------------------------------------------------- a peer through XenoNet
+
+/// The header a XenoNet on this machine takes its local API credential in.
+const XENONET_CREDENTIAL_HEADER: &str = "x-xenonet-credential";
+
+/// The port of a URL that reaches a XenoNet on this machine through its service forwarding
+/// (http://127.0.0.1:<port>/api/svc/… or http://localhost:<port>/api/svc/…), else None. Such a
+/// XenoNet answers its API only to a caller that sends its credential.
+fn xenonet_port(url: &str) -> Option<u16> {
+    let rest = url.strip_prefix("http://")?;
+    let (authority, path) = rest.split_at(rest.find('/')?);
+    let (host, port) = authority.rsplit_once(':')?;
+    if !(host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost")) || !path.starts_with("/api/svc/") {
+        return None;
+    }
+    if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    port.parse().ok()
+}
+
+/// Where XenoNet keeps its runtime files: XENONET_RUNTIME_DIR, or `runtime` in XenoNet's state
+/// folder. A copy of XenoNet's own lookup (crates/xenonet-api/src/http.rs `runtime_dir`, with
+/// crates/xenonet-os's `home_dir` and `dirs::app_dir`), since Xenolith depends on no XenoNet
+/// code: keep the two in step.
+fn xenonet_runtime_dir(env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
+    let env = |k: &str| env(k).filter(|v| !v.is_empty());
+    if let Some(d) = env("XENONET_RUNTIME_DIR") {
+        return PathBuf::from(d);
+    }
+    let state = if let Some(x) = env("XDG_STATE_HOME") {
+        PathBuf::from(x).join("xenonet")
+    } else if cfg!(windows) {
+        let local = env("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env("USERPROFILE").unwrap_or_else(|| "C:\\".into())).join("AppData").join("Local"));
+        local.join("XenoNet")
+    } else if cfg!(target_os = "macos") {
+        PathBuf::from(env("HOME").unwrap_or_else(|| "/".into())).join("Library").join("Application Support").join("XenoNet")
+    } else {
+        PathBuf::from(env("HOME").unwrap_or_else(|| "/".into())).join(".local").join("state").join("xenonet")
+    };
+    state.join("runtime")
+}
+
+/// The credential to send with a request to `url`: when it reaches a XenoNet on this machine, the
+/// one that XenoNet wrote to `<runtime>/api-<port>.cred` when it started (the same check as
+/// xenonet-api's `credential`). Read at each request, since XenoNet writes a new one each start;
+/// None when the URL isn't a local XenoNet or no credential is there.
+fn xenonet_credential(url: &str, runtime: &Path) -> Option<String> {
+    let port = xenonet_port(url)?;
+    let text = fs::read_to_string(runtime.join(format!("api-{port}.cred"))).ok()?;
+    let t = text.trim();
+    (!t.is_empty() && t.bytes().all(|b| b.is_ascii_hexdigit())).then(|| t.to_string())
 }
 
 /// POST without a token (the pairing route, where the proof is in the body).
@@ -1338,6 +1404,64 @@ mod tests {
         assert_eq!(space_url("https://box.example/xenolith/", &atlas), "https://box.example/xenolith/sync/v1/spaces/project/atlas");
         assert_eq!(space_url("http://127.0.0.1:47840/api/svc/studio/xenolith", &atlas), "http://127.0.0.1:47840/api/svc/studio/xenolith/sync/v1/spaces/project/atlas");
         assert_eq!(space_url("http://127.0.0.1:47850", &atlas), "http://127.0.0.1:47850/sync/v1/spaces/project/atlas");
+    }
+
+    #[test]
+    fn only_a_local_xenonet_service_url_is_a_xenonet() {
+        assert_eq!(xenonet_port("http://127.0.0.1:47840/api/svc/studio/xenolith/sync/v1/spaces/project/atlas"), Some(47840));
+        assert_eq!(xenonet_port("http://localhost:47841/api/svc/studio/xenolith/sync/v1/x"), Some(47841));
+        // Xenolith's own service, another API route, another host, https or no port: none.
+        for url in [
+            "http://127.0.0.1:47850/sync/v1/spaces/project/atlas",
+            "http://127.0.0.1:47840/api/graph",
+            "http://box.example:47840/api/svc/x",
+            "https://127.0.0.1:47840/api/svc/x",
+            "http://127.0.0.1/api/svc/x",
+            "http://127.0.0.1:4x/api/svc/x",
+            "http://127.0.0.1.box.example:1/api/svc/x",
+        ] {
+            assert_eq!(xenonet_port(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn a_local_xenonet_gets_the_credential_its_runtime_holds_now() {
+        let (d, _) = tmp_paths();
+        let runtime = d.join("runtime");
+        fs::create_dir_all(&runtime).unwrap();
+        let url = "http://127.0.0.1:47840/api/svc/studio/xenolith/sync/v1/spaces/project/atlas/entries";
+        assert_eq!(xenonet_credential(url, &runtime), None, "no file, no header");
+        fs::write(runtime.join("api-47840.cred"), "00ff11ee\n").unwrap();
+        assert_eq!(xenonet_credential(url, &runtime).as_deref(), Some("00ff11ee"));
+        // A new start writes a new one, read at the next request.
+        fs::write(runtime.join("api-47840.cred"), "abc123").unwrap();
+        assert_eq!(xenonet_credential(url, &runtime).as_deref(), Some("abc123"));
+        // Another port's file, a peer that isn't XenoNet, or a file that isn't a credential: none.
+        assert_eq!(xenonet_credential("http://127.0.0.1:47841/api/svc/x", &runtime), None);
+        assert_eq!(xenonet_credential("http://127.0.0.1:47840/sync/v1/x", &runtime), None);
+        // The header goes on curl's stdin beside the peer's own token, never in its arguments.
+        let config = curl_config(url, "tok", Some(&json!({ "a": 1 })), &runtime);
+        assert_eq!(config, "header = \"Authorization: Bearer tok\"\nheader = \"x-xenonet-credential: abc123\"\ndata-binary = \"{\\\"a\\\":1}\"\n");
+        assert!(!curl_config("http://127.0.0.1:47850/sync/v1/x", "tok", None, &runtime).contains("x-xenonet-credential"));
+        fs::write(runtime.join("api-47840.cred"), "not \"hex\"").unwrap();
+        assert_eq!(xenonet_credential(url, &runtime), None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_runtime_folder_is_found_as_xenonet_finds_it() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(xenonet_runtime_dir(&env(&[("XENONET_RUNTIME_DIR", "/r"), ("XDG_STATE_HOME", "/s")])), PathBuf::from("/r"));
+        assert_eq!(xenonet_runtime_dir(&env(&[("XENONET_RUNTIME_DIR", ""), ("XDG_STATE_HOME", "/s")])), PathBuf::from("/s").join("xenonet").join("runtime"));
+        let home = &[("HOME", "/h"), ("USERPROFILE", "C:\\h"), ("LOCALAPPDATA", "C:\\h\\AppData\\Local")];
+        let want = if cfg!(windows) {
+            PathBuf::from("C:\\h\\AppData\\Local").join("XenoNet").join("runtime")
+        } else if cfg!(target_os = "macos") {
+            PathBuf::from("/h/Library/Application Support/XenoNet/runtime")
+        } else {
+            PathBuf::from("/h/.local/state/xenonet/runtime")
+        };
+        assert_eq!(xenonet_runtime_dir(&env(home)), want);
     }
 
     #[test]
