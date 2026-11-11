@@ -5631,6 +5631,7 @@ dependencies = [
  "ring",
  "serde_json",
  "xenonet-id",
+ "xenonet-model",
 ]
 
 [[package]]

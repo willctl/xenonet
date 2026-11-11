@@ -1,0 +1,300 @@
+{
+  "about": "Known answers for a space's chain and side entries (crates/xenonet-log/src/space.rs): written by crates/xenonet-log/tests/space.rs. Seeds are test values, never a machine's.",
+  "person": [
+    {
+      "n": 0,
+      "prev": "",
+      "op": "found",
+      "root": {
+        "alg": "ed25519",
+        "key": "2ph1Vn1J487bzyOp-aVkJbT1x4duQcNNE4BQbyABlN8"
+      },
+      "salt": "WlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlo",
+      "at": 1792511999000,
+      "signers": [
+        {
+          "key": "xns1_fhdenxmts5mvmyghvtxrkmxe7dwsb2sp",
+          "sig": "rfQnwcUEW8-tFUwbgFEGnDuqcbNiDnxsumpGRXU8hrNk8DTACYFiIEE1YSF1sMJTxlFTgykxeqqsSK5kAenYAQ"
+        }
+      ]
+    },
+    {
+      "n": 1,
+      "prev": "6q9zeONhxLwHGKYoYrzAnIU33heZvXZ9FICa_CXn-Zs",
+      "op": "add-device",
+      "device": {
+        "key": {
+          "alg": "ed25519",
+          "key": "vzkHPgTZnIG9uEvxLMlNBU0IW3EkIEfaPVkqJvH0M7U"
+        },
+        "id": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+        "kind": "weaker",
+        "label": "device 0"
+      },
+      "at": 1792511999100,
+      "signers": [
+        {
+          "key": "xns1_fhdenxmts5mvmyghvtxrkmxe7dwsb2sp",
+          "sig": "FYMvAxAm33ywBRtgWQY5zvMNhLKcPCWoblQAmNxb7hVCwhfv6RODBID7XgMUt0vtpGtOCRDx6w5lepz3wvwyAg",
+          "presence": {
+            "device": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+            "what": "pair",
+            "act": "bIDqEYHilhaWN3ONLcxbGo5WqRod5Os-qmrnjbNPBB4",
+            "nonce": "EREREREREREREREREREREQ",
+            "at": 1792511999100,
+            "sig": "Iki3b4itG40TGHVVysa4qhXjGONMM81N6KMK-Nt139zUPzqo1mN_m1Ep3W3uGzMWIjREempxToo3es8lC1NZCQ"
+          }
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "prev": "umFNfW6A8iYH3DMBS8f9Y4NvDaKg1aOAhnZqe-iksBI",
+      "op": "add-device",
+      "device": {
+        "key": {
+          "alg": "ed25519",
+          "key": "5otm9r4x51L-4YEuxduoCAOQlmJUnCKkel1aqX0_Uyk"
+        },
+        "id": "xns1_2oe6famcqdgqtlpch3lkeafaqvxmemxg",
+        "kind": "weaker",
+        "label": "device 1"
+      },
+      "at": 1792511999101,
+      "signers": [
+        {
+          "key": "xns1_fhdenxmts5mvmyghvtxrkmxe7dwsb2sp",
+          "sig": "6qeY7Af4q82ttM527SPyb2iJsBSsuvZntfJjtKAJaF5Rv4ZCsiyC_1H8i_45vC0x6EhYQz1vOBOgLZa5WC9zDw",
+          "presence": {
+            "device": "xns1_2oe6famcqdgqtlpch3lkeafaqvxmemxg",
+            "what": "pair",
+            "act": "cfIMZvngMlltCyemWpaps_WHjTDizjnJm2zz24wozHg",
+            "nonce": "EhISEhISEhISEhISEhISEg",
+            "at": 1792511999101,
+            "sig": "nB4SPrhQ1h3Fg9P8YzhwskRl2V0czqno-QJlcqavVCfotNv2lMrb-ITCrrcw1X6IGI1LtXk6gkuap3rQOXX4Cw"
+          }
+        }
+      ]
+    }
+  ],
+  "seeds": {
+    "devices": [
+      "QgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "QwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+    ],
+    "curators": [
+      "SgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgo",
+      "SwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws"
+    ],
+    "peer": "TAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+  },
+  "space": "spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc",
+  "entries": [
+    {
+      "what": "found",
+      "signingBytes": "xenolith-space/1\n{\"n\":0,\"prev\":\"\",\"op\":\"found\",\"about\":\"prs_5kxxg6hdmhclybyyuyugfpgatsctpxqx\",\"owner\":{\"person\":\"prs_5kxxg6hdmhclybyyuyugfpgatsctpxqx\"},\"curator\":{\"alg\":\"ed25519\",\"key\":\"oFfNckhKSiD5uzPxtM918F1t_6Kr4pgZRRLwDJCWjzA\"},\"name\":\"will\",\"nonce\":\"d3d3d3d3d3d3d3d3d3d3dw\",\"at\":1792512000000}",
+      "id": "Oga4QdCkjXpMG8cuorefZmbJyrLtIbK5liMg4rcjN-I",
+      "hash": "Fvlnin9jVTiwddBcVhAs2PlP4CC-QminLacUbV0bIIY",
+      "entry": {
+        "n": 0,
+        "prev": "",
+        "op": "found",
+        "about": "prs_5kxxg6hdmhclybyyuyugfpgatsctpxqx",
+        "owner": {
+          "person": "prs_5kxxg6hdmhclybyyuyugfpgatsctpxqx"
+        },
+        "curator": {
+          "alg": "ed25519",
+          "key": "oFfNckhKSiD5uzPxtM918F1t_6Kr4pgZRRLwDJCWjzA"
+        },
+        "name": "will",
+        "nonce": "d3d3d3d3d3d3d3d3d3d3dw",
+        "at": 1792512000000,
+        "signers": [
+          {
+            "key": "xns1_66vcnhu4ngwaami3fdp5mooeyj65zmvr",
+            "sig": "uqhcVL4XvBMybCJkBpB0hVNi57BFgm4HbyXu9QPML2_7Lz_G2Cb5CkH319oox1F0w0w8h_jkteARnI0NxJsmBA"
+          }
+        ]
+      }
+    },
+    {
+      "what": "share with a peer's key at append",
+      "signingBytes": "xenolith-space/1\n{\"n\":1,\"prev\":\"Fvlnin9jVTiwddBcVhAs2PlP4CC-QminLacUbV0bIIY\",\"space\":\"spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc\",\"epoch\":0,\"op\":\"share\",\"subject\":\"key:xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"level\":\"append\",\"endpoint\":\"abababababababababababababababababababababababababababababababab\",\"after\":[],\"personHead\":\"GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw\",\"at\":1792512000001}",
+      "id": "_44HH-Ji5alhBlRJ8Un3Uu1TomUx5I_Z_1Ou3ocoJmk",
+      "hash": "W1fmZMd1T87n1Qf6zus-6f9qE7aV38Fdi4jyNwf7_Bs",
+      "entry": {
+        "n": 1,
+        "prev": "Fvlnin9jVTiwddBcVhAs2PlP4CC-QminLacUbV0bIIY",
+        "space": "spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc",
+        "epoch": 0,
+        "op": "share",
+        "subject": "key:xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "level": "append",
+        "endpoint": "abababababababababababababababababababababababababababababababab",
+        "after": [],
+        "personHead": "GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw",
+        "at": 1792512000001,
+        "signers": [
+          {
+            "key": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+            "sig": "k1IUr0uW4mzvtY05AE4X5ec5UKKroXwMYbQeesOBJMRtAApaFCVqMb43Jqds6dqNkAdMnuOUmhNlZ70be0OHAg",
+            "presence": {
+              "device": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+              "what": "widen",
+              "act": "_44HH-Ji5alhBlRJ8Un3Uu1TomUx5I_Z_1Ou3ocoJmk",
+              "nonce": "ISEhISEhISEhISEhISEhIQ",
+              "at": 1792512000001,
+              "sig": "Iw7vygGXdaDAXFwXhZ8gboyvTwwbCTMmws9LVeoGEqQNGi9wwNjoksPFsU_1EmRECvOjaJ6Y-1wBLa9JaQ45Dg"
+            }
+          },
+          {
+            "key": "xns1_66vcnhu4ngwaami3fdp5mooeyj65zmvr",
+            "sig": "YSQ1Z4FtZyonR1M1gKi8nAhF5TkKlLuxWEiOWNgM-Fhqu92lqBixpowvbN-ldVfuaIpLyGNgytLPtmq2NB8gAQ"
+          }
+        ]
+      }
+    },
+    {
+      "what": "share with a network at read",
+      "signingBytes": "xenolith-space/1\n{\"n\":2,\"prev\":\"W1fmZMd1T87n1Qf6zus-6f9qE7aV38Fdi4jyNwf7_Bs\",\"space\":\"spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc\",\"epoch\":0,\"op\":\"share\",\"subject\":\"network:net_00112233445566778899aabbccddeeff\",\"level\":\"read\",\"endpoint\":null,\"after\":[],\"personHead\":\"GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw\",\"at\":1792512000002}",
+      "id": "kQctWzO7IQQJyO9Fs6-EKyM0AF_kmObw7SZK5zvxV0Q",
+      "hash": "wUF24pskZF5N6nEMTm6z-xWGP69_V59z12k6m5jF5D4",
+      "entry": {
+        "n": 2,
+        "prev": "W1fmZMd1T87n1Qf6zus-6f9qE7aV38Fdi4jyNwf7_Bs",
+        "space": "spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc",
+        "epoch": 0,
+        "op": "share",
+        "subject": "network:net_00112233445566778899aabbccddeeff",
+        "level": "read",
+        "endpoint": null,
+        "after": [],
+        "personHead": "GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw",
+        "at": 1792512000002,
+        "signers": [
+          {
+            "key": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+            "sig": "woAsQUVpsO9d1a9YYz5MotDgDJOS83-qAQP1rnDLokzT7PBs5YWD7j43waHDY3k5aNW29zwA3b63mn54urVQDg",
+            "presence": {
+              "device": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+              "what": "widen",
+              "act": "kQctWzO7IQQJyO9Fs6-EKyM0AF_kmObw7SZK5zvxV0Q",
+              "nonce": "IiIiIiIiIiIiIiIiIiIiIg",
+              "at": 1792512000002,
+              "sig": "bc0co5ochPwjGiOp55UySmclDfs_EC-D6kITx0rS_oNuzLW0_E0L5Az3XC7kk7DKraVRaMIo4akBlXwBoPCFBQ"
+            }
+          },
+          {
+            "key": "xns1_66vcnhu4ngwaami3fdp5mooeyj65zmvr",
+            "sig": "ZqKNzx7L6lQJgWjOfbAJrtXhQ38lr3YvQLaAkl2oHCdRsunszqTghV4UZ3f4fmV7LhMDAsnli-prFOkEMY0SAA"
+          }
+        ]
+      }
+    },
+    {
+      "what": "c2 shares with the network again",
+      "signingBytes": "xenolith-space/1\n{\"n\":3,\"prev\":\"wUF24pskZF5N6nEMTm6z-xWGP69_V59z12k6m5jF5D4\",\"space\":\"spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc\",\"epoch\":1,\"op\":\"share\",\"subject\":\"network:net_00112233445566778899aabbccddeeff\",\"level\":\"read\",\"endpoint\":null,\"after\":[\"8lWRzgJAeXOyAdERX7QigfC8h-h6w5uX2lrBtmJ61Mc\"],\"personHead\":\"GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw\",\"at\":1792512000003}",
+      "id": "e4BgP54es2sJZveEbuLekKZ7Qec-1e5HTWzh-yug0M0",
+      "hash": "_lheydIvMVnwFjtZ1wWgWYPuDof57Pg833ieybGt3WQ",
+      "entry": {
+        "n": 3,
+        "prev": "wUF24pskZF5N6nEMTm6z-xWGP69_V59z12k6m5jF5D4",
+        "space": "spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc",
+        "epoch": 1,
+        "op": "share",
+        "subject": "network:net_00112233445566778899aabbccddeeff",
+        "level": "read",
+        "endpoint": null,
+        "after": [
+          "8lWRzgJAeXOyAdERX7QigfC8h-h6w5uX2lrBtmJ61Mc"
+        ],
+        "personHead": "GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw",
+        "at": 1792512000003,
+        "signers": [
+          {
+            "key": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+            "sig": "8PS677cKvpevALXhfwCUWawzBeX8StgyA3PriJurew4LvrzsK5hww_6Tj5S6k03DTOoRoDrKhN_dG6xKY6hsCQ",
+            "presence": {
+              "device": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+              "what": "widen",
+              "act": "e4BgP54es2sJZveEbuLekKZ7Qec-1e5HTWzh-yug0M0",
+              "nonce": "JCQkJCQkJCQkJCQkJCQkJA",
+              "at": 1792512000003,
+              "sig": "iOiliS9eJzYxdKe-ZBruZp3U2CZx3kSZp2zw5gMrR6JgmaN_6zp6-X3e_P-6E3Y9vSoXcio-__02dI1J9cDaBA"
+            }
+          },
+          {
+            "key": "xns1_bnu66kt67zmga5gbbfytj6qfz2c7lmrn",
+            "sig": "9JvA9ikGPusI_AaAUrGBdnpqFwnjGVBw25Tz8Z65GvULha3Pz2DU4b2H4PgrlIUi2IKrc1lsolrzb2kepEFEAQ"
+          }
+        ]
+      }
+    }
+  ],
+  "sides": [
+    {
+      "what": "unshare the network",
+      "signingBytes": "xenolith-space/1\n{\"space\":\"spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc\",\"op\":\"unshare\",\"subject\":\"network:net_00112233445566778899aabbccddeeff\",\"personHead\":\"GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw\",\"at\":1792512000010}",
+      "id": "8lWRzgJAeXOyAdERX7QigfC8h-h6w5uX2lrBtmJ61Mc",
+      "side": {
+        "space": "spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc",
+        "op": "unshare",
+        "subject": "network:net_00112233445566778899aabbccddeeff",
+        "personHead": "GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw",
+        "at": 1792512000010,
+        "signers": [
+          {
+            "key": "xns1_2oe6famcqdgqtlpch3lkeafaqvxmemxg",
+            "sig": "eavDBTS39Gv0G430H80_HVU5AeIAy1z3nZh4ZVy_i1t2ouzZIOnBEaBUWPdunrDW-6Hj-KbymmN6XM0aMCZIAQ"
+          }
+        ]
+      }
+    },
+    {
+      "what": "take to c2",
+      "signingBytes": "xenolith-space/1\n{\"space\":\"spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc\",\"op\":\"take\",\"epoch\":1,\"to\":{\"alg\":\"ed25519\",\"key\":\"IXQwMN05TN9Imclh401O0j3EDz4miUsoCLLbp7pJnPc\"},\"base\":{\"n\":2,\"hash\":\"wUF24pskZF5N6nEMTm6z-xWGP69_V59z12k6m5jF5D4\"},\"personHead\":\"GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw\",\"at\":1792512000020}",
+      "id": "gvnCIqOJhBchV3gEPx2oTR32Ifd3aFwV9ulWSIir60E",
+      "side": {
+        "space": "spc_ciq4m6g3c6ei5f7c3k2rrhzy4bcdlecc",
+        "op": "take",
+        "epoch": 1,
+        "to": {
+          "alg": "ed25519",
+          "key": "IXQwMN05TN9Imclh401O0j3EDz4miUsoCLLbp7pJnPc"
+        },
+        "base": {
+          "n": 2,
+          "hash": "wUF24pskZF5N6nEMTm6z-xWGP69_V59z12k6m5jF5D4"
+        },
+        "personHead": "GfssR5EAbttRYsjjjRmQO7QhsTr041KvSir8hyI4RUw",
+        "at": 1792512000020,
+        "signers": [
+          {
+            "key": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+            "sig": "by0DrzX_j8JoCFkXN5Gs04cPHqDDgnbzPPADLZvuHdf_Lgk1TM3K6pWPDFR-aKVIG4NiinYRbGmjxuibwPUrAw",
+            "presence": {
+              "device": "xns1_vcsp2nnuwnnozdxbjlthaicmtvqqze6y",
+              "what": "widen",
+              "act": "gvnCIqOJhBchV3gEPx2oTR32Ifd3aFwV9ulWSIir60E",
+              "nonce": "IyMjIyMjIyMjIyMjIyMjIw",
+              "at": 1792512000020,
+              "sig": "3YUe-O52YpcvqitkwyWw1aGDaVDvxUNPWLqjCWkLn0d5fEMmzQ2-_afFIZZ6CsDu10iNh_03YeaSYM7_LysTDQ"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "view": {
+    "about": "prs_5kxxg6hdmhclybyyuyugfpgatsctpxqx",
+    "owner": "prs_5kxxg6hdmhclybyyuyugfpgatsctpxqx",
+    "curator": "xns1_bnu66kt67zmga5gbbfytj6qfz2c7lmrn",
+    "epoch": 1,
+    "head": "_lheydIvMVnwFjtZ1wWgWYPuDof57Pg833ieybGt3WQ",
+    "levels": {
+      "key:xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4": "append",
+      "network:net_00112233445566778899aabbccddeeff": "read"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-log"
-description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster) and a person's chain of device keys; the feeds a machine signs to its network; and its signed address records. Usable alone."
+description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster), a person's chain of device keys and a space's chain of who reads and curates shared context; the feeds a machine signs to its network; and its signed address records. Usable alone."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,9 @@ publish.workspace = true
 [dependencies]
 serde_json.workspace = true
 xenonet-id.workspace = true
+# What a space is about and its id (EntityRef, SpaceId), as every crate
+# reads them.
+xenonet-model.workspace = true
 
 [dev-dependencies]
 # A P-256 key standing in for a secure element's, in the person chain's

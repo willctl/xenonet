@@ -18,6 +18,9 @@
 //! - `address`: a machine's address record (`xenonet-address/1`), where
 //!   its endpoint is reached, signed by its machine signing key and
 //!   checked against the network's chain.
+//! - `space`: a space's chain (`xenolith-space/1`): who reads, appends to,
+//!   writes and curates one layer of shared context, its owner's side
+//!   entries beside it, and the one curator every member agrees on.
 //!
 //! Why `Policy` is a trait rather than one chain with a kind field: each
 //! chain kind (network, person, and later org, project, space) has its own
@@ -35,3 +38,4 @@ pub mod chain;
 pub mod feed;
 pub mod network;
 pub mod person;
+pub mod space;

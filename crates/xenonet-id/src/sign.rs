@@ -38,6 +38,10 @@ impl Purpose {
     /// A machine's address record: where its endpoint is reached
     /// (`xenonet-log`'s `address`).
     pub const ADDRESS: Purpose = Purpose("xenonet-address/1");
+    /// An entry of a space's chain, or a side entry beside it
+    /// (`xenonet-log`'s `space`): who reads, appends, writes and curates
+    /// one layer of shared context.
+    pub const SPACE: Purpose = Purpose("xenolith-space/1");
     /// A signature nothing verifies, which the doctor times a key with:
     /// its own tag, so it can't be taken for any other.
     pub const PROBE: Purpose = Purpose("xenonet-probe/1");
