@@ -1,12 +1,10 @@
 # Grok Bot
 
-Actor `actor:grok-bot`, product id `grok-bot`. **Status: goes ahead**: the
-owner has a SuperGrok plan. Researched on 2026-10-05 for Wave 1
-(`w1/actors-research`), read-only. Grok Bot isn't installed on the
-development Mac, so everything local below comes from the vendor's docs, its
-update feed and the Homebrew cask, and is marked for checking once it's
-installed. XenoNet's observer of it was built in Wave 2 and settled in Wave 3:
-[As built](#as-built) says what it does.
+Actor `actor:grok-bot`, product id `grok-bot`. XenoNet observes it and it
+can report itself: [As built](#as-built) says what XenoNet does. The
+research below was done read-only from the vendor's docs, its update feed
+and the Homebrew cask, then checked against an install on a development
+Mac (section 8).
 
 Each claim that matters says where it comes from:
 
@@ -14,7 +12,7 @@ Each claim that matters says where it comes from:
   feed, the App Store;
 - **secondary**: press, the Homebrew cask, release trackers;
 - **inferred**: our reading of the evidence;
-- **to confirm**: to check on the Mac after the install (Wave 2).
+- **to confirm**: not yet checked on an install.
 
 ## In short
 
@@ -35,9 +33,8 @@ Each claim that matters says where it comes from:
 
 ## As built
 
-The observer is `core/actors/grok-bot.js`, built in Wave 2 on the plan
-below (presence and process ancestry, recommended in section 4) and
-settled by the owner's calls at merge point B and in Wave 3.
+The observer is `adapters/grok-bot` (`observer.rs`): presence and process
+ancestry, as section 4 recommends.
 
 - **Where it looks.** `Grok Bot.app` in `/Applications` or
   `~/Applications`. Not installed there and never seen, the process table
@@ -47,36 +44,35 @@ settled by the owner's calls at merge point B and in Wave 3.
   Mac"); `unknown` with the app closed ("Its app on this Mac is closed"),
   since Bots go on in the cloud and nothing here can say they stopped.
   It's never `offline`, however long the app has been closed, and it stays
-  listed, out of sight, for as long as the app is installed (the owner's
-  call in Wave 3; other installed products are listed as offline once
-  they stop running). `heartbeatMs` is null.
+  listed, out of sight, for as long as the app is installed (other
+  installed products are listed as offline once they stop running). `heartbeatMs` is null.
 - **Commands.** A process the app starts whose program lies outside its
   bundle is a command: a `ran` event, gathered per minute in the project
   holding the folder it started in, by count and place, never by its
   arguments. One that is `claude` or `codex`, or starts one, started a
-  session (`spawned`), matched to the session as `attribution.js` does.
+  session (`spawned`), matched to the session as `xenonet_adapter::observe`'s
+  attribution does.
   While working, its status is "Running commands in atlas-api".
 - **How often.** The observers read the whole process table together
   every 5 s. While the app runs, Grok Bot's also looks at what the app
-  runs every 3 s with `pgrep` (the owner's call at merge point B, against
-  the once a second section 4 asked for), and describes only the pids
+  runs every 3 s with `pgrep` (the person's call, against the once a
+  second section 4 asked for), and describes only the pids
   that are new: a few milliseconds of CPU. A command that starts and ends
   between two looks is missed.
 - **Its version** is `CFBundleShortVersionString` from the app's
-  `Info.plist` (the owner's call at merge point B): read with a regular
+  `Info.plist`: read with a regular
   expression from an XML plist, or with `plutil -extract` from a binary
   one, again only when the file changes, and shown only when it reads as a
   version.
-- **Its bundle id**, `CFBundleIdentifier`, is read beside it since
-  2026-10-08, as Muse's is: a `Grok Bot.app` is Grok Bot's only when the id
-  is Cursor's `com.anysphere.sand`, in the observer and in
-  `core/procs.js`, since anyone can name a bundle that. Those two keys are
+- **Its bundle id**, `CFBundleIdentifier`, is read beside it, as Muse's
+  is: a `Grok Bot.app` is Grok Bot's only when the id is Cursor's
+  `com.anysphere.sand`, in the observer and in the process check, since
+  anyone can name a bundle that. Those two keys are
   all it reads of the `Info.plist`.
 - **Nothing else** of the app's files is read: not its data, logs,
   preferences or tokens. Its observer's switch, in the Actors panel or
   `xenonet actor observe grok-bot off`, takes it off the map.
-- **Reporting itself (2026-10-08, the owner's call, reversing merge point
-  A).** A Bot can register `actor:grok-bot` by running `xenonet actor
+- **Reporting itself.** A Bot can register `actor:grok-bot` by running `xenonet actor
   register --product grok-bot` through local execution, each run approved
   in the app, and the owner's Allow. It joins the observed actor; its token
   (the actor's grant, `xenonet_actor_` and base64url,
@@ -218,9 +214,9 @@ stored on the desktop. The Homebrew cask's cleanup list names the folders
 | `~/Library/Saved Application State/com.anysphere.sand.savedState` | Window state |
 
 Treat all of these as secret until checked: the sign-in session, and possibly
-cached messages and commands, live there. XenoNet reads none of them. In Wave
-2, with the owner's OK, an agent may list the file names and the shapes of
-log lines (keys and types, never values), to see whether a line marks "local
+cached messages and commands, live there. XenoNet reads none of them. With
+the person's OK, an agent may list the file names and the shapes of log
+lines (keys and types, never values), to see whether a line marks "local
 computer connected" or "command approved" without any text.
 
 ## 4. What XenoNet can observe
@@ -229,7 +225,7 @@ computer connected" or "command approved" without any text.
 
 - **The app running:** a process whose program is inside `/Applications/Grok
   Bot.app/Contents/MacOS/` (the name is to confirm). XenoNet's process table
-  (`core/procs.js`) already lists it. Its signature's team id is to confirm
+  (`crates/xenonet-engine/src/procs.rs`) lists it. Its signature's team id is to confirm
   (Anysphere's, or a SpaceX one), so XenoNet can check it the way it checks
   Claude Code's and Codex's.
 - **What that means:** the app running means the Mac can take local work. It
@@ -373,7 +369,7 @@ All official ([security](https://cursor.com/docs/grok-bot/security),
 3. The local execution policy for the trial: **Never allow** (presence only),
    or **Ask every time** to test XenoNet's attribution with a harmless command.
 
-### Download (an approved download in Wave 2)
+### Download
 
 - **Source** (official): the docs point to the
   [downloads page](https://x.ai/bot), which refuses automated reads. The
@@ -389,8 +385,8 @@ All official ([security](https://cursor.com/docs/grok-bot/security),
 - **SHA-256** (from the Homebrew cask, secondary): Apple silicon
   `3da5e4a564b8f4292a6fcbbe651bed3a01630d01f959232b037b9f0acbdf5de6`; Intel
   `7198b0b0bf40f4e23c9c8086a871bb25b90ee1babc03ad3e322e0f872645f1fd`. If the
-  feed has moved on by Wave 2, take the version it names and that version's
-  cask hash.
+  feed has moved on, take the version it names and that version's cask
+  hash.
 - **Requirements:** an Apple silicon Mac. The development Mac is arm64 on
   macOS 26.5.2, with 64 GB of memory and about 78 GB free. Also a Cursor
   account and a SuperGrok that can link.
@@ -410,7 +406,7 @@ All official ([security](https://cursor.com/docs/grok-bot/security),
 | 8 | Settings → Computer: **Route egress through this desktop** off; check the registered computer's name | **Owner** |
 | 9 | Settings → General → Auto-review: add "Ask first before sending any external email or message" | **Owner** |
 | 10 | Refuse macOS prompts for Full Disk Access, Accessibility, Screen Recording, Input Monitoring, Automation and Local Network; allow the microphone only for voice, and notifications if wanted. Turn off **Use hardware security keys** unless you sign in with a key | **Owner** |
-| 11 | Record for Wave 2, read-only: `ps -axo pid,ppid,comm` with the app open, `lsof` sockets of its processes, the file names in the folders of section 3, `launchctl print gui/$(id -u)` and Login Items | Agent |
+| 11 | Record, read-only: `ps -axo pid,ppid,comm` with the app open, `lsof` sockets of its processes, the file names in the folders of section 3, `launchctl print gui/$(id -u)` and Login Items | Agent |
 | 12 | Optional, with **Ask every time**: ask a Bot to run `pwd` in a scratch project, choose **Allow once**, and check that XenoNet sees the process under Grok Bot | Owner, then an agent |
 
 ### Uninstall
@@ -431,7 +427,7 @@ All official ([security](https://cursor.com/docs/grok-bot/security),
    ([delete account](https://cursor.com/help/grok-bot/delete-account)). The
    SuperGrok subscription is separate, and the link can't be undone.
 
-## 8. After the install (2026-10-08)
+## 8. After the install
 
 Recorded read-only on the development Mac, with the app open and signed
 in: names and shapes only. Of the app, only its `Info.plist`, its
@@ -447,40 +443,20 @@ data folders was opened.
 | Folders | `~/Library/Application Support/Grok Bot` (Electron's), `Caches/com.anysphere.sand` and `com.anysphere.sand.ShipIt` (the updater's), `HTTPStorages/com.anysphere.sand`, and `Preferences/com.anysphere.sand.plist`. No log folder under `~/Library/Logs` |
 | MCP | The app manages MCP servers for Bots: remote ones by URL, with OAuth, and ones run by a command, which run "on Grok Bot's computer", the cloud one. So a Bot's MCP servers can't reach XenoNet on this Mac; its local commands can |
 
-## Notes for other lanes
+## Notes for the interface
 
-- **Security (Wave 3).** With egress routing on, cloud Bots "can reach
-  networks available from that device", which may include `127.0.0.1`,
-  where XenoNet's API listens. Such requests would come from the Grok Bot
-  process. XenoNet's process check refuses them for calls in an agent's name,
-  but read-only routes answer any local process today. Worth a look, and a
-  reason to keep routing off.
-- **Interface.** For cloud agents, local evidence can't prove `offline`:
-  presence should fall back to `unknown`, with the desktop link (app up or
-  down) in `status`.
-- **Process polling.** Catching commands needs a descendant poll of about
-  1 Hz while the app runs. The benchmark should cover it. (Built at every
-  3 s, the owner's call at merge point B, and the benchmark's looks read
-  the app's version as the real ones do.)
-
-## The Phase 0 notes, checked
-
-| Phase 0 said | Now |
-|---|---|
-| SpaceXAI, formerly xAI | Yes, and Cursor builds and runs it: the docs live on cursor.com too, and the computers are Cursor's. SpaceX acquired Cursor's maker on 14 Aug 2026 |
-| Also Windows, Linux and Android, from x.ai/bot (unverified) | **Verified:** macOS, Windows, Linux, iOS and Android, with downloads from x.ai/bot |
-| Sign in with a Cursor account and link SuperGrok; how does a SuperGrok-only user sign in? (unverified) | **Verified:** a Cursor account is always needed (a free one will do), with the SuperGrok linked to it. **New:** the link is permanent and one to one, Lite can't link, and X Premium+ can |
-| Settings → General → Bot → Execution on Local Computer, three choices, the card shows the command | **Verified.** Once the account has registered computers, the setting moves to Settings → Computer → Computers, as **Execution on this computer** for each |
-| No local logs, data or API documented | Still true of the vendor's docs. The Homebrew cask names the data folders (section 3) |
+- With egress routing on, cloud Bots "can reach networks available from
+  that device", which may include `127.0.0.1`, where XenoNet's API
+  listens. Such requests come from the Grok Bot process, which the actor
+  and engine routes refuse; it's a reason to keep routing off.
+- For cloud agents, local evidence can't prove `offline`: presence falls
+  back to `unknown`, with the desktop link (app up or down) in `status`.
 
 ## Open questions
 
-- Which Cursor account, and does its profile carry a real name?
-- Which SuperGrok tier?
-- Allow local execution in the trial at all, or keep Grok Bot presence-only?
-- After the install: answered in section 8, except the shell commands run
-  in, the logs' shapes, the registered computer's name, and whether the app
-  adds a login item.
+- Not yet checked on an install: the shell commands run in, the logs'
+  shapes, the registered computer's name, and whether the app adds a login
+  item.
 
 ## Sources
 

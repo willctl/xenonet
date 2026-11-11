@@ -1,10 +1,10 @@
 # Muse
 
-Actor `actor:muse`, product id `muse`. **Status: observed, presence only,
-since 2026-10-08.** Researched on 2026-10-05 for Wave 1
-(`w1/actors-research`), read-only. The owner installed Muse 7.0 on the
-development Mac on 2026-10-08 and asked for it as an actor; section 8
-records what the install showed and what XenoNet does with it.
+Actor `actor:muse`, product id `muse`. XenoNet observes it, presence only,
+and it reports itself through the actor gateway. The research was done
+read-only from Meta's pages, then checked against Muse 7.0 installed on a
+development Mac; section 8 records what the install showed and what
+XenoNet does with it.
 
 Claims are marked **official** (Meta's newsroom, help center, terms and
 security posts, the App Store), **secondary** (press, the Homebrew cask),
@@ -23,11 +23,7 @@ security posts, the App Store), **secondary** (press, the Homebrew cask),
 - XenoNet can see only that the app is running. Muse's work on the Mac
   (reading files, Messages and Mail; driving apps) leaves nothing XenoNet can
   attribute without reading protected system data, which it won't.
-- **Recommendation (2026-10-05):** don't install it on the development Mac
-  for now. If the owner wants Muse as an actor, try it in the VM lab's
-  macOS guest, without Full Disk Access, and model it as presence only.
-- **Built (2026-10-08):** the owner installed it on the development Mac,
-  and XenoNet observes it, presence only (`core/actors/muse.js`). It can't
+- XenoNet observes it, presence only (`adapters/muse`). It can't
   be paired as a remote actor: Muse's custom connectors don't reach MCP
   servers (section 8). It reports itself and messages other actors
   through XenoNet's actor gateway, an MCP server it reaches from Meta's cloud
@@ -211,13 +207,10 @@ the [security post](https://research.meta.ai/blog/security-and-safety-for-ai-age
 
 ## 7. Install plan (short)
 
-**Decision at merge point A.** Recommended: **not now** on the development
-Mac. Muse would add the most invasive permissions of the three actors, and
-XenoNet would see the least.
+Muse asks for the most invasive permissions of the actors, and XenoNet
+sees the least of it. To install it:
 
-If the owner says yes:
-
-1. **Where:** the VM lab's macOS guest first, not the development Mac.
+1. **Where:** a machine or VM kept for it, if you can.
 2. **Requirements:** Apple silicon, macOS 15 or later (press; Homebrew says
    14), the US, 18 or older, and a Meta account (see section 6).
 3. **Cost:** the free tier is enough to test.
@@ -237,7 +230,7 @@ If the owner says yes:
    cloud side, use **Reset Muse**, or delete the Meta account. Cancel any
    subscription first.
 
-## 8. After the install (2026-10-08)
+## 8. After the install
 
 Recorded read-only on the development Mac, with the app open and signed
 in: names and shapes only. Nothing under Muse's folders was opened; of the
@@ -279,12 +272,12 @@ shapes in its bundled web app). A connector is either:
 Nothing in the app mentions MCP. So Muse can't call XenoNet's read-only
 tools (`xenonet mcp assistant`) the way a dot can through OpenAI's tunnel,
 and it isn't paired as a remote actor (`remote: false` in
-`core/actors/products.js`). Pairing it another way would mean serving an
+`crates/xenonet-adapter/src/products.rs`). Pairing it another way would mean serving an
 HTTP API that Meta's cloud can reach, which XenoNet doesn't do.
 
 ### What XenoNet does
 
-`core/actors/muse.js`, as section 4 proposed:
+`adapters/muse` (`observer.rs`), as section 4 proposed:
 
 - `actor:muse`, `via: ["observed"]`, `heartbeatMs` null, identity null.
   Capabilities `browse`, `message-people`, `schedule`, and `use-computer`
@@ -300,14 +293,14 @@ HTTP API that Meta's cloud can reach, which XenoNet doesn't do.
   `CFBundleIdentifier`, through `plutil`, since the file is binary. With
   its observer off, it reads nothing.
 - A `Muse.app` is Meta's only when its bundle id is `com.meta.endo`, in
-  the observer and in `core/procs.js`, as a Hermes.app is checked. Another
+  the observer and in the process check, as a Hermes.app is checked. Another
   maker's Muse.app is no product at all.
 - Its own processes are refused for actors' tokens, as Grok Bot's are
-  (interface.md, section 5, rule 3).
+  ([interface.md](interface.md), section 5, rule 3).
 
-### Reporting itself (2026-10-08)
+### Reporting itself
 
-The owner asked for Muse and Grok Bot to talk through XenoNet.
+Muse and Grok Bot talk through XenoNet.
 
 - **No local route.** Muse's code has a "Run commands" permission
   (`system.run`), but the owner's account isn't offered it: with File
@@ -322,7 +315,7 @@ The owner asked for Muse and Grok Bot to talk through XenoNet.
   Muse reaches XenoNet's actor gateway
   (`crates/xenonet-service/src/gateway/actor_gateway.rs`): an MCP
   server, over HTTP, that the owner turns on and puts on the internet with
-  a tunnel they pick (`gateway.md`). Muse's agent posts JSON-RPC to it from its cloud
+  a tunnel they pick ([gateway.md](gateway.md)). Muse's agent posts JSON-RPC to it from its cloud
   computer (`tools/call` with `send`, `inbox`, `peers`, `whoami`,
   `heartbeat`). Making Muse's gateway token in XenoNet's window, which asks
   your presence, registers `actor:muse`, joining the actor XenoNet observes.
@@ -331,8 +324,8 @@ The owner asked for Muse and Grok Bot to talk through XenoNet.
   field; XenoNet keeps only its revocation id
   ([authorization.md](../authorization.md), "The actor grant"). Its
   messages reach agents with an envelope saying they came by its gateway
-  token alone, from outside this machine. The file mailbox Muse's file access would allow was turned
-  down by the owner in favour of this.
+  token alone, from outside this machine. A file mailbox, which Muse's
+  file access would allow, was turned down in favour of this.
 
 ### Routes to more, later
 
@@ -340,29 +333,14 @@ The owner asked for Muse and Grok Bot to talk through XenoNet.
    `spawned`) could apply to what Muse runs, once the real-system test
    shows where its programs run.
 2. **A remote connection.** Once Muse's custom connectors can reach an MCP
-   server, add an adapter for it (`core/actors/adapters.js`) and set
+   server, add an adapter for it (`crates/xenonet-actors/src/adapters.rs`)
+   and set
    `remote: true`. It would still need a route from Meta's cloud to this
    Mac, as OpenAI's tunnel is for dots.
 
-## The Phase 0 notes, checked
-
-| Phase 0 said | Now |
-|---|---|
-| A Mac app, in beta, needing macOS 15 and Apple silicon (unverified) | **The app is verified:** Meta's help center covers it. "Beta" appears on no Meta page we could read. macOS 15 and Apple silicon come from the press only; the Homebrew cask says macOS 14 |
-| Computer use ("drive any app on your Mac") added at Connect on 23 Sep (unverified) | **Verified** in Meta's newsroom |
-| It asks for Full Disk Access, Automation and Notifications (unverified) | **Verified** in Meta's help center. Computer use adds Accessibility and Screen Recording (secondary) |
-| Each local app set to Off, Read only, or Read and interact (unverified) | **Verified** in Meta's help center |
-| Free, with Power at $20 and Maximum at $100 a month (unverified) | **Verified** in Meta's help center, with 500M and 3B Muse tokens a week |
-| It needs a Meta account | **Verified.** It can be a new one made with an email address, kept apart from other Meta accounts |
-| A download page whose title mentions Mac | It renders in the browser, and the file needs a signed link. Homebrew disabled its cask on 1 Oct 2026 for that reason |
-
 ## Open questions
 
-- Muse at all, and where? Answered on 2026-10-08: the owner installed it on
-  the development Mac and asked for it as an actor.
-- Is presence alone worth an actor? Built, presence only.
-- After an install: answered in section 8, except whether Muse ever runs
-  commands on the Mac.
+- Does Muse ever run commands on the Mac?
 - When Muse's custom connectors reach MCP servers, should it be paired as a
   remote actor?
 

@@ -1,19 +1,21 @@
 # Hermes Agent as an actor
 
-The Wave 1 deep-dive on `hermes` (Hermes Agent, by Nous Research), so that
-XenoNet can model it as an actor (`contracts.md` section 3). It was checked on
-2026-10-05 against Hermes's own docs and against the source installed on the
-development Mac, a clean clone of upstream `main` at `38d19b92e8`. Code links
-point to that commit. The actors interface doc builds on this one. XenoNet's
-observer of Hermes was built from both in Wave 2, observed and attributed
-only (`core/actors/hermes.js`, `hermes-files.js`, and the vendor schemas
-under `nous/hermes-agent/`), and its edited paths count in agents' edit
-warnings, marked as observed. The registered mode is a small XenoNet plugin
-for Hermes (`plugins/hermes/xenonet`), which `xenonet connect hermes`
-installs and the owner turns on (section 6). `interface.md` says what the
-observer does now.
+The research on `hermes` (Hermes Agent, by Nous Research) that XenoNet's
+model of it as an actor rests on ([contracts.md](../contracts.md) section
+3). It was checked against Hermes's own docs and against the source
+installed on a development Mac, a clean clone of upstream `main` at
+`38d19b92e8`. Code links point to that commit. XenoNet's observer of Hermes
+(`adapters/hermes`: `observer.rs`, `files.rs`, and the vendor schemas under
+`schemas/vendor/nous/hermes-agent/`) observes and attributes, and its edited
+paths count in agents' edit warnings, marked as observed. The registered
+mode is a small XenoNet plugin for Hermes (`plugins/hermes/xenonet`), which
+`xenonet connect hermes` installs and the person turns on (section 6).
+Hermes also starts over ACP (`hermes acp`), through XenoNet's generic ACP
+client. [interface.md](interface.md) says what the observer does.
 
 ## Summary
+
+What the development Mac had when this was checked:
 
 - **What's here.** A source install of Hermes Agent 0.21.5 that tracks
   `main`. The Hermes-Setup bootstrap app put it there, and the desktop app
@@ -41,9 +43,9 @@ observer does now.
 
   Sessions it starts inside a detached tmux session, or by driving an app
   with computer use, lose that link. Only registered mode closes the gap.
-- **Recommendation.**
-  - In Wave 2, build Hermes as observed and attributed only: no installs and
-    no changes to its settings.
+- **Recommendation**, which XenoNet follows.
+  - Observed and attributed needs no installs and no changes to its
+    settings.
   - Registered mode runs through a small XenoNet plugin for Hermes
     (observer hooks, metadata only), which the owner installs and turns on.
   - Don't use Hermes's API server, its outbound webhooks or
@@ -290,8 +292,7 @@ Hermes's own status endpoint counts a session as active when it has no
   - Each line is `<YYYY-MM-DD HH:MM:SS>  <tool>: "<argument preview>"`,
     with no session id ([messaging][docs-messaging],
     [`run_turn_runner.py`][src-run-turn-runner]).
-  - The Phase 0 notes listed it as a standard log. It isn't: it's opt-in
-    and gateway-only.
+  - It isn't a standard log: it's opt-in and gateway-only.
 - **XenoNet doesn't need the logs.** `state.db` holds the same facts as data,
   and log messages can carry content. If XenoNet ever reads them, it reads
   only timestamps, levels, the session tag and fixed markers.
@@ -428,7 +429,7 @@ Codex runtime    agent host (Python) → codex app-server                 (the t
 
 | Signal | Covers | Strength | Notes |
 |---|---|---|---|
-| A Hermes agent host among the session process's ancestors | Foreground and background runs, while both processes live | Strong | XenoNet already ties sessions to their processes when its hooks are connected: Claude Code's own HTTP hooks pin each session to the process that sends them, and Codex's command hooks run under its process (`core/engine/verify.js`). `claude --bare` loads no hooks ([CLI reference][cc-cli]), so those runs fall back to the signals below |
+| A Hermes agent host among the session process's ancestors | Foreground and background runs, while both processes live | Strong | XenoNet already ties sessions to their processes when its hooks are connected: Claude Code's own HTTP hooks pin each session to the process that sends them, and Codex's command hooks run under its process (`crates/xenonet-engine/src/verify.rs`). `claude --bare` loads no hooks ([CLI reference][cc-cli]), so those runs fall back to the signals below |
 | An entry in `processes.json`: `pid`, `host_start_time`, `cwd`, `parent_session_id` | Background runs | Strong, and it names the Hermes session | The `claude` or `codex` process descends from the recorded pid. Entries go when the process ends, so XenoNet keeps the link from when it first saw it |
 | A Codex `originator` of `hermes` | Hermes's Codex runtime | Strong, once verified | Codex sets the originator from `clientInfo.name` ([app-server docs][codex-app-server], [PR #8988][codex-pr]). The rollouts here say `codex_exec` and `codex-tui`, so `hermes` would stand out. Not seen here, since the runtime was never used: it needs a test thread to verify |
 | A cwd under `~/.hermes/cache/scratch/` | The codex skill's worktrees | Medium | A convention, not a guarantee |
@@ -444,7 +445,7 @@ Codex runtime    agent host (Python) → codex app-server                 (the t
 - runs of `claude --no-session-persistence`, which leave no transcript at
   all.
 
-**The ladder for Wave 2:**
+**The ladder:**
 
 1. A Codex thread whose originator is `hermes`.
 2. A session process with a Hermes agent host among its ancestors. When
@@ -729,7 +730,7 @@ it's full, and one background thread that talks to XenoNet. Its unit tests
 (`plugins/hermes/test_plugin.py`, run by `npm test`) use a fake `ctx` and a
 fake XenoNet.
 
-**What it sends** to the actor API (`interface.md`, section 2):
+**What it sends** to the actor API ([interface.md](interface.md), section 2):
 
 - a heartbeat every 15 s with the instance (`p<pid>`), `working` for 30 s
   after a tool call and `idle` after, and the folder Hermes runs in;
@@ -807,16 +808,14 @@ approval-wait hooks.
 
 ### XenoNet's MCP server as a Hermes tool
 
-- **The setup.** `hermes mcp add xenonet` would take XenoNet's runtime as the
-  command, `cli/xenonet.js mcp` as its arguments, and `XENONET_PORT` (and
-  `ELECTRON_RUN_AS_NODE=1`) as its environment. Hermes writes its own
-  config, so XenoNet doesn't need to write YAML.
+- **The setup.** `hermes mcp add xenonet` takes `xenonet mcp` as the
+  command, with `XENONET_ACTOR_TOKEN_FILE` in its environment. Hermes
+  writes its own config, so XenoNet doesn't need to write YAML.
 - **It can name only the actor.** Hermes sends no `_meta` with tool calls,
   and one MCP server serves every session in a process
   ([`mcp_tool_handlers.py`][src-mcp-handlers]). So the server can say
-  `actor:hermes`, but not which session is calling. `caller()` in
-  `mcp/xenonet.js` would need a Hermes branch, which the engine's process
-  check backs up.
+  `actor:hermes`, by its token, but not which session is calling. The
+  engine's process check backs the token up.
 - **It costs tokens.** The tools' schemas add tokens to every Hermes turn.
   `trust: untrusted` would make Hermes ask for approval before calls that
   write (claims, messages).
@@ -830,8 +829,8 @@ approval-wait hooks.
     folder.
 - **The MCP server:** one entry in `config.yaml`, which comes out with
   `hermes mcp remove xenonet`.
-- **Like XenoNet's Connect flow** for Claude Code and Codex
-  (`core/engine/connect.js`):
+- **Like XenoNet's Connect flow** for Claude Code and Codex (each
+  adapter's `connect`, applied by the service):
   - the owner sees a preview and confirms it in XenoNet's window;
   - XenoNet keeps a copy of `config.yaml` from before its first change
     (`config.yaml.before-xenonet`);
@@ -839,8 +838,8 @@ approval-wait hooks.
 
 ## 7. Install plan
 
-Nothing needs installing for the observed and attributed mode that Wave 2
-builds. The rest is optional, and each step is the owner's to approve.
+Nothing needs installing for the observed and attributed mode. The rest is
+optional, and each step is the person's to approve.
 
 | # | Step | Needed for | Source | What it changes | Size | Cost | Who |
 |---|---|---|---|---|---|---|---|
@@ -866,44 +865,20 @@ builds. The rest is optional, and each step is the owner's to approve.
 **Updates** stay the owner's: `hermes update`, or Hermes.app's built-in
 updates, which pull the latest agent and rebuild the app in place. This
 install tracks `main`, so expect its formats to drift. The lenient readers
-and drift records in `contracts.md` section 1 are what cover it.
-
-## Corrections to the Phase 0 notes
-
-- `tool_calls.log` isn't a standard log. It's written only by a gateway
-  with `display.tool_progress: log`.
-- `gateway_state.json` and `gateway.pid` live in `~/.hermes`, not in
-  `logs/`.
-- There's no `profiles/` folder here. It appears with the first named
-  profile.
-- `/Applications/Hermes.app` is the setup app. The Hermes.app that runs
-  is a build inside the checkout.
-- That app is set to a remote gateway, so it runs no local `hermes serve`
-  now.
-- `state.db` has more than `sessions`, `messages` and `messages_fts`. The
-  current schema creates 17 tables, and the file here is an older layout.
+and drift records in [contracts.md](../contracts.md) section 1 are what
+cover it.
 
 ## Open questions
 
-1. **For the owner.** Is Hermes.app meant to use a remote gateway, on
-   another machine or Hermes Cloud? If so, Hermes's work happens there, and
-   on this Mac XenoNet sees only the app. That's for the hosts workstream, or
-   for a cloud actor.
-2. **For the owner.** Should Hermes be always on here (steps 3 and 4)?
-3. **For the owner, before Wave 2's later steps.** Is the XenoNet plugin for
-   Hermes all right to add?
-4. **For the owner and the orchestrator.** May XenoNet take file paths from
-   the arguments of tool calls with `json_extract`, or only through the
-   plugin?
-5. **For the interface doc:**
-   - a `use-computer` capability;
-   - whether an app that runs but can't reach its backend gets a presence
-     value of its own;
-   - `actor:hermes-<profile>` for named profiles;
-   - how several Hermes processes register as one actor.
-6. **To verify.** That threads from Hermes's Codex runtime carry
+1. **A remote gateway.** When Hermes.app uses a remote gateway, on another
+   machine or Hermes Cloud, Hermes's work happens there, and on this
+   machine XenoNet sees only the app. XenoNet on that machine, joined to
+   the network, would see it.
+2. **File paths from tool calls.** May XenoNet take file paths from the
+   arguments of tool calls with `json_extract`, or only through the plugin?
+3. **To verify.** That threads from Hermes's Codex runtime carry
    `originator: "hermes"`. That takes the runtime switched on, which edits
-   `~/.codex/config.toml` and so needs the owner's OK, or Codex's source.
+   `~/.codex/config.toml` and so needs the person's OK, or Codex's source.
 
 [releases]: https://github.com/NousResearch/hermes-agent/releases
 [docs-install]: https://hermes-agent.nousresearch.com/docs/getting-started/installation

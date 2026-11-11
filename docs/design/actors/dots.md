@@ -1,13 +1,12 @@
 # dots
 
-Actor `actor:dots`, product id `dots`. **Status: on hold**: the owner has
-no ChatGPT Pro yet. Since 2026-10-07 a dot can be paired as a remote actor
-that reads, through OpenAI's Secure MCP Tunnel and `xenonet mcp assistant`
+Actor `actor:dots`, product id `dots`. **Not built**: no dot is set up. A
+dot can be paired as a remote actor that reads, through OpenAI's Secure MCP
+Tunnel and `xenonet mcp assistant`
 ([cloud-assistants.md](../cloud-assistants.md)); that's untested with a
 real dot, and it doesn't settle anything below about which local threads
-are a dot's. Researched on 2026-10-05 for Wave 1
-(`w1/actors-research`), read-only. The ChatGPT desktop app is installed on
-the development Mac; dots aren't set up.
+are a dot's. The research was done read-only, with the ChatGPT desktop app
+installed on a development Mac.
 
 Claims are marked **official** (OpenAI's docs, the openai/codex source, the
 installed app's bundle and shipped code), **secondary** (press), **inferred**
@@ -133,9 +132,9 @@ the installed codex and the
 [openai/codex source](https://github.com/openai/codex). The values come from
 the app's shipped code, so they're undocumented and may change.
 
-Two gaps in XenoNet today (`core/codex.js`):
+Two gaps in XenoNet's Codex reader (`adapters/codex/src/reader`):
 
-- `threadToSession` ignores `threadSource`. Reading it, and declaring it in
+- `thread_to_session` ignores `threadSource`. Reading it, and declaring it in
   `vendor/openai/codex/app-server` as a discriminator so drift records keep
   its values, is the first step for this actor. Its values are app labels,
   not user text.
@@ -273,35 +272,29 @@ checks:
 Download and size: nothing new to download. The app updates itself in
 place; the size of the update isn't published.
 
-## Notes for other lanes
+## Notes for the interface
 
-- **Core (vendor schemas):** add `threadSource` (and keep `originator`) to
+- **Vendor schemas:** add `threadSource` (and keep `originator`) to
   `vendor/openai/codex/app-server` and `state-db`, with `threadSource` as a
   discriminator. Add a doctor check for threads `thread/list` can't return.
-- **Interface:** if XenoNet ever talks to Codex's shared app-server daemon
-  instead of its own private one, be careful. The first client to
-  `initialize` a server process sets that process's default originator,
-  which threads created afterwards record, and `xenonet` must never become it
-  (`initialize_processor.rs`).
-- **Security (Wave 3):** a dot with computer use, like Muse, can click in
-  XenoNet's window. To XenoNet, that looks like the person, since the window is
-  what XenoNet trusts for "yours alone" actions.
-
-## The Phase 0 notes, checked
-
-| Phase 0 said | Now |
-|---|---|
-| Announced at DevDay on 29 Sep 2026 (unverified) | The press says so. OpenAI's own announcement and help pages refuse automated reads, so this stays secondary |
-| Runs on GPT-6 Astra (unverified) | **Verified** in OpenAI's docs |
-| Plans: Pro 100, 200 and 500, Business Premium, Enterprise | **Verified.** The prices are secondary |
-| The new ChatGPT app is the old Codex app with Chat and Work | **Verified:** the installed app's bundle id is `com.openai.codex`, and OpenAI's help article covers the move |
-| Which `source` or `originator` marks a dot's threads (unverified) | **Neither should:** every thread the app makes is expected to have `originator` `Codex Desktop` and `source` `vscode`. `threadSource` probably does; its value is to confirm |
-| Turn it on in the dot's profile: Computers → Your computer → Allow access | **Verified.** **New:** it needs app 26.929 or later (26.915 is installed), and Codex hooks don't fire for the steps it runs here |
+- **Codex's shared app-server:** if XenoNet ever talks to Codex's shared
+  app-server daemon instead of its own private one, be careful. The first
+  client to `initialize` a server process sets that process's default
+  originator, which threads created afterwards record, and `xenonet` must
+  never become it (`initialize_processor.rs`).
+- **Security:** a dot with computer use, like Muse, can click in XenoNet's
+  window. To XenoNet, that looks like the person, since the window is what
+  XenoNet trusts for "yours alone" actions.
+- **What's confirmed:** every thread the app makes is expected to have
+  `originator` `Codex Desktop` and `source` `vscode`, so neither marks a
+  dot's; `threadSource` probably does, and its value is to confirm. Turning
+  a dot on for a computer needs app 26.929 or later, and Codex hooks don't
+  fire for the steps it runs here.
 
 ## Open questions
 
-- When will ChatGPT Pro be bought, and which tier? It decides whether this
-  actor is built in Wave 2 or later.
+- When will ChatGPT Pro be bought, and which tier? It decides when this
+  actor is built.
 - Should the dot get the Mac at all, or stay cloud-only, with XenoNet showing
   only the Codex threads it starts?
 - Set up OTel export to XenoNet? It's a change to Codex's config.
