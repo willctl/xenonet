@@ -38,6 +38,7 @@
 //!   register-actor -         -         reach     presence
 //!   use-gateway    -         -         reach     -
 //!   revoke         -         -         -         presence
+//!   delegate       -         delegate  -         delegate
 //!
 //!   -         refused
 //!   reach     steps 1 to 3 are enough (an actor's token has the right)
@@ -67,6 +68,13 @@
 //!             run started under a delegation of the person's that answers
 //!             that kind of prompt and names this machine's device and the
 //!             device the run was started from
+//!   delegate  an outbound actor (an agent this machine calls over A2A)
+//!             this machine has, through its local door only: the person;
+//!             an agent inside the scope the person registered it with
+//!             (its id, or its project as this machine's map holds it),
+//!             never an unchecked one, until the scope ends. No other
+//!             machine's principal and no actor calls one, so a remote
+//!             agent's work never goes out under this machine's bearer
 //! ```
 //!
 //! 5. **Hold**: start, answer, admit, widen and publish for another machine
@@ -208,14 +216,15 @@ enum Rule {
     Read,
     Presence,
     Answer,
+    Delegate,
 }
 
-use Rule::{Answer, Claim, No, Presence, Reach, Read, Start, Wake};
+use Rule::{Answer, Claim, Delegate, No, Presence, Reach, Read, Start, Wake};
 
 /// The rule table (the module's doc draws it). Columns: machine, agent,
 /// actor, person.
 #[rustfmt::skip]
-const TABLE: [(Action, [Rule; 4]); 13] = [
+const TABLE: [(Action, [Rule; 4]); 14] = [
     //                       machine   agent     actor     person
     (Action::Message,       [Reach,    Reach,    Reach,    Reach]),
     (Action::Wake,          [Wake,     Wake,     Wake,     Reach]),
@@ -230,6 +239,7 @@ const TABLE: [(Action, [Rule; 4]); 13] = [
     (Action::RegisterActor, [No,       No,       Reach,    Presence]),
     (Action::UseGateway,    [No,       No,       Reach,    No]),
     (Action::Revoke,        [No,       No,       No,       Presence]),
+    (Action::Delegate,      [No,       Delegate, No,       Delegate]),
 ];
 
 /// The actions that hold for another machine on stale governance.
@@ -304,6 +314,7 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
             | (Action::Claim | Action::Handoff | Action::Read | Action::RegisterActor | Action::UseGateway, Resource::Machine(_))
             | (Action::Admit | Action::Widen | Action::Publish, Resource::Network(_))
             | (Action::Revoke, Resource::Machine(_) | Resource::Network(_))
+            | (Action::Delegate, Resource::Actor(_))
     );
     if !fits {
         return Err(Reason::new("resource", format!("a {} isn't done to that", request.action().as_str())));
@@ -311,6 +322,7 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
     match request.resource() {
         Resource::Machine(m) | Resource::Run { machine: m, .. } if m != own => return Err(Reason::new("resource", format!("{m} decides for itself; this is {own}"))),
         Resource::Network(n) if ground.role(n, own).is_none() => return Err(Reason::new("resource", format!("this machine isn't in {n}"))),
+        Resource::Actor(a) if ground.outbound(a).is_none() => return Err(Reason::new("resource", format!("{own} has no outbound actor {a}"))),
         _ => {}
     }
     match (request.act(), request.resource()) {
@@ -524,6 +536,36 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
         }
         Presence => present(request, ground, presence),
         Answer => answer(request, ground, presence, arrival, authority),
+        Delegate => delegate(request, ground, arrival, authority),
+    }
+}
+
+// A delegation to an outbound actor: from this machine's own door, by the
+// person or an agent inside the scope the person registered it with.
+fn delegate(request: &Request, ground: &dyn Ground, arrival: &Arrival, authority: Authority) -> Step<(Authority, Option<&'static str>)> {
+    let (Resource::Actor(actor), Act::Delegate { project }) = (request.resource(), request.act()) else {
+        return Err(Reason::new("act", "a delegation's act is a delegation, to an actor"));
+    };
+    if request.door() != Door::Local || !arrival.own {
+        return Err(Reason::new("door", "an outbound actor is called from this machine's own door"));
+    }
+    // Step 1 found it here.
+    let scope = ground.outbound(actor).ok_or_else(|| Reason::new("resource", format!("no outbound actor {actor} here")))?;
+    if scope.until < request.at() {
+        return Err(Reason::new("scope", format!("the scope the person gave {actor} ended")));
+    }
+    match request.principal() {
+        Principal::Person(_) => Ok((authority, None)),
+        Principal::Agent { attestation: Attestation::Unchecked, .. } => Err(Reason::new("attestation", "an unchecked agent never hands work to an outbound actor")),
+        Principal::Agent { id, .. } => {
+            let in_project = project.as_ref().is_some_and(|p| scope.projects.has(p));
+            if scope.agents.has(id) || in_project {
+                Ok((authority, None))
+            } else {
+                Err(Reason::new("scope", format!("the person didn't let {id} hand work to {actor}")))
+            }
+        }
+        p => Err(Reason::new("principal", format!("a {} doesn't delegate", p.kind()))),
     }
 }
 

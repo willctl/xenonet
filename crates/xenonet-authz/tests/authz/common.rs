@@ -67,6 +67,7 @@ pub struct World {
     pub scopes: HashMap<Vec<u8>, AllowScope>,
     pub asks: HashMap<AskId, Asked>,
     pub synced: Option<i64>,
+    pub outbound: HashMap<ActorSlug, OutboundScope>,
 }
 
 impl Ground for World {
@@ -112,6 +113,9 @@ impl Ground for World {
     fn governance_synced_at(&self) -> Option<i64> {
         self.synced
     }
+    fn outbound(&self, actor: &ActorSlug) -> Option<OutboundScope> {
+        self.outbound.get(actor).cloned()
+    }
 }
 
 /// The question q1: session s1's run asks to run a command, a run m2
@@ -155,6 +159,7 @@ pub fn fixture() -> Fixture {
         scopes: HashMap::new(),
         asks: HashMap::from([(AskId::new("q1").unwrap(), asked(Attestation::HarnessSigned))]),
         synced: Some(NOW - 60_000),
+        outbound: HashMap::new(),
     };
     Fixture { world, m1_root, m2_root }
 }

@@ -70,6 +70,33 @@ pub trait A2a: Send + Sync {
     fn set_default_target(&self, actor: &str, target: Option<&str>) -> Result<(), String>;
 }
 
+/// Outbound actors, the agents XenoNet calls over A2A (the service's
+/// a2a/outbound.rs): the window registers them, sessions hand them work.
+#[async_trait]
+pub trait A2aOut: Send + Sync {
+    /// Each one, what the person approved for it and its latest
+    /// delegations; never a bearer.
+    fn status(&self) -> Value;
+    /// A card, fetched for the window to show before the person approves
+    /// it.
+    async fn preview(&self, card: &str, private_host: Option<&str>) -> Result<Value, String>;
+    /// Registers one with what the window sent, asking for the person's
+    /// presence.
+    async fn register(&self, body: &Value) -> Result<Value, String>;
+    async fn remove(&self, actor: &str) -> Result<bool, String>;
+    /// A session hands one work, or reads on (`task`): the delegation as
+    /// it stands. `project` is the session's as this machine's map has it.
+    async fn delegate(
+        &self,
+        agent: &str,
+        attestation: crate::cores::door::Attestation,
+        project: Option<String>,
+        actor: &str,
+        text: Option<&str>,
+        task: Option<&str>,
+    ) -> Result<Value, String>;
+}
+
 /// What `PUT /api/net/settings` changes of this machine's place in the
 /// network; what's None stays as it is.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

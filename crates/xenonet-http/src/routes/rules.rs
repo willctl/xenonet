@@ -327,6 +327,13 @@ pub const RULES: &[Rule] = &[
     r("DELETE", "/api/actors/*", YOU, Nothing),
     r("GET",    "/api/a2a", YOU, Nothing),
     r("POST",   "/api/a2a", YOU, Nothing),
+    // Outbound actors: the window registers them (with presence), and a
+    // session hands one work, decided by xenonet-authz's delegate rule.
+    r("GET",    "/api/a2a/outbound", YOU, Nothing),
+    r("POST",   "/api/a2a/outbound/card", WINDOW, Nothing),
+    r("POST",   "/api/a2a/outbound", WINDOW, Nothing),
+    r("DELETE", "/api/a2a/outbound/*", YOU, Nothing),
+    r("POST",   "/api/a2a/delegate", &[Session], Nothing),
 
     // ---- remote actors' connections ----
     r("GET",    "/api/assistant", YOU, Nothing),
@@ -418,6 +425,9 @@ fn off(ctx: &Ctx, path: &str) -> Option<Reply> {
     }
     if under("/api/assistant") && ctx.cores.connections.is_none() {
         return Some(no("Actors are off here (XENONET_ACTORS=off), and remote actors with them"));
+    }
+    if path.starts_with("/api/a2a/") && ctx.a2a_out.get().is_none() {
+        return Some(no("A2A out isn't here: actors are off"));
     }
     if path == "/api/a2a" && ctx.a2a.get().is_none() {
         return Some(no("A2A isn't here: actors are off"));

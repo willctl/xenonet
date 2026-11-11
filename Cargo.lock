@@ -5202,6 +5202,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-a2a"
+version = "0.2.0"
+dependencies = [
+ "a2a-lf",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "url",
+ "xenonet-authz",
+]
+
+[[package]]
 name = "xenonet-acp"
 version = "0.2.0"
 dependencies = [
@@ -5799,10 +5813,12 @@ dependencies = [
  "portable-pty",
  "reqwest",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "serde_path_to_error",
  "tokio",
+ "xenonet-a2a",
  "xenonet-actors",
  "xenonet-adapter",
  "xenonet-api",

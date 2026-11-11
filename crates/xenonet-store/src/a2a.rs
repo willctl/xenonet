@@ -93,7 +93,106 @@ pub(crate) const TABLES: &[&str] = &[
         at REAL NOT NULL,
         PRIMARY KEY (actor, message)
     )",
+    // Outbound actors, the agents XenoNet calls: what the person approved
+    // when they registered one (its card's pin, the address it's called
+    // at, the other host and the private host they allowed, who may hand
+    // it work and until when). Its bearer is in the credential store.
+    "CREATE TABLE a2a_outbound (
+        slug TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        card_url TEXT NOT NULL,
+        hash TEXT NOT NULL,
+        interface_url TEXT NOT NULL,
+        approved_host TEXT,
+        private_host TEXT,
+        agents TEXT NOT NULL,
+        projects TEXT NOT NULL,
+        until REAL NOT NULL,
+        created_at REAL NOT NULL
+    )",
+    // Work handed to them: one row a delegation, with where its task
+    // stands and what the agent last said, which the delegating session
+    // reads back.
+    "CREATE TABLE a2a_delegations (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL,
+        agent TEXT NOT NULL,
+        task TEXT,
+        context TEXT,
+        state TEXT NOT NULL,
+        text TEXT,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    )",
+    "CREATE INDEX a2a_delegations_by_agent ON a2a_delegations (agent, slug, updated_at DESC)",
 ];
+
+/// An outbound actor as it's kept. `agents` and `projects` are JSON:
+/// `"all"`, or a list of ids.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutboundRow {
+    pub slug: String,
+    pub name: String,
+    pub card_url: String,
+    pub hash: String,
+    pub interface_url: String,
+    pub approved_host: Option<String>,
+    pub private_host: Option<String>,
+    pub agents: Value,
+    pub projects: Value,
+    pub until: f64,
+    pub created_at: f64,
+}
+
+/// A delegation as it's kept.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DelegationRow {
+    pub id: String,
+    pub slug: String,
+    pub agent: String,
+    pub task: Option<String>,
+    pub context: Option<String>,
+    /// working, done, asks-you, asks-person, failed, rejected, canceled or
+    /// lost.
+    pub state: String,
+    pub text: Option<String>,
+    pub created_at: f64,
+    pub updated_at: f64,
+}
+
+fn outbound_of(r: &Row<'_>) -> rusqlite::Result<OutboundRow> {
+    let json = |k: &str| -> rusqlite::Result<Value> { Ok(serde_json::from_str(&r.get::<_, String>(k)?).unwrap_or(Value::Null)) };
+    Ok(OutboundRow {
+        slug: r.get("slug")?,
+        name: r.get("name")?,
+        card_url: r.get("card_url")?,
+        hash: r.get("hash")?,
+        interface_url: r.get("interface_url")?,
+        approved_host: r.get("approved_host")?,
+        private_host: r.get("private_host")?,
+        agents: json("agents")?,
+        projects: json("projects")?,
+        until: r.get("until")?,
+        created_at: r.get("created_at")?,
+    })
+}
+
+fn delegation_of(r: &Row<'_>) -> rusqlite::Result<DelegationRow> {
+    Ok(DelegationRow {
+        id: r.get("id")?,
+        slug: r.get("slug")?,
+        agent: r.get("agent")?,
+        task: r.get("task")?,
+        context: r.get("context")?,
+        state: r.get("state")?,
+        text: r.get("text")?,
+        created_at: r.get("created_at")?,
+        updated_at: r.get("updated_at")?,
+    })
+}
+
+const OUTBOUND_COLUMNS: &str = "slug, name, card_url, hash, interface_url, approved_host, private_host, agents, projects, until, created_at";
+const DELEGATION_COLUMNS: &str = "id, slug, agent, task, context, state, text, created_at, updated_at";
 
 /// A task as it's kept.
 #[derive(Clone, Debug, PartialEq)]
@@ -477,6 +576,87 @@ impl A2aStore {
     pub fn prune(&self, actor: &str, now: f64) -> R<()> {
         self.db.write(|c| Ok(prune_in(c, actor, now)?))
     }
+
+    // ---------- outbound actors ----------
+
+    /// An outbound actor, registered or registered again.
+    pub fn put_outbound(&self, o: &OutboundRow) -> R<()> {
+        self.db.write(|c| {
+            c.execute(
+                &format!("INSERT OR REPLACE INTO a2a_outbound ({OUTBOUND_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"),
+                params![o.slug, o.name, o.card_url, o.hash, o.interface_url, o.approved_host, o.private_host, o.agents.to_string(), o.projects.to_string(), o.until, o.created_at],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn outbound(&self, slug: &str) -> R<Option<OutboundRow>> {
+        self.db.read(|c| Ok(c.query_row(&format!("SELECT {OUTBOUND_COLUMNS} FROM a2a_outbound WHERE slug = ?"), [slug], outbound_of).optional()?))
+    }
+
+    pub fn outbounds(&self) -> R<Vec<OutboundRow>> {
+        self.db.read(|c| {
+            let mut st = c.prepare(&format!("SELECT {OUTBOUND_COLUMNS} FROM a2a_outbound ORDER BY slug"))?;
+            let rows = st.query_map([], outbound_of)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// An outbound actor removed, with its delegations.
+    pub fn remove_outbound(&self, slug: &str) -> R<bool> {
+        self.db.write(|c| {
+            c.execute("DELETE FROM a2a_delegations WHERE slug = ?", [slug])?;
+            Ok(c.execute("DELETE FROM a2a_outbound WHERE slug = ?", [slug])? > 0)
+        })
+    }
+
+    /// A new delegation; ones finished a week ago go.
+    pub fn insert_delegation(&self, d: &DelegationRow) -> R<()> {
+        self.db.write(|c| {
+            c.execute(
+                &format!("INSERT INTO a2a_delegations ({DELEGATION_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"),
+                params![d.id, d.slug, d.agent, d.task, d.context, d.state, d.text, d.created_at, d.updated_at],
+            )?;
+            c.execute("DELETE FROM a2a_delegations WHERE updated_at < ?1", params![d.created_at - KEEP_MS])?;
+            Ok(())
+        })
+    }
+
+    pub fn delegation(&self, id: &str) -> R<Option<DelegationRow>> {
+        self.db.read(|c| Ok(c.query_row(&format!("SELECT {DELEGATION_COLUMNS} FROM a2a_delegations WHERE id = ?"), [id], delegation_of).optional()?))
+    }
+
+    /// Where a delegation stands now; a task or context it learned is kept.
+    pub fn set_delegation(&self, id: &str, task: Option<&str>, context: Option<&str>, state: &str, text: Option<&str>, at: f64) -> R<()> {
+        self.db.write(|c| {
+            c.execute(
+                "UPDATE a2a_delegations SET task = COALESCE(?2, task), context = COALESCE(?3, context), state = ?4, text = ?5, updated_at = ?6 WHERE id = ?1",
+                params![id, task, context, state, text, at],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// `agent`'s latest delegation to `slug`.
+    pub fn latest_delegation(&self, agent: &str, slug: &str) -> R<Option<DelegationRow>> {
+        self.db.read(|c| {
+            Ok(c.query_row(
+                &format!("SELECT {DELEGATION_COLUMNS} FROM a2a_delegations WHERE agent = ?1 AND slug = ?2 ORDER BY updated_at DESC LIMIT 1"),
+                [agent, slug],
+                delegation_of,
+            )
+            .optional()?)
+        })
+    }
+
+    /// The latest delegations to `slug`, for the window.
+    pub fn delegations(&self, slug: &str) -> R<Vec<DelegationRow>> {
+        self.db.read(|c| {
+            let mut st = c.prepare(&format!("SELECT {DELEGATION_COLUMNS} FROM a2a_delegations WHERE slug = ? ORDER BY updated_at DESC LIMIT 50"))?;
+            let rows = st.query_map([slug], delegation_of)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
 }
 
 // Old finished tasks, and an agent's beyond its latest 1000, go: inside
@@ -600,5 +780,45 @@ mod tests {
         assert_eq!(s.setting("on").unwrap().as_deref(), Some("true"));
         assert_eq!(s.default_target("actor:wren").unwrap().as_deref(), Some("claude:x"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn outbound_actors_and_their_delegations() {
+        let s = A2aStore::new(Arc::new(Db::memory().unwrap()));
+        let o = OutboundRow {
+            slug: "scout".into(),
+            name: "Scout".into(),
+            card_url: "https://agents.example.com/.well-known/agent-card.json".into(),
+            hash: "ab".repeat(32),
+            interface_url: "https://agents.example.com/a2a".into(),
+            approved_host: None,
+            private_host: None,
+            agents: json!(["claude:fix"]),
+            projects: json!("all"),
+            until: 5000.0,
+            created_at: 1000.0,
+        };
+        s.put_outbound(&o).unwrap();
+        assert_eq!(s.outbound("scout").unwrap(), Some(o.clone()));
+        assert_eq!(s.outbounds().unwrap().len(), 1);
+        let d = DelegationRow {
+            id: "dlg_1".into(),
+            slug: "scout".into(),
+            agent: "claude:fix".into(),
+            task: None,
+            context: None,
+            state: "working".into(),
+            text: None,
+            created_at: 1000.0,
+            updated_at: 1000.0,
+        };
+        s.insert_delegation(&d).unwrap();
+        s.set_delegation("dlg_1", Some("task-1"), Some("ctx-1"), "done", Some("the answer"), 1100.0).unwrap();
+        s.set_delegation("dlg_1", None, None, "done", Some("the answer"), 1200.0).unwrap();
+        let got = s.latest_delegation("claude:fix", "scout").unwrap().unwrap();
+        assert_eq!((got.task.as_deref(), got.context.as_deref(), got.state.as_str()), (Some("task-1"), Some("ctx-1"), "done"), "a task once learned stays");
+        assert_eq!(s.delegations("scout").unwrap().len(), 1);
+        assert!(s.remove_outbound("scout").unwrap());
+        assert!(s.delegation("dlg_1").unwrap().is_none(), "its delegations go with it");
     }
 }

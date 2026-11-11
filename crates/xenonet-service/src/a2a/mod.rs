@@ -23,7 +23,9 @@
 //! - **Replies are read from the actor's inbox**, by one pull at a time per
 //!   actor, which always finishes and keeps what it took even when the
 //!   client that started it goes away.
-//! - **No outbound calls**: no push notifications.
+//! - **No push notifications**: XenoNet calls no address an A2A client
+//!   gives it. The agents XenoNet does call are the outbound actors the
+//!   person registered (`outbound`).
 //!
 //! The objects are a2a-lf's (the a2aproject's types for A2A 1.0): the card,
 //! the requests, tasks, messages, artifacts, stream events and error codes.
@@ -35,6 +37,7 @@
 //! (xenonet-http's routes/a2a.rs, through parts.rs).
 
 pub mod card;
+pub mod outbound;
 pub mod rpc;
 /// The task table, kept in the store (`xenonet_store::a2a`).
 pub use xenonet_store::a2a as store;

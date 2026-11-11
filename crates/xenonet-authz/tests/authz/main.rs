@@ -6,6 +6,7 @@
 
 mod answers;
 mod common;
+mod delegate;
 mod matrix;
 mod presence;
 mod props;

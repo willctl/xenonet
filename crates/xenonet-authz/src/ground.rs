@@ -6,7 +6,7 @@
 //! store of its own, and another project can bring its own. Everything
 //! here is the receiver's; nothing comes from the sender's word.
 
-use crate::vocab::{AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, PromptKind, SessionId};
+use crate::vocab::{ActorSlug, AgentId, AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, ProjectId, PromptKind, SessionId};
 use crate::RootCertificate;
 use xenonet_id::sign::VerifyingKey;
 
@@ -159,6 +159,18 @@ pub struct AllowScope {
     pub until: i64,
 }
 
+/// Who may hand work to one of this machine's outbound actors (an agent
+/// it calls over A2A), as the person set it when they registered it, with
+/// presence: the sessions by id and the projects whose sessions may. A
+/// session in neither may not; the person always may.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboundScope {
+    pub agents: Set<AgentId>,
+    pub projects: Set<ProjectId>,
+    /// Milliseconds since 1970 when it ends.
+    pub until: i64,
+}
+
 /// A permission prompt waiting here, as this machine holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asked {
@@ -226,4 +238,10 @@ pub trait Ground {
     /// When this machine last synced governance (the chains) from another
     /// member, in milliseconds since 1970.
     fn governance_synced_at(&self) -> Option<i64>;
+
+    /// The scope of the outbound actor `actor`, when this machine has one
+    /// by that name. None, the default, refuses every delegation to it.
+    fn outbound(&self, _actor: &ActorSlug) -> Option<OutboundScope> {
+        None
+    }
 }

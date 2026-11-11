@@ -2,9 +2,11 @@
 //! parts.rs): the actor gateway, the component service, the assistant's
 //! endpoint, A2A and the network, each over the part it is here.
 
+use crate::a2a::outbound::{Caller, Outbound, Register};
 use crate::a2a::A2a;
 use crate::assistant_endpoint::Endpoint;
 use crate::component::Components;
+use crate::cores::door::Attestation as DoorAttestation;
 use crate::cores::CoreError;
 use crate::gateway::control::GatewayControl;
 use crate::gateway::network::NetService;
@@ -75,6 +77,44 @@ impl parts::A2a for A2a {
     }
     fn set_default_target(&self, actor: &str, target: Option<&str>) -> Result<(), String> {
         A2a::set_default_target(self, actor, target)
+    }
+}
+
+#[async_trait]
+impl parts::A2aOut for Outbound {
+    fn status(&self) -> Value {
+        Outbound::status(self)
+    }
+    async fn preview(&self, card: &str, private_host: Option<&str>) -> Result<Value, String> {
+        Outbound::preview(self, card, private_host).await
+    }
+    async fn register(&self, body: &Value) -> Result<Value, String> {
+        let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+        let r = Register {
+            slug: text("slug").ok_or("name it: { slug }")?,
+            card: text("card").ok_or("send its card: { card }")?,
+            hash: text("hash").ok_or("send the pin the window showed: { hash }")?,
+            approve_host: text("approveHost"),
+            private_host: text("privateHost"),
+            agents: body.get("agents").cloned().unwrap_or(Value::Null),
+            projects: body.get("projects").cloned().unwrap_or(Value::Null),
+            days: body.get("days").and_then(Value::as_f64).unwrap_or(30.0),
+            token: text("token"),
+        };
+        Outbound::register(self, r).await
+    }
+    async fn remove(&self, actor: &str) -> Result<bool, String> {
+        Outbound::remove(self, actor).await
+    }
+    async fn delegate(&self, agent: &str, attestation: DoorAttestation, project: Option<String>, actor: &str, text: Option<&str>, task: Option<&str>) -> Result<Value, String> {
+        let attestation = match attestation {
+            DoorAttestation::Unchecked => xenonet_authz::Attestation::Unchecked,
+            DoorAttestation::ProcessChecked => xenonet_authz::Attestation::ProcessChecked,
+        };
+        // The routes hold it as a trait object; the stream it starts holds
+        // its own reference.
+        let me = self.me().ok_or("A2A out is shutting down")?;
+        me.delegate(&Caller { agent: agent.to_string(), attestation, project }, actor, text, task).await
     }
 }
 

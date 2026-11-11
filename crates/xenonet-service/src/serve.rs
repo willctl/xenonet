@@ -222,6 +222,28 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
             }
             Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
         }
+        // A2A out: the agents XenoNet calls for its sessions, registered at
+        // the window with presence (an actor grant with the delegate
+        // right), their bearers in the credential store.
+        let grants = ctx.cores.grants.clone();
+        let out_parts = crate::a2a::outbound::OutboundParts {
+            db: if config.demo { None } else { store_of(&ctx.cores) },
+            keep: Arc::new(crate::a2a::outbound::Credentials(Arc::new(if config.demo {
+                xenonet_actors::secrets::Secrets::memory()
+            } else {
+                xenonet_actors::secrets::Secrets::real()
+            }))),
+            present: Arc::new(move |slug: &str, scopes: &Value, reason: &str| grants.present(slug, &["delegate".to_string()], scopes, reason)),
+            now: Arc::new(now_ms),
+            block: crate::a2a::outbound::BLOCK,
+            roots: None,
+        };
+        match crate::a2a::outbound::Outbound::new(out_parts) {
+            Ok(o) => {
+                let _ = ctx.a2a_out.set(o);
+            }
+            Err(e) => ctx.log("warn", "a2a.error", &e, None, None),
+        }
     }
     // The network across machines (docs/design/network.md): this machine's
     // node, whose gateway routes the actor gateway's front door serves

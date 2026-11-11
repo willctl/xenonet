@@ -133,6 +133,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // A2A's switch and the agents that called, for the Actors panel: the
     // owner's (routes/a2a.rs). Not under /api/actors/, where it would be a
     // slug.
+    if route.starts_with("/api/a2a/") {
+        return Ok(a2a::outbound(ctx, req).await);
+    }
     if route == "/api/a2a" {
         return Ok(if m == "GET" || m == "POST" { a2a::route(ctx, req).await } else { Reply::error(404, "not found") });
     }

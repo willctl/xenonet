@@ -1,0 +1,28 @@
+[package]
+name = "xenonet-a2a"
+description = "A2A out of XenoNet: other agents XenoNet calls by their Agent Card, over A2A 1.0's JSON-RPC binding and its event stream, with the card pinned, https only, no redirect to another host, no private address the person didn't allow, and the remote's bearer kept out of every answer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# A2A 1.0's types: the card, the requests, tasks and stream events.
+a2a-lf.workspace = true
+# HTTPS, as the service has it (rustls on ring), with XenoNet's own
+# resolver, so the address it checks is the one it connects to.
+reqwest.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+# The card's pin.
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+# What a remote agent says is Information: it informs, never authorizes.
+xenonet-authz.workspace = true
+
+[lints]
+workspace = true

@@ -100,6 +100,11 @@ id!(
     ServiceId,
     "a service's id"
 );
+id!(
+    /// A project, by the name this machine's map gives it (its repo's).
+    ProjectId,
+    "a project's id"
+);
 
 /// The folder a run starts in. A path, so longer than an id and with any
 /// printable character, but never a control character, so it can't hold a
@@ -194,10 +199,12 @@ pub enum Action {
     RegisterActor,
     UseGateway,
     Revoke,
+    /// Calling an outbound actor: another agent XenoNet reaches over A2A.
+    Delegate,
 }
 
 impl Action {
-    pub const ALL: [Action; 13] = [
+    pub const ALL: [Action; 14] = [
         Action::Message,
         Action::Wake,
         Action::Start,
@@ -211,6 +218,7 @@ impl Action {
         Action::RegisterActor,
         Action::UseGateway,
         Action::Revoke,
+        Action::Delegate,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -228,6 +236,7 @@ impl Action {
             Action::RegisterActor => "register-actor",
             Action::UseGateway => "use-gateway",
             Action::Revoke => "revoke",
+            Action::Delegate => "delegate",
         }
     }
 
@@ -250,6 +259,8 @@ pub enum Resource {
     },
     /// A session here, for the facts only this machine holds.
     Session(SessionId),
+    /// One of this machine's outbound actors, which it calls.
+    Actor(ActorSlug),
 }
 
 /// How a started run's permission prompts are answered.
@@ -392,6 +403,13 @@ pub enum Act {
     Revoke {
         what: Revocation,
     },
+    /// Handing work to an outbound actor. `project` is the project of the
+    /// session that delegates, as this machine's own map holds it, never as
+    /// the session says; None for the person, or a session in no project.
+    /// The work's words are Information, beside the request.
+    Delegate {
+        project: Option<ProjectId>,
+    },
 }
 
 impl Act {
@@ -410,6 +428,7 @@ impl Act {
             Act::RegisterActor { .. } => Action::RegisterActor,
             Act::UseGateway => Action::UseGateway,
             Act::Revoke { .. } => Action::Revoke,
+            Act::Delegate { .. } => Action::Delegate,
         }
     }
 
@@ -548,6 +567,7 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         Resource::Network(n) => c.field("network").field(n.as_str()),
         Resource::Run { machine, app, folder } => c.field("run").field(machine.as_str()).field(app.as_str()).field(folder.as_str()),
         Resource::Session(s) => c.field("session").field(s.as_str()),
+        Resource::Actor(a) => c.field("actor").field(a.as_str()),
     };
     c.field(act.action().as_str());
     match act {
@@ -578,6 +598,7 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
             Revocation::Token(id) => c.field("token").bytes(id),
             Revocation::Device(d) => c.field("device").field(d.as_str()),
         },
+        Act::Delegate { project } => c.field(project.as_ref().map_or("", ProjectId::as_str)),
     };
     sha256(&c.0)
 }
@@ -618,6 +639,9 @@ mod tests {
             act_hash(&m, &Act::Read { scope: ReadScope::Search, filters: Some([0; 32]) }),
             act_hash(&m, &Act::Widen { machine: MachineId::new("m2").unwrap(), settings: Settings { start: StartSetting::Network, wake: WakeSetting::Consent } }),
             act_hash(&m, &Act::Widen { machine: MachineId::new("m2").unwrap(), settings: Settings { start: StartSetting::Network, wake: WakeSetting::Network } }),
+            act_hash(&Resource::Actor(ActorSlug::new("scout").unwrap()), &Act::Delegate { project: None }),
+            act_hash(&Resource::Actor(ActorSlug::new("scout").unwrap()), &Act::Delegate { project: Some(ProjectId::new("atlas").unwrap()) }),
+            act_hash(&Resource::Actor(ActorSlug::new("wren").unwrap()), &Act::Delegate { project: None }),
         ];
         let distinct: std::collections::HashSet<_> = hashes.iter().collect();
         assert_eq!(distinct.len(), hashes.len());

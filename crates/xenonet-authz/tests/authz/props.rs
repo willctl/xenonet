@@ -45,6 +45,7 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
         Action::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("x").unwrap(), rights: vec![Action::Message], scopes: [0; 32] }),
         Action::UseGateway => (m1(), Act::UseGateway),
         Action::Revoke => (m1(), Act::Revoke { what: Revocation::Token(vec![1]) }),
+        Action::Delegate => (Resource::Actor(ActorSlug::new("scout").unwrap()), Act::Delegate { project: None }),
     };
     Request::new(Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") }, resource, act, door, at, None)
 }

@@ -20,6 +20,10 @@ test = false
 [dependencies]
 # A2A 1.0's types, which the A2A door reads and answers in (a2a/).
 a2a-lf.workspace = true
+# A2A out: the agents XenoNet calls (a2a/outbound.rs), and the decision
+# each delegation to one takes.
+xenonet-a2a.workspace = true
+xenonet-authz.workspace = true
 xenonet-console.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
@@ -93,9 +97,14 @@ tokio = { workspace = true, features = ["test-util"] }
 xenonet-log.workspace = true
 # The network tests look into the gateway's queue (gateway.sqlite).
 rusqlite.workspace = true
-# The network tests' acts as the person, signed as another machine sends
-# them (a message from a device revoked since).
-xenonet-authz.workspace = true
+# The fake A2A agent the outbound tests call (adapters/a2a/tests/fake)
+# serves TLS with rustls's own stream.
+rustls.workspace = true
+
+# cargo shear reads no `#[path]` module: tests/a2a_out.rs takes the fake
+# agent from adapters/a2a/tests/fake, which is what uses rustls.
+[package.metadata.cargo-shear]
+ignored = ["rustls"]
 
 [lints]
 workspace = true

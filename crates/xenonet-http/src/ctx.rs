@@ -41,6 +41,8 @@ pub struct Ctx {
     pub gateway: std::sync::OnceLock<Arc<dyn Gateway>>,
     /// A2A agents' side of the gateway, made with it.
     pub a2a: std::sync::OnceLock<Arc<dyn A2a>>,
+    /// Outbound actors, the agents XenoNet calls over A2A.
+    pub a2a_out: std::sync::OnceLock<Arc<dyn crate::parts::A2aOut>>,
     pub endpoint: Mutex<Option<Arc<dyn Endpoint>>>,
     pub themes_dir: String,
     pub music: Mutex<Music>,
@@ -103,6 +105,7 @@ impl Ctx {
             components: Mutex::new(None),
             gateway: std::sync::OnceLock::new(),
             a2a: std::sync::OnceLock::new(),
+            a2a_out: std::sync::OnceLock::new(),
             endpoint: Mutex::new(None),
             themes_dir,
             music: Mutex::new(Music::default()),
