@@ -6,6 +6,16 @@ First, XenoNet walks down the folder the way ghq walks its root. It stops at the
 
 Then it works up from each folder a session ran in, the way git finds the repo you're in. This catches repos the walk didn't reach.
 
+## Projects and checkouts
+
+A project is an id XenoNet makes (`prj_…`), never a path. A checkout is one folder of a project on one machine, and a project can have many, on one machine or several. A repo's project id comes from its `origin` remote, so clones of one repo on your machines share a project. A folder that isn't a repo, or a repo before XenoNet knows who you are, gets a random id.
+
+XenoNet finds checkouts on its own: every refresh compares what the scans below find, and every folder a session ran in, with the checkouts it keeps in its store, and updates them. Claims name a project and a path inside it.
+
+The first checkout of a project joins it at once. Another checkout of a project that already has one, such as a second clone, is a candidate until you confirm it: its inspector says "not in its project yet", with **Confirm**. Confirming is yours alone, in XenoNet's window. Until then, claims, grants and starts in the project don't reach it, and a claim on a path in it is refused.
+
+The projects folder is the root XenoNet scans by default. Other roots can be added through the local API: `GET /api/workspace/roots` lists them, and `PUT` sets them, which is yours to do and refused from under an agent.
+
 ## What each folder becomes
 
 - A folder with its own repo is a project. XenoNet doesn't look inside it, except for its submodules, up to 10, and for repos inside it where a session ran. A folder has its own repo when it holds a `.git` folder or file, or another version control system's marker, such as `.hg`, `.jj`, `.sl` or `.svn`.
@@ -53,7 +63,7 @@ Asking Codex spends your Codex usage. Like your rules and the folder itself, ask
 
 As you go, XenoNet checks the folder. It says how many projects and groups it would find there, or why it can't use the folder. The folder has to exist and be readable. It can't be your home folder, a folder that holds your home folder, or the whole disk. If you give a link, XenoNet judges the folder the link leads to. XenoNet also warns you if you pick a repo, since it would show the repo's own folders as projects.
 
-`Use this folder` reads the folder at once, and XenoNet keeps your choice in its `state.json`. If you reached the folder through a link, XenoNet keeps the folder the link leads to, since that's how sessions record it.
+`Use this folder` reads the folder at once, and XenoNet keeps your choice in its store. If you reached the folder through a link, XenoNet keeps the folder the link leads to, since that's how sessions record it.
 
 With XenoNet running, the `xenonet` command does the same:
 
