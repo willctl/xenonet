@@ -45,7 +45,7 @@ fn took_rightly(env: &Envelope, got: &Verified, view: &View) {
     let author = view.by_machine(&got.author).expect("took an entry from outside the network");
     assert!(got.entry().clone().verify(&author.machine).is_ok(), "took an entry its author didn't sign");
     assert_eq!(env.to, To::Machine(net::machine(LAPTOP).id()), "took an envelope for another machine");
-    assert_eq!((env.network.as_str(), env.id.as_str(), env.kind.as_str(), env.author.as_str()), (got.network.as_str(), got.id().as_str(), got.kind.as_str(), got.author.as_str()));
+    assert_eq!((env.network.as_str(), env.id.as_str(), env.kind.as_str(), env.author.as_str()), (got.group.as_str(), got.id().as_str(), got.kind.as_str(), got.author.as_str()));
     assert_eq!((env.pos, env.at), (Some(got.pos()), got.at), "the head's place or time isn't the entry's");
     let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let seen = seen.get_or_insert_with(|| Seen::new(4096));

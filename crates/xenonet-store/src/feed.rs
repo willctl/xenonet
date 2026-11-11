@@ -296,7 +296,7 @@ impl FeedStore for Feeds<'_> {
             let stored = next_stored(c)?;
             c.execute(
                 "INSERT INTO feed_in (author, network, inc, seq, kind, hash, stored) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![e.author, e.network, int(e.inc)?, int(e.seq)?, e.kind.as_str(), e.hash().to_vec(), stored as i64],
+                params![e.author, e.group, int(e.inc)?, int(e.seq)?, e.kind.as_str(), e.hash().to_vec(), stored as i64],
             )?;
             Ok(())
         })
@@ -313,7 +313,7 @@ impl FeedStore for Feeds<'_> {
             let stored = next_stored(c)?;
             c.execute(
                 "INSERT INTO feed_loose (author, network, hash, kind, stored) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![e.author, e.network, e.hash().to_vec(), e.kind.as_str(), stored as i64],
+                params![e.author, e.group, e.hash().to_vec(), e.kind.as_str(), stored as i64],
             )?;
             Ok(())
         })
@@ -333,7 +333,7 @@ impl FeedStore for Feeds<'_> {
         self.0.write(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO feed_held (author, network, inc, seq, entry) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![e.author, e.network, int(e.inc)?, int(e.seq)?, e.to_json().to_string()],
+                params![e.author, e.group, int(e.inc)?, int(e.seq)?, e.to_json().to_string()],
             )?;
             Ok(())
         })

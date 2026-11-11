@@ -71,6 +71,7 @@ mod made {
             "^xns1_[a-z2-7]{32}$" => "xns1_abcdefghijklmnopqrstuvwxyz234567",
             "^prs_[a-z2-7]{32}$" => "prs_abcdefghijklmnopqrstuvwxyz234567",
             "^net_[0-9a-f]{32}$" => "net_0123456789abcdef0123456789abcdef",
+            "^(net_[0-9a-f]{32}|spc_[a-z2-7]{32})$" => "net_0123456789abcdef0123456789abcdef",
             "^sub_[0-9a-f]{32}$" => "sub_0123456789abcdef0123456789abcdef",
             "^svq_[0-9a-f]{32}$" => "svq_0123456789abcdef0123456789abcdef",
             "^msg_[0-9a-f-]{36}$" => "msg_00000000-0000-4000-8000-000000000000",

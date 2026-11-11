@@ -412,7 +412,7 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
     let Some(db) = w.setup.db.clone() else { return };
     let _one = w.net.taking.locked();
     let Arrived { host, entry, authority, .. } = a;
-    let (author, network, kind, at) = (entry.author.clone(), entry.network.clone(), entry.kind, entry.pos());
+    let (author, network, kind, at) = (entry.author.clone(), entry.group.clone(), entry.kind, entry.pos());
     let copy = entry.body.clone();
     // A start or a run's ask waits on other threads that write the store
     // (the run it starts, the prompt it holds): it's taken in the

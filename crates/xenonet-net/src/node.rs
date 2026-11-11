@@ -1349,7 +1349,7 @@ impl Shared {
     /// time is shown, never a reason to drop it.
     pub fn admit(&self, net: &NetFile, from: &str, entry: &Value) -> Result<(String, xenonet_log::feed::Verified), String> {
         let e = FeedEntry::parse(entry).map_err(|e| format!("a feed entry from {from} was dropped: {}", e.message))?;
-        if e.network != net.id {
+        if e.group != net.id {
             return Err(format!("a feed entry from {from} for another network was dropped"));
         }
         let member = {

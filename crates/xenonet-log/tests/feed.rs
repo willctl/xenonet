@@ -40,7 +40,7 @@ fn answers() -> Value {
     let k = SeedSigner::from_seed(&seed(), KeyHome::File).unwrap();
     json!({
         "about": "Known answers for a machine's feed (crates/xenonet-log/src/feed.rs): written by crates/xenonet-log/tests/feed.rs. The seed is a test value, never a machine's.",
-        "network": NET,
+        "group": NET,
         "author": { "seed": b64(&seed()), "keyId": k.public().id() },
         "entries": entries(&k).into_iter().map(|(what, e)| json!({
             "what": what,

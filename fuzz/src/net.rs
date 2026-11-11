@@ -95,7 +95,7 @@ pub fn entry(i: usize, kind: FeedKind, seq: u64, body: Value) -> FeedEntry {
     let kept = kind.class() == Class::Kept;
     let mut e = FeedEntry {
         author: machine(i).id(),
-        network: NET.into(),
+        group: NET.into(),
         inc: T0 as u64,
         seq: seq.max(1),
         prev: (kept && seq <= 1).then_some(Pos::ORIGIN),

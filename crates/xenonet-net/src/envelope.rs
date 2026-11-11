@@ -193,7 +193,7 @@ impl Envelope {
         entry.well_formed().map_err(|e| NetError::bad(e.message))?;
         let to = To::parse(to).filter(|t| *t != To::All).ok_or_else(|| bad("recipient"))?;
         let mut env = Envelope {
-            network: entry.network.clone(),
+            network: entry.group.clone(),
             id: entry.id(),
             kind: entry.kind.as_str().into(),
             author: entry.author.clone(),
@@ -356,7 +356,7 @@ impl Envelope {
         let plain = open(me.key, &self.sealing_head(), &self.body).map_err(|_| NetError::new(400, "unsealed", "that envelope wasn't sealed for this machine, or was changed"))?;
         let entry = FeedEntry::decode(&plain).map_err(|e| NetError::bad(e.message))?;
         let checks: [(&str, bool); 7] = [
-            ("network", entry.network == self.network),
+            ("network", entry.group == self.network),
             ("id", entry.id() == self.id),
             ("kind", entry.kind.as_str() == self.kind),
             ("author", entry.author == self.author),

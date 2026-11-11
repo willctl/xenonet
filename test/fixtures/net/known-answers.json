@@ -22,12 +22,12 @@
   "frame": {
     "ephemeralSecret": "SQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
     "machineSeed": "RwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
-    "entryId": "1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY",
+    "entryId": "hE2yDWCCt8kWqh-Wgn_KXF-QXFQ1vxecaKIWcjPJ9Zc",
     "body": {
       "schema": "network/message/v3",
       "entry": {
         "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
-        "network": "net_00112233445566778899aabbccddeeff",
+        "group": "net_00112233445566778899aabbccddeeff",
         "inc": 1792512000000,
         "seq": 1,
         "kind": "message",
@@ -45,11 +45,11 @@
           "hops": 0,
           "at": 1792512345678
         },
-        "sig": "ynflkpcdODCch-H_xqUb019fHUj1Iw3YRJnexInpPEWSDF0cpn2GqZ55aCLfBYjyUVzBEt5yROrRRXKdUeXqBg"
+        "sig": "JVL2X_rS-RK3wfcRKXItNcKs6ZwJXHSfqC1KJX8TSVQAhNG2iQk-APhCqlMZbJD9pIV-fGv3pfjd8zjUwUxiCQ"
       }
     },
     "sealingHead": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1",
-    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1\n_S01q20uLClkg2b5N2xQS-hjU4ZXZbN600OzthPn0u4",
+    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1\ntXAGr9DJhY7kEXV21YiNbMeO64jGzR3nO2YS3BoRszQ",
     "frame": {
       "v": 1,
       "id": "frm_00000000-0000-4000-8000-0000000000aa",
@@ -58,8 +58,8 @@
       "to": "laptop",
       "at": 1792512345678,
       "sealed": true,
-      "body": "ONGtHtN_RYgcXi9LoskF9gCg5BNwLk0r63UuXzirk0uWXV-sdRPNkPca038H7ZtvrOeF7EY1nvEVT0jAFElaRDcC0FvVCjJ2CApGmDKNX9oNZ7mQ_QmYELkWtzBk53VjC2iwtnxSI28mZUrn5TA8bNPvobkqP071hh1mj6HIZDcGvAanGFZdsIzbzdOqO6lzvQzEDaaA1s__6m-GCCSOCK6qtgitkfZVFPA8joar-ZBko3K2jGyn-5B_xxMCp0sGZ--qheVwreIEidNb0a3rLa7JObXdmhTWDNXQ9mCWEhz8M_W09yAHflVpcFAa3Lq1VOMoI4ZneyZGsGV_VAu6-at4qrd3OOCUYir8sJctiV2MdepeljumLF-xOgV1j9K_K7sLZ3-9J4AM54ZRptRyDimEYdYA7AhfHrGTaEgpt2_8Jd9ufx3mSfFVOccUmy4RE2JLk_mww5dfvx08d7vf2ZJIPuSdpub98wfBArxkxK4FCSHAazbi-Q5Ueuk-uVM7DCr0VAY-XIMI3rxg7bdnL2EmydL7YLs3D0sO_wodXahXEC51EUBVT--DU9HzILdvQRXq3xC9o9oCnTaqaEmuPtMpNb21D0pnzTi4RW45Q4b1y7Ih3-i5yFrBFErF6kjO6_DskGUNmp64LZlTKexEV-vXtAVwvqcdFYElVIfm3A3ThftAOeGATup_JmXXFflYy8ZQj73tcIBeM5cE8LxfMlvoTCk7dctvvEe1HuhKFdkQbEgfeBnt4jNriDGIDfTx9x9DzMLsxThier5ISmYPc_KCu0sQGKys4jAbCu0xLhNbCMMKHhS1WoAWIIY",
-      "sig": "GTU-297DpMJ7hvZEy1dXQU3N2gQDJVPMOqJLqVFwFMcvG_acvLEM0SdRmzMYjgHgfp-CksMmDv5GFl9HKwkmBg"
+      "body": "ONGtHtN_RYgcXi9LoskF9gCg5BNwLk0r63UuXzirk0uWXV-sdRPNkPca038H7ZtvrOeF7EY1nvEVT0jAFElaRDcC0FvVCjJ2CApGmDKNX9oNZ7mQ_QmYELkWtzBk53VjC2iwtnxSI28mZUrn5TA8bNPvobkqP071hh1vmLrKe2dXvFLgAmwZ343aztCrOq50vA3HDqeB2cD-6zfeCyePCamttwmukrIfFLVwhMry6p1spn61i22l-5B_xw8Q-AwEIKS5k_Y35ucJxY1bhur1O7zdPfCUmlmAT5vD-2iTHh_7MfOy9SIJZU8nPVYMmvnsTOtpOIBif2kdsDE4Thmh_K8lsv1qOaGGfH7hsNZmgBbSdb0PnBfxQ1-xOgV1j8-_NrsLenugI4AR75tZpslyEymEYdYA7AhfHrCBdUh28HL9LskpNx2_B_NMPNdKn3URE2JLk_n8kopfvg8hd-SYxJNDKMqGg-uxrQeaR7ht1eJdCXmDbTD16kkaerBwu0o-HHTzDAY-XIMI3vMy8LdmPXwmh5_9dv10DxlJ-wMeEaEFGTE6DxRTX_OIGJLzfvBtSBzSyWbo75UAhHbkNwiyLdl7ar3rRFxr3Cn5HW5-CIP4h-whiK-n3kjVEA-M6gyD8-y-2XcbiNPubtdAJORBW-jQtgN2vKUTX5V6C8zyl1DT9Y91Zd-zV8kxEGGgIfxTtMVXvrj2cfscPKs7744mKEqqVko6UfYvoXqTH-x1CNpkNXoEO2r6-yov0R2RI9j3lwVzz7nwwAslP6FwYSwnS_--imYcA4zM-G_y4fndTstUdqSSKDUyNff8",
+      "sig": "airM7LZM7cLhEXPa0bC5kX1O8tpw9dzEzVsK97LGR2_Ks4as7IFRA3Qtg6LzsWGM-lna5oTxK0mhfw-L72riCw"
     }
   },
   "svcFrame": {
@@ -316,7 +316,7 @@
     "ephemeralSecret": "SwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws",
     "entry": {
       "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
-      "network": "net_00112233445566778899aabbccddeeff",
+      "group": "net_00112233445566778899aabbccddeeff",
       "inc": 1792512000000,
       "seq": 1,
       "kind": "message",
@@ -334,14 +334,14 @@
         "hops": 0,
         "at": 1792512345678
       },
-      "sig": "ynflkpcdODCch-H_xqUb019fHUj1Iw3YRJnexInpPEWSDF0cpn2GqZ55aCLfBYjyUVzBEt5yROrRRXKdUeXqBg"
+      "sig": "JVL2X_rS-RK3wfcRKXItNcKs6ZwJXHSfqC1KJX8TSVQAhNG2iQk-APhCqlMZbJD9pIV-fGv3pfjd8zjUwUxiCQ"
     },
-    "sealingHead": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\n1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY\nmessage\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\nxns1_gsapqx2xjzrx4stuvi4z2v7h75msycca\n1792512000000:1\n1792512345678\nloose\n1",
-    "head": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\n1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY\nmessage\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\nxns1_gsapqx2xjzrx4stuvi4z2v7h75msycca\n1792512000000:1\n1792512345678\nloose\n1\nvCykavYzX3qhYl6cDtn1NKUF0k028cEMGNLYeiyjuNs",
+    "sealingHead": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\nhE2yDWCCt8kWqh-Wgn_KXF-QXFQ1vxecaKIWcjPJ9Zc\nmessage\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\nxns1_gsapqx2xjzrx4stuvi4z2v7h75msycca\n1792512000000:1\n1792512345678\nloose\n1",
+    "head": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\nhE2yDWCCt8kWqh-Wgn_KXF-QXFQ1vxecaKIWcjPJ9Zc\nmessage\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\nxns1_gsapqx2xjzrx4stuvi4z2v7h75msycca\n1792512000000:1\n1792512345678\nloose\n1\ngJgzgoEB2fhWYwf-CG2jb3KOz2fGZ3WTz-Hok31dGoU",
     "envelope": {
       "v": 2,
       "network": "net_00112233445566778899aabbccddeeff",
-      "id": "1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY",
+      "id": "hE2yDWCCt8kWqh-Wgn_KXF-QXFQ1vxecaKIWcjPJ9Zc",
       "kind": "message",
       "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
       "to": "xns1_gsapqx2xjzrx4stuvi4z2v7h75msycca",
@@ -352,7 +352,7 @@
       "at": 1792512345678,
       "class": "loose",
       "sealed": true,
-      "body": "FWkxQqXBwbOUvxFRRY8z3KYqJVmQVuhrj8crnn0QXxaEqsUCx3C2N6YZFzxolcXlqB9hNkafJml9H7CNx_5U8ghlcyABLGHevA4TwC6LG_X9Q8vWsVuKnoP1Ez1pzPLIxTKefyUEZ8B_z0jZpRIggM4GBfacWeT7c9nxCXvnawC6eRpPmkddqP-rNPCcZxkeY3Mf-1Yyd9T6SSNscXavqWgXdHWEfpXqWIbOjf2B0oZI9OA_N5Ex6ZU1eN_VloltN87lqP16gQhGRaYBbFHDLBSA-4c1PB8x8qg3Z5sQUi2pPj4vz3zNn4xn9qZ2VmVvB6L_1Svdoa09W_kkI0-MB19Qdw5mZXD_0RjajM9finzvERpUJ77kRJgXNk1W-puWdWAVzVvYC1PA9ZDt5Kf02qWPyiEDYezz46uabHcyuk5YB4ajS3qFlVvyoxDMFG6zyp8uT3ItL54JMP0rZo6ErIBFwXodHdCY8tLZj3QXEP5nKUypmWEzlst5ZBKMNTWid_S07cGREdTO6D8YgeSUy0AOXr-p_-q6zimoFnjnBpwLuPvtdp0qkc6KG_WBbzrBKd8McFUscPjtXLP86pQmh-9lRLf2yjCCKWVeSBHK1KHC9th0EJ-VN50nMjDU9uaoea5Y9dKv5-gENx1Kp6X8O6m-714BKpD-UYk3rp8o3IUWuGYlvG3cQn_Dnq-qTCFL9r-JpvHy6MlMFwxHSsrvXLk-Kp1g1Gr51LVYf9ksJXJ76amH3ww7GfhFKlWBmENFy329tQ"
+      "body": "FWkxQqXBwbOUvxFRRY8z3KYqJVmQVuhrj8crnn0QXxbx6YYN_9Yn1QHoH6XRy_CJqYg6BLxu8WFh1eXcHStiUYG8xq8yfzymoI23jYht9f4fziE5I7Zi9Hr5EcBp8Ze208iyptWGPGpywt2AdwC0G947LRuSdZVp3vrAIkp7MTG9eyHKXO_AoZlZvVDhsGzF5DY63Ia6bYxduYrWPfnubxGOn8X8M-xcVAW-2LQbpyIjHlidK6EiWwfP6nV7Wsmat7-K4_SVJacsBBf_Fv-57Ok8PcTUKQPJnA3jqCA1vj6zmSTeiZlRxilUuh-8UnjQWENbj9pvBuI-U7MKBCDk80pjGOyd0p4efeA4Qa7RlMBGHCeSGqXfjjip5smO9ilPeqkAghvUDBK38BGWms3yObVRUr-tAmriIvKKNDPTlDzrUEA4-pLZQI_QJJHZP7dQ8Vee40_dYLBkmWDeDUrgSxTiGXoXhVfDjZyvVsJP7EVyFBnz9Pc3beF9hJCp14fy8huvQ66mmEtOPQlxBjSme9lepYvh0DHdIgOWGMmi2Ebaz3Lj-o_RKuILOzEIaTAFcd9w0wH9hUtgS7bgA3paJ1Ju6riarJxN9pIE06GyQd-7XOboo5fbZk2PdmaBEucLu3w6FDc0ebjmfn_nUP_586b3rBa1KrMZfCQhdtGGuqodqM5cue9kxHXwflMNHyqenSSuQcvMqmk5jDTTywKUXrvVprFBYLVMAP0navIGeZsFhyuZOrZa46La66JsjKWzVhg"
     }
   }
 }

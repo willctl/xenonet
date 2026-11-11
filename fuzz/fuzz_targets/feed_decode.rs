@@ -21,7 +21,7 @@ use xenonet_log::feed::{Class, Feed, FeedEntry, Kind, MemoryStore, Offer, Writer
 
 const NET: &str = "net_0123456789abcdef0123456789abcdef";
 const T: u64 = 1_792_512_000_000;
-const FIELDS: [&str; 9] = ["author", "network", "inc", "seq", "prev", "kind", "at", "body", "sig"];
+const FIELDS: [&str; 9] = ["author", "group", "inc", "seq", "prev", "kind", "at", "body", "sig"];
 
 fn key() -> &'static SeedSigner {
     static KEY: OnceLock<SeedSigner> = OnceLock::new();

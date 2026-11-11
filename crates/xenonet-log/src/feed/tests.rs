@@ -106,7 +106,7 @@ fn an_entry_holds_to_its_shape() {
     assert!(bad(&with(&second, &|e| e.seq = 0)));
     assert!(bad(&with(&first, &|e| e.body = json!([1]))), "a body is an object");
     assert!(bad(&with(&first, &|e| e.author = "studio".into())));
-    assert!(bad(&with(&first, &|e| e.network = "net_x".into())));
+    assert!(bad(&with(&first, &|e| e.group = "net_x".into())));
     assert!(bad(&with(&first, &|e| e.sig.truncate(10))));
     assert!(bad(&with(&first, &|e| e.body = json!({ "text": "x".repeat(MAX_ENTRY) }))), "an entry fits in a frame");
     assert!(FeedEntry::decode(&vec![b' '; MAX_ENTRY + 1]).is_err());
@@ -123,9 +123,9 @@ fn a_gap_holds_entries_until_it_fills() {
     let mut f = Feed::new(MemoryStore::new());
     let author = k.public().id();
     assert_eq!(f.ack(&author, NET).unwrap(), None);
-    assert_eq!(offer(&mut f, &k, &e[2]), Offer::Gap(Want { author: author.clone(), network: NET.into(), inc: 0, from: 1 }), "nothing yet: from the first");
+    assert_eq!(offer(&mut f, &k, &e[2]), Offer::Gap(Want { author: author.clone(), group: NET.into(), inc: 0, from: 1 }), "nothing yet: from the first");
     assert_eq!(seqs(&offer(&mut f, &k, &e[0])), [1]);
-    let want = Want { author: author.clone(), network: NET.into(), inc: T, from: 2 };
+    let want = Want { author: author.clone(), group: NET.into(), inc: T, from: 2 };
     assert_eq!(offer(&mut f, &k, &e[3]), Offer::Gap(want.clone()));
     assert!(want.wants(e[1].pos()) && !want.wants(e[0].pos()));
     assert_eq!(offer(&mut f, &k, &e[2]), Offer::Duplicate, "held already");
@@ -267,7 +267,7 @@ fn a_prev_above_what_the_receiver_holds_is_a_gap() {
     seqs(&offer(&mut f, &k, &old[0]));
     seqs(&offer(&mut f, &k, &old[1]));
     assert!(matches!(offer(&mut f, &k, &old[3]), Offer::Gap(_)));
-    assert_eq!(offer(&mut f, &k, &next), Offer::Gap(Want { author: author.clone(), network: NET.into(), inc: T, from: 3 }));
+    assert_eq!(offer(&mut f, &k, &next), Offer::Gap(Want { author: author.clone(), group: NET.into(), inc: T, from: 3 }));
     assert_eq!(seqs(&offer(&mut f, &k, &old[2])), [3, 4, 1], "three, four, then the next incarnation");
     assert_eq!(f.store().held_count(&author, NET), 0);
 }
@@ -293,7 +293,7 @@ fn linking_a_later_incarnation_closes_the_ones_before() {
 }
 
 #[test]
-fn feeds_are_apart_per_author_and_network() {
+fn feeds_are_apart_per_author_and_group() {
     let (a, b) = (key(1), key(2));
     let mut wa = writer(&a);
     let mut wb = writer(&b);
@@ -305,6 +305,29 @@ fn feeds_are_apart_per_author_and_network() {
         seqs(&offer(&mut f, &a, &write(&mut wn, &a, Kind::Claim, n)));
     }
     assert_eq!(f.ack(&a.public().id(), NET).unwrap(), Some(Ack { inc: T, high: 2 }));
+}
+
+#[test]
+fn a_feed_is_scoped_to_a_network_or_a_space() {
+    const SPACE: &str = "spc_abcdefghijklmnopqrstuvwxyz234567";
+    assert_eq!(Group::of(NET), Some(Group::Network));
+    assert_eq!(Group::of(SPACE), Some(Group::Space));
+    for bad in ["prs_abcdefghijklmnopqrstuvwxyz234567", "spc_ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", "spc_abc", "net_0011"] {
+        assert_eq!(Group::of(bad), None, "{bad}");
+    }
+    let k = key(1);
+    let mut ws = Writer::start(k.public().id(), SPACE, T);
+    let mut wn = writer(&k);
+    let e = write(&mut ws, &k, Kind::Claim, 1);
+    assert_eq!(e.to_json()["group"], SPACE);
+    assert_eq!(FeedEntry::decode(&e.encode()).unwrap(), e);
+    let mut f = Feed::new(MemoryStore::new());
+    seqs(&offer(&mut f, &k, &e));
+    assert_eq!(f.ack(&k.public().id(), NET).unwrap(), None, "the author's feed in the network is another feed");
+    seqs(&offer(&mut f, &k, &write(&mut wn, &k, Kind::Claim, 1)));
+    let mut v = e.to_json();
+    v["group"] = json!("prs_abcdefghijklmnopqrstuvwxyz234567");
+    assert!(FeedEntry::parse(&v).is_err(), "a person isn't a group");
 }
 
 /// An author's script: kept kinds, loose kinds, and incarnations bumped

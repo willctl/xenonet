@@ -13,8 +13,9 @@
 //!   members' settings and the presence its admits and widenings need.
 //! - `person`: a person's chain of device keys (`xenonet-person/1`): the
 //!   root key, the devices it or two devices pair, and what they revoke.
-//! - `feed`: a machine's feed in a network (`xenonet-feed/1`), what it
-//!   tells the other members, applied once and in order by each receiver.
+//! - `feed`: a machine's feed in a group, a network or a space
+//!   (`xenonet-feed/1`), what it tells the group's other members, applied
+//!   once and in order by each receiver.
 //! - `address`: a machine's address record (`xenonet-address/1`), where
 //!   its endpoint is reached, signed by its machine signing key and
 //!   checked against the network's chain.

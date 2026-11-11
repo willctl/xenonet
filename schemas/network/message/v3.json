@@ -16,11 +16,12 @@
         "author": {
           "type": "string",
           "pattern": "^xns1_[a-z2-7]{32}$",
-          "description": "The author: its machine signing key, which the network's chain lists for a member"
+          "description": "The author: its machine signing key, which the group's chain lists for a member"
         },
-        "network": {
+        "group": {
           "type": "string",
-          "pattern": "^net_[0-9a-f]{32}$"
+          "pattern": "^(net_[0-9a-f]{32}|spc_[a-z2-7]{32})$",
+          "description": "What a feed is scoped to: a network's net_ id or a space's spc_ id"
         },
         "inc": {
           "type": "integer",
@@ -66,7 +67,7 @@
             "message",
             "receipt"
           ],
-          "description": "What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and network; messages and receipts are loose, each taken once by its id"
+          "description": "What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and group; messages and receipts are loose, each taken once by its id"
         },
         "at": {
           "type": "number",
@@ -85,7 +86,7 @@
       },
       "required": [
         "author",
-        "network",
+        "group",
         "inc",
         "seq",
         "kind",
@@ -93,7 +94,7 @@
         "body",
         "sig"
       ],
-      "description": "One entry of a machine's feed in a network (xenonet-feed/1), signed by its machine signing key",
+      "description": "One entry of a machine's feed in a group, a network or a space (xenonet-feed/1), signed by its machine signing key",
       "additionalProperties": {}
     },
     "authority": {

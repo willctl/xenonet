@@ -1,10 +1,16 @@
-//! A machine's feed in a network (`xenonet-feed/1`): what the machine
-//! tells the other members, as entries it signs with its machine signing
+//! A machine's feed in a group (`xenonet-feed/1`): what the machine tells
+//! the group's other members, as entries it signs with its machine signing
 //! key, numbered so each receiver applies every entry once, in the
 //! author's order, whatever way the entries reached it.
 //!
+//! **Groups.** A feed is scoped to a group: a network (`net_…`), whose
+//! members its roster names, or a space (`spc_…`), whose members its space
+//! chain names. The id's prefix says which (`Group::of`, a space's id as
+//! xenonet-model's `SpaceId` reads it). An author has one feed in each
+//! group it's in, and a receiver keeps each (author, group) apart.
+//!
 //! An entry names its author (the machine signing key's `xns1_` id), the
-//! network, the author's incarnation and a sequence number, its kind, when
+//! group, the author's incarnation and a sequence number, its kind, when
 //! it was made and a body (a JSON object the engine defines per kind).
 //! The author signs the canonical JSON of all of that, after the tag and a
 //! newline (`Purpose::FEED`). The entry's id is the SHA-256 of those same
@@ -12,7 +18,7 @@
 //! so a copy the author signed again is still the same entry.
 //!
 //! **Two classes of kind.** Claims, intents, handoffs, assigns and reports
-//! are kept: they form one gapless sequence per (author, network), and a
+//! are kept: they form one gapless sequence per (author, group), and a
 //! receiver applies them strictly in order, holding any that arrive early
 //! until the gap before them fills. Messages and receipts are loose: they
 //! sit outside that sequence, each has its own number in its own count, and
@@ -38,7 +44,7 @@
 //! - `Gap`: held until the entries before it arrive, with the `Want` to send
 //!   the author (resend from that place on);
 //! - `Fork`: another entry with the same place and a different id, which
-//!   freezes the author's feed in this network;
+//!   freezes the author's feed in this group;
 //! - `Frozen`: the author's feed is frozen, and nothing from it is taken
 //!   until the person unfreezes it (`Feed::unfreeze`);
 //! - `Stale`: from an incarnation the receiver has moved past, at a place
@@ -59,6 +65,7 @@ use std::convert::Infallible;
 use std::fmt;
 use xenonet_id::codec::{b64, sha256, unb64};
 use xenonet_id::sign::{Purpose, Signer, VerifyingKey};
+use xenonet_model::ids::SpaceId;
 
 /// The most bytes an entry's JSON takes: a frame's limit, so any entry
 /// fits in one.
@@ -164,12 +171,35 @@ pub fn next_incarnation(last: u64, now: u64) -> u64 {
     now.max(last.saturating_add(1))
 }
 
+/// What a feed is scoped to, by its id's prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Group {
+    /// A network: `net_` and 32 hex digits.
+    Network,
+    /// A space: `spc_` and 32 base32 characters.
+    Space,
+}
+
+impl Group {
+    /// Which group `id` names, or None when it names neither.
+    pub fn of(id: &str) -> Option<Group> {
+        if is_network_id(id) {
+            Some(Group::Network)
+        } else if SpaceId::parse(id).is_ok() {
+            Some(Group::Space)
+        } else {
+            None
+        }
+    }
+}
+
 /// One entry of a feed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeedEntry {
     /// The author's machine signing key id, `xns1_…`.
     pub author: String,
-    pub network: String,
+    /// The group's id: a network's `net_…` or a space's `spc_…`.
+    pub group: String,
     /// The author's incarnation, from 1.
     pub inc: u64,
     /// From 1 in each incarnation, kept and loose kinds each counted on
@@ -199,7 +229,7 @@ impl FeedEntry {
     fn unsigned(&self) -> Map<String, Value> {
         let mut m = Map::new();
         m.insert("author".into(), Value::String(self.author.clone()));
-        m.insert("network".into(), Value::String(self.network.clone()));
+        m.insert("group".into(), Value::String(self.group.clone()));
         m.insert("inc".into(), Value::from(self.inc));
         m.insert("seq".into(), Value::from(self.seq));
         if let Some(p) = self.prev {
@@ -257,8 +287,8 @@ impl FeedEntry {
         if !is_key_id(&self.author) {
             return Err(FeedError::bad("author"));
         }
-        if !is_network_id(&self.network) {
-            return Err(FeedError::bad("network"));
+        if Group::of(&self.group).is_none() {
+            return Err(FeedError::bad("group"));
         }
         if self.inc == 0 {
             return Err(FeedError::bad("incarnation"));
@@ -296,7 +326,7 @@ impl FeedEntry {
         };
         let e = FeedEntry {
             author: s("author")?.into(),
-            network: s("network")?.into(),
+            group: s("group")?.into(),
             inc: n(v, "inc")?,
             seq: n(v, "seq")?,
             prev,
@@ -319,7 +349,7 @@ impl FeedEntry {
     }
 
     /// The entry, once its signature checks against `key`, the author's
-    /// key as the receiver's network chain has it.
+    /// key as the receiver's chain of the group has it.
     pub fn verify(self, key: &VerifyingKey) -> R<Verified> {
         self.well_formed()?;
         if key.id() != self.author {
@@ -354,11 +384,11 @@ impl std::ops::Deref for Verified {
     }
 }
 
-/// The author's side: numbers and signs its entries in one network.
+/// The author's side: numbers and signs its entries in one group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Writer {
     author: String,
-    network: String,
+    group: String,
     inc: u64,
     kept: u64,
     loose: u64,
@@ -368,23 +398,23 @@ pub struct Writer {
 
 impl Writer {
     /// A feed's first incarnation, at `now` (ms).
-    pub fn start(author: impl Into<String>, network: impl Into<String>, now: u64) -> Writer {
-        Writer { author: author.into(), network: network.into(), inc: next_incarnation(0, now), kept: 0, loose: 0, prev: Some(Pos::ORIGIN) }
+    pub fn start(author: impl Into<String>, group: impl Into<String>, now: u64) -> Writer {
+        Writer { author: author.into(), group: group.into(), inc: next_incarnation(0, now), kept: 0, loose: 0, prev: Some(Pos::ORIGIN) }
     }
 
     /// Where the author left off, as its store has it: the same
     /// incarnation after a restart. `prev` is the last kept entry of an
     /// earlier incarnation when this one has none of its own yet.
-    pub fn resume(author: impl Into<String>, network: impl Into<String>, inc: u64, kept: u64, loose: u64, prev: Pos) -> Writer {
-        Writer { author: author.into(), network: network.into(), inc, kept, loose, prev: (kept == 0).then_some(prev) }
+    pub fn resume(author: impl Into<String>, group: impl Into<String>, inc: u64, kept: u64, loose: u64, prev: Pos) -> Writer {
+        Writer { author: author.into(), group: group.into(), inc, kept, loose, prev: (kept == 0).then_some(prev) }
     }
 
     /// After a restore or a new setup: a new incarnation past `last` (the
     /// highest the author knows of), whose first kept entry names `held`,
     /// the last kept entry the author still has (`Pos::ORIGIN` for none).
-    pub fn restore(author: impl Into<String>, network: impl Into<String>, held: Pos, last: u64, now: u64) -> Writer {
+    pub fn restore(author: impl Into<String>, group: impl Into<String>, held: Pos, last: u64, now: u64) -> Writer {
         let inc = next_incarnation(last.max(held.inc), now);
-        Writer { author: author.into(), network: network.into(), inc, kept: 0, loose: 0, prev: Some(held) }
+        Writer { author: author.into(), group: group.into(), inc, kept: 0, loose: 0, prev: Some(held) }
     }
 
     pub fn inc(&self) -> u64 {
@@ -428,7 +458,7 @@ impl Writer {
                 (self.loose, None)
             }
         };
-        FeedEntry { author: self.author.clone(), network: self.network.clone(), inc: self.inc, seq, prev, kind, at, body, sig: Vec::new() }
+        FeedEntry { author: self.author.clone(), group: self.group.clone(), inc: self.inc, seq, prev, kind, at, body, sig: Vec::new() }
     }
 
     /// The next entry, signed by `key`. Counted only once signed, so a key
@@ -449,7 +479,7 @@ impl Writer {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Want {
     pub author: String,
-    pub network: String,
+    pub group: String,
     pub inc: u64,
     pub from: u64,
 }
@@ -486,7 +516,7 @@ pub struct Fork {
     pub offered: [u8; 32],
 }
 
-/// Where a receiver stands with one author in one network.
+/// Where a receiver stands with one author in one group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Head {
     /// The last kept entry applied, in the latest incarnation linked;
@@ -518,7 +548,7 @@ pub enum Offer {
     Stale,
 }
 
-/// What a receiver keeps of each author's feed in each network. The store
+/// What a receiver keeps of each author's feed in each group. The store
 /// implements it on its tables, called inside the transaction that applies
 /// what `Feed::offer` returns; entries come back as they were stored,
 /// their signatures already checked.
@@ -527,67 +557,67 @@ pub trait FeedStore {
 
     /// Where the receiver stands; the default `Head` for an author it has
     /// nothing from.
-    fn head(&self, author: &str, network: &str) -> Result<Head, Self::Error>;
-    fn set_head(&mut self, author: &str, network: &str, head: Head) -> Result<(), Self::Error>;
+    fn head(&self, author: &str, group: &str) -> Result<Head, Self::Error>;
+    fn set_head(&mut self, author: &str, group: &str, head: Head) -> Result<(), Self::Error>;
     /// The id of the kept entry applied at `at`, if any.
-    fn kept(&self, author: &str, network: &str, at: Pos) -> Result<Option<[u8; 32]>, Self::Error>;
+    fn kept(&self, author: &str, group: &str, at: Pos) -> Result<Option<[u8; 32]>, Self::Error>;
     /// Records a kept entry as applied.
     fn keep(&mut self, e: &FeedEntry) -> Result<(), Self::Error>;
     /// Whether the loose entry with this id was taken.
-    fn has_loose(&self, author: &str, network: &str, id: &[u8; 32]) -> Result<bool, Self::Error>;
+    fn has_loose(&self, author: &str, group: &str, id: &[u8; 32]) -> Result<bool, Self::Error>;
     /// Records a loose entry as taken.
     fn take_loose(&mut self, e: &FeedEntry) -> Result<(), Self::Error>;
     /// The kept entry held (not yet applied) at `at`.
-    fn held(&self, author: &str, network: &str, at: Pos) -> Result<Option<FeedEntry>, Self::Error>;
+    fn held(&self, author: &str, group: &str, at: Pos) -> Result<Option<FeedEntry>, Self::Error>;
     /// Holds a kept entry until the entries before it arrive.
     fn hold(&mut self, e: FeedEntry) -> Result<(), Self::Error>;
-    fn unhold(&mut self, author: &str, network: &str, at: Pos) -> Result<(), Self::Error>;
+    fn unhold(&mut self, author: &str, group: &str, at: Pos) -> Result<(), Self::Error>;
     /// The held first entries (seq 1) of incarnations after `inc`, lowest
     /// incarnation first.
-    fn held_firsts(&self, author: &str, network: &str, after: u64) -> Result<Vec<FeedEntry>, Self::Error>;
+    fn held_firsts(&self, author: &str, group: &str, after: u64) -> Result<Vec<FeedEntry>, Self::Error>;
     /// Drops the held entries of incarnations before `inc`, which can no
     /// longer apply.
-    fn drop_held_before(&mut self, author: &str, network: &str, inc: u64) -> Result<(), Self::Error>;
+    fn drop_held_before(&mut self, author: &str, group: &str, inc: u64) -> Result<(), Self::Error>;
 }
 
 impl<S: FeedStore + ?Sized> FeedStore for &mut S {
     type Error = S::Error;
-    fn head(&self, author: &str, network: &str) -> Result<Head, Self::Error> {
-        (**self).head(author, network)
+    fn head(&self, author: &str, group: &str) -> Result<Head, Self::Error> {
+        (**self).head(author, group)
     }
-    fn set_head(&mut self, author: &str, network: &str, head: Head) -> Result<(), Self::Error> {
-        (**self).set_head(author, network, head)
+    fn set_head(&mut self, author: &str, group: &str, head: Head) -> Result<(), Self::Error> {
+        (**self).set_head(author, group, head)
     }
-    fn kept(&self, author: &str, network: &str, at: Pos) -> Result<Option<[u8; 32]>, Self::Error> {
-        (**self).kept(author, network, at)
+    fn kept(&self, author: &str, group: &str, at: Pos) -> Result<Option<[u8; 32]>, Self::Error> {
+        (**self).kept(author, group, at)
     }
     fn keep(&mut self, e: &FeedEntry) -> Result<(), Self::Error> {
         (**self).keep(e)
     }
-    fn has_loose(&self, author: &str, network: &str, id: &[u8; 32]) -> Result<bool, Self::Error> {
-        (**self).has_loose(author, network, id)
+    fn has_loose(&self, author: &str, group: &str, id: &[u8; 32]) -> Result<bool, Self::Error> {
+        (**self).has_loose(author, group, id)
     }
     fn take_loose(&mut self, e: &FeedEntry) -> Result<(), Self::Error> {
         (**self).take_loose(e)
     }
-    fn held(&self, author: &str, network: &str, at: Pos) -> Result<Option<FeedEntry>, Self::Error> {
-        (**self).held(author, network, at)
+    fn held(&self, author: &str, group: &str, at: Pos) -> Result<Option<FeedEntry>, Self::Error> {
+        (**self).held(author, group, at)
     }
     fn hold(&mut self, e: FeedEntry) -> Result<(), Self::Error> {
         (**self).hold(e)
     }
-    fn unhold(&mut self, author: &str, network: &str, at: Pos) -> Result<(), Self::Error> {
-        (**self).unhold(author, network, at)
+    fn unhold(&mut self, author: &str, group: &str, at: Pos) -> Result<(), Self::Error> {
+        (**self).unhold(author, group, at)
     }
-    fn held_firsts(&self, author: &str, network: &str, after: u64) -> Result<Vec<FeedEntry>, Self::Error> {
-        (**self).held_firsts(author, network, after)
+    fn held_firsts(&self, author: &str, group: &str, after: u64) -> Result<Vec<FeedEntry>, Self::Error> {
+        (**self).held_firsts(author, group, after)
     }
-    fn drop_held_before(&mut self, author: &str, network: &str, inc: u64) -> Result<(), Self::Error> {
-        (**self).drop_held_before(author, network, inc)
+    fn drop_held_before(&mut self, author: &str, group: &str, inc: u64) -> Result<(), Self::Error> {
+        (**self).drop_held_before(author, group, inc)
     }
 }
 
-/// A receiver's feeds: every author's in every network, over a store.
+/// A receiver's feeds: every author's in every group, over a store.
 #[derive(Debug, Clone, Default)]
 pub struct Feed<S> {
     store: S,
@@ -609,14 +639,14 @@ impl<S: FeedStore> Feed<S> {
     /// Takes, holds or drops an entry, and says which.
     pub fn offer(&mut self, e: Verified) -> Result<Offer, S::Error> {
         let e = e.into_entry();
-        let (author, network) = (e.author.clone(), e.network.clone());
-        let mut head = self.store.head(&author, &network)?;
+        let (author, group) = (e.author.clone(), e.group.clone());
+        let mut head = self.store.head(&author, &group)?;
         if let Some(f) = head.frozen {
             return Ok(Offer::Frozen(f));
         }
         if e.class() == Class::Loose {
             let id = e.hash();
-            if self.store.has_loose(&author, &network, &id)? {
+            if self.store.has_loose(&author, &group, &id)? {
                 return Ok(Offer::Duplicate);
             }
             self.store.take_loose(&e)?;
@@ -624,9 +654,9 @@ impl<S: FeedStore> Feed<S> {
         }
         let at = e.pos();
         let id = e.hash();
-        let had = match self.store.kept(&author, &network, at)? {
+        let had = match self.store.kept(&author, &group, at)? {
             Some(h) => Some(h),
-            None => self.store.held(&author, &network, at)?.map(|h| h.hash()),
+            None => self.store.held(&author, &group, at)?.map(|h| h.hash()),
         };
         if let Some(held) = had {
             if held == id {
@@ -634,7 +664,7 @@ impl<S: FeedStore> Feed<S> {
             }
             let fork = Fork { at, held, offered: id };
             head.frozen = Some(fork);
-            self.store.set_head(&author, &network, head)?;
+            self.store.set_head(&author, &group, head)?;
             return Ok(Offer::Fork(fork));
         }
         let latest = head.latest;
@@ -652,12 +682,12 @@ impl<S: FeedStore> Feed<S> {
                 return Ok(Offer::Stale);
             }
             self.store.hold(e)?;
-            return Ok(Offer::Gap(Want { author, network, inc: latest.inc, from: latest.seq + 1 }));
+            return Ok(Offer::Gap(Want { author, group, inc: latest.inc, from: latest.seq + 1 }));
         }
         let mut out = Vec::new();
         self.apply(&mut head, e, &mut out)?;
-        self.drain(&author, &network, &mut head, &mut out)?;
-        self.store.set_head(&author, &network, head)?;
+        self.drain(&author, &group, &mut head, &mut out)?;
+        self.store.set_head(&author, &group, head)?;
         Ok(Offer::New(out))
     }
 
@@ -665,7 +695,7 @@ impl<S: FeedStore> Feed<S> {
         if e.inc != head.latest.inc {
             // Linking a later incarnation closes the ones before it: what's
             // held of them is past where the author said they ended.
-            self.store.drop_held_before(&e.author, &e.network, e.inc)?;
+            self.store.drop_held_before(&e.author, &e.group, e.inc)?;
         }
         self.store.keep(&e)?;
         head.latest = e.pos();
@@ -674,20 +704,20 @@ impl<S: FeedStore> Feed<S> {
     }
 
     /// Applies what's held and now in order.
-    fn drain(&mut self, author: &str, network: &str, head: &mut Head, out: &mut Vec<FeedEntry>) -> Result<(), S::Error> {
+    fn drain(&mut self, author: &str, group: &str, head: &mut Head, out: &mut Vec<FeedEntry>) -> Result<(), S::Error> {
         loop {
             let next = Pos { inc: head.latest.inc, seq: head.latest.seq + 1 };
             if next.inc > 0 {
-                if let Some(e) = self.store.held(author, network, next)? {
-                    self.store.unhold(author, network, next)?;
+                if let Some(e) = self.store.held(author, group, next)? {
+                    self.store.unhold(author, group, next)?;
                     self.apply(head, e, out)?;
                     continue;
                 }
             }
-            let firsts = self.store.held_firsts(author, network, head.latest.inc)?;
+            let firsts = self.store.held_firsts(author, group, head.latest.inc)?;
             match firsts.into_iter().find(|e| e.prev.is_some_and(|p| p <= head.latest)) {
                 Some(e) => {
-                    self.store.unhold(author, network, e.pos())?;
+                    self.store.unhold(author, group, e.pos())?;
                     self.apply(head, e, out)?;
                 }
                 None => return Ok(()),
@@ -697,26 +727,26 @@ impl<S: FeedStore> Feed<S> {
 
     /// What the receiver acknowledges to `author`; None before its first
     /// kept entry.
-    pub fn ack(&self, author: &str, network: &str) -> Result<Option<Ack>, S::Error> {
-        let l = self.store.head(author, network)?.latest;
+    pub fn ack(&self, author: &str, group: &str) -> Result<Option<Ack>, S::Error> {
+        let l = self.store.head(author, group)?.latest;
         Ok((l != Pos::ORIGIN).then_some(Ack { inc: l.inc, high: l.seq }))
     }
 
     /// The fork that froze `author`'s feed, if it's frozen.
-    pub fn frozen(&self, author: &str, network: &str) -> Result<Option<Fork>, S::Error> {
-        Ok(self.store.head(author, network)?.frozen)
+    pub fn frozen(&self, author: &str, group: &str) -> Result<Option<Fork>, S::Error> {
+        Ok(self.store.head(author, group)?.frozen)
     }
 
     /// Takes `author`'s feed again after a fork, keeping the entry the
     /// receiver had: only the person decides this, at the window or
     /// through the doctor, never an agent or another machine. Returns the
     /// held entries it released.
-    pub fn unfreeze(&mut self, author: &str, network: &str) -> Result<Vec<FeedEntry>, S::Error> {
-        let mut head = self.store.head(author, network)?;
+    pub fn unfreeze(&mut self, author: &str, group: &str) -> Result<Vec<FeedEntry>, S::Error> {
+        let mut head = self.store.head(author, group)?;
         head.frozen = None;
         let mut out = Vec::new();
-        self.drain(author, network, &mut head, &mut out)?;
-        self.store.set_head(author, network, head)?;
+        self.drain(author, group, &mut head, &mut out)?;
+        self.store.set_head(author, group, head)?;
         Ok(out)
     }
 }
@@ -732,8 +762,8 @@ pub struct MemoryStore {
     held: HashMap<Key, BTreeMap<Pos, FeedEntry>>,
 }
 
-fn key(author: &str, network: &str) -> Key {
-    (author.to_string(), network.to_string())
+fn key(author: &str, group: &str) -> Key {
+    (author.to_string(), group.to_string())
 }
 
 impl MemoryStore {
@@ -742,64 +772,64 @@ impl MemoryStore {
     }
 
     /// How many kept entries are held for `author`.
-    pub fn held_count(&self, author: &str, network: &str) -> usize {
-        self.held.get(&key(author, network)).map_or(0, BTreeMap::len)
+    pub fn held_count(&self, author: &str, group: &str) -> usize {
+        self.held.get(&key(author, group)).map_or(0, BTreeMap::len)
     }
 }
 
 impl FeedStore for MemoryStore {
     type Error = Infallible;
 
-    fn head(&self, author: &str, network: &str) -> Result<Head, Infallible> {
-        Ok(self.heads.get(&key(author, network)).copied().unwrap_or_default())
+    fn head(&self, author: &str, group: &str) -> Result<Head, Infallible> {
+        Ok(self.heads.get(&key(author, group)).copied().unwrap_or_default())
     }
 
-    fn set_head(&mut self, author: &str, network: &str, head: Head) -> Result<(), Infallible> {
-        self.heads.insert(key(author, network), head);
+    fn set_head(&mut self, author: &str, group: &str, head: Head) -> Result<(), Infallible> {
+        self.heads.insert(key(author, group), head);
         Ok(())
     }
 
-    fn kept(&self, author: &str, network: &str, at: Pos) -> Result<Option<[u8; 32]>, Infallible> {
-        Ok(self.kept.get(&key(author, network)).and_then(|m| m.get(&at)).copied())
+    fn kept(&self, author: &str, group: &str, at: Pos) -> Result<Option<[u8; 32]>, Infallible> {
+        Ok(self.kept.get(&key(author, group)).and_then(|m| m.get(&at)).copied())
     }
 
     fn keep(&mut self, e: &FeedEntry) -> Result<(), Infallible> {
-        self.kept.entry(key(&e.author, &e.network)).or_default().insert(e.pos(), e.hash());
+        self.kept.entry(key(&e.author, &e.group)).or_default().insert(e.pos(), e.hash());
         Ok(())
     }
 
-    fn has_loose(&self, author: &str, network: &str, id: &[u8; 32]) -> Result<bool, Infallible> {
-        Ok(self.loose.get(&key(author, network)).is_some_and(|s| s.contains(id)))
+    fn has_loose(&self, author: &str, group: &str, id: &[u8; 32]) -> Result<bool, Infallible> {
+        Ok(self.loose.get(&key(author, group)).is_some_and(|s| s.contains(id)))
     }
 
     fn take_loose(&mut self, e: &FeedEntry) -> Result<(), Infallible> {
-        self.loose.entry(key(&e.author, &e.network)).or_default().insert(e.hash());
+        self.loose.entry(key(&e.author, &e.group)).or_default().insert(e.hash());
         Ok(())
     }
 
-    fn held(&self, author: &str, network: &str, at: Pos) -> Result<Option<FeedEntry>, Infallible> {
-        Ok(self.held.get(&key(author, network)).and_then(|m| m.get(&at)).cloned())
+    fn held(&self, author: &str, group: &str, at: Pos) -> Result<Option<FeedEntry>, Infallible> {
+        Ok(self.held.get(&key(author, group)).and_then(|m| m.get(&at)).cloned())
     }
 
     fn hold(&mut self, e: FeedEntry) -> Result<(), Infallible> {
-        self.held.entry(key(&e.author, &e.network)).or_default().insert(e.pos(), e);
+        self.held.entry(key(&e.author, &e.group)).or_default().insert(e.pos(), e);
         Ok(())
     }
 
-    fn unhold(&mut self, author: &str, network: &str, at: Pos) -> Result<(), Infallible> {
-        if let Some(m) = self.held.get_mut(&key(author, network)) {
+    fn unhold(&mut self, author: &str, group: &str, at: Pos) -> Result<(), Infallible> {
+        if let Some(m) = self.held.get_mut(&key(author, group)) {
             m.remove(&at);
         }
         Ok(())
     }
 
-    fn held_firsts(&self, author: &str, network: &str, after: u64) -> Result<Vec<FeedEntry>, Infallible> {
-        let Some(m) = self.held.get(&key(author, network)) else { return Ok(Vec::new()) };
+    fn held_firsts(&self, author: &str, group: &str, after: u64) -> Result<Vec<FeedEntry>, Infallible> {
+        let Some(m) = self.held.get(&key(author, group)) else { return Ok(Vec::new()) };
         Ok(m.range(Pos { inc: after.saturating_add(1), seq: 0 }..).filter(|(p, _)| p.seq == 1).map(|(_, e)| e.clone()).collect())
     }
 
-    fn drop_held_before(&mut self, author: &str, network: &str, inc: u64) -> Result<(), Infallible> {
-        if let Some(m) = self.held.get_mut(&key(author, network)) {
+    fn drop_held_before(&mut self, author: &str, group: &str, inc: u64) -> Result<(), Infallible> {
+        if let Some(m) = self.held.get_mut(&key(author, group)) {
             m.retain(|p, _| p.inc >= inc);
         }
         Ok(())

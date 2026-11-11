@@ -437,7 +437,12 @@ impl Document for SendBody {
     const DESCRIPTION: &'static str = "One message from an agent, actor or the person on one host to an agent or actor on another: the body of a message entry in its machine's feed, whose frame carries the authority the act rests on.";
 }
 
-/// What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and network; messages and receipts are loose, each taken once by its id
+crate::pattern! {
+    /// What a feed is scoped to: a network's net_ id or a space's spc_ id
+    pub struct GroupId(r"^(net_[0-9a-f]{32}|spc_[a-z2-7]{32})$");
+}
+
+/// What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and group; messages and receipts are loose, each taken once by its id
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
@@ -457,12 +462,12 @@ pub struct FeedPlace {
     pub seq: Uint,
 }
 
-/// One entry of a machine's feed in a network (xenonet-feed/1), signed by its machine signing key
+/// One entry of a machine's feed in a group, a network or a space (xenonet-feed/1), signed by its machine signing key
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FeedEntry {
-    /// The author: its machine signing key, which the network's chain lists for a member
+    /// The author: its machine signing key, which the group's chain lists for a member
     pub author: SigningKeyId,
-    pub network: NetworkId,
+    pub group: GroupId,
     /// The author's incarnation: it changes only when the author's store was restored or it was set up again
     pub inc: Ranged<1>,
     /// From 1 in each incarnation, kept and loose kinds each counted on their own
