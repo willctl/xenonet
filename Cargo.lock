@@ -5251,6 +5251,7 @@ name = "xenonet-adapter"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "libc",
  "notify",
  "regex",
  "serde",

@@ -10,14 +10,17 @@
 //!   owner the paths of its own specs that changed. When the system drops
 //!   events (a queue overflow) or a watch fails, it says a reconcile is
 //!   needed: the scan is what catches up then.
+//! - `follow`: on macOS, where FSEvents can lag by seconds, a transcript
+//!   being written is watched on its own too (kqueue), beside its folder.
 //! - `sessions::Sessions` drives the registry's platforms on one watcher:
 //!   their paths go through `changed`, other owners' (a repo's) pass
-//!   through as they are.
+//!   through as they are. A transcript it reads lines of is followed.
 //!
 //! An adapter whose sources can't be watched gives no specs, and its scan
 //! stays the reconcile path.
 
 pub mod cursor;
+pub mod follow;
 pub mod runner;
 pub mod sessions;
 

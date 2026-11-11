@@ -30,6 +30,11 @@ notify.workspace = true
 # Where a settings file that isn't JSON goes wrong, for connect's message.
 xenonet-schema.workspace = true
 
+# kqueue, for the transcripts watched on their own (watch/follow.rs):
+# notify's kqueue backend can't run beside its FSEvents one.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
 [features]
 # A fake machine for the adapters' connect tests.
 testing = []

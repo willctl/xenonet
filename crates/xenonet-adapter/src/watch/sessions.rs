@@ -2,13 +2,19 @@
 //! read into session events through its own `changed` and cursor, and the
 //! paths of any other owner (a repo, added under a key of its own) passed
 //! on as they are, so one set of the system's watches serves all of them.
+//!
+//! A transcript an app's lines are read from is being written, so it's
+//! followed (`Watcher::follow`: its own watch, where its folder's is
+//! slow), until it's gone or goes idle. One the scan read that was written
+//! lately is followed as it's seeded.
 
+use super::follow::{Follower, IDLE};
 use super::runner::{Batch, Watcher};
 use super::{Cursor, SessionEvent, WatchSpec};
 use crate::Platform;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// What the owner of the watches hears.
 #[derive(Clone, Debug, PartialEq)]
@@ -45,14 +51,24 @@ impl Sessions {
     /// `Registry::watches` gives them; a platform with none is left out),
     /// and tells `on` what changed.
     pub fn start(platforms: Vec<(Arc<dyn Platform>, Vec<WatchSpec>)>, on: impl FnMut(Report) + Send + 'static) -> notify::Result<Sessions> {
+        Sessions::start_with(super::follow::cap(), platforms, on)
+    }
+
+    // The same, with at most `cap` transcripts followed.
+    pub(crate) fn start_with(cap: usize, platforms: Vec<(Arc<dyn Platform>, Vec<WatchSpec>)>, on: impl FnMut(Report) + Send + 'static) -> notify::Result<Sessions> {
         let apps: Apps = Arc::new(Mutex::new(HashMap::new()));
         let them = apps.clone();
+        // The watcher's own thread follows what it reads, through the
+        // follower it hands back once it's up.
+        let follower: Arc<OnceLock<Follower>> = Arc::new(OnceLock::new());
+        let f = follower.clone();
         let mut on = on;
-        let watcher = Watcher::start(move |b| {
-            for r in handle(&them, b) {
+        let watcher = Watcher::start_with(cap, move |b| {
+            for r in handle(&them, b, f.get()) {
                 on(r);
             }
         })?;
+        let _ = follower.set(watcher.follower());
         let s = Sessions { apps, watcher };
         for (p, specs) in platforms {
             s.add(p, specs);
@@ -75,8 +91,15 @@ impl Sessions {
     /// Says an app's file was read up to `at` already (by the scan at
     /// start, or a reconcile), so its next event reads on from there.
     pub fn seed(&self, app: &str, file: &Path, at: u64) {
-        if let Some((_, c)) = lock(&self.apps).get_mut(&app_key(app)) {
-            c.seed(file, at);
+        match lock(&self.apps).get_mut(&app_key(app)) {
+            Some((_, c)) => c.seed(file, at),
+            None => return,
+        }
+        // Written lately: its session is likely live, so followed now
+        // rather than after its next write is heard the slow way.
+        let lately = std::fs::metadata(file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < IDLE);
+        if lately {
+            self.watcher.follow(file);
         }
     }
 
@@ -94,7 +117,7 @@ impl Sessions {
     }
 }
 
-fn handle(apps: &Apps, b: Batch) -> Vec<Report> {
+fn handle(apps: &Apps, b: Batch, follower: Option<&Follower>) -> Vec<Report> {
     match b {
         Batch::Reconcile { key: None, why } => vec![Report::Reconcile { app: None, why }],
         Batch::Reconcile { key: Some(key), why } => match key.strip_prefix("app:") {
@@ -114,6 +137,17 @@ fn handle(apps: &Apps, b: Batch) -> Vec<Report> {
             }
             if events.is_empty() {
                 return Vec::new();
+            }
+            if let Some(f) = follower {
+                for e in &events {
+                    match e {
+                        SessionEvent::Lines(l) => {
+                            f.follow(&l.file);
+                        }
+                        SessionEvent::Gone { file, .. } => f.unfollow(file),
+                        SessionEvent::Changed { .. } => {}
+                    }
+                }
             }
             vec![Report::Events { app: p.id().to_string(), events }]
         }
@@ -182,5 +216,103 @@ mod tests {
         assert_eq!(lines, ["{\"n\":1}", "{\"n\":2}"]);
         drop(s);
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    // How long each of `rounds` lines appended to a transcript took to come
+    // as lines, with at most `cap` transcripts followed (0: none, the
+    // folder's watch alone). None for a line not heard within a minute.
+    // Every line is heard once at most.
+    fn rounds(name: &str, cap: usize, rounds: usize) -> Vec<Option<Duration>> {
+        use std::io::Write as _;
+        use std::time::Instant;
+        let d = std::env::temp_dir().join(format!("xenonet-sessions-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let d = PathBuf::from(xenonet_os::fs::realpath_native(&d.to_string_lossy()).unwrap());
+        let (tx, rx) = channel();
+        let p: Arc<dyn Platform> = Arc::new(Lines(app("claude").unwrap().clone()));
+        let s = Sessions::start_with(cap, vec![(p, vec![WatchSpec::tree("t", &d, &["*.jsonl"])])], move |r| {
+            let _ = tx.send(r);
+        })
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let f = d.join("live.jsonl");
+        let append = |text: &str| std::fs::OpenOptions::new().create(true).append(true).open(&f).unwrap().write_all(text.as_bytes()).unwrap();
+        let mut seen: Vec<String> = Vec::new();
+        let take = |r: Report, seen: &mut Vec<String>| {
+            if let Report::Events { events, .. } = r {
+                for e in events {
+                    if let SessionEvent::Lines(l) = e {
+                        seen.extend(l.lines);
+                    }
+                }
+            }
+        };
+        // The first line is heard through the folder, and follows the file.
+        let write = || append("{\"r\":\"first\"}\n");
+        write();
+        heard(&rx, |r| matches!(r, Report::Events { .. }), write).expect("the first line");
+        assert_eq!(s.watcher().followed().contains(&f), cap > 0 && cfg!(target_os = "macos"), "a transcript written to is followed where that's quicker");
+        let mut took = Vec::new();
+        for i in 0..rounds {
+            let line = format!("{{\"r\":{i}}}");
+            let start = Instant::now();
+            append(&format!("{line}\n"));
+            let end = start + Duration::from_secs(60);
+            let mut got = None;
+            while got.is_none() {
+                match rx.recv_timeout(end.saturating_duration_since(Instant::now())) {
+                    Ok(r) => {
+                        take(r, &mut seen);
+                        if seen.contains(&line) {
+                            got = Some(start.elapsed());
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            took.push(got);
+        }
+        // Late events from the other watch read nothing again.
+        std::thread::sleep(Duration::from_millis(500));
+        while let Ok(r) = rx.try_recv() {
+            take(r, &mut seen);
+        }
+        for i in 0..rounds {
+            let line = format!("{{\"r\":{i}}}");
+            assert!(seen.iter().filter(|l| **l == line).count() <= 1, "{line} read twice");
+        }
+        drop(s);
+        std::fs::remove_dir_all(&d).unwrap();
+        took
+    }
+
+    // The median, the 95th percentile and the slowest, in ms, and how many
+    // weren't heard.
+    fn summary(took: &[Option<Duration>]) -> String {
+        let mut ms: Vec<u128> = took.iter().flatten().map(Duration::as_millis).collect();
+        ms.sort_unstable();
+        let at = |q: f64| ms.get(((ms.len() as f64 - 1.0) * q).round() as usize).copied().unwrap_or(0);
+        format!("{} rounds: median {} ms, p95 {} ms, max {} ms, missed {}", took.len(), at(0.5), at(0.95), ms.last().copied().unwrap_or(0), took.len() - ms.len())
+    }
+
+    #[test]
+    fn a_followed_transcripts_lines_come_quickly() {
+        let took = rounds("quick", crate::watch::follow::cap(), 20);
+        // Under load the time varies, so it's told rather than held to a
+        // bound; every line still has to come.
+        eprintln!("followed transcript, {}", summary(&took));
+        assert!(took.iter().all(Option::is_some), "every line comes");
+    }
+
+    // The time a line takes with the transcript followed against with its
+    // folder's watch alone: `cargo test -p xenonet-adapter -- --ignored
+    // followed_against --nocapture`.
+    #[test]
+    #[ignore = "a measurement, minutes long where FSEvents lags"]
+    fn followed_against_the_folder_alone() {
+        let n = 30;
+        eprintln!("folder alone: {}", summary(&rounds("folder", 0, n)));
+        eprintln!("followed:     {}", summary(&rounds("followed", crate::watch::follow::cap(), n)));
     }
 }

@@ -9,8 +9,16 @@
 //! A spec's folder that isn't there yet is waited for: the nearest folder
 //! above it (a few levels up at most) is watched until it appears, and its
 //! owner hears a reconcile then, for the files written before the watch.
+//!
+//! A file its owner says is being written (`follow`) is also watched on
+//! its own where the folder's watch is slow (`super::follow`: kqueue on
+//! macOS). Its writes come both ways then; the folder's are left out while
+//! the file's own watch stands, and any that arrive in another window
+//! read nothing new, since the cursor reads on from where it read to.
 
+use super::follow::{self, Follower};
 use super::WatchSpec;
+use notify::event::ModifyKind;
 use notify::{EventKind, RecursiveMode, Watcher as _};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -38,8 +46,15 @@ pub enum Batch {
     Reconcile { key: Option<String>, why: String },
 }
 
+// Where an event came from: a folder's watch, or a file's own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Via {
+    Folder,
+    File,
+}
+
 enum Msg {
-    Event(notify::Result<notify::Event>),
+    Event(Via, notify::Result<notify::Event>),
     Tell(Batch),
     Stop,
 }
@@ -73,6 +88,7 @@ struct Shared {
     // mustn't take the other's watch.
     counts: HashMap<PathBuf, Count>,
     owners: BTreeMap<String, Vec<Entry>>,
+    follower: Follower,
 }
 
 /// The running watcher. Dropping it stops it.
@@ -90,12 +106,25 @@ impl Watcher {
     /// Starts watching nothing yet; `on` hears every batch, on the
     /// watcher's own thread (it may block: file reads are fine there).
     pub fn start(on: impl FnMut(Batch) + Send + 'static) -> notify::Result<Watcher> {
+        Watcher::start_with(follow::cap(), on)
+    }
+
+    // The same, with at most `cap` files watched on their own.
+    pub(crate) fn start_with(cap: usize, on: impl FnMut(Batch) + Send + 'static) -> notify::Result<Watcher> {
         let (tx, rx) = channel::<Msg>();
         let events = tx.clone();
         let notify = notify::recommended_watcher(move |e| {
-            let _ = events.send(Msg::Event(e));
+            let _ = events.send(Msg::Event(Via::Folder, e));
         })?;
-        let shared = Arc::new(Mutex::new(Shared { notify, counts: HashMap::new(), owners: BTreeMap::new() }));
+        let events = tx.clone();
+        let follower = if cap == 0 {
+            Follower::default()
+        } else {
+            Follower::start(cap, move |e| {
+                let _ = events.send(Msg::Event(Via::File, Ok(e)));
+            })
+        };
+        let shared = Arc::new(Mutex::new(Shared { notify, counts: HashMap::new(), owners: BTreeMap::new(), follower }));
         let s = shared.clone();
         let mut on = on;
         let thread = std::thread::Builder::new()
@@ -105,7 +134,7 @@ impl Watcher {
                 while !stopping {
                     let mut window = Vec::new();
                     match rx.recv() {
-                        Ok(Msg::Event(e)) => window.push(e),
+                        Ok(Msg::Event(from, e)) => window.push((from, e)),
                         Ok(Msg::Tell(b)) => {
                             on(b);
                             continue;
@@ -117,7 +146,7 @@ impl Watcher {
                     loop {
                         let left = until.saturating_duration_since(Instant::now());
                         match rx.recv_timeout(left) {
-                            Ok(Msg::Event(e)) => window.push(e),
+                            Ok(Msg::Event(from, e)) => window.push((from, e)),
                             Ok(Msg::Tell(b)) => told.push(b),
                             Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => {
                                 stopping = true;
@@ -171,6 +200,32 @@ impl Watcher {
         lock(&self.shared).owners.keys().cloned().collect()
     }
 
+    /// Watches a file of a spec's on its own as well as through its
+    /// folder, because it's being written now (a live session's
+    /// transcript): on macOS, where the folder's events can lag by
+    /// seconds, its writes then come straight from the kernel. Whether it
+    /// is: false past the cap, and anywhere but macOS, where the folder's
+    /// watch is as quick.
+    pub fn follow(&self, path: &Path) -> bool {
+        self.follower().follow(path)
+    }
+
+    /// Stops watching a file on its own: it's gone, or no longer read.
+    pub fn unfollow(&self, path: &Path) {
+        self.follower().unfollow(path);
+    }
+
+    /// The files watched on their own now.
+    pub fn followed(&self) -> Vec<PathBuf> {
+        self.follower().followed()
+    }
+
+    /// What `follow` and `unfollow` go through, for a caller that must
+    /// reach them from the watcher's own thread.
+    pub fn follower(&self) -> Follower {
+        lock(&self.shared).follower.clone()
+    }
+
     /// An owner's specs, as the watcher names their folders.
     pub fn specs(&self, key: &str) -> Vec<WatchSpec> {
         lock(&self.shared).owners.get(key).map(|es| es.iter().map(|e| e.spec.clone()).collect()).unwrap_or_default()
@@ -180,6 +235,8 @@ impl Watcher {
 impl Drop for Watcher {
     fn drop(&mut self) {
         let _ = self.tx.send(Msg::Stop);
+        let follower = lock(&self.shared).follower.clone();
+        follower.stop();
         if let Some(t) = self.thread.take() {
             // Dropped from its own thread (an `on` that let go of it), it
             // ends when its loop does.
@@ -288,11 +345,11 @@ impl Shared {
     }
 
     // A window's events, as each owner hears them.
-    fn route(&mut self, window: Vec<notify::Result<notify::Event>>) -> Vec<Batch> {
+    fn route(&mut self, window: Vec<(Via, notify::Result<notify::Event>)>) -> Vec<Batch> {
         let mut out = Vec::new();
         let mut changed: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
         let mut touched: Vec<PathBuf> = Vec::new();
-        for e in window {
+        for (from, e) in window {
             match e {
                 Err(e) => {
                     let keys = self.keys_near(&e.paths);
@@ -315,6 +372,14 @@ impl Shared {
                 // Reads are no change, and XenoNet's own reads of a file
                 // would otherwise come back to it.
                 Ok(ev) if matches!(ev.kind, EventKind::Access(_)) => {}
+                // A followed file's writes (and the times they set), which
+                // its own watch tells sooner. What else the folder says of
+                // it (created, renamed, removed) still counts.
+                Ok(ev)
+                    if from == Via::Folder
+                        && matches!(ev.kind, EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_)))
+                        && !ev.paths.is_empty()
+                        && ev.paths.iter().all(|p| self.follower.is_followed(p)) => {}
                 Ok(ev) => {
                     for p in ev.paths {
                         for (key, entries) in &self.owners {
@@ -472,6 +537,38 @@ mod tests {
         let write = || std::fs::write(&f, "x").unwrap();
         write();
         assert!(heard(&rx, changed_with("git:b", &f), write).is_some());
+        drop(w);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn past_the_cap_a_file_is_heard_through_its_folder() {
+        use std::io::Write as _;
+        let d = dir("cap");
+        let (a, b) = (d.join("a.jsonl"), d.join("b.jsonl"));
+        let append = |p: &Path| std::fs::OpenOptions::new().append(true).open(p).unwrap().write_all(b"{}\n").unwrap();
+        std::fs::write(&a, "{}\n").unwrap();
+        std::fs::write(&b, "{}\n").unwrap();
+        let (tx, rx) = channel();
+        let w = Watcher::start_with(1, move |b| {
+            let _ = tx.send(b);
+        })
+        .unwrap();
+        w.add("app:a", vec![WatchSpec::flat("t", &d, &["*.jsonl"])]);
+        std::thread::sleep(Duration::from_millis(300));
+        let mac = cfg!(target_os = "macos");
+        assert_eq!(w.follow(&a), mac, "followed on macOS alone");
+        assert!(!w.follow(&b), "past the cap");
+        assert_eq!(w.followed(), if mac { vec![a.clone()] } else { Vec::new() });
+        while rx.try_recv().is_ok() {}
+        let write = || append(&b);
+        write();
+        assert!(heard(&rx, changed_with("app:a", &b), write).is_some(), "the file past the cap, through its folder");
+        let write = || append(&a);
+        write();
+        assert!(heard(&rx, changed_with("app:a", &a), write).is_some(), "the followed one");
+        w.unfollow(&a);
+        assert_eq!(w.follow(&b), mac, "a slot let go is taken");
         drop(w);
         std::fs::remove_dir_all(&d).unwrap();
     }
