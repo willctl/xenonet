@@ -10,7 +10,7 @@
 //! --retire-agent-wiki-service [--retire-grant <folder>]... (Windows; `xenolith migrate agent-wiki`
 //! passes it): the elevated step also removes agent-wiki's service and its folder grants.
 //!
-//! --from: the folder with xenolith, xenolith-tray, ui/ and icons/ (default: next to this program;
+//! --from: the folder with xenolith, xenolith-service, xenolith-tray, ui/ and icons/ (default: next to this program;
 //! in the repository, rust/target/release with dist/ built). --sandbox: a fake home for tests: files
 //! and configs only, no service, no sign-in entries, no app CLIs.
 
@@ -88,6 +88,7 @@ pub(crate) fn environment(sandbox: Option<&Path>) -> (xenolith_core::paths::Env,
 /// Where the programs and the window's files come from.
 struct Payload {
     agent: PathBuf,
+    service: PathBuf,
     tray: PathBuf,
     ui: PathBuf,
     icons: PathBuf,
@@ -102,14 +103,19 @@ fn payload(from: Option<&Path>) -> Result<Payload, InstallError> {
     let pick = |own: PathBuf, dev: Option<PathBuf>| if own.exists() { own } else { dev.filter(|d| d.exists()).unwrap_or(own) };
     let p = Payload {
         agent: dir.join(format!("xenolith{EXE}")),
+        service: dir.join(format!("xenolith-service{EXE}")),
         tray: dir.join(format!("xenolith-tray{EXE}")),
         ui: pick(dir.join("ui"), repo.as_ref().map(|r| r.join("dist").join("runtime").join("ui"))),
         icons: pick(dir.join("icons"), repo.as_ref().map(|r| r.join("dist").join("icons"))),
         loader: Some(dir.join("WebView2Loader.dll")).filter(|l| cfg!(windows) && l.exists()),
     };
-    for (what, path) in
-        [("xenolith", &p.agent), ("xenolith-tray", &p.tray), ("the window's files (ui/index.html)", &p.ui.join("index.html")), ("the tray icons", &p.icons.join("xenolith-healthy.ico"))]
-    {
+    for (what, path) in [
+        ("xenolith", &p.agent),
+        ("xenolith-service", &p.service),
+        ("xenolith-tray", &p.tray),
+        ("the window's files (ui/index.html)", &p.ui.join("index.html")),
+        ("the tray icons", &p.icons.join("xenolith-healthy.ico")),
+    ] {
         if !path.exists() {
             return Err(InstallError(format!("{what} not found at {} (build with `npm run build && npm run icons` and `cargo build --release`, or pass --from <folder>)", fwd(path))));
         }
@@ -290,6 +296,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
 
     step("1", "Programs and the window's files");
     info(&format!("{}: {}", fwd(&p.agent), replace_file(&pay.agent, &p.agent)?));
+    info(&format!("{}: {}", fwd(&p.service), replace_file(&pay.service, &p.service)?));
     let n = sync_dir(&pay.ui, &p.runtime.join("ui"))?;
     info(&format!("window files -> {} ({n} files)", fwd(&p.runtime.join("ui"))));
 
@@ -378,7 +385,7 @@ fn install(o: &Opts) -> Result<(), InstallError> {
     let n = |x: &Path| if cfg!(windows) { x.to_string_lossy().replace('/', "\\") } else { x.to_string_lossy().into_owned() };
     let mut ini = vec![
         "# Written by the xenolith installer. Read by xenolith-tray.".to_string(),
-        format!("agent={}", n(&p.agent)),
+        format!("serviceExe={}", n(&p.service)),
         format!("wikiDir={}", n(&wiki_dir)),
         format!("logDir={}", n(&p.app.log_dir)),
         format!("icons={}", n(&p.icons)),
@@ -595,7 +602,7 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool, retire: 
     write_lf(
         &p.service_ini,
         &[
-            "# Written by the xenolith installer. Read by the service (xenolith service).".to_string(),
+            "# Written by the xenolith installer. Read by the service (xenolith-service service).".to_string(),
             format!("wikiDir={}", n(wiki_dir)),
             format!("configDir={}", n(&p.app.config_dir)),
             format!("dataDir={}", n(&p.app.data_dir)),
@@ -622,14 +629,14 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool, retire: 
         info("service account access: Modify on the wiki, logs and state, Read on config and program files");
     }
     let bin = windows::service_bin();
-    let registered_here = bin.as_ref().is_some_and(|b| b.to_string_lossy().to_lowercase() == p.agent.to_string_lossy().to_lowercase());
+    let registered_here = bin.as_ref().is_some_and(|b| b.to_string_lossy().to_lowercase() == p.service.to_string_lossy().to_lowercase());
     // agent-wiki's service goes in the same elevated step (one UAC prompt), even when Xenolith's is in place.
     let retire_args = retire.filter(|_| crate::migrate::retire::service_exists()).map(crate::migrate::retire::forward).unwrap_or_default();
     if !registered_here || !retire_args.is_empty() {
         info(&match &bin {
             Some(_) if registered_here => "removing agent-wiki's AgentWiki service (approve the UAC prompt)".to_string(),
-            Some(b) => format!("the service starts {}; re-registering it at {} (approve the UAC prompt)", fwd(b), fwd(&p.agent)),
-            None => format!("registering the service at {} (approve the UAC prompt)", fwd(&p.agent)),
+            Some(b) => format!("the service starts {}; re-registering it at {} (approve the UAC prompt)", fwd(b), fwd(&p.service)),
+            None => format!("registering the service at {} (approve the UAC prompt)", fwd(&p.service)),
         });
         let log = p.app.log_dir.join("install-service.log");
         let _ = std::fs::remove_file(&log);
@@ -656,7 +663,7 @@ fn service_step(p: &Places, wiki_dir: &Path, port: u16, _curated: bool, retire: 
         return Ok("stdio");
     }
     // A replaced program stops the running service, which the SCM restarts on the new build: wait for exactly it.
-    let build = sha12(&p.agent);
+    let build = sha12(&p.service);
     let h = sys::wait_for_health(port, |x| x["ok"] == true && x["version"] == xenolith_core::VERSION && x["build"] == build.as_str(), Duration::from_secs(45));
     match h {
         // /health says nothing private; the wiki folder the service uses is in /status.
@@ -684,7 +691,7 @@ fn service_grants<'a>(p: &'a Places, wiki_dir: &'a Path) -> [(&'a Path, &'static
 }
 
 /// What the Node runtime installed and this one replaces: its bundles next to the programs and the C#
-/// service wrapper. Only once the service runs `xenolith` (a declined UAC prompt leaves the old
+/// service wrapper. Only once the service runs `xenolith-service` (a declined UAC prompt leaves the old
 /// wrapper registered, and it still needs them).
 #[cfg(windows)]
 fn remove_node_runtime(p: &Places) {
@@ -712,7 +719,7 @@ fn service_step(p: &Places, _wiki_dir: &Path, port: u16, curated: bool, _retire:
     for line in posix::install_services(p, port, curated)? {
         info(&line);
     }
-    let build = sha12(&p.agent);
+    let build = sha12(&p.service);
     match sys::wait_for_health(port, |x| x["ok"] == true && x["build"] == build.as_str(), Duration::from_secs(30)) {
         Some(h) if h["build"] == build.as_str() => {
             info(&format!("service running: v{} (build {}), pid {}", h["version"].as_str().unwrap_or("?"), build, h["pid"]));
@@ -1116,7 +1123,7 @@ mod service {
         }
     }
 
-    /// Registers the Xenolith service: `xenolith service` serving HTTP on 127.0.0.1, starting at boot,
+    /// Registers the Xenolith service: `xenolith-service service` serving HTTP on 127.0.0.1, starting at boot,
     /// restarted on failure (and on upgrade), as the low-privilege virtual account NT SERVICE\Xenolith
     /// with Modify on the wiki, logs and state and Read on Xenolith's settings and program folders. It also
     /// lets your account start and stop this one service (the tray's "Restart service").
@@ -1131,13 +1138,13 @@ mod service {
             }
             let p = Places::new(&xenolith_core::paths::process_env());
             let cfg = read_json(&p.config)?.ok_or_else(|| InstallError(format!("run `xenolith install` in a normal terminal first (missing {})", fwd(&p.config))))?;
-            if !p.agent.exists() || !p.service_ini.exists() {
-                return Err(InstallError(format!("run `xenolith install` in a normal terminal first (missing {} or {})", fwd(&p.agent), fwd(&p.service_ini))));
+            if !p.service.exists() || !p.service_ini.exists() {
+                return Err(InstallError(format!("run `xenolith install` in a normal terminal first (missing {} or {})", fwd(&p.service), fwd(&p.service_ini))));
             }
             let wiki_dir = PathBuf::from(cfg["wikiDir"].as_str().unwrap_or(""));
             let port = cfg["httpPort"].as_u64().and_then(|x| u16::try_from(x).ok()).unwrap_or(47850);
             log.say(&format!("Xenolith service installer: {SERVICE_NAME} as {SERVICE_ACCOUNT}, port {port}"));
-            let bin = format!("\"{}\" service --config \"{}\"", p.agent.display(), p.service_ini.display());
+            let bin = format!("\"{}\" service --config \"{}\"", p.service.display(), p.service_ini.display());
             log.say(&format!("program: {bin}"));
             match service_state() {
                 Some(state) => {

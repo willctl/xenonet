@@ -1,6 +1,9 @@
 # What `cargo deny check` holds the Rust core's dependencies to
 # (docs/design/rust-core.md, "Static analysis"): known advisories, licenses
 # that fit XenoNet's MIT, no wildcards, and crates only from crates.io.
+# Xenolith's lock (xenolith/rust/Cargo.lock) is held to this file too, so
+# there's one list of exceptions: those that only Xenolith's tray brings say
+# so, and XenoNet's own check warns that it doesn't meet them.
 [graph]
 # The platforms XenoNet ships for.
 targets = [
@@ -30,6 +33,12 @@ ignore = [
   # 0.8 uses it, through netwatch (iroh's view of the network interfaces
   # on Linux), and the macro runs at build time.
   { id = "RUSTSEC-2024-0436", reason = "a build-time macro under iroh's netwatch, archived with no known bug" },
+  # Xenolith's tray on Linux: gtk 0.18, which tray-icon, muda and wry build
+  # on. glib's VariantStrIter is unsound; the tray never iterates a variant's
+  # strings. proc-macro-error is unmaintained, a build-time macro under
+  # glib-macros.
+  { id = "RUSTSEC-2024-0429", reason = "Xenolith's tray: glib 0.18 under gtk, and the tray never uses VariantStrIter" },
+  { id = "RUSTSEC-2024-0370", reason = "Xenolith's tray: a build-time macro under glib-macros 0.18" },
 ]
 
 [licenses]
@@ -72,6 +81,20 @@ allow = ["CDLA-Permissive-2.0"]
 # the BSD-3-Clause allowed above.
 crate = "spez"
 allow = ["BSD-2-Clause"]
+
+[[licenses.exceptions]]
+# option-ext, through dirs, which Xenolith's tray takes for the system's
+# folders (tray-icon, wry). MPL-2.0 applies file by file to the crate's own
+# files, used here unchanged, and asks nothing of the code beside them.
+crate = "option-ext"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+# target-lexicon, which system-deps reads target triples with in the build
+# scripts of Xenolith's tray on Linux (GTK). The LLVM exception only lifts
+# Apache-2.0's conditions on compiled code.
+crate = "target-lexicon"
+allow = ["Apache-2.0 WITH LLVM-exception"]
 
 [licenses.private]
 # XenoNet's own crates aren't published.

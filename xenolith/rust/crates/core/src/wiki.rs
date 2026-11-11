@@ -873,10 +873,10 @@ pub(crate) fn list_log_files(wiki_dir: &Path) -> Vec<(String, String, PathBuf, u
                 continue;
             }
             let n = f.file_name().to_string_lossy().to_string();
-            if let Some(date) = n.strip_suffix(".md").filter(|d| DATE_RE.is_match(d)) {
-                if let Some((len, mtime)) = crate::readcache::stamp(&f) {
-                    out.push((date.to_string(), format!("log/{yn}/{n}"), f.path(), len, mtime));
-                }
+            if let Some(date) = n.strip_suffix(".md").filter(|d| DATE_RE.is_match(d))
+                && let Some((len, mtime)) = crate::readcache::stamp(&f)
+            {
+                out.push((date.to_string(), format!("log/{yn}/{n}"), f.path(), len, mtime));
             }
         }
     }
@@ -1046,10 +1046,10 @@ fn read_whole(wiki_dir: &Path, target: &str) -> Result<(String, String)> {
             abs = with_md;
         }
     }
-    if !abs.exists() {
-        if let Some(found) = case_insensitive(&abs) {
-            abs = found;
-        }
+    if !abs.exists()
+        && let Some(found) = case_insensitive(&abs)
+    {
+        abs = found;
     }
     if !abs.exists() {
         return wiki_err(format!("Not found: \"{target}\". Use context_search, or a page slug from the index (context_read(\"index.md\"))."));

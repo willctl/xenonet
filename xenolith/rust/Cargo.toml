@@ -1,20 +1,39 @@
-# Xenolith's own workspace: xenolith/ builds on its own, with the toolchain rust-toolchain.toml pins.
+# Xenolith's own workspace: xenolith/ builds on its own, with the toolchain rust-toolchain.toml pins
+# and its own Cargo.lock. From XenoNet it takes the libraries xenonet-id, -log, -authz and -net (and
+# the base crates they bring: model, os, text) as path dependencies, never the app.
+# scripts/xenolith-lock.mjs, in the repository's root, checks that the packages both lockfiles share
+# agree.
+#
+# Two programs: `xenolith` (crates/cli: the stdio MCP server, the session hook, the commands and the
+# installer) on xenolith-core alone, since the hook starts it for every conversation and a smaller
+# program starts faster; and `xenolith-service` (crates/service: the HTTP service, the curator, the
+# Windows service and, through xenolith-net, sync between machines).
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cli", "crates/tray"]
+members = ["crates/core", "crates/mcp", "crates/cli", "crates/net", "crates/service", "crates/tray"]
 # `cargo build` alone leaves the tray out, since on Linux it needs GTK and WebKitGTK; --workspace
 # builds it too.
-default-members = ["crates/core", "crates/cli"]
+default-members = ["crates/core", "crates/mcp", "crates/cli", "crates/net", "crates/service"]
 
 [workspace.package]
 version = "1.10.0" # kept equal to package.json's version (scripts/build.mjs checks)
 edition = "2024"
-rust-version = "1.85"
+# The core's, and so the hook's and the tray's: xenonet-id and -authz need 1.88. xenolith-net and
+# the service need 1.91 (iroh), the tray 1.90 (tray-icon and muda).
+rust-version = "1.88"
 license = "MIT"
 publish = false
 
 [workspace.dependencies]
 xenolith-core = { path = "crates/core" }
+xenolith-mcp = { path = "crates/mcp" }
+xenolith-net = { path = "crates/net" }
+# XenoNet's libraries, from the repository's crates/. Never its service, runtime, surfaces or
+# adapters: scripts/rust-layers.mjs fails on one.
+xenonet-id = { path = "../../crates/xenonet-id" }
+xenonet-log = { path = "../../crates/xenonet-log" }
+xenonet-authz = { path = "../../crates/xenonet-authz" }
+xenonet-net = { path = "../../crates/xenonet-net" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }

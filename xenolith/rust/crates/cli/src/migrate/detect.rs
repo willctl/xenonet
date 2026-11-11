@@ -332,10 +332,10 @@ pub fn registrations(ctx: &Ctx, codex_id: &str) -> (Vec<Reg>, Vec<String>) {
     }
     for (f, key) in [("installed_plugins.json", edits::CLAUDE_PLUGIN_ID), ("known_marketplaces.json", edits::CLAUDE_MARKET)] {
         let file = lay.claude_dir.join("plugins").join(f);
-        if let Ok(Some(v)) = read_json_soft(&file) {
-            if edits::json_mentions(&v, key) {
-                add(if f.starts_with("known") { "Claude Code marketplace" } else { "Claude Code plugin" }, Some(&file), key);
-            }
+        if let Ok(Some(v)) = read_json_soft(&file)
+            && edits::json_mentions(&v, key)
+        {
+            add(if f.starts_with("known") { "Claude Code marketplace" } else { "Claude Code plugin" }, Some(&file), key);
         }
     }
     for f in [&lay.claude_md, &lay.codex_agents] {
@@ -451,11 +451,11 @@ pub fn carry(aw: &Value, xen_prev: &Value, wiki: &Path, codex_home: &str) -> (Va
         *cur = json!({});
     }
     cur["codexHome"] = json!(codex_home);
-    if let Some(e) = out.get_mut("search").and_then(|s| s.get_mut("embeddings")).filter(|e| e["enabled"] == true) {
-        if e["credential"].as_str().is_none_or(str::is_empty) {
-            // agent-wiki read the key under its own name; Xenolith's default name would miss it.
-            e["credential"] = json!(AW_CREDENTIAL);
-        }
+    if let Some(e) = out.get_mut("search").and_then(|s| s.get_mut("embeddings")).filter(|e| e["enabled"] == true)
+        && e["credential"].as_str().is_none_or(str::is_empty)
+    {
+        // agent-wiki read the key under its own name; Xenolith's default name would miss it.
+        e["credential"] = json!(AW_CREDENTIAL);
     }
     (Value::Object(out), dropped)
 }

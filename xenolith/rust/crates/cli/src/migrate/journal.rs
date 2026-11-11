@@ -141,10 +141,10 @@ impl Journal {
     /// Records the state a tracked file is about to be put in (before the write).
     pub fn expect(&mut self, p: &Path, sha: Option<String>) {
         let k = fwd(p);
-        if let Some(t) = self.files.iter_mut().find(|t| t.path == k) {
-            if !t.known.contains(&sha) {
-                t.known.push(sha);
-            }
+        if let Some(t) = self.files.iter_mut().find(|t| t.path == k)
+            && !t.known.contains(&sha)
+        {
+            t.known.push(sha);
         }
     }
 

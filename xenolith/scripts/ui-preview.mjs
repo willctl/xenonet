@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { P, readJson } from './lib.mjs';
-import { rustBin } from '../test/impl.mjs';
+import { serviceBin } from '../test/impl.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -32,8 +32,8 @@ fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ writeMode: 'cu
 console.log(`snapshot of ${source} -> ${wikiDir}`);
 
 const env = { ...process.env, XENOLITH_DIR: wikiDir, XENOLITH_HOME: home, XENOLITH_UI_DIR: path.join(root, 'dist', 'runtime', 'ui') };
-const children = [spawn(rustBin(), ['serve', '--http', '--port', String(port)], { env, stdio: ['ignore', 'inherit', 'inherit'] })];
-if (!args.includes('--no-ask')) children.push(spawn(rustBin(), ['curator', '--asks-only'], { env, stdio: ['ignore', 'inherit', 'inherit'] }));
+const children = [spawn(serviceBin(), ['serve', '--http', '--port', String(port)], { env, stdio: ['ignore', 'inherit', 'inherit'] })];
+if (!args.includes('--no-ask')) children.push(spawn(serviceBin(), ['curator', '--asks-only'], { env, stdio: ['ignore', 'inherit', 'inherit'] }));
 console.log(`window preview: http://127.0.0.1:${port}/ui/`);
 children[0].on('exit', (code) => {
   children.forEach((c) => c.kill());

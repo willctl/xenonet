@@ -59,7 +59,7 @@ fn luhn(digits: &str) -> bool {
         sum += n;
         alt = !alt;
     }
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 fn is_card(m: &str) -> bool {

@@ -1,6 +1,7 @@
 # The Rust that builds Xenolith, here and in its CI (.github/workflows/xenolith.yml), so both agree.
 # rustup installs it for this folder without changing anyone's default. The crates' rust-version
-# (1.85, and 1.90 for the tray) stays as it is: clippy picks its lints by it.
+# (1.88; 1.90 for the tray; 1.91 for xenolith-net and the service, as iroh) stays as it is: clippy
+# picks its lints by it.
 [toolchain]
 channel = "1.99.1"
 components = ["rustfmt", "clippy"]

@@ -46,6 +46,11 @@
 // `#[schemars(…)]`) and the model's schema macros (`open!`, `tag!`,
 // `constant!`, `pattern!`): there an id is a document's wire name, written
 // into its schema, not a branch on a platform.
+//
+// Xenolith (XENOLITH: xenolith/rust, its own workspace) takes XenoNet's
+// libraries, never its app: its crates, and its workspace's dependency
+// table, name no XenoNet crate but xenonet-id, -log, -authz and -net and the
+// base crates. No crate of XenoNet's depends on a crate of Xenolith's.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -75,6 +80,9 @@ const DEMO_USERS = new Set([...Object.keys(SURFACES), ...ROOT, "xenonet-state"])
 const NAMING = new Set(["xenonet-adapter", "xenonet-demo"]);
 // The generic adapters, by package name.
 const GENERIC = new Set(["xenonet-acp", "xenonet-a2a"]);
+// What Xenolith may take of XenoNet's: the libraries, and the base crates
+// they bring.
+const XENOLITH = { dir: "xenolith/rust", may: new Set(["xenonet-id", "xenonet-log", "xenonet-authz", "xenonet-net", ...BASE]) };
 
 // Words that are an app's id and also something else: a literal the check
 // would count, kept because there it isn't an app. Each entry is a file, the
@@ -104,8 +112,9 @@ function crates(dir) {
   return fs.readdirSync(at).filter((n) => fs.existsSync(path.join(at, n, "Cargo.toml"))).map((n) => ({ name: n, dir: path.join(at, n) }));
 }
 
-// A crate's dependencies on XenoNet's own crates, dev-dependencies left out.
-function deps(cargoToml) {
+// A crate's dependencies on XenoNet's own crates (or, with prefix
+// "xenolith", Xenolith's), dev-dependencies left out unless `dev`.
+function deps(cargoToml, { prefix = "xenonet", dev = false } = {}) {
   const text = fs.readFileSync(cargoToml, "utf8");
   const out = new Set();
   let section = "";
@@ -113,8 +122,8 @@ function deps(cargoToml) {
     const t = line.trim();
     const head = /^\[(.+)\]$/.exec(t);
     if (head) section = head[1];
-    if (!/(^|\.)dependencies$/.test(section) || /dev-dependencies$/.test(section)) continue;
-    const m = /^(xenonet-[a-z-]+)\s*(\.workspace|=)/.exec(t);
+    if (!/(^|\.)dependencies$/.test(section) || (!dev && /dev-dependencies$/.test(section))) continue;
+    const m = new RegExp(`^(${prefix}-[a-z-]+)\\s*(\\.workspace|=)`).exec(t);
     if (m) out.add(m[1]);
   }
   return out;
@@ -198,6 +207,24 @@ for (const c of crates("adapters")) {
     if (SURFACES[d] || ROOT.has(d)) breaches.push(`${name} is a generic adapter, and depends on ${d}`);
   }
   literalBreaches(c.dir);
+}
+
+// Xenolith: the libraries and the base crates, never the app, and nothing
+// of XenoNet's depends on it. Its dev-dependencies count too: a test that
+// links the service links the app.
+{
+  const may = [...XENOLITH.may].join(", ");
+  const manifests = [{ name: `${XENOLITH.dir}'s workspace`, file: path.join(root, XENOLITH.dir, "Cargo.toml") }, ...crates(`${XENOLITH.dir}/crates`).map((c) => ({ name: packageName(c.dir), file: path.join(c.dir, "Cargo.toml") }))];
+  for (const m of manifests) {
+    const all = deps(m.file, { dev: true });
+    const others = [...all].filter((d) => !XENOLITH.may.has(d)).sort();
+    if (others.length) breaches.push(`${m.name} is Xenolith's, which takes ${may} alone of XenoNet's, and depends on ${others.join(", ")}`);
+    if (!m.name.endsWith("workspace")) counts.push(`${m.name}: ${[...all].filter((d) => !BASE.has(d)).length} (Xenolith: ${may} only)`);
+  }
+  for (const c of [...crates("crates"), ...crates("adapters")]) {
+    const theirs = [...deps(path.join(c.dir, "Cargo.toml"), { prefix: "xenolith", dev: true })];
+    if (theirs.length) breaches.push(`${packageName(c.dir)} depends on Xenolith's ${theirs.join(", ")}: Xenolith takes XenoNet's libraries, never the other way`);
+  }
 }
 
 // A crate's registry id literals outside its tests, as breaches.

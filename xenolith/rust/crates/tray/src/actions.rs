@@ -61,12 +61,12 @@ pub fn run(cfg: &Config, action: &str, ctx: &Ctx<'_>) -> Result<Option<String>, 
     }
 }
 
-/// `xenolith curator <arg>`, waiting up to 2 minutes.
+/// `xenolith-service curator <arg>`, waiting up to 2 minutes.
 fn run_curator(cfg: &Config, arg: &str, done: &str) -> Result<Option<String>, String> {
-    let mut cmd = Command::new(&cfg.agent);
+    let mut cmd = Command::new(&cfg.service_exe);
     cmd.args(["curator", arg]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     hide(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| format!("Failed: cannot start {}: {e}", cfg.agent.display()))?;
+    let mut child = cmd.spawn().map_err(|e| format!("Failed: cannot start {}: {e}", cfg.service_exe.display()))?;
     let deadline = Instant::now() + Duration::from_secs(120);
     while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));

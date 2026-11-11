@@ -17,6 +17,11 @@ chrono.workspace = true
 getrandom.workspace = true
 x25519-dalek.workspace = true
 unicode-normalization.workspace = true
+# XenoNet's libraries: keys and signatures, signed chains and feeds, and who may do what. None of
+# them brings tokio, reqwest, rustls or iroh, so neither does the core, the hook or the tray.
+xenonet-id.workspace = true
+xenonet-log.workspace = true
+xenonet-authz.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

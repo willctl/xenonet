@@ -13,7 +13,7 @@ import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SIZES, buildIcons } from '../scripts/build-icons.mjs';
 import { currentUserSid, deleteTask, queryTask, regValue, taskXmlBytes, trayTaskXml } from '../scripts/lib.mjs';
-import { rustBin, srv } from './impl.mjs';
+import { rustBin, serviceBin, srv } from './impl.mjs';
 
 const WIN = process.platform === 'win32';
 const repo = fileURLToPath(new URL('..', import.meta.url));
@@ -74,9 +74,12 @@ describe('icons', () => {
 describe('tray app', { timeout: 180_000 }, () => {
   const exeName = WIN ? 'xenolith-tray.exe' : 'xenolith-tray';
   const agentName = WIN ? 'xenolith.exe' : 'xenolith';
+  const serviceName = WIN ? 'xenolith-service.exe' : 'xenolith-service';
   const dir = path.join(tmp, 'rust-tray');
   const exe = path.join(dir, exeName);
   const agent = path.join(dir, 'runtime', agentName);
+  // The program the tray hosts the curator with: beside `agent`, as the installer puts it.
+  const service = path.join(dir, 'runtime', serviceName);
   const wikiDir = path.join(dir, 'wiki');
   const home = path.join(dir, 'home');
   const env = { ...process.env, XENOLITH_DIR: wikiDir, XENOLITH_HOME: home };
@@ -132,6 +135,7 @@ describe('tray app', { timeout: 180_000 }, () => {
     const loader = path.join(path.dirname(rustBin()), 'WebView2Loader.dll');
     if (WIN && fs.existsSync(loader)) fs.copyFileSync(loader, path.join(dir, 'WebView2Loader.dll'));
     fs.copyFileSync(rustBin(), agent);
+    fs.copyFileSync(serviceBin(), service);
     fs.mkdirSync(home, { recursive: true });
     fs.writeFileSync(
       path.join(home, 'config.json'),
@@ -290,10 +294,10 @@ describe('tray app', { timeout: 180_000 }, () => {
       assert.match(clog(), /\[tray\] started curator pid \d+/);
 
       // An upgrade: the running program is renamed aside and a new one copied in (what the installer does).
-      fs.renameSync(agent, `${agent}.old`);
-      fs.copyFileSync(rustBin(), agent);
-      for (let i = 0; i < 100 && !/xenolith changed on disk/.test(clog()); i++) await sleep(200);
-      assert.match(clog(), /xenolith changed on disk; restarting the curator/);
+      fs.renameSync(service, `${service}.old`);
+      fs.copyFileSync(serviceBin(), service);
+      for (let i = 0; i < 100 && !/xenolith-service changed on disk/.test(clog()); i++) await sleep(200);
+      assert.match(clog(), /xenolith-service changed on disk; restarting the curator/);
       for (let i = 0; i < 100 && (clog().match(/started curator pid/g) || []).length < 2; i++) await sleep(200);
 
       let menu = '';

@@ -8,8 +8,9 @@
 # The toolchain is the one rust/rust-toolchain.toml pins. On Linux the tray needs GTK, WebKitGTK and
 # the app indicator to build (libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev).
 #
-# Needs rustup. It adds the x86_64-pc-windows-gnu and aarch64-apple-darwin targets if missing. Off
-# macOS, the tray is linted for macOS only on a Mac: its macOS dependencies need Apple's SDK.
+# Needs rustup. It adds the x86_64-pc-windows-gnu target if missing, and the Windows lint needs
+# MinGW-w64's gcc (x86_64-w64-mingw32-gcc): XenoNet's libraries build C (ring, SQLite). For the same
+# reason macOS is linted only on a Mac, where Apple's SDK is; elsewhere CI's macOS job lints it.
 set -euo pipefail
 cd "$(dirname "$0")/../rust"
 host=$(rustc -vV | sed -n 's/^host: //p')
@@ -24,11 +25,12 @@ if [[ "$host" != *windows* ]]; then
   step "clippy (x86_64-pc-windows-gnu)"
   cargo clippy --workspace --target x86_64-pc-windows-gnu --all-targets --locked -- -D warnings
 fi
-if [[ "$host" != *apple-darwin ]]; then
-  rustup target add aarch64-apple-darwin >/dev/null 2>&1 || true
-  step "clippy (aarch64-apple-darwin: core and cli; the tray needs a Mac)"
-  cargo clippy --target aarch64-apple-darwin -p xenolith-core -p xenolith-cli --all-targets --locked -- -D warnings
-fi
+step "the hook's program and the tray stay light"
+node ../scripts/light.mjs
 step "tests ($host)"
 cargo test --workspace --locked
-printf '\nAll Rust checks passed for %s, Windows and macOS.\n' "$host"
+if [[ "$host" == *apple-darwin ]]; then
+  printf '\nAll Rust checks passed for %s and Windows.\n' "$host"
+else
+  printf '\nAll Rust checks passed for %s and Windows; CI lints macOS.\n' "$host"
+fi

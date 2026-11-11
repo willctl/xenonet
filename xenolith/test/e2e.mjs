@@ -7,7 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { hookCmd, rustBin, srv, srvT } from './impl.mjs';
+import { hookCmd, rustBin, serviceBin, srv, srvT } from './impl.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-e2e-'));
@@ -508,7 +508,19 @@ describe('the command line', () => {
         stderr = String(e.stderr);
       }
       assert.equal(code, 2, args.join(' '));
-      assert.match(stderr, /^(xenolith serve: (unknown argument \S+|--port takes a port number)\n)?usage: xenolith serve /, args.join(' '));
+      assert.match(stderr, /^(xenolith serve: unknown argument \S+\n)?usage: xenolith serve /, args.join(' '));
+    }
+    // The HTTP service is xenolith-service, which takes only the service's flags.
+    for (const args of [['serve', '--help'], ['serve', '--http', '--hepl'], ['serve', '--http', '--port'], ['serve'], ['-h']]) {
+      const r = spawnSync(serviceBin(), args, { env, input: '', encoding: 'utf8' });
+      assert.equal(r.status, 2, args.join(' '));
+      assert.match(r.stderr, /^(xenolith-service serve: (unknown argument \S+|--port takes a port number|--http \(the stdio server is `xenolith serve`\))\n)?usage: xenolith-service serve --http /, args.join(' '));
+    }
+    // And xenolith says where its old service commands went.
+    for (const args of [['serve', '--http'], ['curator', '--once'], ['service', '--config', 'x.ini']]) {
+      const r = spawnSync(rustBin(), args, { env, input: '', encoding: 'utf8' });
+      assert.equal(r.status, 2, args.join(' '));
+      assert.match(r.stderr, /^xenolith \S+( --http)?: that's xenolith-service now/, args.join(' '));
     }
     assert.ok(!fs.existsSync(path.join(dir, 'wiki')), 'no wiki was created');
   });

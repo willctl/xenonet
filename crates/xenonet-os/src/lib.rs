@@ -13,7 +13,8 @@
 //! - `log`: the error log;
 //! - `dirs`: XenoNet's own folders (state, cache); `clock`: a time in the
 //!   machine's own time zone;
-//! - `net`: fetch() over HTTPS; `lines`: lines of another program's output;
+//! - `net`: fetch() over HTTPS (feature `fetch`); `lines`: lines of another
+//!   program's output (feature `process`, with `fx` and `system`);
 //! - `open`: the programs that open a URL, a file or a folder;
 //! - `stats`: what the computer is doing (CPU, memory, GPU), for the
 //!   console's system panel, and `system`, which reads it;
@@ -27,9 +28,12 @@ pub mod dirs;
 pub mod error;
 pub mod files;
 pub mod fs;
+#[cfg(feature = "process")]
 pub mod fx;
+#[cfg(feature = "process")]
 pub mod lines;
 pub mod log;
+#[cfg(feature = "fetch")]
 pub mod net;
 pub mod nodepath;
 pub mod open;
@@ -38,6 +42,7 @@ pub mod private_file;
 pub mod process;
 pub mod stats;
 pub mod sync;
+#[cfg(feature = "process")]
 pub mod system;
 
 /// os.homedir(): HOME (USERPROFILE on Windows), as Node reads it.

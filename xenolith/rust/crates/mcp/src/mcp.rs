@@ -502,24 +502,24 @@ pub fn call_tool(st: &State, ctx: &Ctx, called: &str, args: &Value) -> Value {
         }
     })();
     // Every write goes in the audit chain: who, which space, which note, and a hash of the text.
-    if let (Ok(text), Some(space)) = (&outcome, &used_space) {
-        if needed_level(name, args) >= Level::Append {
-            let note = text.strip_prefix("Saved note ").or_else(|| text.strip_prefix("Already saved as note ")).and_then(|t| t.split_whitespace().next());
-            let content = format!("{}\n{}", s(args, "title"), if name == "context_log" { s(args, "body") } else { s(args, "content") });
-            audit::best_effort(
-                &AppPaths::current(),
-                "write",
-                &ctx.principal.name(),
-                vec![
-                    ("space", json!(space)),
-                    ("tool", json!(name)),
-                    ("note", note.map(|n| json!(n)).unwrap_or(Value::Null)),
-                    ("duplicate", if text.starts_with("Already saved") { json!(true) } else { Value::Null }),
-                    ("content", json!(audit::content_hash(&content))),
-                    ("transport", json!(ctx.transport)),
-                ],
-            );
-        }
+    if let (Ok(text), Some(space)) = (&outcome, &used_space)
+        && needed_level(name, args) >= Level::Append
+    {
+        let note = text.strip_prefix("Saved note ").or_else(|| text.strip_prefix("Already saved as note ")).and_then(|t| t.split_whitespace().next());
+        let content = format!("{}\n{}", s(args, "title"), if name == "context_log" { s(args, "body") } else { s(args, "content") });
+        audit::best_effort(
+            &AppPaths::current(),
+            "write",
+            &ctx.principal.name(),
+            vec![
+                ("space", json!(space)),
+                ("tool", json!(name)),
+                ("note", note.map(|n| json!(n)).unwrap_or(Value::Null)),
+                ("duplicate", if text.starts_with("Already saved") { json!(true) } else { Value::Null }),
+                ("content", json!(audit::content_hash(&content))),
+                ("transport", json!(ctx.transport)),
+            ],
+        );
     }
     let (text, is_error, result, error) = match outcome {
         Ok(t) => (t, false, "ok", None),

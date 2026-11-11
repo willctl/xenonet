@@ -1,4 +1,4 @@
-// Builds the window's web app (ui/, React) into dist/runtime/ui/, which `xenolith serve --http`
+// Builds the window's web app (ui/, React) into dist/runtime/ui/, which `xenolith-service serve --http`
 // serves at /ui/ (the installer copies it next to the program), after checking that package.json
 // and rust/Cargo.toml carry the same version.
 

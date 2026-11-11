@@ -1,10 +1,10 @@
-//! `xenolith service`: the Windows service that serves Streamable HTTP on 127.0.0.1 for every app.
+//! `xenolith-service service`: the Windows service that serves Streamable HTTP on 127.0.0.1 for every app.
 //! It runs the server in this process, logs to
 //! logs\service.log, and when an install replaces this program it stops with an error code, so the
 //! Service Control Manager's recovery action starts the new build (no admin rights needed to upgrade).
 //!
-//!   xenolith service --config <XenolithService.ini>             started by the SCM
-//!   xenolith service --config <XenolithService.ini> --console   the same in the foreground (stops when stdin closes)
+//!   xenolith-service service --config <XenolithService.ini>             started by the SCM
+//!   xenolith-service service --config <XenolithService.ini> --console   the same in the foreground (stops when stdin closes)
 //!
 //! The ini (written by the installer): wikiDir, port, logDir, and configDir/dataDir/stateDir/cacheDir
 //! (this account's profile is not the user's, so each folder is named).
@@ -112,7 +112,7 @@ pub fn run(args: &[String]) -> ! {
     let settings = match read_ini(&ini_path).and_then(|ini| apply(&ini)) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("xenolith service: {e}");
+            eprintln!("xenolith-service service: {e}");
             std::process::exit(2)
         }
     };
@@ -233,7 +233,7 @@ mod scm {
         // SAFETY: a NULL-terminated table whose strings outlive the call (it returns when the service stops).
         let ok = unsafe { StartServiceCtrlDispatcherW(table.as_ptr()) };
         if ok == 0 {
-            eprintln!("xenolith service: not started by the Service Control Manager (use --console to run it here)");
+            eprintln!("xenolith-service service: not started by the Service Control Manager (use --console to run it here)");
             std::process::exit(2);
         }
         std::process::exit(0)
@@ -244,7 +244,7 @@ mod scm {
 mod scm {
     use super::Settings;
     pub fn run(_: Settings) -> ! {
-        eprintln!("xenolith service: Windows only; elsewhere run `xenolith serve --http --exit-on-upgrade` from launchd or systemd");
+        eprintln!("xenolith-service service: Windows only; elsewhere run `xenolith-service serve --http --exit-on-upgrade` from launchd or systemd");
         std::process::exit(2)
     }
 }

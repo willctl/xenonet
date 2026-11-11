@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { rustBin, srvT } from './impl.mjs';
+import { serviceBin, srvT } from './impl.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const WIN = process.platform === 'win32';
@@ -40,7 +40,7 @@ describe('files and paths', () => {
     // macOS: os.tmpdir() is under /var, a symlink to /private/var.
     const real = path.join(tmp, 'real-runtime');
     await fsp.mkdir(real, { recursive: true });
-    await fsp.copyFile(rustBin(), path.join(real, 'xenolith'));
+    await fsp.copyFile(serviceBin(), path.join(real, 'xenolith-service'));
     const link = path.join(tmp, 'linked-runtime');
     await fsp.symlink(real, link, 'dir');
     const npmBin = path.join(tmp, 'npm-prefix-bin');
@@ -52,7 +52,7 @@ describe('files and paths', () => {
     const home = path.join(tmp, 'home-link');
     await fsp.mkdir(home, { recursive: true });
     await fsp.writeFile(path.join(home, 'config.json'), JSON.stringify({ curator: { codexPath: codex, codexHome: path.join(home, 'codex-home') } }));
-    const r = spawnSync(path.join(link, 'xenolith'), ['curator', '--login-status'], {
+    const r = spawnSync(path.join(link, 'xenolith-service'), ['curator', '--login-status'], {
       encoding: 'utf8',
       env: { HOME: home, XENOLITH_HOME: home, XENOLITH_DIR: path.join(tmp, 'wiki-link'), PATH: '/nonexistent' },
       timeout: 30_000,

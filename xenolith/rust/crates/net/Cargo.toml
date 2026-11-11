@@ -1,0 +1,13 @@
+[package]
+name = "xenolith-net"
+description = "Xenolith between machines, on xenonet-net: its own iroh endpoint, sync and joining. Only xenolith-service takes it, so iroh and tokio stay out of the hook, the stdio server and the tray."
+version.workspace = true
+edition.workspace = true
+# iroh's.
+rust-version = "1.91"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+xenolith-core.workspace = true
+xenonet-net.workspace = true

@@ -14,10 +14,11 @@ publish.workspace = true
 # crypto.randomUUID().
 getrandom.workspace = true
 # fetch() (net.rs): HTTPS with rustls on ring and the system's certificates.
-reqwest.workspace = true
-rustls.workspace = true
-# Lines of a program's output (lines.rs).
-tokio.workspace = true
+reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+# Lines of a program's output (lines.rs), the children fx.rs runs and the
+# system panel's reading (system.rs).
+tokio = { workspace = true, optional = true }
 # The log's key patterns and what private_file reads of an ACL.
 regex.workspace = true
 serde_json.workspace = true
@@ -30,6 +31,16 @@ libc.workspace = true
 # stop together (process.rs).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+# Both on by default, for XenoNet. A crate that needs only files, paths and
+# private_file (xenonet-id, so Xenolith's hook and tray) turns them off and
+# so takes no tokio, reqwest or rustls.
+[features]
+default = ["fetch", "process"]
+# fetch() over HTTPS (net.rs).
+fetch = ["dep:reqwest", "dep:rustls"]
+# Programs run and read on tokio: fx.rs, lines.rs and system.rs.
+process = ["dep:tokio"]
 
 [lints]
 workspace = true

@@ -1880,11 +1880,9 @@ impl Curator {
                 }
                 // The account's model list, for the window's model picker (models.rs).
                 crate::models::publish(&self.wiki_dir, &self.cfg.codex_home);
-                if !out {
-                    if let Some(slug) = crate::lint::next_due(&self.wiki_dir, &self.cfg) {
-                        self.lint_one(&slug);
-                        continue; // new notes come first: check the inbox again before the next review
-                    }
+                if !out && let Some(slug) = crate::lint::next_due(&self.wiki_dir, &self.cfg) {
+                    self.lint_one(&slug);
+                    continue; // new notes come first: check the inbox again before the next review
                 }
                 self.set_state(if out { "signed_out" } else { "idle" }, Some(if out { SIGNED_OUT } else { "" }));
                 let now = now_ms();

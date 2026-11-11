@@ -90,8 +90,8 @@ export async function verifyArchive(file, { keep = false, log = (m) => console.l
     assert.equal(x.status, 0, `tar could not unpack ${file}: ${x.stderr}`);
     assert.deepEqual(fs.readdirSync(unpacked), [base], 'one folder at the top, named for the archive');
     const dir = path.join(unpacked, base);
-    for (const f of [`xenolith${EXE}`, `xenolith-tray${EXE}`, 'ui/index.html', 'icons/xenolith-healthy.ico', 'LICENSE', 'README.md']) assert.ok(fs.existsSync(path.join(dir, f)), `${f} is in the archive`);
-    if (process.platform !== 'win32') for (const f of ['xenolith', 'xenolith-tray']) assert.ok(fs.statSync(path.join(dir, f)).mode & 0o100, `${f} is executable`);
+    for (const f of [`xenolith${EXE}`, `xenolith-service${EXE}`, `xenolith-tray${EXE}`, 'ui/index.html', 'icons/xenolith-healthy.ico', 'LICENSE', 'README.md']) assert.ok(fs.existsSync(path.join(dir, f)), `${f} is in the archive`);
+    if (process.platform !== 'win32') for (const f of ['xenolith', 'xenolith-service', 'xenolith-tray']) assert.ok(fs.statSync(path.join(dir, f)).mode & 0o100, `${f} is executable`);
     log(`unpacked into ${unpacked}`);
 
     // Run as a person would, from the unpacked folder: `./xenolith ...`.
@@ -109,8 +109,9 @@ export async function verifyArchive(file, { keep = false, log = (m) => console.l
     const runtime = inst.stdout.match(/^ {2}Runtime: +(.+)$/m)?.[1]?.trim();
     assert.ok(runtime, `the installer names the runtime folder:\n${inst.stdout}`);
     const agent = path.join(runtime, `xenolith${EXE}`);
+    const service = path.join(runtime, `xenolith-service${EXE}`);
     const tray = walk(home).find((f) => path.basename(f) === `xenolith-tray${EXE}`);
-    for (const [what, f] of [['xenolith', agent], ['the window', path.join(runtime, 'ui', 'index.html')], ['xenolith-tray', tray]]) {
+    for (const [what, f] of [['xenolith', agent], ['xenolith-service', service], ['the window', path.join(runtime, 'ui', 'index.html')], ['xenolith-tray', tray]]) {
       assert.ok(f && fs.existsSync(f), `${what} installed`);
       assert.ok(inside(path.resolve(f), home), `${what} landed in the fake home (${f})`);
     }
@@ -118,11 +119,14 @@ export async function verifyArchive(file, { keep = false, log = (m) => console.l
     const iv = run(agent, ['--version']);
     assert.match(iv.stdout, new RegExp(`\\b${version.replace(/\./g, '\\.')}\\b`), `the installed xenolith --version prints ${version}`);
     log(`installed xenolith --version: ${iv.stdout.trim()}`);
+    const sv = run(service, ['--version']);
+    assert.match(sv.stdout, new RegExp(`\\b${version.replace(/\./g, '\\.')}\\b`), `the installed xenolith-service --version prints ${version}`);
+    log(`installed xenolith-service --version: ${sv.stdout.trim()}`);
 
     // The installed server, as the service would run it, on a port the OS says is free. It stops
     // when this script does (--parent-stdin), however the script ends.
     const port = await freePort();
-    server = spawn(agent, ['serve', '--http', '--port', String(port), '--parent-stdin'], { cwd: home, env, stdio: ['pipe', 'ignore', 'pipe'] });
+    server = spawn(service, ['serve', '--http', '--port', String(port), '--parent-stdin'], { cwd: home, env, stdio: ['pipe', 'ignore', 'pipe'] });
     let serverErr = '';
     server.stderr.on('data', (c) => (serverErr += c));
     let h = null;

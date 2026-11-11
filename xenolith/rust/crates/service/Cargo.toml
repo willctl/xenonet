@@ -1,0 +1,30 @@
+[package]
+name = "xenolith-service"
+description = "xenolith-service: the HTTP service, the curator and the Windows service, and sync between machines through xenolith-net"
+version.workspace = true
+edition.workspace = true
+# xenolith-net's: iroh needs Rust 1.91.
+rust-version = "1.91"
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "xenolith-service"
+path = "src/main.rs"
+
+[dependencies]
+xenolith-core.workspace = true
+xenolith-mcp.workspace = true
+xenolith-net.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+chrono.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Services", "Win32_System_Console", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_System_IO", "Win32_Security", "Win32_Security_Authorization"] }
+
+[build-dependencies]
+embed-resource = "3"

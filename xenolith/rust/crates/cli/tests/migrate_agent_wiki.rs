@@ -50,10 +50,12 @@ impl Home {
         let root = std::env::temp_dir().join(format!("xenolith-migrate-e2e-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let sb = root.join("home with space");
-        // The payload a release ships: this program, the tray (not run in a sandbox), the window, the icons.
+        // The payload a release ships: this program, the service and the tray (neither run in a sandbox),
+        // the window, the icons.
         let payload = root.join("payload");
         std::fs::create_dir_all(&payload).unwrap();
         std::fs::copy(BIN, payload.join(exe("xenolith"))).unwrap();
+        write(&payload.join(exe("xenolith-service")), "service");
         write(&payload.join(exe("xenolith-tray")), "tray");
         write(&payload.join("ui").join("index.html"), "<!doctype html>");
         write(&payload.join("icons").join("xenolith-healthy.ico"), "ico");

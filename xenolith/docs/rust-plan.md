@@ -1,6 +1,6 @@
 # Rust runtime
 
-The shipping programs are xenolith and xenolith-tray. The core crate owns storage, search, the curator, held changes, sync and Forget. The CLI owns transports, installation and the service. The tray owns native window and platform integration.
+The shipping programs are xenolith, xenolith-service and xenolith-tray. The core crate owns storage, search, the curator, held changes, sync and Forget, and takes XenoNet's libraries (xenonet-id, -log, -authz) as path dependencies. The mcp crate owns the MCP server's tools, resources and prompts. The CLI (xenolith) owns the stdio server, the hook, the commands and installation, on the core alone, so the hook's program stays small. The service crate (xenolith-service) owns the HTTP service, the curator and the Windows service, and the net crate (xenolith-net, on xenonet-net) sync between machines; only the service takes it. The tray owns native window and platform integration. scripts/xenolith-lock.mjs, in the repository's root, checks that Xenolith's lockfile agrees with the root's on everything the libraries reach.
 
 ## Status
 

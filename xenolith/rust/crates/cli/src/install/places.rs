@@ -13,7 +13,10 @@ pub struct Places {
     pub config: PathBuf,
     pub state: PathBuf,
     pub runtime: PathBuf,
+    /// `xenolith`: the stdio server, the hook and the commands.
     pub agent: PathBuf,
+    /// `xenolith-service`: the HTTP service, the curator and the Windows service.
+    pub service: PathBuf,
     pub tray_dir: PathBuf,
     pub tray_exe: PathBuf,
     pub tray_ini: PathBuf,
@@ -58,6 +61,7 @@ impl Places {
             config: app.config_file(),
             state: app.install_state(),
             agent: runtime.join(format!("xenolith{EXE}")),
+            service: runtime.join(format!("xenolith-service{EXE}")),
             runtime,
             tray_exe: tray_dir.join(format!("xenolith-tray{EXE}")),
             tray_ini: tray_dir.join("xenolith-tray.ini"),

@@ -1,17 +1,43 @@
 name: Xenolith
-# Xenolith's own checks (xenolith/), apart from XenoNet's: it builds and tests on its own, with
-# the toolchain xenolith/rust/rust-toolchain.toml pins. Runs only when Xenolith or this file
-# changes.
+# Xenolith's own checks (xenolith/), apart from XenoNet's: it builds and tests in its own workspace,
+# with the toolchain xenolith/rust/rust-toolchain.toml pins, taking XenoNet's libraries from crates/
+# as path dependencies. Runs when Xenolith, those libraries, the root's lock or this file changes.
 on:
   push:
     branches: [main]
     paths:
       - "xenolith/**"
       - ".github/workflows/xenolith.yml"
+      # XenoNet's libraries, which Xenolith builds from source, and the root's lock they're
+      # tested under (scripts/xenolith-lock.mjs compares the two).
+      - "crates/xenonet-id/**"
+      - "crates/xenonet-log/**"
+      - "crates/xenonet-authz/**"
+      - "crates/xenonet-net/**"
+      - "crates/xenonet-model/**"
+      - "crates/xenonet-os/**"
+      - "crates/xenonet-text/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "scripts/xenolith-lock.mjs"
   pull_request:
     paths:
       - "xenolith/**"
       - ".github/workflows/xenolith.yml"
+      # XenoNet's libraries, which Xenolith builds from source, and the root's lock they're
+      # tested under (scripts/xenolith-lock.mjs compares the two).
+      - "crates/xenonet-id/**"
+      - "crates/xenonet-log/**"
+      - "crates/xenonet-authz/**"
+      - "crates/xenonet-net/**"
+      - "crates/xenonet-model/**"
+      - "crates/xenonet-os/**"
+      - "crates/xenonet-text/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "scripts/xenolith-lock.mjs"
 permissions:
   contents: read
 # One run per branch at a time; a new push to a pull request cancels the run its last push started.
@@ -22,6 +48,33 @@ defaults:
   run:
     working-directory: xenolith
 jobs:
+  # Xenolith's lock against the root's, over what XenoNet's libraries reach, cargo deny on it under
+  # the root's deny.toml, and no network crates under the hook's program or the tray.
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: xenolith-lock-tools-deny-0.20.2
+      - run: rustup toolchain install
+      - if: steps.tools.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-deny@0.20.2
+      - name: The two lockfiles agree
+        run: node scripts/xenolith-lock.mjs
+      - name: cargo deny
+        run: cargo deny --manifest-path xenolith/rust/Cargo.toml --config deny.toml --locked check
+      - name: The hook's program and the tray stay light
+        run: node xenolith/scripts/light.mjs
   checks:
     strategy:
       fail-fast: false

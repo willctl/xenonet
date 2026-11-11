@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// The xenolith program (the curator and its commands); default: next to this one.
-    pub agent: PathBuf,
+    /// The xenolith-service program, which runs the curator and is the Windows service (ini key
+    /// serviceExe). Without the key: beside `agent` (an older installer's ini), else beside this one.
+    pub service_exe: PathBuf,
     pub wiki_dir: PathBuf,
     pub log_dir: PathBuf,
     pub icon_dir: PathBuf,
@@ -75,12 +76,14 @@ impl Config {
         }
         let dir = std::fs::canonicalize(path).ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| PathBuf::from("."));
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_else(|| dir.clone());
-        let agent = d.get("agent").map(PathBuf::from).unwrap_or_else(|| exe_dir.join(if cfg!(windows) { "xenolith.exe" } else { "xenolith" }));
+        let service_name = if cfg!(windows) { "xenolith-service.exe" } else { "xenolith-service" };
+        let service_exe =
+            d.get("serviceexe").map(PathBuf::from).or_else(|| d.get("agent").and_then(|a| Path::new(a).parent()).map(|dir| dir.join(service_name))).unwrap_or_else(|| exe_dir.join(service_name));
         let on = |k: &str, default: bool| d.get(k).map(|v| v != "0" && !v.eq_ignore_ascii_case("off") && !v.eq_ignore_ascii_case("false")).unwrap_or(default);
         let log_dir = PathBuf::from(&d["logdir"]);
         let paths = xenolith_core::paths::AppPaths::current();
         Ok(Config {
-            agent,
+            service_exe,
             wiki_dir: PathBuf::from(&d["wikidir"]),
             icon_dir: PathBuf::from(&d["icons"]),
             webview_dir: d.get("webviewdir").map(PathBuf::from).unwrap_or_else(|| paths.data_dir.join("tray").join("webview")),

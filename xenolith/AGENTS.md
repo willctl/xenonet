@@ -4,18 +4,24 @@ Xenolith is shared context for every app and agent on a machine: an MCP server o
 plain Markdown, a curator that files notes into pages, sync between machines, a tray app with a
 window, and an installer. It stands alone and runs fully on its own. From XenoNet it may take
 only the libraries `xenonet-id`, `xenonet-log`, `xenonet-authz` and `xenonet-net` (with the base
-crates they bring), never the app: not the service, the runtime, the surfaces or the adapters.
-Other programs (XenoNet among them) read its folder through `FORMAT.md`. README.md describes what
+crates they bring: model, os, text), as path dependencies into `../crates`, never the app: not the
+service, the runtime, the surfaces or the adapters (`scripts/rust-layers.mjs` fails on one). Other
+programs (XenoNet among them) read its folder through `FORMAT.md`. README.md describes what
 it does; this file is what an agent changing the code needs. While Xenolith lives in XenoNet's
 repository, that repository's AGENTS.md (one folder up) applies too: its commit conventions, and
 its rules for working beside other agents.
 
 ## Where things are
 
-- `rust/`: the programs that ship. `crates/core` (xenolith-core: the folder, curator, held changes,
-  search, spaces, access and sync),
-  `crates/cli` (`xenolith`: MCP server, HTTP service, window API, installer), `crates/tray`
-  (`xenolith-tray`).
+- `rust/`: the programs that ship, in their own workspace and `Cargo.lock`. `crates/core`
+  (xenolith-core: the folder, curator, held changes, search, spaces, access and sync, on
+  xenonet-id, -log and -authz), `crates/mcp` (xenolith-mcp: the MCP server's tools, resources and
+  prompts), `crates/cli` (`xenolith`: the stdio server, the session hook, the commands and the
+  installer, on the core alone, since the hook starts it for every conversation), `crates/service`
+  (`xenolith-service`: the HTTP service, the window API, the curator and the Windows service),
+  `crates/net` (xenolith-net: Xenolith between machines on xenonet-net, so iroh and tokio; only
+  the service takes it) and `crates/tray` (`xenolith-tray`). Nothing but xenolith-net and the
+  service may reach tokio, reqwest, rustls or iroh (`scripts/light.mjs`).
 - `ui/`: the window (React), built by `npm run build` into `dist/runtime/ui`.
 - `test/*.mjs`: the behaviour suites, run against the Rust programs. `eval/` and `scripts/eval.mjs`:
   the memory eval. `protocol/PROTOCOL.md`: what every connected app is told to do. `FORMAT.md`:
@@ -29,21 +35,29 @@ its rules for working beside other agents.
 
 - `npm run build`: the window, and a check that `package.json` and `rust/Cargo.toml` agree on the
   version.
-- `scripts/check-rust.sh` (Linux, WSL or macOS): rustfmt, clippy for this OS, Windows and macOS,
-  and the Rust unit tests. Run it before pushing Rust changes. On Windows without cargo, run it in
-  WSL.
+- `scripts/check-rust.sh` (Linux, WSL or macOS): rustfmt, clippy for this OS and Windows (on a
+  Mac, macOS), and the Rust unit tests. Run it before pushing Rust changes. On Windows without
+  cargo, run it in WSL. The Windows lint needs MinGW-w64's gcc: XenoNet's libraries build C.
 - `npm test` (or `node --test test/<suite>.mjs`): the suites against the Rust programs in
-  `rust/target/release`, else `rust/target/debug` (or `XENOLITH_RUST_BIN`). Build them first:
-  `cargo build --release --workspace` in `rust/` (the tray and installer suites need
-  `xenolith-tray` too).
+  `rust/target/release`, else `rust/target/debug` (or `XENOLITH_RUST_BIN`, with `xenolith-service`
+  beside it or at `XENOLITH_SERVICE_BIN`). Build them first: `cargo build --release --workspace`
+  in `rust/` (the tray and installer suites need `xenolith-tray` too).
 - To see a change end to end, run an isolated instance: `npm run ui:preview` (a snapshot copy of
-  your shared context folder on port 47859), or `xenolith serve --http --port 0` with `XENOLITH_HOME` and
-  `XENOLITH_DIR` set to temp folders.
+  your shared context folder on port 47859), or `xenolith-service serve --http --port 0` with
+  `XENOLITH_HOME` and `XENOLITH_DIR` set to temp folders.
 - `rust/rust-toolchain.toml` pins the Rust that builds everything, here and in CI. `cargo build`
-  in `rust/` builds the core and the CLI; `--workspace` adds the tray, which on Linux needs
+  in `rust/` builds everything but the tray; `--workspace` adds the tray, which on Linux needs
   `libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev`.
 - CI: `.github/workflows/xenolith.yml` runs rustfmt, clippy, the Rust tests and `npm test` on
-  Linux, macOS and Windows whenever `xenolith/` changes. It needs nothing from XenoNet.
+  Linux, macOS and Windows whenever `xenolith/`, the seven library crates, the root's `Cargo.toml`,
+  `Cargo.lock` or `deny.toml` change, and checks the lockfiles and cargo deny once.
+- The two lockfiles: `node scripts/xenolith-lock.mjs` (from the repository's root; `npm run
+  lint:rust` runs it too) fails when a package XenoNet's libraries reach differs between
+  `Cargo.lock` and `rust/Cargo.lock` in version, source or checksum, or when Xenolith turns on a
+  feature of it the root doesn't. `--fix` moves `rust/Cargo.lock` to the root's versions. Bump a
+  shared dependency in the root first, then `--fix` here.
+- `cargo deny --manifest-path xenolith/rust/Cargo.toml --config deny.toml --locked check` (from the
+  root) holds Xenolith's lock to the root's `deny.toml`: one list of exceptions for both.
 
 ## Releases
 
@@ -72,6 +86,9 @@ A release is a tag `xenolith-v<version>` and four archives, built by
 | --- | --- |
 | Public commits use the repository identity; private paths and data stay out of tracked files | `scripts/check-public.mjs`; see `SECURITY.md` |
 | Lint every OS target before pushing Rust code | `scripts/check-rust.sh` (local) |
+| From XenoNet, only its libraries (xenonet-id, -log, -authz, -net and the base crates), never the app; nothing of XenoNet's depends on Xenolith | `scripts/rust-layers.mjs` (the root's `npm run lint:rust`) |
+| What XenoNet's libraries reach has the same versions, sources and checksums in both lockfiles, and no feature only Xenolith turns on | `scripts/xenolith-lock.mjs` (`npm run lint:rust`, Xenolith's CI) |
+| `xenolith` (the hook) and the tray reach no tokio, reqwest, rustls, hyper, iroh or quinn | `scripts/light.mjs` (`check-rust.sh`, Xenolith's CI) |
 | `package.json` and `rust/Cargo.toml` carry the same version | `scripts/build.mjs` fails |
 | A release's tag, `package.json`, `package-lock.json` and `rust/Cargo.toml` name one version, and its notes exist | `scripts/release-draft.mjs --check`, first in the release workflow |
 | A release archive carries no path from the build machine | `checkNoLocalPaths` in `scripts/package.mjs`, after the remapped build |

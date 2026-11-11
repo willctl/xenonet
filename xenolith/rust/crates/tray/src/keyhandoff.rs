@@ -46,7 +46,7 @@ pub fn offer(cfg: &Config, status: &Status) -> Option<String> {
     let owner = pipe_owner(pipe.as_raw_handle() as _);
     let service = account_sid(r"NT SERVICE\Xenolith");
     let image = image_of(pid);
-    let expected = cfg.agent.to_string_lossy().replace('/', "\\");
+    let expected = cfg.service_exe.to_string_lossy().replace('/', "\\");
     let owned = owner.is_some() && owner == service;
     if !owned && !image.as_deref().is_some_and(|i| i.eq_ignore_ascii_case(&expected)) {
         return Some(format!(

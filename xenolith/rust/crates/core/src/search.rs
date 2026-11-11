@@ -39,12 +39,11 @@ fn tune(name: &str, default: f64) -> f64 {
     #[cfg(debug_assertions)]
     if let Ok(s) = std::env::var("XENOLITH_SEARCH_TUNE") {
         for kv in s.split(',') {
-            if let Some((k, v)) = kv.split_once('=') {
-                if k.trim() == name {
-                    if let Ok(x) = v.trim().parse() {
-                        return x;
-                    }
-                }
+            if let Some((k, v)) = kv.split_once('=')
+                && k.trim() == name
+                && let Ok(x) = v.trim().parse()
+            {
+                return x;
             }
         }
     }

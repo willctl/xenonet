@@ -1,4 +1,4 @@
-//! The curator, hosted as the user: `xenolith curator --parent-stdin`, because the curator uses the
+//! The curator, hosted as the user: `xenolith-service curator --parent-stdin`, because the curator uses the
 //! user's own Codex sign-in, which the service account must never have. Restarted if it exits (with
 //! backoff) and when xenolith is replaced on disk (an upgrade needs no re-login). Its output goes to
 //! logs/curator.log, with the host's own lines marked [tray].
@@ -53,9 +53,9 @@ impl CuratorHost {
     }
 
     fn spawn(&self) -> std::io::Result<Child> {
-        let mut cmd = Command::new(&self.cfg.agent);
+        let mut cmd = Command::new(&self.cfg.service_exe);
         cmd.args(["curator", "--parent-stdin"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        if let Some(dir) = self.cfg.agent.parent() {
+        if let Some(dir) = self.cfg.service_exe.parent() {
             cmd.current_dir(dir);
         }
         #[cfg(windows)]
@@ -70,12 +70,12 @@ impl CuratorHost {
         let mut backoff = 1000u64;
         while !self.waker.stopped() {
             self.restart.store(false, Ordering::SeqCst);
-            let stamp = file_identity(&self.cfg.agent);
+            let stamp = file_identity(&self.cfg.service_exe);
             let started = Instant::now();
             let mut child = match self.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    self.log(&format!("[tray] cannot start the curator ({}): {e}", self.cfg.agent.display()));
+                    self.log(&format!("[tray] cannot start the curator ({}): {e}", self.cfg.service_exe.display()));
                     if self.waker.wait_stop(60_000) {
                         break;
                     }
@@ -101,10 +101,10 @@ impl CuratorHost {
                     break;
                 }
                 self.waker.nap(1000);
-                let now = file_identity(&self.cfg.agent);
+                let now = file_identity(&self.cfg.service_exe);
                 if now.is_some() && now != stamp {
                     changed = true;
-                    self.log("[tray] xenolith changed on disk; restarting the curator");
+                    self.log("[tray] xenolith-service changed on disk; restarting the curator");
                     break;
                 }
             }

@@ -16,8 +16,9 @@ base64.workspace = true
 ring.workspace = true
 serde_json.workspace = true
 x25519-dalek.workspace = true
-# Owner-only files on Windows (the key files).
-xenonet-os.workspace = true
+# Owner-only files on Windows (the key files): private_file alone, so
+# without fetch() and tokio, which Xenolith's hook and tray never take.
+xenonet-os = { path = "../xenonet-os", default-features = false }
 
 [dev-dependencies]
 # Random clocks, steps and remote values for the HLC's properties.

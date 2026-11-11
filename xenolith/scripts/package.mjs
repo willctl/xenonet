@@ -1,5 +1,5 @@
-// What a release ships: the payload folder that `xenolith install` installs from (xenolith and
-// xenolith-tray, the window's files in ui/, the tray icons in icons/), and the release archives that
+// What a release ships: the payload folder that `xenolith install` installs from (xenolith,
+// xenolith-service and xenolith-tray, the window's files in ui/, the tray icons in icons/), and the release archives that
 // carry it. Node is needed here only to build the window and the icons.
 //
 //   node scripts/package.mjs [--out <dir>] [--bin <dir with the Rust programs>] [--no-cargo]
@@ -55,7 +55,7 @@ function buildWeb() {
 
 /** Copies the programs in `from` and the built window and icons into a fresh folder `out`. */
 function assemble(from, out, exe) {
-  const programs = [`xenolith${exe}`, `xenolith-tray${exe}`];
+  const programs = [`xenolith${exe}`, `xenolith-service${exe}`, `xenolith-tray${exe}`];
   for (const p of programs) if (!fs.existsSync(path.join(from, p))) throw new Error(`${p} not found in ${from}: build it (cargo build --release --workspace in rust/) or pass --bin`);
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
@@ -139,7 +139,7 @@ function buildRelease(target, log) {
   if (r.status !== 0) throw new Error(`cargo build for ${triple} failed (rustup target add ${triple}, if it is missing)`);
   const dir = path.join(REPO, 'rust', 'target', triple, 'dist');
   if (platform === 'darwin') {
-    for (const p of ['xenolith', 'xenolith-tray']) {
+    for (const p of ['xenolith', 'xenolith-service', 'xenolith-tray']) {
       const file = path.join(dir, p);
       // The dist profile strips with the toolchain's rust-objcopy, which can't load its LLVM library
       // on GitHub's Mac runners: rustc only warns and leaves the symbol table, which names the build
@@ -163,7 +163,7 @@ export function packageRelease(target, { outDir = path.join(REPO, 'dist', 'relea
   assemble(bin, stage, win ? '.exe' : '');
   for (const f of ['LICENSE', 'README.md', 'SECURITY.md']) fs.copyFileSync(path.join(REPO, f), path.join(stage, f));
   checkNoLocalPaths(stage);
-  const programs = new Set(['xenolith', 'xenolith-tray', 'xenolith.exe', 'xenolith-tray.exe', 'WebView2Loader.dll'].map((p) => `${name}/${p}`));
+  const programs = new Set(['xenolith', 'xenolith-service', 'xenolith-tray', 'xenolith.exe', 'xenolith-service.exe', 'xenolith-tray.exe', 'WebView2Loader.dll'].map((p) => `${name}/${p}`));
   const entries = entriesOf(stage, (rel) => programs.has(rel));
   const file = path.join(outDir, `${name}.${win ? 'zip' : 'tar.gz'}`);
   fs.writeFileSync(file, win ? zip(entries) : tarGz(entries));

@@ -238,10 +238,10 @@ impl Caller {
 impl App {
     /// Who a local request is: the owner when it carries this start's owner key, else a local process.
     pub fn caller(&self, req: &Request) -> Caller {
-        if let (Ok(real), Some(shown)) = (&self.owner, req.header(owner::HEADER)) {
-            if owner::matches(&real.key, shown.trim()) {
-                return Caller::Owner(if req.header("x-xenolith").as_deref() == Some("cli") { "cli" } else { "owner" });
-            }
+        if let (Ok(real), Some(shown)) = (&self.owner, req.header(owner::HEADER))
+            && owner::matches(&real.key, shown.trim())
+        {
+            return Caller::Owner(if req.header("x-xenolith").as_deref() == Some("cli") { "cli" } else { "owner" });
         }
         Caller::Local(access::load(&AppPaths::current()).local)
     }
@@ -411,11 +411,11 @@ pub fn status_report(app: &App, st: &State) -> Value {
 /// the service's health without what the wiki says.
 pub fn status_for(app: &App, st: &State, caller: Caller) -> Value {
     let mut s = status_report(app, st);
-    if !caller.may(Level::Read) {
-        if let Some(o) = s.as_object_mut() {
-            o.remove("recent");
-            o.remove("lastWrite");
-        }
+    if !caller.may(Level::Read)
+        && let Some(o) = s.as_object_mut()
+    {
+        o.remove("recent");
+        o.remove("lastWrite");
     }
     s
 }

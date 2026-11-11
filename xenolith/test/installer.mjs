@@ -16,11 +16,11 @@ test('the installer: a sandboxed install merges into your files, re-runs as a no
   const repo = fileURLToPath(new URL('..', import.meta.url));
   if (!fs.existsSync(path.join(repo, 'dist', 'icons', 'xenolith-healthy.ico'))) buildIcons({ outDir: path.join(repo, 'dist', 'icons'), preview: false });
   const sb = await fsp.mkdtemp(path.join(os.tmpdir(), 'xenolith-rust-install-'));
-  // The payload a release ships: both programs, the window's files and the icons, in one folder.
+  // The payload a release ships: the three programs, the window's files and the icons, in one folder.
   const from = path.join(sb, 'payload');
   const exe = process.platform === 'win32' ? '.exe' : '';
   await fsp.mkdir(from, { recursive: true });
-  for (const name of [`xenolith${exe}`, `xenolith-tray${exe}`, 'WebView2Loader.dll']) {
+  for (const name of [`xenolith${exe}`, `xenolith-service${exe}`, `xenolith-tray${exe}`, 'WebView2Loader.dll']) {
     const src = path.join(path.dirname(rustBin()), name);
     if (fs.existsSync(src)) await fsp.copyFile(src, path.join(from, name));
   }

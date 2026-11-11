@@ -91,10 +91,12 @@ pub fn list(root: &Path) -> Vec<SpaceId> {
         }
         for e in fs::read_dir(&kdir).into_iter().flatten().flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            if let Ok(id) = SpaceId::parse(&format!("{kind}:{name}")) {
-                if id.name == name && !id.is_local() && real_dir(&e.path()) {
-                    rest.push(id);
-                }
+            if let Ok(id) = SpaceId::parse(&format!("{kind}:{name}"))
+                && id.name == name
+                && !id.is_local()
+                && real_dir(&e.path())
+            {
+                rest.push(id);
             }
         }
     }

@@ -76,9 +76,9 @@ fn uid() -> u32 {
 
 /// Writes and (re)starts the server and curator services. Returns what it did, for the log.
 pub fn install_services(p: &Places, port: u16, curator: bool) -> Result<Vec<String>, InstallError> {
-    let agent = p.agent.to_string_lossy().into_owned();
-    let server_args = vec![agent.clone(), "serve".into(), "--http".into(), "--port".into(), port.to_string(), "--exit-on-upgrade".into()];
-    let curator_args = vec![agent, "curator".into()];
+    let service = p.service.to_string_lossy().into_owned();
+    let server_args = vec![service.clone(), "serve".into(), "--http".into(), "--port".into(), port.to_string(), "--exit-on-upgrade".into()];
+    let curator_args = vec![service, "curator".into()];
     let path = service_path(p);
     let mut done = vec![];
     let err = |e: std::io::Error| InstallError(e.to_string());
@@ -205,8 +205,10 @@ mod tests {
         }
         std::fs::write(dir.join("com.example.other.plist"), "someone else's").unwrap();
         let mut calls = vec![];
-        let jobs =
-            vec![(SERVER_LABEL, vec!["xenolith".to_string(), "serve".into()], dir.join("service.log")), (CURATOR_LABEL, vec!["xenolith".to_string(), "curator".into()], dir.join("curator.log"))];
+        let jobs = vec![
+            (SERVER_LABEL, vec!["xenolith-service".to_string(), "serve".into()], dir.join("service.log")),
+            (CURATOR_LABEL, vec!["xenolith-service".to_string(), "curator".into()], dir.join("curator.log")),
+        ];
         let done = load_launch_agents(&dir, "gui/501", &jobs, "/usr/bin", &mut fake(&mut calls, &["dev.xenonet.xenolith.tray", "dev.xenonet.xenolith.server"])).unwrap();
 
         let first_bootstrap = calls.iter().position(|c| c.starts_with("bootstrap")).expect("the new jobs are loaded");

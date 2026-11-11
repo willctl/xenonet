@@ -1,13 +1,13 @@
-//! `xenolith curator`: files queued notes into the wiki, and answers the window's questions (Ask).
+//! `xenolith-service curator`: files queued notes into the wiki, and answers the window's questions (Ask).
 //! It runs as the user (the tray hosts it), because it uses the user's ChatGPT
 //! sign-in through the Codex CLI.
 //!
-//!   xenolith curator [--parent-stdin]   run until stopped; --parent-stdin: stop when stdin closes
-//!   xenolith curator --once             file everything that is due now, ignoring the debounce, then exit
-//!   xenolith curator --retry-dead       give failed (dead-lettered) notes another round of attempts
-//!   xenolith curator --file-raw-dead    file failed notes into the log as they are, without the model
-//!   xenolith curator --login-status     print {"signedIn":...} for the curator's Codex login
-//!   xenolith curator --asks-only        answer the window's questions without filing notes
+//!   xenolith-service curator [--parent-stdin]   run until stopped; --parent-stdin: stop when stdin closes
+//!   xenolith-service curator --once             file everything that is due now, ignoring the debounce, then exit
+//!   xenolith-service curator --retry-dead       give failed (dead-lettered) notes another round of attempts
+//!   xenolith-service curator --file-raw-dead    file failed notes into the log as they are, without the model
+//!   xenolith-service curator --login-status     print {"signedIn":...} for the curator's Codex login
+//!   xenolith-service curator --asks-only        answer the window's questions without filing notes
 //!   --space <id>                         with --retry-dead, --file-raw-dead or --lint: that space's
 //!                                        notes and pages instead of this machine's (machine:local)
 //!
@@ -147,7 +147,9 @@ pub fn run(args: &[String]) -> ! {
     let curator = (!asks_only && !satellite).then(|| Arc::new(Curator::new(&wiki_dir, cfg.clone(), reqlog.clone(), once, Waker::new())));
     // The same process answers the window's questions (Ask): it is the one that runs as the user.
     let asker = (!once && !satellite).then(|| {
-        let server = std::env::current_exe().unwrap_or_else(|_| "xenolith".into());
+        // The read-only server the Ask's Codex starts is `xenolith serve --read-only`, which is
+        // installed beside this program.
+        let server = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(format!("xenolith{}", std::env::consts::EXE_SUFFIX)))).unwrap_or_else(|| "xenolith".into());
         Arc::new(AskWorker::new(&wiki_dir, AskCfg::from_config(&config, &cfg), reqlog.clone(), server, paths.clone(), Waker::new()))
     });
     let stopping = Arc::new(std::sync::atomic::AtomicBool::new(false));

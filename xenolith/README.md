@@ -24,10 +24,12 @@ the Codex CLI, with `gpt-6.1-sol` at medium reasoning by default (Status >
 Models in the window changes it). Reads are instant and deterministic, because
 no model runs on the read path.
 
-Everything users run is two small Rust programs: `xenolith` (the MCP server,
-the session hook, the curator, the Windows service and the installer) and
-`xenolith-tray` (the tray or menu bar icon and the Xenolith window). You need
-Node only to build the window. [docs/rust-plan.md](docs/rust-plan.md) covers how
+Everything users run is three Rust programs: `xenolith` (the MCP server over
+stdio, the session hook, the commands and the installer), `xenolith-service`
+(the HTTP service, the curator and the Windows service) and `xenolith-tray`
+(the tray or menu bar icon and the Xenolith window). The hook starts `xenolith`
+for every conversation, so it stays small and starts fast. You need Node only
+to build the window. [docs/rust-plan.md](docs/rust-plan.md) covers how
 the programs are built and checked.
 
 ## Install, upgrade, uninstall
@@ -45,7 +47,7 @@ has one archive per machine and a `SHA256SUMS` file:
 | Linux x64 | `xenolith-<version>-linux-x64.tar.gz` |
 | Windows x64 | `xenolith-<version>-win32-x64.zip` |
 
-An archive holds one folder with `xenolith`, `xenolith-tray`, the window's
+An archive holds one folder with `xenolith`, `xenolith-service`, `xenolith-tray`, the window's
 files (`ui/`), the tray icons (`icons/`), this README, `LICENSE` and
 `SECURITY.md`. The plugin, the marketplaces and the protocol are built into
 `xenolith`. The machine needs no Rust, Node or checkout. Unpack it anywhere and
@@ -188,7 +190,7 @@ The installer registers a per-machine service that serves Streamable HTTP on
 `http://127.0.0.1:47850/mcp`. While the service is healthy, the plugin and
 Claude Code connect to it. Otherwise each app starts its own stdio server.
 
-- **Windows:** the service `Xenolith` runs `xenolith service`, which hosts the
+- **Windows:** the service `Xenolith` runs `xenolith-service service`, which hosts the
   HTTP server in that one process. It starts at boot and runs as the virtual
   account `NT SERVICE\Xenolith`. That account's only rights are Modify on the
   shared context folder, the logs and the state folder (the audit chain and the [owner
@@ -207,7 +209,7 @@ Claude Code connect to it. Otherwise each app starts its own stdio server.
   and stop the service and query its status, so the tray can restart it. The service logs to
   `%LOCALAPPDATA%\Xenolith\logs\service.log`.
 - **macOS:** LaunchAgents `dev.xenolith.server` and `dev.xenolith.curator` in
-  `~/Library/LaunchAgents`, running as you, and the tray's login item
+  `~/Library/LaunchAgents`, running `xenolith-service` as you, and the tray's login item
   `dev.xenolith.tray`. An install over one that used the earlier
   `dev.xenonet.xenolith.*` labels stops and removes those first, the tray's
   before any other, so two trays or two servers never run at once.
@@ -596,10 +598,10 @@ until you do (the curator id is pinned).
 
 ## The curator
 
-`xenolith curator` runs as you, never as the service. It runs the Codex CLI
+`xenolith-service curator` runs as you, never as the service. It runs the Codex CLI
 with your own sign-in (a ChatGPT account), and the service account must not
 have that sign-in. Other command-line agents are not supported yet. On Windows the tray hosts the curator and restarts it when
-`xenolith` is replaced. On macOS and Linux, a launchd agent or a systemd user
+`xenolith-service` is replaced. On macOS and Linux, a launchd agent or a systemd user
 unit runs it. It never reads Codex's credential files.
 
 - **Isolation.** It runs `codex exec` in its own `CODEX_HOME`
@@ -684,7 +686,7 @@ unit runs it. It never reads Codex's credential files.
   until something else changes it. With Ask me first, the cleanup
   waits in the Inbox as "Proposed cleanup", with a diff, **Approve** and
   **Approve all cleanups**. The first pass after install tidies the pages
-  written before these rules. `xenolith curator --lint [slug...]` runs a
+  written before these rules. `xenolith-service curator --lint [slug...]` runs a
   review now.
 
   Change the schedule in the window's Inbox, under the Approvals switch:
@@ -762,7 +764,7 @@ unit runs it. It never reads Codex's credential files.
   `contextChars`, `pageCapChars`, `lint` (`off` turns cleanups off on that
   computer), `maxAttempts`, `timeoutSeconds`, `codexPath` and `codexHome`. To pause or
   resume the curator, use the tray menu, or create or delete `.curator/paused`.
-- **Command line.** `xenolith curator --once` (file what is due, then exit),
+- **Command line.** `xenolith-service curator --once` (file what is due, then exit),
   `--lint [slug...]` (review pages now), `--retry-dead`, `--file-raw-dead`,
   `--login-status`, `--asks-only`.
 
@@ -980,7 +982,7 @@ folder in your home. On Windows:
 | --- | --- |
 | `%APPDATA%\Xenolith\config.json` | `wikiDir`, `version`, `httpPort`, `writeMode`, `curator`, `logs`, `publicUrl` |
 | `%APPDATA%\Xenolith\access.json`, `sync.json`, `pair.json`, `peers\` | who may use which space, tokens' hashes, sync peers and their tokens, the pairing code waiting (yours alone) |
-| `%LOCALAPPDATA%\Xenolith\runtime\` | `xenolith.exe` and `ui/` (the Xenolith window) |
+| `%LOCALAPPDATA%\Xenolith\runtime\` | `xenolith.exe`, `xenolith-service.exe` and `ui/` (the Xenolith window) |
 | `%LOCALAPPDATA%\Xenolith\service\` | the service's ini |
 | `%LOCALAPPDATA%\Xenolith\tray\` | `xenolith-tray.exe`, its ini, its logon-task definition, icons and the window's data folder (`webview\`) |
 | Task Scheduler `\XenolithTray`, `HKCU\...\CurrentVersion\Run\XenolithTray` | start the tray at sign-in |
@@ -1016,8 +1018,10 @@ its changes in and keeps the file's line endings.
 
 ## With XenoNet (optional)
 
-Xenolith runs on its own, and nothing in it depends on XenoNet. If you use
-XenoNet too, it does two things with Xenolith:
+Xenolith runs on its own. It is built with some of XenoNet's libraries (keys
+and signatures, signed logs, authorization and the transport between machines),
+but it needs no XenoNet installed or running. If you use XenoNet too, it does
+two things with Xenolith:
 
 - **It shows the shared context.** XenoNet's map reads the folder (pages, the
   log and the inbox, as [FORMAT.md](FORMAT.md) describes them) and shows each
@@ -1041,10 +1045,13 @@ XenoNet too, it does two things with Xenolith:
 rust/crates/core/      xenolith-core: paths, pages and frontmatter, index, log, search, read, inbox, locks,
                        request log, secret guard, the curator, Codex runs, Ask's worker, spaces,
                        access, the audit chain, sync
-rust/crates/cli/       xenolith: serve (MCP over stdio and HTTP, /health, /status, /ui, /api, /sync),
-                       hook, curator, service (Windows), install and uninstall, migrate agent-wiki
+rust/crates/mcp/       xenolith-mcp: the MCP server's tools, resources and prompts, which both programs serve
+rust/crates/cli/       xenolith: serve (MCP over stdio), hook, install and uninstall, migrate agent-wiki
                        (journal, rollback, finish; its fixture tests in src/migrate/tests.rs and
                        tests/migrate_agent_wiki.rs), spaces, grants, tokens, audit, sync and held changes
+rust/crates/service/   xenolith-service: serve --http (MCP over HTTP, /health, /status, /ui, /api, /sync),
+                       curator, service (Windows)
+rust/crates/net/       xenolith-net: Xenolith between machines on XenoNet's xenonet-net (empty so far)
 rust/crates/tray/      xenolith-tray: the tray or menu bar icon, its menu, and the window
 protocol/PROTOCOL.md   rules every session follows (seeded into a new folder; you own its copy)
 protocol/POINTER.md    short global-instruction block

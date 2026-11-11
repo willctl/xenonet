@@ -1,4 +1,5 @@
 // electron scripts/capture-window.mjs [--bin <xenolith>] [--out <png>] [--tmp <dir>]
+// (xenolith-service, which serves the window, is the one beside --bin)
 //
 // Captures the window for the showcase (docs/showcase/demo-page.png) from a throwaway instance:
 // a temp wiki holding only the fictional docs/showcase/weekend-studio.md, served by the Rust
@@ -17,6 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
 const opt = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
 const bin = path.resolve(opt('--bin', path.join(root, 'rust', 'target', 'release', process.platform === 'win32' ? 'xenolith.exe' : 'xenolith')));
+const serviceBin = path.join(path.dirname(bin), process.platform === 'win32' ? 'xenolith-service.exe' : 'xenolith-service');
 const out = path.resolve(opt('--out', path.join(root, 'docs', 'showcase', 'demo-page.png')));
 const tmpBase = path.resolve(opt('--tmp', os.tmpdir()));
 const ui = path.join(root, 'dist', 'runtime', 'ui');
@@ -48,7 +50,7 @@ let server;
 function startServer() {
   const init = spawnSync(bin, ['serve', '--init'], { env, encoding: 'utf8' });
   if (init.status !== 0) throw new Error(`${bin} serve --init failed: ${init.error?.message || init.stderr || init.stdout}`);
-  server = spawn(bin, ['serve', '--http', '--port', '0', '--parent-stdin'], { env, stdio: ['pipe', 'ignore', 'pipe'] });
+  server = spawn(serviceBin, ['serve', '--http', '--port', '0', '--parent-stdin'], { env, stdio: ['pipe', 'ignore', 'pipe'] });
   return new Promise((resolve, reject) => {
     let log = '';
     const timer = setTimeout(() => reject(new Error(`the server did not start:\n${log}`)), 15000);

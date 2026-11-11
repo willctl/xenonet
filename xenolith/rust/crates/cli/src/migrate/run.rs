@@ -81,20 +81,20 @@ fn start(ctx: &Ctx, f: &Found) -> Journal {
 pub fn run(ctx: &mut Ctx, out: &Out, resume: bool) -> Result<Journal, String> {
     let work = ctx.lay.work.clone();
     let mut existing = Journal::load(&work)?;
-    if let (Some(j), false) = (&existing, resume) {
-        if j.state == "rolled-back" {
-            // A new migration after a rollback: the old journal and backups are kept beside it.
-            let stamp = xenolith_core::text::history_stamp(&xenolith_core::text::now());
-            for name in ["journal.json", "backup", "migrate.log"] {
-                let from = work.join(name);
-                if from.exists() {
-                    let to = work.join(format!("rolled-back-{stamp}-{name}"));
-                    std::fs::rename(&from, &to).map_err(|e| format!("cannot set aside {}: {e}", fwd(&from)))?;
-                }
+    if let (Some(j), false) = (&existing, resume)
+        && j.state == "rolled-back"
+    {
+        // A new migration after a rollback: the old journal and backups are kept beside it.
+        let stamp = xenolith_core::text::history_stamp(&xenolith_core::text::now());
+        for name in ["journal.json", "backup", "migrate.log"] {
+            let from = work.join(name);
+            if from.exists() {
+                let to = work.join(format!("rolled-back-{stamp}-{name}"));
+                std::fs::rename(&from, &to).map_err(|e| format!("cannot set aside {}: {e}", fwd(&from)))?;
             }
-            out.say(format!("The last migration was rolled back; its journal and backups stay in {} (rolled-back-{stamp}-*).", fwd(&work)));
-            existing = None;
         }
+        out.say(format!("The last migration was rolled back; its journal and backups stay in {} (rolled-back-{stamp}-*).", fwd(&work)));
+        existing = None;
     }
     let mut j = match (existing, resume) {
         (Some(j), _) if j.state == "rolled-back" => return Err("the last migration was rolled back; --run starts a new one".into()),

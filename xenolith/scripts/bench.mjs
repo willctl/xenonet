@@ -78,6 +78,8 @@ function rss(pid) {
 
 const EXE = process.platform === 'win32' ? 'xenolith.exe' : 'xenolith';
 const BIN = process.env.XENOLITH_RUST_BIN || path.join(REPO, 'rust', 'target', 'release', EXE);
+// The HTTP service is xenolith-service, beside xenolith.
+const SERVICE_BIN = path.join(path.dirname(BIN), process.platform === 'win32' ? 'xenolith-service.exe' : 'xenolith-service');
 // One side now (the Node runtime is retired); the harness still takes a list of sides, so a future
 // build can be measured against this one.
 const SIDES = ['rust'];
@@ -90,11 +92,11 @@ const DEBUG_BUILD = /[\\/]debug[\\/]/.test(BIN);
 const PROGRAMS = {
   rust: {
     label: 'Rust',
-    serve: (...a) => [BIN, ['serve', ...a]],
+    serve: (...a) => [a.includes('--http') ? SERVICE_BIN : BIN, ['serve', ...a]],
     hook: [BIN, ['hook']],
     start: [BIN, ['--version']],
     startCheck: (out) => (/^\d+\.\d+\.\d+/.test(out.trim()) ? null : `--version printed ${out.slice(0, 80)}`),
-    installBytes: () => fs.statSync(BIN).size,
+    installBytes: () => fs.statSync(BIN).size + fs.statSync(SERVICE_BIN).size,
     // The Rust server finds the window's files next to itself; here they are in dist/runtime/ui (as in test/impl.mjs).
     env: { XENOLITH_UI_DIR: process.env.XENOLITH_UI_DIR || path.join(RUNTIME, 'ui') },
   },
