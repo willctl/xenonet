@@ -407,15 +407,12 @@ async fn a_repos_watch_reads_it_again_when_its_head_moves() {
     }
     git(&["checkout", "-q", "-b", "dev"]);
     let moved = std::time::Instant::now();
-    let mut poke = moved;
+    // HEAD's write handed to the watcher as its folder's watch would say
+    // it: FSEvents on a busy Mac can hold it back for tens of seconds.
+    // The half minute is only a backstop.
+    s.live.inject(&[std::fs::canonicalize(p.join(".git").join("HEAD")).expect("HEAD")]);
     while branch().as_deref() != Some("dev") {
-        assert!(moved.elapsed() < Duration::from_secs(60), "the checkout was read");
-        // FSEvents on a busy Mac can lag: HEAD written again is another
-        // event to deliver.
-        if poke.elapsed() > Duration::from_secs(3) {
-            std::fs::write(p.join(".git").join("HEAD"), "ref: refs/heads/dev\n").expect("HEAD");
-            poke = std::time::Instant::now();
-        }
+        assert!(moved.elapsed() < Duration::from_secs(30), "the checkout was read");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     eprintln!("a checkout reached the repo's status in {:?}", moved.elapsed());

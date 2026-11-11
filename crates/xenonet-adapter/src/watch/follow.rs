@@ -334,10 +334,11 @@ mod kq {
             (f, rx)
         }
 
-        // The next event naming `path`, within a few seconds: kqueue's are
-        // the kernel's own, with nothing between to lag.
+        // The next event naming `path`. kqueue's are the kernel's own, with
+        // no fseventsd between to lag, so they come at once; the half
+        // minute is for a machine too busy to run the follower's thread.
         fn next_of(rx: &Receiver<notify::Event>, path: &Path) -> Option<notify::Event> {
-            let end = Instant::now() + Duration::from_secs(5);
+            let end = Instant::now() + Duration::from_secs(30);
             while let Ok(e) = rx.recv_timeout(end.saturating_duration_since(Instant::now())) {
                 if e.paths.iter().any(|p| p == path) {
                     return Some(e);
@@ -414,7 +415,7 @@ mod kq {
             let a = d.join("a.jsonl");
             append(&a, "{}\n");
             assert!(f.follow(&a));
-            let end = Instant::now() + Duration::from_secs(5);
+            let end = Instant::now() + Duration::from_secs(30);
             while !f.followed().is_empty() && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(50));
             }

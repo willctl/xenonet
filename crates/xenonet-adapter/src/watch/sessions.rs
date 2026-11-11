@@ -192,10 +192,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(s.apps(), ["claude"]);
-        std::thread::sleep(Duration::from_millis(300));
         let f = d.join("s1.jsonl");
-        let write = || std::fs::write(&f, "{\"n\":1}\n{\"n\":2}\n").unwrap();
-        write();
+        std::fs::write(&f, "{\"n\":1}\n{\"n\":2}\n").unwrap();
+        // Handed to the watcher as the folder's watch would say it, not
+        // waited for from the system (runner's tests say why).
+        s.watcher().inject(std::slice::from_ref(&f));
         let mut lines = Vec::new();
         heard(
             &rx,
@@ -211,7 +212,7 @@ mod tests {
                 }
                 lines.len() >= 2
             },
-            write,
+            || {},
         );
         assert_eq!(lines, ["{\"n\":1}", "{\"n\":2}"]);
         drop(s);
@@ -235,7 +236,6 @@ mod tests {
             let _ = tx.send(r);
         })
         .unwrap();
-        std::thread::sleep(Duration::from_millis(300));
         let f = d.join("live.jsonl");
         let append = |text: &str| std::fs::OpenOptions::new().create(true).append(true).open(&f).unwrap().write_all(text.as_bytes()).unwrap();
         let mut seen: Vec<String> = Vec::new();
@@ -249,9 +249,12 @@ mod tests {
             }
         };
         // The first line is heard through the folder, and follows the file.
-        let write = || append("{\"r\":\"first\"}\n");
-        write();
-        heard(&rx, |r| matches!(r, Report::Events { .. }), write).expect("the first line");
+        // It's handed to the watcher rather than waited for from FSEvents,
+        // which a busy Mac can hold back; the lines after it come through
+        // the file's own watch (kqueue), or inotify, as they're timed.
+        append("{\"r\":\"first\"}\n");
+        s.watcher().inject(std::slice::from_ref(&f));
+        heard(&rx, |r| matches!(r, Report::Events { .. }), || {}).expect("the first line");
         assert_eq!(s.watcher().followed().contains(&f), cap > 0 && cfg!(target_os = "macos"), "a transcript written to is followed where that's quicker");
         let mut took = Vec::new();
         for i in 0..rounds {

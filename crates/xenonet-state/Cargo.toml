@@ -35,6 +35,8 @@ xenonet-sources.workspace = true
 # tests/golden.rs reads the search index's documents back, the tests read
 # transcripts through the adapters' readers, and two archive a transcript.
 [dev-dependencies]
+# Watcher::inject, so the watch tests needn't wait on the system's events.
+xenonet-adapter = { workspace = true, features = ["testing"] }
 ruzstd.workspace = true
 xenonet-platforms.workspace = true
 # What XenoNet saves for you, kept in a store in memory, as the service

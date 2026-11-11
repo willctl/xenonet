@@ -586,6 +586,16 @@ impl Live {
         lock(&self.sessions).as_ref().map(|s| s.watcher().keys()).unwrap_or_default()
     }
 
+    /// Hands the watcher paths as if the system had said they changed
+    /// (`Watcher::inject`), so a test of what follows an event needn't
+    /// wait on a busy Mac's FSEvents. Nothing before the watcher is up.
+    #[cfg(test)]
+    pub(crate) fn inject(&self, paths: &[PathBuf]) {
+        if let Some(s) = lock(&self.sessions).as_ref() {
+            s.watcher().inject(paths);
+        }
+    }
+
     // ---------- running ----------
 
     /// Watches the apps' files (`watches`, as the registry's `watches`
@@ -1066,15 +1076,12 @@ mod tests {
         let call = json!({ "type": "assistant", "timestamp": ts(0.0), "message": { "id": "msg_1", "model": "claude-sonnet-4-5", "stop_reason": "tool_use", "usage": { "input_tokens": 10, "output_tokens": 5 }, "content": [{ "type": "tool_use", "id": "toolu_1", "name": "Bash", "input": { "command": "npm test" } }] } });
         let wrote = std::time::Instant::now();
         append(&file, &line(call));
-        // FSEvents on a busy Mac has been seen to lag by seconds: a blank
-        // line now and then gives it another event to deliver.
-        let mut poke = wrote;
+        // The write handed to the watcher as its folder's watch would say
+        // it: FSEvents on a busy Mac can hold it back for tens of seconds.
+        // The half minute is only a backstop.
+        live.inject(std::slice::from_ref(&file));
         while !lock(&heard).iter().any(|e| matches!(e, Event::Activity(a) if a["kind"] == "tool")) {
-            assert!(wrote.elapsed() < Duration::from_secs(60), "the line came: {:?}", lock(&heard));
-            if poke.elapsed() > Duration::from_secs(3) {
-                append(&file, "\n");
-                poke = std::time::Instant::now();
-            }
+            assert!(wrote.elapsed() < Duration::from_secs(30), "the line came: {:?}", lock(&heard));
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         eprintln!("a transcript's line reached the telemetry in {:?}", wrote.elapsed());

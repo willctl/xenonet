@@ -173,6 +173,37 @@ fn watches_head_and_refs_never_the_index() {
     assert!(!counted(&side, &dot.join("HEAD")), "the main checkout's HEAD is the main checkout's");
 }
 
+type Files = std::collections::BTreeMap<PathBuf, (std::time::SystemTime, Vec<u8>)>;
+
+// Each file under a folder, with when it was last written and what it
+// holds: two of these say which files git wrote between them.
+fn files_under(dir: &Path) -> Files {
+    let mut out = Files::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            let Ok(m) = e.metadata() else { continue };
+            if m.is_dir() {
+                todo.push(p);
+            } else if let (Ok(at), Ok(bytes)) = (m.modified(), std::fs::read(&p)) {
+                out.insert(p, (at, bytes));
+            }
+        }
+    }
+    out
+}
+
+fn written_since(dir: &Path, before: &Files) -> Vec<PathBuf> {
+    files_under(dir).into_iter().filter(|(p, now)| before.get(p) != Some(now)).map(|(p, _)| p).collect()
+}
+
+// What git writes for a commit and a checkout reaches the repo's owner:
+// its ref and HEAD, never its index. The files are found by looking at
+// .git before and after, and handed to the watcher as the system would
+// name them, rather than waited for from the system, whose events a busy
+// Mac's fseventsd can hold back for tens of seconds (xenonet-adapter's
+// tests wait on the system's own).
 #[test]
 fn a_commit_and_a_checkout_are_pushed() {
     use std::sync::mpsc::channel;
@@ -188,39 +219,36 @@ fn a_commit_and_a_checkout_are_pushed() {
     })
     .unwrap();
     w.add("git:app", r.watch());
-    std::thread::sleep(Duration::from_millis(300));
-    // The paths batches for the repo named, until one names `file`, within
-    // a minute. FSEvents on a busy Mac can lag tens of seconds or miss a
-    // write, so every few seconds the file is written again as it is.
+    // The paths of the repo's batches, until one names `file`. They were
+    // handed on, so they come a window later; the half minute is only a
+    // backstop.
     let heard = |file: &Path| {
-        let end = Instant::now() + Duration::from_secs(60);
+        let end = Instant::now() + Duration::from_secs(30);
         let mut all = Vec::new();
-        while Instant::now() < end {
-            match rx.recv_timeout(Duration::from_secs(3)) {
-                Ok(Batch::Changed { key, paths }) => {
-                    assert_eq!(key, "git:app");
-                    all.extend(paths);
-                    if all.iter().any(|p| p == file) {
-                        return all;
-                    }
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    if let Ok(same) = std::fs::read(file) {
-                        let _ = std::fs::write(file, same);
-                    }
+        while let Ok(b) = rx.recv_timeout(end.saturating_duration_since(Instant::now())) {
+            if let Batch::Changed { key, paths } = b {
+                assert_eq!(key, "git:app");
+                all.extend(paths);
+                if all.iter().any(|p| p == file) {
+                    return all;
                 }
             }
         }
-        panic!("no event for {}, only {all:?}", file.display());
+        panic!("no batch named {}, only {all:?}", file.display());
     };
     let git = PathBuf::from(xenonet_os::fs::realpath_native(&app.join(".git").to_string_lossy()).unwrap());
+    let before = files_under(&git);
     std::fs::write(app.join("b.txt"), "b\n").unwrap();
     git_in(&app, &["add", "b.txt"]);
     git_in(&app, &["commit", "-q", "-m", "second"]);
+    let wrote = written_since(&git, &before);
+    assert!(wrote.contains(&git.join("index")), "git wrote its index: {wrote:?}");
+    w.inject(&wrote);
     let seen = heard(&git.join("refs/heads/main"));
     assert!(!seen.contains(&git.join("index")), "the index is never watched");
+    let before = files_under(&git);
     git_in(&app, &["checkout", "-q", "-b", "next"]);
+    w.inject(&written_since(&git, &before));
     heard(&git.join("HEAD"));
     assert_eq!(r.branch().as_deref(), Some("next"));
 }

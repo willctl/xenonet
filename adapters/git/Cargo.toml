@@ -17,5 +17,9 @@ xenonet-model.workspace = true
 # git run without a window, where the ref store isn't files.
 xenonet-os.workspace = true
 
+[dev-dependencies]
+# Watcher::inject, so the watch test needn't wait on the system's events.
+xenonet-adapter = { workspace = true, features = ["testing"] }
+
 [lints]
 workspace = true

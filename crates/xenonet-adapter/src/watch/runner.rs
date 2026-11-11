@@ -230,6 +230,18 @@ impl Watcher {
     pub fn specs(&self, key: &str) -> Vec<WatchSpec> {
         lock(&self.shared).owners.get(key).map(|es| es.iter().map(|e| e.spec.clone()).collect()).unwrap_or_default()
     }
+
+    /// Hands on paths as if a folder's watch had said they changed, through
+    /// the same window and routing as the system's events. For tests:
+    /// FSEvents on a Mac whose fseventsd is busy (a few builds at once)
+    /// can lag by tens of seconds or drop a write, so a test of what the
+    /// watcher does with an event gives it one rather than waiting on the
+    /// system. The paths are named as the system names them (real paths).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn inject(&self, paths: &[PathBuf]) {
+        let ev = paths.iter().fold(notify::Event::new(EventKind::Any), |ev, p| ev.add_path(p.clone()));
+        let _ = self.tx.send(Msg::Event(Via::Folder, Ok(ev)));
+    }
 }
 
 impl Drop for Watcher {
@@ -455,6 +467,11 @@ mod tests {
     use crate::watch::heard;
     use std::sync::mpsc::Receiver;
 
+    // The tests hand the watcher its events (`Watcher::inject`) rather than
+    // wait on the system's, which a busy Mac's fseventsd can hold back for
+    // tens of seconds or drop. What the system watches is read from the
+    // watcher's own table. One test, the last, waits on the system itself.
+
     fn dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("xenonet-watcher-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -476,6 +493,17 @@ mod tests {
         move |b| matches!(b, Batch::Changed { key: k, paths } if *k == key && paths.contains(&file))
     }
 
+    // The first batch `want` takes. What it waits for was injected, so it
+    // comes a window later; the minute is only a backstop.
+    fn next(rx: &Receiver<Batch>, want: impl FnMut(&Batch) -> bool) -> Option<Batch> {
+        heard(rx, want, || {})
+    }
+
+    // How the system watches a folder now, if it does.
+    fn mode(w: &Watcher, d: &Path) -> Option<RecursiveMode> {
+        lock(&w.shared).counts.get(d).and_then(|c| c.mode)
+    }
+
     #[test]
     fn hands_each_owner_its_own_paths() {
         let d = dir("owners");
@@ -483,20 +511,19 @@ mod tests {
         let (w, rx) = started();
         w.add("app:a", vec![WatchSpec::tree("t", d.join("p"), &["*/*.jsonl"])]);
         w.add("app:b", vec![WatchSpec::flat("s", &d, &["state.db"])]);
-        // Let the system's watches settle before the writes they're for.
-        std::thread::sleep(Duration::from_millis(300));
-        let t = d.join("p/w/s.jsonl");
-        let write = || std::fs::write(&t, "{}\n").unwrap();
-        write();
-        std::fs::write(d.join("p/w/notes.txt"), "x").unwrap();
-        assert!(heard(&rx, changed_with("app:a", &t), write).is_some(), "the transcript's owner hears of it");
-        let db = d.join("state.db");
-        let write = || std::fs::write(&db, "x").unwrap();
-        write();
-        let b = heard(&rx, |b| matches!(b, Batch::Changed { key, .. } if key == "app:b"), write).expect("the database's owner hears of it");
+        assert_eq!((mode(&w, &d.join("p")), mode(&w, &d)), (Some(RecursiveMode::Recursive), Some(RecursiveMode::NonRecursive)));
+        let (t, notes, db) = (d.join("p/w/s.jsonl"), d.join("p/w/notes.txt"), d.join("state.db"));
+        std::fs::write(&t, "{}\n").unwrap();
+        std::fs::write(&notes, "x").unwrap();
+        std::fs::write(&db, "x").unwrap();
+        w.inject(&[t.clone(), notes, db.clone()]);
+        let a = next(&rx, |b| matches!(b, Batch::Changed { key, .. } if key == "app:a")).expect("the transcript's owner hears of it");
+        assert_eq!(a, Batch::Changed { key: "app:a".into(), paths: vec![t] }, "not of the notes beside it");
+        let b = next(&rx, |b| matches!(b, Batch::Changed { key, .. } if key == "app:b")).expect("the database's owner hears of it");
         assert_eq!(b, Batch::Changed { key: "app:b".into(), paths: vec![db] });
         w.remove("app:a");
         assert_eq!(w.keys(), ["app:b"]);
+        assert_eq!(mode(&w, &d.join("p")), None, "its folder is let go");
         drop(w);
         std::fs::remove_dir_all(&d).unwrap();
     }
@@ -507,20 +534,16 @@ mod tests {
         let (w, rx) = started();
         let root = d.join("sessions");
         w.add("app:c", vec![WatchSpec::tree("t", &root, &["**/*.jsonl"])]);
-        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!((mode(&w, &d), mode(&w, &root)), (Some(RecursiveMode::NonRecursive), None), "the folder above it is watched meanwhile");
         std::fs::create_dir_all(root.join("2026")).unwrap();
-        // A file beside the folder waited for is an event in the folder
-        // watched, which looks for it again.
-        let poke = || std::fs::write(d.join("poke"), "x").unwrap();
-        assert!(
-            heard(&rx, |b| matches!(b, Batch::Reconcile { key: Some(k), why } if k == "app:c" && why.ends_with("appeared")), poke).is_some(),
-            "a scan for what came before the watch"
-        );
-        std::thread::sleep(Duration::from_millis(300));
+        // The folder watched names the one made in it.
+        w.inject(std::slice::from_ref(&root));
+        assert!(next(&rx, |b| matches!(b, Batch::Reconcile { key: Some(k), why } if k == "app:c" && why.ends_with("appeared"))).is_some(), "a scan for what came before the watch");
+        assert_eq!((mode(&w, &d), mode(&w, &root)), (None, Some(RecursiveMode::Recursive)), "then the folder itself");
         let f = root.join("2026/r.jsonl");
-        let write = || std::fs::write(&f, "{}\n").unwrap();
-        write();
-        assert!(heard(&rx, changed_with("app:c", &f), write).is_some(), "then its files' events");
+        std::fs::write(&f, "{}\n").unwrap();
+        w.inject(std::slice::from_ref(&f));
+        assert!(next(&rx, changed_with("app:c", &f)).is_some(), "then its files' events");
         drop(w);
         std::fs::remove_dir_all(&d).unwrap();
     }
@@ -532,11 +555,13 @@ mod tests {
         w.add("git:a", vec![WatchSpec::tree("refs", &d, &[])]);
         w.add("git:b", vec![WatchSpec::tree("refs", &d, &[])]);
         w.remove("git:a");
-        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(mode(&w, &d), Some(RecursiveMode::Recursive), "still watched");
         let f = d.join("main");
-        let write = || std::fs::write(&f, "x").unwrap();
-        write();
-        assert!(heard(&rx, changed_with("git:b", &f), write).is_some());
+        std::fs::write(&f, "x").unwrap();
+        w.inject(std::slice::from_ref(&f));
+        assert!(next(&rx, changed_with("git:b", &f)).is_some());
+        w.remove("git:b");
+        assert_eq!(mode(&w, &d), None, "let go with the last");
         drop(w);
         std::fs::remove_dir_all(&d).unwrap();
     }
@@ -555,15 +580,16 @@ mod tests {
         })
         .unwrap();
         w.add("app:a", vec![WatchSpec::flat("t", &d, &["*.jsonl"])]);
-        std::thread::sleep(Duration::from_millis(300));
         let mac = cfg!(target_os = "macos");
         assert_eq!(w.follow(&a), mac, "followed on macOS alone");
         assert!(!w.follow(&b), "past the cap");
         assert_eq!(w.followed(), if mac { vec![a.clone()] } else { Vec::new() });
-        while rx.try_recv().is_ok() {}
-        let write = || append(&b);
-        write();
-        assert!(heard(&rx, changed_with("app:a", &b), write).is_some(), "the file past the cap, through its folder");
+        append(&b);
+        w.inject(std::slice::from_ref(&b));
+        assert!(next(&rx, changed_with("app:a", &b)).is_some(), "the file past the cap, through its folder");
+        // The followed file's own watch: kqueue on macOS, the kernel's
+        // own events with nothing between to lag (elsewhere the folder's,
+        // as quick), so this waits on the system.
         let write = || append(&a);
         write();
         assert!(heard(&rx, changed_with("app:a", &a), write).is_some(), "the followed one");
@@ -578,6 +604,24 @@ mod tests {
         let (w, rx) = started();
         let far = std::env::temp_dir().join(format!("xenonet-nowhere-{}", std::process::id())).join("a/b/c/d");
         w.add("app:d", vec![WatchSpec::tree("t", &far, &[])]);
-        assert!(heard(&rx, |b| matches!(b, Batch::Reconcile { key: Some(k), why } if k == "app:d" && why.ends_with("isn't there to watch")), || {}).is_some());
+        assert!(next(&rx, |b| matches!(b, Batch::Reconcile { key: Some(k), why } if k == "app:d" && why.ends_with("isn't there to watch"))).is_some());
+    }
+
+    // The system's own events (FSEvents, inotify, ReadDirectoryChangesW)
+    // reach the owner of the file written. A busy Mac's can lag by tens
+    // of seconds or drop a write, so the file is written again every few
+    // seconds, for up to a minute.
+    #[test]
+    fn the_systems_own_events_reach_their_owner() {
+        let d = dir("system");
+        std::fs::create_dir_all(d.join("w")).unwrap();
+        let (w, rx) = started();
+        w.add("app:a", vec![WatchSpec::tree("t", &d, &["*/*.jsonl"])]);
+        let t = d.join("w/s.jsonl");
+        let write = || std::fs::write(&t, "{}\n").unwrap();
+        write();
+        assert!(heard(&rx, changed_with("app:a", &t), write).is_some(), "the system's event, within a minute");
+        drop(w);
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
