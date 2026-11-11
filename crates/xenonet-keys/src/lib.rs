@@ -7,12 +7,13 @@
 //!   key there without biometry, and the person's device key there with
 //!   Touch ID, which asks for every signature. The person's root seed is
 //!   sealed to the device key (`macos::wrap`, `macos::unwrap`). Presence is
-//!   biometric only, with no passphrase or Windows-style PIN instead.
+//!   biometric only, with no passphrase or PIN instead.
 //! - Linux and the BSDs (`linux`): file keys, and a `UserCheck` that asks
 //!   polkit, or a passphrase on the controlling terminal. Weaker, and said so.
-//! - Windows: file keys, and no presence yet. Windows Hello always lets a
-//!   PIN stand in for biometry, which an agent that can type could enter,
-//!   so it isn't used until that is decided. The TPM isn't used yet either.
+//! - Windows (`windows`): file keys, and a `UserCheck` that asks Windows
+//!   Hello. Hello always lets a PIN stand in for a face or a finger, which
+//!   an agent that can type could enter, so it's weaker, like Linux, and
+//!   said so. The TPM isn't used yet.
 //!
 //! `System` picks these for the machine it runs on; `Fake` stands in for
 //! demo and test instances, and never prompts or touches the hardware.
@@ -26,6 +27,8 @@
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(windows)]
+pub mod windows;
 
 use serde_json::Value;
 use std::cell::RefCell;
@@ -49,7 +52,8 @@ pub const PASSPHRASE_FILE: &str = "presence-passphrase.json";
 pub enum Presence {
     /// The key asks Touch ID for every signature.
     Biometric,
-    /// A check before a file key signs: polkit or a passphrase.
+    /// A check before a file key signs: polkit, a passphrase or Windows
+    /// Hello (which takes a PIN).
     Weaker,
     /// No way to ask the person here.
     None,
@@ -261,7 +265,8 @@ pub fn machine_signer(dir: &Path) -> R<Box<dyn Signer>> {
 /// - Linux and the BSDs: a file key with `user_check`'s check, made the
 ///   first time there is a check. The check may be missing later (pkcheck
 ///   gone): then `presence::prove` refuses, as it should.
-/// - Windows: None.
+/// - Windows: a file key with Windows Hello's check, made the first time
+///   Hello is set up here.
 pub fn device(dir: &Path) -> R<Option<Device>> {
     let file = dir.join(DEVICE_FILE);
     #[cfg(target_os = "macos")]
@@ -288,8 +293,12 @@ pub fn device(dir: &Path) -> R<Option<Device>> {
     }
     #[cfg(windows)]
     {
-        let _ = file;
-        Ok(None)
+        let check = user_check(dir);
+        if check.is_none() && held(&file)?.is_none() {
+            return Ok(None);
+        }
+        let signer = SeedSigner::load_or_create(&file)?;
+        Ok(Some(Device { signer: Box::new(signer), check, kind: Presence::Weaker }))
     }
 }
 
@@ -298,8 +307,9 @@ pub fn device(dir: &Path) -> R<Option<Device>> {
 /// the fallback when polkit can't ask anyone; the passphrase alone without
 /// pkcheck. A surface that acts for the person in another process (the
 /// window) should ask about that process instead, since polkit asks
-/// through its session: `linux::PolkitCheck::for_process`. macOS and
-/// Windows: None (macOS's device key asks by itself).
+/// through its session: `linux::PolkitCheck::for_process`. Windows:
+/// Windows Hello, where it's set up. macOS: None (its device key asks by
+/// itself).
 pub fn user_check(dir: &Path) -> Option<Box<dyn UserCheck>> {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -311,7 +321,12 @@ pub fn user_check(dir: &Path) -> Option<Box<dyn UserCheck>> {
             Ok(None) | Err(_) => passphrase().map(|p| Box::new(p) as Box<dyn UserCheck>),
         }
     }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    #[cfg(windows)]
+    {
+        let _ = dir;
+        windows::HelloCheck::available().map(|c| Box::new(c) as Box<dyn UserCheck>)
+    }
+    #[cfg(target_os = "macos")]
     {
         let _ = dir;
         None

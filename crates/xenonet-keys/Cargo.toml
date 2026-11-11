@@ -31,5 +31,13 @@ security-framework = { version = "3.7", default-features = false }
 security-framework-sys = { version = "2.17", default-features = false }
 core-foundation = "0.10"
 
+# Windows Hello's prompt (UserConsentVerifier), shown over the window the
+# person is in through its interop interface, and windows-future for the
+# operation it returns, which the interop call asks for by type.
+# windows-core is in the lock already; these add the bindings used.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", default-features = false, features = ["std", "Foundation", "Security_Credentials_UI", "Win32_Foundation", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }
+windows-future = { version = "0.3", default-features = false, features = ["std"] }
+
 [lints]
 workspace = true
