@@ -1,6 +1,5 @@
 # The XenoNet lab's settings, shared by its Linux templates (ubuntu.yaml and
-# fedora.yaml). docs/design/vm-lab.md has the plan, scripts/lab/README.md
-# how to use it.
+# fedora.yaml). scripts/lab/README.md says how to use it.
 minimumLimaVersion: 2.1.0
 vmType: vz
 cpus: 2

@@ -2,11 +2,12 @@
 
 Linux VMs on the development Mac, so one XenoNet can be tested against
 several machines. Each VM runs Claude Code, the Codex CLI and a headless
-XenoNet, which joins a network with the Mac's (`docs/guide/network.md`).
-The VMs and the Mac share a LAN, so the checks can test XenoNet's
-transport between machines (phase 5 of the rewrite: direct paths, mDNS, a
-relay, mailboxes, catch-up). `docs/design/vm-lab.md` is the plan; this is
-Phase A of it, the two Linux hosts.
+XenoNet, which joins a network with the Mac's
+([network.md](../../docs/guide/network.md)). The VMs and the Mac share a
+LAN, so the checks can test XenoNet's transport between machines: direct
+paths, mDNS, a relay, mailboxes and catch-up, which phase 5 of the
+rewrite builds ([direction.md](../../docs/design/direction.md)). The lab
+has two Linux VMs; a macOS guest isn't built.
 
 ```sh
 npm run lab -- build ubuntu --ref main   # the golden copies, once
@@ -148,8 +149,8 @@ plans, as on the Mac.
 
 ## The transport checks
 
-Then it runs the checks of phase 5's plan (section 4b of the plan, in
-`transport.mjs`) across vm1 and vm2. Each prints one line:
+Then it runs the transport checks (`transport.mjs`) across vm1 and vm2.
+Each prints one line:
 
 - `ok` or `FAIL`;
 - `wait`: not in this build yet. The check needs phase 5 code that the

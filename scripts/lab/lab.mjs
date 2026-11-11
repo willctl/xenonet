@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The XenoNet lab: Linux VMs on this Mac, in Lima, to test XenoNet against
-// several hosts (docs/design/vm-lab.md). scripts/lab/README.md says how to
-// use it. Commands take the lab's VMs by host id (vm1, vm2), or all of them
-// when none is named.
+// several machines. scripts/lab/README.md says how to use it. Commands
+// take the lab's VMs by host id (vm1, vm2), or all of them when none is
+// named.
 //
 //   npm run lab -- status
 //   npm run lab -- build ubuntu|fedora [--ref <git ref>]

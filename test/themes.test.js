@@ -36,7 +36,7 @@ test("every built-in theme has everything XenoNet's own has, with real colors", 
   assert.deepEqual(all.phosphor.charts, all.xenonet.charts, "the checked chart colors carry over");
 });
 
-// Today's look in the tokens added for the next phase (docs/design/contracts.md, 4).
+// XenoNet's own look in the theme tokens (docs/design/contracts.md, section 4).
 const TODAY = { "stars.shape": "point", "stars.drift": [0, 0, 0], "stars.twinkle": 0.5, "grid.style": "polar", "sweep.shape": "beam", "sonar.style": "ring", "lines.style": "solid", "lines.curvature": 0, "lines.width": 1, "motion.pace": 1, "motion.ease": "smooth", "motion.breathe": 0.1 };
 const at = (o, p) => p.split(".").reduce((x, k) => x?.[k], o);
 
@@ -141,7 +141,7 @@ test("merging: objects field by field, arrays and values replaced", () => {
   assert.deepEqual(merge({ a: { x: 1, y: 2 }, b: [1, 2], c: 1 }, { a: { y: 3 }, b: [9] }), { a: { x: 1, y: 3 }, b: [9], c: 1 });
 });
 
-// The contrast every theme keeps (docs/design/next-phase.md, Budgets): text
+// The contrast every theme keeps (docs/guide/themes.md, "Contrast"): text
 // and labels 4.5:1 on the page and on panels, muted text 4.5:1 and dim text
 // 3:1, and the alert colors 3:1 on panels.
 const BUDGET = [

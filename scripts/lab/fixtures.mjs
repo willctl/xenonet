@@ -1,5 +1,6 @@
 // The made-up repos in each lab host's ~/Projects, from the demo world's
-// names and remotes (crates/xenonet-demo/src/world.rs), laid out as docs/design/vm-lab.md says:
+// names and remotes (crates/xenonet-demo/src/world.rs), as
+// scripts/lab/README.md lists them:
 // atlas-api on every host with the same remote, so its checkouts share one
 // repo key; the other repos on one host each; and on the Linux hosts, a
 // folder whose name has a space and an accent, a worktree beside its repo,
