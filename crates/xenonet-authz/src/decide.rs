@@ -9,7 +9,8 @@
 //! the answer:
 //!
 //! 1. **The resource** fits the action and is this machine's: a machine or
-//!    run here, a network this machine is in, a session here.
+//!    run here, a network this machine is in, a session here, a space whose
+//!    chain this machine holds.
 //! 2. **The door**: at a local door, only this machine's principals and
 //!    the person; from the network, a member of the network the envelope
 //!    names, never this machine itself; at the gateway and A2A, only this
@@ -39,6 +40,10 @@
 //!   use-gateway    -         -         reach     -
 //!   revoke         -         -         -         presence
 //!   delegate       -         delegate  -         delegate
+//!   ctx-read       ctx       ctx       ctx       ctx
+//!   ctx-append     ctx       ctx       ctx       ctx
+//!   ctx-write      ctx       ctx       ctx       ctx
+//!   ctx-admin      ctx       -         ctx       ctx
 //!
 //!   -         refused
 //!   reach     steps 1 to 3 are enough (an actor's token has the right)
@@ -75,6 +80,12 @@
 //!             never an unchecked one, until the scope ends. No other
 //!             machine's principal and no actor calls one, so a remote
 //!             agent's work never goes out under this machine's bearer
+//!   ctx       the space's chain, as this machine holds it, gives the
+//!             principal at least the level the act needs
+//!             (`Ground::space_level`); an actor's token also has the act's
+//!             ctx right. An unchecked agent reads and appends only on its
+//!             own machine, and writes nowhere. Administering widens, so
+//!             the person does it only with a presence block for it
 //! ```
 //!
 //! 5. **Hold**: start, answer, admit, widen and publish for another machine
@@ -86,7 +97,7 @@
 
 use crate::proof::VerifiedPresence;
 use crate::vocab::{Act, Action, AnswerDecision, Attestation, DeviceId, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
-use crate::{DeviceKind, Door, Ground, Role, StandingGrant, StartSetting, Token, WakeSetting};
+use crate::{DeviceKind, Door, Ground, Role, SpaceLevel, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
 
 /// How stale governance may be before acts for another machine hold.
@@ -217,14 +228,15 @@ enum Rule {
     Presence,
     Answer,
     Delegate,
+    Ctx,
 }
 
-use Rule::{Answer, Claim, Delegate, No, Presence, Reach, Read, Start, Wake};
+use Rule::{Answer, Claim, Ctx, Delegate, No, Presence, Reach, Read, Start, Wake};
 
 /// The rule table (the module's doc draws it). Columns: machine, agent,
 /// actor, person.
 #[rustfmt::skip]
-const TABLE: [(Action, [Rule; 4]); 14] = [
+const TABLE: [(Action, [Rule; 4]); 18] = [
     //                       machine   agent     actor     person
     (Action::Message,       [Reach,    Reach,    Reach,    Reach]),
     (Action::Wake,          [Wake,     Wake,     Wake,     Reach]),
@@ -240,6 +252,10 @@ const TABLE: [(Action, [Rule; 4]); 14] = [
     (Action::UseGateway,    [No,       No,       Reach,    No]),
     (Action::Revoke,        [No,       No,       No,       Presence]),
     (Action::Delegate,      [No,       Delegate, No,       Delegate]),
+    (Action::CtxRead,       [Ctx,      Ctx,      Ctx,      Ctx]),
+    (Action::CtxAppend,     [Ctx,      Ctx,      Ctx,      Ctx]),
+    (Action::CtxWrite,      [Ctx,      Ctx,      Ctx,      Ctx]),
+    (Action::CtxAdmin,      [Ctx,      No,       Ctx,      Ctx]),
 ];
 
 /// The actions that hold for another machine on stale governance.
@@ -315,6 +331,7 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
             | (Action::Admit | Action::Widen | Action::Publish, Resource::Network(_))
             | (Action::Revoke, Resource::Machine(_) | Resource::Network(_))
             | (Action::Delegate, Resource::Actor(_))
+            | (Action::CtxRead | Action::CtxAppend | Action::CtxWrite | Action::CtxAdmin, Resource::Space(_))
     );
     if !fits {
         return Err(Reason::new("resource", format!("a {} isn't done to that", request.action().as_str())));
@@ -323,6 +340,7 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
         Resource::Machine(m) | Resource::Run { machine: m, .. } if m != own => return Err(Reason::new("resource", format!("{m} decides for itself; this is {own}"))),
         Resource::Network(n) if ground.role(n, own).is_none() => return Err(Reason::new("resource", format!("this machine isn't in {n}"))),
         Resource::Actor(a) if ground.outbound(a).is_none() => return Err(Reason::new("resource", format!("{own} has no outbound actor {a}"))),
+        Resource::Space(s) if !ground.holds_space(s) => return Err(Reason::new("resource", format!("this machine doesn't hold {s}"))),
         _ => {}
     }
     match (request.act(), request.resource()) {
@@ -537,6 +555,7 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
         Presence => present(request, ground, presence),
         Answer => answer(request, ground, presence, arrival, authority),
         Delegate => delegate(request, ground, arrival, authority),
+        Ctx => ctx(request, ground, presence, arrival, authority),
     }
 }
 
@@ -567,6 +586,28 @@ fn delegate(request: &Request, ground: &dyn Ground, arrival: &Arrival, authority
         }
         p => Err(Reason::new("principal", format!("a {} doesn't delegate", p.kind()))),
     }
+}
+
+// An act on a space: the level the receiver's copy of its chain gives the
+// principal, never more (the module's doc says the rest).
+fn ctx(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresence>, arrival: &Arrival, authority: Authority) -> Step<(Authority, Option<&'static str>)> {
+    let (Act::Ctx(need), Resource::Space(space)) = (request.act(), request.resource()) else {
+        return Err(Reason::new("act", "an act on a space names the level it needs and the space"));
+    };
+    let principal = request.principal();
+    let have = ground.space_level(space, principal).ok_or_else(|| Reason::new("level", format!("{space} isn't shared with that {}", principal.kind())))?;
+    if have < *need {
+        return Err(Reason::new("level", format!("{space} gives that {} {}, and this needs {}", principal.kind(), have.as_str(), need.as_str())));
+    }
+    if let Principal::Agent { attestation: Attestation::Unchecked, .. } = principal {
+        if !arrival.own || *need > SpaceLevel::Append {
+            return Err(Reason::new("attestation", "an unchecked agent reads and appends to a space only on its own machine, and writes nowhere"));
+        }
+    }
+    if matches!(principal, Principal::Person(_)) && *need == SpaceLevel::Admin {
+        return present(request, ground, presence);
+    }
+    Ok((authority, None))
 }
 
 // The person, there for this act: a presence block for it from the device

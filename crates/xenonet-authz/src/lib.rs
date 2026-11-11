@@ -18,6 +18,13 @@
 //!   actors' tokens they mint, attenuate and verify.
 //! - `decide`: the rule table, and the decision with what it allowed.
 //!
+//! Spaces of shared context (Xenolith's) are resources too: a request to
+//! read, append to, write or administer one is judged on the level the
+//! receiver's own copy of the space's chain gives the principal
+//! (`Ground::space_level`), and an actor's token needs the `ctx-*` right
+//! as well. Xenolith's own grants are tokens of this crate under its own
+//! `Schema`, so they share the parser, the roots and the revocations.
+//!
 //! It depends on `xenonet-id` alone, so it can be taken without the rest of
 //! XenoNet.
 
@@ -29,13 +36,13 @@ mod token;
 mod vocab;
 
 pub use decide::{decide, Authority, Authorized, Decision, Reason, HOLD_AFTER_MS};
-pub use ground::{AllowScope, Asked, Consent, Device, DeviceKind, Ground, OutboundScope, Role, Set, Settings, StandingGrant, StartSetting, WakeSetting};
+pub use ground::{AllowScope, Asked, Consent, Device, DeviceKind, Ground, OutboundScope, Role, Set, Settings, SpaceLevel, StandingGrant, StartSetting, WakeSetting};
 pub use info::Information;
 pub use proof::{PersonSigned, VerifiedPresence};
-pub use token::{ActorGrant, Bearer, Narrowing, RootCertificate, Token, TokenRoot, ACTOR_PREFIX, CURSOR_MS, GATEWAY_PREFIX};
+pub use token::{is_alpn, ActorGrant, Bearer, Binding, Narrowing, RootCertificate, Schema, Token, TokenRoot, ACTOR_PREFIX, CURSOR_MS, GATEWAY_PREFIX};
 pub use vocab::{
     act_hash, Act, Action, ActorSlug, AgentId, AnswerDecision, AppId, AskId, Attestation, DeviceId, Door, Folder, MachineId, NetworkId, PersonId, Principal, ProjectId, PromptKind,
-    ReadScope, Request, Resource, Revocation, ServiceId, SessionId, StartMode,
+    ReadScope, Request, Resource, Revocation, ServiceId, SessionId, SpaceId, StartMode,
 };
 
 use std::fmt;

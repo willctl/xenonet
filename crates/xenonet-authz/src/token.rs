@@ -16,6 +16,26 @@
 //! out of its time, one whose machine's key didn't sign it, a revoked
 //! token, and any authority block that isn't exactly what's minted here, so
 //! no root can slip a rule or a fact of the ground's into a decision.
+//!
+//! **Schemas.** What "exactly what's minted" means is a [`Schema`]: the
+//! rights a kind of grant may hold and the optional facts it may carry.
+//! XenoNet's actor grants are [`Schema::XENONET`]; Xenolith's own grants,
+//! for its clients, are [`Schema::XENOLITH`] (the ctx rights alone), under
+//! its own root, with the same parser, roots and revocations. Two optional
+//! facts, each at most once and only where the schema has room:
+//!
+//! - `key(id)`: the actor speaks with this context key (a Xenolith's
+//!   `xns1_…`), so a peer can bind what that key signs to the grant's
+//!   machine. It's honoured only over that machine's own connection
+//!   ([`Token::key_over`]): the key and the grant are files on the machine,
+//!   and a copy used from another machine binds nothing.
+//! - `forward(alpn)`: the actor receives the machine's incoming
+//!   connections on that ALPN (the forwardable ones are the composition
+//!   root's to register; parsing only checks its form).
+//!
+//! Both are part of what the person approves when the grant is issued:
+//! [`Binding::scopes`] folds them into the scopes hash the presence block
+//! names.
 
 use crate::vocab::{Act, Action, ActorSlug, MachineId, NetworkId, ReadScope, Request};
 use crate::{AuthzError, Door, Ground, R};
@@ -41,8 +61,9 @@ const TEXT_MAX: usize = 16 * 1024;
 /// The longest place a page cursor holds.
 const PAGE_MAX: usize = 1024;
 
-// What an authority block may hold: these facts, and this one check.
-const FACTS: [&str; 5] = ["actor", "machine", "network", "right", "expires"];
+// What an authority block may hold: these facts (the last two where the
+// schema has room for them), and this one check.
+const FACTS: [&str; 7] = ["actor", "machine", "network", "right", "expires", "key", "forward"];
 const EXPIRY: &str = "check if time($time), expires($until), $time <= $until";
 
 // Datalog that a token can't make slow: a decision is on a hot path. The
@@ -146,6 +167,74 @@ impl RootCertificate {
     }
 }
 
+/// A kind of grant: the rights its tokens may hold, and whether they may
+/// carry `key(id)` and `forward(alpn)`. Parsing refuses a right or a fact
+/// outside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schema {
+    pub rights: &'static [Action],
+    pub key: bool,
+    pub forward: bool,
+}
+
+impl Schema {
+    /// XenoNet's actor grants: every right, the ctx rights an actor uses a
+    /// shared space with among them, and both optional facts.
+    pub const XENONET: Schema = Schema { rights: &Action::ALL, key: true, forward: true };
+    /// Xenolith's grants for its clients, under its own root: the ctx
+    /// rights alone, and a context key; no forward.
+    pub const XENOLITH: Schema = Schema { rights: &[Action::CtxRead, Action::CtxAppend, Action::CtxWrite, Action::CtxAdmin], key: true, forward: false };
+
+    pub fn allows(&self, right: Action) -> bool {
+        self.rights.contains(&right)
+    }
+}
+
+/// Whether `alpn` is an ALPN as a grant may name one: 1 to 64 lowercase
+/// letters, digits and `.`, `/`, `_`, `-` (`xenolith/sync/2`).
+pub fn is_alpn(alpn: &str) -> bool {
+    (1..=64).contains(&alpn.len()) && alpn.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"./_-".contains(&b))
+}
+
+// A signing key's id: `xns1_` and 32 base32 characters.
+fn is_signing_key_id(id: &str) -> bool {
+    id.strip_prefix("xns1_").is_some_and(|k| k.len() == 32 && k.bytes().all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b)))
+}
+
+/// The optional facts of a grant: the context key it speaks with and the
+/// ALPN it receives.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Binding {
+    pub key: Option<String>,
+    pub forward: Option<String>,
+}
+
+impl Binding {
+    pub fn new(key: Option<&str>, forward: Option<&str>) -> R<Binding> {
+        if key.is_some_and(|k| !is_signing_key_id(k)) {
+            return Err(AuthzError::new("token", "a grant's key is a signing key's id, xns1_…"));
+        }
+        if forward.is_some_and(|a| !is_alpn(a)) {
+            return Err(AuthzError::new("token", "a grant's forward names an ALPN"));
+        }
+        Ok(Binding { key: key.map(str::to_string), forward: forward.map(str::to_string) })
+    }
+
+    /// The scopes hash a grant's presence names (`Act::RegisterActor`'s
+    /// `scopes`), with these facts in it: `rows` is the hash of the rows
+    /// the receiver keeps. So a presence for a grant without a key or a
+    /// forward can't be put on one with them.
+    pub fn scopes(&self, rows: &[u8; 32]) -> [u8; 32] {
+        let mut b = b"xenonet-authz-binding/1\n".to_vec();
+        b.extend_from_slice(rows);
+        for f in [&self.key, &self.forward] {
+            let v = f.as_deref().unwrap_or("");
+            b.extend_from_slice(format!("{}:{v}", v.len()).as_bytes());
+        }
+        sha256(&b)
+    }
+}
+
 /// The key a machine mints tokens with, made fresh in memory at each start.
 pub struct TokenRoot {
     pair: KeyPair,
@@ -184,9 +273,15 @@ impl TokenRoot {
         &self.cert
     }
 
-    fn mint(&self, bearer: Bearer, network: Option<NetworkId>, rights: Vec<Action>, until: i64) -> R<Token> {
+    fn mint(&self, bearer: Bearer, network: Option<NetworkId>, rights: Vec<Action>, until: i64, schema: &Schema, binding: Binding) -> R<Token> {
         if until > self.cert.until {
             return Err(AuthzError::new("token", "a token can't outlive its root"));
+        }
+        if let Some(r) = rights.iter().find(|r| !schema.allows(**r)) {
+            return Err(AuthzError::new("token", format!("{} isn't a right this kind of grant holds", r.as_str())));
+        }
+        if (binding.key.is_some() && !schema.key) || (binding.forward.is_some() && !schema.forward) {
+            return Err(AuthzError::new("token", "this kind of grant carries no such fact"));
         }
         let b = || -> Result<Biscuit, BiscuitError> {
             let mut b = Biscuit::builder().root_key_id(self.cert.key_id());
@@ -197,18 +292,29 @@ impl TokenRoot {
             for r in &rights {
                 b = b.fact(fact("right", &[string(r.as_str())]))?;
             }
+            if let Some(k) = &binding.key {
+                b = b.fact(fact("key", &[string(k)]))?;
+            }
+            if let Some(a) = &binding.forward {
+                b = b.fact(fact("forward", &[string(a)]))?;
+            }
             b.fact(fact("expires", &[to_date(until)]))?.check(EXPIRY)?.build(&self.pair)
         };
         let biscuit = b().map_err(biscuit_error)?;
-        Ok(Token { biscuit, root: self.cert.clone(), bearer, network, rights, until })
+        Ok(Token { biscuit, root: self.cert.clone(), bearer, network, rights, until, key: binding.key, forward: binding.forward })
     }
 
     /// An actor's token, with one right per action it may do.
     pub fn mint_actor(&self, grant: &ActorGrant) -> R<Token> {
+        self.mint_actor_with(grant, &Schema::XENONET, &Binding::default())
+    }
+
+    /// A grant of `schema`'s kind, with the optional facts `binding` holds.
+    pub fn mint_actor_with(&self, grant: &ActorGrant, schema: &Schema, binding: &Binding) -> R<Token> {
         let mut rights = grant.rights.clone();
         rights.sort();
         rights.dedup();
-        self.mint(Bearer { slug: grant.actor.clone(), machine: self.cert.machine.clone() }, grant.network.clone(), rights, grant.until)
+        self.mint(Bearer { slug: grant.actor.clone(), machine: self.cert.machine.clone() }, grant.network.clone(), rights, grant.until, schema, binding.clone())
     }
 }
 
@@ -243,6 +349,8 @@ pub struct Token {
     network: Option<NetworkId>,
     rights: Vec<Action>,
     until: i64,
+    key: Option<String>,
+    forward: Option<String>,
 }
 
 impl fmt::Debug for Token {
@@ -289,6 +397,25 @@ impl Token {
 
     pub fn root(&self) -> &RootCertificate {
         &self.root
+    }
+
+    /// The context key the grant names, whatever connection it came over:
+    /// for showing it. To bind what the key signs, use `key_over`.
+    pub fn key(&self) -> Option<&str> {
+        self.key.as_deref()
+    }
+
+    /// The context key the grant names, when the token came over
+    /// `connection`, the machine whose connection carried it (from the
+    /// transport, never the sender's word), and that's the machine the
+    /// grant is for. Over any other machine's connection it binds nothing.
+    pub fn key_over(&self, connection: &MachineId) -> Option<&str> {
+        (connection == &self.bearer.machine).then_some(self.key.as_deref()).flatten()
+    }
+
+    /// The ALPN the grant receives the machine's connections on.
+    pub fn forward(&self) -> Option<&str> {
+        self.forward.as_deref()
     }
 
     /// Its Biscuit revocation ids, one per block: revoking the first takes
@@ -341,7 +468,16 @@ impl Token {
             }
         };
         let biscuit = self.biscuit.append(block().map_err(biscuit_error)?).map_err(biscuit_error)?;
-        Ok(Token { biscuit, root: self.root.clone(), bearer: self.bearer.clone(), network: self.network.clone(), rights: self.rights.clone(), until: self.until })
+        Ok(Token {
+            biscuit,
+            root: self.root.clone(),
+            bearer: self.bearer.clone(),
+            network: self.network.clone(),
+            rights: self.rights.clone(),
+            until: self.until,
+            key: self.key.clone(),
+            forward: self.forward.clone(),
+        })
     }
 
     /// A page cursor: this token, narrowed to one read with these filters,
@@ -374,8 +510,14 @@ impl Token {
     /// A token from its text, verified against the roots the ground holds
     /// at `now`: refused when the prefix isn't `prefix`, the root is
     /// unknown, uncertified or out of its time, any of its ids is revoked,
-    /// it expired, or it isn't a token minted as here.
+    /// it expired, or it isn't a token minted as here. An actor grant of
+    /// XenoNet's (`Schema::XENONET`).
     pub fn parse(text: &str, prefix: &str, ground: &dyn Ground, now: i64) -> R<Token> {
+        Token::parse_with(text, prefix, &Schema::XENONET, ground, now)
+    }
+
+    /// The same, for a grant of `schema`'s kind.
+    pub fn parse_with(text: &str, prefix: &str, schema: &Schema, ground: &dyn Ground, now: i64) -> R<Token> {
         check_prefix(prefix)?;
         let body = text.strip_prefix(prefix).ok_or_else(|| refused(format!("that isn't a token that starts {prefix}")))?;
         if body.len() > TEXT_MAX {
@@ -398,7 +540,7 @@ impl Token {
                 continue;
             }
             match Biscuit::from(&bytes, cert.biscuit_key()?) {
-                Ok(biscuit) => return Token::read(biscuit, cert, ground, now),
+                Ok(biscuit) => return Token::read(biscuit, cert, schema, ground, now),
                 Err(_) => why = AuthzError::new("root", "that token isn't signed by its root"),
             }
         }
@@ -407,7 +549,7 @@ impl Token {
 
     // A verified Biscuit, read: revocation, the authority block's shape,
     // whom it's for and until when.
-    fn read(biscuit: Biscuit, root: RootCertificate, ground: &dyn Ground, now: i64) -> R<Token> {
+    fn read(biscuit: Biscuit, root: RootCertificate, schema: &Schema, ground: &dyn Ground, now: i64) -> R<Token> {
         if biscuit.revocation_identifiers().iter().any(|id| ground.revoked(id)) {
             return Err(AuthzError::new("revoked", "that token was revoked"));
         }
@@ -419,7 +561,12 @@ impl Token {
                 expiry += 1;
                 continue;
             }
-            let fact = FACTS.iter().any(|f| line.strip_prefix(f).is_some_and(|rest| rest.starts_with('(') && rest.ends_with(')')));
+            let room = |f: &str| match f {
+                "key" => schema.key,
+                "forward" => schema.forward,
+                _ => true,
+            };
+            let fact = FACTS.iter().copied().filter(|f| room(f)).any(|f| line.strip_prefix(f).is_some_and(|rest| rest.starts_with('(') && rest.ends_with(')')));
             if !fact || line.contains("<-") || line.contains('$') || line.contains(',') {
                 return Err(refused("that token's authority holds more than XenoNet mints"));
             }
@@ -439,14 +586,23 @@ impl Token {
         };
         let mut rights = Vec::new();
         for r in values::<String>(&mut a, "right")? {
-            rights.push(Action::parse(&r).ok_or_else(|| refused(format!("{r} isn't a right")))?);
+            let right = Action::parse(&r).filter(|r| schema.allows(*r)).ok_or_else(|| refused(format!("{r} isn't a right")))?;
+            rights.push(right);
         }
+        let optional = |a: &mut biscuit_auth::Authorizer, name: &str, ok: fn(&str) -> bool| -> R<Option<String>> {
+            match values::<String>(a, name)? {
+                v if v.is_empty() => Ok(None),
+                v => Some(one(v, name)?).filter(|x| ok(x)).map(Some).ok_or_else(|| refused(format!("that token's {name} isn't one"))),
+            }
+        };
+        let key = optional(&mut a, "key", is_signing_key_id)?;
+        let forward = optional(&mut a, "forward", is_alpn)?;
         rights.sort();
         let until = from_date(one(values::<SystemTime>(&mut a, "expires")?, "end")?);
         if until / 1000 < now / 1000 {
             return Err(AuthzError::new("expired", "that token expired"));
         }
-        Ok(Token { biscuit, root, bearer, network, rights, until })
+        Ok(Token { biscuit, root, bearer, network, rights, until, key, forward })
     }
 
     /// Runs the token's Datalog for `request`: its own checks (expiry,
@@ -601,6 +757,23 @@ mod tests {
             GOOD.replace(r#"machine("m1");"#, r#"machine("m2");"#),
             GOOD.replace(r#"right("message");"#, r#"right("fly");"#),
             GOOD.replace(r#"actor("muse");"#, r#"actor("two words");"#),
+        ] {
+            assert!(Token::parse(&crafted(&root, &code), ACTOR_PREFIX, &one, NOW).is_err(), "{code}");
+        }
+        // The optional facts: once each, of their form, where the schema
+        // has room.
+        let key = r#"key("xns1_aaaqeayeaudaocajbifqydiob4ibceqt");"#;
+        let with_key = GOOD.replace(r#"right("message");"#, &format!(r#"right("message"); {key}"#));
+        assert_eq!(Token::parse(&crafted(&root, &with_key), ACTOR_PREFIX, &one, NOW).unwrap().key(), Some("xns1_aaaqeayeaudaocajbifqydiob4ibceqt"));
+        let ctx = GOOD.replace(r#"right("message");"#, &format!(r#"right("ctx-read"); {key} forward("xenolith/sync/2");"#));
+        assert_eq!(Token::parse(&crafted(&root, &ctx), ACTOR_PREFIX, &one, NOW).unwrap().forward(), Some("xenolith/sync/2"));
+        assert!(Token::parse_with(&crafted(&root, &ctx), ACTOR_PREFIX, &Schema::XENOLITH, &one, NOW).is_err(), "Xenolith's grants forward nothing");
+        assert!(Token::parse_with(&crafted(&root, &ctx.replace(r#" forward("xenolith/sync/2");"#, "")), ACTOR_PREFIX, &Schema::XENOLITH, &one, NOW).is_ok());
+        for code in [
+            with_key.replace("xns1_aaaqeayeaudaocajbifqydiob4ibceqt", "xnk1_aaaqeayeaudaocajbifqydiob4ibceqt"),
+            with_key.replace(key, &format!("{key} {}", key.replace("aaaq", "baaq"))),
+            GOOD.replace(r#"right("message");"#, r#"right("message"); forward("Two Words");"#),
+            GOOD.replace(r#"right("message");"#, r#"right("message"); forward("a", "b");"#),
         ] {
             assert!(Token::parse(&crafted(&root, &code), ACTOR_PREFIX, &one, NOW).is_err(), "{code}");
         }

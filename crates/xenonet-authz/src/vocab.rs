@@ -5,7 +5,7 @@
 //! parses these from the signed act and its envelope's header, never from a
 //! body.
 
-use crate::{AuthzError, Role, Settings, R};
+use crate::{AuthzError, Role, Settings, SpaceLevel, R};
 use std::fmt;
 use xenonet_id::codec::sha256;
 
@@ -105,6 +105,11 @@ id!(
     ProjectId,
     "a project's id"
 );
+id!(
+    /// A space of shared context, by its chain's id (`spc_…`).
+    SpaceId,
+    "a space's id"
+);
 
 /// The folder a run starts in. A path, so longer than an id and with any
 /// printable character, but never a control character, so it can't hold a
@@ -201,10 +206,18 @@ pub enum Action {
     Revoke,
     /// Calling an outbound actor: another agent XenoNet reaches over A2A.
     Delegate,
+    /// Reading a space's pages.
+    CtxRead,
+    /// Leaving a note for a space's curator.
+    CtxAppend,
+    /// Proposing a change to a space's pages.
+    CtxWrite,
+    /// What a space's owner hands on: everything but owning it.
+    CtxAdmin,
 }
 
 impl Action {
-    pub const ALL: [Action; 14] = [
+    pub const ALL: [Action; 18] = [
         Action::Message,
         Action::Wake,
         Action::Start,
@@ -219,6 +232,10 @@ impl Action {
         Action::UseGateway,
         Action::Revoke,
         Action::Delegate,
+        Action::CtxRead,
+        Action::CtxAppend,
+        Action::CtxWrite,
+        Action::CtxAdmin,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -237,6 +254,10 @@ impl Action {
             Action::UseGateway => "use-gateway",
             Action::Revoke => "revoke",
             Action::Delegate => "delegate",
+            Action::CtxRead => "ctx-read",
+            Action::CtxAppend => "ctx-append",
+            Action::CtxWrite => "ctx-write",
+            Action::CtxAdmin => "ctx-admin",
         }
     }
 
@@ -261,6 +282,8 @@ pub enum Resource {
     Session(SessionId),
     /// One of this machine's outbound actors, which it calls.
     Actor(ActorSlug),
+    /// A space this machine holds the chain of.
+    Space(SpaceId),
 }
 
 /// How a started run's permission prompts are answered.
@@ -410,6 +433,9 @@ pub enum Act {
     Delegate {
         project: Option<ProjectId>,
     },
+    /// Reading, appending to, writing or administering a space: the level
+    /// it needs.
+    Ctx(SpaceLevel),
 }
 
 impl Act {
@@ -429,6 +455,7 @@ impl Act {
             Act::UseGateway => Action::UseGateway,
             Act::Revoke { .. } => Action::Revoke,
             Act::Delegate { .. } => Action::Delegate,
+            Act::Ctx(level) => level.action(),
         }
     }
 
@@ -443,6 +470,7 @@ impl Act {
             Act::Publish { .. } => Some("publish"),
             Act::Revoke { .. } => Some("revoke"),
             Act::RegisterActor { .. } => Some("grant"),
+            Act::Ctx(SpaceLevel::Admin) => Some("widen"),
             _ => None,
         }
     }
@@ -568,6 +596,7 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         Resource::Run { machine, app, folder } => c.field("run").field(machine.as_str()).field(app.as_str()).field(folder.as_str()),
         Resource::Session(s) => c.field("session").field(s.as_str()),
         Resource::Actor(a) => c.field("actor").field(a.as_str()),
+        Resource::Space(s) => c.field("space").field(s.as_str()),
     };
     c.field(act.action().as_str());
     match act {
@@ -599,6 +628,7 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
             Revocation::Device(d) => c.field("device").field(d.as_str()),
         },
         Act::Delegate { project } => c.field(project.as_ref().map_or("", ProjectId::as_str)),
+        Act::Ctx(level) => c.field(level.as_str()),
     };
     sha256(&c.0)
 }
@@ -642,6 +672,9 @@ mod tests {
             act_hash(&Resource::Actor(ActorSlug::new("scout").unwrap()), &Act::Delegate { project: None }),
             act_hash(&Resource::Actor(ActorSlug::new("scout").unwrap()), &Act::Delegate { project: Some(ProjectId::new("atlas").unwrap()) }),
             act_hash(&Resource::Actor(ActorSlug::new("wren").unwrap()), &Act::Delegate { project: None }),
+            act_hash(&Resource::Space(SpaceId::new("spc_a").unwrap()), &Act::Ctx(SpaceLevel::Read)),
+            act_hash(&Resource::Space(SpaceId::new("spc_b").unwrap()), &Act::Ctx(SpaceLevel::Read)),
+            act_hash(&Resource::Space(SpaceId::new("spc_a").unwrap()), &Act::Ctx(SpaceLevel::Admin)),
         ];
         let distinct: std::collections::HashSet<_> = hashes.iter().collect();
         assert_eq!(distinct.len(), hashes.len());

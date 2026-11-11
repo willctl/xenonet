@@ -1,7 +1,8 @@
 //! A made-up world for the tests: three machines in one network, one
 //! person with a biometric device (on m1, this machine) and a weaker one
-//! (on m2), token roots for two of the machines, a question waiting, and a
-//! ground that answers from plain fields.
+//! (on m2), token roots for two of the machines, a question waiting, a
+//! space it holds that gives everyone append, and a ground that answers
+//! from plain fields.
 
 use std::collections::{HashMap, HashSet};
 use xenonet_authz::*;
@@ -68,6 +69,9 @@ pub struct World {
     pub asks: HashMap<AskId, Asked>,
     pub synced: Option<i64>,
     pub outbound: HashMap<ActorSlug, OutboundScope>,
+    /// The spaces this machine holds, and the level each gives every
+    /// principal.
+    pub spaces: HashMap<SpaceId, Option<SpaceLevel>>,
 }
 
 impl Ground for World {
@@ -116,6 +120,17 @@ impl Ground for World {
     fn outbound(&self, actor: &ActorSlug) -> Option<OutboundScope> {
         self.outbound.get(actor).cloned()
     }
+    fn holds_space(&self, space: &SpaceId) -> bool {
+        self.spaces.contains_key(space)
+    }
+    fn space_level(&self, space: &SpaceId, _principal: &Principal) -> Option<SpaceLevel> {
+        self.spaces.get(space).copied().flatten()
+    }
+}
+
+/// The space the world holds.
+pub fn space() -> SpaceId {
+    SpaceId::new("spc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()
 }
 
 /// The question q1: session s1's run asks to run a command, a run m2
@@ -160,6 +175,7 @@ pub fn fixture() -> Fixture {
         asks: HashMap::from([(AskId::new("q1").unwrap(), asked(Attestation::HarnessSigned))]),
         synced: Some(NOW - 60_000),
         outbound: HashMap::new(),
+        spaces: HashMap::from([(space(), Some(SpaceLevel::Append))]),
     };
     Fixture { world, m1_root, m2_root }
 }

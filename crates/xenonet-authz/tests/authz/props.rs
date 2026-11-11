@@ -1,6 +1,7 @@
 //! Properties over generated tokens: a narrowed token never allows what
-//! its parent refuses, a revoked id is refused, whichever block's, and an
-//! actor's Allow is never wider than its allow scope.
+//! its parent refuses, a revoked id is refused, whichever block's, an
+//! actor's Allow is never wider than its allow scope, and a space's share
+//! never yields more than its level.
 
 use crate::common::*;
 use proptest::prelude::*;
@@ -8,7 +9,7 @@ use proptest::test_runner::{Config, TestRunner};
 use std::cell::Cell;
 use xenonet_authz::*;
 
-fn rights(mask: u16) -> Vec<Action> {
+fn rights(mask: u32) -> Vec<Action> {
     Action::ALL.into_iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, a)| a).collect()
 }
 
@@ -16,7 +17,7 @@ fn narrowing() -> impl Strategy<Value = Narrowing> {
     prop_oneof![
         (0..Door::ALL.len()).prop_map(|i| Narrowing::Door(Door::ALL[i])),
         (-HOUR..2 * HOUR).prop_map(|d| Narrowing::Until(NOW + d)),
-        any::<u16>().prop_map(|m| Narrowing::Actions(rights(m))),
+        any::<u32>().prop_map(|m| Narrowing::Actions(rights(m))),
         (0..ReadScope::ALL.len(), any::<bool>(), 0..CURSOR_MS * 2).prop_map(|(s, f, d)| Narrowing::Cursor {
             scope: ReadScope::ALL[s],
             filters: [u8::from(f); 32],
@@ -46,6 +47,10 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
         Action::UseGateway => (m1(), Act::UseGateway),
         Action::Revoke => (m1(), Act::Revoke { what: Revocation::Token(vec![1]) }),
         Action::Delegate => (Resource::Actor(ActorSlug::new("scout").unwrap()), Act::Delegate { project: None }),
+        Action::CtxRead | Action::CtxAppend | Action::CtxWrite | Action::CtxAdmin => {
+            let level = SpaceLevel::ALL.into_iter().find(|l| l.action() == action).unwrap();
+            (Resource::Space(space()), Act::Ctx(level))
+        }
     };
     Request::new(Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") }, resource, act, door, at, None)
 }
@@ -58,8 +63,8 @@ fn world() -> Fixture {
     f
 }
 
-fn case() -> impl Strategy<Value = (u16, Vec<Narrowing>, usize, usize, i64, usize, Option<bool>)> {
-    (any::<u16>(), proptest::collection::vec(narrowing(), 0..4), 0..Action::ALL.len(), 0..Door::ALL.len(), 0..2 * HOUR, 0..ReadScope::ALL.len(), any::<Option<bool>>())
+fn case() -> impl Strategy<Value = (u32, Vec<Narrowing>, usize, usize, i64, usize, Option<bool>)> {
+    (any::<u32>(), proptest::collection::vec(narrowing(), 0..4), 0..Action::ALL.len(), 0..Door::ALL.len(), 0..2 * HOUR, 0..ReadScope::ALL.len(), any::<Option<bool>>())
 }
 
 #[test]
@@ -96,7 +101,7 @@ fn a_revoked_id_is_refused_whichever_block_it_names() {
     let f = world();
     let mut runner = TestRunner::new(Config { cases: 128, ..Config::default() });
     runner
-        .run(&(any::<u16>(), proptest::collection::vec(narrowing(), 0..4), any::<prop::sample::Index>()), |(mask, narrowings, pick)| {
+        .run(&(any::<u32>(), proptest::collection::vec(narrowing(), 0..4), any::<prop::sample::Index>()), |(mask, narrowings, pick)| {
             let mut token = f.m1_root.mint_actor(&actor_grant("muse", &rights(mask | 1))).unwrap();
             for n in &narrowings {
                 token = token.attenuate(n).unwrap();
@@ -159,6 +164,49 @@ fn an_actors_allow_is_never_wider_than_its_scope() {
                 Ok(())
             },
         )
+        .unwrap();
+    assert!(allowed.get() > 0 && refused.get() > 0, "allowed {}, refused {}", allowed.get(), refused.get());
+}
+
+#[test]
+fn a_share_never_yields_more_than_its_level() {
+    // Whoever asks, however they came, with whatever token: an act on a
+    // space is allowed only when the space gives them its level or more.
+    let mut runner = TestRunner::new(Config { cases: 256, ..Config::default() });
+    let (allowed, refused) = (Cell::new(0), Cell::new(0));
+    runner
+        .run(&(0..5usize, 0..4usize, 0..4usize, any::<bool>(), any::<u32>(), 0..Attestation::ALL.len(), any::<bool>()), |(have, need, kind, remote, mask, by, present)| {
+            let mut f = world();
+            let have = (have > 0).then(|| SpaceLevel::ALL[have - 1]);
+            let need = SpaceLevel::ALL[need];
+            f.world.spaces.insert(space(), have);
+            f.world.roles.insert((network(), machine("m2")), Role::Member);
+            let (here, door, net) = if remote { (machine("m2"), Door::Network, Some(network())) } else { (machine("m1"), Door::Local, None) };
+            let (resource, act) = (Resource::Space(space()), Act::Ctx(need));
+            // Minted only for an actor: minting is the slow part.
+            let token = (kind == 2).then(|| if remote { &f.m2_root } else { &f.m1_root }.mint_actor(&actor_grant("muse", &rights(mask))).unwrap());
+            let mut tok = None;
+            let mut p = None;
+            let principal = match kind {
+                0 => Principal::Machine { id: here },
+                1 => Principal::Agent { id: AgentId::new("a1").unwrap(), machine: here, attestation: Attestation::ALL[by] },
+                2 => {
+                    tok = token.as_ref();
+                    Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: here }
+                }
+                _ => as_person(&f.world, &bio_device(), &resource, &act),
+            };
+            let r = Request::new(principal, resource, act, door, NOW, net);
+            let block = (present && kind == 3 && r.act().presence_what().is_some()).then(|| presence(&f.world, &bio_device(), &r));
+            if block.is_some() {
+                p = block.as_ref();
+            }
+            let ok = decide(tok, &r, &f.world, p).is_allow();
+            prop_assert!(!ok || have.is_some_and(|h| h >= need), "{r:?} allowed at {have:?}");
+            allowed.set(allowed.get() + usize::from(ok));
+            refused.set(refused.get() + usize::from(!ok));
+            Ok(())
+        })
         .unwrap();
     assert!(allowed.get() > 0 && refused.get() > 0, "allowed {}, refused {}", allowed.get(), refused.get());
 }

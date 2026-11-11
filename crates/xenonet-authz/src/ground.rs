@@ -6,7 +6,7 @@
 //! store of its own, and another project can bring its own. Everything
 //! here is the receiver's; nothing comes from the sender's word.
 
-use crate::vocab::{ActorSlug, AgentId, AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, ProjectId, PromptKind, SessionId};
+use crate::vocab::{Action, ActorSlug, AgentId, AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, Principal, ProjectId, PromptKind, SessionId, SpaceId};
 use crate::RootCertificate;
 use xenonet_id::sign::VerifyingKey;
 
@@ -25,6 +25,40 @@ impl Role {
             Role::Member => "member",
             Role::Admin => "admin",
             Role::Founder => "founder",
+        }
+    }
+}
+
+/// What a principal may do in a space, lowest first, as the receiver's
+/// own copy of the space's chain gives it (xenonet-log's `space`): each
+/// allows what the ones below it do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SpaceLevel {
+    Read,
+    Append,
+    Write,
+    Admin,
+}
+
+impl SpaceLevel {
+    pub const ALL: [SpaceLevel; 4] = [SpaceLevel::Read, SpaceLevel::Append, SpaceLevel::Write, SpaceLevel::Admin];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpaceLevel::Read => "read",
+            SpaceLevel::Append => "append",
+            SpaceLevel::Write => "write",
+            SpaceLevel::Admin => "admin",
+        }
+    }
+
+    /// The action that does what this level allows and no lower one does.
+    pub fn action(self) -> Action {
+        match self {
+            SpaceLevel::Read => Action::CtxRead,
+            SpaceLevel::Append => Action::CtxAppend,
+            SpaceLevel::Write => Action::CtxWrite,
+            SpaceLevel::Admin => Action::CtxAdmin,
         }
     }
 }
@@ -242,6 +276,22 @@ pub trait Ground {
     /// The scope of the outbound actor `actor`, when this machine has one
     /// by that name. None, the default, refuses every delegation to it.
     fn outbound(&self, _actor: &ActorSlug) -> Option<OutboundScope> {
+        None
+    }
+
+    /// Whether this machine holds `space`'s chain. A machine that holds no
+    /// spaces answers no (the default).
+    fn holds_space(&self, space: &SpaceId) -> bool {
+        let _ = space;
+        false
+    }
+
+    /// `principal`'s level in `space`, as this machine's own copy of the
+    /// space's chain gives it (shares, unshares, the curator and the
+    /// owner), or None when it has none there. The default holds no
+    /// spaces.
+    fn space_level(&self, space: &SpaceId, principal: &Principal) -> Option<SpaceLevel> {
+        let _ = (space, principal);
         None
     }
 }

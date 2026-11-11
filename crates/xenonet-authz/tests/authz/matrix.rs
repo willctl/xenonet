@@ -61,9 +61,13 @@ enum Do {
     RegisterActor,
     UseGateway,
     Revoke,
+    CtxRead,
+    CtxAppend,
+    CtxWrite,
+    CtxAdmin,
 }
 
-const DOS: [Do; 16] = [
+const DOS: [Do; 20] = [
     Do::Message,
     Do::Wake,
     Do::StartAsks,
@@ -80,6 +84,10 @@ const DOS: [Do; 16] = [
     Do::RegisterActor,
     Do::UseGateway,
     Do::Revoke,
+    Do::CtxRead,
+    Do::CtxAppend,
+    Do::CtxWrite,
+    Do::CtxAdmin,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +170,10 @@ fn expected(c: &Case) -> Outcome {
             // Issuing or widening an actor's grant needs the person there.
             Do::RegisterActor => matches!(c.kind, Actor { .. }) || present,
             Do::UseGateway => matches!(c.kind, Actor { .. }),
+            // The world's space gives everyone append: reading and
+            // appending, never writing; an unchecked agent only here.
+            Do::CtxRead | Do::CtxAppend => !(remote && c.kind == Agent(Unchecked)),
+            Do::CtxWrite | Do::CtxAdmin => false,
         };
     let holds = matches!(c.what, Do::StartAsks | Do::StartDelegated | Do::Answer | Do::Admit | Do::Widen | Do::Publish);
     match (allowed, holds && remote && c.stale) {
@@ -193,6 +205,10 @@ fn act_of(what: Do) -> (Resource, Act) {
         Do::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("helper").unwrap(), rights: vec![Action::Message], scopes: [0; 32] }),
         Do::UseGateway => (m1(), Act::UseGateway),
         Do::Revoke => (m1(), Act::Revoke { what: Revocation::Device(device_id(&weak_device())) }),
+        Do::CtxRead => (Resource::Space(space()), Act::Ctx(SpaceLevel::Read)),
+        Do::CtxAppend => (Resource::Space(space()), Act::Ctx(SpaceLevel::Append)),
+        Do::CtxWrite => (Resource::Space(space()), Act::Ctx(SpaceLevel::Write)),
+        Do::CtxAdmin => (Resource::Space(space()), Act::Ctx(SpaceLevel::Admin)),
     }
 }
 
@@ -307,7 +323,7 @@ fn every_case_decides_as_the_rules_say() {
             }
         }
     }
-    assert_eq!(n, 16 * 8 * 5 * 4 * 2 * 4 * 2 * 2);
+    assert_eq!(n, 20 * 8 * 5 * 4 * 2 * 4 * 2 * 2);
     // Neither side of the matrix is empty.
     assert!(allowed > 1000 && held > 100, "{allowed} allowed, {held} held of {n}");
 }
