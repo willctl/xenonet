@@ -76,13 +76,30 @@ answer the alignment check in `goals.md` in the design doc or the PR.
 
 ## Iterate fast
 
-Only Will uses XenoNet, and he wants fast iterations with little friction
-(2026-11-08). Land work on `main` in small Conventional Commits; don't open
-a pull request per change, and don't wait for CI or a release to see your
-work. Check it locally first: the tests, the console tools, and the VM lab
-(`scripts/lab/`, Linux VMs that each run XenoNet) when a change spans
-machines. Open a pull request only for a change Will wants to read before
-it lands, and cut a release only at the end of a phase or when he asks.
+XenoNet is a prototype only Will uses, so treat it as one, not as a
+production app. He wants quick local feedback loops and as little process
+as possible.
+
+- While you build, run only the tests for what you touched
+  (`npm run cargo -- test -p <crate>`, one test file, one e2e spec), so a
+  loop takes seconds to a minute.
+- Run the full suite (below) once before a push, with independent parts in
+  parallel, and `npm run test:e2e` when the change reaches the page, the
+  API or tokens.
+- Land work on `main` in small Conventional Commits, and push in batches
+  at the end of a step. No pull request per change: open one only for a
+  change Will wants to read before it lands.
+- Never wait on CI or report its status. It is a backstop for what can't
+  run here (Windows-only code, paths refused under an agent): fix what it
+  finds in the next commit.
+- Use the VM lab (`scripts/lab/`, Linux VMs that each run XenoNet) for
+  changes that span machines.
+- Skip ceremony a prototype doesn't need: a reviewer pass only for a
+  design that changes the security model, no tests for cases nobody hits
+  yet, docs once at a phase's end. Security rules (presence, grants,
+  refusals) always get their tests.
+- Cut a release only at the end of a phase or when Will asks.
+
 `docs/design/direction.md` says how this applies to the rewrite.
 
 ## Working alongside other agents
