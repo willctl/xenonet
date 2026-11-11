@@ -1039,9 +1039,13 @@ its changes in and keeps the file's line endings.
 
 ## With XenoNet (optional)
 
-Xenolith runs on its own. It is built with some of XenoNet's libraries (keys
-and signatures, signed logs, authorization and the transport between machines),
-but it needs no XenoNet installed or running. If you use XenoNet too, it does
+Xenolith runs on its own. It is built with some of XenoNet's library crates:
+`xenonet-id` (keys and signatures), `xenonet-log` (signed logs),
+`xenonet-authz` (authorization) and `xenonet-net` (the transport between
+machines), with the base crates they bring (`xenonet-model`, `xenonet-os`,
+`xenonet-text`). It never depends on XenoNet's app: not its service, its
+runtime, its surfaces or its adapters. It needs no XenoNet installed or
+running. If you use XenoNet too, it does
 two things with Xenolith:
 
 - **It shows the shared context.** XenoNet's map reads the folder (pages, the
@@ -1057,8 +1061,8 @@ two things with Xenolith:
   credential, read from XenoNet's runtime folder (or `XENONET_RUNTIME_DIR`) at
   each request. The request carries Xenolith's own token, a
   forwarded request is never this machine's own, and the curator's grants
-  decide what the other machine may do. XenoNet's own docs say how to publish
-  the service. A tunnel or reverse proxy of your own works the same way.
+  decide what the other machine may do. XenoNet's guide says how to
+  [publish the service](../docs/guide/network.md#services-through-the-network). A tunnel or reverse proxy of your own works the same way.
 
 ## Repo layout
 
