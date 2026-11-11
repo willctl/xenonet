@@ -40,7 +40,7 @@
 
 ## Repo status
 
-XenoNet looks at each repo every 20 seconds, and runs `git status` only when the repo may have changed: when its index, HEAD, reflog, fetches, pushes or config changed since the last read, or two minutes after it, for edits to files that only `git status` sees. It lists the repo's filter drivers with `git config` only when the repo's config or yours changes, and every ten minutes at most. So that a repo you cloned or unpacked can't make XenoNet run its programs, XenoNet runs `git status` this way:
+XenoNet watches each repo's HEAD, refs, packed refs and config, never its index, and runs `git status` when one of them changes (a commit, a checkout, a fetch or a push), a few seconds after a session works in the repo, at start, and every ten minutes. It lists the repo's filter drivers with `git config` again when the repo's config changes, and every ten minutes. So that a repo you cloned or unpacked can't make XenoNet run its programs, XenoNet runs `git status` this way:
 
 - It empties the filter drivers that the repo's own config names. The filters of git-lfs stay on. Your own filters, from your global and system config, work as they do anywhere.
 - It points the repo's hooks at nothing.

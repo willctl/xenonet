@@ -56,12 +56,17 @@ const SETTLE_MS: u64 = 1000;
 const LINES_SETTLE_MS: u64 = 5000;
 // A moment past a window's end, so the map made then is past it.
 const CLOCK_SLACK_MS: u64 = 50;
-const REPO_POLL_MS: u64 = 20_000;
+// How soon a repo's status is read again once a session works in it: its
+// edits are in no file the repo's watch sees.
+const REPO_SETTLE_MS: u64 = 5000;
+// The keys other owners' watches are under, on the live tailer's watcher.
+const REPO_WATCH: &str = "git:";
+const WIKI_WATCH: &str = "wiki";
+const OBSERVED_WATCH: &str = "observed:";
 const HEARTBEAT_MS: u64 = 2000;
 const DEMO_STEP_MS: u64 = 2200;
-// The wiki's folder, looked at this often for a change (nothing watches it),
-// and the map made again this long after one.
-const WIKI_LOOK_MS: u64 = 1000;
+// The map made again this long after a change in the wiki's folder, once
+// its writes settle.
 const WIKI_SETTLE_MS: u64 = 800;
 
 /// What the map is read from: the demo's made-up world, or this machine's
@@ -97,6 +102,9 @@ struct Inner {
 
 type Done = Option<Result<Value, String>>;
 
+/// Each app's watches, as the registry gives them.
+type Watches = Vec<(Arc<dyn Platform>, Vec<WatchSpec>)>;
+
 pub struct MapState {
     me: Weak<MapState>,
     pub cfg: MapConfig,
@@ -131,9 +139,13 @@ pub struct MapState {
     listening: AtomicBool,
     live_queued: AtomicBool,
     /// The apps' watches, until `begin` starts the watcher with them.
-    watches: Mutex<Vec<(Arc<dyn Platform>, Vec<WatchSpec>)>>,
+    watches: Mutex<Watches>,
     /// Asks for the map to be made again within a while (`refresh_in`).
     refresher: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Duration>>>,
+    /// Each repo watched, by project key: its specs, and its config file.
+    repo_watches: Mutex<HashMap<String, (Vec<WatchSpec>, std::path::PathBuf)>>,
+    /// The repos whose status is to be read again shortly (`repo_soon`).
+    repo_pending: Mutex<std::collections::HashSet<String>>,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// The events it sent, for the tests to read.
     #[cfg(test)]
@@ -303,6 +315,8 @@ impl MapState {
             live_queued: AtomicBool::new(false),
             watches: Mutex::new(watches),
             refresher: Mutex::new(None),
+            repo_watches: Mutex::new(HashMap::new()),
+            repo_pending: Mutex::new(std::collections::HashSet::new()),
             tasks: Mutex::new(Vec::new()),
             #[cfg(test)]
             sent: Mutex::new(Vec::new()),
@@ -576,6 +590,7 @@ impl MapState {
             }
             now
         };
+        self.sync_watches(&projects);
         // Just after the projects folder changed, its repos' status and git
         // identities are read first, so the new map goes out whole.
         if repo_pass {
@@ -776,6 +791,79 @@ impl MapState {
         }
     }
 
+    // Watches each repo the map has (its head, refs and config, as its
+    // checkout says), in place of the ones it had: only what changed is
+    // watched again. The projects folder itself isn't watched: on a Mac
+    // that would hear every file written under it (builds included); a
+    // folder made there shows with its first session, or the reconcile.
+    fn sync_watches(&self, projects: &[Value]) {
+        let want: HashMap<String, (Vec<WatchSpec>, std::path::PathBuf)> = projects
+            .iter()
+            .filter(|p| truthy(p.get("git")))
+            .filter_map(|p| {
+                let c = xenonet_adapter::repo::checkouts().open(std::path::Path::new(s(p, "path")?))?;
+                Some((s(p, "key")?.to_string(), (c.watch, c.config)))
+            })
+            .collect();
+        let mut have = lock(&self.repo_watches);
+        for k in have.keys().filter(|k| !want.contains_key(*k)) {
+            self.live.unwatch(&format!("{REPO_WATCH}{k}"));
+        }
+        for (k, w) in &want {
+            if have.get(k) != Some(w) {
+                self.live.watch(&format!("{REPO_WATCH}{k}"), w.0.clone());
+            }
+        }
+        *have = want;
+    }
+
+    // What another owner's watch heard: a repo's (its status read again,
+    // and its identity when its config changed), the wiki's, or an
+    // observed reader's (the map made again).
+    fn other(&self, key: &str, paths: &[std::path::PathBuf], whole: bool) {
+        if let Some(k) = key.strip_prefix(REPO_WATCH) {
+            let config = whole || lock(&self.repo_watches).get(k).is_some_and(|(_, c)| paths.iter().any(|p| p == c));
+            let Some(me) = self.arc() else { return };
+            let k = k.to_string();
+            tokio::spawn(async move { me.repo_changed(&k, config).await });
+        } else if key == WIKI_WATCH {
+            self.refresh_in(Duration::from_millis(WIKI_SETTLE_MS));
+        } else if key.starts_with(OBSERVED_WATCH) {
+            // A harness that writes its records as it works is read as a
+            // working session's lines are.
+            self.refresh_in(Duration::from_millis(LINES_SETTLE_MS));
+        }
+    }
+
+    // A repo read again, and the map made again when that changed it.
+    async fn repo_changed(&self, key: &str, config: bool) {
+        let mut changed = self.repos.changed(key, config).await;
+        if config {
+            if let Some(w) = &self.identities {
+                let projects = lock(&self.inner).map.projects.clone();
+                changed |= w.refresh_repos(&projects).await;
+            }
+        }
+        if changed {
+            self.refresh_in(Duration::ZERO);
+        }
+    }
+
+    // A repo whose sessions work: its status read again shortly, once for
+    // all the edits made meanwhile.
+    fn repo_soon(&self, key: &str) {
+        if !self.repos.knows(key) || !lock(&self.repo_pending).insert(key.to_string()) {
+            return;
+        }
+        let Some(me) = self.arc() else { return };
+        let key = key.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(REPO_SETTLE_MS)).await;
+            lock(&me.repo_pending).remove(&key);
+            me.repo_changed(&key, false).await;
+        });
+    }
+
     /// Each repo's status, by project key, as the last pass read it.
     pub fn repo_status(&self) -> Vec<(String, Value)> {
         self.repos.status()
@@ -847,16 +935,29 @@ impl MapState {
                     self.maybe_ship_it(&v);
                     self.queue_live();
                     // What the map shows of a working session (when it was
-                    // last written, its title) follows its lines.
+                    // last written, its title) follows its lines, and its
+                    // repo's status its edits.
                     self.refresh_in(Duration::from_millis(LINES_SETTLE_MS));
+                    let home = self.home(s(&v, "sessionId").unwrap_or_default());
+                    if let Some(key) = home.as_deref().and_then(|h| h.strip_prefix("project:")) {
+                        self.repo_soon(key);
+                    }
                 }
                 Event::Tokens(v) if listening => self.emit("tokens", v),
                 // A brand-new transcript means a new session, and a record
                 // that changed or a session gone change the map: it's made
                 // again, a moment later.
                 Event::NewFile(_) | Event::Changed { .. } if listening => self.refresh_in(Duration::from_millis(SETTLE_MS)),
-                // The reconcile read what the watcher missed.
+                // The reconcile read what the watcher missed: the repos'
+                // status and identities are read again too.
+                Event::Reconciled { app: None, .. } if listening => {
+                    self.refresh_in(Duration::ZERO);
+                    if let Some(me) = self.arc() {
+                        tokio::spawn(async move { me.refresh_repos().await });
+                    }
+                }
                 Event::Reconciled { .. } if listening => self.refresh_in(Duration::ZERO),
+                Event::Other { key, paths, reconcile } if listening => self.other(&key, &paths, reconcile.is_some()),
                 _ => {}
             }
         }
@@ -892,6 +993,11 @@ impl MapState {
                 }
             }));
         }
+        // The first map reads every repo's status and git identity before
+        // it goes out, so it goes out whole: from then on a repo's watch
+        // says when to read it again.
+        let root = self.projects_dir();
+        lock(&self.inner).repo_pass_for = path_key(&root);
         if let Err(e) = self.refresh_map().await {
             log("error", "state.refresh", &format!("refresh failed: {e}"));
         }
@@ -905,34 +1011,14 @@ impl MapState {
                 m.emit("live", snap);
             }
         }));
-        let m = me.clone();
-        tasks.push(tokio::spawn(async move {
-            m.refresh_repos().await;
-            let mut every = tokio::time::interval(Duration::from_millis(REPO_POLL_MS));
-            every.tick().await;
-            loop {
-                every.tick().await;
-                m.refresh_repos().await;
-            }
-        }));
         // A change in the wiki's folder makes the map again, once its
-        // writes settle.
+        // writes settle; one in what an observed reader reads, a moment
+        // later.
         if let Some(dir) = self.cfg.wiki_dir.clone() {
-            let m = me.clone();
-            tasks.push(tokio::spawn(async move {
-                let look = |d: String| crate::runtime::util::blocking(move || wiki_stamp(&d));
-                let mut last = look(dir.clone()).await;
-                let mut every = tokio::time::interval(Duration::from_millis(WIKI_LOOK_MS));
-                every.tick().await;
-                loop {
-                    every.tick().await;
-                    if look(dir.clone()).await != last {
-                        tokio::time::sleep(Duration::from_millis(WIKI_SETTLE_MS)).await;
-                        last = look(dir.clone()).await;
-                        let _ = m.refresh_map().await;
-                    }
-                }
-            }));
+            self.live.watch(WIKI_WATCH, vec![WatchSpec::tree("wiki", dir, &[])]);
+        }
+        for o in &self.observed {
+            self.live.watch(&format!("{OBSERVED_WATCH}{}", o.source), o.watch());
         }
         // Build the search index in the background, then keep it current.
         let search = self.search.clone();
@@ -1194,20 +1280,6 @@ async fn refresher(me: Weak<MapState>, mut asks: tokio::sync::mpsc::UnboundedRec
             log("error", "state.refresh", &format!("refresh failed: {e}"));
         }
     }
-}
-
-// What the wiki's folder holds now, as one stamp: each file's path, size
-// and mtime, three folders down.
-fn wiki_stamp(dir: &str) -> String {
-    let mut pick = |_: &str| true;
-    xenonet_os::paths::list_files(dir, &mut pick, 3)
-        .into_iter()
-        .map(|f| match std::fs::metadata(&f) {
-            Ok(m) => format!("{f}:{}:{}", m.len(), xenonet_os::fs::mtime_ms_of(&m).unwrap_or(0.0)),
-            Err(_) => f,
-        })
-        .collect::<Vec<_>>()
-        .join("|")
 }
 
 // What the assistant says of a reader's source: its gatherer's health and the live tailer's.

@@ -14,9 +14,29 @@
         "id": "prj_y5yxzivp2ggstrnktac5mae3mbk26xvx"
       },
       {
+        "remote": "ssh://git@github.com:22/willctl/xenonet",
+        "repoKey": "github.com/willctl/xenonet",
+        "id": "prj_y5yxzivp2ggstrnktac5mae3mbk26xvx"
+      },
+      {
+        "remote": "https://user@github.com:443/willctl/xenonet.git",
+        "repoKey": "github.com/willctl/xenonet",
+        "id": "prj_y5yxzivp2ggstrnktac5mae3mbk26xvx"
+      },
+      {
         "remote": "ssh://git@gitlab.example:22/team/atlas.git",
-        "repoKey": "gitlab.example:22/team/atlas",
-        "id": "prj_elnfjkh4iaihqxre4evhki4ugokpvxrv"
+        "repoKey": "gitlab.example/team/atlas",
+        "id": "prj_wjgqk4nqcnibacgvqi4ojfr5afqeo2mv"
+      },
+      {
+        "remote": "ssh://git@gitlab.example:2222/team/atlas.git",
+        "repoKey": "gitlab.example:2222/team/atlas",
+        "id": "prj_i44umpnnagge5yzejsspkjl5evdoi7pe"
+      },
+      {
+        "remote": "alice@gitlab.example:team/atlas",
+        "repoKey": "gitlab.example/team/atlas",
+        "id": "prj_wjgqk4nqcnibacgvqi4ojfr5afqeo2mv"
       }
     ]
   },

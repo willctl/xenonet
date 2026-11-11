@@ -57,13 +57,22 @@ pub enum Event {
     /// An app's sessions changed where the map reads them (a record read
     /// whole, a session gone, lines of a transcript the tailer doesn't
     /// read, or of one it does).
-    Changed { app: String },
+    Changed {
+        app: String,
+    },
     /// The walk ran: what the watcher missed is read. `app` None: every
     /// app's, as the reconcile every 10 minutes does.
-    Reconciled { app: Option<String>, why: String },
+    Reconciled {
+        app: Option<String>,
+        why: String,
+    },
     /// Another owner's watch (`Live::watch`): its changed paths, or that
     /// it should be read again whole (`reconcile`).
-    Other { key: String, paths: Vec<PathBuf>, reconcile: Option<String> },
+    Other {
+        key: String,
+        paths: Vec<PathBuf>,
+        reconcile: Option<String>,
+    },
 }
 
 pub type Listener = Arc<dyn Fn(Vec<Event>) + Send + Sync>;
@@ -108,6 +117,8 @@ pub struct Live {
     listener: OnceLock<Listener>,
     /// The watcher, once started: the apps' watches and other owners'.
     sessions: Mutex<Option<Sessions>>,
+    /// Other owners' specs, by key, watched once the watcher is up.
+    wanted: Mutex<std::collections::BTreeMap<String, Vec<WatchSpec>>>,
     // The reports', the reconcile's and the limits' tasks, stopped with it.
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     clock: Clock,
@@ -177,6 +188,7 @@ impl Live {
             desktop,
             listener: OnceLock::new(),
             sessions: Mutex::new(None),
+            wanted: Mutex::new(std::collections::BTreeMap::new()),
             tasks: Mutex::new(Vec::new()),
             clock,
         })
@@ -349,15 +361,23 @@ impl Live {
         out
     }
 
-    /// The reconcile: the files it follows read where they grew, dormant
-    /// ones written to again, and a walk for new ones; then the watcher's
-    /// cursors are moved to where the tailer read to, so it reads on from
-    /// there.
+    /// The reconcile: what `catch_up` reads, and a walk for new files.
     fn reconcile_now(&self) -> Vec<Event> {
+        lock(&self.tail).tailer.life.count("reconciles", 1.0);
+        self.read_grown(true)
+    }
+
+    /// The files it follows read where they grew, and dormant ones written
+    /// to again; then the watcher's cursors are moved to where the tailer
+    /// read to, so it reads on from there.
+    fn catch_up(&self) -> Vec<Event> {
+        self.read_grown(false)
+    }
+
+    fn read_grown(&self, walk: bool) -> Vec<Event> {
         let mut out = Vec::new();
         {
             let mut t = lock(&self.tail);
-            t.tailer.life.count("reconciles", 1.0);
             let mut cursor = xenonet_text::ordered::Cursor::of(None);
             while let Some((c, file)) = t.tailer.next_followed(cursor) {
                 cursor = c;
@@ -382,13 +402,15 @@ impl Live {
                     self.error(&mut t, &e);
                 }
             }
-            for file in self.walk(&mut t) {
-                if !t.tailer.may_discover(&file) || lock(&self.telemetry).classify(&file).is_none() {
-                    continue;
-                }
-                if t.tailer.discovered(&file, stat(&file), || self.clock.now()) == Listed::Track {
-                    if let Err(e) = self.read(&mut t, &file, false, &mut out) {
-                        self.error(&mut t, &e);
+            if walk {
+                for file in self.walk(&mut t) {
+                    if !t.tailer.may_discover(&file) || lock(&self.telemetry).classify(&file).is_none() {
+                        continue;
+                    }
+                    if t.tailer.discovered(&file, stat(&file), || self.clock.now()) == Listed::Track {
+                        if let Err(e) = self.read(&mut t, &file, false, &mut out) {
+                            self.error(&mut t, &e);
+                        }
                     }
                 }
             }
@@ -474,10 +496,10 @@ impl Live {
                 }
             }
         }
-        // The map reads an app's sessions from more than the lines: their
-        // titles, when they were last written, the ones the tailer doesn't
-        // read.
-        if changed || out.iter().any(|e| matches!(e, Event::Activity(_) | Event::NewFile(_))) {
+        // The map reads an app's sessions from more than the lines the
+        // tailer reads: their records, the sessions gone, the transcripts it
+        // doesn't read. (What the tailer reads, it tells as activity.)
+        if changed {
             out.push(Event::Changed { app: app.to_string() });
         }
         out
@@ -542,8 +564,10 @@ impl Live {
 
     /// Watches an owner's specs (a repo's, the wiki's) on the same
     /// watcher, in place of any it had: what changes comes as
-    /// `Event::Other` under `key`. Nothing until the watcher has started.
+    /// `Event::Other` under `key`. Asked before the watcher is up, they're
+    /// watched once it is.
     pub fn watch(&self, key: &str, specs: Vec<WatchSpec>) {
+        lock(&self.wanted).insert(key.to_string(), specs.clone());
         if let Some(s) = lock(&self.sessions).as_ref() {
             s.watcher().add(key, specs);
         }
@@ -551,6 +575,7 @@ impl Live {
 
     /// Stops watching an owner's specs.
     pub fn unwatch(&self, key: &str) {
+        lock(&self.wanted).remove(key);
         if let Some(s) = lock(&self.sessions).as_ref() {
             s.watcher().remove(key);
         }
@@ -569,29 +594,48 @@ impl Live {
     /// reconcile every 10 minutes.
     pub async fn start(self: &Arc<Self>, watches: Vec<(Arc<dyn Platform>, Vec<WatchSpec>)>) {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Report>();
-        // The watcher starts first, so what's written while the history is
-        // read waits in the queue rather than going unheard.
-        let heard = tx.clone();
-        match Sessions::start(watches, move |r| {
-            let _ = heard.send(r);
-        }) {
-            Ok(s) => *lock(&self.sessions) = Some(s),
-            Err(e) => {
-                let why = format!("can't watch the transcripts: {e}");
-                log("warn", "live.watch", &why);
-                lock(&self.tail).tailer.life.problem(&why, self.clock.now());
-            }
-        }
         let me = self.clone();
-        let events = crate::runtime::util::blocking(move || {
-            let out = me.prime();
-            me.seed_all();
-            out
-        })
-        .await;
+        let events = crate::runtime::util::blocking(move || me.prime()).await;
         self.tell(events);
+        // The watcher comes up beside the map's first refresh, since its
+        // system watches take a while to set up (FSEvents starts its stream
+        // again for each folder). Then what was written since the history
+        // was read is caught up, and the watcher's cursors seeded.
         let me = self.clone();
+        let heard = tx.clone();
         let reports = tokio::spawn(async move {
+            let m = me.clone();
+            let events = crate::runtime::util::blocking(move || {
+                match Sessions::start(watches, move |r| {
+                    let _ = heard.send(r);
+                }) {
+                    Ok(s) => {
+                        for (key, specs) in lock(&m.wanted).iter() {
+                            s.watcher().add(key, specs.clone());
+                        }
+                        *lock(&m.sessions) = Some(s);
+                    }
+                    Err(e) => {
+                        let why = format!("can't watch the transcripts: {e}");
+                        log("warn", "live.watch", &why);
+                        lock(&m.tail).tailer.life.problem(&why, m.clock.now());
+                    }
+                }
+                m.catch_up()
+            })
+            .await;
+            me.tell(events);
+            // A reconcile the watcher asked for as it came up (a folder that
+            // isn't there to watch yet) is what was just read.
+            let mut early = Vec::new();
+            while let Ok(r) = rx.try_recv() {
+                if !matches!(r, Report::Reconcile { .. }) {
+                    early.push(r);
+                }
+            }
+            for r in early {
+                me.report(r).await;
+            }
             while let Some(r) = rx.recv().await {
                 if let Report::Reconcile { why, .. } = &r {
                     log("info", "live.reconcile", why);
@@ -811,8 +855,7 @@ async fn claude_token() -> Option<Value> {
             _ => None,
         });
     }
-    let dir =
-        std::env::var("CLAUDE_CONFIG_DIR").ok().unwrap_or_else(|| Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").to_string_lossy().into_owned());
+    let dir = std::env::var("CLAUDE_CONFIG_DIR").ok().unwrap_or_else(|| Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").to_string_lossy().into_owned());
     texts.push(std::fs::read_to_string(Path::new(&dir).join(".credentials.json")).ok());
     for t in texts.into_iter().flatten() {
         if let Some((token, expires)) = claude_usage::token_of(Some(&t)) {
@@ -873,8 +916,8 @@ fn desktop_samples(vendor: &Vendor, file: &Path) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::runtime::util::now_ms;
-    use std::io::Write;
     use serde_json::Map;
+    use std::io::Write;
     use xenonet_adapter::watch::{Lines, Read as Took};
     use xenonet_schema::drift::DriftLog;
 
@@ -929,12 +972,13 @@ mod tests {
         assert!(lock(&heard).iter().all(|e| !matches!(e, Event::Activity(_))), "history isn't told as it happens");
         // A tool call, as the watcher reads it on from where the tailer
         // read to: told as live.
-        let call = line(json!({ "type": "assistant", "timestamp": ts(0.0), "message": { "id": "msg_1", "model": "claude-sonnet-4-5", "stop_reason": "tool_use", "usage": { "input_tokens": 10, "output_tokens": 5 }, "content": [{ "type": "tool_use", "id": "toolu_1", "name": "Bash", "input": { "command": "npm test" } }] } }));
+        let call = line(
+            json!({ "type": "assistant", "timestamp": ts(0.0), "message": { "id": "msg_1", "model": "claude-sonnet-4-5", "stop_reason": "tool_use", "usage": { "input_tokens": 10, "output_tokens": 5 }, "content": [{ "type": "tool_use", "id": "toolu_1", "name": "Bash", "input": { "command": "npm test" } }] } }),
+        );
         let before = len(&file);
         append(&file, &call);
         live.report(lines(&file, before, len(&file), Took::Appended, &[call.trim_end()])).await;
         assert!(lock(&heard).iter().any(|e| matches!(e, Event::Activity(a) if a["kind"] == "tool")), "{:?}", lock(&heard));
-        assert!(lock(&heard).iter().any(|e| matches!(e, Event::Changed { app } if app == "claude")), "the map hears its sessions changed");
         assert_eq!(live.snapshot()["sessions"][0]["status"], "tool");
         assert_eq!(live.snapshot()["status"]["lines"], 2);
         assert!(live.info(&format!("claude:{ID}"), now_ms()).is_some());
@@ -1014,7 +1058,11 @@ mod tests {
         let h = heard.clone();
         live.listen(Arc::new(move |e| lock(&h).extend(e)));
         live.start(vec![(claude, specs)]).await;
-        assert!(live.watched().contains(&"app:claude".to_string()));
+        let up = std::time::Instant::now();
+        while !live.watched().contains(&"app:claude".to_string()) {
+            assert!(up.elapsed() < Duration::from_secs(30), "the watcher came up");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         let call = json!({ "type": "assistant", "timestamp": ts(0.0), "message": { "id": "msg_1", "model": "claude-sonnet-4-5", "stop_reason": "tool_use", "usage": { "input_tokens": 10, "output_tokens": 5 }, "content": [{ "type": "tool_use", "id": "toolu_1", "name": "Bash", "input": { "command": "npm test" } }] } });
         let wrote = std::time::Instant::now();
         append(&file, &line(call));

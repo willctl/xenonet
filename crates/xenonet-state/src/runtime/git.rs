@@ -1,7 +1,8 @@
 //! Git's runtime: whether git is there, a repo's status through
 //! git (xenonet-sources' git.rs says what to run and what each answer
-//! means), and the watch that reads every repo's status, three at a time,
-//! each a gatherer that keeps what it had when git can't answer. Git runs
+//! means), and the watch that reads every repo's status (all of them three
+//! at a time in a pass, one when its watch says it changed), each a
+//! gatherer that keeps what it had when git can't answer. Git runs
 //! through a `GitHost`: this machine's git, or what a test answers in its
 //! place.
 
@@ -167,27 +168,20 @@ pub async fn git_status(git: &dyn GitHost, dir: &str, clock: &Clock) -> Option<V
     status_with(git, dir, args, clock.now()).await
 }
 
-/// What the watch keeps of a repo between passes, so it runs git only when
-/// something may have changed (xenonet-sources' git.rs): when its status
-/// was last read and its stamp then, and the arguments its drivers came to,
-/// with the config stamp they were read under.
-#[derive(Default)]
-struct Seen {
-    status: Option<(String, f64)>,
-    drivers: Option<(String, f64, Vec<String>)>,
-}
-
 struct Inner {
     life: Lifecycle,
-    /// project key → its status, as the last pass read it.
+    /// project key → its status, as it was last read.
     status: Vec<(String, Value)>,
     /// project key → (the project's folder, its status's gatherer).
     sources: HashMap<String, (String, Arc<Gather>)>,
-    /// project key → what's kept of it between passes.
-    seen: HashMap<String, Seen>,
+    /// project key → the arguments its drivers came to, which stand until
+    /// its config changes or the next pass.
+    drivers: HashMap<String, Vec<String>>,
 }
 
-/// The watch: every git project's status, refreshed a few at a time.
+/// Every git project's status: all of them in a pass (at start, and the
+/// reconcile's), and one when its watch says it may have changed
+/// (`changed`).
 pub struct RepoWatch {
     inner: Mutex<Inner>,
     clock: Clock,
@@ -204,7 +198,7 @@ impl RepoWatch {
     /// A watch that reads `clock` and runs `git`.
     pub fn new(clock: Clock, git: Git) -> RepoWatch {
         let life = Lifecycle::new(clock.now());
-        RepoWatch { inner: Mutex::new(Inner { life, status: Vec::new(), sources: HashMap::new(), seen: HashMap::new() }), clock, git }
+        RepoWatch { inner: Mutex::new(Inner { life, status: Vec::new(), sources: HashMap::new(), drivers: HashMap::new() }), clock, git }
     }
 
     /// Each repo's status, by project key, in the order they were read.
@@ -216,22 +210,17 @@ impl RepoWatch {
         lock(&self.inner).status.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     }
 
-    /// One pass over the projects that are repos. A repo's status is read
-    /// only when its stamps say it may have changed, or it's been idle for
-    /// a while (git::status_due), and its drivers only when its config may
-    /// have (git::drivers_fresh); otherwise what was read stands.
+    /// Whether a project is a repo the watch reads.
+    pub fn knows(&self, key: &str) -> bool {
+        lock(&self.inner).sources.contains_key(key)
+    }
+
+    /// One pass over the projects that are repos, three at a time: each
+    /// one's drivers listed again, then its status read.
     pub async fn refresh(self: &Arc<Self>, projects: &[Value]) {
         if !self.git.0.available() {
             return;
         }
-        let home = xenonet_os::home_dir(&|k| std::env::var(k).ok());
-        let xdg = std::env::var("XDG_CONFIG_HOME").ok();
-        self.refresh_with(projects, move |dir| git::repo_stamps(dir, &home, xdg.as_deref())).await;
-    }
-
-    /// The pass, with the stamps given (a test's own).
-    pub async fn refresh_with(self: &Arc<Self>, projects: &[Value], stamps: impl Fn(&str) -> Option<git::Stamps> + Send + Sync + 'static) {
-        let stamps = Arc::new(stamps);
         let queue: Vec<(String, String)> = projects
             .iter()
             .filter(|p| xenonet_text::text::truthy(p.get("git")))
@@ -241,90 +230,26 @@ impl RepoWatch {
             let mut g = lock(&self.inner);
             g.status.retain(|(k, _)| queue.iter().any(|(q, _)| q == k));
             g.sources.retain(|k, _| queue.iter().any(|(q, _)| q == k));
-            g.seen.retain(|k, _| queue.iter().any(|(q, _)| q == k));
+            g.drivers.clear();
             for (key, path) in &queue {
                 let clock = self.clock.clone();
                 let entry =
                     g.sources.entry(key.clone()).or_insert_with(|| (path.clone(), Arc::new(Gather::new("git-status:repo", Options { keep: true, clock, ..Default::default() }))));
-                if entry.0 != *path {
-                    // Another folder under the same key: nothing kept of the
-                    // old one stands for it.
-                    entry.0.clone_from(path);
-                    g.seen.remove(key);
-                }
+                entry.0.clone_from(path);
             }
         }
-        type Queue = Arc<Mutex<std::collections::VecDeque<(String, String)>>>;
-        let queue: Queue = Arc::new(Mutex::new(std::collections::VecDeque::from(queue)));
+        type Queue = Arc<Mutex<std::collections::VecDeque<String>>>;
+        let queue: Queue = Arc::new(Mutex::new(queue.into_iter().map(|(k, _)| k).collect()));
         let failed = Arc::new(Mutex::new(Vec::<String>::new()));
-        type Stamper = Arc<dyn Fn(&str) -> Option<git::Stamps> + Send + Sync>;
-        let worker = |me: Arc<Self>, queue: Queue, failed: Arc<Mutex<Vec<String>>>, stamps: Stamper| async move {
+        let worker = |me: Arc<Self>, queue: Queue, failed: Arc<Mutex<Vec<String>>>| async move {
             loop {
-                let Some((key, path)) = lock(&queue).pop_front() else { break };
-                let Some(source) = lock(&me.inner).sources.get(&key).map(|(_, s)| s.clone()) else { continue };
-                let p = path.clone();
-                let st = crate::runtime::util::blocking({
-                    let stamps = stamps.clone();
-                    let p = p.clone();
-                    move || stamps(&p)
-                })
-                .await;
-                let at = me.clock.now();
-                let (due, cached) = {
-                    let g = lock(&me.inner);
-                    let seen = g.seen.get(&key);
-                    let last = seen.and_then(|s| s.status.as_ref()).map(|(stamp, t)| (stamp.as_str(), *t));
-                    let due = !g.status.iter().any(|(k, _)| *k == key) || git::status_due(last, st.as_ref().map(|s| s.status.as_str()), at);
-                    let drivers = seen.and_then(|s| s.drivers.as_ref());
-                    let fresh = git::drivers_fresh(drivers.map(|(stamp, t, _)| (stamp.as_str(), *t)), st.as_ref().map(|s| s.config.as_str()), at);
-                    (due, drivers.filter(|_| fresh).map(|(_, _, args)| args.clone()))
-                };
-                if !due {
-                    continue;
-                }
-                let (me2, key2, config) = (me.clone(), key.clone(), st.as_ref().map(|s| s.config.clone()));
-                let git = me.git.clone();
-                let value = source
-                    .run(false, None, || async move {
-                        let args = match cached {
-                            Some(args) => args,
-                            None => {
-                                let args = status_args(&*git.0, &p).await.ok_or_else(|| git::unreadable(&p))?;
-                                if let Some(config) = config {
-                                    lock(&me2.inner).seen.entry(key2).or_default().drivers = Some((config, at, args.clone()));
-                                }
-                                args
-                            }
-                        };
-                        let now = me2.clock.now();
-                        status_with(&*git.0, &p, args, now).await.ok_or_else(|| git::unreadable(&p))
-                    })
-                    .await;
-                match source.last() {
-                    Some(l) if l.ok => {
-                        let mut g = lock(&me.inner);
-                        if let Some(st) = &st {
-                            g.seen.entry(key.clone()).or_default().status = Some((st.status.clone(), at));
-                        }
-                        match g.status.iter_mut().find(|(k, _)| *k == key) {
-                            Some(slot) => slot.1 = value,
-                            None => g.status.push((key, value)),
-                        }
-                    }
-                    Some(l) => {
-                        // Read it all again next pass.
-                        lock(&me.inner).seen.remove(&key);
-                        lock(&failed).push(l.error.unwrap_or_default());
-                    }
-                    None => {}
+                let Some(key) = lock(&queue).pop_front() else { break };
+                if let Err(e) = me.read(&key).await {
+                    lock(&failed).push(e);
                 }
             }
         };
-        tokio::join!(
-            worker(self.clone(), queue.clone(), failed.clone(), stamps.clone()),
-            worker(self.clone(), queue.clone(), failed.clone(), stamps.clone()),
-            worker(self.clone(), queue, failed.clone(), stamps)
-        );
+        tokio::join!(worker(self.clone(), queue.clone(), failed.clone()), worker(self.clone(), queue.clone(), failed.clone()), worker(self.clone(), queue, failed.clone()));
         let failed = lock(&failed).clone();
         let mut g = lock(&self.inner);
         g.life.count("passes", 1.0);
@@ -332,6 +257,64 @@ impl RepoWatch {
         match git::problem_of(&failed) {
             Some(p) => g.life.problem(&p, now),
             None => g.life.ok(now),
+        }
+    }
+
+    /// One repo read again, as its watch says it may have changed:
+    /// `config` when its config did, which lists its drivers again. Says
+    /// whether its status changed; false for a project the last pass
+    /// didn't read as a repo.
+    pub async fn changed(self: &Arc<Self>, key: &str, config: bool) -> bool {
+        if !self.git.0.available() || !self.knows(key) {
+            return false;
+        }
+        if config {
+            lock(&self.inner).drivers.remove(key);
+        }
+        let before = self.status_of(key);
+        if let Err(e) = self.read(key).await {
+            let mut g = lock(&self.inner);
+            let now = self.clock.now();
+            g.life.problem(&e, now);
+        }
+        self.status_of(key) != before
+    }
+
+    // A repo's status, with the drivers its config lists turned off (listed
+    // again when they aren't kept). What was read stands when git can't
+    // answer; the error says why.
+    async fn read(self: &Arc<Self>, key: &str) -> Result<(), String> {
+        let Some((path, source)) = lock(&self.inner).sources.get(key).cloned() else { return Ok(()) };
+        let cached = lock(&self.inner).drivers.get(key).cloned();
+        let (me, key2, p, git) = (self.clone(), key.to_string(), path.clone(), self.git.clone());
+        let value = source
+            .run(false, None, || async move {
+                let args = match cached {
+                    Some(args) => args,
+                    None => {
+                        let args = status_args(&*git.0, &p).await.ok_or_else(|| git::unreadable(&p))?;
+                        lock(&me.inner).drivers.insert(key2, args.clone());
+                        args
+                    }
+                };
+                let now = me.clock.now();
+                status_with(&*git.0, &p, args, now).await.ok_or_else(|| git::unreadable(&p))
+            })
+            .await;
+        match source.last() {
+            Some(l) if l.ok => {
+                let mut g = lock(&self.inner);
+                match g.status.iter_mut().find(|(k, _)| *k == key) {
+                    Some(slot) => slot.1 = value,
+                    None => g.status.push((key.to_string(), value)),
+                }
+                Ok(())
+            }
+            Some(l) => {
+                lock(&self.inner).drivers.remove(key);
+                Err(l.error.unwrap_or_default())
+            }
+            None => Ok(()),
         }
     }
 }
@@ -353,13 +336,12 @@ mod tests {
 
     /// Every git run, as its arguments.
     pub static RAN: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    static CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     fn clock() -> f64 {
-        CLOCK.load(std::sync::atomic::Ordering::SeqCst) as f64
+        0.0
     }
 
     #[tokio::test]
-    async fn git_runs_only_when_a_repo_may_have_changed() {
+    async fn git_runs_for_a_pass_and_for_a_repo_that_changed() {
         if !git_available() {
             return;
         }
@@ -372,29 +354,22 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         git(&["add", "-A"]);
         git(&["commit", "-q", "-m", "first"]);
-        let home = dir.join("home").to_string_lossy().into_owned();
         let watch = Arc::new(RepoWatch::new(Clock::new(clock), Git::default()));
         let projects = [json!({ "key": "/seen", "path": d, "git": { "origin": null } })];
         let mine = || RAN.lock().unwrap().iter().filter(|a| a.contains(d.as_str())).count();
-        let pass = |ms: u64| {
-            CLOCK.store(ms, std::sync::atomic::Ordering::SeqCst);
-            let (watch, home, projects) = (watch.clone(), home.clone(), projects.clone());
-            async move {
-                let before = mine();
-                watch.refresh_with(&projects, move |p| git::repo_stamps(p, &home, None)).await;
-                mine() - before
-            }
-        };
-        assert_eq!(pass(0).await, 2, "its drivers, then its status");
-        assert_eq!(pass(20_000).await, 0, "nothing changed");
+        let before = mine();
+        watch.refresh(&projects).await;
+        assert_eq!(mine() - before, 2, "its drivers, then its status");
         std::fs::write(dir.join("b.txt"), "b").unwrap();
         git(&["add", "b.txt"]);
-        assert_eq!(pass(40_000).await, 1, "staged: its status again, its drivers as they were");
+        let before = mine();
+        assert!(watch.changed("/seen", false).await, "staged: its status changed");
+        assert_eq!(mine() - before, 1, "its status, its drivers as they were");
         assert_eq!(watch.status_of("/seen").unwrap()["staged"], 1);
-        let later = std::time::SystemTime::now() + Duration::from_secs(5);
-        std::fs::File::options().write(true).open(dir.join(".git").join("config")).unwrap().set_modified(later).unwrap();
-        assert_eq!(pass(60_000).await, 2, "its config changed: both");
-        assert_eq!(pass(60_000 + git::STATUS_IDLE_MS as u64).await, 1, "idle long enough: its status, for edits git alone sees");
+        let before = mine();
+        assert!(!watch.changed("/seen", true).await, "nothing new");
+        assert_eq!(mine() - before, 2, "its config changed: both");
+        assert!(!watch.changed("/elsewhere", false).await, "not a repo it read");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

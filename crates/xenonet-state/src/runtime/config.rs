@@ -225,7 +225,6 @@ impl MapConfig {
         let id = xenonet_adapter::apps::sorter().map_or("", |a| a.id.as_str());
         xenonet_adapter::platforms().get(id).and_then(|p| p.program(&dirs_env(&self.env), &self.platform, &home, &mut Disk)).unwrap_or_else(|| id.to_string())
     }
-
 }
 
 // Spelled as on a unix host, where paths are posix. (Two attributes:

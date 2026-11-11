@@ -192,59 +192,13 @@ impl FactsCache {
 
 // ---------- a repo ----------
 
-/// A repo's branch and origin, and whether it's a linked worktree or a
-/// submodule, read from its git dir.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GitInfo {
-    pub branch: Option<String>,
-    pub origin: Option<String>,
-    pub worktree_of: Option<String>,
-    pub submodule_of: Option<String>,
-}
-
-impl GitInfo {
-    pub fn to_json(&self) -> Value {
-        json!({ "branch": self.branch, "origin": self.origin, "worktreeOf": self.worktree_of, "submoduleOf": self.submodule_of })
-    }
-}
-
-// /^(.*)[\\/]\.git[\\/]modules[\\/]/: what comes before a git dir's
-// .git/modules/, the last on its first line.
-fn superproject(git_dir: &str) -> Option<String> {
-    let line: &str = git_dir.split(text::is_line_terminator).next().unwrap_or("");
-    let b = line.as_bytes();
-    let sep = |c: u8| c == b'/' || c == b'\\';
-    (0..b.len())
-        .rev()
-        .find(|&i| b.len() >= i + 14 && sep(b[i]) && &b[i + 1..i + 5] == b".git" && sep(b[i + 5]) && &b[i + 6..i + 13] == b"modules" && sep(b[i + 13]))
-        .map(|i| line[..i].to_string())
-}
-
-/// What a repo's git dir says (gitInfo): None when its .git can't be read.
-pub fn git_info(dir: &str) -> Option<GitInfo> {
-    let mut git_dir = paths::join(dir, ".git");
-    let st = std::fs::metadata(&git_dir).ok()?;
-    if st.is_file() {
-        // A worktree or submodule: `.git` is a file pointing at the git dir.
-        let to = jsre::rest_after(&read_text(&git_dir, 4096).unwrap_or_default(), "gitdir:")?;
-        git_dir = nodepath::resolve(&[dir, text::trim(&to)]);
-    }
-    // A linked worktree's git dir names the main repo's .git in commondir.
-    let common = read_text(&paths::join(&git_dir, "commondir"), 4096).map(|c| text::trim(&c).to_string());
-    let common = common.filter(|c| !c.is_empty());
-    let common_dir = common.as_ref().map_or_else(|| git_dir.clone(), |c| nodepath::resolve(&[git_dir.as_str(), c.as_str()]));
-    let head = read_text(&paths::join(&git_dir, "HEAD"), 4096).unwrap_or_default();
-    let branch = match jsre::rest_after_both(&head, "ref:", "refs/heads/") {
-        Some(b) => Some(text::trim(&b).to_string()),
-        None => Some(utf16::head(text::trim(&head), 12)).filter(|b| !b.is_empty()),
-    };
-    let cfg = read_text(&paths::join(&common_dir, "config"), 16384).unwrap_or_default();
-    Some(GitInfo {
-        branch,
-        origin: jsre::origin_url(&cfg),
-        worktree_of: common.as_ref().filter(|_| nodepath::basename(&common_dir) == ".git").map(|_| nodepath::dirname(&common_dir)),
-        submodule_of: if common.is_none() { superproject(&git_dir) } else { None },
-    })
+/// What a checkout's version control says of it, as the map shows it:
+/// { branch, origin, worktreeOf, submoduleOf }, from the reader the binary
+/// installed (`xenonet_adapter::repo`). None when it isn't one.
+pub fn git_of(dir: &str) -> Option<Value> {
+    let c = xenonet_adapter::repo::checkouts().open(Path::new(dir))?;
+    let path = |p: Option<std::path::PathBuf>| p.map(|p| p.to_string_lossy().into_owned());
+    Some(json!({ "branch": c.branch, "origin": c.origin, "worktreeOf": path(c.worktree_of), "submoduleOf": path(c.submodule_of) }))
 }
 
 // ---------- what a folder is ----------
@@ -621,9 +575,9 @@ impl Scan {
                     (d, k) = next(&d, &k);
                     continue;
                 };
-                let git = if facts.vcs == Some(".git") { git_info(&d) } else { None };
-                if let Some(of) = git.as_ref().and_then(|g| g.worktree_of.as_deref()) {
-                    if paths::path_key(of).is_some_and(|wk| paths::is_under(&k, &wk)) {
+                let worktree_of = if facts.vcs == Some(".git") { xenonet_adapter::repo::checkouts().open(Path::new(&d)).and_then(|c| c.worktree_of) } else { None };
+                if let Some(of) = worktree_of {
+                    if paths::path_key(&of.to_string_lossy()).is_some_and(|wk| paths::is_under(&k, &wk)) {
                         break;
                     }
                 }
@@ -684,7 +638,7 @@ impl Scan {
         for key in kept_order.iter().filter(|k| kept.contains(*k)) {
             let f = self.get(key).expect("kept holds keys of folders this has").clone();
             let group = groups.contains(key);
-            let git = if f.facts.vcs == Some(".git") { git_info(&f.path).map(|g| g.to_json()) } else { None };
+            let git = if f.facts.vcs == Some(".git") { git_of(&f.path) } else { None };
             let (stack, description) = describe(&f.path, &f.facts);
             let modified = std::fs::metadata(&f.path).ok().and_then(|m| xenonet_os::fs::mtime_ms_of(&m).ok());
             let detected =
@@ -915,14 +869,12 @@ mod tests {
 
     #[test]
     fn reads_a_repo() {
+        xenonet_platforms::install();
         let root = tmp("repo");
         repo(&format!("{root}/app"));
-        let g = git_info(&format!("{root}/app")).unwrap();
-        assert_eq!(g.branch.as_deref(), Some("main"));
-        assert_eq!(g.origin.as_deref(), Some("git@example.com:me/app.git"));
-        assert_eq!(g.worktree_of, None);
-        assert_eq!(superproject("/p/game/.git/modules/art"), Some("/p/game".into()));
-        assert_eq!(superproject("/p/game/.git/worktrees/art"), None);
+        let g = git_of(&format!("{root}/app")).unwrap();
+        assert_eq!(g, json!({ "branch": "main", "origin": "git@example.com:me/app.git", "worktreeOf": null, "submoduleOf": null }));
+        assert_eq!(git_of(&root), None, "not a checkout");
         fs::remove_dir_all(&root).unwrap();
     }
 

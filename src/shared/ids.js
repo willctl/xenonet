@@ -120,17 +120,27 @@ export const isActorId = (id) => parseActorId(id) != null;
 
 // ---------- repos ----------
 
-// A remote as its host and path, the same for every way of writing it:
-// git@github.com:willctl/xenonet.git and https://user@github.com/willctl/xenonet
-// are both github.com/willctl/xenonet.
+// A remote as its host and path, the same for every way of writing it, as
+// xenonet-model's normalize_remote makes it: git@github.com:willctl/xenonet.git,
+// https://user@github.com/willctl/xenonet and ssh://git@github.com:22/willctl/xenonet
+// are all github.com/willctl/xenonet. The scheme's own port goes, another
+// stays; a Windows path (c:/repo) isn't a host.
 export function normalizeRemote(url) {
   if (!url) return null;
-  return url
-    .toLowerCase()
-    .replace(/^git@([^:]+):/, "$1/")
-    .replace(/^[a-z+]+:\/\//, "")
-    .replace(/^[^@/]+@/, "")
-    .replace(/\.git$/, "");
+  let s = url.toLowerCase();
+  const scheme = /^([a-z+]+):\/\//.exec(s);
+  if (scheme) s = s.slice(scheme[0].length);
+  const hostEnd = () => (s.includes("/") ? s.indexOf("/") : s.length);
+  // A user before the host, and the scheme's own port after it.
+  const at = s.slice(0, hostEnd()).lastIndexOf("@");
+  if (at >= 0) s = s.slice(at + 1);
+  const end = hostEnd();
+  const c = s.slice(0, end).indexOf(":");
+  if (c >= 0 && scheme) {
+    const own = { ssh: "22", "git+ssh": "22", "ssh+git": "22", https: "443", http: "80", git: "9418" }[scheme[1]];
+    if (own && s.slice(c + 1, end) === own) s = s.slice(0, c) + s.slice(end);
+  } else if (c > 1) s = `${s.slice(0, c)}/${s.slice(c + 1).replace(/^\/+/, "")}`;
+  return s.replace(/\.git$/, "");
 }
 
 // A project merged across hosts by its git remote: repo:github.com/willctl/xenonet.

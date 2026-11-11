@@ -348,23 +348,45 @@ text_serde!(Principal, "^(@[a-z][a-z0-9-]{1,31}:)?[a-z][a-z0-9-]*:[A-Za-z0-9][A-
 // ---------- repos ----------
 
 /// A remote as its host and path, the same for every way of writing it:
-/// `git@github.com:willctl/xenonet.git` and `https://user@github.com/willctl/xenonet`
-/// are both github.com/willctl/xenonet.
+/// `git@github.com:willctl/xenonet.git`, `https://user@github.com/willctl/xenonet`
+/// and `ssh://git@github.com:22/willctl/xenonet` are all
+/// github.com/willctl/xenonet. Lowercased, without a scheme, a user, the
+/// scheme's own port (ssh's 22, https's 443, http's 80, git's 9418) or
+/// `.git`; another port stays (`host:2222/x`). The scp form
+/// (`[user@]host:path`) names its host by more than one letter, so a
+/// Windows path (`c:/repo`) stays as it is.
 pub fn normalize_remote(url: &str) -> String {
     let mut s = url.to_lowercase();
-    if let Some(rest) = s.strip_prefix("git@") {
-        if let Some(i) = rest.find(':').filter(|&i| i > 0) {
-            s = format!("{}/{}", &rest[..i], &rest[i + 1..]);
-        }
-    }
+    let mut scheme = None;
     if let Some(i) = s.find("://") {
         if i > 0 && s[..i].bytes().all(|c| c.is_ascii_lowercase() || c == b'+') {
+            scheme = Some(s[..i].to_string());
             s = s[i + 3..].to_string();
         }
     }
-    if let Some(i) = s.find(['@', '/']) {
-        if i > 0 && s.as_bytes()[i] == b'@' {
-            s = s[i + 1..].to_string();
+    // A user before the host: what's before an @ ahead of the path.
+    let host_end = s.find('/').unwrap_or(s.len());
+    if let Some(i) = s[..host_end].rfind('@') {
+        s = s[i + 1..].to_string();
+    }
+    let host_end = s.find('/').unwrap_or(s.len());
+    if let Some(c) = s[..host_end].find(':') {
+        match &scheme {
+            Some(scheme) => {
+                let port = &s[c + 1..host_end];
+                let default = match scheme.as_str() {
+                    "ssh" | "git+ssh" | "ssh+git" => "22",
+                    "https" => "443",
+                    "http" => "80",
+                    "git" => "9418",
+                    _ => "",
+                };
+                if !default.is_empty() && port == default {
+                    s = format!("{}{}", &s[..c], &s[host_end..]);
+                }
+            }
+            None if c > 1 => s = format!("{}/{}", &s[..c], s[c + 1..].trim_start_matches('/')),
+            None => {}
         }
     }
     s.strip_suffix(".git").map(str::to_string).unwrap_or(s)
@@ -819,7 +841,14 @@ mod tests {
     fn repos() {
         assert_eq!(normalize_remote("git@github.com:willctl/XenoNet.git"), "github.com/willctl/xenonet");
         assert_eq!(normalize_remote("https://user@github.com/willctl/xenonet"), "github.com/willctl/xenonet");
-        assert_eq!(RepoId::of_remote("ssh://git@host:22/a/b.git").unwrap().to_string(), "repo:host:22/a/b");
+        assert_eq!(normalize_remote("ssh://git@github.com:22/willctl/xenonet"), "github.com/willctl/xenonet", "ssh's own port");
+        assert_eq!(normalize_remote("https://github.com:443/willctl/xenonet.git"), "github.com/willctl/xenonet", "https's own port");
+        assert_eq!(normalize_remote("ssh://git@host:2222/a/b"), "host:2222/a/b", "another port stays");
+        assert_eq!(normalize_remote("alice@host.example:team/app"), "host.example/team/app", "the scp form, any user");
+        assert_eq!(normalize_remote("host.example:/team/app.git"), "host.example/team/app");
+        assert_eq!(normalize_remote("c:/repos/app"), "c:/repos/app", "a Windows path isn't a host");
+        assert_eq!(normalize_remote("/srv/git/app.git"), "/srv/git/app");
+        assert_eq!(RepoId::of_remote("ssh://git@host:22/a/b.git").unwrap().to_string(), "repo:host/a/b");
         assert!(RepoId::of_remote("").is_none());
         assert_eq!(RepoId::parse("repo:github.com/a/b").unwrap().remote(), "github.com/a/b");
         assert!(RepoId::parse("repo:").is_err() && RepoId::parse("project:/x").is_err());

@@ -353,17 +353,74 @@ async fn runs_actors_report_are_sessions_on_the_map() {
     assert_eq!(s.live_info(&id, now_ms()).expect("its info").map(|i| i["status"].clone()), Some(json!("working")));
 }
 
-#[test]
-fn a_page_written_in_the_wiki_changes_its_stamp() {
-    let dir = std::env::temp_dir().join(format!("xenonet-state-wiki-{}", std::process::id()));
-    std::fs::create_dir_all(dir.join("pages")).expect("a folder");
-    let d = dir.to_string_lossy().into_owned();
-    let before = wiki_stamp(&d);
-    std::fs::write(dir.join("pages").join("atlas.md"), "# Atlas\n").expect("a page");
-    let after = wiki_stamp(&d);
-    assert_ne!(before, after);
-    assert_eq!(after, wiki_stamp(&d), "the same until it changes");
-    std::fs::remove_dir_all(&dir).expect("cleaned up");
+// A repo in a made-up home folder: once the map has it, its head and refs
+// are watched, and a branch made and checked out is read without a poll.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repos_watch_reads_it_again_when_its_head_moves() {
+    if !crate::runtime::git::git_available() {
+        return;
+    }
+    let home = std::env::temp_dir().join(format!("xenonet-state-repo-watch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let p = home.join("Projects").join("atlas");
+    std::fs::create_dir_all(&p).expect("a project");
+    let git = |args: &[&str]| {
+        use xenonet_os::process::Background as _;
+        std::process::Command::new("git").no_window().args(xenonet_demo::GIT).args(args).current_dir(&p).output().expect("git")
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(p.join("a.txt"), "a").expect("a file");
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "first"]);
+    let home_s = std::fs::canonicalize(&home).expect("the home").to_string_lossy().into_owned();
+    let mut env = process_env();
+    env.insert("XENONET_CODEX_BIN".into(), json!("/nonexistent/codex"));
+    env.insert("XENONET_CLAUDE_USAGE".into(), json!("off"));
+    env.insert("XENONET_IDENTITIES".into(), json!("off"));
+    env.insert("XENONET_CLAUDE_DESKTOP_DIR".into(), json!(home.join("no-desktop").to_string_lossy()));
+    env.insert("XENONET_STATE_DIR".into(), json!(home.join(".state").to_string_lossy()));
+    env.insert("XENONET_CACHE_DIR".into(), json!(home.join(".cache").to_string_lossy()));
+    env.insert("XENONET_WIKI_DIR".into(), json!(home.join("wiki").to_string_lossy()));
+    env.insert("HOME".into(), json!(home_s));
+    for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XENONET_PROJECTS_DIR", "XENONET_READERS", "XENONET_NUMBAT_FILE", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"] {
+        env.shift_remove(k);
+    }
+    xenonet_platforms::install();
+    let cfg = MapConfig::new(false, false, env, &home_s, None);
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+    let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
+    let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
+    let s = MapState::new(cfg, crate::runtime::saved::in_memory(), vendor, &WireEnv::new("0.0.0"), Readers::Real, live);
+    s.begin().await.expect("begun");
+    let branch = || s.repo_status().into_iter().find(|(k, _)| k.ends_with("/atlas")).and_then(|(_, v)| v["branch"].as_str().map(str::to_string));
+    let started = std::time::Instant::now();
+    while branch().is_none() {
+        assert!(started.elapsed() < Duration::from_secs(30), "the first pass read the repo");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(branch().as_deref(), Some("main"));
+    let key = s.repo_status().into_iter().map(|(k, _)| k).find(|k| k.ends_with("/atlas")).expect("its key");
+    let up = std::time::Instant::now();
+    while !s.live.watched().contains(&format!("git:{key}")) {
+        assert!(up.elapsed() < Duration::from_secs(30), "the repo is watched: {:?}", s.live.watched());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    git(&["checkout", "-q", "-b", "dev"]);
+    let moved = std::time::Instant::now();
+    let mut poke = moved;
+    while branch().as_deref() != Some("dev") {
+        assert!(moved.elapsed() < Duration::from_secs(60), "the checkout was read");
+        // FSEvents on a busy Mac can lag: HEAD written again is another
+        // event to deliver.
+        if poke.elapsed() > Duration::from_secs(3) {
+            std::fs::write(p.join(".git").join("HEAD"), "ref: refs/heads/dev\n").expect("HEAD");
+            poke = std::time::Instant::now();
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    eprintln!("a checkout reached the repo's status in {:?}", moved.elapsed());
+    s.end();
+    std::fs::remove_dir_all(&home).expect("cleaned up");
 }
 
 // A made-up home folder, not the demo: a project with a repo, Claude

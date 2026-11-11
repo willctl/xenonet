@@ -17,7 +17,15 @@ fn hex(bytes: &[u8]) -> String {
 
 fn answers() -> Value {
     let salt = [0x5a_u8; 32];
-    let remotes = ["git@github.com:willctl/xenonet.git", "https://github.com/willctl/XenoNet", "ssh://git@gitlab.example:22/team/atlas.git"];
+    let remotes = [
+        "git@github.com:willctl/xenonet.git",
+        "https://github.com/willctl/XenoNet",
+        "ssh://git@github.com:22/willctl/xenonet",
+        "https://user@github.com:443/willctl/xenonet.git",
+        "ssh://git@gitlab.example:22/team/atlas.git",
+        "ssh://git@gitlab.example:2222/team/atlas.git",
+        "alice@gitlab.example:team/atlas",
+    ];
     let projects: Vec<Value> = remotes
         .iter()
         .map(|r| {

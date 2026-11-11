@@ -105,6 +105,18 @@ impl Observed {
             .collect()
     }
 
+    /// What to watch for it to have something new: its folder, or its
+    /// file and the database's journal and write-ahead log beside it (never
+    /// the shared memory, which a read of the database writes).
+    pub fn watch(&self) -> Vec<xenonet_adapter::watch::WatchSpec> {
+        use xenonet_adapter::watch::WatchSpec;
+        let p = std::path::Path::new(&self.path);
+        if p.is_dir() {
+            return vec![WatchSpec::tree(self.source, p, &[])];
+        }
+        WatchSpec::file(self.source, p, &["-wal", "-journal"]).into_iter().collect()
+    }
+
     /// Reads what's new; a problem is the block's to say, never thrown.
     pub fn read(&self) {
         let now = self.clock.now();

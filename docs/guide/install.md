@@ -90,6 +90,6 @@ The `.pkg` works the same way. You do this once for each new version.
 
 ### What's different on a Mac
 
-- XenoNet checks repos with git. If git comes from Apple's Command Line Tools and they aren't installed, XenoNet leaves repo status off, rather than opening the tools' installer every 20 seconds. Run `xcode-select --install`, or install git with Homebrew, and restart XenoNet.
+- XenoNet checks repos with git. If git comes from Apple's Command Line Tools and they aren't installed, XenoNet leaves repo status off, rather than opening the tools' installer each time it reads a repo. Run `xcode-select --install`, or install git with Homebrew, and restart XenoNet.
 - Opened from Finder, apps get a bare `PATH`. XenoNet reads your login shell's `PATH` once at startup. So XenoNet and its terminal find `codex`, Homebrew and anything else your shell profile sets up.
 - macOS asks before any app reads Documents, Desktop, Downloads or external drives. XenoNet asks only if your projects or sessions live there, or when you work there in its terminal.

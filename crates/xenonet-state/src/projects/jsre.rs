@@ -110,59 +110,6 @@ pub(crate) fn rest_after(text: &str, prefix: &str) -> Option<String> {
     None
 }
 
-/// /PREFIX\s*LITERAL(.+)/.exec(text)?.[1], for a literal that starts with
-/// something other than white space.
-pub(crate) fn rest_after_both(text: &str, prefix: &str, literal: &str) -> Option<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let n = chars.len();
-    for start in 0..n {
-        if !at(&chars, start, prefix) {
-            continue;
-        }
-        let i = skip_space(&chars, start + prefix.chars().count());
-        if !at(&chars, i, literal) {
-            continue;
-        }
-        let k = i + literal.chars().count();
-        let e = (k..n).find(|&e| is_line_terminator(chars[e])).unwrap_or(n);
-        if e > k {
-            return Some(text_of(&chars, k, e));
-        }
-    }
-    None
-}
-
-/// /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/.exec(text)?.[1]: the origin's
-/// url in a git config.
-pub(crate) fn origin_url(text: &str) -> Option<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let n = chars.len();
-    const HEAD: &str = "[remote \"origin\"]";
-    for h in 0..n {
-        if !at(&chars, h, HEAD) {
-            continue;
-        }
-        let mut i = h + HEAD.chars().count();
-        while i < n && chars[i] != '[' {
-            if at(&chars, i, "url") {
-                let j = skip_space(&chars, i + 3);
-                if chars.get(j) == Some(&'=') {
-                    let k = skip_space(&chars, j + 1);
-                    let mut e = k;
-                    while e < n && !is_space(chars[e]) {
-                        e += 1;
-                    }
-                    if e > k {
-                        return Some(text_of(&chars, k, e));
-                    }
-                }
-            }
-            i += 1;
-        }
-    }
-    None
-}
-
 /// Whether some line of a text holds `literal` after nothing but white
 /// space: /^\s*LITERAL/m.
 pub(crate) fn line_starts_with(text: &str, literal: &str) -> bool {
@@ -218,16 +165,6 @@ mod tests {
         assert_eq!(rest_after("nothing", "gitdir:"), None);
         assert_eq!(rest_after("gitdir:", "gitdir:"), None);
         assert_eq!(rest_after("gitdir:  ", "gitdir:").as_deref(), Some(" "));
-        assert_eq!(rest_after_both("ref: refs/heads/main\n", "ref:", "refs/heads/").as_deref(), Some("main"));
-        assert_eq!(rest_after_both("ref: refs/heads/\nref:refs/heads/b", "ref:", "refs/heads/").as_deref(), Some("b"));
-    }
-
-    #[test]
-    fn finds_the_origin() {
-        let cfg = "[core]\n\turl = no\n[remote \"origin\"]\n\tfetch = x\n\turl = git@example.com:me/app.git\n";
-        assert_eq!(origin_url(cfg).as_deref(), Some("git@example.com:me/app.git"));
-        assert_eq!(origin_url("[remote \"origin\"]\n[remote \"x\"]\nurl = a"), None);
-        assert_eq!(origin_url("[remote \"origin\"]\npushurl = a\nurl = b").as_deref(), Some("a"));
     }
 
     #[test]
