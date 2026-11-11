@@ -18,6 +18,8 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+# A2A 1.0's types, which the A2A door reads and answers in (a2a/).
+a2a-lf.workspace = true
 xenonet-console.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
@@ -30,6 +32,10 @@ hyper-util.workspace = true
 portable-pty = "0.9"
 reqwest.workspace = true
 serde_json.workspace = true
+# a2a-lf's request types, read from the JSON-RPC params with the field
+# a request fails at named.
+serde.workspace = true
+serde_path_to_error.workspace = true
 tokio.workspace = true
 # The core traits, settings and event sink it shares with the drivers.
 xenonet-api.workspace = true

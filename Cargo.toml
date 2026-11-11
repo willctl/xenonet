@@ -66,6 +66,11 @@ agent-client-protocol = "=5.2.0"
 # through it).
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 xenonet-git = { path = "adapters/git" }
+# A2A 1.0's types (a2aproject/a2a-rs, Apache-2.0): the Agent Card, messages,
+# tasks, stream events and error codes, for A2A in at the front door and A2A
+# out to other agents. The types alone: not a2a-client-lf, which brings
+# gRPC and a prebuilt protoc. 0.x, so pinned exactly.
+a2a-lf = "=0.4.2"
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
 regex = "1"

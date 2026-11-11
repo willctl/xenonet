@@ -25,6 +25,11 @@
 //!   client that started it goes away.
 //! - **No outbound calls**: no push notifications.
 //!
+//! The objects are a2a-lf's (the a2aproject's types for A2A 1.0): the card,
+//! the requests, tasks, messages, artifacts, stream events and error codes.
+//! XenoNet's own checks run on the JSON first, so a request a2a-lf would
+//! read loosely (a part with two kinds) is still refused as before.
+//!
 //! The tasks are kept in the store (`xenonet_store::a2a`), with the switch,
 //! which is off until the owner turns it on in the Actors panel
 //! (xenonet-http's routes/a2a.rs, through parts.rs).
@@ -39,6 +44,8 @@ use crate::actor_caller::{Rate, BUCKETS};
 use crate::borrowed::{attest, platform, random_uuid, Sender};
 use crate::cores::{Actors, Engine};
 use crate::http::{parse_target, Reply, ReplyBody};
+use ::a2a::methods;
+use ::a2a::{CancelTaskRequest, GetTaskRequest, ListTasksRequest, ListTasksResponse, SubscribeToTaskRequest};
 use bytes::Bytes;
 use card::CardSettings;
 use rpc::{json_reply, result, sse_error, sse_frame, sse_headers, RpcError};
@@ -350,7 +357,7 @@ impl A2a {
             Ok(x) => x,
             Err((id, e)) => return json_reply(200, &e.to_json(&id), &[]),
         };
-        let streaming = matches!(method.as_str(), "SendStreamingMessage" | "SubscribeToTask");
+        let streaming = methods::is_streaming(&method);
         let fail = |e: RpcError| if streaming { sse_error(&id, &e) } else { json_reply(e.status, &e.to_json(&id), &[]) };
         let (_, query) = parse_target(&req.target);
         let asked = rpc::asked_version(&req.headers, &query);
@@ -358,16 +365,14 @@ impl A2a {
             return fail(RpcError::version(&asked));
         }
         let answer = match method.as_str() {
-            "SendMessage" => self.send_message(actor, &params).await,
-            "GetTask" => self.get_task(actor, &params).await,
-            "ListTasks" => self.list_tasks(actor, &params).await,
-            "CancelTask" => self.cancel_task(actor, &params).await,
-            "SendStreamingMessage" => return self.send_streaming(actor, id.clone(), &params).unwrap_or_else(fail),
-            "SubscribeToTask" => return self.subscribe(actor, id.clone(), &params).await.unwrap_or_else(fail),
-            "CreateTaskPushNotificationConfig" | "GetTaskPushNotificationConfig" | "ListTaskPushNotificationConfigs" | "DeleteTaskPushNotificationConfig" => {
-                Err(RpcError::push_not_supported())
-            }
-            "GetExtendedAgentCard" => Err(RpcError::unsupported("XenoNet has no extended Agent Card; the public one says it all")),
+            methods::SEND_MESSAGE => self.send_message(actor, &params).await,
+            methods::GET_TASK => self.get_task(actor, &params).await,
+            methods::LIST_TASKS => self.list_tasks(actor, &params).await,
+            methods::CANCEL_TASK => self.cancel_task(actor, &params).await,
+            methods::SEND_STREAMING_MESSAGE => return self.send_streaming(actor, id.clone(), &params).unwrap_or_else(fail),
+            methods::SUBSCRIBE_TO_TASK => return self.subscribe(actor, id.clone(), &params).await.unwrap_or_else(fail),
+            methods::CREATE_PUSH_CONFIG | methods::GET_PUSH_CONFIG | methods::LIST_PUSH_CONFIGS | methods::DELETE_PUSH_CONFIG => Err(RpcError::push_not_supported()),
+            methods::GET_EXTENDED_AGENT_CARD => Err(RpcError::unsupported("XenoNet has no extended Agent Card; the public one says it all")),
             other => Err(RpcError::method_not_found(other)),
         };
         match answer {
@@ -383,9 +388,11 @@ impl A2a {
         Ok((t, r))
     }
 
-    fn task_param(params: &Value) -> Result<String, RpcError> {
+    /// A request that names a task, as a2a-lf's type for it, once the id
+    /// is there.
+    fn task_param<T: serde::de::DeserializeOwned>(params: &Value) -> Result<T, RpcError> {
         match params.get("id") {
-            Some(Value::String(s)) if !s.is_empty() => Ok(s.clone()),
+            Some(Value::String(s)) if !s.is_empty() => rpc::typed(params),
             _ => Err(RpcError::invalid_params("id", "the task's id is required")),
         }
     }
@@ -407,12 +414,12 @@ impl A2a {
             self.follow(actor, &id, (String::new(), 0), deadline, &mut |_| true).await;
         }
         let (t, r) = self.load(&actor.id, &id)?;
-        Ok(json!({ "task": tasks::task(&t, &r, Shown { history: config.history, artifacts: true }) }))
+        Ok(tasks::task_event(&t, &r, Shown { history: config.history, artifacts: true }))
     }
 
     async fn get_task(self: &Arc<Self>, actor: &A2aActor, params: &Value) -> Result<Value, RpcError> {
-        let id = Self::task_param(params)?;
         let history = tasks::history_length(params.get("historyLength"), "historyLength")?;
+        let GetTaskRequest { id, .. } = Self::task_param(params)?;
         self.sync_now(&actor.id).await;
         let (t, r) = self.load(&actor.id, &id)?;
         Ok(tasks::task(&t, &r, Shown { history, artifacts: true }))
@@ -450,11 +457,18 @@ impl A2a {
             Some(_) => return Err(RpcError::invalid_params("statusTimestampAfter", "must be an ISO 8601 time")),
         };
         let history = tasks::history_length(params.get("historyLength"), "historyLength")?;
-        let artifacts = match params.get("includeArtifacts") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(b)) => *b,
-            Some(_) => return Err(RpcError::invalid_params("includeArtifacts", "must be a boolean")),
-        };
+        if !matches!(params.get("includeArtifacts"), None | Some(Value::Null | Value::Bool(_))) {
+            return Err(RpcError::invalid_params("includeArtifacts", "must be a boolean"));
+        }
+        // The rest as a2a-lf's request reads it. The time after which is
+        // read as XenoNet reads a time (ECMAScript's form, which is wider
+        // than RFC 3339) and handed on in RFC 3339.
+        let mut typed = params.clone();
+        if let Some(at) = after {
+            typed["statusTimestampAfter"] = json!(xenonet_text::time::iso(at));
+        }
+        let req: ListTasksRequest = rpc::typed(&typed)?;
+        let artifacts = req.include_artifacts.unwrap_or(false);
         self.sync_now(&actor.id).await;
         let s = self.store.locked();
         let (mut rows, total) = s.list(&actor.id, &store::Filter { context, state, after, cursor, limit: size + 1 }).map_err(|e| db(&e))?;
@@ -466,11 +480,16 @@ impl A2a {
             let r = s.replies(&t.id).map_err(|e| db(&e))?;
             list.push(tasks::task(t, &r, Shown { history, artifacts }));
         }
-        Ok(json!({ "tasks": list, "nextPageToken": next, "pageSize": size, "totalSize": total }))
+        let page =
+            ListTasksResponse { tasks: Vec::new(), next_page_token: next, page_size: i32::try_from(size).unwrap_or(50), total_size: i32::try_from(total).unwrap_or(i32::MAX) };
+        let mut out = serde_json::to_value(page).map_err(|e| RpcError::internal(&e.to_string()))?;
+        // Each task is a2a-lf's Task, stamped as XenoNet writes times.
+        out["tasks"] = Value::Array(list);
+        Ok(out)
     }
 
     async fn cancel_task(self: &Arc<Self>, actor: &A2aActor, params: &Value) -> Result<Value, RpcError> {
-        let id = Self::task_param(params)?;
+        let CancelTaskRequest { id, .. } = Self::task_param(params)?;
         self.sync_now(&actor.id).await;
         let (t, _) = self.load(&actor.id, &id)?;
         if store::terminal(&t.state) {
@@ -516,7 +535,7 @@ impl A2a {
     }
 
     async fn subscribe(self: &Arc<Self>, actor: &A2aActor, id: Value, params: &Value) -> Result<Reply, RpcError> {
-        let task = Self::task_param(params)?;
+        let SubscribeToTaskRequest { id: task, .. } = Self::task_param(params)?;
         self.sync_now(&actor.id).await;
         let (t, _) = self.load(&actor.id, &task)?;
         if store::terminal(&t.state) {
@@ -546,7 +565,7 @@ impl A2a {
         };
         let known = match self.load(&actor.id, &task) {
             Ok((t, r)) => {
-                send(json!({ "task": tasks::task(&t, &r, Shown::ALL) }));
+                send(tasks::task_event(&t, &r, Shown::ALL));
                 (t.state, r.len())
             }
             Err(e) => {

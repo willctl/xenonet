@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "a2a-lf"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9bdc39f79399c01ec4df5da3b653e31b3bac52214ca3d8331d6f059c273b5b8"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "acto"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -410,8 +424,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -5773,6 +5789,7 @@ dependencies = [
 name = "xenonet-service"
 version = "0.2.0"
 dependencies = [
+ "a2a-lf",
  "async-trait",
  "bytes",
  "getrandom 0.3.4",
@@ -5782,7 +5799,9 @@ dependencies = [
  "portable-pty",
  "reqwest",
  "rusqlite",
+ "serde",
  "serde_json",
+ "serde_path_to_error",
  "tokio",
  "xenonet-actors",
  "xenonet-adapter",

@@ -3,7 +3,9 @@
 //! the JSON-RPC binding at `<address>/a2a`, for version 1.0 only; a gateway
 //! token as HTTP bearer; streaming, and no push notifications.
 
-use serde_json::{json, Value};
+use ::a2a::{AgentCapabilities, AgentCard, AgentInterface, AgentSkill, HttpAuthSecurityScheme, SecurityScheme, TRANSPORT_PROTOCOL_JSONRPC};
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// What the card says beyond its address.
 #[derive(Clone, Debug)]
@@ -36,40 +38,54 @@ pub fn host_of(public_address: &str) -> String {
 }
 
 /// The 1.0 Agent Card for XenoNet at `public_address` (an origin such as
-/// `https://mac.example.ts.net`).
-pub fn agent_card(settings: &CardSettings, public_address: &str) -> Value {
+/// `https://mac.example.ts.net`), as a2a-lf's `AgentCard`.
+pub fn card(settings: &CardSettings, public_address: &str) -> AgentCard {
     let base = origin(public_address);
-    json!({
-        "name": format!("XenoNet on {}", settings.name),
-        "description": "Reach the coding sessions (Claude Code, Codex and others) that XenoNet connects here. Each A2A agent is an actor with its own token and scopes: it reaches only the sessions its user allowed, and a session's reply is the result of the agent's task.",
-        "supportedInterfaces": [{ "url": format!("{base}{PATH}"), "protocolBinding": "JSONRPC", "protocolVersion": super::rpc::VERSION }],
-        "version": settings.version,
-        "documentationUrl": DOCS,
-        "capabilities": { "streaming": true, "pushNotifications": false, "extendedAgentCard": false },
-        "securitySchemes": {
-            SCHEME: { "httpAuthSecurityScheme": { "scheme": "Bearer", "description": "A gateway token made in XenoNet's window for this agent, sent as Authorization: Bearer <token>" } }
-        },
-        "securityRequirements": [{ "schemes": { SCHEME: { "list": [] } } }],
-        "defaultInputModes": ["text/plain"],
-        "defaultOutputModes": ["text/plain"],
-        "skills": [{
-            "id": SKILL,
-            "name": "Message a coding session",
-            "description": "Sends your message to a session your scope allows, and the session's reply completes the task. Name the session in the message's metadata as \"target\": its id (claude:…, codex:…), or repo:<name> for the sessions in that repo. With no target, the message goes to your default target, or, in a context you used before, back to whoever answered last. A context is one XenoNet thread. Text parts only.",
-            "tags": ["coding", "sessions", "messages", "claude-code", "codex"],
-            "examples": [
-                "{\"message\": {\"role\": \"ROLE_USER\", \"parts\": [{\"text\": \"Which branch has the login fix?\"}], \"metadata\": {\"target\": \"repo:atlas\"}}}",
-                "Ask the session working on the docs site whether the build is green."
-            ],
-            "inputModes": ["text/plain"],
-            "outputModes": ["text/plain"]
-        }]
-    })
+    let text = || vec!["text/plain".to_string()];
+    let bearer = HttpAuthSecurityScheme {
+        scheme: "Bearer".into(),
+        description: Some("A gateway token made in XenoNet's window for this agent, sent as Authorization: Bearer <token>".into()),
+        bearer_format: None,
+    };
+    AgentCard {
+        name: format!("XenoNet on {}", settings.name),
+        description: "Reach the coding sessions (Claude Code, Codex and others) that XenoNet connects here. Each A2A agent is an actor with its own token and scopes: it reaches only the sessions its user allowed, and a session's reply is the result of the agent's task.".into(),
+        version: settings.version.clone(),
+        supported_interfaces: vec![AgentInterface::new(format!("{base}{PATH}"), TRANSPORT_PROTOCOL_JSONRPC)],
+        capabilities: AgentCapabilities { streaming: Some(true), push_notifications: Some(false), extensions: None, extended_agent_card: Some(false) },
+        default_input_modes: text(),
+        default_output_modes: text(),
+        skills: vec![AgentSkill {
+            id: SKILL.into(),
+            name: "Message a coding session".into(),
+            description: "Sends your message to a session your scope allows, and the session's reply completes the task. Name the session in the message's metadata as \"target\": its id (claude:…, codex:…), or repo:<name> for the sessions in that repo. With no target, the message goes to your default target, or, in a context you used before, back to whoever answered last. A context is one XenoNet thread. Text parts only.".into(),
+            tags: ["coding", "sessions", "messages", "claude-code", "codex"].map(str::to_string).to_vec(),
+            examples: Some(vec![
+                "{\"message\": {\"role\": \"ROLE_USER\", \"parts\": [{\"text\": \"Which branch has the login fix?\"}], \"metadata\": {\"target\": \"repo:atlas\"}}}".into(),
+                "Ask the session working on the docs site whether the build is green.".into(),
+            ]),
+            input_modes: Some(text()),
+            output_modes: Some(text()),
+            security_requirements: None,
+        }],
+        provider: None,
+        documentation_url: Some(DOCS.into()),
+        icon_url: None,
+        security_schemes: Some(HashMap::from([(SCHEME.to_string(), SecurityScheme::HttpAuth(bearer))])),
+        security_requirements: Some(vec![HashMap::from([(SCHEME.to_string(), Vec::new())])]),
+        signatures: None,
+    }
+}
+
+/// The card as the front door answers it.
+pub fn agent_card(settings: &CardSettings, public_address: &str) -> Value {
+    serde_json::to_value(card(settings, public_address)).unwrap_or(Value::Null)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn origins_from_addresses() {
