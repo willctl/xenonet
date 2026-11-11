@@ -135,3 +135,148 @@ in files rather than in `xenonet.sqlite`:
 `write_atomic` writes through a temporary file and a rename, so a crash
 can't leave half a file. What XenoNet keeps of its own lives in the store
 ([rust-core.md](rust-core.md), `xenonet-store`).
+
+## The golden tests
+
+`crates/xenonet-state/tests/golden.rs` pins what XenoNet makes of a fixed
+world, the demo's world and the odd transcripts it adds, frozen in
+`crates/xenonet-state/tests/fixtures/golden-world`: the live tailer's state
+and history, and lines as they come; each session's stats; the search
+index; the map's refresh; and the projects scan. The clock is fixed at
+2026-10-03 12:00 UTC and every file's mtime is set, so the world comes out
+the same every run. Made-up transcripts add what the demo never writes
+(bad, missing and numeric timestamps, lines that aren't JSON or aren't
+objects, meta and compacted lines, slash commands, a message in two
+lines, Codex's other line types, an archived `.jsonl.zst` rollout).
+
+`XENONET_GOLDEN_OUT=<dir>` writes what came out to
+`<dir>/golden-<name>.json`, to diff with `tests/golden/<name>.json`.
+Change a golden file only for a change meant to change what XenoNet
+produces, and say so in the commit.
+
+## Where the three transcript readers agree, and where they don't
+
+The live tailer, a session's stats and search read the same lines through
+the same normalizers, as one stream of events
+([vendor-layer.md](vendor-layer.md), "One event stream"), as the refusals
+do: the mapper makes what they agree on, and each keeps its own way over
+the events. They agree that:
+
+- A line whose time can't be read is left out of stats and search; the
+  live tailer takes it as written when it's read.
+- A compacted summary and an interruption aren't prompts in any of them.
+- A Codex rollout's prompts are its completed user messages
+  (`item_completed` UserMessage), not the `user_message` events and user
+  response items that may say the same again. A rollout with no completed
+  user message at all (`codex exec` writes none) takes its prompts from
+  its `user_message` events.
+- Codex user messages that are blank (an image alone) or start with `<`
+  (a delegation envelope, a note Codex wrote for itself) aren't prompts
+  (`is_codex_prompt` in `xenonet-sources`' `lines`).
+- A Codex shell call's output ends the call.
+- A Claude Code interruption, or a Codex turn you aborted (`turn_aborted`
+  with the reason `interrupted`, or none), ends the turn under way in the
+  live tailer: a `turn-end` marked `interrupted`, and the session's
+  `interruptedAt` until its next prompt, with no `needsYou`, so it isn't
+  ready for review and doesn't chime. `replaced` and `review_ended`
+  aren't you stopping it.
+- A line that's JSON but not an object is dropped by the lenient readers
+  for all three, and kept as drift.
+
+Where they read a line differently, each keeps its own way:
+
+### Claude Code transcripts
+
+| What | live | stats | search |
+|---|---|---|---|
+| A line whose time can't be read: none, one that can't be parsed as a date, or a number | Written when it's read | Left out | Left out |
+| Line kinds | `user`, `assistant` | `user`, `assistant`; a compacted summary is a compaction | `user` (not meta), `assistant` |
+| A user line's text | Text blocks joined with spaces | The same | Every block's text joined with newlines (an image adds an empty line) |
+| What's a prompt | Not meta, a compacted summary or an interruption (`[Request interrupted…`); not starting with `<`; a sidechain line only in a subagent's file, where the first names the subagent | Not meta, sidechain, a compacted summary or an interruption; a slash command as `/name args`; not `<…`; a subagent's first line is its task | Everything but compacted summaries, interruptions, `<…` and `# AGENTS.md…`; sidechain lines as role `subagent` |
+| A compacted summary, an interruption | A compacted summary is left out. An interruption ends the turn under way, unless it's in a subagent's file | A compaction; left out | Left out |
+| Assistant text | Each text block a message (main file only) | None | Text blocks joined with newlines |
+| A user line with tool results | Each result | Each result | Skipped whole, read only as far as its first result |
+| A message's usage | Once per id; the last 400 ids per session | Once per id, all of them | None |
+| Subagent files | `<id>/subagents/agent-<agent>.jsonl` | Any `.jsonl` in `<id>/subagents/`, `agent-` dropped from the id | Any `.jsonl` under `<id>/subagents/` |
+
+### Codex rollouts
+
+| What | live | stats | search |
+|---|---|---|---|
+| A line whose time can't be read | Written when it's read | Left out | Left out |
+| Prompts | Completed user messages, joined with spaces. In a rollout with none, its `user_message` events, until its first completed one: an event just before that message in the same turn is one prompt, not two. Not blank, not starting with `<` | Completed user messages, or in a rollout with none at all, its `user_message` events, read from the whole file. Not blank, not starting with `<` | The same as stats, joined with newlines, and not `# AGENTS.md…` either; the same text in a file is indexed once. A rollout is indexed by its events while it has no completed user message, and again, whole, once it has one |
+| A turn you stopped | `turn_aborted` with the reason `interrupted`, or none, ends the turn under way | None | None |
+| Agent messages | `item_completed` AgentMessage (spaces), `task_complete`'s last message | None | AgentMessage (newlines), `agent_message`, `response_item` message (role assistant) |
+| Tool calls | `function_call`, `custom_tool_call` and `local_shell_call` start one, and their outputs end it (by `call_id`, else `id`) | The same; a `local_shell_call`, which has no name, is a shell call | None |
+| Commands, MCP calls, file changes, web searches, images, subagents | From `item_completed`; a web search with an empty query shows its action's; a subagent is done once its activity says it completed or was interrupted, until it's given more | None | None |
+| Tokens | The growth of `total_token_usage`, with its `output_tokens` as the output, since OpenAI counts reasoning inside it. The context from `last_token_usage` | A call each time `total_token_usage` grows, priced from `last_token_usage`'s parts | None |
+| Model | `turn_context`'s model | `turn_context`'s model and effort; the service tier from the thread's settings (`thread_settings_applied`), or from `turn_context` in older rollouts; `session_meta`'s provider (a provider other than OpenAI names the model) | None |
+| Rate limits | `token_count`'s `rate_limits`, in XenoNet's shape (`limits.codex`: each window's `pct`, `windowMinutes` and `resetsAt` in ms) | None | None |
+| Archived and compressed rollouts | Not read | Read | Read |
+
+One difference comes of the live tailer reading lines as they come: in a
+rollout whose first completed user message comes turns later (an old one
+picked up again), it keeps those earlier turns' prompts from their
+events, which stats and search, reading the whole file, leave out.
+
+### Grok Build updates
+
+Grok Build streams what you and the agent say as chunks, one ACP update a
+line (`user_message_chunk`, `agent_message_chunk`,
+`agent_thought_chunk`), and a run of chunks of one kind is one message.
+The mapper reads a line at a time, so it keeps the run open in its file
+state (its kind, a key, and its text so far), and the readers agree on
+this:
+
+- A run's first chunk makes the message's events, with that chunk's text,
+  as a Claude Code line would: a prompt, or a reply's call and words (its
+  text, or a thought as a thinking block).
+- Each chunk after it makes `More`: what it carries on (prompt, text or
+  thinking), its own text, and the message's text so far (the chunks
+  joined as written). Each reader puts the whole text in place of what it
+  kept of the message, or keeps it then, when the run's first chunks had
+  nothing in them.
+- A run goes on past the updates that say nothing of the conversation (the
+  context's fill, the plan, the mode, the commands). Any other line ends
+  it: a chunk of another kind, a tool call or its update, or one of Grok's
+  own updates (its turn's end is one). So does a chunk of another key: a
+  prompt of another `promptIndex`, a chunk you didn't ask (a host turn, a
+  shell command), and each interjection's text, as Grok's own replay
+  splits them.
+
+| What | live | stats | search |
+|---|---|---|---|
+| A prompt | Its whole text (`prompts`, `firstPrompt`), and a turn begins at its first chunk with something in it | Its whole text, trimmed, names its turn | One record, its whole text |
+| A reply | Its whole text (`messages`, `lastMessage`) | None | One record, its whole text, rewritten as its chunks come |
+| A thought | None | None | None, as Claude Code's thinking isn't indexed |
+| Its chunks after the first | Each counts as a line of the turn (`lastEventAt`) | None | The record's text grows; the same text in a file is indexed once, as far as it's gone |
+| The activity feed | A message is named once, by its text when it's first kept: its first chunk's, clipped | None | None |
+| A run a read leaves open | The tailer keeps the run as the lines come | Read whole | Kept in the search index's files table, and the next read goes on with it |
+
+The console's transcript of a Grok session
+(`adapters/grok-build/src/reader/entries.rs`) reads the same events: a run
+is one entry at its first chunk's time, with its whole text, and a thought
+shows as reasoning, folded, as Claude Code's thinking does.
+
+The console shows a Codex thread from the app-server's
+`thread/items/list`, and when it can't have that (the app-server may not
+list items, or not start at all), from the thread's rollout, read through
+the same normalizer: its completed items, each as the app-server's would
+show, or for a rollout without any what was said and each call and its
+output. The rollout is read whole the first time and then only what's
+been added: an offset and a half-written last line kept as bytes, as the
+tailer reads; a rollout written again is read from the start, a
+compressed archive is read whole again only when it changes, and one read
+happens at a time.
+
+## Lenient reading and drift
+
+The normalizers' hooks are set for every transcript line the three
+readers read: each line is counted, its file's version followed, a sample
+checked against the vendor schema (the 1st, 2nd, 4th, 8th… line of each
+kind in each file), and the rest guarded for type changes found before. A
+field of another type is taken out of the record before the reader reads
+it, so the readers fall back the way they do for a missing field; a line
+that isn't an object is dropped. [schemas.md](schemas.md), "Vendor data",
+has the rest: the sources, the sampling, drift records, `drift.json`, the
+report and the doctor's check.
