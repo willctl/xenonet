@@ -36,6 +36,9 @@
 //
 // xenonet-adapter is the registry itself, and adapters (adapters/*) may
 // name their own platform; the demo names the apps it makes sessions for.
+// A generic adapter (GENERIC: one protocol, for whichever apps the
+// registry names, as xenonet-acp is) may not: it's held to the core's rule
+// on literals, and depends on no platform's adapter, surface or root.
 // Test code is left out: what follows a `#[cfg(test)]`, files a test
 // module includes (`#[cfg(test)] #[path = "…"] mod …;`), tests/, and
 // dev-dependencies. So are attribute lines (`#[serde(…)]`,
@@ -69,6 +72,8 @@ const ROOT = new Set(["xenonet-service", "xenonet-cli"]);
 const DEMO_USERS = new Set([...Object.keys(SURFACES), ...ROOT, "xenonet-state"]);
 // Crates whose literals aren't the core's: the registry and the demo.
 const NAMING = new Set(["xenonet-adapter", "xenonet-demo"]);
+// The generic adapters, by package name.
+const GENERIC = new Set(["xenonet-acp"]);
 
 // Words that are an app's id and also something else: a literal the check
 // would count, kept because there it isn't an app. Each entry is a file, the
@@ -178,8 +183,26 @@ for (const c of crates("crates")) {
     if (d === "xenonet-demo" && !DEMO_USERS.has(c.name)) breaches.push(`${c.name} depends on the demo's world (xenonet-demo)`);
   }
   if (NAMING.has(c.name)) continue;
-  const src = path.join(c.dir, "src");
-  if (!fs.existsSync(src)) continue;
+  literalBreaches(c.dir);
+}
+
+for (const n of GENERIC) {
+  if (!ADAPTERS.has(n)) breaches.push(`${n} is classed as a generic adapter in scripts/rust-layers.mjs, and there's no such crate: take it out`);
+}
+for (const c of crates("adapters")) {
+  const name = packageName(c.dir);
+  if (!GENERIC.has(name)) continue;
+  for (const d of deps(path.join(c.dir, "Cargo.toml"))) {
+    if (ADAPTERS.has(d)) breaches.push(`${name} is a generic adapter, and depends on the adapter crate ${d}`);
+    if (SURFACES[d] || ROOT.has(d)) breaches.push(`${name} is a generic adapter, and depends on ${d}`);
+  }
+  literalBreaches(c.dir);
+}
+
+// A crate's registry id literals outside its tests, as breaches.
+function literalBreaches(dir) {
+  const src = path.join(dir, "src");
+  if (!fs.existsSync(src)) return;
   const tests = testFiles(src);
   for (const f of rustFiles(src)) {
     if (tests.has(f)) continue;

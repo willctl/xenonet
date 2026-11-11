@@ -1,0 +1,39 @@
+[package]
+name = "xenonet-acp"
+description = "The generic ACP client: starts an agent over the Agent Client Protocol, opens its sessions, prompts and cancels them, and turns its permission requests into XenoNet's prompts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# ACP v1, the client role. Without its `process` feature: XenoNet starts
+# the agent itself (lib.rs says why).
+agent-client-protocol.workspace = true
+# The line transport ACP's connection takes is a futures Sink and Stream.
+futures.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+# An Allow is an Authorized that decide made for this ask; prompts' and
+# messages' text is Information.
+xenonet-authz.workspace = true
+# The framing every delivered message and started prompt carries.
+xenonet-engine.workspace = true
+# No window, the process tree, random ids.
+xenonet-os.workspace = true
+
+[dev-dependencies]
+# Presence for the Allow the tests make with decide.
+xenonet-id.workspace = true
+
+# The fake agent is this test binary run again with `fake-agent`, so the
+# test has a main of its own (libtest's would print on the agent's stdout).
+[[test]]
+name = "acp"
+harness = false
+
+[lints]
+workspace = true

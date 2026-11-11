@@ -59,6 +59,12 @@ xenonet-hermes = { path = "adapters/hermes" }
 xenonet-grok-bot = { path = "adapters/grok-bot" }
 xenonet-muse = { path = "adapters/muse" }
 xenonet-platforms = { path = "adapters/all" }
+# ACP's SDK, for the generic ACP client (adapters/acp): v1 only, pinned
+# exactly, since its majors move in weeks.
+agent-client-protocol = "=5.2.0"
+# ACP's connection runs over a futures Sink and Stream (in the lock already
+# through it).
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 xenonet-git = { path = "adapters/git" }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
