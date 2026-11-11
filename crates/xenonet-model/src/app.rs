@@ -81,6 +81,17 @@ pub struct Connect {
     pub unheard: Opt<Vec<String>>,
 }
 
+// The command that runs an app as an ACP agent over its standard input
+// and output.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
+pub struct Acp {
+    /// The program, by its name on the PATH; the app's adapter may find it elsewhere
+    pub command: String,
+    /// Its arguments
+    pub args: Vec<String>,
+}
+
 // An app as a candidate for a routing suggestion.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(inline)]
@@ -174,6 +185,9 @@ pub struct App {
     /// The arguments that run one turn with the prompt after them, for an agent an OpenShell sandbox runs
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub headless: Opt<Vec<String>>,
+    /// The command that runs it as an agent of the Agent Client Protocol, v1, for an app XenoNet starts sessions of over ACP
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub acp: Opt<Acp>,
     /// As a candidate for a routing suggestion: its place among the candidates and what it's good for
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub routing: Opt<Routing>,

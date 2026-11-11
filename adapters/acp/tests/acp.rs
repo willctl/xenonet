@@ -37,6 +37,11 @@ fn main() {
         fake::run();
         return;
     }
+    // A process the fake agent starts, which runs until it's stopped.
+    if args.get(1).map(String::as_str) == Some("fake-child") {
+        std::thread::sleep(Duration::from_secs(20));
+        return;
+    }
     let filter: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with('-')).collect();
     let tests: &[(&str, Test)] = &[
         ("start_and_prompt_stream_framed_turns", || start_and_prompt_stream_framed_turns().boxed()),
@@ -48,6 +53,7 @@ fn main() {
         ("cancel_ends_the_turn_and_its_held_prompt", || cancel_ends_the_turn_and_its_held_prompt().boxed()),
         ("sign_in_is_the_persons", || sign_in_is_the_persons().boxed()),
         ("a_missing_agent_doesnt_start", || a_missing_agent_doesnt_start().boxed()),
+        ("close_stops_the_agent_and_what_it_started", || close_stops_the_agent_and_what_it_started().boxed()),
     ];
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime");
     let mut failed = Vec::new();
@@ -388,6 +394,33 @@ mod person {
     }
 }
 
+/// Closing the client stops the agent, and on Windows (its job object,
+/// which CI's Windows job runs this on) what the agent started too. The
+/// agent starts with CREATE_NO_WINDOW there, which this run goes through
+/// but can't observe.
+async fn close_stops_the_agent_and_what_it_started() {
+    let host = Arc::new(TestHost::default());
+    let (client, session) = started(host.clone()).await;
+    let agent = client.pid().expect("the agent's pid");
+    session.prompt(turn("child")).await.unwrap();
+    let child: u32 = host.said("child:").await["child:".len()..].parse().unwrap();
+    assert!(xenonet_os::process::running(child, false), "the agent's child runs");
+    client.close().await;
+    let gone = |pid: u32| async move {
+        for _ in 0..50 {
+            if !xenonet_os::process::running(pid, false) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    };
+    assert!(gone(agent).await, "the agent stopped");
+    if cfg!(windows) {
+        assert!(gone(child).await, "its job object stopped what it started");
+    }
+}
+
 // ----- the fake agent -----
 
 mod fake {
@@ -468,6 +501,15 @@ mod fake {
                 };
                 say(&cx, &s, format!("outcome:{said}"))?;
                 return Ok(end);
+            }
+            "child" => {
+                let me = std::env::current_exe().unwrap();
+                let mut child = std::process::Command::new(me).arg("fake-child").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap();
+                let pid = child.id();
+                // Left running, reaped when it ends: the client's close
+                // must stop it.
+                std::thread::spawn(move || child.wait());
+                say(&cx, &s, format!("child:{pid}"))?;
             }
             "wait" => {
                 let mut c = cancels().subscribe();

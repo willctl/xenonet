@@ -214,6 +214,12 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         Err(Held::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
         Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
     }
+    if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer) {
+        if started.is_ok() {
+            w.starts.history.locked().push((now, bucket));
+        }
+        return started;
+    }
     let id = uuid()?;
     let ways = xenonet_engine::delivery::apps::of(&r.app).unwrap_or_default();
     let session = (!ways.picks_id).then(|| format!("{}:{id}", r.app));
@@ -284,6 +290,62 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, &answer));
     }
     Ok(json!({ "session": session, "pid": pid, "folder": folder, "app": app }))
+}
+
+/// A start over ACP, for an app the registry gives `acp`, with no mode
+/// asked for (ACP has no word for XenoNet's modes): its first answer once
+/// its session is open, or why it couldn't be. None leaves it to the
+/// app's headless start: no ACP side here, an app not started over ACP,
+/// a mode asked for, or an agent that didn't start or didn't speak ACP as
+/// XenoNet does (revision 25 keeps the headless start behind it until the
+/// app's ACP mode is proven).
+#[expect(clippy::too_many_arguments, reason = "the start's parts, as run_here took them")]
+fn over_acp(w: &Runtime, r: &Request, by: &Value, from: Option<&str>, kind: Kind, prompt: &Information<String>, cwd: &str, answer: &Answer) -> Option<Result<Value, String>> {
+    let side = w.acp.get()?.clone();
+    let platform = xenonet_adapter::platforms().get(&r.app)?;
+    platform.app().acp.as_ref()?;
+    let headless = xenonet_engine::delivery::apps::of(&r.app).is_some_and(|w| w.start.is_some());
+    if r.mode.is_some() {
+        return None;
+    }
+    let Some(command) = crate::runs::acp_command(platform.as_ref(), &w.setup.home) else {
+        return (!headless).then(|| Err(format!("{} isn't installed here", platform.app().name)));
+    };
+    let world = w.arc()?;
+    let reach = net(w).reach();
+    let delegation = (reach.start == "delegate" && kind != Kind::You).then(|| reach.delegated.clone()).flatten();
+    let on = delegation.as_ref().map(|(_, at)| xenonet_text::time::iso(*at as f64).chars().take(10).collect::<String>());
+    let folder = xenonet_os::paths::tilde(cwd, &w.setup.home);
+    let start = crate::acp::Start {
+        app: r.app.clone(),
+        program: command.program,
+        args: command.args,
+        cwd: cwd.to_string(),
+        folder: folder.clone(),
+        by: by.clone(),
+        from: from.map(str::to_string),
+        delegation: delegation.as_ref().map(|(by, _)| by.clone()).zip(on),
+        prompt: Information::new(prompt.read().clone()),
+        answer: answer.clone(),
+    };
+    match side.start(&world, start) {
+        Ok(started) => {
+            if delegation.is_some() {
+                let d = Delegated { cwd: cwd.to_string(), from: from.map(str::to_string), at: now_ms() };
+                if let Err(e) = w.store.0.db().put_delegated(&started.session, &d, xenonet_engine::delivery::runs::KEEP_MS) {
+                    w.log("warn", "start.delegated", &format!("{}'s delegation couldn't be kept: {}", started.session, e.message));
+                }
+            }
+            w.log("info", "start", &format!("started {} over ACP in {folder} for {}", started.session, from.unwrap_or("this machine")));
+            Some(Ok(json!({ "session": started.session, "pid": started.pid, "folder": folder, "app": r.app })))
+        }
+        Err(crate::acp::Failed::SignIn(why)) => Some(Err(why)),
+        Err(crate::acp::Failed::Unproven(why)) if headless => {
+            w.log("warn", "start.acp", &format!("{} didn't start over ACP ({why}): its headless start takes it", r.app));
+            None
+        }
+        Err(crate::acp::Failed::Unproven(why)) => Some(Err(why)),
+    }
 }
 
 // ---------- signing in for unattended runs ----------
@@ -463,6 +525,13 @@ fn write_private(file: &std::path::Path, text: &str) -> std::io::Result<()> {
         o.mode(0o600);
     }
     std::io::Write::write_all(&mut o.open(file)?, text.as_bytes())
+}
+
+/// The receipt for the end of a turn of a session XenoNet holds open over
+/// ACP, as a run's: what it came to (`finish`), how long it took, and
+/// whether the session is still held open for a reply (`live`).
+pub fn acp_turn_end(w: &Runtime, app: &str, session: &str, finish: &starts::Finish, minutes: f64, live: bool) -> Value {
+    end_body(w, app, Some(&session.to_string()), Some(finish), "", false, false, minutes, live)
 }
 
 /// The receipt for one end of a started run: what the session did

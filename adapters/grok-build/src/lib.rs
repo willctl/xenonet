@@ -137,4 +137,12 @@ impl Platform for Adapter {
     fn session_files(&self) -> Option<Box<dyn xenonet_adapter::platform::SessionFiles>> {
         Some(Box::new(map::Files))
     }
+
+    // Where its installer links it, ~/.grok/bin, for a service whose PATH
+    // doesn't have it (one started at login).
+    fn program(&self, _env: &xenonet_adapter::dirs::Env, platform: &str, home: &str, look: &mut dyn xenonet_adapter::dirs::Look) -> Option<String> {
+        let file = if platform == "win32" { "grok.exe" } else { "grok" };
+        let at = xenonet_os::paths::join_all(&[home, ".grok", "bin", file]);
+        look.exists(&at).then_some(at)
+    }
 }

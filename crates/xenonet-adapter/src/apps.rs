@@ -40,6 +40,9 @@ pub struct App {
     /// The arguments that run one turn with the prompt after them, for an
     /// agent an OpenShell sandbox runs.
     pub headless: Option<Vec<String>>,
+    /// The command that runs it as an ACP v1 agent, for an app XenoNet
+    /// starts sessions of over ACP (`Platform::acp` finds its program).
+    pub acp: Option<Acp>,
     /// As a candidate for a routing suggestion: its place among the
     /// candidates and what it's good for.
     pub routing: Option<Routing>,
@@ -56,6 +59,14 @@ pub struct App {
     /// How a handoff carries a session of it or to it, where it isn't as
     /// for any other app.
     pub handoff: Handoff,
+}
+
+/// The command that runs an app as an ACP agent over its standard input
+/// and output: the program by its name, and its arguments.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Acp {
+    pub command: String,
+    pub args: Vec<String>,
 }
 
 /// How a handoff carries a session: the entries of its transcript read
@@ -164,6 +175,7 @@ fn entry(v: &Value) -> Option<App> {
         has: texts(o.get("has")),
         counted: o.get("counted").and_then(Value::as_bool).unwrap_or(false),
         headless: o.get("headless").and_then(Value::as_array).map(|_| texts(o.get("headless"))),
+        acp: o.get("acp").and_then(Value::as_object).and_then(|a| Some(Acp { command: text(a.get("command"))?, args: texts(a.get("args")) })),
         routing: o.get("routing").and_then(Value::as_object).map(|r| Routing {
             order: r.get("order").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
             description: text(r.get("description")).unwrap_or_default(),
@@ -413,6 +425,8 @@ mod tests {
         let counted: Vec<&str> = apps().iter().filter(|a| a.counted).map(|a| a.id.as_str()).collect();
         assert_eq!(counted, ["claude", "codex"]);
         assert_eq!((app("pi").unwrap().headless.as_deref(), app("grok").unwrap().headless.as_deref()), (Some(&["--print".to_string()][..]), None));
+        let acp: Vec<(&str, &Acp)> = apps().iter().filter_map(|a| Some((a.id.as_str(), a.acp.as_ref()?))).collect();
+        assert_eq!(acp, [("grok", &Acp { command: "grok".into(), args: vec!["agent".into(), "--no-leader".into(), "stdio".into()] })], "Codex stays headless");
         assert_eq!(app("codex").unwrap().routing.as_ref().map(|r| r.order), Some(1));
         assert!(app("codex").unwrap().mcp_status && !claude.mcp_status);
         assert_eq!(claude.reserved.as_ref().map(|r| (r.names.len(), r.makers.as_slice(), r.slugs.len())), Some((2, &["Anthropic".to_string()][..], 2)));

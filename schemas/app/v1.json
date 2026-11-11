@@ -181,6 +181,28 @@
       },
       "description": "The arguments that run one turn with the prompt after them, for an agent an OpenShell sandbox runs"
     },
+    "acp": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The program, by its name on the PATH; the app's adapter may find it elsewhere"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Its arguments"
+        }
+      },
+      "required": [
+        "command",
+        "args"
+      ],
+      "description": "The command that runs it as an agent of the Agent Client Protocol, v1, for an app XenoNet starts sessions of over ACP",
+      "additionalProperties": {}
+    },
     "routing": {
       "type": "object",
       "properties": {

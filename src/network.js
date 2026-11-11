@@ -41,7 +41,10 @@ const START_APPS = [
   ["claude", "Claude Code"],
   ["codex", "Codex"],
   ["grok", "Grok Build"],
+  ["hermes-agent", "Hermes"],
 ];
+// The apps that start under their own settings: no mode.
+const NO_MODE = new Set(["codex", "hermes-agent"]);
 const START_MODES = [
   ["", "Your settings"],
   ["plan", "Plan"],
@@ -215,7 +218,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         : `<button class="act" data-net-replace="${h(x.id)}" data-yours title="It was set up again: a new line for it, under the same id">Replace…</button><button class="act" data-net-remove="${h(x.id)}" title="Take it out of the network">Remove</button>`;
     // A session started there: this machine, or another online whose
     // XenoNet takes starts.
-    const starts = me || (x.online && hostCan(x, "start")) ? `<button class="act" data-net-start-session="${h(x.id)}" title="A new Claude Code, Codex or Grok Build session there, with a first prompt">Start a session…</button>` : "";
+    const starts = me || (x.online && hostCan(x, "start")) ? `<button class="act" data-net-start-session="${h(x.id)}" title="A new Claude Code, Codex, Grok Build or Hermes session there, with a first prompt">Start a session…</button>` : "";
     const theirs = agents.filter((a) => a.host === x.id);
     const mismatch = state.rosterMismatch.includes(x.id) ? `<div class="ac-via net-warn">sees another list of the network's machines</div>` : "";
     return `<li class="ac-row net-host${x.online ? "" : " offline"}" data-key="${h(x.id)}" data-net-host="${h(x.id)}">
@@ -350,7 +353,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const host = hosts.some((x) => x.id === view.host) ? view.host : hosts[0].id;
     view.host = host;
     const app = view.app ?? "claude";
-    const mode = app === "codex" ? "" : (view.mode ?? "");
+    const mode = NO_MODE.has(app) ? "" : (view.mode ?? "");
     const folders = foldersOf(host);
     return `<p class="ac-lead">Start a session</p>
       <div class="net-seg" data-net-start-hosts><span class="net-seg-k">Machine</span>${hosts.map((x) => choice("data-net-start-host", x.id ?? "", x.label, x.id === host)).join("")}</div>
@@ -361,7 +364,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
         <datalist id="net-start-folders" data-net-start-folders>${folders.map((f) => `<option value="${h(f.value)}">${h(f.label)}</option>`).join("")}</datalist>
         <label class="ac-field"><span class="ac-k">Prompt</span><textarea class="ac-input net-start-prompt" data-net-start-prompt rows="5" placeholder="What the new session should do" spellcheck="true">${h(view.prompt ?? "")}</textarea></label>
       </div>
-      <p class="pj-note">It runs headless through XenoNet, and shows on the map like any other session. Its first prompt says you started it from this console. Permission prompts it can't settle by its settings come to Needs you, here and on every window host. Codex runs with its own config's sandbox and approvals. In a terminal: <code>xenonet start --on &lt;machine&gt; "&lt;prompt&gt;"</code></p>
+      <p class="pj-note">Claude Code and Codex run headless through XenoNet, Grok Build and Hermes over ACP, and each shows on the map like any other session. Its first prompt says you started it from this console. Permission prompts it can't settle by its settings come to Needs you, here and on every window host. Codex runs with its own config's sandbox and approvals. In a terminal: <code>xenonet start --on &lt;machine&gt; "&lt;prompt&gt;"</code></p>
       ${errorHtml(view.error)}
       <div class="m-foot"><button class="act" data-net-back>Cancel</button><span class="grow"></span><button class="act primary" data-net-start-send data-yours disabled title="Starts the session">Start</button></div>`;
   }
@@ -389,8 +392,11 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       b.setAttribute("aria-pressed", String(on));
     }
     if (key === "host") body().querySelector("[data-net-start-folders]").innerHTML = foldersOf(value).map((f) => `<option value="${h(f.value)}">${h(f.label)}</option>`).join("");
-    // Codex takes its own config's: no mode.
-    if (key === "app") for (const b of body()?.querySelectorAll("[data-net-start-mode]") ?? []) b.disabled = value === "codex" && b.dataset.netStartMode !== "";
+    // Codex takes its own config's, and Hermes its own settings: no mode.
+    if (key === "app") {
+      for (const b of body()?.querySelectorAll("[data-net-start-mode]") ?? []) b.disabled = NO_MODE.has(value) && b.dataset.netStartMode !== "";
+      if (NO_MODE.has(value)) pick("data-net-start-mode", "");
+    }
     sfx("toggle");
   }
 
@@ -401,7 +407,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const folder = b.querySelector("[data-net-start-folder]").value.trim() || "~";
     const prompt = b.querySelector("[data-net-start-prompt]").value;
     const app = view.app ?? "claude";
-    const mode = app === "codex" ? "" : (view.mode ?? "");
+    const mode = NO_MODE.has(app) ? "" : (view.mode ?? "");
     const remote = host && host !== state.self?.id;
     Object.assign(view, { folder, prompt });
     return busyWith(async () => {

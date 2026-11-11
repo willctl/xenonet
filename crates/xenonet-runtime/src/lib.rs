@@ -11,6 +11,7 @@
 // failed with what it wrote (exec::Failed): both are passed on whole.
 #![expect(clippy::result_large_err, reason = "the service's traits return its CoreError, and a failed command keeps its output")]
 
+pub mod acp;
 pub mod actors;
 pub mod asks;
 pub mod delivery;
@@ -173,6 +174,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         net: network::NetState::default(),
         starts: starts::StartSide::default(),
         asks: asks::AskSide::default(),
+        acp: OnceLock::new(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
     if w.actors.is_some() && !demo {

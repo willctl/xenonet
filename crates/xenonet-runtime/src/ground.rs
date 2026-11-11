@@ -324,12 +324,18 @@ pub fn decide_with(g: &EngineGround, request: &Request, presence: Option<&Presen
 
 /// `judge`, for an act whose principal brought a token (an actor's).
 pub fn judge_by(g: &EngineGround, request: &Request, token: Option<&Token>, presence: Option<&PresenceBlock>) -> Result<(), String> {
+    judged_by(g, request, token, presence).map(|_| ())
+}
+
+/// `judge_by`, with what decide allowed: the Authorized an ACP agent's
+/// allow-once is picked on, which nothing but decide makes.
+pub fn judged_by(g: &EngineGround, request: &Request, token: Option<&Token>, presence: Option<&PresenceBlock>) -> Result<Box<xenonet_authz::Authorized>, String> {
     let v = match verified(g, request, presence) {
         Ok(v) => v,
         Err(e) => return Err(format!("that presence doesn't count: {e}")),
     };
     match decide(token, request, g, v.as_ref()) {
-        Decision::Allow(_) => Ok(()),
+        Decision::Allow(ok) => Ok(ok),
         d => Err(why(&d)),
     }
 }

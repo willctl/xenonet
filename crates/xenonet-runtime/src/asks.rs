@@ -114,6 +114,9 @@ struct Held {
     kind: xenonet_authz::PromptKind,
     by: xenonet_authz::Attestation,
     answer: Option<(String, String)>,
+    /// What decide allowed for the answer, which an ACP session's
+    /// allow-once is picked on.
+    allowed: Option<Box<xenonet_authz::Authorized>>,
 }
 
 /// An ask waiting here, as the ground reads it: its session, its kind, how
@@ -290,11 +293,9 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
             Verdict::Ask(why) => outside = Some(why),
         }
     }
-    let here = net(w).me().map(|m| m.host);
-    let label = here.clone().unwrap_or_else(|| "This machine".into());
+    let label = net(w).me().map_or_else(|| "This machine".to_string(), |m| m.host);
     let session_title = title.map_or_else(|| me.to_string(), |t| xenonet_engine::delivery::policy::sanitize(t, true, 120.0));
     let now = now_ms();
-    let hold = hold_ms(w);
     let a = Ask {
         id,
         host: None,
@@ -308,23 +309,47 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
         },
         warn: reads_env(&input),
         at: now,
-        until: now + hold,
+        until: now + hold_ms(w),
     };
-    let id = a.id.clone();
+    let answer = hold(w, me, a, kind, by).map(|(d, by, _)| (d, by));
+    let (decision, why) = said(answer.as_ref(), hold_ms(w));
+    Ok(answer_json(&decision, &input, &why))
+}
+
+/// An answer as the asker hears it: allow or deny, and why a deny.
+fn said(answer: Option<&(String, String)>, hold: f64) -> (String, String) {
+    match answer {
+        Some((d, _)) if d == "allow" => ("allow".to_string(), String::new()),
+        Some((_, by)) => ("deny".to_string(), format!("your user denied it, from {by}")),
+        None => ("deny".to_string(), format!("nobody answered in {}", minutes(hold))),
+    }
+}
+
+/// What an ask held here came to: allow or deny, who gave it, and what
+/// decide allowed.
+type Heard = (String, String, Option<Box<xenonet_authz::Authorized>>);
+
+/// Holds an ask here until it's answered or the hold runs out: in Needs
+/// you, here and on every window host, and taken back from them when
+/// it's done. Its answer, or None when nobody answered.
+fn hold(w: &Runtime, me: &str, a: Ask, kind: xenonet_authz::PromptKind, by: xenonet_authz::Attestation) -> Option<Heard> {
+    let here = net(w).me().map(|m| m.host);
+    let (id, tool, hold) = (a.id.clone(), a.tool.clone(), a.until - a.at);
     let shown = a.to_json(here.as_deref());
-    w.asks.here.locked().insert(id.clone(), Held { ask: a, kind, by, answer: None });
+    w.asks.here.locked().insert(id.clone(), Held { ask: a, kind, by, answer: None, allowed: None });
     w.log("info", "ask", &format!("{me} asks to run {tool}: waiting for you"));
     w.emit(From::Engine, "ask", shown.clone());
     let mut out = shown;
     out["op"] = json!("ask");
     to_windows(w, me, &out);
-    // Held until you answer, or the hold runs out.
     let side = &w.asks;
     let deadline = Instant::now() + Duration::from_secs_f64(hold / 1000.0);
     let mut held = side.here.locked();
     let answer = loop {
-        if let Some(a) = held.get(&id).and_then(|h| h.answer.clone()) {
-            break Some(a);
+        if let Some(h) = held.get_mut(&id) {
+            if let Some((d, by)) = h.answer.clone() {
+                break Some((d, by, h.allowed.take()));
+            }
         }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
@@ -334,26 +359,56 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     };
     held.remove(&id);
     drop(held);
-    let (decision, why) = match &answer {
-        Some((d, _)) if d == "allow" => ("allow".to_string(), String::new()),
-        Some((_, by)) => ("deny".to_string(), format!("your user denied it, from {by}")),
-        None => ("deny".to_string(), format!("nobody answered in {}", minutes(hold))),
-    };
+    let (decision, why) = said(answer.as_ref().map(|(d, by, _)| (d.clone(), by.clone())).as_ref(), hold);
     let done = json!({ "op": "done", "id": id, "decision": decision });
     w.emit(From::Engine, "ask-done", done.clone());
     to_windows(w, me, &done);
     w.log("info", "ask", &format!("{me}'s ask to run {tool}: {decision}{}", if why.is_empty() { String::new() } else { format!(" ({why})") }));
-    Ok(answer_json(&decision, &input, &why))
+    answer
+}
+
+/// A permission prompt from a session XenoNet holds open over ACP (`me`,
+/// whose agent is XenoNet's own child, so its caller is checked): held as
+/// a run's ask is, by the ask id the ACP client made, until it's answered
+/// or the hold runs out. What decide allowed, for an Allow; None for a
+/// Deny, or nobody answering, which the client answers reject-once.
+pub fn hold_acp(
+    w: &Runtime,
+    me: &str,
+    title: Option<&str>,
+    ask: &xenonet_authz::AskId,
+    tool: &str,
+    kind: xenonet_authz::PromptKind,
+    input: &Value,
+) -> Option<Box<xenonet_authz::Authorized>> {
+    let label = net(w).me().map_or_else(|| "This machine".to_string(), |m| m.host);
+    let session_title = title.map_or_else(|| me.to_string(), |t| xenonet_engine::delivery::policy::sanitize(t, true, 120.0));
+    let now = now_ms();
+    let a = Ask {
+        id: ask.as_str().to_string(),
+        host: None,
+        session: me.to_string(),
+        run: me.to_string(),
+        title: clip(&format!("{label} · {session_title}"), 200),
+        tool: clip(&xenonet_engine::delivery::policy::sanitize(tool, true, 80.0), 80),
+        input: input_words(input, &w.setup.home),
+        warn: reads_env(input),
+        at: now,
+        until: now + hold_ms(w),
+    };
+    let (decision, _, allowed) = hold(w, me, a, kind, xenonet_authz::Attestation::ProcessChecked)?;
+    allowed.filter(|_| decision == "allow")
 }
 
 /// Your Allow or Deny for an ask here (`by` says from where: this
 /// machine's console, or another window host's). False for one that isn't
 /// waiting.
-pub fn decide(w: &Runtime, id: &str, decision: &str, by: &str) -> bool {
+pub fn decide(w: &Runtime, id: &str, decision: &str, by: &str, allowed: Box<xenonet_authz::Authorized>) -> bool {
     let side = &w.asks;
     let mut held = side.here.locked();
     let Some(h) = held.get_mut(id).filter(|h| h.answer.is_none()) else { return false };
     h.answer = Some((if decision == "allow" { "allow" } else { "deny" }.into(), by.to_string()));
+    h.allowed = Some(allowed);
     side.answered.notify_all();
     true
 }
@@ -415,8 +470,8 @@ pub fn answer(w: &Runtime, id: &str, decision: &str) -> Result<Option<String>, S
         } else {
             (xenonet_authz::Principal::Machine { id: g.facts.machine.clone() }, None)
         };
-        crate::ground::judge(&g, &crate::ground::local(&g, principal, resource, act), presence.as_ref())?;
-        if decide(w, id, decision, &label) {
+        let allowed = crate::ground::judged_by(&g, &crate::ground::local(&g, principal, resource, act), None, presence.as_ref())?;
+        if decide(w, id, decision, &label, allowed) {
             return Ok(None);
         }
     }
@@ -451,8 +506,8 @@ pub fn answer_as_actor(w: &Runtime, token: &str, id: &str, decision: &str) -> Re
     let here = w.asks.here.locked().get(id).filter(|h| h.answer.is_none()).map(|h| h.ask.session.clone());
     if let Some(session) = here {
         let (resource, act) = answer_act(&session, id, decision)?;
-        crate::ground::judge_by(&g, &crate::ground::local(&g, principal, resource, act), Some(&token), None)?;
-        if decide(w, id, decision, &format!("actor:{}", bearer.slug)) {
+        let allowed = crate::ground::judged_by(&g, &crate::ground::local(&g, principal, resource, act), Some(&token), None)?;
+        if decide(w, id, decision, &format!("actor:{}", bearer.slug), allowed) {
             return Ok(None);
         }
     }
@@ -573,7 +628,7 @@ pub fn answer_in(w: &Runtime, from: &str, body: &Value) {
     };
     let (by, decided) = if carried.person.is_some() {
         let p = crate::ground::person(w, &g, Some(from), &carried, &resource, &act);
-        (format!("{from}'s console"), p.and_then(|p| crate::ground::judge(&g, &crate::ground::remote(&g, p, resource, act), carried.presence.as_ref())))
+        (format!("{from}'s console"), p.and_then(|p| crate::ground::judged_by(&g, &crate::ground::remote(&g, p, resource, act), None, carried.presence.as_ref())))
     } else if carried.token.is_some() {
         match crate::ground::actor(&mut g, &machine, &carried) {
             Ok((p, token)) => {
@@ -581,18 +636,19 @@ pub fn answer_in(w: &Runtime, from: &str, body: &Value) {
                     xenonet_authz::Principal::Actor { slug, .. } => format!("actor:{slug} on {from}"),
                     _ => from.to_string(),
                 };
-                (by, crate::ground::judge_by(&g, &crate::ground::remote(&g, p, resource, act), Some(&token), None))
+                (by, crate::ground::judged_by(&g, &crate::ground::remote(&g, p, resource, act), Some(&token), None))
             }
             Err(why) => (String::new(), Err(why)),
         }
     } else {
         let p = xenonet_authz::Principal::Machine { id: machine };
-        (format!("{from}'s console"), crate::ground::judge(&g, &crate::ground::remote(&g, p, resource, act), None))
+        (format!("{from}'s console"), crate::ground::judged_by(&g, &crate::ground::remote(&g, p, resource, act), None, None))
     };
-    if let Err(why) = decided {
-        return refused(why);
-    }
-    if !decide(w, &id, &decision, &by) {
+    let allowed = match decided {
+        Ok(a) => a,
+        Err(why) => return refused(why),
+    };
+    if !decide(w, &id, &decision, &by, allowed) {
         w.log("info", "ask", &format!("{from} answered an ask that isn't waiting here"));
     }
 }

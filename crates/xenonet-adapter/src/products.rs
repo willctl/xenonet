@@ -27,6 +27,10 @@ pub struct Product {
     /// Its actor reports what it spent, which the spend view shows under
     /// the product's short name.
     pub reports_spend: bool,
+    /// The command that runs it as an ACP v1 agent (its program by name,
+    /// and its arguments), for a product XenoNet starts sessions of over
+    /// ACP, as an app's registry entry gives one.
+    pub acp: Option<(&'static str, &'static [&'static str])>,
 }
 
 pub const PRODUCTS: [Product; 4] = [
@@ -43,6 +47,7 @@ pub const PRODUCTS: [Product; 4] = [
         per_pair: false,
         makers: &["Nous Research"],
         reports_spend: true,
+        acp: Some(("hermes", &["acp"])),
     },
     // Anysphere (Cursor) builds and runs Grok Bot for SpaceXAI.
     Product {
@@ -58,6 +63,7 @@ pub const PRODUCTS: [Product; 4] = [
         per_pair: false,
         makers: &["SpaceXAI", "xAI", "Anysphere", "Cursor"],
         reports_spend: false,
+        acp: None,
     },
     Product {
         id: "muse",
@@ -72,6 +78,7 @@ pub const PRODUCTS: [Product; 4] = [
         per_pair: false,
         makers: &["Meta"],
         reports_spend: false,
+        acp: None,
     },
     Product {
         id: "dots",
@@ -86,6 +93,7 @@ pub const PRODUCTS: [Product; 4] = [
         per_pair: true,
         makers: &["OpenAI"],
         reports_spend: false,
+        acp: None,
     },
 ];
 

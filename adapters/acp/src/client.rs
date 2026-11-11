@@ -266,6 +266,11 @@ impl Client {
         &self.info
     }
 
+    /// The agent's process id, while the client holds it.
+    pub fn pid(&self) -> Option<u32> {
+        self.process.as_ref().map(|p| p.child.id())
+    }
+
     /// Opens a session in `cwd`, told of XenoNet's own MCP server (`mcp`)
     /// and no other.
     pub async fn open(&self, cwd: &Path, mcp: Option<&Mcp>) -> Result<Session, AcpError> {

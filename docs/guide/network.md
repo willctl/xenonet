@@ -103,7 +103,7 @@ What changes one machine's own setup stays on it: connecting its sessions, insta
 
 ## Starting sessions
 
-You, a session or an actor can start a Claude Code, Codex or Grok Build session on any machine in the network, in a folder there, with a first prompt. It runs headless, through XenoNet's runner, and shows on the map like any other session, so you can message it and follow it.
+You, a session or an actor can start a Claude Code, Codex, Grok Build or Hermes Agent session on any machine in the network, in a folder there, with a first prompt. Claude Code and Codex run headless, through XenoNet's runner. Grok Build and Hermes Agent run over ACP (the Agent Client Protocol): XenoNet starts the agent with no window and none of its own credentials, opens a session in the folder, and holds it open for half an hour after each turn, so a message to it is its next turn. A Grok Build start with a permission mode runs headless, since ACP has no word for XenoNet's modes. A session's permission prompts over ACP come to Needs you, and an Allow covers that one call only. Each session shows on the map like any other, so you can message it and follow it.
 
 - **In the console:** **Start a session…** on a machine's row in the Network panel, on its card in the Machines view, or in its node's panel on the map. Pick the machine, the app, the permissions (your own settings, or plan, accept edits, auto or don't ask), a folder from that machine's projects or its home, and write the prompt. **Start** is yours, and works a moment after the box opens.
 - **Not in a terminal.** A start as you is signed by your key, which asks you (Touch ID on a Mac), so it's made in XenoNet's window. `xenonet start` in a terminal refuses and says so.

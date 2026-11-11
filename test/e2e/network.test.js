@@ -562,7 +562,13 @@ test("Start a session on a made-up machine: the box, Start once it's armed, and 
   // Start is armed a moment after the box shows.
   const armed = await until(async () => ((await network()).session?.armed ? await network() : null));
   assert.ok(armed, "Start is armed");
+  // Hermes starts over ACP under its own settings: the modes go off.
+  assert.deepEqual(Object.keys(armed.session.at.apps), ["claude", "codex", "grok", "hermes-agent"]);
+  await clickAt(armed.session.at.apps["hermes-agent"], "Hermes");
+  const modes = () => s.eval(`return [...document.querySelectorAll("[data-net-start-mode]")].map((b) => [b.dataset.netStartMode, b.disabled, b.classList.contains("on")])`);
+  assert.ok(await until(async () => (await modes()).every(([m, off, on]) => (m === "" ? !off && on : off))), JSON.stringify(await modes()));
   await clickAt(armed.session.at.apps.claude, "Claude Code");
+  assert.ok(await until(async () => (await modes()).every(([, off]) => !off)), "back on for Claude Code");
   await clickAt((await network()).session.at.send, "Start");
   const sent = await until(async () => (await network()).lastStart);
   assert.deepEqual([sent?.state, sent?.host], ["sent", "laptop"], JSON.stringify(sent));

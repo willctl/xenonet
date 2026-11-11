@@ -229,7 +229,15 @@
    "delivery",
    "processes",
    "caller"
-  ]
+  ],
+  "acp": {
+   "command": "grok",
+   "args": [
+    "agent",
+    "--no-leader",
+    "stdio"
+   ]
+  }
  },
  {
   "id": "gemini-cli",

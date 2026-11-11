@@ -23,7 +23,10 @@
 //   counted    the map's stats count its sessions, under its id
 //   headless   the arguments that run one turn with the prompt after them,
 //              for an agent an OpenShell sandbox runs
-//   routing    as a candidate for a routing suggestion: its place among
+//   acp        { command, args }: the command that runs it as an ACP v1
+//              agent over its standard input and output, for an app
+//              XenoNet starts sessions of over ACP
+//   routing   as a candidate for a routing suggestion: its place among
 //              the candidates and what it's good for
 //   mcpStatus  its own server lists the MCP servers it runs and their
 //              catalogs, which XenoNet asks when one of its sessions uses
@@ -121,6 +124,9 @@ export const APPS = [
     },
     editTools: ["search_replace", "write", "edit", "hashline_edit", "apply_patch"],
     has: ["lines", "sessions", "connect", "delivery", "processes", "caller"],
+    // A process of its own for each session XenoNet starts, never a leader
+    // shared with your own sessions.
+    acp: { command: "grok", args: ["agent", "--no-leader", "stdio"] },
   },
   {
     id: "gemini-cli",

@@ -89,6 +89,10 @@ xenonet-grok-build.workspace = true
 xenonet-state.workspace = true
 xenonet-integrations.workspace = true
 xenonet-sources.workspace = true
+# The apps that start over ACP (compose/acp.rs): the generic ACP client,
+# over the runtime's asks.
+xenonet-acp.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.

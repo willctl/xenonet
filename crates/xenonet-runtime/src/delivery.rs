@@ -556,6 +556,13 @@ impl router::Host for RouterHost<'_> {
     fn resume_deliver(&mut self, agent: &str, cwd: Option<&str>, body: &str, fork: bool) -> Delivered {
         resume_deliver(self.w, agent, cwd, body, fork)
     }
+    fn acp_holds(&mut self, agent: &str) -> bool {
+        self.w.acp.get().is_some_and(|a| a.holds(agent))
+    }
+    fn acp_deliver(&mut self, agent: &str, id: &str, from: &str, verified: Option<&str>, text: &str, user: bool) -> Delivered {
+        let Some(a) = self.w.acp.get() else { return Err("XenoNet holds no session open over ACP here".into()) };
+        a.deliver(agent, crate::acp::Message { id, from, verified, text, user })
+    }
 }
 
 /// A message routed: each of its sessions' way in tried. What failed goes

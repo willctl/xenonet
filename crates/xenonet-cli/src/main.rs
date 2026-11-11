@@ -184,6 +184,8 @@ fn serve(args: &[String]) -> i32 {
             // the service has made it.
             let connect = xenonet_service::compose::connect::ConnectDriver::new(&setup);
             if let Some(world) = xenonet_runtime::wire(&mut cores, setup, env) {
+                // The apps that start over ACP, on the generic ACP client.
+                xenonet_service::compose::acp::plug(&world);
                 cores.connect = std::sync::Arc::new(connect);
                 cores.on_net = Some(std::sync::Arc::new(move |svc: &dyn NetLink| {
                     xenonet_runtime::network::plug(&world, svc);

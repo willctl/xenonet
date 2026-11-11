@@ -80,6 +80,9 @@ pub struct Runtime {
     /// Permission prompts of the runs XenoNet started: held here, and
     /// from other machines.
     pub asks: crate::asks::AskSide,
+    /// The ACP side, which the composition root puts in place: the apps
+    /// started over ACP, and their sessions held open.
+    pub acp: OnceLock<Arc<dyn crate::acp::Acp>>,
 }
 
 impl Runtime {

@@ -59,6 +59,9 @@ xenonet-hermes = { path = "adapters/hermes" }
 xenonet-grok-bot = { path = "adapters/grok-bot" }
 xenonet-muse = { path = "adapters/muse" }
 xenonet-platforms = { path = "adapters/all" }
+# The generic ACP client, which the composition root starts the ACP apps
+# with.
+xenonet-acp = { path = "adapters/acp" }
 # ACP's SDK, for the generic ACP client (adapters/acp): v1 only, pinned
 # exactly, since its majors move in weeks.
 agent-client-protocol = "=5.2.0"

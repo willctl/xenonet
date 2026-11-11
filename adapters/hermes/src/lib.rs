@@ -42,4 +42,15 @@ impl Platform for Adapter {
     fn observer(&self) -> Option<Box<dyn Observer>> {
         Some(Box::new(observer::Hermes::new()))
     }
+
+    // Where its installer links it, ~/.local/bin, for a service whose PATH
+    // doesn't have it (one started at login). On Windows it's on the PATH
+    // or not found.
+    fn program(&self, _env: &xenonet_adapter::dirs::Env, platform: &str, home: &str, look: &mut dyn xenonet_adapter::dirs::Look) -> Option<String> {
+        if platform == "win32" {
+            return None;
+        }
+        let at = xenonet_os::paths::join_all(&[home, ".local", "bin", "hermes"]);
+        look.exists(&at).then_some(at)
+    }
 }

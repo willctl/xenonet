@@ -220,9 +220,11 @@ pub fn known(h: &dyn ObserverHost, id: &str) -> bool {
 
 /// A product's entry for the registry of adapters: its id and name, with
 /// nothing of an app's (no folder, hooks or capabilities), since the
-/// registry holds adapters by their `App`.
+/// registry holds adapters by their `App`; and its ACP command, for a
+/// product XenoNet starts sessions of.
 pub fn product_app(p: &Product) -> App {
-    App { id: p.id.into(), name: p.name.into(), ..App::default() }
+    let acp = p.acp.map(|(command, args)| crate::apps::Acp { command: command.into(), args: args.iter().map(|a| (*a).to_string()).collect() });
+    App { id: p.id.into(), name: p.name.into(), acp, ..App::default() }
 }
 
 /// A value as `${v}` writes it.

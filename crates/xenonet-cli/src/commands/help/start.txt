@@ -1,24 +1,29 @@
-A new Claude Code, Codex or Grok Build session, on this machine or on
-another machine in your network, with a first prompt. It runs headless,
-through XenoNet's runner, and shows on the map like any other session.
+A new Claude Code, Codex, Grok Build or Hermes Agent session, on this
+machine or on another machine in your network, with a first prompt.
+Claude Code and Codex run headless, through XenoNet's runner; Grok Build
+and Hermes Agent run over ACP, in a session XenoNet holds open for
+replies.
 
-  xenonet start [--on <machine>] [--in <folder>] [--app claude|codex|grok]
+  xenonet start [--on <machine>] [--in <folder>]
+                [--app claude|codex|grok|hermes-agent]
                 [--mode plan|acceptEdits|auto|dontAsk] "<prompt>"
 
   --on     another machine in your network, by its id; this one when left
            out. It must be online, and its XenoNet new enough to take starts
   --in     a project or folder by its id on that machine's map, a path it
            reports, or ~ (the default)
-  --app    claude (the default), codex or grok
+  --app    claude (the default), codex, grok or hermes-agent
   --mode   a permission mode; left out, the session runs under your own
-           settings. Codex takes its config.toml's, so no mode. A session
-           never starts bypassing its permission checks
+           settings. Codex takes its config.toml's and Hermes Agent its
+           own, so no mode; Grok Build with a mode runs headless. A
+           session never starts bypassing its permission checks
 
 Who may start sessions on a machine is its start setting (xenonet net
 set --start): you, by default. The answer says the session's id at once
 here; from another machine it comes as a line in your console, and again
-when the session ends. A Claude Code session's permission prompts come to
-your console's Needs you, where you allow or deny them.
+when the session ends. A Claude Code session's permission prompts, and
+those of a session over ACP, come to your console's Needs you, where you
+allow or deny them.
 
 From inside a session, the xenonet MCP server's start_session tool asks
 instead: this command is yours. A start as you is signed by your device,

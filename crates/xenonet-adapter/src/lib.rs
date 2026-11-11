@@ -45,4 +45,4 @@ pub mod repo;
 pub mod watch;
 
 pub use check::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
-pub use platform::{install, platforms, Hook, Platform, Registry};
+pub use platform::{install, platforms, AcpCommand, Hook, Platform, Registry};

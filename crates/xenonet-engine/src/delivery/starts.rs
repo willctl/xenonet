@@ -20,10 +20,24 @@ pub use xenonet_adapter::delivery::Finish;
 pub const TARGET: &str = "xenonet:start";
 
 /// The apps XenoNet starts sessions of: those whose adapter has a start,
-/// in the registry's order. The first is the one a request that names no
-/// app gets.
+/// in the registry's order, then those it starts over ACP alone (the
+/// registry's `acp`, as an actor product's entry gives it). The first is
+/// the one a request that names no app gets.
 pub fn apps() -> Vec<&'static xenonet_adapter::apps::App> {
-    apps::apps().into_iter().filter(|(_, w)| w.start.is_some()).map(|(a, _)| a).collect()
+    let mut out: Vec<&'static xenonet_adapter::apps::App> = apps::apps().into_iter().filter(|(a, w)| w.start.is_some() || a.acp.is_some()).map(|(a, _)| a).collect();
+    for p in xenonet_adapter::platforms().iter() {
+        let a = p.app();
+        if a.acp.is_some() && !out.iter().any(|o| o.id == a.id) {
+            out.push(a);
+        }
+    }
+    out
+}
+
+/// Whether XenoNet starts an app's sessions over ACP alone: it has an ACP
+/// command and no headless start to fall back to.
+pub fn acp_only(app: &xenonet_adapter::apps::App) -> bool {
+    app.acp.is_some() && apps::of(&app.id).is_none_or(|w| w.start.is_none())
 }
 
 /// Them as a person reads the list: "Claude Code (claude), Codex (codex)
@@ -95,6 +109,11 @@ pub fn request(v: &Value) -> Result<Request, String> {
         }
         if let Some(why) = apps::of(&app).and_then(|w| w.no_mode) {
             return Err(why.into());
+        }
+        // ACP has no word for XenoNet's modes, and an app with no headless
+        // start has nothing else to start with one.
+        if let Some(a) = started.iter().find(|a| a.id == app && acp_only(a)) {
+            return Err(format!("{} starts under its own settings, so no mode", a.name));
         }
     }
     let prompt = text(v, "prompt").map(|p| p.trim().to_string()).unwrap_or_default();
@@ -362,7 +381,13 @@ mod tests {
         assert_eq!(request(&json!({ "mode": "bypassPermissions", "prompt": "x" })), Err("XenoNet never starts a session that bypasses its permission checks".into()));
         assert!(request(&json!({ "mode": "yolo", "prompt": "x" })).is_err());
         assert!(request(&json!({ "app": "codex", "mode": "plan", "prompt": "x" })).is_err(), "Codex takes its own config's");
-        assert_eq!(request(&json!({ "app": "opencode", "prompt": "x" })), Err("XenoNet starts Claude Code (claude), Codex (codex) or Grok Build (grok), not opencode".into()));
+        assert_eq!(
+            request(&json!({ "app": "opencode", "prompt": "x" })),
+            Err("XenoNet starts Claude Code (claude), Codex (codex), Grok Build (grok) or Hermes Agent (hermes-agent), not opencode".into())
+        );
+        // Hermes starts over ACP alone, under its own settings.
+        assert_eq!(request(&json!({ "app": "hermes-agent", "prompt": "x" })).unwrap().app, "hermes-agent");
+        assert_eq!(request(&json!({ "app": "hermes-agent", "mode": "plan", "prompt": "x" })), Err("Hermes Agent starts under its own settings, so no mode".into()));
         assert_eq!(
             request(&json!({ "app": "codex", "mode": "plan", "prompt": "x" })),
             Err("Codex runs with its own config.toml's sandbox and approvals: leave the mode out".into())
@@ -437,7 +462,7 @@ mod tests {
             command(&r("grok", Some("manual")), id, "/w", None, "xenonet", Some("/s/runs/p.txt")).unwrap().1,
             ["--prompt-file", "/s/runs/p.txt", "-s", id, "--output-format", "json", "--permission-mode", "default"]
         );
-        for app in apps().iter().map(|a| a.id.as_str()) {
+        for app in apps().iter().filter(|a| !acp_only(a)).map(|a| a.id.as_str()) {
             assert!(!command(&r(app, None), id, "/w", None, "xenonet", Some("/p")).unwrap().1.iter().any(|a| a.contains("rm -rf")), "{app}");
         }
         assert!(prompt_in_file("grok") && !prompt_in_file("claude") && !prompt_in_file("codex"));

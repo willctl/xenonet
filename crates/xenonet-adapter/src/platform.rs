@@ -48,6 +48,14 @@ pub struct Hook {
     pub tool: Option<(String, Value)>,
 }
 
+/// The command that starts an app as an ACP agent on this machine: the
+/// file to run, found, and its arguments.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcpCommand {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
 /// What an adapter provides. Every method but `app` has a default: an
 /// adapter brings what its platform has.
 pub trait Platform: Send + Sync {
@@ -213,10 +221,23 @@ pub trait Platform: Send + Sync {
     }
 
     /// The program that runs the app on this machine, for an app XenoNet
-    /// runs turns of its own with (the registry's `sorts`), when the
-    /// adapter finds one; the app's id on the PATH otherwise.
+    /// runs turns of its own with (the registry's `sorts`) or starts over
+    /// ACP (`acp`), when the adapter finds one where its installer puts it;
+    /// the app's id, or its ACP command, on the PATH otherwise.
     fn program(&self, _env: &dirs::Env, _platform: &str, _home: &str, _look: &mut dyn dirs::Look) -> Option<String> {
         None
+    }
+
+    /// How XenoNet starts the app as an ACP agent here, for an app the
+    /// registry gives `acp`: its command on the PATH (on Windows with
+    /// PATHEXT, so a shim's `.cmd` or the `.exe` is the file run), else
+    /// where its adapter finds it (`program`), with the registry's
+    /// arguments. None when it isn't an ACP app, or isn't installed.
+    fn acp(&self, env: &dirs::CliEnv, platform: &str, home: &str, look: &mut dyn dirs::Look, can_run: &mut dyn FnMut(&str) -> bool) -> Option<AcpCommand> {
+        let acp = self.app().acp.as_ref()?;
+        let windows = platform == "win32";
+        let program = xenonet_os::paths::on_path(&acp.command, &env.path, env.pathext.as_deref(), windows, can_run).or_else(|| self.program(&env.dirs, platform, home, look))?;
+        Some(AcpCommand { program, args: acp.args.clone() })
     }
 
     /// How XenoNet reads the account the app is signed in to, for an app

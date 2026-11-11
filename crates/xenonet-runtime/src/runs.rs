@@ -55,6 +55,12 @@ fn cli_env() -> CliEnv {
     }
 }
 
+/// How an app is started as an ACP agent here, as its adapter finds it on
+/// this process's PATH or where its installer puts it under `home`.
+pub(crate) fn acp_command(app: &dyn xenonet_adapter::Platform, home: &str) -> Option<xenonet_adapter::AcpCommand> {
+    app.acp(&cli_env(), platform(), home, &mut Disk, &mut xenonet_os::paths::can_run)
+}
+
 /// Opens a file only you can read: made with mode 0600 on unix, so it's
 /// never readable by others, not even for a moment.
 fn private(o: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
@@ -227,7 +233,13 @@ impl Runner {
     pub fn run(self: &Arc<Self>, t: Turn<'_>, home: &str) -> Result<u32, String> {
         self.admit(t.key)?;
         let key = t.key.to_string();
-        let started = match dirs::find_cli(t.app, &cli_env(), platform(), home, &mut Disk, &mut xenonet_os::paths::can_run) {
+        // An app find_cli doesn't know (Grok Build) is on the PATH, or
+        // where its adapter finds it.
+        let env = cli_env();
+        let found = dirs::find_cli(t.app, &env, platform(), home, &mut Disk, &mut xenonet_os::paths::can_run)
+            .or_else(|| xenonet_os::paths::on_path(t.app, &env.path, env.pathext.as_deref(), cfg!(windows), &mut xenonet_os::paths::can_run))
+            .or_else(|| xenonet_adapter::platforms().get(t.app)?.program(&env.dirs, platform(), home, &mut Disk));
+        let started = match found {
             Some(program) => self.start(t, &program),
             None => Err(format!("{} isn't installed here", t.app)),
         };

@@ -3,6 +3,7 @@
 //! core/delivery/router.js.
 //!
 //!   live       into the session now: its Stop hook listening after a turn,
+//!              the next turn of a session XenoNet holds open over ACP,
 //!              a Claude Code channel, an OpenCode server's prompt_async,
 //!              typed into its tmux pane, or a headless resume of a session
 //!              whose process has gone
@@ -119,6 +120,17 @@ pub trait Host {
     /// A turn resumed for the session (or, `fork`, a copy of it) with the
     /// message as its prompt.
     fn resume_deliver(&mut self, agent: &str, cwd: Option<&str>, text: &str, fork: bool) -> Delivered;
+    /// Whether XenoNet holds the session open over ACP, between its turns.
+    fn acp_holds(&mut self, _agent: &str) -> bool {
+        false
+    }
+    /// The message as the next turn of a session XenoNet holds open over
+    /// ACP: its id, who it's from (`from`, by name), how XenoNet knows
+    /// (`verified`), its text, and whether it's yours. The ACP side frames
+    /// it as hook delivery does.
+    fn acp_deliver(&mut self, _agent: &str, _id: &str, _from: &str, _verified: Option<&str>, _text: &str, _user: bool) -> Delivered {
+        Err("XenoNet holds no session open over ACP here".into())
+    }
 }
 
 /// What the engine asks of live delivery.
@@ -147,7 +159,7 @@ struct Rec {
     from: String,
     /// queued, live, next-turn or notified.
     state: &'static str,
-    /// listen, channel, opencode, tmux, resume, fork or hooks.
+    /// listen, acp, channel, opencode, tmux, resume, fork or hooks.
     how: Option<&'static str>,
     at: f64,
     acked_at: Option<f64>,
@@ -330,6 +342,9 @@ impl Router {
         if h.listening(&id) {
             return Some("right away: it's listening for messages");
         }
+        if h.acp_holds(&id) && Self::may_wake(h, from, &id).allowed() {
+            return Some("right away, as the next turn of the session XenoNet holds open");
+        }
         let ways = a.get("app").and_then(Value::as_str).and_then(super::apps::of);
         if ways.is_some_and(|w| w.channel) && status == Some("idle") && h.channel_live(&id) {
             return Some("right away, through its channel");
@@ -485,6 +500,22 @@ impl Router {
                 let ways = super::apps::of(&app);
                 let ended = view.as_ref().is_some_and(|v| truthy(v.get("ended")));
                 let cwd = view.as_ref().and_then(|v| s(v.get("cwd")));
+                // First, a session XenoNet holds open over ACP, between its
+                // turns: the message is its next turn, with your consent
+                // for that session.
+                if h.acp_holds(&agent) {
+                    if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
+                        tried.push(format!("acp: {why}"));
+                    } else {
+                        match h.acp_deliver(&agent, &text_of(m.get("id")), &from_name, verified.as_deref(), &text_of(m.get("text")), is_you(&from)) {
+                            Ok(location) => {
+                                let t = h.now();
+                                return success(self, h, "acp", Some(t), Some(location));
+                            }
+                            Err(why) => tried.push(format!("acp: {why}")),
+                        }
+                    }
+                }
                 // 1. A Claude Code channel, only to wake an idle session.
                 if ways.is_some_and(|w| w.channel) && idle && h.channel_live(&agent) {
                     let item = json!({ "id": message, "from": from_name, "text": text });
