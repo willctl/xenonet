@@ -2,10 +2,11 @@
 
 Status: analysis and target shape, 2026-11-08. Written for the goals in
 [goals.md](goals.md). Phases 1 to 3 of the order of work are done;
-phase 4 is next. "Where the code stands" is the measure taken before
-phase 1, with the rows phase 3 answered stated as they stand; the order
-of work says what each phase changed. Will decides the open questions at
-the end as each phase reaches them.
+phases 4 to 6 are being built on `main`, and each says below what has
+landed and what is left. "Where the code stands" is the measure taken
+before phase 1, with the rows phase 3 answered stated as they stand; the
+order of work says what each phase changed. Will decides the open
+questions at the end as each phase reaches them.
 
 ## Where the code stands
 
@@ -110,6 +111,28 @@ Platforms plug in behind one trait. The console, CLI, MCP servers and A2A
 are clients of one typed local API. Sessions stay derived from vendor
 files, pushed by watchers into an index. Everything XenoNet itself
 authors is stored, signed and owned by a key.
+
+### What Will has fixed
+
+These hold for every phase and every design below:
+
+- **Intent to outcome.** Actors, people and bots, take an intent to an
+  outcome through hosts (where work runs), identities (whose account it
+  runs as) and running sessions (the agents doing it), each within what
+  they are allowed ([goals.md](goals.md)).
+- **One grant for every actor.** Local actors, bots and cloud assistants
+  hold the same kind of grant: read and act scopes over hosts, identities
+  and sessions. Issuing or widening one takes the person's presence
+  ([Authorization](#authorization)).
+- **Delegation networks.** Delegation is a standing grant the person
+  signs over a set of their machines: an intent made on any of them can be
+  worked by provider sessions on any of the others it names.
+- **No backwards compatibility.** Old networks, entries, tokens and state
+  files are refused or ignored; machines are set up again from scratch
+  ([Order of work](#order-of-work)).
+- **A prototype's process.** Small commits on `main`, local checks, CI as a
+  backstop, releases at a phase's end ([Order of work](#order-of-work)).
+- **Xenolith takes the libraries, never the app** ([Xenolith](#xenolith)).
 
 ### Crates
 
@@ -524,15 +547,41 @@ Will's step on inix and NEO-REX.
    an intent the person makes on one of their devices can be worked by
    provider sessions on any device their delegation grant names (question
    4), so delegation spans the person's machines, not one machine.
-5. **The transport.** Add `xenonet-net` on iroh beside the gateway link
-   for one release, with mailboxes (the gateway queue code moves there),
-   relay lists, presence deltas, the HLC, several networks per machine and
-   the `xenonet-net/2` head. Then delete the HTTP link, signed requests,
-   the clock offset, `gateway.sqlite`, `relay` and `svc` frames. The
-   three-service tests move under turmoil.
+   Landed: one store, `xenonet.sqlite` (`xenonet-store`); feeds on the
+   wire as `network/message/v3`; watchers in place of polling, with
+   kqueue for followed transcripts on macOS; projects and checkouts as
+   rows, confirmed at the window; agents as `agt_` ids; claims as
+   (project, path). Left: intents, and this phase's docs and cleanup.
+5. **The transport.** `xenonet-net` on iroh with mailboxes, relay lists,
+   presence deltas, the HLC, several networks per machine and the
+   `xenonet-net/2` head; then the HTTP link, signed requests, the clock
+   offset, `gateway.sqlite`, `relay` and `svc` frames are deleted, and the
+   three-service tests run on iroh under turmoil. No release carries both
+   transports. Landed: the iroh dial, mesh and admission, with turmoil's
+   simulated dial; the `xenonet-net/2` envelope with a routing-only head;
+   chain ops for relays, mailboxes, rekey and address records, with the
+   network chain signed by the machine signing key; the HLC; the Quint
+   models of delivery and spaces; the engine's `Store` trait; retention
+   and compaction; the transport lab; `xenonet/join/2`. Left: `link/2`,
+   holders, mailboxes and their receipts, presence deltas, several
+   networks per machine, `svc/2`, intents for any machine, the
+   three-service tests on iroh, and deleting the gateway and the remote
+   relay.
 6. **Xenolith and the edges.** Xenolith adopts the four libraries, never
    the app, and deletes its own pairing, tokens and crypto; spaces bind to
    model ids; the generic ACP adapter; A2A outbound; MCP 2026-07-28.
+   Landed: the Windows TPM key; the ACP client (`xenonet-acp`), which
+   starts Grok Build and Hermes; MCP 2026-07-28 with XenoNet's channel
+   over `subscriptions/listen`; A2A inbound on `a2a-lf`, and outbound A2A
+   actors (`adapters/a2a`); spaces (`SpaceId`, `EntityRef`, the
+   `xenolith-space/1` policy, its Quint model, `Resource::Space`);
+   Xenolith built from path dependencies on the libraries, held to them by
+   the layering check, with keys of its own. Left: the network's generic
+   `link/2` and `forward`; Xenolith's chain per space, Biscuit grants,
+   `xenolith/sync/2`, joining, fetching from a holder, shared mode and
+   deleting its old code; the MCP and console surfaces on `xenonet-api`;
+   dissolving the runtime, assistant and integrations crates; the lab and
+   the docs.
 
 ## Verification plan
 
