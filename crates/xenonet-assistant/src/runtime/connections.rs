@@ -17,6 +17,7 @@ use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Ho
 use xenonet_actors::store::{self, Tx};
 use xenonet_api::cores::assistant::ConnectionEvents;
 use xenonet_api::cores::{Actors, Connections, EngineStore, Grants, State, R};
+use xenonet_model::ids::{CheckoutId, ProjectId};
 use xenonet_os::sync::Locked;
 use xenonet_store::engine::{EngineStore as Tables, Shared};
 use xenonet_store::sql::SqlError;
@@ -225,16 +226,14 @@ impl Links for EngineRows {
     }
 }
 
-/// How a project id's making failed: the store's own way, or the maker's.
-enum MakeFail {
-    Sql(SqlError),
-    Store(store::Error),
+fn stored(e: xenonet_store::StoreError) -> store::Error {
+    store::Error { message: e.message, code: Some(e.code.to_string()) }
 }
 
-impl From<SqlError> for MakeFail {
-    fn from(e: SqlError) -> Self {
-        MakeFail::Sql(e)
-    }
+/// A local project node's id, `project:<chk_…>`, as its checkout's; a
+/// place of another machine's, or a zone, isn't one.
+fn checkout_of(place: &Value) -> Option<CheckoutId> {
+    text(place).strip_prefix("project:").and_then(|c| CheckoutId::parse(c).ok())
 }
 
 impl Store for EngineRows {
@@ -292,18 +291,15 @@ impl Store for EngineRows {
     fn add_audit(&self, row: &Value) -> store::Result<()> {
         self.0.with(|s| s.add_audit(row)).map_err(sql)
     }
-    fn project_id_of(&self, place: &Value, make: &mut dyn FnMut() -> store::Result<Value>, now: f64) -> store::Result<Value> {
-        let mut made = || make().map(|v| text(&v)).map_err(MakeFail::Store);
-        self.0.with(|s| s.project_id_of(&text(place), &mut made, now)).map_err(|e| match e {
-            MakeFail::Sql(e) => sql(e),
-            MakeFail::Store(e) => e,
-        })
+    fn project_of(&self, place: &Value) -> store::Result<Value> {
+        let Some(checkout) = checkout_of(place) else { return Ok(Value::Null) };
+        let db = self.0.with(|s| s.db().clone());
+        Ok(db.project_of_checkout(&checkout).map_err(stored)?.map_or(Value::Null, |p| Value::String(p.to_string())))
     }
-    fn project_id_for(&self, place: &Value) -> store::Result<Value> {
-        self.0.with(|s| s.project_id_for(&text(place))).map_err(sql)
-    }
-    fn place_of_project(&self, project_id: &Value) -> store::Result<Value> {
-        self.0.with(|s| s.place_of_project(&text(project_id))).map_err(sql)
+    fn places_of_project(&self, project_id: &Value) -> store::Result<Vec<Value>> {
+        let Ok(id) = ProjectId::parse(&text(project_id)) else { return Ok(Vec::new()) };
+        let db = self.0.with(|s| s.db().clone());
+        Ok(db.confirmed_checkouts_of(&id).map_err(stored)?.iter().map(|c| Value::String(format!("project:{}", c.id))).collect())
     }
 }
 
@@ -479,7 +475,20 @@ mod tests {
     use std::collections::HashMap;
     use xenonet_api::cores::Pending;
 
-    const ATLAS: &str = "project:/users/nova/projects/atlas-api";
+    // A folder found on the map, as the store keeps it.
+    fn found(path: &str, repo_key: Option<&str>) -> xenonet_store::projects::Found {
+        xenonet_store::projects::Found {
+            path: path.into(),
+            path_key: path.into(),
+            vcs: repo_key.map(|_| ".git".into()),
+            branch: None,
+            head: None,
+            repo_key: repo_key.map(Into::into),
+            kind: if repo_key.is_some() { xenonet_store::projects::CheckoutKind::Repo } else { xenonet_store::projects::CheckoutKind::Folder },
+            parent: None,
+            name: path.rsplit('/').next().unwrap_or(path).into(),
+        }
+    }
 
     // The registry, as small as the connections need it: actors by id,
     // each with how it came and what its connections come to.
@@ -552,8 +561,16 @@ mod tests {
         let remote = Remote::start(store.clone(), &creds, &dir.to_string_lossy(), 47999, actors.clone(), Arc::new(Pending), Arc::new(Pending), grants).unwrap();
         assert_eq!(actors.hooks.locked().len(), 1, "its connections go before an actor does");
         let c = ConnectionsCore(remote.clone());
-        let places = json!({ ATLAS: { "place": ATLAS, "name": "atlas-api" } });
-        let ask = json!({ "label": "My dot", "product": "dots", "transport": "openai-secure-mcp-tunnel", "audience": { "description": "Only my ChatGPT account, in my workspace", "verification": "owner_verified", "scope": "owner_endpoint" }, "projects": [ATLAS] });
+        // atlas-api founds its project; a second checkout of it waits for
+        // the person, so it gives rights in nothing.
+        let db = store.with(|s| s.db().clone());
+        db.reconcile(&[found("/users/nova/projects/atlas-api", Some("github.com/nova/atlas")), found("/users/nova/projects/old/atlas-api", Some("github.com/nova/atlas"))], 1)
+            .unwrap();
+        let node = |path: &str| format!("project:{}", db.place(path).unwrap().unwrap().checkout.id);
+        let (atlas, copy) = (node("/users/nova/projects/atlas-api"), node("/users/nova/projects/old/atlas-api"));
+        let project = db.place("/users/nova/projects/atlas-api").unwrap().unwrap().checkout.project.to_string();
+        let places = json!({ atlas.clone(): { "place": atlas, "name": "atlas-api" }, copy.clone(): { "place": copy, "name": "atlas-api" } });
+        let ask = json!({ "label": "My dot", "product": "dots", "transport": "openai-secure-mcp-tunnel", "audience": { "description": "Only my ChatGPT account, in my workspace", "verification": "owner_verified", "scope": "owner_endpoint" }, "projects": [atlas] });
         let v = c.pair(&ask, &places, &["chatgpt:demo-workspace".to_string()]).unwrap();
         assert_eq!((v["actor_id"].clone(), v["state"].clone(), v["data_mode"].clone()), (json!("actor:dots"), json!("active"), json!("real")));
         let grant = v["grant_id"].as_str().unwrap().to_string();
@@ -565,12 +582,16 @@ mod tests {
         assert_eq!(c.authenticate(&json!("gr_ffffffffffffffffffffffff"), &token)["reason"], "unknown-grant");
         let p = c.policy(&s).unwrap();
         assert_eq!(p["dataMode"], "real");
+        assert_eq!((p["projects"].clone(), p["places"].clone()), (json!([project]), json!([[project, atlas]])), "the store's own project id, read through its confirmed checkout");
+        assert_eq!(v["projects"], json!([{ "project_id": project, "place": atlas, "name": null }]));
+        let candidate = json!({ "label": "Copy dot", "product": "dots", "transport": "openai-secure-mcp-tunnel", "audience": { "description": "Only my account", "verification": "owner_verified", "scope": "owner_endpoint" }, "projects": [copy] });
+        assert_eq!(c.pair(&candidate, &places, &[]).unwrap_err().code.as_deref(), Some("bad-request"), "a candidate checkout can't be picked");
         assert_eq!(c.recheck(&grant)["ok"], true);
         assert!(c.any_active());
         assert!(c.list().unwrap()["connections"].as_array().unwrap().iter().any(|x| x["grant_id"] == json!(grant)));
         // A grant whose audience isn't verified reads made-up data only,
         // through every check a real read goes through, and is audited.
-        let unverified = json!({ "label": "Work dot", "name": "Work dot", "product": "dots", "transport": "openai-secure-mcp-tunnel", "audience": { "description": "Anyone in my workspace", "verification": "unverified", "scope": "authenticated_user" }, "projects": [ATLAS] });
+        let unverified = json!({ "label": "Work dot", "name": "Work dot", "product": "dots", "transport": "openai-secure-mcp-tunnel", "audience": { "description": "Anyone in my workspace", "verification": "unverified", "scope": "authenticated_user" }, "projects": [atlas] });
         let w = c.pair(&unverified, &places, &[]).unwrap();
         assert_eq!(w["data_mode"], "fixture");
         let st = store.clone();
@@ -600,12 +621,12 @@ mod tests {
         let narrowed = c.update(&grant, &json!([]), &Value::Null, &places).unwrap();
         assert_eq!((narrowed["revision"].clone(), narrowed["projects"].clone()), (json!(3), json!([])));
         assert_eq!(projects_of(&first).as_deref(), Some("[]"));
-        c.update(&grant, &json!([ATLAS]), &Value::Null, &places).unwrap();
+        c.update(&grant, &json!([atlas]), &Value::Null, &places).unwrap();
         c.rotate(&grant).unwrap();
         assert_eq!(c.authenticate(&json!(grant), &token)["reason"], "wrong-token", "the token from before the rotation");
         assert!(store.with(|s| s.revoked(&first)).unwrap().is_some());
         let second = id_of();
-        assert_eq!((projects_of(&first), projects_of(&second).map(|p| p.contains("prj_"))), (None, Some(true)), "the scope moved with the token");
+        assert_eq!((projects_of(&first), projects_of(&second)), (None, Some(json!([project]).to_string())), "the scope moved with the token");
         let fresh = credential();
         assert_eq!(c.authenticate(&json!(grant), &fresh)["ok"], true);
         let mut events = c.subscribe().unwrap();

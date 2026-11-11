@@ -303,9 +303,10 @@ impl Ctx<'_> {
         }
     }
 
+    // Every place a project is read through: one per confirmed checkout.
     fn targets_of(&self, project: &Value) -> Vec<Value> {
         if truthy(Some(project)) {
-            vec![self.place_of(project).unwrap_or(Value::Null)]
+            p::pairs(self.policy.get("places")).into_iter().filter(|(k, _)| xenonet_text::value::same(Some(k), Some(project))).map(|(_, v)| v).collect()
         } else {
             vec![]
         }

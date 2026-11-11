@@ -6,7 +6,7 @@
 //! the pairing's preview) are the fixtures'. A read's page cursors are the
 //! token it came in with, narrowed (`pages`).
 
-use super::connections::Remote;
+use super::connections::{EngineRows, Remote};
 use crate::pages::{Granted, Standalone};
 use crate::service::{self, Config, Inflight, Pages, ReadHost, LIMITS};
 use crate::{audit, fixtures, projection, source};
@@ -16,6 +16,7 @@ use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use xenonet_actors::adapters::{ADAPTERS, TRANSPORTS};
+use xenonet_actors::connections::Store as _;
 use xenonet_actors::remote_presence::{self, RemotePresence};
 use xenonet_api::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, Grants, State, R};
 use xenonet_api::limits::Buckets;
@@ -71,7 +72,7 @@ pub fn input_ok(tool: &str, args: &Value) -> bool {
     let Some(o) = args.as_object() else { return false };
     let cursor = |v: &Value| v.as_str().is_some_and(|s| re(&CURSOR, r"^xenonet_actor_[A-Za-z0-9_-]{64,4096}$").is_match(s));
     let limit = |v: &Value| v.as_f64().is_some_and(|n| n.fract() == 0.0 && (1.0..=50.0).contains(&n));
-    let project = |v: &Value| v.as_str().is_some_and(|s| re(&PROJECT, &format!("^prj_{UUID}$")).is_match(s));
+    let project = |v: &Value| v.as_str().is_some_and(|s| re(&PROJECT, xenonet_model::assistant::PROJECT_ID).is_match(s));
     let session = |v: &Value| v.as_str().is_some_and(|s| re(&SESSION, &format!("^(claude|codex|grok):{UUID}$")).is_match(s));
     let iso = |v: &Value| v.as_str().is_some_and(|s| re(&ISO, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z$").is_match(s));
     let list_of =
@@ -482,7 +483,9 @@ impl Reads {
 
     /// What a grant with these projects and labels would send: the
     /// made-up answers first, then xenonet_projects and xenonet_sessions as
-    /// they'd read the map now, under ids made for the preview alone.
+    /// they'd read the map now, under the store's own project ids. A place
+    /// that gives rights in no project (a candidate checkout) reads
+    /// nothing, as it would in the grant.
     pub async fn preview(&self, body: &Value, known: &Value) -> R<Value> {
         let mut chosen: Vec<String> = Vec::new();
         for p in body.get("projects").and_then(Value::as_array).into_iter().flatten() {
@@ -497,12 +500,28 @@ impl Reads {
         for op in ["projects", "sessions", "attention"] {
             synthetic.insert(op.into(), self.fixture_read(op, labels).await);
         }
-        let places: Vec<(String, String)> = chosen.into_iter().map(|place| (format!("prj_{}", xenonet_os::random_uuid()), place)).collect();
+        let rows = self.store.clone().map(EngineRows);
+        let mut places: Vec<(String, String)> = Vec::new();
+        for place in chosen {
+            let id = match &rows {
+                Some(r) => r.project_of(&json!(place)).map_err(|e| CoreError::new(e.message))?,
+                None => Value::Null,
+            };
+            if let Some(id) = id.as_str() {
+                places.push((id.to_string(), place));
+            }
+        }
+        let mut ids: Vec<&str> = Vec::new();
+        for (p, _) in &places {
+            if !ids.contains(&p.as_str()) {
+                ids.push(p);
+            }
+        }
         let policy = json!({ "labels": labels, "lookbackMs": projection::WINDOW_MS, "places": places.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>() });
         let t = now_ms();
         let view = self.view()?;
         let mut visible = projection::visible_sessions(&view, &policy, t);
-        let mut counts: Vec<(String, Map<String, Value>)> = places.iter().map(|(p, _)| (p.clone(), projection::empty_counts())).collect();
+        let mut counts: Vec<(String, Map<String, Value>)> = ids.iter().map(|p| ((*p).to_string(), projection::empty_counts())).collect();
         for v in &visible {
             let project = xenonet_text::text::display(&v.project);
             if let Some((_, c)) = counts.iter_mut().find(|(p, _)| *p == project) {
@@ -519,9 +538,10 @@ impl Reads {
                 .and_then(Value::as_str)
                 .map(str::to_string)
         };
-        let projects: Vec<Value> = places
+        let projects: Vec<Value> = ids
             .iter()
-            .map(|(p, place)| {
+            .map(|p| {
+                let place = places.iter().find(|(k, _)| k.as_str() == *p).map_or("", |(_, v)| v.as_str());
                 let label = if labels { place_name(place).and_then(|n| projection::clean_label(&n)).map_or(Value::Null, Value::String) } else { Value::Null };
                 json!({ "project_id": p, "label": label, "session_counts": counts.iter().find(|(k, _)| k == p).map_or_else(|| json!({}), |(_, c)| Value::Object(c.clone())) })
             })

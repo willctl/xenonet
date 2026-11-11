@@ -30,8 +30,8 @@ crate::pattern! {
 }
 crate::pattern! {
     #[schemars(extend("x-bounds-last" = true))]
-    // A project's id: prj_ and a UUID.
-    pub struct ProjectId(r"^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    // A project's id, the store's: prj_ and 32 base32 characters.
+    pub struct ProjectId(r"^prj_[a-z2-7]{32}$");
 }
 crate::pattern! {
     #[schemars(extend("x-bounds-last" = true))]

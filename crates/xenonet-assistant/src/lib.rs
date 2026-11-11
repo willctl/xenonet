@@ -21,3 +21,6 @@ pub mod service;
 pub mod source;
 pub mod tunnel_client;
 pub mod tunnels;
+
+/// A project's id as remote readers see it, the pattern its schemas use.
+pub use xenonet_model::assistant::PROJECT_ID;

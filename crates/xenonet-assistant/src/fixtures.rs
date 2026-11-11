@@ -32,8 +32,9 @@ fn part(role: &str) -> (Value, String) {
 
 pub const ATLAS: &str = "fixture:atlas-api";
 pub const LEDGER: &str = "fixture:ledger";
-pub const ATLAS_PROJECT: &str = "prj_0190fa00-0000-4000-8000-000000000001";
-pub const LEDGER_PROJECT: &str = "prj_0190fa00-0000-4000-8000-000000000002";
+// Made-up projects' ids, which no project of the store's can be.
+pub const ATLAS_PROJECT: &str = "fixture_atlas-api";
+pub const LEDGER_PROJECT: &str = "fixture_ledger";
 pub const WATCHER: &str = "actor:fixture-watcher";
 
 /// FIXTURE, as the JS exports it.

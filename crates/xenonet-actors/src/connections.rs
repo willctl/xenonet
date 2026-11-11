@@ -191,12 +191,13 @@ pub trait Store: Links {
     fn scope(&self, token: &str) -> store::Result<Option<Value>>;
     fn drop_scope(&self, token: &str) -> store::Result<()>;
     fn add_audit(&self, row: &Value) -> store::Result<()>;
-    /// A place's project id, made by `make` when it has none yet.
-    fn project_id_of(&self, place: &Value, make: &mut dyn FnMut() -> store::Result<Value>, now: f64) -> store::Result<Value>;
-    /// A place's project id, or null.
-    fn project_id_for(&self, place: &Value) -> store::Result<Value>;
-    /// A project id's place, or null.
-    fn place_of_project(&self, project_id: &Value) -> store::Result<Value>;
+    /// The project a place on the map gives rights in (the store's
+    /// `prj_…`, the id every other surface names it by), or null for a
+    /// place that isn't a confirmed checkout of one.
+    fn project_of(&self, place: &Value) -> store::Result<Value>;
+    /// The places a project is read through here: its confirmed
+    /// checkouts not gone, by path.
+    fn places_of_project(&self, project_id: &Value) -> store::Result<Vec<Value>>;
 }
 
 fn random_hex(n: usize) -> store::Result<String> {
@@ -596,16 +597,30 @@ impl Connections {
         Ok(row.map_or_else(Vec::new, |r| items(parse(&col(&r, "projects"), json!([])))))
     }
 
-    /// The places these project ids are of, those still known.
+    /// The places these project ids are read through, those still here.
     fn places_of(&self, ids: &[Value]) -> Result<Vec<Value>> {
         let mut places = Vec::new();
         for id in ids {
-            let place = self.store.place_of_project(id)?;
-            if truthy(Some(&place)) {
-                places.push(place);
-            }
+            places.extend(self.store.places_of_project(id)?);
         }
         Ok(places)
+    }
+
+    /// The projects these places give rights in, each once, or a refusal
+    /// for a place that gives rights in none: a folder that isn't a
+    /// checkout, or a candidate the person hasn't confirmed.
+    fn projects_for(&self, places: &[Value]) -> Result<Vec<Value>> {
+        let mut ids: Vec<Value> = Vec::new();
+        for place in places {
+            let id = self.store.project_of(place)?;
+            if !truthy(Some(&id)) {
+                return fail(400.0, "bad-request", "pick projects you've confirmed on the map");
+            }
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        Ok(ids)
     }
 
     fn revoke_row(&self, h: &mut dyn Host, g: &Value, reason: &str, t: f64, by: &str) -> Result<bool> {
@@ -817,6 +832,7 @@ impl Connections {
                 return fail(400.0, "bad-request", "pick projects from the map as it is now");
             }
         }
+        let projects = self.projects_for(&chosen)?;
         let account_link = ask.get("accountLink");
         let link = account_link.and_then(|a| a.get("state")).filter(|s| !s.is_null()).cloned().unwrap_or_else(|| json!("unverified"));
         if link.as_str() == Some("verified") {
@@ -864,10 +880,6 @@ impl Connections {
                 None => {
                     h.add_via(&plan.id, "remote")?;
                 }
-            }
-            let mut projects = Vec::new();
-            for place in &chosen {
-                projects.push(self.store.project_id_of(place, &mut || Ok(Value::String(uuid_id("prj")?)), t)?);
             }
             let connection = json!({
                 "connection_id": connection_id,
@@ -960,24 +972,17 @@ impl Connections {
             if chosen.len() > PROJECTS_MAX {
                 return fail(400.0, "bad-request", format!("a grant names at most {PROJECTS_MAX} projects"));
             }
-            // A place the grant names already may stay, on the map or not.
+            // A place of a project the grant names already may stay, on
+            // the map or not.
             for p in &chosen {
                 if !h.places_has(&display(p)) {
-                    let id = self.store.project_id_for(p)?;
-                    let kept = had.iter().any(|h| match (h, &id) {
-                        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
-                        (Value::Object(_) | Value::Array(_), _) => false,
-                        (a, b) => a == b,
-                    });
-                    if !kept {
+                    let id = self.store.project_of(p)?;
+                    if !truthy(Some(&id)) || !had.contains(&id) {
                         return fail(400.0, "bad-request", "pick projects from the map as it is now");
                     }
                 }
             }
-            let mut ids = Vec::new();
-            for place in &chosen {
-                ids.push(self.store.project_id_of(place, &mut || Ok(Value::String(uuid_id("prj")?)), t)?);
-            }
+            let ids = self.projects_for(&chosen)?;
             projects = Some((chosen, ids));
         }
         let mut labels = had_labels;
@@ -1199,8 +1204,7 @@ impl Connections {
         let projects = Value::Array(self.projects_of(&g)?);
         let mut places = Vec::new();
         for p in items(projects.clone()) {
-            let place = self.store.place_of_project(&p)?;
-            if truthy(Some(&place)) {
+            for place in self.store.places_of_project(&p)? {
                 places.push(json!([p, place]));
             }
         }
@@ -1273,7 +1277,7 @@ impl Connections {
         let (link, identity) = account_links::link_state(self.links(), &text(&conn, "actor_slug"), t)?;
         let mut projects = Vec::new();
         for p in self.projects_of(g)? {
-            let place = self.store.place_of_project(&p)?;
+            let place = self.store.places_of_project(&p)?.into_iter().next().unwrap_or(Value::Null);
             let name = if truthy(Some(&place)) { h.describe(&display(&place)) } else { Value::Null };
             projects.push(json!({ "project_id": p, "place": place, "name": name }));
         }

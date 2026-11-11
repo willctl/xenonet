@@ -147,7 +147,7 @@
         "properties": {
           "project_id": {
             "type": "string",
-            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            "pattern": "^prj_[a-z2-7]{32}$"
           },
           "place": {
             "description": "The project's node id on your map, for this window only",

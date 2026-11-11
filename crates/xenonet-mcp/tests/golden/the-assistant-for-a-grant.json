@@ -723,7 +723,7 @@
                         "properties": {
                           "project_id": {
                             "type": "string",
-                            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                           },
                           "label": {
                             "anyOf": [
@@ -850,7 +850,7 @@
               "properties": {
                 "project_id": {
                   "type": "string",
-                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                 },
                 "statuses": {
                   "minItems": 1,
@@ -994,7 +994,7 @@
                           },
                           "project_id": {
                             "type": "string",
-                            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                           },
                           "app": {
                             "type": "string",
@@ -1141,7 +1141,7 @@
               "properties": {
                 "project_id": {
                   "type": "string",
-                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                 },
                 "kinds": {
                   "minItems": 1,
@@ -1295,7 +1295,7 @@
                           },
                           "project_id": {
                             "type": "string",
-                            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                           },
                           "first_observed_at": {
                             "anyOf": [
@@ -1519,7 +1519,7 @@
                         },
                         "project_id": {
                           "type": "string",
-                          "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                         },
                         "app": {
                           "type": "string",
@@ -1742,7 +1742,7 @@
               "properties": {
                 "project_id": {
                   "type": "string",
-                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                 },
                 "cursor": {
                   "type": "string",
@@ -1935,7 +1935,7 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
-                                      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                                      "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                                     },
                                     {
                                       "type": "string",
@@ -2053,7 +2053,7 @@
         "content": [
           {
             "type": "text",
-            "text": "Input validation error: Invalid arguments for tool xenonet_sessions: project_id: Invalid string: must match pattern /^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, statuses: Too big: expected array to have <=6 items"
+            "text": "Input validation error: Invalid arguments for tool xenonet_sessions: project_id: Invalid string: must match pattern /^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$/, statuses: Too big: expected array to have <=6 items"
           }
         ],
         "isError": true

@@ -61,12 +61,14 @@ second registry. The store (`xenonet.sqlite`, `crates/xenonet-store/src/engine.r
 - `actor_grants`: what a connection may read (labels, lookback, data
   mode), until when, its revision, and its token's revocation id. The
   projects it reads are its grant's scope row in `grant_scopes`, keyed by
-  the same id.
+  the same id: the store's own `prj_` ids, the ones every other surface
+  names projects by. A project is read through its confirmed checkouts
+  on this machine (`project:<chk_…>` on the map); a candidate checkout or
+  a zone can't be picked, since it gives rights in no project.
 - `actor_account_links`, `actor_external_refs`: how sure XenoNet is of the
   account, and the provider's own ids once proven, unique per namespace;
   a conflict is refused for the owner to review, never merged.
-- `assistant_places` (a place's `prj_<uuid>`, since node ids hold paths),
-  `assistant_meta` (the device's id and a fingerprint of the installation),
+- `assistant_meta` (the device's id and a fingerprint of the installation),
   `assistant_audit` (seven days, 20,000 records).
 
 Foreign keys are on in the store. Remote-only actors have

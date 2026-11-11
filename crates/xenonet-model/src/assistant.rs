@@ -12,7 +12,7 @@ use std::borrow::Cow;
 // A string of one shape: an id, a token, a time, refused as it's read
 // when it doesn't match.
 macro_rules! patterned {
-    ($(#[$m:meta])* $name:ident = $pattern:literal $(, $key:literal : $value:literal)*) => {
+    ($(#[$m:meta])* $name:ident = $pattern:expr $(, $key:literal : $value:literal)*) => {
         $(#[$m])*
         #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize)]
         #[serde(transparent)]
@@ -60,9 +60,13 @@ patterned!(
     /// A device's id: dev_ and a UUID.
     DeviceId = "^dev_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 );
+/// A project's id as remote readers see it: the store's (prj_ and 32
+/// base32 characters), or in made-up answers alone, fixture_ and a name.
+pub const PROJECT_ID: &str = "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$";
+
 patterned!(
-    /// A project's id: prj_ and a UUID.
-    ProjectId = "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    /// A project's id: the store's, or a made-up project's (PROJECT_ID).
+    ProjectId = PROJECT_ID
 );
 patterned!(
     /// A session's id: its app, a colon and a UUID.

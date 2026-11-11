@@ -147,8 +147,6 @@ pub(crate) const TABLES: &[&str] = &[
         adapter_id TEXT NOT NULL, issuer TEXT NOT NULL, account_binding TEXT NOT NULL,
         external_actor_id TEXT NOT NULL, verified_at INTEGER NOT NULL,
         UNIQUE (adapter_id, issuer, account_binding, external_actor_id))",
-    "CREATE TABLE assistant_places (
-        place TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)",
     "CREATE TABLE assistant_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     "CREATE TABLE assistant_audit (
         id INTEGER PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL,
@@ -1033,22 +1031,6 @@ impl EngineStore {
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
         self.run("INSERT INTO assistant_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", &[key.into(), value.into()])?;
         Ok(())
-    }
-    /// A place's own id for remote readers (`prj_<uuid>`), made the first
-    /// time it's asked for; `make` makes one.
-    pub fn project_id_of<E: From<SqlError>>(&self, place: &str, make: &mut dyn FnMut() -> std::result::Result<String, E>, now: f64) -> std::result::Result<Value, E> {
-        if let Some(had) = self.get("SELECT project_id FROM assistant_places WHERE place = ?", &[place.into()])? {
-            return Ok(had.get("project_id").to_json());
-        }
-        let id = make()?;
-        self.run("INSERT INTO assistant_places (place, project_id, created_at) VALUES (?, ?, ?)", &[place.into(), (&id).into(), n(now)])?;
-        Ok(Value::String(id))
-    }
-    pub fn project_id_for(&self, place: &str) -> Result<Value> {
-        Ok(self.get("SELECT project_id FROM assistant_places WHERE place = ?", &[place.into()])?.map_or(Value::Null, |r| r.get("project_id").to_json()))
-    }
-    pub fn place_of_project(&self, project_id: &str) -> Result<Value> {
-        Ok(self.get("SELECT place FROM assistant_places WHERE project_id = ?", &[project_id.into()])?.map_or(Value::Null, |r| r.get("place").to_json()))
     }
     /// A connection: a record with its columns' names.
     pub fn add_connection(&self, row: &Value) -> Result<()> {

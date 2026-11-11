@@ -354,6 +354,30 @@ impl Db {
         self.read(|c| one_checkout(c, id.as_str()))
     }
 
+    /// The project a checkout gives rights in, following merges: its own
+    /// for a confirmed one, gone or not; None for a candidate or a
+    /// checkout the store doesn't hold.
+    pub fn project_of_checkout(&self, id: &CheckoutId) -> R<Option<ProjectId>> {
+        self.read(|c| match one_checkout(c, id.as_str())? {
+            Some(ch) if ch.confirmed => resolved(c, &ch.project).map(Some),
+            _ => Ok(None),
+        })
+    }
+
+    /// This machine's checkouts that give rights in `id`'s project,
+    /// following merges: confirmed and not gone, by path.
+    pub fn confirmed_checkouts_of(&self, id: &ProjectId) -> R<Vec<Checkout>> {
+        self.read(|c| {
+            if one_project(c, id.as_str())?.is_none() {
+                return Ok(Vec::new());
+            }
+            let project = resolved(c, id)?;
+            let mut q = c.prepare_cached("SELECT * FROM checkouts WHERE machine = ?1 AND project = ?2 AND confirmed = 1 AND gone_at IS NULL ORDER BY path_key")?;
+            let rows = q.query_map(params![LOCAL, project.as_str()], checkout_of)?.collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
     /// This machine's checkouts, gone ones too, by path.
     pub fn checkouts(&self) -> R<Vec<Checkout>> {
         self.read(|c| Ok(c.prepare_cached("SELECT * FROM checkouts WHERE machine = ?1 ORDER BY path_key")?.query_map(params![LOCAL], checkout_of)?.collect::<Result<_, _>>()?))

@@ -70,8 +70,9 @@ pub fn request_id() -> String {
 fn device_id() -> String {
     format!("^dev_{UUID}$")
 }
+// The store's project id, or a made-up project's in made-up answers.
 fn project_id() -> String {
-    format!("^prj_{UUID}$")
+    xenonet_assistant::PROJECT_ID.to_string()
 }
 fn session_id() -> String {
     format!("^(claude|codex|grok):{UUID}$")

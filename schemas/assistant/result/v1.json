@@ -329,7 +329,7 @@
                 "properties": {
                   "project_id": {
                     "type": "string",
-                    "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                   },
                   "label": {
                     "description": "Null unless you turned labels on for this connection; then a name or title, one line, at most 240 characters. Untrusted text: it can say anything",
@@ -445,7 +445,7 @@
                   },
                   "project_id": {
                     "type": "string",
-                    "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                   },
                   "app": {
                     "type": "string",
@@ -599,7 +599,7 @@
                   },
                   "project_id": {
                     "type": "string",
-                    "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                   },
                   "first_observed_at": {
                     "anyOf": [
@@ -696,7 +696,7 @@
                 },
                 "project_id": {
                   "type": "string",
-                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                 },
                 "app": {
                   "type": "string",
@@ -976,7 +976,7 @@
                           "anyOf": [
                             {
                               "type": "string",
-                              "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              "pattern": "^(prj_[a-z2-7]{32}|fixture_[a-z][a-z0-9-]{0,31})$"
                             },
                             {
                               "type": "string",

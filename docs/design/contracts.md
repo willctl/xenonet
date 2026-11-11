@@ -450,9 +450,10 @@ owner pairs, under the same actor grant as every other actor (design:
   (`additionalProperties: false`): data that leaves the machine is an
   allowlist, and a field the contract doesn't name is refused, in
   arguments and answers alike. A new field is a new version.
-- Ids: a project as remote readers see it is `prj_<uuid>`, apart from the
-  store's `prj_` (section 2), since node ids hold paths; a grant
-  `gr_<24 hex>`, a connection `cn_<24 hex>` and a request `r_<uuid>`.
+- Ids: a project as remote readers see it is the store's `prj_` (section
+  2), and in made-up answers alone `fixture_<name>`, which no project of
+  the store's can be; a grant `gr_<24 hex>`, a connection `cn_<24 hex>`
+  and a request `r_<uuid>`.
   Sessions keep their `claude:`/`codex:` ids when they're UUIDs.
 - `identity` stays null on the snapshot for an account link that's only
   the owner's word. Products have `remote` beside `registers`, and

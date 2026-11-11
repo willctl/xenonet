@@ -169,3 +169,21 @@ fn a_scopes_project_terms_name_confirmed_checkouts_only() {
     assert!(!lone.place("/w/b").unwrap().unwrap().checkout.confirmed, "the copy is a candidate");
     assert_eq!(lone.confirmed_projects(Some("b")).unwrap(), Vec::new(), "a candidate checkout gives no project rights");
 }
+
+#[test]
+fn a_project_reads_through_its_confirmed_checkouts_only() {
+    let db = db();
+    db.reconcile(&[repo("/w/atlas", "x/atlas"), repo("/w/copy/atlas", "x/atlas")], 1).unwrap();
+    let (main, copy) = (db.place("/w/atlas").unwrap().unwrap().checkout, db.place("/w/copy/atlas").unwrap().unwrap().checkout);
+    assert_eq!(db.project_of_checkout(&main.id).unwrap(), Some(main.project.clone()));
+    assert_eq!(db.project_of_checkout(&copy.id).unwrap(), None, "a candidate gives rights in nothing");
+    let ids = |v: Vec<Checkout>| v.into_iter().map(|c| c.id).collect::<Vec<_>>();
+    assert_eq!(ids(db.confirmed_checkouts_of(&main.project).unwrap()), vec![main.id.clone()]);
+    db.confirm(&copy.id).unwrap();
+    assert_eq!(ids(db.confirmed_checkouts_of(&main.project).unwrap()), vec![main.id.clone(), copy.id.clone()], "by path");
+    // Gone, it reads nothing, and still says which project it was in.
+    db.reconcile(&[repo("/w/copy/atlas", "x/atlas")], 2).unwrap();
+    assert_eq!(ids(db.confirmed_checkouts_of(&main.project).unwrap()), vec![copy.id]);
+    assert_eq!(db.project_of_checkout(&main.id).unwrap(), Some(main.project));
+    assert_eq!(db.confirmed_checkouts_of(&ProjectId::parse("prj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()).unwrap(), Vec::new(), "one the store doesn't hold");
+}

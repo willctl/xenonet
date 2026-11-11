@@ -45,7 +45,9 @@ impl AssistantRoutes<'_> {
         Ok(body)
     }
 
-    // The projects and folders on the map now, by node id, most active first.
+    // The projects on the map now that a grant can read, by node id, most
+    // active first: this machine's confirmed checkouts, each the store's
+    // project. A candidate checkout or a zone gives rights in no project.
     fn places(&self) -> Result<Vec<Value>, CoreError> {
         let state = &self.ctx.cores.state;
         let t = self.ctx.now();
@@ -67,7 +69,7 @@ impl AssistantRoutes<'_> {
         }
         let mut places: Vec<Value> = nodes
             .iter()
-            .filter(|n| (n["kind"] == "project" || n["kind"] == "zone") && !xenonet_text::text::truthy(n.get("host")))
+            .filter(|n| n["kind"] == "project" && n["confirmed"] == true && n["projectId"].is_string() && !xenonet_text::text::truthy(n.get("host")))
             .map(|n| {
                 let count = counts.iter().find(|(h, _)| *h == n["id"]).map_or(0.0, |c| c.1);
                 json!({ "place": n["id"], "name": n.get("name").cloned().unwrap_or(Value::Null), "kind": n["kind"], "sessions7d": xenonet_text::json::number(count), "lastActivity": n.get("lastActivity").cloned().unwrap_or(Value::Null) })

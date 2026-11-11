@@ -19,7 +19,7 @@ A connection reads through six tools, and has no others:
 | `xenonet_session` | One session, with its token and tool-call counts if it asks. |
 | `xenonet_actors` | Itself, and other actors acting on those projects. |
 
-It sees only the projects you pick. A connection starts with none. Projects you add to the map later are never added to a connection by themselves.
+It sees only the projects you pick. A connection starts with none. Projects you add to the map later are never added to a connection by themselves. You can pick a project only through a checkout you've confirmed in it ([Projects](projects.md)); a copy still waiting for you, or a folder outside any project, isn't offered.
 
 Without labels, it gets ids, statuses, times and counts. With labels turned on, it also gets project names, session titles and actor names, cleaned of anything that looks like a key, an email or a folder named for a person. Titles are text that sessions and people wrote, so they can say anything. Turning labels on sends that text.
 
