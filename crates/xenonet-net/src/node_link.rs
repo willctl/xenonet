@@ -14,10 +14,22 @@
 //! silent duplicate, never a refused receipt or a second ask. A copy by the
 //! same way is the author sending again, which the feeds take as before.
 //!
+//! **Gaps** are filled from any member that holds the entries (`holder`):
+//! a Want goes to one holder at a time, the author first when it is
+//! connected, then the members whose hello said they hold more, and the
+//! next after a "don't have", an entry that doesn't check, or ten seconds
+//! of nothing. An entry a holder serves is taken as the author's: the
+//! receiver checks its signature against the author's key in its own
+//! chain, and its `prev` against what it applied. This machine serves the
+//! entries it applied of the others' feeds to the current members of the
+//! network, as `holder::serve` rules.
+//!
 //! What link/2 doesn't carry yet: a message whose act rests on an
 //! authority (the envelope has no place for it beside the entry yet), so
 //! those go through the gateway alone; svc/2 and the map's relay; Held
-//! receipts and Compacted answers, which are read and set aside.
+//! receipts and Compacted answers, which are read and set aside (a
+//! holder's Compacted answer counts as "don't have", so the next holder or
+//! the author is asked).
 //!
 //! **Finding members.** Each machine signs an address record (its endpoint
 //! id and direct addresses, under its machine signing key) and puts it in
@@ -29,6 +41,7 @@ use super::{json, Arc, Duration, Locked, NetFile, ReadWrite, Shared, Value, Weak
 use crate::dial::{Close, Dial, Mesh, PeerId};
 use crate::endpoint::{peer_id, IrohDial, Relay, Relays, Settings};
 use crate::envelope::{Class as EnvClass, Envelope, Me as Recipient};
+use crate::holder::{self, Ask, Fetching};
 use crate::link2::{Control, Links, Machine, NetHello, Out};
 use crate::roster::Member;
 use std::collections::{HashMap, VecDeque};
@@ -95,6 +108,11 @@ pub struct Transport2 {
     pub found: std::sync::Mutex<std::collections::BTreeMap<String, std::collections::BTreeSet<&'static str>>>,
     /// This machine's own address record, and when it was signed.
     record: std::sync::Mutex<Option<(Value, Instant)>>,
+    /// The feeds with a gap and the holders asked, and the requesters this
+    /// machine serves as a holder.
+    pub fetching: std::sync::Mutex<Fetching>,
+    /// A fetch began: the clock that moves fetches on looks again.
+    fetch_due: tokio::sync::Notify,
 }
 
 /// This machine's clock, and how far its HLC is ahead of it.
@@ -261,6 +279,77 @@ impl Shared {
         }
     }
 
+    /// The holders for `author`'s feed in `network`, best first, among the
+    /// members connected now.
+    fn holders_of(&self, t: &Transport2, f: &Fetching, network: &str, author: &str) -> Vec<PeerId> {
+        let connected: Vec<PeerId> = t.links.peers().into_iter().filter(|(_, s)| s.networks.contains(network)).map(|(p, _)| p).collect();
+        let by_author = self.roster().view_ref().and_then(|v| v.by_machine(author).map(|m| peer_id(&m.keys)));
+        holder::order(by_author, f.ahead_of(network, author), &connected)
+    }
+
+    fn link2_ask(&self, t: &Transport2, a: Ask) {
+        let want = Control::Want { network: a.network, author: a.author, inc: a.from.inc, from: a.from.seq };
+        if let Err(e) = t.links.send(a.to, Out::Control(want)) {
+            self.log("net.link2", &format!("a want didn't go: {}", e.message));
+        }
+    }
+
+    /// A gap in `author`'s feed in `network` at `from`: a Want to one
+    /// holder, unless one asked has time still.
+    pub(super) fn link2_fetch(&self, network: &str, author: &str, from: Pos) {
+        let Some(t) = self.link2() else { return };
+        let now = self.now().max(0.0) as u64;
+        let ask = {
+            let mut f = t.fetching.locked();
+            let hs = self.holders_of(&t, &f, network, author);
+            f.fetches.want(network, author, from, &hs, now)
+        };
+        if let Some(a) = ask {
+            self.link2_ask(&t, a);
+        }
+        t.fetch_due.notify_one();
+    }
+
+    /// `peer` doesn't have what it was asked for, or served what didn't
+    /// check: the next holder is asked.
+    fn link2_lacks(&self, network: &str, author: &str, peer: PeerId) {
+        let Some(t) = self.link2() else { return };
+        let now = self.now().max(0.0) as u64;
+        let ask = {
+            let mut f = t.fetching.locked();
+            let hs = self.holders_of(&t, &f, network, author);
+            f.fetches.lacks(network, author, peer, &hs, now)
+        };
+        if let Some(a) = ask {
+            self.link2_ask(&t, a);
+        }
+    }
+
+    /// This machine holds `author`'s feed in `network` up to `head`.
+    pub(super) fn link2_filled(&self, network: &str, author: &str, head: Pos) {
+        if let Some(t) = self.link2() {
+            t.fetching.locked().fetches.filled(network, author, head);
+        }
+    }
+
+    /// Moves on the fetches whose holder ran out of time, and the ones
+    /// whose wait is over; says when to look again.
+    fn link2_due(&self) -> Option<u64> {
+        let t = self.link2()?;
+        let now = self.now().max(0.0) as u64;
+        let asks = {
+            let mut f = t.fetching.locked();
+            let holders: Vec<(holder::FeedKey, Vec<PeerId>)> = f.fetches.keys().map(|k| (k.clone(), self.holders_of(&t, &f, &k.0, &k.1))).collect();
+            f.limits.prune(now);
+            f.fetches.due(now, |n, a| holders.iter().find(|(k, _)| k.0 == n && k.1 == a).map(|(_, h)| h.clone()).unwrap_or_default())
+        };
+        for a in asks {
+            self.link2_ask(&t, a);
+        }
+        let next = t.fetching.locked().fetches.next_due();
+        next
+    }
+
     /// The kept entries of this machine's feed in `net` after `after`,
     /// sealed for `m`.
     fn resend_sealed(&self, net: &NetFile, m: &Member, after: Pos) -> Vec<Out> {
@@ -315,6 +404,20 @@ impl Machine for NodeMachine {
         if at != Pos::ORIGIN {
             n.ack_in(&net, &m.id, at);
         }
+        // A peer that holds more of a third member's feed than this
+        // machine does is asked for the rest.
+        let mine = n.opts.persist.feed_heads(&net.id).unwrap_or_default();
+        let peer_machine = m.machine.id();
+        for (author, at) in &hello.feeds {
+            if *author == me || *author == peer_machine {
+                continue;
+            }
+            let had = mine.iter().find(|(a, _)| a == author).map_or(Pos::ORIGIN, |(_, p)| *p);
+            let from = n.link2().and_then(|t| t.fetching.locked().ahead(&net.id, author, peer, *at, had));
+            if let Some(from) = from {
+                n.link2_fetch(&net.id, author, from);
+            }
+        }
         let mut out = n.resend_sealed(&net, &m, at);
         if let Some(record) = n.address_record() {
             out.push(Out::Control(Control::Address { network: net.id, record }));
@@ -336,31 +439,53 @@ impl Machine for NodeMachine {
             return Vec::new();
         }
         let Some(me) = n.machine_id() else { return Vec::new() };
+        let from_holder = env.author != m.machine.id();
         let v = match env.open_entry(&Recipient { machine: &me, key: &key }, &view) {
             Ok(v) => v,
             Err(e) => {
                 n.log("net.link2", &format!("an envelope from {} was refused: {}", m.id, e.message));
+                // A holder's: the next one is asked.
+                if from_holder && env.class == EnvClass::Kept {
+                    n.link2_lacks(&env.network, &env.author, peer);
+                }
                 return Vec::new();
             }
         };
-        // Entries come from their authors until members fetch them from
-        // any holder (phase 5's commit 10).
-        if v.author != m.machine.id() {
-            n.log("net.link2", &format!("{} sent an entry of another member's feed, which was refused: entries come from their authors", m.id));
+        if !from_holder {
+            n.take_entry(m.id, v, json!({}), window, Via::Link);
             return Vec::new();
         }
-        n.take_entry(m.id, v, json!({}), window, Via::Link);
+        // Another member's entry, which `m` holds: a kept one, checked
+        // against its author's key above, and against what this machine
+        // applied of its feed by the feed. Loose entries come from their
+        // authors.
+        let Some(author) = view.by_machine(&v.author).cloned().filter(|_| env.class == EnvClass::Kept) else {
+            n.log("net.link2", &format!("{} sent a message of another member's feed, which was refused: messages come from their authors", m.id));
+            return Vec::new();
+        };
+        n.take_entry(author.id.clone(), v, json!({}), view.is_window(&author.id), Via::Link);
         Vec::new()
     }
 
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out> {
         let Some(n) = self.shared() else { return Vec::new() };
         let (Some(net), Some(m), Some(me)) = (n.in_network(network), n.member_at(peer), n.machine_id()) else { return Vec::new() };
-        if author != me {
-            // Holders serve other members' feeds from commit 10.
-            return Vec::new();
+        if author == me {
+            return n.resend_sealed(&net, &m, Pos::new(from.inc, from.seq.saturating_sub(1)));
         }
-        n.resend_sealed(&net, &m, Pos::new(from.inc, from.seq.saturating_sub(1)))
+        // Another member's feed, served as a holder.
+        let Some(t) = n.link2() else { return Vec::new() };
+        let now = n.now().max(0.0) as u64;
+        let held = |from: Pos| {
+            n.opts.persist.held(&net.id, author, from, holder::SERVE).unwrap_or_else(|e| {
+                n.log("net.link2", &format!("what this machine holds of a feed couldn't be read: {}", e.message));
+                Vec::new()
+            })
+        };
+        let roster = n.roster();
+        let Some(view) = roster.view_ref() else { return Vec::new() };
+        let mut f = t.fetching.locked();
+        holder::serve(view, |mm| holder::admitted_at(&roster, mm), peer, (&net.id, author, from), held, &mut f.limits, now)
     }
 
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos) {
@@ -376,6 +501,16 @@ impl Machine for NodeMachine {
         let Some(m) = n.member_at(peer) else { return };
         match record {
             Control::Address { record, .. } => n.address_in(&m.id, &record, "record"),
+            Control::DontHave { network, author, why, .. } => {
+                n.log("net.link2", &format!("{} doesn't hold what was wanted of a feed ({})", m.id, why.as_str()));
+                n.link2_lacks(&network, &author, peer);
+            }
+            // Taking a compaction is commit 17's: until then the next
+            // holder, or the author, is asked.
+            Control::Compacted { network, author, .. } => {
+                n.log("net.link2", &format!("a compacted range from {} was set aside: not taken yet", m.id));
+                n.link2_lacks(&network, &author, peer);
+            }
             // Held receipts and Compacted answers are commits 11 and 17's.
             other => n.log("net.link2", &format!("a {} record from {} was set aside: not taken yet", other.to_json()["t"].as_str().unwrap_or("control"), m.id)),
         }
@@ -416,12 +551,45 @@ pub async fn run(n: Weak<Shared>) {
     };
     let mesh = Arc::new(Mesh::new(dial.clone(), admission));
     let links = Links::new(mesh.clone(), Arc::new(NodeMachine(n.clone())));
-    let t = Arc::new(Transport2 { dial, mesh, links: links.clone(), found: std::sync::Mutex::default(), record: std::sync::Mutex::new(None) });
+    let t = Arc::new(Transport2 {
+        dial,
+        mesh,
+        links: links.clone(),
+        found: std::sync::Mutex::default(),
+        record: std::sync::Mutex::new(None),
+        fetching: std::sync::Mutex::default(),
+        fetch_due: tokio::sync::Notify::new(),
+    });
     *s.link2.writing() = Some(t);
     s.members_changed();
     s.log("net.link2", "link/2 is listening");
     drop(s);
-    tokio::join!(links.clone().accept(), links.keep_up());
+    tokio::join!(links.clone().accept(), links.keep_up(), fetch_clock(n));
+}
+
+/// Moves fetches on when a holder runs out of time or a wait is over, and
+/// sleeps until the next, or until a fetch begins.
+async fn fetch_clock(n: Weak<Shared>) {
+    loop {
+        let (wait, t) = {
+            let Some(s) = n.upgrade() else { return };
+            let Some(t) = s.link2() else { return };
+            let next = s.link2_due();
+            let now = s.now().max(0.0) as u64;
+            (next.map(|at| Duration::from_millis(at.saturating_sub(now).max(10))), t)
+        };
+        let woke = t.fetch_due.notified();
+
+        match wait {
+            Some(wait) => {
+                tokio::select! {
+                    () = woke => {}
+                    () = tokio::time::sleep(wait) => {}
+                }
+            }
+            None => woke.await,
+        }
+    }
 }
 
 /// Stops link/2: every connection closes, and the endpoint.

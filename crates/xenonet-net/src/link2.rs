@@ -44,6 +44,7 @@
 use crate::codec::is_network_id;
 use crate::dial::{Alpn, Close, Link, Mesh, PeerId, Reader, Writer};
 use crate::envelope::{Class, Envelope, MAX_ENVELOPE};
+use crate::holder::Lack;
 use crate::{NetError, R};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -165,6 +166,9 @@ pub enum Control {
     /// What answers a Want below the author's floor (xenonet-log's
     /// `Compacted`).
     Compacted { network: String, author: String, body: Value },
+    /// A holder's answer to a Want it sends nothing for, and why: the
+    /// receiver asks the next holder or the author.
+    DontHave { network: String, author: String, inc: u64, from: u64, why: Lack },
     /// A mailbox's receipt for what it holds.
     Held { network: String, body: Value },
     /// The sender's address record in `network` (xenonet-log's
@@ -195,6 +199,7 @@ impl Control {
             Control::Hello { .. } => None,
             Control::Want { network, .. }
             | Control::Ack { network, .. }
+            | Control::DontHave { network, .. }
             | Control::Compacted { network, .. }
             | Control::Held { network, .. }
             | Control::Address { network, .. } => Some(network),
@@ -206,6 +211,9 @@ impl Control {
             Control::Hello { at, networks } => json!({ "t": "hello", "v": 2, "at": at, "networks": networks.iter().map(NetHello::to_json).collect::<Vec<_>>() }),
             Control::Want { network, author, inc, from } => json!({ "t": "want", "network": network, "author": author, "inc": inc, "from": from }),
             Control::Ack { network, author, inc, high } => json!({ "t": "ack", "network": network, "author": author, "inc": inc, "high": high }),
+            Control::DontHave { network, author, inc, from, why } => {
+                json!({ "t": "dont-have", "network": network, "author": author, "inc": inc, "from": from, "why": why.as_str() })
+            }
             Control::Compacted { network, author, body } => json!({ "t": "compacted", "network": network, "author": author, "body": body }),
             Control::Held { network, body } => json!({ "t": "held", "network": network, "body": body }),
             Control::Address { network, record } => json!({ "t": "address", "network": network, "record": record }),
@@ -231,6 +239,13 @@ impl Control {
             }
             Some("want") => Ok(Control::Want { network: network_of(v)?, author: author_of(v)?, inc: n(v, "inc")?, from: n(v, "from")? }),
             Some("ack") => Ok(Control::Ack { network: network_of(v)?, author: author_of(v)?, inc: n(v, "inc")?, high: n(v, "high")? }),
+            Some("dont-have") => Ok(Control::DontHave {
+                network: network_of(v)?,
+                author: author_of(v)?,
+                inc: n(v, "inc")?,
+                from: n(v, "from")?,
+                why: v.get("why").and_then(Value::as_str).and_then(Lack::parse).ok_or_else(|| bad("why"))?,
+            }),
             Some("compacted") => Ok(Control::Compacted { network: network_of(v)?, author: author_of(v)?, body: body("body")? }),
             Some("held") => Ok(Control::Held { network: network_of(v)?, body: body("body")? }),
             Some("address") => Ok(Control::Address { network: network_of(v)?, record: body("record")? }),
@@ -291,7 +306,7 @@ pub trait Machine: Send + Sync {
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out>;
     /// The peer holds `author`'s feed in `network` up to `at`.
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos);
-    /// A Compacted, Held or Address record.
+    /// A DontHave, Compacted, Held or Address record.
     fn other_in(&self, _peer: PeerId, _record: Control) {}
     /// A connection to the peer came up, or went.
     fn up(&self, _peer: PeerId, _up: bool) {}

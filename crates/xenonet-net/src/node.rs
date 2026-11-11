@@ -2026,7 +2026,9 @@ impl Net for Shared {
         if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "ack": { "inc": inc, "high": high } })) {
             self.log("net.feed", &format!("an ack for {host} wasn't queued: {why}"));
         }
-        if let Some(author) = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id())) {
+        let author = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id()));
+        if let Some(author) = author {
+            self.link2_filled(&net.id, &author, Pos::new(inc, high));
             self.link2_control(host, link2::Control::Ack { network: net.id.clone(), author, inc, high });
         }
     }
@@ -2036,8 +2038,11 @@ impl Net for Shared {
         if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "want": { "inc": inc, "from": from } })) {
             self.log("net.feed", &format!("a want for {host} wasn't queued: {why}"));
         }
-        if let Some(author) = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id())) {
-            self.link2_control(host, link2::Control::Want { network: net.id.clone(), author, inc, from });
+        // On link/2, from one holder at a time: the author when it is
+        // connected, else any member that holds the entries.
+        let author = self.roster().view_ref().and_then(|v| v.member(host).map(|m| m.machine.id()));
+        if let Some(author) = author {
+            self.link2_fetch(&net.id, &author, Pos::new(inc, from));
         }
     }
 

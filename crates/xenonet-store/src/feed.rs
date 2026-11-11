@@ -64,8 +64,9 @@ pub(crate) const TABLES: &[&str] = &[
         PRIMARY KEY (network, member)
     ) STRICT",
     // The kept entries applied from each author's feed, by place, and
-    // whether each is still open; `stored` is empty for an id a header
-    // chain put at a place this machine skipped.
+    // whether each is still open, with the entry as its author signed it,
+    // which this machine serves as a holder; `stored` and `entry` are empty
+    // for an id a header chain put at a place this machine skipped.
     "CREATE TABLE feed_in (
         author TEXT NOT NULL,
         network TEXT NOT NULL,
@@ -76,6 +77,7 @@ pub(crate) const TABLES: &[&str] = &[
         until INTEGER,
         open INTEGER NOT NULL,
         stored INTEGER UNIQUE,
+        entry TEXT,
         PRIMARY KEY (author, network, inc, seq)
     ) STRICT",
     // The loose entries taken from each author's feed, by id, with the
@@ -351,6 +353,21 @@ impl Db {
         })
     }
 
+    /// The kept entries this machine applied of `author`'s feed in
+    /// `network` from `from` on, in order, at most `limit`, each with
+    /// whether it is still open: what it serves as a holder. A place a
+    /// header chain filled has no entry, and ends the run.
+    pub fn feed_in_from(&self, author: &str, network: &str, from: Pos, limit: usize) -> R<Vec<(FeedEntry, bool)>> {
+        let rows: Vec<(Option<String>, i64)> = self.read(|c| {
+            let mut q = c.prepare("SELECT entry, open FROM feed_in WHERE author = ?1 AND network = ?2 AND (inc > ?3 OR (inc = ?3 AND seq >= ?4)) ORDER BY inc, seq LIMIT ?5")?;
+            let rows = q
+                .query_map(params![author, network, int(from.inc)?, int(from.seq)?, i64::try_from(limit).unwrap_or(i64::MAX)], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })?;
+        rows.into_iter().map_while(|(e, open)| e.map(|e| (e, open))).map(|(e, open)| Ok((entry_of(&e)?, open == 1))).collect()
+    }
+
     /// How many kept entries are held behind a gap in `network`.
     pub fn feed_held_count(&self, network: &str) -> R<u64> {
         self.read(|c| Ok(num(c.query_row("SELECT count(*) FROM feed_held WHERE network = ?1", params![network], |r| r.get(0))?)))
@@ -400,8 +417,8 @@ impl FeedStore for Feeds<'_> {
             let stored = next_stored(c)?;
             let until = e.until().map(int).transpose()?;
             c.execute(
-                "INSERT INTO feed_in (author, network, inc, seq, kind, hash, until, open, stored) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
-                params![e.author, e.group, int(e.inc)?, int(e.seq)?, e.kind.as_str(), e.hash().to_vec(), until, stored as i64],
+                "INSERT INTO feed_in (author, network, inc, seq, kind, hash, until, open, stored, entry) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9)",
+                params![e.author, e.group, int(e.inc)?, int(e.seq)?, e.kind.as_str(), e.hash().to_vec(), until, stored as i64, e.to_json().to_string()],
             )?;
             Ok(())
         })

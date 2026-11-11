@@ -62,6 +62,7 @@ pub mod frame;
 pub mod gateway;
 pub mod ground;
 pub mod gwstore;
+pub mod holder;
 pub mod identity;
 pub mod join;
 pub mod keys;

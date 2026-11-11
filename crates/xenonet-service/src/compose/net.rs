@@ -13,6 +13,7 @@ use std::sync::Arc;
 use xenonet_id::codec::{b64, unb64_n};
 use xenonet_net::feed::{FeedEntry, Fork, Pos};
 use xenonet_net::files::{NetFile, Pin};
+use xenonet_net::holder::Held;
 use xenonet_net::identity::person::{self, PersonPolicy};
 use xenonet_net::persist::{Persist, Person, Seen, WriterAt};
 use xenonet_net::roster::{self, NetworkPolicy};
@@ -150,6 +151,9 @@ impl Persist for StorePersist {
     }
     fn frozen_feeds(&self, network: &str) -> R<Vec<(String, Fork)>> {
         Ok(self.0.frozen_feeds(network).map_err(store)?.into_iter().map(|f| (f.author, f.fork)).collect())
+    }
+    fn held(&self, network: &str, author: &str, from: Pos, limit: usize) -> R<Vec<Held>> {
+        Ok(self.0.feed_in_from(author, network, from, limit).map_err(store)?.into_iter().map(|(entry, open)| Held { entry, open }).collect())
     }
 }
 

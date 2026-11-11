@@ -37,12 +37,14 @@ const T: u64 = 1_792_512_000_000;
 const A: u8 = 10;
 const B: u8 = 20;
 const C: u8 = 30;
+const D: u8 = 40;
 
 fn host_of(n: u8) -> &'static str {
     match n {
         A => "a",
         B => "b",
-        _ => "c",
+        C => "c",
+        _ => "d",
     }
 }
 
@@ -63,7 +65,7 @@ fn author(n: u8) -> String {
 }
 
 fn hosts() -> BTreeMap<PeerId, String> {
-    [A, B, C].into_iter().map(|n| (peer(n), host_of(n).to_string())).collect()
+    [A, B, C, D].into_iter().map(|n| (peer(n), host_of(n).to_string())).collect()
 }
 
 fn member(n: u8) -> Member {
@@ -82,6 +84,18 @@ fn member(n: u8) -> Member {
 fn view(network: &str, members: &[u8]) -> View {
     View { network: network.into(), founder: host_of(members[0]).into(), members: members.iter().map(|n| (host_of(*n).to_string(), member(*n))).collect(), ..View::default() }
 }
+
+/// How a machine answers a Want for another member's feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Holds {
+    Honest,
+    /// Changes each entry's body before it seals it.
+    Tampers,
+    /// Answers nothing.
+    Withholds,
+}
+
+use crate::holder::Fetching;
 
 /// A machine: its keys, its own copy of each network's chain, its feed in
 /// each network as an author, and the feeds it takes as a receiver.
@@ -105,6 +119,14 @@ struct Party {
     duplicates: AtomicU64,
     wants: AtomicU64,
     refused: AtomicU64,
+    holds: Mutex<Holds>,
+    fetching: Mutex<Fetching>,
+    /// When each member was admitted, by network and host: 0 unless set.
+    admitted: Mutex<BTreeMap<(String, String), u64>>,
+    /// Entries served as a holder, and the Wants it sent: to whom, from
+    /// where.
+    served: AtomicU64,
+    asked: Mutex<Vec<(u8, Pos)>>,
     links: OnceLock<Arc<Links>>,
     /// What another host's task asks of this machine, done on its own
     /// simulated host: a socket is written only from the host it's on.
@@ -135,6 +157,11 @@ impl Party {
             duplicates: AtomicU64::new(0),
             wants: AtomicU64::new(0),
             refused: AtomicU64::new(0),
+            holds: Mutex::new(Holds::Honest),
+            fetching: Mutex::new(Fetching::default()),
+            admitted: Mutex::new(BTreeMap::new()),
+            served: AtomicU64::new(0),
+            asked: Mutex::new(Vec::new()),
             links: OnceLock::new(),
             own: OnceLock::new(),
         })
@@ -172,7 +199,67 @@ impl Party {
             }
         });
         links.keep(everyone);
+        // The fetches' clock: a holder that ran out of time, a fetch whose
+        // wait is over.
+        let me = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                let now = me.now_ms();
+                let asks = {
+                    let mut f = me.fetching.locked();
+                    let Fetching { fetches, ahead, .. } = &mut *f;
+                    fetches.due(now, |n, a| me.holders(ahead, n, a))
+                };
+                for a in asks {
+                    me.ask(a);
+                }
+            }
+        });
         Ok(links)
+    }
+
+    /// The holders to ask for `author`'s feed in `network`, best first.
+    fn holders(&self, ahead: &BTreeMap<crate::holder::FeedKey, Vec<PeerId>>, network: &str, author: &str) -> Vec<PeerId> {
+        let Some(links) = self.links.get() else { return Vec::new() };
+        let connected: Vec<PeerId> = links.peers().into_iter().filter(|(_, s)| s.networks.contains(network)).map(|(p, _)| p).collect();
+        let by_author = self.views.locked().get(network).and_then(|v| v.by_machine(author).map(|m| PeerId(m.keys.sign)));
+        let ahead = ahead.get(&(network.to_string(), author.to_string())).cloned().unwrap_or_default();
+        crate::holder::order(by_author, &ahead, &connected)
+    }
+
+    /// A gap in `author`'s feed at `from`: a Want to one holder.
+    fn fetch(&self, network: &str, author: &str, from: Pos) {
+        let ask = {
+            let mut f = self.fetching.locked();
+            let hs = self.holders(&f.ahead, network, author);
+            f.fetches.want(network, author, from, &hs, self.now_ms())
+        };
+        if let Some(a) = ask {
+            self.ask(a);
+        }
+    }
+
+    fn lacks(&self, network: &str, author: &str, from: PeerId) {
+        let ask = {
+            let mut f = self.fetching.locked();
+            let hs = self.holders(&f.ahead, network, author);
+            f.fetches.lacks(network, author, from, &hs, self.now_ms())
+        };
+        if let Some(a) = ask {
+            self.ask(a);
+        }
+    }
+
+    fn ask(&self, a: crate::holder::Ask) {
+        let n = [A, B, C, D].into_iter().find(|n| peer(*n) == a.to).unwrap_or(0);
+        self.asked.locked().push((n, a.from));
+        let _ = self.links().send(a.to, Out::Control(Control::Want { network: a.network, author: a.author, inc: a.from.inc, from: a.from.seq }));
+    }
+
+    /// The head of `author`'s feed in `network` here.
+    fn head(&self, author: &str, network: &str) -> Pos {
+        xenonet_log::feed::FeedStore::head(self.feed.locked().store(), author, network).unwrap().latest
     }
 
     /// This machine's chain now has `n` out of `network`.
@@ -273,6 +360,18 @@ impl Machine for Party {
 
     fn hello_in(&self, peer: PeerId, hello: &NetHello) -> Vec<Out> {
         self.hellos.locked().push(hello.network.clone());
+        // A peer that holds more of a third member's feed than this
+        // machine does: it is asked for the rest.
+        for (author, at) in &hello.feeds {
+            if *author == self.me() {
+                continue;
+            }
+            let mine = self.head(author, &hello.network);
+            let from = self.fetching.locked().ahead(&hello.network, author, peer, *at, mine);
+            if let Some(from) = from {
+                self.fetch(&hello.network, author, from);
+            }
+        }
         self.resend(&hello.network, peer, hello.head_of(&self.me()))
     }
 
@@ -294,6 +393,10 @@ impl Machine for Party {
         let opened = env.open_entry(&Recipient { machine: &me, key: &self.transport }, &view);
         let Ok(v) = opened else {
             self.refused.fetch_add(1, Ordering::SeqCst);
+            // From a holder, not the author: the next holder is asked.
+            if view.by_machine(&env.author).is_some_and(|m| m.keys.sign != peer.0) {
+                self.lacks(&env.network, &env.author, peer);
+            }
             return Vec::new();
         };
         let (author, network, kept) = (v.author.clone(), v.group.clone(), v.class() == xenonet_log::feed::Class::Kept);
@@ -302,13 +405,16 @@ impl Machine for Party {
             Offer::New(applied) => {
                 self.ended.locked().extend(applied.ended.iter().copied());
                 self.applied.locked().extend(applied.entries);
+                let head = self.head(&author, &network);
+                self.fetching.locked().fetches.filled(&network, &author, head);
             }
             Offer::Duplicate => {
                 self.duplicates.fetch_add(1, Ordering::SeqCst);
             }
             Offer::Gap(w) => {
                 self.wants.fetch_add(1, Ordering::SeqCst);
-                return vec![Out::Control(Control::Want { network: w.group, author: w.author, inc: w.inc, from: w.from })];
+                self.fetch(&w.group, &w.author, Pos::new(w.inc, w.from));
+                return Vec::new();
             }
             _ => return Vec::new(),
         }
@@ -320,13 +426,60 @@ impl Machine for Party {
     }
 
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out> {
-        if author != self.me() {
+        if author == self.me() {
+            return self.resend(network, peer, Pos::new(from.inc, from.seq.saturating_sub(1)));
+        }
+        let holds = *self.holds.locked();
+        if holds == Holds::Withholds {
             return Vec::new();
         }
-        self.resend(network, peer, Pos::new(from.inc, from.seq.saturating_sub(1)))
+        let Some(view) = self.views.locked().get(network).cloned() else { return Vec::new() };
+        let ended = self.ended.locked().clone();
+        let held = |from: Pos| {
+            let applied = self.applied.locked();
+            applied
+                .iter()
+                .filter(|e| e.author == author && e.group == network && e.class() == xenonet_log::feed::Class::Kept && e.pos() >= from)
+                .map(|e| {
+                    let mut entry = e.clone();
+                    if holds == Holds::Tampers {
+                        entry.body["path"] = json!("src/elsewhere.rs");
+                    }
+                    crate::holder::Held { entry, open: !ended.contains(&e.pos()) }
+                })
+                .collect()
+        };
+        let admitted = self.admitted.locked().clone();
+        let at = |m: &Member| admitted.get(&(network.to_string(), m.id.clone())).copied().unwrap_or(0);
+        let now = self.now_ms();
+        let out = crate::holder::serve(&view, at, peer, (network, author, from), held, &mut self.fetching.locked().limits, now);
+        self.served.fetch_add(out.iter().filter(|o| matches!(o, Out::Envelope(_))).count() as u64, Ordering::SeqCst);
+        out
     }
 
     fn ack_in(&self, _peer: PeerId, _network: &str, _author: &str, _at: Pos) {}
+
+    fn other_in(&self, peer: PeerId, record: Control) {
+        match record {
+            Control::DontHave { network, author, .. } => self.lacks(&network, &author, peer),
+            Control::Compacted { network, author, body } => {
+                let Some(m) = self.views.locked().get(&network).and_then(|v| v.by_machine(&author).cloned()) else { return };
+                let Some(c) = crate::holder::compacted_of(&body).and_then(|c| c.verify(&m.machine).ok()) else {
+                    self.refused.fetch_add(1, Ordering::SeqCst);
+                    self.lacks(&network, &author, peer);
+                    return;
+                };
+                let offered = self.feed.locked().offer_compacted(c);
+                if let Ok(Offer::New(applied)) = offered {
+                    self.ended.locked().extend(applied.ended.iter().copied());
+                    self.applied.locked().extend(applied.entries);
+                }
+                let head = self.head(&author, &network);
+                self.fetching.locked().fetches.filled(&network, &author, head);
+            }
+            _ => {}
+        }
+    }
 
     fn log(&self, words: &str) {
         if std::env::var("LINK2_TEST_LOG").is_ok() {
@@ -801,3 +954,6 @@ fn records_read_back_and_a_record_past_the_limit_is_refused() {
         assert_eq!(read_record(&mut r).await.unwrap_err().code, "bad-request");
     });
 }
+
+#[path = "holder_tests.rs"]
+mod holder;

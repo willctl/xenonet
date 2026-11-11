@@ -307,6 +307,21 @@ mod feeds {
     }
 
     #[test]
+    fn the_entries_applied_are_kept_as_signed_to_serve_as_a_holder() {
+        let db = Db::memory().unwrap();
+        let es = entries(4);
+        let id = author().public().id();
+        let mut f = Feed::new(db.feeds());
+        for e in &es {
+            f.offer(e.clone()).unwrap();
+        }
+        let from = db.feed_in_from(&id, NET, Pos::new(es[0].inc, 2), 2).unwrap();
+        assert_eq!(from.iter().map(|(e, open)| (e.seq, *open)).collect::<Vec<_>>(), [(2, true), (3, true)]);
+        assert_eq!(from[0].0, *es[1].entry(), "as its author signed it");
+        assert_eq!(db.feed_in_from(&id, NET, Pos::new(es[0].inc, 5), 10).unwrap().len(), 0, "nothing past the head");
+    }
+
+    #[test]
     fn what_a_transaction_applies_goes_with_it_or_not_at_all() {
         let db = Db::memory().unwrap();
         let es = entries(1);

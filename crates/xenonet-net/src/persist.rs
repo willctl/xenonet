@@ -100,6 +100,13 @@ pub trait Persist: Send + Sync {
     fn feed_heads(&self, network: &str) -> R<Vec<(String, Pos)>>;
     /// The authors whose feeds a fork froze here, with the fork.
     fn frozen_feeds(&self, network: &str) -> R<Vec<(String, Fork)>>;
+    /// The kept entries this machine applied of `author`'s feed in
+    /// `network` from `from` on, as signed, in order, at most `limit`: what
+    /// it serves as a holder (`holder`). A machine that keeps none serves
+    /// none.
+    fn held(&self, _network: &str, _author: &str, _from: Pos, _limit: usize) -> R<Vec<crate::holder::Held>> {
+        Ok(Vec::new())
+    }
     /// What the person shares into a network (`share`), once they said:
     /// None until then, when the network's default holds.
     fn sharing(&self, _network: &str) -> R<Option<Sharing>> {
