@@ -225,9 +225,8 @@ keywords under `x-xenonet`.
   versions, but no name or value from it goes in a schema, a fixture or
   a test: a transcript can hold unreleased features' names as well as
   people's work.
-- Made-up records for each source, ones that fit and odd ones with the
-  drift each should show, are in `test/fixtures/vendor.js`;
-  the lenient readers' tests in `crates/xenonet-schema` read them.
+- The lenient readers' tests in `crates/xenonet-schema` use made-up
+  records, ones that fit and odd ones with the drift each should show.
 
 ### Reading leniently
 
