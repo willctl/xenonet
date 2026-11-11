@@ -92,3 +92,4 @@ Sessions are runs of a harness; actors last across runs.
 | Muse (its Mac app) | Actor | Observes whether its app runs | No | Through the gateway |
 | OpenAI dots | Actor | A remote connection you pair | No | No, it only reads |
 | Your own programs | Actor | Register with a token, or connect through the gateway | Yes, when they report them | Yes |
+| Agents that speak A2A | Actor | Inbound at the actor gateway's A2A door; outbound, an agent you register by its Agent Card, which sessions hand work to with `delegate` | No | Yes |
