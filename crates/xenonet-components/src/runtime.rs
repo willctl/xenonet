@@ -51,7 +51,7 @@ pub fn bin_name(platform: &str) -> &'static str {
 }
 
 /// The launcher's own copy of the binary, which never moves
-/// (docs/design/contracts.md, section 12): `<runtime>/launcher/xenonet`.
+/// (docs/design/contracts.md, "Integration points"): `<runtime>/launcher/xenonet`.
 pub fn launcher_bin(env: &Env, m: &Machine) -> String {
     NATIVE.join(&[&runtime_dir(env, m), "launcher", bin_name(&m.platform)])
 }

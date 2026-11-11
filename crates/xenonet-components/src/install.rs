@@ -41,7 +41,7 @@ pub struct Ctx {
 /// The node launcher script this XenoNet ships (launcher.cjs), built in,
 /// so a package needs none of XenoNet's JS beside its binary. It runs the
 /// Tools' binary for entries an earlier XenoNet wrote
-/// (docs/design/contracts.md, section 12).
+/// (docs/design/contracts.md, "Integration points").
 pub const LAUNCHER_SCRIPT: &str = include_str!("launcher.cjs");
 
 // The node an earlier XenoNet put in its packages and copied into the

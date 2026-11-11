@@ -30,7 +30,7 @@ export function apiCredential(env = process.env, port = env.XENONET_PORT || 4784
 export const stopFile = (env = process.env) => path.join(runtimeDir(env), `service-${env.XENONET_PORT || 47840}.stop`);
 
 // The xenonet binary's name, and the launcher's own copy of it, which
-// never moves (docs/design/contracts.md, section 12).
+// never moves (docs/design/contracts.md, "Integration points").
 export const binName = (platform = process.platform) => (platform === "win32" ? "xenonet.exe" : "xenonet");
 export const launcherBin = (env = process.env, platform = process.platform) => path.join(runtimeDir(env), "launcher", binName(platform));
 

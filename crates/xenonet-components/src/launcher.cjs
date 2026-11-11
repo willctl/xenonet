@@ -5,7 +5,7 @@
 // Code's and Codex's hooks and MCP servers, the xenonet command on PATH and
 // other programs run this path, so it stays until they're written again,
 // which runs the xenonet binary beside it (<state>/runtime/launcher/xenonet)
-// instead (docs/design/contracts.md, section 12). XenoNet writes it again only
+// instead (docs/design/contracts.md, "Integration points"). XenoNet writes it again only
 // when it ships a newer one (the version above), atomically.
 //
 //   xenonet hook <app>   passes a hook event to the running XenoNet, itself,

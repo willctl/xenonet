@@ -89,7 +89,7 @@ pub fn xenonet_root() -> String {
 /// xenonetComponent), the Tools package's binary (the package.json beside
 /// it says so), or the launcher's copy of that binary, which hooks and MCP
 /// entries run and which has a `.from` file beside it naming the Tools it
-/// was copied from (docs/design/contracts.md, section 12). One binary goes
+/// was copied from (docs/design/contracts.md, "Integration points"). One binary goes
 /// in a checkout, the Service and the Tools.
 pub fn installed_tools() -> bool {
     if crate::commands::console::INSTALLED {
