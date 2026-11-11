@@ -163,37 +163,16 @@ seal() {
   say "downloaded since boot: $(( $(cat "/sys/class/net/$nic/statistics/rx_bytes") / 1000000 )) MB"
 }
 
-# One working VM's settings: its environment, the console's key restricted
-# to the relay, its services, and its name.
+
+# One working VM's settings: its environment and its two XenoNets. The VM
+# gets its host id in a network when the owner joins it to one.
 vm() {
   mkdir -p "$HOME/.config/xenonet-lab"
   printf '%s' "$XENONET_ENV" >"$HOME/.config/xenonet-lab/xenonet.env"
-  key
   systemctl --user daemon-reload
   systemctl --user enable xenonet.service xenonet-demo.service
   systemctl --user restart xenonet.service xenonet-demo.service
   answering
-  name
-}
-
-# The console's key, which can run the relay and nothing else. It replaces
-# the lab's earlier line, and leaves Lima's own key alone.
-key() {
-  mkdir -p -m 700 "$HOME/.ssh"
-  touch "$HOME/.ssh/authorized_keys"
-  { grep -v ' xenonet-lab-console$' "$HOME/.ssh/authorized_keys" || true; printf '%s\n' "$CONSOLE_KEY_LINE"; } >"$HOME/.ssh/authorized_keys.new"
-  chmod 600 "$HOME/.ssh/authorized_keys.new"
-  mv "$HOME/.ssh/authorized_keys.new" "$HOME/.ssh/authorized_keys"
-  if command -v restorecon >/dev/null; then restorecon -R "$HOME/.ssh" || true; fi
-}
-
-# The host names itself with `xenonet hosts self`, once the branch has it.
-name() {
-  if xenonet hosts --help >/dev/null 2>&1; then
-    xenonet hosts self "$HOST_ID"
-  else
-    say "xenonet hosts self $HOST_ID: not in this branch yet; lab push names it once it is"
-  fi
 }
 
 # What `npm run lab -- status` shows, one fact per line.
@@ -203,11 +182,176 @@ facts() {
   for v in xenonet xenonet-demo; do echo "$v=$(systemctl --user is-active "$v" 2>/dev/null || true)"; done
   echo "health-47840=$(health 47840 2>/dev/null | head -c 60 || true)"
   echo "health-47841=$(health 47841 2>/dev/null | head -c 60 || true)"
-  echo "relay=$(sed -n 's/.*command="\([^"]*\)".* xenonet-lab-console$/\1/p' "$HOME/.ssh/authorized_keys" 2>/dev/null | head -1)"
+  echo "lan=$(ip -o -4 addr show dev lima0 2>/dev/null | awk '{print $4}' | paste -sd, -)"
   echo "zone=$(timedatectl show -p Timezone --value 2>/dev/null || true)"
   # Read from the installs rather than run: starting Claude Code writes ids
   # into ~/.claude.json.
   echo "versions=$(node --version 2>/dev/null) · claude $(basename "$(readlink -f "$HOME/.local/bin/claude" 2>/dev/null)") · codex $(node -p 'require(process.env.HOME + "/.local/lib/node_modules/@openai/codex/package.json").version' 2>/dev/null)"
+}
+
+# The subjects of the commits the VM's XenoNet was built from, newest
+# first: the transport checks look in them for the phase 5 commits they
+# wait on.
+subjects() {
+  git -C "$HOME/xenonet" log --format=%s -n 5000 2>/dev/null || true
+}
+
+# The VM's addresses on the lab's LAN (lima0), as `ip -j` gives them.
+lanaddrs() {
+  ip -j addr show dev lima0
+}
+
+# This VM's XenoNet's network, as `xenonet net status --json` gives it, or
+# nothing when the build or the service can't say.
+netstate() {
+  xenonet net status --json 2>/dev/null || true
+}
+
+# A stand-in session: a made-up Claude Code session in ~/Projects/$PROJECT,
+# which XenoNet hears of through its hook (`xenonet hook claude`,
+# SessionStart), and which calls the engine's tools through `xenonet mcp`,
+# as a real session's would.
+# CALLS is a JSON list of {name, arguments, until, within}: with until,
+# the call is made again every half second, for `within` ms at most, until
+# its answer has that text in it. Each answer is printed as a JSON line,
+# with the VM's clock at the call. END=1 ends the session after the calls.
+standin() {
+  node - <<'EOF'
+const { spawn, spawnSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const env = process.env;
+const id = env.SESSION;
+const cwd = path.join(env.HOME, "Projects", env.PROJECT);
+const dir = path.join(env.HOME, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+const transcript = path.join(dir, `${id}.jsonl`);
+const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+const hook = (event, more) => spawnSync("xenonet", ["hook", "claude"], { input: JSON.stringify({ session_id: id, transcript_path: transcript, cwd, hook_event_name: event, ...more }), encoding: "utf8", timeout: 15000 });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  if (env.REGISTER !== "0") {
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(transcript)) fs.writeFileSync(transcript, "");
+    hook("SessionStart", { source: "startup" });
+  }
+  const calls = JSON.parse(env.CALLS || "[]");
+  if (calls.length) {
+    const mcp = spawn("xenonet", ["mcp"], { cwd, env: { ...env, CLAUDE_CODE_SESSION_ID: id, XENONET_PORT: "47840" }, stdio: ["pipe", "pipe", "ignore"] });
+    const waiting = new Map();
+    let buf = "";
+    let n = 0;
+    mcp.stdout.on("data", (d) => {
+      buf += d;
+      for (let i; (i = buf.indexOf("\n")) >= 0; ) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        try {
+          const m = JSON.parse(line);
+          if (waiting.has(m.id)) waiting.get(m.id)(m);
+        } catch {}
+      }
+    });
+    const rpc = (method, params, ms = 150000) =>
+      new Promise((resolve, reject) => {
+        const k = ++n;
+        const timer = setTimeout(() => waiting.delete(k) && reject(new Error(`${method} got no answer`)), ms);
+        waiting.set(k, (m) => (clearTimeout(timer), waiting.delete(k), resolve(m)));
+        mcp.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: k, method, params }) + "\n");
+      });
+    await rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "xenonet-lab", version: "1" } }, 30000);
+    mcp.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+    out({ ready: true, at: Date.now() });
+    for (const c of calls) {
+      const until = Date.now() + (c.within ?? 0);
+      for (;;) {
+        const at = Date.now();
+        const m = await rpc("tools/call", { name: c.name, arguments: c.arguments ?? {} });
+        const text = (m.result?.content ?? []).map((x) => x.text ?? "").join("\n") || m.error?.message || "";
+        const found = c.until ? text.includes(c.until) : undefined;
+        if (!c.until || found || Date.now() >= until) {
+          out({ name: c.name, at, done: Date.now(), error: Boolean(m.error || m.result?.isError), found, text });
+          break;
+        }
+        await sleep(500);
+      }
+    }
+    mcp.kill();
+  }
+  if (env.END === "1") {
+    hook("SessionEnd", { reason: "other" });
+    fs.rmSync(transcript, { force: true });
+  }
+}
+main().catch((e) => {
+  out({ error: String(e?.message ?? e) });
+  process.exit(1);
+});
+EOF
+}
+
+# The relay for the relay check: iroh-relay, built at the version
+# versions.json pins with its server feature and its own lockfile, run in
+# its dev mode (plain HTTP on port 3340) as a transient user service, so it
+# stops with `relayoff` or the VM. It builds with the toolchain XenoNet's
+# checkout pins; the first build takes a few minutes.
+relay() {
+  if [ "$("$HOME/.local/bin/iroh-relay" --version 2>/dev/null | awk '{print $2}')" != "$RELAY_VERSION" ]; then
+    (cd "$HOME/xenonet" && rustup toolchain install >/dev/null && cargo install -q --locked --features server --root "$HOME/.local" iroh-relay --version "$RELAY_VERSION")
+  fi
+  systemctl --user stop xenonet-lab-relay.service 2>/dev/null || true
+  systemd-run --user -q --collect --unit=xenonet-lab-relay "$HOME/.local/bin/iroh-relay" --dev
+  local i
+  for i in $(seq 1 30); do
+    if curl -s -o /dev/null -m 2 http://127.0.0.1:3340/; then echo "relay=http://$(ip -o -4 addr show dev lima0 | awk '{print $4}' | cut -d/ -f1 | head -1):3340"; return 0; fi
+    sleep 1
+  done
+  echo "iroh-relay --dev didn't answer on port 3340" >&2
+  exit 1
+}
+
+relayoff() {
+  systemctl --user stop xenonet-lab-relay.service 2>/dev/null || true
+}
+
+# One UDP datagram, NONCE, to ADDR:PORT, or to the multicast group GROUP
+# on lima0; and a listener that waits 5 s for it, printing `ready` once it
+# listens, then `got` or `none`.
+udpsend() {
+  node - <<'EOF'
+const dgram = require("dgram");
+const os = require("os");
+const { ADDR, GROUP, PORT, NONCE } = process.env;
+const mine = (os.networkInterfaces().lima0 ?? []).find((a) => a.family === "IPv4")?.address;
+const s = dgram.createSocket("udp4");
+s.bind(0, mine, () => {
+  if (GROUP) {
+    s.setMulticastInterface(mine);
+    s.setMulticastTTL(1);
+  }
+  s.send(NONCE, Number(PORT), GROUP || ADDR, (err) => {
+    if (err) console.error(err.message);
+    s.close();
+  });
+});
+EOF
+}
+
+udplisten() {
+  node - <<'EOF'
+const dgram = require("dgram");
+const os = require("os");
+const { GROUP, PORT, NONCE } = process.env;
+const mine = (os.networkInterfaces().lima0 ?? []).find((a) => a.family === "IPv4")?.address;
+const s = dgram.createSocket({ type: "udp4", reuseAddr: true });
+const done = (word) => (console.log(word), s.close(), process.exit(0));
+s.on("message", (m) => String(m) === NONCE && done("got"));
+s.bind(Number(PORT), GROUP ? undefined : mine, () => {
+  if (GROUP) s.addMembership(GROUP, mine);
+  console.log("ready");
+  setTimeout(() => done("none"), 5000);
+});
+EOF
 }
 
 "$STEP"

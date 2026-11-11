@@ -1,14 +1,16 @@
-// The VM lab (scripts/lab): the files it writes on the Mac, the hash it
-// gives each VM for sudo, the settings in its templates, and the made-up
-// repos it puts in each VM. Nothing here starts a VM.
+// The VM lab (scripts/lab): the hash it gives each VM for sudo, the
+// settings in its templates, the made-up repos it puts in each VM, and the
+// transport checks, run against a made-up lab. Nothing here starts a VM.
 import { bash, runBash } from "./harness/bash.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { BASES, VMS, LAB_INSTANCES, HOST_ID, labPaths, sshPath, sshConfigText, withHostKey, hostKeyOf, authorizedKeyLine, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
+import { BASES, VMS, LAB_INSTANCES, HOST_ID, LAN_DEV, labPaths, envFileText, guestScript, shq, sha512crypt, randomSalt, newPassword } from "../scripts/lab/config.mjs";
+import { CHECKS, LANDS, OWNER, missing, runCheck, rules, addrsOf, networksOf, sharedNetwork } from "../scripts/lab/transport.mjs";
 import { REPOS, reposFor, reposScript } from "../scripts/lab/fixtures.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,7 +24,6 @@ const tmp = () => {
 after(() => made.forEach((dir) => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10 })));
 
 const H = "/Users/me";
-const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBq1sBYnXHeqn8D+pYeSGa1Nqv3Uv8ZQwRM4c3Xvm7eF";
 
 test("SHA-512 crypt matches the specification's results and OpenSSL's", () => {
   assert.equal(sha512crypt("Hello world!", "saltstring"), "$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1");
@@ -55,50 +56,9 @@ test("the VMs: host ids, one SSH port each, golden copies that exist, names tear
   for (const vm of Object.values(VMS)) assert.match(vm.timezone, /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/);
 });
 
-test("the lab's files go in XenoNet Dev's state folder, or where XENONET_LAB_DIR says", () => {
-  const mac = labPaths({ env: {}, home: H, platform: "darwin" });
-  assert.equal(mac.dir, path.join(H, "Library", "Application Support", "XenoNet Dev", "lab"));
-  assert.equal(mac.password("xenonet-vm1"), path.join(H, ".lima", "xenonet-vm1", "xenonet-lab-password"));
-  assert.equal(labPaths({ env: { XDG_STATE_HOME: "/x" }, home: H, platform: "darwin" }).dir, path.join("/x", "xenonet-dev", "lab"));
-  assert.equal(labPaths({ env: { XENONET_LAB_DIR: "/l", LIMA_HOME: "/m" }, home: H }).knownHosts, path.join(path.resolve("/l"), "known_hosts"));
+test("each VM's password goes in its Lima folder, or where LIMA_HOME says", () => {
+  assert.equal(labPaths({ env: {}, home: H }).password("xenonet-vm1"), path.join(H, ".lima", "xenonet-vm1", "xenonet-lab-password"));
   assert.equal(labPaths({ env: { LIMA_HOME: "/m" }, home: H }).instanceDir("xenonet-vm2"), path.join(path.resolve("/m"), "xenonet-vm2"));
-});
-
-test("the lab's ssh config: an alias per VM, the console key alone, host keys checked, no user name", () => {
-  const paths = labPaths({ env: {}, home: H, platform: "darwin" });
-  const text = sshConfigText({ paths, home: H });
-  assert.ok(!text.includes(H), "the home folder is written as ~");
-  assert.match(text, /^Host vm1\n {2}HostName 127\.0\.0\.1\n {2}Port 60851\n {2}HostKeyAlias xenonet-lab-vm1\n {2}User will\n/m);
-  assert.match(text, /^Host vm2\n {2}HostName 127\.0\.0\.1\n {2}Port 60852\n/m);
-  assert.ok(text.includes('IdentityFile "~/Library/Application Support/XenoNet Dev/lab/console_ed25519"'));
-  assert.ok(text.includes('UserKnownHostsFile "~/Library/Application Support/XenoNet Dev/lab/known_hosts"'));
-  for (const line of ["IdentitiesOnly yes", "IdentityAgent none", "StrictHostKeyChecking yes", "ForwardAgent no", "PasswordAuthentication no"]) {
-    assert.equal(text.split("\n").filter((l) => l.trim() === line).length, Object.keys(VMS).length, line);
-  }
-  assert.equal(sshPath("/elsewhere/key", H), '"/elsewhere/key"');
-  assert.throws(() => sshPath('/a"b', H), /ssh config/);
-  assert.throws(() => sshConfigText({ vms: { VM1: { sshPort: 1 } }, paths, home: H }), /host id/);
-});
-
-test("known_hosts: a VM's line is replaced, the others kept, and only ed25519 keys go in", () => {
-  const one = withHostKey("", "vm1", `${KEY} root@lima-xenonet-vm1`);
-  assert.equal(one, `xenonet-lab-vm1 ${KEY}\n`, "the key's comment is left out");
-  const two = withHostKey(one, "vm2", KEY.replace("Bq1", "Cq2"));
-  const again = withHostKey(two, "vm1", KEY.replace("Bq1", "Dq3"));
-  assert.equal(again.split("\n").filter(Boolean).length, 2);
-  assert.equal(hostKeyOf(again, "vm1"), KEY.replace("Bq1", "Dq3"));
-  assert.equal(hostKeyOf(again, "vm2"), KEY.replace("Bq1", "Cq2"));
-  assert.equal(hostKeyOf(again, "vm3"), null);
-  assert.throws(() => withHostKey("", "vm1", "ssh-rsa AAAAB3Nza"), /ed25519/);
-  assert.throws(() => withHostKey("", "vm1", "ssh-ed25519 not;a;key"), /ed25519/);
-});
-
-test("the console key runs the relay and nothing else, on the port of the XenoNet under test", () => {
-  assert.equal(authorizedKeyLine(`${KEY} anything`), `restrict,command="/home/will/.local/bin/xenonet relay --port 47841" ${KEY} xenonet-lab-console`);
-  assert.match(authorizedKeyLine(KEY, 47840), /relay --port 47840" /);
-  assert.throws(() => authorizedKeyLine(KEY, "47840; sh"), /port/);
-  assert.throws(() => authorizedKeyLine(KEY, 70000), /port/);
-  assert.throws(() => authorizedKeyLine('ssh-ed25519 AAAA" evil'), /ed25519/);
 });
 
 test("a VM's settings file and guest.sh's values are quoted for the shell", { skip: !bash && "Bash is required" }, () => {
@@ -115,8 +75,11 @@ test("a VM's settings file and guest.sh's values are quoted for the shell", { sk
   assert.equal(shq("a'b"), `'a'\\''b'`);
 });
 
-test("versions.json pins Node with its checksum, Claude Code and Codex", () => {
+test("versions.json pins Node with its checksum, Claude Code, Codex, and iroh-relay at the workspace's iroh", () => {
   const v = JSON.parse(fs.readFileSync(lab("versions.json"), "utf8"));
+  const iroh = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8").match(/^iroh = \{ version = "([^"]+)"/m)?.[1];
+  assert.ok(iroh, "Cargo.toml pins iroh");
+  assert.equal(v["iroh-relay"], iroh, "the relay check's iroh-relay is the iroh XenoNet uses");
   assert.match(v.node.version, /^22\.\d+\.\d+$/);
   assert.match(v.node.sha256["linux-arm64"], /^[0-9a-f]{64}$/);
   assert.match(v.claude, /^\d+\.\d+\.\d+$/);
@@ -135,6 +98,10 @@ test("the templates: plain mode, no mounts, a made-up user, no agent forwarding,
   assert.match(shared, /ip daddr 192\.168\.5\.2 meta l4proto udp drop/);
   assert.ok(!/ct state/.test(shared));
   assert.match(shared, /ssh_deletekeys: false/);
+  // A second interface on Apple's shared NAT, for UDP and multicast between
+  // the VMs and the Mac.
+  assert.match(shared, /^networks:\n- vzNAT: true$/m);
+  assert.equal(LAN_DEV, "lima0");
   assert.match(shared, /PasswordAuthentication no/);
   assert.match(shared, /will ALL=\(ALL\) ALL\n/);
   assert.match(shared, /loginctl enable-linger will/);
@@ -165,3 +132,166 @@ test("the made-up repos: atlas-api on every host with one remote, the rest on on
   assert.equal(runBash( ["-n"], { input: reposScript("vm1") }).status, 0);
 });
 
+
+// ---------- the transport checks ----------
+
+// Subjects of commits on main before link/2, and the ones the plan names
+// for the pieces the checks wait on.
+const BEFORE = ["feat(net): the xenonet-net/2 envelope", "feat(log): relays, mailboxes and rekey chain ops; AddressRecord", "feat(net): Dial, the iroh endpoint and admission", "test(net): the turmoil harness"];
+const PLANNED = ["feat(net): link/2: hello, kept/loose/live streams, Want/Ack", "feat(net): fetch from any holder", "feat(net): mailboxes and Held receipts", "feat(net)!: several networks per machine"];
+
+test("a transport check waits on the phase 5 commits it needs, found by their subjects", () => {
+  assert.deepEqual(missing(Object.keys(LANDS), BEFORE), ["link/2", "holders", "mailboxes", "networks"]);
+  assert.deepEqual(missing(Object.keys(LANDS), [...BEFORE, ...PLANNED]), []);
+  assert.deepEqual(missing(["link/2"], ["docs: link/2 in the plan", "feat(net): link/2"]), [], "a feat(net) commit lands it");
+  assert.deepEqual(missing(["mailboxes"], ["docs(net): mailboxes"]), ["mailboxes"], "only a feat(net) commit lands a piece");
+  assert.deepEqual(Object.values(LANDS).map((l) => l.commit), [9, 10, 11, 13]);
+});
+
+test("the transport checks: the plan's eight and the LAN's three, each saying what it needs and changes", () => {
+  const ids = CHECKS.map((c) => c.id);
+  assert.deepEqual(ids, ["lan-udp", "lan-multicast", "mac-udp", "mdns", "lan-message", "relay", "mailbox", "gap", "skew", "networks", "restore"]);
+  for (const c of CHECKS) {
+    for (const n of c.needs) assert.ok(LANDS[n], `${c.id} needs ${n}`);
+    assert.ok(c.what && c.changes && typeof c.run === "function", c.id);
+    // Every check past the LAN's own needs a network, which is the owner's
+    // to make, and names what an agent looks at instead.
+    if (!/^(lan-udp|lan-multicast|mac-udp)$/.test(c.id)) assert.ok(c.owner?.includes(OWNER.join) && c.standIn, c.id);
+  }
+  const by = Object.fromEntries(CHECKS.map((c) => [c.id, c.needs]));
+  assert.deepEqual(by.mailbox, ["link/2", "mailboxes"]);
+  assert.deepEqual(by.gap, ["link/2", "holders"]);
+  assert.deepEqual(by.networks, ["link/2", "networks"]);
+  assert.deepEqual(by.restore, [], "a restore's new incarnation is in this build");
+  // Only the Mac's own datagram may open a macOS window, so it runs only
+  // when named.
+  assert.deepEqual(CHECKS.filter((c) => c.optIn).map((c) => c.id), ["mac-udp"]);
+});
+
+// A made-up lab that answers each check as it should: two VMs in one
+// network (and vm1 in a second one), stand-ins whose messages and handoffs
+// arrive, and the firewall, clock and relay the checks change.
+function fakeLab({ subjects = [...BEFORE, ...PLANNED], network = true, relays = true } = {}) {
+  const sent = new Map();
+  const goals = new Set();
+  const lab = { nft: {}, clock: 0 };
+  const url = "http://192.168.64.2:3340";
+  const host = (id, me) => ({ id, online: true, found: ["mdns"], path: lab.nft[me] ? "relay" : "direct", skewMs: id === "vm2" ? lab.clock : 0 });
+  const n2 = (me) => ({ id: "net-2", name: "lab", hosts: [host("mac", me), host("vm1", me), host("vm2", me)], relays: relays ? [url] : [], mailboxes: ["mac"], frozen: [] });
+  const n1 = (me) => ({ id: "net-1", name: "N1", hosts: [host("mac", me), host("vm1", me)], relays: [], mailboxes: [], frozen: [] });
+  const standin = async (vm, o) =>
+    (o.calls ?? []).map((c) => {
+      const at = Date.now();
+      let text = "";
+      if (c.name === "send") sent.set(c.arguments.to, c.arguments.text);
+      if (c.name === "handoff" && c.arguments?.goal) goals.add(c.arguments.goal);
+      if (c.name === "inbox") text = sent.get(o.session) ?? "";
+      if (c.name === "handoff" && c.until) text = goals.has(c.until) ? c.until : "";
+      if (c.name === "peers") text = c.until ?? "";
+      return { name: c.name, at, done: at + 5, error: false, found: c.until ? text.includes(c.until) : undefined, text };
+    });
+  return {
+    lab,
+    both: true,
+    lanDev: "lima0",
+    sleep: async () => {},
+    session: () => `s-${Math.random().toString(16).slice(2)}`,
+    subjects: async () => subjects,
+    state: async (vm) => (network ? { networks: vm === "vm1" ? [n1(vm), n2(vm)] : [n2(vm)], self: { id: vm, hlcAheadMs: Math.min(lab.clock, 300000) } } : { network: null, hosts: [] }),
+    standin,
+    standinLater: (vm, o) => ({ ready: Promise.resolve(), done: new Promise((r) => setImmediate(() => r(standin(vm, o)))) }),
+    lanAddrs: async (vm) => (vm === "vm1" ? ["192.168.64.2", "fe80::1"] : ["192.168.64.3"]),
+    nft: async (vm, text) => (lab.nft[vm] = text),
+    clock: async (vm, offset) => (lab.clock = offset ?? 0),
+    down: async () => {},
+    up: async () => {},
+    service: async () => {},
+    snapshot: async () => {},
+    relay: async () => url,
+    relayOff: async () => {},
+    doctor: async () => JSON.stringify({ rows: [{ id: "network.clock", detail: "vm2 is 6 min ahead" }] }),
+    logs: async () => "vm1 holds more of this machine's feed than it has: its store was restored, so it writes from a new incarnation",
+    udp: async () => true,
+  };
+}
+
+test("every transport check passes on a lab that behaves, and puts back what it changed", async () => {
+  for (const c of CHECKS) {
+    const ctx = fakeLab();
+    const r = await runCheck(c, ctx);
+    assert.equal(r.status, "ok", `${c.id}: ${r.detail}`);
+    assert.deepEqual(Object.values(ctx.lab.nft).filter(Boolean), [], `${c.id} heals the firewall`);
+    assert.equal(ctx.lab.clock, 0, `${c.id} puts the clock back`);
+  }
+});
+
+test("a transport check skips without both VMs, waits on missing code, and asks the owner for a network", async () => {
+  const restore = CHECKS.find((c) => c.id === "restore");
+  const skip = await runCheck(CHECKS.find((c) => c.id === "mdns"), { ...fakeLab({ subjects: BEFORE }), both: false });
+  assert.equal(skip.status, "skip");
+  assert.match(skip.detail, /needs vm1 and vm2 running; this checkout waits on link\/2 \(phase 5 commit 9\)/);
+  const wait = await runCheck(CHECKS.find((c) => c.id === "gap"), fakeLab({ subjects: BEFORE }));
+  assert.deepEqual(wait, { status: "wait", detail: "not in this build yet: waits on link/2 (phase 5 commit 9), holders (phase 5 commit 10)" });
+  // No network yet: what the owner runs, never a failure.
+  assert.deepEqual(await runCheck(restore, fakeLab({ network: false })), { status: "owner", detail: OWNER.join });
+  const noRelay = await runCheck(CHECKS.find((c) => c.id === "relay"), fakeLab({ relays: false }));
+  assert.equal(noRelay.status, "owner");
+  assert.match(noRelay.detail, /add http:\/\/192\.168\.64\.2:3340 .* as a relay/);
+  // A check that throws fails, with why.
+  const boom = async () => {
+    throw new Error("boom");
+  };
+  assert.deepEqual(await runCheck({ ...restore, run: boom }, fakeLab()), { status: "FAIL", detail: "boom" });
+});
+
+test("the networks check fails when anything of N1 reaches vm2", async () => {
+  const ctx = fakeLab();
+  const state = ctx.state;
+  ctx.state = async (vm) => (vm === "vm2" ? { ...(await state(vm)), leaked: "net-1" } : state(vm));
+  const r = await runCheck(CHECKS.find((c) => c.id === "networks"), ctx);
+  assert.equal(r.status, "FAIL");
+  assert.match(r.detail, /N1's id/);
+});
+
+test("the checks' firewall rules: UDP to a peer dropped, or a VM cut off its LAN but for one peer", () => {
+  const udp = rules({ udpTo: ["192.168.64.3", "fe80::2"] });
+  assert.match(udp, /^table inet xenonet_lab_check\ndelete table inet xenonet_lab_check\n/);
+  assert.match(udp, /hook output priority -10; policy accept;\n {4}ip daddr \{ 192\.168\.64\.3 \} meta l4proto udp drop\n {4}ip6 daddr \{ fe80::2 \} meta l4proto udp drop/);
+  assert.match(udp, /hook input .*\n {4}ip saddr \{ 192\.168\.64\.3 \} meta l4proto udp drop/);
+  const cut = rules({ isolate: "lima0", allow: ["192.168.64.2"] });
+  assert.match(cut, /oifname "lima0" ip daddr \{ 192\.168\.64\.2 \} accept\n {4}oifname "lima0" drop/);
+  assert.match(cut, /iifname "lima0" ip saddr \{ 192\.168\.64\.2 \} accept\n {4}iifname "lima0" drop/);
+  assert.match(rules({ isolate: "lima0" }), /oifname "lima0" drop/);
+  assert.throws(() => rules({ udpTo: ["1.2.3.4; drop"] }), /not an address/);
+  assert.throws(() => rules({ isolate: "lima0 drop" }), /not an interface/);
+  assert.throws(() => rules({}), /no rules/);
+});
+
+test("a VM's networks and addresses, as its XenoNet and ip give them", () => {
+  const before = { network: { id: "n", name: "lab" }, hosts: [{ id: "vm1" }, { id: "vm2" }] };
+  assert.deepEqual(networksOf(before).map((n) => [n.id, n.hosts.length]), [["n", 2]]);
+  assert.deepEqual(networksOf({ network: null, hosts: [] }), []);
+  assert.deepEqual(networksOf({ networks: [{ id: "a", hosts: [] }, { id: "b", hosts: [] }] }).map((n) => n.id), ["a", "b"]);
+  assert.equal(sharedNetwork(before, before).id, "n");
+  assert.equal(sharedNetwork(before, { network: { id: "other" }, hosts: [{ id: "vm1" }, { id: "vm2" }] }), null);
+  const ip = JSON.stringify([{ ifname: "lima0", addr_info: [{ family: "inet", local: "192.168.64.3" }, { family: "inet6", local: "fe80::5054:ff:fe12:3456" }] }]);
+  assert.deepEqual(addrsOf(ip), ["192.168.64.3", "fe80::5054:ff:fe12:3456"]);
+  assert.deepEqual(addrsOf("not json"), []);
+});
+
+test("guest.sh parses, and so does each Node script it runs in a VM", { skip: !bash && "Bash is required" }, () => {
+  const text = fs.readFileSync(lab("guest.sh"), "utf8");
+  assert.equal(runBash(["-n"], { input: guestScript("standin", { SESSION: "s", PROJECT: "atlas-api", CALLS: "[]" }, text) }).status, 0);
+  const scripts = [...text.matchAll(/node - <<'EOF'\n([\s\S]*?)\nEOF\n/g)].map((m) => m[1]);
+  assert.equal(scripts.length, 3, "standin, udpsend and udplisten");
+  const dir = tmp();
+  scripts.forEach((s, i) => {
+    const file = path.join(dir, `guest-${i}.cjs`);
+    fs.writeFileSync(file, s);
+    const r = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  });
+  // The steps lab.mjs runs are all there.
+  for (const step of ["vm", "facts", "subjects", "lanaddrs", "netstate", "standin", "relay", "relayoff", "udpsend", "udplisten", "answering"]) assert.match(text, new RegExp(`^${step}\\(\\) \\{`, "m"), step);
+  assert.ok(!/authorized_keys\.new|hosts self|relay --port/.test(text), "nothing of the retired SSH hosts");
+});

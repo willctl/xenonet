@@ -3,15 +3,17 @@
 Linux VMs on the development Mac, so one XenoNet can be tested against
 several machines. Each VM runs Claude Code, the Codex CLI and a headless
 XenoNet, which joins a network with the Mac's (`docs/guide/network.md`).
-`docs/design/vm-lab.md` is the plan; this is Phase A of it, the two Linux
-hosts.
+The VMs and the Mac share a LAN, so the checks can test XenoNet's
+transport between machines (phase 5 of the rewrite: direct paths, mDNS, a
+relay, mailboxes, catch-up). `docs/design/vm-lab.md` is the plan; this is
+Phase A of it, the two Linux hosts.
 
 ```sh
-npm run lab -- build ubuntu --ref wA/merge   # the golden copies, once
-npm run lab -- build fedora --ref wA/merge
-npm run lab -- clone vm1                     # the working VMs
+npm run lab -- build ubuntu --ref main   # the golden copies, once
+npm run lab -- build fedora --ref main
+npm run lab -- clone vm1                 # the working VMs
 npm run lab -- clone vm2
-npm run lab -- check                         # the plan's checks
+npm run lab -- check                     # each VM's checks, then the transport's
 npm run lab -- status
 ```
 
@@ -35,6 +37,8 @@ plans, as on the Mac.
 - **Working VMs** are copy-on-write clones of them, which take close to
   no disk at first. A clone makes its own SSH host keys on its first boot,
   and Claude Code makes its own machine ids there the first time it runs.
+- **Host ids** are the ids the owner gives the VMs when joining them to a
+  network. The transport checks look for `vm1` and `vm2`.
 - **Time zones** come from a template parameter, `labTimezone`, which the
   VM's root setup applies at every boot: Lima's own `timezone` setting does
   nothing in plain mode.
@@ -45,14 +49,13 @@ plans, as on the Mac.
 
 | `npm run lab -- …` | What it does |
 |---|---|
-| `status` | The lab's VMs, the XenoNets in the running ones, and the lab's files |
+| `status` | The lab's VMs, the XenoNets in the running ones, and each VM's address on the lab's LAN |
 | `build ubuntu\|fedora [--ref R]` | Builds a golden copy: creates it, installs the tools and XenoNet at git ref R (HEAD by default), checks the demo XenoNet answers, then stops and protects it. A build that stopped halfway picks up where it was |
-| `clone vm1\|vm2` | Clones a working VM, starts it, records its host key, installs the console key, puts made-up repos in `~/Projects`, and starts its two XenoNets |
-| `up [vm…]` / `down [vm…]` | Starts or stops working VMs. `up` records the host key again |
-| `push [vm…] [--ref R]` | Pushes XenoNet at git ref R into running VMs, reinstalls its dependencies, and restarts its services |
-| `keys [vm…] [--relay-port N]` | Points the console key at the XenoNet under test: 47841, the demo XenoNet (the default), or 47840 |
-| `check [vm…]` | The plan's checks (below) |
-| `teardown [--yes]` | Deletes the lab's VMs, by name, and the lab's files |
+| `clone vm1\|vm2` | Clones a working VM, starts it, puts made-up repos in `~/Projects`, and starts its two XenoNets |
+| `up [vm…]` / `down [vm…]` | Starts or stops working VMs |
+| `push [vm…] [--ref R]` | Pushes XenoNet at git ref R into running VMs, rebuilds it, and restarts its services |
+| `check [vm…] [--only C,…]` | Each VM's checks, then the transport checks across vm1 and vm2 (below). `--only` runs just the transport checks named |
+| `teardown [--yes]` | Deletes the lab's VMs, by name |
 
 ## What's in each VM
 
@@ -73,10 +76,15 @@ plans, as on the Mac.
   `xenonet` command in `~/.local/bin`.
 - **Two XenoNets**, as systemd user services that run without anyone logged
   in (linger): `xenonet.service` on 127.0.0.1:47840, which reads the VM's own
-  sessions, and `xenonet-demo.service` on 127.0.0.1:47841, with made-up data
-  for the hosts prototype's first runs. They serve the API only; the page
-  isn't built. `~/.config/xenonet-lab/xenonet.env` holds a VM's settings: `vm2`
-  has `XENONET_CLAUDE_USAGE=off`, so only `vm1` asks Anthropic for plan usage.
+  sessions and is the one that joins a network, and `xenonet-demo.service`
+  on 127.0.0.1:47841, with made-up data. They serve the API only; the page
+  isn't built. `~/.config/xenonet-lab/xenonet.env` holds a VM's settings:
+  `vm2` has `XENONET_CLAUDE_USAGE=off`, so only `vm1` asks Anthropic for
+  plan usage.
+- **iroh-relay** in `vm1`, once the relay check has run: built in the VM at
+  the version `versions.json` pins (the iroh XenoNet uses), with
+  `--features server --locked`, into `~/.local/bin`. The first build takes
+  a few minutes.
 - **Made-up repos** in `~/Projects` (`fixtures.mjs`), from the demo world's
   names and remotes: `atlas-api` on both VMs with the same remote and the
   same commits; `atlas-web` and `labs/geofence` on `vm1`; `ledger` and
@@ -86,82 +94,140 @@ plans, as on the Mac.
 
 ## On the Mac
 
-- **The lab's folder**, `~/Library/Application Support/XenoNet Dev/lab`
-  (`XENONET_LAB_DIR` moves it):
-  - `ssh_config`, with an alias per VM (`vm1`, `vm2`);
-  - `console_ed25519`, the console key, made for the lab;
-  - `known_hosts`, with each VM's host key.
 - **Each VM's Lima folder**, `~/.lima/<instance>`, which also holds
   `xenonet-lab-password`: the VM's sudo password (mode 0600). Only its hash
   went into the VM.
 - Nothing is added to `~/.ssh/config`.
 
-## SSH
-
-- **XenoNet's hosts use the lab's own config:** `ssh -F <the lab's ssh_config>
-  vm1`. It offers the console key alone, never the Mac's agent, and checks
-  host keys against the lab's `known_hosts`.
-- **The console key can run the relay and nothing else.** In each VM's
-  `~/.ssh/authorized_keys` it reads
-  `restrict,command="/home/will/.local/bin/xenonet relay --port 47841" …`,
-  so connecting with it gets the relay's hello, whatever command is
-  asked. (On a branch from before the relay, it prints
-  `xenonet: no command "relay"`, which still shows the key and the host key
-  work.)
-- **The command `status` prints for each VM** runs as printed:
-  `ssh -F ~/'Library/Application Support/XenoNet Dev/lab/ssh_config' vm1`,
-  the `~` outside the quotes, where the shell expands it, since XenoNet
-  Dev's state folder has a space in its name.
-- **Host keys are recorded through Lima's channel**, from the VM's
-  `/etc/ssh`, so nothing is trusted blindly the first time. Lima gives a VM
-  a new instance id at every start, which would have cloud-init make new
-  host keys each time; the templates keep them (`ssh_deletekeys: false`).
-- **For a shell in a VM**, use Lima's channel: `limactl shell xenonet-vm1`,
-  or `ssh -F ~/.lima/xenonet-vm1/ssh.config lima-xenonet-vm1`.
-
 ## Networking and root
 
 - **Plain mode**: no mounts, no automatic port forwards, no guest agent.
   Nothing in the Mac's home folder is visible in a VM, and nothing a VM
-  listens on appears on the Mac.
-- **The Mac's loopback is blocked.** Lima's network maps 192.168.5.2 in a
-  guest to the Mac's 127.0.0.1, where XenoNet's API listens. nftables rules,
-  loaded before the network at every boot (`xenonet-lab-firewall.service`),
-  drop the TCP connections and UDP a guest starts toward it. They look at
-  TCP's SYN flag rather than conntrack's state, so the SSH connections the
-  Mac opens into the VM are never caught, even one open before the rules
-  load. DNS (Lima serves it at 192.168.5.2 too) and DHCP still work.
+  listens on is forwarded to the Mac's 127.0.0.1.
+- **Two interfaces.** `eth0` is Lima's user network, for SSH from the Mac
+  and the internet. `lima0` is Lima's vzNAT network (Apple's shared NAT):
+  the VMs and the Mac are on one LAN there, the Mac at the subnet's `.1`,
+  with UDP and multicast between all three. That's where XenoNet's direct
+  paths and mDNS run. `status` shows each VM's address on it.
+- **The Mac's loopback is blocked.** Lima's user network maps 192.168.5.2 in
+  a guest to the Mac's 127.0.0.1, where XenoNet's API listens. nftables
+  rules, loaded before the network at every boot
+  (`xenonet-lab-firewall.service`), drop the TCP connections and UDP a guest
+  starts toward it. They look at TCP's SYN flag rather than conntrack's
+  state, so the SSH connections the Mac opens into the VM are never caught,
+  even one open before the rules load. DNS (Lima serves it at 192.168.5.2
+  too) and DHCP still work. XenoNet's API listens on 127.0.0.1 in the VMs
+  and on the Mac, so it isn't on the LAN either.
 - **Root needs the VM's password**, which only the Mac holds, so an agent
-  in the VM can't lift the rule. The two exceptions are commands Lima runs:
+  in the VM can't lift the rules. The two exceptions are commands Lima runs:
   `sudo cat /mnt/lima-cidata/param.env` at every start, and
   `sudo /sbin/shutdown -h now`. To run something as root yourself, with
   the password on standard input and no terminal to echo it:
   `ssh -F ~/.lima/xenonet-vm1/ssh.config -T lima-xenonet-vm1 sudo -S -p "''" <command> < ~/.lima/xenonet-vm1/xenonet-lab-password`.
-- SSH takes keys only, with no agent or X11 forwarding into a VM.
+- **SSH** is Lima's own channel: `limactl shell xenonet-vm1`, or
+  `ssh -F ~/.lima/xenonet-vm1/ssh.config lima-xenonet-vm1`. It takes keys
+  only, with no agent or X11 forwarding into a VM. Lima gives a VM a new
+  instance id at every start, which would have cloud-init make new host
+  keys each time; the templates keep them (`ssh_deletekeys: false`).
 
-## The checks
+## Each VM's checks
 
-`npm run lab -- check` runs the plan's checks in each running VM, nine in
-each (eighteen with both VMs up), one `ok` or `FAIL` line apiece, and
-fails if any does:
+`npm run lab -- check` first runs these in each running VM, one `ok` or
+`FAIL` line apiece:
 
 1. both XenoNets answer, on 127.0.0.1:47840 and :47841 (two checks);
 2. a server on the Mac's 127.0.0.1 can't be reached through 192.168.5.2,
    while the internet can (two);
-3. XenoNet listens on 127.0.0.1 only, and nothing is mounted from the Mac
-   (two);
-4. the console key gets the relay, not a shell;
+3. the VM has an address on the lab's LAN (`lima0`);
+4. XenoNet's API listens on 127.0.0.1 only, and nothing is mounted from
+   the Mac (two);
 5. only made-up names: the lab user is "Will", git's is Nova, and the
    Mac's own names appear nowhere in the VM's users, groups, git config or
    authorized keys;
 6. `sudo` without the password is refused, and with it works.
 
-## Joining the VMs to a network (the owner)
+## The transport checks
 
-XenoNet refuses creating a network, and adding a machine to one, from under
-an agent, so joining the lab's VMs is yours: from the Mac's XenoNet window,
-**Add a machine**, then `xenonet net join` in the VM. An agent checking the
-page uses XenoNet Dev's `net-…` simulations instead.
+Then it runs the checks of phase 5's plan (section 4b of the plan, in
+`transport.mjs`) across vm1 and vm2. Each prints one line:
+
+- `ok` or `FAIL`;
+- `wait`: not in this build yet. The check needs phase 5 code that the
+  VMs' XenoNet was built without. The lab looks for the commit that lands
+  each piece in the history the VM was built from, by its subject
+  (`LANDS` in `transport.mjs`): `feat(net): … link/2 …` (commit 9),
+  `… holder …` (10), `… mailboxes …` (11) and `… several networks …` (13).
+  `push` the VMs once it lands;
+- `owner`: the check needs something only you can set up, and says what;
+  with the stand-in an agent uses instead;
+- `skip`: vm1 and vm2 aren't both running. The line still says what this
+  checkout waits on.
+
+Only `FAIL` makes `check` fail.
+
+| Check | What it shows | Waits on | You set up | An agent uses | What it changes, and puts back |
+|---|---|---|---|---|---|
+| `lan-udp` | vm1 and vm2 reach each other over UDP on the LAN | | | | nothing |
+| `lan-multicast` | multicast from vm1 reaches vm2, as mDNS needs | | | | nothing |
+| `mac-udp` | the Mac reaches each VM over UDP on the LAN | | run it: `--only mac-udp`, from your own terminal | | nothing |
+| `mdns` | mDNS finds the other machines, and the path to each is direct | link/2 | the network | `simulate net-founder` | nothing |
+| `lan-message` | a message on the LAN arrives in under 1 s | link/2 | the network | the delivery tests | two stand-in sessions |
+| `relay` | with vm1↔vm2 UDP dropped by nft, traffic goes through `iroh-relay --dev` in vm1 | link/2 | the network, and the relay's URL in it | the endpoint tests | starts the relay and drops the UDP, then stops and lifts both |
+| `mailbox` | after `down vm2`, a mailbox delivers to vm2 once it's back, the sender offline | link/2, mailboxes | the network, and the Mac as its mailbox | `simulate host-offline` | stops vm2 and vm1's XenoNet, starts both again |
+| `gap` | after a partition, vm2 fills its gap from vm1 | link/2, holders | the network | the turmoil tests | cuts vm2 off the LAN, lets vm1 alone back, then lifts it |
+| `skew` | vm2's clock 3 min ahead is ordered by it; 6 min ahead is accepted, clamped to 5 min, and the doctor shows the skew | link/2 | the network | `simulate host-skew` | vm2's clock, with NTP off, then back on |
+| `networks` | vm1 in N1 and N2, vm2 in N2 only: vm2 sees nothing of N1 | link/2, networks | the network (N2), and N1 | the several-networks tests | two stand-in sessions |
+| `restore` | a restored state dir starts a new incarnation and doesn't freeze | | the network | `simulate net-frozen` | copies vm2's `~/.local/state/xenonet` aside, writes past it, restores it, drops the copy |
+
+**How they test it.** A check messages and hands off between *stand-in
+sessions*: a made-up Claude Code session in a VM's `~/Projects/atlas-api`
+(or `atlas-web`), which XenoNet hears of through `xenonet hook claude` and
+which calls the engine's tools (`peers`, `send`, `inbox`, `handoff`,
+`claim`) through `xenonet mcp`, as a real session would. A message is a
+loose entry, a handoff a kept one. The partitions are nft rules in a table
+of their own (`xenonet_lab_check`), which every `check` lifts first and a
+reboot forgets. The clock is set as root, from the Mac's time.
+
+**What they read** from `xenonet net status --json` in each VM, besides
+what's there today (`network`, `hosts[].id`, `hosts[].online`, `frozen`):
+`networks[]` once a machine may be in several, the network's `relays`
+(URLs) and `mailboxes` (host ids), `hosts[].path` (`direct` or `relay`),
+`hosts[].found` (how its address was found, `mdns` among them),
+`hosts[].skewMs` (that machine's clock ahead of this one's, measured on the
+hello) and `self.hlcAheadMs` (this machine's HLC ahead of its own clock).
+The skew check also looks for vm2 in `xenonet doctor --json`. The phase 5
+commit that adds each one names it so, or changes `transport.mjs` with it.
+
+### Setting up the network (you)
+
+XenoNet refuses creating a network, joining one, and widening one (a relay,
+a mailbox) from under an agent, so these are yours. The checks read the
+VMs' state and say which is missing.
+
+1. **The network.** In the Mac's XenoNet window, start a network, then
+   **Add a machine** with host id `vm1`, and run the line it shows inside
+   the VM: `limactl shell xenonet-vm1`, then paste it. The same for `vm2`.
+   Say yes to finding machines on the LAN (mDNS) when it asks.
+2. **The relay** (for `relay`). Run `npm run lab -- check --only relay`
+   once: it builds and starts the relay in vm1 and prints its URL,
+   `http://<vm1's lima0 address>:3340`. Add that URL as a relay of the
+   network in the Mac's window (Network settings), then run the check
+   again.
+3. **The mailbox** (for `mailbox`). Name the Mac as a mailbox of the
+   network in its window (Network settings).
+4. **A second network** (for `networks`). Make N1 of the Mac and vm1 only,
+   and share `atlas-web` into N1 and no other network. The first network
+   stays N2, with vm2 and `atlas-api`.
+
+An agent doesn't do these. It looks at the same states in XenoNet Dev
+with the `simulate` kinds in the table (AGENTS.md), and at the tests named
+there.
+
+macOS may ask once, in a window, whether an app may reach the local
+network: your terminal, the first time you run `--only mac-udp` (which
+`check` skips unless it's named, so an agent's run never opens that
+window), and XenoNet when its endpoint first uses the LAN. Both are yours
+to allow.
 
 ## Signing in (the owner, after the VMs are built)
 
@@ -209,11 +275,11 @@ in each (port 47840) starts showing that VM's sessions.
 ## Changing things
 
 - **Another branch of XenoNet**: `npm run lab -- push --ref <branch>`.
-  `push` names each host with `xenonet hosts self` (`vm1`, `vm2`), on a
-  branch that has it.
-- **The relay's port**: `npm run lab -- keys --relay-port 47840` once tests
-  move from the demo XenoNet to the real one.
 - **Newer tools**: change `versions.json` and build the golden copies again.
+- **A VM without `lima0`** (made from a template without `networks`):
+  `limactl stop xenonet-vm1`, then
+  `limactl edit --set '.networks=[{"vzNAT": true}]' xenonet-vm1`, then
+  `npm run lab -- up vm1`.
 
 ## Resets and teardown
 

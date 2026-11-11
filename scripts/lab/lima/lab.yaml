@@ -7,11 +7,20 @@ cpus: 2
 memory: 4GiB
 disk: 20GiB
 
-# Plain mode: no mounts, no automatic port forwards and no guest agent, so a
-# VM is a machine reached over SSH and nothing else. Nothing in the Mac's
-# home folder is visible in it.
+# Plain mode: no mounts, no automatic port forwards and no guest agent.
+# Nothing in the Mac's home folder is visible in a VM, and nothing it
+# listens on is forwarded to the Mac's 127.0.0.1.
 plain: true
 mounts: []
+
+# A second interface, lima0, on Apple's shared NAT network: the VMs and the
+# Mac are on one LAN there (a subnet macOS picks, the Mac at its .1), with
+# UDP and multicast between them, as XenoNet's direct paths and mDNS need.
+# The first interface, Lima's user network, stays for SSH and the internet,
+# and the firewall below keeps the Mac's loopback out of reach.
+networks:
+- vzNAT: true
+
 # Lima would otherwise copy proxy settings from the environment limactl runs
 # in.
 propagateProxyEnv: false
