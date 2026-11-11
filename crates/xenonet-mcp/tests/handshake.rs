@@ -2,7 +2,9 @@
 // 2026-07-28 probe (server/discover) first, then the 2025 handshake. A
 // channel session gets method-not-found for the probe, the 2025-11-25
 // handshake with experimental["claude/channel"], and each message its long
-// poll brings as notifications/claude/channel. A fake XenoNet stands in.
+// poll brings as notifications/claude/channel. A client of the 2026-07-28
+// revision that names XenoNet's channel extension gets the revision, and
+// the messages on a subscriptions/listen stream. A fake XenoNet stands in.
 
 #![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap")]
 
@@ -122,6 +124,15 @@ fn probe() -> Value {
     json!({ "_meta": { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}, "io.modelcontextprotocol/clientInfo": { "name": "claude-code", "version": "2.1.302" } } })
 }
 
+// The same _meta, from a client that names XenoNet's channel extension.
+fn listening() -> Value {
+    json!({ "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": { "extensions": { "dev.xenonet/channel": {} } } })
+}
+
+// The tools' names, which harnesses' allow rules (mcp__xenonet__send) name.
+const TOOLS: [&str; 14] =
+    ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "delegate", "doctor", "ask_gateway_token", "permission"];
+
 fn init(s: &mut Server) -> Value {
     let r = s.ask(1, "initialize", json!({ "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": { "name": "claude-code", "version": "2.1.302" } }));
     s.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
@@ -160,10 +171,8 @@ fn a_channel_session_gets_the_2025_handshake_and_its_messages() {
 
     let tools = s.ask(2, "tools/list", json!({}));
     let names: Vec<_> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(
-        names,
-        ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "delegate", "doctor", "ask_gateway_token", "permission"]
-    );
+    assert_eq!(names, TOOLS);
+    assert_eq!(s.ask(4, "ping", json!({}))["result"], json!({}), "the 2025 handshake keeps ping");
 
     let call = s.ask(3, "tools/call", json!({ "name": "send", "arguments": { "to": "repo", "text": "hello", "reply_to": 7 } }));
     assert!(call["result"].get("isError").is_none(), "an answer, as the JS server gives it: {call}");
@@ -177,12 +186,81 @@ fn a_channel_session_gets_the_2025_handshake_and_its_messages() {
     assert_eq!((body["to"].clone(), body["text"].clone(), body["replyTo"].clone()), (json!("repo"), json!("hello"), json!(7)));
 }
 
+// The 2026-07-28 revision's channel: the probe names the extension, so
+// it's answered with it; the messages come only on a listen stream that
+// asks for them in its _meta, each tagged with the stream's id, and the
+// stream ends with the revision's final result when XenoNet says channels
+// are off.
+#[test]
+fn a_2026_client_that_names_the_extension_gets_the_channel_on_a_listen_stream() {
+    let message = json!({ "id": 9, "from": "Muse", "text": "[XenoNet from Muse] (message #9) hi" });
+    let (port, heard) = xenonet(vec![json!({ "items": [message] })]);
+    let mut s = Server::start(port, true);
+
+    let probe = s.ask(0, "server/discover", json!({ "_meta": listening() }));
+    let r = &probe["result"];
+    assert_eq!((r["supportedVersions"].clone(), r["resultType"].clone()), (json!(["2026-07-28"]), json!("complete")), "{probe}");
+    assert_eq!(r["capabilities"]["extensions"], json!({ "dev.xenonet/channel": {} }));
+    assert!(r["capabilities"].get("experimental").is_none(), "the 2025 handshake's claude/channel isn't this revision's: {probe}");
+    assert!(r["instructions"].as_str().unwrap().contains("<channel source=\"xenonet\""));
+
+    let tools = s.ask(1, "tools/list", json!({ "_meta": listening() }));
+    let names: Vec<_> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, TOOLS);
+    assert_eq!((tools["result"]["ttlMs"].clone(), tools["result"]["cacheScope"].clone()), (json!(0), json!("private")));
+    for (method, id) in [("ping", 2), ("logging/setLevel", 3)] {
+        let r = s.ask(id, method, json!({ "_meta": listening(), "level": "info" }));
+        assert_eq!(r["error"]["code"], json!(-32601), "the revision has no {method}: {r}");
+    }
+    thread::sleep(Duration::from_millis(300));
+    assert!(heard.try_recv().is_err(), "nothing pushed, nor polled for, before the client listens");
+
+    // A stream that doesn't ask for the channel is acknowledged and carries
+    // nothing.
+    s.send(json!({ "jsonrpc": "2.0", "id": 4, "method": "subscriptions/listen", "params": { "_meta": listening(), "notifications": { "toolsListChanged": true } } }));
+    let ack = s.next();
+    assert_eq!(ack["method"], json!("notifications/subscriptions/acknowledged"), "{ack}");
+    assert_eq!((ack["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"].clone(), ack["params"]["notifications"].clone()), (json!(4), json!({})));
+
+    let mut meta = listening();
+    meta["dev.xenonet/channel"] = json!({});
+    s.send(json!({ "jsonrpc": "2.0", "id": 5, "method": "subscriptions/listen", "params": { "_meta": meta, "notifications": {} } }));
+    let ack = s.next();
+    assert_eq!(
+        (ack["method"].clone(), ack["params"]["_meta"]["io.modelcontextprotocol/subscriptionId"].clone()),
+        (json!("notifications/subscriptions/acknowledged"), json!(5)),
+        "{ack}"
+    );
+    let note = s.next();
+    assert_eq!(
+        note,
+        json!({ "jsonrpc": "2.0", "method": "notifications/claude/channel", "params": { "content": "[XenoNet from Muse] (message #9) hi", "meta": { "from": "Muse", "message_id": "9" }, "_meta": { "io.modelcontextprotocol/subscriptionId": 5 } } })
+    );
+    let (path, agent, _, body) = heard.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!((path.as_str(), agent, body["waitSeconds"].clone()), ("/api/engine/channel", format!("claude:{SESSION}"), json!(25)));
+    // The next poll says channels are off: the stream ends, gracefully.
+    let end = s.next();
+    assert_eq!((end["id"].clone(), end["result"]["resultType"].clone()), (json!(5), json!("complete")), "{end}");
+    assert_eq!(end["result"]["_meta"]["io.modelcontextprotocol/subscriptionId"], json!(5));
+}
+
+// A session that isn't a channel has nothing to listen for.
+#[test]
+fn another_session_has_no_stream() {
+    let (port, _heard) = xenonet(vec![]);
+    let mut s = Server::start(port, false);
+    let listen = s.ask(1, "subscriptions/listen", json!({ "_meta": listening(), "notifications": { "toolsListChanged": true } }));
+    assert_eq!(listen["error"]["code"], json!(-32601), "{listen}");
+}
+
 #[test]
 fn another_session_gets_both_eras_and_no_channel() {
     let (port, _heard) = xenonet(vec![]);
     let mut s = Server::start(port, false);
     let probe = s.ask(0, "server/discover", probe());
     assert!(probe.get("result").is_some(), "the 2026 probe is answered: {probe}");
+    let named = s.ask(10, "server/discover", json!({ "_meta": listening() }));
+    assert!(named["result"]["capabilities"].get("extensions").is_none(), "no channel to offer: {named}");
     let r = init(&mut s);
     assert_eq!(r["result"]["protocolVersion"], json!("2025-11-25"));
     assert!(r["result"]["capabilities"].get("experimental").is_none(), "{r}");
@@ -198,10 +276,7 @@ fn the_tools_are_the_js_servers() {
     let tools = s.ask(2, "tools/list", json!({}));
     let tools = tools["result"]["tools"].as_array().unwrap();
     let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(
-        names,
-        ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "delegate", "doctor", "ask_gateway_token", "permission"]
-    );
+    assert_eq!(names, TOOLS);
     for t in tools {
         assert_eq!(t["inputSchema"]["type"], json!("object"));
         assert_eq!(t["inputSchema"]["$schema"], json!("https://json-schema.org/draft/2020-12/schema"));

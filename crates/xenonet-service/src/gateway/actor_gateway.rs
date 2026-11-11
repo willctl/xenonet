@@ -915,4 +915,25 @@ mod tests {
         assert_eq!(normal_host(Some("  ")), None);
         assert_eq!(normal_host(None), None);
     }
+
+    // An Mcp-Name that names another tool than the body's is refused as
+    // HeaderMismatch (-32020), as a missing one is in the fixture; one that
+    // agrees passes.
+    #[test]
+    fn an_mcp_name_that_disagrees_with_the_body_is_refused() {
+        let m = json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "whoami", "arguments": {}, "_meta": { format!("{ENVELOPE}protocolVersion"): MODERN, format!("{ENVELOPE}clientCapabilities"): {} } } });
+        let headers = |name: &'static str| {
+            move |k: &str| match k {
+                "mcp-method" => Some("tools/call"),
+                "mcp-name" => Some(name),
+                _ => None,
+            }
+        };
+        let refused = ActorGateway::envelope(&m, Some(MODERN), headers("send")).expect("a refusal");
+        let crate::http::ReplyBody::Full(bytes) = &refused.body else { panic!("a stream where JSON was due") };
+        let body = json::parse(&String::from_utf8_lossy(bytes)).unwrap();
+        assert_eq!((refused.status, body["error"]["code"].clone(), body["id"].clone()), (400, json!(-32020), json!(3)), "{body}");
+        assert_eq!(body["error"]["data"]["mismatch"]["header"], json!("send"));
+        assert!(ActorGateway::envelope(&m, Some(MODERN), headers("whoami")).is_none());
+    }
 }

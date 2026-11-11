@@ -333,7 +333,20 @@ schema key for key, and refused calls, in each kind of session.
 
 - **Both protocol eras.** The 2025 handshake (`initialize`, answered with
   the client's version when it's one the server knows, else 2025-11-25),
-  or 2026-07-28's `server/discover` with each request's `_meta`.
+  or 2026-07-28's `server/discover` with each request's `_meta`. On
+  2026-07-28 every result carries `resultType`, list results `ttlMs: 0`
+  and `cacheScope: "private"`, and `ping` and `logging/setLevel` are
+  method-not-found (`rmcp` does this). The tools' names are the same in
+  both eras, since harnesses' allow rules (`mcp__xenonet__send`) name
+  them.
+- **XenoNet's namespace.** What XenoNet adds to the protocol sits under
+  the vendor prefix `dev.xenonet/` (xenonet.dev, reversed): today the
+  channel extension, `dev.xenonet/channel`, in `capabilities.extensions`
+  and in a `subscriptions/listen` request's `_meta` (below). The actor
+  gateway's MCP over HTTP (`crates/xenonet-service/src/gateway/actor_gateway.rs`)
+  checks 2026-07-28's `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name`
+  headers against the body and refuses a disagreement with HeaderMismatch
+  (`-32020`).
 - **Who's calling.** A Claude Code session is `CLAUDE_CODE_SESSION_ID`. A
   Codex thread comes from the request's `_meta` (`threadId`, or
   `x-codex-turn-metadata.thread_id`), or `CODEX_THREAD_ID`. Each call to
@@ -352,8 +365,12 @@ schema key for key, and refused calls, in each kind of session.
 Claude Code registers a channel server (one with
 `experimental: { "claude/channel": {} }` that sends
 `notifications/claude/channel`) only on the 2025 handshake. A server that
-answers 2026-07-28 gets "Channel notifications skipped". So for a channel
-session, `xenonet mcp` holds to the 2025 handshake:
+answers 2026-07-28 gets "Channel notifications skipped" (checked with
+Claude Code 2.1.318: it skips a channel on a connection that negotiated
+the 2026 revision, which has no unsolicited notifications). So for a
+channel session, `xenonet mcp` holds Claude Code to the 2025 handshake,
+and offers the channel on 2026-07-28 only to a client that asks for it
+through XenoNet's extension:
 
 - **When.** A channel session has `CLAUDE_CODE_SESSION_ID`, and its
   `claude` process (the parent, or `CLAUDE_PID`) was started with
@@ -375,9 +392,23 @@ session, `xenonet mcp` holds to the 2025 handshake:
   `params: { content, meta: { from, message_id } }`: `content` as the
   service framed it, `from` with anything but word characters, spaces and
   `.:@-` taken out and cut to 80 characters, and `message_id` as a string.
+  On the 2025 handshake they're pushed as soon as the client is in.
+- **On 2026-07-28.** A probe whose client capabilities name
+  `extensions["dev.xenonet/channel"]` gets the revision, with
+  `extensions: { "dev.xenonet/channel": {} }` in place of
+  `experimental["claude/channel"]`. Nothing is pushed unasked: the
+  messages come on the stream of a `subscriptions/listen` whose `_meta`
+  names `dev.xenonet/channel`, as the same notification with
+  `_meta: { "io.modelcontextprotocol/subscriptionId": <the listen's id> }`
+  in its params. The acknowledgment's filter is empty (XenoNet sends none
+  of the filter's own kinds), one stream takes the messages at a time (a
+  second ends at once with the final result), and the stream ends with
+  the final result when XenoNet says channels are off. A session that
+  isn't a channel answers `subscriptions/listen` with method-not-found.
 - **Checked** by `crates/xenonet-mcp/tests/handshake.rs`, which drives the
-  server over stdio as Claude Code does, with a fake XenoNet's long poll,
-  and by the channel session's golden file.
+  server over stdio as Claude Code does, and as a 2026-07-28 client that
+  names the extension, with a fake XenoNet's long poll, and by the channel
+  session's golden file.
 - **If a later `rmcp` can't be held to the 2025 handshake**, the server
   serves channel sessions over a stdio loop of its own: newline-delimited
   JSON-RPC, `initialize`, `tools/list`, `tools/call` and the notification.
