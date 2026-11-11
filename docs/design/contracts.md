@@ -24,7 +24,7 @@ orchestrator's OK and a note to every lane it touches.
   `actor/gateway-ask`,
   `actor/report`, `actor/me`,
   `actor/events`, `actor/console`, `actor/requests`, `actor/tokens`,
-  `drift/record`, `drift/log`, for hosts `host/list` and
+  `drift/record`, `drift/log`, for other machines' relays
   `host/hello`, `app`, an entry of the app registry (`core/apps.js`),
   for the tray app `tray/status` and `tray/event` (section 14), and
   `system`, a computer's load as `GET /api/system` answers it.
@@ -460,7 +460,7 @@ Accepted with every recommendation at merge point A (see
 `next-phase.md`). The sections above already say them; this is the list.
 
 - Schemas (§1): `actor/credentials`, `actor/report`, `actor/me`,
-  `actor/events`, `actor/console`, `drift/log`, `host/list` and
+  `actor/events`, `actor/console`, `drift/log` and
   `host/hello`. Drift merges across vendor versions, counts unknown keys
   only in closed objects, and splits notes (additions) from warnings
   (changes).

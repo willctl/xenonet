@@ -1,4 +1,4 @@
-//! core/hosts/declared.js: what a host sends, kept as XenoNet's schemas
+//! What a host sends, kept as XenoNet's schemas
 //! declare it. Every object in the schemas is loose, so a value that
 //! passes its check still carries keys the schema never names, which the
 //! page might read as its own and write into its markup unescaped.

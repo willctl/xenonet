@@ -127,7 +127,7 @@ impl cores::Verify for Weather {
 #[tokio::test]
 async fn the_switch_is_the_owners() {
     let w = Arc::new(Weather::default());
-    let mut c = Cores::pending(true, false, false);
+    let mut c = Cores::pending(true, false);
     xenonet_service::serve::wire_root(&mut c);
     c.verify = w.clone();
     let ctx = Ctx::for_tests(c);

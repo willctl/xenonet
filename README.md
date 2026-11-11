@@ -247,15 +247,6 @@ network or spends money comes to you in Needs you, on any of your consoles.
 The assistant is told how it ended and woken for it.
 [Delegating work to another machine](docs/guide/delegation.md) has the details.
 
-### Shows other machines over SSH, as a prototype
-
-Start XenoNet with `XENONET_HOSTS=1` and it can show other machines' XenoNets
-beside its own, read only, without a network. Each machine runs its own
-XenoNet, and your console reads it over SSH. A machine sends titles, states
-and counts, and a transcript crosses only when you open it in XenoNet's
-window.
-[Other machines over SSH](docs/guide/other-machines.md) shows how to set one up.
-
 ## Apps XenoNet reads
 
 XenoNet reads these apps' own session records. Apps marked "observed" show
@@ -414,7 +405,6 @@ common things.
 | `XENONET_CLAUDE_USAGE=off` | Stops the plan usage request to Anthropic |
 | `XENONET_IDENTITIES=off` | Stops reading sign-ins, gh's accounts and each repo's git identity |
 | `XENONET_ACTORS=off` | Turns actors off |
-| `XENONET_HOSTS=1` | Shows other machines' XenoNets |
 | `XENONET_ASSISTANT=off` | Turns remote actors' connections off altogether |
 
 [How it works](docs/guide/how-it-works.md) lists every variable, every

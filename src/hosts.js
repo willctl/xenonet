@@ -1,14 +1,14 @@
-// Other machines on the map (docs/design/hosts.md): over SSH with
-// XENONET_HOSTS=1, and the machines of your network, drawn from their
-// presence (network-map.js makes their nodes). Each host is a
+// Other machines on the map (docs/design/network.md, section 7): the
+// machines of your network, drawn from their presence (network-map.js
+// makes their nodes) or from the map each one's relay sends. Each host is a
 // constellation of its own beside this machine's: its host node
 // (@<host>:core) held on an outer orbit, and its projects and sessions on
 // rings of their own around it. A dashed bridge joins checkouts of one
 // repo on different machines (hosts-draw.js draws those and the host node).
 // A host that isn't live keeps its constellation in place, dimmed and
-// still. A host over SSH is read-only: Preview and Stats, nothing that
-// opens, dismisses or messages anything on it. A network's sessions take a
-// message from you, and nothing else.
+// still. A host is read-only: Preview and Stats, nothing that opens or
+// dismisses anything on it. Its sessions take a message from you, and
+// nothing else.
 //
 // This module holds what isn't three.js: the layout's forces, the words
 // for how a host stands, the chips under Filters, the cap on what's drawn
@@ -284,7 +284,7 @@ export function whereHtml(n, index, now = Date.now(), self = here) {
   if (!isRemote(n)) return `<div class="insp-where live here"><i class="host-dot live"></i>${h(text)}<span class="dim"> · this machine, in your network</span></div>`;
   const state = hostOf(n, index)?.state ?? (n.stale ? "offline" : "live");
   // A machine in your network shows what its presence says, and takes a
-  // message from you; one over SSH is read-only.
+  // message from you.
   return `<div class="insp-where ${h(state)}"><i class="host-dot ${h(state)}"></i>${h(text)}<span class="dim"> · ${n.network ? "in your network" : "read-only"}</span></div>`;
 }
 
@@ -368,7 +368,7 @@ export const alertText = (it) => (it.host && !it.text ? `The question is on ${it
 
 // Each node a host puts on the map costs about 0.05 ms a frame, mostly in
 // drawing it, so a few large hosts would take the map past the hosts'
-// frame budget (docs/design/hosts.md; the benchmark's hosts part measures
+// frame budget (the benchmark's hosts part measures
 // it). So what's drawn of the hosts you're not looking at is capped: every
 // host node, and beyond those at most HOST_CAP of their nodes, shared
 // between the hosts in turn. A host is looked at while the selection is

@@ -362,14 +362,6 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/net/svc/unpublish", YOU, Nothing),
     r("PUT",    "/api/net/settings", YOU, Nothing),
     r("*",      "/api/svc/**", &[Program], Nothing),
-    r("GET",    "/api/hosts", LOCAL, Read(Map)),
-    r("POST",   "/api/hosts", YOU, Nothing),
-    r("GET",    "/api/hosts/self", LOCAL, Read(Map)),
-    r("POST",   "/api/hosts/self", YOU, Nothing),
-    r("POST",   "/api/hosts/*/reconnect", LOCAL, Nothing),
-    r("POST",   "/api/hosts/*/test", LOCAL, Nothing),
-    r("GET",    "/api/hosts/*", LOCAL, Read(Map)),
-    r("DELETE", "/api/hosts/*", YOU, Nothing),
 
     // ---- XenoNet Dev (each answers only in a development instance) ----
     r("POST",   "/api/dev/simulate", LOCAL, Nothing),

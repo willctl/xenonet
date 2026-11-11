@@ -5,7 +5,7 @@
 //! Each check asks what it reads of the machine through `DoctorHost`
 //! (`Here`): its files and programs here, and XenoNet's own state through
 //! the other cores (the map's health and live state, the store's load report, the drift
-//! log, the process check, actors, the gateway, wakes, hosts). The checks
+//! log, the process check, actors, the gateway, wakes). The checks
 //! run side by side, each given 8 seconds. A run happens a minute after the
 //! service starts, then every half hour, and when asked; new problems and
 //! each result go out as the doctor's events. The demo checks only itself,
@@ -34,18 +34,8 @@ const EVERY_MS: u64 = 30 * 60 * 1000;
 const FIRST_AFTER_MS: u64 = 60 * 1000;
 
 /// The checks the demo runs: itself, never your machine.
-pub const DEMO_ONLY: [&str; 10] = [
-    "xenonet.server",
-    "xenonet.sources",
-    "xenonet.blocks",
-    "contracts.drift",
-    "claude.transcripts",
-    "codex.sessions",
-    "grok.sessions",
-    "system.projects",
-    "system.runtime",
-    "hosts",
-];
+pub const DEMO_ONLY: [&str; 9] =
+    ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "grok.sessions", "system.projects", "system.runtime"];
 
 const STATE_VERSION: f64 = 2.0;
 
@@ -352,10 +342,6 @@ struct Machine {
     paths: Value,
 }
 
-fn text(v: Option<&Value>) -> String {
-    v.map(xenonet_text::text::display).unwrap_or_default()
-}
-
 fn failure(e: CoreError) -> Failure {
     Failure::msg(e.message)
 }
@@ -589,27 +575,14 @@ async fn one(id: String, facts: Value, m: Arc<Machine>) -> Value {
     }
 }
 
-/// runDoctor(ctx, { only }): every check (or those `only` keeps), the
-/// hosts' with the hub on, each in 8 seconds at most, and their summary.
+/// runDoctor(ctx, { only }): every check (or those `only` keeps), each in
+/// 8 seconds at most, and their summary.
 pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: bool) -> Value {
     let started = now_ms();
-    let hosts: Option<Vec<Value>> = parts.cores.hub.as_ref().and_then(|h| h.list().ok()).map(|l| l.as_array().cloned().unwrap_or_default());
-    // Each check: its id, group, title, and the host's view for a host's.
+    // Each check: its id, group, title, and its verdict when it's ready.
     let mut all: Vec<(String, String, String, Option<Value>)> = checks::all().into_iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
-    if let Some(hs) = &hosts {
-        for h in hs {
-            let id = text(h.get("id"));
-            all.push((format!("hosts.{id}"), "Hosts".into(), format!("{id} is connected"), Some(h.clone())));
-        }
-        let plain: Vec<Value> =
-            hs.iter().map(|h| if h.is_object() { json!({ "id": h.get("id"), "key": h.get("key"), "simulated": h.get("simulated") }) } else { h.clone() }).collect();
-        let keyed = xenonet_hosts::doctor::keyed(&plain);
-        if keyed.len() >= 2 {
-            all.push(("hosts.keys.own".into(), "Hosts".into(), "Each host has a key of its own".into(), Some(json!({ "keyed": keyed }))));
-        }
-    }
     // The network across machines, from its files, when this machine is in
-    // one: each verdict is ready, as a host's view is.
+    // one: each verdict is ready.
     let network = std::path::Path::new(&parts.config.state_dir).join("network");
     // How this machine asks the person and keeps their root key, once an
     // identity was set up here.
@@ -620,16 +593,14 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
     let picked: Vec<_> = all.into_iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
     let facts = facts(&parts, by_hand).await;
     let m = Arc::new(Machine { paths: parts.paths.clone(), parts: parts.clone() });
-    let runs = picked.into_iter().map(|(id, group, title, host)| {
+    let runs = picked.into_iter().map(|(id, group, title, ready)| {
         let (facts, m) = (facts.clone(), m.clone());
         async move {
             let t0 = now_ms();
             let check = async {
-                match (&host, id.as_str()) {
-                    (Some(k), "hosts.keys.own") => xenonet_hosts::doctor::key_check(k["keyed"].as_array().map_or(&[][..], Vec::as_slice)),
-                    (Some(k), id) if id.starts_with("network.") => k["network"].clone(),
-                    (Some(h), _) => run::host_check(h, now_ms()),
-                    (None, _) => one(id.clone(), facts, m).await,
+                match &ready {
+                    Some(k) => k["network"].clone(),
+                    None => one(id.clone(), facts, m).await,
                 }
             };
             let r = tokio::time::timeout(Duration::from_millis(CHECK_MS), check)
@@ -920,7 +891,7 @@ mod tests {
         };
         let paths = json!({ "stateDir": state, "cacheDir": format!("{state}/cache"), "projectsDir": state, "claudeProjectsDir": "/nowhere/claude", "codexHome": "/nowhere/codex", "homeDir": "/home/nova" });
         Arc::new(Parts {
-            cores: Cores::pending(false, false, false),
+            cores: Cores::pending(false, false),
             config,
             paths,
             version: "0.0.0".into(),
@@ -943,7 +914,7 @@ mod tests {
     async fn the_demo_checks_only_itself() {
         let d = DoctorService::new(parts(true, &tmp("demo")));
         let r = d.run(false, false).await;
-        let ids: Vec<String> = r["results"].as_array().unwrap().iter().map(|x| text(x.get("id"))).collect();
+        let ids: Vec<String> = r["results"].as_array().unwrap().iter().map(|x| x.get("id").map(xenonet_text::text::display).unwrap_or_default()).collect();
         assert!(ids.iter().all(|id| DEMO_ONLY.iter().any(|o| run::kept(id, &[o.to_string()]))), "{ids:?}");
         let server = r["results"].as_array().unwrap().iter().find(|x| x["id"] == "xenonet.server").unwrap();
         assert_eq!(server["status"], "ok");

@@ -149,7 +149,7 @@ impl Host {
             _ => None,
         };
         let config = Config::from(&[], &env);
-        let mut cores = Cores::pending(false, false, false);
+        let mut cores = Cores::pending(false, false);
         xenonet_service::serve::wire_root(&mut cores);
         cores.verify = Arc::new(You { person: json!({ "ok": true }) });
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -756,7 +756,7 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
         xenonet_net::doctor::checks(&a.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
     assert_eq!(doctor["network.join"]["status"], "warn", "{:?}", doctor["network.join"]);
     // The routes are the owner's: an agent's process is refused.
-    let mut cores = Cores::pending(false, false, false);
+    let mut cores = Cores::pending(false, false);
     xenonet_service::serve::wire_root(&mut cores);
     cores.verify = Arc::new(You { person: json!({ "ok": false, "reason": "it came from under a Claude Code process" }) });
     let ctx = Arc::new(Ctx::new(Config::from(&[], &|_| None), "0".into(), cores, Log::new(None, "service", None, None, "/", 1 << 20)));

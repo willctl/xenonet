@@ -24,14 +24,13 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use xenonet_api::cores::{self, Cores, HubNet, SelfApi, State, R};
 use xenonet_api::wire::Emitter;
-use xenonet_hosts::runtime::config::HostsStore;
-use xenonet_hosts::runtime::hub::{HostHub, HubCore, HubParts};
-use xenonet_hosts::runtime::relay::Timing as RelayTiming;
-use xenonet_hosts::runtime::schemas::HostSchemas;
 use xenonet_model::ops::Sink as _;
 use xenonet_net::gwstore::Caps;
 use xenonet_net::node::{now_ms, Options, Timing};
 use xenonet_os::log::Log;
+use xenonet_runtime::remote::runtime::hub::{HostHub, HubCore, HubParts};
+use xenonet_runtime::remote::runtime::relay::Timing as RelayTiming;
+use xenonet_runtime::remote::runtime::schemas::HostSchemas;
 use xenonet_service::config::Config;
 use xenonet_service::ctx::Ctx;
 use xenonet_service::gateway::network::NetService;
@@ -220,7 +219,7 @@ impl Host {
         let vars = [("HOME", home.as_str()), ("XENONET_STATE_DIR", state.as_str()), ("XENONET_CACHE_DIR", state.as_str()), ("XENONET_PORT", "47995")];
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let config = Config::from(&[], &get);
-        let mut cores = Cores::pending(false, false, false);
+        let mut cores = Cores::pending(false, false);
         xenonet_service::serve::wire_root(&mut cores);
         let map = Arc::new(Map { home: home.clone(), sessions });
         cores.state = map.clone();
@@ -233,11 +232,9 @@ impl Host {
                 _ => 32,
             },
         });
-        let schemas = Arc::new(HostSchemas::new());
-        let hosts = Arc::new(HostsStore::new(&state, schemas.clone()));
+        let schemas = Arc::new(HostSchemas::new(xenonet_state::graph::activity_of));
         let emitter = Emitter::new();
         let hub = HostHub::new(HubParts {
-            hosts,
             schemas,
             state: map,
             store: Arc::new(cores::Pending),
@@ -247,9 +244,7 @@ impl Host {
             demo: false,
             windows: json!({ "activeWindowMs": 600000, "recentWindowMs": 86400000, "projectActiveMs": 3600000 }),
             emitter: emitter.clone(),
-            bin: "/no/such/xenonet".into(),
-            ssh_bin: vec!["ssh".into()],
-            ssh: false,
+            aliases: xenonet_state::identities::parse_ssh_aliases,
             relay: relay_timing(),
         });
         cores.hub = Some(Arc::new(HubCore(hub.clone())));

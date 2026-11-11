@@ -106,7 +106,7 @@ pub fn run(_args: &[String], flags: &Flags) -> Done {
             PRESENCES.iter().map(|p| (p, actors.iter().filter(|a| str(a, "presence") == Some(p)).count())).filter(|(_, n)| *n > 0).map(|(p, n)| format!("{n} {p}")).collect();
         rows.push(vec![c::dim("Actors"), by.join(", ")]);
     }
-    // A session on another machine (XENONET_HOSTS=1) says which.
+    // A session on another machine of the network says which.
     let named = |n: &Value| format!("{}{}", if on(n, "host") { format!("{} · ", t(n, "host")) } else { String::new() }, t(n, "title"));
     // A program asking to be an actor is answered only in XenoNet's window.
     let waits = |it: &Value| match str(it, "kind") {

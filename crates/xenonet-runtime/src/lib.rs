@@ -25,6 +25,7 @@ pub mod network;
 pub mod observers;
 pub mod procs;
 pub mod registration;
+pub mod remote;
 pub mod reports;
 pub mod runs;
 pub mod runtime;

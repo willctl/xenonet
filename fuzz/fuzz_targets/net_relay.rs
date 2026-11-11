@@ -25,12 +25,11 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use xenonet_fuzz::net::{overlay, Choices};
-use xenonet_hosts::network::{self as wire, Op};
-use xenonet_hosts::runtime::config::HostsStore;
-use xenonet_hosts::runtime::hub::{HostHub, HubCore, HubParts};
-use xenonet_hosts::runtime::relay::{net_allowed, net_key, Parts, RelayServer, Timing};
-use xenonet_hosts::runtime::schemas::HostSchemas;
-use xenonet_hosts::runtime::transport::{new_sub, Transport};
+use xenonet_runtime::remote::network::{self as wire, Op};
+use xenonet_runtime::remote::runtime::hub::{HostHub, HubCore, HubParts};
+use xenonet_runtime::remote::runtime::relay::{net_allowed, net_key, Parts, RelayServer, Timing};
+use xenonet_runtime::remote::runtime::schemas::HostSchemas;
+use xenonet_runtime::remote::runtime::transport::{new_sub, Transport};
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink};
 use xenonet_service::cores::{Hub, Pending, SelfApi};
 use xenonet_service::events::Events;
@@ -130,9 +129,8 @@ fn world() -> &'static World {
             timing: Timing::default(),
         });
         let dir = std::env::temp_dir().join(format!("xenonet-fuzz-relay-{}", std::process::id()));
-        let schemas = Arc::new(HostSchemas::new());
+        let schemas = Arc::new(HostSchemas::new(xenonet_state::graph::activity_of));
         let hub = HostHub::new(HubParts {
-            hosts: Arc::new(HostsStore::new(&dir.join("state").to_string_lossy(), schemas.clone())),
             schemas,
             state: Arc::new(Pending),
             store: Arc::new(Pending),
@@ -142,9 +140,7 @@ fn world() -> &'static World {
             demo: false,
             windows: json!({ "activeWindowMs": 600000, "recentWindowMs": 86400000, "projectActiveMs": 3600000 }),
             emitter: Emitter::new(),
-            bin: "/no/such/xenonet".into(),
-            ssh_bin: vec!["ssh".into()],
-            ssh: false,
+            aliases: |_| Vec::new(),
             relay: Timing::default(),
         });
         let link = Arc::new(Fake { sub: Mutex::new(String::new()) });

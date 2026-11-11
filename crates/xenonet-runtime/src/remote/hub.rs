@@ -1,12 +1,12 @@
-//! core/hosts/hub.js: the console's side of hosts. A link to each host in
-//! hosts.json, each host's last snapshot kept in the cache folder, and the
-//! merged view the server sends in place of this machine's own: the map at
-//! most once a second, the live state at most every half second, and the
-//! hosts' events with their ids qualified. Nothing a host sends changes
-//! anything here; hosts stay read-only.
+//! The console's side of the network's maps: a link to each window host
+//! it shows, each host's last snapshot kept in the cache folder, and the
+//! merged view the service sends in place of this machine's own: the map
+//! at most once a second, the live state at most every half second, and
+//! the hosts' events with their ids qualified. Nothing a host sends
+//! changes anything here; hosts stay read-only.
 //!
-//! This has the hub's decisions; its emitter, timers and links are the
-//! twin's.
+//! This has the hub's decisions; its emitter, timers and links are
+//! runtime/hub.rs's.
 
 use serde_json::{json, Map, Value};
 use xenonet_text::text::display;
@@ -15,7 +15,6 @@ use xenonet_text::text::truthy;
 pub const GRAPH_EVERY_MS: f64 = 1000.0;
 pub const LIVE_EVERY_MS: f64 = 500.0;
 pub const CACHE_EVERY_MS: f64 = 30e3;
-pub const TEST_MS: f64 = 30e3;
 
 /// How long to wait before the next of a kind goes out: at most once per
 /// `every`, the last change always going.
@@ -44,7 +43,7 @@ pub fn info_of(link_info: &Value, cached: bool, cached_hello: &Value, skew_ms: f
     Value::Object(info)
 }
 
-/// How a host stands, for GET /api/hosts and the doctor.
+/// How a host stands.
 pub fn view(info: &Value, entry: &Value, snapshot: &Value, cached: bool, simulated: bool, doctor: &Value) -> Value {
     let hello = info.get("hello");
     let field = |v: Option<&Value>| v.filter(|x| !x.is_null()).cloned().unwrap_or(Value::Null);
@@ -76,24 +75,18 @@ pub fn view(info: &Value, entry: &Value, snapshot: &Value, cached: bool, simulat
     m.insert("nodes".into(), json!(nodes.iter().filter(|x| x.get("id") != Some(&json!("core"))).count()));
     m.insert("sessions".into(), json!(nodes.iter().filter(|x| x.get("kind") == Some(&json!("session"))).count()));
     put(&mut m, "transport", entry.get("transport"));
-    put(&mut m, "target", info.get("target"));
-    put(&mut m, "port", entry.get("port"));
-    put(&mut m, "command", entry.get("command"));
-    put(&mut m, "sessionsSince", entry.get("since"));
-    put(&mut m, "detail", entry.get("detail"));
     put(&mut m, "key", entry.get("key"));
-    put(&mut m, "addedAt", entry.get("addedAt"));
     put(&mut m, "counts", info.get("counts"));
     put(&mut m, "lastDrop", info.get("lastDrop"));
     m.insert("doctor".into(), doctor.clone());
     Value::Object(m)
 }
 
-/// The page hears how each host stands, without how it's reached: the ssh
-/// target's user and machine names can hold a person's name.
+/// The page hears how each host stands, without its key, its counts or
+/// its last dropped frame.
 pub fn for_page(view: &Value) -> Value {
     let mut m = view.as_object().cloned().unwrap_or_default();
-    for k in ["target", "key", "command", "counts", "lastDrop"] {
+    for k in ["key", "counts", "lastDrop"] {
         m.shift_remove(k);
     }
     Value::Object(m)
@@ -141,15 +134,4 @@ pub fn skew_of(ms: &Value, b: &Value) -> f64 {
     } else {
         180e3
     }
-}
-
-/// What a probe (xenonet hosts test) found of the snapshot: its nodes, its
-/// sessions and its live sessions.
-pub fn probe_snapshot(graph: &Value, live: &Value) -> Value {
-    let nodes: Vec<Value> = graph.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-    json!({
-        "nodes": nodes.iter().filter(|x| x.get("id") != Some(&json!("core"))).count(),
-        "sessions": nodes.iter().filter(|x| x.get("kind") == Some(&json!("session"))).count(),
-        "live": live.get("sessions").and_then(Value::as_array).map_or(0, Vec::len),
-    })
 }

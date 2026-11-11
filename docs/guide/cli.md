@@ -49,7 +49,6 @@ $ xenonet
 | `xenonet start "<prompt>"` | Starts a Claude Code, Codex or Grok Build session with a first prompt: `--on <machine>` another machine of your network, `--in <folder>` a project or folder there (or `~`), `--app claude\|codex\|grok`, `--mode` a permission mode. A start as you is signed by your key, which asks you, so it's made in XenoNet's window and this command refuses in a terminal; a session asks with the `start_session` tool. See [Starting sessions](network.md#starting-sessions). |
 | `xenonet runs [sign-in\|forget]` | The Claude Code sign-in for the sessions XenoNet runs itself: `sign-in` takes the token `claude setup-token` prints, unechoed, into your credential store; `forget` takes it away. See [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs). |
 | `xenonet svc` | Publishes a local HTTP service to the network's other machines, which reach it through their own XenoNet. `publish <name> http://127.0.0.1:<port> --paths <prefix>` publishes one, `unpublish <name>` takes it off, and `list` shows what this machine publishes. See [Services through the network](network.md#services-through-the-network). |
-| `xenonet hosts` | Shows [other machines' XenoNets](other-machines.md) beside this one, a prototype. `self` names this XenoNet as a host. `add`, `remove`, `test` and `reconnect` manage the hosts it shows. |
 | `xenonet console <steps>` | Drives XenoNet Dev, to check a change to XenoNet. See [Driving XenoNet](development.md#driving-xenonet-from-agents-scripts-and-tests). |
 | `xenonet service` | The background service. `start`, `status` and `stop` start it, say how it is and stop it; `stop` refuses while terminals run, unless `--force`, and holds until `start` or your next login, even when the copy that starts at login was waiting to take over. `install` starts it at login, and again if it stops unexpectedly, under launchd on macOS, systemd on Linux or Task Scheduler on Windows; `uninstall` turns that off. `run` is what they run. See [Keeping the service running](always-on.md). |
 | `xenonet setup` | Installs a downloaded Service or Tools package for your account. Run it from the package's extracted folder, as `bin/xenonet setup`. See [Install without Desktop](components.md#install-without-desktop). |
@@ -74,7 +73,7 @@ A command exits 0 when it did what you asked, 1 when it failed or found a proble
 - for actors, tokens left in repos or expired, what the observers read, and that tokens are held to their processes
 - when the service starts at login, its registration with launchd, systemd or Task Scheduler
 
-Each problem comes with a fix, and a failed check exits 1. With no XenoNet running, `xenonet doctor` runs the checks itself, and skips the ones that need XenoNet. With [other machines](other-machines.md#checking-on-hosts) turned on, it checks each host too.
+Each problem comes with a fix, and a failed check exits 1. With no XenoNet running, `xenonet doctor` runs the checks itself, and skips the ones that need XenoNet.
 
 XenoNet runs the same checks a minute after it starts, and every half hour. When they find a new problem, a chip appears in the alert strip. Unless XenoNet's window is in front, a notification appears too. Either one opens the results, and so does `Check XenoNet's setup` in the palette.
 

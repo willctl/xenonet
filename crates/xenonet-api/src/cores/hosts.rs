@@ -1,7 +1,6 @@
-//! Hosts (core/hosts/): this XenoNet as a host (config.js), and the hub
-//! that shows other machines' XenoNets: the hosts in hosts.json over SSH
-//! with XENONET_HOSTS=1 (hub.js), and the hosts of this machine's network
-//! through its gateway (docs/design/network.md, section 7).
+//! The hub that shows the other machines of this one's network on its
+//! map, through the network's gateway (docs/design/network.md, section 7),
+//! and this machine's own API as the relay that serves its map reads it.
 
 use super::{pending, Pending, R};
 use crate::events::EventStream;
@@ -12,21 +11,7 @@ use std::time::Duration;
 use xenonet_model::ops::Net;
 use xenonet_net::sink::SinkSlot;
 
-const CONFIG: &str = "core/hosts/config.js";
-const HUB: &str = "core/hosts/hub.js";
-
-pub trait HostsConfig: Send + Sync {
-    /// `hosts.self()`: its name, its key, the folder ~ stands for.
-    fn self_info(&self) -> R<Value> {
-        pending(CONFIG)
-    }
-    fn set_self(&self, _id: &Value) -> R<Value> {
-        pending(CONFIG)
-    }
-    fn ssh_config(&self) -> R<Value> {
-        pending(CONFIG)
-    }
-}
+const HUB: &str = "the hub";
 
 /// A host's answer through its relay: `{ status, body }`.
 pub struct HubAnswer {
@@ -44,7 +29,7 @@ pub trait SelfApi: Send + Sync {
     async fn get(&self, path: &str) -> Result<(u16, Value), (String, u16)>;
 }
 
-/// The API over HTTP on 127.0.0.1, as `xenonet relay` reads it. It sends
+/// The API over HTTP on 127.0.0.1, as the relay reads it. It sends
 /// no window key and no token. It carries the API's credential, as any
 /// program here does, and with `own`, the service's own key: the hub reads
 /// for another machine of the network only what the network decided that
@@ -115,24 +100,6 @@ pub trait Hub: Send + Sync {
     async fn get(&self, _host: &str, _path: &str) -> R<HubAnswer> {
         pending(HUB)
     }
-    fn list(&self) -> R<Value> {
-        pending(HUB)
-    }
-    fn add(&self, _body: &Value, _replace: bool) -> R<Value> {
-        pending(HUB)
-    }
-    fn detail(&self, _id: &str) -> R<Value> {
-        pending(HUB)
-    }
-    fn remove(&self, _id: &str, _forget: bool) -> R<Value> {
-        pending(HUB)
-    }
-    fn reconnect(&self, _id: &str) -> R<Value> {
-        pending(HUB)
-    }
-    async fn test(&self, _id: &str) -> R<Value> {
-        pending(HUB)
-    }
     /// This machine's map with other hosts' in it.
     fn graph(&self, g: Value) -> Value {
         g
@@ -153,11 +120,6 @@ pub trait Hub: Send + Sync {
     fn simulate(&self, _kind: &str, _args: &Value) -> R<Option<Value>> {
         pending(HUB)
     }
-    /// Whether hosts over SSH (hosts.json, XENONET_HOSTS=1) are on: their
-    /// routes answer only then.
-    fn ssh(&self) -> bool {
-        true
-    }
     /// The network, once the service has it: the hub's relay sinks go in,
     /// and its network hosts come from the roster.
     fn plug_net(&self, _net: HubNet) {}
@@ -165,11 +127,9 @@ pub trait Hub: Send + Sync {
     /// closed, as it last said), and how many pages read the event stream.
     /// The hub subscribes to network hosts' maps only while one is.
     fn console(&self, _window: Option<&str>, _pages: usize) {}
-    fn start(&self) {}
     fn stop(&self) {}
 }
 
-impl HostsConfig for Pending {}
 impl Hub for Pending {}
 
 #[cfg(test)]

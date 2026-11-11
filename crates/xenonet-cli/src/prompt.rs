@@ -1,5 +1,5 @@
-//! Asking a yes or no in the terminal, as cli/commands/connect.js's and
-//! hosts.js's confirm do: --yes says yes, and only a terminal is asked.
+//! Asking a yes or no in the terminal, as cli/commands/connect.js's
+//! confirm does: --yes says yes, and only a terminal is asked.
 
 use crate::args::Flags;
 use crate::out::{c, write, Fail};
@@ -24,12 +24,4 @@ pub fn confirm(question: &str, flags: &Flags) -> Result<bool, Fail> {
         return Err(Fail::new(format!("{question} Run it again with --yes to go ahead."), 1));
     }
     Ok(asked(question))
-}
-
-/// hosts.js's confirm: with no terminal to ask, it's a no.
-pub fn ask(question: &str, flags: &Flags) -> bool {
-    if flags.on("yes") {
-        return true;
-    }
-    std::io::stdin().is_terminal() && asked(question)
 }

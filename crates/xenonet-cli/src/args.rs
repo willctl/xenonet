@@ -33,13 +33,6 @@ const TAKES_VALUE: &[&str] = &[
     "provider",
     // xenonet live
     "hours",
-    // xenonet hosts
-    "sshPort",
-    "xenonetPort",
-    "identity",
-    "knownHosts",
-    "hostKeyAlias",
-    "command",
     // xenonet actor
     "name",
     "slug",
@@ -84,7 +77,7 @@ const TAKES_VALUE: &[&str] = &[
 ];
 // Flags that take a value in one command only, because another command
 // reads the same name as a switch: xenonet net set --start network, but
-// xenonet hosts add … --start and xenonet relay --start.
+// a switch anywhere else.
 const TAKES_VALUE_IN: &[(&str, &[&str])] = &[("net", &["start"])];
 const REPEATS: &[&str] = &["add", "remove", "paths", "hosts"];
 
@@ -296,9 +289,7 @@ mod tests {
         assert_eq!(parse(&args(&["refusals", "--provider", "claude"])).flags, flags(json!({ "provider": "claude" })));
         assert_eq!(parse(&args(&["live", "pause", "--hours", "2"])).flags, flags(json!({ "hours": "2" })));
         // --start is a switch everywhere but net.
-        assert_eq!(parse(&args(&["relay", "--start", "--demo"])).flags, flags(json!({ "start": true, "demo": true })));
-        let hosts = parse(&args(&["hosts", "add", "box", "--start", "user@box"]));
-        assert_eq!((hosts.rest, hosts.flags), (args(&["hosts", "add", "box", "user@box"]), flags(json!({ "start": true }))));
+        assert_eq!(parse(&args(&["status", "--start", "--demo"])).flags, flags(json!({ "start": true, "demo": true })));
     }
 
     // The --flags a command's help file shows with a value after them

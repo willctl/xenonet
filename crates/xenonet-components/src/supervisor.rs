@@ -250,7 +250,6 @@ pub const KEPT: &[&str] = &[
     "XENONET_GATEWAY_PORT",
     "XENONET_ACTORS",
     "XENONET_ASSISTANT",
-    "XENONET_HOSTS",
     "XDG_CONFIG_HOME",
     "XDG_STATE_HOME",
     "XDG_CACHE_HOME",
@@ -1463,7 +1462,7 @@ mod tests {
         }
         assert_eq!(settings_of(Kind::Launchd, &plist(&Job { env: vec![], ..job() })), vec![]);
         // Only XenoNet's own settings.
-        assert_eq!(settings_of(Kind::Systemd, "Environment=\"PATH=/bin\"\nEnvironment=\"XENONET_HOSTS=1\"\n"), vec![("XENONET_HOSTS".to_string(), "1".to_string())]);
+        assert_eq!(settings_of(Kind::Systemd, "Environment=\"PATH=/bin\"\nEnvironment=\"XENONET_ACTORS=1\"\n"), vec![("XENONET_ACTORS".to_string(), "1".to_string())]);
     }
 
     #[test]
@@ -1492,13 +1491,13 @@ mod tests {
         let launcher = native("/home/will/.local/state/xenonet/runtime/launcher/xenonet");
         let runtime = native("/home/will/.local/state/xenonet/runtime");
         let j =
-            super::job(&env_of(&[("XENONET_PORT", "47840"), ("XENONET_RUNTIME_DIR", &runtime), ("XENONET_HOSTS", "1"), ("PATH", "/bin")]), &m, "/own/xenonet", |p| p == launcher);
+            super::job(&env_of(&[("XENONET_PORT", "47840"), ("XENONET_RUNTIME_DIR", &runtime), ("XENONET_ACTORS", "1"), ("PATH", "/bin")]), &m, "/own/xenonet", |p| p == launcher);
         assert_eq!(
             j,
             Job {
                 program: launcher,
                 args: vec!["service".into(), "run".into()],
-                env: vec![("XENONET_HOSTS".into(), "1".into())],
+                env: vec![("XENONET_ACTORS".into(), "1".into())],
                 dir: "/home/will".into(),
                 log: native("/home/will/.local/state/xenonet/runtime/service-47840.log")
             }

@@ -21,7 +21,7 @@ It sees only the projects you pick. A connection starts with none. Projects you 
 
 Without labels, it gets ids, statuses, times and counts. With labels turned on, it also gets project names, session titles and actor names, cleaned of anything that looks like a key, an email or a folder named for a person. Titles are text that sessions and people wrote, so they can say anything. Turning labels on sends that text.
 
-It never gets transcripts, prompts, messages, a question's text, tool names, arguments or output, file paths, branches, git remotes, accounts, credentials, error messages, or anything from [other machines](other-machines.md). It can't run commands, open terminals, read files, take screenshots, use the console or message sessions.
+It never gets transcripts, prompts, messages, a question's text, tool names, arguments or output, file paths, branches, git remotes, accounts, credentials, error messages, or anything from [other machines](network.md). It can't run commands, open terminals, read files, take screenshots, use the console or message sessions.
 
 ## Pairing one
 

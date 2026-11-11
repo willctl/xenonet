@@ -14,7 +14,7 @@
 //!   subscription. `seq` counts 1, 2, 3… within it, so a hole says frames
 //!   were lost, and the console asks for a fresh snapshot.
 
-use crate::frames::{shallow, FROM_RELAY, MAX_DEPTH};
+use crate::remote::frames::{shallow, FROM_RELAY, MAX_DEPTH};
 use serde_json::{json, Value};
 
 pub const SCHEMA: &str = "network/relay/v1";
@@ -131,7 +131,7 @@ pub fn batch(sub: &str, seq: u64, frames: &[Value]) -> Value {
 /// An answer, checked: the schema, a subscription id, a seq from 1, and
 /// at most MAX_FRAMES frames, each an object of a kind a relay sends,
 /// nested no deeper than a relay's frame may be. The link checks each
-/// frame again, as it checks a line from ssh.
+/// frame again, as a line.
 pub fn parse_batch(v: &Value) -> Result<Batch, String> {
     if !v.is_object() || v.get("schema").and_then(Value::as_str) != Some(SCHEMA) {
         return Err("not a relay body".into());

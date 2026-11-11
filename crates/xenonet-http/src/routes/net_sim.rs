@@ -1351,7 +1351,7 @@ mod tests {
     }
 
     fn dev_ctx() -> Arc<Ctx> {
-        let mut cores = Cores::pending(false, false, false);
+        let mut cores = Cores::pending(false, false);
         cores.verify = Arc::new(Window);
         // The local door and the registry as the composition root wires them.
         cores.door = xenonet_runtime::door::local();

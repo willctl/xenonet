@@ -1,8 +1,8 @@
 //! What the service runs as, from its arguments and environment: the part of
 //! core/config.js the service itself reads (its port, its folders, demo
 //! and dev), and server/index.js's own switches (its name, which instance
-//! it is, the layers XENONET_ACTORS, XENONET_ASSISTANT and XENONET_HOSTS
-//! turn on and off). The readers' own settings (the projects scan's
+//! it is, the layers XENONET_ACTORS and XENONET_ASSISTANT turn on and
+//! off). The readers' own settings (the projects scan's
 //! limits, the poll, the identities…) are theirs to read.
 
 use std::path::{Path, PathBuf};
@@ -27,7 +27,6 @@ pub struct Config {
     pub instance: Option<String>,
     pub actors: bool,
     pub assistant: bool,
-    pub hosts: bool,
     /// No app started it (always-on): the component service listens.
     pub standalone: bool,
     /// XenoNet Dev's control channel goes through it.
@@ -165,7 +164,6 @@ impl Config {
             instance,
             actors: env("XENONET_ACTORS").as_deref() != Some("off"),
             assistant: env("XENONET_ASSISTANT").as_deref() != Some("off"),
-            hosts: env("XENONET_HOSTS").as_deref() == Some("1"),
             standalone,
             control: env("XENONET_CONTROL").as_deref() == Some("1"),
             upstream: if dev { set("XENONET_UPSTREAM") } else { None },

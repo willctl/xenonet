@@ -29,9 +29,8 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
                                   made-up connection through a tunnel, with an adapter
                                   connected or not, and actor-read[,actor[,node]]: a read
                                   through it (all demo and test instances only);
-                                  with XENONET_HOSTS=1 also host-add,<id>,<port> (another XenoNet
-                                  here, shown as a host), host-offline and host-online (a: the
-                                  host, the first if left out) and host-skew[,host[,ms]];
+                                  host-offline and host-online (a: another machine on the map,
+                                  the first if left out) and host-skew[,host[,ms]];
                                   and a made-up network across machines: net-none,
                                   net-founder, net-member, net-gateway-down, net-ticket,
                                   net-mismatch, net-remote-waiting (a: the machine you're at)
@@ -41,7 +40,7 @@ export const STEPS = `  launch[:inactive|front|hidden]  start it unless it's run
   feed[:<n>]                      the activity feed's last lines, sessions' and actors'
   identities[:<keys>|all]         the identity chips; with chip keys (comma-separated), only their work
   mask:on|off                     hide identities (GitHub A, Claude B…) or show them
-  hosts[:<ids>|all]               other machines on the map (XENONET_HOSTS=1) and how each
+  hosts[:<ids>|all]               the network's other machines on the map and how each
                                   stands; with host ids (comma-separated, @here for this
                                   machine), only their work
   network[:open|start|join|add]   the network across machines (Network settings): this

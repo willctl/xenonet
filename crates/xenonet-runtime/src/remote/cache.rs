@@ -1,4 +1,4 @@
-//! core/hosts/cache.js: each host's last snapshot, in the cache folder, so
+//! Each host's last snapshot, in the cache folder, so
 //! an offline host is still on the map after a restart. Kept by the host's
 //! key; only what came with the snapshot and the events after it, never a
 //! transcript or stats.

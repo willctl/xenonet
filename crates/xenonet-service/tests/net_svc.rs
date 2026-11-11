@@ -130,7 +130,7 @@ impl Host {
         let vars = [("HOME", home.as_str()), ("XENONET_STATE_DIR", state.as_str()), ("XENONET_CACHE_DIR", state.as_str()), ("XENONET_PORT", port.as_str())];
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let config = Config::from(&[], &get);
-        let mut cores = Cores::pending(false, false, false);
+        let mut cores = Cores::pending(false, false);
         xenonet_service::serve::wire_root(&mut cores);
         let peers = Arc::new(Peers::default());
         cores.verify = peers.clone();

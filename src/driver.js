@@ -250,8 +250,8 @@ export function createDriver(app) {
     // ones first, then the most recent. `kind` narrows it: session, project,
     // native (a Codex project), zone (a folder outside the projects folder),
     // resource (a shared system), wiki (the shared context), page (a context
-    // page), core, host (another machine's XenoNet: over SSH
-    // with XENONET_HOSTS=1, or in your network) or actor (actors beside the map, by id, name and
+    // page), core, host (another machine's XenoNet, in your network) or
+    // actor (actors beside the map, by id, name and
     // product, after the nodes when not narrowed, so words that found a node
     // still find it first). A node from another machine has an id that
     // starts with @<host>: and says which host it's on.
@@ -793,8 +793,8 @@ export function createDriver(app) {
       return { ...st, made };
     },
 
-    // Other machines on the map (hosts.js: over SSH with XENONET_HOSTS=1,
-    // and your network's, from their presence): each host with how it stands, its node and where that is on screen, its
+    // Other machines on the map (hosts.js: your network's, from their
+    // presence or their relays): each host with how it stands, its node and where that is on screen, its
     // constellation, and the machines' chips under Filters with the ones
     // picked; the bridges between checkouts of one repo, drawn or not.
     hosts() {

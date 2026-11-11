@@ -20,7 +20,6 @@
 //! signal
 //! is_disabled…delete_      core/assistant/credentials.js              assistant
 //! credential
-//! run_relay                core/hosts/relay.js runRelay               relay
 //! runtime_dir…update_      core/components/                           setup, service, update
 //! component
 //! supervisor::*            docs/design/always-on.md                   service install, uninstall,
@@ -41,7 +40,6 @@ mod control;
 mod demo;
 mod native;
 mod net;
-mod relay;
 mod secrets;
 mod setup;
 pub mod supervisor;
@@ -52,7 +50,6 @@ pub use components::{
     stop_file, update_component,
 };
 pub use control::{control_driver, control_launch, control_quit, control_record, run_module, run_script, ConsoleControl};
-pub use relay::run_relay;
 
 use crate::out::Fail;
 use crate::sys;

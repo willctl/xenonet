@@ -1,12 +1,10 @@
-//! core/hosts/relay.js: xenonet relay, this XenoNet's map for a console on
-//! another machine, over the ssh connection the console opened. It reads
-//! the map, the live state and the engine's from 127.0.0.1, follows the
-//! event stream, and writes it all as frames on its standard output; on
-//! its standard input it reads only the console's requests, and answers
-//! them from an allowlist of GET routes. It never opens a port, never
-//! writes to XenoNet, and never sends the home folder: every path under it
-//! goes as ~, and so does the name of any other folder named for a person
-//! that the map's places are in.
+//! The relay: this XenoNet's map for a console on another machine of the
+//! network. It reads the map, the live state and the engine's from
+//! 127.0.0.1, follows the event stream, and sends it all as frames; of
+//! the console it reads only requests, and answers them from an allowlist
+//! of GET routes. It never writes to XenoNet, and never sends the home
+//! folder: every path under it goes as ~, and so does the name of any
+//! other folder named for a person that the map's places are in.
 //!
 //! What crosses by default is titles, states and counts: prompts,
 //! messages, a waiting question's text, tool details, subagents' tasks and
@@ -15,11 +13,11 @@
 //! another host is dropped, so data never passes from one machine to the
 //! next.
 //!
-//! This has the shaping, the allowlist and the relay's decisions; the
-//! twin wires the streams, the HTTP calls and the timers.
+//! This has the shaping and the allowlist; runtime/relay.rs wires the
+//! subscriptions, the HTTP calls and the timers.
 
-use crate::aliases::{AliasReader, Look};
-use crate::merge::repo_key;
+use crate::remote::aliases::{AliasReader, Look};
+use crate::remote::merge::repo_key;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use xenonet_os::paths::path_key;
@@ -30,40 +28,6 @@ pub const PING_MS: f64 = 15e3;
 pub const DEFAULT_SINCE_MS: f64 = 7.0 * 86400e3;
 pub const GET_TIMEOUT_MS: f64 = 20e3;
 pub const MAX_GETS: usize = 4;
-/// What waits while the console reads slowly, besides the newest map and
-/// live state: other events up to this many bytes.
-pub const QUEUE_BYTES: usize = 4 << 20;
-pub const EXIT_DONE: i32 = 0;
-pub const EXIT_FAILED: i32 = 1;
-pub const EXIT_NO_XENONET: i32 = 3;
-pub const EXIT_XENONET_GONE: i32 = 4;
-pub const EXIT_OLD_XENONET: i32 = 5;
-
-/// "7d" → 604800000; None for anything else.
-pub fn parse_since(text: &str) -> Option<f64> {
-    // The digits, then the unit: split after the digits, which are ASCII,
-    // so the split never falls inside a character, whatever comes after.
-    let digits = text.bytes().take_while(u8::is_ascii_digit).count();
-    let ms = match &text[digits..] {
-        "m" => 60e3,
-        "h" => 3600e3,
-        "d" => 86400e3,
-        _ => return None,
-    };
-    if !(1..=4).contains(&digits) {
-        return None;
-    }
-    Some(text[..digits].parse::<f64>().ok()? * ms)
-}
-
-/// A key restricted to the relay in authorized_keys runs that command
-/// whatever the console asked for, and ssh puts what it asked for in
-/// SSH_ORIGINAL_COMMAND. Only --since is taken from there.
-pub fn from_original_command(text: &str) -> Option<f64> {
-    let words: Vec<&str> = xenonet_text::text::trim(text).split(|c: char| xenonet_text::text::is_space(c)).filter(|w| !w.is_empty()).collect();
-    let at = words.iter().position(|w| *w == "--since")?;
-    parse_since(words.get(at + 1).copied().unwrap_or("")).filter(|s| *s != 0.0)
-}
 
 // ---------- the home folder as ~ ----------
 
@@ -789,102 +753,18 @@ pub fn route_to_read(shape: Shape, path: &str) -> String {
     }
 }
 
-// ---------- what goes out, and when ----------
-
-/// The relay's way out: frames go as they come while the console keeps
-/// up; while it doesn't, the newest map and live state wait (each replacing
-/// the last), other events up to QUEUE_BYTES, and past that a fresh
-/// snapshot goes once it catches up.
-#[derive(Default)]
-pub struct Outbox {
-    pub busy: bool,
-    queue: Vec<String>,
-    queued: usize,
-    latest: Vec<(String, String)>,
-    gap: bool,
-    pub last_write: f64,
-}
-
-/// What sending does: write these now (each one returns whether the
-/// output took it), or nothing.
-impl Outbox {
-    /// A frame's text to go now, or None while busy (it waits, or is
-    /// dropped and remembered as a gap).
-    pub fn send(&mut self, text: String, coalesce: Option<&str>, now: f64) -> Option<String> {
-        if self.busy {
-            match coalesce {
-                Some(c) => match self.latest.iter_mut().find(|(k, _)| k == c) {
-                    Some(slot) => slot.1 = text,
-                    None => self.latest.push((c.to_string(), text)),
-                },
-                None if self.queued + xenonet_text::utf16::len(&text) <= QUEUE_BYTES => {
-                    self.queued += xenonet_text::utf16::len(&text);
-                    self.queue.push(text);
-                }
-                None => self.gap = true,
-            }
-            return None;
-        }
-        self.last_write = now;
-        Some(text)
-    }
-
-    /// The output said it can take no more for now.
-    pub fn full(&mut self) {
-        self.busy = true;
-    }
-
-    /// A frame went to the output now.
-    pub fn wrote(&mut self, now: f64) {
-        self.last_write = now;
-    }
-
-    /// The output drained: what waited, in order, to write while it takes
-    /// them; the twin calls `wrote` before each, and `left` with the rest
-    /// once the output is full again.
-    pub fn drain(&mut self) -> Vec<String> {
-        self.busy = false;
-        let mut waiting = std::mem::take(&mut self.queue);
-        waiting.extend(std::mem::take(&mut self.latest).into_iter().map(|(_, t)| t));
-        self.queued = 0;
-        waiting
-    }
-
-    /// What a drain couldn't write, back in the queue.
-    pub fn left(&mut self, rest: Vec<String>) {
-        for t in rest {
-            self.queued += xenonet_text::utf16::len(&t);
-            self.queue.push(t);
-        }
-    }
-
-    /// Whether a fresh snapshot is owed, now that the output keeps up.
-    pub fn take_gap(&mut self) -> bool {
-        if !self.busy && self.gap {
-            self.gap = false;
-            return true;
-        }
-        false
-    }
-
-    pub fn ping_due(&self, now: f64) -> bool {
-        now - self.last_write >= PING_MS
-    }
-}
-
 // ---------- the frames ----------
 
-/// How a home folder's SSH aliases are read: alias → host, in order
-/// (identities.js's parseSshAliases).
+/// How a home folder's ~/.ssh/config names git remotes' hosts: alias →
+/// host, in order (xenonet-state's parse_ssh_aliases).
 pub type AliasParse = fn(&str) -> Vec<(String, String)>;
 
 /// The relay's frames from this XenoNet's map, live state, engine state
 /// and events, shaped to leave as the functions above shape them: other
 /// hosts' parts and old sessions left out, the home folder and folders
 /// named for a person as ~, and titles, states and counts only unless
-/// `detail`. `xenonet relay` runs one for its console over ssh, and the
-/// service one for each console that subscribes over the network; the
-/// reads and the event stream are theirs.
+/// `detail`. The service runs one for each console that subscribes over
+/// the network; the reads and the event stream are runtime/relay.rs's.
 pub struct Producer {
     pub since_ms: f64,
     pub detail: bool,
@@ -991,17 +871,6 @@ impl Producer {
     }
 }
 
-/// What the relay says when it stops for want of a XenoNet here, or one
-/// that can't say which host it is.
-pub fn self_bye(status: f64, body: &Value, up_version: Option<&Value>) -> (i32, Value) {
-    if status == 404.0 {
-        let v = up_version.filter(|v| !v.is_null()).map_or_else(|| "an older version".to_string(), display);
-        return (EXIT_OLD_XENONET, json!({ "code": "old-xenonet", "message": format!("the XenoNet here ({v}) can't be a host yet; update it") }));
-    }
-    let why = body.get("error").filter(|e| !e.is_null()).map_or_else(|| xenonet_text::json::number_string(status), display);
-    (EXIT_FAILED, json!({ "code": "no-self", "message": format!("the XenoNet here couldn't say which host it is ({why})") }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1029,12 +898,5 @@ mod tests {
             assert!(allowed(Some(&json!(bad))).is_err(), "{bad}");
         }
         assert_eq!(route_to_read(Shape::Graph, "/api/graph"), "/api/graph?hosts=0");
-        assert_eq!(parse_since("90m"), Some(5_400_000.0));
-        assert_eq!(parse_since("7x"), None);
-        for odd in ["é", "7é", "7dé", "", "d", "12345d"] {
-            assert_eq!(parse_since(odd), None, "{odd}");
-        }
-        assert_eq!(from_original_command("xenonet relay --since 7€"), None);
-        assert_eq!(from_original_command("xenonet relay --since 12h"), Some(43_200_000.0));
     }
 }

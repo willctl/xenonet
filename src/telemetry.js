@@ -288,7 +288,7 @@ export function createTelemetry({ onSelect, onDecisionKey = null }) {
       .join("");
   }
 
-  // An account signed in only on another machine (with XENONET_HOSTS=1): its
+  // An account signed in only on another machine of the network: its
   // plan's bars of their own under the machine it was read on, never named
   // by the account, so hidden identities stay hidden.
   function otherGauges(o) {

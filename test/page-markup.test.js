@@ -1,5 +1,5 @@
 // What the page writes as markup from the map's nodes, live sessions,
-// actors and other machines (docs/design/hosts.md: what hosts send is
+// actors and other machines (docs/design/network.md: what hosts send is
 // untrusted input, and the page escapes it). The page's own renderers run
 // here on a stand-in for the browser that records every piece of markup
 // written, fed made-up data whose fields carry markup of their own. None of

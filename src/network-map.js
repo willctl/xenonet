@@ -15,7 +15,7 @@
 // agents (network-model.js's remoteAgents): nothing another machine sent
 // is put on the map as it came. Its text is shown escaped where the map
 // shows text, and never reaches an agent. A machine that's on the map
-// already, from its snapshot or over SSH (XENONET_HOSTS), keeps that view,
+// already, from its relay's snapshot, keeps that view,
 // which has more in it. No DOM here; main.js merges the part into the map
 // before it's drawn.
 import { HOST_ID } from "./network-model.js";

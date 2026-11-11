@@ -1,14 +1,13 @@
 //! This host's map for a console on another host in the network
-//! (docs/design/network.md, section 7; `network/relay/v1`): the relay
-//! `xenonet relay` runs for a console over ssh, run here in the service for
-//! each window host that subscribes, with its frames sealed between the two
-//! hosts through the gateway.
+//! (docs/design/network.md, section 7; `network/relay/v1`): the relay, run
+//! in the service for each window host that subscribes, with its frames
+//! sealed between the two hosts through the gateway.
 //!
 //! - It serves only a window host in the roster, one subscription for each,
 //!   while it's renewed (every 20 s; it lapses after 60 s without one), and
 //!   ends it when the host goes offline, is removed or stops being a window
 //!   host, or this host's link to the gateway goes down.
-//! - The shaping is the SSH relay's (`crate::relay::Producer`): the
+//! - The shaping is `crate::remote::relay::Producer`'s: the
 //!   home folder as ~, other hosts' parts left out, and detail unless this
 //!   host shares titles only.
 //! - It follows this machine's own view of its events in-process (the
@@ -28,9 +27,9 @@
 //!   GET /api/system goes as a `system` event, inside those bodies, for
 //!   the console's Machines panel: without its history or each core.
 
-use crate::frames::{encode, MAX_DEPTH, PROTOCOL};
-use crate::network::{self as wire, Op};
-use crate::relay::{self as core, Producer, Shape};
+use crate::remote::frames::{encode, MAX_DEPTH, PROTOCOL};
+use crate::remote::network::{self as wire, Op};
+use crate::remote::relay::{self as core, Producer, Shape};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -586,7 +585,7 @@ impl Session {
     /// left out.
     fn fit(&self, f: Value) -> Option<Value> {
         let n = encode(&f).len();
-        if n <= BODY_BYTES && crate::frames::shallow(&f, MAX_DEPTH) {
+        if n <= BODY_BYTES && crate::remote::frames::shallow(&f, MAX_DEPTH) {
             return Some(f);
         }
         if f["t"] == "res" {

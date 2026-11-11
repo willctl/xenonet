@@ -34,9 +34,6 @@ reqwest.workspace = true
 url.workspace = true
 # The token look's names, shown without the token.
 regex.workspace = true
-# The relay's scrubber, for the detail presence carries to other machines:
-# the home folder as ~, as the relay writes it.
-xenonet-hosts.workspace = true
 # Every act from another machine is decided here (xenonet-authz), on this
 # machine's copy of the chains and the person on it (xenonet-net's
 # governance), with the person's device signatures and presence

@@ -1,6 +1,7 @@
-//! core/hosts/aliases.js: a home folder's SSH aliases (Host gh-work with
-//! HostName github.com), read again when ~/.ssh/config changes. Only read,
-//! never written. The reading of the file's words is identities.js's.
+//! A home folder's SSH aliases (Host gh-work with HostName github.com),
+//! read again when ~/.ssh/config changes, so a git remote through an alias
+//! names the same repo as one without. Only read, never written. The
+//! reading of the file's words is xenonet-state's (identities.rs).
 
 use xenonet_os::nodepath::NATIVE;
 

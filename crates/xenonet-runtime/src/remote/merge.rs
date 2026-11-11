@@ -1,4 +1,4 @@
-//! core/hosts/merge.js: other machines in this XenoNet's view, as pure
+//! Other machines in this XenoNet's view, as pure
 //! functions over what hosts sent and what this XenoNet has.
 //!
 //! Every id from a host becomes `@<host>:<its id>`. An id that already

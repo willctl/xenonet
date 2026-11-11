@@ -1,22 +1,19 @@
-//! Hosts over the API (server/routes/hosts.js; docs/design/hosts.md). Being
-//! a host needs no flag (GET and POST /api/hosts/self); hosts over SSH are
-//! behind XENONET_HOSTS=1, without which /api/hosts answers 404. A remote
-//! session's transcript and stats, and a collision on one host, are read
-//! through its relay (over SSH or the network), and only by XenoNet's own
-//! window (rules.rs: those rows are the window's when they name another
-//! machine), so a session here can't read another machine's transcripts. Every other
-//! route that takes an id refuses remote ones, since hosts are read-only.
-//! `route` is None when it isn't one of these.
+//! Reads of another machine of the network through its relay
+//! (docs/design/network.md, section 7): a remote session's transcript and
+//! stats, and a collision on one host, only by XenoNet's own window
+//! (rules.rs: those rows are the window's when they name another
+//! machine), so a session here can't read another machine's transcripts.
+//! Every other route that takes an id refuses remote ones, since other
+//! machines' maps are read-only here. `route` is None when it isn't one of
+//! these.
 
-use crate::cores::{CoreError, HostsConfig, Hub};
+use crate::cores::{CoreError, Hub};
 use crate::ctx::pending_reply;
 use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::sync::Arc;
-use xenonet_model::ids::{is_host_id, parse_qualified, Qualified};
-
-const OFF: &str = "hosts are off in this XenoNet: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype)";
+use xenonet_model::ids::{parse_qualified, Qualified};
 
 /// The refusal of another machine's transcript, stats or collision to
 /// anything but the window.
@@ -24,10 +21,8 @@ pub fn window_only_reply() -> Reply {
     Reply::send(403, &json!({ "error": "another machine's transcripts, stats and diffs open only in XenoNet's own window", "code": "window" }), &[])
 }
 
-pub struct HostRoutes<'a> {
-    pub hosts: Arc<dyn HostsConfig>,
+pub struct HostRoutes {
     pub hub: Option<Arc<dyn Hub>>,
-    pub home: &'a str,
 }
 
 // ^(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$
@@ -84,7 +79,7 @@ pub fn url_search(pairs: &[(&str, &str)]) -> String {
     search(pairs)
 }
 
-impl HostRoutes<'_> {
+impl HostRoutes {
     pub async fn route(&self, req: &mut Req) -> Option<Reply> {
         match self.inner(req).await {
             Ok(r) => r,
@@ -95,20 +90,6 @@ impl HostRoutes<'_> {
 
     async fn inner(&self, req: &mut Req) -> Result<Option<Reply>, CoreError> {
         let p = req.path.clone();
-        if p == "/api/hosts/self" {
-            if req.method == "GET" {
-                return Ok(Some(Reply::json(200, merged(self.hosts.self_info()?, json!({ "home": self.home })))));
-            }
-            if req.method == "POST" {
-                let body = req.json_body().await?;
-                let Some(id) = body.get("id") else {
-                    return Ok(Some(Reply::error(400, "say what to call this XenoNet: { id }, or id null to take its name away")));
-                };
-                return Ok(Some(Reply::json(200, merged(self.hosts.set_self(id)?, json!({ "home": self.home })))));
-            }
-            return Ok(Some(Reply::error(405, "GET or POST")));
-        }
-
         // A remote session's transcript or stats, through its host's relay.
         if let Some(rest) = p.strip_prefix("/api/session/") {
             if let Some((raw, what)) = rest.split_once('/') {
@@ -177,41 +158,6 @@ impl HostRoutes<'_> {
             }
         }
 
-        if p != "/api/hosts" && !p.starts_with("/api/hosts/") {
-            return Ok(None);
-        }
-        let Some(hub) = self.hub.as_ref().filter(|h| h.ssh()) else { return Ok(Some(Reply::error(404, OFF))) };
-        if p == "/api/hosts" {
-            if req.method == "GET" {
-                return Ok(Some(Reply::json(200, json!({ "self": self.hosts.self_info()?, "sshConfig": self.hosts.ssh_config()?, "hosts": hub.list()? }))));
-            }
-            if req.method == "POST" {
-                let body = req.json_body().await?;
-                let replace = body.get("replace") == Some(&Value::Bool(true));
-                return Ok(Some(Reply::json(200, hub.add(&body, replace)?)));
-            }
-            return Ok(Some(Reply::error(405, "GET or POST")));
-        }
-        let rest = &p["/api/hosts/".len()..];
-        let (id, action) = match rest.split_once('/') {
-            Some((id, a @ ("reconnect" | "test"))) => (id, Some(a)),
-            Some(_) => return Ok(Some(Reply::error(404, "not found"))),
-            None => (rest, None),
-        };
-        if id.is_empty() || !is_host_id(id) {
-            return Ok(Some(Reply::error(404, "not found")));
-        }
-        match (action, req.method.as_str()) {
-            (None, "GET") => Ok(Some(Reply::json(200, hub.detail(id)?))),
-            (None, "DELETE") => Ok(Some(Reply::json(200, hub.remove(id, req.param("forget") == Some("1"))?))),
-            (Some("reconnect"), "POST") => Ok(Some(Reply::json(200, hub.reconnect(id)?))),
-            (Some("test"), "POST") => {
-                if !hub.has(id) {
-                    return Ok(Some(Reply::error(404, format!("there's no host called {id}"))));
-                }
-                Ok(Some(Reply::json(200, hub.test(id).await?)))
-            }
-            _ => Ok(Some(Reply::error(405, "not that way"))),
-        }
+        Ok(None)
     }
 }

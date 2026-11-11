@@ -377,13 +377,13 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
         let home = w.setup.home.as_str();
         let mut also: Vec<String> = Vec::new();
         for a in &agents {
-            if let Some(f) = xenonet_hosts::relay::user_folder_of(a.get("cwd"), Some(home)) {
+            if let Some(f) = crate::remote::relay::user_folder_of(a.get("cwd"), Some(home)) {
                 if !also.contains(&f) {
                     also.push(f);
                 }
             }
         }
-        xenonet_hosts::relay::Scrubber::new(Some(home), &also)
+        crate::remote::relay::Scrubber::new(Some(home), &also)
     });
     let now = now_ms();
     let mut out = BTreeMap::new();
@@ -427,7 +427,7 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
 /// of what waits on you (only while it waits), its last message and its
 /// stuck reasons, each scrubbed and clipped as the schema has them. What
 /// it doesn't have is left out.
-fn detail(v: &mut Value, live: &Value, waits: bool, scrub: &xenonet_hosts::relay::Scrubber) {
+fn detail(v: &mut Value, live: &Value, waits: bool, scrub: &crate::remote::relay::Scrubber) {
     let text = |k: &str, max: usize| live.get(k).and_then(Value::as_str).map(|t| clip(&scrub.text(t), max)).filter(|t| !t.trim().is_empty());
     if let Some(q) = text("question", QUESTION_MAX).filter(|_| waits) {
         v["question"] = json!(q);

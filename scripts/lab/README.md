@@ -1,10 +1,10 @@
 # The XenoNet lab
 
 Linux VMs on the development Mac, so one XenoNet can be tested against
-several hosts. Each VM runs Claude Code, the Codex CLI and a headless
-XenoNet, and the XenoNet on the Mac reaches it over SSH with `xenonet relay`
-(`docs/design/hosts.md`). `docs/design/vm-lab.md` is the plan; this is
-Phase A of it, the two Linux hosts.
+several machines. Each VM runs Claude Code, the Codex CLI and a headless
+XenoNet, which joins a network with the Mac's (`docs/guide/network.md`).
+`docs/design/vm-lab.md` is the plan; this is Phase A of it, the two Linux
+hosts.
 
 ```sh
 npm run lab -- build ubuntu --ref wA/merge   # the golden copies, once
@@ -156,21 +156,12 @@ fails if any does:
    authorized keys;
 6. `sudo` without the password is refused, and with it works.
 
-## Adding the VMs to a console (the owner)
+## Joining the VMs to a network (the owner)
 
-XenoNet refuses `xenonet hosts add` from under an agent, so adding the lab's
-VMs to a console is yours; an agent checking the page uses XenoNet Dev's
-`host-add` simulation instead. On the Mac, with XenoNet Dev started with
-`XENONET_HOSTS=1`, give `xenonet hosts add` (with `--dev` while the installed
-XenoNet runs too) what the lab's ssh config says of each VM:
-`will@127.0.0.1` as the target, its SSH port (`--ssh-port`,
-from the table above), the console key (`--identity`, `console_ed25519`
-in the lab's folder), the lab's `known_hosts` (`--known-hosts`), and the
-name its host key is kept under there (`--host-key-alias xenonet-lab-vm1`,
-or `xenonet-lab-vm2`). The host key is in that file already, so there's
-none to accept. The console key runs the relay for the demo XenoNet
-whatever is asked, until `npm run lab -- keys --relay-port 47840` points
-it at the real one.
+XenoNet refuses creating a network, and adding a machine to one, from under
+an agent, so joining the lab's VMs is yours: from the Mac's XenoNet window,
+**Add a machine**, then `xenonet net join` in the VM. An agent checking the
+page uses XenoNet Dev's `net-…` simulations instead.
 
 ## Signing in (the owner, after the VMs are built)
 

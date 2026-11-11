@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/host/hello/v1.json",
   "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A relay's hello",
-  "description": "The first frame xenonet relay writes on its standard output: which XenoNet is talking, in which protocol, and what it will send.",
+  "description": "The first frame a relay sends a console that subscribes to its map: which XenoNet is talking, in which protocol, and what it will send.",
   "type": "object",
   "properties": {
     "t": {
@@ -45,7 +45,7 @@
         "key": {
           "type": "string",
           "pattern": "^[0-9a-f]{32}$",
-          "description": "Made once, at random, by the host: it recognizes the host across renames and SSH aliases. It names the host and proves nothing; SSH does that"
+          "description": "The host's key in the network: it recognizes the host across renames. It names the host and proves nothing; the network's seal does that"
         }
       },
       "required": [

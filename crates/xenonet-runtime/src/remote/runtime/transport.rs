@@ -1,16 +1,15 @@
-//! How the hub's links reach a host that isn't a program (docs/design/
-//! network.md, section 7): the `network` transport, beside `ssh` and
-//! `local`. A link writes the relay's console frames (get, time) and reads
+//! How the hub's links reach a host (docs/design/network.md, section 7):
+//! the `network` transport. A link writes the relay's console frames (get, time) and reads
 //! the relay's frames back, whatever carries them; here they're the asks
 //! and answers of `network/relay/v1`, through the network's gateway.
 //!
 //! The hub starts a subscription for a link's run, writes to it, renews it
 //! and ends it through a `Transport`; what comes back reaches the hub's
 //! relay sink as `{ sub, seq, frames }`, and each frame goes to the link as
-//! a line would from ssh.
+//! a line.
 
-use crate::frames::{parse_frame, FROM_CONSOLE};
-use crate::network::{self as wire, Op};
+use crate::remote::frames::{parse_frame, FROM_CONSOLE};
+use crate::remote::network::{self as wire, Op};
 use serde_json::Value;
 use std::sync::{Arc, Weak};
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, RelaySink, To};

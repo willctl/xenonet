@@ -30,7 +30,7 @@ pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Grant
 pub use delivery::{Policy, Router};
 pub use door::{Apps, LocalDoor};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
-pub use hosts::{HostsConfig, HttpApi, Hub, HubNet, SelfApi};
+pub use hosts::{HttpApi, Hub, HubNet, SelfApi};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
 pub use settings::{Command, Demo, Opener, Schemas, Store, Themes};
 pub use state::State;
@@ -135,9 +135,9 @@ pub fn reason(v: &Value) -> String {
 }
 
 /// Every core the service holds, as the JS service's top level makes them.
-/// Optional ones are null in JS when a switch turns them off
-/// (XENONET_ACTORS=off, XENONET_ASSISTANT=off, hosts without
-/// XENONET_HOSTS=1).
+/// Optional ones are None when a switch turns them off
+/// (XENONET_ACTORS=off, XENONET_ASSISTANT=off), and the hub until the
+/// service makes it.
 #[derive(Clone)]
 pub struct Cores {
     pub state: Arc<dyn State>,
@@ -157,7 +157,6 @@ pub struct Cores {
     pub spend: Arc<dyn Spend>,
     pub policy: Arc<dyn Policy>,
     pub router: Arc<dyn Router>,
-    pub hosts: Arc<dyn HostsConfig>,
     pub hub: Option<Arc<dyn Hub>>,
     pub connections: Option<Arc<dyn Connections>>,
     pub tunnels: Option<Arc<dyn Tunnels>>,
@@ -214,7 +213,7 @@ pub struct Pending;
 impl Cores {
     /// Every core pending, with the optional ones there as the JS service's
     /// switches have them.
-    pub fn pending(actors: bool, assistant: bool, hosts: bool) -> Cores {
+    pub fn pending(actors: bool, assistant: bool) -> Cores {
         let p = Arc::new(Pending);
         Cores {
             state: p.clone(),
@@ -234,8 +233,7 @@ impl Cores {
             spend: p.clone(),
             policy: p.clone(),
             router: p.clone(),
-            hosts: p.clone(),
-            hub: hosts.then(|| p.clone() as Arc<dyn Hub>),
+            hub: None,
             connections: (actors && assistant).then(|| p.clone() as Arc<dyn Connections>),
             tunnels: (actors && assistant).then(|| p.clone() as Arc<dyn Tunnels>),
             audit: (actors && assistant).then(|| p.clone() as Arc<dyn Audit>),

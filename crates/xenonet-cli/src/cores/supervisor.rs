@@ -470,8 +470,8 @@ mod tests {
     #[test]
     fn a_tasks_arguments_are_xenonets_own_settings() {
         let given = json!({ "XENONET_PORT": "47850" });
-        let settings: Vec<String> = ["XENONET_STATE_DIR=D:\\Xeno Net\\state", "PATH=C:\\elsewhere", "XENONET_HOSTS=1", "plain"].map(String::from).to_vec();
-        assert_eq!(with_settings(&given, &settings), json!({ "XENONET_PORT": "47850", "XENONET_STATE_DIR": "D:\\Xeno Net\\state", "XENONET_HOSTS": "1" }));
+        let settings: Vec<String> = ["XENONET_STATE_DIR=D:\\Xeno Net\\state", "PATH=C:\\elsewhere", "XENONET_ACTORS=1", "plain"].map(String::from).to_vec();
+        assert_eq!(with_settings(&given, &settings), json!({ "XENONET_PORT": "47850", "XENONET_STATE_DIR": "D:\\Xeno Net\\state", "XENONET_ACTORS": "1" }));
         assert_eq!(with_settings(&given, &[]), given);
     }
 

@@ -267,19 +267,6 @@ impl cores::Router for Fake {
     }
 }
 
-impl cores::HostsConfig for Fake {
-    fn self_info(&self) -> R<Value> {
-        Ok(json!({ "id": "studio", "key": "7c1e0000000000000000000000000001", "createdAt": 1 }))
-    }
-    fn set_self(&self, id: &Value) -> R<Value> {
-        self.note("setSelf", id.clone());
-        Ok(json!({ "id": id, "key": "7c1e0000000000000000000000000001", "createdAt": 1 }))
-    }
-    fn ssh_config(&self) -> R<Value> {
-        Ok(json!("/Users/nova/Library/Application Support/XenoNet/ssh_config"))
-    }
-}
-
 #[async_trait]
 impl cores::Hub for Fake {
     fn has(&self, host: &str) -> bool {
@@ -291,26 +278,6 @@ impl cores::Hub for Fake {
             return Ok(HubAnswer { status: a.status, body: a.body.clone() });
         }
         Ok(HubAnswer { status: 200, body: json!({ "id": S, "path": path }) })
-    }
-    fn list(&self) -> R<Value> {
-        Ok(json!([{ "id": "vm1", "state": "live" }]))
-    }
-    fn add(&self, body: &Value, replace: bool) -> R<Value> {
-        self.note("add", json!([body, { "replace": replace }]));
-        Ok(json!({ "id": body["id"], "state": "connecting" }))
-    }
-    fn detail(&self, id: &str) -> R<Value> {
-        Ok(json!({ "id": id, "engine": null }))
-    }
-    fn remove(&self, id: &str, forget: bool) -> R<Value> {
-        self.note("remove", json!(id));
-        Ok(json!({ "id": id, "removed": true, "forget": forget }))
-    }
-    fn reconnect(&self, id: &str) -> R<Value> {
-        Ok(json!({ "id": id, "state": "connecting" }))
-    }
-    async fn test(&self, id: &str) -> R<Value> {
-        Ok(json!({ "id": id, "ok": true }))
     }
 }
 
@@ -338,7 +305,7 @@ impl cores::Integrations for Fake {
 /// A service whose cores are this fake where it stands in, pending elsewhere.
 fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
-    let mut c = Cores::pending(true, true, hub);
+    let mut c = Cores::pending(true, true);
     xenonet_service::serve::wire_root(&mut c);
     c.engine = f.clone();
     c.connect = f.clone();
@@ -347,7 +314,6 @@ fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
     c.state = f.clone();
     c.policy = f.clone();
     c.router = f.clone();
-    c.hosts = f.clone();
     c.hub = hub.then(|| f.clone() as Arc<dyn cores::Hub>);
     c.store = f.clone();
     c.integrations = f.clone();
@@ -357,7 +323,7 @@ fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
 /// The same, with actors on: tokens, their processes and what you allowed.
 fn with_actors() -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
-    let mut c = Cores::pending(true, false, false);
+    let mut c = Cores::pending(true, false);
     xenonet_service::serve::wire_root(&mut c);
     c.engine = f.clone();
     c.verify = f.clone();
@@ -691,7 +657,7 @@ async fn an_actor_reports_only_as_itself_from_its_own_process_and_within_its_rat
 #[tokio::test]
 async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_window() {
     let f = Arc::new(Fake::new());
-    let mut c = Cores::pending(true, true, false);
+    let mut c = Cores::pending(true, true);
     xenonet_service::serve::wire_root(&mut c);
     c.verify = f.clone();
     let ctx = Ctx::for_tests(c);
@@ -749,7 +715,7 @@ async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_windo
     }
     assert_eq!(code(&go(&ctx, "GET", "/api/assistant/audit?grant=everyone", &[], None).await), (400, json!("bad-request"), json!("grant is a grant's id")));
     // With remote actors off, there's nothing to reach.
-    let mut c = Cores::pending(true, false, false);
+    let mut c = Cores::pending(true, false);
     xenonet_service::serve::wire_root(&mut c);
     c.verify = f.clone();
     let off = Ctx::for_tests(c);
@@ -758,7 +724,7 @@ async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_windo
 
 #[tokio::test]
 async fn with_actors_off_a_token_reaches_nothing() {
-    let mut c = Cores::pending(false, false, false);
+    let mut c = Cores::pending(false, false);
     xenonet_service::serve::wire_root(&mut c);
     c.engine = Arc::new(Fake::new());
     let off = Ctx::for_tests(c);
@@ -835,34 +801,11 @@ async fn from_your_terminal_the_folder_changes_and_goes_back() {
     assert_eq!(f.was("setRoot"), vec![json!("~/Clients"), Value::Null]);
 }
 
-// ---------- test/hosts-routes.test.js ----------
+// ---------- reads of another machine through its relay ----------
 
 #[tokio::test]
-async fn this_xenonet_as_a_host_needs_no_flag() {
-    for hub in [true, false] {
-        let (ctx, _) = service(hub);
-        assert_eq!(
-            go(&ctx, "GET", "/api/hosts/self", &[], None).await.body_json(),
-            json!({ "id": "studio", "key": "7c1e0000000000000000000000000001", "createdAt": 1, "home": "/home/nova" })
-        );
-        assert_eq!(go(&ctx, "POST", "/api/hosts/self", &[], Some(json!({ "id": "lab" }))).await.body_json()["id"], json!("lab"));
-        assert_eq!(go(&ctx, "POST", "/api/hosts/self", &[], Some(json!({}))).await.status, 400);
-    }
-    let (ctx, f) = service(true);
-    *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process" });
-    let r = go(&ctx, "POST", "/api/hosts/self", &[], Some(json!({ "id": "lab" }))).await;
-    assert_eq!(status_error(&r), (403, json!("this is yours to do, and it came from under a Claude Code process")));
-    assert_eq!(f.was("setSelf"), Vec::<Value>::new());
-}
-
-#[tokio::test]
-async fn without_the_flag_showing_hosts_answers_404() {
+async fn without_a_hub_a_remote_id_is_the_windows_and_then_the_states() {
     let (ctx, _) = service(false);
-    for (m, p) in [("GET", "/api/hosts"), ("POST", "/api/hosts"), ("GET", "/api/hosts/vm1"), ("DELETE", "/api/hosts/vm1"), ("POST", "/api/hosts/vm1/test")] {
-        let r = go(&ctx, m, p, &[], Some(json!({ "id": "vm1" }))).await;
-        assert_eq!(r.status, 404, "{m} {p}");
-        assert!(r.body_json()["error"].as_str().unwrap().contains("XENONET_HOSTS=1"));
-    }
     // A remote id is the window's to read (routes/rules.rs); from there
     // it's left to the routes that don't know it: the state's.
     let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&format!("@vm1:{S}"))), &[], None).await;
@@ -870,31 +813,7 @@ async fn without_the_flag_showing_hosts_answers_404() {
     let key = ctx.window_key.reveal().to_string();
     let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&format!("@vm1:{S}"))), &[("x-xenonet-window", &key)], None).await;
     assert_eq!(r.status, 501, "the server's own route, whose state is pending here");
-}
-
-#[tokio::test]
-async fn adding_and_removing_are_yours_the_rest_whats_on_the_list() {
-    let (ctx, f) = service(true);
-    assert_eq!(
-        go(&ctx, "GET", "/api/hosts", &[], None).await.body_json(),
-        json!({ "self": { "id": "studio", "key": "7c1e0000000000000000000000000001", "createdAt": 1 }, "sshConfig": "/Users/nova/Library/Application Support/XenoNet/ssh_config", "hosts": [{ "id": "vm1", "state": "live" }] })
-    );
-    assert_eq!(go(&ctx, "POST", "/api/hosts", &[], Some(json!({ "id": "vm2", "target": "lab@vm2.local" }))).await.body_json(), json!({ "id": "vm2", "state": "connecting" }));
-    assert_eq!(f.was("add")[0], json!([{ "id": "vm2", "target": "lab@vm2.local" }, { "replace": false }]));
-    go(&ctx, "POST", "/api/hosts", &[], Some(json!({ "id": "vm2", "replace": true }))).await;
-    assert_eq!(f.was("add")[1][1], json!({ "replace": true }));
-    assert_eq!(go(&ctx, "DELETE", "/api/hosts/vm1?forget=1", &[], None).await.body_json(), json!({ "id": "vm1", "removed": true, "forget": true }));
-    assert_eq!(go(&ctx, "POST", "/api/hosts/vm1/reconnect", &[], None).await.body_json(), json!({ "id": "vm1", "state": "connecting" }));
-    assert_eq!(go(&ctx, "POST", "/api/hosts/vm1/test", &[], None).await.body_json(), json!({ "id": "vm1", "ok": true }));
-    assert_eq!(go(&ctx, "POST", "/api/hosts/vm9/test", &[], None).await.status, 404);
-    assert_eq!(go(&ctx, "GET", "/api/hosts/vm1", &[], None).await.body_json(), json!({ "id": "vm1", "engine": null }));
-    assert_eq!(go(&ctx, "GET", "/api/hosts/Not-A-Host", &[], None).await.status, 404);
-    // A method the route doesn't take has no row (routes/rules.rs).
-    assert_eq!(go(&ctx, "PUT", "/api/hosts/vm1", &[], None).await.status, 404);
-    *f.person.lock().unwrap() = json!({ "ok": false, "reason": "yours to do" });
-    assert_eq!(go(&ctx, "POST", "/api/hosts", &[], Some(json!({ "id": "vm2" }))).await.status, 403);
-    assert_eq!(go(&ctx, "DELETE", "/api/hosts/vm1", &[], None).await.status, 403);
-    assert_eq!((f.was("add").len(), f.was("remove").len()), (2, 1));
+    assert_eq!(go(&ctx, "GET", "/api/hosts", &[], None).await.status, 404, "hosts over SSH are gone");
 }
 
 fn urlencode(s: &str) -> String {
@@ -1122,7 +1041,7 @@ async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
 /// A service for the tray: the map's summary and the process checks.
 fn tray_service() -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
-    let mut c = Cores::pending(false, false, false);
+    let mut c = Cores::pending(false, false);
     xenonet_service::serve::wire_root(&mut c);
     c.verify = f.clone();
     c.state = f.clone();

@@ -34,7 +34,7 @@ export function createTray({ baseUrl, windowKey = () => null, showWindow, sendCo
   const keyed = (headers = {}) => { const key = windowKey(); return key ? { ...headers, "x-xenonet-window": key } : headers; };
   const post = (url, body) => fetch(baseUrl + url, { method: "POST", headers: keyed({ "content-type": "application/json" }), body: JSON.stringify(body) }).catch(() => {});
   const image = (working, need) => (isMac ? trayGlyph(working, need) : iconImage(32, working, need, 2));
-  // A session on another machine (with XENONET_HOSTS=1) says which; it opens
+  // A session on another machine of the network says which; it opens
   // nothing here, since hosts are read-only, so a click shows it on the map.
   const named = (n, max) => `${n.host ? `${n.host} · ` : ""}${n.title}`.slice(0, max);
 

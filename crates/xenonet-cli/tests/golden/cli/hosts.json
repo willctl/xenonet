@@ -1,7 +1,0 @@
-{
-  "args": [
-    "hosts"
-  ],
-  "code": 0,
-  "stdout": "Hosts are off in XenoNet: start it with XENONET_HOSTS=1 to show other machines' XenoNets (a prototype).\nAs a host, it hasn't named itself: xenonet hosts self <name>.\n"
-}

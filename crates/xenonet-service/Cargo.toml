@@ -67,14 +67,15 @@ xenonet-schema.workspace = true
 # decisions, which every service's cores get (serve.rs's wire_root).
 xenonet-runtime.workspace = true
 xenonet-components.workspace = true
-# The composition's other cores (compose/app.rs): hosts and the hub,
-# remote actors' connections and tunnels, the integrations, the decision
-# model, refusals and the doctor; and Grok Build's config.toml, which the
-# MCP catalog reads through its adapter.
+# The composition's other cores (compose/app.rs): remote actors'
+# connections and tunnels, the integrations, the decision model, refusals
+# and the doctor; Grok Build's config.toml, which the MCP catalog reads
+# through its adapter; and the map's activity rule and SSH aliases, which
+# the network's hub draws other machines' maps with.
 xenonet-assistant.workspace = true
 xenonet-doctor.workspace = true
 xenonet-grok-build.workspace = true
-xenonet-hosts.workspace = true
+xenonet-state.workspace = true
 xenonet-integrations.workspace = true
 xenonet-sources.workspace = true
 

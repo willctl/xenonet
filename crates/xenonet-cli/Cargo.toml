@@ -45,7 +45,6 @@ xenonet-os.workspace = true
 xenonet-assistant.workspace = true
 xenonet-components.workspace = true
 xenonet-engine.workspace = true
-xenonet-hosts.workspace = true
 xenonet-sources.workspace = true
 xenonet-state.workspace = true
 xenonet-runtime.workspace = true

@@ -3121,7 +3121,6 @@ dependencies = [
  "xenonet-doctor",
  "xenonet-engine",
  "xenonet-hermes",
- "xenonet-hosts",
  "xenonet-mcp",
  "xenonet-os",
  "xenonet-platforms",
@@ -3231,7 +3230,6 @@ dependencies = [
  "xenonet-api",
  "xenonet-components",
  "xenonet-engine",
- "xenonet-hosts",
  "xenonet-model",
  "xenonet-net",
  "xenonet-os",
@@ -3305,26 +3303,6 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-os",
  "xenonet-schema",
- "xenonet-text",
-]
-
-[[package]]
-name = "xenonet-hosts"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "regex",
- "serde_json",
- "tokio",
- "url",
- "xenonet-adapter",
- "xenonet-api",
- "xenonet-blocks",
- "xenonet-model",
- "xenonet-net",
- "xenonet-os",
- "xenonet-schema",
- "xenonet-state",
  "xenonet-text",
 ]
 
@@ -3543,7 +3521,6 @@ dependencies = [
  "xenonet-blocks",
  "xenonet-demo",
  "xenonet-engine",
- "xenonet-hosts",
  "xenonet-id",
  "xenonet-keys",
  "xenonet-log",
@@ -3591,7 +3568,6 @@ dependencies = [
  "xenonet-doctor",
  "xenonet-engine",
  "xenonet-grok-build",
- "xenonet-hosts",
  "xenonet-http",
  "xenonet-id",
  "xenonet-integrations",
@@ -3604,6 +3580,7 @@ dependencies = [
  "xenonet-runtime",
  "xenonet-schema",
  "xenonet-sources",
+ "xenonet-state",
  "xenonet-text",
 ]
 

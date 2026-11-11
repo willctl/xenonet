@@ -69,7 +69,7 @@ fn say(line: &str) {
 }
 
 pub fn run(args: &[String], built: &str) -> i32 {
-    run_with(args, built, Box::new(|config, _env| Cores::pending(config.actors, config.assistant, config.hosts)))
+    run_with(args, built, Box::new(|config, _env| Cores::pending(config.actors, config.assistant)))
 }
 
 /// What makes the service's cores: given the settings (the demo's world
@@ -103,7 +103,7 @@ pub fn run_with(args: &[String], built: &str, build: Builder) -> i32 {
 /// The service with every core pending.
 pub async fn main(args: Vec<String>, built: String) -> i32 {
     let mut config = Config::from_env(&args);
-    let cores = Cores::pending(config.actors, config.assistant, config.hosts);
+    let cores = Cores::pending(config.actors, config.assistant);
     serve_with(&mut config, cores, &built, WireEnv::default()).await
 }
 
@@ -375,9 +375,6 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
     ctx.cores.doctor.start();
     if let Some(a) = &ctx.cores.actors {
         a.start();
-    }
-    if let Some(h) = &ctx.cores.hub {
-        h.start();
     }
     if let Some(g) = parts.gateway.clone() {
         tokio::spawn(async move {

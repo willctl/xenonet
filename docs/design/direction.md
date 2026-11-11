@@ -62,8 +62,6 @@ schemas and the design docs. Sizes are lines of Rust under `crates/*/src`.
 - Schemas are written in zod in JS and generated into `schemas/`; Rust
   validates `serde_json::Value` against them at runtime and has no derived
   types. Changing a schema needs the Node toolchain.
-- The SSH hosts prototype (`XENONET_HOSTS=1`) keeps a second host-id
-  namespace beside the roster.
 
 ## How the target shape was chosen
 
@@ -446,8 +444,9 @@ Will's step on inix and NEO-REX.
    the actors' list on each call; the per-app line views stay in
    `xenonet-sources` as types the adapters name by format; the Pi
    integration's session reading is still in `xenonet-integrations`; and
-   `xenonet-hosts` still tells Claude Code's plan readings from the
-   registry's limits kind rather than through its adapter.
+   the network's merge (`xenonet-runtime`'s `remote`) still tells Claude
+   Code's plan readings from the registry's limits kind rather than
+   through its adapter.
 3. **One authorization. Done (2026-11-11).** Four crates hold it, each
    usable alone ([authorization.md](authorization.md)). `xenonet-id` has
    keys and signatures bound to their purpose, the `Signer` and `Vault`
@@ -544,7 +543,7 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Questions 1, 2, 4 and 5, and 8's grants, are decided. The rest can wait
+Questions 1, 2, 4, 5 and 8 are decided. The rest can wait
 for the phase that needs them.
 
 1. **The person's root key, the presence check and the chain rules.**
@@ -609,8 +608,9 @@ for the phase that needs them.
    revoke, disable and audit, are this grant's read right. The receiver
    decides every read and act with `xenonet-authz`. Issuing or widening
    a grant needs the person's presence, as an Allow does; narrowing and
-   revoking need none. Still open: retire the SSH hosts prototype?
-   Recommended: yes.
+   revoking need none. The SSH hosts prototype is retired (Will,
+   2026-11-11): machines join through the network, and another machine's
+   map reaches a console only through the network's relay.
 9. **The remote map.** Is it acceptable that other machines show as
    session cards from presence, not today's relayed full graph?
 10. **Defaults.** Two mailboxes per network, named by the person

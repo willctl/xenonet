@@ -1,6 +1,6 @@
 //! The app's cores, made and put in place: opening things and the
 //! xenonet command, refusals, the decision model and OpenRouter's spend,
-//! the system panel, the MCP catalog, hosts and the hub, remote actors'
+//! the system panel, the MCP catalog, the network's hub, remote actors'
 //! connections, reads and tunnels, the integrations and the doctor. Each
 //! is its domain crate's; the demo's are made up or kept in memory, and
 //! never reach your machine's own credential store or apps.
@@ -17,8 +17,8 @@ use xenonet_assistant::runtime as assistant;
 use xenonet_components::runtime::xenonet_bin_here;
 use xenonet_console::cores::{open, system};
 use xenonet_doctor::runtime as doctor;
-use xenonet_hosts::runtime as hosts;
 use xenonet_integrations::runtime::{self as integrations, decide, mcp};
+use xenonet_runtime::remote::runtime as remote;
 use xenonet_sources::refusals::runtime as refusals;
 
 /// What these cores run with: the service's settings it reads, once the
@@ -40,8 +40,6 @@ pub struct Settings {
     pub cache_dir: String,
     /// Where XenoNet's files are.
     pub root: PathBuf,
-    /// Hosts over SSH from hosts.json (XENONET_HOSTS=1).
-    pub hosts: bool,
     /// The demo's world, when it was made.
     pub world: Option<Value>,
 }
@@ -66,17 +64,11 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
     cores.system = if demo { Arc::new(system::DemoSystem) } else { Arc::new(system::SystemPanel(xenonet_os::system::System::new())) };
     cores.mcp_info = Arc::new(mcp::Catalog::new(&js, &env.version, cores.state.clone(), xenonet_grok_build::connect::toml::read_settings));
 
-    // Hosts: this XenoNet as one, which needs no flag, and the hub, always:
-    // the network's hosts come from its roster, and with XENONET_HOSTS=1
-    // hosts over SSH from hosts.json, which is then one of the map's
-    // building blocks.
-    let schemas = Arc::new(hosts::schemas::HostSchemas::new());
-    let host_store = Arc::new(hosts::config::HostsStore::new(&state_dir, schemas.clone()));
-    cores.hosts = Arc::new(hosts::config::Hosts(host_store.clone()));
-    let ssh = config.hosts;
+    // The hub, always: it shows the network's hosts, from its roster, once
+    // this machine is in a network.
+    let schemas = Arc::new(remote::schemas::HostSchemas::new(xenonet_state::graph::activity_of));
     let windows = serde_json::json!({ "activeWindowMs": js["activeWindowMs"], "recentWindowMs": js["recentWindowMs"], "projectActiveMs": js["projectActiveMs"] });
-    let parts = hosts::hub::HubParts {
-        hosts: host_store.clone(),
+    let parts = remote::hub::HubParts {
         schemas,
         state: cores.state.clone(),
         store: cores.store.clone(),
@@ -86,16 +78,10 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         demo,
         windows,
         emitter: env.emitter.clone(),
-        bin: xenonet_bin_here(&config.home),
-        ssh_bin: vec!["ssh".into()],
-        ssh,
-        relay: hosts::relay::Timing::default(),
+        aliases: xenonet_state::identities::parse_ssh_aliases,
+        relay: remote::relay::Timing::default(),
     };
-    cores.hub = Some(Arc::new(hosts::hub::HubCore(hosts::hub::HostHub::new(parts))));
-    if ssh {
-        let block = host_store;
-        let _ = cores.state.add_block(Arc::new(move || block.health()), None);
-    }
+    cores.hub = Some(Arc::new(remote::hub::HubCore(remote::hub::HostHub::new(parts))));
 
     // Remote actors: their connections, reads, audit and tunnels, over
     // the engine's own store, with actors and the assistant both on. The
@@ -141,8 +127,7 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         Err(e) => env.emitter.log("error", "integrations.start", &format!("the integrations' records can't be kept: {}", e.message)),
     }
 
-    // The doctor last: its context is the other cores (the hub's hosts
-    // among them).
+    // The doctor last: its context is the other cores.
     let settings = doctor::Settings {
         demo,
         port: config.port,

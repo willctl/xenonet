@@ -50,8 +50,7 @@ XenoNet never adds a dot folder to your home folder. XDG variables win when they
 | What [A2A agents](actors.md#agents-that-speak-a2a) sent and the replies they got, a week after each task ends, whether A2A is on, and each agent's default target | `%LOCALAPPDATA%\XenoNet\a2a.sqlite` | `~/Library/Application Support/XenoNet/a2a.sqlite` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |
 | The search index, which can be rebuilt | `%LOCALAPPDATA%\XenoNet\Cache\search.sqlite` | `~/Library/Caches/XenoNet/search.sqlite` | `XENONET_CACHE_DIR`, `XDG_CACHE_HOME` |
 | [Drift](#drift), which is what differs in the apps' data from what XenoNet expects, kept as shapes | `%LOCALAPPDATA%\XenoNet\Cache\drift.json` | `~/Library/Caches/XenoNet/drift.json` | `XENONET_CACHE_DIR`, `XDG_CACHE_HOME` |
-| This XenoNet's host name and key, the hosts it shows, and its own ssh config for them, for [other machines](other-machines.md) | `%LOCALAPPDATA%\XenoNet\hosts.json`, `ssh_config` | `~/Library/Application Support/XenoNet/hosts.json`, `ssh_config` | `XENONET_STATE_DIR`, `XDG_STATE_HOME` |
-| Each host's last snapshot, so an offline host stays on the map | `%LOCALAPPDATA%\XenoNet\Cache\hosts\` | `~/Library/Caches/XenoNet/hosts/` | `XENONET_CACHE_DIR`, `XDG_CACHE_HOME` |
+| Each [network](network.md) machine's last map snapshot, so an offline machine stays on the map | `%LOCALAPPDATA%\XenoNet\Cache\hosts\` | `~/Library/Caches/XenoNet/hosts/` | `XENONET_CACHE_DIR`, `XDG_CACHE_HOME` |
 | Window settings, such as mute and terminal height | `%APPDATA%\XenoNet` | `~/Library/Application Support/XenoNet` | |
 | Posters | `Pictures\XenoNet` | `~/Pictures/XenoNet` | `XENONET_CAPTURES_DIR` |
 | Replay clips and films | `Videos\XenoNet` | `~/Movies/XenoNet` | `XENONET_CAPTURES_DIR` |
@@ -82,6 +81,5 @@ On Linux, these go in the XDG defaults, `~/.local/state` and `~/.cache`.
 | `XENONET_NUMBAT_FILE` | Unset. Name the NDJSON file numbat writes events to, and XenoNet shows the runs in it as sessions, observed through numbat. See [Related work](related-work.md#numbat-runs-xenonet-doesnt-read-itself-experimental). |
 | `XENONET_DEMO` | Set it to `1` for demo mode, the same as `npm run demo`. |
 | `XENONET_UPSTREAM` | XenoNet Dev only: another XenoNet's address on this computer, such as a forwarded port, whose data the page shows, read-only. See [Developing on another computer](development.md#developing-on-another-computer). |
-| `XENONET_HOSTS` | Off. Set it to `1` to show [other machines' XenoNets](other-machines.md), a prototype. |
 | `XENONET_ASSISTANT` | On. Set it to `off` to leave out [remote actors' connections](cloud-assistants.md) altogether: no pairing, no private endpoint. |
 | `XENONET_GATEWAY_PORT` | The service's port plus 1010, so `48850`. A gateway you already set up keeps the port it had. See [the actor gateway](actors.md#actors-outside-this-machine-the-gateway). |

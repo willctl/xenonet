@@ -30,7 +30,7 @@ mod made {
     }
 
     /// Every document read from outside: another host's frames, a relay's
-    /// hello and the hosts file, and what actors send.
+    /// hello, and what actors send.
     pub fn untrusted() -> Vec<Doc> {
         vec![
             doc::<network::Claims>(),
@@ -45,7 +45,6 @@ mod made {
             doc::<network::State>(),
             doc::<network::Svc>(),
             doc::<host::Hello>(),
-            doc::<host::List>(),
             doc::<actor::Registration>(),
             doc::<actor::Report>(),
             doc::<actor::Console>(),

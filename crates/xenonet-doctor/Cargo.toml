@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-doctor"
-description = "XenoNet's doctor: whether what XenoNet needs is in place, and how to fix it when it isn't. Each check's verdict and wording, the hosts' checks, the summary and what counts as a new problem; the diagnostics bundle; and the service's Doctor and Diagnostics cores over them."
+description = "XenoNet's doctor: whether what XenoNet needs is in place, and how to fix it when it isn't. Each check's verdict and wording, the summary and what counts as a new problem; the diagnostics bundle; and the service's Doctor and Diagnostics cores over them."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,13 +19,12 @@ xenonet-os.workspace = true
 xenonet-text.workspace = true
 xenonet-schema.workspace = true
 # The runtime (src/runtime.rs): the Doctor and Diagnostics cores over the
-# other cores, the engine's process self-test, the network's and hosts'
+# other cores, the engine's process self-test, the network's
 # checks, state.json read as its type, whether git needs the developer
 # tools, and the checks' processes and timers.
 tokio.workspace = true
 xenonet-api.workspace = true
 xenonet-engine.workspace = true
-xenonet-hosts.workspace = true
 xenonet-model.workspace = true
 xenonet-net.workspace = true
 xenonet-sources.workspace = true

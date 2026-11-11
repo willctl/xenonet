@@ -79,7 +79,7 @@ async function until(fn, timeout = 60000) {
 async function scenario(name, { demo, home, bytes, keep }) {
   const port = await freePort();
   const tmp = home ?? fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), "xenonet-bench-svc-"));
-  const env = { ...process.env, XENONET_PORT: String(port), XENONET_RUNTIME_DIR: path.join(tmp, "runtime"), XENONET_HOSTS: "", XENONET_CONTROL: "", XENONET_HOT: "0" };
+  const env = { ...process.env, XENONET_PORT: String(port), XENONET_RUNTIME_DIR: path.join(tmp, "runtime"), XENONET_CONTROL: "", XENONET_HOT: "0" };
   // The API's credential the service writes at start, read again for each
   // request while it may not be there yet.
   const keyed = () => ({ headers: { "x-xenonet-credential": apiCredential(env, port) ?? "" } });

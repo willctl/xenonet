@@ -145,7 +145,7 @@ fn serve(args: &[String]) -> i32 {
         args,
         VERSION,
         Box::new(|config, env| {
-            let mut cores = xenonet_api::cores::Cores::pending(config.actors, config.assistant, config.hosts);
+            let mut cores = xenonet_api::cores::Cores::pending(config.actors, config.assistant);
             let home = config.home.clone();
             let demo = xenonet_state::runtime::demo_world(&mut cores, config.demo, config.port);
             config.take_world(&*cores.demo);
@@ -193,7 +193,6 @@ fn serve(args: &[String]) -> i32 {
                 state_dir: config.state_dir.clone(),
                 cache_dir: config.cache_dir.clone(),
                 root: config.root.clone(),
-                hosts: config.hosts,
                 world: config.world.clone(),
             };
             xenonet_service::compose::app::wire(&mut cores, &app, env);

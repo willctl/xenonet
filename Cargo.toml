@@ -24,9 +24,8 @@ xenonet-engine = { path = "crates/xenonet-engine" }
 xenonet-schema = { path = "crates/xenonet-schema" }
 xenonet-sources = { path = "crates/xenonet-sources" }
 xenonet-state = { path = "crates/xenonet-state" }
-# The install, hosts, assistant, integrations and doctor.
+# The install, assistant, integrations and doctor.
 xenonet-components = { path = "crates/xenonet-components" }
-xenonet-hosts = { path = "crates/xenonet-hosts" }
 xenonet-assistant = { path = "crates/xenonet-assistant" }
 xenonet-integrations = { path = "crates/xenonet-integrations" }
 xenonet-doctor = { path = "crates/xenonet-doctor" }

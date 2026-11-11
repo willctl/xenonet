@@ -79,7 +79,7 @@ Not in the menu yet: Quit XenoNet, turning the gateway off, Pause notifications 
 
 ## The settings it keeps
 
-launchd, systemd and Task Scheduler start the service with a plain environment. The launch agent, unit or task keeps the XenoNet settings you had when you turned it on: `XENONET_PORT` (unless it's 47840), `XENONET_RUNTIME_DIR`, `XENONET_STATE_DIR`, `XENONET_CACHE_DIR`, `XENONET_PROJECTS_DIR`, `XENONET_GATEWAY_PORT`, `XENONET_ACTORS`, `XENONET_ASSISTANT`, `XENONET_HOSTS` and the `XDG_*_HOME` folders. If you change one, run `xenonet service install` again. A scheduled task has no environment of its own, so on Windows the task passes them to `xenonet service run` as arguments, such as `XENONET_PORT=47850`.
+launchd, systemd and Task Scheduler start the service with a plain environment. The launch agent, unit or task keeps the XenoNet settings you had when you turned it on: `XENONET_PORT` (unless it's 47840), `XENONET_RUNTIME_DIR`, `XENONET_STATE_DIR`, `XENONET_CACHE_DIR`, `XENONET_PROJECTS_DIR`, `XENONET_GATEWAY_PORT`, `XENONET_ACTORS`, `XENONET_ASSISTANT` and the `XDG_*_HOME` folders. If you change one, run `xenonet service install` again. A scheduled task has no environment of its own, so on Windows the task passes them to `xenonet service run` as arguments, such as `XENONET_PORT=47850`.
 
 On macOS and Linux, `xenonet service run` adds your login shell's `PATH`, as Desktop does for the service it starts. So the service finds Codex, Homebrew's git and anything else your shell profile sets up.
 

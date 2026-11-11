@@ -41,7 +41,6 @@ xenonet-text = { path = "../crates/xenonet-text" }
 xenonet-blocks = { path = "../crates/xenonet-blocks" }
 xenonet-components = { path = "../crates/xenonet-components" }
 xenonet-engine = { path = "../crates/xenonet-engine" }
-xenonet-hosts = { path = "../crates/xenonet-hosts" }
 xenonet-model = { path = "../crates/xenonet-model" }
 xenonet-integrations = { path = "../crates/xenonet-integrations" }
 xenonet-net = { path = "../crates/xenonet-net" }

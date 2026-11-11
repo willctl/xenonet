@@ -58,7 +58,7 @@ fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBu
         made_up: xenonet_runtime::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
     };
     let empty = Arc::new(Empty::default());
-    let mut cores = Cores::pending(true, false, false);
+    let mut cores = Cores::pending(true, false);
     cores.state = empty.clone();
     let env = WireEnv::new("0.0.0");
     // The real adapters, as the binary installs them at start.

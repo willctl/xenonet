@@ -1,10 +1,9 @@
 # One network across machines
 
 Status: built, 2026-10-22, apart from what "As built" below lists as
-not built. It replaces the pull-over-SSH plan in `hosts.md` as the main
-way to use XenoNet on several machines. It keeps that plan's relay frames,
-ids, merge and privacy rules, which were built and tested, and keeps SSH as
-a second way to look at a machine. The guide is
+not built. It is the way to use XenoNet on several machines; the SSH hosts
+prototype it grew from is retired. It keeps that prototype's relay frames,
+ids, merge and privacy rules. The guide is
 [docs/guide/network.md](../guide/network.md).
 
 **In short:**
@@ -74,7 +73,7 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   never `peers` or an agent's view. The strip and the Network panel show
   the question's text and the stuck reason.
 - Other hosts' maps through the gateway (section 7):
-  - Relay frames (`network/relay/v1`) carry the SSH relay's own frames
+  - Relay frames (`network/relay/v1`) carry the relay's frames
     between two hosts, sealed as every host frame is. They go to relay
     sinks beside the engine's sink (`RelaySink`, set by role on the
     `SinkSlot`), never to the engine. They go up in relay batches of their
@@ -91,8 +90,8 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
     every half second within it. `seq` counts within the subscription: a
     hole, or a `gap`, makes the console ask for a fresh snapshot.
   - The serving side is the service's relay
-    (`crates/xenonet-hosts/src/runtime/relay.rs`), which runs
-    `xenonet_hosts::relay::Producer`, the SSH relay's shaping, in-process:
+    (`crates/xenonet-runtime/src/remote/runtime/relay.rs`), which runs
+    `xenonet_runtime::remote::relay::Producer`'s shaping, in-process:
     it follows this machine's own view of its events from the event
     stream, and reads its own API as a 127.0.0.1 client with the service's
     own credential and no token, so the allowlist and the routes' rows both
@@ -113,31 +112,29 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
     serves them at `GET /api/system?hosts=1` for the Machines panel.
     Nothing about load goes in presence, so a console that isn't a window
     host's sees other machines' load from no one.
-  - The subscribing side is the hub, now always built: hosts.json's hosts
-    over SSH with `XENONET_HOSTS=1`, and the roster's always, each a link
-    whose transport is the network (`link::Start::Network`,
-    `crates/xenonet-hosts/src/runtime/transport.rs`). The link's states,
-    the merge, the declared-field cleaning and the caps are the SSH
-    links'. A window host's hub subscribes only while a console is open
-    there (Desktop's window shown, or a page reading the event stream). A
-    host in hosts.json and the roster is shown once, from hosts.json.
-  - The page draws a network host from its snapshot as it draws an SSH
-    host (`network: "relay"` on its nodes), dimmed and kept while it's
-    away. The hub keeps the last snapshot in the cache folder as it keeps
-    an SSH host's, under a key made from the network's id and the host's,
+  - The subscribing side is the hub, always built: the roster's hosts,
+    each a link whose transport is the network
+    (`crates/xenonet-runtime/src/remote/runtime/transport.rs`), with its
+    states, the merge, the declared-field cleaning and the caps. A window
+    host's hub subscribes only while a console is open there (Desktop's
+    window shown, or a page reading the event stream).
+  - The page draws a network host from its snapshot (`network: "relay"`
+    on its nodes), dimmed and kept while it's away. The hub keeps the
+    last snapshot in the cache folder, under a key made from the
+    network's id and the host's,
     and forgets it when the host leaves the roster. A remote session's
     transcript and stats open through the window; nothing remote opens,
     dismisses or hands off here.
 - Other hosts on the map, from presence, until their first snapshot
-  (section 7): the page makes each one a constellation as the SSH
-  prototype draws one (a project per repo key or folder, sessions with
+  (section 7): the page makes each one a constellation, as it draws one
+  from a snapshot (a project per repo key or folder, sessions with
   their state and waits, ids qualified `@<host>:…`), merged into the map
   before it's drawn (`src/network-map.js`), with the hosts layout's cap on
   what's drawn.
 - Another machine's transcript, stats, collision diffs and MCP server
   details are read only by the window (their rows in the local API's rules
   table are the window's alone when they name another machine: its
-  credential, and no token), over SSH and the network alike, so an agent on
+  credential, and no token), so an agent on
   one machine can't read another's transcripts.
 - The chime (section 8): presence carries `youAt`, when the person last
   worked at a host's console (input in the last two minutes, to the half
@@ -741,16 +738,15 @@ twins, are unchanged.
   - `relay` frames carry the existing relay protocol (`hello`, `get`,
     `snapshot`, `event`, `res`, `time`, `ping`, `bye`), sealed between the
     two hosts (`network/relay/v1`).
-  - The hub merges them as it merges SSH links, through a third link
-    transport, `network`, beside `ssh` and `local`.
+  - The hub merges them, through each host's link over the network.
 - **Only a window host is shown other hosts' maps.** A host serves its map
   only to a window host in its roster, one subscription for each.
 - **Subscriptions last only while a console is open,** and are renewed
   every 20 s, so an idle network carries presence and nothing else, and a
   vanished console doesn't leave a stream running: a host ends a
   subscription that isn't renewed for 60 s.
-- **`XENONET_HOSTS` isn't needed for network hosts.** They show as soon as
-  they're in the roster. SSH hosts stay behind the flag.
+- **Network hosts need no flag.** They show as soon as they're in the
+  roster.
 - **Detail is on inside a network:** the text of a waiting question, the
   last message and stuck reasons.
   - Every host in a network is one the person let in, and seeing what
@@ -1363,14 +1359,14 @@ one LAN, and a recovery key for a lost founder.
 ## Open questions for the owner
 
 1. **Detail.** Is detail on by default inside a network right, or should a
-   network start titles-only, as SSH hosts do?
+   network start titles-only?
 2. **A2A's tokens.** The A2A side uses gateway tokens. Should it later take
    A2A's own OAuth flows?
 3. **Secrets for outside services.** A2A out needs a secret kept for an
    outside service, which XenoNet has never done. Is an owner-only file
    acceptable, or should that wait for the system keychain?
-4. **SSH hosts.** Should the SSH hosts prototype be kept, or retired once
-   the network covers its uses?
+4. **SSH hosts.** Decided by Will on 2026-11-11: retired. Machines join
+   through the network.
 5. **Codex.** Should Codex's full-access mode also hold messages from
    other machines, as Claude Code's bypass mode does?
 6. **Recovery.** Should creating a network print a recovery key that can

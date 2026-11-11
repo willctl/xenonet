@@ -118,14 +118,6 @@
    "golden": "http/drift.json"
   },
   {
-   "get": "/api/hosts",
-   "golden": "http/hosts.json"
-  },
-  {
-   "get": "/api/hosts/self",
-   "golden": null
-  },
-  {
    "get": "/api/doctor",
    "golden": null
   },
@@ -391,13 +383,6 @@
     "--help"
    ],
    "golden": "cli/runs_--help.json"
-  },
-  {
-   "run": [
-    "hosts",
-    "--help"
-   ],
-   "golden": null
   },
   {
    "run": [
@@ -777,19 +762,6 @@
    "run": [
     "svc",
     "list",
-    "--json"
-   ],
-   "golden": null
-  },
-  {
-   "run": [
-    "hosts"
-   ],
-   "golden": "cli/hosts.json"
-  },
-  {
-   "run": [
-    "hosts",
     "--json"
    ],
    "golden": null

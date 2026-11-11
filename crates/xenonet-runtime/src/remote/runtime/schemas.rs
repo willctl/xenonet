@@ -1,19 +1,25 @@
-//! What the hosts take from another machine, checked and copied: a host
-//! entry and a relay's hello read as host/list/v1's entry and
-//! host/hello/v1, and what another host sends read as its document's type
+//! What the hub takes from another machine, checked and copied: a relay's
+//! hello read as host/hello/v1, and what another host sends read as its document's type
 //! (xenonet-model) and copied with only what that type declares (the
 //! merge's clean). Everything a host sends is untrusted, so
 //! the copy is what the type keeps of it: a key the type doesn't name is
 //! dropped at every level, and a value that isn't its type is left out.
 
-use crate::merge;
+use crate::remote::merge;
 use serde_json::{json, Value};
 use xenonet_model::{engine, graph, host, identity, live, system};
 use xenonet_schema::typed::{self, clean};
 
+/// How active a node is by when it was last updated: the map's own rule
+/// (xenonet-state's activity_of), so another host's nodes are drawn as
+/// this machine's are.
+pub type ActivityOf = fn(Option<&Value>, f64, Option<&Value>) -> &'static str;
+
 /// The checks on what hosts send, by the document each frame is.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct HostSchemas;
+#[derive(Clone, Copy, Debug)]
+pub struct HostSchemas {
+    activity: ActivityOf,
+}
 
 // `<path>: <message>`, with "(the value)" for the root.
 fn explain(issue: typed::Issue) -> String {
@@ -21,13 +27,8 @@ fn explain(issue: typed::Issue) -> String {
 }
 
 impl HostSchemas {
-    pub fn new() -> Self {
-        HostSchemas
-    }
-
-    /// A host entry (host/list/v1's hosts' items), or why it isn't one.
-    pub fn check_entry(&self, v: &Value) -> Option<String> {
-        typed::read::<host::Host>(v).err().map(explain)
+    pub fn new(activity: ActivityOf) -> Self {
+        HostSchemas { activity }
     }
 
     /// A relay's hello, or why it isn't one.
@@ -58,7 +59,7 @@ impl HostSchemas {
     }
 }
 
-/// The merge's asks, answered: the schemas, and graph.js's activityOf.
+/// The merge's asks, answered: the schemas, and the map's activity_of.
 pub struct MergeSchemas<'a>(pub &'a HostSchemas);
 
 impl merge::Schemas for MergeSchemas<'_> {
@@ -67,7 +68,7 @@ impl merge::Schemas for MergeSchemas<'_> {
     }
 
     fn activity(&mut self, updated_at: &Value, now: f64, windows: &Value) -> Value {
-        json!(xenonet_state::graph::activity_of(Some(updated_at), now, Some(windows)))
+        json!((self.0.activity)(Some(updated_at), now, Some(windows)))
     }
 }
 
@@ -75,24 +76,19 @@ impl merge::Schemas for MergeSchemas<'_> {
 mod tests {
     use super::*;
 
+    fn idle(_: Option<&Value>, _: f64, _: Option<&Value>) -> &'static str {
+        "idle"
+    }
+
     #[test]
-    fn a_hosts_entry_and_hello_as_their_types_check_them() {
-        let s = HostSchemas::new();
-        let entry =
-            json!({ "id": "lab", "transport": "local", "ssh": null, "port": 47840, "command": null, "since": "7d", "detail": false, "key": null, "name": null, "addedAt": 1 });
-        assert_eq!(s.check_entry(&entry), None);
-        let mut bad = entry.clone();
-        bad["port"] = json!("47840");
-        assert!(s.check_entry(&bad).unwrap().starts_with("port: "));
-        let mut bad = entry;
-        bad["id"] = json!("Not A Name");
-        assert!(s.check_entry(&bad).unwrap().starts_with("id: "));
+    fn a_hello_as_its_type_checks_it() {
+        let s = HostSchemas::new(idle);
         assert!(s.check_hello(&json!({ "t": "hello" })).unwrap().starts_with("(the value): missing field"));
     }
 
     #[test]
     fn what_a_host_sends_keeps_only_what_its_type_declares() {
-        let s = HostSchemas::new();
+        let s = HostSchemas::new(idle);
         let mut m = MergeSchemas(&s);
         use merge::Schemas;
         let wiki = json!({ "id": "wiki", "kind": "wiki", "name": "Agent Wiki", "path": "~/wiki", "pages": 3, "script": "<b>x</b>" });
@@ -106,7 +102,7 @@ mod tests {
 
     #[test]
     fn a_hosts_load_fits_system_v1_and_keeps_only_what_it_declares() {
-        let s = HostSchemas::new();
+        let s = HostSchemas::new(idle);
         let mut m = MergeSchemas(&s);
         use merge::Schemas;
         // The demo's reading, as this machine's own /api/system answers it.

@@ -50,14 +50,12 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   unless asked, since it's the user's own XenoNet Dev.
 - `simulate` puts sessions into rare states (a question waiting, an edit
   collision, a stuck loop), and actors and other machines too
-  (`actor-request`, `actor-needs-you`, `actor-tunnel`, `host-add`,
-  `host-offline`, `net-founder`, `net-remote-waiting`…), so you can check
-  how they look.
+  (`actor-request`, `actor-needs-you`, `actor-tunnel`, `host-offline`,
+  `net-founder`, `net-remote-waiting`…), so you can check how they look.
 - Changes for other machines can be checked in the VM lab (`npm run lab`,
-  `scripts/lab/README.md`), Linux VMs that each run XenoNet. Adding them to
-  a console as hosts, or joining machines into a network, is the owner's
-  to do, since XenoNet refuses it from under an agent; `simulate` with
-  `host-add` or the `net-*` kinds stands in. The network itself is tested
+  `scripts/lab/README.md`), Linux VMs that each run XenoNet. Joining
+  machines into a network is the owner's to do, since XenoNet refuses it
+  from under an agent; `simulate` with the `net-*` kinds stands in. The network itself is tested
   with three services in one process (`crates/xenonet-service/tests/net*.rs`).
 - Some paths are refused from under an agent (creating a network,
   `xenonet service install`). Their tests take the refused branch here and

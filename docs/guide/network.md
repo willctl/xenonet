@@ -258,7 +258,7 @@ Crosses, signed and sealed:
 - each machine's start and wake settings, what waits to widen them, and what its XenoNet takes;
 - start requests, with their prompt, and their answers, to and from the machine they're for;
 - a run's permission prompt, to each window host: its machine, session, run, tool and what it would run (a command or a path, up to 300 characters, with the home folder as `~`), and your answer back;
-- while a console is open on a window host, each other machine's map for it: its places and its sessions of the last 7 days (at most 5,000), with the home folder as `~`, and their live state, as the [SSH hosts prototype](other-machines.md) sends them with detail on. Only a window host is sent maps, and only while its console asks again every 20 seconds;
+- while a console is open on a window host, each other machine's map for it: its places and its sessions of the last 7 days (at most 5,000), with the home folder as `~`, and their live state, with detail on. Only a window host is sent maps, and only while its console asks again every 20 seconds;
 - a session's transcript or stats, only when you open one in a window host's XenoNet window. Nothing keeps them;
 - each machine's load, every 5 seconds, with its map, while a window host's console watches it: CPU, GPU and memory in use, and what the parts are (the CPU's model, threads and speed, total memory, each GPU's name and memory, platform and architecture). No machine names, serials or OS version. A machine keeps its load to itself with **Share load with the network** off in its Network panel (on by default), or `xenonet net set --no-share-load`. A console that isn't a window host's gets no other machine's load, as it gets no other machine's map;
 - a request to a service a machine published, and its answer, when a program on another machine asks for it (see [Services through the network](#services-through-the-network)).
@@ -277,7 +277,3 @@ The gateway sees, for each frame, which machine sent it, which it's for, its kin
 The link is `live` while this machine hears the gateway. It's `offline` when the gateway can't be reached, doesn't answer a request within 35 seconds, or sends nothing for 45 seconds, which is what a gateway behind a firewall that blocks XenoNet looks like. `xenonet net status`, the Network panel and the doctor then say since when and why. XenoNet keeps trying by itself, and the link is `live` again as soon as the gateway answers. `refused` means the gateway answered and turned this machine away; the reason says why.
 
 A machine whose clock is off still links: it signs with the gateway's time, which it takes only from an answer the gateway signed. One more than a day off is refused, and the doctor says so.
-
-## Other machines over SSH
-
-The [SSH hosts prototype](other-machines.md) is another way to look at a machine: a read-only map of it, over SSH, without a network.

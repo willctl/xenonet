@@ -20,7 +20,6 @@ pub mod drift;
 pub mod film;
 pub mod gateway;
 pub mod hook;
-pub mod hosts;
 pub mod install;
 pub mod live;
 pub mod logs;
@@ -28,7 +27,6 @@ pub mod mcp;
 pub mod messages;
 pub mod net;
 pub mod refusals;
-pub mod relay;
 pub mod root;
 pub mod runs;
 pub mod script;
@@ -102,7 +100,6 @@ pub const COMMANDS: &[Command] = &[
     cmd("svc", "Publish a local HTTP service to the network, for programs on its other machines", Some("[publish|unpublish|list]")),
     cmd("start", "Start a session here or on another machine, with a first prompt", Some("[--on <machine>] \"<prompt>\"")),
     cmd("runs", "The Claude Code sign-in for the sessions XenoNet runs itself", Some("[status|sign-in|forget]")),
-    cmd("hosts", "Other machines' XenoNets on this map, over SSH (a prototype, with XENONET_HOSTS=1)", Some("[self|add|remove|test|reconnect]")),
     cmd("search", "Search every {apps lines} transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),
     cmd("film", "Render a film of today to an MP4, in a hidden window", None),
@@ -121,7 +118,6 @@ pub const COMMANDS: &[Command] = &[
         args: Some("[ready|bundle|runtime|updates|update|activate|current|launcher]"),
         hidden: true,
     },
-    Command { name: "relay", about: "Stream this XenoNet's map to a console on another machine (consoles run it over SSH)", args: None, hidden: true },
 ];
 
 pub const ALIASES: &[(&str, &str)] = &[("st", "status"), ("peers", "agents"), ("dev", "console"), ("actors", "actor")];
@@ -158,7 +154,6 @@ fn text(name: &str) -> &'static str {
         "film" => film::HELP,
         "gateway" => gateway::HELP,
         "hook" => hook::HELP,
-        "hosts" => hosts::HELP,
         "install" => install::HELP,
         "live" => live::HELP,
         "logs" => logs::HELP,
@@ -166,7 +161,6 @@ fn text(name: &str) -> &'static str {
         "messages" => messages::HELP,
         "net" => net::HELP,
         "refusals" => refusals::HELP,
-        "relay" => relay::HELP,
         "root" => root::HELP,
         "script" => script::HELP,
         "search" => search::HELP,
@@ -204,7 +198,6 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "film" => film::run(args, flags),
         "gateway" => gateway::run(args, flags),
         "hook" => hook::run(args, flags),
-        "hosts" => hosts::run(args, flags),
         "install" => install::run(args, flags),
         "live" => live::run(args, flags),
         "logs" => logs::run(args, flags),
@@ -212,7 +205,6 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "messages" => messages::run(args, flags),
         "net" => net::run(args, flags),
         "refusals" => refusals::run(args, flags),
-        "relay" => relay::run(args, flags),
         "root" => root::run(args, flags),
         "script" => script::run(args, flags),
         "search" => search::run(args, flags),
