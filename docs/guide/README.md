@@ -1,6 +1,8 @@
 # XenoNet user guide
 
-XenoNet is the network for SI (super intelligence) on your machine. It has a background service, a CLI, MCP tools and a desktop console. Start with the [front page](../../README.md), and come here for the detail behind it. Many steps here use the palette, the list of commands that `Ctrl+K` opens, or `⌘K` on a Mac.
+XenoNet helps actors, people and bots, take an intent to an outcome together. The work runs on hosts (your machines), as identities (your accounts), in running sessions (Claude Code, Codex, Grok Build and other agents), and every actor works within the grant it holds. Each actor gets the same kind of grant, to read and to act, scoped to the machines, projects and sessions you allow, and issuing or widening one takes you at the machine. [How it works](how-it-works.md) says how the pieces fit.
+
+XenoNet is a background service on each machine, the `xenonet` command, MCP tools for agents and a desktop console. Start with the [front page](../../README.md), and come here for the detail behind it. Many steps here use the palette, the list of commands that `Ctrl+K` opens, or `⌘K` on a Mac.
 
 - [Install](install.md) says how to build XenoNet's installers, and how to install and uninstall it on Windows and macOS.
 - [Components and updates](components.md) explains separate installs, the MCP servers and which processes keep running during an update.
