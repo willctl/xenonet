@@ -1,9 +1,10 @@
 #![no_main]
 
 // Feeds (xenonet-feed/1): the input's bytes read as an entry, then a fixed
-// author's entries (kept and loose kinds, incarnations bumped by restores
-// that lost nothing) offered to a receiver in the order the input picks,
-// repeated, dropped, or with a field changed.
+// author's entries (kept and loose kinds, compact entries keeping nothing
+// live, incarnations bumped by restores that lost nothing) offered to a
+// receiver in the order the input picks, repeated, dropped, or with a
+// field changed.
 //
 // Nothing may panic. An entry that decodes reads back as itself from its
 // own bytes. A changed entry is taken only if its signature still checks,
@@ -15,9 +16,9 @@
 use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
-use xenonet_fuzz::net::Choices;
+use xenonet_fuzz::net::{Choices, KINDS};
 use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
-use xenonet_log::feed::{Class, Feed, FeedEntry, Kind, MemoryStore, Offer, Writer};
+use xenonet_log::feed::{Class, Feed, FeedEntry, MemoryStore, Offer, Writer};
 
 const NET: &str = "net_0123456789abcdef0123456789abcdef";
 const T: u64 = 1_792_512_000_000;
@@ -36,9 +37,10 @@ fn script(c: &mut Choices<'_>) -> Vec<FeedEntry> {
     let mut out = Vec::new();
     for n in 0..c.below(24) {
         now += 1 + u64::from(c.u8());
-        match c.below(9) {
+        match c.below(10) {
             8 => w = Writer::restore(k.public().id(), NET, w.head(), w.inc(), now),
-            i => out.push(w.write(k, Kind::ALL[i % Kind::ALL.len()], now, json!({ "n": n })).expect("the author's key signs")),
+            9 if w.kept() > 0 => out.push(w.compact(k, now, &[]).expect("the author's key signs")),
+            i => out.push(w.write(k, KINDS[i % KINDS.len()], now, json!({ "n": n })).expect("the author's key signs")),
         }
     }
     out
@@ -75,7 +77,7 @@ fuzz_target!(|data: &[u8]| {
     }
     let ids: Vec<String> = entries.iter().map(FeedEntry::id).collect();
     let kept: Vec<String> = entries.iter().filter(|e| e.class() == Class::Kept).map(FeedEntry::id).collect();
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = Feed::at(MemoryStore::new(), T);
     let (mut got_kept, mut got_loose) = (Vec::new(), Vec::new());
     for _ in 0..48 {
         if c.is_empty() {

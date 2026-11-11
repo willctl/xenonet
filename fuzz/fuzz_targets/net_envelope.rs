@@ -23,7 +23,7 @@ use libfuzzer_sys::fuzz_target;
 use std::sync::Mutex;
 use xenonet_fuzz::net::{self, Choices, LAPTOP};
 use xenonet_id::sign::{Purpose, Signer};
-use xenonet_log::feed::{FeedEntry, Kind, Verified};
+use xenonet_log::feed::{FeedEntry, Verified};
 use xenonet_net::envelope::{Class, Envelope, Me, Seen, To};
 use xenonet_net::roster::View;
 
@@ -77,7 +77,7 @@ fn whole(data: &[u8]) {
 
 /// An entry of host `author`'s feed, signed by host `signer`'s machine key.
 fn entry(c: &mut Choices<'_>, author: usize, signer: usize) -> FeedEntry {
-    let kind = *c.pick(&Kind::ALL);
+    let kind = *c.pick(&net::KINDS);
     let mut e = net::entry(author, kind, u64::from(c.u8() % 4) + 1, serde_json::json!({ "text": xenonet_fuzz::text(c.chunk()) }));
     if signer != author {
         let tag = Purpose::FEED.tag().len() + 1;

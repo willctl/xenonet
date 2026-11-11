@@ -101,7 +101,7 @@ fn a_sealed_entry_opens_for_its_recipient_through_its_json() {
     // The receiver's feed takes it.
     let mut f = Feed::new(MemoryStore::new());
     let v = open_as(&sealed_for(&claim, &n.laptop), &n.laptop, &view).unwrap();
-    assert_eq!(f.offer(v).unwrap(), Offer::New(vec![claim]));
+    assert_eq!(f.offer(v).unwrap(), Offer::New(vec![claim].into()));
 }
 
 #[test]

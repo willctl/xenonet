@@ -432,6 +432,12 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
                     apply(w, &host, e, auth);
                 }
             }
+            // What a compact entry ended: the feed closed those places.
+            // XenoNet takes no kept kind that stays open here yet besides
+            // handoffs, which don't record their place, so this is noted.
+            if !entries.ended.is_empty() {
+                w.log("info", "net.feed", &format!("{host} compacted its feed: {} entries applied here before are no longer open", entries.ended.len()));
+            }
         }
         Ok(offer)
     });
@@ -467,6 +473,7 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
         // From history the author gave up in a restore: it hears how far
         // this machine holds its feed.
         Ok(Offer::Stale) => ack(w),
+        Ok(Offer::Expired) => w.log("info", "net.feed", &format!("a {} from {host} was refused: it was signed longer ago than its feed keeps entries", kind.as_str())),
         Err(e) => w.log("warn", "net.feed", &format!("an entry from {host} wasn't taken: {e}")),
     }
 }
@@ -485,6 +492,9 @@ fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &
         EntryKind::Message => message_in(w, host, &e.body, authority, e.at as f64),
         EntryKind::Receipt => receipt_in(w, host, &e.body),
         EntryKind::Handoff => handoff_in(w, host, &e.body),
+        // The feed applies a compact entry itself: what it leaves out is
+        // closed there (`Applied::ended`).
+        EntryKind::Compact => Ok(()),
         other => Err(fail(format!("XenoNet doesn't take {} entries yet", other.as_str()))),
     };
     if let Err(f) = done {

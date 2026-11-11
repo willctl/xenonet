@@ -17,7 +17,7 @@ use crate::{roster, R};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-use xenonet_log::feed::{FeedEntry, Fork, Pos};
+use xenonet_log::feed::{FeedEntry, Fork, Link, Pos};
 use xenonet_log::person;
 use xenonet_os::sync::Locked;
 
@@ -29,14 +29,17 @@ pub type Seen = (String, [u8; 16], i64);
 pub type Person = (String, bool, Vec<person::Entry>);
 
 /// Where this machine writes its feed in a network: its incarnation, the
-/// kept and loose entries written in it, and the last kept entry before it
-/// while it has none of its own (`Writer::resume`).
+/// kept and loose entries written in it, the incarnation's link and the
+/// last kept entry it wrote (`Writer::resume`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WriterAt {
     pub inc: u64,
     pub kept: u64,
     pub loose: u64,
-    pub prev: Pos,
+    /// What the incarnation's first kept entry names.
+    pub link: Link,
+    /// The last kept entry written, the link until the first.
+    pub head: Link,
 }
 
 pub trait Persist: Send + Sync {

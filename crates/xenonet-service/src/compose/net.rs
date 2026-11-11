@@ -122,10 +122,10 @@ impl Persist for StorePersist {
         self.0.put_link_cursor(network, epoch, seq).map_err(store)
     }
     fn feed_writer(&self, network: &str) -> R<Option<WriterAt>> {
-        Ok(self.0.feed_writer(network).map_err(store)?.map(|w| WriterAt { inc: w.inc, kept: w.kept, loose: w.loose, prev: w.prev }))
+        Ok(self.0.feed_writer(network).map_err(store)?.map(|w| WriterAt { inc: w.inc, kept: w.kept, loose: w.loose, link: w.link, head: w.head }))
     }
     fn put_feed_writer(&self, network: &str, author: &str, at: WriterAt, kept: Option<&FeedEntry>) -> R<()> {
-        let at = xenonet_store::feed::WriterAt { inc: at.inc, kept: at.kept, loose: at.loose, prev: at.prev };
+        let at = xenonet_store::feed::WriterAt { inc: at.inc, kept: at.kept, loose: at.loose, link: at.link, head: at.head };
         self.0.put_feed_writer(network, author, at, kept).map_err(store)
     }
     fn feed_out_after(&self, network: &str, after: Pos, limit: usize) -> R<Vec<FeedEntry>> {

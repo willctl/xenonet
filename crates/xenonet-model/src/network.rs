@@ -442,7 +442,7 @@ crate::pattern! {
     pub struct GroupId(r"^(net_[0-9a-f]{32}|spc_[a-z2-7]{32})$");
 }
 
-/// What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and group; messages and receipts are loose, each taken once by its id
+/// What a feed entry is about: claims, intents, handoffs, assigns, reports and compact entries are kept, in one gapless sequence per author and group; messages and receipts are loose, each taken once by its id
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
@@ -453,6 +453,7 @@ pub enum EntryKind {
     Report,
     Message,
     Receipt,
+    Compact,
 }
 
 // A place in a feed: an incarnation and a number in it.
@@ -460,6 +461,15 @@ pub enum EntryKind {
 pub struct FeedPlace {
     pub inc: Uint,
     pub seq: Uint,
+}
+
+// The kept entry before another: its place, and its id (the SHA-256 of what its author signed), none at 0, 0.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeedLink {
+    pub inc: Uint,
+    pub seq: Uint,
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub id: Opt<Base64Bytes>,
 }
 
 /// One entry of a machine's feed in a group, a network or a space (xenonet-feed/1), signed by its machine signing key
@@ -472,15 +482,15 @@ pub struct FeedEntry {
     pub inc: Ranged<1>,
     /// From 1 in each incarnation, kept and loose kinds each counted on their own
     pub seq: Ranged<1>,
-    /// On the first kept entry of an incarnation only: the last kept entry before it, or 0, 0
+    /// On kept entries only: the kept entry before it; for an incarnation's first, the last kept entry before the incarnation, or 0, 0
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub prev: Opt<FeedPlace>,
+    pub prev: Opt<FeedLink>,
     pub kind: EntryKind,
     /// When the author made it, by its clock: shown, never a reason to drop it
     pub at: Ms,
     /// What it says: network/send/v1 for a message, network/receipt/v1, network/handoff/v1
     pub body: serde_json::Map<String, serde_json::Value>,
-    /// The author's signature over xenonet-feed/1, a newline and the entry's canonical JSON without it
+    /// The author's signature over xenonet-feed/1, a newline and the entry's header: its canonical JSON with the body as its SHA-256 (bodyHash), without the signature
     pub sig: Base64Bytes,
 }
 

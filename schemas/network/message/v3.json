@@ -47,13 +47,17 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$"
             }
           },
           "required": [
             "inc",
             "seq"
           ],
-          "description": "On the first kept entry of an incarnation only: the last kept entry before it, or 0, 0",
+          "description": "On kept entries only: the kept entry before it; for an incarnation's first, the last kept entry before the incarnation, or 0, 0",
           "additionalProperties": {}
         },
         "kind": {
@@ -65,9 +69,10 @@
             "assign",
             "report",
             "message",
-            "receipt"
+            "receipt",
+            "compact"
           ],
-          "description": "What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and group; messages and receipts are loose, each taken once by its id"
+          "description": "What a feed entry is about: claims, intents, handoffs, assigns, reports and compact entries are kept, in one gapless sequence per author and group; messages and receipts are loose, each taken once by its id"
         },
         "at": {
           "type": "number",
@@ -81,7 +86,7 @@
         "sig": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]*$",
-          "description": "The author's signature over xenonet-feed/1, a newline and the entry's canonical JSON without it"
+          "description": "The author's signature over xenonet-feed/1, a newline and the entry's header: its canonical JSON with the body as its SHA-256 (bodyHash), without the signature"
         }
       },
       "required": [

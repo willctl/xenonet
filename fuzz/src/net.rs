@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer, VerifyingKey};
-use xenonet_log::feed::{Class, FeedEntry, Kind as FeedKind, Pos};
+use xenonet_log::feed::{Class, FeedEntry, Kind as FeedKind, Link, Pos};
 use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
 use xenonet_model::ops::{Incoming, Sink};
 use xenonet_net::codec::b64;
@@ -88,17 +88,29 @@ pub fn machine(i: usize) -> VerifyingKey {
     machine_key(i).public()
 }
 
+/// The kinds an entry made here may be: every kind but a compact entry,
+/// whose body the feed's writer makes.
+pub const KINDS: [FeedKind; 7] = [FeedKind::Claim, FeedKind::Intent, FeedKind::Handoff, FeedKind::Assign, FeedKind::Report, FeedKind::Message, FeedKind::Receipt];
+
 /// Entry `seq` of host `i`'s feed, of `kind`, saying `body`, signed by its
 /// machine key: kept entries in one sequence from the network's start,
-/// loose ones each its own.
+/// loose ones each its own. A kept entry after the first names a made-up
+/// id for the one before it (`entry_after` names a real one).
 pub fn entry(i: usize, kind: FeedKind, seq: u64, body: Value) -> FeedEntry {
+    entry_after(i, kind, seq, None, body)
+}
+
+/// `entry`, naming `prev` as the kept entry before it.
+pub fn entry_after(i: usize, kind: FeedKind, seq: u64, prev: Option<Link>, body: Value) -> FeedEntry {
     let kept = kind.class() == Class::Kept;
+    let seq = seq.max(1);
+    let before = if seq == 1 { Link::ORIGIN } else { Link::to(Pos::new(T0 as u64, seq - 1), [0; 32]) };
     let mut e = FeedEntry {
         author: machine(i).id(),
         group: NET.into(),
         inc: T0 as u64,
-        seq: seq.max(1),
-        prev: (kept && seq <= 1).then_some(Pos::ORIGIN),
+        seq,
+        prev: kept.then(|| prev.unwrap_or(before)),
         kind,
         at: now() as u64,
         body,

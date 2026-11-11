@@ -26,7 +26,7 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_fuzz::net::{body_for, entry, overlay, Choices};
+use xenonet_fuzz::net::{body_for, entry_after, overlay, Choices};
 use xenonet_id::sign::Signer as _;
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing};
 use xenonet_runtime::engine::EngineDriver;
@@ -112,6 +112,8 @@ struct Engine {
     last: f64,
     /// Each host's next kept and loose entry.
     seqs: std::collections::HashMap<&'static str, (u64, u64)>,
+    /// Each host's last kept entry in order, which its next one names.
+    heads: std::collections::HashMap<&'static str, xenonet_net::feed::Link>,
 }
 
 impl Drop for Engine {
@@ -167,7 +169,7 @@ fn engine() -> Engine {
     kept.put_person(owner.id().expect("the owner"), true, owner.entries()).expect("the owner's chain");
     let identity = xenonet_net::identity::Identity::open(identity_dir, kept, None).expect("the identity");
     xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Gov(identity))));
-    Engine { dir, w, net, runs: 0, last: 0.0, seqs: std::collections::HashMap::new() }
+    Engine { dir, w, net, runs: 0, last: 0.0, seqs: std::collections::HashMap::new(), heads: std::collections::HashMap::new() }
 }
 
 /// studio's governance: the fixed network's chain, its owner's.
@@ -278,13 +280,20 @@ fuzz_target!(|data: &[u8]| {
             let at = e.seqs.entry(from).or_insert((1, 1));
             let kept = fed.class() == xenonet_net::feed::Class::Kept;
             let seq = if c.rarely(8) { u64::from(c.u8() % 6) + 1 } else if kept { at.0 } else { at.1 };
+            // The next kept entry in order names the last one by its id.
+            let next = kept && seq == at.0;
             if kept { at.0 = at.0.max(seq + 1) } else { at.1 = at.1.max(seq + 1) }
             let authority = b.get("authority").cloned().unwrap_or_else(|| json!({}));
             let mut inner = b.clone();
             if let Some(o) = inner.as_object_mut() {
                 o.remove("authority");
             }
-            let v = entry(i, fed, seq, Value::Object(inner.as_object().cloned().unwrap_or_default())).verify(&xenonet_fuzz::net::machine(i)).expect("its own key");
+            let prev = if next { e.heads.get(from).copied() } else { None };
+            let made = entry_after(i, fed, seq, prev, Value::Object(inner.as_object().cloned().unwrap_or_default()));
+            if next {
+                e.heads.insert(from, xenonet_net::feed::Link::to(made.pos(), made.hash()));
+            }
+            let v = made.verify(&xenonet_fuzz::net::machine(i)).expect("its own key");
             let arrived = xenonet_net::sink::Arrived { host: from.into(), entry: v, authority, window };
             xenonet_fuzz::run(data, || network::entry_in(w, arrived.clone()));
         } else {

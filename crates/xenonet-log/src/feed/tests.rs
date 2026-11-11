@@ -24,6 +24,16 @@ fn write(w: &mut Writer, k: &SeedSigner, kind: Kind, n: u64) -> FeedEntry {
     w.write(k, kind, T + n, json!({ "n": n })).unwrap()
 }
 
+/// A receiver as of a little after the entries here were made.
+fn feed() -> Feed<MemoryStore> {
+    Feed::at(MemoryStore::new(), T + 1_000)
+}
+
+/// What an entry after `e` names as the one before it.
+fn link(e: &FeedEntry) -> Link {
+    Link::to(e.pos(), e.hash())
+}
+
 fn offer(f: &mut Feed<MemoryStore>, k: &SeedSigner, e: &FeedEntry) -> Offer {
     f.offer(e.clone().verify(&k.public()).unwrap()).unwrap()
 }
@@ -66,7 +76,7 @@ fn an_entry_reads_back_and_checks_only_against_its_author() {
     let k = key(1);
     let mut w = writer(&k);
     let e = write(&mut w, &k, Kind::Claim, 1);
-    assert_eq!((e.inc, e.seq, e.prev), (T, 1, Some(Pos::ORIGIN)));
+    assert_eq!((e.inc, e.seq, e.prev), (T, 1, Some(Link::ORIGIN)));
     assert_eq!(FeedEntry::decode(&e.encode()).unwrap(), e);
     assert!(e.signing_bytes().starts_with(b"xenonet-feed/1\n"));
     assert!(e.clone().verify(&k.public()).is_ok());
@@ -96,12 +106,17 @@ fn an_entry_holds_to_its_shape() {
         f(&mut e);
         e
     };
-    assert!(bad(&with(&first, &|e| e.prev = None)), "a first kept entry names prev");
-    assert!(bad(&with(&second, &|e| e.prev = Some(Pos::ORIGIN))), "only the first does");
-    assert!(bad(&with(&loose, &|e| e.prev = Some(Pos::ORIGIN))), "a loose one never does");
-    assert!(bad(&with(&first, &|e| e.prev = Some(Pos::new(T, 4)))), "prev is before its incarnation");
-    assert!(bad(&with(&first, &|e| e.prev = Some(Pos::new(5, 0)))), "an incarnation's place 0 names nothing");
-    assert!(bad(&with(&first, &|e| e.prev = Some(Pos::new(0, 3)))), "nor does the origin's");
+    assert_eq!(second.prev, Some(link(&first)), "a kept entry names the one before it");
+    assert!(bad(&with(&first, &|e| e.prev = None)), "a kept entry names prev");
+    assert!(bad(&with(&loose, &|e| e.prev = Some(Link::ORIGIN))), "a loose one never does");
+    assert!(bad(&with(&second, &|e| e.prev = Some(Link::ORIGIN))), "the one before it, not the origin");
+    assert!(bad(&with(&second, &|e| e.prev = Some(Link { at: first.pos(), id: None }))), "by its id");
+    assert!(bad(&with(&second, &|e| e.prev = Some(Link::to(Pos::new(T, 5), first.hash())))), "at the place before it");
+    assert!(bad(&with(&first, &|e| e.prev = Some(Link::to(Pos::new(T, 4), [1; 32])))), "the link is before its incarnation");
+    assert!(bad(&with(&first, &|e| e.prev = Some(Link::to(Pos::new(5, 0), [1; 32])))), "an incarnation's place 0 names nothing");
+    assert!(bad(&with(&first, &|e| e.prev = Some(Link::to(Pos::new(0, 3), [1; 32])))), "nor does the origin's");
+    assert!(bad(&with(&first, &|e| e.prev = Some(Link { at: Pos::new(5, 2), id: None }))), "a real place has an id");
+    assert!(bad(&with(&first, &|e| e.prev = Some(Link::to(Pos::ORIGIN, [1; 32])))), "the origin has none");
     assert!(bad(&with(&first, &|e| e.inc = 0)));
     assert!(bad(&with(&second, &|e| e.seq = 0)));
     assert!(bad(&with(&first, &|e| e.body = json!([1]))), "a body is an object");
@@ -120,7 +135,7 @@ fn a_gap_holds_entries_until_it_fills() {
     let k = key(1);
     let mut w = writer(&k);
     let e: Vec<_> = (1..=4).map(|n| write(&mut w, &k, Kind::Intent, n)).collect();
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     let author = k.public().id();
     assert_eq!(f.ack(&author, NET).unwrap(), None);
     assert_eq!(offer(&mut f, &k, &e[2]), Offer::Gap(Want { author: author.clone(), group: NET.into(), inc: 0, from: 1 }), "nothing yet: from the first");
@@ -146,7 +161,7 @@ fn loose_entries_are_taken_once_and_wait_for_nothing() {
     let claim = write(&mut w, &k, Kind::Claim, 2);
     let msg = write(&mut w, &k, Kind::Message, 3);
     let receipt = write(&mut w, &k, Kind::Receipt, 4);
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     assert!(matches!(offer(&mut f, &k, &claim), Offer::Gap(_)));
     assert_eq!(seqs(&offer(&mut f, &k, &receipt)), [2], "not behind the claim's gap");
     assert_eq!(seqs(&offer(&mut f, &k, &msg)), [1]);
@@ -162,7 +177,7 @@ fn a_copy_signed_again_is_a_duplicate() {
     again.sign(&k).unwrap();
     assert_ne!(again.sig, e.sig, "P-256 signs differently each time");
     assert_eq!(again.id(), e.id());
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     assert!(matches!(f.offer(e.verify(&k.public()).unwrap()).unwrap(), Offer::New(_)));
     assert_eq!(f.offer(again.verify(&k.public()).unwrap()).unwrap(), Offer::Duplicate);
 }
@@ -178,7 +193,7 @@ fn a_fork_freezes_the_feed_until_the_person_unfreezes_it() {
     let other = w2.write(&k, Kind::Claim, T, json!({ "n": "something else" })).unwrap();
     let three = write(&mut w, &k, Kind::Claim, 3);
     let four = write(&mut w, &k, Kind::Claim, 4);
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     seqs(&offer(&mut f, &k, &one));
     seqs(&offer(&mut f, &k, &two));
     assert!(matches!(offer(&mut f, &k, &four), Offer::Gap(_)));
@@ -202,7 +217,7 @@ fn two_entries_held_at_one_place_are_a_fork() {
     let mut w2 = w.clone();
     let a = write(&mut w, &k, Kind::Claim, 2);
     let b = w2.write(&k, Kind::Claim, T, json!({ "other": true })).unwrap();
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     assert!(matches!(offer(&mut f, &k, &a), Offer::Gap(_)));
     assert!(matches!(offer(&mut f, &k, &b), Offer::Fork(Fork { held, .. }) if held == a.hash()));
 }
@@ -217,19 +232,19 @@ fn an_incarnation_increases() {
     let mut w = writer(&k);
     write(&mut w, &k, Kind::Claim, 1);
     write(&mut w, &k, Kind::Message, 2);
-    assert_eq!(w.head(), Pos::new(T, 1), "the head is the last kept entry");
+    assert_eq!(w.head().at, Pos::new(T, 1), "the head is the last kept entry");
     let mut r = Writer::restore(k.public().id(), NET, w.head(), w.inc(), T - 1000);
     assert_eq!(r.inc(), T + 1);
-    assert_eq!(r.head(), Pos::new(T, 1));
+    assert_eq!(r.head().at, Pos::new(T, 1));
     let first = write(&mut r, &k, Kind::Assign, 3);
-    assert_eq!((first.inc, first.seq, first.prev), (T + 1, 1, Some(Pos::new(T, 1))));
+    assert_eq!((first.inc, first.seq, first.prev), (T + 1, 1, Some(w.head())));
     assert_eq!(write(&mut r, &k, Kind::Message, 4).seq, 1);
-    assert_eq!(write(&mut r, &k, Kind::Report, 5).prev, None);
+    assert_eq!(write(&mut r, &k, Kind::Report, 5).prev, Some(link(&first)), "the next names the first");
     // After a restart, the same incarnation goes on.
-    let mut again = Writer::resume(k.public().id(), NET, r.inc(), 2, 1, Pos::ORIGIN);
+    let mut again = Writer::resume(k.public().id(), NET, r.inc(), r.kept(), r.loose(), r.link(), r.head());
     assert_eq!(write(&mut again, &k, Kind::Report, 6).pos(), Pos::new(T + 1, 3));
-    let mut fresh = Writer::resume(k.public().id(), NET, T + 7, 0, 0, Pos::new(T, 1));
-    assert_eq!(write(&mut fresh, &k, Kind::Report, 7).prev, Some(Pos::new(T, 1)));
+    let mut fresh = Writer::resume(k.public().id(), NET, T + 7, 0, 0, w.head(), w.head());
+    assert_eq!(write(&mut fresh, &k, Kind::Report, 7).prev, Some(w.head()));
 }
 
 #[test]
@@ -238,13 +253,13 @@ fn a_restore_links_below_what_the_receiver_holds() {
     let author = k.public().id();
     let mut w = writer(&k);
     let old: Vec<_> = (1..=6).map(|n| write(&mut w, &k, Kind::Claim, n)).collect();
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     for e in &old[..5] {
         seqs(&offer(&mut f, &k, e));
     }
     // The author's store came back from a backup taken after its third,
     // so it lost four to six; the receiver has four and five.
-    let mut r = Writer::restore(author.clone(), NET, Pos::new(T, 3), T, T + 10);
+    let mut r = Writer::restore(author.clone(), NET, link(&old[2]), T, T + 10);
     let first = write(&mut r, &k, Kind::Claim, 7);
     let second = write(&mut r, &k, Kind::Claim, 8);
     assert!(matches!(offer(&mut f, &k, &second), Offer::Gap(Want { inc: T, from: 6, .. })));
@@ -263,7 +278,7 @@ fn a_prev_above_what_the_receiver_holds_is_a_gap() {
     let old: Vec<_> = (1..=4).map(|n| write(&mut w, &k, Kind::Claim, n)).collect();
     let mut r = Writer::restore(author.clone(), NET, w.head(), w.inc(), T + 10);
     let next = write(&mut r, &k, Kind::Claim, 5);
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     seqs(&offer(&mut f, &k, &old[0]));
     seqs(&offer(&mut f, &k, &old[1]));
     assert!(matches!(offer(&mut f, &k, &old[3]), Offer::Gap(_)));
@@ -278,17 +293,17 @@ fn linking_a_later_incarnation_closes_the_ones_before() {
     let author = k.public().id();
     let mut w = writer(&k);
     let old: Vec<_> = (1..=4).map(|n| write(&mut w, &k, Kind::Claim, n)).collect();
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     seqs(&offer(&mut f, &k, &old[0]));
     assert!(matches!(offer(&mut f, &k, &old[3]), Offer::Gap(_)));
     // Restored from right after the first: two to four are gone.
-    let mut r = Writer::restore(author.clone(), NET, Pos::new(T, 1), T, T + 10);
+    let mut r = Writer::restore(author.clone(), NET, link(&old[0]), T, T + 10);
     let first = write(&mut r, &k, Kind::Claim, 5);
     assert_eq!(seqs(&offer(&mut f, &k, &first)), [1]);
     assert_eq!(f.store().held_count(&author, NET), 0, "four can't apply any more");
     assert_eq!(offer(&mut f, &k, &old[1]), Offer::Stale);
     // An incarnation below the receiver's that it never linked.
-    let mut between = Writer::restore(author.clone(), NET, Pos::new(T, 1), T, T + 5);
+    let mut between = Writer::restore(author.clone(), NET, link(&old[0]), T, T + 5);
     assert_eq!(offer(&mut f, &k, &write(&mut between, &k, Kind::Claim, 6)), Offer::Stale);
 }
 
@@ -298,7 +313,7 @@ fn feeds_are_apart_per_author_and_group() {
     let mut wa = writer(&a);
     let mut wb = writer(&b);
     let mut wn = Writer::start(a.public().id(), "net_ffffffffffffffffffffffffffffffff", T);
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     for n in 1..=2 {
         seqs(&offer(&mut f, &a, &write(&mut wa, &a, Kind::Claim, n)));
         seqs(&offer(&mut f, &b, &write(&mut wb, &b, Kind::Claim, n)));
@@ -321,7 +336,7 @@ fn a_feed_is_scoped_to_a_network_or_a_space() {
     let e = write(&mut ws, &k, Kind::Claim, 1);
     assert_eq!(e.to_json()["group"], SPACE);
     assert_eq!(FeedEntry::decode(&e.encode()).unwrap(), e);
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     seqs(&offer(&mut f, &k, &e));
     assert_eq!(f.ack(&k.public().id(), NET).unwrap(), None, "the author's feed in the network is another feed");
     seqs(&offer(&mut f, &k, &write(&mut wn, &k, Kind::Claim, 1)));
@@ -353,7 +368,7 @@ fn script(ops: &[u8]) -> (SeedSigner, Vec<FeedEntry>) {
 /// Returns the kept entries applied, in order, and the loose ones.
 fn deliver(k: &SeedSigner, entries: &[FeedEntry], schedule: &[prop::sample::Index]) -> Result<(Vec<String>, Vec<String>), TestCaseError> {
     let kept_ids: Vec<String> = entries.iter().filter(|e| e.class() == Class::Kept).map(FeedEntry::id).collect();
-    let mut f = Feed::new(MemoryStore::new());
+    let mut f = feed();
     let (mut kept, mut loose) = (Vec::new(), Vec::new());
     let mut take = |f: &mut Feed<MemoryStore>, e: &FeedEntry| -> Result<(), TestCaseError> {
         match f.offer(e.clone().verify(&k.public()).unwrap()).unwrap() {

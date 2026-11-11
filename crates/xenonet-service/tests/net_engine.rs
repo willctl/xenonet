@@ -1560,7 +1560,7 @@ fn has_handoff(h: &Host, n: u32) -> bool {
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_on_a_fork() {
     use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
-    use xenonet_net::feed::{FeedEntry, Kind as EntryKind, Writer};
+    use xenonet_net::feed::{FeedEntry, Kind as EntryKind, Link, Writer};
     use xenonet_net::node::entry_body;
     let root = std::env::temp_dir().join(format!("xenonet-net-feeds-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -1592,7 +1592,7 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     let mut w = Writer::start(stranger.public().id(), net.id.as_str(), now_ms() as u64);
     let foreign = w.write(&stranger, EntryKind::Handoff, now_ms() as u64, offer(3)).unwrap();
     desk.frame(&hand(&b, &c, &entry_body(&foreign, None)));
-    let mut forged = FeedEntry { seq: 3, prev: None, body: offer(4), ..e2.clone() };
+    let mut forged = FeedEntry { seq: 3, prev: Some(Link::to(e2.pos(), e2.hash())), body: offer(4), ..e2.clone() };
     forged.sig = stranger.sign(xenonet_id::sign::Purpose::FEED, b"another entry").unwrap();
     desk.frame(&hand(&b, &c, &entry_body(&forged, None)));
     tokio::time::sleep(Duration::from_millis(500)).await;

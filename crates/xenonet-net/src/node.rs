@@ -336,7 +336,7 @@ const RESEND: usize = 500;
 
 /// Where a writer stands, as `Persist` keeps it.
 fn writer_at(w: &Writer) -> WriterAt {
-    WriterAt { inc: w.inc(), kept: w.kept(), loose: w.loose(), prev: w.prev().unwrap_or(Pos::ORIGIN) }
+    WriterAt { inc: w.inc(), kept: w.kept(), loose: w.loose(), link: w.link(), head: w.head() }
 }
 
 /// A presence's agents folded into what a host had: all of them on a full
@@ -1374,7 +1374,7 @@ impl Shared {
         if slot.is_none() {
             let author = self.identity.machine_key()?.public().id();
             let w = match self.opts.persist.feed_writer(&net.id)? {
-                Some(at) => Writer::resume(author, net.id.as_str(), at.inc, at.kept, at.loose, at.prev),
+                Some(at) => Writer::resume(author, net.id.as_str(), at.inc, at.kept, at.loose, at.link, at.head),
                 None => {
                     let w = Writer::start(author.clone(), net.id.as_str(), self.now() as u64);
                     self.opts.persist.put_feed_writer(&net.id, &author, writer_at(&w), None)?;

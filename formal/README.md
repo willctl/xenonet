@@ -13,10 +13,10 @@ npm run formal -- --model delivery --seed 0x6c7445f854ee425f  # reproduce one ru
 
 ## What `delivery.qnt` models
 
-The receiver is `Feed::offer` ([crates/xenonet-log/src/feed.rs](../crates/xenonet-log/src/feed.rs)) as phase 5 extends it: every kept entry names the id of the entry before it, a compact entry stands for the range before it, and a revoked proof is refused by store order. Those three are ahead of the code (revisions 11d, 12d and 15 of the phase 5 plan); the model is the spec the code will follow.
+The receiver is `Feed::offer` and `Feed::offer_compacted` ([crates/xenonet-log/src/feed.rs](../crates/xenonet-log/src/feed.rs)): every kept entry names the id of the entry before it, a compact entry stands for the range before it, and a revoked proof is refused by store order. The first two are in the code (revisions 11d, 12d and 15 of the phase 5 plan, its commit 17); refusing by store order is ahead of it, and the model is the spec the code will follow there.
 
 - **Authors** write kept entries (open or close an item), loose entries (messages) and compact entries. They restore to a new incarnation that links at the last entry they still hold, and a faulty author equivocates: it signs a second entry at a place it already used and carries on from it.
-- **Receivers** (R1, R2) hold entries behind a gap and send a Want, drop duplicates and stale incarnations, freeze an author on a fork, and keep loose dedupe records for the retention period.
+- **Receivers** (R1, R2) hold entries behind a gap and send a Want, drop duplicates and stale incarnations, freeze an author on a fork, and keep loose dedupe records for the retention period. The code keeps them longer than it keeps loose entries (`LOOSE_DEDUPE_MS`, 9 days, against 7 days' `RETENTION_MS`); the model's equal bounds are the tightest case of that rule. A receiver that applies a compact entry across a gap keeps the header chain's id for each place it skipped, so a later copy there is a duplicate and another entry there is a fork.
 - **The mailbox** keeps entries for offline receivers.
 - **The honest holder** (H, a receiver too) serves its applied entries after the receiver's ack, on one ordered stream, when a receiver reconnects.
 - **The adversary** is a member acting as holder or mailbox. It can't forge (entries are signed), but it serves any signed entry to anyone at any time: withholding, replays, subsets, stale incarnations, and the two sides of a fork to different receivers. The mailbox also replays, withholds and evicts. An iroh relay sees only QUIC ciphertext, so it has no part apart from the network.
@@ -44,7 +44,7 @@ An invariant can pass because the runs never reach the states it's about, so `np
 
 ## Scenarios
 
-`quint test` runs the plan's gates as fixed runs: a fork split across two holders (`splitForkTest`), cancel then compact (`cancelThenCompactTest`), a held entry behind a gap that a compact entry covers and a replay of it (`heldBehindCompactTest`), a fork inside a compacted range (`forkInCompactedRangeTest`), an entry signed before a revocation and delivered after it (`revokedWithheldTest`), a gap held and filled (`gapFilledTest`), and a restore below what a receiver applied (`restoreTest`).
+`quint test` runs the plan's gates as fixed runs: a fork split across two holders (`splitForkTest`), cancel then compact (`cancelThenCompactTest`), a held entry behind a gap that a compact entry covers and a replay of it (`heldBehindCompactTest`), a fork inside a compacted range (`forkInCompactedRangeTest`), the other side of a fork arriving at a place a compact entry let the receiver skip (`forkAfterJumpTest`; random runs rarely reach it, since it needs a fork, a compact entry, a jump and a late entry), an entry signed before a revocation and delivered after it (`revokedWithheldTest`), a gap held and filled (`gapFilledTest`), and a restore below what a receiver applied (`restoreTest`).
 
 ## Seeded bugs
 
@@ -69,8 +69,9 @@ On a 16-core M3 Max, `npm run formal` takes about 50 s. For `delivery.qnt`: type
 - Want routing, timeouts and rate limits (revision 11a, c), and mailbox quotas and Held receipts (revision 12a, b).
 - Presence, HLC and clock skew (revisions 13, 14), and `any` arbitration (revision 16).
 - Intents staying in `live` until their `until` passes (revision 15b): every item is a claim the author may end alone.
-- A compact entry is checked against the header chain of the range it covers (the ids and predecessors of the entries in it). The model takes that chain from the set of signed entries, so commit 17 has to send it with a compact entry to a receiver that holds or applied entries in the range, or a fork there goes unseen.
-- Receivers keep the id of every kept entry they applied (`FeedStore::kept`), which the fork rule needs; compaction on the receiver's side isn't modelled.
+- A compact entry is checked against the header chain of the range it covers (the ids and predecessors of the entries in it). The model takes that chain from the set of signed entries; the code gets it in the author's `Compacted` answer to a Want below its floor, which carries the headers of the range from the place wanted, and a compact entry never applies across a gap without them.
+- The live entries themselves: the model's compact entry lists open items, while the code's lists the places of the entries still open, which the `Compacted` answer carries and the receiver applies before the compact entry.
+- Receivers keep the id of every kept entry they applied, and of every place a compact entry let them skip (`FeedStore::kept`, `FeedStore::know`), which the fork rule needs; compaction on the receiver's side isn't modelled.
 - Liveness and fairness (above).
 
 ## What `space.qnt` models

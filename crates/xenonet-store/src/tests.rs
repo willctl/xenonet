@@ -319,13 +319,74 @@ mod feeds {
         let k = author();
         let mut w = Writer::start(k.public().id(), NET, 1_792_000_000_000);
         let e = w.write(&k, Kind::Handoff, 1, serde_json::json!({})).unwrap();
-        let at = WriterAt { inc: w.inc(), kept: 1, loose: 0, prev: Pos::ORIGIN };
+        let at = WriterAt { inc: w.inc(), kept: 1, loose: 0, link: w.link(), head: w.head() };
         db.put_feed_writer(NET, &k.public().id(), at, Some(&e)).unwrap();
         assert_eq!(db.feed_writer(NET).unwrap(), Some(at));
+        let back = Writer::resume(k.public().id(), NET, at.inc, at.kept, at.loose, at.link, at.head);
+        assert_eq!(back, w, "the writer comes back as it was");
         assert_eq!(db.feed_out_after(NET, Pos::ORIGIN, 10).unwrap(), std::slice::from_ref(&e));
         assert_eq!(db.feed_out_after(NET, e.pos(), 10).unwrap(), []);
         db.put_feed_ack(NET, "laptop", e.pos()).unwrap();
         db.put_feed_ack(NET, "laptop", Pos::ORIGIN).unwrap();
         assert_eq!(db.feed_ack(NET, "laptop").unwrap(), Some(e.pos()), "acks only move on");
+    }
+
+    /// The author writes through the store, as the network does.
+    fn put(db: &Db, w: &Writer, e: &xenonet_log::feed::FeedEntry) {
+        let at = WriterAt { inc: w.inc(), kept: w.kept(), loose: w.loose(), link: w.link(), head: w.head() };
+        db.put_feed_writer(NET, &author().public().id(), at, Some(e)).unwrap();
+    }
+
+    #[test]
+    fn a_compact_entry_drops_what_it_doesnt_keep_and_answers_a_member_behind() {
+        let (author_db, db) = (Db::memory().unwrap(), Db::memory().unwrap());
+        let k = author();
+        let t = 1_792_000_000_000;
+        let mut w = Writer::start(k.public().id(), NET, t);
+        let mut f = Feed::at(db.feeds(), t + 10);
+        let mut written = Vec::new();
+        for (i, path) in ["kept", "released", "held"].into_iter().enumerate() {
+            let e = w.write(&k, Kind::Claim, t + i as u64, serde_json::json!({ "path": path })).unwrap();
+            put(&author_db, &w, &e);
+            written.push(e);
+        }
+        // The member applied the first and holds the third behind a gap.
+        assert_eq!(seqs(&f.offer(written[0].clone().verify(&k.public()).unwrap()).unwrap()), [1]);
+        assert!(matches!(f.offer(written[2].clone().verify(&k.public()).unwrap()).unwrap(), Offer::Gap(_)));
+        let c = w.compact(&k, t + 5, &[1]).unwrap();
+        put(&author_db, &w, &c);
+        assert_eq!(author_db.feed_out_after(NET, Pos::ORIGIN, 10).unwrap(), [written[0].clone(), c.clone()], "the rest are dropped");
+        assert_eq!(author_db.feed_compacted(NET, c.pos()).unwrap(), None, "nothing compacted past it");
+        let answer = author_db.feed_compacted(NET, written[0].pos()).unwrap().unwrap();
+        assert_eq!((answer.compact.clone(), answer.live.len(), answer.headers.len()), (c.clone(), 0, 2));
+        let o = f.offer_compacted(answer.verify(&k.public()).unwrap()).unwrap();
+        let Offer::New(applied) = o else { panic!("{o:?}") };
+        assert_eq!((applied.entries.len(), applied.ended.clone()), (1, vec![]), "only the compact entry: the released claim was never applied here");
+        assert_eq!(db.feed_held_count(NET).unwrap(), 0, "the held claim is dropped");
+        assert_eq!(f.offer(written[1].clone().verify(&k.public()).unwrap()).unwrap(), Offer::Duplicate, "the chain's id is kept for the place it skipped");
+        let id = k.public().id();
+        let open: Vec<Pos> = xenonet_log::feed::FeedStore::open_upto(&db.feeds(), &id, NET, c.pos()).unwrap().into_iter().map(|o| o.at).collect();
+        assert_eq!(open, [written[0].pos(), c.pos()]);
+        // A new member gets the whole range: the live claim and three headers.
+        let fresh = author_db.feed_compacted(NET, Pos::ORIGIN).unwrap().unwrap();
+        assert_eq!((fresh.live, fresh.headers.len()), (vec![written[0].clone()], 3));
+    }
+
+    #[test]
+    fn loose_records_are_pruned_past_their_dedupe_period() {
+        use xenonet_log::feed::LOOSE_DEDUPE_MS;
+        let db = Db::memory().unwrap();
+        let k = author();
+        let t = 1_792_000_000_000;
+        let mut w = Writer::start(k.public().id(), NET, t);
+        let old = w.write(&k, Kind::Message, t, serde_json::json!({ "text": "old" })).unwrap();
+        assert_eq!(seqs(&Feed::at(db.feeds(), t).offer(old.clone().verify(&k.public()).unwrap()).unwrap()), [1]);
+        let new = w.write(&k, Kind::Message, t + LOOSE_DEDUPE_MS, serde_json::json!({ "text": "new" })).unwrap();
+        let mut later = Feed::at(db.feeds(), t + LOOSE_DEDUPE_MS + 1);
+        assert_eq!(seqs(&later.offer(new.clone().verify(&k.public()).unwrap()).unwrap()), [2]);
+        assert_eq!(later.offer(old.verify(&k.public()).unwrap()).unwrap(), Offer::Expired, "refused by its age once its record is gone");
+        assert_eq!(later.offer(new.verify(&k.public()).unwrap()).unwrap(), Offer::Duplicate);
+        let rows: i64 = db.read(|c| Ok(c.query_row("SELECT count(*) FROM feed_loose", [], |r| r.get(0))?)).unwrap();
+        assert_eq!(rows, 1);
     }
 }

@@ -8,8 +8,21 @@
   "entries": [
     {
       "what": "the feed's first entry",
-      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":1,\"prev\":{\"inc\":0,\"seq\":0},\"kind\":\"claim\",\"at\":1792512345679,\"body\":{\"project\":\"prj_atlas\",\"path\":\"src/api.rs\",\"note\":\"the route\"}}",
-      "id": "wFLAMYrO7XjqM6UDXWzsydFxaeHXZHIRyfD9xKjbpkI",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":1,\"prev\":{\"inc\":0,\"seq\":0},\"kind\":\"claim\",\"at\":1792512345679,\"bodyHash\":\"2JIKhx0Sra3hVouHiUOoVC_tliaz0hBPVbALSBxfxG0\"}",
+      "id": "p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0",
+      "header": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "group": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 1,
+        "prev": {
+          "inc": 0,
+          "seq": 0
+        },
+        "kind": "claim",
+        "at": 1792512345679,
+        "bodyHash": "2JIKhx0Sra3hVouHiUOoVC_tliaz0hBPVbALSBxfxG0"
+      },
       "entry": {
         "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
         "group": "net_00112233445566778899aabbccddeeff",
@@ -26,31 +39,60 @@
           "path": "src/api.rs",
           "note": "the route"
         },
-        "sig": "a26WHI4aurFZ51YF789yBlpQBeVQsxhEfCt1CDDYQiYfL647MEPhVtg3Xr7hoK2JAEW9XEDFaI78E_EY_GysCw"
+        "sig": "nZ12SlPtR0-ReHxPjbj0FkG9wH6ALh_Tb9L6Sm8A1o79Oz_UDjvT5ZRYEFCHv7xGNPGNsQpsRSLnmQMpI6w5CA"
       }
     },
     {
       "what": "a second kept entry",
-      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":2,\"kind\":\"intent\",\"at\":1792512345680,\"body\":{\"op\":\"make\",\"goal\":\"fix the build\"}}",
-      "id": "uLEPAuHU8KpOT6D-Fhn1rmdQYgCHLDerw4AbKFaF_Ew",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":2,\"prev\":{\"inc\":1792512345678,\"seq\":1,\"id\":\"p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0\"},\"kind\":\"intent\",\"at\":1792512345680,\"bodyHash\":\"4HM9Tn6MIWMVXmuBY8O1M0EoNiEKpZ-1A8qGoxADEvQ\"}",
+      "id": "2az8xaPW74OPHWTB7xscR3krpdHv6DiA2n8ceQyPlN0",
+      "header": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "group": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 2,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 1,
+          "id": "p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0"
+        },
+        "kind": "intent",
+        "at": 1792512345680,
+        "bodyHash": "4HM9Tn6MIWMVXmuBY8O1M0EoNiEKpZ-1A8qGoxADEvQ"
+      },
       "entry": {
         "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
         "group": "net_00112233445566778899aabbccddeeff",
         "inc": 1792512345678,
         "seq": 2,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 1,
+          "id": "p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0"
+        },
         "kind": "intent",
         "at": 1792512345680,
         "body": {
           "op": "make",
-          "goal": "fix the build"
+          "goal": "fix the build",
+          "until": 1792515945678
         },
-        "sig": "T3zejzSY0aDCchA2nGO1bC3eKWn3WOkI9IByZ-EJyyNpS3pSBSvIbhpsDRR3OxG_oTRpt26JkHiecBAHlgbdBA"
+        "sig": "xz-IeCh-PBu1eliAf1UVlT38PM3RPAYyFmb_gH4pOl1IgVLdbZkTfZqpQyqxkDhzEQh82jZB5CwHO8IfgKv0Dg"
       }
     },
     {
       "what": "a loose entry",
-      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":1,\"kind\":\"message\",\"at\":1792512345681,\"body\":{\"to\":\"laptop\",\"text\":\"héllo \\\"there\\\"\"}}",
-      "id": "i7GXPIBa-tsVtbo_FpkLhw3yb4OAG1ZE2_ELMMRnA-A",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":1,\"kind\":\"message\",\"at\":1792512345681,\"bodyHash\":\"83tVxTQSFLV2Ciong90jPngsW64e-kyuaA07J-eaq_Y\"}",
+      "id": "qk4O1HSmK303vDEHw-PHCHZHNqGdsJu8vEQu_rWRM88",
+      "header": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "group": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 1,
+        "kind": "message",
+        "at": 1792512345681,
+        "bodyHash": "83tVxTQSFLV2Ciong90jPngsW64e-kyuaA07J-eaq_Y"
+      },
       "entry": {
         "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
         "group": "net_00112233445566778899aabbccddeeff",
@@ -62,13 +104,72 @@
           "to": "laptop",
           "text": "héllo \"there\""
         },
-        "sig": "CVkplCzTpfRssU3K-BClnklUoVEBxa0-NYX-klANYUFIVmG7bqrl5DA2QVFhbW1nDnNPPx0ET0MOyztR-fZLDw"
+        "sig": "UkAWx2HL0lJDbZ4s2DeYJbMjZgoGc0UKzxqdq-pVvjNIvPtSRYmDkg0QQPWdITU7PgWc4yL_LYur3GnJgVAVDw"
+      }
+    },
+    {
+      "what": "a compact entry",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":3,\"prev\":{\"inc\":1792512345678,\"seq\":2,\"id\":\"2az8xaPW74OPHWTB7xscR3krpdHv6DiA2n8ceQyPlN0\"},\"kind\":\"compact\",\"at\":1792512345682,\"bodyHash\":\"ugJoVSUhwXs5PrEFmmMDT2inaKRzfHVVhCx64hudtCY\"}",
+      "id": "3NKSD_1xfceI9WZhy_cVhjCzwmr3RdgYELy3hhzuTbA",
+      "header": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "group": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 3,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 2,
+          "id": "2az8xaPW74OPHWTB7xscR3krpdHv6DiA2n8ceQyPlN0"
+        },
+        "kind": "compact",
+        "at": 1792512345682,
+        "bodyHash": "ugJoVSUhwXs5PrEFmmMDT2inaKRzfHVVhCx64hudtCY"
+      },
+      "entry": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "group": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 3,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 2,
+          "id": "2az8xaPW74OPHWTB7xscR3krpdHv6DiA2n8ceQyPlN0"
+        },
+        "kind": "compact",
+        "at": 1792512345682,
+        "body": {
+          "inc": 1792512345678,
+          "upto": 2,
+          "live": [
+            2
+          ],
+          "atId": "2az8xaPW74OPHWTB7xscR3krpdHv6DiA2n8ceQyPlN0",
+          "base": {
+            "inc": 0,
+            "seq": 0
+          }
+        },
+        "sig": "m1wzahwZnZ8-NT_QcdLYt2O8kWwKPGmQjZHc3IfVi_E04pWRAIvNChctGkwadf90A-PlXB8dC5o3BZcpxdnvCA"
       }
     },
     {
       "what": "the first after a restore",
-      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345688,\"seq\":1,\"prev\":{\"inc\":1792512345678,\"seq\":1},\"kind\":\"report\",\"at\":1792512345689,\"body\":{\"op\":\"note\",\"text\":\"back\"}}",
-      "id": "hnyVeXH8bHOIwvMYJ2YbthCqAqgH_z2rrTbvW_rsBs8",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"group\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345688,\"seq\":1,\"prev\":{\"inc\":1792512345678,\"seq\":1,\"id\":\"p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0\"},\"kind\":\"report\",\"at\":1792512345689,\"bodyHash\":\"q-4HCVhsJh23SkyzcVmwpKRs9T8nlKF2AvKk7PpvxQY\"}",
+      "id": "Qyf8HLr9dSm3jsbu47uhy-gtSgRxLgoMO04K0pJdPls",
+      "header": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "group": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345688,
+        "seq": 1,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 1,
+          "id": "p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0"
+        },
+        "kind": "report",
+        "at": 1792512345689,
+        "bodyHash": "q-4HCVhsJh23SkyzcVmwpKRs9T8nlKF2AvKk7PpvxQY"
+      },
       "entry": {
         "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
         "group": "net_00112233445566778899aabbccddeeff",
@@ -76,7 +177,8 @@
         "seq": 1,
         "prev": {
           "inc": 1792512345678,
-          "seq": 1
+          "seq": 1,
+          "id": "p-z5Zz6NWH3kkwV-4j5_nOtSNru4MFJwf4RT017M3D0"
         },
         "kind": "report",
         "at": 1792512345689,
@@ -84,7 +186,7 @@
           "op": "note",
           "text": "back"
         },
-        "sig": "o5bDlHIaZVtcnyRDjak6-J62PGy0aMR4f3FGzKas-OkxNAT-nxRiOAhdpZ52LdIEnR1vmNvf4jeH0azCvhnUCQ"
+        "sig": "NKbFSefrgHKA-laQMBFJlpZj0A6iWqOljm8AduY4t3MX8QTaKMJhgtpP3xPhakj_uSxh06DPt7OdzEjvt-9gAg"
       }
     }
   ]

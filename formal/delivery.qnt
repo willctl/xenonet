@@ -187,6 +187,14 @@ module deliveryCore {
     else
       st.revoked.keys().contains(e.proof)
 
+  // The id the header chain of a compact entry the receiver applied puts
+  // at `e`'s place, which the receiver skipped when it applied that entry
+  // across a gap, or -1. The receiver keeps those ids (`FeedStore::know`).
+  pure def skippedId(sg: int -> Entry, f: Recv, e: Entry): int =
+    f.kept.keys()
+      .filter(p => f.kept.get(p).kind == "compact" and p.inc == e.inc and e.seq <= f.kept.get(p).upto)
+      .fold(-1, (acc, p) => if (acc != -1) acc else ancestorAt(sg, f.kept.get(p), pos(e)))
+
   // What the receiver does with a kept entry: "dup", "fork", "stale",
   // "apply" or "hold" (a gap: hold it and send a Want).
   pure def classify(sg: int -> Entry, f: Recv, e: Entry): str =
@@ -194,11 +202,16 @@ module deliveryCore {
     val heldThere = f.held.filter(h => pos(h) == at)
     val keptPrev = f.kept.keys().contains(e.prev)
     val keptBase = f.kept.keys().contains(e.base)
+    val skipped = skippedId(sg, f, e)
     if (f.frozen) "frozen"
     else if (f.kept.keys().contains(at))
       if (f.kept.get(at).id == e.id) "dup" else "fork"
     else if (heldThere != Set())
       if (heldThere.exists(h => h.id == e.id)) "dup" else "fork"
+    // A place a compact entry covered: the chain's id there tells a copy
+    // of the entry it skipped from the other side of a fork.
+    else if (skipped != -1)
+      if (skipped == e.id) "dup" else "fork"
     // The entry names a different entry before it than the one applied
     // there: one side of a fork, whichever holder it came from.
     else if (BUG != "noPrevCheck" and keptPrev and f.kept.get(e.prev).id != e.prevId) "fork"
@@ -790,6 +803,23 @@ module deliveryCore {
       .then(injectTo("R1", 1))
       .then(injectTo("R1", 3))
       .then(injectTo("R1", 5))
+      .expect(feedOf(s, "R1", "A").frozen and safety)
+
+  // A receiver that applied a compact entry across a gap, then gets the
+  // other side of a fork at a place it skipped: the chain's id there
+  // shows it, and a copy of the side on the chain is a duplicate.
+  run forkAfterJumpTest =
+    init
+      .then(writeBy("A", "open", 1, "p1"))      // 1 at (1,1)
+      .then(writeBy("A", "open", 2, "p1"))      // 2 at (1,2)
+      .then(equivocateBy("A", "close", 1))      // 3 at (1,2)
+      .then(writeBy("A", "close", 2, "p1"))     // 4 at (1,3), after 3
+      .then(compactBy("A"))                     // 5, after 4
+      .then(injectTo("R1", 1))
+      .then(injectTo("R1", 5))
+      .then(injectTo("R1", 3))
+      .expect(not(feedOf(s, "R1", "A").frozen) and feedOf(s, "R1", "A").latest == { inc: 1, seq: 4 } and safety)
+      .then(injectTo("R1", 2))
       .expect(feedOf(s, "R1", "A").frozen and safety)
 
   // Signed with p1 before the revocation, withheld by the mailbox, and
