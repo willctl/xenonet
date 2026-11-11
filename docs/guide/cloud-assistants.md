@@ -2,7 +2,9 @@
 
 An agent that runs somewhere else, such as an OpenAI dot in ChatGPT's cloud, can read session statuses on this computer through a connection you pair. XenoNet calls it a remote actor. It can see which sessions are working, waiting, stuck or finished, and how much they used. It can't change anything.
 
-This is new and experimental. It has been tested on Windows with a local MCP client and with made-up data. It hasn't been tested with a real dot through OpenAI's tunnel yet, so treat dot support as unconfirmed until you've run the checks under [Trying it first](#trying-it-first).
+A remote actor holds the same kind of grant as every other actor ([Tokens](actors.md#tokens)): a token signed by this machine, with its scopes kept beside it. The connection uses the grant's read right, scoped to the projects you pick, and the six tools below are all it serves.
+
+This is experimental. It has been tested on Windows with a local MCP client and with made-up data. It hasn't been tested with a real dot through OpenAI's tunnel yet, so treat dot support as unconfirmed until you've run the checks under [Trying it first](#trying-it-first).
 
 ## What it can read
 
@@ -32,7 +34,7 @@ It never gets transcripts, prompts, messages, a question's text, tool names, arg
 5. Choose `Preview what leaves`. XenoNet shows made-up answers first, then the exact fields it would send for the projects you picked.
 6. Choose `Approve and pair`. XenoNet shows the command your tunnel client runs.
 
-XenoNet writes the connection's grant, the token it reads with, to its state folder, readable only by your account, and never shows it. The command holds no secret:
+XenoNet writes the connection's grant, the token it reads with, to its state folder, readable only by your account, and never shows it. XenoNet itself keeps only the token's revocation id. The command holds no secret:
 
 ```bash
 xenonet mcp assistant --grant gr_…
@@ -89,7 +91,7 @@ Then pair a connection without ticking the verified box, which still reads made-
 
 - `Revoke` on a connection's row stops it at once, for good, and deletes its credential. Its actor, its history and its other connections stay.
 - `Cloud access` beside Remote connections turns every connection off at once. Turning it on again happens only in XenoNet's window.
-- From a terminal, `xenonet assistant revoke <grant>` and `xenonet assistant disable` do the same, and work with XenoNet stopped. They leave a tombstone in XenoNet's state folder that every version of XenoNet honors, so restarting, updating or restoring an older copy of XenoNet's database can't bring a connection back.
+- From a terminal, `xenonet assistant revoke <grant>` and `xenonet assistant disable` do the same, and work with XenoNet stopped. They leave a tombstone in XenoNet's state folder that XenoNet honors whatever its store says, so restarting, updating or restoring XenoNet's store from a backup can't bring a connection back.
 - Removing the actor in the Actors panel revokes all of its connections.
 
 Revoking doesn't take back what a remote actor already read. Revoke the tunnel or the endpoint with its provider too.
