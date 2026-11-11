@@ -7,26 +7,25 @@ on the map, in the live tailer, in stats, search and the doctor, and they can
 see and message the other sessions once you connect Grok Build.
 
 This note says what Grok Build keeps, how XenoNet reads it, what XenoNet
-writes into Grok Build's settings, and what's still to do. It was written
-against Grok Build 1.0.50, its source and the user guide that ships with it
-in `~/.grok/docs/user-guide/`, and the session files Grok Build 1.0.70 wrote
-read through the schemas and the reader. The tests' Grok Build files are made
-up in the shapes the source writes.
+writes into Grok Build's settings, how XenoNet starts Grok Build sessions,
+and what's still to do. It's checked against Grok Build 1.0.50, its source
+and the user guide that ships with it in `~/.grok/docs/user-guide/`, and
+the session files Grok Build 1.0.70 writes. The tests' Grok Build files
+are made up in the shapes the source writes.
 
 ## Where it sits
 
-Grok Build is an app in the registry (`core/apps.js`, schema `app/v1`), with
-the id `grok`, like Claude Code's and Codex's entries:
+Grok Build is an app in the registry (`src/shared/apps.js`, schema
+`app/v1`), with the id `grok`, like Claude Code's and Codex's entries, and
+its adapter is `adapters/grok-build` ([vendor-layer.md](vendor-layer.md)):
 
 - `roots`: `GROK_HOME`, else `~/.grok`.
 - `context`: a 256,000-token window, until its usage updates say the size.
 - `team`: the Apple team that signs the `grok` binary.
 - `has`: `lines` (its updates go through the shared event stream),
-  `sessions`, `connect`, `processes` and `caller`.
-
-The Rust copy of the registry is generated from it (`node scripts/apps.mjs`).
-Each capability is the same in JS and in Rust. The JS is the contract the
-tests hold the binary to.
+  `sessions`, `connect`, `delivery`, `processes` and `caller`.
+- `acp`: `grok agent --no-leader stdio`, how XenoNet starts one of its
+  sessions as an ACP agent (below).
 
 ## What Grok Build keeps
 
@@ -49,8 +48,9 @@ Everything lives under `~/.grok`, or the folder `GROK_HOME` names.
 
 ### Sessions
 
-`core/grok.js` (and `crates/xenonet-sources/src/grok.rs`) lists the session
-folders on every refresh. Grok Build has no listing to ask: `grok sessions
+`adapters/grok-build/src/reader/listing.rs` lists the session folders,
+and the watcher (`adapters/grok-build/src/watch.rs`) says when one
+changes. Grok Build has no listing to ask: `grok sessions
 list` prints one folder's sessions, for people.
 
 - A session is `grok:<session id>`, the id in `summary.json`'s `info`, or
@@ -76,16 +76,15 @@ list` prints one folder's sessions, for people.
 
 Both files, and `usage.json` and `meta.json`, go through lenient schemas
 (`spacexai/grok-build/session-summary`, `spacexai/grok-build/update-line`,
-`spacexai/grok-build/usage` and `spacexai/grok-build/subagent-meta`, in
-`core/schema/vendor/spacexai/grok-build.js`), so a change in Grok's
-formats shows as drift instead of quietly emptying the map. The daily
-provider drift check watches Grok Build's releases too.
+`spacexai/grok-build/usage` and `spacexai/grok-build/subagent-meta`, under
+`schemas/vendor/spacexai/grok-build/`), so a change in Grok's formats
+shows as drift instead of quietly emptying the map.
 
 ### The conversation and live activity
 
-`GrokLine` (`core/lines.js`) reads a line of `updates.jsonl`, and the
-`grok` mapper (`core/events.js`, and `line_events.rs`) turns it into the
-events the tailer, stats and search read for every app.
+`GrokLine` (`crates/xenonet-sources/src/lines.rs`) reads a line of
+`updates.jsonl`, and the `grok` mapper (`line_events.rs`) turns it into
+the events the tailer, stats and search read for every app.
 
 | ACP update | Events |
 | --- | --- |
@@ -118,7 +117,7 @@ The updates say how full the context is (`usage_update`), not what a call
 took. Grok keeps that in the session's `usage.json`, which it writes as
 each turn ends, before the update that ends the turn
 (`session/usage_file.rs` in its source). XenoNet reads it with
-`grokUsageTurns` (`core/grok-usage.js`, `usage_turns` in `grok.rs`), through
+`usage_turns` (`adapters/grok-build/src/reader/usage.rs`), through
 its lenient schema (`spacexai/grok-build/usage`), and counts it as it
 counts Claude Code's calls:
 
@@ -158,7 +157,7 @@ what Grok recorded; when none of its calls today has a cost, it's null
 any app has a price. The model has no price either way, so it's named
 under "not counted". `xenonet spend` shows it as unknown.
 
-A session's stats (`core/stats.js`) put each turn's calls among its lines'
+A session's stats put each turn's calls among its lines'
 events, when the turn ended. Their cost isn't split by kind of token, so
 the kinds' costs are null; a turn whose calls have no cost has a null
 cost; and the context's fill comes from the usage updates.
@@ -173,7 +172,7 @@ XenoNet tells by the `grok` command or its folder.
 - `[mcp_servers.xenonet]`, with its `env` table, in `config.toml`, and
   `xenonet-console` beside it for the installed XenoNet. `grok mcp add`
   rewrites the whole file and drops your comments, so XenoNet edits the
-  text itself (`core/engine/toml.js`, `toml.rs`). It takes out its own
+  text itself (`adapters/grok-build/src/connect/toml.rs`). It takes out its own
   tables and adds them at the end. Every other line stays as it was, it
   keeps the file's mode, and it saves a copy as
   `config.toml.before-xenonet` the first time. A server of that name
@@ -211,19 +210,18 @@ Grok also runs Claude Code's hooks (`[compat.claude] hooks`, on unless you
 turn it off), with its own payload. XenoNet's Claude Code routes pass over
 an event with Grok's camelCase keys (`hookEventName`, or `sessionId`
 without `session_id`), unchecked, so a Grok session is heard once, on its
-own route (`hook_written_by` in `xenonet-adapter`'s apps, `hookWrittenBy` in
-`core/apps.js`).
+own route (`hook_written_by` in `xenonet-adapter`'s apps).
 
 ### Which session is calling
 
 Grok Build runs a session's MCP servers with `GROK_SESSION_ID` set, so the
-xenonet MCP server knows its session (`CALLERS` in `mcp/xenonet.js`, and
-`xenonet.rs`). A server Grok started for a session serves no actor.
+xenonet MCP server knows its session (`crates/xenonet-mcp/src/xenonet.rs`).
+A server Grok started for a session serves no actor.
 
 Requests in a Grok Build session's name must come from a `grok` process,
 or from under one, as Codex's must come from Codex
-(`core/engine/verify.js`). XenoNet tells Grok's processes apart by their
-program (`core/processes.js`): `grok`, the `grok-<os>-<arch>` binaries in
+(`crates/xenonet-engine/src/verify.rs`). XenoNet tells Grok's processes
+apart by their program (the adapter's `processes` rules): `grok`, the `grok-<os>-<arch>` binaries in
 `~/.grok/downloads`, and what `~/.grok/bin` links, where the installer
 also puts an `agent` command that only counts there, since Cursor's CLI is
 called `agent` too.
@@ -232,19 +230,41 @@ called `agent` too.
 
 An MCP server's panel lists the Grok Build settings that name it: the
 user's `config.toml`, and `.grok/config.toml` in the folder of each Grok
-session that called it (`core/mcp-info.js`, `xenonet-integrations`' `mcp_info.rs`).
+session that called it (`xenonet-integrations`' `mcp_info.rs`).
 XenoNet reads servers written as tables of their own
 (`[mcp_servers.<name>]`, the form `grok mcp add` writes), with their
 command, args, url, `enabled` and the names of their `env` keys, never
-the values (`mcpServers` in `core/engine/toml.js`, `toml.rs`). Grok also
+the values (`adapters/grok-build/src/connect/toml.rs`). Grok also
 reads `.grok/config.toml` in the folders between the repo's root and the
 session's; XenoNet reads only the session's own.
 
 ### Cloud assistants
 
 The assistant protocol counts Grok Build as a source beside Claude Code
-and Codex (`SOURCES` in `core/schema/assistant.js`), and its session ids
-are `grok:<id>`. With no `~/.grok`, the source is ready with no sessions.
+and Codex (`crates/xenonet-assistant`), and its session ids are
+`grok:<id>`. With no `~/.grok`, the source is ready with no sessions.
+
+## Starting a session
+
+XenoNet starts Grok Build sessions over ACP, with the generic client in
+`adapters/acp` and the registry's `acp` command, `grok agent --no-leader
+stdio`: a process of its own for each session, never a leader shared with
+your own sessions. A start (`xenonet start`, the `start_session` tool, a
+start from another machine) is decided and limited like any other
+([delegation.md](../guide/delegation.md)); then XenoNet runs the agent with
+none of its credentials in the environment, opens a session in the folder
+and sends the first prompt as a turn, framed as who asked rather than as
+the user's words (`crates/xenonet-runtime/src/acp.rs`). The session stays
+open between turns, and a message routed to it is its next turn, after the
+router's consent and wake checks.
+
+The agent's permission requests become prompts XenoNet holds until they're
+answered. An Allow picks the agent's allow-once option and nothing wider,
+and needs what any Allow needs: the person's presence, an actor's allow
+scope or the person's delegation. A Deny picks reject-once. XenoNet offers
+the agent no file system or terminal of its own, so it works through its
+own tools, under its own sandbox and prompts, and it never answers
+`authenticate`: you sign in to Grok Build yourself.
 
 ## The doctor
 
@@ -268,9 +288,9 @@ readers: their replies come in a chunk a sentence after a thought, and
 their ledgers record tokens and no cost, as on a SuperGrok sign-in.
 
 No desktop app hosts Grok Build's sessions, so they have no "open in app",
-and XenoNet shows the session instead. If one does, it fits in beside `grok.js`
-the way Claude desktop fits beside Claude Code, with an `open-app` action in
-`core/open.js` and its name in `APP_DESKTOP` in `src/theme.js`. Grok Bot,
+and XenoNet shows the session instead. If one does, it fits in as an
+`opener` in its adapter, the way Claude desktop fits beside Claude Code,
+with its name in `APP_DESKTOP` in `src/theme.js`. Grok Bot,
 SpaceXAI's always-on agent, stays an actor.
 
 ## Still to do
