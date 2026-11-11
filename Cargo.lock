@@ -3356,6 +3356,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-git"
+version = "0.2.0"
+dependencies = [
+ "xenonet-adapter",
+ "xenonet-model",
+ "xenonet-os",
+]
+
+[[package]]
 name = "xenonet-grok-bot"
 version = "0.2.0"
 dependencies = [
