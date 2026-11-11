@@ -41,6 +41,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 use xenonet_adapter::apps::is_session_id;
 use xenonet_api::From;
+use xenonet_authz::Information;
 use xenonet_engine::delivery::policy::Guard;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
 use xenonet_engine::host::Collaborators;
@@ -806,13 +807,13 @@ fn envelope(from: &str, mid: &str, at: f64, sender: &str, kind: &str, name: Opti
 }
 
 /// A message as the store takes it: to `target`, with its recipients and
-/// envelope.
-fn stored_message(sender: &str, target: &str, body: &str, reply_to: Option<f64>, env: &Value) -> Value {
+/// envelope. Its text is information: stored and shown, never decided on.
+fn stored_message(sender: &str, target: &str, body: &Information<String>, reply_to: Option<f64>, env: &Value) -> Value {
     obj(vec![
         ("sender", json!(sender)),
         ("target", json!(target)),
         ("scope", Value::Null),
-        ("body", json!(body)),
+        ("body", json!(body.read())),
         ("replyTo", reply_to.map_or(Value::Null, number)),
         ("recipients", json!([target])),
         ("envelope", env.clone()),
@@ -874,19 +875,22 @@ fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
     let (Some(mid), Some(sender), Some(kind), Some(target), Some(body)) = (s(b, "mid"), s(b, "sender"), s(b, "senderKind"), s(b, "target"), s(b, "body")) else {
         return Err(fail("a message without its mid, sender, target or body"));
     };
+    // What it says is information from here on: the decisions below read
+    // the frame's sender and the act's authority, never the text.
+    let body = Information::new(body);
     let sender_ok = match kind.as_str() {
         "person" => sender == YOU,
         "agent" | "actor" => own_id(&sender),
         _ => false,
     };
-    if !mid.starts_with("msg_") || !sender_ok || body.is_empty() || body.chars().count() > 16000 {
+    if !mid.starts_with("msg_") || !sender_ok || body.read().is_empty() || body.read().chars().count() > 16000 {
         return Err(fail("a message that isn't network/message/v2"));
     }
     let authority = b.get("authority").cloned().unwrap_or(Value::Null);
     // A start request: the starts' own (starts.rs), answered by receipts
     // keyed by its mid. An older XenoNet refuses the target below.
     if target == xenonet_engine::delivery::starts::TARGET {
-        crate::starts::start_in(w, from, &mid, &kind, &sender, &body, &authority, at);
+        crate::starts::start_in(w, from, &mid, &kind, &sender, body, &authority, at);
         return Ok(());
     }
     let Some(mut g) = crate::ground::ground(w, None) else {
@@ -947,7 +951,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
         return Ok(());
     }
     // This host's own limits hold for it too: paused, too fast, a repeat.
-    if let Err(e) = w.policy.check_send(&sender_id, std::slice::from_ref(&view), &body, hops) {
+    if let Err(e) = w.policy.check_send(&sender_id, std::slice::from_ref(&view), body.read(), hops) {
         receipt(w, from, &mid, &target, "refused", Some(&why(&Fail::from(e))));
         return Ok(());
     }
@@ -978,7 +982,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
         ("from", json!(sender_id)),
         ("to", json!([target])),
         ("target", json!(target)),
-        ("text", json!(format!("{framing}\n{body}"))),
+        ("text", json!(format!("{framing}\n{}", body.read()))),
         ("ts", number(now)),
         ("verified", env["line"].clone()),
         ("attestation", env["auth"]["attestation"].clone()),
@@ -1475,7 +1479,7 @@ fn note_with(w: &Runtime, sender: &str, target: &str, words: &str, host: Option<
             env = envelope(h, &mid, now_ms(), sender, "agent", None, 0.0);
         }
     }
-    let stored = stored_message(sender, target, words, None, &env);
+    let stored = stored_message(sender, target, &Information::new(words.to_string()), None, &env);
     let now = now_ms();
     let Ok(id) = store(w, |s| s.send(&stored, now)) else { return };
     w.mail.wake(target);
@@ -1582,8 +1586,13 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
             if store(w, |st| st.open_handoffs_from(from, now))? >= MAX_HANDOFFS {
                 return Err(fail(format!("{from} has {MAX_HANDOFFS} handoffs open here, the most a host keeps")));
             }
-            // As the schema has them: what's past its limits is cut.
+            // As the schema has them: what's past its limits is cut. What
+            // it says is information, stored to show the taker, never
+            // decided on: the act was the member's handoff, decided above.
             let field = |k: &str, max: usize| s(b, k).map(|t| clip(&t, max));
+            let note = |k: &str, max: usize| field(k, max).map(Information::new);
+            let (goal, done, next) = (note("goal", 2000), note("done", 8000), note("next", 8000));
+            let text = |t: &Option<Information<String>>| t.as_ref().map(|t| t.read().clone());
             let files: Vec<Value> =
                 b.get("files").and_then(Value::as_array).map(|f| f.iter().filter_map(Value::as_str).take(200).map(|p| json!(clip(p, 1000))).collect()).unwrap_or_default();
             let commit = s(b, "commit").filter(|c| (7..=64).contains(&c.len()) && c.bytes().all(|x| x.is_ascii_hexdigit()));
@@ -1597,9 +1606,9 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
                 ("to_repo", json!(s(&to, "repoKey").map(|k| clip(&k, 300)))),
                 ("to_scope", Value::Null),
                 ("to_host", json!(s(&to, "host").filter(|h| xenonet_model::ids::is_host_id(h)))),
-                ("goal", json!(field("goal", 2000))),
-                ("done", json!(field("done", 8000))),
-                ("next", json!(field("next", 8000))),
+                ("goal", json!(text(&goal))),
+                ("done", json!(text(&done))),
+                ("next", json!(text(&next))),
                 ("files", json!(Value::Array(files).to_string())),
                 ("branch", json!(field("branch", 200))),
                 ("commit_sha", json!(commit)),

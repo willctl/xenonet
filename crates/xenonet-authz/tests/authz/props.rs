@@ -41,7 +41,7 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
         Action::Read => (m1(), Act::Read { scope, filters: filters.map(|f| [u8::from(f); 32]) }),
         Action::Admit => (Resource::Network(network()), Act::Admit { machine: machine("m3"), role: Role::Member }),
         Action::Widen => (Resource::Network(network()), Act::Widen { machine: machine("m1"), settings: Settings::default() }),
-        Action::Publish => (Resource::Network(network()), Act::Publish { service: ServiceId::new("web").unwrap() }),
+        Action::Publish => (Resource::Network(network()), Act::Publish { service: ServiceId::new("web").unwrap(), spec: [0; 32] }),
         Action::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("x").unwrap(), rights: vec![Action::Message], scopes: [0; 32] }),
         Action::UseGateway => (m1(), Act::UseGateway),
         Action::Revoke => (m1(), Act::Revoke { what: Revocation::Token(vec![1]) }),

@@ -93,10 +93,11 @@ pub trait Engine: Send + Sync {
         pending(ENGINE)
     }
     /// A run's permission prompt (the xenonet MCP server's `permission`
-    /// tool), from `me`, titled `title`: held until you answer. The answer
-    /// Claude Code takes; refused (403) for a caller that isn't a run
-    /// XenoNet started.
-    async fn permission(&self, _me: &str, _title: Option<String>, _body: Value) -> R<Value> {
+    /// tool), from `me`, titled `title`, with how the route's process check
+    /// found the caller (`by`): held until you answer. The answer Claude
+    /// Code takes; refused (403) for a caller that isn't a run XenoNet
+    /// started.
+    async fn permission(&self, _me: &str, _title: Option<String>, _body: Value, _by: crate::cores::door::Attestation) -> R<Value> {
         pending(ENGINE)
     }
     /// The permission prompts waiting: this machine's and the others'.

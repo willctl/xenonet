@@ -373,8 +373,12 @@ pub enum Act {
         machine: MachineId,
         settings: Settings,
     },
+    /// Publishing a service to the network: its name, and the hash of
+    /// what it publishes (its address, paths and callers), so a presence
+    /// for one publication can't be put on a wider one.
     Publish {
         service: ServiceId,
+        spec: [u8; 32],
     },
     /// Issuing an actor's grant, or widening it: its rights and its
     /// scopes (the hash of the rows the receiver keeps of them), so a
@@ -559,7 +563,7 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         Act::Read { scope, filters } => c.field(scope.as_str()).bytes(filters.as_ref().map_or(&[][..], |f| &f[..])),
         Act::Admit { machine, role } => c.field(machine.as_str()).field(role.as_str()),
         Act::Widen { machine, settings } => c.field(machine.as_str()).field(settings.start.as_str()).field(settings.wake.as_str()),
-        Act::Publish { service } => c.field(service.as_str()),
+        Act::Publish { service, spec } => c.field(service.as_str()).bytes(spec),
         Act::RegisterActor { slug, rights, scopes } => {
             c.field(slug.as_str());
             let mut rights = rights.clone();

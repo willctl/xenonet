@@ -106,20 +106,24 @@ impl Ask {
     }
 }
 
-/// An ask held here, its kind of prompt, and its answer once there is one:
-/// allow or deny, and who gave it.
+/// An ask held here, its kind of prompt, how its caller was checked when
+/// it asked, and its answer once there is one: allow or deny, and who gave
+/// it.
 struct Held {
     ask: Ask,
     kind: xenonet_authz::PromptKind,
+    by: xenonet_authz::Attestation,
     answer: Option<(String, String)>,
 }
 
-/// An ask waiting here, as the ground reads it: its session, its kind, and
-/// where its run was started from under your delegation (None: it wasn't;
-/// Some(None): from this machine).
+/// An ask waiting here, as the ground reads it: its session, its kind, how
+/// the caller was checked when it asked, and where its run was started
+/// from under your delegation (None: it wasn't; Some(None): from this
+/// machine).
 pub struct Waiting {
     pub session: String,
     pub kind: xenonet_authz::PromptKind,
+    pub by: xenonet_authz::Attestation,
     pub delegated_from: Option<Option<String>>,
 }
 
@@ -254,10 +258,15 @@ fn to_windows(w: &Runtime, me: &str, body: &Value) {
 }
 
 /// The permission tool's call from `me`: `tool_name`, `input` and
-/// `tool_use_id`, as Claude Code passes them. Held until you answer, or the
-/// hold runs out; then the answer Claude Code takes. Err(403) for a caller
-/// that isn't a run XenoNet started.
-pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value) -> Result<Value, (u16, String)> {
+/// `tool_use_id`, as Claude Code passes them, with what the process check
+/// found of the caller (`by`). Held until you answer, or the hold runs
+/// out; then the answer Claude Code takes. Err(403) for a caller that
+/// isn't a run XenoNet started.
+///
+/// Only a run XenoNet started asks, but the caller is that run only as far
+/// as the process check could see: where it saw nothing, the ask is
+/// recorded as unchecked, and nobody but the person may Allow it.
+pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet_authz::Attestation) -> Result<Value, (u16, String)> {
     let Some(run) = run_of_soon(w, me) else {
         return Err((403, "only the sessions XenoNet runs ask through this tool; anyone else asks in its own app".into()));
     };
@@ -271,7 +280,7 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value) -> Result<V
     let kind = prompt_kind(&tool);
     if let Some((folder, from)) = crate::starts::delegated(w, me) {
         match delegation::judge(&tool, &input, &folder, &w.setup.home, cfg!(windows)) {
-            Verdict::Allow if !reads_env(&input) => match granted(w, &id, Waiting { session: me.to_string(), kind, delegated_from: Some(from) }) {
+            Verdict::Allow if !reads_env(&input) => match granted(w, &id, Waiting { session: me.to_string(), kind, by, delegated_from: Some(from) }) {
                 Ok(()) => {
                     w.log("info", "ask", &format!("{me}'s {tool} ({}) is allowed by your delegation", input_words(&input, &w.setup.home)));
                     return Ok(answer_json("allow", &input, ""));
@@ -304,7 +313,7 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value) -> Result<V
     };
     let id = a.id.clone();
     let shown = a.to_json(here.as_deref());
-    w.asks.here.locked().insert(id.clone(), Held { ask: a, kind, answer: None });
+    w.asks.here.locked().insert(id.clone(), Held { ask: a, kind, by, answer: None });
     w.log("info", "ask", &format!("{me} asks to run {tool}: waiting for you"));
     w.emit(From::Engine, "ask", shown.clone());
     let mut out = shown;
@@ -370,12 +379,12 @@ fn answer_act(session: &str, ask: &str, decision: &str) -> Result<(xenonet_authz
 
 /// The asks waiting here, for the ground's facts.
 pub fn waiting(w: &Runtime) -> Vec<(String, Waiting)> {
-    let held: Vec<(String, String, xenonet_authz::PromptKind)> =
-        w.asks.here.locked().iter().filter(|(_, h)| h.answer.is_none()).map(|(id, h)| (id.clone(), h.ask.session.clone(), h.kind)).collect();
+    let held: Vec<(String, String, xenonet_authz::PromptKind, xenonet_authz::Attestation)> =
+        w.asks.here.locked().iter().filter(|(_, h)| h.answer.is_none()).map(|(id, h)| (id.clone(), h.ask.session.clone(), h.kind, h.by)).collect();
     held.into_iter()
-        .map(|(id, session, kind)| {
+        .map(|(id, session, kind, by)| {
             let delegated_from = crate::starts::delegated(w, &session).map(|(_, from)| from);
-            (id, Waiting { session, kind, delegated_from })
+            (id, Waiting { session, kind, by, delegated_from })
         })
         .collect()
 }
@@ -499,9 +508,11 @@ pub fn answer_sent(w: &Runtime, id: &str, decision: &str) {
 }
 
 /// An ask from another machine (`message_in` routes the target here), or
-/// its end.
-pub fn ask_in(w: &Runtime, from: &str, body: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(body) else { return };
+/// its end. What it asks is information, shown on this console: the
+/// answer is decided on the ask's id and the person's presence, never on
+/// its text.
+pub fn ask_in(w: &Runtime, from: &str, body: &xenonet_authz::Information<String>) {
+    let Ok(v) = serde_json::from_str::<Value>(body.read()) else { return };
     let side = &w.asks;
     match v.get("op").and_then(Value::as_str) {
         Some("ask") => {

@@ -365,6 +365,25 @@ impl Identity {
         self.append(at_window, person::Op::Undelegate { id: id.to_string() }, false, "end a delegation of yours", now)
     }
 
+    /// Revokes another of this person's devices, as for a lost machine:
+    /// signed by this device with its presence (it asks once, or twice
+    /// where the device key asks for its signature too). A revoked device
+    /// signs nothing that counts again, here or at any machine that holds
+    /// the entry. Never this machine's own device, which would leave it
+    /// unable to act as the person; revoke it from another machine.
+    pub fn revoke_device(&self, at_window: bool, device: &str, now: i64) -> R<Vec<person::Entry>> {
+        if self.device_id().as_deref() == Some(device) {
+            return Err(NetError::new(409, "own-device", "that's this machine's own device: revoke it from another machine of yours"));
+        }
+        let known = self.own.reading().person().and_then(|p| p.device(device).map(Device::active));
+        match known {
+            None => return Err(NetError::new(404, "no-device", format!("{device} isn't one of your devices"))),
+            Some(false) => return Err(NetError::new(409, "no-change", format!("{device} can't sign already"))),
+            Some(true) => {}
+        }
+        self.append(at_window, person::Op::Revoke(person::Revocation::Device(device.to_string())), true, "revoke a device of yours", now)
+    }
+
     // An entry of this person's own, signed by this device, with its
     // presence when `present`.
     fn append(&self, at_window: bool, op: person::Op, present: bool, reason: &str, now: i64) -> R<Vec<person::Entry>> {
@@ -590,6 +609,35 @@ mod tests {
         laptop.accept(&block, &device, "answer", &act, 20).unwrap();
         let later = Identity::open(&b, Some(Arc::new(Fake))).unwrap();
         assert!(later.accept(&block, &device, "answer", &act, 30).is_err(), "seen before a restart");
+        let _ = std::fs::remove_dir_all(a);
+        let _ = std::fs::remove_dir_all(b);
+    }
+
+    #[test]
+    fn another_device_is_revoked_from_the_window_and_never_this_one() {
+        let (a, b) = (dir("revoke-a"), dir("revoke-b"));
+        let studio = Identity::open(&a, Some(Arc::new(Fake))).unwrap();
+        studio.found(true, "studio", 1).unwrap();
+        let laptop = Identity::open(&b, Some(Arc::new(Fake))).unwrap();
+        let key = laptop.device_key().unwrap().unwrap().signer.public();
+        studio.pair(true, NewDevice { key: key.clone(), kind: DeviceKind::Weaker, label: "laptop".into() }, 2).unwrap();
+        assert!(laptop.adopt(&studio.chain()) && laptop.can_act());
+        let lost = key.id();
+        // Away from the window, nothing is asked or signed.
+        assert_eq!(studio.revoke_device(false, &lost, 3).unwrap_err().code, "window");
+        // This machine's own device, or one the person doesn't have: refused.
+        assert_eq!(studio.revoke_device(true, &studio.device_id().unwrap(), 3).unwrap_err().code, "own-device");
+        assert_eq!(studio.revoke_device(true, "xns1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 3).unwrap_err().code, "no-device");
+        // laptop's device, revoked with studio's presence: it can't sign as
+        // the person any more, and laptop, taking the entry, can't act.
+        let made = studio.revoke_device(true, &lost, 3).unwrap();
+        assert_eq!(made.len(), 1);
+        assert!(made[0].signers[0].presence.is_some(), "a revocation carries the device's presence");
+        assert!(studio.chain().person().unwrap().active_device(&lost).is_none());
+        assert_eq!(studio.revoke_device(true, &lost, 4).unwrap_err().code, "no-change");
+        let person = studio.person_id().unwrap();
+        assert!(laptop.offer(&person, &[made[0].to_json()]).unwrap());
+        assert!(!laptop.can_act());
         let _ = std::fs::remove_dir_all(a);
         let _ = std::fs::remove_dir_all(b);
     }

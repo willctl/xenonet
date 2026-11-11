@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::From;
+use xenonet_authz::Information;
 use xenonet_engine::delivery::starts::{self, Request, TARGET};
 use xenonet_model::ids::YOU;
 use xenonet_model::ops::{Kind as FrameKind, To};
@@ -127,6 +128,19 @@ fn delegated_words(w: &Runtime, r: &Request, kind: Kind) -> Option<String> {
     Some(format!("{me} isn't set to take delegated work: your user sets that once, in Machines under Start sessions, as Delegated (xenonet net set --on {me} --start delegate)"))
 }
 
+/// A start request without its prompt, and the prompt apart, as
+/// information: what's decided is the request's app, folder and mode, and
+/// the prompt goes to the run only once a start was allowed.
+pub struct Apart {
+    pub request: Request,
+    pub prompt: Information<String>,
+}
+
+fn apart(mut r: Request) -> Apart {
+    let prompt = Information::new(std::mem::take(&mut r.prompt));
+    Apart { request: r, prompt }
+}
+
 /// The run a start makes, and the act, as a request names them: on
 /// `machine`, from the request's own app, folder and mode.
 fn run_act(machine: &xenonet_authz::MachineId, r: &Request) -> Result<(xenonet_authz::Resource, xenonet_authz::Act), String> {
@@ -169,9 +183,11 @@ pub type Answer = Arc<dyn Fn(&Runtime, &str, Value) + Send + Sync>;
 
 /// A start on this machine, asked for by `by` ({ kind, id, title }) from
 /// `from` (another machine, or None for this one), `kind` and `id` as this
-/// machine took them, once xenonet-authz allowed it. Its first answer, or
-/// why it didn't start; `answer` hears the rest.
-pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &str, r: &Request, answer: Answer) -> Result<Value, String> {
+/// machine took them, once xenonet-authz allowed it, with its first
+/// `prompt`. Its first answer, or why it didn't start; `answer` hears the
+/// rest.
+pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &str, start: &Apart, answer: Answer) -> Result<Value, String> {
+    let (r, prompt) = (&start.request, &start.prompt);
     let reach = net(w).reach();
     if w.setup.demo {
         return Err("XenoNet's demo starts no sessions".into());
@@ -199,7 +215,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // This machine's limits on messages hold for a start too: too fast
     // from one sender, a repeat of the same prompt.
     use xenonet_engine::delivery::policy::Fail as Held;
-    match w.policy.with(|p, h| p.check_send(h, id, &[json!(TARGET)], &r.prompt, 0.0)) {
+    match w.policy.with(|p, h| p.check_send(h, id, &[json!(TARGET)], prompt.read(), 0.0)) {
         Ok(()) => {}
         Err(Held::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
         Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
@@ -213,7 +229,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // your user's delegation, set where and when, as this machine keeps it.
     let delegation = (reach.start == "delegate" && kind != Kind::You).then(|| reach.delegated.clone()).flatten();
     let on = delegation.as_ref().map(|(_, at)| xenonet_text::time::iso(*at as f64).chars().take(10).collect::<String>());
-    let text = starts::framed(by, from, &r.prompt, delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()));
+    let text = starts::framed(by, from, prompt.read(), delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()));
     // An app that reads its prompt from a file (Grok Build) gets one only
     // its owner can read, taken away when the run ends.
     let prompt_file = if starts::prompt_in_file(&r.app) {
@@ -613,9 +629,12 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         _ => None,
     };
     let Some(host) = machine else {
-        // Decided at this machine's own door.
+        // Decided at this machine's own door, on the request without its
+        // prompt.
+        let start = apart(r);
+        let r = &start.request;
         let id = s(&by, "id").unwrap_or_default();
-        let (resource, act) = run_act(&g.facts.machine, &r).map_err(|why| (400, why))?;
+        let (resource, act) = run_act(&g.facts.machine, r).map_err(|why| (400, why))?;
         let principal = match (&token, kind) {
             (_, Kind::You) => {
                 let auth = crate::ground::authority(&g.facts.identity, at_window, &resource, &act, &format!("start {} in {} as you", r.app, r.folder), g.facts.now)
@@ -626,10 +645,10 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
             _ => crate::ground::agent(&id, &g.facts.machine),
         }
         .map_err(|why| (403, why))?;
-        crate::ground::judge_by(&g, &crate::ground::local(&g, principal, resource, act), token.as_ref(), None).map_err(|why| (409, delegated_words(w, &r, kind).unwrap_or(why)))?;
+        crate::ground::judge_by(&g, &crate::ground::local(&g, principal, resource, act), token.as_ref(), None).map_err(|why| (409, delegated_words(w, r, kind).unwrap_or(why)))?;
         let who = by.clone();
         let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| tell(w, &who, "this machine", state, &a));
-        let first = run_here(w, &by, None, kind, &id, &r, answer).map_err(|why| (409, why))?;
+        let first = run_here(w, &by, None, kind, &id, &start, answer).map_err(|why| (409, why))?;
         let mut out = first;
         out["state"] = json!("started");
         out["host"] = me.map_or(Value::Null, |m| json!(m.host));
@@ -705,7 +724,7 @@ fn start_receipt(w: &Runtime, to: &str, mid: &str, state: &str, extra: &Value) {
 /// with, `at` when it was sent, by this clock. Decided here, on this
 /// machine's own facts.
 #[expect(clippy::too_many_arguments, reason = "the frame's parts")]
-pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, body: &str, authority: &Value, at: f64) {
+pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, body: Information<String>, authority: &Value, at: f64) {
     let refuse = |why: &str| start_receipt(w, from, mid, "refused", &json!({ "reason": why }));
     let now = now_ms();
     {
@@ -718,17 +737,19 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, bo
     if now - at > starts::FRESH_MS {
         return refuse("it waited too long on its way to be started: a start is never kept for later");
     }
-    let Ok(v) = serde_json::from_str::<Value>(body) else { return refuse("that isn't a start request") };
-    let r = match starts::request(&v) {
-        Ok(r) => r,
+    let Ok(v) = serde_json::from_str::<Value>(body.read()) else { return refuse("that isn't a start request") };
+    // Decided on the request without its prompt, which is information.
+    let start = match starts::request(&v) {
+        Ok(r) => apart(r),
         Err(why) => return refuse(&why),
     };
+    let r = &start.request;
     let k = kind_of(kind);
     let Some(mut g) = crate::ground::ground(w, None) else { return refuse("this machine's governance isn't plugged in, so it starts nothing") };
-    let decided = run_act(&g.facts.machine, &r)
+    let decided = run_act(&g.facts.machine, r)
         .and_then(|(resource, act)| crate::network::judge_remote(w, &mut g, &crate::network::SentBy { host: from, kind, sender, authority }, resource, act));
     if let Err(why) = decided {
-        let why = delegated_words(w, &r, k).unwrap_or(why);
+        let why = delegated_words(w, r, k).unwrap_or(why);
         w.log("info", "start", &format!("a start from {from} was refused: {why}"));
         return refuse(&why);
     }
@@ -736,7 +757,7 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, bo
     let by = json!({ "kind": k.as_str(), "id": qualified, "title": v.get("by").and_then(|b| b.get("title")).and_then(Value::as_str) });
     let (to, m) = (from.to_string(), mid.to_string());
     let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| start_receipt(w, &to, &m, state, &a));
-    match run_here(w, &by, Some(from), k, &qualified, &r, answer) {
+    match run_here(w, &by, Some(from), k, &qualified, &start, answer) {
         Ok(first) => start_receipt(w, from, mid, "started", &first),
         Err(why) => {
             w.log("info", "start", &format!("a start from {from} was refused: {why}"));

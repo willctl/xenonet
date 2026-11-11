@@ -117,16 +117,19 @@ async fn permission(ctx: &Ctx, req: &mut Req) -> Reply {
     if req.header("authorization").is_some() {
         return Reply::coded(403, "not-a-run", "an actor's own prompts aren't asked here");
     }
-    // The session, as rules.rs checked it against its process.
-    let Some((me, _)) = req.by.session.clone() else {
+    // The session, as rules.rs checked it against its process: what the
+    // check found is kept with the ask, since a run XenoNet started is
+    // that run only as far as the check could see.
+    let Some((me, verdict)) = req.by.session.clone() else {
         return Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id>)");
     };
+    let by = crate::routes::rules::attestation_of(&verdict);
     let body = match req.json(BODY).await {
         Ok(b) => b,
         Err(e) => return Reply::error(e.status, e.message),
     };
     let title = ctx.cores.engine.view(&me).await.ok().flatten().and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_string));
-    core_reply(ctx.cores.engine.permission(&me, title, body).await)
+    core_reply(ctx.cores.engine.permission(&me, title, body, by).await)
 }
 
 /// An actor of this machine, by its token, allowed to answer prompts (the

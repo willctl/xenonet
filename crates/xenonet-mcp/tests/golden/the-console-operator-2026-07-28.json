@@ -1074,7 +1074,7 @@
           {
             "name": "network",
             "title": "The network",
-            "description": "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, where you're at, who may start and wake sessions there, and what its XenoNet takes), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch, and this machine's titles-only, share-load, start and wake settings. `open` shows the panel and `join` its form. `start` opens Start a session on a machine (host, this one by default) with its folder, app, mode and prompt filled in; on a machine on its own, with none of those, it opens the form that starts a network. `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, the settings (at.set for this machine's, at.setOn for another's), Start (session.at.send, once session.armed) and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. answers lists the answers to the starts you asked for. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
+            "description": "This machine's network across machines, as Network settings in the palette shows it: whether it's in one, its name and this machine; the gateway (address, kind, link, since when, why it's down, clock skew); each machine (online or since when, its agents and what waits on you, founder, gateway, window, where you're at, who may start and wake sessions there, and what its XenoNet takes), with its agents under it; the tickets waiting, what waits for approval (proposals: each with what it does and who signed it), the outbox, a roster mismatch, and this machine's titles-only, share-load, start and wake settings. `open` shows the panel and `join` its form. `start` opens Start a session on a machine (host, this one by default) with its folder, app, mode and prompt filled in; on a machine on its own, with none of those, it opens the form that starts a network. `add` opens Add a machine with the new machine's id (host) and whether you'll use a XenoNet window on it (window) filled in. `publish` opens Publish a service with its name, address (target), paths and the machines that may call it (hosts) filled in; `devices` and `services` show the panel at Your devices or Services. person lists your devices (how each asks you, which is this machine's, which are revoked) and whether your identity's root key is sealed here; services, what this machine publishes. `message` opens the box that messages a session as you (to: its id, or @<host>:<id> for another machine's) with text in it. Making the join line, starting or joining a network, removing or replacing a machine, approving, revoking a device (at.revoke, then at.revokeYes), publishing (at.publish), the settings (at.set for this machine's, at.setOn for another's), Start (session.at.send, once session.armed) and Send are the person's: clicks in the window, at the answer's at and message.sendAt, which only the demo and test instances let this console make. The join line shows once, masked: join.masked says whether it is, never the ticket. answers lists the answers to the starts you asked for. In XenoNet Dev, simulate net-… makes up a network to look at. Returns the network, and the state once the view has settled when something opened.",
             "inputSchema": {
               "type": "object",
               "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1088,6 +1088,9 @@
                     "start",
                     "join",
                     "add",
+                    "publish",
+                    "devices",
+                    "services",
                     "message",
                     "close"
                   ]
@@ -1095,6 +1098,28 @@
                 "host": {
                   "description": "For add: the new machine's id. For start: the machine to start a session on.",
                   "type": "string"
+                },
+                "name": {
+                  "description": "For publish: the service's name.",
+                  "type": "string"
+                },
+                "target": {
+                  "description": "For publish: its address, as http://127.0.0.1:<port>.",
+                  "type": "string"
+                },
+                "paths": {
+                  "description": "For publish: the paths other machines may reach, each starting and ending with /.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "hosts": {
+                  "description": "For publish: the machines that may call it; every machine when left out.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "window": {
                   "description": "For add: whether you'll use a XenoNet window on it.",
@@ -1363,7 +1388,7 @@
           {
             "name": "actors",
             "title": "Actors",
-            "description": "The actors beside the map. They are the person at the console (You), always-on agents and actors of your own, drawn on a layer of their own above the map, with beams into the projects and sessions they act on. Each comes with its id, presence (working, idle, away, offline, unknown), status, how XenoNet knows of it (via), its product, its form and color in the theme, the node ids it beams into now and where it is on screen. The answer also has every beam drawn and the layer's time for its last frame. `requests` lists the programs waiting for an Allow in the window, each with what it asks, who asked, and whether its card is up. `gatewayAsks` lists sessions' asks for an actor's gateway token, each with the actor, who asked, whether it replaces a token, and whether its card is up. It never holds a token, since none exists until the person allows the ask, and no tool here allows one. `tokens` says how each registered actor's token stands, as the Actors panel shows it (works, expired or none, when it expires, and when it was last used, null if never), and never holds a token itself. `remote` lists remote actors' connections (a dot reading through a tunnel, say) and whether cloud access is on. For each connection it gives the actor, state, how many projects it reads, whether labels go, its data mode, expiry and whether an adapter is connected, and never a credential. Its `tunnels` says whether tunnel-client is here, and for each tunnel XenoNet can run, its tunnel id, whether a key is kept (never the key), whether it starts with XenoNet, and whether it runs and why not. The `tunnels` beside the beams give each tunnel's gate on the map, how open it is and where. Allowing an actor, pairing, revoking or turning on a remote connection, and keeping a tunnel's key or starting it, are the person's alone, so no tool here does any of it. The command actors opens the Actors panel for them. `select` selects an actor, as clicking it would. The camera frames it with what it acts on and the inspector shows it (null clears the selection), and the answer then includes the state once the view has settled.",
+            "description": "The actors beside the map. They are the person at the console (You), always-on agents and actors of your own, drawn on a layer of their own above the map, with beams into the projects and sessions they act on. Each comes with its id, presence (working, idle, away, offline, unknown), status, how XenoNet knows of it (via), its product, its form and color in the theme, the node ids it beams into now and where it is on screen. The answer also has every beam drawn and the layer's time for its last frame. `requests` lists the programs waiting for an Allow in the window, each with what it asks, who asked, and whether its card is up. `gatewayAsks` lists sessions' asks for an actor's gateway token, each with the actor, who asked, whether it replaces a token, and whether its card is up. It never holds a token, since none exists until the person allows the ask, and no tool here allows one. `tokens` says how each registered actor's token stands, as the Actors panel shows it (works, expired or none, when it expires, and when it was last used, null if never), and never holds a token itself. `remote` lists remote actors' connections (a dot reading through a tunnel, say) and whether cloud access is on. For each connection it gives the actor, state, how many projects it reads, whether labels go, its data mode, expiry and whether an adapter is connected, and never a credential. Its `tunnels` says whether tunnel-client is here, and for each tunnel XenoNet can run, its tunnel id, whether a key is kept (never the key), whether it starts with XenoNet, and whether it runs and why not. `scopes` says what each registered actor's grant reaches: its sessions scope (a selector such as project:xenonet, and when it ends) and, for one allowed to answer permission prompts, its allow scope (every session or a list, the kinds of prompt, and when it ends), each null when it has none, with what the Actors panel's row says. The `tunnels` beside the beams give each tunnel's gate on the map, how open it is and where. Allowing an actor, setting or narrowing its scopes, pairing, revoking or turning on a remote connection, and keeping a tunnel's key or starting it, are the person's alone, so no tool here does any of it. The command actors opens the Actors panel for them. `select` selects an actor, as clicking it would. The camera frames it with what it acts on and the inspector shows it (null clears the selection), and the answer then includes the state once the view has settled.",
             "inputSchema": {
               "type": "object",
               "$schema": "https://json-schema.org/draft/2020-12/schema",

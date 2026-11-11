@@ -357,6 +357,35 @@ export function createDriver(app) {
       return { canSee: v.canSee, off: v.off, tokens };
     },
 
+    // What each registered actor's grant reaches, as the Actors panel shows
+    // it (scope-panel.js), read fresh with the window's key: its sessions
+    // scope (selector, expiresAt, expired) or null, its allow scope
+    // (sessions "all" or ids, kinds, until) or null, and what its row
+    // says. "open" opens the Scope view for `arg.actor` with its fields
+    // filled from `arg` ({ selector, sessionDays, allowAll, allowList,
+    // kinds, allowDays }) and gives the view: what's typed, what it says
+    // now, and `at`, where Set, Take away, End and each kind's toggle are.
+    // "view" reads the open view again. Setting and narrowing are yours:
+    // clicks at `at`, which only the demo and test instances let the
+    // control channel make. `canSee` is false in a window without the key.
+    async actorScopes(action = "read", arg = null, opts) {
+      const a = app.actorScopes;
+      if (!a) throw new Error("This page has no Actors panel.");
+      const rowOf = (id) => document.querySelector(`[data-ac-actors] > li[data-key="${CSS.escape(id)}"] .ac-scope-state`)?.textContent.replace(/Scope…$/, "").trim() ?? null;
+      if (action === "read") {
+        const v = await a.read();
+        return { ...v, scopes: v.scopes.map((x) => ({ ...x, row: rowOf(x.actor) })) };
+      }
+      if (action === "view") return { view: a.view() };
+      if (action === "open") {
+        const { actor, ...fill } = arg ?? {};
+        if (!actor) throw new Error("Say which actor: { actor: \"actor:<slug>\" }.");
+        const st = await act(() => a.open(actor, fill), opts);
+        return { ...st, view: a.view() };
+      }
+      throw new Error("Use read, open or view.");
+    },
+
     // Remote actors' connections, as the Actors panel shows them
     // (remote-panel.js), read fresh with the window's key: whether cloud
     // access is on, and each connection's actor, state, projects (how
@@ -517,10 +546,14 @@ export function createDriver(app) {
     // the outbox, a roster mismatch and the titles-only setting, and, while
     // the panel shows the join line, whether it shows masked (never the
     // ticket). "open" shows the panel, "start" and "join" its forms, "add"
-    // Add a machine with { host, window } filled in, and "close" closes it;
+    // Add a machine with { host, window } filled in, "publish" Publish a
+    // service with { name, target, paths, hosts } filled in, "devices" and
+    // "services" the panel scrolled to Your devices or Services, and
+    // "close" closes it;
     // "refresh" reads it again, and "served" gives GET /api/net/state as
     // the window reads it. Making the line, starting, joining,
-    // removing, replacing, approving and the setting are yours: clicks where the
+    // removing, replacing, approving, revoking a device (at.revoke, then
+    // at.revokeYes), publishing (at.publish) and the setting are yours: clicks where the
     // answer's `at` points, which only the demo and test instances let the
     // control channel make.
     async network(action = "read", arg = null, opts) {
@@ -538,8 +571,10 @@ export function createDriver(app) {
       else if (action === "start" && (arg || n.state.network)) st = await act(() => n.startSession(arg ?? {}), opts);
       else if (action === "start" || action === "join") st = await act(() => n.open(action), opts);
       else if (action === "add") st = await act(() => n.addMachine({ host: arg?.host ?? "", window: !!arg?.window }), opts);
+      else if (action === "publish") st = await act(() => n.publishService(arg ?? {}), opts);
+      else if (action === "devices" || action === "services") st = await act(() => n.reveal(action), opts);
       else if (action === "close") st = await act(() => n.close(), opts);
-      else throw new Error("Use read, refresh, served, open, start, join, add or close.");
+      else throw new Error("Use read, refresh, served, open, start, join, add, publish, devices, services or close.");
       return { ...st, network: n.driverState() };
     },
     // Start a session (network.js): the box, on a machine (`host`, this one

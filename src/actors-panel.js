@@ -18,6 +18,9 @@
 //     (crates/xenonet-actors/src/wake.rs, wake-panel.js), in its row, and Wake… to set
 //     it: a webhook, whose URL and key go to the credential store, a
 //     notification, or nothing;
+//   - what each actor that reports itself reaches (scope-panel.js), in its
+//     row, and Scope… to set and narrow it: the sessions it reaches, and,
+//     for one allowed to answer prompts, what it may Allow;
 //   - remote connections (remote-panel.js): who reads what through each,
 //     Revoke, the switch that turns them all off, and Pair a remote
 //     actor, which shows what would leave before anything is approved;
@@ -47,6 +50,7 @@ import { handoff, wakeHelp } from "./shared/handoff.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur } from "./secret.js";
 import { gatewayHtml, gateHtml, gatewaySetupHtml, readPick, gatewayAskHtml, gatewayTokenHtml, gatewayMovedHtml, connected, waitWords } from "./gateway-panel.js";
 import { wakeHtml, wakeViewHtml, readWake } from "./wake-panel.js";
+import { scopeHtml, scopeViewHtml, scopeDraft, readScope, grantBody, allowsBody } from "./scope-panel.js";
 import { a2aHtml } from "./a2a-panel.js";
 import { remoteSectionHtml, remoteRow, tunnelStateHtml, tunnelFootHtml } from "./remote-panel.js";
 import { createRemoteViews } from "./remote-views.js";
@@ -161,14 +165,15 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     const t = tokens?.of(s.id) ?? null;
     const gate = gateHtml(gateOf(s.id));
     const wake = canDecide && !actions.you && s.via?.includes("registered") ? wakeHtml(s.id, wakeOf(s.id)) : "";
-    const stat = `${head}<div class="ac-via">${viaHtml(s, actions)}</div>|${actsHtml(s, actions)}|${color}|${t ? `${t.state}|${t.expiresAt}|${t.usedAt}` : ""}|${gate}|${wake}`;
+    const scope = canDecide && grants && !actions.you && s.via?.includes("registered") ? scopeHtml(s.id, scopeOf(s.id)) : "";
+    const stat = `${head}<div class="ac-via">${viaHtml(s, actions)}</div>|${actsHtml(s, actions)}|${color}|${t ? `${t.state}|${t.expiresAt}|${t.usedAt}` : ""}|${gate}|${wake}|${scope}`;
     return {
       key: s.id,
       sig: stat,
       live: liveHtml(s, actions),
       // How XenoNet knows it, its token, its gateway connection and how it's
       // woken, on one line.
-      html: `<li class="ac-row" style="--c:${color}"><span class="ac-dot"></span><div class="ac-main">${head}<div class="ac-live"></div><div class="ac-meta"><div class="ac-via">${viaHtml(s, actions)}</div>${t ? tokenHtmlFor(t) : ""}${gate}${wake}</div></div><div class="ac-acts">${actsHtml(s, actions)}</div></li>`,
+      html: `<li class="ac-row" style="--c:${color}"><span class="ac-dot"></span><div class="ac-main">${head}<div class="ac-live"></div><div class="ac-meta"><div class="ac-via">${viaHtml(s, actions)}</div>${t ? tokenHtmlFor(t) : ""}${gate}${wake}${scope}</div></div><div class="ac-acts">${actsHtml(s, actions)}</div></li>`,
     };
   }
 
@@ -306,6 +311,17 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
   // A webhook's URL and key as typed in the Wake view (wake-panel.js),
   // held here only until they're saved.
   let wakeDraft = { url: "", key: "" };
+
+  // Each actor's sessions scope (GET /api/delivery's grants), for a window
+  // that can change them; its allow scope comes with its token's state.
+  let grants = null;
+  async function loadGrants() {
+    const r = canDecide ? await calls.call("GET", "/api/delivery").catch(() => null) : null;
+    grants = r?.ok ? (r.data.grants ?? []) : null;
+  }
+  const scopeOf = (id) => ({ grant: grants?.find((g) => g.actor === id) ?? null, allows: tokens?.of(id)?.allows ?? null, answers: !!actorNamed(id)?.capabilities?.includes("answer-prompts") });
+  // What's typed in the Scope view, between redraws.
+  let scopeTyped = null;
 
   // The list as it is now, put in place.
   function drawList() {
@@ -456,9 +472,9 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     clearTimeout(armTimer);
     const REMOTE = { pair: "Pair a remote actor", preview: "What would leave", paired: "Paired", unpair: "Revoke a connection", tunnel: "A tunnel XenoNet runs" };
     const who = view.id ? nameOf(view.id) : "";
-    const GATEWAY = { "gateway-setup": "Put the gateway online", gateway: `Connect ${who}`, "gateway-token": `Connect ${who}`, "gateway-moved": `New address for ${who}`, wake: `Wake ${who}` };
+    const GATEWAY = { "gateway-setup": "Put the gateway online", gateway: `Connect ${who}`, "gateway-token": `Connect ${who}`, "gateway-moved": `New address for ${who}`, wake: `Wake ${who}`, scope: `What ${who} reaches` };
     head.textContent = REMOTE[view.name] ?? GATEWAY[view.name] ?? (view.name === "add" ? "Add an actor" : view.name === "token" ? (view.rotated ? "A new token" : "An actor of your own") : view.name === "rotate" ? "A new token" : "Remove an actor");
-    const SUB = { wake: "When a message arrives for it", token: "Shown once", "gateway-token": "Its token shows once", "gateway-moved": "Its token still works", "gateway-setup": "How apps in other clouds reach XenoNet", add: "A script or daemon of your own", preview: "Nothing is approved yet", pair: "Read-only, for the projects you pick" };
+    const SUB = { scope: "Its grant's scopes", wake: "When a message arrives for it", token: "Shown once", "gateway-token": "Its token shows once", "gateway-moved": "Its token still works", "gateway-setup": "How apps in other clouds reach XenoNet", add: "A script or daemon of your own", preview: "Nothing is approved yet", pair: "Read-only, for the projects you pick" };
     panel.querySelector(".m-sub").textContent = SUB[view.name] ?? "";
     if (REMOTE[view.name]) body.innerHTML = remoteViews.html(view, actors);
     else if (view.name === "gateway") body.innerHTML = gatewayAskHtml(view, { gateway, a: actorNamed(view.id), name: nameOf(view.id), again: !!gateOf(view.id)?.token, a2a: a2aCard() });
@@ -467,6 +483,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     else if (view.name === "gateway-moved") body.innerHTML = gatewayMovedHtml(gateway?.url ?? "", productOf(view.id));
     else if (view.name === "gateway-setup") body.innerHTML = gatewaySetupHtml(view, gateway);
     else if (view.name === "wake") body.innerHTML = wakeViewHtml(view, { wake: wakeOf(view.id), help: wakeHelp(productOf(view.id)), draft: wakeDraft });
+    else if (view.name === "scope") body.innerHTML = scopeViewHtml(view, { ...scopeOf(view.id), draft: (scopeTyped ??= scopeDraft(scopeOf(view.id))) });
     else body.innerHTML = view.name === "add" ? addHtml() : view.name === "token" ? tokenHtml(view) : confirmHtml(view);
     if (view.name === "add") body.querySelector("[data-ac-name]")?.focus();
     if (view.name === "gateway-token") watchConnect();
@@ -480,6 +497,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
     view = next;
     forgetSecrets();
     if (next.name !== "wake") wakeDraft = { url: "", key: "" };
+    if (next.name !== "scope") scopeTyped = null;
     render();
   }
 
@@ -669,6 +687,49 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       sfx(copied ? "select" : "error");
       return toast(copied ? (d.acCopied ?? "Copied") : "Couldn't copy it", !copied);
     }
+    if (d.acScope) {
+      await Promise.all([loadGrants(), readTokens()]);
+      scopeTyped = null;
+      return go({ name: "scope", id: d.acScope });
+    }
+    if (d.acAllowAll !== undefined || d.acAllowKind) {
+      scopeTyped = readScope(body, scopeTyped);
+      if (d.acAllowAll !== undefined) scopeTyped.allowAll = !scopeTyped.allowAll;
+      else scopeTyped.kinds = scopeTyped.kinds.includes(d.acAllowKind) ? scopeTyped.kinds.filter((k) => k !== d.acAllowKind) : [...scopeTyped.kinds, d.acAllowKind];
+      sfx("toggle");
+      return render();
+    }
+    if (d.acScopeSet || d.acScopeRevoke || d.acAllowSet || d.acAllowEnd) {
+      const id = d.acScopeSet ?? d.acScopeRevoke ?? d.acAllowSet ?? d.acAllowEnd;
+      const slug = encodeURIComponent(slugOf(id));
+      scopeTyped = readScope(body, scopeTyped);
+      const asked = d.acScopeSet ? grantBody(id, scopeTyped) : d.acAllowSet ? allowsBody(scopeTyped, scopeOf(id)) : { body: null };
+      const error = body.querySelector("[data-ac-error]");
+      if (asked.error) return Object.assign(error, { hidden: false, textContent: asked.error });
+      t.disabled = true;
+      const r = d.acScopeSet
+        ? await calls.call("POST", "/api/delivery/grant", asked.body)
+        : d.acScopeRevoke
+          ? await calls.call("POST", "/api/delivery/revoke", { actor: id })
+          : d.acAllowSet
+            ? await calls.call("PUT", `/api/actors/${slug}/allows`, asked.body)
+            : await calls.call("DELETE", `/api/actors/${slug}/allows`);
+      if (!r.ok) {
+        sfx("error");
+        t.disabled = false;
+        return Object.assign(error, { hidden: false, textContent: r.error ?? "That didn't work" });
+      }
+      sfx("success");
+      await Promise.all([loadGrants(), readTokens()]);
+      const name = nameOf(id);
+      toast(d.acScopeSet ? `${name} reaches ${asked.body.scope}` : d.acScopeRevoke ? `${name} reaches no sessions` : d.acAllowSet ? `Saved what ${name} may allow` : `${name} may only deny prompts now`);
+      // The scope just saved shows as it is now; what's typed for the other
+      // stays.
+      const now = scopeDraft(scopeOf(id));
+      const { selector, sessionDays, ...allow } = now;
+      scopeTyped = d.acScopeSet || d.acScopeRevoke ? { ...scopeTyped, selector, sessionDays } : { ...scopeTyped, ...allow };
+      return render();
+    }
     if (d.acRemove) return go({ name: "remove", id: d.acRemove });
     if (d.acBack !== undefined || d.acDone !== undefined) return go({ name: "list" });
     if (d.acCap) {
@@ -746,6 +807,7 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
         clearTimeout(waitTimer);
         forgetSecrets();
         wakeDraft = { url: "", key: "" };
+        scopeTyped = null;
         unblur();
       },
     });
@@ -762,11 +824,11 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       for (const el of panel.querySelectorAll("[data-since]")) el.textContent = timeAgo(Number(el.dataset.since));
       for (const el of panel.querySelectorAll("[data-until]")) el.textContent = leftWords(Number(el.dataset.until));
       // The gateway's checks and its apps' calls, as they come.
-      if (view.name === "list") Promise.all([gateway?.on ? loadGateway() : null, a2a?.on ? loadA2a() : null, loadWakes()]).then(() => isOpen() && view.name === "list" && drawList());
+      if (view.name === "list") Promise.all([gateway?.on ? loadGateway() : null, a2a?.on ? loadA2a() : null, loadWakes(), loadGrants()]).then(() => isOpen() && view.name === "list" && drawList());
     }, 15000);
     const mine = panel;
     [canDecide] = await Promise.all([calls.ready(), loadObservers(), requests.refresh(), readTokens(), remote?.refresh(), loadGateway(), loadA2a()]);
-    await loadWakes();
+    await Promise.all([loadWakes(), loadGrants()]);
     if (panel !== mine) return;
     loaded = true;
     render();
@@ -785,6 +847,42 @@ export function createActorsPanel({ modals, sfx, toast, calls, requests, decide,
       remote?.refresh().then(() => isOpen() && view.name === "list" && render());
     },
     tunnelsChanged,
+    // The Scope view for actor `id` (the driver's actorScopes), with what's
+    // typed in its fields as `fill` gives it ({ selector, sessionDays,
+    // allowAll, allowList, kinds, allowDays }); nothing is set until a
+    // button is pressed.
+    async openScope(id, fill = {}) {
+      if (!isOpen()) await open();
+      // The panel's first read, and an actor registered a moment ago,
+      // which reaches the list with the next state: waited for briefly, so
+      // the view knows what it may answer.
+      const end = Date.now() + 5000;
+      while ((!loaded || !actorNamed(id)) && isOpen() && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+      await Promise.all([loadGrants(), readTokens()]);
+      go({ name: "scope", id });
+      scopeTyped = { ...scopeDraft(scopeOf(id)), ...fill };
+      render();
+    },
+    // The Scope view as it stands: whose, what's typed, the error it shows,
+    // and where its buttons are, for a click; null while it isn't showing.
+    scopeState() {
+      if (!isOpen() || view.name !== "scope") return null;
+      const body = panel.querySelector(".m-body");
+      const centre = (sel) => {
+        const r = body.querySelector(sel)?.getBoundingClientRect();
+        return r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null;
+      };
+      const error = body.querySelector("[data-ac-error]");
+      const kinds = Object.fromEntries([...body.querySelectorAll("[data-ac-allow-kind]")].map((b) => [b.dataset.acAllowKind, centre(`[data-ac-allow-kind="${b.dataset.acAllowKind}"]`)]));
+      return {
+        actor: view.id,
+        typed: readScope(body, scopeTyped ?? scopeDraft(scopeOf(view.id))),
+        sessionsNow: body.querySelector("[data-ac-scope-now]")?.textContent ?? null,
+        allowsNow: body.querySelector("[data-ac-allow-now]")?.textContent ?? null,
+        error: error && !error.hidden ? error.textContent : null,
+        at: { set: centre("[data-ac-scope-set]"), takeAway: centre("[data-ac-scope-revoke]"), allowSet: centre("[data-ac-allow-set]"), allowEnd: centre("[data-ac-allow-end]"), allowAll: centre("[data-ac-allow-all]"), kinds, back: centre("[data-ac-back]") },
+      };
+    },
     // A gateway token made by Allow on a session's ask (main.js): the
     // panel opens on the steps that show it masked, as Connect… does.
     async showGatewayToken({ id, token, url }) {

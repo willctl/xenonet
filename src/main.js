@@ -1521,6 +1521,19 @@ if (import.meta.env.DEV || desktop) {
     environments: environmentsUi,
     actorRequests,
     actorTokens,
+    // Each registered actor's scopes, as the Actors panel's Scope view
+    // reads them with the window's key: the sessions it reaches (GET
+    // /api/delivery's grant) and what it may Allow (its token's allows);
+    // and the Scope view itself (actors-panel.js), opened and read.
+    actorScopes: {
+      async read() {
+        const [d, t] = await Promise.all([windowCalls.call("GET", "/api/delivery").catch(() => null), actorTokens.refresh()]);
+        const grants = d?.ok ? (d.data.grants ?? []) : [];
+        return { canSee: !!t.canSee && !!d?.ok, off: t.off, scopes: t.tokens.map((x) => ({ actor: x.actor, sessions: grants.find((g) => g.actor === x.actor) ?? null, allows: x.allows ?? null })) };
+      },
+      open: async (id, fill) => (await openActors(), actorsPanel.openScope(id, fill)),
+      view: () => actorsPanel?.scopeState() ?? null,
+    },
     remoteConnections,
     needsYou,
     network,

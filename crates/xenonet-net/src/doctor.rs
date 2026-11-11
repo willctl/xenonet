@@ -225,6 +225,53 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
     out
 }
 
+/// How this machine asks you and keeps your identity's root key, from the
+/// identity folder beside `dir` (the network's), without opening any key:
+/// none when no identity was set up here.
+///
+/// - `network.presence`: how this machine's device asks you before it acts
+///   as you, as your chain recorded it when the device was paired:
+///   biometric, weaker, or none (no active device of yours here).
+/// - `network.root`: whether the root key is sealed to the device key, kept
+///   in an owner-only file (a warning), or held by another machine.
+pub fn identity_checks(dir: &Path) -> Vec<Check> {
+    let d = Dir::new(dir);
+    let Ok(identity) = crate::identity::Identity::open(d.identity_dir(), None) else { return Vec::new() };
+    let chain = identity.chain();
+    let Some(person) = chain.person() else { return Vec::new() };
+    // This machine's device: the one its roster entry names, or, with no
+    // network, the one device the person has (it was set up here).
+    let host = d.read_network().ok().flatten().map(|n| n.host);
+    let named = host.and_then(|h| read_roster(&d).ok()?.view().member(&h)?.device.clone());
+    let device = match named {
+        Some(id) => person.device(&id),
+        None => {
+            let mut active = person.active_devices();
+            match (active.next(), active.next()) {
+                (Some(one), None) => Some(one),
+                _ => None,
+            }
+        }
+    };
+    let presence = match device.filter(|d| d.active()).map(|d| d.kind) {
+        Some(xenonet_log::person::DeviceKind::Biometric) => verdict("ok", "biometric: Touch ID, for every signature as you", None),
+        Some(xenonet_log::person::DeviceKind::Weaker) => {
+            verdict("info", "weaker: Windows Hello, polkit or a passphrase, which a program that can type could pass. XenoNet notes it on every decision this device signs", None)
+        }
+        None => verdict("info", "none: this machine has no device of yours that can sign, so it does nothing as you", None),
+    };
+    let root = match identity.root_sealed() {
+        Some(true) => verdict("ok", "sealed to this machine's device key: opening it asks you", None),
+        Some(false) => verdict(
+            "warn",
+            "kept in an owner-only file (identity/root.json), since this machine can't seal it to its device key: a program running as you could read it and add devices to your identity",
+            Some("Run only programs you trust under this account. A Mac with Touch ID seals the root key to its device key instead."),
+        ),
+        None => verdict("info", "not on this machine: the machine that set up your identity holds it", None),
+    };
+    vec![("network.presence", "This machine asks you before it acts as you", presence), ("network.root", "Your identity's root key is kept safe", root)]
+}
+
 /// What the doctor's firewall check (xenonet-doctor's firewall.rs) reads of
 /// the network: null when this machine isn't in one, else whether it's the
 /// network's gateway (as the roster says, or network.json when the roster
@@ -313,6 +360,51 @@ mod tests {
         assert_eq!(address("laptop", "100.64.0.7:48114")["status"], "info", "a tailnet address is a LAN one");
         assert_eq!(address("laptop", "gw.example.com")["status"], "ok");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_identity_checks_say_how_this_machine_asks_and_keeps_the_root() {
+        use std::sync::Arc;
+        use xenonet_id::presence::FixedCheck;
+        use xenonet_id::sign::{SeedSigner, Signer, VerifyingKey};
+        use xenonet_id::vault::{DeviceKey, Vault};
+        struct Fake(bool);
+        impl Vault for Fake {
+            fn machine_signer(&self, dir: &Path) -> xenonet_id::R<Box<dyn Signer>> {
+                Ok(Box::new(SeedSigner::load_or_create(&dir.join("machine.key"))?))
+            }
+            fn device(&self, dir: &Path) -> xenonet_id::R<Option<DeviceKey>> {
+                Ok(Some(DeviceKey { signer: Box::new(SeedSigner::load_or_create(&dir.join("device.key"))?), check: Some(Box::new(FixedCheck(true))), biometric: self.0 }))
+            }
+            fn seal(&self, _to: &VerifyingKey, secret: &[u8]) -> xenonet_id::R<Option<Vec<u8>>> {
+                Ok(self.0.then(|| secret.to_vec()))
+            }
+            fn open(&self, _dir: &Path, sealed: &[u8], _reason: &str) -> xenonet_id::R<Vec<u8>> {
+                Ok(sealed.to_vec())
+            }
+            fn asking(&self, _reason: &str, f: &mut dyn FnMut()) {
+                f();
+            }
+        }
+        let checks = |name: &str, biometric: bool| {
+            let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-identity-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let network = dir.join("network");
+            assert!(identity_checks(&network).is_empty(), "no identity, no checks");
+            let id = crate::identity::Identity::open(Dir::new(&network).identity_dir(), Some(Arc::new(Fake(biometric)))).unwrap();
+            id.found(true, "laptop", 1).unwrap();
+            let out: Vec<(String, Value)> = identity_checks(&network).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
+            let _ = std::fs::remove_dir_all(&dir);
+            out
+        };
+        let mac = checks("mac", true);
+        assert_eq!((mac[0].0.as_str(), mac[0].1["status"].clone()), ("network.presence", json!("ok")), "{mac:?}");
+        assert!(mac[0].1["detail"].as_str().unwrap().starts_with("biometric"), "{mac:?}");
+        assert_eq!((mac[1].0.as_str(), mac[1].1["status"].clone()), ("network.root", json!("ok")), "{mac:?}");
+        let linux = checks("linux", false);
+        assert!(linux[0].1["detail"].as_str().unwrap().starts_with("weaker"), "{linux:?}");
+        assert_eq!(linux[1].1["status"], "warn", "a root in a file is a warning: {linux:?}");
+        assert!(linux[1].1["fix"].as_str().is_some_and(|f| !f.is_empty()), "{linux:?}");
     }
 
     #[test]

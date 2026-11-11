@@ -189,7 +189,7 @@ fn act_of(what: Do) -> (Resource, Act) {
         Do::ReadTranscripts => (m1(), Act::Read { scope: ReadScope::Transcripts, filters: None }),
         Do::Admit => (n1(), Act::Admit { machine: machine("m3"), role: Role::Member }),
         Do::Widen => (n1(), Act::Widen { machine: machine("m1"), settings: Settings { start: StartSetting::Network, wake: WakeSetting::Network } }),
-        Do::Publish => (n1(), Act::Publish { service: ServiceId::new("web").unwrap() }),
+        Do::Publish => (n1(), Act::Publish { service: ServiceId::new("web").unwrap(), spec: [0; 32] }),
         Do::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("helper").unwrap(), rights: vec![Action::Message], scopes: [0; 32] }),
         Do::UseGateway => (m1(), Act::UseGateway),
         Do::Revoke => (m1(), Act::Revoke { what: Revocation::Device(device_id(&weak_device())) }),

@@ -129,9 +129,15 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     assert!(out.contains("xenonet net join <address> <ticket>"), "{out}");
     let (code, out, _) = s.run(&["svc", "--help"]);
     assert_eq!(code, 0);
-    assert!(out.contains("xenonet svc publish <name> http://127.0.0.1:<port> --paths"), "{out}");
-    let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9"]);
-    assert_eq!(code, 2, "no paths: {err}");
+    assert!(out.contains("done in XenoNet's window"), "{out}");
+    // Publishing asks you, so it's the window's: refused here before
+    // anything is sent, in a network or not.
+    let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("XenoNet's window"), "{err}");
+    let (code, _, err) = s.run(&["net", "revoke-device"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("XenoNet's window"), "{err}");
     let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--lan", lan, "--json"]);
     if code != 0 {
         // Under an agent, or (with no identity here yet, which making the
@@ -139,14 +145,6 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
         // terminal: that's XenoNet's window's.
         assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex") || err.contains("window"), "refused for what it is: {err}");
         assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
-        let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/"]);
-        assert_eq!(code, 1);
-        // Under an agent it's refused as yours; from a plain terminal the
-        // create was the window's, so there's no network to publish into.
-        assert!(
-            err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex") || err.contains("isn't in a XenoNet network"),
-            "refused for what it is: {err}"
-        );
         return;
     }
     let st: Value = serde_json::from_str(&out).unwrap();
@@ -168,27 +166,16 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     let (code, _, err) = s.run(&["net", "create", "--name", "again", "--host", "studio"]);
     assert_eq!(code, 1);
     assert!(err.contains("already"), "{err}");
-    // A service, published, listed and taken off. Programs on other hosts
-    // would reach it at /api/svc/studio/files/…; this one alone has no
-    // one to call it.
-    let (code, out, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/", "--paths", "/files/"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(out.contains("/api/svc/studio/files/"), "{out}");
-    let (code, _, err) = s.run(&["svc", "publish", "own", &format!("http://127.0.0.1:{}", s.port), "--paths", "/api/"]);
-    assert_eq!(code, 1, "never XenoNet's own API");
-    assert!(err.contains("XenoNet's own"), "{err}");
-    let (code, _, err) = s.run(&["svc", "publish", "far", "http://192.168.1.5:9", "--paths", "/"]);
-    assert_eq!(code, 1);
-    assert!(err.contains("loopback"), "{err}");
+    // Services: publishing is the window's (crates/xenonet-service/tests/
+    // net_svc.rs publishes from it); here the list is empty, and taking
+    // off what isn't published says so.
     let (code, out, _) = s.run(&["svc", "list", "--json"]);
     assert_eq!(code, 0);
     let list: Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(list["services"][0]["paths"], serde_json::json!(["/files/", "/sync/v1/"]), "{list}");
+    assert_eq!(list["services"], serde_json::json!([]), "{list}");
     let (code, out, _) = s.run(&["svc"]);
     assert_eq!(code, 0);
-    assert!(out.contains("files") && out.contains("http://127.0.0.1:9") && out.contains("every host"), "{out}");
-    let (code, _, err) = s.run(&["svc", "unpublish", "files"]);
-    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Publish a service"), "{out}");
     let (code, _, err) = s.run(&["svc", "unpublish", "files"]);
     assert_eq!(code, 1);
     assert!(err.contains("no service named files"), "{err}");

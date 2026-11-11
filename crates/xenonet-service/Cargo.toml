@@ -83,6 +83,9 @@ xenonet-sources.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # The network tests' person chain entries (a revocation, a new device).
 xenonet-log.workspace = true
+# The network tests' acts as the person, signed as another machine sends
+# them (a message from a device revoked since).
+xenonet-authz.workspace = true
 
 [lints]
 workspace = true

@@ -431,8 +431,17 @@ impl Actors for ActorsDriver {
     fn pids_of(&self, id: &str) -> R<Vec<u32>> {
         Ok(self.side()?.read(|r| r.pids_of(id)).into_iter().filter(|p| p.is_finite() && *p >= 0.0).map(|p| p as u32).collect())
     }
+    /// Each registered actor's token, with its allow scope when it has
+    /// one: what the Actors panel shows and narrows.
     fn tokens(&self, now: f64) -> R<Value> {
-        self.side()?.read(|r| r.tokens(now)).map(Value::Array).map_err(|f| core_error(thrown(f)))
+        let mut list = self.side()?.read(|r| r.tokens(now)).map_err(|f| core_error(thrown(f)))?;
+        for t in &mut list {
+            let slug = t.get("actor").and_then(Value::as_str).and_then(|a| a.strip_prefix("actor:")).map(str::to_string);
+            if let Some(allows) = slug.and_then(|s| crate::grants::allows_of(&self.0, &s)) {
+                t["allows"] = allows;
+            }
+        }
+        Ok(Value::Array(list))
     }
     fn info(&self, id: &str) -> Option<Value> {
         let v = self.side().ok()?.read(|r| r.info(id));

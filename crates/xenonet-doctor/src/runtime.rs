@@ -611,7 +611,10 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
     // The network across machines, from its files, when this machine is in
     // one: each verdict is ready, as a host's view is.
     let network = std::path::Path::new(&parts.config.state_dir).join("network");
-    for (id, title, verdict) in xenonet_net::doctor::checks(&network, now_ms()) {
+    // How this machine asks the person and keeps their root key, once an
+    // identity was set up here.
+    let checks = xenonet_net::doctor::checks(&network, now_ms()).into_iter().chain(xenonet_net::doctor::identity_checks(&network));
+    for (id, title, verdict) in checks {
         all.push((id.into(), "Network".into(), title.into(), Some(json!({ "network": verdict }))));
     }
     let picked: Vec<_> = all.into_iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();

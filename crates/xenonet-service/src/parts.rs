@@ -150,8 +150,11 @@ impl parts::Network for NetService {
     fn svc_list(&self) -> Value {
         self.node().shared().svc_list()
     }
-    fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String]) -> NetResult {
-        answered(self.node().shared().svc_publish(name, target, paths, hosts))
+    fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> NetResult {
+        answered(self.node().shared().svc_publish(name, target, paths, hosts, at_window))
+    }
+    fn revoke_device(&self, device: &str, at_window: bool) -> NetResult {
+        answered(self.node().shared().revoke_device(device, at_window))
     }
     fn svc_unpublish(&self, name: &str) -> NetResult {
         answered(self.node().shared().svc_unpublish(name))

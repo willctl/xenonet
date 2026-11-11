@@ -104,6 +104,57 @@
               "usedAt"
             ],
             "additionalProperties": {}
+          },
+          "allows": {
+            "description": "What it may Allow of the permission prompts it answers, when it has an allow scope: PUT /api/actors/<slug>/allows sets it from the window, DELETE ends it",
+            "type": "object",
+            "properties": {
+              "sessions": {
+                "description": "The sessions an allow scope covers: every session here, or these.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "all"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "edit",
+                        "command",
+                        "web",
+                        "tool"
+                      ]
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "until": {
+                "description": "When it ends",
+                "type": "number"
+              }
+            },
+            "required": [
+              "sessions",
+              "kinds",
+              "until"
+            ],
+            "additionalProperties": {}
           }
         },
         "required": [

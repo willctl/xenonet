@@ -653,6 +653,125 @@
     "simulated": {
       "type": "boolean",
       "description": "XenoNet Dev's made-up network (simulate net-…)"
+    },
+    "person": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^prs_[a-z2-7]{32}$",
+              "description": "A person's id: prs_ and 32 base32 characters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null until an identity is set up here"
+        },
+        "owner": {
+          "type": "boolean",
+          "description": "Whether the person is the network's owner"
+        },
+        "device": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^xns1_[a-z2-7]{32}$",
+              "description": "A signing key's id: xns1_ and 32 base32 characters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "This machine's device, by its key's id; null where it has no way to ask the person"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "biometric",
+                "weaker"
+              ],
+              "description": "How a device asks the person before it signs: biometric (Touch ID), or weaker (Windows Hello, polkit or a passphrase)"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acts": {
+          "type": "boolean",
+          "description": "Whether this machine's device is an active device of the person's, so it can act as them"
+        },
+        "rootSealed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the person's root key is sealed to this machine's device key (false: in an owner-only file); null where this machine doesn't hold it"
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "description": "One of the person's devices, as their chain holds it",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "A signing key's id: xns1_ and 32 base32 characters",
+                "type": "string",
+                "pattern": "^xns1_[a-z2-7]{32}$"
+              },
+              "label": {
+                "description": "The machine it was paired on, as the person named it then",
+                "type": "string",
+                "maxLength": 64
+              },
+              "kind": {
+                "description": "How a device asks the person before it signs: biometric (Touch ID), or weaker (Windows Hello, polkit or a passphrase)",
+                "type": "string",
+                "enum": [
+                  "biometric",
+                  "weaker"
+                ]
+              },
+              "active": {
+                "description": "Whether it can sign: false once it was removed or revoked",
+                "type": "boolean"
+              },
+              "here": {
+                "description": "Whether it's this machine's own device",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "active",
+              "here"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "The person's devices, every one their chain holds"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "device",
+        "kind",
+        "acts",
+        "rootSealed"
+      ],
+      "description": "Who this machine acts as, while it's in a network",
+      "additionalProperties": {}
     }
   },
   "required": [

@@ -964,6 +964,29 @@ pub struct GatewayToken {
     pub used_at: Nullable<Ms>,
 }
 
+crate::tag!(pub AllSessions = "all");
+
+/// The sessions an allow scope covers: every session here, or these.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AllowSessions {
+    All(AllSessions),
+    Only(Vec<String>),
+}
+
+crate::open!(PromptKind of KnownPromptKind { Read = "read", Edit = "edit", Command = "command", Web = "web", Tool = "tool" });
+
+// What an actor whose grant has the right to answer may Allow (its allow
+// scope, kept in its grant's scopes row): the sessions, the kinds of
+// prompt, and until when.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Allows {
+    pub sessions: AllowSessions,
+    pub kinds: Vec<PromptKind>,
+    /// When it ends
+    pub until: Ms,
+}
+
 // One registered actor's token, as the owner sees it: never the token.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -979,6 +1002,9 @@ pub struct Token {
     /// Its gateway token, while it has one that works (server/actor-gateway.js)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub gateway: Opt<GatewayToken>,
+    /// What it may Allow of the permission prompts it answers, when it has an allow scope: PUT /api/actors/<slug>/allows sets it from the window, DELETE ends it
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub allows: Opt<Allows>,
 }
 
 /// Registered actors' tokens.

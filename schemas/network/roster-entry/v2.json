@@ -224,10 +224,18 @@
                 "pattern": "^xns1_[a-z2-7]{32}$"
               },
               "what": {
-                "description": "What it approves: answer, admit, widen, publish, revoke or pair",
+                "description": "What a presence block approves: an Allow (answer), admitting a machine, widening a network's settings, publishing a service, a revocation, pairing a device, a delegation, or issuing or widening an actor's grant",
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 32
+                "enum": [
+                  "answer",
+                  "admit",
+                  "widen",
+                  "publish",
+                  "revoke",
+                  "pair",
+                  "delegate",
+                  "grant"
+                ]
               },
               "act": {
                 "description": "The SHA-256 of the act, base64url",

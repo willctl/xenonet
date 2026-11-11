@@ -145,7 +145,11 @@ pub trait Network: Send + Sync {
     async fn settings(&self, change: NetChange, at_window: bool) -> NetResult;
     /// The services this machine publishes.
     fn svc_list(&self) -> Value;
-    fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String]) -> NetResult;
+    /// Publishing asks the person (their presence), so only from the window.
+    fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> NetResult;
+    /// Revokes another of the person's devices: a lost machine. Asks them,
+    /// so only from the window.
+    fn revoke_device(&self, device: &str, at_window: bool) -> NetResult;
     fn svc_unpublish(&self, name: &str) -> NetResult;
     /// The port a service's target address names, when it's one.
     fn svc_port(&self, target: &str) -> Option<u16>;

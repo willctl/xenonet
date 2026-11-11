@@ -12,7 +12,9 @@
 //     machines' agents under them with Message (with the text of what
 //     waits on you, or why one seems stuck, as their machine shares it,
 //     escaped as transcripts are), the tickets waiting, the outbox, a
-//     roster mismatch, and "Share with the network: titles only".
+//     roster mismatch, and "Share with the network: titles only"; your
+//     devices, with Revoke for a lost machine's, and the services this
+//     machine publishes, with Publish a service (network-person.js).
 //   - Add a machine asks the new machine's id and whether you'll use a
 //     XenoNet window on it, then shows the join line once, masked as a
 //     token is (secret.js): out of the page's text until Show, then for ten
@@ -30,6 +32,7 @@ import { escapeHtml as h } from "./format.js";
 import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
+import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
 import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
@@ -64,6 +67,8 @@ const addrHtml = (text) => `<span class="addr-real">${h(text)}</span><span class
 export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {}, onChange = () => {}, message = () => {}, gateway = () => {}, projects = () => [], request = (...a) => globalThis.fetch(...a) }) {
   let state = stateOf(null);
   let agents = [];
+  // What this machine publishes to the network (GET /api/net/svc).
+  let services = [];
   let read = false;
   let seq = 0;
   let timer = null;
@@ -113,9 +118,11 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     const n = ++seq;
     const next = stateOf(await getJson("/api/net/state").catch(() => null));
     const list = inNetwork(next) ? await engineAgents() : [];
+    const published = inNetwork(next) ? servicesOf(await getJson("/api/net/svc").catch(() => null)) : [];
     if (n !== seq) return state;
     state = next;
     agents = remoteAgents(list);
+    services = published;
     read = true;
     schedule();
     onChange(viewOf());
@@ -251,6 +258,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       ${state.start === "delegate" ? `<p class="pj-note" data-net-delegation="${h(state.self?.id ?? "")}">${h(delegationWords(state.delegated ? { by: state.delegated.by, at: state.delegated.at } : null))}</p>` : ""}
       <p class="pj-note">Who may start a session on this machine: nobody, you from a window host's console, the network, which adds the sessions and actors on window hosts, or delegated: the network, and what its sessions and actors start here runs on your standing delegation, within the limits above. Who may wake a session here to take a message at once: the sessions you allowed with <code>xenonet live allow</code>, or anyone in the network, within the wake budget. A window host can narrow these from its console; widening to the network from another machine takes the founder or a second window host.</p>
       ${selfWidens()}
+      ${devicesHtml(personOf(state), view.confirmDevice)}
+      ${servicesHtml(services)}
       ${errorHtml(view.error)}
       <div class="m-foot"><span class="grow"></span><button class="act primary" data-net-go="add">Add a machine…</button></div>`;
   }
@@ -399,7 +408,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     });
   }
 
-  const VIEWS = { main: () => (inNetwork(state) ? memberHtml() : aloneHtml()), start: startHtml, join: joinHtml, add: addHtml, line: lineHtml, session: sessionHtml };
+  const VIEWS = { main: () => (inNetwork(state) ? memberHtml() : aloneHtml()), start: startHtml, join: joinHtml, add: addHtml, line: lineHtml, session: sessionHtml, publish: () => publishHtml(view.draft, view.error) };
 
   // Drawn again only when something it shows changed, so a read every few
   // seconds never swaps a button out from under the pointer. A form keeps
@@ -419,13 +428,13 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       if (wait && wait.dataset.acWait !== (joined() ? "done" : "waiting")) wait.outerHTML = waitHtml();
       return;
     }
-    if ((view.name === "add" || view.name === "start" || view.name === "join" || view.name === "session") && drawn === view.name) return;
+    if ((view.name === "add" || view.name === "start" || view.name === "join" || view.name === "session" || view.name === "publish") && drawn === view.name) return;
     const html = VIEWS[view.name]?.() ?? VIEWS.main();
     if (view.name === "main" && html === drawn) return;
     b.innerHTML = html;
     drawn = view.name === "main" ? html : view.name;
     if (view.name === "session") arm();
-    b.querySelector("[data-net-add-host], [data-net-self], [data-net-join-address]")?.focus();
+    b.querySelector("[data-net-add-host], [data-net-self], [data-net-join-address], [data-net-svc-name]")?.focus();
   }
 
   function go(next) {
@@ -502,6 +511,50 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       sfx("success");
       toast(`${host} is out of the network. Its frames are refused from now on.`);
       view = { name: "main" };
+      await refresh();
+      return { ok: true };
+    });
+  }
+
+  // Revokes another of your devices, as for a lost machine: it asks you.
+  async function revokeDevice(device) {
+    const d = personOf(state)?.devices.find((x) => x.id === device);
+    return busyWith(async () => {
+      const r = await calls.call("POST", "/api/net/devices/revoke", { device });
+      if (!r.ok) return failed(r);
+      sfx("success");
+      toast(`${d?.label ?? device}'s device is revoked: nothing it signs counts on any machine now.`);
+      view = { name: "main" };
+      await refresh();
+      return { ok: true, revoked: device };
+    });
+  }
+
+  // Publishes a service from the form: it asks you.
+  async function publish() {
+    const b = body();
+    const draft = { name: b.querySelector("[data-net-svc-name]").value, target: b.querySelector("[data-net-svc-target]").value, paths: b.querySelector("[data-net-svc-paths]").value, hosts: b.querySelector("[data-net-svc-hosts]").value };
+    view = { ...view, draft };
+    const sent = publishBody(draft);
+    if (!sent.name || !sent.target || !sent.paths.length) return failed({ status: 400, error: "Give its name, its address and the paths other machines may reach." });
+    return busyWith(async () => {
+      const r = await calls.call("POST", "/api/net/svc/publish", sent);
+      if (!r.ok) return failed(r);
+      sfx("success");
+      toast(`${sent.name} is published: other machines reach it through their own XenoNet.`);
+      view = { name: "main" };
+      await refresh();
+      return { ok: true, name: sent.name };
+    });
+  }
+
+  // Takes a service off the network: it asks nothing.
+  async function unpublish(name) {
+    return busyWith(async () => {
+      const r = await calls.call("POST", "/api/net/svc/unpublish", { name });
+      if (!r.ok) return failed(r, `xenonet svc unpublish ${name}`);
+      sfx("success");
+      toast(`${name} is off the network.`);
       await refresh();
       return { ok: true };
     });
@@ -644,6 +697,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (d.netRemove) return go({ name: "main", confirm: d.netRemove });
     if (t.closest("[data-net-keep]")) return go({ name: "main" });
     if (d.netRemoveYes) return remove(d.netRemoveYes);
+    if (d.netRevoke) return go({ name: "main", confirmDevice: d.netRevoke });
+    if (d.netRevokeYes) return revokeDevice(d.netRevokeYes);
+    if (d.netUnpublish) return unpublish(d.netUnpublish);
+    if (t.closest("[data-net-publish]")) return publish();
     if (d.netReplace) return replace(d.netReplace);
     if (d.netApprove) return approve(d.netApprove);
     if (d.netStartSession != null) return startSession({ host: d.netStartSession || null });
@@ -684,7 +741,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       });
       panel.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" || !e.target.matches?.("input")) return;
-        panel.querySelector("[data-net-make], [data-net-create], [data-net-join]")?.click();
+        panel.querySelector("[data-net-make], [data-net-create], [data-net-join], [data-net-publish]")?.click();
       });
     }
     view = at ? { name: at, ...opts } : { name: "main" };
@@ -699,6 +756,17 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
 
   // Add a machine: its form, with what's given filled in.
   const addMachine = ({ host = "", window = false } = {}) => open("add", { host, window: !!window });
+
+  // The panel, scrolled to Your devices or Services (`what`), for the
+  // driver: they're at its foot.
+  async function reveal(what) {
+    await open();
+    panel?.querySelector(what === "services" ? "[data-net-services]" : "[data-net-devices]")?.scrollIntoView({ block: "center" });
+    return driverState();
+  }
+
+  // Publish a service: its form, with what's given filled in.
+  const publishService = ({ name = "", target = "", paths = "", hosts = "" } = {}) => open("publish", { draft: { name, target, paths: [paths].flat().join(" "), hosts: [hosts].flat().join(" ") } });
 
   // Start a session: the box, on a machine (this one when none), with what's
   // given filled in.
@@ -766,6 +834,10 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       waits: remoteWaits(state, agents).filter((w) => w.kind === "remote-need").map((w) => ({ agent: w.id, host: w.host, text: w.text, chime: w.chime })),
       stuck: remoteWaits(state, agents).filter((w) => w.kind === "remote-stuck").map((w) => ({ agent: w.id, host: w.host, text: w.text })),
       join: joinState(),
+      // Your devices and how each asks, whether the root key is sealed
+      // here; and what this machine publishes.
+      person: personOf(state),
+      services,
       // The Start a session box: what it's set to, whether Start is armed,
       // where each choice is; and the last start sent from it.
       session:
@@ -787,7 +859,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish") } : null,
     };
   }
 
@@ -804,6 +876,8 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
   return {
     open,
     addMachine,
+    publishService,
+    reveal,
     startSession,
     show,
     refresh,

@@ -145,6 +145,10 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     if what == "add-machine" {
         return Err(Fail::new("Add a machine is XenoNet's window's, since it asks you: choose Add a machine in the palette", 1));
     }
+    // So is revoking a device, which takes the person's presence.
+    if what == "revoke-device" {
+        return Err(Fail::new("Revoking a device is XenoNet's window's, since it asks you: Network settings › Your devices, then Revoke on the lost machine's device", 1));
+    }
     let s = need(flags)?;
     let out = |v: &Value, show: &dyn Fn(&Value)| {
         if flags.on("json") {

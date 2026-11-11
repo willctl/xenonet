@@ -321,6 +321,9 @@ ol.actor-events a { color: var(--accent); text-decoration: none; }
   text-underline-offset: 3px;
 }
 .ac .ac-link:hover { text-decoration-color: var(--accent); }
+.ac .ac-scope-state .ac-link { margin-left: 8px; }
+.ac .ac-scope-acts { display: flex; align-items: center; gap: 8px; margin: 10px 0 18px; }
+.ac .ac-scope-acts .grow { flex: 1; }
 .ac .ac-link:disabled { opacity: 0.4; cursor: default; }
 
 /* An actor's name shows it on the map. */

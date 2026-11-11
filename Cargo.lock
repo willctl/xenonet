@@ -3584,6 +3584,7 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-api",
  "xenonet-assistant",
+ "xenonet-authz",
  "xenonet-components",
  "xenonet-console",
  "xenonet-doctor",

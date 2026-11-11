@@ -463,6 +463,43 @@ test("net-approval: a window host another one signed in waits for an approval he
   await s.driver("network", "close");
 }));
 
+test("your devices: a lost machine's revoked from here, never this one's; a service published and taken off", { timeout: limit(60000) }, shoot("network-devices", async () => {
+  await simulate("net-founder", {}, (n) => n.person?.devices.length === 3);
+  const raw = await served();
+  assert.deepEqual(raw.person.devices.map((d) => [d.label, d.kind, d.active, d.here]), [["studio", "biometric", true, true], ["laptop", "biometric", true, false], ["rack", "weaker", true, false]]);
+  assert.equal(raw.person.rootSealed, true, "the founder's machine holds the root, sealed");
+  const { network: n } = await s.driver("network", "devices");
+  assert.equal(n.at.revoke[n.person.device], undefined, "no Revoke on this machine's own device");
+  const laptop = n.person.devices.find((d) => d.label === "laptop").id;
+  await clickAt(n.at.revoke[laptop], "Revoke… on laptop's device");
+  const asking = await until(async () => {
+    const got = await network();
+    return got.at?.revokeYes ? got : null;
+  });
+  assert.match(asking.text, /Revoke laptop's device\?/);
+  await clickAt(asking.at.revokeYes, "Revoke");
+  const revoked = await until(async () => {
+    const got = await network();
+    return got.person.devices.find((d) => d.id === laptop)?.active === false ? got : null;
+  });
+  assert.ok(revoked, "laptop's device is revoked");
+  assert.match(revoked.text, /revoked: nothing it signs counts/);
+  assert.equal((await served()).person.devices.find((d) => d.id === laptop).active, false);
+  // Publish a service: its form, then Publish, which asks you; Take off
+  // asks nothing.
+  const form = (await s.driver("network", "publish", { name: "files", target: "http://127.0.0.1:4790", paths: ["/sync/v1/"] })).network;
+  assert.equal(form.view, "publish");
+  await clickAt(form.at.publish, "Publish");
+  assert.ok(await until(async () => {
+    const got = await network();
+    return got.view === "main" && got.services.some((x) => x.name === "files" && x.paths.join() === "/sync/v1/");
+  }), "files is published");
+  const shown = (await s.driver("network", "services")).network;
+  await clickAt(shown.at.unpublish.files, "Take off");
+  assert.ok(await until(async () => (await network()).services.length === 0), "taken off");
+  await s.driver("network", "close");
+}));
+
 test("start and wake: this machine's set here, another machine's sent to it, and a widening that waits for a second window host", { timeout: limit(60000) }, shoot("network-reach", async () => {
   // laptop is a window host, not the founder.
   await simulate("net-member", {}, (n) => n.self === "laptop");

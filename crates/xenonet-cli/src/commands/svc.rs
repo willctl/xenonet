@@ -1,10 +1,11 @@
-//! xenonet svc (docs/guide/network.md, "Services through the network"): a
-//! local HTTP service this machine publishes to its network, through the
-//! local service's /api/net/svc routes. Publishing and taking a service
-//! off are the person's: the service refuses them from under an agent, as
-//! it does creating or joining a network. Other hosts' programs reach a
-//! published service through their own XenoNet, at
-//! `/api/svc/<host>/<name>/<path>`.
+//! xenonet svc (docs/guide/network.md, "Services through the network"): the
+//! local HTTP services this machine publishes to its network, through the
+//! local service's /api/net/svc routes. Publishing widens what the network
+//! reaches, so it asks the person and is the window's (Network settings ›
+//! Publish a service): refused here before anything is sent. Taking a
+//! service off is the person's from their terminal too; the service
+//! refuses it from under an agent. Other hosts' programs reach a published
+//! service through their own XenoNet, at `/api/svc/<host>/<name>/<path>`.
 
 use crate::args::Flags;
 use crate::js::{list, str, t};
@@ -30,7 +31,7 @@ fn words(list_of: &[Value]) -> Vec<String> {
 fn show(v: &Value) {
     let services = list(v, "services");
     if services.is_empty() {
-        print("This machine publishes no services. xenonet svc publish <name> http://127.0.0.1:<port> --paths /<path>/ publishes one.");
+        print("This machine publishes no services. Publish one in XenoNet's window: Network settings › Publish a service.");
         return;
     }
     let host = str(v, "host").unwrap_or("<this host>");
@@ -45,6 +46,10 @@ fn show(v: &Value) {
 
 pub fn run(args: &[String], flags: &Flags) -> Done {
     let what = args.first().map_or("list", String::as_str);
+    // Publishing asks the person, which only the window does.
+    if what == "publish" {
+        return Err(Fail::new("Publishing a service asks you, so it's done in XenoNet's window: Network settings › Publish a service", 1));
+    }
     let s = need(flags)?;
     let out = |v: &Value| {
         if flags.on("json") {
@@ -56,24 +61,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
     };
     match what {
         "list" => out(&call(&s, "GET", "/api/net/svc", None)?),
-        "publish" => {
-            let name = arg(args, 1, "the service's name and address: xenonet svc publish <name> http://127.0.0.1:<port> --paths /<path>/")?;
-            let target = arg(args, 2, "the service's address, as http://127.0.0.1:<port>")?;
-            let paths = flags.list("paths");
-            if paths.is_empty() {
-                return Err(Fail::new("say the paths other hosts may reach, as --paths /sync/v1/: nothing else of the service is reachable", 2));
-            }
-            let body = json!({ "name": name, "target": target, "paths": paths, "hosts": flags.list("hosts") });
-            let v = call(&s, "POST", "/api/net/svc/publish", Some(&body))?;
-            if flags.on("json") {
-                json(&v);
-                return Ok(0);
-            }
-            let host = str(&v, "host").unwrap_or("<this host>");
-            print(format!("{} published {name}: other hosts reach it at /api/svc/{host}/{name}/<path> on their own XenoNet", c::green("✓")));
-            print(c::dim("  A service with no sign-in of its own is open to every program on every host allowed to call it."));
-            Ok(0)
-        }
         "unpublish" => {
             let name = arg(args, 1, "which service: its name")?;
             let v = call(&s, "POST", "/api/net/svc/unpublish", Some(&json!({ "name": name })))?;

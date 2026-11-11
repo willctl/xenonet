@@ -43,9 +43,9 @@ use xenonet_os::sync::ReadWrite;
 /// and the token roots of other machines that came with an act.
 pub struct EngineGround {
     pub facts: Facts,
-    /// Each ask waiting here: its session, how its run's agent was checked
-    /// (a run XenoNet started, so process-checked), its kind, and the
-    /// machine it was started from under the person's delegation.
+    /// Each ask waiting here: its session, how its caller was checked when
+    /// it asked, its kind, and the machine it was started from under the
+    /// person's delegation.
     pub asks: HashMap<String, Asked>,
     /// The engine's store, whose revoked table holds every token taken back.
     pub store: Option<xenonet_engine::store::Shared>,
@@ -130,15 +130,17 @@ pub fn ground(w: &Runtime, extra: Option<(&str, crate::asks::Waiting)>) -> Optio
     Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new() })
 }
 
-// An ask as a decision reads it. A run XenoNet started is process-checked;
-// one started under the delegation from this machine names it.
+// An ask as a decision reads it: its caller as the process check found it
+// when it asked (only a run XenoNet started asks, but the check may have
+// seen nothing of the caller); one started under the delegation from this
+// machine names it.
 fn asked(own: &MachineId, a: crate::asks::Waiting) -> Option<Asked> {
     let delegated_by = match a.delegated_from {
         None => None,
         Some(None) => Some(own.clone()),
         Some(Some(host)) => Some(MachineId::new(&host).ok()?),
     };
-    Some(Asked { session: SessionId::new(&a.session).ok()?, by: Attestation::ProcessChecked, kind: a.kind, delegated_by })
+    Some(Asked { session: SessionId::new(&a.session).ok()?, by: a.by, kind: a.kind, delegated_by })
 }
 
 /// An allow scope from its row's JSON: `{ sessions: "all" | [ids], kinds:
@@ -584,6 +586,28 @@ mod tests {
         assert!(matches!(d, Decision::Hold(_)), "{}", why(&d));
         let studio = Principal::Machine { id: MachineId::new("studio").unwrap() };
         assert!(decide_with(&g, &remote(&g, studio, session(), deny), None).is_allow());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_ask_keeps_what_the_process_check_found_of_its_caller() {
+        let delegate = chain::Settings { start: chain::Start::Delegate, wake: chain::Wake::Consent };
+        let (mut g, identity, dir) = ground("asker", delegate, Some(NOW));
+        identity.delegate(true, xenonet_log::person::Delegation::standard("dlg_0123456789abcdef".into(), NOW + 1000), NOW).unwrap();
+        g.facts.identity = identity.clone();
+        let laptop = MachineId::new("laptop").unwrap();
+        let ask = |by| crate::asks::Waiting { session: "claude:run".into(), kind: PromptKind::Command, by, delegated_from: Some(None) };
+        // The ask names its caller as the check found it.
+        assert_eq!(asked(&laptop, ask(Attestation::ProcessChecked)).unwrap().by, Attestation::ProcessChecked);
+        assert_eq!(asked(&laptop, ask(Attestation::Unchecked)).unwrap().by, Attestation::Unchecked);
+        // A run started under the delegation is allowed by this machine
+        // when the check saw its caller; one it couldn't see isn't, though
+        // the session names a run XenoNet started.
+        let me = Principal::Machine { id: laptop.clone() };
+        g.asks.insert("ask_1".into(), asked(&laptop, ask(Attestation::ProcessChecked)).unwrap());
+        assert!(decide_with(&g, &local(&g, me.clone(), session(), answer(AnswerDecision::Allow)), None).is_allow());
+        g.asks.insert("ask_1".into(), asked(&laptop, ask(Attestation::Unchecked)).unwrap());
+        assert!(!decide_with(&g, &local(&g, me, session(), answer(AnswerDecision::Allow)), None).is_allow());
         let _ = std::fs::remove_dir_all(dir);
     }
 

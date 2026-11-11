@@ -897,6 +897,55 @@ fn row_of(st: &Value, id: &str) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn a_device_revoked_from_another_machine_signs_nothing_desk_takes() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-revoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("desk/home")).unwrap();
+    let root = root.canonicalize().unwrap();
+    let [lan] = common::free_ports();
+    let desk_home = root.join("desk/home").to_string_lossy().into_owned();
+    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![sess(D1, "Ledger fixtures", &desk_home)]]).await;
+    // laptop's device is the person's, and every machine lists it.
+    let lost = b.state().await["person"]["device"].as_str().unwrap().to_string();
+    let listed = |st: &Value| st["person"]["devices"].as_array().unwrap().iter().find(|d| d["id"] == lost.as_str()).cloned().unwrap_or(Value::Null);
+    assert_eq!((listed(&c.state().await)["active"].clone(), listed(&b.state().await)["here"].clone()), (json!(true), json!(true)));
+
+    // Two messages as you from laptop to desk, signed by laptop's device
+    // while it could sign, as they'd come in its frames.
+    let identity = b.svc.node().shared().identity().clone();
+    let desk = xenonet_authz::Resource::Machine(xenonet_authz::MachineId::new("desk").unwrap());
+    let authority = xenonet_runtime::ground::authority(&identity, true, &desk, &xenonet_authz::Act::Message, "", now_ms() as i64).unwrap();
+    let as_you = |mid: &str, text: &str| xenonet_model::ops::Incoming {
+        from: "laptop".into(),
+        kind: xenonet_model::ops::Kind::Message,
+        body: json!({ "schema": "network/message/v2", "mid": mid, "sender": xenonet_model::ids::YOU, "senderKind": "person", "target": D1, "body": text, "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms(), "authority": authority }),
+        at: now_ms(),
+        from_window_host: true,
+    };
+    let inbox = || async { texts(&c.agent(D1, "inbox", json!({})).await) };
+    xenonet_runtime::network::receive(&c.world, as_you("msg_0123456789abcdef01", "Before the laptop was lost"));
+    assert_eq!(inbox().await, ["Before the laptop was lost"]);
+
+    // Only from the window, never this machine's own device.
+    let (s, v) = a.call("POST", "/api/net/devices/revoke", json!({ "device": lost }), &[]).await;
+    assert_eq!(s, 403, "{v}");
+    let own = a.state().await["person"]["device"].clone();
+    let (s, v) = a.window("POST", "/api/net/devices/revoke", json!({ "device": own })).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("own-device")), "{v}");
+    // studio revokes laptop's device: the entry reaches desk, and laptop
+    // acts as the person no more.
+    let (s, v) = a.window("POST", "/api/net/devices/revoke", json!({ "device": lost })).await;
+    assert_eq!((s, v["revoked"].clone()), (200, json!(lost)), "{v}");
+    until("the revocation at desk", 10, || async { listed(&c.state().await)["active"] == false }).await;
+    until("the revocation at laptop", 10, || async { b.state().await["person"]["acts"] == false }).await;
+    // What laptop's device signed before is refused at desk now.
+    xenonet_runtime::network::receive(&c.world, as_you("msg_0123456789abcdef02", "After the laptop was lost"));
+    assert!(inbox().await.is_empty(), "nothing a revoked device signed is taken");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_two() {
     let root = std::env::temp_dir().join(format!("xenonet-net-reach-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -1312,7 +1361,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
     // An answer whose frame can't go (to a machine that isn't in the
     // network) leaves the ask on the console, to answer again.
     let ghost = json!({ "op": "ask", "id": "ask_ghost", "session": "claude:x", "tool": "Bash", "input": "ls", "at": now_ms(), "until": now_ms() + 60e3 });
-    xenonet_runtime::asks::ask_in(&b.world, "ghost", &ghost.to_string());
+    xenonet_runtime::asks::ask_in(&b.world, "ghost", &xenonet_authz::Information::new(ghost.to_string()));
     let (s, v) = b.window("POST", "/api/runs/answer", json!({ "ask": "ask_ghost", "decision": "allow" })).await;
     assert_ne!(s, 200, "{v}");
     assert!(shown(&b).await.iter().any(|x| x["id"] == "ask_ghost"), "kept to answer again");

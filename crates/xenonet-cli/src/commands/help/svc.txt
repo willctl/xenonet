@@ -7,16 +7,16 @@ machine's own XenoNet, as if it ran there:
 The request crosses sealed, like everything between machines, and the
 gateway can't read it. XenoNet knows nothing of what the service is.
 
-  xenonet svc publish <name> http://127.0.0.1:<port> --paths /<path>/ [--paths …] [--hosts <host> …]
-                                   publishes a service listening on this
-                                   machine's loopback address (127.0.0.1 or
-                                   [::1], by IP, plain http). Only paths
-                                   under each --paths are reachable. Every
-                                   host in the network may call it, or only
-                                   those named with --hosts. Publishing a
-                                   name again replaces it
-  xenonet svc unpublish <name>     takes a service off the network
   xenonet svc list [--json]        what this machine publishes
+  xenonet svc unpublish <name>     takes a service off the network
+
+Publishing widens what the network can reach, so it asks you (Touch ID
+on a Mac) and is done in XenoNet's window: Network settings › Publish a
+service. A service listens on this machine's loopback address (127.0.0.1
+or [::1], by IP, plain http), and only the paths you list under it are
+reachable. Every host in the network may call it, or only the hosts you
+name. Publishing a name again replaces it. xenonet svc publish says so
+and does nothing.
 
 This machine's XenoNet sends the service each request with a Forwarded
 header naming the calling host (Forwarded: by=xenonet;for=laptop). Only
@@ -28,5 +28,5 @@ host is offline.
 
 A service with no sign-in of its own is open to every program on every
 host allowed to call it: give it its own tokens, or name the hosts that
-may call. Publishing and taking a service off are yours to do: XenoNet
-refuses them from under an agent.
+may call. Taking a service off is yours to do, from the window or your
+own terminal: XenoNet refuses it from under an agent.

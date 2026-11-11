@@ -342,13 +342,26 @@ pub struct PersonAuthority {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PresenceProof {
     pub device: SigningKeyId,
-    /// What it approves: answer, admit, widen, publish, revoke or pair
-    pub what: Text<1, 32>,
+    pub what: PresenceWhat,
     /// The SHA-256 of the act, base64url
     pub act: Base64Bytes,
     pub nonce: Base64Bytes,
     pub at: Ms,
     pub sig: Base64Bytes,
+}
+
+/// What a presence block approves: an Allow (answer), admitting a machine, widening a network's settings, publishing a service, a revocation, pairing a device, a delegation, or issuing or widening an actor's grant
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PresenceWhat {
+    Answer,
+    Admit,
+    Widen,
+    Publish,
+    Revoke,
+    Pair,
+    Delegate,
+    Grant,
 }
 
 // A token root's certificate: the machine signing key's word that this root speaks for the machine, for a while.
@@ -905,6 +918,47 @@ pub struct Removal {
     pub n: Uint,
 }
 
+/// How a device asks the person before it signs: biometric (Touch ID), or weaker (Windows Hello, polkit or a passphrase)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceKind {
+    Biometric,
+    Weaker,
+}
+
+/// One of the person's devices, as their chain holds it
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PersonDevice {
+    pub id: SigningKeyId,
+    /// The machine it was paired on, as the person named it then
+    pub label: Text<0, 64>,
+    pub kind: DeviceKind,
+    /// Whether it can sign: false once it was removed or revoked
+    pub active: bool,
+    /// Whether it's this machine's own device
+    pub here: bool,
+}
+
+/// Who this machine acts as: the person, its device here and how it asks, and whether the person owns the network
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonHere {
+    /// null until an identity is set up here
+    pub id: Nullable<PersonId>,
+    /// Whether the person is the network's owner
+    pub owner: bool,
+    /// This machine's device, by its key's id; null where it has no way to ask the person
+    pub device: Nullable<SigningKeyId>,
+    pub kind: Nullable<DeviceKind>,
+    /// Whether this machine's device is an active device of the person's, so it can act as them
+    pub acts: bool,
+    /// Whether the person's root key is sealed to this machine's device key (false: in an owner-only file); null where this machine doesn't hold it
+    pub root_sealed: Nullable<bool>,
+    /// The person's devices, every one their chain holds
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub devices: Opt<Vec<PersonDevice>>,
+}
+
 /// The network, as a host sees it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -955,6 +1009,9 @@ pub struct State {
     /// XenoNet Dev's made-up network (simulate net-…)
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub simulated: Opt<bool>,
+    /// Who this machine acts as, while it's in a network
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub person: Opt<PersonHere>,
 }
 
 impl Document for State {

@@ -505,10 +505,10 @@ test("the Actors panel lists every actor and how XenoNet knows it, and takes you
   assert.match(row("actor:wren").via, /XenoNet reads its state · XenoNet traces work here back to it · made up, for the demo/);
   assert.match(row("actor:kestrel").via, /^XenoNet reads its state/);
   assert.match(row("actor:moth").via, /^it reports itself/);
-  // Its name shows it on the map; Wake…, New token and Remove for the one
-  // that reports itself, an observer's switch for the observed ones, and
-  // Show me on the map for you.
-  assert.deepEqual(row("actor:moth").buttons, ["Moth", "Wake…", "New token", "Remove"]);
+  // Its name shows it on the map; Wake…, Scope…, New token and Remove for
+  // the one that reports itself, an observer's switch for the observed
+  // ones, and Show me on the map for you.
+  assert.deepEqual(row("actor:moth").buttons, ["Moth", "Wake…", "Scope…", "New token", "Remove"]);
   assert.deepEqual(row("actor:moth").yours, ["New token"], "New token is yours alone");
   assert.deepEqual(row("actor:wren").buttons, ["Wren"]);
   assert.deepEqual(row("actor:you").buttons, ["Show me on the map"]);

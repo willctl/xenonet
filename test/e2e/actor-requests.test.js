@@ -320,3 +320,69 @@ test("waking an actor: a webhook set in the window, its key hidden as it's typed
     await fromWindow(`return await call("POST", "/api/actors/gateway", { on: false });`);
   }
 }));
+
+test("an actor's scopes: set from its Scope view in the window, which asks you as they widen, then narrowed to nothing there, which asks nothing", { timeout: limit(90000) }, shoot("actor-scopes", async () => {
+  const until = async (fn, ms = 10000) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const got = await fn();
+      if (got || Date.now() > end) return got;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  };
+  const scopes = async () => (await s.driver("actorScopes")).scopes.find((x) => x.actor === "actor:pipit") ?? null;
+  const view = async () => (await s.driver("actorScopes", "view")).view;
+  // Clicks a button of the Scope view where the driver says it is, once
+  // it's there, and waits for the view to change.
+  const press = async (key, kind = null) => {
+    const before = JSON.stringify(await view());
+    const at = await until(async () => {
+      const v = await view();
+      return kind ? v?.at.kinds[kind] : v?.at[key];
+    });
+    assert.ok(at, `${kind ?? key} is in the Scope view`);
+    await s.input({ click: at });
+    await until(async () => JSON.stringify(await view()) !== before);
+  };
+  try {
+    assert.equal((await fromWindow(`return await call("POST", "/api/actors", { schema: "actor/registration/v1", name: "Pipit", capabilities: ["message-agents", "answer-prompts"], heartbeatMs: 60000 });`)).status, 201);
+    // Away from the window, neither scope can be set.
+    const outside = await s.fetch("/api/actors/pipit/allows", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessions: "all", kinds: ["edit"], until: Date.now() + 86400e3 }) });
+    assert.equal(outside.status, 403, "only the window sets an allow scope");
+    assert.deepEqual(await scopes(), { actor: "actor:pipit", sessions: null, allows: null, row: null });
+
+    // Its Scope view, with the sessions it reaches and what it may allow typed in.
+    const opened = await s.driver("actorScopes", "open", { actor: "actor:pipit", selector: "project:atlas-api", sessionDays: 10, allowAll: true, kinds: ["edit"], allowDays: 5 });
+    assert.equal(opened.view.actor, "actor:pipit");
+    assert.match(opened.view.sessionsNow, /reaches no sessions/);
+    assert.match(opened.view.allowsNow, /allows none/);
+    assert.equal(opened.view.at.takeAway, null, "nothing to take away yet");
+
+    // Set: it reaches the project's sessions for ten days.
+    await press("set");
+    const set = await until(async () => (await scopes())?.sessions?.selector === "project:atlas-api" && (await scopes()));
+    assert.ok(set, JSON.stringify(await scopes()));
+    assert.ok(Math.abs(set.sessions.expiresAt - (Date.now() + 10 * 86400e3)) < 60e3);
+    assert.match((await view()).sessionsNow, /project:atlas-api, 10 days left/);
+
+    // Set what it may allow: edits, in every session, for five days.
+    await press("allowSet");
+    const allowed = await until(async () => (await scopes())?.allows && (await scopes()));
+    assert.deepEqual([allowed.allows.sessions, allowed.allows.kinds], ["all", ["edit"]]);
+    assert.match((await view()).allowsNow, /edits in every session · 5 days left/);
+
+    // Narrowed to nothing: End, then Take away.
+    await press("allowEnd");
+    assert.equal(await until(async () => (await scopes())?.allows === null), true, "the allow scope ended");
+    await press("takeAway");
+    assert.equal(await until(async () => (await scopes())?.sessions === null), true, "it reaches no sessions");
+    await press("back");
+    // Its row says so.
+    const row = await until(async () => (await scopes())?.row);
+    assert.match(row ?? "", /reaches no sessions · allows no prompts, only denies/);
+    await s.input({ keys: "Escape" });
+    assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
+  } finally {
+    await fromWindow(`return await call("DELETE", "/api/actors/pipit");`);
+  }
+}));

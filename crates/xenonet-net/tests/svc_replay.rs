@@ -116,7 +116,7 @@ async fn a_svc_request_is_passed_on_once_however_it_comes_back() {
 
     let hits = Arc::new(AtomicUsize::new(0));
     let port = counting_service(hits.clone()).await;
-    n.svc_publish("files", &format!("http://127.0.0.1:{port}"), &["/pay/".into()], &[]).unwrap();
+    n.svc_publish("files", &format!("http://127.0.0.1:{port}"), &["/pay/".into()], &[], true).unwrap();
 
     // laptop's request: a POST with its bearer, dated four minutes ahead.
     let now = T0 + 10 * MIN;

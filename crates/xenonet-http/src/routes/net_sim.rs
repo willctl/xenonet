@@ -15,6 +15,10 @@
 //!   hosts' agents after this machine's own;
 //! - POST /api/actors/you/message to a simulated host's agent, which goes
 //!   into the simulated outbox while its host is away;
+//! - the person's devices in the state, and revoking one from the window
+//!   (POST /api/net/devices/revoke);
+//! - the services this machine publishes (GET /api/net/svc, and from the
+//!   window POST /api/net/svc/publish and svc/unpublish);
 //! - GET /api/system?hosts=1, with a made-up reading for each other host,
 //!   each its own machine, so the Machines panel's sums aren't this one
 //!   counted again.
@@ -38,6 +42,7 @@ const NETWORK_ID: &str = "net_5d1e0c7a9b3f4e2d8c6a1b0f9e7d3c25";
 const ADDRESS: &str = "gw.example.net";
 const ROSTER_HEAD: &str = "c2ltdWxhdGVkLXJvc3Rlci1oZWFkLTA0";
 const PROPOSAL_ID: &str = "c2ltdWxhdGVkLWFkZC1kZW4tYXMtd2luZG93";
+const PERSON_ID: &str = "prs_simulatedpersonofthehomenetwork2";
 const TICKET_MS: f64 = 10.0 * 60e3;
 const MAX_TICKETS: usize = 5;
 const MAX_TEXT: usize = 16000;
@@ -48,6 +53,8 @@ struct Sim {
     agents: Vec<Value>,
     /// Made-up permission prompts of runs on the other machines.
     asks: Vec<Value>,
+    /// The services this machine publishes, as `xenonet svc list` has them.
+    services: Vec<Value>,
 }
 
 fn sims() -> &'static Mutex<HashMap<usize, Sim>> {
@@ -126,7 +133,7 @@ pub fn simulate(ctx: &Ctx, kind: &str, you_at: Option<&str>, variant: Option<&st
         Some("ask-env") => vec![made_up_ask(ctx.now(), true)],
         _ => Vec::new(),
     };
-    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone() });
+    sims().locked().insert(key(ctx), Sim { state: state.clone(), agents, asks: asks.clone(), services: Vec::new() });
     for a in &asks {
         ctx.broadcast("ask", a);
     }
@@ -206,7 +213,24 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             }
             Ok(Some(Reply::json(200, reading)))
         }
-        ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave" | "/api/net/approve")
+        ("GET", "/api/net/svc") => {
+            let all = sims().locked();
+            let Some(sim) = all.get(&key(ctx)) else { return Ok(None) };
+            Ok(Some(Reply::json(200, json!({ "host": sim.state["self"]["id"], "services": sim.services }))))
+        }
+        (
+            "POST",
+            "/api/net/ticket"
+            | "/api/net/replace"
+            | "/api/net/remove"
+            | "/api/net/create"
+            | "/api/net/join"
+            | "/api/net/leave"
+            | "/api/net/approve"
+            | "/api/net/devices/revoke"
+            | "/api/net/svc/publish"
+            | "/api/net/svc/unpublish",
+        )
         | ("PUT", "/api/net/settings") => {
             if !req.by.window {
                 return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
@@ -398,6 +422,28 @@ fn host_row(m: &Machine, online: bool, seen: Option<f64>, agents: usize, you: bo
     })
 }
 
+/// A made-up device's id: xns1_ and its machine's key id's letters.
+fn device_id(host: &str) -> String {
+    format!("xns1_{}", &key_id(host)[5..])
+}
+
+/// The person as `me` holds them: one device on each of `machines`, a
+/// Mac's biometric and the others' weaker, and the root sealed on the
+/// founder's machine, which holds it.
+fn person_of(me: &str, machines: &[&Machine]) -> Value {
+    let kind = |m: &Machine| if m.platform == "darwin" { "biometric" } else { "weaker" };
+    let here = machines.iter().find(|m| m.id == me);
+    json!({
+        "id": PERSON_ID,
+        "owner": true,
+        "device": device_id(me),
+        "kind": here.map_or("biometric", |m| kind(m)),
+        "acts": true,
+        "rootSealed": if here.is_some_and(|m| m.founder) { json!(true) } else { Value::Null },
+        "devices": machines.iter().map(|m| json!({ "id": device_id(m.id), "label": m.id, "kind": kind(m), "active": true, "here": m.id == me })).collect::<Vec<_>>(),
+    })
+}
+
 /// The state and the other hosts' agents for `kind`, at `now`.
 fn made_up(kind: &str, you_at: Option<&str>, now: f64) -> Option<(Value, Vec<Value>)> {
     made_up_with(kind, you_at, false, now)
@@ -472,6 +518,7 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         "start": "you",
         "wake": "consent",
         "simulated": true,
+        "person": person_of(me.id, &[&STUDIO, &LAPTOP, &RACK]),
     });
     match kind {
         "net-ticket" => state["tickets"] = json!([{ "host": "desk", "window": false, "expires": now + 8.5 * MINUTE }]),
@@ -656,6 +703,10 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             row["id"] = json!(host);
             row["keyId"] = json!(key_id(&host));
             state["hosts"] = json!([row]);
+            state["person"] = person_of(STUDIO.id, &[&STUDIO]);
+            state["person"]["device"] = json!(device_id(&host));
+            state["person"]["devices"][0]["id"] = json!(device_id(&host));
+            state["person"]["devices"][0]["label"] = json!(host);
             // No tunnel or LAN address yet: the person sets one, as the
             // Actors panel's gateway does.
             state["gateway"] = Value::Null;
@@ -753,6 +804,60 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
                 }
             }
             Reply::json(200, sim.state.clone())
+        }
+        "/api/net/devices/revoke" => {
+            if !in_network {
+                return outside();
+            }
+            let device = body.get("device").and_then(Value::as_str).unwrap_or("");
+            if sim.state["person"]["device"] == device {
+                return fail(409, "own-device", "that's this machine's own device: revoke it from another machine of yours");
+            }
+            let Some(d) = sim.state["person"]["devices"].as_array_mut().and_then(|l| l.iter_mut().find(|d| d["id"] == device)) else {
+                return fail(404, "no-device", format!("{device} isn't one of your devices"));
+            };
+            if d["active"] != true {
+                return fail(409, "no-change", format!("{device} can't sign already"));
+            }
+            d["active"] = json!(false);
+            Reply::json(200, json!({ "revoked": device }))
+        }
+        "/api/net/svc/publish" => {
+            if !in_network {
+                return outside();
+            }
+            let name = body.get("name").and_then(Value::as_str).unwrap_or("");
+            let target = body.get("target").and_then(Value::as_str).unwrap_or("");
+            let words = |k: &str| body.get(k).and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+            let (paths, hosts) = (words("paths"), words("hosts"));
+            let named = name.len() >= 2
+                && name.len() <= 32
+                && name.starts_with(|c: char| c.is_ascii_lowercase())
+                && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !named {
+                return fail(400, "bad-request", "a service's name is 2 to 32 lowercase letters, digits and dashes, starting with a letter");
+            }
+            if !target.starts_with("http://127.0.0.1:") && !target.starts_with("http://[::1]:") {
+                return fail(400, "bad-request", "a service listens on this machine's loopback address, by IP, plain http: http://127.0.0.1:<port>");
+            }
+            if paths.is_empty() || paths.iter().any(|p| !p.starts_with('/') || !p.ends_with('/')) {
+                return fail(400, "bad-request", "say the paths callers may reach, each starting and ending with /, as /sync/v1/");
+            }
+            if let Some(h) = hosts.iter().find(|h| !has_host(&sim.state, h) || **h == me) {
+                return fail(400, "bad-request", format!("{h} isn't another machine in the network"));
+            }
+            sim.services.retain(|x| x["name"] != name);
+            sim.services.push(json!({ "name": name, "target": target, "paths": paths, "hosts": hosts, "at": now }));
+            Reply::json(200, json!({ "host": me, "services": sim.services }))
+        }
+        "/api/net/svc/unpublish" => {
+            let name = body.get("name").and_then(Value::as_str).unwrap_or("");
+            let had = sim.services.len();
+            sim.services.retain(|x| x["name"] != name);
+            if sim.services.len() == had {
+                return fail(404, "not-published", format!("this machine publishes no service named {name}"));
+            }
+            Reply::json(200, json!({ "host": me, "services": sim.services }))
         }
         "/api/net/settings" => {
             if !in_network {
@@ -1132,9 +1237,28 @@ mod tests {
         assert!(has_host(&s.state, "den"));
     }
 
+    #[test]
+    fn a_device_is_revoked_once_never_this_machines_and_a_service_published_and_taken_off() {
+        let now = 1.8e12;
+        let mut s = sim("net-founder");
+        let laptop = device_id("laptop");
+        assert_eq!(apply(&mut s, "/api/net/devices/revoke", &json!({ "device": device_id("studio") }), now).status, 409, "this machine's own");
+        assert_eq!(apply(&mut s, "/api/net/devices/revoke", &json!({ "device": laptop }), now).status, 200);
+        assert_eq!(apply(&mut s, "/api/net/devices/revoke", &json!({ "device": laptop }), now).status, 409, "once");
+        let d = s.state["person"]["devices"].as_array().unwrap().iter().find(|d| d["id"] == laptop.as_str()).unwrap().clone();
+        assert_eq!(d["active"], false);
+        let publish = |s: &mut Sim, body: Value| apply(s, "/api/net/svc/publish", &body, now).status;
+        assert_eq!(publish(&mut s, json!({ "name": "files", "target": "http://127.0.0.1:4790", "paths": ["/sync/v1/"] })), 200);
+        assert_eq!(publish(&mut s, json!({ "name": "files", "target": "http://example.com", "paths": ["/sync/v1/"] })), 400);
+        assert_eq!(publish(&mut s, json!({ "name": "files", "target": "http://127.0.0.1:4790", "paths": ["/sync/v1/"], "hosts": ["nowhere"] })), 400);
+        assert_eq!(s.services.len(), 1);
+        assert_eq!(apply(&mut s, "/api/net/svc/unpublish", &json!({ "name": "files" }), now).status, 200);
+        assert_eq!(s.services, Vec::<Value>::new());
+    }
+
     fn sim(kind: &str) -> Sim {
         let (state, agents) = made_up(kind, None, 1.8e12).unwrap();
-        Sim { state, agents, asks: Vec::new() }
+        Sim { state, agents, asks: Vec::new(), services: Vec::new() }
     }
 
     #[test]

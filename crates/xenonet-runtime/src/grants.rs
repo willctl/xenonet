@@ -123,6 +123,16 @@ fn within(a: &xenonet_authz::AllowScope, b: &xenonet_authz::AllowScope) -> bool 
     sessions && a.kinds.iter().all(|k| b.kinds.contains(k)) && a.until <= b.until
 }
 
+/// The allow scope this machine's actor `slug` holds now, as its row keeps
+/// it, or None: no token, no row, or one that doesn't read.
+pub fn allows_of(w: &Runtime, slug: &str) -> Option<Value> {
+    let row = w.store.with(|s| s.actor_row(slug)).ok().flatten()?;
+    let token = row.text("token_id")?.to_string();
+    let scope = w.store.with(|s| s.scope(&token)).ok().flatten()?;
+    let v = serde_json::from_str::<Value>(scope.text("allows")?).ok()?;
+    crate::ground::allow_scope_of(&v).map(|_| v)
+}
+
 /// What this machine's actor `slug` may Allow of the prompts it answers:
 /// `scope` (`{ sessions: "all" | [session ids], kinds: [read, edit,
 /// command, web, tool], until }`), or none, when its right to answer is a

@@ -1330,9 +1330,12 @@ impl Shared {
         &self.svc
     }
 
-    /// `xenonet svc publish`: the owner publishes a service on this machine
-    /// to the network, in place of one by its name.
-    pub fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String]) -> R<Value> {
+    /// The person publishes a service on this machine to the network, in
+    /// place of one by its name. Publishing widens what the network can
+    /// reach, so it's decided as the person's act (`Act::Publish`), with
+    /// their presence for exactly this publication: only from XenoNet's
+    /// window (`at_window`), where they can be asked.
+    pub fn svc_publish(&self, name: &str, target: &str, paths: &[String], hosts: &[String], at_window: bool) -> R<Value> {
         let net = self.network().ok_or_else(not_in)?;
         let p = svc::Published::new(name, target, paths, hosts, self.now() as i64).map_err(NetError::bad)?;
         {
@@ -1347,11 +1350,51 @@ impl Shared {
                 }
             }
         }
+        if !at_window {
+            return Err(identity::not_at_window("publishing a service"));
+        }
+        self.decide_publish(&net.id, &p)?;
         let words =
             format!("this machine published {} at {} to {}", p.name, p.target.url(), if p.hosts.is_empty() { "every host in the network".to_string() } else { p.hosts.join(", ") });
         self.svc.publish(p)?;
         self.log("net.svc", &words);
         Ok(self.svc_list())
+    }
+
+    /// The person's publication of `p`, decided here: their presence for
+    /// it from this device (it asks them once), checked and taken once,
+    /// then `decide` at this machine's own door.
+    fn decide_publish(&self, network: &str, p: &svc::Published) -> R<()> {
+        use xenonet_authz::{Act, Decision, Door, NetworkId, PersonId, PersonSigned, Principal, Request, Resource, ServiceId, VerifiedPresence};
+        let refused = |why: String| NetError::new(403, "not-allowed", why);
+        let id = &self.identity;
+        let person =
+            id.person_id().filter(|_| id.can_act()).ok_or_else(|| NetError::new(409, "no-person", "this machine has no device of yours that can sign, so it publishes nothing"))?;
+        let spec = json!({ "target": p.target.url(), "paths": p.paths, "hosts": p.hosts }).to_string();
+        let act = Act::Publish { service: ServiceId::new(&p.name).map_err(|e| NetError::bad(e.message))?, spec: xenonet_id::codec::sha256(spec.as_bytes()) };
+        let resource = Resource::Network(NetworkId::new(network).map_err(|e| NetError::bad(e.message))?);
+        let facts = self.facts();
+        let block = id.prove(true, "publish", &xenonet_authz::act_hash(&resource, &act), &format!("publish {} to your network", p.name), facts.now)?;
+        let person = PersonId::new(&person).map_err(|e| NetError::bad(e.message))?;
+        let signed = PersonSigned::from_presence(&facts, &person, &block, &resource, &act).map_err(|e| refused(e.message))?;
+        let request = Request::new(Principal::Person(signed), resource, act, Door::Local, facts.now, None);
+        let presence = id.with_seen(|seen| VerifiedPresence::check(seen, &block, &facts, &request).map_err(|e| NetError::new(403, "presence", e.message)))?;
+        match xenonet_authz::decide(None, &request, &facts, Some(&presence)) {
+            Decision::Allow(_) => Ok(()),
+            d => Err(refused(d.reason().map_or_else(|| "not allowed".to_string(), |r| r.text().to_string()))),
+        }
+    }
+
+    /// Revokes one of the person's other devices, as for a lost machine:
+    /// an entry in their chain signed by this device with its presence,
+    /// pushed to the network's machines, each of which then refuses
+    /// anything that device signs. Only from XenoNet's window.
+    pub fn revoke_device(&self, device: &str, at_window: bool) -> R<Value> {
+        let made = self.identity.revoke_device(at_window, device, self.gateway_now() as i64)?;
+        if !made.is_empty() {
+            self.log("net.person", &format!("you revoked the device {device}: nothing it signs counts any more"));
+        }
+        Ok(json!({ "revoked": device }))
     }
 
     /// `xenonet svc unpublish`.
@@ -2244,13 +2287,25 @@ impl Node {
         // Who this machine acts as, as the window shows it: the person, the
         // device here and how it asks, and whether it's the network's owner.
         let id = &n.identity;
+        let here = id.device_id();
+        let devices: Vec<Value> = id
+            .chain()
+            .person()
+            .map(|p| {
+                p.devices
+                    .values()
+                    .map(|d| json!({ "id": d.id, "label": d.label, "kind": d.kind.as_str(), "active": d.active(), "here": here.as_deref() == Some(d.id.as_str()) }))
+                    .collect()
+            })
+            .unwrap_or_default();
         let person = json!({
             "id": id.person_id(),
             "owner": view.owner.is_some() && view.owner == id.person_id(),
-            "device": id.device_id(),
+            "device": here,
             "kind": id.device_kind().map(xenonet_log::person::DeviceKind::as_str),
             "acts": id.can_act(),
             "rootSealed": id.root_sealed(),
+            "devices": devices,
         });
         let address = net.gateway.address.clone().unwrap_or_default();
         let kind = if address.is_empty() { "tunnel" } else { address_kind(&address) };

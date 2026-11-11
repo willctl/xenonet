@@ -292,6 +292,11 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let (s, v) = a.window("POST", "/api/net/svc/publish", json!({ "name": "files", "target": target, "paths": ["/sync/v1/"] })).await;
     assert_eq!((s, v["code"].clone()), (403, json!("yours")), "{v}");
     a.peers.agent.store(false, Ordering::SeqCst);
+    // It widens what the network reaches, so it asks the person: the
+    // window's, never the terminal's, where nothing asks.
+    let terminal = json!({ "name": "files", "target": target, "paths": ["/sync/v1/"] }).to_string();
+    let (s, _, out) = a.call("POST", "/api/net/svc/publish", Some(terminal.as_bytes()), &[]).await;
+    assert_eq!(s, 403, "{}", String::from_utf8_lossy(&out));
     // Never XenoNet's own API or actor gateway, nor a name, nor anything
     // but loopback. studio's actor gateway runs on a port it saved, not
     // the default.
@@ -414,9 +419,10 @@ async fn a_program_on_one_host_reaches_a_service_another_host_published() {
     let (s, h, _) = b.call("GET", "/api/svc/studio/files/sync/v1/slow", None, &[]).await;
     assert_eq!((s, header(&h, "x-xenonet-refused")), (504, Some("timeout")));
 
-    // Taken off the network: not published any more.
-    let (s, v) = a.window("POST", "/api/net/svc/unpublish", json!({ "name": "private" })).await;
-    assert_eq!(s, 200, "{v}");
+    // Taken off the network, from the terminal (it only narrows, so it
+    // asks nothing): not published any more.
+    let (s, _, out) = a.call("POST", "/api/net/svc/unpublish", Some(br#"{"name":"private"}"#), &[]).await;
+    assert_eq!(s, 200, "{}", String::from_utf8_lossy(&out));
     let (s, h, _) = gw.call("GET", "/api/svc/studio/private/sync/v1/x", None, &[]).await;
     assert_eq!((s, header(&h, "x-xenonet-refused")), (404, Some("not-published")));
 

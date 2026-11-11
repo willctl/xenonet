@@ -24,8 +24,14 @@
 //!   chain, signed here (with presence where they widen); `approve` signs
 //!   one that waits, by its id.
 //! - `GET svc`, `POST svc/publish`, `POST svc/unpublish`: the services this
-//!   host publishes to the network (`xenonet svc`). Other hosts reach them
-//!   at `/api/svc/…` (routes/svc.rs).
+//!   host publishes to the network. Other hosts reach them at
+//!   `/api/svc/…` (routes/svc.rs). Publishing widens what the network
+//!   reaches, so it's the window's, with the person's presence; taking a
+//!   service off is yours from your terminal too (`xenonet svc`).
+//! - `POST devices/revoke`: revokes another of the person's devices (a
+//!   lost machine), with their presence: the window's.
+//!
+//! The person's devices are in `GET state`'s `person.devices`.
 
 use crate::cores::CoreError;
 use crate::ctx::{Answer, Ctx};
@@ -96,7 +102,10 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     let known = matches!(
         (method, rest),
         ("GET", "state" | "svc")
-            | ("POST", "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "approve" | "gateway/take" | "gateway/set" | "svc/publish" | "svc/unpublish")
+            | (
+                "POST",
+                "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "approve" | "gateway/take" | "gateway/set" | "svc/publish" | "svc/unpublish" | "devices/revoke"
+            )
             | ("PUT", "settings")
     );
     if !known {
@@ -143,7 +152,8 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "approve" => net.approve(&text("id"), window).await,
         "gateway/take" => take(ctx, net, &body, window).await,
         "svc" => Ok(net.svc_list()),
-        "svc/publish" => publish(ctx, net, &body),
+        "svc/publish" => publish(ctx, net, &body, window),
+        "devices/revoke" => net.revoke_device(&text("device"), window),
         "svc/unpublish" => net.svc_unpublish(&text("name")),
         _ => net.set_gateway(&text("address")).await,
     };
@@ -197,10 +207,11 @@ async fn take(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetRe
     took
 }
 
-/// `xenonet svc publish`: a service on this machine for the network's
-/// other hosts. Never XenoNet's own API or its doors, which would hand
-/// what's this machine's owner's to every allowed host.
-fn publish(ctx: &Ctx, svc: &dyn Network, body: &Value) -> NetResult {
+/// **Publish a service**: a service on this machine for the network's
+/// other hosts, from the window, with the person's presence. Never
+/// XenoNet's own API or its doors, which would hand what's this machine's
+/// owner's to every allowed host.
+fn publish(ctx: &Ctx, svc: &dyn Network, body: &Value, window: bool) -> NetResult {
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let list = |k: &str| -> Result<Vec<String>, CoreError> {
         match body.get(k) {
@@ -221,7 +232,7 @@ fn publish(ctx: &Ctx, svc: &dyn Network, body: &Value) -> NetResult {
             return Err(bad(format!("port {port} is XenoNet's own: publishing it would let other hosts act as this machine's owner")));
         }
     }
-    svc.svc_publish(&text("name"), &target, &list("paths")?, &list("hosts")?)
+    svc.svc_publish(&text("name"), &target, &list("paths")?, &list("hosts")?, window)
 }
 
 async fn settings(svc: &dyn Network, body: &Value, window: bool) -> NetResult {

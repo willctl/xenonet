@@ -607,9 +607,13 @@ impl Engine for EngineDriver {
         let out = tokio::task::spawn_blocking(move || crate::starts::sign_in(&w, &action, &token)).await.map_err(|e| CoreError::new(e.to_string()))?;
         out.map_err(|(status, why)| CoreError::status(status, why))
     }
-    async fn permission(&self, me: &str, title: Option<String>, body: Value) -> R<Value> {
+    async fn permission(&self, me: &str, title: Option<String>, body: Value, by: xenonet_api::cores::door::Attestation) -> R<Value> {
         let (w, me) = (self.0.clone(), me.to_string());
-        let out = tokio::task::spawn_blocking(move || crate::asks::ask(&w, &me, title.as_deref(), &body)).await.map_err(|e| CoreError::new(e.to_string()))?;
+        let by = match by {
+            xenonet_api::cores::door::Attestation::Unchecked => xenonet_authz::Attestation::Unchecked,
+            xenonet_api::cores::door::Attestation::ProcessChecked => xenonet_authz::Attestation::ProcessChecked,
+        };
+        let out = tokio::task::spawn_blocking(move || crate::asks::ask(&w, &me, title.as_deref(), &body, by)).await.map_err(|e| CoreError::new(e.to_string()))?;
         out.map_err(|(status, why)| CoreError::status(status, why))
     }
     async fn asks(&self) -> R<Value> {

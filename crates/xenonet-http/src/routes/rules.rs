@@ -357,7 +357,8 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/net/approve", YOU, Nothing),
     r("POST",   "/api/net/gateway/take", YOU, Nothing),
     r("POST",   "/api/net/gateway/set", YOU, Nothing),
-    r("POST",   "/api/net/svc/publish", YOU, Nothing),
+    r("POST",   "/api/net/svc/publish", WINDOW, Nothing),
+    r("POST",   "/api/net/devices/revoke", WINDOW, Nothing),
     r("POST",   "/api/net/svc/unpublish", YOU, Nothing),
     r("PUT",    "/api/net/settings", YOU, Nothing),
     r("*",      "/api/svc/**", &[Program], Nothing),
@@ -503,7 +504,7 @@ fn act_of(doing: Doing) -> Option<Act> {
 
 /// How a session's verdict counts: checked, unless the check passed
 /// because nothing could be seen.
-fn attestation_of(verdict: &Value) -> Attestation {
+pub(crate) fn attestation_of(verdict: &Value) -> Attestation {
     if verdict.get("checked") == Some(&Value::Bool(false)) {
         Attestation::Unchecked
     } else {
