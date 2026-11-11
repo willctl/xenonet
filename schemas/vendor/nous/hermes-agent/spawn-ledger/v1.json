@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/spawn-ledger/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Hermes Agent's spawn ledger",
   "description": "~/.hermes/spawn-ledger.json: every long-lived Hermes process of the install (the classic CLI, a desktop backend, the dashboard, the gateway, MCP helpers), as Hermes keeps it for itself. Dead entries stay until the next one is added, so each is checked against the process table. argv is never read: it can hold a prompt.",
   "type": "array",

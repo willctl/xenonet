@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/gateway-state/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Hermes Agent's gateway state",
   "description": "gateway_state.json in ~/.hermes (and each profile's): the always-on gateway's state, heartbeat and messaging platforms. argv, hermes_home and each platform's error_message, ingress_url and listener_base are never read.",
   "oneOf": [

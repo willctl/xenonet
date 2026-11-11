@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/google/gemini-cli/chat-record/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Gemini CLI's chat records",
   "description": "The lines of Gemini CLI's chat records (~/.gemini/tmp/<project>/chats/session-*.jsonl, or GEMINI_CLI_HOME's): the session's metadata, its messages' ids, kinds and times, the file each write_file and replace call names, and the metadata updates. The project's folder is read from .project_root beside chats. The records carry no version.",
   "type": "object",

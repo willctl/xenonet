@@ -4,8 +4,7 @@
 // an app does stays in code.
 //
 //   numbat     the names numbat records its runs under
-//   products   its vendor products: the sources of each are kept in
-//              scripts/provider-drift/registry.mjs
+//   products   its vendor products, each with the sources XenoNet reads
 //   roots      the variable that moves its folder, and the folder otherwise
 //   context    its context window, until a line says otherwise
 //   identity   the kind of account it runs under (identity/v1)

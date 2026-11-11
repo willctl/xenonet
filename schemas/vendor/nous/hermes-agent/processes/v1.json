@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/nous/hermes-agent/processes/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Hermes Agent's background processes",
   "description": "processes.json in ~/.hermes (and each profile's): the processes Hermes's terminal tool started in the background and still runs, its checkpoint for after a crash. Commands, watch patterns and session keys are never read.",
   "type": "array",

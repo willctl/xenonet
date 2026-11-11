@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/spacexai/grok-build/usage/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "A Grok Build session's usage",
   "description": "Grok Build's ~/.grok/sessions/<encoded cwd>/<session id>/usage.json, the session's token and cost ledger, written at the end of each turn: the session's totals and each turn's, each by model. A fork starts with a copy of its parent's. The file carries no version, so the newest schema reads it.",
   "type": "object",

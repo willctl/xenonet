@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/anthropic/claude-desktop/plan-usage/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Claude desktop's plan usage samples",
   "description": "Claude desktop's plan-usage-history.json: samples of plan usage it takes while its usage view has been open lately. The version is the file's own `version`.",
   "type": "object",

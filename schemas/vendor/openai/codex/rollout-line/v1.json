@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/openai/codex/rollout-line/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "A line of a Codex rollout",
   "description": "A line of ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<time>-<thread>.jsonl (and of archived, zstd-compressed ones), as the live tailer, a session's stats and search read it, and a thread shown from its rollout when the app-server can't list its items. The version is the rollout's first line's, session_meta's cli_version.",
   "oneOf": [

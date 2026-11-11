@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/anomaly/opencode/db/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "OpenCode's database",
   "description": "The rows XenoNet reads from OpenCode's opencode.db ($XDG_DATA_HOME/opencode, ~/.local/share/opencode by default, or OPENCODE_DB), opened read only: its sessions and which files their edit tools changed. OpenCode 2 writes session_v2 and session_part, 1.x session and part; a database upgraded from 1.x can hold both. The version is the newest session's own (session.version).",
   "type": "object",

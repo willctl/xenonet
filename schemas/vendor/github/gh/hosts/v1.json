@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/github/gh/hosts/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "gh's hosts.yml",
   "description": "gh's hosts.yml ($GH_CONFIG_DIR, or the XDG or platform config folder), hosts and logins only. The file carries no version, so the newest schema reads it.",
   "type": "object",

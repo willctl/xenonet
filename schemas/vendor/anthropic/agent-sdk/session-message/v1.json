@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/anthropic/agent-sdk/session-message/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "A message as the Agent SDK reads it from a transcript",
   "description": "One of the messages getSessionMessages() returns (SessionMessage), as the console's transcript view reads it. The version is the installed SDK's own.",
   "oneOf": [

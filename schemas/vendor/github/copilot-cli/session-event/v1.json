@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/github/copilot-cli/session-event/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Copilot CLI's session events",
   "description": "The lines of Copilot CLI's session event logs (~/.copilot/session-state/<id>/events.jsonl, or <id>.jsonl before 1.0.11): session.start (id, version, start, working folder and branch), resume and context changes, title changes, shutdown (the files it changed), and tool.execution_start for the file an edit tool names. Other kinds of event are passed over. The version is session.start's own (version).",
   "type": "object",

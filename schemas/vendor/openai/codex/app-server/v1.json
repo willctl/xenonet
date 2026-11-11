@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/openai/codex/app-server/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "The codex app-server's answers",
   "description": "The results of the codex app-server methods XenoNet calls over stdio JSON-RPC, by method: initialize (its userAgent), thread/list (the map's Codex threads) and thread/items/list (a thread in the console). XenoNet sends initialize with its name and version, and thread/list with archived, limit, cursor, sourceKinds and useStateDbOnly. Renaming a thread in XenoNet sends thread/name/set with threadId and name, whose answer ({}) isn't read. The version is Codex's, from the userAgent.",
   "type": "object",

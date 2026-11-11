@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/anthropic/claude-code/transcript-line/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "A line of a Claude Code transcript",
   "description": "A line of ~/.claude/projects/<project>/<session>.jsonl, or of a subagent's <session>/subagents/agent-<id>.jsonl, as the live tailer, a session's stats and search read it. The version is the line's own `version`, Claude Code's.",
   "oneOf": [

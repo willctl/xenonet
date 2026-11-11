@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/openai/codex/state-db/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Codex's state database",
   "description": "The tables and columns XenoNet queries in ~/.codex/state_5.sqlite, opened read only, for Codex desktop's projects. The version is the file's number (state_5); a state database of another number is drift.",
   "type": "object",

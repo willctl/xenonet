@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xenonet.dev/schemas/vendor/anysphere/cursor/hook-input/v1.json",
-  "$comment": "Written by npm run schemas from core/schema. Change the definition there, not this file.",
+  "$comment": "Kept by hand: this file is the definition. docs/design/schemas.md says how vendor schemas change.",
   "title": "Cursor's hook input",
   "description": "The fields of Cursor's hook input (cursor.com/docs/agent/hooks) that XenoNet's Cursor hook keeps, one line per sessionStart, afterFileEdit, stop and sessionEnd, in the file it's told to write. The version is Cursor's own (cursor_version).",
   "type": "object",
