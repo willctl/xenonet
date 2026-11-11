@@ -98,7 +98,7 @@ test("A2A is off until the window turns it on; the card's address comes with the
   assert.equal(await until(() => click('[data-ac-gateway="actor:plover"]')), true);
   assert.equal(await until(() => click('[data-ac-gateway-make="actor:plover"][data-ac-kind="a2a"]')), true);
   assert.match((await until(() => text("[data-ac-token-text]"))) ?? "", /^xenonet_gateway_•+$/);
-  assert.equal(await s.eval(`return /xenonet_gateway_[0-9a-f]{64}/.test(document.documentElement.outerHTML)`), false);
+  assert.equal(await s.eval(`return /xenonet_gateway_[A-Za-z0-9_-]{64,}/.test(document.documentElement.outerHTML)`), false);
   assert.match((await text(".ac-steps")) ?? "", /Agent Card URL[\s\S]*https:\/\/xenonet\.example\.com\/\.well-known\/agent-card\.json[\s\S]*Authorization: Bearer <token>/);
   await click("[data-ac-done]");
   await s.input({ keys: "Escape" });

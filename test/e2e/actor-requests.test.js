@@ -107,7 +107,7 @@ test("a made-up registration waits for the window, which allows one and denies a
 test("an actor added from the window gets its token once; a new token stops the old; removing it stops both", { timeout: limit(60000) }, shoot("actor-tokens", async () => {
   const added = await fromWindow(`return await call("POST", "/api/actors", { name: "Kite", capabilities: ["run-commands"] });`);
   assert.deepEqual([added.status, added.body.state, added.body.id], [201, "allowed", "actor:kite"]);
-  assert.match(added.body.token, /^xenonet_actor_[0-9a-f]{64}$/);
+  assert.match(added.body.token, /^xenonet_actor_[A-Za-z0-9_-]{64,}$/);
   const outside = await fetch(`${s.base}/api/actors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Kite 2" }) });
   assert.equal(outside.status, 403, "only the window adds actors");
 
@@ -173,10 +173,10 @@ test("the actor gateway: set up in the window with a tunnel of your own, its add
   assert.equal(await until(() => click('[data-ac-gateway-make="actor:lark"]')), true);
   // Its token is masked, and out of the page, until Show.
   assert.match((await until(() => text("[data-ac-token-text]"))) ?? "", /^xenonet_gateway_•+$/);
-  assert.equal(await s.eval(`return /xenonet_gateway_[0-9a-f]{64}/.test(document.documentElement.outerHTML)`), false);
+  assert.equal(await s.eval(`return /xenonet_gateway_[A-Za-z0-9_-]{64,}/.test(document.documentElement.outerHTML)`), false);
   await click('[data-secret-show="token"]');
   const token = await until(() => text('[data-secret="token"] .secret-plain'));
-  assert.match(token ?? "", /^xenonet_gateway_[0-9a-f]{64}$/);
+  assert.match(token ?? "", /^xenonet_gateway_[A-Za-z0-9_-]{64,}$/);
   assert.match(await text(".ac-steps"), /add an MCP server with this URL[\s\S]*https:\/\/xenonet\.example\.com\/mcp[\s\S]*Authorization: Bearer <token>[\s\S]*Waiting for Lark's first call/);
   // As a cloud agent calls it, through a tunnel to the gateway's own port.
   const rpc = (tok, method, params = {}) =>
@@ -214,7 +214,7 @@ test("a session asks for an actor's gateway token: it is told none exists, the c
       await new Promise((r) => setTimeout(r, 150));
     }
   };
-  const TOKEN = /xenonet_(gateway|actor)_[0-9a-f]{64}/;
+  const TOKEN = /xenonet_(gateway|actor)_[A-Za-z0-9_-]{64,}/;
   // A program on this machine asks, as a session or the xenonet command does.
   const asked = await fetch(`${s.base}/api/actors/moth/gateway/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const answer = await asked.text();
@@ -242,7 +242,7 @@ test("a session asks for an actor's gateway token: it is told none exists, the c
   assert.equal(await until(() => s.eval(`return !document.querySelector('#alerts [data-al-request="${card.id}"]')`)), true, "answered");
   assert.deepEqual((await s.driver("actorRequests")).gatewayAsks, []);
   await click('[data-secret-show="token"]');
-  assert.match((await until(() => s.eval(`return document.querySelector('[data-secret="token"] .secret-plain')?.innerText ?? null`))) ?? "", /^xenonet_gateway_[0-9a-f]{64}$/, "Show reveals it, in the window alone");
+  assert.match((await until(() => s.eval(`return document.querySelector('[data-secret="token"] .secret-plain')?.innerText ?? null`))) ?? "", /^xenonet_gateway_[A-Za-z0-9_-]{64,}$/, "Show reveals it, in the window alone");
   // A screenshot holds a shown token masked.
   const shot = await s.eval(`return document.documentElement.outerHTML.includes("secret-masked")`);
   assert.equal(shot, true);

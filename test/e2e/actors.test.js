@@ -561,9 +561,9 @@ test("an actor added in the panel shows its token once; New token replaces it, a
   await clickOn("[data-ac-add]");
   // Masked, and not in the page at all, until Show.
   assert.match((await until(tokenMasked)) ?? "", /^xenonet_actor_•+$/);
-  assert.equal(await s.eval(`return /xenonet_actor_[0-9a-f]{64}/.test(document.documentElement.outerHTML)`), false, "the token isn't in the page before Show");
+  assert.equal(await s.eval(`return /xenonet_actor_[A-Za-z0-9_-]{64,}/.test(document.documentElement.outerHTML)`), false, "the token isn't in the page before Show");
   const first = await until(tokenShown);
-  assert.match(first ?? "", /^xenonet_actor_[0-9a-f]{64}$/, "its token, once");
+  assert.match(first ?? "", /^xenonet_actor_[A-Za-z0-9_-]{64,}$/, "its token, once");
   // XenoNet knows it; from under an agent, which may be running these tests,
   // the process check still refuses it on macOS.
   assert.notEqual((await asActor(first)).status, 401, "XenoNet knows the token");
@@ -599,7 +599,7 @@ test("an actor added in the panel shows its token once; New token replaces it, a
     const t = await tokenShown();
     return t && t !== first ? t : null;
   });
-  assert.match(second ?? "", /^xenonet_actor_[0-9a-f]{64}$/);
+  assert.match(second ?? "", /^xenonet_actor_[A-Za-z0-9_-]{64,}$/);
   assert.deepEqual([(await asActor(first)).status, (await asActor(first)).body.reason], [401, "rotated"]);
   assert.equal((await tokenOf("actor:kite"))?.state, "works", "its new token works");
   // Closing the panel lets that one go too.
