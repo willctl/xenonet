@@ -1,7 +1,7 @@
 #![no_main]
 
 // What other tools print or keep, as XenoNet reads it: gh's hosts.yml, an
-// ssh config's aliases, git's remotes and config, ps, lsof and netstat on
+// ssh config's aliases, git's config and its remotes in it, ps, lsof and netstat on
 // the processes at the other end of a connection, tmux's panes, Codex's
 // picks for the projects folder, a delivery selector an agent wrote, and
 // the system's GPU and memory stats. The first byte picks one.
@@ -10,7 +10,7 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::json;
 use xenonet_engine::delivery::selector::Selector;
 use xenonet_engine::delivery::{opencode, tmux};
-use xenonet_engine::{engine, procs};
+use xenonet_engine::procs;
 use xenonet_state::{classify, identities};
 
 fuzz_target!(|data: &[u8]| {
@@ -28,7 +28,6 @@ fuzz_target!(|data: &[u8]| {
         1 => {
             let _ = (procs::parse_texts(&text), procs::parse_cwd(&text), procs::parse_cwds(&text), procs::parse_commands(&text), procs::parse_ps(&text));
             let _ = (procs::parse_netstat(&text, "47840", "51234"), procs::parse_netstat_windows(&text, "47840", "51234"));
-            let _ = engine::parse_repo(&text);
         }
         2 => {
             let _ = tmux::parse_panes(&text);

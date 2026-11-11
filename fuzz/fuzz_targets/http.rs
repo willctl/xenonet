@@ -27,13 +27,12 @@ use xenonet_service::{serve, server, upstream};
 // sessions, hooks, actors and pages. Routes that open apps, run
 // terminals or change this machine's settings stay out, whatever the
 // cores would say.
-const ROUTES: [&str; 16] = [
+const ROUTES: [&str; 15] = [
     "/api/hook/",
     "/api/engine/",
     "/api/delivery",
     "/api/actors",
     "/api/assistant",
-    "/api/hosts",
     "/api/refusals",
     "/api/drift",
     "/api/search",
@@ -119,7 +118,7 @@ fn service() -> &'static Arc<Ctx> {
     static CTX: OnceLock<Arc<Ctx>> = OnceLock::new();
     CTX.get_or_init(|| {
         runtime().block_on(async {
-            let mut c = Cores::pending(true, true, true);
+            let mut c = Cores::pending(true, true);
             serve::wire_root(&mut c);
             c.verify = Arc::new(Permit);
             Ctx::for_tests(c)

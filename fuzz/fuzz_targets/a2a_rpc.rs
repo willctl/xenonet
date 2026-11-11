@@ -84,7 +84,7 @@ fn a2a(inbox: Vec<Value>) -> Arc<A2a> {
     let fake = Arc::new(Fake { inbox: Mutex::new(inbox), next: Mutex::new(0) });
     let a = A2a::new(A2aParts {
         cores: A2aCores { engine: fake.clone(), actors: fake },
-        file: None,
+        db: None,
         version: "0.2.0".into(),
         home: "/home/nova".into(),
         name: Arc::new(|| Some("home".into())),

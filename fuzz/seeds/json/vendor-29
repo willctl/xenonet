@@ -1,1 +1,1 @@
-{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"c3","name":"apply_patch","input":"*** Begin Patch"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","thread_id":"t1","turn_id":"u1","completed_at_ms":1791230001000,"item":{"type":"Plan","id":"i8","text":"1. Profile\n2. Fix"}}}

@@ -1,1 +1,1 @@
-{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c3","name":"apply_patch","output":"Done"}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","id":"i9","kind":"web.search","query":"","action":{"type":"search","query":null,"queries":["rounding","banker's rounding"]},"results":[]}}}

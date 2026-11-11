@@ -1,0 +1,1 @@
+2{"timestamp":1791201605,"method":"session/update","params":{"sessionId":"019a3b5c-0000-7000-8000-00000000000a","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"npm test","kind":"execute","status":"pending","rawInput":{"command":"npm test"},"locations":[{"path":"/Users/ada/atlas"}]}}}

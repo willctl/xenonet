@@ -1,0 +1,1 @@
+2{"timestamp":1791201609,"method":"session/update","params":{"sessionId":"019a3b5c-0000-7000-8000-00000000000a","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"48 passing"}}]}}}

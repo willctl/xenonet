@@ -1,0 +1,1 @@
+2{"timestamp":1791201600,"method":"session/update","params":{"sessionId":"019a3b5c-0000-7000-8000-00000000000a","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Add partial refunds"}}}}

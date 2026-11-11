@@ -24,6 +24,8 @@ const at = (rel) => path.join(frozen, "world", ...rel.split("/").map((p) => (p.s
 const world = { root: "<world>", claudeRoot: at(dirs.claudeRoot), codexHome: at(dirs.codexHome), stateDir: at(dirs.stateDir), wikiDir: at(dirs.wikiDir) };
 const tmp = fs.realpathSync.native(os.tmpdir());
 const { VENDOR } = await import("../test/fixtures/vendor.js");
+// The map's golden state (crates/xenonet-state/tests/golden): its graph.
+const golden = JSON.parse(fs.readFileSync(path.join(repo, "crates/xenonet-state/tests/golden/state.json"), "utf8"));
 const hooks = await import("../test/fixtures/hook-payloads.js");
 const numbat = await import("../test/fixtures/numbat.js");
 
@@ -109,8 +111,14 @@ for (const [source, { fits, odd }] of Object.entries(VENDOR)) {
     if (body !== undefined) seed("schema", `${source.replaceAll("/", "-")}-${k}`, (2 * i) % 256, 1, body);
   });
 }
-const state = clean(fs.readFileSync(path.join(world.stateDir, "state.json"), "utf8"));
-for (let i = 1; i < 80; i += 2) seed("schema", `state-${i}`, i, 1, state);
+// XenoNet's own documents, by their place in the target's OWN (an odd
+// first byte): a host's hello, then a session's and a project's node as
+// another host sends them.
+const hello = { t: "hello", schema: "host/hello/v1", protocol: 1, version: "0.4.0", host: { id: "vm1", key: "9a2b0000000000000000000000000002" }, platform: "linux", demo: false, now: T, sinceMs: 7 * 86400e3, detail: false };
+seed("schema", "own-hello", 1, 1, JSON.stringify(hello));
+const nodeOf = (kind) => golden.graph.nodes.find((n) => n.kind === kind);
+seed("schema", "own-session", 3, 1, JSON.stringify(nodeOf("session")));
+seed("schema", "own-project", 5, 1, JSON.stringify(nodeOf("project")));
 
 // ---------- base ----------
 const base = [
@@ -192,17 +200,19 @@ codexHooks.forEach((h, i) => {
 });
 seed("hooks", "patch", 1, JSON.stringify({ session_id: S1, hook_event_name: "PreToolUse", cwd: "/w/atlas", tool_name: "apply_patch", tool_input: { command: ["apply_patch", "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-a\n+b\n*** Add File: ../b.ts\n+x\n*** End Patch"] } }), "\0", "src/");
 seed("http", "listen", 0, wire("POST", "/api/hook/claude/listen?seconds=5", local, JSON.stringify(hooks.claude.stop(S1, "/w/atlas"))));
-for (const [m, t] of [["GET", "/api/state?scope=7d"], ["GET", "/api/search?q=refund&limit=5"], ["GET", "/api/refusals?since=0&provider=anthropic"], ["GET", "/api/actors/requests"], ["POST", "/api/engine/send"], ["GET", "/api/hosts/vm1/graph"], ["POST", "/api/layout"], ["GET", "/api/stats?session=claude%3A0190d3e0-0000-7000-8000-000000000001"]]) {
+for (const [m, t] of [["GET", "/api/state?scope=7d"], ["GET", "/api/search?q=refund&limit=5"], ["GET", "/api/refusals?since=0&provider=anthropic"], ["GET", "/api/actors/requests"], ["POST", "/api/engine/send"], ["POST", "/api/layout"], ["GET", "/api/stats?session=claude%3A0190d3e0-0000-7000-8000-000000000001"]]) {
   seed("http", `route-${m}-${t.replace(/[^a-z]+/gi, "-")}`, 0, wire(m, t, local, m === "POST" ? JSON.stringify({ to: "claude:x", text: "hi", positions: { core: { x: 1, y: 2, z: 3 } } }) : ""));
 }
-seed("state", "demo", state, "\0", JSON.stringify({ core: { x: 1, y: 2, z: 3 }, "project:/home/nova/projects/atlas-api": null }));
-seed("state", "v1", JSON.stringify({ layout: { core: { x: 1, y: 2, z: 3 } }, acks: { [`claude:${S1}`]: T }, marks: {}, projects: { rules: { "/home/nova/projects/labs": { path: "/home/nova/Projects/labs", as: "group", at: T } }, codex: { ranAt: T, ms: 9000, fingerprint: "0123456789abcdef", sent: 12, picks: [{ path: "labs/snippets", as: "project", reason: "Its own pyproject.toml." }] } }, identities: { names: { "github:github.com/atlas-co": "work" }, hidden: {}, pins: {}, known: {}, signins: { claude: [{ id: "claude:a:b", from: T - 1000, to: T }] } }, theme: "phosphor" }));
-seed("state", "future", JSON.stringify({ version: 3, layout: {} }));
+// The page's positions, then a value the routes keep.
+const positions = JSON.stringify({ core: { x: 1, y: 2, z: 3 }, "project:chk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": null, "claude:x": { x: 0.125, y: "1", z: 2 } });
+seed("state", "rule", positions, "\0", JSON.stringify({ path: "/home/nova/Projects/labs", as: "group", at: T }));
+seed("state", "picks", positions, "\0", JSON.stringify({ ranAt: T, ms: 9000, fingerprint: "0123456789abcdef", sent: 12, picks: [{ path: "labs/snippets", as: "project", reason: "Its own pyproject.toml." }] }));
+seed("state", "signins", "{}", "\0", JSON.stringify([{ id: "claude:a:b", from: T - 1000, to: T }]));
+seed("state", "name", "null", "\0", JSON.stringify("work"));
+seed("state", "found", "{}", "\0", JSON.stringify([{ path: "/home/nova/Projects/atlas-api", why: "repo" }, { path: "/home/nova/notes", why: "session" }, { path: "", why: "folder" }]));
 
 // ---------- hosts ----------
-const golden = JSON.parse(fs.readFileSync(path.join(repo, "test/golden/state.json"), "utf8"));
 const graph = { ...golden.graph, nodes: golden.graph.nodes.slice(0, 12), links: (golden.graph.links ?? []).slice(0, 12) };
-const hello = { t: "hello", schema: "host/hello/v1", protocol: 1, version: "0.4.0", host: { id: "vm1", key: "9a2b0000000000000000000000000002" }, platform: "linux", demo: false, now: T, sinceMs: 7 * 86400e3, detail: false };
 const snapshot = { t: "snapshot", at: T, graph, live: { at: T, sessions: [] }, engine: null };
 const frames = (fs) => fs.map((f) => JSON.stringify(f).replaceAll("<world>", "/home/nova")).join("\n") + "\n";
 seed("hosts", "link", 128, frames([hello, snapshot, { t: "event", name: "live", data: { sessions: [] } }, { t: "time", id: 1, now: T + 5 }, { t: "res", id: 1, status: 200, body: {} }, { t: "ping" }, { t: "bye", code: 0 }]));
@@ -256,5 +266,4 @@ seed("tools", "picks", 3, '```json\n{"picks":[{"path":"labs/snippets","as":"proj
 seed("tools", "selector", 4, "project:xeno* app:codex identity:github:nova-dev");
 seed("tools", "gpu", 5, "0, 45, 1024, 8192\n\"Utilization Percentage\" = 37\n");
 
-fs.rmSync(tmp, { recursive: true, force: true });
 process.stderr.write(`${written} seeds in ${path.relative(repo, out)}\n`);

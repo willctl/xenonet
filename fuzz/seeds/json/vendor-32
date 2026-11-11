@@ -1,1 +1,1 @@
-{"timestamp":"2026-10-05T12:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Why?"}]}}
+{"timestamp":"2026-10-05T12:00:00.000Z","type":"event_msg","payload":{"type":"thread_goal_updated","threadId":"t1","turnId":"u1","goal":{"threadId":"t1","objective":"Make the build fast","status":"active","tokensUsed":10,"timeUsedSeconds":5,"createdAt":1791230000,"updatedAt":1791230005}}}

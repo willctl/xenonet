@@ -1,58 +1,49 @@
 #![no_main]
 
-// state.json as the service loads it: read from disk, its version read,
-// migrated (v1 to v2), prepared, and what the map asks of it, then a
-// layout from the page put in it and the file saved again. The file can be
-// one an older or newer XenoNet wrote, or one cut short or edited by hand.
-// A NUL splits the file from the positions the page sends.
+// What XenoNet saves for you (the store's state domain, in place of
+// state.json), as the page and the routes change it: a layout the page
+// sends, then a value the routes keep for you (a rule for a folder, an
+// app's picks, what XenoNet knows of an identity, an app's sign-ins, the
+// folders the map found), each read back as the map reads it. A NUL
+// splits the positions from the value. Nothing is read from disk: the
+// store is in memory, and a fresh one each run.
 
 use libfuzzer_sys::fuzz_target;
-use std::path::PathBuf;
-use std::sync::OnceLock;
-use xenonet_state::runtime::store::StateStore;
-use xenonet_state::{migrate, statefile, store};
+use serde_json::Value;
+use std::sync::Arc;
+use xenonet_api::cores::Store;
+use xenonet_runtime::saved::{layout_changes, rules_to_clear, Saved};
+use xenonet_store::Db;
 
-fn dir() -> &'static PathBuf {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| std::env::temp_dir().join(format!("xenonet-fuzz-state-{}", std::process::id())))
-}
+const NOW: f64 = 1_791_230_000_000.0;
 
 fuzz_target!(|data: &[u8]| {
-    let (file, positions) = xenonet_fuzz::split(data, 0);
-    let d = dir();
-    // A fresh folder each time: a load can leave a backup of a file it
-    // couldn't read.
-    let _ = std::fs::remove_dir_all(d);
-    std::fs::create_dir_all(d).expect("a temp folder");
-    std::fs::write(d.join("state.json"), file).expect("a state file");
-    let positions = xenonet_fuzz::json(positions);
+    let (positions, value) = xenonet_fuzz::split(data, 0);
+    let positions = xenonet_fuzz::json(positions).unwrap_or(Value::Null);
+    let value = xenonet_fuzz::json(value);
     xenonet_fuzz::run(data, || {
-        if let Some(v) = xenonet_fuzz::json(file) {
-            let _ = statefile::up_1_to_2(&v, Some("/home/nova/projects"));
-            let _ = migrate::plan(&[(1.0, 2.0)], v.get("version"), Some(&serde_json::json!(2)));
-            if let serde_json::Value::Object(mut m) = v {
-                let _ = store::prepare(&mut m);
+        let s = Saved::with_clock(Arc::new(Db::memory().expect("a store in memory")), Arc::new(|| NOW));
+        let _ = layout_changes(&positions);
+        let _ = s.set_layout(&positions);
+        let _ = s.layout();
+        if let Some(v) = &value {
+            let _ = s.set_project_rule("/home/nova/projects/labs", Some(v));
+            let _ = s.set_app_setting("codex", "picks", "/home/nova/projects", Some(v));
+            let _ = s.set_identity_known("github:nova-dev", v);
+            let _ = s.set_signins("claude", v);
+            if let Some(name) = v.as_str() {
+                let _ = (s.set_identity_name("github:nova-dev", Some(name)), s.set_identity_pin("project:atlas", Some(name)), s.set_theme(name));
             }
-            let _ = store::folder_key(positions.as_ref());
+            // The folders a scan found: none is opened, since no version
+            // control is installed here.
+            let _ = s.reconcile_checkouts(v);
         }
-        let s = StateStore::new(&d.to_string_lossy(), "/home/nova/Projects");
-        let _ = (s.load_report(), s.layout(), s.acks(), s.project_rules(), s.workspace_root(), s.identities());
-        let _ = s.codex_picks(Some("/home/nova/projects"));
-        let _ = s.part(&["layout", "positions"]);
-        let _ = store::layout_changes(positions.as_ref());
-        s.change(|doc| {
-            for (k, v) in store::layout_changes(positions.as_ref()) {
-                let layout = doc.entry("layout").or_insert_with(|| serde_json::json!({}));
-                if let Some(l) = layout.as_object_mut() {
-                    match v {
-                        Some(v) => l.insert(k, v),
-                        None => l.shift_remove(&k),
-                    };
-                }
-            }
-        });
-        s.ack("claude:0190d3e0-0000-7000-8000-000000000001", 1_791_230_000_000.0);
-        s.set_identity_name("github:nova-dev", Some("Nova".into()));
-        s.flush();
+        s.ack("claude:0190d3e0-0000-7000-8000-000000000001").expect("an ack");
+        let _ = (s.acks(), s.marks(), s.project_rules(), s.identities(), s.theme(), s.checkouts());
+        let _ = s.app_setting("codex", "picks", "/home/nova/projects");
+        let keys: Vec<String> = s.project_rules().ok().and_then(|r| r.as_object().map(|m| m.keys().cloned().collect())).unwrap_or_default();
+        let _ = rules_to_clear(&keys, Some("/home/nova/projects"));
+        let _ = s.clear_project_rules(Some("/home/nova/projects"));
+        let _ = s.clear_layout();
     });
 });

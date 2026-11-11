@@ -3,15 +3,15 @@
 // Records checked against XenoNet's own schemas (schemas/), as the service
 // checks what other programs write: leniently against each vendor schema
 // (what drifts is recorded, the record stripped or dropped), and as
-// XenoNet's own documents, read as their types (state.json as the doctor
-// reads it, what other hosts and actors send). The first byte picks the
-// schema; the second, the version a record says it was written by.
+// XenoNet's own documents, read as their types (what other hosts and
+// actors send). The first byte picks the schema; the second, the version
+// a record says it was written by.
 
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use xenonet_model::{actor, host, state, system};
+use xenonet_model::{actor, graph, host, system};
 use xenonet_schema::drift::DriftLog;
 use xenonet_schema::lenient;
 use xenonet_schema::typed;
@@ -33,11 +33,10 @@ fn schemas() -> &'static Schemas {
 
 /// XenoNet's own documents a record is read as: each gives the first
 /// problem, worded, or the record cleaned to what its type declares.
-const OWN: [fn(&Value) -> Option<String>; 7] = [
-    |v| typed::read::<state::StateV1>(v).err().map(|i| i.worded("the whole file")),
-    |v| typed::read::<state::State>(v).err().map(|i| i.worded("the whole file")),
-    |v| typed::read::<host::Host>(v).err().map(|i| i.worded("(the value)")),
+const OWN: [fn(&Value) -> Option<String>; 6] = [
     |v| typed::read::<host::Hello>(v).err().map(|i| i.worded("(the value)")),
+    |v| typed::clean::<graph::SessionNode>(v).map(|c| c.to_string()),
+    |v| typed::clean::<graph::ProjectNode>(v).map(|c| c.to_string()),
     |v| typed::clean::<system::System>(v).map(|c| c.to_string()),
     |v| typed::read::<actor::Report>(v).err().map(|i| i.worded("the body")),
     |v| typed::read::<actor::Registration>(v).err().map(|i| i.worded("the body")),

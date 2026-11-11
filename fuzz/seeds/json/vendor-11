@@ -1,1 +1,1 @@
-{"timestamp":"2026-10-05T12:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5-codex","effort":"high","cwd":"/Users/ada/ledger"}}
+{"type":"worktree-state","sessionId":"0190d3e0-0000-7000-8000-000000000001","worktreeSession":{"worktreeName":"tokenizer","worktreePath":"/Users/ada/atlas/.claude/worktrees/tokenizer","originalCwd":"/Users/ada/atlas"}}

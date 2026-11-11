@@ -180,7 +180,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `native`, `sources`, `wiki` | The other apps' files (Gemini CLI, Copilot CLI, OpenCode, Cursor, numbat), Codex's app-server, git's output, plan usage, the shared context (`wiki`) |
 | `base` | The text, OS, model and adapter helpers: JS's string functions, apply_patch texts, times, paths (XenoNet's and Node's, and the adapters' scratch zones), ids and git remotes, model names and prices, the log's scrubbing, the numbers the page shows |
 | `http`, `hooks` | The service's routes, Claude Code's, Codex's and Grok Build's hook payloads, and the actor gateway |
-| `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
+| `state`, `hosts`, `misc` | What the page and the routes save for you (the layout, rules, picks, identities, the folders a scan found) in the store, frames from other machines, component packages, tokens and the remote actors' requests |
 | `tools` | What other tools print or keep: gh's and ssh's config, git's, ps, lsof, netstat, tmux, Codex's picks |
 | `net_frame`, `net_roster` | The network's frames and roster entries, checked against a roster and opened |
 | `net_envelope` | Envelopes (`xenonet-net/2`): decoded, opened for one machine and checked against the chain and the entry inside, and live ones read from one host's connection |
@@ -188,6 +188,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `net_relay` | The map between machines: a console's asks at a host's relay, the paths it serves, and the relay's answers at the console's hub |
 | `net_svc` | Services through the network: the paths, requests, answers, addresses and headers a host checks before it passes a request to a service it published, and before a program gets the answer |
 | `a2a_rpc` | A2A's JSON-RPC requests and its event streams |
+| `feed_decode` | A machine's feed entries (`xenonet-feed/1`), decoded and offered to a receiver in any order, repeated, dropped or changed |
 
 The network's targets build well-formed frames, entries and requests from a made-up network with fixed keys, then change them, so a run reaches past the signature checks. They fail if a changed frame or request is ever taken.
 

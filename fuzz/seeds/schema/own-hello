@@ -1,0 +1,1 @@
+{"t":"hello","schema":"host/hello/v1","protocol":1,"version":"0.4.0","host":{"id":"vm1","key":"9a2b0000000000000000000000000002"},"platform":"linux","demo":false,"now":1791201600000,"sinceMs":604800000,"detail":false}
