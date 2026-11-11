@@ -31,10 +31,16 @@ a second way to look at a machine. The guide is
 - **Agents on every host see each other** in `peers`, message each other,
   and are warned when someone on another machine is changing the same file
   in their clone. Messages stay information, never authority.
-- **The person (the operator) can sit at any host.** Every console shows
-  every host, and what waits on you shows everywhere. From any console you
-  can message any session or actor, add a machine or remove one. What
-  changes one machine's own setup stays on that machine.
+- **Each host decides for itself.** Every act that comes in from another
+  host is decided by the receiving host, on its own copies of the network's
+  chain and the person's, under one authorization
+  ([authorization.md](authorization.md)). What a sender says of its own
+  strength is never read.
+- **The person can sit at any host.** Every console shows every host, and
+  what waits on you shows everywhere. From any window host's console you
+  can message any session or actor, add a machine or remove one, signed by
+  your device on that machine. What changes one machine's own setup stays
+  on that machine.
 - **A2A**, the cross-vendor agent-to-agent standard (1.0, March 2026,
   Linux Foundation), lets agent frameworks reach the network's sessions
   through the gateway, as actors. MCP stays how sessions talk to XenoNet.
@@ -88,8 +94,9 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
     (`crates/xenonet-hosts/src/runtime/relay.rs`), which runs
     `xenonet_hosts::relay::Producer`, the SSH relay's shaping, in-process:
     it follows this machine's own view of its events from the event
-    stream, and reads its own API as a 127.0.0.1 client with no window key
-    and no token, so the allowlist and the routes' checks both apply. It
+    stream, and reads its own API as a 127.0.0.1 client with the service's
+    own credential and no token, so the allowlist and the routes' rows both
+    apply. It
     serves only window hosts in the roster, one subscription each, renewed
     every 20 s, and ends one that lapses after 60 s, whose host goes
     offline, is removed or stops being a window host, or when this host's
@@ -128,9 +135,10 @@ Network panel, A2A in `crates/xenonet-service/src/a2a`):
   before it's drawn (`src/network-map.js`), with the hosts layout's cap on
   what's drawn.
 - Another machine's transcript, stats, collision diffs and MCP server
-  details are read only by the window (`Ctx::window_only`: its key, and no
-  token), over SSH and the network alike, so an agent on one machine can't
-  read another's transcripts.
+  details are read only by the window (their rows in the local API's rules
+  table are the window's alone when they name another machine: its
+  credential, and no token), over SSH and the network alike, so an agent on
+  one machine can't read another's transcripts.
 - The chime (section 8): presence carries `youAt`, when the person last
   worked at a host's console (input in the last two minutes, to the half
   minute, by the gateway's clock), and every host's row in the state has
@@ -213,12 +221,10 @@ Not built yet:
 
 - **Collisions and MCP servers' details over the network** (section 7).
   Both ends refuse them with why: they open on their own machine.
-- **`operator` frames** (section 8) are checked when they arrive, but
-  nothing sends one: the person messages a session on another host as a
-  `message` frame from `actor:you`, which a host takes only from a window
-  host's frame with a strong check; adding and removing machines are
-  roster entries the window host signs itself.
-- **Moving actors' tokens and scopes with the gateway** (section 9).
+- **Moving actors' grants and scopes with the gateway** (section 9).
+- **An actor's Allow from another machine** (section 10): an actor's allow
+  scope is a row on its own machine, so from another machine it can only
+  Deny.
 
 ## Words
 
@@ -228,10 +234,10 @@ Not built yet:
 | gateway | The host whose service answers the network's routes, at one address |
 | host | A machine running the `xenonet` service that has joined a network. Its id matches `^[a-z][a-z0-9-]{1,31}$` and is picked by the person, never the machine's name |
 | founder | The host that made the network. Its key is the network's root |
-| window host | A host with a XenoNet window the person uses; it may act for them on other hosts |
+| window host | A host with a XenoNet window the person uses, an admin in the roster; the person acts from its window |
 | link | A host's connection to the gateway |
-| operator | The person, `actor:you`, wherever they sit |
-| roster | The signed, chained list of the network's hosts and their keys |
+| person | You, `actor:you`, wherever you sit: a device key of yours on each host that can ask you, in your person chain ([authorization.md](authorization.md)) |
+| roster | The network's chain: the signed, chained list of its hosts, their keys and their settings (`xenonet-roster/2`) |
 | ticket | A one-time code from **Add a machine** that lets one machine join |
 
 ## Where XenoNet starts from
@@ -473,27 +479,49 @@ xenonet-net/1
   may carry a service's own credential, are never queued either, and a
   host drops one older than two minutes (section 14).
 
-**The roster** is a chain of entries. Each entry holds:
+**The roster** is the network's chain (`xenonet-roster/2`, the network
+policy of `crates/xenonet-log`, schema `network/roster-entry/v2`). Each
+entry holds:
 
 - `n` and `prev`: its index, and the hash of the entry before it;
-- `op`: `found`, `add`, `remove`, `window` (turning "acts for you" on or
-  off) or `gateway`;
-- the host it's about: its id and public keys, and whether it's a window
-  host;
+- `op`: `found`, `add`, `remove`, `window` (turning "admin" on or off),
+  `gateway` or `settings`;
+- the host it's about: its id, its transport keys, whether it's a window
+  host, the person's device on it (none on a host with no way to ask
+  them), and its machine signing key, which roots its tokens;
+- for `found`, the network's owner: the person it's theirs; for `gateway`,
+  the address; for `settings`, the host's start and wake;
+- `personHead`: the head of the owner's person chain it was made under;
 - a time;
-- `signers`: one or more host ids, each with its signature over the entry.
+- `signers`: one to four host ids, each with its signature by its host
+  key, and with a presence block where the entry admits or widens.
 
-What each `op` needs:
+What each `op` needs, with a window host as an admin and the founder
+counted as one:
 
 | `op` | Signed by |
 |---|---|
-| `found` | the founder, once, as entry 0 |
-| `add` a host that isn't a window host | any window host |
-| `add` a window host, `window` on, `remove` a window host, `gateway` | the founder, or two different window hosts |
+| `found` | the founder, once, as entry 0, naming the owner |
+| `add` a host that isn't a window host | any window host, with presence |
+| `add` a window host, `window` on, `gateway` | the founder, or two different window hosts, each with presence |
+| `window` off, `remove` a window host | the founder, or two different window hosts |
 | `remove` a host that isn't a window host | any window host |
+| `settings` that narrow | any window host, or the host itself |
+| `settings` that widen (start to `network` or `delegate`, wake to `network`) | the founder, or two window hosts, each with presence |
 | `remove` the founder | nobody: a network whose founder is lost is made again |
 | `remove` the gateway's host | nobody, until the gateway moves |
 | `remove` itself (leaving), any host but the founder | that host |
+
+**Presence.** A window host's signature counts toward an admit or a
+widening only with a presence block from the person's device on that host
+(the one its `add` entry named), for what the entry does and its digest,
+and only when the owner's chain had that device active at the head the
+entry names. A block is checked for what it signs, never its age, since a
+host catching up reads entries that were fresh when made; a live receiver
+refuses a head older than the one it holds. So a window host's key alone
+admits and widens nothing: on a Mac that takes Touch ID. Presence, the
+person's chain and what each prompt is are in
+[authorization.md](authorization.md).
 
 **How hosts use it:**
 
@@ -503,17 +531,20 @@ What each `op` needs:
   different rosters notice and say so.
 - A gateway that's been broken into can withhold entries, which shows,
   but it can't add or change one.
-- A stolen window laptop can remove ordinary hosts and add ordinary ones
-  that can message agents. It can't take the network: it can't move the
-  gateway, remove another window host or make itself the founder.
+- A stolen window laptop, without the person there, can remove ordinary
+  hosts and narrow settings, which its host key signs alone. It can't
+  admit a host, widen anything, move the gateway, remove another window
+  host or make itself the founder.
 - With only two machines, the founder can do everything and the other can
   manage ordinary hosts. The guide says plainly that the founder's key is
   the network's root, and what losing it means.
+- A receiver's decisions read from it each member's role, its settings,
+  its device and its machine signing key.
 
-**Duplicates.** An entry's identity is its `op`, host id and keys. Two
-window hosts approving the same thing at once make one entry, and the
-later identical one is dropped. A conflicting one, such as a different
-window choice, loses to chain order.
+**Duplicates.** An entry's identity is everything it says but its time.
+Two window hosts approving the same thing at once make one entry, and the
+later identical one is dropped. A different one at the same index is a
+fork, and refused.
 
 **A removed host's frames are refused** from then on, by the gateway and
 by every host.
@@ -554,9 +585,13 @@ asks for one, as the Actors panel does. Desktop's version is
    with its new key, proving it holds it.
 3. The gateway checks the ticket and adds an `add` entry. The entry is
    signed by the ticket's maker, which signed the ticket's terms when it
-   made it. If the terms need the founder or two window hosts, the
-   ticket's maker must be the founder, or the console says it needs a
-   second window host to approve.
+   made it, with the person's presence (`admit`): on a Mac, Touch ID on the
+   maker. When the maker holds the person's root key and the new machine
+   brought a device key, the maker pairs that device into the person's
+   chain first, which asks the person again; otherwise the new machine
+   joins as a plain member that does nothing as the person. If the terms
+   need the founder or two window hosts, the ticket's maker must be the
+   founder, or the console says it needs a second window host to approve.
 4. The gateway answers with the roster and a proof that it knew the ticket
    (an HMAC keyed with the ticket over its key and the nonce). The new
    machine pins the gateway's key from that answer: trust on first use,
@@ -567,11 +602,13 @@ asks for one, as the Actors panel does. Desktop's version is
 Rules:
 
 - `net create`, `net join` and `net leave` are the person's: refused from
-  under an agent, as `xenonet service install` is.
-- **Add a machine** is the window's alone, so a ticket only ever shows
-  where the person is looking. From a terminal,
-  `xenonet net add-machine <id>` makes one on macOS only, where process
-  checks can tell the person from an agent.
+  under an agent, as `xenonet service install` is. Creating the network
+  sets up the person's identity on the founder when there's none, which
+  asks them once.
+- **Add a machine** is the window's alone, on every platform, so a ticket
+  only ever shows where the person is looking, and signing the machine in
+  can ask them. `xenonet net add-machine <id>` in a terminal refuses and
+  says so.
 - At most 5 tickets wait at once. 20 bad tickets in an hour from one
   source shut the join route to it for an hour; 200 from everywhere shut it
   for everyone ("As built" has the detail).
@@ -633,14 +670,14 @@ that includes remote agents:
 
 1. The local engine stores the message, with its `mid`, as sent.
 2. A `message` frame for `laptop` goes into the outbox.
-3. `laptop`'s engine stores it with the sender qualified
-   (`@studio:codex:…`) and an envelope saying:
+3. `laptop` decides it (section 8), then its engine stores it with the
+   sender qualified (`@studio:codex:…`) and an envelope saying:
    - transport `network`, auth method `host`;
    - the host it came from;
-   - the original sender's kind, auth method and strength, as its own host
-     saw them.
+   - the original sender's kind and attestation, as its own host vouched
+     for them, and the authority the message carried.
 
-   A weak original stays weak.
+   An unchecked original stays unchecked.
 4. `laptop`'s own router delivers it exactly as it delivers local mail.
 
 **Receipts.**
@@ -724,7 +761,8 @@ twins, are unchanged.
   detail off.
 - **Another machine's transcripts and stats are the window's alone.** A
   console's host reads them through the relay only for its own window (its
-  key, and no token), never for an agent, an actor or a browser tab there.
+  credential, and no token), never for an agent, an actor or a browser tab
+  there.
 - **The relay's privacy rules stay:**
   - home folders cross as `~`;
   - no transcripts are cached;
@@ -738,7 +776,7 @@ twins, are unchanged.
   consoles that watch it, unless the host turns "Share load with the
   network" off. It carries no names, serials or OS version.
 
-### 8. The operator at any host
+### 8. The person at any host
 
 - **Presence.** `actor:you` is "here" on the host whose console had the
   person's last input, and every host learns it through presence. The map
@@ -748,49 +786,41 @@ twins, are unchanged.
   attention strip, with its host. The chime and notification play only on
   the host you're at, or on all of them if you've been away from every
   console for five minutes.
-- **Acting for you from another machine.** An action in a console is
-  checked by its own host as today. That host then signs an `operator`
-  frame for the host it concerns. The frame says how the action was
-  checked:
-  - **`window`:** the window key. This is strong on every platform.
-  - **`person`:** a terminal, with process checks. Strong on macOS; weak
-    elsewhere.
-
-  The receiving host accepts the frame only if all of these hold:
-  - the signer is a window host in the roster;
-  - the action is on the list below;
-  - it's less than 60 seconds old and hasn't been seen before;
-  - it's strong.
-
-  A weak one is refused with the reason.
+- **Acting as you from another machine.** An act in a window host's
+  console carries its authority in the frame (`authority`, in
+  `network/message/v2` and `network/operator/v2`): your device's signature
+  over that one act, or, for an act that needs you there, a presence block
+  for it, which stands for the signature. The receiving host maps the
+  device to you through its own copy of your person chain, and decides the
+  act with `xenonet-authz` ([authorization.md](authorization.md)). Signing
+  asks you where the device key asks (Touch ID on a Mac), so it's done
+  from the window alone. No frame says how strongly its sender checked
+  anything, and nothing reads such a claim.
 - **What may be done from another machine:**
-  - message any session or actor, as you;
+  - message any session or actor, as you: your device's signature for
+    each machine the message goes to;
   - add a machine and remove a host, by the rules in section 3;
   - read a transcript or stats through the relay, from the window only,
     unless that host shares titles only (section 7);
   - start a session there (below);
-  - change who may start and wake sessions there (`operator`, action
-    `settings`): narrowing (`off`, `you`, `consent`) from any window host;
-    widening to `network` from the founder, or waiting ten minutes on that
-    host for a second window host's `settings` with `approve` and the
-    widening's id. Each host's presence carries its settings
-    (`reach: { start, wake, pending }`) and what it takes (`can`), so every
-    window host's Network panel shows them and the widenings that wait;
-  - answer a run's permission prompt (`operator`, action `answer`,
-    `{ ask, decision }`).
+  - change who may start and wake sessions there: a `settings` entry in
+    the roster (section 3). Narrowing (`off`, `you`, `consent`) from any
+    window host; widening to `network` or `delegate` from the founder, or
+    waiting at the gateway for a second window host to approve the same
+    entry, each with your presence. Each host's presence carries its
+    settings and what waits (`reach: { start, wake, pending }`) and what it
+    takes (`can`), so every window host's Network panel shows them;
+  - answer a run's permission prompt (`network/operator/v2`,
+    `{ ask, session, decision }`).
 - **What stays on the machine itself:**
   - connecting or disconnecting its agents;
   - installing the always-on service;
-  - the gateway's tunnel or LAN address, and actor tokens and scopes (on
-    the gateway host);
+  - the gateway's tunnel or LAN address, and actors' grants and scopes;
   - creating, joining or leaving a network.
 
-  These change what runs on that machine. Actor tokens and scopes moving
-  across machines is a later step, with a token sealed to the window that
-  asked.
-- **Messaging a session as you is new everywhere.** Today the window
-  messages only actors. Now a session's panel can message any session,
-  local or remote. It arrives as:
+  These change what runs on that machine.
+- **Messaging a session as you.** A session's panel can message any
+  session, local or remote. It arrives as:
 
   > From you, at studio's console.
 
@@ -799,16 +829,20 @@ twins, are unchanged.
   the sessions XenoNet runs itself (below).
 - **Starting a session on another host.** A start is a `message` frame to
   the reserved target `xenonet:start`, whose body is the request as JSON:
-  `{ request, by, folder, app, mode, prompt }`. No new frame kind: an old
-  host or gateway refuses unknown kinds, and an old host answers this
+  `{ request, by, folder, app, mode, prompt }`, with the act's authority:
+  your device's signature over the run, or an actor's token minted for the
+  start, or the sending host's word for its agent. No new frame kind: an
+  old host or gateway refuses unknown kinds, and an old host answers this
   target as an id it doesn't have, which the sender reads as too old. The
-  receiving host decides (`reach::decide`):
-  - the sending host is a window host, whatever `by` says (only the
-    frame's signer can be checked);
-  - you need a strong check; a session or actor needs `start: network`;
+  receiving host decides it with `xenonet-authz`:
+  - its start setting: `off` refuses everyone, `you` takes only you,
+    `network` and `delegate` take agents and actors of members too, never
+    an unchecked agent; a delegated run needs `delegate` and your
+    delegation naming both hosts' devices;
   - the folder is a project or folder of its map, a folder its sessions
     report, or `~`; the app is claude, codex or grok; never
     `bypassPermissions`;
+  - it holds when governance hasn't synced in ten minutes;
   - 20 starts an hour, 10 from one sending host, and the runner's cap.
 
   The answers are receipts keyed by the frame's mid: `started { session,
@@ -820,9 +854,12 @@ twins, are unchanged.
   `--permission-prompt-tool mcp__xenonet__permission`. The tool answers only
   for a run in the runs table. The ask crosses as a `message` frame to
   `xenonet:ask`, one to each window host (`To::Host`), never in presence;
-  done, a second one takes it back. Allow or Deny from another window host
-  is an `operator` frame's `answer`. The call is held ten minutes; no
-  answer is a deny.
+  done, a second one takes it back. An answer from another window host is
+  a `network/operator/v2` frame. An Allow carries your presence block for
+  that ask and decision. A Deny needs none: it comes from you, from the
+  window host relaying its window's, or from an actor with the right to
+  answer, and never holds on stale governance. The run's host decides it.
+  The call is held ten minutes; no answer is a deny.
 
 ### 9. When the gateway is down, and moving it
 
@@ -863,7 +900,7 @@ twins, are unchanged.
    `xenonet net gateway take`.
 2. That makes a `gateway` roster entry: the new address, its key id and a
    higher version. It must be signed by the founder, or by two window
-   hosts.
+   hosts, each with your presence.
 3. If the old gateway is up, it passes the entry to every host, then the
    queues, sealed to the new gateway, and stops its network routes.
 4. Hosts follow the entry: it extends their roster, its signers are
@@ -888,19 +925,30 @@ As built:
   which every host takes as a `gap`, so senders send again what has no
   receipt.
 
-Moving the actors' rows (hashed tokens, scopes) with the gateway is a
-later step. Until then their apps are told to reconnect, as an address
+Moving the actors' rows (their grants' revocation ids and scopes) with the
+gateway is a later step; their tokens are rooted at the old gateway's
+machine. Until then their apps are told to reconnect, as an address
 change already handles. Automatic failover to a standby is left out: it's
 where a stolen machine could take a network over.
 
 ### 10. Actors on the network
 
 - **Actors connect to the network's gateway,** as they do to a machine's
-  gateway now: same tokens, same tools, same default-deny scopes.
+  gateway: their grant, narrowed to the gateway as a gateway token, the
+  same tools and the same default-deny scopes.
 - **Scopes can name hosts:** `machine:laptop repo:github.com/x/y` gives an
-  actor the sessions in that repo on that machine.
-- **An actor's message to a session on another host** goes from the
-  gateway host's engine as a `message` frame, like any other.
+  actor the sessions in that repo on that machine. The grant itself names
+  the machine that minted it and the network it acts in.
+- **An actor's act on another host** (a message, a start) goes from its
+  own host's engine as a `message` frame, like any other, once its own
+  host has decided its token. It carries a token that host mints for that
+  act's right alone, in the network, for eight days, and the certificate
+  of the root it's minted from. The receiver checks the certificate
+  against the sender's machine signing key in the roster and decides the
+  act as that actor ([authorization.md](authorization.md), "The actor
+  grant").
+- **An actor's answer from another host** is a Deny only: what an actor
+  may Allow is its allow scope, a row on its own host.
 - **`report_run`** (sandboxes and cloud runs) works across the network,
   unchanged.
 
@@ -995,19 +1043,22 @@ message, a handoff or Xenolith. That keeps context selective, which the
 | Someone on the internet joins | A join needs a one-time ticket (50 bits, ten minutes) made in a window; anything else gets a 404, and bad tickets shut the route |
 | A wrong or hijacked gateway address | The new host pins the gateway's key from an answer only a gateway that knew the ticket could make; after that, every link starts with a `hello` signed over the host's nonce |
 | The gateway is broken into | It sees heads only; it can't forge a host (signatures) or add or change a roster entry (the chain). It can drop or delay frames, which shows as a gap, an offline host or a roster mismatch in presence |
-| A window laptop is stolen | It can remove and add ordinary hosts. Moving the gateway, removing a window host and adding one need the founder or two window hosts. The founder removes the laptop; its frames are refused from then on |
+| A window laptop is stolen | Without the person there (Touch ID on a Mac) it can remove ordinary hosts and narrow settings, never admit a host or widen anything. Moving the gateway, removing a window host and adding one need the founder or two window hosts. The founder removes the laptop, and revoking its device in the person's chain stops every act as the person from it |
 | Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute, and the map's relay frames, 120 a minute, apart |
-| An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its key, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API as a local program, with no key, through its allowlist of GETs |
-| A weak "from you" | Operator frames say how they were checked; only window-key and macOS process checks count |
+| An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its credential, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API with the service's own credential, through its allowlist of GETs |
+| A forged "from you" | An act as you carries your device's signature over that act, and an Allow, an admit or a widening your presence block for it; the receiver checks both against its own copy of your person chain. No frame's word on how it was checked is read |
 | Replay | Frame ids for a week. Relay and svc frame ids until their own date is two minutes old, against a floor that only rises, so a gateway that sets a host's clock back can't replay one; relay frames with their seq within a subscription too. Request nonces for 2 minutes; times within 60 s |
-| Keys and tokens leaking | Private keys stay in an owner-only file. Tickets are kept hashed. Nothing secret is queued, svc frames, which may carry a service's bearer, never reach the gateway's disk, and on a LAN-only gateway `/mcp` isn't served |
-| A2A misuse | A2A clients are actors: tokens, default-deny scopes, rate limits. No outbound calls in the first step |
+| Keys and tokens leaking | Private keys stay in owner-only files, or the Secure Enclave on a Mac. Tickets are kept hashed. XenoNet keeps an actor token's revocation id, never the token. Nothing secret is queued, svc frames, which may carry a service's bearer, never reach the gateway's disk, and on a LAN-only gateway `/mcp` isn't served |
+| A2A misuse | A2A clients are actors: gateway tokens, default-deny scopes, rate limits. No outbound calls in the first step |
 | A service published to the network | Nothing is published until the owner does it, from the window or their own terminal. Targets are loopback IPs over plain http, never XenoNet's own ports; no redirects, proxy or name lookups. Only the paths named, checked once decoded; roster hosts, or the ones named; 300 requests a minute for each caller; the caller in `Forwarded` from the frame's signature; four headers in and no cookies out. A service with no auth of its own is open to every program on every allowed host |
 
-Process checks still run on macOS only, so on a Linux or Windows host a
-local program can claim to be an agent there, as today. The network
-doesn't make that worse: a remote host's frames are signed by the host,
-never trusted as a particular process, and weak checks travel as weak.
+Where a host can't see the calling process, a local program can claim to
+be an agent there, and the host vouches for it as unchecked. The network
+doesn't make that worse: a remote host's frames are signed by the host, an
+agent's attestation is its host's statement, and the receiver refuses
+starts, Allows, claims and reads that matter from an unchecked agent.
+[authorization.md](authorization.md), "What stays weaker", lists what one
+compromised account on a host can still do.
 
 ### 14. Services through the network
 
@@ -1018,7 +1069,8 @@ request and the answer, and checks them at both ends. The first use is
 Xenolith's sync, with a follower on one host and the curator on another.
 
 **Publishing** is the owner's, refused from under an agent as `net
-create` and `net join` are (`Ctx::from_you`), and off until they do it:
+create` and `net join` are (the local API's `You` rows), and off until
+they do it:
 
 ```text
 xenonet svc publish <name> http://127.0.0.1:<port> --paths /sync/v1/ [--paths …] [--hosts <host>…]
@@ -1044,8 +1096,10 @@ own local API, for any program on that machine. It's never under
 `/net/v1/`, which the front door hands to the gateway on its LAN and
 tunnel doors. The API's `Host` check applies, and a request with an
 `Origin`, or a browser's `Sec-Fetch-Site` other than `none`, is refused.
-XenoNet's API version header doesn't apply to it. `Authorization` is the
-service's own credential, never read as an actor's token.
+XenoNet's API version header doesn't apply to it. The caller presents
+XenoNet's API credential (`x-xenonet-credential`, from
+`<runtime>/api-<port>.cred`) as for any local route. `Authorization` is
+the service's own credential, never read as an actor's token.
 
 **Frames.** `svc` (`network/svc/v1`) has two bodies, keyed by a request
 id the caller makes (`svq_` and 32 hex digits):
@@ -1141,8 +1195,11 @@ does `xenonet svc --help`.
   `handoff`, `relay`, `operator` and `svc`. They're sealed and signed by
   the sending host. `relay` and `svc` frames go up in relay batches of
   their own (`frames?relay=1`).
-- Their bodies are in `schemas/network/<kind>/v1.json`, and the engine's
-  side of them in `xenonet_model::ops`.
+- Their bodies are in `schemas/network/<kind>/`: `message/v2` and
+  `operator/v2` carry the act's `authority` (an actor's token and its
+  root's certificate, or the person's device, signature and presence, and
+  the head of their chain), and roster entries are `roster-entry/v2`. The
+  engine's side of them is in `xenonet_model::ops`.
 
 **Routes on the gateway**, all under `/net/v1/`:
 
@@ -1158,7 +1215,9 @@ A request with an `Origin` is refused. `Host` must be the gateway's
 address.
 
 **Routes on each host's own API**, for its window and CLI, under
-`/api/net/`. All are owner-only, and window-only where section 8 says so:
+`/api/net/`. Each has its row in the local API's rules table: `ticket` is
+the window's, the rest yours (the window or your own terminal), and any
+act among them that asks you is done from the window:
 
 | Route | Does |
 |---|---|
@@ -1187,6 +1246,9 @@ any method a service takes: another host's published service (section
   too: the engine then sends again the messages with no `stored` receipt.
 - `<state>/network/link.json`: how the link last stood, for the doctor.
 - `<state>/network/services.json`: the services this host publishes.
+- `<state>/identity/`: the person on this host, their chain, the device
+  and machine signing keys, and the token roots' certificates
+  ([authorization.md](authorization.md), "The person").
 - `<state>/network/gateway.sqlite`, on the gateway only: tickets (hashed),
   queues, frame ids, the epoch, and the last presence of each host. Never
   relay or svc frames, which the gateway holds in memory only.
@@ -1203,7 +1265,7 @@ xenonet net create --name <name> --host <id> [--lan <address>]
 xenonet net join <address> <ticket>
 xenonet net status [--json]
 xenonet net hosts
-xenonet net add-machine <id> [--window]   (macOS terminal; the window elsewhere)
+xenonet net add-machine <id> [--window]   (the window's: in a terminal it says so)
 xenonet net remove <host>
 xenonet net leave
 xenonet net gateway take | set <address>
@@ -1286,7 +1348,7 @@ built ("As built").
    - the guide (`docs/guide/network.md`).
 
 Later: collisions' diffs and MCP servers' details over the network, A2A
-out, actor tokens and scopes from another machine, moving actors' rows
+out, an actor's Allow from another machine, moving actors' rows
 with the gateway, the Claude Code messaging bridge, ACP, MCP 2026-07-28, a direct path between hosts on
 one LAN, and a recovery key for a lost founder.
 

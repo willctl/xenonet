@@ -32,7 +32,7 @@ It never gets transcripts, prompts, messages, a question's text, tool names, arg
 5. Choose `Preview what leaves`. XenoNet shows made-up answers first, then the exact fields it would send for the projects you picked.
 6. Choose `Approve and pair`. XenoNet shows the command your tunnel client runs.
 
-XenoNet writes the connection's credential to its state folder, readable only by your account, and never shows it. The command holds no secret:
+XenoNet writes the connection's grant, the token it reads with, to its state folder, readable only by your account, and never shows it. The command holds no secret:
 
 ```bash
 xenonet mcp assistant --grant gr_…
@@ -40,7 +40,7 @@ xenonet mcp assistant --grant gr_…
 
 Until you've checked who can call the endpoint and ticked `I checked who can call this endpoint`, the connection reads made-up data only, and every answer says so.
 
-Pairing happens only in XenoNet's window. A remote actor can't pair itself, widen its own access or approve anything.
+Pairing happens only in XenoNet's window, and asks you once (Touch ID on a Mac), as widening a connection's projects does. A remote actor can't pair itself, widen its own access or approve anything.
 
 ## Connecting a dot through OpenAI's tunnel
 

@@ -122,10 +122,17 @@ the internet.
 
 ## What stays the owner's
 
-All of the following are owner actions, checked by `fromYou` in
-`server/routes/actors.js`: picking a tunnel, turning the gateway on or
-off, Check, Repair and `revoke`. Making a gateway token is the window's
-alone.
+All of the following are owner actions, the `You` rows of the local
+API's rules table (the window, or your own terminal): picking a tunnel,
+turning the gateway on or off, Check, Repair and `revoke`. Making a
+gateway token is the window's alone, and asks your presence (Touch ID on a
+Mac), since it widens the actor's grant.
+
+A gateway token is the actor's grant with the right to use the gateway,
+narrowed to the gateway's door and written `xenonet_gateway_` and
+base64url ([authorization.md](../authorization.md), "The actor grant").
+It works at `/mcp` and `/a2a` and nowhere else, and XenoNet keeps only its
+revocation id.
 
 ## Asking for a token (2026-10-13)
 
@@ -138,9 +145,9 @@ program on this machine, as registering is, because it holds nothing:
   MCP tool also withholds anything shaped like a token from what it
   returns, so a change on the server's side can't put one in a transcript.
 - It leaves a card in the window (the attention strip and the Actors
-  panel) with who asked. **Allow**, which only the window can send, makes
-  the token then, as Connect… does, and the answer to the window alone
-  holds it, once. Deny drops the ask.
+  panel) with who asked. **Allow**, which only the window can send, asks
+  your presence and makes the token then, as Connect… does, and the answer
+  to the window alone holds it, once. Deny drops the ask.
 - Until Allow, nothing changes: the old token keeps working, so an ask can't
   break a connection. An ask lapses with a registration's ten minutes, one
   waits per actor, four at a time and twenty an hour.

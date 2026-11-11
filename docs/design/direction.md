@@ -1,10 +1,11 @@
 # Direction: from the prototype to the system
 
 Status: analysis and target shape, 2026-11-08. Written for the goals in
-[goals.md](goals.md). Phases 1 and 2 of the order of work are done;
-phase 3 is next. "Where the code stands" is the measure taken before
-phase 1; the order of work says what each phase changed. Will decides the
-open questions at the end as each phase reaches them.
+[goals.md](goals.md). Phases 1 to 3 of the order of work are done;
+phase 4 is next. "Where the code stands" is the measure taken before
+phase 1, with the rows phase 3 answered stated as they stand; the order
+of work says what each phase changed. Will decides the open questions at
+the end as each phase reaches them.
 
 ## Where the code stands
 
@@ -13,10 +14,10 @@ schemas and the design docs. Sizes are lines of Rust under `crates/*/src`.
 
 ### What already serves the goals
 
-- **The frame crypto and the roster chain** (`crates/xenonet-net`, 8.6k
-  lines). Ed25519 signatures over a head that binds the sealed body;
-  X25519 + HKDF + ChaCha20-Poly1305 sealing per recipient; a hash-chained
-  roster with signer rules; one-time tickets with HMAC proofs both ways;
+- **The frame crypto and the roster chain** (`crates/xenonet-net`, with
+  the chain in `crates/xenonet-log`). Ed25519 signatures over a head that
+  binds the sealed body; X25519 + HKDF + ChaCha20-Poly1305 sealing per
+  recipient; a hash-chained roster with signer rules; one-time tickets with HMAC proofs both ways;
   replay windows; a gateway that relays and can neither read nor forge.
   Known answers in `test/fixtures/net/` and about fifty tests. The seam to the
   engine (`xenonet_model::ops::{Net, Sink}`) is small and typed. This is
@@ -29,8 +30,12 @@ schemas and the design docs. Sizes are lines of Rust under `crates/*/src`.
 - **The app registry** (`apps.json`, 26 apps) with capabilities per app,
   and the doctor.
 - **The owner's controls**: admitting, widening and publishing are refused
-  from under an agent; tokens are kept as hashes; secrets never enter an
-  agent's context.
+  from under an agent, and admitting and widening take the person's
+  presence; XenoNet keeps a token's revocation id, never the token;
+  secrets never enter an agent's context.
+- **One authorization** (`crates/xenonet-id`, `-log`, `-authz`, `-keys`):
+  person and network chains, presence blocks, one actor grant, and one
+  decision at the receiver ([authorization.md](authorization.md)).
 
 ### Where it falls short
 
@@ -38,13 +43,13 @@ schemas and the design docs. Sizes are lines of Rust under `crates/*/src`.
 |---|---|
 | 1 Collaboration across machines | Built for messages, claims, presence, handoffs, starts and permissions. Each relies on one gateway per network and one network per host (`crates/xenonet-net/src/files.rs`). Remote maps and transcripts reach only a window host. |
 | 2 Many-to-many | Not there. No person, organization or team entity: an org is text inside an identity id, a GitHub org is an ordinary identity with `role: owner`. `actor:you` is one constant across every host. One projects folder, one shared context, one network per host. Project ids are lowercased absolute paths; session ids are vendor ids; nothing XenoNet mints is referable across machines except `repo:<remote>`. Sessions, projects and identity links are recomputed from vendor files on every refresh, not stored. |
-| 3 Secure by construction | Four principal types (agent, actor, you, host), each with its own authenticator and its own rule sites (routes, policy, reach, operator, roster). Actors have an ACL-ish capability list plus one selector grant each. A receiving host takes the sender's self-reported auth strength, so a compromised window host speaks as "strong you" everywhere. Process checks pass unchecked off macOS. Read routes and the event stream answer any local process. |
+| 3 Secure by construction | Four principals (machine, agent, actor, person) decided by one function at the receiver, on its own copies of the person's and the network's chains ([authorization.md](authorization.md)). Every actor holds one Biscuit grant; the person is a device signature, with presence for what widens; every local route takes a credential and has one row in one rules table. Still short: off a Mac the person's device key is a file, and the machine signing key and the host key can be used by any program of the account; revocation is held where it's made, not yet in store order; tokens name machines and networks, not projects or agents. |
 | 4 Performance | Polling throughout: transcripts every 8 s, observers every 3 to 5 s, presence every 2 s, inbox and channels by long-poll. `Engine::agents()` dedupes in O(n²) and runs on every send, peers call and presence tick. |
 | 5 Distributed and scalable | Presence is one sealed frame per host per tick, so O(hosts² × agents); by the frame cap of 64 KiB, a full presence with detail would be refused at roughly 50 to 100 agents per host, and 20 hosts would exhaust the 600 frames/min bucket (both inferred from the limits, not measured). One gateway, single SQLite, no failover by design, moved by hand. |
 | 6 Modular | The engine is a line-by-line port of JS: cores call each other through `Calls::call(path, method, args)` with string names and JS-shaped values (`crates/xenonet-engine/src/peer.rs`), so there are no typed boundaries between engine, store, policy, delivery and actors. `xenonet-base` holds the vendor registry, the Hermes plugin, pricing and 2.8k lines of Node emulation, and every crate depends on it. Five leaf crates depend on `xenonet-app` for JS shims. `connect.rs` (1,775 lines of Claude, Codex and Grok config writing) lives inside the messaging engine. `"claude"` and `"codex"` appear in over a hundred Rust files. The `cli` crate depends on 19 crates, `wire-app` on 15. |
 | 7 Seamless setup | Only Claude Code, Codex and Grok Build have `connect`; Codex still needs `/hooks` trust by hand, Hermes a config edit and a token file, Cursor a checkout and a hand-edited hooks file. The Mac app is unsigned (Open Anyway every version, no auto-update), Windows too. The plugin hard-codes port 47840 and breaks on Windows. The doctor's 33 checks are hand-listed, not derived from the registry. |
-| 8 Reuse | MCP (rmcp) and inbound A2A are adopted. The wire format, the roster, tokens, delivery and sync are all XenoNet's own. ACP, which Grok Build, Hermes and the Claude Code adapter all speak, is not used to start or drive sessions. |
-| 9 Verified | 951 Rust tests, 1,762 JS tests, 23 fuzz targets. No property tests, no model, no simulation: nothing checks the roster, the tickets, the outbox or the claims under reordering, loss or crashes. |
+| 8 Reuse | MCP (rmcp), inbound A2A and Biscuit (biscuit-auth 6, for every actor's grant) are adopted. The wire format, the chains, delivery and sync are XenoNet's own. ACP, which Grok Build, Hermes and the Claude Code adapter all speak, is not used to start or drive sessions. |
+| 9 Verified | The authorization rules have an exhaustive decision matrix, property tests and compile-fail tests; there are 23 fuzz targets. No model and no simulation: nothing checks the chains, the tickets, the outbox or the claims under reordering, loss or crashes. |
 | 10 Xenolith follows | Xenolith is a separate workspace in the same repo, excluded from the root workspace, with its own copies of private-file, X25519, SHA-256 and token code. XenoNet reads its folder by format and syncs it as an opaque published service. Its spaces are free-text names, not XenoNet ids. |
 
 ### Dead weight
@@ -247,80 +252,83 @@ Each stream kind declares its order and retention:
 
 ### Authorization
 
+Phase 3 built this; [authorization.md](authorization.md) says how it
+works in full, and this is the shape it holds to.
+
 - **Every incoming act is decided at the receiver** by one function:
-  `decide(token, request, ground, policy)` → `Allow | Hold | Refuse`. The
-  sender's check is a courtesy. The sender's self-reported strength is
-  never trusted. Local surfaces present a per-surface credential issued
-  at install, and the service checks the peer's uid; that keeps other
-  users and stray programs out, but not an agent on the same OS account,
-  whose MCP server is its own child. Reads that matter (transcripts,
-  search, other machines' state) therefore need a Biscuit read scope,
-  not just a connection.
-- **Authority is a Biscuit v6 token.** Biscuit roots are keys, so: tokens
-  a person issues root at one of their device keys, and the receiver maps
-  the device to the person through the person chain; tokens a group
-  issues carry the chain's admin keys as third-party blocks; the person's
-  offline root key signs chain entries, never daily tokens. Facts take
-  the tuple shape `member(group, subject, role)`, and the agent's
-  attestation (`HarnessSigned`, `ProcessChecked`, `Unchecked`) is a fact
-  too: policy refuses `start`, `answer` and claims on other machines from
-  an `Unchecked` agent, and a standing grant names the attestation it
-  requires. Routine machine actions rest on membership facts; a standing
-  grant from the person lets a machine mint agent tokens of 24 hours,
-  renewed while the session lives, each narrowed to one agent. Delegation
-  is attenuation: offline, narrowing only, hop-capped.
-- **A human is proven** by a device signature made after an OS
-  user-presence check, carried as a presence block that only a
-  presence-capable surface can mint. On macOS the check is Touch ID with
-  no passphrase fallback, so a computer-use agent on the same account
-  cannot pass it. Windows uses Windows Hello, PIN included, and Linux
-  polkit or a passphrase; an agent that can type could pass those, so
-  both are marked weaker, in the device's chain entry and in the doctor. When the person has
-  enabled a hardware key, the widest acts (admit, widen, publish) also
-  need its tap. The block signs the purpose, the hash of the one act it approves
-  (or the receiver's nonce) and the time; the receiver accepts it once,
-  and refuses it after 60 seconds. It cannot be lifted off one act and
-  put on another. This replaces the window key. The person alone founds,
-  admits, widens, publishes, revokes, and answers permission prompts,
-  unless they issued a standing grant for answers; the receiver accepts
-  an Allow only under authority that chains to a person, with presence or
-  under that grant. A Deny narrows, so it needs no presence.
-- **Revocation** is a chain entry. It takes effect on a machine the
-  moment that machine holds it, and from then on a revoked proof is
-  ineffective for every entry the machine had not already stored. The
-  receiver's own store order decides what counts as before, never the
-  entry's clock, which the author asserts and could backdate. For
-  `start`, `answer`, `admit`, `widen` and `publish` on another machine's
-  behalf, the verifier must have synced governance within ten minutes or
-  it holds; a machine acting on its own runs is exempt, so a laptop on a
-  plane still answers its own prompts.
-- **"Information, never authorization" is in the types.** Message,
-  handoff, ask and prompt text is `Information<T>`, which converts to
-  nothing; the authorizer's inputs are a closed struct built from header,
-  token and chain facts, never from a body; `Authorized` has no public
-  constructor; the framing an adapter shows a session cannot be dropped. A
-  compile-fail test keeps it so.
+  `decide(token, request, ground, presence)` → `Allow | Hold | Refuse`.
+  The sender's check is a courtesy, and a sender's word on its own
+  strength is never read. Local surfaces present a credential: the API
+  credential each start writes to an owner-only file, the window's key, or
+  an actor's own token; one rules table names who may call each route.
+  That keeps other users and stray programs out, but not an agent on the
+  same OS account, which can read the file. So reads that matter
+  (transcripts, search, the engine's state, other machines' state) need
+  the window, the caller's own terminal or a session whose process passes
+  the check, and an actor reads through its grant.
+- **Authority is a Biscuit v6 token,** one kind for every actor: its
+  grant, rooted at a key each service start makes in memory and the
+  machine signing key certifies for a year. It names the actor, its
+  machine, its network and its rights, and a receiver-side row keyed by
+  its revocation id holds its scopes (sessions, projects, what it may
+  Allow, and room for identities and intents). The agent's attestation
+  (`HarnessSigned`, `ProcessChecked`, `Unchecked`) is part of the request:
+  policy refuses `start`, an Allow and claims on other machines from an
+  `Unchecked` agent. To come: tokens a person issues rooted at their
+  device keys, a group's admin keys as third-party blocks, and agent
+  tokens of 24 hours under the person's standing grant, each narrowed to
+  one agent, once phase 4 stores agent and project ids.
+- **A human is proven** by a device signature over the act, and, for what
+  widens, a presence block made after an OS user-presence check. On macOS
+  the check is Touch ID with no passphrase fallback, so a computer-use
+  agent on the same account cannot pass it. Windows uses Windows Hello,
+  PIN included, and Linux polkit or a passphrase; an agent that can type
+  could pass those, so both are marked weaker, in the device's chain entry
+  and in each decision on it (the doctor doesn't show it yet). The block
+  signs the purpose, the hash of the one act it approves, a nonce and the
+  time; the receiver accepts it once, and refuses it after 60 seconds. It cannot be lifted off one act and put on
+  another, and it stands for the act signature, so the person is asked
+  once. The person alone founds, admits, widens, revokes devices and
+  answers permission prompts with an Allow, unless their delegation or an
+  actor's allow scope covers the prompt. A Deny narrows, so it needs no
+  presence. A hardware key's tap for the widest acts is to come.
+- **Delegation** is an entry in the person's chain: a standing grant to a
+  set of their devices, naming the work (starts, answers), the kinds of
+  prompt, its limits and its end. It covers work only when it names both
+  the device that runs it and the device it came from.
+- **Revocation** takes effect on a machine the moment that machine holds
+  it: an actor's grant in that machine's revoked table, a device in the
+  person's chain. In phase 4, with feeds, a revoked proof becomes
+  ineffective for every entry the machine had not already stored, by the
+  receiver's own store order, never the entry's clock, which the author
+  asserts and could backdate. For `start`, `answer`, `admit`, `widen` and
+  `publish` on another machine's behalf, the verifier must have synced
+  governance within ten minutes or it holds; a machine acting on its own
+  runs is exempt, so a laptop on a plane still answers its own prompts.
+- **"Information, never authorization" is in the types.** The authorizer's
+  inputs are a closed struct built from header, token and chain facts,
+  with no field for text; `Information<T>` converts to nothing;
+  `Authorized` has no public constructor; the framing an adapter shows a
+  session cannot be dropped. Compile-fail tests keep it so.
 
 ### The machine key
 
-All three candidates and today's code root every agent's authority in
-the machine key, kept in an owner-only file or the OS keychain. The agents
-run as the same OS user with a shell, so any session can read that file
-or run the binary the keychain trusts, and sign as any agent on the
+All three candidates rooted every agent's authority in the machine key.
+The agents run as the same OS user with a shell, so any session can read a
+key file or run the binary a keychain trusts, and sign as any agent on the
 machine. Presence checks guard the person's key; nothing guards the
 machine's. iroh needs the raw Ed25519 secret of the endpoint key for its
-QUIC handshake, so that key can never be hardware-backed. The design
-therefore gives a machine two keys, as the roster already carries a
-signing and a sealing key: a **transport key** in a file, which proves
-the channel and nothing else, and a **machine signing key** behind a
-`Signer` trait, which signs chain entries, feed entries and agent tokens.
-The machine's chain entry binds the two. By Will's decision the signing
-key is hardware-backed and non-exportable by default where the platform
-has a secure element (the Secure Enclave on macOS, the TPM on Windows),
-and a file elsewhere, with attestation recorded honestly either way and
-used by policy as the authorization section says. A service running as
-its own OS user is the fallback hardening for machines without a secure
-element (question 2 below).
+QUIC handshake, so that key can never be hardware-backed. So a machine has
+two keys: a **transport key** in a file (`host.key`, which signs frames
+and network chain entries), and a **machine signing key** behind the
+`Signer` trait, which certifies token roots and, with feeds, will sign
+feed entries. The machine's chain entry binds the two. By Will's decision
+the signing key is hardware-backed and non-exportable where the platform
+has a secure element: on macOS it's in the Secure Enclave; the TPM on
+Windows isn't used yet, so there and on Linux it's a file, and the key
+says where it lives. Any program of the account can still ask the Secure
+Enclave to sign, so a service running as its own OS user is the hardening
+that completes it (question 2 below).
 
 ### Adapters and surfaces
 
@@ -440,22 +448,51 @@ Will's step on inix and NEO-REX.
    integration's session reading is still in `xenonet-integrations`; and
    `xenonet-hosts` still tells Claude Code's plan readings from the
    registry's limits kind rather than through its adapter.
-3. **One authorization.** Add `xenonet-log::chain` with today's
-   `roster.rs` as its first `Policy`, so the network chain *is* the roster
-   and one implementation runs the old transport and the new rules; add
-   person chains with device keys, `xenonet-authz`, the presence block,
-   the `Information<T>` types and the compile-fail test. The frame head
-   stays `xenonet-net/1` and its kinds stay closed; the message body
-   schema goes to v2 and gains the act's authority, which is how Biscuits
-   travel until phase 5. Tokens in this phase name machines and networks
-   only; project- and agent-scoped grants wait for the stored ids of phase
-   4, so no token dies at that cutover. Revocation in this phase takes
-   effect once the receiver holds the entry; the store-order refinement
-   comes with feeds in phase 4. Re-express, then delete: actor tokens and
-   capability lists, delivery grants and selectors, `reach`, `operator`,
-   assistant grants, gateway and A2A tokens, all replaced by one actor
-   grant (question 8). Decide at the receiver; the local API gets its
-   credential.
+3. **One authorization. Done (2026-11-11).** Four crates hold it, each
+   usable alone ([authorization.md](authorization.md)). `xenonet-id` has
+   keys and signatures bound to their purpose, the `Signer` and `Vault`
+   traits, and presence blocks taken once within a minute. `xenonet-log`
+   has `Chain<P: Policy>` with two policies: the network's chain
+   (`xenonet-roster/2`, the roster with an owner, each machine's device and
+   signing key, a `settings` op, and presence on every admit and widening)
+   and the person's chain of device keys and delegations
+   (`xenonet-person/1`). `xenonet-authz` has `decide`, its closed `Request`,
+   `Ground`, Biscuit tokens with their machine-certified roots,
+   `Information<T>` and the compile-fail tests, an exhaustive decision
+   matrix and property tests. `xenonet-keys` has the platform keys: the
+   Secure Enclave with Touch ID on a Mac, Windows Hello, polkit or a
+   passphrase on Linux, each but the Mac marked weaker, and fakes for every
+   instance but the installed and `dev` ones. Every act from another
+   machine is decided at the receiver, on its own copies of the chains: the
+   message body is `network/message/v2` with the act's authority, and
+   `network/operator/v2` carries only answers. Every actor holds one grant,
+   local actors, bots and cloud assistants alike, with its scopes in rows
+   the receiver keeps; an Allow, and issuing or widening a grant or a
+   delegation, take the person's presence, and a Deny takes none.
+   Delegation is an entry in the person's chain naming a set of their
+   devices. The local API takes a credential on every route, with one rules
+   table. The frame head stays `xenonet-net/1` and its kinds stay closed.
+   Deleted: `reach.rs`, `operator.rs`'s acts but answers, the node's widen
+   and operator nonces, `attest.rs`'s strength ladder and the model's
+   `Strength` and `CheckedBy`; actor tokens as hashes, the capability
+   column and `Actors::can`, delivery.json's grants, the token file's
+   format check, the assistant's hashed credentials, its HMAC page cursors
+   and `xenonet_assistant_`; the four route guards (`yours`,
+   `from_window`, `from_you`, `window_only`); the network v1 bodies; and
+   `network.json`'s upgrade step. Networks, identities and grants made by
+   an earlier build are made again. Left for later: copying the root key
+   to other devices, so a machine other than the root's can pair one, and
+   the recovery phrase; an actor's Allow on another machine than its own; a
+   nonce in the device's signature over start and message acts; reading
+   the person chain's token revocations at the receiver; the TPM for the
+   machine key on Windows, hardware keys for the widest acts, and the
+   service as its own OS user; the doctor showing the device's kind and
+   whether the root is sealed; the network state's `person` in its schema;
+   typed requests in `xenonet-api` (its core traits still pass JSON); the
+   MCP and console surfaces on `xenonet-api` alone (held to ceilings until
+   phase 5), and the composition crates' ceilings lowered as each phase
+   dissolves them ([rust-core.md](rust-core.md)); and project- and agent-scoped tokens and
+   store-order revocation, which come with phase 4's stored ids and feeds.
 4. **Many-to-many ids, one store.** Add feeds and stored ids (project,
    agent, org, space) with checkouts as rows; claims become (project,
    relative path) with a one-time mapping; consolidate the dozen state
@@ -502,9 +539,8 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Questions 1, 2, 4 and 5, and 8's grants, are decided, so nothing gates
-phase 3. The rest
-can wait for the phase that needs them.
+Questions 1, 2, 4 and 5, and 8's grants, are decided. The rest can wait
+for the phase that needs them.
 
 1. **The person's root key, the presence check and the chain rules.**
    Decided by Will on 2026-11-08. The root key lives in the first
@@ -584,10 +620,11 @@ can wait for the phase that needs them.
   used, with direct fan-out until gossip 1.0.
 - quint-connect is young (0.1.x); the Quint specs stand on their own if
   the bridge breaks.
-- User-presence proofs differ by OS; Linux falls back to polkit or a
-  passphrase and is weaker by design, which the doctor states.
-- Secure Enclave and TPM signing need platform code (Security.framework,
-  Windows CNG) that nothing in the workspace has today.
+- User-presence proofs differ by OS; Windows and Linux use a file key
+  behind Windows Hello, polkit or a passphrase, weaker by design, which
+  the person's chain records.
+- TPM signing on Windows needs platform code (Windows CNG) testable only
+  on Windows hardware; the Secure Enclave's is built.
 - Biscuit checks on hot paths need caching; presence is checked once per
   connection, never per delta.
 - Mixing old and new ids during phase 4; one id system at a time.

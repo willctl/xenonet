@@ -21,10 +21,10 @@ The path a read takes:
 cloud assistant (a dot)
   -> OpenAI-managed tunnel endpoint
   -> tunnel-client, on the owner's computer
-  -> xenonet mcp assistant --grant <grant>      mcp/assistant.js, stdio
-  -> private endpoint, 127.0.0.1               server/assistant-endpoint.js
-  -> assistant.read                            core/assistant/service.js
-  -> XenoNet's in-memory state                   core/assistant/source.js
+  -> xenonet mcp assistant --grant <grant>      crates/xenonet-mcp/src/assistant, stdio
+  -> private endpoint, 127.0.0.1               crates/xenonet-service/src/assistant_endpoint.rs
+  -> assistant.read                            crates/xenonet-assistant/src/service.rs
+  -> XenoNet's in-memory state                 crates/xenonet-assistant/src/source.rs
 ```
 
 The ordinary HTTP API, its Host and Origin rules, the component service
@@ -37,27 +37,28 @@ connection.
 | --- | --- | --- |
 | Local transport for the adapter | A separate private endpoint, not a role on the component service | The component service's hello takes the Tools token first, which the adapter must never hold. A separate listener with its own fresh allowlist (`hello`, `assistant.read`) leaves the Desktop and Tools roles' code untouched, and works in XenoNet Dev, where there's no component service. It reuses the same framing (`core/components/rpc.js`, now with a per-connection line limit). |
 | When it listens | Only while a grant could be used | No listener at all for an owner who never pairs anything. It stops when the last grant is revoked or expires and when access is turned off. |
-| Where the credential lives | `<state>/assistant/credentials/<grant>.json`, written with `core/private-file.js` and checked for other readers | Windows Credential Manager or the macOS keychain would need a new dependency or a native helper. The private-file helper already protects the component service's descriptor and actors' token files, on every supported OS. A file another account can read is deleted and pairing fails. |
+| What the connection holds | The connection's actor grant ([authorization.md](authorization.md), "The actor grant"): a Biscuit minted at this machine with the right to read, written `xenonet_actor_` and base64url, kept for the adapter in `<state>/assistant/credentials/<grant>.json`, readable only by the owner's account. XenoNet's database keeps only its revocation id | One grant for every actor, so the assistant's reads are decided by `xenonet-authz` like any actor's. The adapter needs the token to say hello, and an owner-only file is what protects actors' token files on every supported OS. A file another account can read is deleted and pairing fails. |
 | Revocation without the service | Tombstones in `<state>/assistant/` (`disabled`, `revoked/<grant>`) | They're honored by the service on every read and every two seconds, by the adapter before it serves anything from its cache, and on startup, where a tombstone wins over a database restored from a copy. Older XenoNets don't know grants at all, so they can't serve one. |
-| Who may do what | Pairing, widening a grant, rotating and turning access back on: the window only, with its key. Listing, revoking and turning access off: the window or the owner's own terminal (`verify.person`) | Anything that creates or widens access needs the window. The fail-safe directions should work from a terminal, without the window, so an owner can stop access quickly. On Windows `verify.person` doesn't check processes yet, so the window key is what protects pairing there. |
+| Who may do what | Pairing, widening a grant, rotating and turning access back on: the window only, and pairing and widening take the owner's presence (Touch ID on a Mac). Listing, revoking and turning access off: the window or the owner's own terminal (the local API's `You` rows) | Anything that creates or widens access needs the window and the owner there. The fail-safe directions should work from a terminal, without the window, so an owner can stop access quickly. |
 | Audience | The owner says who can call the endpoint, and whether they checked. Until they say they checked, the grant reads made-up data only (`data_mode: fixture`) | The tunnel passes XenoNet no assertion of the caller, so XenoNet can't check the audience itself. Recording the owner's statement, and keeping real data off without it, follows the spec's rule that real data stays disabled until the audience is bounded. |
 | Account links | Unverified, or the owner's word for an identity XenoNet already knows; never verified through this route | No transport here provides a provider assertion to validate. The verification path exists (`account-links.js`, `adapters.js`) and is tested with made-up evidence, so a later adapter with a real assertion plugs in without a new table. |
 | Identity in snapshots | `identity` stays null for an owner-asserted link; `remote.accountLink` says how sure XenoNet is | Older clients show `identity` as fact, so a link that's only the owner's word never goes there. |
 | Presence | A read is working for a 90-second lease, then unknown | A read is evidence of activity at that moment only. The lease ages to unknown, never offline, and the most present instance still wins, so an observer's word about Grok Bot outranks a lapsed lease. |
-| Pagination | Keyset tokens, HMAC-signed with a key made at start, bound to grant, revision, tool and filters, five minutes | No server-side snapshot to keep or expire. The view is documented as the current one: an item that changes between pages can move. |
+| Pagination | A page cursor is the connection's grant narrowed to one read, the hash of its tool and filters and five minutes, holding where the last page ended and the grant's revision (`crates/xenonet-assistant/src/pages.rs`) | No server-side snapshot to keep or expire, and no key of its own: a cursor can't be made up or changed, and it ends with the grant. The view is documented as the current one: an item that changes between pages can move. |
 | Status of a session | From the tailer's signals: waiting (question or permission), stuck, working (a turn under way), completed (a turn ended and hasn't been looked at), idle, unknown (its source unavailable) | These are the signals the console already shows, so the answer matches what the owner sees. `status_basis` says which signal it came from. |
 | Version | Not chosen | Release numbering and publication are the maintainer's. See [section 9](#9-release). |
 
 ## 3. The actor model
 
-A connection belongs to an actor in the existing `actors` table; there is
-no second registry. Migration 5 of `engine.sqlite` adds child tables:
+A connection belongs to an actor in the `actors` table; there is no
+second registry. `engine.sqlite` holds its child tables:
 
 - `actor_connections`: one per way an actor reaches XenoNet (transport,
   label, audience and the owner's word on it), cascading with its actor.
-- `actor_grants`: what a connection may read (projects by their own ids,
-  labels, lookback, data mode), until when, its revision, and its
-  credential's SHA-256 only.
+- `actor_grants`: what a connection may read (labels, lookback, data
+  mode), until when, its revision, and its token's revocation id. The
+  projects it reads are its grant's scope row in `grant_scopes`, keyed by
+  the same id.
 - `actor_account_links`, `actor_external_refs`: how sure XenoNet is of the
   account, and the provider's own ids once proven, unique per namespace;
   a conflict is refused for the owner to review, never merged.
@@ -65,8 +66,7 @@ no second registry. Migration 5 of `engine.sqlite` adds child tables:
   `assistant_meta` (the device's id and a fingerprint of the installation),
   `assistant_audit` (seven days, 20,000 records).
 
-Foreign keys are now on for `engine.sqlite`; the older tables declare
-none. The legacy `actors.token_hash` is untouched. Remote-only actors have
+Foreign keys are on for `engine.sqlite`. Remote-only actors have
 `via: ["remote"]`, no `allowedAt`, no capabilities and no heartbeat, so
 they don't count as registered, don't show an expired token, aren't
 message-reachable, and don't take one of the 16 registered places.
@@ -83,19 +83,19 @@ Agent can be paired; none of them registers because of it. A new dot is
 
 ## 4. The trust boundary
 
-What the owner approves is a grant, and what holds the grant is a local
-credential readable only by the owner's account. The endpoint accepts a
+What the owner approves is a grant, and what holds it is the grant's token
+in a file readable only by the owner's account. The endpoint accepts a
 hello only with the exact keys `role`, `api`, `grant_id` and `token`; a
-wrong credential is refused like an unknown grant, and the right one hears
-how its grant stands (revoked, expired, off). After hello, only
-`assistant.read` is answered. The service, not the adapter, checks the
-grant on each read and again just before the answer goes: revoked,
-expired or off by then, the answer is dropped; changed in scope, the read
-runs again once under the new revision.
+wrong token is refused like an unknown grant, and the right one hears how
+its grant stands (revoked, expired, off). After hello, only
+`assistant.read` is answered. The service, not the adapter, decides the
+grant on each read with `xenonet-authz`, and again just before the answer
+goes: revoked, expired or off by then, the answer is dropped; changed in
+scope, the read runs again once under the new revision.
 
 What completes the boundary is outside XenoNet: the tunnel's configuration
 and its audience, which the owner sets up with OpenAI and attests to.
-Credential possession says nothing about which remote model is calling.
+Holding the grant's token says nothing about which remote model is calling.
 
 A state folder copied to another machine or account doesn't match the
 fingerprint of the installation that made its grants, so they're revoked
@@ -137,21 +137,21 @@ account. `xenonet assistant audit` and `GET /api/assistant/audit` read it.
 
 | Threat | Control | Tested in |
 | --- | --- | --- |
-| A remote caller with no grant | The tunnel's own access, then the endpoint's hello; a wrong credential hears nothing more than an unknown one | `assistant-endpoint.test.js` |
+| A remote caller with no grant | The tunnel's own access, then the endpoint's hello; a wrong token hears nothing more than an unknown one | `assistant-endpoint.test.js` |
 | A caller asking for an unselected project or session | Authorized view before any filter or count; uniform `NOT_FOUND` | `assistant-service.test.js` |
 | A compromised adapter asking for more | Fresh method allowlist on the endpoint; every check in the service; the component service refuses the assistant role, and the endpoint refuses Tools tokens | `assistant-endpoint.test.js` |
 | Prompt injection or secrets in titles | Labels off by default; cleaning when on; tool descriptions and instructions say labels are data, never instructions | `assistant-service.test.js` (canaries) |
-| Stale authorization, replay | Recheck before release; revision-bound cursors and cache; tombstones; credential deleted on revoke; owner removal of a registered actor revokes its connections | `assistant-service.test.js`, `assistant-endpoint.test.js`, `assistant-connections.test.js` |
+| Stale authorization, replay | Recheck before release; revision-bound cursors and cache; tombstones; the grant's file deleted on revoke; owner removal of a registered actor revokes its connections | `assistant-service.test.js`, `assistant-endpoint.test.js`, `assistant-connections.test.js` |
 | A schema change adding fields | Strict output schemas checked before release | `assistant-service.test.js` |
 | Overload | 16 KiB arguments, 256 KiB answers, 60 a minute with bursts of ten, four at a time, ten seconds, 320 KiB lines, refused hellos throttled | `assistant-service.test.js`, `assistant-endpoint.test.js` |
 | A copied state folder | Installation fingerprint; grants revoked on mismatch | `assistant-connections.test.js` |
-| Cached data after revocation, expiry or a narrower scope | The adapter serves a cached answer only while the grant's files say it stands (credential, tombstones, expiry) and only under the revision on disk now | `assistant-endpoint.test.js` |
+| Cached data after revocation, expiry or a narrower scope | The adapter serves a cached answer only while the grant's files say it stands (its token's file, tombstones, expiry) and only under the revision on disk now | `assistant-endpoint.test.js` |
 | A stale endpoint file after a crash, naming a port someone else took | The adapter connects only while the process that wrote the file runs as this account | `assistant-endpoint.test.js` |
 | Work piling up past the concurrency limit | A read that timed out keeps its slot until its work ends | `assistant-service.test.js` |
 
 What this can't stop: code running as the owner's account can read the
-credential file, the database and the transcripts themselves, and
-change the tombstones. The design keeps a remote caller out of that
+grant's file, the database and the transcripts themselves, and change the
+tombstones. The design keeps a remote caller out of that
 category; it doesn't claim to protect against a compromised account.
 
 ## 8. Checks

@@ -28,8 +28,8 @@ Built, as of Wave 3 (2026-10-06):
   its window shows, and the placeholder everywhere else.
 - **Registering** (`core/actors/registration.js`,
   `server/routes/actors.js`): requests and your Allow, adding from the
-  window, tokens (rotated in the window, expired after 30 days unused,
-  revoked hashes kept a week), heartbeats, events, targets, `me` and
+  window, tokens (each actor's one grant, a Biscuit minted at this machine,
+  rotated in the window and revoked after 30 days unused), heartbeats, events, targets, `me` and
   leaving, the limits, and the window's view of the tokens
   (`GET /api/actors/tokens`).
 - **The process checks** on macOS (`verify.actor`, `register`, `window`
@@ -63,7 +63,8 @@ Built, as of Wave 3 (2026-10-06):
   `npm run test:real` checks a round trip between the two on a real Mac.
 - **The actor gateway** (`server/actor-gateway.js`, 2026-10-08): an MCP
   server over HTTP for actors outside this machine, with its own gateway
-  tokens (made in the window, kept as hashes, accepted nowhere else), five
+  tokens (the actor's grant narrowed to the gateway, made in the window,
+  accepted nowhere else), five
   tools (`send`, `inbox`, `peers`, `whoami`, `heartbeat`), the envelope
   method `gateway`, and a switch that's yours. A tunnel the owner picks
   (Tailscale Funnel, Cloudflare, ngrok or their own) puts it on the
@@ -98,12 +99,15 @@ itself, dots, and what section 5 leaves open.
   window or by connecting its product. A program asks, and XenoNet answers at
   once with an id and a token, which starts working when you click Allow.
   Agents can't ask.
-- **Tokens:**
-  - 256 random bits with a `xenonet_actor_` prefix;
-  - shown once, and stored as a SHA-256 hash;
+- **Tokens:** each actor holds one grant
+  ([authorization.md](../authorization.md), "The actor grant"):
+  - a Biscuit minted at this machine, written `xenonet_actor_` and
+    base64url, naming the actor, its machine, its network and its rights;
+  - shown once; XenoNet keeps only its revocation id;
   - sent as `Authorization: Bearer`;
   - kept in 0600 files, never on a command line;
-  - rotated in the window, and revoked there or with `xenonet actor remove`.
+  - issued or widened with your presence at the window, and revoked there
+    or with `xenonet actor remove`.
 - **On macOS a token is also bound to processes.**
   - It never works from under Claude Code or Codex.
   - A product's token works only from under that product.
@@ -111,8 +115,10 @@ itself, dots, and what section 5 leaves open.
     for its cloud.
 - **Actors use the engine as `actor:<slug>`**: messages, claims and peers.
   - Their messages arrive framed as an actor's.
-  - They approve nothing.
-  - They're held to the capabilities you allowed.
+  - They allow a permission prompt only inside an allow scope you gave
+    them.
+  - They're held to their grant's rights, which the capabilities you
+    allowed name.
 - **You are `actor:you`.** XenoNet's window alone reports you, with a key only
   the window holds. Outside the window you're a placeholder, so no agent,
   actor or other program learns whether you're at the console or what
@@ -267,10 +273,11 @@ itself, dots, and what section 5 leaves open.
 
 ### Routes
 
-Everything is on XenoNet's own port, with today's protections: 127.0.0.1
-only, the `Host` check, and no cross-origin POSTs (`server/index.js`). The
-routes go in `server/routes/actors.js`, which `server/index.js` only mounts
-(contracts section 6).
+Everything is on XenoNet's own port, with its protections: 127.0.0.1
+only, the `Host` check, no cross-origin POSTs, and a credential on every
+route, each route with its row in the local API's rules table
+([authorization.md](../authorization.md), "The local API"). "Any local
+program" below is one that presents the API credential.
 
 | Route | Called by | Checked by | Does |
 |---|---|---|---|
@@ -286,10 +293,10 @@ routes go in `server/routes/actors.js`, which `server/index.js` only mounts
 | `GET /api/actors/events?since=<ms>` | Any local program | | `actor/events/v1`: events since then, for replay, without yours |
 | `GET /api/actors/observers` | Any local program | | The products XenoNet observes, whether each observer is on, and their actors |
 | `GET /api/actors/requests` | XenoNet's window | The window key | Registrations waiting for you, an `actor/requests/v1` |
-| `GET /api/actors/tokens` | XenoNet's window | The window key | `actor/tokens/v1`: for each actor that reports itself, whether its token works (`works`, `expired`, or `none` for the demo's made-up one), when it expires unless it's used, and when it was last used: exactly the first time, to within the hour after, and null for a token never used. A **New token** makes it never used again. Never the token, nor its hash |
-| `POST /api/actors/requests/<id>` | XenoNet's window | The window key | `{"decision": "allow"}` or `{"decision": "deny"}` |
-| `POST /api/actors` | XenoNet's window | The window key | Adds an actor at once, and returns its token once |
-| `POST /api/actors/<slug>/token` | XenoNet's window | The window key | A new token, once. The old one stops working |
+| `GET /api/actors/tokens` | XenoNet's window | The window's credential | `actor/tokens/v1`: for each actor that reports itself, whether its token works (`works`, `expired`, or `none` for the demo's made-up one), when it expires unless it's used, and when it was last used: exactly the first time, to within the hour after, and null for a token never used. A **New token** makes it never used again. Never the token |
+| `POST /api/actors/requests/<id>` | XenoNet's window | The window key, and your presence for an Allow | `{"decision": "allow"}` or `{"decision": "deny"}` |
+| `POST /api/actors` | XenoNet's window | The window key, and your presence | Adds an actor at once, and returns its token once |
+| `POST /api/actors/<slug>/token` | XenoNet's window | The window key, and your presence | A new token, once. The old one stops working |
 | `DELETE /api/actors/<slug>` | XenoNet's window, or `xenonet actor remove` | The window key, or yours | Removes an actor. One XenoNet only observes is refused (409 `observed`), whoever asks: its observer's switch takes it off the map |
 | `POST /api/actors/observers` | XenoNet's window, or `xenonet actor observe` | The window key, or yours | `{"product": "grok-bot", "on": false}` turns an observer off or on |
 | `POST /api/actors/you`, `GET /api/actors/you` | XenoNet's window | The window key | The person's reports, and their record (section 6). Without the key, `GET` answers the placeholder the list shows |
@@ -350,8 +357,9 @@ routes go in `server/routes/actors.js`, which `server/index.js` only mounts
 
    It shows in the attention strip and in the Actors panel, in the
    attention color in every theme.
-5. **Allow** makes the token work, and the actor joins the list. It's
-   `unknown` until its first heartbeat.
+5. **Allow** asks your presence (Touch ID on a Mac), since it issues the
+   actor's grant, then makes the token work, and the actor joins the list.
+   It's `unknown` until its first heartbeat.
 6. **Deny, or ten minutes without an answer**, revokes the token.
 
 - **A new request replaces an old one.** When the same program asks again
@@ -390,11 +398,11 @@ routes go in `server/routes/actors.js`, which `server/index.js` only mounts
 | `heartbeatMs` | 5,000 to 3,600,000. The default is 60,000 |
 | `pid` | Optional: the actor's own long-lived process. On macOS it must be the caller or one of its parents below the first app above it (section 5). XenoNet watches it, and the actor goes offline when it ends. From the window, it means nothing |
 
-**The answer** is `actor/credentials/v1`:
+**The answer** is `actor/credentials/v2`:
 
 ```json
 {
-  "schema": "actor/credentials/v1",
+  "schema": "actor/credentials/v2",
   "id": "actor:wren",
   "token": "xenonet_actor_…",
   "state": "waiting",
@@ -584,18 +592,25 @@ That's today's `{error}`, with a code a program can test.
 
 ### Tokens
 
-- **Made.** 32 bytes from `crypto.randomBytes`, written as
-  `xenonet_actor_<64 hex digits>`.
+An actor's token is its grant ([authorization.md](../authorization.md),
+"The actor grant"), minted and decided by `xenonet-authz`
+(`crates/xenonet-actors/src/tokens.rs`).
+
+- **Made.** A Biscuit rooted at a key this machine's service makes in
+  memory at each start and its machine signing key certifies for a year.
+  Its facts are the actor, this machine, the network it may act in, one
+  `right(...)` for each action its capabilities allow, and when it ends.
+  It's written `xenonet_actor_` and the base64url of the token.
   - The prefix makes a leaked token easy to recognize, by people and by
     secret scanners. That's the reason GitHub gives for its own token
     prefixes ([GitHub][gh-tokens]).
-  - Hex never holds an underscore, so the prefix can't be mistaken, and a
-    double-click still selects the whole token.
-- **Stored.** Only its SHA-256, in `engine.sqlite`.
-  - A token has 256 bits of randomness, so a fast hash is enough: there's
-    nothing to guess (our reasoning, not a standard's).
-  - XenoNet finds the actor by the hash, so no comparison leaks timing.
-  - A copy of `engine.sqlite` gives no working token.
+- **Stored.** Only its revocation id and the capability words it was
+  minted for, in `engine.sqlite`. A copy of `engine.sqlite` gives no
+  working token.
+- **Issued or widened with you there.** Allowing a registration, adding an
+  actor, a new token, a gateway token and a wider scope each take your
+  presence at the window, bound to the actor, its rights and its scopes.
+  Narrowing, revoking and removing take nothing.
 - **Shown once.** In the window, or written to a 0600 file by the xenonet
   command, the desktop app, or Connect for a product.
   - It's never in a log, an error message, `state.json`, the doctor's
@@ -606,22 +621,22 @@ That's today's `{error}`, with a code a program can test.
   - The old token stops working at once: rotating usually means it leaked.
   - For a token Connect put in a product's folder, XenoNet writes the new one
     into the same file, and the product picks it up on its next 401.
-- **Revoked** when:
+- **Revoked**, by its revocation id in one `revoked` table, when:
   - you deny a request, or it expires;
   - you remove the actor, or it leaves;
   - you rotate the token;
   - 30 days pass without a call. The actor stays in the list, offline,
     until you give it a new token or remove it, and the doctor says so.
-- **Revoked hashes are kept for 7 days**, so a program gets a 401 `revoked`
-  with the reason, not a bare `bad-token`.
+- **Revocations are kept 400 days**, past a root's year, so a program gets
+  a 401 `revoked` with the reason, not a bare `bad-token`.
 - **How each stands** is the window's to see (`GET /api/actors/tokens`),
   and the Actors panel shows it under each actor that reports itself:
   whether it works, when it expires, and when it was last used. A token's
   first use is written down exactly, so the window can tell one never
   used, and later uses at most once an hour.
 - **One XenoNet's tokens are its own.** XenoNet (47840) and XenoNet Dev (47842)
-  each have their own `engine.sqlite`, so an actor registered with one is
-  unknown to the other.
+  each have their own state and token roots, so an actor registered with
+  one is unknown to the other.
 
 ### Limits
 
@@ -647,11 +662,12 @@ writer: the server. New tables:
 
 | Table | Holds | Kept |
 |---|---|---|
-| `actors` | One row per registered or observed actor: slug, kind, name, product, `via`, capabilities, `heartbeat_ms`, `token_hash`, `token_at`, `enabled` (an observer you turned off), `created_at`, `allowed_at`, `last_seen`, the last presence and status with their times | Until removed |
-| `actor_requests` | Waiting registrations: a random id, what was asked, the token's hash, who asked (program, parents and folder, as `~`), `expires_at`, the decision | A day |
+| `actors` | One row per registered or observed actor: slug, kind, name, product, `via`, `heartbeat_ms`, its token's revocation id and capability words (`token_id`, `token_rights`), `token_at`, its gateway token's id and time, `enabled` (an observer you turned off), `created_at`, `allowed_at`, `last_seen`, the last presence and status with their times | Until removed |
+| `actor_requests` | Waiting registrations: a random id, what was asked, the token's revocation id, who asked (program, parents and folder, as `~`), `expires_at`, the decision | A day |
 | `actor_events` | `id`, `actor`, `at`, `kind`, `target`, `detail`, `via`, `facts` (the JSON of `count`, `paths`, `platform`, `subject`, `app`), `ref` | 7 days and 10,000 per actor; the person's 24 hours |
 | `actor_targets` | `actor`, `target`, `relation`, `since`, `last_at` | 7 days after `last_at` |
-| `actor_revoked` | A revoked token's hash, its actor, why and when | 7 days |
+| `revoked` | A revoked token's revocation id, its actor, why and when | 400 days |
+| `grant_scopes` | A grant's scopes, by its token's revocation id: the sessions it reaches, the projects a remote connection reads, its allow scope, and room for identities and intents | Until revoked |
 
 - **The engine's tables** (`messages`, `deliveries`, `claims`, `focus`,
   `contacts`) take `actor:<slug>` like any agent id. They keep their
@@ -766,10 +782,9 @@ calls carry `Authorization: Bearer`, never `x-xenonet-agent`.
   - The doctor looks for tokens in the repos it knows, with `git grep`:
     in what's tracked, what's untracked, and ignored files such as a
     `.env`, where tokens are most often left, outside dependency, build
-    and cache folders (`findTokenFiles` in `core/actors/token-file.js`).
-    Only a token XenoNet issued counts: the SHA-256 of each one found is
-    held to the hashes `engine.sqlite` keeps of the tokens that work now
-    (actors' own, their gateway tokens, and waiting registrations'), so a
+    and cache folders (`crates/xenonet-runtime/src/tokens.rs`). Only a
+    token XenoNet issued counts: the revocation ids of each one found are
+    held to the ids `engine.sqlite` keeps of the tokens it issued, so a
     made-up token in a test fixture or a fuzz seed isn't a warning. When
     the store can't be read, every token counts, and the warning says
     XenoNet couldn't check them.
@@ -853,9 +868,11 @@ these parts of `core/engine/engine.js`:
 
 ### What an actor may not do
 
-- **Approve anything.** XenoNet has nothing an actor could approve, and keeps
-  it that way:
-  - it doesn't answer an agent's question or permission prompt;
+- **Approve anything beyond its grant.**
+  - With `answer-prompts` it may Deny a permission prompt of a run XenoNet
+    started, and Allow one only inside the allow scope you gave its grant
+    (sessions, kinds of prompt, until), on its own machine; it never
+    answers an agent's question;
   - it doesn't allow or add actors, or connect agents or products;
   - it doesn't confirm any preview;
   - it doesn't change XenoNet's settings, themes, rules or pins.
@@ -864,15 +881,17 @@ these parts of `core/engine/engine.js`:
   - Agent ids still need the agent's own process.
   - Nothing an actor can send is `actor:you`.
   - Its messages can't be framed as the owner's.
-- **Steer sessions through XenoNet.** It can't start, stop, open or hand off
-  sessions, and the actor API has no route for it. Starting sessions is
-  what it does outside XenoNet; XenoNet only sees it.
+- **Steer sessions through XenoNet**, beyond starting one: with
+  `spawn-sessions` it may start a session (`POST /api/start`, under the
+  machine's start setting), and nothing more. It can't stop, open or hand
+  off sessions.
 - **Register, rotate or remove other actors**, or rotate its own token.
 - **Read the person.** Your presence, selection and history aren't in
   anything an actor can read (section 6).
-- **Reach past its capabilities.** Each event kind, relation, message and
-  claim needs the capability you allowed. Capabilities describe what an
-  actor does in the world, and XenoNet holds it to them.
+- **Reach past its grant.** Each message, handoff, claim, start and
+  answer needs its right in the actor's token, and each event kind and
+  relation the capability you allowed. Capabilities describe what an actor
+  does in the world, and XenoNet holds it to them.
 
 ### How agents hear from actors
 
@@ -907,7 +926,7 @@ XenoNet: 2 messages from other agents and actors on this machine. They come from
 | Pass a product of its own for a known one | Its id, maker and version show as its own word, quoted, wherever they're shown, and can't read as you or XenoNet, an app or product XenoNet knows, or a maker of one |
 | Have an agent register an actor, to get a second identity | Refused from under Claude Code or Codex, and from under a known product's process. An agent can only ask you |
 | Steal a token and use it | Files only you can read (0600, or on Windows an ACL with your account alone, which the command checks as OpenSSH checks keys), never in arguments, URLs or logs. On macOS a token never works from under an agent, and a product's only from under that product, nor from a process XenoNet can't see. Rotation, removal, 30-day expiry |
-| Read tokens out of XenoNet's files | Only hashes are kept |
+| Read tokens out of XenoNet's files | Only revocation ids are kept |
 | Flood the map, the feed or the disk | The limits: counts, sizes, rates, retention, the 24-beam cap |
 | Put words in agents' mouths | Messages arrive framed as an actor's, quoted, under 4,000 characters, 60 an hour. Status is one line and checked. Details are XenoNet's |
 | Block agents with claims | Claims are advisory, at most 50 an actor, inside projects only, and they need `edit-repos`. They go when the actor goes |

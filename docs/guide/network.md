@@ -12,12 +12,13 @@ The design is in [docs/design/network.md](../design/network.md).
 
 - A **host** is a machine in the network. You pick its id, such as `studio` or `laptop`: lowercase letters, digits and dashes. XenoNet never uses the machine's own name.
 - The **founder** is the machine that started the network. Its key is the network's root: if the founder is lost for good, the network is made again.
-- A **window host** is a machine you use a XenoNet window on. It can act for you on the other machines: message their sessions as you, and add or remove machines. A server you only reach in a terminal isn't one.
-- The **roster** is the signed list of the network's machines and their keys. Every machine keeps a copy and checks each change against it.
+- A **window host** is a machine you use a XenoNet window on. From its window you act on the other machines: message their sessions as you, and add or remove machines. A server you only reach in a terminal isn't one.
+- The **roster** is the signed list of the network's machines, their keys and their settings. Every machine keeps a copy and checks each change against it.
+- **Your identity** is a key of yours on each machine that can ask you (Touch ID on a Mac, Windows Hello on Windows, polkit or a passphrase on Linux), in a chain every machine keeps a copy of. Whatever XenoNet does as you on another machine is signed by it, and what lets anyone do more (adding a machine, widening a setting, an Allow) asks you first. The design is in [Authorization](../design/authorization.md).
 
 ## Starting a network
 
-On the first machine, open **Network settings: your other machines** from the palette (`Ctrl+K`, or `⌘K` on a Mac), choose **Start a network**, and give the network a name and this machine an id. In a terminal:
+On the first machine, open **Network settings: your other machines** from the palette (`Ctrl+K`, or `⌘K` on a Mac), choose **Start a network**, and give the network a name and this machine an id. That sets up your identity on this machine, which asks you once. Once it's set up, a terminal does the same:
 
 ```bash
 xenonet net create --name home --host studio
@@ -46,15 +47,17 @@ This machine is now the founder and the gateway. The other machines reach the ga
    xenonet net join gw.example.net KX7Q-49MZ-T2
    ```
 
-   The ticket in it works once, for ten minutes. The gateway keeps only its hash. At most five tickets wait at once. On a Mac, `xenonet net add-machine laptop [--window]` makes one from your own terminal; elsewhere, only the window makes them.
+   The ticket in it works once, for ten minutes. The gateway keeps only its hash. At most five tickets wait at once. Only the window makes them, since signing the machine in asks you: `xenonet net add-machine` in a terminal says so.
 
 2. On the new machine, install XenoNet and run that line in a terminal. Or open **Network settings** there, choose **Join one**, and paste it.
 
-3. The new machine makes its keys, proves it has the ticket, and pins the gateway's key from an answer only a gateway that knew the ticket could give. It shows in every console within seconds.
+3. The new machine makes its keys, proves it has the ticket, and pins the gateway's key from an answer only a gateway that knew the ticket could give. The machine that made the ticket signs it in, which asks you there (Touch ID on a Mac): once to add it, and twice more to pair the new machine's key into your identity, when that machine holds your identity's root key, which the machine you started the network on does. It shows in every console within seconds.
+
+A machine signed in by a window host that doesn't hold the root key joins without your identity: it takes part in the network, but nothing on it can act as you. Make tickets on the machine you started the network on.
 
 A ticket can come from any window host, not only the gateway. If it was made on another machine, that machine signs the new one in when it joins. While it's away, the join waits for it, says so, and keeps asking for the rest of the ticket's ten minutes.
 
-Adding a window host gives it a say in the network, so it needs the founder, or two window hosts. A window host made by anyone else waits for a second approval: the founder or another window host sees it in the Network panel under **Waiting for approval**, with **Approve**, or runs `xenonet net approve laptop --op add`. The join goes through once it's approved.
+Adding a window host gives it a say in the network, so it needs the founder, or two window hosts. A window host made by anyone else waits for a second approval: the founder or another window host sees it in the Network panel under **Waiting for approval**, with **Approve**, which asks you there. The join goes through once it's approved.
 
 The join route answers only a valid ticket. Twenty bad tickets in an hour from one address shut it to that address for an hour, and two hundred from anywhere shut it for everyone, which the doctor says. Five wrong tries at one ticket retire it.
 
@@ -89,24 +92,24 @@ The chime and the notification for anything that waits on you, on this machine o
 
 From a window host's console you can:
 
-- **Message any session, as you.** Choose **Message** beside it in the Network panel, or in a session's own panel. It arrives as "From you, at studio's console." A machine takes a message as you only from a window host's console, checked by that console's window key, and refuses one from any other machine.
+- **Message any session, as you.** Choose **Message** beside it in the Network panel, or in a session's own panel. It arrives as "From you, at studio's console." A message as you to another machine is signed by your key on this one, which on a Mac asks Touch ID, once for each machine it goes to. The machine it reaches checks the signature against its own copy of your identity, and refuses a message as you without one.
 - **Start a session on any machine**, as [Starting sessions](#starting-sessions) says.
 - **Change who may start and wake sessions on another machine**, as [Who may start and wake sessions](#who-may-start-and-wake-sessions) says.
 - **Answer a permission prompt** from a session XenoNet runs on any machine, as [Permission prompts](#permission-prompts) says.
 - **Add a machine**, as above.
 - **Remove a machine** that isn't a window host. Removing a window host, or moving the gateway, needs the founder or two window hosts.
 
-What changes one machine's own setup stays on it: connecting its sessions, installing its background service, its gateway's tunnel, and actors' tokens and scopes. So do creating, joining and leaving a network, which XenoNet refuses from under an agent.
+What changes one machine's own setup stays on it: connecting its sessions, installing its background service, its gateway's tunnel, and actors' grants and scopes. So do creating, joining and leaving a network, which XenoNet refuses from under an agent.
 
 ## Starting sessions
 
 You, a session or an actor can start a Claude Code, Codex or Grok Build session on any machine in the network, in a folder there, with a first prompt. It runs headless, through XenoNet's runner, and shows on the map like any other session, so you can message it and follow it.
 
 - **In the console:** **Start a session…** on a machine's row in the Network panel, on its card in the Machines view, or in its node's panel on the map. Pick the machine, the app, the permissions (your own settings, or plan, accept edits, auto or don't ask), a folder from that machine's projects or its home, and write the prompt. **Start** is yours, and works a moment after the box opens.
-- **In a terminal on a Mac:** `xenonet start --on neo-rex --in project:atlas "Run the ledger fixtures"`. Leave `--on` out for this machine. `--app` picks codex or grok, and `--mode` a permission mode. On Linux and Windows, XenoNet can't check who signed the program that calls from a terminal, so a start as you from there isn't strong enough for a machine to take, and `xenonet start` refuses at once: start from XenoNet's window instead.
+- **Not in a terminal.** A start as you is signed by your key, which asks you (Touch ID on a Mac), so it's made in XenoNet's window. `xenonet start` in a terminal refuses and says so.
 - **From a session or an actor:** the xenonet MCP server's `start_session` tool. An actor needs the spawn-sessions capability, and calls from its own machine (see [Actors](actors.md)). For a machine you set to take delegated work, `delegate` hands it a task instead, and the work runs on your standing delegation (see [Delegating work to another machine](delegation.md)).
 
-The machine that runs it decides. A start comes only from a window host: a machine without a window can be started on, but never starts anything. A start as you comes from your window host's console, checked by its window key, or from a terminal on a Mac, where XenoNet checks the calling program and who signed it. A start from a session or an actor needs that machine's start setting to be **the network** or **delegated** (see below). The folder is a project or folder from its map, by id or path, a folder one of its sessions works in, or `~`. A session never starts bypassing its permission checks, and Codex runs with its own `config.toml`'s sandbox and approvals. A machine starts 20 sessions an hour at most, and 10 for any one machine that asks, or any one session, actor or you on the machine itself. A start passes the same limits as a message there: too many from one sender, or the same prompt again within a minute, is refused. While XenoNet is paused there (`xenonet live pause`), it starts nothing, whoever asks.
+The machine that runs it decides, on its own copy of the roster and of your identity. A start as you carries your key's signature over that one start, made at a console. A start from a session or an actor needs that machine's start setting to be **the network** or **delegated** (see below); an actor's carries a token its own machine made for that start. A session XenoNet couldn't check never starts one. The folder is a project or folder from its map, by id or path, a folder one of its sessions works in, or `~`. A session never starts bypassing its permission checks, and Codex runs with its own `config.toml`'s sandbox and approvals. A machine starts 20 sessions an hour at most, and 10 for any one machine that asks, or any one session, actor or you on the machine itself. A start passes the same limits as a message there: too many from one sender, or the same prompt again within a minute, is refused. While XenoNet is paused there (`xenonet live pause`), it starts nothing, whoever asks.
 
 The first prompt says who asked: "[XenoNet] Started by you, at inix's console.", or "[XenoNet] inix says this was asked by the session «Fix the login form» (claude:…). It came from an agent, not from your user."
 
@@ -133,17 +136,19 @@ Two settings on each machine decide what the network may do to its sessions:
 | `start`: who may start sessions here | nobody (`off`), `you` from a window host's console, `network`: you, and the sessions and actors on window hosts, or `delegate`: the network, with what a session or actor starts here running on your standing delegation (see [Delegating work](delegation.md)) | `you` |
 | `wake`: who may wake a session here to take a message at once | your `consent` per session (`xenonet live allow`), or `network`: any sender, within the wake budget | `consent` |
 
-Set this machine's in the Network panel's **This machine** box, or with `xenonet net set --start network --wake network`. At its own keyboard you can always set either.
+Set this machine's in the Network panel's **This machine** box. Narrowing is done at once, here or with `xenonet net set --start you` in your own terminal. Widening (`network`, `delegate`, wake `network`) asks you, so it's done in the window.
 
 A session XenoNet starts, resumes or forks runs with the Claude Code sign-in you gave its runs on that machine (`xenonet runs sign-in`), and can read it from its environment. Under **the network** or **delegated**, the sessions and actors on window hosts can start such a session, or prompt one through a wake, and so can have it read the token. Widen these only on a machine whose token you'd let them see; the Allow card warns when a call may read the environment (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)).
 
-From a window host, change another machine's on its row in the Network panel, or with `xenonet net set --on neo-rex --start off` in a terminal on a Mac. On Linux and Windows, `--on` refuses at once, since XenoNet can't check who signed the program that calls from a terminal there: use the Network panel. Narrowing (to nobody, you or consent) is done at once. Widening to the network, or to delegation, takes the founder's console, or a second window host: from any other window host it waits ten minutes on that machine, shows on its row in every window host's Network panel, and another window host approves it there, or with `xenonet net set --on neo-rex --approve <id>`.
+From a window host, change another machine's on its row in the Network panel. Narrowing (to nobody, you or consent) is done at once, and works from your own terminal too: `xenonet net set --on neo-rex --start off`. Widening to the network, or to delegation, asks you, so it's done in the window, and takes the founder's console or a second window host: from any other window host it waits at the gateway, shows on its row in every window host's Network panel, and another window host approves it there, which asks you there too.
 
 ## Permission prompts
 
 A Claude Code session XenoNet starts, and a turn it resumes or forks, asks XenoNet, through the xenonet MCP server's `permission` tool, whenever its settings don't settle a tool call. XenoNet answers only for its own runs; any other session asks in its own app.
 
-The prompt shows in Needs you on that machine and on every window host: "neo-rex · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
+The prompt shows in Needs you on that machine and on every window host: "neo-rex · Fix the login form wants to run Bash", with what it would run, the machine and the run. It chimes where you are. **Allow** lets it run this once; **Deny** tells the session no. A call that may read the run's environment, where the sign-in token for XenoNet's runs is, says so on its row. Allow is yours, and works a moment after the row shows. It asks you once (Touch ID on a Mac), here or on any window host, and the machine the run is on checks it against its own copy of your identity. Deny asks nothing.
+
+Answers come only from XenoNet's window, never from a terminal or a session. An actor you gave `answer-prompts` may Deny, and Allow only the sessions and kinds of prompt you let it in the Actors panel, which asks you when you set or widen it. A run you delegated is answered by its machine within the delegation (see [Delegating work](delegation.md)). Nobody answering in ten minutes is a deny that says so; `XENONET_PERMISSION_HOLD_MS` sets another hold.
 
 ## Everything crosses through the gateway
 
@@ -173,10 +178,11 @@ Publishing and taking a service off are yours to do: XenoNet refuses them from u
 On another machine in the network, a program calls its own XenoNet:
 
 ```bash
-curl http://127.0.0.1:47840/api/svc/studio/files/api/v1/items
+curl -H "x-xenonet-credential: $(cat "<state>/runtime/api-47840.cred")" \
+  http://127.0.0.1:47840/api/svc/studio/files/api/v1/items
 ```
 
-`/api/svc/<machine>/<name>` stands for the service's address, and the rest of the path is passed on: here the service on studio gets `GET /api/v1/items`. Any program on that machine may call it, with GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS. A web page can't: a request with an `Origin` header is refused.
+`/api/svc/<machine>/<name>` stands for the service's address, and the rest of the path is passed on: here the service on studio gets `GET /api/v1/items`. Like every route of XenoNet's API, it takes XenoNet's API credential: XenoNet writes it at each start to `api-<port>.cred` in the `runtime` folder of its state folder (see [Where XenoNet keeps files](how-it-works.md#where-xenonet-keeps-files)), readable only by your account, and a program sends it as `x-xenonet-credential`. Without it the answer is 401. Any program on that machine that can read the file may call it, with GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS. A web page can't: a request with an `Origin` header is refused.
 
 The service gets:
 
@@ -221,19 +227,15 @@ At the gateway, what waits for a machine that's away is kept the same way. When 
 
 ## Moving the gateway
 
-On the machine that takes over, give it an address first (a LAN address, or a tunnel), then:
+On the machine that takes over, give it an address first (a LAN address, or a tunnel), then choose **Make this the network's gateway** in its Network panel. Moving the gateway asks you, so it's done in the window; `xenonet net gateway take` in a terminal says so.
 
-```bash
-xenonet net gateway take --lan 192.168.1.7:48850
-```
-
-On the founder's machine that's done. On any other, it waits for the founder or a second window host to approve it, in the Network panel or with `xenonet net approve <id>`. The old gateway tells the machines linked to it, and they follow. A machine that was away during the move, or one whose old gateway is gone for good, follows by hand:
+On the founder's machine that's done. On any other, it waits for the founder or a second window host to approve it in the Network panel, which asks you there. The old gateway tells the machines linked to it, and they follow. A machine that was away during the move, or one whose old gateway is gone for good, follows by hand:
 
 ```bash
 xenonet net gateway set 192.168.1.7:48850
 ```
 
-It follows only a gateway that proves the key the roster gives it. Actors' tokens and scopes stay on the machine that made them, and don't move with the gateway yet.
+It follows only a gateway that proves the key the roster gives it. Taking the gateway asks you, so it's done in the window: **Make this the network's gateway** in the Network panel. Actors' grants and scopes stay on the machine that made them, and don't move with the gateway yet.
 
 ## Removing a machine
 

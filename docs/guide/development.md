@@ -48,7 +48,7 @@ For machines with many cores, `npm test -- --test-concurrency=4` keeps the unit 
 
 ## The page's Content-Security-Policy
 
-The page runs under a Content-Security-Policy, set in `crates/xenonet-service/src/static_files.rs` for the service, and in `electron/lib/static.js` for XenoNet Dev's own frontend server and `vite.config.js`. Scripts load only from XenoNet's own server, with nothing inline and no `eval`, and the page connects only to that server. An inline script, an `eval` or a script from elsewhere won't run, so don't add one.
+The page runs under a Content-Security-Policy, set in `crates/xenonet-http/src/static_files.rs` for the service, and in `electron/lib/static.js` for XenoNet Dev's own frontend server and `vite.config.js`. Scripts load only from XenoNet's own server, with nothing inline and no `eval`, and the page connects only to that server. An inline script, an `eval` or a script from elsewhere won't run, so don't add one.
 
 ## The VM lab
 
@@ -68,7 +68,7 @@ Claude Code and Codex can run on one computer while you develop XenoNet on anoth
 ssh -N -R 127.0.0.1:47840:127.0.0.1:47840 -L 127.0.0.1:47842:127.0.0.1:47842 you@devbox
 ```
 
-- **The page against real sessions.** On the other computer, `XENONET_UPSTREAM=http://127.0.0.1:47840 npm run dev` serves the page from the checkout and passes its reads to the installed XenoNet (`crates/xenonet-service/src/upstream.rs`). Only reads go through: anything that would change something there is refused, so a page in development can look but never act. Add `--demo` to keep the dev server's own service on made-up data. `XENONET_UPSTREAM` takes only an address on that computer, a forwarded port, and the installed service ignores it.
+- **The page against real sessions.** On the other computer, `XENONET_UPSTREAM=http://127.0.0.1:47840 npm run dev` serves the page from the checkout and passes its reads to the installed XenoNet (`crates/xenonet-http/src/upstream.rs`). Only reads go through: anything that would change something there is refused, so a page in development can look but never act. Add `--demo` to keep the dev server's own service on made-up data. `XENONET_UPSTREAM` takes only an address on that computer, a forwarded port, and the installed service ignores it.
 - **Sessions talking to XenoNet Dev.** On the sessions' computer, `xenonet connect --here --port 47842` adds XenoNet Dev's MCP server and hooks to Claude Code's and Codex's settings beside the installed XenoNet's, through that computer's own launcher. Asking XenoNet Dev itself would write the other computer's settings. While the forward is down, its hooks do nothing. `xenonet disconnect --port 47842` takes them out again.
 
 What acts on the sessions' computer (opening a session in its app, handoffs, terminals in its folders, its credential store) stays with the installed XenoNet there.
@@ -216,6 +216,23 @@ Development instances each have their own settings and port, so they run beside 
 
 Agents and `xenonet console` use `demo` unless told otherwise, so nothing private ends up in their screenshots. Opened from the Dock or with `npm run app`, XenoNet Dev is `dev`. `XENONET_INSTANCE` picks another instance. `XENONET_SHOW=inactive` or `XENONET_SHOW=hidden` starts the window the way an agent does.
 
+### Calling the local API
+
+Every `/api/` route but `/api/health`, the Spotify sign-in's return and Claude Code's HTTP hooks takes a credential, and answers 401 without one. Each start of a service writes a new one to `api-<port>.cred` in the runtime folder, readable only by your account: `runtime/` in XenoNet's state folder (`~/Library/Application Support/XenoNet/runtime/` on a Mac), or `XENONET_RUNTIME_DIR`. Every instance writes there, by its own port. Send it as `x-xenonet-credential`:
+
+```bash
+cred=$(cat ~/Library/Application\ Support/XenoNet/runtime/api-47841.cred)
+curl -s -H "x-xenonet-credential: $cred" http://127.0.0.1:47841/api/graph
+```
+
+The `xenonet` command, the MCP servers, the hooks and the e2e harness (`apiCredential` in `electron/lib/components/runtime.js`) read it themselves. The page uses the window's key instead, as a cookie Desktop sets. What each route takes is its row in the rules table (`crates/xenonet-http/src/routes/rules.rs`): the file alone reaches the map and the window's settings, while transcripts, search and the engine's state also need the window, your own terminal, or a session named in `x-xenonet-agent` whose process passes the check. Under an agent, those reads are refused, and so is anything that's yours. [Authorization](../design/authorization.md) has the callers and the table.
+
+### Keys and your identity in development
+
+The installed XenoNet and the `dev` instance use the machine's own keys: the Secure Enclave and Touch ID on a Mac, Windows Hello, polkit or a passphrase elsewhere. Every other instance (`demo`, `test`, `film`, `showcase`, and any `XENONET_INSTANCE` of your own) gets fake keys (`xenonet_keys::Fake`): key files in its own state folder and a presence check that answers yes, so nothing ever prompts or touches the hardware. Use those to try acts that ask you. In `dev`, an act that asks you shows the real prompt, so leave it to the person.
+
+The person on a machine lives in `identity/` in the instance's state folder: their chain (`person.json`), the other people's chains (`persons.json`), the root key (`root.json`), the device and machine keys (`device-sign.key`, `machine-sign.key`), the presence blocks taken (`presence-seen.json`) and the token roots' certificates (`token-roots.json`). XenoNet Dev's `dev` instance has its own, apart from the installed XenoNet's, so its identity and the tokens it mints are its own. There's no upgrade path between builds: when a change to the chains or tokens lands, delete a test instance's state folder and set it up again.
+
 ### Launching and quitting
 
 If a copy of XenoNet Dev is starting or quitting, `launch` waits for it.
@@ -255,9 +272,9 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 
 ### `crates/` and `adapters/`
 
-`crates/` and `adapters/` are the Rust core, one cargo workspace that builds the `xenonet` binary. [Rust core](../design/rust-core.md) lists every crate, its job and what it may depend on. In short: the model and formats (`xenonet-text`, `xenonet-model`, `xenonet-schema`), the machine (`xenonet-os`, `xenonet-blocks`), the registry (`xenonet-adapter`), the domains (`xenonet-sources`, `xenonet-state`, `xenonet-engine`, `xenonet-actors`, `xenonet-net`, `xenonet-hosts`, `xenonet-assistant`, `xenonet-components`, `xenonet-integrations`, `xenonet-doctor`), the engine's runtime (`xenonet-runtime`), the demo's world (`xenonet-demo`), the local protocol (`xenonet-api`), and the surfaces (`xenonet-service`, `xenonet-mcp`, `xenonet-cli`, `xenonet-console`). The composition root is `xenonet-cli`'s `serve()` with `crates/xenonet-service/src/compose/`.
+`crates/` and `adapters/` are the Rust core, one cargo workspace that builds the `xenonet` binary. [Rust core](../design/rust-core.md) lists every crate, its job and what it may depend on. In short: the model and formats (`xenonet-text`, `xenonet-model`, `xenonet-schema`), the machine (`xenonet-os`, `xenonet-blocks`), the registry (`xenonet-adapter`), the domains (`xenonet-sources`, `xenonet-state`, `xenonet-engine`, `xenonet-actors`, `xenonet-net`, `xenonet-hosts`, `xenonet-assistant`, `xenonet-components`, `xenonet-integrations`, `xenonet-doctor`), the engine's runtime (`xenonet-runtime`), the demo's world (`xenonet-demo`), the local protocol (`xenonet-api`), the surfaces (`xenonet-http`, the local HTTP API on `xenonet-api` alone; `xenonet-mcp`; `xenonet-console`), and the composition root (`xenonet-service` and `xenonet-cli`, whose `serve()` composes with `crates/xenonet-service/src/compose/`). `node scripts/rust-layers.mjs --report` lists each crate's class and dependency count.
 
-`adapters/` holds one crate per platform: Claude Code, Codex, Grok Build and OpenCode; the readers of Cursor's, Gemini CLI's and Copilot CLI's records; and the actor products Hermes Agent, Grok Bot and Muse. Each implements `xenonet_adapter::Platform`: how its processes are told apart, how live delivery reaches its sessions, how it's connected, its readers, its doctor checks, and for an actor product its observer (`xenonet_adapter::observe`). `adapters/all` (`xenonet-platforms`) is every adapter, which the binary installs at start. The core asks `xenonet_adapter::platforms()` and never names a platform itself: `npm run lint:rust` fails when a core crate depends on a surface or an adapter crate or holds a registry id literal (`scripts/rust-layers.mjs`; `node scripts/rust-layers.mjs --report` lists every breach without failing).
+`adapters/` holds one crate per platform: Claude Code, Codex, Grok Build and OpenCode; the readers of Cursor's, Gemini CLI's and Copilot CLI's records; and the actor products Hermes Agent, Grok Bot and Muse. Each implements `xenonet_adapter::Platform`: how its processes are told apart, how live delivery reaches its sessions, how it's connected, its readers, its doctor checks, and for an actor product its observer (`xenonet_adapter::observe`). `adapters/all` (`xenonet-platforms`) is every adapter, which the binary installs at start. The core asks `xenonet_adapter::platforms()` and never names a platform itself: `npm run lint:rust` fails when a core crate depends on a surface or an adapter crate or holds a registry id literal, or a crate leaves its class's limit on internal dependencies (`scripts/rust-layers.mjs`; `node scripts/rust-layers.mjs --report` lists every breach and each crate's count without failing). [Rust core](../design/rust-core.md#the-layering) has the classes.
 
 Its contract with the outside is held by golden files, recorded from the JS implementation XenoNet had before the Rust and replayed by the Rust tests:
 

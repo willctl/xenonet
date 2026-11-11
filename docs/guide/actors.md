@@ -128,7 +128,7 @@ What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's
 To set it up:
 
 1. In the Actors panel, under **actor gateway**, choose **Set up…** and pick a tunnel. The ones this computer has come first. XenoNet starts the tunnel, then checks that the address reaches the gateway from the internet side, and shows **Online** once it does.
-2. On the actor, choose **Connect…**. XenoNet makes a gateway token, which works only at the gateway. For Muse, which XenoNet only observes until then, this also makes it an actor that reports itself.
+2. On the actor, choose **Connect…**. XenoNet makes a gateway token, which works only at the gateway, and asks you first (Touch ID on a Mac). For Muse, which XenoNet only observes until then, this also makes it an actor that reports itself.
    A session can start this step for you, in Claude Code or Codex with the `ask_gateway_token` tool, or from a terminal with `xenonet gateway token <slug>`. That makes no token and returns none. It leaves a card in XenoNet's window, in the attention strip and the Actors panel, saying whose app it's for and who asked. **Allow** makes the token and opens the steps below, with the token masked. **Deny** drops the ask. Until you allow, the actor's old token keeps working, and an ask lapses after ten minutes. The session never sees the token, so don't paste one to it or into a chat.
 3. Follow the numbered steps XenoNet shows, each with its own Copy button. The token stays masked until you choose **Show**, and for ten seconds after, and **Copy token** copies it without showing it. The last step waits for the app's first call and ticks when it comes:
    - **Grok Bot**: copy the message into a Grok Bot chat. It asks Grok Bot to add XenoNet as an MCP server by URL, and to ask you for the token with its secure secret card. When the card shows, choose **Copy token**, paste the token into the card, not the chat, and save it. Grok Bot keeps it as a secret its model never sees.
@@ -236,7 +236,7 @@ The Hermes figure goes to the Hermes actor. An OpenCode session isn't an actor, 
 
 Your own programs register with the `xenonet` command, and wait for your Allow in XenoNet's window. Every new actor waits for it, even one you register from your own terminal.
 
-The request shows as a card in the strip at the top, in the Needs you panel and in the Actors panel, with what it asks for and which program asked. Allow makes its token work. Deny, or ten minutes without an answer, revokes the token. `Add an actor` in the Actors panel does it all in one step.
+The request shows as a card in the strip at the top, in the Needs you panel and in the Actors panel, with what it asks for and which program asked. Allow asks you once (Touch ID on a Mac) and makes its token work. Deny, or ten minutes without an answer, revokes the token. `Add an actor` in the Actors panel does it all in one step.
 
 ```console
 $ xenonet actor register --name Wren --capabilities run-commands,edit-repos,message-agents --token-file ~/.config/wren/xenonet.token
@@ -257,14 +257,20 @@ With `message-agents`, an actor can write to sessions and to other actors of you
 
 With `spawn-sessions`, an actor on this machine can start a Claude Code, Codex or Grok Build session, here or on another machine of your network, with the `start_session` tool or `POST /api/start` under its token. The machine it starts on must let the network start sessions there, and the new session's first prompt says an actor asked (see [Starting sessions](network.md#starting-sessions)). It's never offered through the actor gateway, so an actor outside this machine can't start one.
 
+With `answer-prompts`, an actor can answer the permission prompts of the sessions XenoNet runs, with the `/api/runs/answer` route under its token. On its own it can only Deny. To let it Allow, it needs an allow scope on this machine: the sessions (all, or some), the kinds of prompt (reading, editing, commands, the web, other tools) and until when. Setting or widening one asks you, so only XenoNet's window can (`PUT /api/actors/<slug>/allows`), and the window has no control for it yet; ending one (`DELETE`) works from your own terminal. An actor never allows a prompt from a run XenoNet couldn't check, and from another machine it can only Deny. See [Permission prompts](network.md#permission-prompts).
+
 A program that speaks MCP gets the same calls as tools from the `xenonet` MCP server, with `XENONET_ACTOR_TOKEN_FILE` in its environment. Its own tools are `actor_heartbeat`, `actor_events` and `actor_targets`. The [actor interface](../design/actors/interface.md) has the whole API.
 
 ## Tokens
 
-A token is `xenonet_actor_` followed by 64 hex digits. XenoNet shows it once, and keeps only a hash of it. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
+An actor's token is its grant: what it may do in XenoNet (read, message, claim, start sessions, answer prompts, as the capabilities you allowed say), on which machine and in which network, and until when, signed by this machine. It's `xenonet_actor_` followed by a long run of letters, digits, `-` and `_`. XenoNet shows it once, and keeps only an id to revoke it by, never the token. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
 
 The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself. It warns only about tokens XenoNet issued, so a made-up one in a test fixture doesn't count.
 
 On macOS, a token is also held to processes. It never works from under Claude Code or Codex, or from an actor app's own process. A product's token works only from under that product.
 
+Giving an actor a token, or more than it had (allowing its registration, adding it, `New token`, a gateway token, a wider scope, letting it allow prompts), asks you first: Touch ID on a Mac, Windows Hello or polkit elsewhere. Taking anything away asks nothing.
+
 `New token` in the Actors panel replaces a token. The panel says whether each token works, when it expires, and when it was last used. A token unused for 30 days stops working, and the doctor says so.
+
+A token made by XenoNet Dev, or by the network's other machines, doesn't work on this XenoNet: each machine's tokens are its own.

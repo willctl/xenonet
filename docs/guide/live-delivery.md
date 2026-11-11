@@ -247,25 +247,24 @@ Everything `to` took before still works the same: a session's id
 
 ## What actors may see: scopes
 
-An actor sees and reaches no session until you grant its token a scope:
+An actor sees and reaches no session until you give its grant a scope of sessions. Giving one, or a wider one, asks you (Touch ID on a Mac), so only XenoNet's window can, through `POST /api/delivery/grant`. The window has no control for it yet, and `xenonet live grant` in a terminal refuses and says so. Taking a scope away works from your own terminal:
 
 ```
-xenonet live grant hermes project:atlas identity:adal --hours 72
 xenonet live revoke hermes
 ```
 
-- A grant is a selector. The actor's `peers`, its `send` to an id or words,
+- A scope is a selector, such as `project:atlas identity:adal`, kept beside the actor's grant on this machine. The actor's `peers`, its `send` to an id or words,
   and its broadcasts (`all`, `repo`, a selector) only reach what the grant
   covers. So do the counts `whoami` gives it, and the sessions `who_has`
   and a claim's "also held by" name.
-- A grant expires (30 days by default). `revoke` takes effect at once.
-- A grant for one identity never shows another identity's sessions, so
+- A scope expires (30 days by default). `revoke` takes effect at once.
+- A scope for one identity never shows another identity's sessions, so
   separate accounts stay apart.
-- An actor sees another actor only if its grant names it with `by:<slug>`.
+- An actor sees another actor only if its scope names it with `by:<slug>`.
   That covers an actor of that name on any machine in your
   [network](network.md), so for an actor on another machine, name the
   machine too: `by:muse machine:laptop`.
-- `by:` matches what actors report they work on, so a grant can't use the
+- `by:` matches what actors report they work on, so a scope can't use the
   actor's own slug: an actor's reports never widen its own scope.
 
 You and the sessions on this machine see everything, as before.

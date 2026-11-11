@@ -4,14 +4,13 @@ When you tell an assistant on one machine "do this on the other one", the work s
 
 ## Setting it, once
 
-On the machine that will do the work, set its **start** setting to **Delegated**:
+On the machine that will do the work, set its **start** setting to **Delegated**: in the console, open the Network panel (the palette's Network settings), find the machine's row, and press **Delegated** under **Start sessions**. On this machine's own settings the buttons are in the same place.
 
-- In the console, open the Network panel (the palette's Network settings), find the machine's row, and press **Delegated** under **Start sessions**. On this machine's own settings the buttons are in the same place.
-- Or in a terminal: `xenonet net set --on neo-rex --start delegate` for another machine (on a Mac; on Linux and Windows use the window), or `xenonet net set --start delegate` for this one.
+This widens what the network may do there, so it asks you (Touch ID on a Mac, Windows Hello or polkit elsewhere), and it's done in XenoNet's window: `xenonet net set --start delegate` in a terminal refuses and says so. Putting another machine on delegate takes the founder, or waits for a second window host to approve it, the same as letting the network start sessions there. Stepping back to **The network**, **You** or **Nobody** is done at once, from any window host or your own terminal.
 
-The buttons are yours alone: an agent can't press them, and XenoNet's control channel refuses to outside the demo. Putting another machine on delegate takes the founder, or waits for a second window host to approve it, the same as letting the network start sessions there. Stepping back to **The network**, **You** or **Nobody** is done at once from any window host.
+The first time, it also issues your **delegation**: an entry in your identity, signed by your key, that lets your machines start sessions and answer their routine prompts for work you started on any of them. It names all your machines' keys, those you add later too, and lasts a year. Issuing it asks you twice: once to approve it, once to sign it. A machine needs a key of yours to be named in it, so a machine that joined without your identity can't take delegated work, and XenoNet says so when you press it.
 
-The machine keeps who set it and when, in its own `network.json`, and the console shows both under the machine's settings: "Delegated by inix, Nov 1."
+The machine that does the work checks both: its own start setting, and a delegation of yours that names both its key and the key of the machine the task came from. The console shows who set it and when under the machine's settings: "Delegated by inix, Nov 1."
 
 ## What an assistant does
 
@@ -31,11 +30,11 @@ The first prompt of a delegated session says whose delegation it runs on, which 
 
 > [XenoNet] inix says this was asked by the session «Fix the login form» (claude:…). Your user delegated it: they put this machine on standing delegation at inix's console on 2026-11-01, which XenoNet here checked; the asker can't claim it.
 
-The machine writes that line from its own settings. What the asker sent is the task, after the line, and can't change it. Before, an agent's start said "it came from an agent, not from your user", and a careful session on the other machine stopped to ask whether it could go ahead with anything that mattered. Under a delegation it doesn't have to ask about what the delegation covers.
+The machine writes that line from its own settings and its copy of your identity. What the asker sent is the task, after the line, and can't change it. A start from an agent without a delegation says "it came from an agent, not from your user", so a careful session stops to ask before anything that matters; under a delegation it doesn't have to ask about what the delegation covers.
 
 ## What it covers
 
-A delegated session is a Claude Code run, and its permission prompts come to XenoNet, as any run's do. XenoNet answers them itself when they are within the delegation, and shows the rest in **Needs you**, on every window host, where you allow or deny them from any of your machines. An assistant can't answer for you.
+A delegated session is a Claude Code run, and its permission prompts come to XenoNet, as any run's do. XenoNet answers them itself when they are within the delegation, and shows the rest in **Needs you**, on every window host, where you allow or deny them from any of your machines. An Allow there asks you once (Touch ID on a Mac); a Deny asks nothing. An assistant can't answer for you.
 
 Covered, with no question:
 
