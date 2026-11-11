@@ -407,7 +407,16 @@ async fn adding_a_machine_is_the_windows_and_its_join_pairs_the_device() {
     // person asks them.
     let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), false).await;
     assert_eq!((s, v["code"].clone()), (403, json!("window")), "{v}");
-    let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
+    // The port was free when picked, but the hosts made since bind ports of
+    // their own, and a parallel test may take it first: pick again then.
+    let mut port = port;
+    let (s, v) = loop {
+        let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
+        if s != 400 || !v["error"].as_str().is_some_and(|e| e.contains("already in use")) {
+            break (s, v);
+        }
+        [port] = common::free_ports();
+    };
     assert_eq!(s, 200, "{v}");
     assert_eq!((v["person"]["owner"].clone(), v["person"]["acts"].clone()), (json!(true), json!(true)), "{v}");
     // A ticket only from the window.
