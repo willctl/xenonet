@@ -274,7 +274,7 @@ elsewhere; they allow nothing in XenoNet but reporting it.
 
 **Scopes** follow the goals' hosts, identities and sessions. Hosts are in
 the token: the machine that minted it and the network it names. The rest
-is a row in `grant_scopes` in `engine.sqlite`, keyed by the token's first
+is a row in `grant_scopes` in the store (`xenonet.sqlite`), keyed by the token's first
 revocation id:
 
 | Column | What it scopes | Used by |
@@ -325,7 +325,7 @@ ended as data that narrows nothing. A cursor can't be made up or changed,
 it ends with the grant, and one from before the grant's scope changed is
 refused.
 
-**Revocation** is one `revoked` table in `engine.sqlite`, by revocation
+**Revocation** is one `revoked` table in the store, by revocation
 id, read through `Ground::revoked`. Revoking a token's first id takes back
 it and everything narrowed from it. Revocations are kept 400 days, past a
 root's year. A token unused for 30 days is revoked. Locally a token must
