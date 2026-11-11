@@ -20,6 +20,14 @@ pub struct Checkout {
     pub vcs: &'static str,
     /// The branch it's on, or a detached head's first 12 characters.
     pub branch: Option<String>,
+    /// Whether HEAD is on no branch, so `branch` is a commit's first
+    /// characters.
+    pub detached: bool,
+    /// The commit HEAD is at, None before a branch's first commit.
+    pub head: Option<String>,
+    /// The folder its refs and objects are in, the same for every
+    /// worktree of one repo (a linked worktree's main `.git`).
+    pub common: PathBuf,
     /// origin's URL, as its config writes it (url, never pushurl).
     pub origin: Option<String>,
     /// origin's URL normalized (`xenonet_model::ids::normalize_remote`).

@@ -22,6 +22,7 @@ pub mod delivery;
 pub mod engine;
 pub mod feed;
 pub mod net;
+pub mod projects;
 pub mod schema;
 pub mod sql;
 pub mod state;
@@ -129,6 +130,10 @@ pub struct Db {
     conn: Mutex<Turn>,
     free: Condvar,
     path: Option<PathBuf>,
+    // Where the random ids the store mints come from, and who this
+    // machine's projects are owned by (`projects`).
+    ids: std::sync::RwLock<std::sync::Arc<xenonet_model::ids::Ids>>,
+    owner: std::sync::RwLock<Option<projects::OwnerFn>>,
 }
 
 struct Turn {
@@ -191,7 +196,13 @@ impl Db {
         }
         // The statements the domains run often stay prepared.
         conn.set_prepared_statement_cache_capacity(256);
-        Ok(Db { conn: Mutex::new(Turn { conn, holder: None }), free: Condvar::new(), path })
+        Ok(Db {
+            conn: Mutex::new(Turn { conn, holder: None }),
+            free: Condvar::new(),
+            path,
+            ids: std::sync::RwLock::new(std::sync::Arc::new(xenonet_model::ids::Ids::random())),
+            owner: std::sync::RwLock::new(None),
+        })
     }
 
     /// Where the store is; None for one in memory.

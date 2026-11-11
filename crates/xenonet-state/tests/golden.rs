@@ -730,6 +730,8 @@ async fn map(w: &World, c: &mut Check) {
     cfg.git = Git::new(FixtureGit { home: w.dir("home") });
     let vendor = vendor();
     let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
+    // The ids it mints, the same every run.
+    db.use_ids(xenonet_model::ids::Ids::seeded("golden"));
     let tick = clock.clone();
     let store = Saved::new(Arc::new(xenonet_runtime::saved::Saved::with_clock(db, Arc::new(move || tick.now()))));
     let remembered = xenonet_text::json::parse(&std::fs::read_to_string(Path::new(&cfg.state_dir).join("state.json")).expect("the fixture's state")).expect("JSON");

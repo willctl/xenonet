@@ -272,13 +272,6 @@ impl Repo {
         self.remotes().into_iter().find(|r| r.name == "origin").map(|r| r.url)
     }
 
-    /// origin's URL, else the first remote's, as the network names a repo
-    /// (xenonet-engine's first_remote).
-    pub fn remote(&self) -> Option<String> {
-        let all = self.remotes();
-        all.iter().find(|r| r.name == "origin").or(all.first()).map(|r| r.url.clone())
-    }
-
     /// Its repo key: origin's URL normalized, which a project's id is made
     /// from. None with no origin.
     pub fn key(&self) -> Option<String> {
@@ -316,10 +309,14 @@ impl Git {
             Kind::Submodule { superproject } => (None, Some(superproject.clone())),
         };
         let origin = repo.origin();
+        let head = repo.head();
         Checkout {
             top: repo.top.clone(),
             vcs: ".git",
-            branch: repo.head().map(|h| h.label()),
+            branch: head.as_ref().map(Head::label),
+            detached: matches!(head, Some(Head::Detached { .. })),
+            head: head.as_ref().and_then(|h| h.commit().map(str::to_string)),
+            common: repo.common_dir.clone(),
             key: origin.as_deref().and_then(repo_key),
             origin,
             worktree_of,

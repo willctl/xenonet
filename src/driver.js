@@ -71,6 +71,9 @@ export function createDriver(app) {
     } else if (PLACES.has(n.kind)) {
       out.active = !!n.active;
       if (n.repo?.dirty) out.uncommitted = n.repo.dirty;
+      // This machine's checkout of a project: the project it's in, or for a
+      // candidate the one it would join once you confirm it.
+      if (n.checkout && !n.host) out.checkout = { id: n.checkout, project: n.projectId ?? null, confirmed: n.confirmed !== false };
     } else if (n.kind === "host") out.state = n.state;
     // From another machine (hosts.js): which, and whether it's live; one in
     // your network says so, and for a session whether it waits on you.
@@ -79,6 +82,15 @@ export function createDriver(app) {
     // they have no host, which is what marks another machine's.
     else if (n.kind !== "core" && n.kind !== "host" && hereId()) out.machine = { id: hereId(), here: true };
     return out;
+  }
+
+  // A candidate checkout's Confirm button in the inspector, where it is:
+  // yours alone to press (data-yours).
+  function withConfirm(b) {
+    if (!b?.checkout || b.checkout.confirmed) return b;
+    const r = document.querySelector("[data-confirm-checkout]")?.getBoundingClientRect();
+    b.checkout.at = { confirm: r?.width ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } : null };
+    return b;
   }
 
   function alertBrief(it) {
@@ -106,7 +118,7 @@ export function createDriver(app) {
     const count = (kinds) => graph?.nodes.filter((n) => kinds.includes(n.kind)).length ?? 0;
     return {
       version: VERSION,
-      selection: selected ? brief(nodeOf(selected)) : null,
+      selection: selected ? withConfirm(brief(nodeOf(selected))) : null,
       gathered: scene.gathering(),
       identities: { filter: app.identities?.selected ?? [], masked: !!app.identities?.masked },
       // The toggles under Filters: each app's sessions, archived ones, and

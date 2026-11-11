@@ -1,9 +1,18 @@
 //! core/graph.js: the hierarchy the page renders:
 //!   core (the projects folder) → `[groups]` → projects →
 //!   `[Codex native project]` → sessions → spawned or forked sessions
-//! plus zones for sessions whose folder is outside the projects folder, the
-//! shared context's wiki as its own constellation, and the shared systems
+//! plus zones for sessions whose folder is outside every root, the shared
+//! context's wiki as its own constellation, and the shared systems
 //! sessions reach through MCP. A group is a project node with `group` set.
+//! The roots are the projects folder and the folders the person named
+//! beside it (`roots`); the core is named for the projects folder.
+//!
+//! A project node is one checkout on this machine: `project:<chk_…>`, by
+//! the checkout the store keeps for its folder (`checkout`), with the
+//! project it's in or would join (`projectId`) and whether the person
+//! confirmed it there (`confirmed`). Its `parent` and `satelliteOf` name
+//! checkouts the same way. Without a checkout (no store) it's named by its
+//! path key.
 //!
 //! Which project orbits which (projects.js's projectRelations) comes in
 //! as `parent_of`, worked out by whoever has the projects.
@@ -150,6 +159,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
 
     let mut g = Graph { nodes: Vec::new(), at: HashMap::new(), links: Vec::new(), parent_of_node: HashMap::new() };
     let root_key = path_key(&projects_dir);
+    let roots: Vec<String> = root_key.iter().cloned().chain(items(field("roots")).iter().filter_map(|r| key_of(Some(r)))).collect();
     // Named for the projects folder in use: ~/Projects, ~/code/work, or the
     // whole path of one outside the home folder.
     let root_name = match &home_dir {
@@ -159,27 +169,34 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
     g.set("core", obj(json!({ "id": "core", "kind": "core", "name": root_name, "path": projects_dir, "home": home_dir })));
 
     let pkey = |p: &Value| get(p, "key").map_or_else(|| "undefined".into(), display);
+    // What names each project's node: its checkout, else its key.
+    let named: HashMap<String, String> = projects.iter().map(|p| (pkey(p), get(p, "checkout").filter(|c| c.is_string()).map_or_else(|| pkey(p), display))).collect();
+    let name_of = |k: &str| named.get(k).cloned().unwrap_or_else(|| k.to_string());
+    let pid = |k: &str| format!("project:{}", name_of(k));
     for p in projects {
         let k = pkey(p);
-        let id = format!("project:{k}");
+        let id = pid(&k);
         let mut n = Map::new();
         n.insert("id".into(), Value::String(id.clone()));
         n.insert("kind".into(), Value::String("project".into()));
         for (key, v) in p.as_object().into_iter().flatten() {
             n.insert(key.clone(), v.clone());
         }
+        if let Some(parent) = get(p, "parent").filter(|v| truthy(Some(v))).map(display) {
+            n.insert("parent".into(), Value::String(name_of(&parent)));
+        }
         n.insert("group".into(), Value::Bool(str_of(p, "role") == Some("group")));
-        n.insert("satelliteOf".into(), parent_of.get(&k).map_or(Value::Null, |s| Value::String(s.clone())));
+        n.insert("satelliteOf".into(), parent_of.get(&k).map_or(Value::Null, |s| Value::String(name_of(s))));
         n.insert("repo".into(), repo_of(&k).unwrap_or(Value::Null));
         g.set(&id, n);
     }
     for p in projects {
         let k = pkey(p);
-        let id = format!("project:{k}");
+        let id = pid(&k);
         if let Some(sat) = parent_of.get(&k) {
-            g.link(&format!("project:{sat}"), &id, "satellite");
-        } else if let Some(parent) = get(p, "parent").filter(|v| truthy(Some(v))).map(display).filter(|pp| g.has(&format!("project:{pp}"))) {
-            g.link(&format!("project:{parent}"), &id, "nested");
+            g.link(&pid(sat), &id, "satellite");
+        } else if let Some(parent) = get(p, "parent").filter(|v| truthy(Some(v))).map(display).filter(|pp| g.has(&pid(pp))) {
+            g.link(&pid(&parent), &id, "nested");
         } else {
             g.link("core", &id, "contains");
         }
@@ -214,7 +231,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
         let app = get(np, "app").cloned().unwrap_or(Value::Null);
         let id = format!("native:{}:{raw}", display(&app));
         let home = items(get(np, "roots")).iter().find_map(|r| key_of(Some(r)).and_then(|k| project_for_key(&k)));
-        let home_id = home.map(|h| format!("project:{}", pkey(h)));
+        let home_id = home.map(|h| pid(&pkey(h)));
         g.set(&id, obj(json!({ "id": id, "kind": "native", "app": app, "name": get(np, "name").cloned().unwrap_or(Value::Null), "roots": get(np, "roots").cloned().unwrap_or(Value::Null) })));
         g.link(home_id.as_deref().unwrap_or("core"), &id, "native");
         native_ids.insert(raw);
@@ -257,12 +274,12 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
             return format!("native:codex:{np}");
         }
         let key = key_of(get(s, "cwd"));
-        let p = key.as_deref().filter(|k| root_key.as_deref().is_some_and(|r| is_under(k, r))).and_then(project_for_key);
+        let p = key.as_deref().filter(|k| roots.iter().any(|r| is_under(k, r))).and_then(project_for_key);
         if let Some(p) = p {
-            return format!("project:{}", pkey(p));
+            return pid(&pkey(p));
         }
         if let Some(by) = get(s, "origin").filter(|v| truthy(Some(v))).and_then(|o| remote_of(Some(o))).and_then(|r| by_remote.get(&r).copied()) {
-            return format!("project:{}", pkey(by));
+            return pid(&pkey(by));
         }
         zone_for(g, key.as_deref(), get(s, "cwd"))
     };
@@ -363,7 +380,7 @@ pub fn build_graph(input: &Value, parent_of: &HashMap<String, String>) -> Value 
                 }
             }
             for key in items(get(p, "projects")) {
-                relations.push(json!({ "a": id, "b": format!("project:{}", display(key)), "kind": "mentions" }));
+                relations.push(json!({ "a": id, "b": pid(&display(key)), "kind": "mentions" }));
             }
         }
     }

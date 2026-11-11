@@ -98,11 +98,11 @@ fn keys_a_repo_by_its_origin_as_project_ids_are_made() {
     let app = t.0.join("app");
     repo_with_commit(&app);
     let r = open(&app).unwrap();
-    assert_eq!((r.origin(), r.remote(), r.key()), (None, None, None));
+    assert_eq!((r.origin(), r.key()), (None, None));
     git_in(&app, &["remote", "add", "upstream", "https://github.com/other/app.git"]);
-    assert_eq!((r.origin(), r.remote().as_deref(), r.key()), (None, Some("https://github.com/other/app.git"), None));
+    assert_eq!((r.origin(), r.key()), (None, None), "only origin names the repo");
     git_in(&app, &["remote", "add", "origin", "git@github.com:Willctl/XenoNet.git"]);
-    assert_eq!(r.remote().as_deref(), Some("git@github.com:Willctl/XenoNet.git"), "origin before the first");
+    assert_eq!(r.remotes().len(), 2);
     assert_eq!(r.key().as_deref(), Some("github.com/willctl/xenonet"));
     assert_eq!(r.key(), Some(xenonet_model::ids::normalize_remote("git@github.com:Willctl/XenoNet.git")), "the normalization project ids are made with");
     assert_eq!(repo_key("https://user@github.com/willctl/xenonet"), Some("github.com/willctl/xenonet".into()));

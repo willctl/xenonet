@@ -21,7 +21,7 @@
         "actions": []
       },
       {
-        "id": "project:<home>/projects/atlas-api",
+        "id": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
         "kind": "project",
         "name": "atlas-api",
         "path": "<home>/Projects/atlas-api",
@@ -38,6 +38,9 @@
         "description": "Orders, inventory and payments API for the Atlas store.",
         "modifiedAt": "<time>",
         "rule": null,
+        "checkout": "chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
+        "projectId": "prj_u4mndiefyfoxw7gh5eoyjogewqdo7vbf",
+        "confirmed": true,
         "group": false,
         "satelliteOf": null,
         "repo": null,
@@ -67,7 +70,7 @@
         "identities": []
       },
       {
-        "id": "project:<home>/projects/ledger",
+        "id": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
         "kind": "project",
         "name": "ledger",
         "path": "<home>/Projects/ledger",
@@ -84,6 +87,9 @@
         "description": "Double-entry bookkeeping service with monthly reconciliation.",
         "modifiedAt": "<time>",
         "rule": null,
+        "checkout": "chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
+        "projectId": "prj_sfpqscwpttbndjvk6qlshi5gmeya44rb",
+        "confirmed": true,
         "group": false,
         "satelliteOf": null,
         "repo": null,
@@ -113,7 +119,7 @@
         "identities": []
       },
       {
-        "id": "project:<home>/projects/pathfinder",
+        "id": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
         "kind": "project",
         "name": "pathfinder",
         "path": "<home>/Projects/pathfinder",
@@ -130,6 +136,9 @@
         "description": "Route planner for delivery vans.",
         "modifiedAt": "<time>",
         "rule": null,
+        "checkout": "chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
+        "projectId": "prj_jrj2q2wbqbklosstanshwxf5e4pslvfw",
+        "confirmed": true,
         "group": false,
         "satelliteOf": null,
         "repo": null,
@@ -390,36 +399,36 @@
     "links": [
       {
         "source": "core",
-        "target": "project:<home>/projects/atlas-api",
+        "target": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
         "kind": "contains"
       },
       {
         "source": "core",
-        "target": "project:<home>/projects/ledger",
+        "target": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
         "kind": "contains"
       },
       {
         "source": "core",
-        "target": "project:<home>/projects/pathfinder",
+        "target": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
         "kind": "contains"
       },
       {
-        "source": "project:<home>/projects/atlas-api",
+        "source": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
         "target": "claude:0190d3e0-0000-7000-8000-000000000001",
         "kind": "session"
       },
       {
-        "source": "project:<home>/projects/pathfinder",
+        "source": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
         "target": "claude:0190d3e0-0000-7000-8000-000000000003",
         "kind": "session"
       },
       {
-        "source": "project:<home>/projects/ledger",
+        "source": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
         "target": "claude:0190d3e0-0000-7000-8000-000000000002",
         "kind": "session"
       },
       {
-        "source": "project:<home>/projects/pathfinder",
+        "source": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
         "target": "grok:0190d3e0-0000-7000-8000-000000000004",
         "kind": "session"
       }

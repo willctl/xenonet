@@ -544,6 +544,7 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
         ) +
         row("sync", node.repo && (node.repo.ahead || node.repo.behind) ? `${node.repo.ahead ? `↑${h(node.repo.ahead)} to push` : ""} ${node.repo.behind ? `↓${h(node.repo.behind)} to pull` : ""}` : null) +
         row("remote", mono(node.git?.origin)) +
+        row("checkout", checkoutRow(node), "wrap") +
         row("stack", node.stack?.length ? node.stack.map((s) => `<span class="tag">${h(s)}</span>`).join(" ") : null) +
         row("grouped with", node.satelliteOf ? `<a href="#" data-goto="${h(sameHost(node, `project:${node.satelliteOf}`))}">${h(index.get(sameHost(node, `project:${node.satelliteOf}`))?.name ?? "")}</a>` : null) +
         row("in", groupLink(node)) +
@@ -649,6 +650,28 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
       toast(`Opening in ${where}`);
     } catch (err) {
       toast(`Couldn't open it: ${err.message}`, true);
+    }
+  }
+
+  // ---------- a checkout's project ----------
+
+  // A checkout joins a project that already has one only by your word, here
+  // in the window: a folder that copies a repo's remote doesn't take its
+  // project's claims, grants or intents until you confirm it.
+  function checkoutRow(node) {
+    if (!node.checkout || node.host) return null;
+    if (node.confirmed !== false) return `<span class="dim">in its project</span>`;
+    return `<span class="pressure">not in its project yet</span> <span class="dim">another checkout of this repo came first; confirm this one is yours to work in</span> <button class="act" data-confirm-checkout="${h(node.checkout)}" data-yours title="It joins the project: claims, grants and starts there reach it">Confirm</button>`;
+  }
+
+  async function confirmCheckout(id) {
+    try {
+      const res = await fetch(`/api/checkouts/${encodeURIComponent(id)}/confirm`, { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error);
+      toast("It's in its project now");
+    } catch (err) {
+      toast(`Couldn't confirm it: ${err.message}`, true);
     }
   }
 
@@ -920,6 +943,8 @@ export function createHud({ onSelect, onBack, onStep, onFilters, onLayout, onPre
     if (e.target.closest("[data-rename]")) return void startRename();
     const write = e.target.closest("[data-message-actor]");
     if (write) return void onMessageActor?.(write.dataset.messageActor);
+    const confirm = e.target.closest("[data-confirm-checkout]");
+    if (confirm) return void confirmCheckout(confirm.dataset.confirmCheckout);
     const act = e.target.closest("[data-action]");
     if (act && current) return runAction(current, act.dataset.action);
     if (e.target.closest("[data-close]")) return onSelect(null);

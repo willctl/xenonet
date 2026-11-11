@@ -559,6 +559,15 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(workspace::route(ctx, req).await);
     }
 
+    // This machine's checkouts, and confirming one in its project.
+    if route == "/api/checkouts" || route.starts_with("/api/checkouts/") {
+        return Ok(match checkouts(ctx, req) {
+            Ok(r) => r,
+            Err(e) if e.is_pending() => pending_reply(&e),
+            Err(e) => Reply::error(e.status.unwrap_or(400), e.message),
+        });
+    }
+
     // How the projects folder is read: the last scan, your rules, Codex's picks.
     if route.starts_with("/api/projects") {
         match projects(ctx, req).await {
@@ -1196,4 +1205,25 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
     let Some(done) = cores.state.simulate(&kind_s, a, b)? else { return Ok(None) };
     ctx.events.broadcast("live", &cores.state.live_snapshot()?, Local::Same);
     Ok(Some(done))
+}
+
+// GET /api/checkouts: this machine's checkouts. POST
+// /api/checkouts/<id>/confirm: the person's word that a candidate is in the
+// project it would join (the window's alone, rules.rs), then the map made
+// again.
+fn checkouts(ctx: &Arc<Ctx>, req: &Req) -> Result<Reply, CoreError> {
+    let route = req.path.clone();
+    if req.method == "GET" && route == "/api/checkouts" {
+        return Ok(Reply::json(200, ctx.cores.store.checkouts()?));
+    }
+    let id = route.strip_prefix("/api/checkouts/").and_then(|r| r.strip_suffix("/confirm")).and_then(decode_uri_component);
+    if let (Some(id), "POST") = (id, req.method.as_str()) {
+        let ch = ctx.cores.store.confirm_checkout(&id)?;
+        let c = ctx.clone();
+        tokio::spawn(async move {
+            let _ = c.cores.state.refresh_after_change().await;
+        });
+        return Ok(Reply::json(200, ch));
+    }
+    Ok(Reply::error(404, "not found"))
 }

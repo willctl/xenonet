@@ -5,6 +5,7 @@
 //   npm run test:e2e
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -91,6 +92,36 @@ test("asking Codex shows the outline first, and Send records its picks", { timeo
   await fromWindow("/api/projects/codex", "DELETE");
   assert.equal((await until((g) => g.length === 3)).length, 3);
   await s.input({ keys: "Escape" });
+}));
+
+// A second checkout of a repo the map already has is a candidate: it joins
+// the repo's project only once you confirm it in the window, so a folder that
+// copies a remote takes none of the project's claims, grants or starts.
+test("a second checkout of a repo waits for you to confirm it in its project", { timeout: limit(60000) }, shoot("projects-confirm", async () => {
+  const graph = await api("/api/graph");
+  const atlas = graph.nodes.find((n) => n.kind === "project" && n.rel === "atlas-api");
+  assert.ok(atlas?.id.startsWith("project:chk_") && atlas.projectId?.startsWith("prj_"), `a project node is its checkout: ${atlas?.id}`);
+  assert.equal(atlas.confirmed, true, "the first checkout of a repo founds its project");
+  const copy = path.join(path.dirname(atlas.path), "atlas-api-copy");
+  execFileSync("git", ["clone", "-q", atlas.path, copy]);
+  execFileSync("git", ["-C", copy, "remote", "set-url", "origin", atlas.git.origin]);
+  await api("/api/projects/rescan", { method: "POST" });
+  let node;
+  for (const end = Date.now() + 8000; Date.now() < end && !node; await sleep(200)) node = (await api("/api/graph")).nodes.find((n) => n.rel === "atlas-api-copy");
+  assert.ok(node, "the copy is on the map");
+  assert.equal(node.projectId, atlas.projectId, "a checkout of the same project");
+  assert.equal(node.confirmed, false, "a candidate until you confirm it");
+  const refused = await api(`/api/checkouts/${node.checkout}/confirm`, { method: "POST" });
+  assert.match(refused.error ?? "", /window/, "not with the file's credential");
+  const st = await s.driver("select", node.id);
+  assert.deepEqual([st.selection.checkout.id, st.selection.checkout.confirmed], [node.checkout, false]);
+  assert.ok(st.selection.checkout.at.confirm, "the inspector shows Confirm");
+  await s.input({ click: st.selection.checkout.at.confirm });
+  let confirmed = false;
+  for (const end = Date.now() + 8000; Date.now() < end && !confirmed; await sleep(200)) confirmed = (await api("/api/checkouts")).checkouts.find((c) => c.id === node.checkout)?.confirmed;
+  assert.equal(confirmed, true, "confirmed from the window");
+  await s.input({ keys: "Escape" });
+  fs.rmSync(copy, { recursive: true, force: true });
 }));
 
 test("no page errors", { timeout: limit(30000) }, async () => {

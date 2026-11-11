@@ -113,12 +113,14 @@ impl registry::Store for Rows {
 }
 
 /// The demo world's nodes, as resolveDemo finds them: its projects folder,
-/// and its sessions by title.
+/// and its sessions by title; a project by the checkout the store keeps
+/// for its folder, which the map names it by.
 #[derive(Clone)]
 pub struct DemoNames {
     projects_dir: String,
     sessions: Vec<(String, String)>,
     claude_account: fn(Option<&str>) -> Value,
+    db: Option<Arc<xenonet_store::Db>>,
 }
 
 /// The demo's made-up world, as the actors' requests name its nodes: its
@@ -139,14 +141,23 @@ impl MadeUp {
 }
 
 impl DemoNames {
-    pub fn new(projects_dir: &str, made_up: &MadeUp) -> DemoNames {
-        DemoNames { projects_dir: projects_dir.to_string(), sessions: made_up.sessions.clone(), claude_account: made_up.claude_account }
+    pub fn new(projects_dir: &str, made_up: &MadeUp, db: Option<Arc<xenonet_store::Db>>) -> DemoNames {
+        DemoNames { projects_dir: projects_dir.to_string(), sessions: made_up.sessions.clone(), claude_account: made_up.claude_account, db }
+    }
+
+    // The node a project of the demo's folder is: its checkout's.
+    fn project(&self, dir: &str) -> String {
+        let checkout = self.db.as_ref().and_then(|db| {
+            let found = crate::checkouts::found_of(dir, crate::checkouts::Why::Repo)?;
+            db.ensure(&found, now_ms() as i64).ok().map(|(c, _)| c.id.as_str().to_string())
+        });
+        format!("project:{}", checkout.unwrap_or_else(|| xenonet_os::paths::path_key(dir).unwrap_or_default()))
     }
 
     fn resolve(&self, kind: &str, what: &str) -> Value {
         let file = || what.split('/').fold(self.projects_dir.clone(), |p, part| xenonet_os::paths::join(&p, part));
         match kind {
-            "project" => json!(format!("project:{}", xenonet_os::paths::path_key(&file()).unwrap_or_default())),
+            "project" => json!(self.project(&file())),
             "session" => self.sessions.iter().find(|(t, _)| t == what).map_or(Value::Null, |(_, id)| json!(id)),
             "file" => json!(file()),
             "identity" => {

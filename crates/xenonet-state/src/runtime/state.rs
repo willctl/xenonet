@@ -28,7 +28,7 @@ use crate::state::{self as decide, Memory};
 use crate::{classify, digest, redact, rename, workspace};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -145,7 +145,7 @@ pub struct MapState {
     /// Each repo watched, by project key: its specs, and its config file.
     repo_watches: Mutex<HashMap<String, (Vec<WatchSpec>, std::path::PathBuf)>>,
     /// The repos whose status is to be read again shortly (`repo_soon`).
-    repo_pending: Mutex<std::collections::HashSet<String>>,
+    repo_pending: Mutex<HashSet<String>>,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// The events it sent, for the tests to read.
     #[cfg(test)]
@@ -316,7 +316,7 @@ impl MapState {
             watches: Mutex::new(watches),
             refresher: Mutex::new(None),
             repo_watches: Mutex::new(HashMap::new()),
-            repo_pending: Mutex::new(std::collections::HashSet::new()),
+            repo_pending: Mutex::new(HashSet::new()),
             tasks: Mutex::new(Vec::new()),
             #[cfg(test)]
             sent: Mutex::new(Vec::new()),
@@ -561,7 +561,7 @@ impl MapState {
         lock(&self.inner).map.session_dirs.clone_from(&session_dirs);
         let rules = self.project_rules(true, &root);
         let t0 = self.now();
-        let scanned = self.projects_scan.scan(&root, session_dirs, rules.clone(), self.cfg.project_limits.clone(), false, None).await;
+        let scanned = self.projects_scan.scan(&root, session_dirs.clone(), rules.clone(), self.cfg.project_limits.clone(), false, None).await;
         let (mut projects, scan, mut projects_st) = match scanned {
             Ok(found) => {
                 let list = Value::Array(found.projects.clone());
@@ -569,12 +569,26 @@ impl MapState {
             }
             Err(e) => (Vec::new(), None, decide::source_status("projects", false, Some(&num(self.now() - t0)), None, Some(&json!(e)))),
         };
+        // The other roots you named, each scanned on a walk of its own; a
+        // folder two of them hold is listed once.
+        let roots = self.store.roots();
+        for r in &roots {
+            let rules = self.project_rules(false, r);
+            if let Ok(found) = self.projects_scan.scan(r, session_dirs.clone(), rules, self.cfg.project_limits.clone(), true, None).await {
+                for p in found.projects {
+                    if !projects.iter().any(|q| q.get("key") == p.get("key")) {
+                        projects.push(p);
+                    }
+                }
+            }
+        }
         for p in &mut projects {
             let key = p.get("key").map(display).unwrap_or_default();
             if let Some(m) = p.as_object_mut() {
                 m.insert("rule".into(), rules.get(&key).cloned().unwrap_or(Value::Null));
             }
         }
+        self.checkouts(&mut projects, &session_dirs);
         if let Some(sc) = scan.as_ref().filter(|sc| truthy(sc.get("ok"))) {
             projects_st["count"] = sc.get("projects").cloned().unwrap_or(Value::Null);
             projects_st["note"] = json!(decide::projects_note(sc));
@@ -617,6 +631,7 @@ impl MapState {
         resources.retain(|r| r.get("server").map(display).is_some_and(|srv| decide::visible_resource(&srv, &hidden)));
         let input = json!({
             "projectsDir": root,
+            "roots": roots,
             "homeDir": self.cfg.home_dir,
             "projects": projects,
             "sessions": sessions,
@@ -713,6 +728,36 @@ impl MapState {
             self.emit("pulse", json!({ "nodeId": id, "reason": "updated" }));
         }
         Ok(graph)
+    }
+
+    /// Every project the scans found and every folder a session ran in,
+    /// diffed into the store's checkouts; each project then names its
+    /// checkout, the project it's in (or would join) and whether you
+    /// confirmed it there.
+    fn checkouts(&self, projects: &mut [Value], session_dirs: &[Value]) {
+        let mut found: Vec<Value> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for p in projects.iter() {
+            let Some(path) = p.get("path").and_then(Value::as_str) else { continue };
+            let why = if p.get("git").is_some_and(|g| !g.is_null()) { "repo" } else { "folder" };
+            if seen.insert(path.to_string()) {
+                found.push(json!({ "path": path, "why": why }));
+            }
+        }
+        for d in session_dirs {
+            if let Some(path) = d.as_str().filter(|p| seen.insert((*p).to_string())) {
+                found.push(json!({ "path": path, "why": "session" }));
+            }
+        }
+        let Some(by_key) = self.store.reconcile_checkouts(found) else { return };
+        for p in projects.iter_mut() {
+            let Some(ch) = p.get("key").and_then(Value::as_str).and_then(|k| by_key.get(k)).cloned() else { continue };
+            if let Some(m) = p.as_object_mut() {
+                m.insert("checkout".into(), ch["id"].clone());
+                m.insert("projectId".into(), ch["project"].clone());
+                m.insert("confirmed".into(), ch["confirmed"].clone());
+            }
+        }
     }
 
     /// The runs XenoNet observes without a reader of its own, and the
@@ -939,8 +984,9 @@ impl MapState {
                     // repo's status its edits.
                     self.refresh_in(Duration::from_millis(LINES_SETTLE_MS));
                     let home = self.home(s(&v, "sessionId").unwrap_or_default());
-                    if let Some(key) = home.as_deref().and_then(|h| h.strip_prefix("project:")) {
-                        self.repo_soon(key);
+                    let key = home.and_then(|h| self.node_of(&h)).filter(|n| s(n, "kind") == Some("project")).and_then(|n| s(&n, "key").map(String::from));
+                    if let Some(key) = key {
+                        self.repo_soon(&key);
                     }
                 }
                 Event::Tokens(v) if listening => self.emit("tokens", v),
@@ -1607,6 +1653,24 @@ impl State for MapState {
         let mut r = workspace::root(self.cfg.env_projects_dir.as_deref(), Some(&self.store.workspace_root()), &self.cfg.home_dir);
         r["scan"] = lock(&self.inner).map.scan.clone().unwrap_or(Value::Null);
         Ok(r)
+    }
+    fn roots(&self) -> R<Value> {
+        Ok(json!({ "roots": self.store.roots() }))
+    }
+    async fn set_roots(&self, roots: Value) -> R<Value> {
+        let mut out: Vec<String> = Vec::new();
+        for r in roots.as_array().into_iter().flatten() {
+            let v = workspace::validate(Some(r), &self.cfg.home_dir, &self.cfg.platform);
+            if v["ok"] != true {
+                return Err(status(400, v["error"].as_str().unwrap_or("That folder can't be read").to_string()));
+            }
+            if let Some(p) = v["path"].as_str().filter(|p| !out.iter().any(|o| o == p)) {
+                out.push(p.to_string());
+            }
+        }
+        self.store.set_roots(&out).map_err(err)?;
+        self.after_change().await?;
+        self.roots()
     }
     async fn set_root(&self, path: Value) -> R<Value> {
         if let Some(why) = workspace::locked(self.cfg.env_projects_dir.as_deref(), &self.cfg.home_dir) {

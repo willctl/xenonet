@@ -1,7 +1,8 @@
-//! The projects folder XenoNet reads (server/routes/workspace.js): GET,
-//! POST and DELETE /api/workspace/root, and POST /api/workspace/check.
-//! Changing the folder is yours, as connecting agents is; looking and
-//! checking are any local surface's (rules.rs).
+//! Where XenoNet looks for projects: the projects folder (GET, POST and
+//! DELETE /api/workspace/root, and POST /api/workspace/check), and the
+//! other roots you named beside it (GET and PUT /api/workspace/roots).
+//! Changing them is yours, as connecting agents is; looking and checking
+//! are any local surface's (rules.rs).
 
 use crate::cores::CoreError;
 use crate::ctx::{pending_reply, Ctx};
@@ -31,6 +32,18 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
                 return Ok(Reply::error(400, "say which folder: { path }, or path null for the default"));
             };
             return Ok(Reply::json(200, state.set_root(path.clone()).await?));
+        }
+    }
+    if req.path == "/api/workspace/roots" {
+        if req.method == "GET" {
+            return Ok(Reply::json(200, state.roots()?));
+        }
+        if req.method == "PUT" {
+            let body = req.json_body().await?;
+            let Some(roots) = body.get("roots").filter(|r| r.is_array()) else {
+                return Ok(Reply::error(400, "say which folders: { roots: [path] }"));
+            };
+            return Ok(Reply::json(200, state.set_roots(roots.clone()).await?));
         }
     }
     if req.method == "POST" && req.path == "/api/workspace/check" {

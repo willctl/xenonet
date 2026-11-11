@@ -62,6 +62,31 @@ pub trait Store: Send + Sync {
     fn set_workspace_root(&self, _dir: Option<&str>) -> R<()> {
         pending(STORE)
     }
+    /// The folders you named to look for projects in beside the projects
+    /// folder, as paths: `[path]`.
+    fn roots(&self) -> R<Value> {
+        pending(STORE)
+    }
+    fn set_roots(&self, _roots: &[String]) -> R<()> {
+        pending(STORE)
+    }
+    /// What the map found on this machine (`[{ path, why }]`, why `repo`,
+    /// `folder` or `session`) diffed into the checkouts the store keeps:
+    /// `{ checkouts: [checkout], fixes: [words] }`, every checkout of this
+    /// machine's, gone ones too. A checkout is `{ id, project, path,
+    /// pathKey, kind, branch, parent, confirmed, gone }`.
+    fn reconcile_checkouts(&self, _found: &Value) -> R<Value> {
+        pending(STORE)
+    }
+    /// This machine's checkouts, as `reconcile_checkouts` answers them.
+    fn checkouts(&self) -> R<Value> {
+        pending(STORE)
+    }
+    /// A candidate confirmed in the project it would join: the person's,
+    /// at the window, which the route that calls it checks. The checkout.
+    fn confirm_checkout(&self, _id: &str) -> R<Value> {
+        pending(STORE)
+    }
     /// Your rules for the projects folder: `{ key: rule }`.
     fn project_rules(&self) -> R<Value> {
         pending(STORE)

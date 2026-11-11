@@ -353,20 +353,6 @@ pub fn edit_paths(tool_name: &str, input: &Value, cwd: Option<&str>) -> Vec<Stri
     out
 }
 
-/// What git printed for `rev-parse`, as a repo, or None when it didn't print
-/// a top and a common dir.
-pub fn parse_repo(stdout: &str) -> Option<Repo> {
-    let t = trim(stdout);
-    let mut lines = t.split('\n');
-    let top = lines.next().filter(|s| !s.is_empty())?;
-    let common = lines.next().filter(|s| !s.is_empty())?;
-    let branch = match lines.next() {
-        None | Some("HEAD") => None,
-        Some(b) => Some(b.to_string()),
-    };
-    Some(Repo { top: top.to_string(), common: xenonet_os::paths::resolve(common), branch })
-}
-
 /// Two agents share a repo if their working trees share a git dir. Outside
 /// git, if they work in the same folder or the same project.
 pub fn together(a: &Value, b: &Value) -> bool {
@@ -2309,10 +2295,7 @@ mod tests {
     }
 
     #[test]
-    fn a_repo_is_its_top_and_common_dir() {
-        let r = parse_repo("/w/a\n/w/a/.git\nHEAD\n").unwrap();
-        assert_eq!(r.branch, None);
-        assert!(parse_repo("/w/a\n").is_none());
+    fn times_and_short_ids() {
         assert_eq!(ago(30e3), "just now");
         assert_eq!(ago(150e3), "3 min ago");
         assert_eq!(short("claude:0123456789abcdef"), "claude:01234567");

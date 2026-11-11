@@ -180,7 +180,7 @@ fn defs(installed: bool) -> Vec<Def> {
         def(
             "select",
             "Select a node",
-            "Selects a node, as clicking it would: a project, Codex project or folder gathers its sessions around it and the camera frames them; an actor (actor:<slug>) is framed with what it acts on; anything else gets the camera's focus and the inspector. Give an id, or a query to select the best match from find. null clears the selection. Returns the state once the view has settled.",
+            "Selects a node, as clicking it would: a project, Codex project or folder gathers its sessions around it and the camera frames them; an actor (actor:<slug>) is framed with what it acts on; anything else gets the camera's focus and the inspector. Give an id, or a query to select the best match from find. null clears the selection. A project's selection names its checkout on this machine (checkout: its id, the project it's in and whether it's confirmed there). A checkout of a project that already had one is a candidate until you confirm it, and its at.confirm is the inspector's Confirm button: the person's, a click in the window that only the demo and test instances let this console make. Returns the state once the view has settled.",
             object(vec![
                 ("id", string().nullable().optional().describe("A node id from find or status, or an actor id from actors; null clears the selection.")),
                 ("query", string().optional().describe("Instead of an id: select the first node find gives for these words.")),

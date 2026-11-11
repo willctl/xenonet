@@ -104,6 +104,44 @@ impl Saved {
         wrote("the projects folder", self.store.set_workspace_root(dir.as_deref()));
     }
 
+    /// The folders you named to look for projects in, beside the projects
+    /// folder.
+    pub fn roots(&self) -> Vec<String> {
+        read("the roots you named", self.store.roots(), Value::Array(Vec::new())).as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect()
+    }
+
+    pub fn set_roots(&self, roots: &[String]) -> Result<(), String> {
+        self.store.set_roots(roots).map_err(|e| e.message)
+    }
+
+    /// What the map found (`[{ path, why }]`) diffed into the store's
+    /// checkouts, each change logged: this machine's checkouts by path key.
+    /// None without a store.
+    pub fn reconcile_checkouts(&self, found: Vec<Value>) -> Option<std::collections::HashMap<String, Value>> {
+        let out = self.store.reconcile_checkouts(&Value::Array(found));
+        let out = match out {
+            Ok(v) => v,
+            Err(e) => {
+                if !e.is_pending() {
+                    crate::runtime::util::log("warn", "projects.reconcile", &format!("the checkouts couldn't be kept: {}", e.message));
+                }
+                return None;
+            }
+        };
+        for fix in out.get("fixes").and_then(Value::as_array).into_iter().flatten() {
+            crate::runtime::util::log("info", "projects.reconcile", fix.as_str().unwrap_or_default());
+        }
+        Some(
+            out.get("checkouts")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|c| c.get("gone") != Some(&Value::Bool(true)))
+                .filter_map(|c| Some((c.get("pathKey")?.as_str()?.to_string(), c.clone())))
+                .collect(),
+        )
+    }
+
     /// `{ names, hidden, pins, known, signins }`.
     pub fn identities(&self) -> Value {
         read("the identities", self.store.identities(), json!({ "names": {}, "hidden": {}, "pins": {}, "known": {}, "signins": {} }))

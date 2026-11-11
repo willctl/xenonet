@@ -92,6 +92,40 @@ impl Store for Saved {
     fn set_workspace_root(&self, dir: Option<&str>) -> R<()> {
         self.db.set_setting("workspace.root", dir.map(|d| Value::String(d.into())).as_ref()).map_err(failed)
     }
+    fn roots(&self) -> R<Value> {
+        let v = self.db.setting("workspace.roots").map_err(failed)?;
+        Ok(if v.is_array() { v } else { Value::Array(Vec::new()) })
+    }
+    fn set_roots(&self, roots: &[String]) -> R<()> {
+        let v = (!roots.is_empty()).then(|| Value::Array(roots.iter().cloned().map(Value::String).collect()));
+        self.db.set_setting("workspace.roots", v.as_ref()).map_err(failed)
+    }
+    fn reconcile_checkouts(&self, found: &Value) -> R<Value> {
+        let rows: Vec<_> = found
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|f| crate::checkouts::found_of(f.get("path")?.as_str()?, crate::checkouts::Why::parse(f.get("why")?.as_str()?)?))
+            .collect();
+        let fixes = self.db.reconcile(&rows, (self.clock)() as i64).map_err(failed)?;
+        let mut out = self.checkouts()?;
+        out["fixes"] = Value::Array(fixes.iter().map(|f| Value::String(f.words())).collect());
+        Ok(out)
+    }
+    fn checkouts(&self) -> R<Value> {
+        let all = self.db.checkouts().map_err(failed)?;
+        Ok(serde_json::json!({ "checkouts": all.iter().map(crate::checkouts::json_of).collect::<Vec<_>>() }))
+    }
+    fn confirm_checkout(&self, id: &str) -> R<Value> {
+        let Ok(id) = xenonet_model::ids::CheckoutId::parse(id) else {
+            return Err(CoreError::status(400, format!("{id} isn't a checkout's id")));
+        };
+        match self.db.confirm(&id) {
+            Ok(ch) => Ok(crate::checkouts::json_of(&ch)),
+            Err(e) if e.code == "not-found" => Err(CoreError::status(404, e.message)),
+            Err(e) => Err(failed(e)),
+        }
+    }
     fn project_rules(&self) -> R<Value> {
         self.db.project_rules().map_err(failed)
     }

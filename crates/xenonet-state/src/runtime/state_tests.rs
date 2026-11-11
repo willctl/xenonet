@@ -466,7 +466,10 @@ async fn a_home_folders_own_sessions_and_projects() {
     let g = s.refresh_map().await.expect("a map");
     let session = items(g.get("nodes")).iter().find(|n| s_of(n, "id") == Some(&format!("claude:{id}"))).cloned().expect("the session, on the map");
     assert_eq!((session["title"].as_str(), session["cwd"].as_str()), (Some("Add a health check route"), Some(cwd.as_str())));
-    assert!(s.home(&format!("claude:{id}")).is_some_and(|h| h.ends_with("/atlas")), "in its project");
+    let place = s.home(&format!("claude:{id}")).and_then(|h| s.node_of(&h)).expect("its home, on the map");
+    assert!(s_of(&place, "path").is_some_and(|p| p.ends_with("/atlas")), "in its project");
+    assert!(s_of(&place, "id").is_some_and(|i| i.starts_with("project:chk_")), "a project node is its checkout: {place}");
+    assert_eq!((place["projectId"].as_str().map(|p| &p[..4]), place["confirmed"].as_bool()), (Some("prj_"), Some(true)), "the founding checkout of its project");
     let st = |name: &str| items(g.get("sources")).iter().find(|x| s_of(x, "name") == Some(name)).cloned().unwrap_or(Value::Null);
     assert_eq!((st("claude")["ok"].as_bool(), st("claude")["count"].as_u64()), (Some(true), Some(1)));
     assert_eq!(st("codex")["error"], "spawn /nonexistent/codex ENOENT", "no Codex here, said as Node says it");

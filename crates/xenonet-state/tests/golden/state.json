@@ -19,7 +19,7 @@
     "actions": []
    },
    {
-    "id": "project:<world>/home/projects/atlas-api",
+    "id": "project:chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
     "kind": "project",
     "name": "atlas-api",
     "path": "<world>/home/Projects/atlas-api",
@@ -42,6 +42,9 @@
     "description": "Orders, inventory and payments API for the Atlas store.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
+    "projectId": "prj_ydkyxa2avqkhcxr3ame2z4ihxft6jty7",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -99,7 +102,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/atlas-api-local-db",
+    "id": "project:chk_oron3kasrqglrrwtgtdfkdvoxqaefamx",
     "kind": "project",
     "name": "atlas-api-local-db",
     "path": "<world>/home/Projects/atlas-api-local-db",
@@ -117,8 +120,11 @@
     "description": "Local Postgres and Supabase for atlas-api.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_oron3kasrqglrrwtgtdfkdvoxqaefamx",
+    "projectId": "prj_dnkodknjpbkaw6rlwoqaarjv57xb5wrz",
+    "confirmed": true,
     "group": false,
-    "satelliteOf": "<world>/home/projects/atlas-api",
+    "satelliteOf": "chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
     "repo": null,
     "fx": null,
     "fy": null,
@@ -153,7 +159,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/atlas-web",
+    "id": "project:chk_tqrwrin7gz2a2u7bhbjyp6r6pkznlbga",
     "kind": "project",
     "name": "atlas-web",
     "path": "<world>/home/Projects/atlas-web",
@@ -176,6 +182,9 @@
     "description": "The Atlas storefront, built with Next.js.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_tqrwrin7gz2a2u7bhbjyp6r6pkznlbga",
+    "projectId": "prj_kru73w7soma5gawyrijvtqlad45hz6mm",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -233,7 +242,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/docs",
+    "id": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
     "kind": "project",
     "name": "docs",
     "path": "<world>/home/Projects/docs",
@@ -255,6 +264,9 @@
     "description": "Docs site for Atlas and Ledger.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
+    "projectId": "prj_sfpqscwpttbndjvk6qlshi5gmeya44rb",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -312,7 +324,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/infra",
+    "id": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
     "kind": "project",
     "name": "infra",
     "path": "<world>/home/Projects/infra",
@@ -334,6 +346,9 @@
     "description": "Terraform modules and deploy scripts for every environment.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
+    "projectId": "prj_u4mndiefyfoxw7gh5eoyjogewqdo7vbf",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -385,7 +400,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/labs",
+    "id": "project:chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
     "kind": "project",
     "name": "labs",
     "path": "<world>/home/Projects/labs",
@@ -400,6 +415,9 @@
     "description": "Experiments that aren't projects yet.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
+    "projectId": "prj_kgntrj3yiayde6fu7eyt2v272jvtfwjh",
+    "confirmed": true,
     "group": true,
     "satelliteOf": null,
     "repo": null,
@@ -436,7 +454,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/labs/geofence",
+    "id": "project:chk_j6rfcdpilav7jhjyc6sq7io5fahttszk",
     "kind": "project",
     "name": "geofence",
     "path": "<world>/home/Projects/labs/geofence",
@@ -445,7 +463,7 @@
     "role": "project",
     "detected": "repo",
     "marker": ".git",
-    "parent": "<world>/home/projects/labs",
+    "parent": "chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
     "git": {
      "branch": "main",
      "origin": "https://github.com/orbitworks/geofence.git",
@@ -458,6 +476,9 @@
     "description": "Delivery zones drawn from postcodes.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_j6rfcdpilav7jhjyc6sq7io5fahttszk",
+    "projectId": "prj_4gsg2jliucrsa6cgx3sfqjqnarsvtutt",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -515,7 +536,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/labs/route-sim",
+    "id": "project:chk_fcnyklyswgoty4aktnp3pl6xoywgkhnd",
     "kind": "project",
     "name": "route-sim",
     "path": "<world>/home/Projects/labs/route-sim",
@@ -524,7 +545,7 @@
     "role": "project",
     "detected": "repo",
     "marker": ".git",
-    "parent": "<world>/home/projects/labs",
+    "parent": "chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
     "git": {
      "branch": "main",
      "origin": "git@gh-orbit:orbitworks/route-sim.git",
@@ -537,6 +558,9 @@
     "description": "Simulates a day of van routes against pathfinder.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_fcnyklyswgoty4aktnp3pl6xoywgkhnd",
+    "projectId": "prj_cabknb55t5owgim6djwjj6bg7mt3bzr4",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -588,7 +612,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/ledger",
+    "id": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
     "kind": "project",
     "name": "ledger",
     "path": "<world>/home/Projects/ledger",
@@ -610,6 +634,9 @@
     "description": "Double-entry bookkeeping service with monthly reconciliation.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
+    "projectId": "prj_jrj2q2wbqbklosstanshwxf5e4pslvfw",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -667,7 +694,7 @@
     ]
    },
    {
-    "id": "project:<world>/home/projects/pathfinder",
+    "id": "project:chk_zrn62z5ky6bicugca3m4j3i6neykfxwa",
     "kind": "project",
     "name": "pathfinder",
     "path": "<world>/home/Projects/pathfinder",
@@ -689,6 +716,9 @@
     "description": "Route planner for delivery vans.",
     "modifiedAt": 1791021600000,
     "rule": null,
+    "checkout": "chk_zrn62z5ky6bicugca3m4j3i6neykfxwa",
+    "projectId": "prj_hdkxh2tb6n3ygvcz2r4mgn6hptpwi4wv",
+    "confirmed": true,
     "group": false,
     "satelliteOf": null,
     "repo": {
@@ -1986,56 +2016,56 @@
   "links": [
    {
     "source": "core",
-    "target": "project:<world>/home/projects/atlas-api",
+    "target": "project:chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
     "kind": "contains"
    },
    {
-    "source": "project:<world>/home/projects/atlas-api",
-    "target": "project:<world>/home/projects/atlas-api-local-db",
+    "source": "project:chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
+    "target": "project:chk_oron3kasrqglrrwtgtdfkdvoxqaefamx",
     "kind": "satellite"
    },
    {
     "source": "core",
-    "target": "project:<world>/home/projects/atlas-web",
+    "target": "project:chk_tqrwrin7gz2a2u7bhbjyp6r6pkznlbga",
     "kind": "contains"
    },
    {
     "source": "core",
-    "target": "project:<world>/home/projects/docs",
+    "target": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
     "kind": "contains"
    },
    {
     "source": "core",
-    "target": "project:<world>/home/projects/infra",
+    "target": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
     "kind": "contains"
    },
    {
     "source": "core",
-    "target": "project:<world>/home/projects/labs",
+    "target": "project:chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
     "kind": "contains"
    },
    {
-    "source": "project:<world>/home/projects/labs",
-    "target": "project:<world>/home/projects/labs/geofence",
+    "source": "project:chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
+    "target": "project:chk_j6rfcdpilav7jhjyc6sq7io5fahttszk",
     "kind": "nested"
    },
    {
-    "source": "project:<world>/home/projects/labs",
-    "target": "project:<world>/home/projects/labs/route-sim",
+    "source": "project:chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
+    "target": "project:chk_fcnyklyswgoty4aktnp3pl6xoywgkhnd",
     "kind": "nested"
    },
    {
     "source": "core",
-    "target": "project:<world>/home/projects/ledger",
+    "target": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
     "kind": "contains"
    },
    {
     "source": "core",
-    "target": "project:<world>/home/projects/pathfinder",
+    "target": "project:chk_zrn62z5ky6bicugca3m4j3i6neykfxwa",
     "kind": "contains"
    },
    {
-    "source": "project:<world>/home/projects/atlas-api",
+    "source": "project:chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
     "target": "native:codex:demo-atlas",
     "kind": "native"
    },
@@ -2050,12 +2080,12 @@
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/ledger",
+    "source": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
     "target": "codex:0190d3e0-0000-7000-8000-000000000004",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/docs",
+    "source": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
     "target": "codex:0190d3e0-0000-7000-8000-000000000006",
     "kind": "session"
    },
@@ -2075,32 +2105,32 @@
     "kind": "lineage"
    },
    {
-    "source": "project:<world>/home/projects/labs/geofence",
+    "source": "project:chk_j6rfcdpilav7jhjyc6sq7io5fahttszk",
     "target": "codex:0190d3e0-0000-7000-8000-000000000013",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/atlas-api",
+    "source": "project:chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
     "target": "claude:0190d3e0-0000-7000-8000-000000000001",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/atlas-web",
+    "source": "project:chk_tqrwrin7gz2a2u7bhbjyp6r6pkznlbga",
     "target": "claude:0190d3e0-0000-7000-8000-000000000003",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/pathfinder",
+    "source": "project:chk_zrn62z5ky6bicugca3m4j3i6neykfxwa",
     "target": "claude:0190d3e0-0000-7000-8000-000000000005",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/infra",
+    "source": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
     "target": "claude:0190d3e0-0000-7000-8000-000000000007",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/ledger",
+    "source": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
     "target": "claude:0190d3e0-0000-7000-8000-000000000009",
     "kind": "session"
    },
@@ -2110,12 +2140,12 @@
     "kind": "lineage"
    },
    {
-    "source": "project:<world>/home/projects/labs",
+    "source": "project:chk_g34rpjsukhmpl43oarstp7mnxaaxxtgn",
     "target": "claude:0190d3e0-0000-7000-8000-000000000014",
     "kind": "session"
    },
    {
-    "source": "project:<world>/home/projects/atlas-web",
+    "source": "project:chk_tqrwrin7gz2a2u7bhbjyp6r6pkznlbga",
     "target": "grok:0190d3e0-0000-7000-8000-000000000015",
     "kind": "session"
    },
@@ -2125,7 +2155,7 @@
     "kind": "lineage"
    },
    {
-    "source": "project:<world>/home/projects/pathfinder",
+    "source": "project:chk_zrn62z5ky6bicugca3m4j3i6neykfxwa",
     "target": "grok:0190d3e0-0000-7000-8000-000000000017",
     "kind": "session"
    },
@@ -2178,7 +2208,7 @@
    },
    {
     "a": "wiki:atlas-api",
-    "b": "project:<world>/home/projects/atlas-api",
+    "b": "project:chk_oimiwo6rto4novntm5sbjdr5xl54f2yr",
     "kind": "mentions"
    },
    {
@@ -2188,17 +2218,17 @@
    },
    {
     "a": "wiki:ledger",
-    "b": "project:<world>/home/projects/ledger",
+    "b": "project:chk_qr7jr5m2ba2idy2gqpsennx5canh6kdw",
     "kind": "mentions"
    },
    {
     "a": "wiki:refunds",
-    "b": "project:<world>/home/projects/docs",
+    "b": "project:chk_cdsxsrqhuf4gn6myccdvnl7yxlu7yayx",
     "kind": "mentions"
    },
    {
     "a": "wiki:staging-cluster",
-    "b": "project:<world>/home/projects/infra",
+    "b": "project:chk_b3y2yhk3bmhvt27jhyajlxyfrmmd5gjm",
     "kind": "mentions"
    }
   ],

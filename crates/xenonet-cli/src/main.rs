@@ -162,6 +162,10 @@ fn serve(args: &[String]) -> i32 {
             // what XenoNet saves for you is its first core.
             let db = xenonet_runtime::open_store(&config.state_dir, env);
             if let Some(db) = &db {
+                // The demo's made-up world makes the same ids each run.
+                if config.demo {
+                    xenonet_runtime::seed_ids(db, "demo");
+                }
                 cores.store = std::sync::Arc::new(xenonet_runtime::saved::Saved::new(db.clone()));
             }
             xenonet_state::runtime::wire(&mut cores, &map, demo, env);

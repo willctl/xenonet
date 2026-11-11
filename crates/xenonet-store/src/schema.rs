@@ -36,6 +36,7 @@ pub(crate) fn tables() -> impl Iterator<Item = &'static str> {
         .chain(crate::state::TABLES)
         .chain(crate::delivery::TABLES)
         .chain(crate::a2a::TABLES)
+        .chain(crate::projects::TABLES)
         .copied()
 }
 

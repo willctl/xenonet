@@ -289,6 +289,13 @@ impl cores::Store for Fake {
         *self.environment.lock().unwrap() = json!(id);
         Ok(())
     }
+    fn checkouts(&self) -> R<Value> {
+        Ok(json!({ "checkouts": [] }))
+    }
+    fn confirm_checkout(&self, id: &str) -> R<Value> {
+        self.note("confirmCheckout", json!([id]));
+        Ok(json!({ "id": id, "confirmed": true }))
+    }
 }
 
 #[async_trait]
@@ -539,6 +546,29 @@ async fn an_actors_calls_need_its_token_its_own_process_and_what_you_allowed_it(
     assert_eq!(code(&r), (400, json!("bad-request"), json!("a caller is a session or an actor, never both, so send x-xenonet-agent or a token, not both")));
     // A Claude Code channel is a session's alone.
     assert_eq!(go(&ctx, "POST", "/api/engine/channel", &as_wren, Some(json!({}))).await.status, 404);
+}
+
+// A checkout joins a project that has one only by the person's word at the
+// window (docs/design/direction.md, phase 4's revision 3): never the file's
+// credential (an agent on this account reads it), an actor or a program run
+// in XenoNet.
+#[tokio::test]
+async fn a_checkout_is_confirmed_in_its_project_from_the_window_alone() {
+    let (ctx, f) = service(false);
+    let key = ctx.window_key.reveal().to_string();
+    let p = "/api/checkouts/chk_x/confirm";
+    let code = |r: &Reply| (r.status, r.body_json()["code"].clone());
+    assert_eq!(code(&go(&ctx, "POST", p, &[], None).await), (403, json!("yours")), "the file's credential");
+    assert_eq!(code(&go(&ctx, "POST", p, &[AGENT], None).await), (403, json!("yours")), "a session");
+    assert_eq!(go(&ctx, "POST", p, &[("x-xenonet-window", "not-its-key")], None).await.status, 401);
+    *f.window.lock().unwrap() = json!({ "ok": false, "reason": "it came from a program run in XenoNet" });
+    assert_eq!(code(&go(&ctx, "POST", p, &[("x-xenonet-window", &key)], None).await), (403, json!("yours")), "not the window's own process");
+    assert!(f.was("confirmCheckout").is_empty(), "none of those confirmed it");
+    *f.window.lock().unwrap() = json!({ "ok": true });
+    let r = go(&ctx, "POST", p, &[("x-xenonet-window", &key)], None).await;
+    assert_eq!((r.status, r.body_json()["confirmed"].clone()), (200, json!(true)));
+    assert_eq!(f.was("confirmCheckout"), vec![json!(["chk_x"])]);
+    assert_eq!(go(&ctx, "GET", "/api/checkouts", &[], None).await.body_json(), json!({ "checkouts": [] }), "looking is any local surface's");
 }
 
 #[tokio::test]

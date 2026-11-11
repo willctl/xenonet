@@ -14,6 +14,7 @@
 pub mod acp;
 pub mod actors;
 pub mod asks;
+pub mod checkouts;
 pub mod delivery;
 pub mod door;
 pub mod engine;
@@ -97,12 +98,25 @@ pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtim
 /// build (the doctor says to set the machine up again).
 pub fn open_store(state_dir: &str, env: &WireEnv) -> Option<Arc<Db>> {
     match Db::open(Path::new(state_dir)) {
-        Ok(db) => Some(Arc::new(db)),
+        Ok(db) => {
+            // The ids it mints, the same each run for the golden files,
+            // which name a seed.
+            if let Ok(seed) = std::env::var("XENONET_IDS_SEED") {
+                db.use_ids(xenonet_model::ids::Ids::seeded(&seed));
+            }
+            Some(Arc::new(db))
+        }
         Err(e) => {
             log_later(env, "error", "engine.store", format!("the store can't be opened: {}", e.message));
             None
         }
     }
+}
+
+/// The store's random ids from `seed` from now on: the same ids each run,
+/// for a made-up world.
+pub fn seed_ids(db: &Db, seed: &str) {
+    db.use_ids(xenonet_model::ids::Ids::seeded(seed));
 }
 
 /// The runtime, made on the map the cores already have; None without the
@@ -134,7 +148,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         delivery::listen_settings(&setup.state_dir, setup.port).map_err(|e| log_later(env, "warn", "delivery.listen", format!("listen settings: {e}"))).ok()
     };
     let actors = if setup.actors {
-        let names = actors::DemoNames::new(&setup.projects_dir, &setup.made_up);
+        let names = actors::DemoNames::new(&setup.projects_dir, &setup.made_up, setup.db.clone());
         match actors::ActorSide::new(store.clone(), setup.demo, &map, names) {
             Ok(a) => Some(a),
             Err(e) => {
@@ -177,6 +191,9 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         acp: OnceLock::new(),
     });
     let _ = w.me.set(Arc::downgrade(&w));
+    if let Some(db) = &w.setup.db {
+        checkouts::own(db, Arc::downgrade(&w));
+    }
     if w.actors.is_some() && !demo {
         observers::make(&w);
     }

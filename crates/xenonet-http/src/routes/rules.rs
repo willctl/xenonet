@@ -217,6 +217,13 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/workspace/root", YOU, Nothing),
     r("DELETE", "/api/workspace/root", YOU, Nothing),
     r("POST",   "/api/workspace/check", LOCAL, Nothing),
+    r("GET",    "/api/workspace/roots", LOCAL, Nothing),
+    r("PUT",    "/api/workspace/roots", YOU, Nothing),
+    // This machine's checkouts; a candidate joins its project only by your
+    // word, at the window (a folder that copies a repo's remote mustn't
+    // take its project's claims, grants or intents).
+    r("GET",    "/api/checkouts", LOCAL, Read(Map)),
+    r("POST",   "/api/checkouts/*/confirm", WINDOW, Nothing),
     r("GET",    "/api/projects", LOCAL, Nothing),
     r("POST",   "/api/projects/rule", YOU, Nothing),
     r("DELETE", "/api/projects/rules", YOU, Nothing),
@@ -683,6 +690,7 @@ mod tests {
         assert_eq!(rule("POST", "/api/assistant/gr_0123456789abcdef01234567/tunnel/stop").unwrap().who, &[You]);
         assert_eq!(rule("POST", "/api/assistant/gr_0123456789abcdef01234567/tunnel/start").unwrap().who, &[Window]);
         assert_eq!(rule("PATCH", "/api/svc/desk/notes/x").unwrap().who, &[Program]);
+        assert_eq!(rule("POST", "/api/checkouts/chk_x/confirm").unwrap().who, &[Window], "a checkout joins its project by the person's word alone");
         // No row, no route: a path made up now, or a method a path doesn't take.
         assert!(rule("GET", "/api/brand-new").is_none());
         assert!(rule("PUT", "/api/graph").is_none());

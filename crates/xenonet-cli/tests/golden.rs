@@ -214,6 +214,8 @@ impl Service {
             ("XENONET_RUNTIME_DIR".into(), h(".xenonet-runtime")),
             ("XENONET_CLAUDE_USAGE".into(), "off".into()),
             ("XENONET_ACTORS".into(), "off".into()),
+            // The ids the store mints (checkouts, projects), the same each run.
+            ("XENONET_IDS_SEED".into(), "golden".into()),
             ("XENONET_SUPERVISOR_BIN".into(), h("no-supervisor")),
             ("XENONET_SUPERVISOR_DIR".into(), h(".xenonet-agents")),
             ("XENONET_APPLICATIONS_DIR".into(), h("Applications")),
@@ -638,6 +640,16 @@ fn golden_files(kind: &str) -> Vec<String> {
     files
 }
 
+// XENONET_GOLDEN_OUT=<dir> writes each answer, as it's compared, to
+// <dir>/<golden's file name>, to diff with the golden.
+fn out(file: &str, answer: &Value) {
+    if let Ok(dir) = std::env::var("XENONET_GOLDEN_OUT") {
+        let f = Path::new(&dir).join(file);
+        let _ = std::fs::create_dir_all(f.parent().unwrap());
+        let _ = std::fs::write(f, serde_json::to_string_pretty(answer).unwrap_or_default() + "\n");
+    }
+}
+
 #[test]
 fn the_service_and_the_command_answer_as_the_js_did() {
     let sequence = read_json(&tests_dir().join("golden").join("sequence.json"));
@@ -672,8 +684,9 @@ fn the_service_and_the_command_answer_as_the_js_did() {
                 refused = true;
                 continue;
             }
-            let Some((_, g)) = &golden else { continue };
+            let Some((file, g)) = &golden else { continue };
             let answer = normal().walk(&serde_json::json!({ "status": status, "body": body }), None);
+            out(file, &answer);
             differences(&serde_json::json!({ "status": g["status"], "body": g["body"] }), &answer, "", &mut d);
         } else {
             let args: Vec<String> = step["run"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().replace("{{home}}", s.home_text())).collect();
@@ -688,7 +701,11 @@ fn the_service_and_the_command_answer_as_the_js_did() {
                 d.push(format!("exit code {code}, the golden's {}", g["code"]));
             }
             match (g.get("json"), serde_json::from_str::<Value>(&stdout)) {
-                (Some(want), Ok(got)) => differences(want, &n.walk(&got, None), ".json", &mut d),
+                (Some(want), Ok(got)) => {
+                    let got = n.walk(&got, None);
+                    out(step["golden"].as_str().unwrap_or_default(), &serde_json::json!({ "json": got }));
+                    differences(want, &got, ".json", &mut d);
+                }
                 (Some(_), Err(_)) => d.push(format!("JSON in the golden, and the answer isn't: {:?}", stdout.chars().take(200).collect::<String>())),
                 (None, _) => differences(&g["stdout"], &Value::String(n.swap(&stdout)), ".stdout", &mut d),
             }

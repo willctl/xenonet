@@ -131,44 +131,29 @@ impl Mail {
     }
 }
 
-/// The git repository a folder belongs to: its working tree's top and the
-/// shared git dir, which is the same for every worktree of a repo. Each
-/// folder's answer is kept for a minute, 512 folders at most, and only a
-/// few git commands run at once.
+/// The repository a folder belongs to, as the version control the binary
+/// installed reads it (`xenonet_adapter::repo`): its working tree's top
+/// and the shared git folder, which is the same for every worktree of a
+/// repo. Each folder's answer is kept for a minute, 512 folders at most.
 #[derive(Default)]
 pub struct Repos {
     cache: Mutex<Vec<(String, f64, Option<Repo>)>>,
-    running: Mutex<usize>,
-    room: Condvar,
-    /// Each folder's repo key across the network (its remote), kept as
-    /// long as its repo; asked only while this machine is in a network or
-    /// for a handoff.
+    /// Each folder's repo key across the network (origin, normalized),
+    /// kept as long as its repo.
     remotes: Mutex<Vec<(String, f64, Option<String>)>>,
 }
 
 const REPO_TTL_MS: f64 = 60e3;
 const REPOS_KEPT: usize = 512;
-const GIT_AT_ONCE: usize = 8;
 
 impl Repos {
-    fn read(&self, cwd: &str) -> Option<Repo> {
-        {
-            let mut n = self.running.locked();
-            while *n >= GIT_AT_ONCE {
-                n = self.room.wait(n).unwrap_or_else(std::sync::PoisonError::into_inner);
-            }
-            *n += 1;
-        }
-        let args: Vec<String> =
-            ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir", "--abbrev-ref", "HEAD"].iter().map(ToString::to_string).collect();
-        let out = crate::exec::run(&crate::exec::Spec::new("git", &args, 3000));
-        *self.running.locked() -= 1;
-        self.room.notify_one();
-        out.ok().and_then(|stdout| xenonet_engine::engine::parse_repo(&stdout))
+    fn read(cwd: &str) -> Option<Repo> {
+        let ch = xenonet_adapter::repo::checkouts().find(std::path::Path::new(cwd))?;
+        Some(Repo { top: ch.top.to_string_lossy().into_owned(), common: ch.common.to_string_lossy().into_owned(), branch: ch.branch.filter(|_| !ch.detached) })
     }
 
-    /// A folder's repo key across the network: its repo's remote (origin,
-    /// else the first), normalized; None outside git or with no remote.
+    /// A folder's repo key across the network: its repo's origin,
+    /// normalized; None outside a repo or with no origin.
     pub fn remote_key_of(&self, cwd: &str) -> Option<String> {
         if cwd.is_empty() {
             return None;
@@ -177,11 +162,7 @@ impl Repos {
         if let Some((_, _, v)) = self.remotes.locked().iter().find(|(k, at, _)| k == cwd && now - at < REPO_TTL_MS) {
             return v.clone();
         }
-        let args: Vec<String> = ["-C", cwd, "config", "--get-regexp", r"^remote\..*\.url$"].iter().map(ToString::to_string).collect();
-        let v = crate::exec::run(&crate::exec::Spec::new("git", &args, 3000))
-            .ok()
-            .and_then(|out| xenonet_engine::network::first_remote(&out))
-            .and_then(|u| xenonet_engine::network::repo_key_of(&u));
+        let v = xenonet_adapter::repo::checkouts().find(std::path::Path::new(cwd)).and_then(|c| c.key);
         let mut c = self.remotes.locked();
         c.retain(|(k, at, _)| k != cwd && now - at < REPO_TTL_MS);
         c.push((cwd.to_string(), now, v.clone()));
@@ -198,7 +179,7 @@ impl Repos {
         if let Some((_, _, v)) = self.cache.locked().iter().find(|(k, at, _)| k == cwd && now - at < REPO_TTL_MS) {
             return v.clone();
         }
-        let v = self.read(cwd);
+        let v = Self::read(cwd);
         let mut c = self.cache.locked();
         // Read again, it goes to the end, the last to be let go.
         c.retain(|(k, _, _)| k != cwd);
