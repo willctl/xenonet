@@ -504,12 +504,13 @@ export async function main(argv = process.argv.slice(2)) {
       if (o.seedConsent) {
         say("--seed-consent: writing the same allowance into the demo XenoNet's own state, then starting it again");
         await stopXenoNet();
-        const file = path.join(xn.state, "delivery.json");
-        let previous = null;
-        try {
-          previous = JSON.parse(fs.readFileSync(file, "utf8"));
-        } catch {}
-        fs.writeFileSync(file, JSON.stringify(seededConsent(refused.map(([p]) => p.id), { previous }), null, 1), { mode: 0o600 });
+        // The consent goes into the stopped XenoNet's store, as `live
+        // allow` would have kept it.
+        const { DatabaseSync } = await import("node:sqlite");
+        const db = new DatabaseSync(path.join(xn.state, "xenonet.sqlite"));
+        const put = db.prepare("INSERT INTO consent (session, terms) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET terms = excluded.terms");
+        for (const [id, terms] of Object.entries(seededConsent(refused.map(([p]) => p.id)).consent)) put.run(id, JSON.stringify(terms));
+        db.close();
         await startXenoNet();
       } else {
         say("Consent is yours to give. In your own terminal, run:");

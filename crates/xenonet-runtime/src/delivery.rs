@@ -1,5 +1,5 @@
-//! Delivery: its policy (kept in delivery.json with its audit log beside
-//! it), the router that puts messages into live sessions (with its ways
+//! Delivery: its policy (kept in the store with its audit log), the
+//! router that puts messages into live sessions (with its ways
 //! in: a listening Stop hook, a Claude Code channel, OpenCode's server,
 //! tmux, a headless resume) and Claude Code's channels. The decisions are the engine's cores'; the
 //! files, commands, HTTP, timers and events are here, behind the cores'
@@ -55,28 +55,10 @@ impl Files for Fs {
 
 // ---------- the policy ----------
 
-/// The policy's host: the disk, and the engine's store, where each actor's
-/// grant keeps its sessions scope by its token's revocation id.
+/// The policy's host: the engine's tables, where each actor's grant keeps
+/// its sessions scope by its token's revocation id.
 struct Here<'a> {
     store: Option<&'a Shared>,
-}
-
-impl Files for Here<'_> {
-    fn read_file(&mut self, path: &str) -> Result<String, String> {
-        Fs.read_file(path)
-    }
-    fn mkdir_all(&mut self, dir: &str) -> Result<(), String> {
-        Fs.mkdir_all(dir)
-    }
-    fn write_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
-        Fs.write_file(path, body, mode)
-    }
-    fn append_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
-        Fs.append_file(path, body, mode)
-    }
-    fn rename(&mut self, from: &str, to: &str) -> Result<(), String> {
-        Fs.rename(from, to)
-    }
 }
 
 /// The token an actor's grant scopes are kept by: its own token's id, else
@@ -137,8 +119,9 @@ fn core_error(f: Fail) -> CoreError {
 }
 
 impl PolicySide {
-    pub fn new(file: Option<String>, audit_file: Option<String>, store: Option<Shared>) -> PolicySide {
-        let core = PolicyCore::load(&mut Here { store: store.as_ref() }, file, audit_file);
+    /// The policy, kept in `store`'s store; with none, in memory.
+    pub fn new(store: Option<Shared>) -> PolicySide {
+        let core = PolicyCore::load(store.as_ref().map(|s| s.0.db().clone()));
         PolicySide { core: Mutex::new(core), store }
     }
 
@@ -182,7 +165,7 @@ impl Policy for PolicyDriver {
         Ok(self.0.policy.consent())
     }
     fn read_audit(&self, n: f64) -> R<Value> {
-        Ok(Value::Array(self.0.policy.with(|p, h| p.read_audit(h, n))))
+        Ok(Value::Array(self.0.policy.with(|p, _| p.read_audit(n))))
     }
     fn set_paused(&self, paused: bool) -> R<Value> {
         self.0.policy.with(|p, h| p.set_paused(h, paused, "you")).map_err(core_error)
@@ -295,15 +278,16 @@ pub struct RouterSide {
 }
 
 impl RouterSide {
-    /// `state_dir` is where the runs' logs and records go.
-    pub fn new(demo: bool, listen_file: Option<String>, state_dir: &std::path::Path) -> RouterSide {
+    /// `state_dir` is where the runs' logs go, and `db` where their records
+    /// are kept.
+    pub fn new(demo: bool, listen_file: Option<String>, state_dir: &std::path::Path, db: Option<std::sync::Arc<xenonet_store::Db>>) -> RouterSide {
         RouterSide {
             core: RouterCore::default(),
             timers: Mutex::new(HashMap::new()),
             opencode: OpenCode::new(10e3),
             tmux: Tmux { off: cfg!(windows) },
             // Made-up sessions are never resumed.
-            resume: (!demo).then(|| Resumes { runner: Runner::new(Some(state_dir.to_path_buf())), settings: listen_file }),
+            resume: (!demo).then(|| Resumes { runner: Runner::new(Some(state_dir.to_path_buf()), db), settings: listen_file }),
         }
     }
 

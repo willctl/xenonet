@@ -8,11 +8,9 @@
 //! At most `CAP` runs go at once on a machine, one per session, and a turn
 //! runs `TURN_MS` at most. Each run's output goes to `runs/<id>.log` in
 //! XenoNet's state folder (`LOG_MAX` at most, kept a week), and its
-//! record (when it started, its exit, how long it took) to
-//! delivery-runs.json beside it, so a restart keeps counting the runs
-//! still under way.
-
-use serde_json::{json, Value};
+//! record (when it started, its exit, how long it took) to the store
+//! (`xenonet_store::delivery`), so a restart keeps counting the runs still
+//! under way.
 
 /// Runs at once on one machine.
 pub const CAP: usize = 4;
@@ -73,7 +71,7 @@ pub fn launch_with(program: &str, args: &[String], windows: bool, cmd: &str) -> 
     Ok(Launch { program: cmd.into(), args: vec!["/d".into(), "/s".into(), "/c".into(), format!("\"{line}\"")], verbatim: true })
 }
 
-/// One run, as delivery-runs.json keeps it.
+/// One run, as its record keeps it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Run {
     pub id: String,
@@ -91,56 +89,13 @@ pub struct Run {
     pub timed_out: bool,
 }
 
-fn opt(v: Option<f64>) -> Value {
-    v.map_or(Value::Null, xenonet_text::json::number)
-}
-
 impl Run {
-    /// As the file keeps it: `timedOut` only on a run the cap stopped.
-    pub fn to_json(&self) -> Value {
-        let mut v = json!({ "id": self.id, "key": self.key, "app": self.app, "pid": opt(self.pid), "at": xenonet_text::json::number(self.at), "end": opt(self.end), "exit": opt(self.exit), "ms": opt(self.ms) });
-        if self.timed_out {
-            v["timedOut"] = Value::Bool(true);
-        }
-        v
-    }
-
-    /// A record as the file has it; None for one without its id, key or
-    /// start.
-    pub fn of(v: &Value) -> Option<Run> {
-        let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
-        let n = |k: &str| v.get(k).and_then(Value::as_f64);
-        Some(Run {
-            id: s("id")?,
-            key: s("key")?,
-            app: s("app").unwrap_or_default(),
-            pid: n("pid"),
-            at: n("at")?,
-            end: n("end"),
-            exit: n("exit"),
-            ms: n("ms"),
-            timed_out: v.get("timedOut").and_then(Value::as_bool).unwrap_or(false),
-        })
-    }
-
     /// Whether it counts as under way: not ended, within its turn, and its
     /// process alive (one a XenoNet before a restart started is watched by
     /// no one, but still runs).
     pub fn live(&self, now: f64, alive: &mut dyn FnMut(f64) -> bool) -> bool {
         self.end.is_none() && now - self.at < TURN_MS && self.pid.is_some_and(&mut *alive)
     }
-}
-
-/// The records in delivery-runs.json's text: none for a file that isn't
-/// one.
-pub fn read(text: &str) -> Vec<Run> {
-    let Ok(v) = serde_json::from_str::<Value>(text) else { return Vec::new() };
-    v.get("runs").and_then(Value::as_array).map(|a| a.iter().filter_map(Run::of).collect()).unwrap_or_default()
-}
-
-/// delivery-runs.json's text for these records.
-pub fn write(runs: &[Run]) -> String {
-    json!({ "runs": runs.iter().map(Run::to_json).collect::<Vec<_>>() }).to_string()
 }
 
 /// Whether a run for `key` may start now: None, or why not.
@@ -239,13 +194,6 @@ mod tests {
         assert_eq!(admit_with(&runs[..2], &mine, "claude:g", now, CAP, &mut alive).as_deref(), Some("a run is under way for it"), "admitted, still starting");
         assert_eq!(admit_with(&runs[..2], &mine, "claude:h", now, CAP, &mut alive), None, "claude:a counted once");
         assert!(admit_with(&runs[..2], &s(&["claude:a", "claude:g", "claude:h"]), "claude:i", now, 3, &mut alive).is_some());
-        // What the file keeps comes back the same, a timed-out run too.
-        runs[1].timed_out = true;
-        assert_eq!(runs[1].to_json()["timedOut"], true);
-        assert!(runs[0].to_json().get("timedOut").is_none());
-        let back = read(&write(&runs));
-        assert_eq!(back, runs);
-        assert_eq!(read("not json"), []);
         let old = run("old", "claude:z", now - KEEP_MS, Some(now - KEEP_MS));
         assert_eq!(kept(&[old, runs[0].clone()], now), [runs[0].clone()]);
         let many: Vec<Run> = (0..250).map(|i| run(&format!("r{i}"), "claude:a", now - 1.0, Some(now))).collect();

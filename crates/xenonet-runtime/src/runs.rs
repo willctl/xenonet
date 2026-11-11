@@ -1,8 +1,8 @@
 //! The runner: headless turns of Claude Code and
 //! Codex that this machine starts, for a session it resumes. What runs,
 //! quoted how, and whether it may start now are xenonet-engine's
-//! (`delivery::runs`); the processes, their logs in `runs/` and the
-//! records in delivery-runs.json are here. Each run's processes are one
+//! (`delivery::runs`); the processes, their logs in `runs/` and their
+//! records, kept in the store, are here. Each run's processes are one
 //! `Tree` (a job object on Windows): a run counts until they've all ended,
 //! and its cap stops them all.
 
@@ -16,6 +16,8 @@ use xenonet_adapter::dirs::{self, CliEnv, Look, Unreadable};
 use xenonet_engine::delivery::runs::{self, Run};
 use xenonet_os::process::Tree;
 use xenonet_os::sync::Locked;
+use xenonet_store::delivery::RunRow;
+use xenonet_store::Db;
 use xenonet_text::time::now_ms;
 
 /// The disk as it is.
@@ -62,18 +64,6 @@ fn private(o: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
         o.mode(0o600);
     }
     o
-}
-
-/// A file only you can read, written whole: a temporary file, then a
-/// rename, so a reader never sees half of it.
-fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(d) = file.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    let tmp = file.with_extension("json.tmp");
-    let _ = std::fs::remove_file(&tmp);
-    private(std::fs::OpenOptions::new().write(true).create_new(true)).open(&tmp)?.write_all(text.as_bytes())?;
-    std::fs::rename(&tmp, file)
 }
 
 /// A run's log, up to `LOG_MAX`, then a line that says the rest isn't
@@ -152,12 +142,22 @@ struct State {
 }
 
 pub struct Runner {
-    /// XenoNet's state folder: the logs and the records' file are there.
-    /// None keeps both in memory.
+    /// XenoNet's state folder, where the logs go; None keeps them in
+    /// memory.
     dir: Option<PathBuf>,
+    /// The store the records are kept in; None keeps them in memory.
+    db: Option<Arc<Db>>,
     state: Mutex<State>,
-    /// Writes of the records' file, one at a time.
+    /// Writes of the records, one at a time.
     saving: Mutex<()>,
+}
+
+fn run_of(r: RunRow) -> Run {
+    Run { id: r.id, key: r.key, app: r.app, pid: r.pid, at: r.at, end: r.end, exit: r.exit, ms: r.ms, timed_out: r.timed_out }
+}
+
+fn row_of(r: &Run) -> RunRow {
+    RunRow { id: r.id.clone(), key: r.key.clone(), app: r.app.clone(), pid: r.pid, at: r.at, end: r.end, exit: r.exit, ms: r.ms, timed_out: r.timed_out }
 }
 
 fn alive(pid: f64) -> bool {
@@ -165,9 +165,9 @@ fn alive(pid: f64) -> bool {
 }
 
 impl Runner {
-    pub fn new(dir: Option<PathBuf>) -> Arc<Runner> {
-        let runs = dir.as_ref().and_then(|d| std::fs::read_to_string(d.join("delivery-runs.json")).ok()).map(|t| runs::read(&t)).unwrap_or_default();
-        Arc::new(Runner { dir, state: Mutex::new(State { runs, watching: Vec::new() }), saving: Mutex::new(()) })
+    pub fn new(dir: Option<PathBuf>, db: Option<Arc<Db>>) -> Arc<Runner> {
+        let runs = db.as_ref().and_then(|d| d.runs().ok()).map(|rows| rows.into_iter().map(run_of).collect()).unwrap_or_default();
+        Arc::new(Runner { dir, db, state: Mutex::new(State { runs, watching: Vec::new() }), saving: Mutex::new(()) })
     }
 
     /// Whether a run for `key` is under way: one this runner watches, or
@@ -183,13 +183,13 @@ impl Runner {
 
     fn save(&self) {
         let _one = self.saving.locked();
-        let text = {
+        let rows: Vec<RunRow> = {
             let mut s = self.state.locked();
             s.runs = runs::kept(&s.runs, now_ms());
-            runs::write(&s.runs)
+            s.runs.iter().map(row_of).collect()
         };
-        if let Some(d) = &self.dir {
-            let _ = write_private(&d.join("delivery-runs.json"), &text);
+        if let Some(db) = &self.db {
+            let _ = db.put_runs(&rows);
         }
     }
 
@@ -373,7 +373,8 @@ mod tests {
         let cwd = dir.to_string_lossy().into_owned();
         let found = dirs::find_cli("claude", &CliEnv { path: cwd.clone(), ..CliEnv::default() }, platform(), "/nowhere", &mut Disk, &mut xenonet_os::paths::can_run).unwrap();
         assert_eq!(found, bin.to_string_lossy());
-        let r = Runner::new(Some(dir.clone()));
+        let db = Arc::new(Db::memory().unwrap());
+        let r = Runner::new(Some(dir.clone()), Some(db.clone()));
         let env = [("PATH".to_string(), "/usr/bin:/bin".to_string()), ("GO".to_string(), go.to_string_lossy().into_owned())];
         let turn = |key| Turn { key, app: "claude", args: &[], cwd: &cwd, env: &env, text: "hello\n".into() };
         // Admitted is counted at once: a second message to the session, or
@@ -390,7 +391,7 @@ mod tests {
         let pid = r.start(turn("claude:a"), &found).unwrap();
         assert!(r.running("claude:a"));
         assert_eq!(r.admit("claude:a"), Err("a run is under way for it".into()));
-        assert!(Runner::new(Some(dir.clone())).running("claude:a"), "a restart counts it while it runs");
+        assert!(Runner::new(Some(dir.clone()), Some(db.clone())).running("claude:a"), "a restart counts it while it runs");
         // A run that doesn't start leaves no log, and its session free.
         assert_eq!(r.run(Turn { app: "nothing-here", ..turn("claude:x") }, "/nowhere"), Err("nothing-here isn't installed here".into()));
         assert!(!r.running("claude:x"));
@@ -409,7 +410,7 @@ mod tests {
         assert!(rec.ms.is_some_and(|ms| ms >= 0.0));
         let log = std::fs::read_to_string(dir.join("runs").join(format!("{}.log", rec.id))).unwrap();
         assert!(log.contains("out: hello") && log.contains("err"), "{log}");
-        let again = Runner::new(Some(dir.clone()));
+        let again = Runner::new(Some(dir.clone()), Some(db));
         assert_eq!(again.list(), r.list(), "the records are read back");
         let _ = std::fs::remove_dir_all(&dir);
     }

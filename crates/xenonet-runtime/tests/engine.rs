@@ -227,12 +227,12 @@ async fn delivery_records_a_message_handed_to_a_listening_hook_and_the_pause_swi
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert_eq!((recent[0]["agent"].clone(), recent[0]["state"].clone(), recent[0]["how"].clone()), (json!(C), json!("live"), json!("listen")), "{recent}");
-    // Paused: kept in delivery.json, and a session's message refused.
+    // Paused: kept in the store, and a session's message refused.
     use xenonet_api::cores::{Policy, Router};
     policy.set_paused(true).unwrap();
     assert!(policy.paused().unwrap());
-    let kept = std::fs::read_to_string(dir.join("state").join("delivery.json")).unwrap();
-    assert!(kept.contains("\"paused\": true"), "{kept}");
+    let kept = w.store.0.db().delivery_policy().unwrap().expect("the policy, kept");
+    assert_eq!(kept["paused"], json!(true), "{kept:?}");
     let held = e.send(A, json!({ "to": C, "text": "while paused" }), None).await.unwrap_err();
     assert_eq!((held.status, held.code.as_deref()), (Some(429), Some("paused")));
     assert_eq!(policy.read_audit(10.0).unwrap().as_array().unwrap().last().unwrap()["kind"], "refused");

@@ -150,6 +150,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
     let (demo, state_dir) = (setup.demo, setup.state_dir.clone());
     let state_dir = Path::new(&state_dir);
     let policy_store = store.clone();
+    let runs_db = setup.db.clone();
     let w = Arc::new(Runtime {
         setup,
         env: env.clone(),
@@ -161,12 +162,8 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         engine: xenonet_engine::engine::Engine::default(),
         mail: engine::Mail::default(),
         repos: engine::Repos::default(),
-        policy: delivery::PolicySide::new(
-            Some(state_dir.join("delivery.json").to_string_lossy().into_owned()),
-            Some(state_dir.join("delivery-audit.jsonl").to_string_lossy().into_owned()),
-            Some(policy_store),
-        ),
-        router: delivery::RouterSide::new(demo, listen_file, state_dir),
+        policy: delivery::PolicySide::new(Some(policy_store)),
+        router: delivery::RouterSide::new(demo, listen_file, state_dir, runs_db),
         channels: delivery::ChannelSide::default(),
         actors,
         registration,

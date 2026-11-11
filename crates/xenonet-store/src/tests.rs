@@ -207,3 +207,33 @@ fn what_you_saved_keeps_the_order_it_was_saved_in() {
     assert_eq!(ids["pins"]["claude:x"], serde_json::json!({ "identity": "git:a", "at": 5 }));
     assert_eq!(ids["signins"]["an-app"][0]["to"], 2);
 }
+
+#[test]
+fn delivery_keeps_its_policy_runs_and_delegations_across_a_restart() {
+    use delivery::{Delegated, RunRow};
+    let dir = folder("delivery");
+    {
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.delivery_policy().unwrap(), None, "nothing kept yet");
+        let data = serde_json::json!({ "paused": true, "consent": { "claude:a": { "until": 5 } } });
+        db.put_delivery_policy(data.as_object().unwrap()).unwrap();
+        db.put_wake_budget(&[("w:actor:wren".into(), vec![1.0, 2.0])]).unwrap();
+        db.put_runs(&[RunRow { id: "run_1".into(), key: "claude:a".into(), app: "claude".into(), pid: Some(7.0), at: 1.0, end: None, exit: None, ms: None, timed_out: false }])
+            .unwrap();
+        db.put_delegated("claude:a", &Delegated { cwd: "/p".into(), from: Some("studio".into()), at: 10.0 }, 100.0).unwrap();
+        db.put_delegated("claude:b", &Delegated { cwd: "/q".into(), from: None, at: 500.0 }, 100.0).unwrap();
+        for i in 0..delivery::AUDIT_LINES + 2 {
+            db.add_delivery_audit(&serde_json::json!({ "i": i })).unwrap();
+        }
+    }
+    let db = Db::open(&dir).unwrap();
+    let kept = db.delivery_policy().unwrap().unwrap();
+    assert_eq!((kept["paused"].clone(), kept["consent"]["claude:a"]["until"].clone()), (serde_json::json!(true), serde_json::json!(5)));
+    assert_eq!(db.wake_budget().unwrap(), [("w:actor:wren".to_string(), vec![1.0, 2.0])]);
+    assert_eq!(db.runs().unwrap()[0].pid, Some(7.0));
+    assert_eq!(db.delegated("claude:a").unwrap(), None, "a delegation older than what's kept goes");
+    assert_eq!(db.delegated("claude:b").unwrap().map(|d| d.cwd), Some("/q".into()));
+    let audit = db.delivery_audit().unwrap();
+    assert_eq!((audit.len() as i64, audit[0]["i"].clone()), (delivery::AUDIT_LINES, serde_json::json!(2)), "the oldest lines go");
+    let _ = std::fs::remove_dir_all(&dir);
+}

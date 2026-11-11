@@ -13,25 +13,24 @@
 //! store's grant scopes, through `Host`), never in its token, so it goes
 //! with the token.
 //!
-//! The policy keeps the rest of its data in its file (delivery.json) and its audit log
-//! beside it, through `Host`. The wake budget's counts go in
-//! delivery-wakes.json beside the policy's file, so a restart doesn't hand
-//! every sender a fresh budget.
+//! The policy keeps the rest of its data, its audit log and the wake
+//! budget's counts in the store (`xenonet_store::delivery`), so a restart
+//! doesn't hand every sender a fresh budget; with no store, it keeps them
+//! in memory.
 
 use super::selector::Selector;
-use super::{number_text, template, text_of, truthy, Files};
+use super::{number_text, template, text_of, truthy};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use xenonet_os::nodepath::NATIVE;
+use std::sync::Arc;
 use xenonet_os::sync::Locked;
-use xenonet_text::json::stringify;
+use xenonet_store::Db;
 
 pub const YOU: &str = xenonet_model::ids::YOU;
 
-/// The policy's clock, the files it keeps, and the actors' grants' sessions
-/// scopes.
-pub trait Host: Files {
+/// The policy's clock, and the actors' grants' sessions scopes.
+pub trait Host {
     /// The time, in epoch ms.
     fn now(&mut self) -> f64;
     /// The sessions scope of this machine's actor `actor`'s grant, `{
@@ -305,13 +304,12 @@ pub struct Policy {
     hits: HashMap<String, Vec<f64>>,
     /// dedupe key → when.
     recent: Vec<(String, f64)>,
-    /// The audit's lines, when there's no file for them.
+    /// The audit's lines, when there's no store for them.
     pub memory_audit: Vec<Value>,
     pub limits: Limits,
-    /// delivery.json, and the audit log beside it; None keeps everything
-    /// in memory.
-    file: Option<String>,
-    audit_file: Option<String>,
+    /// Where the data, the audit log and the wake budget are kept; None
+    /// keeps everything in memory.
+    db: Option<Arc<Db>>,
 }
 
 impl Default for Policy {
@@ -319,73 +317,52 @@ impl Default for Policy {
         let mut data = Map::new();
         data.insert("paused".into(), Value::Bool(false));
         data.insert("consent".into(), json!({}));
-        Policy { data, hits: HashMap::new(), recent: Vec::new(), memory_audit: Vec::new(), limits: Limits::default(), file: None, audit_file: None }
+        Policy { data, hits: HashMap::new(), recent: Vec::new(), memory_audit: Vec::new(), limits: Limits::default(), db: None }
     }
 }
 
 impl Policy {
-    /// The policy, with what its file keeps.
-    pub fn load(h: &mut dyn Host, file: Option<String>, audit_file: Option<String>) -> Policy {
-        let mut p = Policy { file, audit_file, ..Policy::default() };
-        if let Some(file) = p.file.clone().filter(|f| !f.is_empty()) {
-            if let Ok(text) = h.read_file(&file) {
-                if let Ok(v) = xenonet_text::json::parse(&text) {
-                    for (k, v) in spread(&v) {
-                        p.data.insert(k, v);
-                    }
+    /// The policy, with what the store keeps of it.
+    pub fn load(db: Option<Arc<Db>>) -> Policy {
+        let mut p = Policy { db, ..Policy::default() };
+        if let Some(db) = p.db.clone() {
+            if let Ok(Some(data)) = db.delivery_policy() {
+                for (k, v) in spread(&Value::Object(data)) {
+                    p.data.insert(k, v);
                 }
             }
             // The wake budget's counts, so a restart doesn't hand every
             // sender and session a fresh budget.
-            if let Ok(text) = h.read_file(&Self::wakes_file(&file)) {
-                if let Ok(Value::Object(m)) = xenonet_text::json::parse(&text) {
-                    for (k, times) in m {
-                        if let (true, Value::Array(times)) = (k.starts_with("w:") || k.starts_with("wt:"), times) {
-                            p.hits.insert(k, times.iter().filter_map(Value::as_f64).collect());
-                        }
-                    }
+            for (k, times) in db.wake_budget().unwrap_or_default() {
+                if k.starts_with("w:") || k.starts_with("wt:") {
+                    p.hits.insert(k, times);
                 }
             }
         }
         p
     }
 
-    /// delivery-wakes.json, beside the policy's file.
-    fn wakes_file(file: &str) -> String {
-        NATIVE.join(&[&NATIVE.dirname(file), "delivery-wakes.json"])
-    }
-
-    fn file(&self) -> Option<&str> {
-        self.file.as_deref().filter(|f| !f.is_empty())
-    }
-
     /// The wakes of the last hour, the only ones the budget counts.
     fn save_wakes(&self, h: &mut dyn Host) {
-        let Some(file) = self.file() else { return };
+        let Some(db) = &self.db else { return };
         let t = h.now();
-        let mut keep = Map::new();
+        let mut keep = Vec::new();
         for (k, times) in &self.hits {
             if !(k.starts_with("w:") || k.starts_with("wt:")) {
                 continue;
             }
-            let live: Vec<Value> = times.iter().filter(|x| t - **x < 3600e3).map(|x| xenonet_text::json::number(*x)).collect();
+            let live: Vec<f64> = times.iter().copied().filter(|x| t - *x < 3600e3).collect();
             if !live.is_empty() {
-                keep.insert(k.clone(), Value::Array(live));
+                keep.push((k.clone(), live));
             }
         }
-        let wakes = Self::wakes_file(file);
-        let tmp = format!("{wakes}.tmp");
-        // A budget that can't be written is still kept in memory.
-        let _ = h.mkdir_all(&NATIVE.dirname(&wakes)).and_then(|()| h.write_file(&tmp, &stringify(&Value::Object(keep), 0), Some(0o600))).and_then(|()| h.rename(&tmp, &wakes));
+        // A budget that can't be kept is still kept in memory.
+        let _ = db.put_wake_budget(&keep);
     }
 
-    fn save(&self, h: &mut dyn Host) -> Result<()> {
-        let Some(file) = self.file() else { return Ok(()) };
-        h.mkdir_all(&NATIVE.dirname(file))?;
-        let tmp = format!("{file}.tmp");
-        h.write_file(&tmp, &stringify(&Value::Object(self.data.clone()), 1), Some(0o600))?;
-        h.rename(&tmp, file)?;
-        Ok(())
+    fn save(&self) -> Result<()> {
+        let Some(db) = &self.db else { return Ok(()) };
+        db.put_delivery_policy(&self.data).map_err(|e| Fail::Error(e.message))
     }
 
     fn table(&mut self, k: &str) -> Result<&mut Map<String, Value>> {
@@ -411,7 +388,7 @@ impl Policy {
     /// { paused }.
     pub fn set_paused(&mut self, h: &mut dyn Host, on: bool, by: &str) -> Result<Value> {
         self.data.insert("paused".into(), Value::Bool(on));
-        self.save(h)?;
+        self.save()?;
         self.audit(h, json!({ "kind": if on { "paused" } else { "resumed" }, "by": by }))?;
         Ok(json!({ "paused": self.paused() }))
     }
@@ -604,7 +581,7 @@ impl Policy {
         let at = h.now();
         let consent = json!({ "until": xenonet_text::json::number(until), "remote": remote, "at": xenonet_text::json::number(at) });
         self.table("consent")?.insert(session.to_string(), consent.clone());
-        self.save(h)?;
+        self.save()?;
         self.audit(h, json!({ "kind": "consent", "session": session, "until": xenonet_text::json::number(until), "remote": remote, "by": by }))?;
         Ok(consent)
     }
@@ -613,7 +590,7 @@ impl Policy {
         if let Some(Value::Object(m)) = self.data.get_mut("consent") {
             m.shift_remove(session);
         }
-        self.save(h)?;
+        self.save()?;
         self.audit(h, json!({ "kind": "consent-withdrawn", "session": session, "by": by }))?;
         Ok(())
     }
@@ -671,10 +648,9 @@ impl Policy {
             }
         }
         let line = Value::Object(line);
-        match self.audit_file.as_deref().filter(|f| !f.is_empty()) {
-            Some(file) => {
-                let text = format!("{}\n", stringify(&line, 0));
-                let _ = h.mkdir_all(&NATIVE.dirname(file)).and_then(|()| h.append_file(file, &text, Some(0o600)));
+        match &self.db {
+            Some(db) => {
+                let _ = db.add_delivery_audit(&line);
             }
             None => self.memory_audit.push(line.clone()),
         }
@@ -682,7 +658,7 @@ impl Policy {
     }
 
     /// The last `limit` lines of the audit.
-    pub fn read_audit(&self, h: &mut dyn Host, limit: f64) -> Vec<Value> {
+    pub fn read_audit(&self, limit: f64) -> Vec<Value> {
         // slice(-limit), as JS takes the number.
         let tail = |n: usize| -> usize {
             let l = if limit.is_nan() { 0.0 } else { limit.trunc() };
@@ -695,23 +671,12 @@ impl Policy {
             }
             n.saturating_sub(l.min(n as f64) as usize)
         };
-        let Some(file) = self.audit_file.as_deref().filter(|f| !f.is_empty()) else {
-            let from = tail(self.memory_audit.len());
-            return self.memory_audit[from..].to_vec();
+        let lines = match &self.db {
+            Some(db) => db.delivery_audit().unwrap_or_default(),
+            None => self.memory_audit.clone(),
         };
-        let Ok(text) = h.read_file(file) else {
-            return Vec::new();
-        };
-        let lines: Vec<&str> = xenonet_text::text::trim(&text).split('\n').collect();
         let from = tail(lines.len());
-        let mut out = Vec::new();
-        for l in &lines[from..] {
-            match xenonet_text::json::parse(l) {
-                Ok(v) => out.push(v),
-                Err(_) => return Vec::new(),
-            }
-        }
-        out
+        lines[from..].to_vec()
     }
 }
 
@@ -789,30 +754,12 @@ mod tests {
         assert!(f.ends_with(")\nhi"));
     }
 
-    /// The policy's clock, with nothing kept on disk, and the grants'
-    /// sessions scopes in memory (wren, muse and kite have grants).
+    /// The policy's clock, with nothing kept, and the grants' sessions
+    /// scopes in memory (wren, muse and kite have grants).
     struct Clock(f64, std::collections::BTreeMap<String, Value>);
 
     fn clock(t: f64) -> Clock {
         Clock(t, std::collections::BTreeMap::new())
-    }
-
-    impl Files for Clock {
-        fn read_file(&mut self, path: &str) -> std::result::Result<String, String> {
-            Err(format!("no {path} here"))
-        }
-        fn mkdir_all(&mut self, dir: &str) -> std::result::Result<(), String> {
-            Err(format!("no {dir} here"))
-        }
-        fn write_file(&mut self, path: &str, _: &str, _: Option<u32>) -> std::result::Result<(), String> {
-            Err(format!("no {path} here"))
-        }
-        fn append_file(&mut self, path: &str, _: &str, _: Option<u32>) -> std::result::Result<(), String> {
-            Err(format!("no {path} here"))
-        }
-        fn rename(&mut self, from: &str, _: &str) -> std::result::Result<(), String> {
-            Err(format!("no {from} here"))
-        }
     }
 
     impl Host for Clock {
@@ -849,9 +796,21 @@ mod tests {
     }
 
     #[test]
+    fn the_pause_consent_and_audit_are_kept_in_the_store() {
+        let db = Arc::new(Db::memory().unwrap());
+        let mut c = clock(1_000_000.0);
+        let mut p = Policy::load(Some(db.clone()));
+        p.set_paused(&mut c, true, "you").unwrap();
+        let again = Policy::load(Some(db));
+        assert!(again.paused(), "a restart keeps it");
+        assert_eq!(again.read_audit(5.0).last().map(|l| l["kind"].clone()), Some(json!("paused")));
+        assert!(again.memory_audit.is_empty(), "the store has the audit, not memory");
+    }
+
+    #[test]
     fn an_actor_sees_and_reaches_nothing_until_you_grant_it_a_scope() {
         let mut c = clock(1_000_000.0);
-        let mut p = Policy::load(&mut c, None, None);
+        let mut p = Policy::load(None);
         let (wren, muse, you) = ("actor:wren", "actor:muse", "actor:you");
         let atlas = facts("claude:a", "claude", "atlas", &[]);
         let ledger = facts("codex:b", "codex", "ledger", &[]);
@@ -914,7 +873,7 @@ mod tests {
             assert_eq!(actor_of(not), None, "{not}");
         }
         let mut c = clock(1_000_000.0);
-        let mut p = Policy::load(&mut c, None, None);
+        let mut p = Policy::load(None);
         let (wren, you) = ("actor:wren", "you");
         let muse = |machine: &str| json!({ "id": format!("@{machine}:actor:muse"), "app": "actor", "machine": machine });
         assert!(!p.visible(&mut c, wren, &muse("studio")), "default deny");
@@ -944,7 +903,7 @@ mod tests {
     #[test]
     fn a_message_stops_at_the_pause_the_fan_out_the_depth_and_the_rates() {
         let mut c = clock(1_000_000.0);
-        let mut p = Policy::load(&mut c, None, None);
+        let mut p = Policy::load(None);
         let (a, b, you) = ("claude:a", "codex:b", "actor:you");
         let to_b = [json!(b)];
         let text = |i: usize| format!("message {i}");
@@ -992,7 +951,7 @@ mod tests {
     #[test]
     fn a_wake_needs_consent_and_fits_a_budget() {
         let mut c = clock(1_000_000.0);
-        let mut p = Policy::load(&mut c, None, None);
+        let mut p = Policy::load(None);
         let (a, b, you) = ("claude:a", "codex:b", "actor:you");
         assert!(!p.consented(&mut c, b, false));
         p.allow(&mut c, b, false, Some(60e3), you).unwrap();

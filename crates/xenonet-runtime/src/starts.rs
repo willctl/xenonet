@@ -37,6 +37,7 @@ use xenonet_engine::delivery::starts::{self, Request, TARGET};
 use xenonet_model::ids::YOU;
 use xenonet_model::ops::{Kind as FrameKind, To};
 use xenonet_os::sync::Locked;
+use xenonet_store::delivery::Delegated;
 use xenonet_text::time::now_ms;
 
 /// How long Claude Code waits on an MCP tool: a minute past the permission
@@ -64,13 +65,6 @@ pub struct StartSide {
     /// Copies of sessions XenoNet forked to answer a message, each with the
     /// session it came from: the last 200.
     forks: Mutex<Vec<(String, String)>>,
-    /// Sessions started under the person's delegation, each with the
-    /// folder it started in, what its permission prompts are judged against
-    /// (`xenonet_engine::delivery::delegation`), and the machine it was
-    /// started from (None for this one), which the delegation must name.
-    /// Kept in memory: after a restart its prompts go to your console, as
-    /// any run's do.
-    delegations: Mutex<HashMap<String, (String, Option<String>)>>,
 }
 
 /// One turn: of XENONET_RUNS_BIN's program when it names one (the tests'
@@ -270,7 +264,12 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     };
     w.starts.history.locked().push((now, bucket));
     if let (Some(session), Some(_)) = (&session, &delegation) {
-        w.starts.delegations.locked().insert(session.clone(), (cwd.clone(), from.map(str::to_string)));
+        // Kept in the store, so its prompts are judged against the
+        // delegation after a restart too; a week on, its runs are over.
+        let d = Delegated { cwd: cwd.clone(), from: from.map(str::to_string), at: now };
+        if let Err(e) = w.store.0.db().put_delegated(session, &d, xenonet_engine::delivery::runs::KEEP_MS) {
+            w.log("warn", "start.delegated", &format!("{session}'s delegation couldn't be kept: {}", e.message));
+        }
     }
     let folder = xenonet_os::paths::tilde(&cwd, &w.setup.home);
     w.log(
@@ -338,7 +337,7 @@ pub fn sign_in(w: &Runtime, action: &str, pasted: &str) -> Result<Value, (u16, S
 /// it was, and the machine it was started from (None for this one): what
 /// a delegation covers is judged against them.
 pub fn delegated(w: &Runtime, session: &str) -> Option<(String, Option<String>)> {
-    w.starts.delegations.locked().get(session).cloned()
+    w.store.0.db().delegated(session).ok().flatten().map(|d| (d.cwd, d.from))
 }
 
 /// The forks XenoNet made, newest last: each copy and the session it was
