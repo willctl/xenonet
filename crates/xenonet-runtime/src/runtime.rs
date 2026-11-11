@@ -54,6 +54,8 @@ pub struct Runtime {
     pub env: WireEnv,
     pub rt: tokio::runtime::Handle,
     pub store: Shared,
+    /// The same tables, as the engine keeps what it knows in them.
+    pub tables: Arc<crate::store::Store>,
     pub map: Map,
     pub sys: Arc<System>,
     pub checks: Arc<Checks>,

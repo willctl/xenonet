@@ -30,6 +30,7 @@ use crate::delivery::selector::{format_selector, Selector};
 use crate::host::{Collaborators, Repo, StatusSet};
 use crate::index::SessionIndex;
 use crate::network::{self, network_host, NetHandle};
+use crate::store::Kept;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -38,8 +39,6 @@ use xenonet_adapter::products::product_of;
 use xenonet_model::ids::YOU;
 use xenonet_os::nodepath::{style_of, NATIVE};
 use xenonet_os::sync::Locked;
-use xenonet_store::engine::{row_json, EngineStore};
-use xenonet_store::sql::{self, Row};
 use xenonet_text::json::number;
 use xenonet_text::text::{display, to_number, trim, truthy};
 
@@ -67,12 +66,6 @@ pub enum Fail {
 impl From<Thrown> for Fail {
     fn from(t: Thrown) -> Self {
         Fail::Thrown(t)
-    }
-}
-
-impl From<sql::SqlError> for Fail {
-    fn from(e: sql::SqlError) -> Self {
-        Fail::Thrown(e.into())
     }
 }
 
@@ -108,12 +101,6 @@ impl Thrown {
 impl std::fmt::Display for Thrown {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
-    }
-}
-
-impl From<sql::SqlError> for Thrown {
-    fn from(e: sql::SqlError) -> Self {
-        Thrown { message: e.message().to_string(), code: e.code().map(str::to_string) }
     }
 }
 
@@ -228,12 +215,8 @@ fn put_some(v: &mut Value, k: &str, x: Option<Value>) {
 }
 
 /// A row of the store, or null for none.
-fn row(r: sql::Result<Option<Row>>) -> Result<Value> {
-    Ok(r?.as_ref().map_or(Value::Null, row_json))
-}
-
-fn rows(r: sql::Result<Vec<Row>>) -> Result<Vec<Value>> {
-    Ok(r?.iter().map(row_json).collect())
+fn row(r: Kept<Option<Value>>) -> Result<Value> {
+    Ok(r?.unwrap_or(Value::Null))
 }
 
 // ---------- ids, paths and words ----------
@@ -764,7 +747,8 @@ impl Engine {
     }
 
     fn claims_of(c: &Collaborators<'_>, id: &str, now: f64) -> Result<Vec<Value>> {
-        Ok(rows(c.store.with(|s| s.claims(now)))?
+        Ok(c.store
+            .claims(now)?
             .into_iter()
             .filter(|cl| as_str(get(cl, "agent")) == Some(id))
             .map(|cl| obj_some(vec![("pattern", get(&cl, "pattern").cloned()), ("note", get(&cl, "note").cloned()), ("until", get(&cl, "expires_at").cloned())]))
@@ -837,7 +821,7 @@ impl Engine {
         let now = c.clock.now();
         let node = c.map.node(id)?.unwrap_or(Value::Null);
         let live = c.map.live(id, now)?.unwrap_or(Value::Null);
-        let contact = row(c.store.with(|s| s.contact(id)))?;
+        let contact = row(c.store.contact(id))?;
         let describe = !truthy(Some(&node)) && !truthy(Some(&live)) && c.delivery.is_some();
         Ok(Pending { id: id.to_string(), now, node, live, contact, describe })
     }
@@ -880,7 +864,7 @@ impl Engine {
             _ if truthy(Some(&cwd)) => string(format!("{app} in {}", NATIVE.basename(&text(Some(&cwd)), None))),
             _ => string(short(&id)),
         };
-        let focus = or_null(get(&row(c.store.with(|s| s.focus(id.as_str())))?, "text"));
+        let focus = or_null(get(&row(c.store.focus(id.as_str()))?, "text"));
         let claims = Self::claims_of(c, &id, now)?;
         let reachable = (truthy(Some(&contact)) && !truthy(ended_at) && now - num(get(&contact, "at")) < REACHABLE_MS) || c.delivery.is_some_and(|d| d.reaches(&id));
         let mut v = obj(vec![
@@ -1021,7 +1005,7 @@ impl Engine {
                 others.push(a);
             }
         }
-        let unread = c.store.with(|s| s.unseen(me))?.len();
+        let unread = c.store.unseen(me)?.len();
         let in_repo = others.iter().filter(|a| together(a, &me_view)).count();
         let mut out =
             obj(vec![("you", me_view.clone()), ("unread", number(unread as f64)), ("peersInRepo", number(in_repo as f64)), ("peersOnMachine", number(others.len() as f64))]);
@@ -1197,7 +1181,7 @@ impl Engine {
         let replying = truthy(Some(&reply_to));
         let mut to = or_null(get(ask, "to"));
         if !truthy(Some(&to)) && replying {
-            let m = row(c.store.with(|s| s.message(num(Some(&reply_to)))))?;
+            let m = row(c.store.message(num(Some(&reply_to))))?;
             to = reply_target(me, &m);
         }
         if !truthy(Some(&to)) {
@@ -1269,14 +1253,14 @@ impl Engine {
         let mut hops = 0.0;
         if let Some(policy) = c.policy {
             let mut depth: f64 = 0.0;
-            let mut r = if replying { row(c.store.with(|s| s.message(num(Some(&reply_to)))))? } else { Value::Null };
+            let mut r = if replying { row(c.store.message(num(Some(&reply_to))))? } else { Value::Null };
             // A reply to a message from another host counts the hops it
             // had come there too.
             let came = if networked { hops_of(&r) } else { None };
             while truthy(Some(&r)) && depth < 50.0 {
                 depth += 1.0;
                 let next = or_null(get(&r, "reply_to"));
-                r = if truthy(Some(&next)) { row(c.store.with(|s| s.message(num(Some(&next)))))? } else { Value::Null };
+                r = if truthy(Some(&next)) { row(c.store.message(num(Some(&next))))? } else { Value::Null };
             }
             if let Some(h) = came {
                 depth = depth.max(h + 1.0);
@@ -1310,7 +1294,7 @@ impl Engine {
             ("recipients", Value::Array(ids.clone())),
             ("envelope", envelope.clone()),
         ]);
-        let id = c.store.with(|s| s.send(&stored, now))?;
+        let id = c.store.send(&stored, now)?;
         // What goes to other hosts goes out now, as sent, and waits in the
         // outbox for its stored receipt.
         let far: Vec<Value> = recipients.iter().filter(|r| truthy(get(r, "host"))).cloned().collect();
@@ -1397,9 +1381,9 @@ impl Engine {
             return Ok(());
         }
         let since = c.clock.now() - RECENT_MS;
-        for m in rows(c.store.with(|s| s.scoped(&text(Some(&key)), since)))? {
+        for m in c.store.scoped(&text(Some(&key)), since)? {
             if as_str(get(&m, "sender")) != Some(me) {
-                c.store.with(|s| s.deliver(num(Some(&m["id"])), me))?;
+                c.store.deliver(num(Some(&m["id"])), me)?;
             }
         }
         Ok(())
@@ -1412,11 +1396,11 @@ impl Engine {
         if !truthy(Some(reply_to)) {
             return Ok(Value::Null);
         }
-        let m = row(c.store.with(|s| s.message(num(Some(reply_to)))))?;
+        let m = row(c.store.message(num(Some(reply_to))))?;
         if !truthy(Some(&m)) || as_str(get(&m, "sender")) == Some(me) {
             return Ok(Value::Null);
         }
-        let sent_to_me = rows(c.store.with(|s| s.deliveries(num(Some(&m["id"])))))?.iter().any(|d| as_str(get(d, "agent")) == Some(me));
+        let sent_to_me = c.store.deliveries(num(Some(&m["id"])))?.iter().any(|d| as_str(get(d, "agent")) == Some(me));
         Ok(if sent_to_me { or_null(get(&m, "sender")) } else { Value::Null })
     }
 
@@ -1518,7 +1502,7 @@ impl Engine {
     /// that long for one to arrive first.
     pub fn inbox(&self, c: &Collaborators<'_>, me: &str, wait_ms: f64) -> Result<Vec<Value>> {
         self.catch_up(c, me)?;
-        if c.store.with(|s| s.unseen(me))?.is_empty() && wait_ms > 0.0 {
+        if c.store.unseen(me)?.is_empty() && wait_ms > 0.0 {
             c.waits.wait(me, wait_ms.min(120e3));
         }
         self.take(c, me, true)
@@ -1550,7 +1534,7 @@ impl Engine {
                 return Ok(None);
             }
             self.catch_up(c, me)?;
-            let waiting: Vec<Value> = rows(c.store.with(|s| s.unseen(me)))?.into_iter().filter(|m| !self.held(me, m)).collect();
+            let waiting: Vec<Value> = c.store.unseen(me)?.into_iter().filter(|m| !self.held(me, m)).collect();
             if let Some(first) = waiting.first() {
                 let ok = c.delivery.is_none_or(|d| d.wake(&text(get(first, "sender")), me).ok());
                 if !ok {
@@ -1577,11 +1561,11 @@ impl Engine {
     /// the session asked (its inbox), so what it holds comes too.
     fn take(&self, c: &Collaborators<'_>, me: &str, asked: bool) -> Result<Vec<Value>> {
         self.catch_up(c, me)?;
-        let waiting: Vec<Value> = rows(c.store.with(|s| s.unseen(me)))?.into_iter().filter(|m| asked || !self.held(me, m)).collect();
+        let waiting: Vec<Value> = c.store.unseen(me)?.into_iter().filter(|m| asked || !self.held(me, m)).collect();
         let ids: Vec<Value> = waiting.iter().map(|m| or_null(get(m, "id"))).collect();
         let now = c.clock.now();
         let seen: Vec<f64> = ids.iter().map(|id| num(Some(id))).collect();
-        c.store.with(|s| s.mark_seen(me, &seen, now))?;
+        c.store.mark_seen(me, &seen, now)?;
         if !waiting.is_empty() {
             c.events.emit("seen", obj(vec![("agent", string(me)), ("ids", Value::Array(ids))]));
         }
@@ -1656,7 +1640,7 @@ impl Engine {
         }
         for p in &abs {
             let t = c.clock.now();
-            c.store.with(|s| s.claim(me, p.as_str(), &note, until, t))?;
+            c.store.claim(me, p.as_str(), &note, until, t)?;
         }
         // Claiming what someone else holds is allowed; say so.
         let plain: Vec<String> = abs.iter().filter(|p| !p.contains('*') && !p.ends_with('/')).cloned().collect();
@@ -1698,7 +1682,7 @@ impl Engine {
             }
         }
         let now = c.clock.now();
-        let mut held: Vec<String> = rows(c.store.with(|s| s.claims(now)))?.iter().filter(|cl| as_str(get(cl, "agent")) == Some(me)).map(|cl| text(get(cl, "pattern"))).collect();
+        let mut held: Vec<String> = c.store.claims(now)?.iter().filter(|cl| as_str(get(cl, "agent")) == Some(me)).map(|cl| text(get(cl, "pattern"))).collect();
         for p in abs {
             if !held.contains(p) {
                 held.push(p.clone());
@@ -1718,9 +1702,9 @@ impl Engine {
             p if !truthy(Some(p)) => None,
             Value::Array(a) => Some(a.iter().map(|p| text(Some(p))).collect()),
             Value::String(s) => Some(s.chars().map(String::from).collect()),
-            _ => return Err(sql::SqlError::Other("that isn't a list".into()).into()),
+            _ => return Err(Thrown::new("that isn't a list").into()),
         };
-        let n = c.store.with(|s| s.release(me, patterns.as_deref()))?;
+        let n = c.store.release(me, patterns.as_deref())?;
         Ok(obj(vec![("released", number(n))]))
     }
 
@@ -1735,8 +1719,8 @@ impl Engine {
             };
         }
         let now = c.clock.now();
-        c.store.with(|s| s.set_focus(me, &clip_text(&t, 200), now))?;
-        let focus = row(c.store.with(|s| s.focus(me)))?;
+        c.store.set_focus(me, &clip_text(&t, 200), now)?;
+        let focus = row(c.store.focus(me))?;
         Ok(obj(vec![("focus", or_null(get(&focus, "text")))]))
     }
 
@@ -1750,16 +1734,14 @@ impl Engine {
         let now = c.clock.now();
         let via = get(ask, "via").cloned();
         let contact = obj_some(vec![("app", get(ask, "app").cloned()), ("cwd", get(ask, "cwd").cloned()), ("via", via.clone()), ("pid", Some(pid))]);
-        // The index hears of it under the store's lock, so pushes land in
-        // the store's order; a write that failed may have gone partway.
-        c.store.with(|s| {
-            let r = s.touch(me, &contact, now);
-            match &r {
-                Ok(()) => self.index.touched(me, now),
-                Err(_) => self.index.invalidate(),
-            }
-            r
-        })?;
+        // The index hears of it straight after the write; a write that
+        // failed may have gone partway.
+        let r = c.store.touch(me, &contact, now);
+        match &r {
+            Ok(()) => self.index.touched(me, now),
+            Err(_) => self.index.invalidate(),
+        }
+        r?;
         c.events.emit("contact", obj_some(vec![("agent", Some(string(me))), ("via", via)]));
         Ok(())
     }
@@ -1805,7 +1787,7 @@ impl Engine {
             }
         }
         // The actors that act on it, as they reported.
-        let targets = rows(c.store.with(EngineStore::actor_targets))?;
+        let targets = c.store.actor_targets()?;
         let actors: Vec<Value> = targets
             .iter()
             .filter(|t| same(get(t, "target"), get(a, "id")))
@@ -1859,14 +1841,12 @@ impl Engine {
         let ev = event.unwrap_or("");
         if ev == "SessionEnd" {
             let now = c.clock.now();
-            c.store.with(|s| {
-                let r = s.ended(me.as_str(), now);
-                match &r {
-                    Ok(()) => self.index.ended(&me),
-                    Err(_) => self.index.invalidate(),
-                }
-                r
-            })?;
+            let r = c.store.ended(me.as_str(), now);
+            match &r {
+                Ok(()) => self.index.ended(&me),
+                Err(_) => self.index.invalidate(),
+            }
+            r?;
             return Ok(None);
         }
         // Whether the session bypasses its permission checks, as Claude
@@ -2264,8 +2244,10 @@ impl Engine {
             }
         }
         let mut messages = Vec::new();
-        for m in rows(c.store.with(|s| s.recent(now - 24.0 * 3600e3)))? {
-            let mut to: Vec<Value> = rows(c.store.with(|s| s.deliveries(num(Some(&m["id"])))))?
+        for m in c.store.recent(now - 24.0 * 3600e3)? {
+            let mut to: Vec<Value> = c
+                .store
+                .deliveries(num(Some(&m["id"])))?
                 .iter()
                 .map(|d| obj_some(vec![("id", get(d, "agent").cloned()), ("seen", Some(Value::Bool(truthy(get(d, "seen_at")))))]))
                 .collect();

@@ -3,8 +3,8 @@
 //! comes from it (`verify`), messages, claims and views (`engine`), the
 //! agents it knows of, kept current as they change (`index`),
 //! delivery (`delivery`), and the network's side of them (`network`).
-//! What they keep is the engine's tables in the store
-//! (`xenonet_store::engine`).
+//! What they keep goes through the engine's own `store::Store`, which the
+//! composition implements over the one store.
 //!
 //! What a module does with the outside world (running a command, reading
 //! the clock, the store) goes through a trait of its own, which the
@@ -19,7 +19,11 @@ pub mod network;
 pub mod processes;
 pub mod procs;
 pub mod procs_native;
+pub mod store;
 pub mod verify;
+
+#[cfg(test)]
+mod test_store;
 
 /// A pattern, in the regex crate's syntax, compiled once, the first time
 /// it's used. Where a pattern reads text as the engine's callers write it,

@@ -230,7 +230,7 @@ impl<'a> Side<'a> {
 
     pub fn collaborators(&self) -> Collaborators<'_> {
         Collaborators {
-            store: &self.w.store,
+            store: &*self.w.tables,
             clock: self,
             processes: self,
             map: self,

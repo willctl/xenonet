@@ -23,7 +23,6 @@ pub mod ground;
 pub mod map;
 pub mod network;
 pub mod observers;
-pub mod persist;
 pub mod procs;
 pub mod registration;
 pub mod remote;
@@ -70,7 +69,7 @@ fn log_later(env: &WireEnv, level: &'static str, code: &'static str, message: St
 /// Connecting the agents (`cores.connect`) is the composition's to set.
 pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime>> {
     let w = runtime(cores, setup, env)?;
-    cores.engine_store = Arc::new(store::Store(w.store.clone()));
+    cores.engine_store = w.tables.clone();
     cores.verify = w.checks.clone();
     cores.engine = Arc::new(engine::EngineDriver(w.clone()));
     cores.channels = Arc::new(delivery::ChannelsDriver(w.clone()));
@@ -155,6 +154,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         setup,
         env: env.clone(),
         rt: tokio::runtime::Handle::current(),
+        tables: Arc::new(store::Store(store.clone())),
         store,
         map,
         sys,

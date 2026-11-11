@@ -12,7 +12,7 @@ use crate::runtime::Runtime;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{Channels, CoreError, Policy, Router, R};
 use xenonet_api::From;
@@ -121,7 +121,7 @@ fn core_error(f: Fail) -> CoreError {
 impl PolicySide {
     /// The policy, kept in `store`'s store; with none, in memory.
     pub fn new(store: Option<Shared>) -> PolicySide {
-        let core = PolicyCore::load(store.as_ref().map(|s| s.0.db().clone()));
+        let core = PolicyCore::load(store.clone().map(|s| Arc::new(crate::store::Store(s)) as Arc<dyn xenonet_engine::store::Store>));
         PolicySide { core: Mutex::new(core), store }
     }
 
@@ -152,7 +152,7 @@ impl policy::Guard for PolicySide {
     }
 }
 
-pub struct PolicyDriver(pub std::sync::Arc<Runtime>);
+pub struct PolicyDriver(pub Arc<Runtime>);
 
 impl Policy for PolicyDriver {
     fn paused(&self) -> R<bool> {
@@ -251,7 +251,7 @@ impl ChannelSide {
     }
 }
 
-pub struct ChannelsDriver(pub std::sync::Arc<Runtime>);
+pub struct ChannelsDriver(pub Arc<Runtime>);
 
 #[async_trait]
 impl Channels for ChannelsDriver {
@@ -265,7 +265,7 @@ impl Channels for ChannelsDriver {
 /// Headless resume: the shared runner, and the settings file a resumed
 /// Claude Code turn listens with.
 pub struct Resumes {
-    pub runner: std::sync::Arc<Runner>,
+    pub runner: Arc<Runner>,
     pub settings: Option<String>,
 }
 
@@ -280,7 +280,7 @@ pub struct RouterSide {
 impl RouterSide {
     /// `state_dir` is where the runs' logs go, and `db` where their records
     /// are kept.
-    pub fn new(demo: bool, listen_file: Option<String>, state_dir: &std::path::Path, db: Option<std::sync::Arc<xenonet_store::Db>>) -> RouterSide {
+    pub fn new(demo: bool, listen_file: Option<String>, state_dir: &std::path::Path, db: Option<Arc<xenonet_store::Db>>) -> RouterSide {
         RouterSide {
             core: RouterCore::default(),
             timers: Mutex::new(HashMap::new()),
@@ -579,7 +579,7 @@ pub fn contact(w: &Runtime, agent: &str) {
     w.router.core.contact(&mut RouterHost::of(w), agent);
 }
 
-pub struct RouterDriver(pub std::sync::Arc<Runtime>);
+pub struct RouterDriver(pub Arc<Runtime>);
 
 impl Router for RouterDriver {
     fn usage(&self, app: &str) -> R<Value> {

@@ -31,12 +31,12 @@
 //! `xenonet_adapter::products`.
 
 use crate::procs::Link;
+use crate::store::Store;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use xenonet_adapter::products;
 use xenonet_os::sync::Locked;
-use xenonet_store::engine::Shared;
 use xenonet_text::json::number;
 
 /// What a check reads of the machine: procs' lookups and the clock.
@@ -79,9 +79,9 @@ impl std::fmt::Display for Fail {
     }
 }
 
-impl From<xenonet_store::sql::SqlError> for Fail {
-    fn from(e: xenonet_store::sql::SqlError) -> Self {
-        Fail::Store(e.message().to_string())
+impl From<crate::engine::Thrown> for Fail {
+    fn from(e: crate::engine::Thrown) -> Self {
+        Fail::Store(e.message)
     }
 }
 
@@ -324,7 +324,7 @@ struct Inner {
 }
 
 pub struct Verifier {
-    store: Shared,
+    store: Arc<dyn Store>,
     inner: Mutex<Inner>,
 }
 
@@ -345,7 +345,7 @@ fn num_text(n: f64) -> String {
 impl Verifier {
     /// `home`: the process of XenoNet's own app, when an app started the
     /// server; else the Desktop that connects says (`desktop`).
-    pub fn new(store: Shared, home: Option<f64>) -> Self {
+    pub fn new(store: Arc<dyn Store>, home: Option<f64>) -> Self {
         Verifier { store, inner: Mutex::new(Inner { counts: Counts::default(), verdicts: HashMap::new(), actor_verdicts: HashMap::new(), desktops: 0, home }) }
     }
 
@@ -435,25 +435,25 @@ impl Verifier {
         }
         // The pins of processes still running; the others go.
         let mut held: Vec<(f64, f64, bool)> = Vec::new();
-        for p in self.store.with(|s| s.pins(agent))? {
-            let (pid, start) = (p.num("pid").unwrap_or(f64::NAN), p.num("start").unwrap_or(f64::NAN));
+        for p in self.store.pins(agent)? {
+            let (pid, start) = (p.pid, p.start);
             if h.alive(pid, start)? {
-                held.push((pid, start, p.num("sure").is_some_and(|s| s != 0.0)));
+                held.push((pid, start, p.sure));
             } else {
-                self.store.with(|s| s.unpin(agent, pid, start))?;
+                self.store.unpin(agent, pid, start)?;
             }
         }
         // Claude Code itself, in one of its HTTP hooks: this process holds
         // the session.
         if hook && rules(app).is_some_and(|r| r.pins_by_hook) && chain[0].row.pid == holder.row.pid && h.signed(holder) {
             let t = h.now();
-            self.store.with(|s| s.pin(agent, root.0, root.1, true, t))?;
-            self.store.with(|s| s.drop_guesses(agent))?;
+            self.store.pin(agent, root.0, root.1, true, t)?;
+            self.store.drop_guesses(agent)?;
             return Ok(ok(true));
         }
         if let Some((_, _, sure)) = held.iter().find(|(pid, start, _)| *pid == root.0 && *start == root.1) {
             let t = h.now();
-            self.store.with(|s| s.pin(agent, root.0, root.1, *sure, t))?;
+            self.store.pin(agent, root.0, root.1, *sure, t)?;
             return Ok(ok(false));
         }
         if !held.is_empty() {
@@ -461,7 +461,7 @@ impl Verifier {
             return Ok(self.refuse(h, Some(agent), &format!("{agent} belongs to another {word} process")));
         }
         let t = h.now();
-        self.store.with(|s| s.pin(agent, root.0, root.1, false, t))?;
+        self.store.pin(agent, root.0, root.1, false, t)?;
         Ok(ok(false))
     }
 
@@ -874,7 +874,7 @@ mod tests {
     }
 
     fn verifier(home: Option<f64>) -> Verifier {
-        Verifier::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), home)
+        Verifier::new(Arc::new(crate::test_store::Tables::memory()), home)
     }
 
     /// A verdict, as (ok, the reason it says).

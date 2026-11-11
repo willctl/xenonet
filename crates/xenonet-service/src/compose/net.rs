@@ -4,7 +4,9 @@
 //! where it stands in the gateway's stream, the services published, the
 //! presence blocks taken and the token roots' certificates
 //! (`xenonet_store::net`), and this machine's feed and how it stands with
-//! the others' (`xenonet_store::feed`).
+//! the others' (`xenonet_store::feed`). Here at the composition root,
+//! which knows both: the network depends on no store, and the store on no
+//! network.
 
 use serde_json::Value;
 use std::sync::Arc;
@@ -149,7 +151,7 @@ mod tests {
 
     #[test]
     fn a_network_and_its_person_are_kept_across_a_restart() {
-        let dir = std::env::temp_dir().join(format!("xenonet-runtime-persist-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("xenonet-service-persist-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let open = || -> Arc<dyn Persist> { Arc::new(StorePersist(Arc::new(Db::open(&dir).unwrap()))) };
         let kept = open();

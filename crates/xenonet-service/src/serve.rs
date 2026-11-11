@@ -536,7 +536,7 @@ pub fn store_of(cores: &Cores) -> Option<Arc<xenonet_store::Db>> {
 }
 
 /// Where the network and the person are kept: the store
-/// (`xenonet_runtime::persist`), or None when the engine is pending.
+/// (`compose::net`), or None when the engine is pending.
 pub fn kept_network(cores: &Cores) -> Option<Arc<dyn xenonet_net::persist::Persist>> {
-    Some(Arc::new(xenonet_runtime::persist::StorePersist(store_of(cores)?)))
+    Some(Arc::new(crate::compose::net::StorePersist(store_of(cores)?)))
 }

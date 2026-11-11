@@ -8,9 +8,8 @@
 //! At most `CAP` runs go at once on a machine, one per session, and a turn
 //! runs `TURN_MS` at most. Each run's output goes to `runs/<id>.log` in
 //! XenoNet's state folder (`LOG_MAX` at most, kept a week), and its
-//! record (when it started, its exit, how long it took) to the store
-//! (`xenonet_store::delivery`), so a restart keeps counting the runs still
-//! under way.
+//! record (when it started, its exit, how long it took) to the store (the
+//! runner's), so a restart keeps counting the runs still under way.
 
 /// Runs at once on one machine.
 pub const CAP: usize = 4;

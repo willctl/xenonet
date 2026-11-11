@@ -14,18 +14,18 @@
 //! with the token.
 //!
 //! The policy keeps the rest of its data, its audit log and the wake
-//! budget's counts in the store (`xenonet_store::delivery`), so a restart
+//! budget's counts in the engine's store (`crate::store`), so a restart
 //! doesn't hand every sender a fresh budget; with no store, it keeps them
 //! in memory.
 
 use super::selector::Selector;
 use super::{number_text, template, text_of, truthy};
+use crate::store::Store;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use xenonet_os::sync::Locked;
-use xenonet_store::Db;
 
 pub const YOU: &str = xenonet_model::ids::YOU;
 
@@ -309,7 +309,7 @@ pub struct Policy {
     pub limits: Limits,
     /// Where the data, the audit log and the wake budget are kept; None
     /// keeps everything in memory.
-    db: Option<Arc<Db>>,
+    db: Option<Arc<dyn Store>>,
 }
 
 impl Default for Policy {
@@ -323,7 +323,7 @@ impl Default for Policy {
 
 impl Policy {
     /// The policy, with what the store keeps of it.
-    pub fn load(db: Option<Arc<Db>>) -> Policy {
+    pub fn load(db: Option<Arc<dyn Store>>) -> Policy {
         let mut p = Policy { db, ..Policy::default() };
         if let Some(db) = p.db.clone() {
             if let Ok(Some(data)) = db.delivery_policy() {
@@ -797,7 +797,7 @@ mod tests {
 
     #[test]
     fn the_pause_consent_and_audit_are_kept_in_the_store() {
-        let db = Arc::new(Db::memory().unwrap());
+        let db: Arc<dyn Store> = Arc::new(crate::test_store::Tables::memory());
         let mut c = clock(1_000_000.0);
         let mut p = Policy::load(Some(db.clone()));
         p.set_paused(&mut c, true, "you").unwrap();

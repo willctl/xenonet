@@ -18,13 +18,13 @@ xenonet-adapter.workspace = true
 xenonet-model.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
-# The store the engine keeps its tables in.
-xenonet-store.workspace = true
-
-# The tests check the real apps' rules and ways, which their adapters bring.
 
 [dev-dependencies]
+# The tests check the real apps' rules and ways, which their adapters bring.
 xenonet-platforms.workspace = true
+# The tests keep the engine's tables in the real store, in memory: the
+# engine itself only knows its own `store::Store`.
+xenonet-store.workspace = true
 
 [lints]
 workspace = true

@@ -7,8 +7,9 @@
 //! presence blocks taken, and the token roots' certificates. The keys stay
 //! files in the network's folder (`files`).
 //!
-//! The network crate doesn't say where these go: the runtime keeps them
-//! in the store (xenonet-store) through this trait, and a test, or a node
+//! The network crate doesn't say where these go: the composition root
+//! keeps them in the store (xenonet-service's `compose::net`, over
+//! xenonet-store) through this trait, and a test, or a node
 //! with nothing to keep them in, uses `Memory`.
 
 use crate::files::NetFile;

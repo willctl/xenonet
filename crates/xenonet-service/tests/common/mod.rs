@@ -44,5 +44,5 @@ pub fn local(ctx: &xenonet_service::ctx::Ctx, mut req: xenonet_service::http::Re
 /// state folder, which outlives a restart of the machine.
 pub fn kept(state: &std::path::Path) -> std::sync::Arc<dyn xenonet_net::persist::Persist> {
     let db = xenonet_store::Db::open(state).expect("the test machine's store");
-    std::sync::Arc::new(xenonet_runtime::persist::StorePersist(std::sync::Arc::new(db)))
+    std::sync::Arc::new(xenonet_service::compose::net::StorePersist(std::sync::Arc::new(db)))
 }

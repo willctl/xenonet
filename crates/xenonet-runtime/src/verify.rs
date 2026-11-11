@@ -109,7 +109,7 @@ impl Checks {
     pub fn new(store: Shared, sys: Arc<System>) -> Checks {
         // The service is its own process, so no app is its parent: the
         // Desktop that connects says which process is home.
-        Checks { verifier: Arc::new(Verifier::new(store, None)), sys }
+        Checks { verifier: Arc::new(Verifier::new(Arc::new(crate::store::Store(store)), None)), sys }
     }
 
     async fn run(&self, peer: Option<Peer>, f: impl FnOnce(&Verifier, &mut dyn Host) -> Result<Verdict, Fail> + Send + 'static) -> Value {

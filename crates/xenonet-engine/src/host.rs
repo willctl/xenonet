@@ -1,7 +1,8 @@
 //! What the engine asks of its collaborators, one trait each: the clock,
 //! the processes, the map's narrow readers, the actors, the repos, the
 //! sessions listening after a turn, the waits on mail, the events and the
-//! network across machines; live delivery and the policy are
+//! network across machines; what the engine keeps is `store::Store`, and
+//! live delivery and the policy are
 //! `delivery::router::Delivery` and `delivery::policy::Guard`. The binary
 //! implements them over its parts; a test implements them over made-up
 //! data. `Collaborators` bundles them for one call.
@@ -9,8 +10,8 @@
 use crate::delivery::policy::Guard;
 use crate::delivery::router::Delivery;
 use crate::engine::Result;
+use crate::store::Store;
 use serde_json::Value;
-use xenonet_store::engine::Shared;
 
 /// The engine's clock: the time it reasons with, the wall clock a
 /// listening hook's deadline is set by, and the time as the locale writes
@@ -170,7 +171,7 @@ pub trait Net {
 /// only sessions; without delivery, messages wait for the hooks; without a
 /// policy, everyone sees everyone; off a network, nothing is remote.
 pub struct Collaborators<'a> {
-    pub store: &'a Shared,
+    pub store: &'a dyn Store,
     pub clock: &'a dyn Clock,
     pub processes: &'a dyn Processes,
     pub map: &'a dyn MapReader,

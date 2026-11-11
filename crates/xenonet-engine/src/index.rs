@@ -30,7 +30,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use xenonet_os::sync::Locked;
-use xenonet_store::engine::row_json;
 use xenonet_text::text::{display, truthy};
 
 /// How often the index is rebuilt from the scans, whatever was pushed.
@@ -209,7 +208,7 @@ impl SessionIndex {
                 out.add(n.id);
             }
         }
-        for contact in c.store.with(|s| s.contacts(since))?.iter().map(row_json) {
+        for contact in c.store.contacts(since)? {
             if !truthy(contact.get("ended_at")) {
                 out.add(agent_of(&contact));
             }
@@ -256,25 +255,22 @@ impl SessionIndex {
     }
 
     /// Builds the index again from the scans and puts it in place of what
-    /// was pushed. The contacts are read and put in place under the store's
-    /// lock, so no write lands between the two.
+    /// was pushed: the nodes, then the contacts, put in place together.
     pub fn reconcile(&self, c: &Collaborators<'_>) -> Result<()> {
         let now = c.clock.now();
         let version = c.map.nodes_version();
         let (nodes, places) = Self::read_nodes(c)?;
-        c.store.with(|s| -> Result<()> {
-            let rows: Vec<Value> = s.contacts(f64::MIN)?.iter().map(row_json).collect();
-            let mut ix = self.inner.locked();
-            ix.nodes = nodes;
-            ix.places = places;
-            ix.version = version;
-            ix.contacts = Column::of_contacts(&rows);
-            ix.built = Some(now);
-            ix.stale = false;
-            ix.stats.rebuilds += 1;
-            ix.stats.node_reads += 1;
-            Ok(())
-        })
+        let rows: Vec<Value> = c.store.contacts(f64::MIN)?;
+        let mut ix = self.inner.locked();
+        ix.nodes = nodes;
+        ix.places = places;
+        ix.version = version;
+        ix.contacts = Column::of_contacts(&rows);
+        ix.built = Some(now);
+        ix.stale = false;
+        ix.stats.rebuilds += 1;
+        ix.stats.node_reads += 1;
+        Ok(())
     }
 
     /// The map's nodes, as its sessions and its places.

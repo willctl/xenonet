@@ -110,7 +110,7 @@ impl Host<'_> {
     }
 
     fn sql(e: sql::SqlError) -> Fail {
-        fail(Thrown::from(e))
+        fail(crate::store::thrown(e))
     }
 }
 

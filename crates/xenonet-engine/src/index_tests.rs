@@ -8,8 +8,9 @@ use crate::delivery::policy::WakeAllowed;
 use crate::delivery::router::Delivery;
 use crate::engine::Engine;
 use crate::host::{ActorsView, Clock, Events, Listening, MapReader, Processes, Repo, Repos, StatusSet, Waits};
+use crate::store::Store;
+use crate::test_store::Tables;
 use serde_json::json;
-use xenonet_store::engine::{EngineStore, Shared};
 
 const HOUR: f64 = 3600e3;
 
@@ -30,14 +31,14 @@ struct World {
 
 struct Fake {
     w: Mutex<World>,
-    store: Shared,
+    store: Tables,
     delivery: bool,
 }
 
 impl Fake {
     fn new(versioned: bool) -> Fake {
         let w = World { now: 1e12, versioned, version: 1, ..World::default() };
-        Fake { w: Mutex::new(w), store: Shared::new(EngineStore::memory(1e12).unwrap()), delivery: true }
+        Fake { w: Mutex::new(w), store: Tables::at(1e12), delivery: true }
     }
 
     fn c(&self) -> Collaborators<'_> {
@@ -308,7 +309,7 @@ fn a_write_the_index_cant_be_sure_of_rebuilds_it() {
     e.index.candidates(&f.c(), 0.0).unwrap();
     // A contact written past the engine (another process on the same
     // file): unseen until the index is told it may be wrong.
-    f.store.with(|s| s.touch(&session(1), &json!({ "app": "claude", "via": "hook" }), 1e12)).unwrap();
+    f.store.touch(&session(1), &json!({ "app": "claude", "via": "hook" }), 1e12).unwrap();
     assert_eq!(e.index.candidates(&f.c(), 0.0).unwrap(), Vec::<String>::new());
     e.index.invalidate();
     assert_eq!(e.index.candidates(&f.c(), 0.0).unwrap(), vec![session(1)]);
@@ -406,7 +407,7 @@ fn crowded(n: usize) -> (Fake, Engine) {
         }
     });
     for i in 0..n {
-        f.store.with(|s| s.touch(&session(i), &json!({ "app": "claude", "via": "hook" }), if i % 10 == 0 { now - 60e3 } else { now - 30.0 * HOUR })).unwrap();
+        f.store.touch(&session(i), &json!({ "app": "claude", "via": "hook" }), if i % 10 == 0 { now - 60e3 } else { now - 30.0 * HOUR }).unwrap();
     }
     (f, e)
 }

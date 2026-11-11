@@ -246,7 +246,7 @@ pub(crate) fn send_with(w: &Runtime, to: To, kind: Kind, body: Value, authority:
 }
 
 fn store<T>(w: &Runtime, f: impl FnOnce(&EngineStore) -> xenonet_store::sql::Result<T>) -> Result<T> {
-    w.store.with(|s| f(s)).map_err(Fail::from)
+    w.store.with(|s| f(s)).map_err(|e| Fail::from(crate::store::thrown(e)))
 }
 
 /// The engine with its collaborators over this world, for one call.
