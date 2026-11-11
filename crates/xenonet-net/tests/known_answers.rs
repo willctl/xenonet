@@ -59,7 +59,7 @@ fn block(device: &SeedSigner, what: &str, act: [u8; 32], nonce: u8, at: i64) -> 
 /// presence.
 fn person(root: &SeedSigner, device: &SeedSigner) -> PersonChain {
     let mut c = PersonChain::new();
-    c.offer(person::found(root, 1_792_511_000_000).unwrap()).unwrap();
+    c.offer(person::found_salted(root, [0x5a; person::SALT_BYTES], 1_792_511_000_000).unwrap()).unwrap();
     let mut add = c.next(person::Body { op: person::Op::AddDevice(NewDevice { key: device.public(), kind: DeviceKind::Weaker, label: "studio".into() }), at: 1_792_511_000_001 });
     let b = block(device, person::PAIR, add.digest(), 0x11, 1_792_511_000_001);
     add.sign(&root.public().id(), root, Some(b)).unwrap();

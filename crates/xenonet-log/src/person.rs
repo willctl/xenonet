@@ -41,6 +41,12 @@
 //! A person's id is `prs_` and the base32 of the first 20 bytes of the
 //! SHA-256 of entry 0's canonical JSON with its signer.
 //!
+//! **The project salt.** Entry 0 carries 32 random bytes, `salt`, made at
+//! founding: a project's id (`prj_`, xenonet-model's `ProjectId::of_repo`)
+//! is an HMAC of its git remote under it, so one repo is one project on
+//! every machine of the person's, and the id names no repo to anyone who
+//! doesn't hold the chain.
+//!
 //! A device key that was removed or revoked isn't added again: a machine
 //! that comes back makes a new key, and so a device's history is one span,
 //! which `device_at` reads for any past head.
@@ -48,7 +54,7 @@
 use crate::chain::{self, Chain, ChainError, Codes, Format, Policy, Signature, R};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
-use xenonet_id::codec::{base32, sha256};
+use xenonet_id::codec::{b64, base32, sha256, unb64_n};
 use xenonet_id::sign::{Purpose, VerifyingKey};
 
 /// A person's chain.
@@ -255,10 +261,15 @@ impl Delegation {
     }
 }
 
+/// The bytes of a person's project salt.
+pub const SALT_BYTES: usize = 32;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Found {
         root: VerifyingKey,
+        /// What their projects' ids are made under.
+        salt: [u8; SALT_BYTES],
     },
     AddDevice(NewDevice),
     RemoveDevice {
@@ -334,6 +345,8 @@ impl Device {
 pub struct Person {
     pub id: String,
     pub root: VerifyingKey,
+    /// What their projects' ids are made under (the module's header).
+    pub salt: [u8; SALT_BYTES],
     /// Every device ever paired, by key id, active or not.
     pub devices: BTreeMap<String, Device>,
     /// The revoked tokens' ids, with the entry that revoked each.
@@ -405,8 +418,9 @@ impl Policy for PersonPolicy {
     fn write_body(b: &Body, out: &mut Map<String, Value>) {
         out.insert("op".into(), Value::String(b.op.as_str().into()));
         match &b.op {
-            Op::Found { root } => {
+            Op::Found { root, salt } => {
                 out.insert("root".into(), root.to_json());
+                out.insert("salt".into(), Value::String(b64(salt)));
             }
             Op::AddDevice(d) => {
                 out.insert("device".into(), json!({ "key": d.key.to_json(), "id": d.key.id(), "kind": d.kind.as_str(), "label": d.label }));
@@ -435,7 +449,10 @@ impl Policy for PersonPolicy {
         let bad = |what: &str| Self::FORMAT.bad(what);
         let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
         let op = match v.get("op").and_then(Value::as_str) {
-            Some("found") => Op::Found { root: v.get("root").and_then(VerifyingKey::parse).ok_or_else(|| bad("root key"))? },
+            Some("found") => Op::Found {
+                root: v.get("root").and_then(VerifyingKey::parse).ok_or_else(|| bad("root key"))?,
+                salt: v.get("salt").and_then(Value::as_str).and_then(unb64_n::<SALT_BYTES>).ok_or_else(|| bad("salt"))?,
+            },
             Some("add-device") => {
                 let d = v.get("device").filter(|d| d.is_object()).ok_or_else(|| bad("device"))?;
                 let key = d.get("key").and_then(VerifyingKey::parse).ok_or_else(|| bad("device key"))?;
@@ -494,7 +511,7 @@ impl Policy for PersonPolicy {
 
     fn scope(&self, person: Option<&Person>, e: &Entry) -> R<()> {
         match (person, &e.op) {
-            (None, Op::Found { root }) => {
+            (None, Op::Found { root, .. }) => {
                 if e.signers.len() != 1 || e.signers[0].by != root.id() {
                     return Err(root_alone());
                 }
@@ -512,7 +529,7 @@ impl Policy for PersonPolicy {
     fn signer_key(&self, person: Option<&Person>, e: &Entry, by: &str) -> R<VerifyingKey> {
         let Some(p) = person else {
             return match &e.op {
-                Op::Found { root } => Ok(root.clone()),
+                Op::Found { root, .. } => Ok(root.clone()),
                 _ => Err(root_alone()),
             };
         };
@@ -615,8 +632,8 @@ impl Policy for PersonPolicy {
 
     fn apply(&self, person: Option<Person>, e: &Entry) -> Person {
         let Some(mut p) = person else {
-            let Op::Found { root } = &e.op else { unreachable!("scope takes only `found` as a person's entry 0") };
-            return Person { id: person_id(e), root: root.clone(), devices: BTreeMap::new(), revoked_tokens: BTreeMap::new(), delegations: BTreeMap::new() };
+            let Op::Found { root, salt } = &e.op else { unreachable!("scope takes only `found` as a person's entry 0") };
+            return Person { id: person_id(e), root: root.clone(), salt: *salt, devices: BTreeMap::new(), revoked_tokens: BTreeMap::new(), delegations: BTreeMap::new() };
         };
         match &e.op {
             Op::Found { .. } => {}
@@ -694,10 +711,17 @@ pub fn person_id(found: &Entry) -> String {
     format!("prs_{}", base32(&sha256(found.to_json().to_string().as_bytes())[..20]))
 }
 
-/// Entry 0 of a new person's chain, signed by their root key.
+/// Entry 0 of a new person's chain, signed by their root key, with a
+/// project salt of the system's random numbers.
 pub fn found(root: &dyn xenonet_id::sign::Signer, at: i64) -> xenonet_id::R<Entry> {
+    found_salted(root, xenonet_id::codec::random::<SALT_BYTES>()?, at)
+}
+
+/// Entry 0 with the salt given: for known answers and made-up worlds,
+/// whose ids are the same each run.
+pub fn found_salted(root: &dyn xenonet_id::sign::Signer, salt: [u8; SALT_BYTES], at: i64) -> xenonet_id::R<Entry> {
     let key = root.public();
-    let mut e = Entry::new(0, "", Body { op: Op::Found { root: key.clone() }, at });
+    let mut e = Entry::new(0, "", Body { op: Op::Found { root: key.clone(), salt }, at });
     e.sign(&key.id(), root, None)?;
     Ok(e)
 }

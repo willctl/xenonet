@@ -110,8 +110,16 @@ fn found_is_entry_0_signed_by_the_root_alone() {
     assert_eq!(c.id(), Some(p.id.as_str()));
     // Another root, another person.
     assert_ne!(person_id(&found(&other, T).unwrap()), p.id);
+    // A salt of its own, kept; and the same root with another salt is
+    // another person.
+    assert_ne!(p.salt, [0; SALT_BYTES]);
+    assert_eq!(found_salted(&root, [3; SALT_BYTES], T).unwrap().op, Op::Found { root: root.public(), salt: [3; SALT_BYTES] });
+    assert_ne!(person_id(&found(&root, T).unwrap()), p.id, "a new salt each founding");
+    let mut unsalted = e.to_json();
+    unsalted.as_object_mut().unwrap().remove("salt");
+    assert!(Entry::parse(&unsalted).is_err(), "an entry 0 with no salt is refused");
     // Once.
-    let mut again = c.next(Body { op: Op::Found { root: other.public() }, at: T });
+    let mut again = c.next(Body { op: Op::Found { root: other.public(), salt: [1; SALT_BYTES] }, at: T });
     sign(&mut again, &root, None);
     assert!(c.offer(again).unwrap_err().message.contains("one root key"));
 }

@@ -13,6 +13,8 @@
 //! - An actor is `actor:<slug>`; the person at the console is `actor:you`.
 //! - A repo is a project merged across hosts by its git remote,
 //!   `repo:<host>/<path>`.
+//! - The store's ids, `prj_`, `chk_`, `agt_` and `int_`, are below
+//!   ("stored ids").
 
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -199,15 +201,16 @@ pub fn is_actor_agent(id: &str) -> bool {
     parse_actor_id(id).is_some_and(|(host, _)| host.is_none()) && id != YOU
 }
 
-/// A harness session: `<app>:<run>`, on this host or another.
+/// A harness session as its app names it: `<app>:<run>`, on this host or
+/// another. The store's own id for it is an `AgentId`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AgentId {
+pub struct SessionId {
     pub host: Option<HostId>,
     pub app: AppId,
     pub run: String,
 }
 
-impl AgentId {
+impl SessionId {
     /// `claude:4f1c…` or `@vm1:claude:4f1c…`.
     pub fn parse(id: &str) -> Result<Self, NotAnId> {
         let bad = || NotAnId(id.to_string());
@@ -216,7 +219,7 @@ impl AgentId {
         if app == "actor" || !is_app_id(app) || !is_run_id(run) {
             return Err(bad());
         }
-        Ok(AgentId { host: q.host.map(|h| HostId(h.to_string())), app: AppId(app.to_string()), run: run.to_string() })
+        Ok(SessionId { host: q.host.map(|h| HostId(h.to_string())), app: AppId(app.to_string()), run: run.to_string() })
     }
 
     /// The id without its host.
@@ -225,7 +228,7 @@ impl AgentId {
     }
 }
 
-impl fmt::Display for AgentId {
+impl fmt::Display for SessionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.host {
             Some(h) => write!(f, "@{h}:{}:{}", self.app, self.run),
@@ -275,13 +278,13 @@ impl fmt::Display for ActorId {
 /// Who acts: a session, or an actor (the person among them).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Principal {
-    Agent(AgentId),
+    Agent(SessionId),
     Actor(ActorId),
 }
 
 impl Principal {
     pub fn parse(id: &str) -> Result<Self, NotAnId> {
-        ActorId::parse(id).map(Principal::Actor).or_else(|_| AgentId::parse(id).map(Principal::Agent))
+        ActorId::parse(id).map(Principal::Actor).or_else(|_| SessionId::parse(id).map(Principal::Agent))
     }
 
     pub fn host(&self) -> Option<&HostId> {
@@ -338,7 +341,7 @@ macro_rules! text_serde {
     };
 }
 
-text_serde!(AgentId, "^(@[a-z][a-z0-9-]{1,31}:)?[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{6,}$");
+text_serde!(SessionId, "^(@[a-z][a-z0-9-]{1,31}:)?[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{6,}$");
 text_serde!(ActorId, "^(@[a-z][a-z0-9-]{1,31}:)?actor:[a-z0-9][a-z0-9-]{0,31}$");
 text_serde!(Principal, "^(@[a-z][a-z0-9-]{1,31}:)?[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]{0,}$");
 
@@ -542,9 +545,237 @@ impl fmt::Display for SchemaId {
 
 text_serde!(SchemaId, "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*/v[1-9][0-9]*$");
 
+// ---------- stored ids ----------
+//
+// The ids the store keeps (docs/design/direction.md, "Domain model"): each
+// a prefix and the base32 of 20 bytes, as a person's `prs_` is.
+//
+// - A project is `prj_`: the HMAC-SHA256 of its normalized git remote
+//   under its owner's salt, which their person chain holds, so one repo
+//   is one project on every machine of theirs, and its id names no repo
+//   to anyone without the chain. A project with no remote gets one at
+//   random.
+// - A checkout is `chk_`, at random: one per folder on one machine.
+// - An agent is `agt_`, at random, made the first time XenoNet sees the
+//   session; the store keeps which app's session it is.
+// - An intent is `int_`: the first 20 bytes of the hash of the act that
+//   made it.
+//
+// Random ones come from an `Ids`, which the demo and the golden files seed
+// so the same run makes the same ids.
+
+const BASE32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+
+/// The bytes a stored id carries.
+pub const STORED_BYTES: usize = 20;
+/// The base32 characters those bytes take.
+const STORED_CHARS: usize = 32;
+
+/// RFC 4648 base32, lowercase and unpadded, of 20 bytes: 32 characters.
+fn base32(bytes: &[u8; STORED_BYTES]) -> String {
+    let mut out = String::with_capacity(STORED_CHARS);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for &b in bytes {
+        buffer = (buffer << 8) | u32::from(b);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(char::from(BASE32[((buffer >> bits) & 31) as usize]));
+        }
+        buffer &= (1 << bits) - 1;
+    }
+    out
+}
+
+fn is_base32(s: &str) -> bool {
+    s.len() == STORED_CHARS && s.bytes().all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
+}
+
+fn sha256(parts: &[&[u8]]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    for p in parts {
+        h.update(p);
+    }
+    h.finalize().into()
+}
+
+/// HMAC-SHA256 (RFC 2104) of `msg` under `key`.
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        k[..32].copy_from_slice(&sha256(&[key]));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let (mut inner, mut outer) = ([0x36u8; BLOCK], [0x5cu8; BLOCK]);
+    for i in 0..BLOCK {
+        inner[i] ^= k[i];
+        outer[i] ^= k[i];
+    }
+    sha256(&[&outer, &sha256(&[&inner, msg])])
+}
+
+fn first20(bytes: &[u8; 32]) -> [u8; STORED_BYTES] {
+    let mut out = [0u8; STORED_BYTES];
+    out.copy_from_slice(&bytes[..STORED_BYTES]);
+    out
+}
+
+macro_rules! stored_id {
+    ($(#[$m:meta])* $name:ident, $prefix:literal, $pattern:literal) => {
+        $(#[$m])*
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(String);
+
+        impl $name {
+            pub const PREFIX: &'static str = $prefix;
+
+            /// The id of these 20 bytes.
+            pub fn from_bytes(bytes: &[u8; STORED_BYTES]) -> Self {
+                $name(format!("{}{}", $prefix, base32(bytes)))
+            }
+
+            /// The id, when the text is one.
+            pub fn parse(s: &str) -> Result<Self, NotAnId> {
+                match s.strip_prefix($prefix) {
+                    Some(rest) if is_base32(rest) => Ok($name(s.to_string())),
+                    _ => Err(NotAnId(s.to_string())),
+                }
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        text_serde!($name, $pattern);
+    };
+}
+
+stored_id!(
+    /// A project: `prj_` and 32 base32 characters.
+    ProjectId,
+    "prj_",
+    "^prj_[a-z2-7]{32}$"
+);
+stored_id!(
+    /// A checkout of a project, one folder on one machine: `chk_` and 32 base32 characters.
+    CheckoutId,
+    "chk_",
+    "^chk_[a-z2-7]{32}$"
+);
+stored_id!(
+    /// An agent, a harness's session as the store knows it: `agt_` and 32 base32 characters.
+    AgentId,
+    "agt_",
+    "^agt_[a-z2-7]{32}$"
+);
+stored_id!(
+    /// An intent: `int_` and 32 base32 characters.
+    IntentId,
+    "int_",
+    "^int_[a-z2-7]{32}$"
+);
+
+/// A person's salt for their projects' ids: 32 bytes their person chain
+/// holds from its founding.
+pub type ProjectSalt = [u8; 32];
+
+impl ProjectId {
+    /// The project of a repo, by its normalized remote (`normalize_remote`),
+    /// for the person whose salt this is.
+    pub fn of_repo(salt: &ProjectSalt, repo_key: &str) -> Self {
+        Self::from_bytes(&first20(&hmac_sha256(salt, repo_key.as_bytes())))
+    }
+}
+
+impl IntentId {
+    /// The intent an act made, by the act's hash.
+    pub fn of_act(hash: &[u8; 32]) -> Self {
+        Self::from_bytes(&first20(hash))
+    }
+}
+
+/// Where random ids come from: the system's random numbers, or a seed, so
+/// the demo and the golden files make the same ids each run. A seeded
+/// source's n-th id is the first 20 bytes of SHA-256 over its seed, its
+/// kind's prefix and n, counted for all kinds together.
+pub struct Ids(Source);
+
+enum Source {
+    Random,
+    Seeded { seed: Vec<u8>, next: std::sync::atomic::AtomicU64 },
+}
+
+impl Ids {
+    /// From the system's random numbers.
+    pub fn random() -> Self {
+        Ids(Source::Random)
+    }
+
+    /// From `seed`, the same ids in the same order every time.
+    pub fn seeded(seed: &str) -> Self {
+        Ids(Source::Seeded { seed: seed.as_bytes().to_vec(), next: std::sync::atomic::AtomicU64::new(0) })
+    }
+
+    fn bytes(&self, prefix: &str) -> [u8; STORED_BYTES] {
+        match &self.0 {
+            Source::Random => {
+                let mut b = [0u8; STORED_BYTES];
+                // The system's random numbers fail only on a broken system,
+                // where no id XenoNet could make would be safe either.
+                getrandom::fill(&mut b).expect("the system's random numbers");
+                b
+            }
+            Source::Seeded { seed, next } => {
+                let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                first20(&sha256(&[seed, b"\0", prefix.as_bytes(), &n.to_be_bytes()]))
+            }
+        }
+    }
+
+    /// A project with no remote.
+    pub fn project(&self) -> ProjectId {
+        ProjectId::from_bytes(&self.bytes(ProjectId::PREFIX))
+    }
+
+    pub fn checkout(&self) -> CheckoutId {
+        CheckoutId::from_bytes(&self.bytes(CheckoutId::PREFIX))
+    }
+
+    pub fn agent(&self) -> AgentId {
+        AgentId::from_bytes(&self.bytes(AgentId::PREFIX))
+    }
+}
+
+impl fmt::Debug for Ids {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self.0 {
+            Source::Random => "Ids::random()",
+            Source::Seeded { .. } => "Ids::seeded(…)",
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hmac_as_rfc_4231_has_it() {
+        let hex = |b: &[u8]| b.iter().fold(String::new(), |out, x| out + &format!("{x:02x}"));
+        assert_eq!(hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        let long = hmac_sha256(&[0xaa; 131], b"Test Using Larger Than Block-Size Key - Hash Key First");
+        assert_eq!(hex(&long), "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54", "a key longer than a block is hashed first");
+    }
 
     #[test]
     fn hosts_and_qualified_ids() {
@@ -561,16 +792,16 @@ mod tests {
 
     #[test]
     fn agents_and_actors() {
-        let a = AgentId::parse("claude:4f1c2a3b-1").unwrap();
+        let a = SessionId::parse("claude:4f1c2a3b-1").unwrap();
         assert_eq!((a.app.as_str(), a.run.as_str(), a.host.is_none()), ("claude", "4f1c2a3b-1", true));
         assert_eq!(a.to_string(), "claude:4f1c2a3b-1");
-        let r = AgentId::parse("@vm1:codex:0199abcdef").unwrap();
+        let r = SessionId::parse("@vm1:codex:0199abcdef").unwrap();
         assert_eq!(r.host.as_ref().map(HostId::as_str), Some("vm1"));
         assert_eq!(r.to_string(), "@vm1:codex:0199abcdef");
         assert_eq!(r.local(), "codex:0199abcdef");
-        assert!(AgentId::parse("claude:short").is_err(), "a run's id has seven characters or more");
-        assert!(AgentId::parse("actor:kite-bot").is_err(), "an actor isn't an agent");
-        assert!(AgentId::parse("Claude:abcdefgh").is_err());
+        assert!(SessionId::parse("claude:short").is_err(), "a run's id has seven characters or more");
+        assert!(SessionId::parse("actor:kite-bot").is_err(), "an actor isn't an agent");
+        assert!(SessionId::parse("Claude:abcdefgh").is_err());
         let k = ActorId::parse("actor:kite").unwrap();
         assert_eq!((k.slug.as_str(), k.to_string().as_str()), ("kite", "actor:kite"));
         assert!(ActorId::parse("actor:you").unwrap().is_you());
@@ -581,7 +812,7 @@ mod tests {
         assert!(Principal::parse("project:/x").is_err());
         let json = serde_json::to_string(&Principal::parse("@vm1:actor:kite").unwrap()).unwrap();
         assert_eq!(json, "\"@vm1:actor:kite\"");
-        assert!(serde_json::from_str::<AgentId>("\"nope\"").is_err());
+        assert!(serde_json::from_str::<SessionId>("\"nope\"").is_err());
     }
 
     #[test]

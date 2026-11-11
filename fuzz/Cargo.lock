@@ -3023,10 +3023,12 @@ dependencies = [
 name = "xenonet-model"
 version = "0.2.0"
 dependencies = [
+ "getrandom 0.3.4",
  "regex",
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "xenonet-text",
 ]
 

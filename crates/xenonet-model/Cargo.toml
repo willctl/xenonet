@@ -18,6 +18,15 @@ serde_json.workspace = true
 # Text and times as XenoNet reads them: remotes trimmed as JS trims, token
 # figures as numbers, a price's day. No IO.
 xenonet-text.workspace = true
+# The store's ids (ids.rs): a project's is an HMAC-SHA256 of its remote,
+# an intent's a hash, and the rest random, from the system's random
+# numbers. Here, so every crate derives them alike.
+getrandom.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+# Ids read back as they were written, for any bytes.
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true
