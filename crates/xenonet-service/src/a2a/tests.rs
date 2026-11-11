@@ -87,7 +87,7 @@ fn a2a_with(fake: Arc<Fake>, clock: Arc<Mutex<f64>>) -> Arc<A2a> {
     let c = clock;
     let a = A2a::new(A2aParts {
         cores: A2aCores { engine: fake.clone(), actors: fake },
-        file: None,
+        db: None,
         version: "0.2.0".into(),
         home: "/home/nova".into(),
         name: Arc::new(|| None),

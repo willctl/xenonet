@@ -21,6 +21,8 @@ xenonet-log.workspace = true
 # always had them.
 xenonet-model.workspace = true
 xenonet-text.workspace = true
+# The store's file, owner-only.
+xenonet-os.workspace = true
 
 [dev-dependencies]
 # Keys made from seeds, to sign the tests' chain entries.

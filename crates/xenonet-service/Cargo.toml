@@ -28,8 +28,6 @@ hyper-util.workspace = true
 # has node-pty).
 portable-pty = "0.9"
 reqwest.workspace = true
-# A2A's task table, <state>/a2a.sqlite (a2a/store.rs).
-rusqlite.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 # The core traits, settings and event sink it shares with the drivers.
@@ -86,6 +84,8 @@ xenonet-sources.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # The network tests' person chain entries (a revocation, a new device).
 xenonet-log.workspace = true
+# The network tests look into the gateway's queue (gateway.sqlite).
+rusqlite.workspace = true
 # The network tests' acts as the person, signed as another machine sends
 # them (a message from a device revoked since).
 xenonet-authz.workspace = true

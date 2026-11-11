@@ -3319,7 +3319,6 @@ dependencies = [
  "xenonet-api",
  "xenonet-components",
  "xenonet-engine",
- "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-platforms",
@@ -3500,7 +3499,6 @@ dependencies = [
  "xenonet-components",
  "xenonet-doctor",
  "xenonet-engine",
- "xenonet-model",
  "xenonet-os",
  "xenonet-platforms",
  "xenonet-schema",
@@ -3743,6 +3741,7 @@ dependencies = [
  "xenonet-id",
  "xenonet-log",
  "xenonet-model",
+ "xenonet-os",
  "xenonet-text",
 ]
 

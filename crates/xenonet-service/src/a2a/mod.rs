@@ -25,13 +25,14 @@
 //!   client that started it goes away.
 //! - **No outbound calls**: no push notifications.
 //!
-//! The tasks are kept in `<state>/a2a.sqlite` (store.rs), with the switch,
+//! The tasks are kept in the store (`xenonet_store::a2a`), with the switch,
 //! which is off until the owner turns it on in the Actors panel
 //! (xenonet-http's routes/a2a.rs, through parts.rs).
 
 pub mod card;
 pub mod rpc;
-pub mod store;
+/// The task table, kept in the store (`xenonet_store::a2a`).
+pub use xenonet_store::a2a as store;
 pub mod tasks;
 
 use crate::actor_caller::{Rate, BUCKETS};
@@ -43,14 +44,14 @@ use card::CardSettings;
 use rpc::{json_reply, result, sse_error, sse_frame, sse_headers, RpcError};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use store::{ReplyRow, Store, TaskRow};
+use store::{A2aStore, ReplyRow, TaskRow};
 use tasks::Shown;
 use tokio::sync::{mpsc, watch};
 use xenonet_api::limits::Buckets;
 use xenonet_os::sync::Locked;
+use xenonet_store::{Db, StoreError};
 
 /// The most of a body XenoNet reads, as the gateway's own limit.
 pub const BODY_MAX: usize = 64 << 10;
@@ -136,8 +137,9 @@ impl Default for Limits {
 
 pub struct A2aParts {
     pub cores: A2aCores,
-    /// `<state>/a2a.sqlite`, or None to keep it in memory (the demo, tests).
-    pub file: Option<PathBuf>,
+    /// The store the task table is kept in, or None to keep it in memory
+    /// (the demo, tests).
+    pub db: Option<Arc<Db>>,
     /// XenoNet's version, for the card.
     pub version: String,
     pub home: String,
@@ -149,7 +151,7 @@ pub struct A2aParts {
 
 pub struct A2a {
     cores: A2aCores,
-    store: Mutex<Store>,
+    store: Mutex<A2aStore>,
     problem: Option<String>,
     buckets: Mutex<Buckets>,
     watches: Mutex<HashMap<String, watch::Sender<u64>>>,
@@ -202,7 +204,7 @@ fn config_of(params: &Value) -> Result<Config, RpcError> {
     Ok(Config { history: tasks::history_length(c.get("historyLength"), "configuration.historyLength")?, immediately })
 }
 
-fn db(e: &rusqlite::Error) -> RpcError {
+fn db(e: &StoreError) -> RpcError {
     RpcError::internal(&format!("XenoNet's task table: {e}"))
 }
 
@@ -221,13 +223,13 @@ fn messages_of(v: &Value) -> Vec<Value> {
 }
 
 impl A2a {
-    /// The A2A side, with its table opened. A table that can't be opened
-    /// leaves A2A off, kept in memory, saying why.
+    /// The A2A side, over its table in the store, or in memory.
     pub fn new(parts: A2aParts) -> Result<Arc<A2a>, String> {
-        let (store, problem) = match Store::open(parts.file.as_deref()) {
-            Ok(s) => (s, None),
-            Err(e) => (Store::open(None).map_err(|m| m.to_string())?, Some(format!("a2a.sqlite: {e}"))),
+        let db = match parts.db {
+            Some(db) => db,
+            None => Arc::new(Db::memory().map_err(|e| e.message)?),
         };
+        let (store, problem) = (A2aStore::new(db), None);
         Ok(Arc::new(A2a {
             cores: parts.cores,
             store: Mutex::new(store),
@@ -798,7 +800,7 @@ impl A2a {
             let name = m["from"]["title"].as_str().or_else(|| m["from"]["name"].as_str()).filter(|n| !n.is_empty()).map(str::to_string);
             let text = xenonet_text::text::display(&m["text"]);
             let at = m["at"].as_f64().unwrap_or(now);
-            let found = (|| -> rusqlite::Result<Option<TaskRow>> {
+            let found = (|| -> xenonet_store::R<Option<TaskRow>> {
                 if let Some(r) = int(&m["replyTo"]) {
                     if let Some(t) = s.task_by_message(actor, r)? {
                         return Ok(Some(t));

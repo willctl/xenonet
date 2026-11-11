@@ -218,7 +218,7 @@ fn delivery_keeps_its_policy_runs_and_delegations_across_a_restart() {
         let data = serde_json::json!({ "paused": true, "consent": { "claude:a": { "until": 5 } } });
         db.put_delivery_policy(data.as_object().unwrap()).unwrap();
         db.put_wake_budget(&[("w:actor:wren".into(), vec![1.0, 2.0])]).unwrap();
-        db.put_runs(&[RunRow { id: "run_1".into(), key: "claude:a".into(), app: "claude".into(), pid: Some(7.0), at: 1.0, end: None, exit: None, ms: None, timed_out: false }])
+        db.put_runs(&[RunRow { id: "run_1".into(), key: "claude:a".into(), app: "an-app".into(), pid: Some(7.0), at: 1.0, end: None, exit: None, ms: None, timed_out: false }])
             .unwrap();
         db.put_delegated("claude:a", &Delegated { cwd: "/p".into(), from: Some("studio".into()), at: 10.0 }, 100.0).unwrap();
         db.put_delegated("claude:b", &Delegated { cwd: "/q".into(), from: None, at: 500.0 }, 100.0).unwrap();
@@ -235,5 +235,17 @@ fn delivery_keeps_its_policy_runs_and_delegations_across_a_restart() {
     assert_eq!(db.delegated("claude:b").unwrap().map(|d| d.cwd), Some("/q".into()));
     let audit = db.delivery_audit().unwrap();
     assert_eq!((audit.len() as i64, audit[0]["i"].clone()), (delivery::AUDIT_LINES, serde_json::json!(2)), "the oldest lines go");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_store_is_the_owners_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = folder("mode");
+    let db = Db::open(&dir).unwrap();
+    db.set_setting("theme", Some(&serde_json::json!("rime"))).unwrap();
+    assert_eq!(std::fs::metadata(dir.join(FILE)).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::metadata(dir.join(format!("{FILE}-wal"))).unwrap().permissions().mode() & 0o777, 0o600, "and its write-ahead log");
     let _ = std::fs::remove_dir_all(&dir);
 }

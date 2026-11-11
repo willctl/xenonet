@@ -25,7 +25,6 @@ xenonet-schema.workspace = true
 tokio.workspace = true
 xenonet-api.workspace = true
 xenonet-engine.workspace = true
-xenonet-model.workspace = true
 xenonet-net.workspace = true
 xenonet-sources.workspace = true
 

@@ -2922,7 +2922,6 @@ dependencies = [
  "xenonet-api",
  "xenonet-components",
  "xenonet-engine",
- "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-schema",
@@ -3245,7 +3244,6 @@ dependencies = [
  "hyper-util",
  "portable-pty",
  "reqwest",
- "rusqlite",
  "serde_json",
  "tokio",
  "xenonet-actors",
@@ -3323,6 +3321,7 @@ dependencies = [
  "sha2 0.10.9",
  "xenonet-log",
  "xenonet-model",
+ "xenonet-os",
  "xenonet-text",
 ]
 

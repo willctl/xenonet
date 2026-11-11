@@ -144,7 +144,7 @@ async fn the_switch_is_the_owners() {
     assert_eq!(go("GET", window(), None).await.status, 503, "not made: actors are pending here");
     let a = A2a::new(A2aParts {
         cores: A2aCores { engine: w.clone(), actors: w },
-        file: None,
+        db: None,
         version: "0.2.0".into(),
         home: "/home/nova".into(),
         name: Arc::new(|| None),
@@ -173,7 +173,7 @@ async fn the_specs_examples_answered() {
     let engine = Arc::new(Weather::default());
     let a = A2a::new(A2aParts {
         cores: A2aCores { engine: engine.clone(), actors: engine },
-        file: None,
+        db: None,
         version: "0.2.0".into(),
         home: "/home/nova".into(),
         name: Arc::new(|| Some("studio".into())),

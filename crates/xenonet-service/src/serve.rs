@@ -197,7 +197,8 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         let named = kept.clone();
         let a2a_parts = crate::a2a::A2aParts {
             cores: crate::a2a::A2aCores { engine: ctx.cores.engine.clone(), actors: actors.clone() },
-            file: (!config.demo).then(|| Path::new(&config.state_dir).join("a2a.sqlite")),
+            // The demo keeps its tasks in memory, with nothing else of yours.
+            db: if config.demo { None } else { store_of(&ctx.cores) },
             version: version.clone(),
             home: config.home.clone(),
             name: Arc::new(move || named.as_deref().and_then(crate::a2a::network_name)),
@@ -526,11 +527,16 @@ fn shutdown(ctx: &Arc<Ctx>, parts: &Parts) {
     let _ = json!(null);
 }
 
-/// Where the network and the person are kept: the store the engine's
-/// runtime opened (`xenonet_runtime::persist`), or None when the engine is
-/// pending.
-pub fn kept_network(cores: &Cores) -> Option<Arc<dyn xenonet_net::persist::Persist>> {
+/// The one store, as the engine's runtime was given it: None when the
+/// engine is pending.
+pub fn store_of(cores: &Cores) -> Option<Arc<xenonet_store::Db>> {
     let native = cores.engine_store.native()?;
     let tables = native.downcast_ref::<xenonet_store::engine::Shared>()?;
-    Some(Arc::new(xenonet_runtime::persist::StorePersist(tables.0.db().clone())))
+    Some(tables.0.db().clone())
+}
+
+/// Where the network and the person are kept: the store
+/// (`xenonet_runtime::persist`), or None when the engine is pending.
+pub fn kept_network(cores: &Cores) -> Option<Arc<dyn xenonet_net::persist::Persist>> {
+    Some(Arc::new(xenonet_runtime::persist::StorePersist(store_of(cores)?)))
 }

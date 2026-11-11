@@ -334,7 +334,7 @@ impl Host {
                 g.set_net(svc.node().clone());
                 let a2a = A2a::new(A2aParts {
                     cores: A2aCores { engine: c.engine.clone(), actors: c.actors.clone().unwrap() },
-                    file: Some(dir.join("state").join("a2a.sqlite")),
+                    db: xenonet_service::serve::store_of(&ctx.cores),
                     version: "0.0.0-test".into(),
                     home: home.clone(),
                     name: Arc::new(|| Some("home".into())),

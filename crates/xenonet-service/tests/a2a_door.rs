@@ -127,7 +127,7 @@ async fn the_card_and_a2a_through_the_front_door_in_mcps_order() {
     );
     let a2a = A2a::new(A2aParts {
         cores: A2aCores { engine: stand.clone(), actors: stand.clone() },
-        file: None,
+        db: None,
         version: "0.0.0-test".into(),
         home: "/home/nova".into(),
         name: Arc::new(|| Some("home".into())),

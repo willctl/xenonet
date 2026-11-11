@@ -16,6 +16,7 @@
 //! SQLite's own types stay inside the crate: what the store answers is its
 //! own, so a domain moving in doesn't spread rusqlite through the core.
 
+pub mod a2a;
 mod chains;
 pub mod delivery;
 pub mod engine;
@@ -157,7 +158,11 @@ impl Db {
             }
         }
         std::fs::create_dir_all(state_dir).map_err(|e| StoreError::new("sqlite", format!("{}: {e}", state_dir.display())))?;
+        // What agents, sessions and actors wrote: the owner's alone, from
+        // the start, so SQLite's own files beside it are too.
+        private(&file);
         let conn = Connection::open(&file)?;
+        let _ = xenonet_os::private_file::chmod_600(&file);
         // WAL, so reads go on while the one writer writes; FULL, so an
         // entry the store said it took survives the machine losing power.
         conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
@@ -295,6 +300,18 @@ impl Db {
             }
         }
     }
+}
+
+// The store's file made empty and owner-only before SQLite opens it,
+// which then makes its own files beside it with the same mode.
+fn private(file: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(file);
+    }
+    #[cfg(not(unix))]
+    let _ = file;
 }
 
 /// The next number in the store's order, taken inside the write that
