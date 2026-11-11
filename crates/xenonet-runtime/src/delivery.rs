@@ -25,8 +25,8 @@ use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
 use xenonet_engine::delivery::usage::plan_usage;
 use xenonet_engine::delivery::{Delivered, Error, Files};
-use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::Shared;
 use xenonet_text::text::to_number;
 use xenonet_text::time::now_ms;
 
@@ -112,7 +112,7 @@ impl policy::Host for Here<'_> {
     }
     fn all_sessions(&mut self) -> Vec<(String, Value)> {
         let Some(store) = self.store else { return Vec::new() };
-        let rows = store.with(|s| s.actor_rows()).unwrap_or_default();
+        let rows = store.with(xenonet_store::engine::EngineStore::actor_rows).unwrap_or_default();
         rows.iter().filter_map(|r| r.text("slug").map(|slug| format!("actor:{slug}"))).filter_map(|actor| self.sessions_of(&actor).map(|g| (actor, g))).collect()
     }
 }
@@ -343,7 +343,7 @@ fn usage(w: &Runtime, app: &str) -> Option<f64> {
     plan_usage(&limits, app, now_ms())
 }
 
-fn store_error(e: xenonet_engine::sql::SqlError) -> Error {
+fn store_error(e: xenonet_store::sql::SqlError) -> Error {
     Error(e.message().to_string())
 }
 

@@ -46,11 +46,11 @@ use xenonet_engine::delivery::policy::Guard;
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
 use xenonet_engine::host::Collaborators;
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
-use xenonet_engine::sql::Row;
-use xenonet_engine::store::EngineStore;
 use xenonet_model::ids::{parse_actor_id, qualify, YOU};
 use xenonet_model::ops::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::EngineStore;
+use xenonet_store::sql::Row;
 use xenonet_text::time::now_ms;
 
 /// How often presence and claims go out when they changed.
@@ -213,7 +213,7 @@ pub(crate) fn send(w: &Runtime, to: To, kind: Kind, body: Value) {
     }
 }
 
-fn store<T>(w: &Runtime, f: impl FnOnce(&EngineStore) -> xenonet_engine::sql::Result<T>) -> Result<T> {
+fn store<T>(w: &Runtime, f: impl FnOnce(&EngineStore) -> xenonet_store::sql::Result<T>) -> Result<T> {
     w.store.with(|s| f(s)).map_err(Fail::from)
 }
 

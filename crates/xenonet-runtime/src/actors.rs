@@ -16,9 +16,9 @@ use xenonet_actors::store::{self as rows, Tx};
 use xenonet_api::cores::{Actors, CoreError, R};
 use xenonet_api::From;
 use xenonet_engine::engine::Thrown;
-use xenonet_engine::sql::{self, Row, SqlError};
-use xenonet_engine::store::{row_json, EngineStore, Shared};
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::{row_json, EngineStore, Shared};
+use xenonet_store::sql::{self, Row, SqlError};
 use xenonet_text::time::now_ms;
 
 type Result<T> = std::result::Result<T, Thrown>;
@@ -44,35 +44,32 @@ pub fn row_of(r: sql::Result<Option<Row>>) -> rows::Result<Option<Value>> {
 
 impl Rows {
     /// A call on the store, its failure as the actors' cores take it.
-    pub fn direct<T>(&self, f: impl FnOnce(&mut EngineStore) -> sql::Result<T>) -> rows::Result<T> {
+    pub fn direct<T>(&self, f: impl FnOnce(&EngineStore) -> sql::Result<T>) -> rows::Result<T> {
         self.0.with(f).map_err(store_error)
-    }
-    fn exec(&self, q: &str) -> rows::Result<()> {
-        self.direct(|s| s.db().and_then(|db| sql::exec(db, q)))
     }
 }
 
 impl Tx for Rows {
     fn in_transaction(&self) -> bool {
-        self.0.with(|s| s.in_transaction())
+        self.0.with(EngineStore::in_transaction)
     }
     fn begin(&self) -> rows::Result<()> {
-        self.exec("BEGIN")
+        self.direct(EngineStore::begin)
     }
     fn commit(&self) -> rows::Result<()> {
-        self.exec("COMMIT")
+        self.direct(EngineStore::commit)
     }
     fn rollback(&self) {
-        let _ = self.exec("ROLLBACK");
+        self.0.with(EngineStore::rollback);
     }
 }
 
 impl registry::Store for Rows {
     fn actor_rows(&self) -> rows::Result<Vec<Value>> {
-        rows_json(self.0.with(|s| s.actor_rows()))
+        rows_json(self.0.with(EngineStore::actor_rows))
     }
     fn actor_targets(&self) -> rows::Result<Vec<Value>> {
-        rows_json(self.0.with(|s| s.actor_targets()))
+        rows_json(self.0.with(EngineStore::actor_targets))
     }
     fn last_actor_events(&self, actor: &str, limit: f64) -> rows::Result<Vec<Value>> {
         rows_json(self.0.with(|s| s.last_actor_events(actor, limit)))
@@ -108,7 +105,7 @@ impl registry::Store for Rows {
         rows_json(self.0.with(|s| s.actor_events_since(since, limit, only, except)))
     }
     fn actor_token_times(&self) -> rows::Result<Vec<Value>> {
-        self.direct(|s| s.actor_token_times())
+        self.direct(EngineStore::actor_token_times)
     }
     fn prune(&self, now: f64) -> rows::Result<()> {
         self.direct(|s| s.prune(now))

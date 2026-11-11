@@ -16,8 +16,8 @@ use xenonet_api::cores::{CoreError, Kind, Registration, R};
 use xenonet_api::From;
 use xenonet_authz::{decide, Act, Action, Door, Principal, Request, Resource, Token};
 use xenonet_engine::engine::Thrown;
-use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::Shared;
 use xenonet_text::text::display;
 use xenonet_text::time::now_ms;
 

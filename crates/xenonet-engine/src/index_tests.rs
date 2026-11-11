@@ -8,8 +8,8 @@ use crate::delivery::policy::WakeAllowed;
 use crate::delivery::router::Delivery;
 use crate::engine::Engine;
 use crate::host::{ActorsView, Clock, Events, Listening, MapReader, Processes, Repo, Repos, StatusSet, Waits};
-use crate::store::{EngineStore, Shared};
 use serde_json::json;
+use xenonet_store::engine::{EngineStore, Shared};
 
 const HOUR: f64 = 3600e3;
 
@@ -37,7 +37,7 @@ struct Fake {
 impl Fake {
     fn new(versioned: bool) -> Fake {
         let w = World { now: 1e12, versioned, version: 1, ..World::default() };
-        Fake { w: Mutex::new(w), store: Shared::new(EngineStore::open(":memory:", 1e12).unwrap()), delivery: true }
+        Fake { w: Mutex::new(w), store: Shared::new(EngineStore::memory(1e12).unwrap()), delivery: true }
     }
 
     fn c(&self) -> Collaborators<'_> {

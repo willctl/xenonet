@@ -2698,11 +2698,11 @@ dependencies = [
  "xenonet-api",
  "xenonet-authz",
  "xenonet-components",
- "xenonet-engine",
  "xenonet-id",
  "xenonet-model",
  "xenonet-os",
  "xenonet-schema",
+ "xenonet-store",
  "xenonet-text",
 ]
 
@@ -2719,7 +2719,6 @@ dependencies = [
 name = "xenonet-blocks"
 version = "0.2.0"
 dependencies = [
- "rusqlite",
  "serde_json",
  "xenonet-os",
  "xenonet-text",
@@ -2848,13 +2847,12 @@ version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "regex",
- "rusqlite",
  "serde_json",
  "sha2 0.10.9",
  "xenonet-adapter",
- "xenonet-blocks",
  "xenonet-model",
  "xenonet-os",
+ "xenonet-store",
  "xenonet-text",
 ]
 
@@ -2893,6 +2891,7 @@ dependencies = [
  "xenonet-service",
  "xenonet-sources",
  "xenonet-state",
+ "xenonet-store",
  "xenonet-text",
 ]
 
@@ -3116,7 +3115,6 @@ dependencies = [
  "async-trait",
  "regex",
  "reqwest",
- "rusqlite",
  "serde_json",
  "tokio",
  "url",
@@ -3127,11 +3125,11 @@ dependencies = [
  "xenonet-blocks",
  "xenonet-engine",
  "xenonet-id",
- "xenonet-log",
  "xenonet-model",
  "xenonet-net",
  "xenonet-os",
  "xenonet-schema",
+ "xenonet-store",
  "xenonet-text",
 ]
 
@@ -3182,6 +3180,7 @@ dependencies = [
  "xenonet-schema",
  "xenonet-sources",
  "xenonet-state",
+ "xenonet-store",
  "xenonet-text",
 ]
 
@@ -3223,6 +3222,18 @@ dependencies = [
  "xenonet-os",
  "xenonet-schema",
  "xenonet-sources",
+ "xenonet-text",
+]
+
+[[package]]
+name = "xenonet-store"
+version = "0.2.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "sha2 0.10.9",
+ "xenonet-log",
+ "xenonet-model",
  "xenonet-text",
 ]
 

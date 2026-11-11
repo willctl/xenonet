@@ -60,7 +60,7 @@ Each crate has one job. "Depends on" lists the XenoNet crates it uses
 | Crate | Its job | Depends on |
 | --- | --- | --- |
 | `xenonet-os` | Files, paths, processes started with no window, locks that outlive a panic (`sync`), the error log, XenoNet's own folders, the home folder and platform, random ids, `fetch()` over HTTPS, a program's output lines, the programs that open things, the system panel's numbers, and `Failure`, why something didn't give its value | text |
-| `xenonet-blocks` | The building blocks the subsystems are made of ([blocks.md](blocks.md)): lifecycle and health, scanners, tailers, normalizers, JSON stores and versioned SQLite | os, text |
+| `xenonet-blocks` | The building blocks the subsystems are made of ([blocks.md](blocks.md)): lifecycle and health, scanners, tailers, normalizers and JSON stores | os, text |
 
 **The registry and the adapters.**
 
@@ -78,11 +78,11 @@ Each crate has one job. "Depends on" lists the XenoNet crates it uses
 | --- | --- | --- |
 | `xenonet-sources` | What XenoNet reads: transcript lines and their events, the records readers make, live telemetry, Codex's archived rollouts, the shared context, plan usage, and the refusals XenoNet keeps (with the Refusals core) | adapter, model, os, text, schema, api |
 | `xenonet-state` | The map's data and what XenoNet remembers: `state.json` and its versions, the graph, search, stats and digests, projects and identities, the decision model's checks; and the map's runtime | adapter, api, blocks, components, demo, model, os, schema, text, sources |
-| `xenonet-engine` | Which process sent a request (`procs`, `verify`), messages, claims and views, the index of the agents it knows, live delivery, the network's side of them, and the engine's SQLite store | adapter, model, os, text, blocks |
+| `xenonet-engine` | Which process sent a request (`procs`, `verify`), messages, claims and views, the index of the agents it knows, live delivery, and the network's side of them, over its tables in the store (`xenonet_store::engine`) | adapter, model, os, text, store |
 | `xenonet-actors` | The programs you allow in XenoNet: their registry, registration, reports, wakes, remote connections, tokens and token files; and the secret stores | adapter, model, os, text |
-| `xenonet-store` | The one store, `<state>/xenonet.sqlite`: one writer in WAL mode, the schema's hash as its `user_version` (another version, or an `engine.sqlite` from before it, is left on disk and refused: set the machine up again), one store order (`meta.stored`) every chain and feed entry is numbered in, and the chains' entries; the domains' tables come as each moves in. SQLite's types stay inside it | log |
+| `xenonet-store` | The one store, `<state>/xenonet.sqlite`: one writer in WAL mode, the schema's hash as its `user_version` (another version, or an `engine.sqlite` from before it, is left on disk and refused: set the machine up again), one store order (`meta.stored`) every chain and feed entry is numbered in, and the chains' entries; the domains' tables come as each moves in (`engine`: messages, claims, actors, grants, the network's presence and handoffs). SQLite's types stay inside it | log, model, text |
 | `xenonet-net` | One network across machines ([network.md](network.md)): a host's keys, signed and sealed frames, the roster chain, tickets, the gateway's routes and queues, a host's link to its gateway, services through the network | model, os, text |
-| `xenonet-assistant` | What remote actors may read ([cloud-assistants.md](cloud-assistants.md)): grant credentials, page tokens, the projection a grant sees, the six reads, the tunnels; and their runtime | os, text, components, api, engine, actors, adapter, model, schema |
+| `xenonet-assistant` | What remote actors may read ([cloud-assistants.md](cloud-assistants.md)): grant credentials, page tokens, the projection a grant sees, the six reads, the tunnels; and their runtime | os, text, components, api, store, actors, adapter, model, schema |
 | `xenonet-components` | XenoNet's install: the command on PATH, the service's settings, XenoNet Dev's instances, the version, the Service and Tools packages (checked, unpacked, switched, rolled back), starting the service at login, and the launcher | os, text |
 | `xenonet-integrations` | Routing suggestions, OpenShell sandboxes and their reviews, Pi sessions, MCP servers' catalogs, the decision model and OpenRouter's spend; and their cores | os, adapter, text, api, actors, sources, state |
 | `xenonet-doctor` | Each check's verdict and wording, the summary, new problems, the diagnostics bundle; and the Doctor and Diagnostics cores | components, adapter, os, text, schema, api, engine, model, net, sources |
@@ -93,7 +93,7 @@ timers, child processes, files and the waits between them. Most of it is a
 
 | Crate or module | Its job | Depends on |
 | --- | --- | --- |
-| `xenonet-runtime` | The engine running here: its store's sides, the map's readers, the process table and its checks, the engine and delivery's drivers, the network across machines, starts, asks and runs, the actors' sides (registration, wakes, reports, tokens, spend, observers), the local door's decisions through `xenonet-authz` (`door`), and other machines of the network on the map (`remote`: the relay, each host's link and the merge that qualifies what a host sends, with the hub that runs them) | adapter, text, api, os, actors, blocks, engine, schema, model, authz, id, log, net |
+| `xenonet-runtime` | The engine running here: its store's sides, the map's readers, the process table and its checks, the engine and delivery's drivers, the network across machines, starts, asks and runs, the actors' sides (registration, wakes, reports, tokens, spend, observers), the local door's decisions through `xenonet-authz` (`door`), and other machines of the network on the map (`remote`: the relay, each host's link and the merge that qualifies what a host sends, with the hub that runs them) | adapter, text, api, os, actors, blocks, engine, store, schema, model, authz, id, net |
 | `xenonet-state`'s `runtime` | The map kept current: the refresh from the vendor files, the live tailer, identities, projects, search, stats and the demo's world | (its crate's) |
 | `runtime` in `xenonet-assistant`, `-doctor`, `-integrations`, and `xenonet-sources`' `refusals::runtime` | Each domain's cores, as the service runs them | (their crates') |
 | `xenonet-demo` | The made-up world the demo runs on: projects, transcripts, rollouts and a shared context in a temporary folder, kept busy | os, text |
@@ -146,7 +146,7 @@ one needs a reason too.
 | Crate | For |
 | --- | --- |
 | `serde`, `serde_json` (with `preserve_order`), `schemars`, `serde_path_to_error` | Every document, body and record, in the order its keys were added, as the files and golden files have them; the JSON Schemas written from the model; the field a document fails at |
-| `rusqlite` (bundled) | `xenonet.sqlite` (the store), `engine.sqlite`, `search.sqlite`, the network's queues, OpenCode's and Codex's databases. Bundled, so FTS5 and `VACUUM INTO` are there whatever the system has |
+| `rusqlite` (bundled) | `xenonet.sqlite` (the store), `search.sqlite`, the network's queues, OpenCode's and Codex's databases. Bundled, so FTS5 and `VACUUM INTO` are there whatever the system has |
 | `tokio`, `async-trait` | The service's sockets, timers and child processes, and the async core traits |
 | `hyper`, `hyper-util`, `http-body-util`, `bytes` | The HTTP API and the gateway, with XenoNet's own router on top, since the order of the checks and routes is part of the contract |
 | `rmcp` | The MCP servers over stdio |

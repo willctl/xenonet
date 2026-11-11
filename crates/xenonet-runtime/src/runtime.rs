@@ -19,7 +19,7 @@ use std::sync::{Arc, OnceLock};
 use xenonet_api::cores::State;
 use xenonet_api::wire::WireEnv;
 use xenonet_api::From;
-use xenonet_engine::store::Shared;
+use xenonet_store::engine::Shared;
 
 /// What the area runs as: the service's settings it reads, once the demo's
 /// world has moved their folders.

@@ -48,7 +48,7 @@ pub struct EngineGround {
     /// person's delegation.
     pub asks: HashMap<String, Asked>,
     /// The engine's store, whose revoked table holds every token taken back.
-    pub store: Option<xenonet_engine::store::Shared>,
+    pub store: Option<xenonet_store::engine::Shared>,
     /// Another machine's root certificates an act carried, unverified: a
     /// token's parse checks each against that machine's signing key.
     pub roots: Vec<RootCertificate>,

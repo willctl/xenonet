@@ -15,11 +15,11 @@ use std::sync::Mutex;
 use xenonet_adapter::observe::{self, Actors, Census, Db, Fail, Files, Observer, ObserverHost, Pins, Procs, SpawnsState, Stat, Vendor, LOOK_MS};
 use xenonet_blocks::lifecycle::Lifecycle;
 use xenonet_engine::engine::Thrown;
-use xenonet_engine::sql::{self, Bind};
-use xenonet_engine::store::row_json;
 use xenonet_os::sync::Locked;
 use xenonet_schema::drift::{DriftLog, Piece};
 use xenonet_schema::vendor::{Checked, Readers};
+use xenonet_store::engine::row_json;
+use xenonet_store::sql::{self, Bind};
 use xenonet_text::time::now_ms;
 
 /// One observer: a building block with its lifecycle.
@@ -28,7 +28,7 @@ pub struct One {
     life: Mutex<Lifecycle>,
     looking: Mutex<bool>,
     polling: Mutex<bool>,
-    db: Mutex<Option<rusqlite::Connection>>,
+    db: Mutex<Option<sql::ReadOnly>>,
 }
 
 pub struct Observers {
@@ -261,8 +261,7 @@ impl Pins for Host<'_> {
 impl Db for Host<'_> {
     fn open(&self, file: &str) -> observe::Result<()> {
         let Some(o) = self.o else { return Err(Fail::new("no observer")) };
-        let c = rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)
-            .map_err(|e| Host::sql(sql::SqlError::from(e)))?;
+        let c = sql::ReadOnly::open(file).map_err(Host::sql)?;
         *o.db.locked() = Some(c);
         Ok(())
     }
@@ -271,7 +270,7 @@ impl Db for Host<'_> {
         let db = o.db.locked();
         let Some(c) = db.as_ref() else { return Err(Fail::new("the database isn't open")) };
         let params = args.iter().enumerate().map(|(i, v)| Bind::scalar(v).ok_or_else(|| sql::unbindable(i + 1))).collect::<sql::Result<Vec<Bind>>>().map_err(Host::sql)?;
-        let rows = sql::all(c, sql, &params).map_err(Host::sql)?;
+        let rows = c.all(sql, &params).map_err(Host::sql)?;
         Ok(rows.iter().map(row_json).collect())
     }
     fn get(&self, sql: &str, args: &[Value]) -> observe::Result<Value> {

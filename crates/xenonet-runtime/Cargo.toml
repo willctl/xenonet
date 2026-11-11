@@ -23,7 +23,8 @@ xenonet-os.workspace = true
 xenonet-actors.workspace = true
 xenonet-blocks.workspace = true
 xenonet-engine.workspace = true
-rusqlite.workspace = true
+# The one store, which the engine's tables are in.
+xenonet-store.workspace = true
 # The checks on what an actor reports: its events and targets read as their
 # types.
 xenonet-schema.workspace = true
@@ -37,13 +38,14 @@ regex.workspace = true
 # Every act from another machine is decided here (xenonet-authz), on this
 # machine's copy of the chains and the person on it (xenonet-net's
 # governance), with the person's device signatures and presence
-# (xenonet-id, xenonet-log).
+# (xenonet-id).
 xenonet-authz.workspace = true
 xenonet-id.workspace = true
-xenonet-log.workspace = true
 xenonet-net.workspace = true
 
 [dev-dependencies]
+# The chains the tests build: the network's and the person's.
+xenonet-log.workspace = true
 # Fake keys for the tests' person and devices: never the machine's own.
 xenonet-keys.workspace = true
 # The real adapters, which the tests install as the binary does at start.

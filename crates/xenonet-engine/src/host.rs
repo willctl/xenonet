@@ -9,8 +9,8 @@
 use crate::delivery::policy::Guard;
 use crate::delivery::router::Delivery;
 use crate::engine::Result;
-use crate::store::Shared;
 use serde_json::Value;
+use xenonet_store::engine::Shared;
 
 /// The engine's clock: the time it reasons with, the wall clock a
 /// listening hook's deadline is set by, and the time as the locale writes

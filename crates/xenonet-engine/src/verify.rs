@@ -31,12 +31,12 @@
 //! `xenonet_adapter::products`.
 
 use crate::procs::Link;
-use crate::store::Shared;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_adapter::products;
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::Shared;
 use xenonet_text::json::number;
 
 /// What a check reads of the machine: procs' lookups and the clock.
@@ -79,8 +79,8 @@ impl std::fmt::Display for Fail {
     }
 }
 
-impl From<crate::sql::SqlError> for Fail {
-    fn from(e: crate::sql::SqlError) -> Self {
+impl From<xenonet_store::sql::SqlError> for Fail {
+    fn from(e: xenonet_store::sql::SqlError) -> Self {
         Fail::Store(e.message().to_string())
     }
 }
@@ -874,7 +874,7 @@ mod tests {
     }
 
     fn verifier(home: Option<f64>) -> Verifier {
-        Verifier::new(Shared::new(crate::store::EngineStore::open(":memory:", 0.0).unwrap()), home)
+        Verifier::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), home)
     }
 
     /// A verdict, as (ok, the reason it says).

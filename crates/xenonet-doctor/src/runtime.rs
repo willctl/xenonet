@@ -67,6 +67,9 @@ pub struct Parts {
     pub emitter: Emitter,
     /// The actor gateway, once the service has made it.
     pub gateway: Slot<Arc<dyn GatewayStatus>>,
+    /// Why the store in a state folder can't be used, if it can't
+    /// (`xenonet_store::standing`, which the composition gives).
+    pub standing: fn(&str) -> Option<String>,
 }
 
 impl Parts {
@@ -424,6 +427,9 @@ impl DoctorHost for Here {
     }
     async fn state_file(&self, dir: &str) -> Value {
         inspect_state(dir)
+    }
+    async fn store(&self, dir: &str) -> Option<String> {
+        (self.m.parts.standing)(dir)
     }
     async fn command(&self) -> Value {
         let dir = xenonet_components::command::command_dir(&self.m.parts.home(), xenonet_os::platform(), fx::env_set("LOCALAPPDATA").as_deref());
@@ -898,6 +904,7 @@ mod tests {
             drift: Arc::new(Mutex::new(DriftLog::default())),
             emitter: Emitter::new(),
             gateway: Slot::default(),
+            standing: |_| None,
         })
     }
 
@@ -943,6 +950,20 @@ mod tests {
         let c = d.run(true, false).await;
         assert_ne!(c["at"], a["at"], "a fresh one runs again");
         assert!(std::path::Path::new(&state).join("doctor.json").exists(), "the last run is kept");
+    }
+
+    // A store this build doesn't read makes the state check say to set the
+    // machine up again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_store_to_set_up_again_fails_the_state_check() {
+        let state = tmp("set-up-again");
+        let mut p = Arc::into_inner(parts(false, &state)).unwrap();
+        p.standing = |dir| Some(format!("{dir}/engine.sqlite is from an earlier XenoNet"));
+        let d = DoctorService::new(Arc::new(p));
+        let r = d.run(false, false).await;
+        let check = r["results"].as_array().unwrap().iter().find(|x| x["id"] == "xenonet.state").unwrap().clone();
+        assert_eq!(check["status"], "fail");
+        assert!(check["fix"].as_str().unwrap().starts_with("Set this machine up again"), "{check}");
     }
 
     #[test]

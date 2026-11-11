@@ -105,3 +105,40 @@ fn a_chain_is_rebuilt_from_its_stored_entries() {
     assert_eq!(db.entries::<PersonPolicy>("person:nobody").unwrap().len(), 0, "no such chain");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn another_threads_call_waits_for_a_transaction_to_end() {
+    let db = std::sync::Arc::new(Db::memory().unwrap());
+    let other = db.clone();
+    let (ready, go) = std::sync::mpsc::channel();
+    let out: Result<(), sql::SqlError> = db.transaction(|| {
+        db.write(|c| Ok(c.execute_batch("CREATE TABLE t (x)")?)).map_err(|e| sql::SqlError::Other(e.message))?;
+        // Another thread's write, started while this transaction is open,
+        // isn't part of it: it waits, and lands after the rollback.
+        let h = std::thread::spawn(move || {
+            ready.send(()).unwrap();
+            other.write(|c| Ok(c.execute_batch("CREATE TABLE u (x)")?)).unwrap();
+        });
+        go.recv().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(db.in_transaction() && !h.is_finished(), "the other write waits");
+        Err(sql::SqlError::Other("give up".into()))
+    });
+    assert!(out.is_err());
+    // The other thread's table is made once the transaction is gone.
+    for _ in 0..100 {
+        if db.read(|c| Ok(c.query_row("SELECT count(*) FROM sqlite_schema WHERE name = 'u'", [], |r| r.get::<_, i64>(0))?)).unwrap() == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let names: Vec<String> = db
+        .read(|c| {
+            let mut q = c.prepare("SELECT name FROM sqlite_schema WHERE name IN ('t', 'u') ORDER BY name")?;
+            let rows = q.query_map([], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .unwrap();
+    assert_eq!(names, ["u"], "the rolled back transaction's table is gone, the other thread's stays");
+    assert!(!db.in_transaction());
+}

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use xenonet_api::cores::Verify;
 use xenonet_api::peer::Peer;
 use xenonet_engine::procs::Link;
-use xenonet_engine::store::Shared;
 use xenonet_engine::verify::{Fail, Host, Verdict, Verifier};
+use xenonet_store::engine::Shared;
 use xenonet_text::json::number;
 use xenonet_text::time::now_ms;
 
@@ -191,7 +191,7 @@ mod tests {
     use super::*;
 
     fn checks() -> Checks {
-        Checks::new(Shared::new(xenonet_engine::store::EngineStore::open(":memory:", 0.0).unwrap()), System::new())
+        Checks::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), System::new())
     }
 
     #[tokio::test]
@@ -289,7 +289,7 @@ mod tests {
                 _ => Err(xenonet_engine::procs::Failure { message: format!("Command failed: {}", c.file), stdout: None }),
             }),
         );
-        let c = Checks::new(Shared::new(xenonet_engine::store::EngineStore::open(":memory:", 0.0).unwrap()), sys);
+        let c = Checks::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), sys);
         assert_eq!(tray_apps("/Users/me"), ["/Applications", "/Users/me/Applications"]);
         assert_eq!(c.tray(from(51010), "/Users/me").await, json!({ "ok": true, "checked": true }));
         let under = c.tray(from(51011), "/Users/me").await;
@@ -301,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn a_request_in_a_sessions_name_is_held_to_the_process_it_comes_from() {
         xenonet_platforms::install();
-        let c = Checks::new(Shared::new(xenonet_engine::store::EngineStore::open(":memory:", 0.0).unwrap()), machine());
+        let c = Checks::new(Shared::new(xenonet_store::engine::EngineStore::memory(0.0).unwrap()), machine());
         let s = "claude:0190d3e0-0000-7000-8000-00000000000a";
         // From the shell under Claude Code: it's that session's, now pinned
         // to its process.

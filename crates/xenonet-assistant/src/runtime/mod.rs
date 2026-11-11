@@ -20,7 +20,7 @@ pub mod tunnels;
 
 use serde_json::{Map, Value};
 use xenonet_api::cores::{CoreError, Kind};
-use xenonet_engine::sql::{Cell, Row};
+use xenonet_store::sql::{Cell, Row};
 
 /// A row of the engine's store as JSON: each column as node:sqlite read it,
 /// an integer as a number.

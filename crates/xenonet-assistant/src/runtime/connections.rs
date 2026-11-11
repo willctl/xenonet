@@ -17,9 +17,9 @@ use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Ho
 use xenonet_actors::store::{self, Tx};
 use xenonet_api::cores::assistant::ConnectionEvents;
 use xenonet_api::cores::{Actors, Connections, EngineStore, Grants, State, R};
-use xenonet_engine::sql::SqlError;
-use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::{EngineStore as Tables, Shared};
+use xenonet_store::sql::SqlError;
 use xenonet_text::text::display;
 use xenonet_text::time::now_ms;
 
@@ -183,33 +183,27 @@ fn text(v: &Value) -> String {
 }
 
 /// Rows answered, as JSON.
-fn rows(r: Result<Vec<xenonet_engine::sql::Row>, SqlError>) -> store::Result<Vec<Value>> {
+fn rows(r: Result<Vec<xenonet_store::sql::Row>, SqlError>) -> store::Result<Vec<Value>> {
     r.map(|rows| rows.iter().map(row_json).collect()).map_err(sql)
 }
 
 /// A row answered, if any, as JSON.
-fn row(r: Result<Option<xenonet_engine::sql::Row>, SqlError>) -> store::Result<Option<Value>> {
+fn row(r: Result<Option<xenonet_store::sql::Row>, SqlError>) -> store::Result<Option<Value>> {
     r.map(|row| row.as_ref().map(row_json)).map_err(sql)
-}
-
-impl EngineRows {
-    fn exec(&self, sql_text: &str) -> store::Result<()> {
-        self.0.with(|s| s.db().and_then(|db| xenonet_engine::sql::exec(db, sql_text))).map_err(sql)
-    }
 }
 
 impl Tx for EngineRows {
     fn in_transaction(&self) -> bool {
-        self.0.with(|s| s.in_transaction())
+        self.0.with(Tables::in_transaction)
     }
     fn begin(&self) -> store::Result<()> {
-        self.exec("BEGIN")
+        self.0.with(xenonet_store::engine::EngineStore::begin).map_err(sql)
     }
     fn commit(&self) -> store::Result<()> {
-        self.exec("COMMIT")
+        self.0.with(xenonet_store::engine::EngineStore::commit).map_err(sql)
     }
     fn rollback(&self) {
-        let _ = self.exec("ROLLBACK");
+        self.0.with(xenonet_store::engine::EngineStore::rollback);
     }
 }
 
@@ -251,7 +245,7 @@ impl Store for EngineRows {
         self.0.with(|s| s.set_meta(key, value)).map_err(sql)
     }
     fn grants(&self) -> store::Result<Vec<Value>> {
-        rows(self.0.with(|s| s.grants()))
+        rows(self.0.with(Tables::grants))
     }
     fn grant(&self, id: &str) -> store::Result<Option<Value>> {
         row(self.0.with(|s| s.grant(id)))
@@ -260,7 +254,7 @@ impl Store for EngineRows {
         row(self.0.with(|s| s.connection(id)))
     }
     fn connections(&self) -> store::Result<Vec<Value>> {
-        rows(self.0.with(|s| s.connections()))
+        rows(self.0.with(Tables::connections))
     }
     fn connections_of(&self, slug: &str) -> store::Result<Vec<Value>> {
         rows(self.0.with(|s| s.connections_of(slug)))
@@ -551,7 +545,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xenonet-connections-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let store = Shared::new(xenonet_engine::store::EngineStore::open(&dir.join("engine.sqlite").to_string_lossy(), now_ms()).unwrap());
+        let store = Shared::new(xenonet_store::engine::EngineStore::new(Arc::new(xenonet_store::Db::open(&dir).unwrap()), now_ms()).unwrap());
         let creds = dir.join("assistant").to_string_lossy().into_owned();
         let actors = Arc::new(FakeActors { store: store.clone(), known: Mutex::new(HashMap::new()), hooks: Mutex::new(Vec::new()) });
         let grants = Arc::new(crate::pages::Memory::new());

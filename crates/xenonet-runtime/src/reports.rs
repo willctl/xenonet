@@ -12,10 +12,10 @@ use xenonet_actors::registration::Fail;
 use xenonet_actors::reports;
 use xenonet_api::cores::{CoreError, Reports, R};
 use xenonet_engine::engine::Thrown;
-use xenonet_engine::sql::Bind;
 use xenonet_model::actor::{ReportEvent, ReportTarget};
 use xenonet_os::sync::Locked;
 use xenonet_schema::typed;
+use xenonet_store::sql::Bind;
 use xenonet_text::time::now_ms;
 
 /// What a report reads besides the registry: the actor's processes as
@@ -51,7 +51,7 @@ impl ReportHost<'_> {
         self.w.actors.as_ref().map_or_else(T::default, |a| a.read(f))
     }
 
-    fn store<T>(&self, f: impl FnOnce(&mut xenonet_engine::store::EngineStore) -> xenonet_engine::sql::Result<T>) -> Result<T, Fail> {
+    fn store<T>(&self, f: impl FnOnce(&xenonet_store::engine::EngineStore) -> xenonet_store::sql::Result<T>) -> Result<T, Fail> {
         self.w.store.with(f).map_err(|e| Fail::Error(crate::actors::store_error(e)))
     }
 }
@@ -79,7 +79,7 @@ impl reports::Host for ReportHost<'_> {
         self.with("target", |r, _| r.target(id, node, relation, at))
     }
     fn pins(&mut self, session: &str) -> Result<Vec<Value>, Fail> {
-        self.store(|s| s.pins(session)).map(|rows| rows.iter().map(xenonet_engine::store::row_json).collect())
+        self.store(|s| s.pins(session)).map(|rows| rows.iter().map(xenonet_store::engine::row_json).collect())
     }
     fn has_actor_ref(&mut self, id: &str, r: &Value, since: f64) -> Result<bool, Fail> {
         // The ref as the event gave it: a text, or a number kept as text.

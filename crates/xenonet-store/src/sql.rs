@@ -1,6 +1,7 @@
-//! SQL over rusqlite, bound and read as the engine's store (`store`) and
-//! the tests that look into it expect, and as the file it keeps has
-//! always been written:
+//! SQL over rusqlite, bound and read as the engine's tables (`engine`)
+//! and the tests that look into them expect, and as the engine has always
+//! written them. These are the store's own types, so rusqlite's stay
+//! inside the crate:
 //!
 //! - A number (`Bind::Real`, what an f64 becomes) is bound as a REAL; a
 //!   column with INTEGER affinity keeps a whole one as an integer, and one
@@ -249,7 +250,7 @@ fn clear(stmt: &mut Statement<'_>) -> Result<()> {
 
 /// Binds the anonymous parameters in order; too few leave the rest NULL,
 /// too many are an error.
-pub fn bind(stmt: &mut Statement<'_>, args: &[Bind]) -> Result<()> {
+pub(crate) fn bind(stmt: &mut Statement<'_>, args: &[Bind]) -> Result<()> {
     clear(stmt)?;
     let mut anon = 1;
     for v in args {
@@ -265,7 +266,7 @@ pub fn bind(stmt: &mut Statement<'_>, args: &[Bind]) -> Result<()> {
 /// Binds a record's fields to the named parameters (:x, $x or @x) of the
 /// same names, each as `Bind::scalar` takes it. A field no parameter has is
 /// an error, and a parameter the record leaves out is NULL.
-pub fn bind_record(stmt: &mut Statement<'_>, record: &serde_json::Map<String, serde_json::Value>) -> Result<()> {
+pub(crate) fn bind_record(stmt: &mut Statement<'_>, record: &serde_json::Map<String, serde_json::Value>) -> Result<()> {
     clear(stmt)?;
     for (k, v) in record {
         let mut index = None;
@@ -317,14 +318,14 @@ fn read_rows(stmt: &mut Statement<'_>, first: bool) -> Result<Vec<Row>> {
 
 /// A statement prepared (and kept, as the store keeps the ones it runs
 /// often): its rows.
-pub fn all(db: &Connection, sql: &str, args: &[Bind]) -> Result<Vec<Row>> {
+pub(crate) fn all(db: &Connection, sql: &str, args: &[Bind]) -> Result<Vec<Row>> {
     let mut st = db.prepare_cached(sql)?;
     bind(&mut st, args)?;
     read_rows(&mut st, false)
 }
 
 /// Its first row, or None.
-pub fn get(db: &Connection, sql: &str, args: &[Bind]) -> Result<Option<Row>> {
+pub(crate) fn get(db: &Connection, sql: &str, args: &[Bind]) -> Result<Option<Row>> {
     let mut st = db.prepare_cached(sql)?;
     bind(&mut st, args)?;
     Ok(read_rows(&mut st, true)?.into_iter().next())
@@ -337,7 +338,7 @@ pub struct Changes {
     pub last_insert_rowid: i64,
 }
 
-pub fn run(db: &Connection, sql: &str, args: &[Bind]) -> Result<Changes> {
+pub(crate) fn run(db: &Connection, sql: &str, args: &[Bind]) -> Result<Changes> {
     let mut st = db.prepare_cached(sql)?;
     bind(&mut st, args)?;
     st.raw_execute()?;
@@ -345,35 +346,31 @@ pub fn run(db: &Connection, sql: &str, args: &[Bind]) -> Result<Changes> {
 }
 
 /// A run with a record's fields as its named parameters (`bind_record`).
-pub fn run_record(db: &Connection, sql: &str, record: &serde_json::Map<String, serde_json::Value>) -> Result<Changes> {
+pub(crate) fn run_record(db: &Connection, sql: &str, record: &serde_json::Map<String, serde_json::Value>) -> Result<Changes> {
     let mut st = db.prepare_cached(sql)?;
     bind_record(&mut st, record)?;
     st.raw_execute()?;
     Ok(Changes { changes: db.changes() as i64, last_insert_rowid: db.last_insert_rowid() })
 }
 
-/// Checks a statement prepares, as DatabaseSync.prepare does.
-pub fn prepare(db: &Connection, sql: &str) -> Result<()> {
-    db.prepare_cached(sql)?;
-    Ok(())
-}
-
-pub fn exec(db: &Connection, sql: &str) -> Result<()> {
+#[cfg(test)]
+fn exec(db: &Connection, sql: &str) -> Result<()> {
     db.execute_batch(sql).map_err(SqlError::from)
 }
 
-/// `fn` in a transaction of its own, unless one is under way already.
-pub fn transaction<T>(db: &Connection, f: impl FnOnce() -> Result<T>) -> Result<T> {
-    if !db.is_autocommit() {
-        return f();
+/// Another program's database, open to read only (an observer reads
+/// what an actor's own app keeps), with its rows read as the store's are.
+pub struct ReadOnly(Connection);
+
+impl ReadOnly {
+    pub fn open(file: &str) -> Result<ReadOnly> {
+        let c = Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        Ok(ReadOnly(c))
     }
-    exec(db, "BEGIN")?;
-    match f().and_then(|out| exec(db, "COMMIT").map(|()| out)) {
-        Ok(out) => Ok(out),
-        Err(e) => {
-            let _ = exec(db, "ROLLBACK");
-            Err(e)
-        }
+
+    /// A query's rows, its anonymous parameters bound in order.
+    pub fn all(&self, sql: &str, args: &[Bind]) -> Result<Vec<Row>> {
+        all(&self.0, sql, args)
     }
 }
 

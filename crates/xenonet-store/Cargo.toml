@@ -17,6 +17,10 @@ serde_json.workspace = true
 sha2.workspace = true
 # The chains' entries the store keeps.
 xenonet-log.workspace = true
+# The model's ids, and numbers and JSON text as the domains' answers have
+# always had them.
+xenonet-model.workspace = true
+xenonet-text.workspace = true
 
 [dev-dependencies]
 # Keys made from seeds, to sign the tests' chain entries.

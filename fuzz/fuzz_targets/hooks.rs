@@ -13,7 +13,7 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use xenonet_engine::engine::{self, Engine, Result};
 use xenonet_engine::host::{Clock, Collaborators, Events, IndexEntry, Listening, MapReader, Processes, Repo, Repos, Waits};
-use xenonet_engine::store::{EngineStore, Shared};
+use xenonet_store::engine::{EngineStore, Shared};
 
 const NOW: f64 = 1_791_230_000_000.0;
 
@@ -97,7 +97,7 @@ fuzz_target!(|data: &[u8]| {
     let Some(input) = xenonet_fuzz::json(payload) else { return };
     let pattern = xenonet_fuzz::text(pattern);
     xenonet_fuzz::run(payload, || {
-        let store = Shared::new(EngineStore::open(":memory:", NOW).expect("a store in memory"));
+        let store = Shared::new(EngineStore::memory(NOW).expect("a store in memory"));
         let q = Quiet;
         let c = Collaborators {
             store: &store,

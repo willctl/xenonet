@@ -46,9 +46,11 @@ xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
 # JSON, text and times as XenoNet writes them.
 xenonet-text.workspace = true
-# A2A's targets are the engine's selectors (a2a/tasks.rs), and the
-# composition's engine parts (compose/app.rs).
+# A2A's targets are the engine's selectors (a2a/tasks.rs).
 xenonet-engine.workspace = true
+# The engine's tables, which the composition hands the remote actors
+# (compose/app.rs), and the store's standing, for the doctor.
+xenonet-store.workspace = true
 # One network across machines: the gateway's routes behind the front door,
 # the link, and the node /api/net reaches (parts.rs).
 xenonet-net.workspace = true

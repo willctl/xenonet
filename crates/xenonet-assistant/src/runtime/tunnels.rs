@@ -57,7 +57,7 @@ struct Handles {
 
 pub struct Runner {
     remote: Arc<Remote>,
-    store: xenonet_engine::store::Shared,
+    store: xenonet_store::engine::Shared,
     tdir: String,
     secrets: Arc<Secrets>,
     launch: Launch,
@@ -74,7 +74,7 @@ pub struct Runner {
 
 impl Runner {
     #[expect(clippy::too_many_arguments, reason = "createTunnels' options, one by one")]
-    pub fn new(remote: Arc<Remote>, store: xenonet_engine::store::Shared, dir: &str, secrets: Arc<Secrets>, launch: Launch, home: &str, demo: bool, emitter: Emitter) -> Arc<Self> {
+    pub fn new(remote: Arc<Remote>, store: xenonet_store::engine::Shared, dir: &str, secrets: Arc<Secrets>, launch: Launch, home: &str, demo: bool, emitter: Emitter) -> Arc<Self> {
         let r = Arc::new_cyclic(|me| Runner {
             remote: remote.clone(),
             store,

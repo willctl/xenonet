@@ -30,7 +30,8 @@ xenonet-id.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 xenonet-api.workspace = true
-xenonet-engine.workspace = true
+# The engine's tables, where remote actors' connections and grants are.
+xenonet-store.workspace = true
 xenonet-actors.workspace = true
 xenonet-adapter.workspace = true
 xenonet-model.workspace = true

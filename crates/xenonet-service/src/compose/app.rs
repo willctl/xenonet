@@ -89,7 +89,7 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
     if cores.connections.is_some() {
         let reads_of =
             |remote, store| assistant::reads::Reads::new(remote, cores.state.clone(), cores.actors.clone(), cores.engine_store.clone(), store, &env.version, env.emitter.clone());
-        let native = cores.engine_store.native().and_then(|a| a.downcast_ref::<xenonet_engine::store::Shared>().cloned());
+        let native = cores.engine_store.native().and_then(|a| a.downcast_ref::<xenonet_store::engine::Shared>().cloned());
         cores.assistant_source = Some(Arc::new(assistant::reads::SourceCore(reads_of(None, None))));
         if let (Some(store), Some(actors)) = (native, cores.actors.clone()) {
             let dir = xenonet_assistant::credentials::assistant_dir(&state_dir);
@@ -146,8 +146,19 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         drift: env.drift.clone(),
         emitter: env.emitter.clone(),
         gateway: env.gateway.clone(),
+        standing: store_standing,
     });
     let service = doctor::DoctorService::new(parts.clone());
     cores.doctor = Arc::new(doctor::DoctorCore(service.clone()));
     cores.diagnostics = Arc::new(doctor::Diagnose { parts, doctor: service });
+}
+
+/// Why the store in a state folder can't be used, if it can't: data from
+/// an earlier build, or another version's store, which the machine is set
+/// up again for.
+fn store_standing(state_dir: &str) -> Option<String> {
+    match xenonet_store::standing(Path::new(state_dir)) {
+        xenonet_store::Standing::SetUpAgain(why) => Some(why),
+        xenonet_store::Standing::None | xenonet_store::Standing::Ready => None,
+    }
 }

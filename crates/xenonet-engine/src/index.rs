@@ -25,12 +25,12 @@
 
 use crate::engine::Result;
 use crate::host::{Collaborators, IndexEntry};
-use crate::store::row_json;
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::row_json;
 use xenonet_text::text::{display, truthy};
 
 /// How often the index is rebuilt from the scans, whatever was pushed.

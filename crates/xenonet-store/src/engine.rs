@@ -1,15 +1,12 @@
-//! What the engine remembers, in engine.sqlite in the state dir
-//! (core/engine/store.js): messages between agents (and which of their
-//! recipients have seen them), the files agents have claimed, what each
-//! says it's doing, when XenoNet last heard from each agent directly, and
-//! which process holds each agent's session (pins; see `verify`). Actors
-//! keep their rows, events and targets here too, with registrations
-//! waiting for you and revoked tokens, and remote actors' connections and
-//! grants, with the bounded log of what they read. One writer, the
-//! service; agents and actors never touch the file. The store block
-//! (xenonet_blocks::sqlite) opens it and keeps its version, and copies a
-//! file with data in it before taking it a step up (`engine.v<n>.sqlite`
-//! beside it).
+//! What the engine remembers, in the store: messages between agents (and
+//! which of their recipients have seen them), the files agents have
+//! claimed, what each says it's doing, when XenoNet last heard from each
+//! agent directly, and which process holds each agent's session (pins).
+//! Actors keep their rows, events and targets here too, with
+//! registrations waiting for you and revoked tokens, and remote actors'
+//! connections and grants, with the bounded log of what they read. The
+//! network keeps other machines' presence and claims, and handoffs. One
+//! writer, the service; agents and actors never touch the file.
 //!
 //! Every call binds and reads as `sql` does: ids and texts as text, times
 //! and counts as numbers (REALs), a record (a message, an actor's row, an
@@ -18,11 +15,10 @@
 //! does, with every integer a number.
 
 use crate::sql::{self, Bind, Cell, Changes, Result, Row, SqlError};
-use rusqlite::Connection;
+use crate::Db;
 use serde_json::{json, Value};
-use xenonet_blocks::sqlite::{SqliteStore, Step, Version};
+use std::sync::Arc;
 use xenonet_model::ids::YOU;
-use xenonet_os::sync::Locked;
 
 const DAY_MS: f64 = 24.0 * 3600e3;
 const WEEK_MS: f64 = 7.0 * DAY_MS;
@@ -36,150 +32,43 @@ fn you_slug() -> &'static str {
     &YOU["actor:".len()..]
 }
 
-const STEP_ONE: &str = r"
-      CREATE TABLE IF NOT EXISTS messages (
+/// The engine's tables. They aren't STRICT: a number binds as a REAL, and
+/// a column's affinity decides what's kept (`sql`), as the engine's
+/// answers have always been read. Columns are in the order the answers
+/// list them (`SELECT *`).
+pub(crate) const TABLES: &[&str] = &[
+    // Messages, and their deliveries: `scope` is the repo a message to
+    // everyone working there went to, `envelope` how XenoNet knows who
+    // sent it, `host` and `mid` where it came from and its id across the
+    // network; a delivery's `host` is the machine its agent is on, with
+    // the receipt it sent and the frame that carries it.
+    "CREATE TABLE messages (
         id INTEGER PRIMARY KEY, sender TEXT NOT NULL, target TEXT NOT NULL,
-        body TEXT NOT NULL, reply_to INTEGER, created_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS deliveries (
+        body TEXT NOT NULL, reply_to INTEGER, created_at INTEGER NOT NULL,
+        scope TEXT, envelope TEXT, host TEXT, mid TEXT)",
+    "CREATE INDEX messages_by_mid ON messages (mid) WHERE mid IS NOT NULL",
+    "CREATE TABLE deliveries (
         message_id INTEGER NOT NULL, agent TEXT NOT NULL, seen_at INTEGER,
-        PRIMARY KEY (message_id, agent));
-      CREATE INDEX IF NOT EXISTS deliveries_unseen ON deliveries (agent, seen_at);
-      CREATE TABLE IF NOT EXISTS claims (
+        host TEXT, receipt TEXT, receipt_at INTEGER, frame TEXT,
+        PRIMARY KEY (message_id, agent))",
+    "CREATE INDEX deliveries_unseen ON deliveries (agent, seen_at)",
+    "CREATE TABLE claims (
         id INTEGER PRIMARY KEY, agent TEXT NOT NULL, pattern TEXT NOT NULL,
-        note TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS focus (agent TEXT PRIMARY KEY, text TEXT NOT NULL, at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS contacts (
+        note TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+    "CREATE TABLE focus (agent TEXT PRIMARY KEY, text TEXT NOT NULL, at INTEGER NOT NULL)",
+    // When XenoNet last heard from each agent directly, and its process.
+    "CREATE TABLE contacts (
         agent TEXT PRIMARY KEY, app TEXT NOT NULL, cwd TEXT, via TEXT NOT NULL,
-        at INTEGER NOT NULL, ended_at INTEGER);
-      CREATE TABLE IF NOT EXISTS pins (
+        at INTEGER NOT NULL, ended_at INTEGER, pid INTEGER)",
+    // The process (pid and start time) holding each session.
+    "CREATE TABLE pins (
         agent TEXT NOT NULL, pid INTEGER NOT NULL, start INTEGER NOT NULL,
-        sure INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (agent, pid, start));
-    ";
-const STEP_FOUR: &str = r"
-      CREATE TABLE IF NOT EXISTS actors (
-        slug TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
-        product TEXT, via TEXT NOT NULL, capabilities TEXT NOT NULL,
-        heartbeat_ms INTEGER, identity TEXT,
-        token_hash TEXT UNIQUE, token_at INTEGER,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        created_at INTEGER NOT NULL, allowed_at INTEGER, last_seen INTEGER,
-        presence TEXT NOT NULL DEFAULT 'unknown', presence_at INTEGER,
-        status TEXT, status_at INTEGER,
-        seq INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE IF NOT EXISTS actor_requests (
-        id TEXT PRIMARY KEY, slug TEXT NOT NULL, ask TEXT NOT NULL,
-        token_hash TEXT NOT NULL UNIQUE, asker TEXT,
-        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-        decision TEXT, decided_at INTEGER);
-      CREATE TABLE IF NOT EXISTS actor_events (
-        id TEXT PRIMARY KEY, actor TEXT NOT NULL, at INTEGER NOT NULL,
-        kind TEXT NOT NULL, target TEXT, detail TEXT, via TEXT NOT NULL,
-        facts TEXT, ref TEXT);
-      CREATE INDEX IF NOT EXISTS actor_events_by_actor ON actor_events (actor, at);
-      CREATE INDEX IF NOT EXISTS actor_events_by_time ON actor_events (at);
-      CREATE INDEX IF NOT EXISTS actor_events_by_ref ON actor_events (actor, ref) WHERE ref IS NOT NULL;
-      CREATE TABLE IF NOT EXISTS actor_targets (
-        actor TEXT NOT NULL, target TEXT NOT NULL, relation TEXT NOT NULL,
-        since INTEGER NOT NULL, last_at INTEGER NOT NULL,
-        PRIMARY KEY (actor, target, relation));
-      CREATE TABLE IF NOT EXISTS actor_revoked (
-        token_hash TEXT PRIMARY KEY, actor TEXT NOT NULL, reason TEXT NOT NULL,
-        at INTEGER NOT NULL);
-    ";
-const STEP_FIVE: &str = r"
-      CREATE TABLE IF NOT EXISTS actor_connections (
-        connection_id TEXT PRIMARY KEY,
-        actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
-        adapter_id TEXT NOT NULL, provider TEXT NOT NULL,
-        transport_kind TEXT NOT NULL, transport_binding TEXT,
-        label TEXT NOT NULL, device_alias TEXT,
-        audience_description TEXT NOT NULL, audience_verification TEXT NOT NULL,
-        audience_scope TEXT NOT NULL,
-        state TEXT NOT NULL DEFAULT 'active',
-        created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER);
-      CREATE INDEX IF NOT EXISTS actor_connections_by_actor ON actor_connections (actor_slug);
-      CREATE TABLE IF NOT EXISTS actor_grants (
-        grant_id TEXT PRIMARY KEY,
-        connection_id TEXT NOT NULL REFERENCES actor_connections (connection_id) ON DELETE CASCADE,
-        device_id TEXT NOT NULL, permissions TEXT NOT NULL,
-        project_allowlist TEXT NOT NULL, field_policy TEXT NOT NULL,
-        data_mode TEXT NOT NULL, lookback_ms INTEGER NOT NULL,
-        revision INTEGER NOT NULL DEFAULT 1, token_hash TEXT NOT NULL UNIQUE,
-        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-        revoked_at INTEGER, revoked_reason TEXT, last_used_at INTEGER);
-      CREATE INDEX IF NOT EXISTS actor_grants_by_connection ON actor_grants (connection_id);
-      CREATE TABLE IF NOT EXISTS actor_account_links (
-        link_id TEXT PRIMARY KEY,
-        actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
-        identity_id TEXT, issuer TEXT, provider TEXT NOT NULL, workspace TEXT,
-        proof_status TEXT NOT NULL, proof_method TEXT, subject_binding TEXT,
-        checked_at INTEGER, expires_at INTEGER, created_at INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS actor_account_links_by_actor ON actor_account_links (actor_slug);
-      CREATE TABLE IF NOT EXISTS actor_external_refs (
-        external_ref_id TEXT PRIMARY KEY,
-        actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
-        adapter_id TEXT NOT NULL, issuer TEXT NOT NULL, account_binding TEXT NOT NULL,
-        external_actor_id TEXT NOT NULL, verified_at INTEGER NOT NULL,
-        UNIQUE (adapter_id, issuer, account_binding, external_actor_id));
-      CREATE TABLE IF NOT EXISTS assistant_places (
-        place TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS assistant_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS assistant_audit (
-        id INTEGER PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL,
-        request_id TEXT, grant_id TEXT, grant_revision INTEGER, actor TEXT,
-        connection_id TEXT, operation TEXT NOT NULL, result TEXT NOT NULL,
-        latency_ms INTEGER, bytes INTEGER, projects INTEGER);
-      CREATE INDEX IF NOT EXISTS assistant_audit_by_time ON assistant_audit (at);
-    ";
-
-const STEP_EIGHT: &str = r"
-      CREATE INDEX IF NOT EXISTS messages_by_mid ON messages (mid) WHERE mid IS NOT NULL;
-      CREATE TABLE IF NOT EXISTS net_presence (
-        host TEXT PRIMARY KEY, counter INTEGER NOT NULL, at INTEGER NOT NULL,
-        you INTEGER NOT NULL DEFAULT 0, roster TEXT, agents TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS net_claims (
-        host TEXT NOT NULL, repo_key TEXT NOT NULL, path TEXT NOT NULL,
-        agent TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, until INTEGER,
-        at INTEGER NOT NULL, PRIMARY KEY (host, repo_key, path, agent, kind));
-      CREATE TABLE IF NOT EXISTS handoffs (
-        id TEXT PRIMARY KEY, host TEXT, maker TEXT NOT NULL,
-        to_agent TEXT, to_repo TEXT, to_scope TEXT, to_host TEXT,
-        goal TEXT, done TEXT, next TEXT, files TEXT NOT NULL,
-        branch TEXT, commit_sha TEXT,
-        state TEXT NOT NULL DEFAULT 'open', taken_by TEXT, taken_at INTEGER,
-        asked_by TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    ";
-
-/// The columns step 8 adds, each to its table.
-const STEP_EIGHT_COLUMNS: [(&str, &str, &str); 6] = [
-    ("messages", "host", "ALTER TABLE messages ADD COLUMN host TEXT"),
-    ("messages", "mid", "ALTER TABLE messages ADD COLUMN mid TEXT"),
-    ("deliveries", "host", "ALTER TABLE deliveries ADD COLUMN host TEXT"),
-    ("deliveries", "receipt", "ALTER TABLE deliveries ADD COLUMN receipt TEXT"),
-    ("deliveries", "receipt_at", "ALTER TABLE deliveries ADD COLUMN receipt_at INTEGER"),
-    ("deliveries", "frame", "ALTER TABLE deliveries ADD COLUMN frame TEXT"),
-];
-
-/// Step 9: one grant for every actor (docs/design/direction.md,
-/// "Authorization"). An actor's token is a Biscuit minted here, bots and
-/// cloud assistants alike, and what it may do is the token's rights, so
-/// XenoNet keeps a token's revocation id, never the token, and the
-/// capability words it was minted for, for the window. Which sessions and
-/// identities a grant may use are its scopes, a row keyed by the same id;
-/// `intents` is kept for intents, which aren't built. One revoked table
-/// holds every token taken back. There's no going back: the actors'
-/// tables start afresh (their children first, as their foreign keys ask),
-/// so every actor, token, registration and remote connection from before
-/// is gone and is given again at the window.
-const STEP_NINE: &str = r"
-      DROP TABLE IF EXISTS actor_grants;
-      DROP TABLE IF EXISTS actor_external_refs;
-      DROP TABLE IF EXISTS actor_account_links;
-      DROP TABLE IF EXISTS actor_connections;
-      DROP TABLE IF EXISTS actor_requests;
-      DROP TABLE IF EXISTS actor_revoked;
-      DROP TABLE IF EXISTS actors;
-      CREATE TABLE actors (
+        sure INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (agent, pid, start))",
+    // Actors: one grant each, a Biscuit minted here, kept by its
+    // revocation id (never the token) with the capability words it was
+    // minted for; its scopes in grant_scopes, keyed by the same id; every
+    // token taken back in revoked.
+    "CREATE TABLE actors (
         slug TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
         product TEXT, via TEXT NOT NULL,
         heartbeat_ms INTEGER, identity TEXT,
@@ -189,20 +78,33 @@ const STEP_NINE: &str = r"
         created_at INTEGER NOT NULL, allowed_at INTEGER, last_seen INTEGER,
         presence TEXT NOT NULL DEFAULT 'unknown', presence_at INTEGER,
         status TEXT, status_at INTEGER,
-        seq INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE actor_requests (
+        seq INTEGER NOT NULL DEFAULT 0)",
+    "CREATE TABLE actor_requests (
         id TEXT PRIMARY KEY, slug TEXT NOT NULL, ask TEXT NOT NULL,
         token_id TEXT NOT NULL UNIQUE, asker TEXT,
         created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-        decision TEXT, decided_at INTEGER);
-      CREATE TABLE revoked (
+        decision TEXT, decided_at INTEGER)",
+    "CREATE TABLE actor_events (
+        id TEXT PRIMARY KEY, actor TEXT NOT NULL, at INTEGER NOT NULL,
+        kind TEXT NOT NULL, target TEXT, detail TEXT, via TEXT NOT NULL,
+        facts TEXT, ref TEXT)",
+    "CREATE INDEX actor_events_by_actor ON actor_events (actor, at)",
+    "CREATE INDEX actor_events_by_time ON actor_events (at)",
+    "CREATE INDEX actor_events_by_ref ON actor_events (actor, ref) WHERE ref IS NOT NULL",
+    "CREATE TABLE actor_targets (
+        actor TEXT NOT NULL, target TEXT NOT NULL, relation TEXT NOT NULL,
+        since INTEGER NOT NULL, last_at INTEGER NOT NULL,
+        PRIMARY KEY (actor, target, relation))",
+    "CREATE TABLE revoked (
         id TEXT PRIMARY KEY, actor TEXT NOT NULL, reason TEXT NOT NULL,
-        at INTEGER NOT NULL);
-      CREATE TABLE grant_scopes (
+        at INTEGER NOT NULL)",
+    "CREATE TABLE grant_scopes (
         token TEXT PRIMARY KEY, actor TEXT NOT NULL,
         sessions TEXT, projects TEXT, identities TEXT, intents TEXT,
-        at INTEGER NOT NULL, until INTEGER);
-      CREATE TABLE actor_connections (
+        at INTEGER NOT NULL, until INTEGER, allows TEXT)",
+    // Remote actors' connections, grants, account links and refs, and the
+    // log of what they read.
+    "CREATE TABLE actor_connections (
         connection_id TEXT PRIMARY KEY,
         actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
         adapter_id TEXT NOT NULL, provider TEXT NOT NULL,
@@ -211,135 +113,59 @@ const STEP_NINE: &str = r"
         audience_description TEXT NOT NULL, audience_verification TEXT NOT NULL,
         audience_scope TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'active',
-        created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER);
-      CREATE INDEX actor_connections_by_actor ON actor_connections (actor_slug);
-      CREATE TABLE actor_grants (
+        created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER)",
+    "CREATE INDEX actor_connections_by_actor ON actor_connections (actor_slug)",
+    "CREATE TABLE actor_grants (
         grant_id TEXT PRIMARY KEY,
         connection_id TEXT NOT NULL REFERENCES actor_connections (connection_id) ON DELETE CASCADE,
         device_id TEXT NOT NULL, permissions TEXT NOT NULL,
         field_policy TEXT NOT NULL, data_mode TEXT NOT NULL, lookback_ms INTEGER NOT NULL,
         revision INTEGER NOT NULL DEFAULT 1, token_id TEXT NOT NULL UNIQUE,
         created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-        revoked_at INTEGER, revoked_reason TEXT, last_used_at INTEGER);
-      CREATE INDEX actor_grants_by_connection ON actor_grants (connection_id);
-      CREATE TABLE actor_account_links (
+        revoked_at INTEGER, revoked_reason TEXT, last_used_at INTEGER)",
+    "CREATE INDEX actor_grants_by_connection ON actor_grants (connection_id)",
+    "CREATE TABLE actor_account_links (
         link_id TEXT PRIMARY KEY,
         actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
         identity_id TEXT, issuer TEXT, provider TEXT NOT NULL, workspace TEXT,
         proof_status TEXT NOT NULL, proof_method TEXT, subject_binding TEXT,
-        checked_at INTEGER, expires_at INTEGER, created_at INTEGER NOT NULL);
-      CREATE INDEX actor_account_links_by_actor ON actor_account_links (actor_slug);
-      CREATE TABLE actor_external_refs (
+        checked_at INTEGER, expires_at INTEGER, created_at INTEGER NOT NULL)",
+    "CREATE INDEX actor_account_links_by_actor ON actor_account_links (actor_slug)",
+    "CREATE TABLE actor_external_refs (
         external_ref_id TEXT PRIMARY KEY,
         actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
         adapter_id TEXT NOT NULL, issuer TEXT NOT NULL, account_binding TEXT NOT NULL,
         external_actor_id TEXT NOT NULL, verified_at INTEGER NOT NULL,
-        UNIQUE (adapter_id, issuer, account_binding, external_actor_id));
-    ";
+        UNIQUE (adapter_id, issuer, account_binding, external_actor_id))",
+    "CREATE TABLE assistant_places (
+        place TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)",
+    "CREATE TABLE assistant_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    "CREATE TABLE assistant_audit (
+        id INTEGER PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL,
+        request_id TEXT, grant_id TEXT, grant_revision INTEGER, actor TEXT,
+        connection_id TEXT, operation TEXT NOT NULL, result TEXT NOT NULL,
+        latency_ms INTEGER, bytes INTEGER, projects INTEGER)",
+    "CREATE INDEX assistant_audit_by_time ON assistant_audit (at)",
+    // The network across machines (docs/design/network.md): the latest
+    // presence of each other host, their claims, and handoffs.
+    "CREATE TABLE net_presence (
+        host TEXT PRIMARY KEY, counter INTEGER NOT NULL, at INTEGER NOT NULL,
+        you INTEGER NOT NULL DEFAULT 0, roster TEXT, agents TEXT NOT NULL)",
+    "CREATE TABLE net_claims (
+        host TEXT NOT NULL, repo_key TEXT NOT NULL, path TEXT NOT NULL,
+        agent TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, until INTEGER,
+        at INTEGER NOT NULL, PRIMARY KEY (host, repo_key, path, agent, kind))",
+    "CREATE TABLE handoffs (
+        id TEXT PRIMARY KEY, host TEXT, maker TEXT NOT NULL,
+        to_agent TEXT, to_repo TEXT, to_scope TEXT, to_host TEXT,
+        goal TEXT, done TEXT, next TEXT, files TEXT NOT NULL,
+        branch TEXT, commit_sha TEXT,
+        state TEXT NOT NULL DEFAULT 'open', taken_by TEXT, taken_at INTEGER,
+        asked_by TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+];
 
 /// How long a revoked token is remembered: past the year its root lasts.
 const REVOKED_KEPT_MS: f64 = 400.0 * DAY_MS;
-
-/// The steps the database's shape takes; PRAGMA user_version counts those
-/// taken.
-pub const ENGINE_VERSION: usize = 10;
-
-/// The statements step `i` (0 for the first) runs, given whether a table
-/// has a column already: a database from before versions were counted can
-/// have any of the first three already, so those look before they change.
-pub fn engine_step<E>(i: usize, has_column: &mut dyn FnMut(&str, &str) -> std::result::Result<bool, E>) -> std::result::Result<Vec<&'static str>, E> {
-    Ok(match i {
-        // 1: the tables as they first were.
-        0 => vec![STEP_ONE],
-        // 2: a message's repo (its scope), for messages to everyone working there.
-        1 => {
-            if has_column("messages", "scope")? {
-                vec![]
-            } else {
-                vec!["ALTER TABLE messages ADD COLUMN scope TEXT"]
-            }
-        }
-        // 3: an agent's process, to tell when it's gone.
-        2 => {
-            if has_column("contacts", "pid")? {
-                vec![]
-            } else {
-                vec!["ALTER TABLE contacts ADD COLUMN pid INTEGER"]
-            }
-        }
-        // 4: actors, their registrations, events, targets and revoked tokens.
-        3 => vec![STEP_FOUR],
-        // 5: remote actors' connections, grants, account links and refs,
-        // and the log of what was read.
-        4 => vec![STEP_FIVE],
-        // 6: how XenoNet knows who sent a message (attest): what it checked.
-        5 => {
-            if has_column("messages", "envelope")? {
-                vec![]
-            } else {
-                vec!["ALTER TABLE messages ADD COLUMN envelope TEXT"]
-            }
-        }
-        // 7: an actor's gateway token, apart from its own.
-        6 => {
-            let mut out = Vec::new();
-            if !has_column("actors", "gateway_hash")? {
-                out.push("ALTER TABLE actors ADD COLUMN gateway_hash TEXT");
-            }
-            if !has_column("actors", "gateway_at")? {
-                out.push("ALTER TABLE actors ADD COLUMN gateway_at INTEGER");
-            }
-            out
-        }
-        // 8: a network across machines (docs/design/network.md): where a
-        // message came from and its id across the network, which host each
-        // delivery is on and its receipt, the latest presence of each other
-        // host, their claims, and handoffs.
-        7 => {
-            let mut out = Vec::new();
-            for (table, column, sql) in STEP_EIGHT_COLUMNS {
-                if !has_column(table, column)? {
-                    out.push(sql);
-                }
-            }
-            out.push(STEP_EIGHT);
-            out
-        }
-        // 9: one grant for every actor: the actors' tables afresh.
-        8 => vec![STEP_NINE],
-        // 10: what an actor's grant may Allow (its allow scope), beside
-        // its other scopes.
-        9 => {
-            if has_column("grant_scopes", "allows")? {
-                vec![]
-            } else {
-                vec!["ALTER TABLE grant_scopes ADD COLUMN allows TEXT"]
-            }
-        }
-        _ => vec![],
-    })
-}
-
-/// Whether a table has a column, as PRAGMA table_info says.
-pub fn has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
-    Ok(sql::all(db, &format!("PRAGMA table_info({table})"), &[])?.iter().any(|c| c.text("name") == Some(column)))
-}
-
-/// The steps, for the store block.
-pub fn engine_steps() -> Vec<Step> {
-    (0..ENGINE_VERSION)
-        .map(|i| -> Step {
-            Box::new(move |db: &Connection| {
-                let stmts =
-                    engine_step(i, &mut |t, c| db.query_row(&format!("SELECT count(*) FROM pragma_table_info('{t}') WHERE name = ?"), [c], |r| r.get::<_, i64>(0)).map(|n| n > 0))?;
-                for s in stmts {
-                    db.execute_batch(s)?;
-                }
-                Ok(())
-            })
-        })
-        .collect()
-}
 
 // The columns of an actor's row that the actors write, and their values
 // when they leave one out.
@@ -416,63 +242,60 @@ pub fn row_json(r: &Row) -> Value {
     Value::Object(r.0.iter().map(|(k, c)| (k.clone(), cell_json(c))).collect())
 }
 
+/// The engine's tables in the store.
 pub struct EngineStore {
-    pub block: SqliteStore,
+    db: Arc<Db>,
 }
 
 impl EngineStore {
-    /// Opens `file` (":memory:" for one of its own), brings it up to date
-    /// and prunes it.
-    pub fn open(file: &str, now: f64) -> std::result::Result<Self, String> {
-        // Foreign keys on, so a connection goes with its actor and a grant
-        // with its connection; the tables from before 5 declare none.
-        let mut block = SqliteStore::new("engine", file, engine_steps(), vec!["journal_mode = WAL".into(), "foreign_keys = ON".into()], true, now);
-        block.open(now)?;
-        if let Some(db) = &block.db {
-            db.set_prepared_statement_cache_capacity(256);
-        }
-        let mut store = EngineStore { block };
+    /// The engine's side of `db`, pruned.
+    pub fn new(db: Arc<Db>, now: f64) -> std::result::Result<Self, String> {
+        let store = EngineStore { db };
         store.prune(now).map_err(|e| e.to_string())?;
         Ok(store)
     }
 
-    pub fn version(&self) -> Option<Version> {
-        self.block.version
+    /// One on a store in memory of its own, for tests.
+    pub fn memory(now: f64) -> std::result::Result<Self, String> {
+        EngineStore::new(Arc::new(Db::memory().map_err(|e| e.message)?), now)
     }
 
-    /// The connection, while it's open.
-    pub fn db(&self) -> Result<&Connection> {
-        self.block.db.as_ref().ok_or_else(|| SqlError::State("database is not open".into()))
-    }
-
-    pub fn is_open(&self) -> bool {
-        self.block.db.is_some()
-    }
-
-    pub fn close(&mut self, now: f64) {
-        self.block.close(now);
+    /// The store the tables are in.
+    pub fn db(&self) -> &Arc<Db> {
+        &self.db
     }
 
     fn run(&self, q: &str, args: &[Bind]) -> Result<Changes> {
-        sql::run(self.db()?, q, args)
+        self.db.with_conn(|c| sql::run(c, q, args))
     }
     fn run_record(&self, q: &str, record: &serde_json::Map<String, Value>) -> Result<Changes> {
-        sql::run_record(self.db()?, q, record)
+        self.db.with_conn(|c| sql::run_record(c, q, record))
     }
     fn get(&self, q: &str, args: &[Bind]) -> Result<Option<Row>> {
-        sql::get(self.db()?, q, args)
+        self.db.with_conn(|c| sql::get(c, q, args))
     }
     fn all(&self, q: &str, args: &[Bind]) -> Result<Vec<Row>> {
-        sql::all(self.db()?, q, args)
+        self.db.with_conn(|c| sql::all(c, q, args))
     }
 
-    /// `f` in a transaction of its own, unless one is under way already.
-    pub fn transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
-        sql::transaction(self.db()?, f)
+    /// `f` in a transaction of its own, unless this thread has one open
+    /// already (`Db::transaction`).
+    pub fn transaction<T, E: From<SqlError>>(&self, f: impl FnOnce() -> std::result::Result<T, E>) -> std::result::Result<T, E> {
+        self.db.transaction(f)
     }
 
     pub fn in_transaction(&self) -> bool {
-        self.block.db.as_ref().is_some_and(|d| !d.is_autocommit())
+        self.db.in_transaction()
+    }
+    /// A transaction that spans the caller's own calls (`Db::begin`).
+    pub fn begin(&self) -> Result<()> {
+        self.db.begin()
+    }
+    pub fn commit(&self) -> Result<()> {
+        self.db.commit()
+    }
+    pub fn rollback(&self) {
+        self.db.rollback();
     }
 
     /// What's kept, at start and every hour: messages and pins for a week,
@@ -480,10 +303,8 @@ impl EngineStore {
     /// ACTOR_EVENTS_KEPT each, their targets for a week after they were
     /// last touched, registrations a day, revoked tokens a week; the person
     /// at the console's events, targets and status for a day. Other hosts'
-    /// claims until they lapse, and handoffs a week past theirs. A copy
-    /// made before a migration goes a week after it was made.
-    pub fn prune(&mut self, now: f64) -> Result<()> {
-        self.block.prune_backups(now);
+    /// claims until they lapse, and handoffs a week past theirs.
+    pub fn prune(&self, now: f64) -> Result<()> {
         self.transaction(|| {
             self.run("DELETE FROM deliveries WHERE message_id IN (SELECT id FROM messages WHERE created_at < ?)", &[n(now - WEEK_MS)])?;
             self.run("DELETE FROM messages WHERE created_at < ?", &[n(now - WEEK_MS)])?;
@@ -1340,9 +1161,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_new_store_takes_every_step_and_keeps_messages() {
-        let s = EngineStore::open(":memory:", 1000.0).unwrap();
-        assert_eq!(s.version().unwrap(), Version { from: 0, version: 10, newer: false });
+    fn a_new_store_keeps_messages() {
+        let s = EngineStore::memory(1000.0).unwrap();
         let id = s.send(&json!({ "sender": "claude:a", "target": "codex:b", "body": "hi", "recipients": ["codex:b"] }), 1000.0).unwrap();
         assert_eq!(id, 1.0);
         let unseen = s.unseen("codex:b").unwrap();
@@ -1356,7 +1176,7 @@ mod tests {
 
     #[test]
     fn the_network_keeps_presence_receipts_claims_and_handoffs() {
-        let s = EngineStore::open(":memory:", 1000.0).unwrap();
+        let s = EngineStore::memory(1000.0).unwrap();
         s.set_net_presence("laptop", 5.0, 1000.0, true, "", "[]").unwrap();
         s.set_net_presence("laptop", 6.0, 1001.0, false, "", "[{\"id\":\"claude:x\"}]").unwrap();
         assert_eq!(s.net_presence("laptop").unwrap().unwrap().num("counter"), Some(6.0));
@@ -1394,7 +1214,7 @@ mod tests {
 
     #[test]
     fn the_issued_tokens_are_the_ones_that_work_now() {
-        let s = EngineStore::open(":memory:", 1000.0).unwrap();
+        let s = EngineStore::memory(1000.0).unwrap();
         assert_eq!(s.issued_token_ids().unwrap(), Vec::<String>::new());
         for (slug, token, gateway) in [("muse", Some("i-muse"), Some("g-muse")), ("wren", Some("i-wren"), None), ("moth", None, None)] {
             s.run(
@@ -1418,28 +1238,8 @@ mod tests {
     }
 
     #[test]
-    fn step_nine_starts_the_actors_tables_afresh() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        let steps = engine_steps();
-        for step in &steps[..8] {
-            step(&db).unwrap();
-        }
-        db.execute_batch(
-            "INSERT INTO actors (slug, kind, name, via, capabilities, created_at, token_hash) VALUES ('muse', 'agent', 'Muse', '[]', '[]', 1, 'h1');
-             INSERT INTO actor_connections (connection_id, actor_slug, adapter_id, provider, transport_kind, label, audience_description, audience_verification, audience_scope, created_at)
-               VALUES ('cn_1', 'muse', 'a', 'p', 't', 'l', 'd', 'v', 's', 1);",
-        )
-        .unwrap();
-        steps[8](&db).unwrap();
-        let count = |t: &str| db.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get::<_, i64>(0)).unwrap();
-        assert_eq!([count("actors"), count("actor_connections"), count("revoked"), count("grant_scopes")], [0; 4]);
-        assert!(!has_column(&db, "actors", "capabilities").unwrap() && has_column(&db, "actors", "token_rights").unwrap());
-    }
-
-    #[test]
     fn a_grants_scopes_go_by_its_token() {
-        let s = EngineStore::open(":memory:", 1000.0).unwrap();
+        let s = EngineStore::memory(1000.0).unwrap();
         s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "sessions": "project:atlas", "at": 1.0, "until": 9.0 })).unwrap();
         s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "projects": "[\"prj_1\"]", "at": 2.0 })).unwrap();
         let allows = r#"{"sessions":"all","kinds":["read"],"until":5}"#;
@@ -1457,41 +1257,24 @@ mod tests {
     }
 }
 
-/// A store shared by the parts that use it (the engine, the actors, the
-/// checks): each call holds it only while it runs SQL, so a call may come
-/// back to it from within another's transaction.
+/// The engine's tables, shared by the parts that use them (the engine,
+/// the actors, the checks). The store takes each call in turn, so a call
+/// may come back to it from within another's transaction on its thread.
 #[derive(Clone)]
-pub struct Shared(pub std::sync::Arc<std::sync::Mutex<EngineStore>>);
+pub struct Shared(pub Arc<EngineStore>);
 
 impl Shared {
     pub fn new(store: EngineStore) -> Self {
-        Shared(std::sync::Arc::new(std::sync::Mutex::new(store)))
+        Shared(Arc::new(store))
     }
 
-    pub fn with<T>(&self, f: impl FnOnce(&mut EngineStore) -> T) -> T {
-        f(&mut self.0.locked())
+    pub fn with<T>(&self, f: impl FnOnce(&EngineStore) -> T) -> T {
+        f(&self.0)
     }
 
-    /// `f` in a transaction of its own, unless one is under way already,
-    /// without holding the store while `f` runs.
+    /// `f` in a transaction of its own, unless this thread has one open
+    /// already, without holding the store while `f` runs.
     pub fn transaction<T, E: From<SqlError>>(&self, f: impl FnOnce() -> std::result::Result<T, E>) -> std::result::Result<T, E> {
-        if self.with(|s| s.in_transaction()) {
-            return f();
-        }
-        self.with(|s| s.db().and_then(|db| sql::exec(db, "BEGIN")))?;
-        let out = f();
-        match out {
-            Ok(v) => match self.with(|s| s.db().and_then(|db| sql::exec(db, "COMMIT"))) {
-                Ok(()) => Ok(v),
-                Err(e) => {
-                    let _ = self.with(|s| s.db().and_then(|db| sql::exec(db, "ROLLBACK")));
-                    Err(e.into())
-                }
-            },
-            Err(e) => {
-                let _ = self.with(|s| s.db().and_then(|db| sql::exec(db, "ROLLBACK")));
-                Err(e)
-            }
-        }
+        self.0.transaction(f)
     }
 }

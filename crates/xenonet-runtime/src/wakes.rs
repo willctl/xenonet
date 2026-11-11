@@ -20,8 +20,8 @@ use xenonet_actors::wake::{self, Fail, Fetched, Request, Wakes as Core, TIMEOUT_
 use xenonet_api::cores::actors::WakeStream;
 use xenonet_api::cores::{CoreError, Kind, Wakes, R};
 use xenonet_api::From;
-use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::Shared;
 use xenonet_text::time::now_ms;
 
 /// Your computer's credential store, or the demo's memory.
@@ -294,7 +294,7 @@ impl wake::Store for Rows {
         rows_json(self.0.with(|s| s.unseen(actor))).map(|rs| rs.into_iter().map(|r| r["id"].clone()).collect())
     }
     fn actor_token_times(&self) -> rows::Result<Vec<Value>> {
-        self.direct(|s| s.actor_token_times())
+        self.direct(xenonet_store::engine::EngineStore::actor_token_times)
     }
 }
 

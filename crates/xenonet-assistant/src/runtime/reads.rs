@@ -210,7 +210,7 @@ pub struct Reads {
     pub state: Arc<dyn State>,
     pub actors: Option<Arc<dyn Actors>>,
     pub engine_store: Arc<dyn EngineStore>,
-    pub store: Option<xenonet_engine::store::Shared>,
+    pub store: Option<xenonet_store::engine::Shared>,
     pub version: String,
     pub emitter: Emitter,
     /// The made-up reads' page cursors, for the pairing's preview.
@@ -279,7 +279,7 @@ impl Reads {
         state: Arc<dyn State>,
         actors: Option<Arc<dyn Actors>>,
         engine_store: Arc<dyn EngineStore>,
-        store: Option<xenonet_engine::store::Shared>,
+        store: Option<xenonet_store::engine::Shared>,
         version: &str,
         emitter: Emitter,
     ) -> Arc<Self> {

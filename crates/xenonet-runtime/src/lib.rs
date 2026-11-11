@@ -41,7 +41,9 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use xenonet_api::cores::Cores;
 use xenonet_api::wire::WireEnv;
-use xenonet_engine::store::{EngineStore, Shared};
+use xenonet_blocks::lifecycle::Lifecycle;
+use xenonet_store::engine::{EngineStore, Shared};
+use xenonet_store::Db;
 
 /// A line for the service's log once it's up: what went wrong while the
 /// cores were made, before there was a log to write it in.
@@ -62,7 +64,7 @@ fn log_later(env: &WireEnv, level: &'static str, code: &'static str, message: St
 /// store, the process checks, the engine and delivery, and with actors on,
 /// the actors, their registration, wakes, reports and observers (never in
 /// the demo). The runtime it made, for the network's link to plug into
-/// (`network::plug`), or None when engine.sqlite couldn't be opened.
+/// (`network::plug`), or None when the store couldn't be opened.
 /// Connecting the agents (`cores.connect`) is the composition's to set.
 pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime>> {
     let w = runtime(cores, setup, env)?;
@@ -87,24 +89,25 @@ pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtim
     Some(w)
 }
 
-/// The runtime, made on the map the cores already have; None when
-/// engine.sqlite can't be opened, and the engine's routes stay pending.
+/// The runtime, made on the map the cores already have; None when the
+/// store (`<state>/xenonet.sqlite`) can't be opened, as when the folder
+/// holds data from an earlier build, and the engine's routes stay pending.
 pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime>> {
-    let file = Path::new(&setup.state_dir).join("engine.sqlite");
-    if let Err(e) = std::fs::create_dir_all(&setup.state_dir) {
-        log_later(env, "error", "engine.store", format!("the state folder can't be made: {e}"));
-    }
-    let store = match EngineStore::open(&file.to_string_lossy(), xenonet_text::time::now_ms()) {
+    let now = xenonet_text::time::now_ms();
+    let mut life = Lifecycle::new(now);
+    let opened = Db::open(Path::new(&setup.state_dir)).map_err(|e| e.message).and_then(|db| EngineStore::new(Arc::new(db), now));
+    let store = match opened {
         Ok(s) => Shared::new(s),
         Err(e) => {
-            log_later(env, "error", "engine.store", format!("engine.sqlite can't be opened: {e}"));
+            log_later(env, "error", "engine.store", format!("the store can't be opened: {e}"));
             return None;
         }
     };
-    // The engine's store, listed with the map's blocks in /api/health and
-    // the doctor.
-    let held = store.clone();
-    let _ = cores.state.add_block(Arc::new(move || held.with(|s| store::block_health("engine", "store", &s.block.life))), None);
+    life.count("opens", 1.0);
+    life.ok(now);
+    // The store, listed with the map's blocks in /api/health and the
+    // doctor.
+    let _ = cores.state.add_block(Arc::new(move || store::block_health("engine", "store", &life)), None);
     let map = map::Map::new(cores.state.clone());
     let sys = procs::System::new();
     let checks = Arc::new(verify::Checks::new(store.clone(), sys.clone()));

@@ -3,8 +3,8 @@
 
 use serde_json::Value;
 use xenonet_api::cores::{CoreError, EngineStore as Trait, R};
-use xenonet_engine::sql::SqlError;
-use xenonet_engine::store::{row_json, Shared};
+use xenonet_store::engine::{row_json, Shared};
+use xenonet_store::sql::SqlError;
 
 fn core_error(e: SqlError) -> CoreError {
     CoreError::new(e.message().to_string())
@@ -26,10 +26,10 @@ impl Trait for Store {
         self.0.with(|s| s.set_meta(key, value)).map_err(core_error)
     }
     fn actor_token_times(&self) -> R<Vec<Value>> {
-        self.0.with(|s| s.actor_token_times()).map_err(core_error)
+        self.0.with(xenonet_store::engine::EngineStore::actor_token_times).map_err(core_error)
     }
     fn expired_actor_tokens(&self) -> R<Value> {
-        self.0.with(|s| s.expired_actor_tokens()).map(Value::Array).map_err(core_error)
+        self.0.with(xenonet_store::engine::EngineStore::expired_actor_tokens).map(Value::Array).map_err(core_error)
     }
     fn waiting_actor_requests(&self, now: f64) -> R<Vec<Value>> {
         self.0.with(|s| s.waiting_actor_requests(now)).map(|r| r.iter().map(row_json).collect()).map_err(core_error)
@@ -62,11 +62,11 @@ pub fn block_health(name: &str, kind: &str, l: &xenonet_blocks::lifecycle::Lifec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xenonet_engine::store::EngineStore;
+    use xenonet_store::engine::EngineStore;
 
     #[test]
     fn the_service_reads_meta_and_registrations() {
-        let s = Shared::new(EngineStore::open(":memory:", 1000.0).unwrap());
+        let s = Shared::new(EngineStore::memory(1000.0).unwrap());
         s.with(|s| s.pin("claude:a", 7.0, 2000.0, true, 1000.0)).unwrap();
         let pins = s.with(|s| s.pins("claude:a")).unwrap();
         assert_eq!(pins.len(), 1);

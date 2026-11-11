@@ -7,8 +7,8 @@
 
 use sha2::{Digest, Sha256};
 
-/// The statements that make an empty store, in order.
-pub(crate) const TABLES: &[&str] = &[
+/// The store's own statements, before the domains'.
+const TABLES: &[&str] = &[
     // What the store knows of itself. `stored` counts every chain and feed
     // entry it has taken, the order they were stored in.
     "CREATE TABLE meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL) STRICT",
@@ -25,12 +25,18 @@ pub(crate) const TABLES: &[&str] = &[
     ) STRICT",
 ];
 
+/// The statements that make an empty store, in order: the store's own,
+/// then each domain's.
+pub(crate) fn tables() -> impl Iterator<Item = &'static str> {
+    TABLES.iter().chain(crate::engine::TABLES).copied()
+}
+
 /// The version an up-to-date store has in `PRAGMA user_version`: the first
 /// 31 bits of the SHA-256 of its statements, never 0, which is SQLite's
 /// for a database nothing has set one on.
 pub fn version() -> i32 {
     let mut h = Sha256::new();
-    for t in TABLES {
+    for t in tables() {
         h.update(t.as_bytes());
         h.update([0]);
     }

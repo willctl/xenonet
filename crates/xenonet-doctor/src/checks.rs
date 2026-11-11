@@ -167,6 +167,11 @@ pub trait DoctorHost {
     /// state.json in a folder: its version, whether it fits its schema,
     /// and the files moved aside.
     async fn state_file(&self, dir: &str) -> Value;
+    /// Why the store in a folder can't be used (data from an earlier
+    /// build, or another version's store), or None when it can.
+    async fn store(&self, _dir: &str) -> Option<String> {
+        None
+    }
     /// The xenonet command on PATH: its file, whether it's installed and
     /// ours, what it runs, and whether that's gone.
     async fn command(&self) -> Value;
@@ -682,6 +687,11 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     }
     if !c.host.writable(&dir).await {
         return Ok(fail(format!("can't write to {shown}"), Some("Fix the folder's permissions, or set XENONET_STATE_DIR to a folder you own.")));
+    }
+    // A store this build doesn't read: nothing is migrated, so the machine
+    // is set up again.
+    if let Some(why) = c.host.store(&dir).await {
+        return Ok(fail(c.tilde(&why), Some("Set this machine up again: quit XenoNet, move its state folder aside, start XenoNet, and join your network again.")));
     }
     // The file itself: one moved aside, one it can't read now, one from a
     // newer XenoNet, one it isn't saving to, or parts that don't fit.

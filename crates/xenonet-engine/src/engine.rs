@@ -30,8 +30,6 @@ use crate::delivery::selector::{format_selector, Selector};
 use crate::host::{Collaborators, Repo, StatusSet};
 use crate::index::SessionIndex;
 use crate::network::{self, network_host, NetHandle};
-use crate::sql::{self, Row};
-use crate::store::row_json;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -40,6 +38,8 @@ use xenonet_adapter::products::product_of;
 use xenonet_model::ids::YOU;
 use xenonet_os::nodepath::{style_of, NATIVE};
 use xenonet_os::sync::Locked;
+use xenonet_store::engine::{row_json, EngineStore};
+use xenonet_store::sql::{self, Row};
 use xenonet_text::json::number;
 use xenonet_text::text::{display, to_number, trim, truthy};
 
@@ -1805,7 +1805,7 @@ impl Engine {
             }
         }
         // The actors that act on it, as they reported.
-        let targets = rows(c.store.with(|s| s.actor_targets()))?;
+        let targets = rows(c.store.with(EngineStore::actor_targets))?;
         let actors: Vec<Value> = targets
             .iter()
             .filter(|t| same(get(t, "target"), get(a, "id")))

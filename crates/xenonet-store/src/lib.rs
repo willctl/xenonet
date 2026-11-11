@@ -17,14 +17,17 @@
 //! own, so a domain moving in doesn't spread rusqlite through the core.
 
 mod chains;
+pub mod engine;
 pub mod schema;
+pub mod sql;
 
 pub use chains::Put;
 
-use rusqlite::{Connection, OpenFlags, Transaction};
+use rusqlite::{Connection, OpenFlags};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::ThreadId;
 
 /// The store's file in the state folder.
 pub const FILE: &str = "xenonet.sqlite";
@@ -115,8 +118,17 @@ fn found_version(c: &Connection) -> R<i32> {
 
 /// The store, open.
 pub struct Db {
-    conn: Mutex<Connection>,
+    // The one connection, and the thread whose transaction is open on it
+    // if one is: a statement from another thread waits until that
+    // transaction ends, so what a transaction writes is only its own.
+    conn: Mutex<Turn>,
+    free: Condvar,
     path: Option<PathBuf>,
+}
+
+struct Turn {
+    conn: Connection,
+    holder: Option<ThreadId>,
 }
 
 impl fmt::Debug for Db {
@@ -162,13 +174,15 @@ impl Db {
     fn ready(mut conn: Connection, path: Option<PathBuf>) -> R<Db> {
         if found_version(&conn)? == 0 {
             let tx = conn.transaction()?;
-            for t in schema::TABLES {
+            for t in schema::tables() {
                 tx.execute_batch(t)?;
             }
             tx.pragma_update(None, "user_version", schema::version())?;
             tx.commit()?;
         }
-        Ok(Db { conn: Mutex::new(conn), path })
+        // The statements the domains run often stay prepared.
+        conn.set_prepared_statement_cache_capacity(256);
+        Ok(Db { conn: Mutex::new(Turn { conn, holder: None }), free: Condvar::new(), path })
     }
 
     /// Where the store is; None for one in memory.
@@ -181,26 +195,108 @@ impl Db {
         self.read(|c| Ok(c.query_row("SELECT v FROM meta WHERE k = 'stored'", [], |r| r.get::<_, i64>(0))? as u64))
     }
 
-    /// A read, under the one lock.
-    pub(crate) fn read<T>(&self, f: impl FnOnce(&Connection) -> R<T>) -> R<T> {
-        let c = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        f(&c)
+    // The connection once it's this thread's turn: no other thread's
+    // transaction is open on it.
+    fn turn(&self) -> MutexGuard<'_, Turn> {
+        let me = std::thread::current().id();
+        let mut t = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
+        while t.holder.is_some_and(|h| h != me) {
+            t = self.free.wait(t).unwrap_or_else(PoisonError::into_inner);
+        }
+        t
     }
 
-    /// A write, in a transaction of its own, under the one lock: it all
-    /// happens, or none of it.
-    pub(crate) fn write<T>(&self, f: impl FnOnce(&Transaction<'_>) -> R<T>) -> R<T> {
-        let mut c = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let tx = c.transaction()?;
-        let out = f(&tx)?;
-        tx.commit()?;
-        Ok(out)
+    /// The connection for one call, on this thread's turn.
+    pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> T) -> T {
+        f(&mut self.turn().conn)
+    }
+
+    /// A read, under the one lock.
+    pub(crate) fn read<T>(&self, f: impl FnOnce(&Connection) -> R<T>) -> R<T> {
+        self.with_conn(|c| f(c))
+    }
+
+    /// A write, in a transaction of its own (a savepoint, inside one
+    /// that's open), under the one lock: it all happens, or none of it.
+    pub(crate) fn write<T>(&self, f: impl FnOnce(&Connection) -> R<T>) -> R<T> {
+        self.with_conn(|c| {
+            if c.is_autocommit() {
+                let tx = c.transaction()?;
+                let out = f(&tx)?;
+                tx.commit()?;
+                Ok(out)
+            } else {
+                let sp = c.savepoint()?;
+                let out = f(&sp)?;
+                sp.commit()?;
+                Ok(out)
+            }
+        })
+    }
+
+    /// Whether this thread has a transaction open on the store.
+    pub fn in_transaction(&self) -> bool {
+        let me = std::thread::current().id();
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner).holder == Some(me)
+    }
+
+    /// Opens a transaction for this thread, once no other thread has one
+    /// open: until `commit` or `rollback`, other threads' calls wait.
+    /// For a caller whose transaction spans calls of its own (the actors');
+    /// `transaction` is the one to use otherwise.
+    pub fn begin(&self) -> Result<(), sql::SqlError> {
+        let mut t = self.turn();
+        t.conn.execute_batch("BEGIN")?;
+        t.holder = Some(std::thread::current().id());
+        Ok(())
+    }
+
+    /// Ends this thread's transaction, keeping what it wrote: on an error
+    /// it's rolled back, and nothing stays.
+    pub fn commit(&self) -> Result<(), sql::SqlError> {
+        self.end("COMMIT")
+    }
+
+    /// Ends this thread's transaction, keeping nothing it wrote.
+    pub fn rollback(&self) {
+        let _ = self.end("ROLLBACK");
+    }
+
+    fn end(&self, how: &str) -> Result<(), sql::SqlError> {
+        let mut t = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
+        let out = t.conn.execute_batch(how).map_err(sql::SqlError::from);
+        if out.is_err() && !t.conn.is_autocommit() {
+            let _ = t.conn.execute_batch("ROLLBACK");
+        }
+        t.holder = None;
+        drop(t);
+        self.free.notify_all();
+        out
+    }
+
+    /// `f` in a transaction of its own, unless this thread has one open
+    /// already, in which case it's part of that one. The store isn't held
+    /// while `f` runs: `f` makes its calls as any caller does, and another
+    /// thread's calls wait for the transaction to end. On an error from
+    /// `f`, or from the commit, nothing it wrote stays.
+    pub fn transaction<T, E: From<sql::SqlError>>(&self, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        if self.in_transaction() {
+            return f();
+        }
+        self.begin()?;
+        match f() {
+            Ok(v) => self.commit().map(|()| v).map_err(E::from),
+            Err(e) => {
+                self.rollback();
+                Err(e)
+            }
+        }
     }
 }
 
 /// The next number in the store's order, taken inside the write that
 /// stores its entry, so the count and the entry go in together.
-pub(crate) fn next_stored(tx: &Transaction<'_>) -> R<u64> {
+pub(crate) fn next_stored(tx: &Connection) -> R<u64> {
     Ok(tx.query_row("UPDATE meta SET v = v + 1 WHERE k = 'stored' RETURNING v", [], |r| r.get::<_, i64>(0))? as u64)
 }
 
