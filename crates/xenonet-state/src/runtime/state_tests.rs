@@ -260,7 +260,7 @@ async fn identities_named_hidden_pinned_and_found_again() {
 async fn the_consoles_simulations_and_clear() {
     let w = world();
     let s = &w.state;
-    s.live.start().await;
+    s.live.start(Vec::new()).await;
     s.refresh_map().await.expect("a map");
     for kind in ["needs-you", "collision", "stuck", "turn-end", "wiki-write"] {
         assert_eq!(s.simulate_live(kind, None, None).map(|d| d["kind"].clone()), Some(json!(kind)), "{kind}");
@@ -284,7 +284,7 @@ async fn the_consoles_simulations_and_clear() {
 async fn a_handoff_brief_from_what_the_tailer_saw() {
     let w = world();
     let s = &w.state;
-    s.live.start().await;
+    s.live.start(Vec::new()).await;
     s.refresh_map().await.expect("a map");
     let h = s.handoff(Some(SESSION1), "codex").await.expect("a brief");
     assert!(h["brief"].as_str().is_some_and(|b| b.contains("Continue the work from a Claude Code session titled \"Add partial refunds")), "{h}");
@@ -299,7 +299,7 @@ async fn activity_goes_out_and_the_live_state_after_it_at_most_twice_a_second() 
     let w = world();
     let s = &w.state;
     s.refresh_map().await.expect("a map");
-    s.live.start().await;
+    s.live.start(Vec::new()).await;
     s.listening.store(true, Ordering::SeqCst);
     let weak = Arc::downgrade(s);
     s.live.listen(Arc::new(move |events| {

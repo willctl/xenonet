@@ -1,7 +1,11 @@
 //! The map's state: `MapState`, what the service knows,
 //! refreshed. A refresh gathers each app's sessions, scans the projects
-//! folder, reads the wiki, builds the map and links identities; between
-//! refreshes the live tailer follows the transcripts. What a refresh
+//! folder, reads the wiki, builds the map and links identities. Nothing
+//! polls: the watcher (through the live tailer, which follows the
+//! transcripts) says what changed and the map is made again a moment
+//! later, or when the clock alone would change it (a session leaving its
+//! active window), and the reconcile every 10 minutes is the backstop.
+//! What a refresh
 //! decides, and what it remembers from one to the next, are
 //! `crate::state` (`Memory`); the gathering, the timers, the
 //! map's index and the events (pulse, activity, refusal, tokens, graph,
@@ -32,6 +36,8 @@ use std::time::Duration;
 use tokio::sync::watch;
 use xenonet_adapter::apps::{tailed_or_text, untailed, App};
 use xenonet_adapter::reader::{Lister, ListerEnv};
+use xenonet_adapter::watch::WatchSpec;
+use xenonet_adapter::Platform;
 use xenonet_api::cores::{CoreError, Decider, Runs, State, R};
 use xenonet_api::wire::{Emitter, Slot, WireEnv};
 use xenonet_api::From;
@@ -43,9 +49,15 @@ use xenonet_text::text::{display, truthy};
 type Fields = Vec<(String, Option<Value>)>;
 
 const LIVE_THROTTLE_MS: u64 = 500;
+// How soon the map is made again after the watcher says an app's sessions
+// changed (a new transcript, a record, a session gone), and after the lines
+// of one that's working: changes that come together make one map.
+const SETTLE_MS: u64 = 1000;
+const LINES_SETTLE_MS: u64 = 5000;
+// A moment past a window's end, so the map made then is past it.
+const CLOCK_SLACK_MS: u64 = 50;
 const REPO_POLL_MS: u64 = 20_000;
 const HEARTBEAT_MS: u64 = 2000;
-const NEW_FILE_MS: u64 = 1200;
 const DEMO_STEP_MS: u64 = 2200;
 // The wiki's folder, looked at this often for a change (nothing watches it),
 // and the map made again this long after one.
@@ -118,7 +130,10 @@ pub struct MapState {
     version: AtomicU64,
     listening: AtomicBool,
     live_queued: AtomicBool,
-    new_files: AtomicU64,
+    /// The apps' watches, until `begin` starts the watcher with them.
+    watches: Mutex<Vec<(Arc<dyn Platform>, Vec<WatchSpec>)>>,
+    /// Asks for the map to be made again within a while (`refresh_in`).
+    refresher: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Duration>>>,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// The events it sent, for the tests to read.
     #[cfg(test)]
@@ -245,6 +260,15 @@ impl MapState {
             .into_iter()
             .map(|(app, l)| (app, Arc::from(l)))
             .collect();
+        let watches = xenonet_adapter::platforms().watches(|app| ListerEnv {
+            home_dir: &cfg.home_dir,
+            root: cfg.folder(&app.id),
+            desktop_dir: cfg.claude_desktop_dir.as_deref(),
+            state_dir: &cfg.state_dir,
+            env: &cfg.env,
+            version,
+            handle: handle.clone(),
+        });
         let gathers = listers
             .iter()
             .filter_map(|(app, _)| {
@@ -277,7 +301,8 @@ impl MapState {
             version: AtomicU64::new(0),
             listening: AtomicBool::new(false),
             live_queued: AtomicBool::new(false),
-            new_files: AtomicU64::new(0),
+            watches: Mutex::new(watches),
+            refresher: Mutex::new(None),
             tasks: Mutex::new(Vec::new()),
             #[cfg(test)]
             sent: Mutex::new(Vec::new()),
@@ -661,6 +686,11 @@ impl MapState {
             (pulses, changed)
         };
         self.version.fetch_add(1, Ordering::SeqCst);
+        // Made again when the clock alone would change it.
+        let now = self.now();
+        if let Some(at) = crate::graph::next_change(&graph, now, Some(&self.cfg.windows)) {
+            self.refresh_in(Duration::from_millis((at - now).ceil() as u64 + CLOCK_SLACK_MS));
+        }
         if changed {
             self.emit("graph", graph.clone());
         }
@@ -816,21 +846,17 @@ impl MapState {
                     self.emit("activity", v.clone());
                     self.maybe_ship_it(&v);
                     self.queue_live();
+                    // What the map shows of a working session (when it was
+                    // last written, its title) follows its lines.
+                    self.refresh_in(Duration::from_millis(LINES_SETTLE_MS));
                 }
                 Event::Tokens(v) if listening => self.emit("tokens", v),
-                // A brand-new transcript means a new session: the map is
-                // made again, a moment later.
-                Event::NewFile(_) if listening => {
-                    let n = self.new_files.fetch_add(1, Ordering::SeqCst) + 1;
-                    if let Some(me) = self.arc() {
-                        tokio::spawn(async move {
-                            tokio::time::sleep(Duration::from_millis(NEW_FILE_MS)).await;
-                            if me.new_files.load(Ordering::SeqCst) == n {
-                                let _ = me.refresh_map().await;
-                            }
-                        });
-                    }
-                }
+                // A brand-new transcript means a new session, and a record
+                // that changed or a session gone change the map: it's made
+                // again, a moment later.
+                Event::NewFile(_) | Event::Changed { .. } if listening => self.refresh_in(Duration::from_millis(SETTLE_MS)),
+                // The reconcile read what the watcher missed.
+                Event::Reconciled { .. } if listening => self.refresh_in(Duration::ZERO),
                 _ => {}
             }
         }
@@ -846,9 +872,13 @@ impl MapState {
                 s.heard(events);
             }
         }));
-        self.live.start().await;
+        let watches = std::mem::take(&mut *lock(&self.watches));
+        self.live.start(watches).await;
         self.listening.store(true, Ordering::SeqCst);
         let mut tasks = Vec::new();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        *lock(&self.refresher) = Some(tx);
+        tasks.push(tokio::spawn(refresher(self.me.clone(), rx)));
         if let Some(demo) = self.demo().cloned() {
             tasks.push(tokio::spawn(async move {
                 let mut every = tokio::time::interval(Duration::from_millis(DEMO_STEP_MS));
@@ -865,18 +895,6 @@ impl MapState {
         if let Err(e) = self.refresh_map().await {
             log("error", "state.refresh", &format!("refresh failed: {e}"));
         }
-        let poll = self.cfg.poll();
-        let m = me.clone();
-        tasks.push(tokio::spawn(async move {
-            let mut every = tokio::time::interval(poll);
-            every.tick().await;
-            loop {
-                every.tick().await;
-                if let Err(e) = m.refresh_map().await {
-                    log("error", "state.refresh", &format!("refresh failed: {e}"));
-                }
-            }
-        }));
         let m = me.clone();
         tasks.push(tokio::spawn(async move {
             let mut every = tokio::time::interval(Duration::from_millis(HEARTBEAT_MS));
@@ -930,7 +948,16 @@ impl MapState {
         Ok(())
     }
 
+    /// Asks for the map to be made again within `within`: asks that come
+    /// together make one map, the soonest one's. Nothing before `begin`.
+    pub fn refresh_in(&self, within: Duration) {
+        if let Some(tx) = lock(&self.refresher).as_ref() {
+            let _ = tx.send(within);
+        }
+    }
+
     pub fn end(&self) {
+        *lock(&self.refresher) = None;
         for t in lock(&self.tasks).drain(..) {
             t.abort();
         }
@@ -1144,6 +1171,28 @@ impl MapState {
             out["b"] = b.map_or(Value::Null, Value::String);
         }
         Some(out)
+    }
+}
+
+// Makes the map again when asked (`MapState::refresh_in`): the first ask
+// sets when, a later one may make it sooner, and asks made while the map
+// is being made wait for the next.
+async fn refresher(me: Weak<MapState>, mut asks: tokio::sync::mpsc::UnboundedReceiver<Duration>) {
+    while let Some(first) = asks.recv().await {
+        let mut due = tokio::time::Instant::now() + first;
+        loop {
+            tokio::select! {
+                () = tokio::time::sleep_until(due) => break,
+                more = asks.recv() => match more {
+                    Some(d) => due = due.min(tokio::time::Instant::now() + d),
+                    None => return,
+                },
+            }
+        }
+        let Some(m) = me.upgrade() else { return };
+        if let Err(e) = m.refresh_map().await {
+            log("error", "state.refresh", &format!("refresh failed: {e}"));
+        }
     }
 }
 

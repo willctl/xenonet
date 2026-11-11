@@ -1,4 +1,4 @@
-//! The settings the map reads (through xenonet-components' config): its folders, the projects scan's limits, the poll, the
+//! The settings the map reads (through xenonet-components' config): its folders, the projects scan's limits, the
 //! readers that are on, identities and the windows a session counts as
 //! active in. Worked out once, after the demo's world has moved the
 //! folders. With them, what the map's runtime reads from outside: the
@@ -23,7 +23,6 @@ pub struct MapConfig {
     /// Grok Build's folder: GROK_HOME, or ~/.grok.
     pub grok_home: String,
     pub claude_desktop_dir: Option<String>,
-    pub poll_ms: f64,
     pub claude_usage: bool,
     pub claude_projects_dir: String,
     pub identities: bool,
@@ -163,10 +162,6 @@ impl MapConfig {
             Some(Field::Set(list)) => list.clone(),
             _ => Vec::new(),
         };
-        let numf = |k: &str| match c.get(k) {
-            Some(Field::Num(n)) => *n,
-            _ => f64::NAN,
-        };
         let flag = |k: &str| json(k) == Value::Bool(true);
         let env_projects_dir = if demo { None } else { var(&env, "XENONET_PROJECTS_DIR").filter(|d| !d.is_empty()) };
         let named =
@@ -181,7 +176,6 @@ impl MapConfig {
             codex_home: text("codexHome"),
             grok_home: text("grokHome"),
             claude_desktop_dir: maybe("claudeDesktopDir"),
-            poll_ms: numf("pollMs"),
             claude_usage: flag("claudeUsage"),
             claude_projects_dir: text("claudeProjectsDir"),
             identities: flag("identities"),
@@ -232,12 +226,6 @@ impl MapConfig {
         xenonet_adapter::platforms().get(id).and_then(|p| p.program(&dirs_env(&self.env), &self.platform, &home, &mut Disk)).unwrap_or_else(|| id.to_string())
     }
 
-    /// The poll's period: XENONET_POLL_MS, 8 seconds by default; never
-    /// under a second, so a mistyped one can't spin.
-    pub fn poll(&self) -> std::time::Duration {
-        let ms = if self.poll_ms.is_finite() && self.poll_ms > 0.0 { self.poll_ms.max(1000.0) } else { 8000.0 };
-        std::time::Duration::from_millis(ms as u64)
-    }
 }
 
 // Spelled as on a unix host, where paths are posix. (Two attributes:
@@ -259,10 +247,8 @@ mod tests {
         assert!(c.readers.is_empty() && c.numbat_file.is_none());
         let mut env = Map::new();
         env.insert("XENONET_READERS".into(), json!("opencode, cursor"));
-        env.insert("XENONET_POLL_MS".into(), json!("10"));
         let c = MapConfig::new(false, false, env, "/home/nova", None);
         assert!(c.readers.contains("opencode") && c.readers.contains("cursor"));
-        assert_eq!(c.poll().as_millis(), 1000, "never under a second");
         assert_eq!(c.projects_dir, "/home/nova/Projects");
     }
 }

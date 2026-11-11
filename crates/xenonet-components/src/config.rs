@@ -123,7 +123,6 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
         Some(w) => w.get("claudeDesktopDir").cloned().unwrap_or(Value::Null),
         None => finds.claude_desktop_dir().map_or(Value::Null, Value::String),
     };
-    let poll_ms = var(env, "XENONET_POLL_MS").map_or(8000.0, number);
     let claude_config_dir = var(env, "CLAUDE_CONFIG_DIR");
     let claude_projects_dir =
         world_str(world, "claudeRoot").unwrap_or_else(|| Value::String(path.join(&[&claude_config_dir.map_or_else(|| path.join(&[home, ".claude"]), String::from), "projects"])));
@@ -171,7 +170,6 @@ pub fn config(argv: &[String], env: &Env, home: &str, platform: &str, finds: &mu
             ("codexHome", Field::Json(codex_home)),
             ("grokHome", Field::Json(grok_home)),
             ("claudeDesktopDir", Field::Json(claude_desktop_dir)),
-            ("pollMs", Field::Num(poll_ms)),
             ("claudeUsage", Field::Json(Value::Bool(!demo && !off("XENONET_CLAUDE_USAGE")))),
             ("claudeProjectsDir", Field::Json(claude_projects_dir)),
             ("identities", Field::Json(Value::Bool(!off("XENONET_IDENTITIES")))),
@@ -248,14 +246,13 @@ mod tests {
         let mut f = Fake { asked: vec![] };
         let c = config(
             &["node".into(), "server/index.js".into()],
-            &env(&[("XENONET_PROJECTS_DEPTH", "0"), ("XENONET_POLL_MS", "x"), ("XENONET_READERS", " opencode, ,cursor"), ("XDG_STATE_HOME", "/xdg")]),
+            &env(&[("XENONET_PROJECTS_DEPTH", "0"), ("XENONET_READERS", " opencode, ,cursor"), ("XDG_STATE_HOME", "/xdg")]),
             "/home/me",
             "linux",
             &mut f,
         );
         assert_eq!(f.asked, ["context", "desktop"], "the server comes with the folder the lookup found");
         assert_eq!(num_of(&c, "port"), 47840.0);
-        assert!(num_of(&c, "pollMs").is_nan());
         assert_eq!(json_of(&c, "projectsDir"), "/home/me/Projects");
         assert!(matches!(c.get("projectLimits"), Some(Field::Nums(n)) if n == &[("depth", 3.0), ("maxDirs", 2000.0)]));
         assert_eq!(json_of(&c, "wikiDir"), "/ctx");

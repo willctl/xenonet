@@ -212,9 +212,6 @@ impl Service {
             ("XENONET_RUNTIME_DIR".into(), h(".xenonet-runtime")),
             ("XENONET_CLAUDE_USAGE".into(), "off".into()),
             ("XENONET_ACTORS".into(), "off".into()),
-            // One pass of the readers, so what they count doesn't depend on
-            // how long the run takes.
-            ("XENONET_POLL_MS".into(), "600000".into()),
             ("XENONET_SUPERVISOR_BIN".into(), h("no-supervisor")),
             ("XENONET_SUPERVISOR_DIR".into(), h(".xenonet-agents")),
             ("XENONET_APPLICATIONS_DIR".into(), h("Applications")),

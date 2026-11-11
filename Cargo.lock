@@ -3594,6 +3594,7 @@ dependencies = [
  "xenonet-copilot",
  "xenonet-cursor",
  "xenonet-gemini-cli",
+ "xenonet-git",
  "xenonet-grok-bot",
  "xenonet-grok-build",
  "xenonet-hermes",

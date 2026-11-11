@@ -13,6 +13,8 @@
 //! - `Repo::watch`: what to watch for a checkout's head and refs to move:
 //!   HEAD, the refs, packed-refs and the config, never the index, which
 //!   git rewrites on every status.
+//! - `Git`: the core's `xenonet_adapter::repo::Checkouts`, which the binary
+//!   installs (`install`).
 
 use std::path::{Path, PathBuf};
 use xenonet_adapter::watch::WatchSpec;
@@ -299,6 +301,48 @@ impl Repo {
         out.push(WatchSpec { tag: REFS_TAG, root: self.common_dir.join("refs"), recursive: true, include: Vec::new() });
         out
     }
+}
+
+/// The core's reader of checkouts: git's.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Git;
+
+impl Git {
+    fn checkout(repo: &Repo) -> xenonet_adapter::repo::Checkout {
+        use xenonet_adapter::repo::Checkout;
+        let (worktree_of, submodule_of) = match &repo.kind {
+            Kind::Main => (None, None),
+            Kind::Worktree { main } => (Some(main.clone()), None),
+            Kind::Submodule { superproject } => (None, Some(superproject.clone())),
+        };
+        let origin = repo.origin();
+        Checkout {
+            top: repo.top.clone(),
+            vcs: ".git",
+            branch: repo.head().map(|h| h.label()),
+            key: origin.as_deref().and_then(repo_key),
+            origin,
+            worktree_of,
+            submodule_of,
+            watch: repo.watch(),
+            config: xenonet_adapter::watch::canonical(&repo.common_dir.join("config")),
+        }
+    }
+}
+
+impl xenonet_adapter::repo::Checkouts for Git {
+    fn open(&self, top: &Path) -> Option<xenonet_adapter::repo::Checkout> {
+        open(top).as_ref().map(Git::checkout)
+    }
+
+    fn find(&self, path: &Path) -> Option<xenonet_adapter::repo::Checkout> {
+        find(path).as_ref().map(Git::checkout)
+    }
+}
+
+/// Puts git's reader of checkouts in place for the core, once.
+pub fn install() {
+    xenonet_adapter::repo::install(std::sync::Arc::new(Git));
 }
 
 /// A remote's URL as its repo key: host and path, lowercased, without a

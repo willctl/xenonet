@@ -10,7 +10,7 @@ XenoNet reads Claude Code's, Codex's and Grok Build's files. It acts only when y
 | Codex sessions and transcripts | `codex app-server` JSON-RPC, started from the ChatGPT desktop app's bundled binary or the Codex CLI | Official API, labelled experimental |
 | Claude Code sessions and transcripts | Its transcript files in `~/.claude/projects`, or under `CLAUDE_CONFIG_DIR`, read as the Agent SDK's `listSessions` and `getSessionMessages` read them | Internal format, best effort |
 | Grok Build sessions and transcripts | Each session's folder under `~/.grok/sessions`, or `GROK_HOME`'s: its `summary.json`, its `updates.jsonl` of ACP session updates, and its `usage.json` of tokens and cost. See [Grok Build in XenoNet](../design/grok-build.md). | `summary.json` is in Grok's guide; the rest is undocumented, best effort |
-| Live activity, tokens, context, subagents and edits | The end of each app's transcript files, read as they grow | Internal format, best effort |
+| Live activity, tokens, context, subagents and edits | The end of each app's transcript files, read as the system's file events say they grow, with a walk of the folders at start and every 10 minutes for what the events missed | Internal format, best effort |
 | Codex rate limits | `token_count` events in Codex rollouts | Undocumented, optional |
 | Claude plan usage | Anthropic's `/api/oauth/usage`, the endpoint Claude Code's `/usage` reads. XenoNet asks every 5 minutes, with Claude Code's sign-in. It reads the sign-in from the "Claude Code-credentials" keychain item on macOS, or else from `~/.claude/.credentials.json`. Claude desktop's `plan-usage-history.json` fills in when it's newer. | Undocumented, optional |
 | Codex desktop projects, and Claude desktop stars, archives and worktrees | `~/.codex/state_5.sqlite`, and Claude desktop's session files | Undocumented, optional |
@@ -69,7 +69,6 @@ On Linux, these go in the XDG defaults, `~/.local/state` and `~/.cache`.
 | `XENONET_CACHE_DIR` | `%LOCALAPPDATA%\XenoNet\Cache`, or `~/Library/Caches/XenoNet` on macOS |
 | `XENONET_CAPTURES_DIR` | Posters go in `Pictures\XenoNet`, and clips in `Videos\XenoNet`. On macOS, clips go in `Movies/XenoNet`. |
 | `XENONET_WIKI_DIR` | The shared context's folder. XenoNet finds it from Xenolith's settings, or Agent Wiki's when Xenolith isn't installed ([Shared context](shared-context.md)). Otherwise there's none. Any folder with `pages/*.md` works, and it can also have `log/<year>/<date>.md` and `inbox/*.md`. |
-| `XENONET_POLL_MS` | `8000` |
 | `XENONET_CLAUDE_USAGE` | On. Set it to `off` to stop asking Anthropic for Claude plan usage. |
 | `XENONET_ACTIVE_MINUTES` | `60`, how recently a session must have run in a project for the map to light the project |
 | `XENONET_CODEX_BIN` | The `codex` bundled with the ChatGPT desktop app, or else `codex` on your `PATH`. The bundled one is the newest `codex.exe` on Windows, and `ChatGPT.app/Contents/Resources/codex` on macOS. |

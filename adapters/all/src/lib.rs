@@ -24,9 +24,11 @@ pub fn all() -> Vec<Arc<dyn Platform>> {
     ]
 }
 
-/// Puts every adapter in place (`xenonet_adapter::install`), once.
+/// Puts every adapter in place (`xenonet_adapter::install`), and git's
+/// reader of checkouts (`xenonet_adapter::repo`), once.
 pub fn install() {
     xenonet_adapter::install(all());
+    xenonet_git::install();
 }
 
 /// The registry as the routes ask it: which ids are sessions', the apps

@@ -59,6 +59,7 @@ xenonet-hermes = { path = "adapters/hermes" }
 xenonet-grok-bot = { path = "adapters/grok-bot" }
 xenonet-muse = { path = "adapters/muse" }
 xenonet-platforms = { path = "adapters/all" }
+xenonet-git = { path = "adapters/git" }
 # Where the JS matches with a regular expression that has no lookaround
 # (the log's key patterns); lookarounds are written out by hand.
 regex = "1"

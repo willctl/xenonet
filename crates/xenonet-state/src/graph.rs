@@ -51,6 +51,40 @@ pub fn activity_of(updated_at: Option<&Value>, now: f64, windows: Option<&Value>
     }
 }
 
+/// When the map would next read differently by the clock alone: the
+/// earliest time after `now` that a session leaves its active or recent
+/// window, or a place its projectActiveMs. None when nothing will. The
+/// map is made again then, rather than on a timer.
+pub fn next_change(graph: &Value, now: f64, windows: Option<&Value>) -> Option<f64> {
+    let w = |k: &str| windows.and_then(|w| get(w, k)).filter(|v| !v.is_null()).map(|v| to_number(Some(v)));
+    let (active, recent) = (w("activeWindowMs"), w("recentWindowMs"));
+    let place = w("projectActiveMs").unwrap_or(3600e3);
+    let mut next: Option<f64> = None;
+    let mut at = |t: f64| {
+        if t.is_finite() && t > now {
+            next = Some(next.map_or(t, |n| n.min(t)));
+        }
+    };
+    for n in get(graph, "nodes").and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
+        match get(n, "kind").and_then(Value::as_str) {
+            Some("session") => {
+                if let Some(u) = get(n, "updatedAt").filter(|v| truthy(Some(v))).map(|v| to_number(Some(v))) {
+                    for win in [active, recent].into_iter().flatten() {
+                        at(u + win);
+                    }
+                }
+            }
+            Some("project" | "native" | "zone") => {
+                if let Some(l) = get(n, "lastSessionAt").filter(|v| !v.is_null()).map(|v| to_number(Some(v))) {
+                    at(l + place);
+                }
+            }
+            _ => {}
+        }
+    }
+    next
+}
+
 struct Graph {
     nodes: Vec<(String, Map<String, Value>)>,
     at: HashMap<String, usize>,

@@ -24,6 +24,8 @@ xenonet-copilot.workspace = true
 xenonet-hermes.workspace = true
 xenonet-grok-bot.workspace = true
 xenonet-muse.workspace = true
+# What a checkout is, read from git's files.
+xenonet-git.workspace = true
 
 [dev-dependencies]
 # tests/native.rs makes an OpenCode database to read.

@@ -25,7 +25,7 @@ use xenonet_text::value::{less, raw};
 pub const SCHEMA: &str = "diagnostics/bundle/v1";
 
 /// XENONET_ settings whose values say nothing private.
-pub const SHOWN: [&str; 11] = [
+pub const SHOWN: [&str; 10] = [
     "XENONET_PORT",
     "XENONET_INSTANCE",
     "XENONET_DEMO",
@@ -33,7 +33,6 @@ pub const SHOWN: [&str; 11] = [
     "XENONET_ASSISTANT",
     "XENONET_IDENTITIES",
     "XENONET_CLAUDE_USAGE",
-    "XENONET_POLL_MS",
     "XENONET_STANDALONE",
     "XENONET_HOT",
     "XENONET_DEBUG",
