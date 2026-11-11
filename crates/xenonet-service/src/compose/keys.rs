@@ -1,10 +1,11 @@
 //! Whose keys an instance gets (docs/design/direction.md, "The machine
 //! key"): the installed XenoNet and XenoNet Dev's dev instance use the
 //! machine's own (xenonet-keys' `System`: the Secure Enclave and Touch ID
-//! on a Mac, polkit or a passphrase on Linux), since they act for the
-//! person. The demo, the tests and every other instance get fakes, which
-//! never prompt or touch the hardware: file keys in their own state
-//! folder, and a presence check that answers yes.
+//! on a Mac, the TPM and Windows Hello on Windows, polkit or a passphrase
+//! on Linux), since they act for the person. The demo, the tests and every
+//! other instance get fakes, which never prompt or touch the hardware:
+//! file keys in their own state folder, and a presence check that answers
+//! yes.
 
 use std::sync::Arc;
 use xenonet_id::vault::Vault;
@@ -12,11 +13,25 @@ use xenonet_id::vault::Vault;
 /// The vault for an instance, by its name (None for the installed one)
 /// and whether it's the demo.
 pub fn vault(instance: Option<&str>, demo: bool) -> Arc<dyn Vault> {
-    if !demo && matches!(instance, None | Some("" | "installed" | "dev")) {
+    if machines_own(instance, demo) {
         Arc::new(xenonet_keys::System)
     } else {
         Arc::new(xenonet_keys::Fake { allow: true })
     }
+}
+
+/// The doctor's row for the machine signing key of the same instance: a
+/// fake's never asks the TPM or the Secure Enclave.
+pub fn machine_standing(instance: Option<&str>, demo: bool) -> fn(&std::path::Path) -> Option<serde_json::Value> {
+    if machines_own(instance, demo) {
+        xenonet_keys::machine_standing
+    } else {
+        xenonet_keys::Fake::machine_standing
+    }
+}
+
+fn machines_own(instance: Option<&str>, demo: bool) -> bool {
+    !demo && matches!(instance, None | Some("" | "installed" | "dev"))
 }
 
 #[cfg(test)]

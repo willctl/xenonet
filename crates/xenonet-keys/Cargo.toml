@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-keys"
-description = "Where this machine's keys live and how it asks the person: the Secure Enclave signer and ECIES on macOS, polkit and a passphrase on Linux, file keys elsewhere, and fakes that never prompt. Only the composition root uses it."
+description = "Where this machine's keys live and how it asks the person: the Secure Enclave signer and ECIES on macOS, the TPM signer and Windows Hello on Windows, polkit and a passphrase on Linux, file keys elsewhere, and fakes that never prompt. Only the composition root uses it."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -33,10 +33,11 @@ core-foundation = "0.10"
 
 # Windows Hello's prompt (UserConsentVerifier), shown over the window the
 # person is in through its interop interface, and windows-future for the
-# operation it returns, which the interop call asks for by type.
+# operation it returns, which the interop call asks for by type; and
+# NCrypt (Win32_Security_Cryptography) for the TPM's machine signing key.
 # windows-core is in the lock already; these add the bindings used.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", default-features = false, features = ["std", "Foundation", "Security_Credentials_UI", "Win32_Foundation", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", default-features = false, features = ["std", "Foundation", "Security_Credentials_UI", "Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }
 windows-future = { version = "0.3", default-features = false, features = ["std"] }
 
 [lints]

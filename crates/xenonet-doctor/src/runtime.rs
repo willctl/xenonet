@@ -68,6 +68,10 @@ pub struct Parts {
     /// Why the store in a state folder can't be used, if it can't
     /// (`xenonet_store::standing`, which the composition gives).
     pub standing: fn(&str) -> Option<String>,
+    /// The machine signing key's row (its verdict), from the key folder:
+    /// where the key is, and that it opens; None before it's made
+    /// (`xenonet_keys::machine_standing`, which the composition gives).
+    pub machine_key: fn(&std::path::Path) -> Option<Value>,
     /// Where the network and the person are kept, while the store is open.
     pub net: Option<Arc<dyn xenonet_net::persist::Persist>>,
 }
@@ -543,6 +547,12 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
     for (id, title, verdict) in checks {
         all.push((id.into(), "Network".into(), title.into(), Some(json!({ "network": verdict }))));
     }
+    // Where the machine signing key is, once it's made: a key in the TPM
+    // or the Secure Enclave that doesn't open is a failure here, since
+    // XenoNet never makes a new one in its place.
+    if let Some(verdict) = (parts.machine_key)(&std::path::Path::new(&parts.config.state_dir).join("identity")) {
+        all.push(("network.signing".into(), "Network".into(), "This machine's signing key is where it was made".into(), Some(json!({ "network": verdict }))));
+    }
     let picked: Vec<_> = all.into_iter().filter(|(id, ..)| only.is_none_or(|o| run::kept(id, o))).collect();
     let facts = facts(&parts, by_hand).await;
     let m = Arc::new(Machine { paths: parts.paths.clone(), parts: parts.clone() });
@@ -852,6 +862,7 @@ mod tests {
             emitter: Emitter::new(),
             gateway: Slot::default(),
             standing: |_| None,
+            machine_key: |_| None,
             net: None,
         })
     }
@@ -912,6 +923,20 @@ mod tests {
         let check = r["results"].as_array().unwrap().iter().find(|x| x["id"] == "xenonet.state").unwrap().clone();
         assert_eq!(check["status"], "fail");
         assert!(check["fix"].as_str().unwrap().starts_with("Set this machine up again"), "{check}");
+    }
+
+    // The machine signing key's row shows once the key is made, from the
+    // identity folder, and a key that doesn't open fails it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_machine_key_has_its_row_once_made() {
+        let state = tmp("machine-key");
+        let row = |r: &Value| r["results"].as_array().unwrap().iter().find(|x| x["id"] == "network.signing").cloned();
+        assert_eq!(row(&DoctorService::new(parts(false, &state)).run(false, false).await), None, "no key yet");
+        let mut p = Arc::into_inner(parts(false, &state)).unwrap();
+        p.machine_key = |dir| dir.ends_with("identity").then(|| json!({ "status": "fail", "detail": "the TPM doesn't have it any more" }));
+        let r = DoctorService::new(Arc::new(p)).run(false, false).await;
+        let check = row(&r).unwrap();
+        assert_eq!((check["status"].as_str(), check["group"].as_str()), (Some("fail"), Some("Network")), "{check}");
     }
 
     #[test]

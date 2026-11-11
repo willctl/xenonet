@@ -147,6 +147,7 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         emitter: env.emitter.clone(),
         gateway: env.gateway.clone(),
         standing: store_standing,
+        machine_key: super::keys::machine_standing(config.instance.as_deref(), demo),
         net: crate::serve::kept_network(cores),
     });
     let service = doctor::DoctorService::new(parts.clone());

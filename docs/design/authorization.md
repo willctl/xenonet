@@ -556,9 +556,10 @@ check that the window called, so no prompt starts from anywhere else.
   paths, and an agent that can type could pass polkit, a passphrase or a
   PIN. Those devices are recorded as weaker and every decision on them
   says so.
-- **The machine signing key.** On a Mac any program of the account can ask
-  the Secure Enclave to sign with it; elsewhere it's a file, and the TPM
-  isn't used. Either way a program running as the account can certify a
+- **The machine signing key.** On a Mac and on Windows with a TPM, any
+  program of the account can ask the Secure Enclave or the TPM to sign
+  with it, though not copy it; on Linux, and where the hardware is
+  missing, it's a file. Either way a program running as the account can certify a
   root and mint tokens for this machine's actors. Running the service as
   its own OS user is the hardening for that, and isn't built.
 - **The host key** is a file. A program of the account that copies it can

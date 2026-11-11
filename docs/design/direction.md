@@ -325,11 +325,17 @@ roots. The machine's chain entry binds the two, and a `rekey` entry,
 signed by the machine signing key with the person's presence, replaces a
 stolen transport key without removing the machine. By Will's decision
 the signing key is hardware-backed and non-exportable where the platform
-has a secure element: on macOS it's in the Secure Enclave; the TPM on
-Windows isn't used yet, so there and on Linux it's a file, and the key
-says where it lives. Any program of the account can still ask the Secure
-Enclave to sign, so a service running as its own OS user is the hardening
-that completes it (question 2 below).
+has a secure element: on macOS it's in the Secure Enclave, on Windows in
+the TPM (NCrypt's Platform Crypto Provider, in the key store of the
+account the service runs as); on Linux, and where the hardware is
+missing, it's a file, and the key says where it lives (`KeyHome`, the
+machine's own claim, so decisions call it asserted). A key made in
+hardware is never replaced: one that can't be opened at start is a doctor
+error, and a file key is made only where no key was made in hardware.
+There's no rekey, so moving a key means rejoining. Any program of the
+account can still ask the Secure Enclave or the TPM to sign, so the
+property is "can't be copied off the machine", and a service running as
+its own OS user is the hardening that completes it (question 2 below).
 
 ### Adapters and surfaces
 
@@ -491,8 +497,8 @@ Will's step on inix and NEO-REX.
    to other devices, so a machine other than the root's can pair one, and
    the recovery phrase; an actor's Allow on another machine than its own; a
    nonce in the device's signature over start and message acts; reading
-   the person chain's token revocations at the receiver; the TPM for the
-   machine key on Windows, hardware keys for the widest acts, and the
+   the person chain's token revocations at the receiver; hardware keys
+   for the widest acts, and the
    service as its own OS user; `Information<T>` inside the engine's own
    crate, which would need it in `xenonet-model`; typed requests in
    `xenonet-api` (its core traits still pass JSON); the
@@ -568,9 +574,9 @@ for the phase that needs them.
    Linux uses polkit or a passphrase; both are marked weaker.
 2. **The machine signing key.** Decided by Will on 2026-11-08: hardened
    by default. On macOS the key lives in the Secure Enclave and on Windows
-   in the TPM, non-exportable, signing only through the service; an agent
-   that reads every file the account owns still cannot sign as the
-   machine. On Linux, and wherever the hardware is missing, the key is a
+   in the TPM, non-exportable: an agent that reads every file the account
+   owns still cannot copy the key off the machine, though a program of
+   the account can ask the element to sign. On Linux, and wherever the hardware is missing, the key is a
    file and attestation says so. Running the service as its own OS user
    stays an option behind `xenonet setup --harden` for machines without a
    secure element. The transport key stays a file on every platform.
@@ -633,8 +639,12 @@ for the phase that needs them.
 - User-presence proofs differ by OS; Windows and Linux use a file key
   behind Windows Hello, polkit or a passphrase, weaker by design, which
   the person's chain records.
-- TPM signing on Windows needs platform code (Windows CNG) testable only
-  on Windows hardware; the Secure Enclave's is built.
+- TPM signing on Windows runs only on Windows hardware with a TPM:
+  GitHub's Windows runners have none, so CI covers the file fallback and
+  the refusal of a key that doesn't open, and the TPM path is checked on a
+  real machine (the key opens after a restart and a reboot, and the
+  doctor's row says how long a signature takes; feed entries are batched
+  under one signature if it's over 20 ms).
 - Biscuit checks on hot paths need caching; presence is checked once per
   connection, never per delta.
 - Mixing old and new ids during phase 4; one id system at a time.

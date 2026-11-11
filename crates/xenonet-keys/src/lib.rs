@@ -10,10 +10,15 @@
 //!   biometric only, with no passphrase or PIN instead.
 //! - Linux and the BSDs (`linux`): file keys, and a `UserCheck` that asks
 //!   polkit, or a passphrase on the controlling terminal. Weaker, and said so.
-//! - Windows (`windows`): file keys, and a `UserCheck` that asks Windows
-//!   Hello. Hello always lets a PIN stand in for a face or a finger, which
-//!   an agent that can type could enter, so it's weaker, like Linux, and
-//!   said so. The TPM isn't used yet.
+//! - Windows (`windows`, `tpm`): the machine signing key in the TPM where
+//!   there is one, non-exportable; the person's device key is a file key,
+//!   with a `UserCheck` that asks Windows Hello. Hello always lets a PIN
+//!   stand in for a face or a finger, which an agent that can type could
+//!   enter, so it's weaker, like Linux, and said so.
+//!
+//! A machine signing key in a secure element is never replaced: one that
+//! can't be opened is an error, and a file key stands in only where none
+//! was made (`machine`).
 //!
 //! `System` picks these for the machine it runs on; `Fake` stands in for
 //! demo and test instances, and never prompts or touches the hardware.
@@ -23,10 +28,14 @@
 //! or unwrap asks Touch ID, and only a `UserCheck`'s `confirm` asks polkit
 //! or the terminal, so only a route where the person acts should call them.
 
+mod ecdsa;
 #[cfg(unix)]
 pub mod linux;
+pub mod machine;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(windows)]
+pub mod tpm;
 #[cfg(windows)]
 pub mod windows;
 
@@ -119,6 +128,12 @@ impl Fake {
     pub fn key_store() -> MemoryKeyStore {
         MemoryKeyStore::new()
     }
+
+    /// The doctor's row for a fake's machine signing key in `dir`, which
+    /// is a file key: None before it's made. It never asks the hardware.
+    pub fn machine_standing(dir: &Path) -> Option<Value> {
+        machine::standing(dir, None)
+    }
 }
 
 impl Keys for Fake {
@@ -203,6 +218,8 @@ impl Device {
 enum Held {
     /// A Secure Enclave key's blob.
     Enclave,
+    /// A TPM key's name and public key (`machine`).
+    Tpm,
     /// An Ed25519 seed (`SeedSigner`).
     Seed,
 }
@@ -216,6 +233,8 @@ fn held(file: &Path) -> R<Option<Held>> {
     let v: Value = serde_json::from_str(&text).map_err(|_| IdError::internal(format!("{} isn't readable", file.display())))?;
     if v["kind"].as_str() == Some("secure-enclave") {
         Ok(Some(Held::Enclave))
+    } else if v["kind"].as_str() == Some(machine::TPM) {
+        Ok(Some(Held::Tpm))
     } else if v["seed"].is_string() {
         Ok(Some(Held::Seed))
     } else {
@@ -236,24 +255,35 @@ fn enclave(file: &Path) -> R<Box<dyn Signer>> {
 }
 
 /// The machine signing key in `dir`: in the Secure Enclave on a Mac that
-/// has one, else a file key, so that its home (`KeyHome::Hardware` or
-/// `KeyHome::File`) says where it really is. A key made before stays what
-/// it was: one the Secure Enclave can't restore any more is an error, never
-/// silently replaced, since the machine's identity rests on it.
+/// has one, in the TPM on Windows where there is one, else a file key, so
+/// that its home (`KeyHome::Hardware` or `KeyHome::File`) says where it
+/// really is. A key made before stays what it was: one the Secure Enclave
+/// or the TPM can't open any more is an error, never silently replaced,
+/// since the machine's identity rests on it (`machine`).
 pub fn machine_signer(dir: &Path) -> R<Box<dyn Signer>> {
-    let file = dir.join(MACHINE_FILE);
-    match held(&file)? {
-        Some(Held::Enclave) => enclave(&file),
-        Some(Held::Seed) => Ok(Box::new(SeedSigner::load_or_create(&file)?)),
-        None => {
-            #[cfg(target_os = "macos")]
-            if macos::has_secure_enclave() {
-                return Ok(Box::new(macos::SecureEnclaveSigner::create(&file, false)?));
-            }
-            Ok(Box::new(SeedSigner::load_or_create(&file)?))
+    #[cfg(target_os = "macos")]
+    {
+        let file = dir.join(MACHINE_FILE);
+        if held(&file)?.is_none() && macos::has_secure_enclave() {
+            return Ok(Box::new(macos::SecureEnclaveSigner::create(&file, false)?));
         }
     }
+    machine::signer(dir, ELEMENT)
 }
+
+/// The doctor's row for the machine signing key in `dir`: where it is and,
+/// for a key in hardware, that it opens and how long a signature takes;
+/// None before the key is made. Nothing prompts.
+pub fn machine_standing(dir: &Path) -> Option<Value> {
+    machine::standing(dir, ELEMENT)
+}
+
+/// The secure element that keeps this machine's keys by name: the TPM on
+/// Windows, none elsewhere.
+#[cfg(windows)]
+const ELEMENT: Option<&dyn machine::NamedKeys> = Some(&tpm::Tpm);
+#[cfg(not(windows))]
+const ELEMENT: Option<&dyn machine::NamedKeys> = None;
 
 /// The person's device key in `dir`.
 ///
@@ -273,7 +303,9 @@ pub fn device(dir: &Path) -> R<Option<Device>> {
     {
         let signer = match held(&file)? {
             Some(Held::Enclave) => macos::SecureEnclaveSigner::load(&file)?,
-            Some(Held::Seed) => return Err(IdError::internal(format!("{} is a file key, and a Mac's device key is in its Secure Enclave", file.display()))),
+            Some(Held::Seed | Held::Tpm) => {
+                return Err(IdError::internal(format!("{} isn't a Secure Enclave key, and a Mac's device key is in its Secure Enclave", file.display())))
+            }
             None if macos::has_secure_enclave() && macos::has_touch_id() => macos::SecureEnclaveSigner::create(&file, true)?,
             None => return Ok(None),
         };
@@ -454,6 +486,8 @@ mod tests {
         assert_eq!(held(&f).unwrap(), None);
         std::fs::write(&f, r#"{"v":1,"kind":"secure-enclave","toid":"x"}"#).unwrap();
         assert_eq!(held(&f).unwrap(), Some(Held::Enclave));
+        std::fs::write(&f, r#"{"v":1,"kind":"tpm","name":"x"}"#).unwrap();
+        assert_eq!(held(&f).unwrap(), Some(Held::Tpm));
         std::fs::write(&f, r#"{"v":1,"seed":"x"}"#).unwrap();
         assert_eq!(held(&f).unwrap(), Some(Held::Seed));
         std::fs::write(&f, r#"{"v":1}"#).unwrap();
