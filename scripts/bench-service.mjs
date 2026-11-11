@@ -15,6 +15,7 @@ import path from "node:path";
 import net from "node:net";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { apiCredential } from "../electron/lib/components/runtime.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -78,14 +79,17 @@ async function until(fn, timeout = 60000) {
 async function scenario(name, { demo, home, bytes, keep }) {
   const port = await freePort();
   const tmp = home ?? fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), "xenonet-bench-svc-"));
-  const env = { ...process.env, XENONET_PORT: String(port), XENONET_HOSTS: "", XENONET_CONTROL: "", XENONET_HOT: "0" };
+  const env = { ...process.env, XENONET_PORT: String(port), XENONET_RUNTIME_DIR: path.join(tmp, "runtime"), XENONET_HOSTS: "", XENONET_CONTROL: "", XENONET_HOT: "0" };
+  // The API's credential the service writes at start, read again for each
+  // request while it may not be there yet.
+  const keyed = () => ({ headers: { "x-xenonet-credential": apiCredential(env, port) ?? "" } });
   if (demo) env.XENONET_DEMO = "1";
   else Object.assign(env, { HOME: tmp, XENONET_STATE_DIR: path.join(tmp, "state"), XENONET_CACHE_DIR: path.join(tmp, "cache") });
   if (!demo && !argv.includes("--keep-state")) for (const d of ["state", "cache"]) fs.rmSync(path.join(tmp, d), { recursive: true, force: true });
   const t0 = performance.now();
   const svc = spawn(bin, ["serve"], { env, stdio: "ignore" });
   try {
-  const up = await until(async () => (await fetch(`http://127.0.0.1:${port}/api/graph`)).ok).then((t) => t + (performance.now() - t0 - t));
+  const up = await until(async () => (await fetch(`http://127.0.0.1:${port}/api/graph`, keyed())).ok).then((t) => t + (performance.now() - t0 - t));
   const result = { scenario: name, pileMB: bytes ? Math.round(bytes / 1e6) : 0, startMs: Math.round(up) };
   // Settle: let the first scan, index and tail finish before sampling.
   // Peak resident memory and the CPU spent while it does, and how long the
@@ -99,7 +103,7 @@ async function scenario(name, { demo, home, bytes, keep }) {
   result.peakRssMB = r1(peak);
   result.startCpuS = r1(cpuSeconds(svc.pid));
   try {
-    const sessions = await (await fetch(`http://127.0.0.1:${port}/api/sessions`)).json();
+    const sessions = await (await fetch(`http://127.0.0.1:${port}/api/sessions`, keyed())).json();
     result.indexMs = Math.round(sessions.search?.ms ?? 0);
     result.indexDocs = sessions.search?.docs ?? 0;
   } catch {}

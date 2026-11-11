@@ -1,11 +1,43 @@
 //! A request to a XenoNet on this machine: HTTP/1.1 to 127.0.0.1, which is
 //! all the command and its clients need, within a deadline (when there's
 //! one) that covers connecting, sending and the whole answer.
+//!
+//! A request to the API (`/api/…`) carries the credential the XenoNet on
+//! that port wrote to `<runtime>/api-<port>.cred` when it started, which
+//! only this account can read, in `x-xenonet-credential`.
 
 use std::fmt::Write as _;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+/// The header the API's credential goes in.
+pub const CREDENTIAL_HEADER: &str = "x-xenonet-credential";
+
+/// Where XenoNet's runtime files are: XENONET_RUNTIME_DIR, or `runtime`
+/// in XenoNet's state folder (crates/xenonet-components' runtime_dir).
+pub fn runtime_dir() -> PathBuf {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    if let Some(d) = env("XENONET_RUNTIME_DIR") {
+        return PathBuf::from(d);
+    }
+    let home = xenonet_os::home_dir(&env);
+    let state = xenonet_os::dirs::app_dir("state", env("XDG_STATE_HOME").as_deref(), env("LOCALAPPDATA").as_deref(), xenonet_os::platform(), &home, "XenoNet");
+    Path::new(&state).join("runtime")
+}
+
+/// The file the XenoNet on `port` keeps its API credential in.
+pub fn credential_file(runtime: &Path, port: u16) -> PathBuf {
+    runtime.join(format!("api-{port}.cred"))
+}
+
+/// The API credential of the XenoNet on `port`, when one there wrote it.
+pub fn credential(port: u16) -> Option<String> {
+    let text = std::fs::read_to_string(credential_file(&runtime_dir(), port)).ok()?;
+    let t = text.trim();
+    (!t.is_empty() && t.bytes().all(|b| b.is_ascii_hexdigit())).then(|| t.to_string())
+}
 
 /// An answer: its status and reason, and its body, or how reading the body
 /// failed (fetch's res.json() fails then, after the status came).
@@ -45,6 +77,12 @@ pub fn request(port: u16, method: &str, path: &str, headers: &[(String, String)]
     let mut head = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
     for (k, v) in headers {
         let _ = write!(head, "{k}: {v}\r\n");
+    }
+    let given = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(CREDENTIAL_HEADER));
+    if path.starts_with("/api/") && !given {
+        if let Some(c) = credential(port) {
+            let _ = write!(head, "{CREDENTIAL_HEADER}: {c}\r\n");
+        }
     }
     if let Some(b) = body {
         let _ = write!(head, "Content-Length: {}\r\n", b.len());

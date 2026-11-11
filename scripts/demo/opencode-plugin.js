@@ -18,10 +18,40 @@
 // OpenCode calls every export of a plugin file as a plugin, so this file
 // exports the one.
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 const QUIET_MS = 30e3;
 const EDIT_TOOLS = new Set(["edit", "write", "multiedit", "patch", "apply_patch"]);
 
 const base = () => `http://127.0.0.1:${Number(process.env.XENONET_PORT) || 47840}`;
+// The API's credential the XenoNet on that port wrote when it started, in
+// its runtime folder (XENONET_RUNTIME_DIR, else runtime in XenoNet's state
+// folder), which only your account can read. Read at each call, since
+// XenoNet writes a new one each time it starts; none when there's none.
+const runtimeDir = () => {
+  const env = process.env;
+  if (env.XENONET_RUNTIME_DIR) return env.XENONET_RUNTIME_DIR;
+  const home = os.homedir();
+  const state = env.XDG_STATE_HOME
+    ? path.join(env.XDG_STATE_HOME, "xenonet")
+    : process.platform === "win32"
+      ? path.join(env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "XenoNet")
+      : process.platform === "darwin"
+        ? path.join(home, "Library", "Application Support", "XenoNet")
+        : path.join(home, ".local", "state", "xenonet");
+  return path.join(state, "runtime");
+};
+const credential = () => {
+  try {
+    const value = fs.readFileSync(path.join(runtimeDir(), `api-${Number(process.env.XENONET_PORT) || 47840}.cred`), "utf8").trim();
+    return /^[a-f0-9]+$/.test(value) ? { "x-xenonet-credential": value } : {};
+  } catch {
+    return {};
+  }
+};
+
 const agentId = (sessionID) => `opencode:${String(sessionID).replace(/^ses_/, "ses-")}`;
 const str = (v) => (typeof v === "string" && v ? v : null);
 const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
@@ -71,7 +101,7 @@ export const XenoNet = async ({ directory } = {}) => {
       .then(() =>
         fetch(`${base()}/api/engine/opencode-event`, {
           method: "POST",
-          headers: { "content-type": "application/json", "x-xenonet-agent": agentId(sessionID) },
+          headers: { "content-type": "application/json", "x-xenonet-agent": agentId(sessionID), ...credential() },
           body: JSON.stringify({ events, cwd: directory, pid: process.pid }),
           signal: AbortSignal.timeout(800),
         }),

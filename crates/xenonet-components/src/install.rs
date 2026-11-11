@@ -849,7 +849,7 @@ mod tests {
         assert_eq!(launcher_version(Some("// xenonet-launcher 7\nrest")), 7.0);
         assert_eq!(launcher_version(Some("// an old one")), 1.0);
         assert_eq!(launcher_version(None), 0.0);
-        assert_eq!(launcher_version(Some(LAUNCHER_SCRIPT)), 3.0, "the script built in");
+        assert_eq!(launcher_version(Some(LAUNCHER_SCRIPT)), 4.0, "the script built in");
     }
 }
 

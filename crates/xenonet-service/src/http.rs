@@ -44,6 +44,23 @@ pub struct Req {
     pub headers: Vec<(String, String)>,
     pub peer: Peer,
     pub body: Body,
+    /// Who the router found the request is from (routes/rules.rs), for the
+    /// handlers that answer differently by it. Nothing until it's admitted.
+    pub by: By,
+}
+
+/// What routes/rules.rs found of a request's caller before its handler
+/// runs.
+#[derive(Clone, Debug, Default)]
+pub struct By {
+    /// The window: its credential, and its process where XenoNet can see
+    /// it, with no actor's token.
+    pub window: bool,
+    /// Why it isn't the window, for the handlers that refuse what isn't.
+    pub not_window: String,
+    /// The session named in x-xenonet-agent, once its process passed the
+    /// check, and the check's verdict.
+    pub session: Option<(String, Value)>,
 }
 
 impl Req {
@@ -119,6 +136,7 @@ impl Req {
             headers: headers.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.to_string())).collect(),
             peer: Peer::new(addr, addr),
             body: body.map_or(Body::Taken, |b| Body::Bytes(b.as_bytes().to_vec())),
+            by: By::default(),
         }
     }
 }

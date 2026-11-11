@@ -73,7 +73,9 @@ after(async () => {
 
 test("A2A is off until the window turns it on; the card's address comes with the gateway's; Connect… gives an A2A agent the card and its token", { timeout: limit(90000) }, shoot("a2a", async () => {
   // Off, and only the window may look or change it.
-  assert.equal((await fetch(`${s.base}/api/a2a`, { method: "POST", headers: { "content-type": "application/json", "x-xenonet-window": "not-its-key" }, body: JSON.stringify({ on: true }) })).status, 403);
+  // A key that isn't the window's is no credential at all, whatever else
+  // comes with it.
+  assert.equal((await s.fetch(`/api/a2a`, { method: "POST", headers: { "content-type": "application/json", "x-xenonet-window": "not-its-key" }, body: JSON.stringify({ on: true }) })).status, 401);
   const before = await fromWindow(`return await call("GET", "/api/a2a");`);
   assert.deepEqual([before.status, before.body.on, before.body.card], [200, false, null]);
   await s.driver("command", "actors");

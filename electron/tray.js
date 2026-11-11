@@ -21,7 +21,8 @@ const isMac = process.platform === "darwin";
 
 // `themes`: the Theme menu as the page last said it (theme-menu.js), or
 // null; setThemes() gives a newer one.
-export function createTray({ baseUrl, showWindow, sendCommand, select, themes = null }) {
+// `windowKey()` is the window's credential for the API, while connected.
+export function createTray({ baseUrl, windowKey = () => null, showWindow, sendCommand, select, themes = null }) {
   let tray = null;
   let started = false;
   let hidden = false;
@@ -30,7 +31,8 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   let summary = null;
   let themeMenu = themes;
 
-  const post = (url, body) => fetch(baseUrl + url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+  const keyed = (headers = {}) => { const key = windowKey(); return key ? { ...headers, "x-xenonet-window": key } : headers; };
+  const post = (url, body) => fetch(baseUrl + url, { method: "POST", headers: keyed({ "content-type": "application/json" }), body: JSON.stringify(body) }).catch(() => {});
   const image = (working, need) => (isMac ? trayGlyph(working, need) : iconImage(32, working, need, 2));
   // A session on another machine (with XENONET_HOSTS=1) says which; it opens
   // nothing here, since hosts are read-only, so a click shows it on the map.
@@ -112,7 +114,8 @@ export function createTray({ baseUrl, showWindow, sendCommand, select, themes = 
   async function poll() {
     if (!tray) return;
     try {
-      summary = await fetch(baseUrl + "/api/summary").then((r) => r.json());
+      const answer = await fetch(baseUrl + "/api/summary", { headers: keyed() });
+      summary = answer.ok ? await answer.json() : null;
     } catch {
       summary = null;
     }

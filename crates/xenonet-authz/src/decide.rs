@@ -50,8 +50,8 @@
 //!             for starts that names this machine's device and the device
 //!             the start came from
 //!   claim     reach, but an unchecked agent claims only on its own machine
-//!   read      the map: reach; transcripts and search: here, an agent
-//!             process-checked at least; from another machine, an admin
+//!   read      the map: reach; transcripts, search and state: here, an
+//!             agent process-checked at least; from another machine, an admin
 //!             member, never an unchecked agent
 //!   presence  the person, with a presence block for this act from the
 //!             device that signed it; a weaker device is allowed and the

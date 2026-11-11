@@ -675,6 +675,10 @@ fn open_stream(port: u16, route: &str, headers: &[(String, String)]) -> std::io:
     for (k, v) in headers {
         let _ = write!(head, "{k}: {v}\r\n");
     }
+    // The API's credential, as the shared client sends it.
+    if let Some(c) = route.starts_with("/api/").then(|| xenonet_api::http::credential(port)).flatten() {
+        let _ = write!(head, "{}: {c}\r\n", xenonet_api::http::CREDENTIAL_HEADER);
+    }
     head.push_str("Connection: close\r\n\r\n");
     (&s).write_all(head.as_bytes())?;
     let mut r = BufReader::new(s);

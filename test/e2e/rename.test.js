@@ -21,7 +21,7 @@ const port = await new Promise((resolve) => {
 });
 const s = xenonet("test", { port });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const api = (route) => fetch(`http://127.0.0.1:${port}${route}`).then((r) => r.json());
+const api = (route) => s.fetch(route).then((r) => r.json());
 const titleOf = async (id) => (await api("/api/graph")).nodes.find((n) => n.id === id)?.title;
 // The inspector's title, or the field in its place, as the page shows it.
 const shown = () => s.eval(`return { title: document.querySelector("#inspector h2.insp-title")?.textContent ?? null, field: document.querySelector("#inspector .rename-input")?.value ?? null, focused: document.activeElement?.matches(".rename-input") ?? false, where: document.querySelector("#inspector .rename-where")?.textContent ?? null }`);

@@ -22,7 +22,7 @@
 //! With nothing simulated, every one of these is the real route's.
 
 use crate::borrowed::random_uuid;
-use crate::cores::{ok, reason, CoreError};
+use crate::cores::CoreError;
 use crate::ctx::Ctx;
 use crate::http::{Body, Reply, Req};
 use serde_json::{json, Value};
@@ -208,8 +208,8 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
         }
         ("POST", "/api/net/ticket" | "/api/net/replace" | "/api/net/remove" | "/api/net/create" | "/api/net/join" | "/api/net/leave" | "/api/net/approve")
         | ("PUT", "/api/net/settings") => {
-            if let Some(why) = ctx.from_window(req).await {
-                return Ok(Some(Reply::coded(403, "yours", why)));
+            if !req.by.window {
+                return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
             }
             let body = req.json(16 << 10).await?;
             let now = ctx.now();
@@ -798,8 +798,8 @@ fn made_up_ask(now: f64, env: bool) -> Value {
 /// the real route's, with its body put back.
 async fn asks(ctx: &Arc<Ctx>, req: &mut Req, answer: bool) -> Result<Option<Reply>, CoreError> {
     if !answer {
-        if let Some(why) = ctx.from_window(req).await {
-            return Ok(Some(Reply::coded(403, "yours", why)));
+        if !req.by.window {
+            return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
         }
         let mut real = ctx.cores.engine.asks().await.unwrap_or_else(|_| json!({ "asks": [] }));
         let made: Vec<Value> = sims().locked().get(&key(ctx)).map(|s| s.asks.clone()).unwrap_or_default();
@@ -817,8 +817,8 @@ async fn asks(ctx: &Arc<Ctx>, req: &mut Req, answer: bool) -> Result<Option<Repl
         req.body = Body::Bytes(bytes);
         return Ok(None);
     }
-    if let Some(why) = ctx.from_window(req).await {
-        return Ok(Some(Reply::coded(403, "yours", why)));
+    if !req.by.window {
+        return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
     }
     if !matches!(decision.as_str(), "allow" | "deny") {
         return Ok(Some(Reply::coded(400, "bad-request", "the answer is allow or deny")));
@@ -846,8 +846,8 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
         req.body = Body::Bytes(bytes);
         return Ok(None);
     };
-    if let Some(why) = ctx.from_window(req).await {
-        return Ok(Some(Reply::coded(403, "yours", why)));
+    if !req.by.window {
+        return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
     }
     let prompt = body.get("prompt").and_then(Value::as_str).map_or("", str::trim);
     if prompt.is_empty() {
@@ -991,12 +991,8 @@ async fn message(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> {
         req.body = Body::Bytes(bytes);
         return Ok(None);
     };
-    if !ctx.window_only(req) {
-        return Ok(Some(Reply::coded(403, "yours", "this is for XenoNet's own window")));
-    }
-    let seen = ctx.cores.verify.window(req.peer).await;
-    if !ok(&seen) {
-        return Ok(Some(Reply::coded(403, "yours", reason(&seen))));
+    if !req.by.window {
+        return Ok(Some(Reply::coded(403, "yours", req.by.not_window.clone())));
     }
     let text = body.get("text").and_then(Value::as_str).map_or("", str::trim);
     if text.is_empty() || text.chars().count() > MAX_TEXT {
@@ -1222,6 +1218,14 @@ mod tests {
         }
     }
 
+    /// A request as rules.rs admits it, or its refusal's status.
+    async fn admitted(ctx: &Ctx, mut req: Req) -> Result<Req, u16> {
+        match crate::routes::rules::admit(ctx, &mut req).await {
+            Ok(()) => Ok(req),
+            Err(r) => Err(r.status),
+        }
+    }
+
     fn dev_ctx() -> Arc<Ctx> {
         let mut cores = Cores::pending(false, false, false);
         cores.verify = Arc::new(Window);
@@ -1241,7 +1245,7 @@ mod tests {
         let get = |ctx: Arc<Ctx>| {
             let key = key.clone();
             async move {
-                let mut req = Req::fake("GET", "/api/net/state", &[("x-xenonet-window", key.as_str())], None);
+                let mut req = admitted(&ctx, Req::fake("GET", "/api/net/state", &[("x-xenonet-window", key.as_str())], None)).await.unwrap();
                 assert!(route(&ctx, &mut req).await.unwrap().is_none(), "never this one's");
                 crate::routes::net::route(&ctx, &mut req).await.unwrap().unwrap()
             }
@@ -1250,11 +1254,11 @@ mod tests {
         assert_eq!(get(ctx.clone()).await.status, 503);
         assert!(simulate(&ctx, "net-founder", None, None).is_some());
         assert_eq!(get(ctx.clone()).await.body_json()["network"]["name"], "home");
-        // Simulated or not, the state is the owner's: no window key and no
-        // person, no state.
-        let mut bare = Req::fake("GET", "/api/net/state", &[], None);
-        assert!(route(&ctx, &mut bare).await.unwrap().is_none());
-        assert_eq!(crate::routes::net::route(&ctx, &mut bare).await.unwrap().unwrap().status, 403);
+        // Simulated or not, the state is the owner's: no credential, no
+        // state, and with the file's but no person, none either.
+        assert_eq!(admitted(&ctx, Req::fake("GET", "/api/net/state", &[], None)).await.err(), Some(401));
+        let file = ctx.api_key.reveal().to_string();
+        assert_eq!(admitted(&ctx, Req::fake("GET", "/api/net/state", &[("x-xenonet-credential", file.as_str())], None)).await.err(), Some(403));
         assert!(simulated_net_state(&ctx).is_some());
         // The engine's state and its list have the other hosts' agents.
         for path in ["/api/engine/state", "/api/engine/agents"] {
@@ -1276,20 +1280,21 @@ mod tests {
         simulate(&ctx, "net-gateway-down", None, None).unwrap();
         let key = ctx.window_key.reveal().to_string();
         let with_key = [("x-xenonet-window", key.as_str())];
+        let file = ctx.api_key.reveal().to_string();
         let ticket = |headers: &[(&str, &str)]| Req::fake("POST", "/api/net/ticket", headers, Some(r#"{"host":"desk"}"#));
-        assert_eq!(route(&ctx, &mut ticket(&[])).await.unwrap().unwrap().status, 403);
-        assert_eq!(route(&ctx, &mut ticket(&with_key)).await.unwrap().unwrap().status, 200);
+        assert_eq!(admitted(&ctx, ticket(&[("x-xenonet-credential", file.as_str())])).await.err(), Some(403), "the window's");
+        assert_eq!(route(&ctx, &mut admitted(&ctx, ticket(&with_key)).await.unwrap()).await.unwrap().unwrap().status, 200);
         assert_eq!(simulated_net_state(&ctx).unwrap()["tickets"][0]["host"], "desk");
         let to = simulated_remote_agents(&ctx).unwrap().into_iter().find(|a| a["host"] == "studio").unwrap()["id"].clone();
         let body = json!({ "to": to, "text": "Hold the release until the tests pass" }).to_string();
         let msg = |headers: &[(&str, &str)]| Req::fake("POST", "/api/actors/you/message", headers, Some(&body));
         assert_eq!(route(&ctx, &mut msg(&[])).await.unwrap().unwrap().status, 403);
-        let sent = route(&ctx, &mut msg(&with_key)).await.unwrap().unwrap().body_json();
+        let sent = route(&ctx, &mut admitted(&ctx, msg(&with_key)).await.unwrap()).await.unwrap().unwrap().body_json();
         assert_eq!((sent["state"].clone(), sent["host"].clone()), (json!("queued"), json!("studio")));
         assert!(sent["mid"].as_str().unwrap().starts_with("msg_"));
         assert_eq!(simulated_net_state(&ctx).unwrap()["outbox"]["frames"], 4);
         // A message for anyone else goes on to the real route, its body whole.
-        let mut other = Req::fake("POST", "/api/actors/you/message", &with_key, Some(r#"{"to":"actor:wren","text":"hi"}"#));
+        let mut other = admitted(&ctx, Req::fake("POST", "/api/actors/you/message", &with_key, Some(r#"{"to":"actor:wren","text":"hi"}"#))).await.unwrap();
         assert!(route(&ctx, &mut other).await.unwrap().is_none());
         assert_eq!(other.json(1024).await.unwrap()["to"], "actor:wren");
         clear(&ctx);

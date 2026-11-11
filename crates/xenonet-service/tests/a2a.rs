@@ -137,7 +137,10 @@ async fn the_switch_is_the_owners() {
         let req = Req::fake(method, "/api/a2a", &h, text.as_deref());
         async move { answered(&ctx, "", "", api(&ctx, req).await) }
     };
-    assert_eq!(go("GET", vec![], None).await.status, 503, "not made: actors are pending here");
+    let key = ctx.window_key.reveal().to_string();
+    let window = || vec![("x-xenonet-window", key.clone())];
+    assert_eq!(go("GET", vec![], None).await.status, 401, "no credential");
+    assert_eq!(go("GET", window(), None).await.status, 503, "not made: actors are pending here");
     let a = A2a::new(A2aParts {
         cores: A2aCores { engine: w.clone(), actors: w },
         file: None,
@@ -149,9 +152,7 @@ async fn the_switch_is_the_owners() {
     })
     .unwrap();
     let _ = ctx.a2a.set(a.clone());
-    let key = ctx.window_key.reveal().to_string();
-    let window = || vec![("x-xenonet-window", key.clone())];
-    assert_eq!(go("GET", vec![("x-xenonet-window", "not-its-key".into())], None).await.status, 403);
+    assert_eq!(go("GET", vec![("x-xenonet-window", "not-its-key".into())], None).await.status, 401, "a key that isn't its own is none");
     let actor = vec![("x-xenonet-window", key.clone()), ("authorization", format!("Bearer xenonet_gateway_{}", "a".repeat(64)))];
     assert_eq!(go("POST", actor, Some(json!({ "on": true }))).await.status, 403, "an actor can't turn it on");
     assert!(!a.enabled());

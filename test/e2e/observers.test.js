@@ -57,7 +57,7 @@ test("the test instance's actors are the demo's alone: no observer looks at this
   // The observers' switches still answer, for the demo's own Hermes and Grok
   // Bot, and Muse's, which no actor of the demo's is.
   assert.deepEqual((await s.api("/api/actors/observers")).observers.map((o) => [o.product, o.actors]), [["hermes-agent", ["actor:wren"]], ["grok-bot", ["actor:kestrel"]], ["muse", []]]);
-  const doctor = await (await fetch(`${s.base}/api/doctor`, { method: "POST" })).json();
+  const doctor = await (await s.fetch(`/api/doctor`, { method: "POST" })).json();
   assert.deepEqual(doctor.results.filter((r) => r.id.startsWith("actors.")), [], "the demo's doctor checks only itself");
   assert.equal((await s.driver("state")).errors, 0, JSON.stringify(await s.driver("errors")));
 }));

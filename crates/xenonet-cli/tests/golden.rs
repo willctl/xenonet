@@ -28,6 +28,20 @@
 // The network's commands (net, svc) have no goldens: the JS command passed
 // them to the binary, and the binary refuses them from under an agent, so
 // what was recorded was that refusal, not an answer of the JS.
+//
+// Every read carries the API's credential, from the file the service
+// writes in its runtime folder, as the command's own reads do; a step with
+// `"credential": false` goes without one (those goldens, the 401s, were
+// recorded from the binary when the credential came in, 2026-11-10). A
+// read that matters (transcripts, search, the engine's state, delivery)
+// takes more than the file: your own terminal, the window or a checked
+// session. Under an agent, which these tests are run from on a
+// development machine, the reads say which session they're from, as an
+// MCP server's do, and pass its process check. The command doesn't say,
+// so the service refuses its reads that matter from under an agent, as it
+// refuses everything that's yours from under one; there the test takes
+// the refusal for what it is (and the log's and the readers' traces of it)
+// and leaves the comparison to CI, as tests/net.rs does.
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap or panic")]
@@ -228,7 +242,7 @@ impl Service {
     fn wait_ready(&self) {
         let until = Instant::now() + Duration::from_secs(90);
         while Instant::now() < until {
-            if let Some((200, Value::Object(g))) = get(self.port, "/api/graph") {
+            if let Some((200, Value::Object(g))) = self.credential().and_then(|c| get(self.port, "/api/graph", Some(&c))) {
                 let nodes = g.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
                 if nodes.iter().any(|n| matches!(n["kind"].as_str(), Some("session" | "project"))) {
                     // A moment for the readers' first pass.
@@ -245,9 +259,15 @@ impl Service {
         self.home.to_str().unwrap()
     }
 
-    fn run(&self, args: &[String]) -> (i32, String) {
+    /// The API's credential the service wrote in its runtime folder.
+    fn credential(&self) -> Option<String> {
+        let file = self.home.join(".xenonet-runtime").join(format!("api-{}.cred", self.port));
+        std::fs::read_to_string(file).ok().map(|c| c.trim().to_string()).filter(|c| !c.is_empty())
+    }
+
+    fn run(&self, args: &[String]) -> (i32, String, String) {
         let out = Command::new(BIN).args(args).current_dir(&self.home).env_clear().envs(self.env.iter().cloned()).stdin(Stdio::null()).output().unwrap();
-        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
     }
 }
 
@@ -264,11 +284,16 @@ impl Drop for Service {
     }
 }
 
-// GET a route: its status and its body, as JSON when it is.
-fn get(port: u16, route: &str) -> Option<(u16, Value)> {
+// GET a route, with `credential` when there's one: its status and its
+// body, as JSON when it is.
+fn get(port: u16, route: &str, credential: Option<&str>) -> Option<(u16, Value)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok()?;
-    write!(stream, "GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: */*\r\nConnection: close\r\n\r\n").ok()?;
+    let mut cred = credential.map(|c| format!("x-xenonet-credential: {c}\r\n")).unwrap_or_default();
+    if let Some(me) = credential.and(session()) {
+        cred = format!("{cred}x-xenonet-agent: {me}\r\n");
+    }
+    write!(stream, "GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: */*\r\n{cred}Connection: close\r\n\r\n").ok()?;
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).ok()?;
     let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
@@ -542,6 +567,27 @@ fn differences(a: &Value, b: &Value, at: &str, out: &mut Vec<String>) {
     }
 }
 
+// The session this test runs in, when it runs in one, as the MCP servers
+// say it: its reads are that session's, which the service checks against
+// its process, as it does an MCP server's. Under no agent (CI), none, and
+// the reads are from your own terminal.
+fn session() -> Option<String> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    env("CLAUDE_CODE_SESSION_ID")
+        .map(|s| format!("claude:{s}"))
+        .or_else(|| env("GROK_SESSION_ID").map(|s| format!("grok:{s}")))
+        .or_else(|| env("CODEX_THREAD_ID").map(|s| format!("codex:{s}")))
+}
+
+// Whether a refusal is the service's of a request from under an agent,
+// and this test runs under one (Claude Code, Codex or Grok Build say so in
+// their sessions' environments): then there's nothing of the JS's to
+// compare it with here, and CI, under no agent, compares it.
+fn refused_under_agent(words: &str) -> bool {
+    let agent = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "GROK_SESSION_ID"].iter().any(|k| std::env::var(k).is_ok_and(|v| !v.is_empty()));
+    agent && words.contains("from under")
+}
+
 fn version() -> String {
     let package = read_json(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../package.json"));
     package["version"].as_str().unwrap().to_string()
@@ -569,22 +615,39 @@ fn the_service_and_the_command_answer_as_the_js_did() {
     files.sort();
     assert_eq!(named, files, "every golden is a step of sequence.json, and every step's golden is there");
     let s = Service::start();
+    let credential = s.credential().expect("the service wrote its API credential");
     let version = version();
     let normal = || Normal { home: s.home_text().to_string(), tmp: s.tmp.clone(), port: s.port, version: version.clone(), now: now_ms() };
     let mut failed = Vec::new();
+    // Whether a read was refused under an agent: the log and the readers'
+    // counts then hold traces the recording's run didn't make.
+    let mut refused = false;
     // Each read in the order the recording made them, the ones without a
     // golden too: some leave a trace a later one shows.
     for step in steps {
+        let traces = step["run"].get(0).and_then(Value::as_str).is_some_and(|c| c == "logs" || c == "drift");
+        if refused && traces {
+            continue;
+        }
         let golden = step["golden"].as_str().map(|f| (f, read_json(&tests_dir().join("golden").join(f))));
         let mut d = Vec::new();
         if let Some(route) = step["get"].as_str() {
-            let (status, body) = get(s.port, &route.replace("{{home}}", s.home_text())).unwrap_or((0, Value::Null));
+            let with = (step["credential"] != false).then_some(credential.as_str());
+            let (status, body) = get(s.port, &route.replace("{{home}}", s.home_text()), with).unwrap_or((0, Value::Null));
+            if status == 403 && refused_under_agent(body["error"].as_str().unwrap_or("")) {
+                refused = true;
+                continue;
+            }
             let Some((_, g)) = &golden else { continue };
             let answer = normal().walk(&serde_json::json!({ "status": status, "body": body }), None);
             differences(&serde_json::json!({ "status": g["status"], "body": g["body"] }), &answer, "", &mut d);
         } else {
             let args: Vec<String> = step["run"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().replace("{{home}}", s.home_text())).collect();
-            let (code, stdout) = s.run(&args);
+            let (code, stdout, stderr) = s.run(&args);
+            if code != 0 && refused_under_agent(&format!("{stdout}{stderr}")) {
+                refused = true;
+                continue;
+            }
             let Some((_, g)) = &golden else { continue };
             let n = normal();
             if g["code"] != code {

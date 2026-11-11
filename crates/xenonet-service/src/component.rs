@@ -24,7 +24,7 @@ use crate::cores::{ok, Terminals};
 use crate::http::Peer;
 use crate::routes::{api_range, CAPABILITIES, CONSOLE_API, SERVICE_API};
 use crate::rpc::{negotiate, Handler, Rpc, MAX_LINE};
-use crate::window_key::{random_hex, same, TrayKey, WindowKey};
+use crate::window_key::{random_hex, same, write_private, TrayKey, WindowKey};
 use serde_json::{json, Value};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -254,35 +254,9 @@ struct Conn {
     peer: Peer,
 }
 
-/// Writes the descriptor through a temporary file only this account can
-/// read, renamed into place.
+/// Writes the descriptor where only this account can read it.
 fn write_descriptor(file: &Path, port: u16, token: &str, version: &str) -> std::io::Result<()> {
-    let dir = file.parent().unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-    }
-    let tmp = PathBuf::from(format!("{}.{}.tmp", file.display(), std::process::id()));
-    let wrote = (|| -> std::io::Result<()> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        drop(opts.open(&tmp)?);
-        let mut run = |f: &str, a: &[&str]| xenonet_os::private_file::run_private(f, a);
-        xenonet_os::private_file::protect_file(&tmp.to_string_lossy(), cfg!(windows), &mut run).map_err(|e| std::io::Error::other(e.message().to_string()))?;
-        std::fs::write(&tmp, xenonet_text::json::stringify(&json!({ "port": port, "token": token, "pid": std::process::id(), "version": version }), 0))?;
-        std::fs::rename(&tmp, file)
-    })();
-    if wrote.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    wrote
+    write_private(file, xenonet_text::json::stringify(&json!({ "port": port, "token": token, "pid": std::process::id(), "version": version }), 0).as_bytes())
 }
 
 /// Starts the component service and writes its descriptor.

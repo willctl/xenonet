@@ -13,7 +13,7 @@
 //! Every request needs the tray's key (x-xenonet-tray), which only the
 //! tray app the component socket can tell is XenoNet's gets, and must be
 //! yours (verify.person), so nothing works from under an agent even with
-//! the key. An actor's token never does.
+//! the key. An actor's token never does. rules.rs checks both.
 
 use crate::ctx::{Answer, Ctx};
 use crate::http::{Reply, Req};
@@ -208,22 +208,9 @@ fn selectable(id: &str) -> bool {
     id.len() <= 300 && (local(id) || xenonet_model::ids::parse_qualified(id).is_some_and(|q| q.host.is_some() && local(q.local)))
 }
 
-fn refused(error: &str) -> Reply {
-    Reply::send(403, &json!({ "error": error, "code": "tray" }), &[])
-}
-
+/// The tray's routes, once rules.rs took the tray's key from your own
+/// process (an actor's token never makes a request the tray's).
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Answer {
-    // The tray's key and nothing else: an actor's token never makes a
-    // request the tray's.
-    if req.header("authorization").is_some() {
-        return Ok(refused("this is for XenoNet's tray app, and an actor can't use it"));
-    }
-    if !ctx.tray_key.matches(req.header("x-xenonet-tray")) {
-        return Ok(refused("this is for XenoNet's tray app, and the request didn't come with its key"));
-    }
-    if let Some(r) = ctx.yours(req).await {
-        return Ok(r);
-    }
     let method = req.method.clone();
     match (method.as_str(), req.path.as_str()) {
         ("GET", "/api/tray/v1/status") => Ok(Reply::json(200, status(ctx)?)),

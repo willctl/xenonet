@@ -60,21 +60,6 @@ fn public_host(ctx: &Ctx) -> Option<String> {
     g.gateway().public_host()
 }
 
-/// Whether a request may make a ticket: the window's, since signing the
-/// new machine in asks the person. The reason it may not, or None.
-async fn ticket_check(ctx: &Ctx, req: &Req) -> Option<String> {
-    if req.header("x-xenonet-window").is_none() && req.header("authorization").is_none() {
-        return Some("Add a machine is XenoNet's window's, since it asks you: choose Add a machine in the palette".into());
-    }
-    ctx.from_window(req).await
-}
-
-/// Whether the request came with the window's key, from the window: only
-/// then may an act ask the person.
-pub async fn at_window(ctx: &Ctx, req: &Req) -> bool {
-    req.header("x-xenonet-window").is_some() && ctx.from_window(req).await.is_none()
-}
-
 /// `/api/net/…`, or None for any other path.
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
     let path = req.path.clone();
@@ -93,10 +78,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     if !known {
         return Reply::error(404, "not found");
     }
-    let why = if rest == "ticket" { ticket_check(ctx, req).await } else { ctx.from_you(req).await };
-    if let Some(why) = why {
-        return Reply::coded(403, "yours", why);
-    }
+    // Who may is rules.rs's: yours, and a ticket the window's.
     if rest == "state" {
         if let Some(s) = simulated_net_state(ctx) {
             return Reply::json(200, super::net_sim::with_own_agents(ctx, s).await);
@@ -114,7 +96,8 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let on = |k: &str| body.get(k) == Some(&Value::Bool(true));
     let node = svc.node();
-    let window = at_window(ctx, req).await;
+    // Only a request from the window may ask the person.
+    let window = req.by.window;
     let result = match rest {
         "state" => Ok(svc.state()),
         "create" => create(ctx, &svc, &body, window).await,

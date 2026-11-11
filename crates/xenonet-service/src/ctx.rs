@@ -1,5 +1,5 @@
 //! What every route reaches: the service's settings, its cores, the event
-//! stream, the window key, the error log, and the parts server/index.js
+//! stream, the API's credentials, the error log, and the parts server/index.js
 //! keeps at its top level (the component service, the actor gateway, the
 //! assistant's endpoint, Spotify's poll).
 
@@ -7,11 +7,11 @@ use crate::actor_caller::{ActorCaller, Rate};
 use crate::borrowed::now_ms;
 use crate::component::Components;
 use crate::config::Config;
-use crate::cores::{ok, reason, CoreError, Cores};
+use crate::cores::{CoreError, Cores};
 use crate::events::Events;
 use crate::gateway::control::GatewayControl;
-use crate::http::{BodyError, Reply, Req};
-use crate::window_key::{TrayKey, WindowKey};
+use crate::http::{BodyError, Reply};
+use crate::window_key::{ApiKey, SelfKey, TrayKey, WindowKey};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use xenonet_actors::limits::Bucket;
@@ -27,6 +27,11 @@ pub struct Ctx {
     pub window_key: Arc<WindowKey>,
     /// The tray app's key, for its routes (routes/tray.rs).
     pub tray_key: Arc<TrayKey>,
+    /// The API credential this service writes for the programs of this
+    /// account (routes/rules.rs).
+    pub api_key: Arc<ApiKey>,
+    /// The service's own key, for its in-process reads of its own API.
+    pub self_key: Arc<SelfKey>,
     pub log: Mutex<Log>,
     pub drift: Arc<Mutex<DriftLog>>,
     pub caller: Option<ActorCaller>,
@@ -78,7 +83,7 @@ impl From<BodyError> for CoreError {
 impl Ctx {
     /// The service's parts around its cores, as serve.rs makes them: no
     /// log folder unless one's given, the drift log in memory unless it's
-    /// opened, a new window key.
+    /// opened, new keys.
     pub fn new(config: Config, version: String, cores: Cores, log: Log) -> Ctx {
         let caller = cores.registration.clone().map(|r| ActorCaller::new(r, cores.verify.clone()));
         let themes_dir = std::path::Path::new(&config.state_dir).join("themes").to_string_lossy().into_owned();
@@ -89,6 +94,8 @@ impl Ctx {
             events: Arc::new(Events::new()),
             window_key: Arc::new(WindowKey::new()),
             tray_key: Arc::new(TrayKey::new()),
+            api_key: Arc::new(ApiKey::new()),
+            self_key: Arc::new(SelfKey::new()),
             log: Mutex::new(log),
             drift: Arc::new(Mutex::new(DriftLog::default())),
             caller,
@@ -147,47 +154,6 @@ impl Ctx {
             }
         }
         self.cores.opener.launch(target)
-    }
-
-    /// yours(req, res): your standing settings are yours, from XenoNet's
-    /// window or your own terminal, never from under an agent or an actor
-    /// product. The refusal to send, or None.
-    pub async fn yours(&self, req: &Req) -> Option<Reply> {
-        let you = self.cores.verify.person(req.peer).await;
-        (!ok(&you)).then(|| Reply::send(403, &json!({ "error": you.get("reason").cloned().unwrap_or(Value::Null), "code": "yours" }), &[]))
-    }
-
-    /// Whether a request is the window's: its key, and its process where
-    /// XenoNet can see it. An actor's token never makes it the window's.
-    /// The reason it isn't, or None.
-    pub async fn from_window(&self, req: &Req) -> Option<String> {
-        if req.header("authorization").is_some() {
-            return Some("this is for XenoNet's own window, and an actor can't do it".into());
-        }
-        if !self.window_key.matches(req.header("x-xenonet-window")) {
-            return Some("this is for XenoNet's own window, and the request didn't come with its key".into());
-        }
-        let seen = self.cores.verify.window(req.peer).await;
-        (!ok(&seen)).then(|| reason(&seen))
-    }
-
-    /// Whether a request is yours: from the window, or else from your own
-    /// terminal. The reason it isn't, or None.
-    pub async fn from_you(&self, req: &Req) -> Option<String> {
-        if req.header("authorization").is_some() {
-            return Some("this is yours to do, and an actor can't do it".into());
-        }
-        if req.header("x-xenonet-window").is_some() {
-            return self.from_window(req).await;
-        }
-        let seen = self.cores.verify.person(req.peer).await;
-        (!ok(&seen)).then(|| reason(&seen))
-    }
-
-    /// The window's key and nothing else (no token), for the window-only
-    /// routes server/index.js answers itself.
-    pub fn window_only(&self, req: &Req) -> bool {
-        req.header("authorization").is_none() && self.window_key.matches(req.header("x-xenonet-window"))
     }
 }
 

@@ -1,4 +1,5 @@
-//! Provider refusals XenoNet kept (server/routes/refusals.js), yours only:
+//! Provider refusals XenoNet kept (server/routes/refusals.js), yours only
+//! (rules.rs):
 //! the list with its filters, whether their context is kept, and one's
 //! saved request.
 
@@ -20,9 +21,6 @@ pub async fn route(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError>
     let route = req.path.clone();
     if route != "/api/refusals" && !route.starts_with("/api/refusals/") {
         return Ok(None);
-    }
-    if let Some(r) = ctx.yours(req).await {
-        return Ok(Some(r));
     }
     let refusals = &ctx.cores.refusals;
     let demo = if ctx.config.demo { Some(refusals.demo_records()?) } else { None };

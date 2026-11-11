@@ -28,9 +28,6 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
     match req.method.as_str() {
         "GET" => Ok(Reply::json(200, json!({ "current": environment_of(store.environment()?.as_str()).id, "environments": environments() }))),
         "POST" => {
-            if let Some(r) = ctx.yours(req).await {
-                return Ok(r);
-            }
             let id = req.json_body().await?.get("id").cloned().unwrap_or(Value::Null);
             if !is_environment(&id) {
                 return Ok(Reply::error(404, "that environment isn't available"));

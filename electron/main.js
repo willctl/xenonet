@@ -130,11 +130,23 @@ let quitting = false;
 // How long a loaded page has to start before it's loaded again.
 const BOOT_MS = 30e3;
 let updates = null;
-// The window key (crates/xenonet-actors/src/key.rs), from the service this app connects
-// to, for the routes only XenoNet's own window may use. Held here while
-// connected, and given only to XenoNet's own page (app:window-key); never
-// written down.
+// The window key (crates/xenonet-service/src/window_key.rs), from the
+// service this app connects to: the window's credential for the API
+// (crates/xenonet-service/src/routes/rules.rs). Held here while connected,
+// given only to XenoNet's own page (app:window-key and its cookie), and
+// never written down.
 let windowKey = null;
+// The window key as the page's cookie, for Desktop's own frontend, which
+// passes it on to the service with the page's requests: HttpOnly, so the
+// page's scripts never read it, and SameSite=Strict. A cookie, since an
+// EventSource can't send a header. Named for the service's port.
+const WINDOW_COOKIE = `xenonet-window-${PORT}`;
+async function setWindowCookie(key) {
+  if (BASE === SERVICE_BASE) return;
+  const cookies = session.defaultSession.cookies;
+  if (key) await cookies.set({ url: BASE, name: WINDOW_COOKIE, value: key, httpOnly: true, sameSite: "strict" }).catch((err) => desktopLog.warn("desktop.cookie", `the window's cookie wasn't set: ${err.message}`));
+  else await cookies.remove(BASE, WINDOW_COOKIE).catch(() => {});
+}
 // What quitting stops: Desktop's hold on the terminal's shells (the
 // service keeps them), and its connection to the service, which hears
 // first that the window closed (you went offline). An installed XenoNet's
@@ -330,8 +342,8 @@ async function startServer() {
   // A --prod run stands in for an installed XenoNet, whose service outlives it.
   if (dev && how === "started") ownService = serviceClient.info.pid;
   serviceClient.on("notification", notify);
-  serviceClient.on("connected", (info) => { windowKey = info.windowKey; if (win && !win.isDestroyed()) win.webContents.reload(); });
-  serviceClient.on("disconnect", () => { windowKey = null; control?.log("service", "warning", "XenoNet Service disconnected."); });
+  serviceClient.on("connected", async (info) => { windowKey = info.windowKey; await setWindowCookie(windowKey); if (win && !win.isDestroyed()) win.webContents.reload(); });
+  serviceClient.on("disconnect", () => { windowKey = null; setWindowCookie(null); control?.log("service", "warning", "XenoNet Service disconnected."); });
   // Only the window's own API requests carry this through Desktop, which
   // the service takes for the window's (electron/desktop-server.js).
   const secret = crypto.randomBytes(32).toString("hex");
@@ -341,6 +353,7 @@ async function startServer() {
   frontendServer = await desktopServer({ root, port: pagePort, service: SERVICE_BASE, secret, dev: dev ? { hot: !instance?.frozen } : null });
   BASE = frontendServer.base;
   pageHeaders(session.defaultSession, { base: BASE, secret });
+  await setWindowCookie(windowKey);
   const dir = runtimeDir(env);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "desktop.json"), JSON.stringify({ command: process.execPath, args: fromSource ? [root, "--prod"] : [], cwd: root }));
@@ -963,7 +976,9 @@ if (iconsArg >= 0) {
     if (SHOW !== "hidden") {
       const tray = createTray({
         // The service itself: Desktop's frontend takes only the page's.
+        // This process is the window's, so it shows the window key.
         baseUrl: SERVICE_BASE,
+        windowKey: () => windowKey,
         showWindow,
         sendCommand: (cmd) => win?.webContents.send("app:command", cmd),
         select: (id) => win?.webContents.send("app:select", id),

@@ -43,7 +43,7 @@ test("a hook goes to the running XenoNet by itself, and XenoNet's answer is what
     let body = "";
     req.on("data", (d) => (body += d));
     req.on("end", () => {
-      heard.push({ url: req.url, body });
+      heard.push({ url: req.url, body, credential: req.headers["x-xenonet-credential"] ?? null });
       res.writeHead(200, { "content-type": "application/json" });
       res.end('{"systemMessage":"from XenoNet"}');
     });
@@ -51,9 +51,12 @@ test("a hook goes to the running XenoNet by itself, and XenoNet's answer is what
   await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
   try {
     const { port } = server.address();
-    const out = await run(r.entry, ["hook", "codex"], { input: '{"hook_event_name":"Stop"}', env: { XENONET_PORT: String(port) } });
+    // The API's credential the XenoNet on that port wrote in the runtime
+    // folder goes with it.
+    fs.writeFileSync(path.join(r.dir, `api-${port}.cred`), "0a1b2c\n");
+    const out = await run(r.entry, ["hook", "codex"], { input: '{"hook_event_name":"Stop"}', env: { XENONET_PORT: String(port), XENONET_RUNTIME_DIR: "" } });
     assert.deepEqual([out.code, out.stdout, out.stderr], [0, '{"systemMessage":"from XenoNet"}', ""]);
-    assert.deepEqual(heard, [{ url: "/api/hook/codex", body: '{"hook_event_name":"Stop"}' }]);
+    assert.deepEqual(heard, [{ url: "/api/hook/codex", body: '{"hook_event_name":"Stop"}', credential: "0a1b2c" }]);
     const claude = await run(r.entry, ["hook", "claude", "--port", String(port)], { input: "" });
     assert.equal(claude.code, 0);
     assert.equal(heard.at(-1).url, "/api/hook/claude");

@@ -87,7 +87,9 @@ enum Event {
 fn follow_events(port: u16, route: &str, to: mpsc::UnboundedSender<Event>) -> Result<(), String> {
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("connect {} 127.0.0.1:{port}", xenonet_os::fs::code_of(&e).unwrap_or("ECONNREFUSED")))?;
     let _ = s.set_nodelay(true);
-    write!(s, "GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+    // The API's credential, as the shared client sends it.
+    let cred = xenonet_api::http::credential(port).map(|c| format!("{}: {c}\r\n", xenonet_api::http::CREDENTIAL_HEADER)).unwrap_or_default();
+    write!(s, "GET {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\n{cred}Connection: close\r\n\r\n").map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
     let mut line = String::new();
     r.read_line(&mut line).map_err(|e| e.to_string())?;

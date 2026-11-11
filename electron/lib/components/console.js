@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { connectService, runtimeDir } from "./runtime.js";
+import { apiCredential, connectService, runtimeDir } from "./runtime.js";
 import { CONSOLE_API, negotiate } from "./protocol.js";
 
 // An MCP process survives a Desktop restart. Each action finds the service
@@ -76,6 +76,8 @@ export function installedConsole({ env = process.env } = {}) {
     logs: (opts) => call({ op: "logs", ...opts }),
     record: (opts) => call({ op: "record", ...opts }),
     eval: onlyDev, simulate: onlyDev,
-    api: async (route) => (await fetch(`http://127.0.0.1:${env.XENONET_PORT || 47840}${route}`)).json(),
+    // With the API's credential the service wrote, as any program here.
+    api: async (route) => (await fetch(`http://127.0.0.1:${env.XENONET_PORT || 47840}${route}`, { headers: { "x-xenonet-credential": apiCredential(env) ?? "" } })).json(),
+    fetch: (route, init = {}) => fetch(`http://127.0.0.1:${env.XENONET_PORT || 47840}${route}`, { ...init, headers: { "x-xenonet-credential": apiCredential(env) ?? "", ...init.headers } }),
   };
 }

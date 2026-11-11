@@ -1,4 +1,4 @@
-// xenonet-launcher 3 (protocol 1)
+// xenonet-launcher 4 (protocol 1)
 //
 // XenoNet's earlier command launcher, at <state>/runtime/launcher/cli/xenonet.js
 // beside a node of its own. Entries an earlier XenoNet wrote into Claude
@@ -24,7 +24,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const LAUNCHER = 3;
+const LAUNCHER = 4;
 const BIN = process.platform === "win32" ? "xenonet.exe" : "xenonet";
 const PROTOCOL = 1;
 const dir = path.resolve(__dirname, "../..");
@@ -43,8 +43,10 @@ function tools() {
   }
 }
 
-// A hook: the event on stdin goes to XenoNet's /api/hook/<app>, and what
-// XenoNet answers goes to stdout, the hook output format both apps read.
+// A hook: the event on stdin goes to XenoNet's /api/hook/<app>, with the
+// API's credential the XenoNet on that port wrote beside this launcher
+// (<runtime>/api-<port>.cred), and what XenoNet answers goes to stdout, the
+// hook output format both apps read.
 async function hook(app) {
   app = app === "claude" ? "claude" : "codex";
   const flag = args.indexOf("--port");
@@ -54,7 +56,12 @@ async function hook(app) {
   try {
     process.stdin.setEncoding("utf8");
     for await (const chunk of process.stdin) input += chunk;
-    const res = await fetch(`http://127.0.0.1:${port}/api/hook/${app}`, { method: "POST", headers: { "content-type": "application/json" }, body: input || "{}", signal: AbortSignal.timeout(4000) });
+    const headers = { "content-type": "application/json" };
+    try {
+      const cred = fs.readFileSync(path.join(process.env.XENONET_RUNTIME_DIR || dir, `api-${port}.cred`), "utf8").trim();
+      if (/^[a-f0-9]+$/.test(cred)) headers["x-xenonet-credential"] = cred;
+    } catch {}
+    const res = await fetch(`http://127.0.0.1:${port}/api/hook/${app}`, { method: "POST", headers, body: input || "{}", signal: AbortSignal.timeout(4000) });
     if (res.status === 200) out = await res.text();
   } catch {}
   process.stdout.write(out, () => process.exit(0));

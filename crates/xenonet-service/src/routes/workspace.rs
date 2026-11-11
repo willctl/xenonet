@@ -1,12 +1,12 @@
 //! The projects folder XenoNet reads (server/routes/workspace.js): GET,
 //! POST and DELETE /api/workspace/root, and POST /api/workspace/check.
 //! Changing the folder is yours, as connecting agents is; looking and
-//! checking are anyone's.
+//! checking are any local surface's (rules.rs).
 
-use crate::cores::{ok, CoreError};
+use crate::cores::CoreError;
 use crate::ctx::{pending_reply, Ctx};
 use crate::http::{Reply, Req};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub async fn route(ctx: &Ctx, req: &mut Req) -> Reply {
     match inner(ctx, req).await {
@@ -21,12 +21,6 @@ async fn inner(ctx: &Ctx, req: &mut Req) -> Result<Reply, CoreError> {
     if req.path == "/api/workspace/root" {
         if req.method == "GET" {
             return Ok(Reply::json(200, state.root_info()?));
-        }
-        if req.method == "DELETE" || req.method == "POST" {
-            let you = ctx.cores.verify.person(req.peer).await;
-            if !ok(&you) {
-                return Ok(Reply::send(403, &json!({ "error": you.get("reason").cloned().unwrap_or(Value::Null), "code": "yours" }), &[]));
-            }
         }
         if req.method == "DELETE" {
             return Ok(Reply::json(200, state.set_root(Value::Null).await?));

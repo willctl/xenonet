@@ -1,10 +1,10 @@
 //! Integrations (server/routes/integrations.js): yours to read, the owner's
-//! (the window's, with its process) to change. Each route goes to the
+//! (the window's, with its process) to change, as rules.rs has it. Each route goes to the
 //! integration that answers it; their own errors keep their status and
 //! code, a body that's too big or isn't JSON is a bad request, and anything
 //! else is the integration failing.
 
-use crate::cores::{ok, reason, Kind};
+use crate::cores::Kind;
 use crate::ctx::{pending_reply, Ctx};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
@@ -38,28 +38,9 @@ fn field(v: &Value, k: &str) -> Value {
     v.get(k).cloned().unwrap_or(Value::Null)
 }
 
-async fn owner(ctx: &Ctx, req: &Req) -> Option<Reply> {
-    if !ctx.window_key.matches(req.header("x-xenonet-window")) {
-        return Some(Reply::coded(403, "yours", "Use XenoNet's own window to send decisions or launch jobs."));
-    }
-    let seen = ctx.cores.verify.window(req.peer).await;
-    (!ok(&seen)).then(|| Reply::coded(403, "yours", reason(&seen)))
-}
-
 pub async fn route(ctx: &Ctx, req: &mut Req) -> Option<Reply> {
     if req.path != "/api/integrations" && !req.path.starts_with("/api/integrations/") {
         return None;
-    }
-    if req.header("authorization").is_some() {
-        return Some(Reply::coded(403, "yours", "Integration data belongs to the owner."));
-    }
-    if let Some(r) = ctx.yours(req).await {
-        return Some(r);
-    }
-    if req.method != "GET" {
-        if let Some(r) = owner(ctx, req).await {
-            return Some(r);
-        }
     }
     let route = req.path["/api/integrations".len()..].to_string();
     let Some((_, _, name, limit, args)) = ROUTES.iter().find(|(m, r, ..)| *m == req.method && *r == route) else {

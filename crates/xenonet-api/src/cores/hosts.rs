@@ -45,12 +45,18 @@ pub trait SelfApi: Send + Sync {
 }
 
 /// The API over HTTP on 127.0.0.1, as `xenonet relay` reads it. It sends
-/// no window key and no token: whatever it reads, any program here could.
+/// no window key and no token. It carries the API's credential, as any
+/// program here does, and with `own`, the service's own key: the hub reads
+/// for another machine of the network only what the network decided that
+/// machine may read, so its read of this service is the service's own.
 pub struct HttpApi {
     pub port: u16,
     /// A read's longest wait, and its biggest answer.
     pub timeout: Duration,
     pub max_bytes: usize,
+    /// The service's own key (x-xenonet-self), when the service reads
+    /// itself.
+    pub own: Option<String>,
 }
 
 impl HttpApi {
@@ -62,7 +68,10 @@ impl HttpApi {
 impl SelfApi for HttpApi {
     async fn get(&self, path: &str) -> Result<(u16, Value), (String, u16)> {
         let (port, route, timeout, max) = (self.port, path.to_string(), self.timeout, self.max_bytes);
-        let headers: Vec<(String, String)> = Self::HEADERS.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+        let mut headers: Vec<(String, String)> = Self::HEADERS.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+        if let Some(own) = &self.own {
+            headers.push(("x-xenonet-self".into(), own.clone()));
+        }
         let r = tokio::task::spawn_blocking(move || crate::http::request(port, "GET", &route, &headers, None, Some(timeout))).await.map_err(|e| (e.to_string(), 502))?;
         let a = r.map_err(|e| match e.kind() {
             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => (format!("no answer in {} s", timeout.as_secs()), 504),
@@ -168,8 +177,8 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
 
-    // The relay's reads of this machine's own API carry no key and no
-    // token: whatever another host asks for, any program here could read.
+    // The relay's reads of this machine's own API carry no window key and
+    // no token, and the service's own key only when it's given one.
     #[tokio::test]
     async fn the_relays_own_reads_carry_no_key() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -182,10 +191,13 @@ mod tests {
             write!(s, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
             String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase()
         });
-        let api = HttpApi { port, timeout: Duration::from_secs(5), max_bytes: 1 << 20 };
+        let api = HttpApi { port, timeout: Duration::from_secs(5), max_bytes: 1 << 20, own: None };
         assert_eq!(api.get("/api/graph?hosts=0").await.unwrap(), (200, serde_json::json!({ "nodes": [] })));
         let request = seen.join().unwrap();
         assert!(request.starts_with("get /api/graph?hosts=0 http/1.1"), "{request}");
-        assert!(!request.contains("x-xenonet-window") && !request.contains("authorization") && !request.contains("x-xenonet-agent"), "{request}");
+        assert!(
+            !request.contains("x-xenonet-window") && !request.contains("authorization") && !request.contains("x-xenonet-agent") && !request.contains("x-xenonet-self"),
+            "{request}"
+        );
     }
 }

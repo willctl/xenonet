@@ -53,7 +53,7 @@ const fromWindow = (code) =>
 // An actor's own call, from this test's process: XenoNet knows the token or
 // says why not before it looks at the process.
 const asActor = async (token, route = "/api/actors/me") => {
-  const r = await fetch(`${s.base}${route}`, { headers: { authorization: `Bearer ${token}` } });
+  const r = await s.fetch(route, { headers: { authorization: `Bearer ${token}` } });
   return { status: r.status, body: await r.json() };
 };
 const listed = async (id) => (await s.api("/api/actors")).actors.some((a) => a.id === id);
@@ -77,7 +77,7 @@ test("a made-up registration waits for the window, which allows one and denies a
   const heron = await s.simulate("actor-request");
   const osprey = await s.simulate("actor-request", { a: "Osprey" });
   assert.deepEqual([heron.ok, heron.a, osprey.a], [true, "actor:heron", "actor:osprey"]);
-  const outside = await fetch(`${s.base}/api/actors/requests`);
+  const outside = await s.fetch(`/api/actors/requests`);
   assert.equal(outside.status, 403, "a program without the key can't see them");
   assert.equal((await outside.json()).code, "yours");
 
@@ -108,7 +108,7 @@ test("an actor added from the window gets its token once; a new token stops the 
   const added = await fromWindow(`return await call("POST", "/api/actors", { name: "Kite", capabilities: ["run-commands"] });`);
   assert.deepEqual([added.status, added.body.state, added.body.id], [201, "allowed", "actor:kite"]);
   assert.match(added.body.token, /^xenonet_actor_[A-Za-z0-9_-]{64,}$/);
-  const outside = await fetch(`${s.base}/api/actors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Kite 2" }) });
+  const outside = await s.fetch(`/api/actors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Kite 2" }) });
   assert.equal(outside.status, 403, "only the window adds actors");
 
   const fresh = await fromWindow(`return await call("POST", "/api/actors/kite/token");`);
@@ -164,7 +164,7 @@ test("the actor gateway: set up in the window with a tunnel of your own, its add
   const on = await fromWindow(`return await call("GET", "/api/actors/gateway");`);
   assert.deepEqual([on.body.on, on.body.listening, on.body.tunnel.kind, on.body.reach.state, on.body.reach.local], [true, true, "own", "ok", true]);
   // Not from a program on this machine without the window's key.
-  assert.equal((await fetch(`${s.base}/api/actors/moth/gateway`, { method: "POST" })).status, 403);
+  assert.equal((await s.fetch(`/api/actors/moth/gateway`, { method: "POST" })).status, 403);
   // Connect… on an actor of your own (the demo's made-up ones have none):
   // a token, shown once, and what to tell its app.
   const lark = await fromWindow(`return await call("POST", "/api/actors", { schema: "actor/registration/v1", name: "Lark", capabilities: ["message-agents"], heartbeatMs: 60000 });`);
@@ -216,16 +216,16 @@ test("a session asks for an actor's gateway token: it is told none exists, the c
   };
   const TOKEN = /xenonet_(gateway|actor)_[A-Za-z0-9_-]{64,}/;
   // A program on this machine asks, as a session or the xenonet command does.
-  const asked = await fetch(`${s.base}/api/actors/moth/gateway/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const asked = await s.fetch(`/api/actors/moth/gateway/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const answer = await asked.text();
   assert.equal(asked.status, 202, answer);
   assert.doesNotMatch(answer, TOKEN, "what the asker gets holds no token");
   const ask = JSON.parse(answer);
   assert.deepEqual([ask.id, ask.state], ["actor:moth", "waiting"]);
   // It can't answer its own ask, nor see the card.
-  const own = await fetch(`${s.base}/api/actors/requests/${ask.request}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "allow" }) });
+  const own = await s.fetch(`/api/actors/requests/${ask.request}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "allow" }) });
   assert.equal(own.status, 403, "only the window allows");
-  assert.equal((await fetch(`${s.base}/api/actors/requests`)).status, 403);
+  assert.equal((await s.fetch(`/api/actors/requests`)).status, 403);
 
   // The window shows the card; what the driver says of it holds no token.
   const card = await until(async () => (await s.driver("actorRequests")).gatewayAsks.find((g) => g.actor === "actor:moth" && g.card && g.armed), 15000);

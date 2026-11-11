@@ -147,7 +147,7 @@ impl Host {
         if let Some(b) = body {
             req.body = xenonet_service::http::Body::Bytes(b.to_vec());
         }
-        let r = api(&self.ctx, req).await.unwrap();
+        let r = api(&self.ctx, common::local(&self.ctx, req)).await.unwrap();
         let bytes = match r.body {
             xenonet_service::http::ReplyBody::Full(b) => b.to_vec(),
             xenonet_service::http::ReplyBody::Stream(_) => Vec::new(),
@@ -160,7 +160,7 @@ impl Host {
         let key = self.ctx.window_key.reveal().to_string();
         let text = body.to_string();
         let req = Req::fake(method, path, &[("x-xenonet-window", key.as_str())], if method == "GET" { None } else { Some(text.as_str()) });
-        let r = api(&self.ctx, req).await.unwrap();
+        let r = api(&self.ctx, common::local(&self.ctx, req)).await.unwrap();
         (r.status, r.body_json())
     }
 

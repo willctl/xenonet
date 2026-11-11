@@ -84,7 +84,7 @@ after(async () => {
 });
 
 test("a dot paired in the window reads the demo's sessions through xenonet mcp assistant, and nothing once revoked", { timeout: limit(120000) }, shoot("assistant", async () => {
-  const outside = await fetch(`${s.base}/api/assistant/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ product: "dots" }) });
+  const outside = await s.fetch(`/api/assistant/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ product: "dots" }) });
   assert.equal(outside.status, 403, "only the window pairs");
 
   const places = await fromWindow(`return (await call("GET", "/api/assistant/places")).body.places;`);
@@ -137,7 +137,7 @@ test("a tunnel for a dot is set up in the window: its tunnel, a key kept and nev
   // A made-up key, for this test instance's memory only.
   const KEY = "sk-e2e-MADEUP0123456789abcdefghij";
   const TUNNEL = "tunnel_00112233445566778899aabbccddeeff";
-  const outside = await fetch(`${s.base}/api/assistant/${grant}/tunnel/key`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: KEY }) });
+  const outside = await s.fetch(`/api/assistant/${grant}/tunnel/key`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: KEY }) });
   assert.equal(outside.status, 403, "only the window keeps a key");
 
   await s.driver("command", "actors");

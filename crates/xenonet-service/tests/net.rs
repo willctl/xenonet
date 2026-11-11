@@ -173,7 +173,7 @@ impl Host {
         let headers: Vec<(&str, &str)> = if window { vec![("x-xenonet-window", key.as_str())] } else { vec![] };
         let text = body.to_string();
         let req = Req::fake(method, path, &headers, if method == "GET" { None } else { Some(text.as_str()) });
-        let r = api(&self.ctx, req).await.unwrap();
+        let r = api(&self.ctx, common::local(&self.ctx, req)).await.unwrap();
         (r.status, r.body_json())
     }
 
@@ -759,12 +759,12 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     cores.verify = Arc::new(You { person: json!({ "ok": false, "reason": "it came from under a Claude Code process" }) });
     let ctx = Arc::new(Ctx::new(Config::from(&[], &|_| None), "0".into(), cores, Log::new(None, "service", None, None, "/", 1 << 20)));
     let _ = ctx.net.set(b.svc.clone());
-    let r = api(&ctx, Req::fake("POST", "/api/net/create", &[], Some("{}"))).await.unwrap();
+    let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/net/create", &[], Some("{}")))).await.unwrap();
     assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("yours")));
-    let r = api(&ctx, Req::fake("GET", "/api/net/state", &[], None)).await.unwrap();
+    let r = api(&ctx, common::local(&ctx, Req::fake("GET", "/api/net/state", &[], None))).await.unwrap();
     assert_eq!(r.status, 403);
     // A ticket from a terminal is macOS's alone, and the person's there.
-    let r = api(&ctx, Req::fake("POST", "/api/net/ticket", &[], Some("{\"host\":\"x1\"}"))).await.unwrap();
+    let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/net/ticket", &[], Some("{\"host\":\"x1\"}")))).await.unwrap();
     assert_eq!(r.status, 403);
 }
 

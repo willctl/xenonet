@@ -31,6 +31,11 @@ async fn send(port: u16, method: &str, path: &str, headers: &[(String, String)],
     for (k, v) in headers {
         let _ = write!(head, "{k}: {v}\r\n");
     }
+    // The API's credential the XenoNet on that port wrote, as the shared
+    // client sends it (xenonet_api::http).
+    if let Some(c) = path.starts_with("/api/").then(|| xenonet_api::http::credential(port)).flatten() {
+        let _ = write!(head, "{}: {c}\r\n", xenonet_api::http::CREDENTIAL_HEADER);
+    }
     if let Some(b) = body {
         let _ = write!(head, "Content-Length: {}\r\n", b.len());
     }

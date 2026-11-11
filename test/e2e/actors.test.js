@@ -98,7 +98,7 @@ const onPage = (text) => s.eval(`return document.documentElement.outerHTML.inclu
 const panelClosed = async () => !(await s.driver("state")).overlays.modal;
 // An actor's token tried from this test's process.
 async function asActor(token) {
-  const r = await fetch(`${s.base}/api/actors/me`, { headers: { authorization: `Bearer ${token}` } });
+  const r = await s.fetch(`/api/actors/me`, { headers: { authorization: `Bearer ${token}` } });
   return { status: r.status, body: await r.json() };
 }
 
@@ -462,11 +462,13 @@ test("you write to an actor from its inspector: it reads it in its inbox as your
   assert.ok(await until(() => s.eval(`return !!document.querySelector("[data-msg-text]")`)), "the box to write in");
   assert.equal(await s.eval(`return document.querySelector("[data-msg-text]").hasAttribute("data-yours") && document.querySelector("[data-msg-send]").hasAttribute("data-yours")`), true, "yours alone to write and send");
   await s.eval(`return (() => { document.querySelector("[data-msg-text]").value = "Hold the geofence job until morning."; document.querySelector("[data-msg-send]").click(); })()`);
-  const sent = await until(async () => (await s.api("/api/engine/state")).messages.find((m) => m.from === "actor:you" && m.text === "Hold the geofence job until morning."), 6000);
+  // The engine's state is a read that matters: the window's, here.
+  const state = () => s.eval(`return fetch("/api/engine/state").then((r) => r.json())`);
+  const sent = await until(async () => (await state()).messages.find((m) => m.from === "actor:you" && m.text === "Hold the geofence job until morning."), 6000);
   assert.ok(sent, "sent as yours");
   assert.deepEqual(sent.to.map((t) => t.id), ["actor:moth"]);
   // Not from outside the window, and not to an agent's session.
-  const outside = await fetch(`${s.base}/api/actors/you/message`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: "actor:moth", text: "x" }) });
+  const outside = await s.fetch(`/api/actors/you/message`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: "actor:moth", text: "x" }) });
   assert.equal(outside.status, 403);
   await s.driver("select", null);
   assert.deepEqual(await s.driver("errors"), []);
@@ -589,7 +591,7 @@ test("an actor added in the panel shows its token once; New token replaces it, a
   assert.equal(all.canSee, true, "this window holds the key");
   assert.deepEqual([(await tokenOf("actor:moth"))?.state, (await tokenOf("actor:moth"))?.row], ["none", "no token"], "the demo's made-up actor that reports itself has none");
   assert.ok(!all.tokens.some((t) => t.actor === "actor:wren"), "an actor XenoNet only observes has no token");
-  assert.equal((await fetch(`${s.base}/api/actors/tokens`)).status, 403, "a program without the key can't see them");
+  assert.equal((await s.fetch(`/api/actors/tokens`)).status, 403, "a program without the key can't see them");
 
   // New token, asked first: a new one, once, and the old one stops.
   await clickOn('[data-ac-token="actor:kite"]');

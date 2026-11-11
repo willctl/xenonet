@@ -27,7 +27,7 @@ const port = await new Promise((resolve) => {
 });
 const s = xenonet("test", { port });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const api = (route) => fetch(`http://127.0.0.1:${port}${route}`).then((r) => r.json());
+const api = (route) => s.fetch(route).then((r) => r.json());
 
 // Runs a test body, and on failure saves what the window looked like.
 const shoot = (name, body) => async () => {

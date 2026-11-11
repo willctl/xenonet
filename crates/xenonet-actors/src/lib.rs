@@ -14,7 +14,6 @@ pub mod connections;
 pub mod demo;
 pub mod detail;
 pub mod handoff;
-pub mod key;
 pub mod limits;
 pub mod names;
 pub mod registration;

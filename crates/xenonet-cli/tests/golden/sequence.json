@@ -836,6 +836,31 @@
     "--json"
    ],
    "golden": null
+  },
+  {
+   "get": "/api/graph",
+   "credential": false,
+   "golden": "http/no-credential_graph.json"
+  },
+  {
+   "get": "/api/engine/state",
+   "credential": false,
+   "golden": "http/no-credential_engine_state.json"
+  },
+  {
+   "get": "/api/session/claude%3A0190d3e0-0000-7000-8000-000000000001/transcript",
+   "credential": false,
+   "golden": "http/no-credential_session_claude-0190d3e0-0000-7000-8000-000000000001_transcript.json"
+  },
+  {
+   "get": "/api/actors",
+   "credential": false,
+   "golden": "http/no-credential_actors.json"
+  },
+  {
+   "get": "/api/theme",
+   "credential": false,
+   "golden": "http/no-credential_theme.json"
   }
  ]
 }

@@ -1,7 +1,9 @@
-//! The API, in the order server/index.js's api() dispatches it: the version
-//! check, the window's message to an actor, then each route module and
-//! index.js's own routes. The order matters: it's part of the contract,
-//! since a route that answers first is the one that answers.
+//! The API, in the order server/index.js's api() dispatches it: first the
+//! request's row in the rules table (rules.rs), which says who may call
+//! each route, then the version check, the window's message to an actor,
+//! each route module and index.js's own routes. The order matters: it's
+//! part of the contract, since a route that answers first is the one that
+//! answers.
 
 pub mod actors;
 pub mod assistant;
@@ -15,6 +17,7 @@ pub mod mcp;
 pub mod net;
 pub mod net_sim;
 pub mod refusals;
+pub mod rules;
 pub mod runs;
 pub mod svc;
 pub mod themes;
@@ -59,6 +62,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     let req = &mut req;
     let method = req.method.clone();
     let m = method.as_str();
+    if let Err(refused) = rules::admit(ctx, req).await {
+        return Ok(refused);
+    }
     // Other hosts' services, for any program here (routes/svc.rs): what
     // they're sent and answer is theirs, so XenoNet's own API version
     // doesn't apply.
@@ -88,15 +94,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
 
     // You, writing from XenoNet's own window to an actor that reads its
     // inbox, or to a session, here or on another machine of your network
-    // (`@<host>:<id>`): only with the window's key, never with a token.
+    // (`@<host>:<id>`): the window's alone (rules.rs).
     if m == "POST" && route == "/api/actors/you/message" {
-        if !ctx.window_only(req) {
-            return Ok(Reply::coded(403, "yours", "this is for XenoNet's own window"));
-        }
-        let w = cores.verify.window(req.peer).await;
-        if !ok(&w) {
-            return Ok(Reply::send(403, &json!({ "error": w.get("reason").cloned().unwrap_or(Value::Null), "code": "yours" }), &[]));
-        }
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
         // Another host's session or actor, by its qualified id.
@@ -127,8 +126,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(r.route(req).await);
     }
     if route == "/api/delivery" || route.starts_with("/api/delivery/") {
-        let window = net::at_window(ctx, req).await;
-        let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), verify: cores.verify.clone(), window };
+        let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone() };
         return Ok(r.route(req).await);
     }
     // A2A's switch and the agents that called, for the Actors panel: the
@@ -157,8 +155,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
             return a;
         }
     }
-    let window = ctx.window_only(req);
-    if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), verify: cores.verify.clone(), home: &ctx.config.home, window }).route(req).await {
+    if let Some(r) = (hosts::HostRoutes { hosts: cores.hosts.clone(), hub: cores.hub.clone(), home: &ctx.config.home }).route(req).await {
         return Ok(r);
     }
 
@@ -263,9 +260,6 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(Reply::json(200, current_theme(ctx)?));
     }
     if route == "/api/theme" && m == "POST" {
-        if let Some(r) = ctx.yours(req).await {
-            return Ok(r);
-        }
         let id = req.json_body().await?.get("id").cloned().unwrap_or(Value::Null);
         let read = cores.themes.read(&ctx.themes_dir)?;
         let Some(id) = id.as_str().filter(|i| read["themes"].get(*i).is_some()).map(str::to_string) else {
@@ -343,18 +337,12 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
                 return Ok(Some(Reply::json(200, decider.status().await?)));
             }
             if route == "/api/decide/key" && m == "POST" {
-                if !ctx.window_only(req) {
-                    return Ok(Some(Reply::coded(403, "yours", "this is for XenoNet's own window")));
-                }
                 let key = req.json(2048).await?.get("key").cloned().unwrap_or(Value::Null);
                 let stored = decider.store_key(&key).await?;
                 cores.openrouter.forget();
                 return Ok(Some(Reply::json(200, stored)));
             }
             if route == "/api/decide/key" && m == "DELETE" {
-                if let Some(r) = ctx.yours(req).await {
-                    return Ok(Some(r));
-                }
                 cores.openrouter.forget();
                 return Ok(Some(Reply::json(200, decider.forget_key().await?)));
             }
@@ -388,9 +376,6 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/diagnose/ask" && m == "POST" {
         if ctx.config.demo {
             return Ok(Reply::coded(409, "demo", "this is the demo: ask about the XenoNet with your own sessions"));
-        }
-        if let Some(r) = ctx.yours(req).await {
-            return Ok(r);
         }
         let body = req.json(4096).await?;
         // Codex, unless you ask for Claude Code; another app is refused.
@@ -654,9 +639,6 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // A session's new name, saved in its own app: it changes another app's
     // files, so it's yours to do.
     if m == "POST" && route == "/api/session/rename" {
-        if let Some(r) = ctx.yours(req).await {
-            return Ok(r);
-        }
         let body = req.json_body().await?;
         return Ok(match cores.state.rename_session(body.get("nodeId").cloned().unwrap_or(Value::Null), body.get("title").cloned().unwrap_or(Value::Null)).await {
             Ok(v) => Reply::json(200, v),
@@ -1008,20 +990,12 @@ async fn projects(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> 
     match (m.as_str(), route.as_str()) {
         ("GET", "/api/projects") => Ok(Some(Reply::json(200, state.project_detection().await?))),
         ("POST", "/api/projects/rule") => {
-            if let Some(r) = ctx.yours(req).await {
-                return Ok(Some(r));
-            }
             let body = req.json_body().await?;
             let as_ = body.get("as").filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null);
             Ok(Some(Reply::json(200, state.set_project_rule(body.get("path").cloned().unwrap_or(Value::Null), as_).await?)))
         }
         // The rules for the folder in use; with ?all=1, every folder's.
-        ("DELETE", "/api/projects/rules") => {
-            if let Some(r) = ctx.yours(req).await {
-                return Ok(Some(r));
-            }
-            Ok(Some(Reply::json(200, state.clear_project_rules(req.param("all") == Some("1")).await?)))
-        }
+        ("DELETE", "/api/projects/rules") => Ok(Some(Reply::json(200, state.clear_project_rules(req.param("all") == Some("1")).await?))),
         ("POST", "/api/projects/rescan") => Ok(Some(Reply::json(200, state.rescan_projects().await?))),
         // The Codex pass: GET shows exactly what would be sent, POST sends
         // that (it must name the same fingerprint), DELETE forgets the picks.
@@ -1033,9 +1007,6 @@ async fn projects(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> 
             Ok(Some(Reply::json(200, out)))
         }
         ("POST", "/api/projects/codex") => {
-            if let Some(r) = ctx.yours(req).await {
-                return Ok(Some(r));
-            }
             let body = req.json_body().await?;
             let fingerprint = body.get("fingerprint").cloned().unwrap_or(Value::Null);
             if !truthy(Some(&fingerprint)) {
@@ -1043,12 +1014,7 @@ async fn projects(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError> 
             }
             Ok(Some(Reply::json(200, state.ask_codex_about_projects(fingerprint, body.get("via").and_then(Value::as_str) == Some("decider")).await?)))
         }
-        ("DELETE", "/api/projects/codex") => {
-            if let Some(r) = ctx.yours(req).await {
-                return Ok(Some(r));
-            }
-            Ok(Some(Reply::json(200, state.forget_codex_picks().await?)))
-        }
+        ("DELETE", "/api/projects/codex") => Ok(Some(Reply::json(200, state.forget_codex_picks().await?))),
         _ => Ok(None),
     }
 }
@@ -1059,11 +1025,6 @@ async fn identities(ctx: &Ctx, req: &mut Req) -> Result<Option<Reply>, CoreError
     let m = req.method.clone();
     if m == "GET" && route == "/api/identities" {
         return Ok(Some(Reply::json(200, state.identity_detection()?)));
-    }
-    if m == "POST" && ["/api/identities/name", "/api/identities/hidden", "/api/identities/pin"].contains(&route.as_str()) {
-        if let Some(r) = ctx.yours(req).await {
-            return Ok(Some(r));
-        }
     }
     let get = |b: &Value, k: &str| b.get(k).cloned().unwrap_or(Value::Null);
     match (m.as_str(), route.as_str()) {
@@ -1111,15 +1072,9 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
             }));
         }
         if m == "POST" && route == "/api/spotify/disconnect" {
-            if let Some(r) = ctx.yours(req).await {
-                return Ok(Some(r));
-            }
             return Ok(Some(Reply::json(200, s.disconnect().await?)));
         }
         if m == "POST" {
-            if !ctx.window_only(req) {
-                return Ok(Some(Reply::coded(403, "yours", "this is for XenoNet's own window")));
-            }
             let body = req.json(2048).await.ok().filter(|b| !b.is_null()).unwrap_or_else(|| json!({}));
             match route.as_str() {
                 "/api/spotify/app" => return Ok(Some(Reply::json(200, s.set_app(body.get("clientId").unwrap_or(&Value::Null))?))),

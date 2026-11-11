@@ -25,7 +25,6 @@
 //!   a message while the session was open elsewhere, each with the session
 //!   it came from, which the console links them to.
 
-use crate::cores::ok;
 use crate::ctx::{fail, pending_reply, Answer, Ctx};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
@@ -87,27 +86,21 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
         let token = req.header("authorization").and_then(bearer_of).map(str::to_string);
         return Ok((json!({ "kind": "actor", "id": id, "title": name, "token": token }), false));
     }
+    // A session, as rules.rs checked it against its process.
     if let Some(me) = req.header("x-xenonet-agent").map(str::to_string) {
-        if !is_agent_id(&me) {
+        let Some((me, _)) = req.by.session.clone().filter(|(id, _)| *id == me && is_agent_id(id)) else {
             return Err(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
-        }
-        let verdict = cores.verify.check(req.peer, &me, false).await;
-        if !ok(&verdict) {
-            return Err(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));
-        }
+        };
         let title = cores.engine.view(&me).await.ok().flatten().and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_string));
         return Ok((json!({ "kind": "session", "id": me, "title": title }), false));
     }
-    if let Some(why) = ctx.from_you(req).await {
-        return Err(Reply::coded(403, "yours", why));
-    }
-    // As you, a start is signed by your device, which asks you: from the
-    // window alone. Never prompted for from a terminal or an agent.
-    let window = super::net::at_window(ctx, req).await;
-    if !window {
+    // It's yours (rules.rs). As you, a start is signed by your device,
+    // which asks you: from the window alone. Never prompted for from a
+    // terminal or an agent.
+    if !req.by.window {
         return Err(Reply::coded(403, "weak", AS_YOU));
     }
-    Ok((json!({ "kind": "you", "id": xenonet_model::ids::YOU, "title": "you" }), window))
+    Ok((json!({ "kind": "you", "id": xenonet_model::ids::YOU, "title": "you" }), true))
 }
 
 fn core_reply(r: Result<Value, crate::cores::CoreError>) -> Reply {
@@ -125,13 +118,10 @@ async fn permission(ctx: &Ctx, req: &mut Req) -> Reply {
     if req.header("authorization").is_some() {
         return Reply::coded(403, "not-a-run", "an actor's own prompts aren't asked here");
     }
-    let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(m)).map(str::to_string) else {
+    // The session, as rules.rs checked it against its process.
+    let Some((me, _)) = req.by.session.clone() else {
         return Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id>)");
     };
-    let verdict = ctx.cores.verify.check(req.peer, &me, false).await;
-    if !ok(&verdict) {
-        return Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]);
-    }
     let body = match req.json(BODY).await {
         Ok(b) => b,
         Err(e) => return Reply::error(e.status, e.message),
@@ -158,12 +148,11 @@ async fn answering_actor(ctx: &Ctx, req: &Req) -> Result<String, Reply> {
 /// The permission prompts waiting, for the window, or an actor that
 /// answers them.
 async fn asks(ctx: &Ctx, req: &Req) -> Reply {
+    // Else it's the window's (rules.rs).
     if req.header("authorization").is_some() {
         if let Err(r) = answering_actor(ctx, req).await {
             return r;
         }
-    } else if let Some(why) = ctx.from_window(req).await {
-        return Reply::coded(403, "yours", why);
     }
     core_reply(ctx.cores.engine.asks().await)
 }
@@ -173,13 +162,12 @@ async fn asks(ctx: &Ctx, req: &Req) -> Reply {
 /// Decided here for an ask here, or sent to the machine whose ask it is,
 /// which decides it (the engine does both).
 async fn answer(ctx: &Ctx, req: &mut Req) -> Reply {
+    // Else it's the window's (rules.rs).
     let token = if req.header("authorization").is_some() {
         match answering_actor(ctx, req).await {
             Ok(t) => Some(t),
             Err(r) => return r,
         }
-    } else if let Some(why) = ctx.from_window(req).await {
-        return Reply::coded(403, "yours", why);
     } else {
         None
     };
@@ -201,9 +189,6 @@ async fn answer(ctx: &Ctx, req: &mut Req) -> Reply {
 }
 
 async fn sign_in(ctx: &Ctx, req: &mut Req) -> Reply {
-    if let Some(why) = ctx.from_you(req).await {
-        return Reply::coded(403, "yours", why);
-    }
     let (action, token) = match req.method.as_str() {
         "GET" => ("status", String::new()),
         "DELETE" => ("forget", String::new()),

@@ -4,7 +4,10 @@
 //! to that XenoNet, so a page in development shows real sessions. Only reads
 //! go through: anything that would change something there is refused. The
 //! dev service's own routes (its health, the window's control and the
-//! page's error reports) stay here.
+//! page's error reports) stay here. This service's own credentials stay
+//! here too; a read carries the other XenoNet's API credential when its
+//! file is on this computer (a XenoNet here on another port), and a
+//! forwarded port from another computer answers 401 without it.
 
 use crate::http::{Reply, ReplyBody};
 use bytes::Bytes;
@@ -16,7 +19,7 @@ use tokio::sync::mpsc;
 
 // What the page's request says about itself, which the other XenoNet has no
 // use for and might take as a page of its own.
-const DROP: [&str; 7] = ["host", "origin", "referer", "cookie", "x-xenonet-window", "authorization", "connection"];
+const DROP: [&str; 9] = ["host", "origin", "referer", "cookie", "x-xenonet-window", "x-xenonet-credential", "x-xenonet-self", "authorization", "connection"];
 
 pub struct Upstream {
     /// The host to connect to, without brackets.
@@ -92,6 +95,9 @@ impl Upstream {
         let mut head = format!("{method} {target} HTTP/1.1\r\n");
         for (k, v) in headers.iter().filter(|(k, _)| !DROP.contains(&k.as_str())) {
             let _ = write!(head, "{k}: {v}\r\n");
+        }
+        if let Some(c) = xenonet_api::http::credential(self.port) {
+            let _ = write!(head, "{}: {c}\r\n", xenonet_api::http::CREDENTIAL_HEADER);
         }
         let _ = write!(head, "host: {}\r\nconnection: close\r\n\r\n", self.host);
         let mut stream = stream;

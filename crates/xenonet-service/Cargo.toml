@@ -52,6 +52,8 @@ xenonet-net.workspace = true
 # vault (compose/keys.rs).
 xenonet-keys.workspace = true
 xenonet-id.workspace = true
+# Every route's rule is decided through it (routes/rules.rs).
+xenonet-authz.workspace = true
 # Ids, and the engine's seam to the network; the tray's status and a
 # made-up machine's load are checked as their types in the tests.
 xenonet-model.workspace = true

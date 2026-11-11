@@ -357,7 +357,7 @@ impl Host {
     async fn call(&self, method: &str, path: &str, body: Value, headers: &[(&str, &str)]) -> (u16, Value) {
         let text = body.to_string();
         let req = Req::fake(method, path, headers, if method == "GET" { None } else { Some(text.as_str()) });
-        let r = api(&self.ctx, req).await.unwrap();
+        let r = api(&self.ctx, common::local(&self.ctx, req)).await.unwrap();
         (r.status, r.body_json())
     }
 
@@ -1239,7 +1239,7 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
         let ctx = c.ctx.clone();
         tokio::spawn(async move {
             let body = json!({ "tool_name": "Bash", "input": { "command": "ls" }, "tool_use_id": "toolu_1" }).to_string();
-            let r = api(&ctx, Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", copy)], Some(&body))).await.unwrap();
+            let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/runs/permission", &[("x-xenonet-agent", copy)], Some(&body)))).await.unwrap();
             (r.status, r.body_json())
         })
     };
@@ -1285,7 +1285,7 @@ async fn a_runs_permission_prompt_reaches_every_window_host_and_is_answered_from
                 &[("x-xenonet-agent", me.as_str())],
                 Some(&json!({ "tool_name": "Bash", "input": input, "tool_use_id": "toolu_1" }).to_string()),
             );
-            let r = api(&ctx, req).await.unwrap();
+            let r = api(&ctx, common::local(&ctx, req)).await.unwrap();
             (r.status, r.body_json())
         })
     };
@@ -1410,7 +1410,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
                 &[("x-xenonet-agent", run.as_str())],
                 Some(&json!({ "tool_name": tool, "input": input, "tool_use_id": "toolu_1" }).to_string()),
             );
-            let r = api(&ctx, req).await.unwrap();
+            let r = api(&ctx, common::local(&ctx, req)).await.unwrap();
             (r.status, r.body_json())
         })
     };

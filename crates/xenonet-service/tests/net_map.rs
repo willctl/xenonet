@@ -143,7 +143,9 @@ impl SelfApi for OwnApi {
     async fn get(&self, path: &str) -> Result<(u16, Value), (String, u16)> {
         self.read.lock().unwrap().push(path.to_string());
         let ctx = self.ctx.lock().unwrap().upgrade().ok_or(("gone".to_string(), 502))?;
-        let r = api(&ctx, Req::fake("GET", path, &[], None)).await.map_err(|e| (e.message, 502))?;
+        // The service reading itself, with its own key, as HttpApi does.
+        let own = ctx.self_key.reveal().to_string();
+        let r = api(&ctx, Req::fake("GET", path, &[("x-xenonet-self", own.as_str())], None)).await.map_err(|e| (e.message, 502))?;
         Ok((r.status, r.body_json()))
     }
 }
@@ -273,7 +275,7 @@ impl Host {
     async fn call(&self, method: &str, path: &str, body: Value, headers: &[(&str, &str)]) -> (u16, Value) {
         let text = body.to_string();
         let req = Req::fake(method, path, headers, if method == "GET" { None } else { Some(text.as_str()) });
-        let r = api(&self.ctx, req).await.unwrap();
+        let r = api(&self.ctx, common::local(&self.ctx, req)).await.unwrap();
         (r.status, r.body_json())
     }
 

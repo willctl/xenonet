@@ -264,10 +264,18 @@ async function freePort() {
   });
 }
 
+// The demo XenoNet's runtime folder, once it's made.
+let runtime = null;
+
 async function http(base, route, { method = "GET", body, ms = 5000 } = {}) {
+  // The API's credential the demo's XenoNet wrote, for its API.
+  let credential = null;
+  try {
+    credential = fs.readFileSync(path.join(runtime ?? "", `api-${new URL(base).port}.cred`), "utf8").trim();
+  } catch {}
   const r = await fetch(`${base}${route}`, {
     method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
+    headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...(credential && route.startsWith("/api/") ? { "x-xenonet-credential": credential } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(ms),
   });
@@ -337,7 +345,10 @@ export async function main(argv = process.argv.slice(2)) {
   const sock = tag; // tmux -L: a server of the demo's own
   const home = path.join(dir, "home");
   const xdg = Object.fromEntries(["config", "data", "state", "cache"].map((k) => [k, path.join(dir, "xdg", k)]));
-  const xn = { state: path.join(dir, "xenonet/state"), cache: path.join(dir, "xenonet/cache"), log: path.join(dir, "xenonet/server.log") };
+  const xn = { state: path.join(dir, "xenonet/state"), cache: path.join(dir, "xenonet/cache"), runtime: path.join(dir, "xenonet/runtime"), log: path.join(dir, "xenonet/server.log") };
+  // Where the demo's XenoNet writes its API credential, which the plugin,
+  // the tools, the command and this script read.
+  runtime = xn.runtime;
   for (const d of [home, ...Object.values(xdg), xn.state, xn.cache, path.join(home, ".claude"), path.join(home, ".codex"), path.join(home, "wiki")]) fs.mkdirSync(d, { recursive: true });
   const port = o.port ?? (await freePort());
   const xbase = `http://127.0.0.1:${port}`;
@@ -381,6 +392,7 @@ export async function main(argv = process.argv.slice(2)) {
       XENONET_NAME: "XenoNet (OpenCode demo)",
       XENONET_STATE_DIR: xn.state,
       XENONET_CACHE_DIR: xn.cache,
+      XENONET_RUNTIME_DIR: xn.runtime,
       XENONET_PROJECTS_DIR: path.join(dir, "projects"),
       XENONET_WIKI_DIR: path.join(home, "wiki"),
       XENONET_IDENTITIES: "off",
@@ -401,7 +413,7 @@ export async function main(argv = process.argv.slice(2)) {
     server.kill("SIGTERM");
     await Promise.race([new Promise((r) => server.once("exit", r)), sleep(5000)]);
   };
-  const xenonet = (...args) => spawnSync(bin(), [...args, "--port", String(port)], { env: cleanEnv({ NO_COLOR: "1" }), encoding: "utf8" });
+  const xenonet = (...args) => spawnSync(bin(), [...args, "--port", String(port)], { env: cleanEnv({ NO_COLOR: "1", XENONET_RUNTIME_DIR: xn.runtime }), encoding: "utf8" });
 
   try {
     say(`OpenCode ${ocVersion}, model ${o.model}, ${o.sessions} sessions, ${o.rounds} round${o.rounds > 1 ? "s" : ""}`);
@@ -438,6 +450,7 @@ export async function main(argv = process.argv.slice(2)) {
         OPENCODE_DISABLE_CLAUDE_CODE: "1",
         OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
         XENONET_PORT: String(port),
+        XENONET_RUNTIME_DIR: xn.runtime,
       };
       const cmd = `exec env -i ${Object.entries(env).map(([k, v]) => `${k}=${sh(v)}`).join(" ")} ${sh(opencode)} --hostname 127.0.0.1 --port ${p.port} ${sh(p.dir)}`;
       // The first starts the server, without your tmux config.

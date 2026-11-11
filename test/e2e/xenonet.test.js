@@ -349,9 +349,9 @@ test("the doctor lists what went wrong lately, copies diagnostics safe to share,
   assert.match(view ?? "", /never files an issue, opens a pull request or sends anything/);
   await s.eval(`return document.querySelector('[data-dr-app="claude"]').click()`);
   assert.equal(await s.eval(`return document.querySelector('[data-dr-app="claude"]').getAttribute("aria-pressed")`), "true");
-  // The demo's XenoNet isn't yours to ask about.
-  const refused = await fetch(`${s.base}/api/diagnose/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-  assert.equal(refused.status, 409);
+  // The demo's XenoNet isn't yours to ask about, even from the window.
+  const refused = await s.eval(`return fetch("/api/diagnose/ask", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => r.status)`);
+  assert.equal(refused, 409);
   await s.eval(`return document.querySelector("[data-dr-back]").click()`);
   assert.ok(await until(() => s.eval(`return !!document.querySelector("[data-dr-run]")`)), "back to the checks");
   await home();
@@ -549,7 +549,7 @@ test("Spotify's chip shows what's playing in the demo's made-up player, pauses i
     return sp && !sp.now?.playing ? sp : null;
   });
   assert.equal(paused?.yielding, false, "and comes back when it stops");
-  const outside = await fetch(`${s.base}/api/spotify/player`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "pause" }) });
+  const outside = await s.fetch(`/api/spotify/player`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "pause" }) });
   assert.equal(outside.status, 403, "only the window plays and pauses");
 }));
 

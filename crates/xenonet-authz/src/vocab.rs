@@ -312,16 +312,20 @@ pub enum ReadScope {
     Transcripts,
     /// A search over them.
     Search,
+    /// What this machine holds beyond the map: the messages between agents
+    /// (the engine's state), delivery's records, other machines' state.
+    State,
 }
 
 impl ReadScope {
-    pub const ALL: [ReadScope; 3] = [ReadScope::Map, ReadScope::Transcripts, ReadScope::Search];
+    pub const ALL: [ReadScope; 4] = [ReadScope::Map, ReadScope::Transcripts, ReadScope::Search, ReadScope::State];
 
     pub fn as_str(self) -> &'static str {
         match self {
             ReadScope::Map => "map",
             ReadScope::Transcripts => "transcripts",
             ReadScope::Search => "search",
+            ReadScope::State => "state",
         }
     }
 }

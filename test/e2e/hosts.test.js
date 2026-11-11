@@ -10,6 +10,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { apiCredential, runtimeDir } from "../../electron/lib/components/runtime.js";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -71,13 +72,15 @@ before(async () => {
   // runs, with a home of its own.
   other = spawn(...service(["--demo"]), {
     cwd: root,
-    env: { ...process.env, HOME: home, USERPROFILE: home, XENONET_PORT: String(hostPort), XENONET_HOSTS: "", XENONET_INSTANCE: "", XENONET_CONTROL: "", XENONET_EXEC: "", XENONET_HOT: "0" },
+    // Its API credential goes where the relay reading it looks: the
+    // runtime folder of this account, not of the made-up home.
+    env: { ...process.env, HOME: home, USERPROFILE: home, XENONET_PORT: String(hostPort), XENONET_RUNTIME_DIR: runtimeDir(process.env), XENONET_HOSTS: "", XENONET_INSTANCE: "", XENONET_CONTROL: "", XENONET_EXEC: "", XENONET_HOT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   other.stdout.on("data", (d) => (otherLog += d));
   other.stderr.on("data", (d) => (otherLog += d));
   await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
-  const ready = await until(async () => (await fetch(`http://127.0.0.1:${hostPort}/api/graph`).then((r) => r.json()).catch(() => null))?.nodes?.some((n) => n.kind === "session"), Boolean, 60000);
+  const ready = await until(async () => (await fetch(`http://127.0.0.1:${hostPort}/api/graph`, { headers: { "x-xenonet-credential": apiCredential(process.env, hostPort) ?? "" } }).then((r) => r.json()).catch(() => null))?.nodes?.some((n) => n.kind === "session"), Boolean, 60000);
   assert.ok(ready, `the other XenoNet didn't start: ${otherLog.slice(-1500)}`);
   const added = await s.simulate("host-add", { a: HOST, b: String(hostPort) });
   assert.equal(added.ok, true, JSON.stringify(added));

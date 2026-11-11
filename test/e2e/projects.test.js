@@ -20,7 +20,7 @@ const port = await new Promise((resolve) => {
 });
 const s = xenonet("test", { port });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const api = (route, opts) => fetch(`http://127.0.0.1:${port}${route}`, opts).then((r) => r.json());
+const api = (route, opts) => s.fetch(route, opts).then((r) => r.json());
 // Asking Codex and forgetting its picks are yours (verify.person), and these
 // tests run under an agent, so they're done from the page, as XenoNet's own
 // window does them.

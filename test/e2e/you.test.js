@@ -113,7 +113,7 @@ test("what you type into the palette never reaches XenoNet", { timeout: limit(60
 }));
 
 test("your reports take the window's key, which only the window has, and never in a URL", { timeout: limit(30000) }, shoot("you-key", async () => {
-  const outside = await fetch(`${s.base}/api/actors/you`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ presence: "working" }) });
+  const outside = await s.fetch(`/api/actors/you`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ presence: "working" }) });
   assert.equal(outside.status, 403, "a program without the key is refused");
   assert.equal((await outside.json()).code, "yours");
   // The page has it from the desktop app, reads your record with it, and
@@ -125,4 +125,14 @@ test("your reports take the window's key, which only the window has, and never i
     return { has: typeof key === "string" && key.length === 64, status: r.status, name: body.name, heartbeatMs: body.heartbeatMs, inUrl: location.href.includes(key), stored: JSON.stringify({ ...localStorage, ...sessionStorage }).includes(key), inPage: document.documentElement.outerHTML.includes(key) };
   })()`);
   assert.deepEqual(inside, { has: true, status: 200, name: "You", heartbeatMs: 60000, inUrl: false, stored: false, inPage: false });
+  // The page's own requests, its event stream among them, carry the key as
+  // a cookie Desktop set, which the page's scripts never see.
+  const cookie = await s.eval(`return (async () => {
+    const key = await window.xenonetDesktop.windowKey();
+    const r = await fetch("/api/engine/state");
+    return { status: r.status, seen: document.cookie.includes(key) || document.cookie.includes("xenonet-window") };
+  })()`);
+  assert.deepEqual(cookie, { status: 200, seen: false });
+  // Without any credential, the API refuses even its reads.
+  assert.equal((await fetch(`${s.base}/api/graph`)).status, 401);
 }));

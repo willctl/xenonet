@@ -1,10 +1,10 @@
 //! Remote actors' connections over the API (server/routes/assistant.js;
 //! docs/guide/cloud-assistants.md). None of this is reachable from a
-//! connection itself. Yours, from the window or your own terminal: the
-//! list, places, audit, revoking, turning all off, the tunnels and stopping
-//! or forgetting one. The window's alone, since they make or widen access:
-//! preview, pairing, a new scope or credential, turning on again, and a
-//! tunnel's settings, key, start and check.
+//! connection itself. Who may is rules.rs's. Yours, from the window or your
+//! own terminal: the list, places, audit, revoking, turning all off, the
+//! tunnels and stopping or forgetting one. The window's alone, since they
+//! make or widen access: preview, pairing, a new scope or credential,
+//! turning on again, and a tunnel's settings, key, start and check.
 
 use crate::cores::{CoreError, Kind};
 use crate::ctx::{fail, pending_reply, Ctx};
@@ -37,11 +37,6 @@ pub struct AssistantRoutes<'a> {
 }
 
 impl AssistantRoutes<'_> {
-    async fn guard(&self, req: &Req, window: bool) -> Option<Reply> {
-        let refused = if window { self.ctx.from_window(req).await } else { self.ctx.from_you(req).await };
-        refused.map(|r| fail(403, "yours", r, &[], &none()))
-    }
-
     async fn object_of(&self, req: &mut Req) -> Result<Value, CoreError> {
         let body = req.json(BODY).await?;
         if !body.is_object() {
@@ -118,9 +113,6 @@ impl AssistantRoutes<'_> {
         let tunnels = self.ctx.cores.tunnels.clone();
         let no_tunnels = || fail(503, "off", "XenoNet runs no tunnels here: remote actors are off", &[], &none());
         if p == "/api/assistant" && m == "GET" {
-            if let Some(r) = self.guard(req, false).await {
-                return Ok(r);
-            }
             let listening = self.ctx.endpoint.locked().clone().map(|e| e.info());
             let sources = match &self.ctx.cores.assistant_source {
                 Some(s) => s.sources_data()?,
@@ -138,9 +130,6 @@ impl AssistantRoutes<'_> {
             return Ok(Reply::json(200, out));
         }
         if p == "/api/assistant/places" && m == "GET" {
-            if let Some(r) = self.guard(req, false).await {
-                return Ok(r);
-            }
             let ids: Vec<Value> = self
                 .identities()?
                 .into_iter()
@@ -150,9 +139,6 @@ impl AssistantRoutes<'_> {
             return Ok(Reply::json(200, json!({ "places": self.places()?, "identities": ids })));
         }
         if p == "/api/assistant/audit" && m == "GET" {
-            if let Some(r) = self.guard(req, false).await {
-                return Ok(r);
-            }
             let grant = req.param("grant").filter(|g| !g.is_empty()).map(str::to_string);
             if grant.as_deref().is_some_and(|g| !grant_id(g)) {
                 return Ok(fail(400, "bad-request", "grant is a grant's id", &[], &none()));
@@ -163,39 +149,24 @@ impl AssistantRoutes<'_> {
             return Ok(Reply::json(200, json!({ "records": audit.recent(grant.as_deref(), limit)? })));
         }
         if p == "/api/assistant/disable" && m == "POST" {
-            if let Some(r) = self.guard(req, false).await {
-                return Ok(r);
-            }
             return Ok(Reply::json(200, connections.disable()?));
         }
         // Turning access back on widens it again, so it's the window's alone.
         if p == "/api/assistant/enable" && m == "POST" {
-            if let Some(r) = self.guard(req, true).await {
-                return Ok(r);
-            }
             return Ok(Reply::json(200, connections.enable()?));
         }
         if p == "/api/assistant/preview" && m == "POST" {
-            if let Some(r) = self.guard(req, true).await {
-                return Ok(r);
-            }
             let body = self.object_of(req).await?;
             let known = self.place_map()?;
             let source = self.ctx.cores.assistant_source.clone().ok_or_else(|| CoreError::pending("core/assistant/source.js"))?;
             return Ok(Reply::json(200, source.preview(&body, &known).await?));
         }
         if p == "/api/assistant/pair" && m == "POST" {
-            if let Some(r) = self.guard(req, true).await {
-                return Ok(r);
-            }
             let body = self.object_of(req).await?;
             let ids: Vec<String> = self.identities()?.iter().map(|i| xenonet_text::text::display(&i["id"])).collect();
             return Ok(Reply::json(201, connections.pair(&body, &self.place_map()?, &ids)?));
         }
         if p == "/api/assistant/tunnels" && m == "GET" {
-            if let Some(r) = self.guard(req, false).await {
-                return Ok(r);
-            }
             let Some(t) = &tunnels else { return Ok(no_tunnels()) };
             return Ok(Reply::json(200, t.status().await?));
         }
@@ -214,13 +185,7 @@ impl AssistantRoutes<'_> {
             // Stopping one, or taking away its key, narrows what reaches this
             // computer: yours from a terminal too. The rest is the window's.
             if matches!(action, Some("stop" | "forget")) {
-                if let Some(r) = self.guard(req, false).await {
-                    return Ok(r);
-                }
                 return Ok(Reply::json(200, if action == Some("stop") { t.stop(grant)? } else { t.forget_key(grant).await? }));
-            }
-            if let Some(r) = self.guard(req, true).await {
-                return Ok(r);
             }
             return Ok(Reply::json(
                 200,
@@ -242,13 +207,7 @@ impl AssistantRoutes<'_> {
             let grant = parts[0];
             let action = parts.get(1).copied();
             if action == Some("revoke") {
-                if let Some(r) = self.guard(req, false).await {
-                    return Ok(r);
-                }
                 return Ok(Reply::json(200, connections.revoke(grant)?));
-            }
-            if let Some(r) = self.guard(req, true).await {
-                return Ok(r);
             }
             if action == Some("rotate") {
                 return Ok(Reply::json(200, connections.rotate(grant)?));

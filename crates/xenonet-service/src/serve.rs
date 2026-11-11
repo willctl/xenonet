@@ -9,7 +9,7 @@ use crate::component::{self, Hooks};
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};
 use crate::ctx::Ctx;
-use crate::http::{node_headers, parse_target, raw_query, Body, Peer, Reply, ReplyBody, Req};
+use crate::http::{node_headers, parse_target, raw_query, Body, By, Peer, Reply, ReplyBody, Req};
 use crate::routes;
 use crate::wire::WireEnv;
 use bytes::Bytes;
@@ -96,13 +96,18 @@ pub async fn handle(ctx: &Arc<Ctx>, req: hyper::Request<Incoming>, peer: Peer) -
     }
     let target = req.uri().to_string();
     let (path, query) = parse_target(&target);
-    if let Some(up) = ctx.upstream.as_ref().filter(|u| u.handles(&path)) {
-        return up.pass(&method, &target, &headers).await;
-    }
-    let incoming = req.into_body();
-    let request = Req { method: method.clone(), path: path.clone(), query, raw_query: raw_query(&target), headers, peer, body: Body::Incoming(incoming) };
     if !path.starts_with("/api/") {
         return crate::static_files::serve(&ctx.config.root.join("dist"), &path);
+    }
+    let incoming = req.into_body();
+    let mut request = Req { method: method.clone(), path: path.clone(), query, raw_query: raw_query(&target), headers, peer, body: Body::Incoming(incoming), by: By::default() };
+    // XenoNet Dev reading another XenoNet passes on only what this one's
+    // rules let in.
+    if let Some(up) = ctx.upstream.as_ref().filter(|u| u.handles(&path)) {
+        if let Err(refused) = routes::rules::admit(ctx, &mut request).await {
+            return refused;
+        }
+        return up.pass(&method, &target, &request.headers).await;
     }
     let answer = routes::api(ctx, request).await;
     answered(ctx, &method, &path, answer)
@@ -413,6 +418,19 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         }
     };
     let port = listener.local_addr().map_or(config.port, |a| a.port());
+    // The API's credential, for the programs of this account: new at each
+    // start, readable by this account alone, and never logged.
+    let cred_file = xenonet_api::http::credential_file(Path::new(&config.runtime_dir), port);
+    if let Err(e) = ctx.api_key.write(&cred_file) {
+        eprintln!("[xenonet] the API's credential couldn't be written: {e}");
+        ctx.log(
+            "error",
+            "service.credential",
+            &format!("the API's credential couldn't be written to the runtime folder: {e}"),
+            None,
+            Some("XenoNet's window still works; the xenonet command, hooks and MCP servers can't reach the API until it's written"),
+        );
+    }
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
     // Desktop's window, as it last said: shown, hidden or closed.
     let window: Arc<Mutex<Option<String>>> = Arc::default();
@@ -570,6 +588,11 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         () = signal() => {}
     }
     shutdown(&ctx);
+    // The credential goes with this service, unless another start wrote
+    // its own over it.
+    if std::fs::read_to_string(&cred_file).is_ok_and(|c| ctx.api_key.matches(Some(c.trim()))) {
+        let _ = std::fs::remove_file(&cred_file);
+    }
     0
 }
 
@@ -591,8 +614,8 @@ async fn signal() {
 
 /// The hub and the network, once both are there and the service listens:
 /// the hub hears the map's relay frames, and serves this host's own map to
-/// the window hosts that subscribe, reading this service's API on `port` as
-/// any local program reads it, with no key. Every two seconds it's told
+/// the window hosts that subscribe, reading this service's API on `port`
+/// with the service's own key (the network decided what they may read). Every two seconds it's told
 /// whether a console is open here, from Desktop's window as it last said
 /// and the pages reading the event stream.
 fn plug_hub(ctx: &Arc<Ctx>, port: u16, window: &Arc<Mutex<Option<String>>>) {
@@ -602,7 +625,7 @@ fn plug_hub(ctx: &Arc<Ctx>, port: u16, window: &Arc<Mutex<Option<String>>>) {
             net: svc.net(),
             sinks: svc.sinks().clone(),
             events: ctx.events.clone(),
-            api: Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 16 << 20 }),
+            api: Arc::new(crate::cores::HttpApi { port, timeout: Duration::from_secs(20), max_bytes: 16 << 20, own: Some(ctx.self_key.reveal().to_string()) }),
             home: ctx.config.home.clone(),
             version: ctx.version.clone(),
             platform: crate::borrowed::platform().to_string(),

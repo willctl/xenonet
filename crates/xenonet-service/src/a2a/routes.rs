@@ -1,4 +1,4 @@
-//! The window's side of A2A, `/api/a2a`, the owner's alone: GET
+//! The window's side of A2A, `/api/a2a`, the owner's alone (rules.rs): GET
 //! says whether A2A agents may reach XenoNet, the card's address and the
 //! agents that called; POST turns it on or off (`{ on }`), or sets an
 //! agent's default target (`{ actor, target }`, target null to clear it).
@@ -12,9 +12,6 @@ const SMALL_BODY: usize = 1 << 10;
 
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Reply {
     let Some(a2a) = ctx.a2a.get().cloned() else { return fail(503, "off", "A2A isn't here: actors are off", &[], &Value::Null) };
-    if let Some(r) = ctx.from_you(req).await {
-        return fail(403, "yours", r, &[], &Value::Null);
-    }
     let address = ctx.gateway.get().and_then(|g| g.url().as_str().map(str::to_string));
     if req.method == "GET" {
         return Reply::json(200, a2a.status(address.as_deref()));

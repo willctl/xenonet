@@ -2676,6 +2676,7 @@ dependencies = [
  "tokio",
  "xenonet-model",
  "xenonet-net",
+ "xenonet-os",
  "xenonet-schema",
  "xenonet-text",
 ]
@@ -3166,6 +3167,7 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-api",
  "xenonet-assistant",
+ "xenonet-authz",
  "xenonet-components",
  "xenonet-console",
  "xenonet-doctor",

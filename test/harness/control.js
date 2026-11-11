@@ -19,6 +19,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { installedConsole } from "../../electron/lib/components/console.js";
+import { apiCredential } from "../../electron/lib/components/runtime.js";
 import { INSTANCES } from "../../electron/lib/instances.js";
 
 export { INSTANCES };
@@ -161,6 +162,14 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
   // ends it; dev and film show your own sessions.
   const { name, demo: madeUp } = INSTANCES[id];
   const base = `http://127.0.0.1:${port}`;
+  // A request to the instance's API, as a program of this account makes
+  // one: with the credential its service wrote, read again each time,
+  // since a service that restarts writes a new one.
+  const keyed = (headers = {}) => {
+    const credential = apiCredential(process.env, port);
+    return credential ? { "x-xenonet-credential": credential, ...headers } : headers;
+  };
+  const request = (route, init = {}) => fetch(`${base}${route}`, { ...init, headers: keyed(init.headers) });
   const lockDir = userData ?? (id === "test" ? path.join(os.tmpdir(), `xenonet-demo-${port}`, "electron") : userDataDir(name));
 
   // What's on the port: "up" (a XenoNet answers), "down" (nothing listens, so
@@ -193,7 +202,7 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
     for (;;) {
       let res;
       try {
-        res = await fetch(`${base}/api/dev/control`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        res = await request("/api/dev/control", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       } catch (err) {
         if (err.cause?.code === "ECONNREFUSED" && Date.now() < until) {
           await sleep(400);
@@ -413,7 +422,7 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
   }
 
   async function simulate(kind, { a, b } = {}) {
-    const res = await fetch(`${base}/api/dev/simulate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, a, b }) });
+    const res = await request("/api/dev/simulate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, a, b }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? res.statusText);
     return data;
@@ -441,7 +450,11 @@ export function xenonet(id = "demo", { port = INSTANCES[id]?.port, userData, log
     record: (opts) => call({ op: "record", ...opts, ...(opts?.action === "stop" ? { timeout: 120000 } : {}) }),
     logs: (opts = {}) => call({ op: "logs", ...opts }),
     eval: (expression, opts = {}) => call({ op: "eval", expression, ...opts }),
-    // Any read-only API route, such as /api/live.
-    api: async (route) => (await fetch(`${base}${route}`)).json(),
+    // Any read-only API route, such as /api/live, with the API's
+    // credential; a read that matters (transcripts, search, the engine's
+    // state, delivery) takes the window's, through `eval`.
+    api: async (route) => (await request(route)).json(),
+    // fetch() on the instance's API, with the API's credential.
+    fetch: request,
   };
 }

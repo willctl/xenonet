@@ -3,12 +3,12 @@
 //! behind XENONET_HOSTS=1, without which /api/hosts answers 404. A remote
 //! session's transcript and stats, and a collision on one host, are read
 //! through its relay (over SSH or the network), and only by XenoNet's own
-//! window: with the window key, never an agent's or an actor's request,
-//! so a session here can't read another machine's transcripts. Every other
+//! window (rules.rs: those rows are the window's when they name another
+//! machine), so a session here can't read another machine's transcripts. Every other
 //! route that takes an id refuses remote ones, since hosts are read-only.
 //! `route` is None when it isn't one of these.
 
-use crate::cores::{ok, reason, CoreError, HostsConfig, Hub, Verify};
+use crate::cores::{CoreError, HostsConfig, Hub};
 use crate::ctx::pending_reply;
 use crate::http::{decode_uri_component, Reply, Req};
 use serde_json::{json, Value};
@@ -27,11 +27,7 @@ pub fn window_only_reply() -> Reply {
 pub struct HostRoutes<'a> {
     pub hosts: Arc<dyn HostsConfig>,
     pub hub: Option<Arc<dyn Hub>>,
-    pub verify: Arc<dyn Verify>,
     pub home: &'a str,
-    /// Whether the request is the window's (`Ctx::window_only`): its key,
-    /// and no token.
-    pub window: bool,
 }
 
 // ^(?:claude|codex):[0-9A-Za-z][0-9A-Za-z._-]{0,127}$
@@ -89,11 +85,6 @@ pub fn url_search(pairs: &[(&str, &str)]) -> String {
 }
 
 impl HostRoutes<'_> {
-    async fn yours(&self, req: &Req) -> Option<Reply> {
-        let you = self.verify.person(req.peer).await;
-        (!ok(&you)).then(|| Reply::error(403, reason(&you)))
-    }
-
     pub async fn route(&self, req: &mut Req) -> Option<Reply> {
         match self.inner(req).await {
             Ok(r) => r,
@@ -109,9 +100,6 @@ impl HostRoutes<'_> {
                 return Ok(Some(Reply::json(200, merged(self.hosts.self_info()?, json!({ "home": self.home })))));
             }
             if req.method == "POST" {
-                if let Some(r) = self.yours(req).await {
-                    return Ok(Some(r));
-                }
                 let body = req.json_body().await?;
                 let Some(id) = body.get("id") else {
                     return Ok(Some(Reply::error(400, "say what to call this XenoNet: { id }, or id null to take its name away")));
@@ -127,9 +115,6 @@ impl HostRoutes<'_> {
                 if !raw.is_empty() && (what == "transcript" || what == "stats") && req.method == "GET" {
                     let Some(id) = decode_uri_component(raw) else { return Ok(None) };
                     let Some(hub) = self.hub.as_ref().filter(|_| id.starts_with('@')) else { return Ok(None) };
-                    if !self.window {
-                        return Ok(Some(window_only_reply()));
-                    }
                     let Some((host, local)) = remote_session(Some(&id)).filter(|(h, _)| hub.has(h)) else {
                         return Ok(Some(Reply::error(404, "XenoNet doesn't know that session")));
                     };
@@ -167,9 +152,6 @@ impl HostRoutes<'_> {
             if let Some(hub) = self.hub.as_ref() {
                 let (qa, qb) = (req.param("a").map(str::to_string), req.param("b").map(str::to_string));
                 if [&qa, &qb].iter().any(|x| x.as_deref().is_some_and(|s| s.starts_with('@'))) {
-                    if !self.window {
-                        return Ok(Some(window_only_reply()));
-                    }
                     let (a, b) = (remote_session(qa.as_deref()), remote_session(qb.as_deref()));
                     let (Some(a), Some(b)) = (a, b) else {
                         return Ok(Some(Reply::error(400, "collisions across machines come later: both sessions have to be on one host")));
@@ -204,9 +186,6 @@ impl HostRoutes<'_> {
                 return Ok(Some(Reply::json(200, json!({ "self": self.hosts.self_info()?, "sshConfig": self.hosts.ssh_config()?, "hosts": hub.list()? }))));
             }
             if req.method == "POST" {
-                if let Some(r) = self.yours(req).await {
-                    return Ok(Some(r));
-                }
                 let body = req.json_body().await?;
                 let replace = body.get("replace") == Some(&Value::Bool(true));
                 return Ok(Some(Reply::json(200, hub.add(&body, replace)?)));
@@ -224,12 +203,7 @@ impl HostRoutes<'_> {
         }
         match (action, req.method.as_str()) {
             (None, "GET") => Ok(Some(Reply::json(200, hub.detail(id)?))),
-            (None, "DELETE") => {
-                if let Some(r) = self.yours(req).await {
-                    return Ok(Some(r));
-                }
-                Ok(Some(Reply::json(200, hub.remove(id, req.param("forget") == Some("1"))?)))
-            }
+            (None, "DELETE") => Ok(Some(Reply::json(200, hub.remove(id, req.param("forget") == Some("1"))?))),
             (Some("reconnect"), "POST") => Ok(Some(Reply::json(200, hub.reconnect(id)?))),
             (Some("test"), "POST") => {
                 if !hub.has(id) {

@@ -131,22 +131,16 @@ impl ActorRoutes<'_> {
         Ok(body)
     }
 
-    async fn window_only(&self, req: &Req) -> Option<Reply> {
-        self.ctx.from_window(req).await.map(|r| fail(403, "yours", r, &[], &none()))
-    }
-
     async fn you(&self, req: &mut Req) -> Result<Reply, CoreError> {
         let actors = self.actors();
-        // Without a key it's any program asking about you, which gets what
-        // the list says.
-        if req.method == "GET" && req.header("x-xenonet-window").is_none() {
+        // From anything but the window it's any program asking about you,
+        // which gets what the list says. The rest is the window's
+        // (rules.rs).
+        if req.method == "GET" && !req.by.window {
             return Ok(Reply::json(200, actors.snapshot(YOU, None, true)?.unwrap_or(Value::Null)));
         }
         if !["GET", "POST", "DELETE"].contains(&req.method.as_str()) {
             return Ok(not_found());
-        }
-        if let Some(r) = self.window_only(req).await {
-            return Ok(r);
         }
         // Show me on the map turned off: your record goes at once.
         if req.method == "DELETE" {
@@ -409,9 +403,6 @@ impl ActorRoutes<'_> {
     }
 
     async fn add(&self, req: &mut Req) -> Result<Reply, CoreError> {
-        if let Some(r) = self.window_only(req).await {
-            return Ok(r);
-        }
         let body = req.json(REGISTER_BODY).await?;
         if let Err(e) = self.ctx.cores.schemas.check("actor/registration/v1", &body) {
             return Ok(bad(format!("that isn't an actor to add (actor/registration/v1): {}", issue(&e))));
@@ -420,9 +411,6 @@ impl ActorRoutes<'_> {
     }
 
     async fn decide(&self, req: &mut Req, id: &str) -> Result<Reply, CoreError> {
-        if let Some(r) = self.window_only(req).await {
-            return Ok(r);
-        }
         let body = self.object_of(req, SMALL_BODY).await?;
         let Some(request) = decode_uri_component(id).filter(|r| !r.is_empty()) else {
             return Ok(fail(404, "not-found", "no registration with that id is waiting", &[], &none()));
@@ -436,10 +424,7 @@ impl ActorRoutes<'_> {
         Ok(Reply::json(200, out))
     }
 
-    async fn rotate(&self, req: &Req, raw: &str) -> Result<Reply, CoreError> {
-        if let Some(r) = self.window_only(req).await {
-            return Ok(r);
-        }
+    fn rotate(&self, raw: &str) -> Result<Reply, CoreError> {
         let Some(slug) = slug_of(raw) else { return Ok(fail(404, "not-found", "XenoNet has no such actor", &[], &none())) };
         Ok(Reply::json(200, self.registration().rotate(&slug)?))
     }
@@ -450,10 +435,6 @@ impl ActorRoutes<'_> {
     /// ends it (its right to answer is then a Deny's), yours from anywhere.
     async fn allows(&self, req: &mut Req, raw: &str) -> Result<Reply, CoreError> {
         let put = req.method == "PUT";
-        let refused = if put { self.window_only(req).await } else { self.ctx.from_you(req).await.map(|r| fail(403, "yours", r, &[], &none())) };
-        if let Some(r) = refused {
-            return Ok(r);
-        }
         let Some(slug) = slug_of(raw) else { return Ok(fail(404, "not-found", "XenoNet has no such actor", &[], &none())) };
         let scope = if put {
             match req.json(4 << 10).await {
@@ -470,10 +451,7 @@ impl ActorRoutes<'_> {
         }
     }
 
-    async fn remove(&self, req: &Req, raw: &str) -> Result<Reply, CoreError> {
-        if let Some(r) = self.ctx.from_you(req).await {
-            return Ok(fail(403, "yours", r, &[], &none()));
-        }
+    async fn remove(&self, raw: &str) -> Result<Reply, CoreError> {
         let Some(slug) = slug_of(raw) else { return Ok(fail(404, "not-found", "XenoNet has no such actor", &[], &none())) };
         // registration.remove refuses one XenoNet only observes (409
         // observed, with its product), from the window or a program alike.
@@ -488,9 +466,6 @@ impl ActorRoutes<'_> {
 
     async fn gateway_state(&self, req: &mut Req) -> Result<Reply, CoreError> {
         let Some(gateway) = self.ctx.gateway.get().cloned() else { return Ok(fail(503, "off", "the actor gateway isn't here", &[], &none())) };
-        if let Some(r) = self.ctx.from_you(req).await {
-            return Ok(fail(403, "yours", r, &[], &none()));
-        }
         if req.method == "GET" {
             return Ok(Reply::json(200, gateway.status().await?));
         }
@@ -513,13 +488,7 @@ impl ActorRoutes<'_> {
     async fn gateway_token(&self, req: &mut Req, raw: &str) -> Result<Reply, CoreError> {
         let Some(slug) = slug_of(raw) else { return Ok(fail(404, "not-found", "XenoNet has no such actor", &[], &none())) };
         if req.method == "DELETE" {
-            if let Some(r) = self.ctx.from_you(req).await {
-                return Ok(fail(403, "yours", r, &[], &none()));
-            }
             return Ok(Reply::json(200, self.registration().drop_gateway(&slug)?));
-        }
-        if let Some(r) = self.window_only(req).await {
-            return Ok(r);
         }
         let body = self.object_of(req, SMALL_BODY).await?;
         let caps = body.get("capabilities").filter(|c| c.is_array()).cloned();
@@ -544,11 +513,8 @@ impl ActorRoutes<'_> {
         Ok(Reply::json(202, self.registration().ask_gateway(&slug, &verdict)?))
     }
 
-    async fn wakes_state(&self, req: &Req) -> Result<Reply, CoreError> {
+    fn wakes_state(&self) -> Result<Reply, CoreError> {
         let Some(wakes) = &self.ctx.cores.wakes else { return Ok(fail(503, "off", "waking actors isn't here", &[], &none())) };
-        if let Some(r) = self.ctx.from_you(req).await {
-            return Ok(fail(403, "yours", r, &[], &none()));
-        }
         Ok(Reply::json(200, json!({ "at": xenonet_text::json::number(self.ctx.now()), "wakes": wakes.list()? })))
     }
 
@@ -556,13 +522,7 @@ impl ActorRoutes<'_> {
         let Some(wakes) = self.ctx.cores.wakes.clone() else { return Ok(fail(503, "off", "waking actors isn't here", &[], &none())) };
         let Some(slug) = slug_of(raw).filter(|s| s != "you") else { return Ok(fail(404, "not-found", "XenoNet has no such actor", &[], &none())) };
         if test || req.method == "DELETE" {
-            if let Some(r) = self.ctx.from_you(req).await {
-                return Ok(fail(403, "yours", r, &[], &none()));
-            }
             return Ok(Reply::json(200, if test { wakes.test(&slug).await? } else { wakes.set(&slug, json!({ "kind": "none" })).await? }));
-        }
-        if let Some(r) = self.window_only(req).await {
-            return Ok(r);
         }
         let body = self.object_of(req, WAKE_BODY).await?;
         Ok(Reply::json(200, wakes.set(&slug, json!({ "kind": body.get("kind"), "url": body.get("url"), "key": body.get("key") })).await?))
@@ -633,9 +593,6 @@ impl ActorRoutes<'_> {
     }
 
     async fn observe(&self, req: &mut Req) -> Result<Reply, CoreError> {
-        if let Some(r) = self.ctx.from_you(req).await {
-            return Ok(fail(403, "yours", r, &[], &none()));
-        }
         let body = self.object_of(req, SMALL_BODY).await?;
         Ok(Reply::json(200, self.registration().observe(body.get("product").unwrap_or(&Value::Null), body.get("on").unwrap_or(&Value::Null))?))
     }
@@ -687,22 +644,16 @@ impl ActorRoutes<'_> {
                     _ => Ok(not_found()),
                 }
             }
-            "/api/actors/wakes" => return if m == "GET" { self.wakes_state(req).await } else { Ok(not_found()) },
+            "/api/actors/wakes" => return if m == "GET" { self.wakes_state() } else { Ok(not_found()) },
             "/api/actors/heartbeat" => return if m == "POST" { self.heartbeat(req).await } else { Ok(not_found()) },
             "/api/actors/targets" => return if m == "POST" { self.targets(req).await } else { Ok(not_found()) },
             "/api/actors/requests" => {
                 if m != "GET" {
                     return Ok(not_found());
                 }
-                if let Some(r) = self.window_only(req).await {
-                    return Ok(r);
-                }
                 return Ok(Reply::json(200, self.registration().requests()?));
             }
             "/api/actors/tokens" if m == "GET" => {
-                if let Some(r) = self.window_only(req).await {
-                    return Ok(r);
-                }
                 let t = self.ctx.now();
                 return Ok(Reply::json(200, json!({ "schema": "actor/tokens/v1", "at": xenonet_text::json::number(t), "tokens": self.actors().tokens(t)? })));
             }
@@ -764,7 +715,7 @@ impl ActorRoutes<'_> {
             }
             [slug, "token"] if one(slug) => {
                 if m == "POST" {
-                    self.rotate(req, slug).await
+                    self.rotate(slug)
                 } else {
                     Ok(not_found())
                 }
@@ -779,7 +730,7 @@ impl ActorRoutes<'_> {
                     _ => fail(404, "not-found", "XenoNet has no such actor", &[], &none()),
                 })
             }
-            [slug] if one(slug) && m == "DELETE" => self.remove(req, slug).await,
+            [slug] if one(slug) && m == "DELETE" => self.remove(slug).await,
             _ => Ok(not_found()),
         }
     }

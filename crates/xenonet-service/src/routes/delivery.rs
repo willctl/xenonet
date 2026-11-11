@@ -1,9 +1,9 @@
-//! Delivery's controls (server/routes/delivery.js), yours only, never an
-//! agent's or an actor's: the pause switch, scopes granted to actors'
-//! tokens, consent to wake or type into a session, and the audit log. GET
-//! /api/delivery reads them; the POSTs change them.
+//! Delivery's controls (server/routes/delivery.js): the pause switch,
+//! scopes granted to actors' tokens, consent to wake or type into a
+//! session, and the audit log. GET /api/delivery reads them, the POSTs
+//! change them; who may is rules.rs's (a read that matters, and yours).
 
-use crate::cores::{ok, reason, CoreError, Engine, Policy, Router, Verify};
+use crate::cores::{CoreError, Engine, Policy, Router};
 use crate::ctx::pending_reply;
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
@@ -16,10 +16,6 @@ pub struct DeliveryRoutes {
     pub policy: Arc<dyn Policy>,
     pub router: Arc<dyn Router>,
     pub engine: Arc<dyn Engine>,
-    pub verify: Arc<dyn Verify>,
-    /// Whether the request came from XenoNet's window, where widening an
-    /// actor's scope may ask the person.
-    pub window: bool,
 }
 
 // Consent is kept under the id the router looks it up by, so an OpenCode
@@ -65,9 +61,6 @@ impl DeliveryRoutes {
     }
 
     async fn inner(&self, req: &mut Req) -> Result<Reply, CoreError> {
-        if req.header("authorization").is_some() {
-            return Ok(Reply::coded(403, "yours", "delivery's controls are yours, and an actor can't change them"));
-        }
         let route = req.path.clone();
         if req.method == "GET" && route == "/api/delivery" {
             let usage: serde_json::Map<String, Value> = ["claude", "codex"].iter().map(|app| (app.to_string(), self.router.usage(app).unwrap_or(Value::Null))).collect();
@@ -90,15 +83,14 @@ impl DeliveryRoutes {
         if req.method != "POST" {
             return Ok(Reply::error(404, "not found"));
         }
-        let you = self.verify.person(req.peer).await;
-        if !ok(&you) {
-            return Ok(Reply::error(403, reason(&you)));
-        }
+        // From XenoNet's window, widening an actor's scope may ask the
+        // person.
+        let window = req.by.window;
         let b = req.json_body().await?;
         let ans = |v: Value| Ok(Reply::json(200, v));
         match route.as_str() {
             "/api/delivery/pause" => ans(self.policy.set_paused(b.get("paused") != Some(&Value::Bool(false)))?),
-            "/api/delivery/grant" => ans(self.policy.grant(&str_of(&b["actor"]), &str_of(&b["scope"]), hours(b.get("hours"), 24.0 * 30.0), self.window)?),
+            "/api/delivery/grant" => ans(self.policy.grant(&str_of(&b["actor"]), &str_of(&b["scope"]), hours(b.get("hours"), 24.0 * 30.0), window)?),
             "/api/delivery/revoke" => ans(self.policy.revoke(&str_of(&b["actor"]))?),
             "/api/delivery/allow" => {
                 let session = session_of(b.get("session").unwrap_or(&Value::Null))?;

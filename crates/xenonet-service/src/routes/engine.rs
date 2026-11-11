@@ -5,8 +5,9 @@
 //! xenonet command /api/engine/agents and /api/engine/who; and
 //! /api/engine/connect previews, adds and removes XenoNet in Claude Code's
 //! and Codex's settings. Every request in an agent's name is checked
-//! against the process it comes from, and connecting agents only goes
-//! through when no agent is asking.
+//! against the process it comes from (rules.rs, before the route runs, or
+//! here for a hook, whose body names the session), and connecting agents
+//! is yours (rules.rs).
 //!
 //! Registered actors call the same operations as `actor:<slug>`, with their
 //! token, checked as their own routes are, and held to what you allowed
@@ -17,7 +18,7 @@
 
 use crate::actor_caller::{rates, retry_after, ActorCaller};
 use crate::borrowed::{attest, platform, Sender};
-use crate::cores::{ok, reason, Actors, Channels, Connect, CoreError, Engine, State, Verify};
+use crate::cores::{ok, Actors, Channels, Connect, CoreError, Engine, State, Verify};
 use crate::ctx::{fail, pending_reply};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
@@ -25,7 +26,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use xenonet_actors::tokens::token_in_url;
 use xenonet_engine::delivery::selector::Selector;
-use xenonet_engine::engine::is_agent_id;
 use xenonet_os::nodepath::NATIVE;
 use xenonet_text::text::{to_number, truthy};
 
@@ -247,15 +247,8 @@ impl EngineRoutes<'_> {
             if req.method == "GET" {
                 return Ok(Reply::json(200, self.connect.preview().await?));
             }
-            // Changing Claude Code's and Codex's settings is yours to do, not
-            // an agent's, and never an actor's.
-            if req.header("authorization").is_some() {
-                return Ok(Reply::coded(403, "yours", "connecting Claude Code and Codex is yours to do, and an actor can't do it"));
-            }
-            let you = self.verify.person(req.peer).await;
-            if !ok(&you) {
-                return Ok(Reply::error(403, reason(&you)));
-            }
+            // Changing Claude Code's and Codex's settings is yours to do
+            // (rules.rs), not an agent's, and never an actor's.
             if req.method == "POST" {
                 let apps = req.json_body().await?.get("apps").cloned().unwrap_or(Value::Null);
                 return Ok(Reply::json(200, self.connect.apply(apps).await?));
@@ -271,13 +264,10 @@ impl EngineRoutes<'_> {
         if req.header("authorization").is_some() {
             return Ok(if name == "channel" { Reply::error(404, "not found") } else { self.as_actor(req, &name).await });
         }
-        let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(m)).map(str::to_string) else {
+        // The session, as rules.rs checked it against its process.
+        let Some((me, verdict)) = req.by.session.clone() else {
             return Ok(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
         };
-        let verdict = self.verify.check(req.peer, &me, false).await;
-        if !ok(&verdict) {
-            return Ok(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));
-        }
         let body = req.json_body().await?;
         // The agent's own process, where XenoNet could see it; else what the
         // MCP server says.

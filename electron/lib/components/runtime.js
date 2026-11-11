@@ -9,6 +9,19 @@ import { SERVICE_API, negotiate } from "./protocol.js";
 
 export const runtimeDir = (env = process.env) => env.XENONET_RUNTIME_DIR || path.join(appDir("state", { env }), "runtime");
 export const descriptorFile = (env = process.env) => path.join(runtimeDir(env), `service-${env.XENONET_PORT || 47840}.json`);
+// The API's credential the service on `port` wrote when it started, which
+// only this account can read (crates/xenonet-service/src/routes/rules.rs):
+// what the programs of this account present to the API, or null when
+// there's none.
+export const credentialFile = (env = process.env, port = env.XENONET_PORT || 47840) => path.join(runtimeDir(env), `api-${port}.cred`);
+export function apiCredential(env = process.env, port = env.XENONET_PORT || 47840) {
+  try {
+    const value = fs.readFileSync(credentialFile(env, port), "utf8").trim();
+    return /^[a-f0-9]+$/.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
 // What `xenonet service stop` leaves beside the descriptor: a supervisor
 // that was waiting for another service to give up the port (one Desktop
 // started before the service was registered) reads it as "stay stopped"

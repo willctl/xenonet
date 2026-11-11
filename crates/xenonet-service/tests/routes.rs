@@ -366,9 +366,20 @@ fn with_actors() -> (Arc<Ctx>, Arc<Fake>) {
     (Ctx::for_tests(c), f)
 }
 
+/// A request as a program of this account sends it: with the API's
+/// credential from its file, unless it brings one of its own (the window's
+/// key, an actor's token, the tray's key).
+fn local(ctx: &Ctx, mut req: Req) -> Req {
+    let own = ["x-xenonet-window", "authorization", "x-xenonet-credential", "x-xenonet-tray"];
+    if !req.headers.iter().any(|(k, _)| own.contains(&k.as_str())) {
+        req.headers.push(("x-xenonet-credential".into(), ctx.api_key.reveal().to_string()));
+    }
+    req
+}
+
 async fn go(ctx: &Arc<Ctx>, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Value>) -> Reply {
     let text = body.map(|b| b.to_string());
-    let answer = api(ctx, Req::fake(method, path, headers, text.as_deref())).await;
+    let answer = api(ctx, local(ctx, Req::fake(method, path, headers, text.as_deref()))).await;
     answered(ctx, method, path, answer)
 }
 
@@ -538,7 +549,7 @@ async fn an_actors_calls_need_its_token_its_own_process_and_what_you_allowed_it(
     }
     assert_eq!(go(&ctx, "POST", "/api/engine/focus", &as_wren, Some(json!({ "text": "again" }))).await.status, 429);
     // What it sends has to be JSON, and small.
-    let r = api(&ctx, Req::fake("POST", "/api/engine/whoami", &as_wren, Some("{"))).await;
+    let r = api(&ctx, local(&ctx, Req::fake("POST", "/api/engine/whoami", &as_wren, Some("{")))).await;
     assert_eq!(code(&answered(&ctx, "POST", "/api/engine/whoami", r)), (400, json!("bad-request"), json!("that body isn't JSON")));
     let big = json!({ "text": "x".repeat(17 << 10) });
     assert_eq!(code(&go(&ctx, "POST", "/api/engine/whoami", &as_wren, Some(big)).await), (413, json!("too-big"), json!("that body is over the size this route takes")));
@@ -584,7 +595,8 @@ async fn managing_actors_is_the_windows_or_yours_never_an_actors() {
     ] {
         let at = format!("{m} {p}");
         assert_eq!(code(&go(&ctx, m, p, &[], Some(json!({}))).await), (403, json!("yours"), no_key.clone()), "{at}");
-        assert_eq!(code(&go(&ctx, m, p, &[("x-xenonet-window", "not-its-key")], Some(json!({}))).await), (403, json!("yours"), no_key.clone()), "{at}");
+        // A key that isn't the window's is no credential at all.
+        assert_eq!(go(&ctx, m, p, &[("x-xenonet-window", "not-its-key")], Some(json!({}))).await.status, 401, "{at}");
         let both = [("x-xenonet-window", key.as_str()), ("authorization", wren.as_str())];
         assert_eq!(code(&go(&ctx, m, p, &both, Some(json!({}))).await), (403, json!("yours"), json!("this is for XenoNet's own window, and an actor can't do it")), "{at}");
         *f.window.lock().unwrap() = json!({ "ok": false, "reason": in_xenonet });
@@ -603,7 +615,7 @@ async fn managing_actors_is_the_windows_or_yours_never_an_actors() {
     ] {
         let at = format!("{m} {p}");
         assert_eq!(code(&go(&ctx, m, p, &[("authorization", &wren)], None).await), (403, json!("yours"), json!("this is yours to do, and an actor can't do it")), "{at}");
-        assert_eq!(code(&go(&ctx, m, p, &[("x-xenonet-window", "not-its-key")], None).await), (403, json!("yours"), no_key.clone()), "{at}");
+        assert_eq!(go(&ctx, m, p, &[("x-xenonet-window", "not-its-key")], None).await.status, 401, "{at}: a key that isn't the window's is none");
         *f.person.lock().unwrap() = json!({ "ok": false, "reason": under_codex });
         assert_eq!(code(&go(&ctx, m, p, &[], None).await), (403, json!("yours"), json!(under_codex)), "{at}");
         *f.person.lock().unwrap() = json!({ "ok": true });
@@ -734,7 +746,9 @@ async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_windo
     }
     assert_eq!(code(&go(&ctx, "GET", "/api/assistant/audit?grant=everyone", &[], None).await), (400, json!("bad-request"), json!("grant is a grant's id")));
     // With remote actors off, there's nothing to reach.
-    let off = Ctx::for_tests(Cores::pending(true, false, false));
+    let mut c = Cores::pending(true, false, false);
+    c.verify = f.clone();
+    let off = Ctx::for_tests(c);
     assert_eq!(code(&go(&off, "GET", "/api/assistant", &[], None).await).1, json!("off"));
 }
 
@@ -764,7 +778,10 @@ async fn deliverys_controls_are_yours_never_an_actors_or_an_agents() {
     *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do" });
     assert_eq!(go(&ctx, "POST", "/api/delivery/pause", &[], Some(json!({ "paused": false }))).await.status, 403, "never an agent");
     assert_eq!(f.was("setPaused"), vec![json!(true)]);
-    let state = go(&ctx, "GET", "/api/delivery?audit=7", &[], None).await.body_json();
+    // Reading them is a read that matters: not with the file alone, from
+    // under an agent; a session XenoNet checked reads them.
+    assert_eq!(go(&ctx, "GET", "/api/delivery?audit=7", &[], None).await.body_json()["code"], json!("checked"));
+    let state = go(&ctx, "GET", "/api/delivery?audit=7", &[AGENT], None).await.body_json();
     assert_eq!((state["paused"].clone(), state["audit"].clone()), (json!(true), json!({ "n": 7 })));
 }
 
@@ -841,8 +858,12 @@ async fn without_the_flag_showing_hosts_answers_404() {
         assert_eq!(r.status, 404, "{m} {p}");
         assert!(r.body_json()["error"].as_str().unwrap().contains("XENONET_HOSTS=1"));
     }
-    // A remote id is left to the routes that don't know it: the state's.
+    // A remote id is the window's to read (routes/rules.rs); from there
+    // it's left to the routes that don't know it: the state's.
     let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&format!("@vm1:{S}"))), &[], None).await;
+    assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("window")));
+    let key = ctx.window_key.reveal().to_string();
+    let r = go(&ctx, "GET", &format!("/api/session/{}/transcript", urlencode(&format!("@vm1:{S}"))), &[("x-xenonet-window", &key)], None).await;
     assert_eq!(r.status, 501, "the server's own route, whose state is pending here");
 }
 
@@ -863,7 +884,8 @@ async fn adding_and_removing_are_yours_the_rest_whats_on_the_list() {
     assert_eq!(go(&ctx, "POST", "/api/hosts/vm9/test", &[], None).await.status, 404);
     assert_eq!(go(&ctx, "GET", "/api/hosts/vm1", &[], None).await.body_json(), json!({ "id": "vm1", "engine": null }));
     assert_eq!(go(&ctx, "GET", "/api/hosts/Not-A-Host", &[], None).await.status, 404);
-    assert_eq!(go(&ctx, "PUT", "/api/hosts/vm1", &[], None).await.status, 405);
+    // A method the route doesn't take has no row (routes/rules.rs).
+    assert_eq!(go(&ctx, "PUT", "/api/hosts/vm1", &[], None).await.status, 404);
     *f.person.lock().unwrap() = json!({ "ok": false, "reason": "yours to do" });
     assert_eq!(go(&ctx, "POST", "/api/hosts", &[], Some(json!({ "id": "vm2" }))).await.status, 403);
     assert_eq!(go(&ctx, "DELETE", "/api/hosts/vm1", &[], None).await.status, 403);
@@ -936,7 +958,8 @@ async fn environment_settings_persist_and_bad_or_unauthorized_choices_are_refuse
     *f.person.lock().unwrap() = json!({ "ok": false, "reason": "no" });
     go(&ctx, "POST", "/api/environment", &[], Some(json!({ "id": "aurora" }))).await;
     assert_eq!(*f.environment.lock().unwrap(), json!("vault"));
-    assert_eq!(go(&ctx, "PUT", "/api/environment", &[], None).await.status, 405);
+    // A method the route doesn't take has no row (routes/rules.rs).
+    assert_eq!(go(&ctx, "PUT", "/api/environment", &[], None).await.status, 404);
 }
 
 // ---------- test/integrations-routes.test.js ----------
@@ -1014,10 +1037,10 @@ async fn the_version_header_and_pending_cores() {
 #[tokio::test]
 async fn bodies_that_arent_json_or_are_too_big_are_the_clients_error() {
     let (ctx, _) = service(false);
-    let r = api(&ctx, Req::fake("POST", "/api/layout", &[], Some("{ not json"))).await;
+    let r = api(&ctx, local(&ctx, Req::fake("POST", "/api/layout", &[], Some("{ not json")))).await;
     assert_eq!(r.err().and_then(|e| e.status), Some(400));
     let big = format!("{{\"positions\":{{}},\"pad\":\"{}\"}}", "x".repeat(1 << 20));
-    let r = api(&ctx, Req::fake("POST", "/api/layout", &[], Some(&big))).await;
+    let r = api(&ctx, local(&ctx, Req::fake("POST", "/api/layout", &[], Some(&big)))).await;
     assert_eq!(r.err().and_then(|e| e.status), Some(413));
 }
 
@@ -1142,4 +1165,73 @@ async fn the_trays_routes_need_its_key_and_you_never_an_agent_or_an_actor() {
     assert_eq!(go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], None).await.status, 200, "no id: the console as it is");
     assert_eq!(go(&ctx, "POST", "/api/tray/v1/open-console", &[tray], Some(json!({ "id": "https://example.com" }))).await.status, 400);
     assert_eq!(go(&ctx, "GET", "/api/tray/v1/nope", &[tray], None).await.status, 404);
+}
+
+// ---------- the credential and the rules table (routes/rules.rs) ----------
+
+#[tokio::test]
+async fn every_route_takes_a_credential_and_one_with_no_row_is_refused() {
+    let (ctx, f) = service(false);
+    let bare = |method: &str, path: &str| {
+        let ctx = ctx.clone();
+        let (method, path) = (method.to_string(), path.to_string());
+        async move { answered(&ctx, &method, &path, api(&ctx, Req::fake(&method, &path, &[], None)).await) }
+    };
+    // Without one: 401, in XenoNet's error shape, before anything is read.
+    for (m, p) in
+        [("GET", "/api/graph"), ("GET", "/api/engine/state"), ("POST", "/api/engine/send"), ("GET", "/api/delivery"), ("POST", "/api/theme"), ("GET", "/api/svc/desk/notes")]
+    {
+        let r = bare(m, p).await;
+        assert_eq!((r.status, r.body_json()["code"].clone()), (401, json!("credential")), "{m} {p}");
+        assert!(r.body_json()["error"].as_str().unwrap().contains("api-<port>.cred"));
+    }
+    assert!(f.was("snapshot").is_empty(), "no core was asked");
+    // A credential that isn't this service's is none.
+    let r = api(&ctx, Req::fake("GET", "/api/graph", &[("x-xenonet-credential", &"0".repeat(64))], None)).await.unwrap();
+    assert_eq!(r.status, 401);
+    // The open routes need none.
+    assert_eq!(bare("GET", "/api/health").await.status, 200);
+    // A path with no row, or a method its row doesn't take, is refused
+    // before any handler runs, with the credential or without.
+    for (m, p) in [("GET", "/api/brand-new"), ("PUT", "/api/graph"), ("POST", "/api/engine/state"), ("GET", "/api/projects/rules")] {
+        let r = go(&ctx, m, p, &[], None).await;
+        assert_eq!(r.body_json(), json!({ "error": "not found" }), "{m} {p}");
+        assert_eq!(r.status, 404);
+    }
+    assert_eq!(go(&ctx, "PATCH", "/api/actors/wren", &[], None).await.body_json()["code"], json!("not-found"));
+    // The window's cookie is the window's credential, as its key is.
+    let cookie = format!("theme=1; xenonet-window-{}={}", ctx.config.port, ctx.window_key.reveal());
+    let r = api(&ctx, Req::fake("GET", "/api/engine/state", &[("cookie", &cookie)], None)).await.unwrap();
+    assert_eq!(r.status, 200, "{}", r.body_json());
+    let other_port = format!("xenonet-window-1={}", ctx.window_key.reveal());
+    assert_eq!(api(&ctx, Req::fake("GET", "/api/graph", &[("cookie", &other_port)], None)).await.unwrap().status, 401, "another port's cookie");
+}
+
+#[tokio::test]
+async fn reads_that_matter_take_the_window_a_checked_session_or_you() {
+    let (ctx, f) = service(false);
+    let key = ctx.window_key.reveal().to_string();
+    *f.person.lock().unwrap() = json!({ "ok": false, "reason": "this is yours to do, and it came from under a Claude Code process; run it in your own terminal or in XenoNet" });
+    for p in ["/api/engine/state", "/api/delivery", "/api/search?q=refunds", "/api/handoff?nodeId=x"] {
+        // The file's credential alone, from under an agent: refused, as an
+        // unchecked caller authz doesn't let read it.
+        let r = go(&ctx, "GET", p, &[], None).await;
+        assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("checked")), "{p}");
+        assert!(r.body_json()["error"].as_str().unwrap().contains("unchecked agent"), "{p}");
+        // The window, or a session whose process passes the check.
+        assert_ne!(go(&ctx, "GET", p, &[("x-xenonet-window", &key)], None).await.status, 403, "{p}: the window");
+        assert_ne!(go(&ctx, "GET", p, &[AGENT], None).await.status, 403, "{p}: a checked session");
+        // Never an actor's token: actors read through their grants.
+        assert_eq!(go(&ctx, "GET", p, &[("authorization", "Bearer x")], None).await.body_json()["code"], json!("yours"), "{p}: an actor");
+    }
+    // A session whose process doesn't pass is refused for what it is.
+    *f.check.lock().unwrap() = json!({ "ok": false, "reason": "requests in claude:x's name have to come from a Claude Code process" });
+    let r = go(&ctx, "GET", "/api/engine/state", &[AGENT], None).await;
+    assert_eq!(r.status, 403);
+    // From your own terminal it reads.
+    *f.person.lock().unwrap() = json!({ "ok": true });
+    assert_eq!(go(&ctx, "GET", "/api/engine/state", &[], None).await.status, 200);
+    // The map is any local surface's.
+    *f.person.lock().unwrap() = json!({ "ok": false, "reason": "no" });
+    assert_ne!(go(&ctx, "GET", "/api/graph", &[], None).await.status, 403);
 }
