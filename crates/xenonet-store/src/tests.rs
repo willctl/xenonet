@@ -220,8 +220,8 @@ fn delivery_keeps_its_policy_runs_and_delegations_across_a_restart() {
         db.put_wake_budget(&[("w:actor:wren".into(), vec![1.0, 2.0])]).unwrap();
         db.put_runs(&[RunRow { id: "run_1".into(), key: "claude:a".into(), app: "an-app".into(), pid: Some(7.0), at: 1.0, end: None, exit: None, ms: None, timed_out: false }])
             .unwrap();
-        db.put_delegated("claude:a", &Delegated { cwd: "/p".into(), from: Some("studio".into()), at: 10.0 }, 100.0).unwrap();
-        db.put_delegated("claude:b", &Delegated { cwd: "/q".into(), from: None, at: 500.0 }, 100.0).unwrap();
+        db.put_delegated("claude:a", &Delegated { cwd: "/p".into(), from: Some("studio".into()), at: 10.0, intent: None }, 100.0).unwrap();
+        db.put_delegated("claude:b", &Delegated { cwd: "/q".into(), from: None, at: 500.0, intent: Some(("int_a".into(), "dlg_a".into())) }, 100.0).unwrap();
         for i in 0..delivery::AUDIT_LINES + 2 {
             db.add_delivery_audit(&serde_json::json!({ "i": i })).unwrap();
         }
@@ -232,7 +232,8 @@ fn delivery_keeps_its_policy_runs_and_delegations_across_a_restart() {
     assert_eq!(db.wake_budget().unwrap(), [("w:actor:wren".to_string(), vec![1.0, 2.0])]);
     assert_eq!(db.runs().unwrap()[0].pid, Some(7.0));
     assert_eq!(db.delegated("claude:a").unwrap(), None, "a delegation older than what's kept goes");
-    assert_eq!(db.delegated("claude:b").unwrap().map(|d| d.cwd), Some("/q".into()));
+    assert_eq!(db.delegated("claude:b").unwrap().map(|d| (d.cwd, d.intent)), Some(("/q".into(), Some(("int_a".into(), "dlg_a".into())))));
+    assert_eq!(db.intent_run("int_a").unwrap().as_deref(), Some("claude:b"), "the run an intent started");
     let audit = db.delivery_audit().unwrap();
     assert_eq!((audit.len() as i64, audit[0]["i"].clone()), (delivery::AUDIT_LINES, serde_json::json!(2)), "the oldest lines go");
     let _ = std::fs::remove_dir_all(&dir);

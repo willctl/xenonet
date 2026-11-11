@@ -372,6 +372,13 @@
   },
   {
    "run": [
+    "intent",
+    "--help"
+   ],
+   "golden": "cli/intent_--help.json"
+  },
+  {
+   "run": [
     "start",
     "--help"
    ],

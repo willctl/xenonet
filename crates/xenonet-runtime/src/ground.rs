@@ -111,6 +111,22 @@ impl Ground for EngineGround {
         let ids = store.with(|s| s.grant_projects(&xenonet_id::codec::hex(token))).ok().flatten()?;
         Some(ids.iter().filter_map(|p| xenonet_authz::ProjectId::new(p).ok()).collect())
     }
+    fn grant_intents(&self, token: &[u8]) -> Option<Vec<xenonet_authz::IntentId>> {
+        let store = self.store.as_ref()?;
+        let ids = store.with(|s| s.db().grant_intents(&xenonet_id::codec::hex(token))).ok().flatten()?;
+        Some(ids.iter().filter_map(|i| xenonet_authz::IntentId::new(i).ok()).collect())
+    }
+    /// The intent as this machine's store keeps it.
+    fn intent(&self, id: &xenonet_authz::IntentId) -> Option<xenonet_authz::HeldIntent> {
+        let store = self.store.as_ref()?;
+        let i = store.with(|s| s.db().intent(id.as_str())).ok().flatten()?;
+        Some(xenonet_authz::HeldIntent {
+            maker: MachineId::new(&i.machine).ok()?,
+            target: MachineId::new(&i.target).ok()?,
+            agent: i.agent.as_deref().and_then(|a| xenonet_authz::AgentId::new(a).ok()),
+            open: i.open(),
+        })
+    }
 }
 
 /// This machine's governance, once the network's link plugged it in.
@@ -145,7 +161,11 @@ fn asked(own: &MachineId, a: crate::asks::Waiting) -> Option<Asked> {
         Some(None) => Some(own.clone()),
         Some(Some(host)) => Some(MachineId::new(&host).ok()?),
     };
-    Some(Asked { session: SessionId::new(&a.session).ok()?, by: a.by, kind: a.kind, delegated_by, delegation: None })
+    let delegation = match a.delegation {
+        Some(d) => Some(xenonet_authz::DelegationId::new(&d).ok()?),
+        None => None,
+    };
+    Some(Asked { session: SessionId::new(&a.session).ok()?, by: a.by, kind: a.kind, delegated_by, delegation })
 }
 
 /// An allow scope from its row's JSON: `{ sessions: "all" | [ids], kinds:
@@ -608,7 +628,7 @@ mod tests {
         identity.delegate(true, xenonet_log::person::Delegation::standard("dlg_0123456789abcdef".into(), NOW + 1000), NOW).unwrap();
         g.facts.identity = identity.clone();
         let laptop = MachineId::new("laptop").unwrap();
-        let ask = |by| crate::asks::Waiting { session: "claude:run".into(), kind: PromptKind::Command, by, delegated_from: Some(None) };
+        let ask = |by| crate::asks::Waiting { session: "claude:run".into(), kind: PromptKind::Command, by, delegated_from: Some(None), delegation: None };
         // The ask names its caller as the check found it.
         assert_eq!(asked(&laptop, ask(Attestation::ProcessChecked)).unwrap().by, Attestation::ProcessChecked);
         assert_eq!(asked(&laptop, ask(Attestation::Unchecked)).unwrap().by, Attestation::Unchecked);

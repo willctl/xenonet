@@ -343,6 +343,17 @@ pub const RULES: &[Rule] = &[
     r("DELETE", "/api/a2a/outbound/*", YOU, Nothing),
     r("POST",   "/api/a2a/delegate", &[Session], Nothing),
 
+    // ---- the person's intents ----
+    // Making and cancelling one signs as you: the window's alone, where your
+    // device signs it (anywhere else it would need your presence). Its
+    // session, or an actor whose grant names it, reports on one worked
+    // here, decided by the engine.
+    r("GET",    "/api/intents", YOU, Nothing),
+    r("POST",   "/api/intents", WINDOW, Nothing),
+    r("POST",   "/api/intents/*/cancel", WINDOW, Nothing),
+    r("POST",   "/api/intents/*/note", AGENTS, Nothing),
+    r("POST",   "/api/intents/*/done", AGENTS, Nothing),
+
     // ---- remote actors' connections ----
     r("GET",    "/api/assistant", YOU, Nothing),
     r("GET",    "/api/assistant/places", YOU, Nothing),

@@ -128,6 +128,9 @@ pub struct Waiting {
     pub kind: xenonet_authz::PromptKind,
     pub by: xenonet_authz::Attestation,
     pub delegated_from: Option<Option<String>>,
+    /// For a run started for an intent: the delegation that intent names,
+    /// which alone answers its prompts.
+    pub delegation: Option<String>,
 }
 
 /// A tool call's kind of prompt.
@@ -282,13 +285,15 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value, by: xenonet
     let kind = prompt_kind(&tool);
     if let Some((folder, from)) = crate::starts::delegated(w, me) {
         match delegation::judge(&tool, &input, &folder, &w.setup.home, cfg!(windows)) {
-            Verdict::Allow if !reads_env(&input) => match granted(w, &id, Waiting { session: me.to_string(), kind, by, delegated_from: Some(from) }) {
-                Ok(()) => {
-                    w.log("info", "ask", &format!("{me}'s {tool} ({}) is allowed by your delegation", input_words(&input, &w.setup.home)));
-                    return Ok(answer_json("allow", &input, ""));
+            Verdict::Allow if !reads_env(&input) => {
+                match granted(w, &id, Waiting { session: me.to_string(), kind, by, delegated_from: Some(from), delegation: crate::intents::of_session(w, me).map(|(_, d)| d) }) {
+                    Ok(()) => {
+                        w.log("info", "ask", &format!("{me}'s {tool} ({}) is allowed by your delegation", input_words(&input, &w.setup.home)));
+                        return Ok(answer_json("allow", &input, ""));
+                    }
+                    Err(why) => outside = Some(why),
                 }
-                Err(why) => outside = Some(why),
-            },
+            }
             Verdict::Allow => outside = Some("it may read the run's environment".to_string()),
             Verdict::Ask(why) => outside = Some(why),
         }
@@ -438,7 +443,8 @@ pub fn waiting(w: &Runtime) -> Vec<(String, Waiting)> {
     held.into_iter()
         .map(|(id, session, kind, by)| {
             let delegated_from = crate::starts::delegated(w, &session).map(|(_, from)| from);
-            (id, Waiting { session, kind, by, delegated_from })
+            let delegation = crate::intents::of_session(w, &session).map(|(_, d)| d);
+            (id, Waiting { session, kind, by, delegated_from, delegation })
         })
         .collect()
 }

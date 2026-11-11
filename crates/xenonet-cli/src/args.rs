@@ -75,6 +75,9 @@ const TAKES_VALUE: &[&str] = &[
     "mode",
     // xenonet svc
     "hosts",
+    // xenonet intent
+    "project",
+    "delegation",
 ];
 // Flags that take a value in one command only, because another command
 // reads the same name as a switch: xenonet net set --start network, but

@@ -250,6 +250,29 @@ fn defs(installed: bool) -> Vec<Def> {
             read(),
         ),
         def(
+            "intents",
+            "See the person's intents",
+            "Opens the Intents view: the person's intents (work asked for on one machine, done on the one it names), each with how it stands, and the form for a new one. `refresh` reads them again, `select` shows one by its id, and `draft` fills in the form (goal, target machine, project, app, hours) without sending it. Making and cancelling an intent sign as the person, so this tool does neither: the person clicks Make or Cancel.",
+            object(vec![
+                ("action", enumeration(&["open", "refresh", "select", "draft", "close"]).optional().describe("open, the default, shows the view.")),
+                ("id", string().optional().describe("For select: an intent's id (int_…).")),
+                (
+                    "draft",
+                    object(vec![
+                        ("goal", string().optional()),
+                        ("target", string().optional().describe("A machine of the network, by its host id.")),
+                        ("project", string().optional().describe("A project's id (prj_…).")),
+                        ("app", string().optional()),
+                        ("hours", number().optional()),
+                    ])
+                    .optional(),
+                ),
+                ("settle", settle_arg()),
+                ("instance", inst()),
+            ]),
+            read(),
+        ),
+        def(
             "integrations",
             "Review agent workflows",
             "Browse routing decisions, OpenShell jobs and read-only Pi run metadata. Open a tab, filter, page, select a record, open its cached local review or select a reviewed file. Retrieval, export, forgetting, sending decisions, source configuration, launch and deletion stay in the owner's window; this tool never executes them.",
@@ -729,6 +752,14 @@ impl Console {
                 };
                 one(self.driver(&s, "refusals", vec![json!(action), second, settle(a)]).await?)
             }
+            "intents" => {
+                let action = a.get("action").and_then(Value::as_str).unwrap_or("open");
+                let second = match action {
+                    "select" => arg(a, "id"),
+                    _ => arg(a, "draft"),
+                };
+                one(self.driver(&s, "intents", vec![json!(action), second, settle(a)]).await?)
+            }
             "integrations" => {
                 let action = a.get("action").and_then(Value::as_str).unwrap_or("open");
                 let second = match action {
@@ -1069,6 +1100,7 @@ mod tests {
                 "stats",
                 "needs_you",
                 "refusals",
+                "intents",
                 "integrations",
                 "spend",
                 "rename",
@@ -1096,6 +1128,6 @@ mod tests {
             ]
         );
         let installed: Vec<&str> = defs(true).iter().map(|d| d.name).collect();
-        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 34);
+        assert!(!installed.contains(&"eval") && !installed.contains(&"simulate") && installed.len() == 35);
     }
 }

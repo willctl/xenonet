@@ -371,8 +371,12 @@ or actor is on.
   starts and answers, read, edit, command and tool prompts, the routine
   limits, for a year.
 
-The set is named as devices, not machines, so the intents phase 4 adds
-(made on one device, worked on the others) take the same grant.
+The set is named as devices, not machines, so intents take the same
+grant: an intent, made on one device, names one delegation by its id and
+the machine to work it, and that machine decides it under that delegation
+alone (`crates/xenonet-runtime/src/intents.rs`). The run it starts keeps
+the delegation's id, so only that delegation answers its prompts, and
+revoking it stops what wasn't started yet.
 
 ## `decide` and its rule table
 
@@ -422,6 +426,8 @@ answer:
   register-actor -         -         reach     presence
   use-gateway    -         -         reach     -
   revoke         -         -         -         presence
+  intend         -         -         -         intend
+  report         report    report    report    report
 ```
 
 | Cell | Means |
@@ -434,8 +440,10 @@ answer:
 | `read` | the map: reach. Transcripts, search and state: here, an agent process-checked at least; from another machine, an admin member, never an unchecked agent |
 | `presence` | the person, with a presence block for this act from the device that signed it; a weaker device is allowed and the decision says so. `register-actor` is issuing an actor's grant or widening it; narrowing and revoking need no act |
 | `answer` | A Deny only narrows, so it needs no presence: the person; this machine for its own window; a window host (an admin) relaying its window's; an actor whose token has the right. An Allow widens, and never for a run whose agent is unchecked: the person, with a presence block for it; an actor, inside its allow scope here; this machine itself, for a run started under a delegation of the person's that answers that kind of prompt and names this machine's device and the device the run was started from |
+| `intend` | An intent worked here, made by the person's device signature (the delegation it names took their presence), before its `until`: start `off` refuses it, and the delegation it names, that one and no other, must be unended, cover starts and name this machine's device and the device that signed it |
+| `report` | On an intent this machine holds, still open: a cancel is the person's alone; a start, a note or done comes from the machine it's worked on, or there, at its own door, from the agent working it (process-checked at least) or an actor whose grant names it (`grant_intents`; a note or done, never a start) |
 
-5. **Hold.** Start, answer, admit, widen and publish for another machine (a
+5. **Hold.** Start, intend, answer, admit, widen and publish for another machine (a
    principal not of this machine, or the person over the network) hold
    instead of allowing when governance was last synced from another member
    more than ten minutes ago, or never. This machine acting on its own is

@@ -691,6 +691,66 @@
             }
           },
           {
+            "name": "intent_note",
+            "title": "Note how an intent goes",
+            "description": "Only for a session working one of your user's intents (its first prompt says so and names it): tells your user, at the machine where they made it, how it goes. Keep each note short; XenoNet keeps the last. Any other session is refused.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "intent": {
+                  "type": "string",
+                  "description": "The intent's id (int_…), as your first prompt names it."
+                },
+                "text": {
+                  "type": "string",
+                  "description": "One short note: what's done, what's next, what's in the way."
+                }
+              },
+              "required": [
+                "intent",
+                "text"
+              ]
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
+            "name": "intent_done",
+            "title": "Say what came of an intent",
+            "description": "Only for a session working one of your user's intents: says what came of it, done or (with failed) not, and ends it. Your user sees it at the machine where they made it, so say what changed and where, or why it couldn't be done. Call it once, when you've finished. Any other session is refused.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "intent": {
+                  "type": "string",
+                  "description": "The intent's id (int_…), as your first prompt names it."
+                },
+                "outcome": {
+                  "type": "string",
+                  "description": "What came of it, for your user: what changed and where, or why it couldn't be done."
+                },
+                "failed": {
+                  "description": "true when it couldn't be done.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "intent",
+                "outcome"
+              ]
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false
+            }
+          },
+          {
             "name": "doctor",
             "title": "Check XenoNet's setup",
             "description": "Whether what XenoNet needs is in place on this machine: XenoNet itself, Claude Code, Codex and Grok Build installed and signed in, the folders XenoNet reads, git, and whether Claude Code, Codex and Grok Build are connected. Lists only what isn't fine, each with a fix for your user. Use it when XenoNet's other tools fail.",

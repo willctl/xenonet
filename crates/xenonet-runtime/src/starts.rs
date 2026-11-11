@@ -128,11 +128,14 @@ fn delegated_words(w: &Runtime, r: &Request, kind: Kind) -> Option<String> {
 pub struct Apart {
     pub request: Request,
     pub prompt: Information<String>,
+    /// For a run started for an intent: the intent, which frames its
+    /// prompt and names the delegation that alone answers its prompts.
+    pub intent: Option<crate::intents::Intended>,
 }
 
 fn apart(mut r: Request) -> Apart {
     let prompt = Information::new(std::mem::take(&mut r.prompt));
-    Apart { request: r, prompt }
+    Apart { request: r, prompt, intent: None }
 }
 
 /// The run a start makes, and the act, as a request names them: on
@@ -214,7 +217,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         Err(Held::Refused { code: "duplicate", .. }) => return Err("the same start was asked for under a minute ago".into()),
         Err(Held::Refused { why, .. } | Held::Error(why)) => return Err(format!("this machine's limits hold it: {why}")),
     }
-    if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer) {
+    if let Some(started) = over_acp(w, r, by, from, kind, prompt, &cwd, &answer, start.intent.as_ref()) {
         if started.is_ok() {
             w.starts.history.locked().push((now, bucket));
         }
@@ -230,7 +233,10 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
     // your user's delegation, set where and when, as this machine keeps it.
     let delegation = (reach.start == "delegate" && kind != Kind::You).then(|| reach.delegated.clone()).flatten();
     let on = delegation.as_ref().map(|(_, at)| xenonet_text::time::iso(*at as f64).chars().take(10).collect::<String>());
-    let text = starts::framed(by, from, prompt.read(), delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref()));
+    let text = match &start.intent {
+        Some(i) => crate::intents::framed(i, prompt.read()),
+        None => starts::framed(by, from, prompt.read(), delegation.as_ref().map(|(by, _)| by.as_str()).zip(on.as_deref())),
+    };
     // An app that reads its prompt from a file (Grok Build) gets one only
     // its owner can read, taken away when the run ends.
     let prompt_file = if starts::prompt_in_file(&r.app) {
@@ -285,10 +291,12 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
             None
         }
     };
-    if let (Some(session), Some(_)) = (&session, &delegation) {
+    if let (Some(session), true) = (&session, delegation.is_some() || start.intent.is_some()) {
         // Kept in the store, so its prompts are judged against the
         // delegation after a restart too; a week on, its runs are over.
-        let d = Delegated { cwd: cwd.clone(), from: from.map(str::to_string), at: now };
+        // One started for an intent keeps it, and the delegation it names.
+        let intent = start.intent.as_ref().map(|i| (i.id.clone(), i.delegation.clone()));
+        let d = Delegated { cwd: cwd.clone(), from: from.map(str::to_string), at: now, intent };
         if let Err(e) = w.store.0.db().put_delegated(session, &d, xenonet_engine::delivery::runs::KEEP_MS) {
             w.log("warn", "start.delegated", &format!("{session}'s delegation couldn't be kept: {}", e.message));
         }
@@ -316,7 +324,17 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
 /// XenoNet does (revision 25 keeps the headless start behind it until the
 /// app's ACP mode is proven).
 #[expect(clippy::too_many_arguments, reason = "the start's parts, as run_here took them")]
-fn over_acp(w: &Runtime, r: &Request, by: &Value, from: Option<&str>, kind: Kind, prompt: &Information<String>, cwd: &str, answer: &Answer) -> Option<Result<Value, String>> {
+fn over_acp(
+    w: &Runtime,
+    r: &Request,
+    by: &Value,
+    from: Option<&str>,
+    kind: Kind,
+    prompt: &Information<String>,
+    cwd: &str,
+    answer: &Answer,
+    intent: Option<&crate::intents::Intended>,
+) -> Option<Result<Value, String>> {
     let side = w.acp.get()?.clone();
     let platform = xenonet_adapter::platforms().get(&r.app)?;
     platform.app().acp.as_ref()?;
@@ -341,13 +359,14 @@ fn over_acp(w: &Runtime, r: &Request, by: &Value, from: Option<&str>, kind: Kind
         by: by.clone(),
         from: from.map(str::to_string),
         delegation: delegation.as_ref().map(|(by, _)| by.clone()).zip(on),
-        prompt: Information::new(prompt.read().clone()),
+        // An intent's run is told whose intent it is, and how to report.
+        prompt: Information::new(intent.map_or_else(|| prompt.read().clone(), |i| crate::intents::framed(i, prompt.read()))),
         answer: answer.clone(),
     };
     match side.start(&world, start) {
         Ok(started) => {
-            if delegation.is_some() {
-                let d = Delegated { cwd: cwd.to_string(), from: from.map(str::to_string), at: now_ms() };
+            if delegation.is_some() || intent.is_some() {
+                let d = Delegated { cwd: cwd.to_string(), from: from.map(str::to_string), at: now_ms(), intent: intent.map(|i| (i.id.clone(), i.delegation.clone())) };
                 if let Err(e) = w.store.0.db().put_delegated(&started.session, &d, xenonet_engine::delivery::runs::KEEP_MS) {
                     w.log("warn", "start.delegated", &format!("{}'s delegation couldn't be kept: {}", started.session, e.message));
                 }

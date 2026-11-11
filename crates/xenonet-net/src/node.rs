@@ -1409,6 +1409,28 @@ impl Shared {
         Ok(e)
     }
 
+    /// A compact entry of this machine's feed, now: over what its
+    /// incarnation wrote, keeping live what the kinds' retention keeps
+    /// (`open` says which of the kinds kept while open still are), and the
+    /// rest of the range dropped from what it sends again. Kept as
+    /// `write_entry` keeps an entry; when the link writes them is link/2's.
+    pub fn compact_entry(&self, open: impl Fn(&FeedEntry) -> bool) -> R<FeedEntry> {
+        let net = self.network().ok_or_else(not_in)?;
+        let key = self.identity.machine_key()?;
+        let mut slot = self.writer.locked();
+        let w = self.writer_in(&mut slot, &net)?;
+        let now = self.gateway_now().max(0.0) as u64;
+        let held = self.opts.persist.feed_out_after(&net.id, Pos::new(w.inc(), 0), usize::MAX)?;
+        let live = xenonet_log::feed::live_set(&held, w.inc(), now, open).map_err(|e| NetError::bad(e.message))?;
+        let before = w.clone();
+        let e = w.compact(key.as_ref(), now, &live)?;
+        if let Err(err) = self.opts.persist.put_feed_writer(&net.id, &e.author, writer_at(w), Some(&e)) {
+            *w = before;
+            return Err(err);
+        }
+        Ok(e)
+    }
+
     /// A frame of `body` for `to`, into the outbox.
     fn queue(&self, net: &NetFile, key: &HostKey, to: &str, body: &Value) -> Result<(), String> {
         let keys = {

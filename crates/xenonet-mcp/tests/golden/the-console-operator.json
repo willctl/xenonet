@@ -861,6 +861,74 @@
             }
           },
           {
+            "name": "intents",
+            "title": "See the person's intents",
+            "description": "Opens the Intents view: the person's intents (work asked for on one machine, done on the one it names), each with how it stands, and the form for a new one. `refresh` reads them again, `select` shows one by its id, and `draft` fills in the form (goal, target machine, project, app, hours) without sending it. Making and cancelling an intent sign as the person, so this tool does neither: the person clicks Make or Cancel.",
+            "inputSchema": {
+              "type": "object",
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "properties": {
+                "action": {
+                  "description": "open, the default, shows the view.",
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "refresh",
+                    "select",
+                    "draft",
+                    "close"
+                  ]
+                },
+                "id": {
+                  "description": "For select: an intent's id (int_…).",
+                  "type": "string"
+                },
+                "draft": {
+                  "type": "object",
+                  "properties": {
+                    "goal": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "description": "A machine of the network, by its host id.",
+                      "type": "string"
+                    },
+                    "project": {
+                      "description": "A project's id (prj_…).",
+                      "type": "string"
+                    },
+                    "app": {
+                      "type": "string"
+                    },
+                    "hours": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "settle": {
+                  "description": "Wait for the view to settle before returning (default true).",
+                  "type": "boolean"
+                },
+                "instance": {
+                  "description": "Which XenoNet: installed (the default for installed Tools), demo (made-up data; the default in this checkout), dev, test or film. Stays picked for later calls.",
+                  "type": "string",
+                  "enum": [
+                    "dev",
+                    "demo",
+                    "test",
+                    "film",
+                    "installed",
+                    "showcase"
+                  ]
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "openWorldHint": false
+            }
+          },
+          {
             "name": "integrations",
             "title": "Review agent workflows",
             "description": "Browse routing decisions, OpenShell jobs and read-only Pi run metadata. Open a tab, filter, page, select a record, open its cached local review or select a reviewed file. Retrieval, export, forgetting, sending decisions, source configuration, launch and deletion stay in the owner's window; this tool never executes them.",

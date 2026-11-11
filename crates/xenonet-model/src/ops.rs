@@ -41,10 +41,17 @@ pub enum Kind {
     /// A request to a service another host published, or its answer:
     /// never the engine's either.
     Svc,
+    /// An intent the person made here, or their cancel of one.
+    Intent,
+    /// The maker's machine giving an intent to the machine it names.
+    Assign,
+    /// How an intent worked here stands: started, a note, done.
+    Report,
 }
 
 impl Kind {
-    pub const ALL: [Self; 8] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Svc];
+    pub const ALL: [Self; 11] =
+        [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Svc, Self::Intent, Self::Assign, Self::Report];
 
     /// Its name, and the schema's folder; the frame kind on the wire for
     /// what isn't a feed entry.
@@ -58,6 +65,9 @@ impl Kind {
             Self::Operator => "operator",
             Self::Relay => "relay",
             Self::Svc => "svc",
+            Self::Intent => "intent",
+            Self::Assign => "assign",
+            Self::Report => "report",
         }
     }
 
@@ -75,19 +85,22 @@ impl Kind {
     }
 
     /// Whether it travels as an entry of this machine's feed: a message
-    /// and a receipt loose, each taken once by its id, and a claim and a
-    /// handoff kept, in the feed's gapless sequence to every member.
+    /// and a receipt loose, each taken once by its id, and a claim, a
+    /// handoff and an intent's entries kept, in the feed's gapless
+    /// sequence to every member.
     pub fn fed(self) -> bool {
-        matches!(self, Self::Message | Self::Receipt | Self::Claims | Self::Handoff)
+        matches!(self, Self::Message | Self::Receipt | Self::Claims | Self::Handoff | Self::Intent | Self::Assign | Self::Report)
     }
 
     /// The schema of a body of this kind: a message's is the body of its
     /// feed entry, and the person's answer is at v2, which carries the
-    /// act's authority.
+    /// act's authority. An intent's entries are all `network/intent/v1`,
+    /// told apart by their op.
     pub fn schema(self) -> String {
         match self {
             Self::Message => "network/send/v1".into(),
             Self::Operator => "network/operator/v2".into(),
+            Self::Intent | Self::Assign | Self::Report => "network/intent/v1".into(),
             _ => format!("network/{}/v1", self.as_str()),
         }
     }
@@ -344,7 +357,7 @@ mod tests {
         }
         assert!(Kind::Message.queued() && Kind::Handoff.queued() && Kind::Claims.queued() && Kind::Operator.queued() && Kind::Receipt.queued());
         assert!(!Kind::Presence.queued() && !Kind::Relay.queued() && !Kind::Svc.queued());
-        assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed() && Kind::Claims.fed());
+        assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed() && Kind::Claims.fed() && Kind::Intent.fed() && Kind::Assign.fed() && Kind::Report.fed());
         assert!(!Kind::Presence.fed() && !Kind::Operator.fed() && !Kind::Relay.fed());
         assert_eq!(Kind::parse("frame"), None);
         assert_eq!(Kind::Presence.schema(), "network/presence/v1");

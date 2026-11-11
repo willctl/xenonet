@@ -38,12 +38,16 @@ pub(crate) const TABLES: &[&str] = &[
         timed_out INTEGER NOT NULL
     ) STRICT",
     // The sessions started under the person's delegation: the folder each
-    // started in, and the machine it was started from (NULL: this one).
+    // started in, the machine it was started from (NULL: this one), and
+    // for one started for an intent, the intent and the delegation it
+    // names, which alone answers its prompts.
     "CREATE TABLE delegated_runs (
         session TEXT PRIMARY KEY,
         cwd TEXT NOT NULL,
         from_machine TEXT,
-        at REAL NOT NULL
+        at REAL NOT NULL,
+        intent TEXT,
+        delegation TEXT
     ) STRICT",
 ];
 
@@ -68,6 +72,9 @@ pub struct Delegated {
     /// The machine it was started from; None for this one.
     pub from: Option<String>,
     pub at: f64,
+    /// The intent it works and the delegation that intent names, for a
+    /// run started for one.
+    pub intent: Option<(String, String)>,
 }
 
 // Rows of a key and its JSON text.
@@ -211,11 +218,13 @@ impl Db {
     /// A session started under the person's delegation. Those started more
     /// than `keep_ms` before `at` go: their runs are long over.
     pub fn put_delegated(&self, session: &str, d: &Delegated, keep_ms: f64) -> R<()> {
+        let (intent, delegation) = d.intent.clone().unzip();
         self.write(|c| {
             c.execute(
-                "INSERT INTO delegated_runs (session, cwd, from_machine, at) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT (session) DO UPDATE SET cwd = excluded.cwd, from_machine = excluded.from_machine, at = excluded.at",
-                params![session, d.cwd, d.from, d.at],
+                "INSERT INTO delegated_runs (session, cwd, from_machine, at, intent, delegation) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (session) DO UPDATE SET cwd = excluded.cwd, from_machine = excluded.from_machine, at = excluded.at,
+                   intent = excluded.intent, delegation = excluded.delegation",
+                params![session, d.cwd, d.from, d.at, intent, delegation],
             )?;
             c.execute("DELETE FROM delegated_runs WHERE at < ?1", params![d.at - keep_ms])?;
             Ok(())
@@ -225,10 +234,17 @@ impl Db {
     /// The delegation a session was started under, if it was.
     pub fn delegated(&self, session: &str) -> R<Option<Delegated>> {
         self.read(|c| {
-            Ok(c.query_row("SELECT cwd, from_machine, at FROM delegated_runs WHERE session = ?1", params![session], |r| {
-                Ok(Delegated { cwd: r.get(0)?, from: r.get(1)?, at: r.get(2)? })
+            Ok(c.query_row("SELECT cwd, from_machine, at, intent, delegation FROM delegated_runs WHERE session = ?1", params![session], |r| {
+                let intent: Option<String> = r.get(3)?;
+                let delegation: Option<String> = r.get(4)?;
+                Ok(Delegated { cwd: r.get(0)?, from: r.get(1)?, at: r.get(2)?, intent: intent.zip(delegation) })
             })
             .optional()?)
         })
+    }
+
+    /// The session started for an intent, if one was.
+    pub fn intent_run(&self, intent: &str) -> R<Option<String>> {
+        self.read(|c| Ok(c.query_row("SELECT session FROM delegated_runs WHERE intent = ?1 ORDER BY at DESC LIMIT 1", params![intent], |r| r.get(0)).optional()?))
     }
 }

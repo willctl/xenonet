@@ -2,7 +2,8 @@
 //! (`runtime`), the drivers for the engine, delivery and the network
 //! across machines, starts, asks and runs, the process checks and the
 //! store's sides, the actors' sides (registration, wakes, reports, tokens,
-//! spend, observers), the local door's decisions (`door`), and the timers,
+//! spend, observers), the person's intents (`intents`), the local door's
+//! decisions (`door`), and the timers,
 //! processes and waits they need. The
 //! adapters are the ones in place (`xenonet_adapter::platforms()`), which
 //! the binary installs at start.
@@ -22,6 +23,7 @@ pub mod exec;
 pub mod fs;
 pub mod grants;
 pub mod ground;
+pub mod intents;
 pub mod map;
 pub mod network;
 pub mod observers;
@@ -80,6 +82,7 @@ pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtim
     cores.reports = Arc::new(reports::ReportsDriver(w.clone()));
     cores.spend = Arc::new(spend::SpendDriver::new(w.clone()));
     cores.grants = Arc::new(grants::GrantsDriver(w.clone()));
+    cores.intents = Arc::new(intents::IntentsDriver(w.clone()));
     if w.actors.is_some() {
         cores.actors = Some(Arc::new(actors::ActorsDriver(w.clone())));
         cores.registration = Some(Arc::new(registration::RegistrationDriver(w.clone())));
@@ -188,6 +191,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         net: network::NetState::default(),
         starts: starts::StartSide::default(),
         asks: asks::AskSide::default(),
+        intents: intents::IntentSide::default(),
         acp: OnceLock::new(),
     });
     let _ = w.me.set(Arc::downgrade(&w));

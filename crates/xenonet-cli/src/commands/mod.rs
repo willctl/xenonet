@@ -21,6 +21,7 @@ pub mod film;
 pub mod gateway;
 pub mod hook;
 pub mod install;
+pub mod intent;
 pub mod live;
 pub mod logs;
 pub mod mcp;
@@ -99,6 +100,7 @@ pub const COMMANDS: &[Command] = &[
     ),
     cmd("svc", "Publish a local HTTP service to the network, for programs on its other machines", Some("[publish|unpublish|list]")),
     cmd("start", "Start a session here or on another machine, with a first prompt", Some("[--on <machine>] \"<prompt>\"")),
+    cmd("intent", "Your intents: work asked for here, done on the machine it names", Some("[list|make|cancel]")),
     cmd("runs", "The Claude Code sign-in for the sessions XenoNet runs itself", Some("[status|sign-in|forget]")),
     cmd("search", "Search every {apps lines} transcript", Some("<words>")),
     cmd("theme", "The console's look and sound: list, switch, or make your own", Some("[id]")),
@@ -171,6 +173,7 @@ fn text(name: &str) -> &'static str {
         "spend" => spend::HELP,
         "status" => status::HELP,
         "svc" => svc::HELP,
+        "intent" => intent::HELP,
         "start" => start::HELP,
         "runs" => runs::HELP,
         "theme" => theme::HELP,
@@ -215,6 +218,7 @@ pub fn run(name: &str, args: &[String], flags: &Flags) -> Done {
         "spend" => spend::run(args, flags),
         "status" => status::run(args, flags),
         "svc" => svc::run(args, flags),
+        "intent" => intent::run(args, flags),
         "start" => start::run(args, flags),
         "runs" => runs::run(args, flags),
         "theme" => theme::run(args, flags),

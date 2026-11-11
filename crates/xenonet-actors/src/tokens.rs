@@ -49,11 +49,12 @@ pub fn hex(bytes: &[u8]) -> String {
 }
 
 /// The actions a token minted for these capability words has the right
-/// to: reading what its scopes let it see, which every actor does, and
-/// sessions it may start, messages and handoffs it may send, files it may
-/// claim, permission prompts it may answer.
+/// to: reading what its scopes let it see and reporting on the intents its
+/// grant names, which every actor does (the rows the person keeps beside
+/// the token say which), and sessions it may start, messages and handoffs
+/// it may send, files it may claim, permission prompts it may answer.
 pub fn rights(capabilities: &[String]) -> Vec<Action> {
-    let mut out = vec![Action::Read];
+    let mut out = vec![Action::Read, Action::Report];
     for c in capabilities {
         out.extend_from_slice(match c.as_str() {
             "spawn-sessions" => &[Action::Start][..],
@@ -87,9 +88,9 @@ mod tests {
     #[test]
     fn capabilities_map_onto_rights() {
         let words = |w: &[&str]| w.iter().map(ToString::to_string).collect::<Vec<_>>();
-        assert_eq!(rights(&words(&["browse", "message-agents", "spawn-sessions"])), [Action::Message, Action::Start, Action::Handoff, Action::Read]);
-        assert_eq!(rights(&words(&["edit-repos", "run-commands"])), [Action::Claim, Action::Read]);
-        assert_eq!(rights(&words(&["use-computer"])), [Action::Read], "every actor reads");
-        assert_eq!(rights(&words(&["answer-prompts"])), [Action::Answer, Action::Read]);
+        assert_eq!(rights(&words(&["browse", "message-agents", "spawn-sessions"])), [Action::Message, Action::Start, Action::Handoff, Action::Read, Action::Report]);
+        assert_eq!(rights(&words(&["edit-repos", "run-commands"])), [Action::Claim, Action::Read, Action::Report]);
+        assert_eq!(rights(&words(&["use-computer"])), [Action::Read, Action::Report], "every actor reads, and reports on the intents its grant names");
+        assert_eq!(rights(&words(&["answer-prompts"])), [Action::Answer, Action::Read, Action::Report]);
     }
 }

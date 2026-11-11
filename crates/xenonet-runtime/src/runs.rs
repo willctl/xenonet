@@ -145,6 +145,9 @@ struct State {
     /// Each run this runner admitted, from then until it and everything it
     /// started have ended.
     watching: Vec<String>,
+    /// The runs asked to stop (an intent cancelled or expired), by key,
+    /// until they have.
+    stopping: Vec<String>,
 }
 
 pub struct Runner {
@@ -173,7 +176,7 @@ fn alive(pid: f64) -> bool {
 impl Runner {
     pub fn new(dir: Option<PathBuf>, db: Option<Arc<Db>>) -> Arc<Runner> {
         let runs = db.as_ref().and_then(|d| d.runs().ok()).map(|rows| rows.into_iter().map(run_of).collect()).unwrap_or_default();
-        Arc::new(Runner { dir, db, state: Mutex::new(State { runs, watching: Vec::new() }), saving: Mutex::new(()) })
+        Arc::new(Runner { dir, db, state: Mutex::new(State { runs, watching: Vec::new(), stopping: Vec::new() }), saving: Mutex::new(()) })
     }
 
     /// Whether a run for `key` is under way: one this runner watches, or
@@ -201,7 +204,23 @@ impl Runner {
 
     /// Lets go of a run admitted for `key`.
     fn release(&self, key: &str) {
-        self.state.locked().watching.retain(|k| k != key);
+        let mut s = self.state.locked();
+        s.watching.retain(|k| k != key);
+        s.stopping.retain(|k| k != key);
+    }
+
+    /// Stops the run under way for `key`, and everything it started, when
+    /// this runner watches one: whether it does. One started before a
+    /// restart runs on until it ends.
+    pub fn stop(&self, key: &str) -> bool {
+        let mut s = self.state.locked();
+        if !s.watching.iter().any(|k| k == key) {
+            return false;
+        }
+        if !s.stopping.iter().any(|k| k == key) {
+            s.stopping.push(key.to_string());
+        }
+        true
     }
 
     /// Logs a week old or more go when a run starts.
@@ -339,6 +358,11 @@ impl Runner {
                     tree.kill(&mut child);
                     let _ = child.wait();
                     timed_out = true;
+                    break;
+                }
+                if me.state.locked().stopping.contains(&key) {
+                    tree.kill(&mut child);
+                    let _ = child.wait();
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(250));

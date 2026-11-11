@@ -31,6 +31,8 @@
 //!   warning.
 //! - **Handoffs.** Work left for another session, kept by the host that
 //!   made it, which decides who takes it.
+//! - **Intents.** The person's intents, their assigns and the reports on
+//!   them are kept entries too, applied by `crate::intents`.
 //!
 //! Every act from another machine is decided here before it's taken
 //! (`crate::ground`, xenonet-authz): a message, a start, an ask, a
@@ -356,7 +358,8 @@ pub fn removed(w: &Runtime, host: &str) {
 }
 
 /// What this host tells the others now, if it changed: presence; and
-/// handoffs made here that lapsed, and messages no one read.
+/// handoffs made here that lapsed, and messages no one read; and the
+/// intents that expired or wait to be started here.
 pub fn tick(w: &Runtime) {
     if net(w).me().is_none() {
         return;
@@ -364,6 +367,7 @@ pub fn tick(w: &Runtime) {
     presence(w, false);
     lapse(w);
     unread(w);
+    crate::intents::tick(w);
 }
 
 /// A body from another host.
@@ -377,7 +381,7 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
         Kind::Presence => presence_in(w, &from, &body),
         // Messages, receipts, claims and handoffs come as entries of their
         // author's feed (`entry_in`), never as bare bodies.
-        Kind::Message | Kind::Receipt | Kind::Claims | Kind::Handoff => Err(fail("it comes only as an entry of its machine's feed")),
+        Kind::Message | Kind::Receipt | Kind::Claims | Kind::Handoff | Kind::Intent | Kind::Assign | Kind::Report => Err(fail("it comes only as an entry of its machine's feed")),
         // The person's answer to a run's permission prompt, from another
         // machine's console (`network/operator/v2`).
         Kind::Operator => {
@@ -496,7 +500,9 @@ fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &
         // closed there (`Applied::ended`).
         EntryKind::Compact => Ok(()),
         EntryKind::Claim => claim_in(w, host, &e.author, &e.body),
-        other => Err(fail(format!("XenoNet doesn't take {} entries yet", other.as_str()))),
+        EntryKind::Intent => crate::intents::intent_in(w, host, &e.body).map_err(fail),
+        EntryKind::Assign => crate::intents::assign_in(w, host, &e.body).map_err(fail),
+        EntryKind::Report => crate::intents::report_in(w, host, &e.body).map_err(fail),
     };
     if let Err(f) = done {
         w.log("warn", "net.receive", &format!("a {} from {host} wasn't taken: {}", e.kind.as_str(), why(&f)));

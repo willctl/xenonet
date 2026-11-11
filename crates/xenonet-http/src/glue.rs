@@ -72,6 +72,8 @@ pub fn event(ctx: &Ctx, from: From, name: &str, data: Value) {
         (From::Engine, "start") => ctx.broadcast("start", &data),
         // A copy of a session XenoNet forked to answer a message.
         (From::Engine, "fork") => ctx.broadcast("fork", &data),
+        // The intents changed: one made, given, reported on or ended.
+        (From::Engine, "intents") => ctx.broadcast("intents", &data),
         // A run's permission prompt waits for you, here or on another
         // machine; and its end.
         (From::Engine, "ask") => {

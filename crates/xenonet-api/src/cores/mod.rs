@@ -16,6 +16,7 @@ pub mod delivery;
 pub mod door;
 pub mod engine;
 pub mod hosts;
+pub mod intents;
 pub mod services;
 pub mod settings;
 pub mod state;
@@ -31,6 +32,7 @@ pub use delivery::{Policy, Router};
 pub use door::{Apps, LocalDoor};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
 pub use hosts::{HttpApi, Hub, HubNet, SelfApi};
+pub use intents::{Intents, Reporter};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
 pub use settings::{Command, Demo, Opener, Schemas, Store, Themes};
 pub use state::State;
@@ -179,6 +181,8 @@ pub struct Cores {
     pub mcp_info: Arc<dyn McpInfo>,
     pub terminals: Arc<dyn Terminals>,
     pub demo: Arc<dyn Demo>,
+    /// The person's intents, made here and heard of from the network.
+    pub intents: Arc<dyn Intents>,
     /// The local door's decisions, and the app registry as the routes ask
     /// it: the composition root's (xenonet-authz, the adapters).
     pub door: Arc<dyn LocalDoor>,
@@ -254,6 +258,7 @@ impl Cores {
             mcp_info: p.clone(),
             terminals: p.clone(),
             demo: p.clone(),
+            intents: p.clone(),
             door: p.clone(),
             apps: p,
             on_net: None,

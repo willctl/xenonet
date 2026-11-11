@@ -21,6 +21,7 @@ import { createConnectPanel } from "./connect.js";
 import { createDoctorPanel } from "./doctor.js";
 import { createStatsPanel } from "./stats.js";
 import { createRefusalsPanel } from "./refusals.js";
+import { createIntentsPanel } from "./intents.js";
 import { createIntegrationsPanel } from "./integrations.js";
 import { createRootPanel } from "./root.js";
 import { createAlerts } from "./alerts.js";
@@ -276,6 +277,8 @@ const doctorPanel = createDoctorPanel({
 // A session's models, tokens, costs and timing (crates/xenonet-state/src/stats.rs).
 const statsPanel = createStatsPanel({ modals, sfx, toast: (m, b) => hud.toast(m, b), read: windowCalls.read });
 const refusalsPanel = createRefusalsPanel({ modals });
+// The person's intents (intents.js): made here, done on the machine named.
+const intentsPanel = createIntentsPanel({ modals, calls: windowCalls });
 const integrationsPanel = createIntegrationsPanel({ modals, calls: windowCalls, savePatch: desktop?.savePatch });
 const openStats = (node) => (note("stats", node.id), you.did("read", node.id), statsPanel.open(node));
 // The OpenRouter key for decision models: into your credential store, by
@@ -735,6 +738,7 @@ const commandList = [
   { id: "sandbox", label: "Launch sandbox", keywords: "openshell nvidia policy execution wsl", run: () => integrationsPanel.open("sandbox") },
   { id: "sandbox-results", label: "Review sandbox changes", keywords: "openshell results diff patch export", run: () => integrationsPanel.open("results") },
   { id: "pi-runs", label: "Review Pi runs", keywords: "pi harness sessions exports checkpoints", run: () => integrationsPanel.open("pi") },
+  { id: "intents", label: "Intents: ask for work on a machine of yours", keywords: "intent goal outcome delegate delegation task work machine cancel", run: () => intentsPanel.open() },
   // Provider refusals XenoNet keeps (core/refusals): whether each new one
   // keeps the transcript up to it too, for a dataset. Off until you turn it
   // on; transcripts can hold secrets.
@@ -1358,6 +1362,7 @@ events.addEventListener("sign-in", (e) => {
   needsYou.refresh();
   if (fresh) hud.toast(String(s.words ?? `Claude Code on ${s.host} needs a sign-in for XenoNet's runs`), true);
 });
+events.addEventListener("intents", () => intentsPanel.changed());
 events.addEventListener("fork", (e) => {
   const f = JSON.parse(e.data);
   forks.set(f.child, f.parent);
@@ -1506,6 +1511,7 @@ if (import.meta.env.DEV || desktop) {
     commands: commandList,
     stats: { open: openStats, get data() { return statsPanel.data; } },
     refusals: refusalsPanel,
+    intents: intentsPanel,
     integrations: integrationsPanel,
     rename: renameSession,
     film,

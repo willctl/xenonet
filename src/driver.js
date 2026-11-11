@@ -616,6 +616,14 @@ export function createDriver(app) {
       const st = await act(() => app.refusals.action(action, value), opts);
       return { ...st, refusals: app.refusals.state };
     },
+    // The Intents view (intents.js): open, refresh, select an intent by
+    // its id, draft the form ({ goal, target, project, app, hours }), close.
+    // Making and cancelling sign as the person, so there's no action for
+    // them: the person clicks.
+    async intents(action = "open", value, opts) {
+      const st = await act(() => app.intents.action(action, value), opts);
+      return { ...st, intents: app.intents.state };
+    },
     async integrations(action = "open", value, opts) {
       // Review and file only browse cached text; retrieval and export stay
       // in the owner's window like sandbox launch and deletion.

@@ -130,8 +130,24 @@ fn listening() -> Value {
 }
 
 // The tools' names, which harnesses' allow rules (mcp__xenonet__send) name.
-const TOOLS: [&str; 14] =
-    ["whoami", "peers", "who_has", "send", "inbox", "claim", "release", "focus", "handoff", "start_session", "delegate", "doctor", "ask_gateway_token", "permission"];
+const TOOLS: [&str; 16] = [
+    "whoami",
+    "peers",
+    "who_has",
+    "send",
+    "inbox",
+    "claim",
+    "release",
+    "focus",
+    "handoff",
+    "start_session",
+    "delegate",
+    "intent_note",
+    "intent_done",
+    "doctor",
+    "ask_gateway_token",
+    "permission",
+];
 
 fn init(s: &mut Server) -> Value {
     let r = s.ask(1, "initialize", json!({ "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": { "name": "claude-code", "version": "2.1.302" } }));

@@ -1650,3 +1650,252 @@ async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_o
     assert!(has_handoff(&c, 2) && !has_handoff(&c, 6));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ---------- intents ----------
+//
+// laptop (A) makes intents at its window; desk (B) works them; studio (C)
+// is the third machine, which the delegation doesn't name. Each machine
+// has a clone of acme/atlas with a session in it, so each has a checkout of
+// the project the person confirmed (the first of it there founds it).
+
+const DLG: &str = "dlg_0123456789abcdef";
+
+/// The three machines, each with a session in its clone of acme/atlas; the
+/// project's id once laptop and desk both hold a confirmed checkout of it.
+async fn three_in_atlas(root: &Path, lan: u16) -> (Host, Host, Host, String) {
+    let s = clone(&root.join("studio/home/src/atlas"), "git@github.com:acme/atlas.git", "main");
+    let l = clone(&root.join("laptop/home/work/atlas"), "https://github.com/acme/atlas", "main");
+    let d = clone(&root.join("desk/home/atlas"), "git@github.com:acme/atlas.git", "main");
+    let (a, b, c) = three(root, lan, [vec![sess(S1, "Add partial refunds", &s)], vec![sess(L1, "Fix the login form", &l)], vec![sess(D2, "Release notes", &d)]]).await;
+    let project = until_value("laptop and desk hold a checkout of acme/atlas", 20, || async {
+        let (on_b, on_c) = (projects(&b).await, projects(&c).await);
+        on_b.iter().find(|p| on_c.contains(p)).map(|p| json!(p))
+    })
+    .await;
+    (a, b, c, project.as_str().unwrap().to_string())
+}
+
+/// The projects `h` holds a confirmed checkout of, as its window lists
+/// them for a new intent.
+async fn projects(h: &Host) -> Vec<String> {
+    let (_, v) = h.window("GET", "/api/intents", Value::Null).await;
+    v["projects"].as_array().cloned().unwrap_or_default().iter().filter_map(|p| p["id"].as_str().map(str::to_string)).collect()
+}
+
+/// A host's device of the person's, as its state says.
+async fn device(h: &Host) -> String {
+    h.state().await["person"]["device"].as_str().unwrap().to_string()
+}
+
+/// A delegation for starts and answers, naming these devices, issued at
+/// `h`'s window (its presence and its signature), once every machine holds
+/// it.
+async fn delegate(h: &Host, id: &str, devices: Vec<String>, all: [&Host; 3]) {
+    let mut d = xenonet_net::identity::person::Delegation::standard(id.into(), now_ms() as i64 + 3_600_000);
+    let mut devices = devices;
+    devices.sort();
+    d.devices = xenonet_net::identity::person::DeviceSet::Only(devices);
+    h.svc.node().shared().identity().delegate(true, d, now_ms() as i64).unwrap();
+    for x in all {
+        until(&format!("{} holds {id}", x.name), 10, || async { x.svc.node().shared().identity().chain().person().is_some_and(|p| p.delegations.contains_key(id)) }).await;
+    }
+}
+
+/// `h`'s intent `id`, as its window lists it.
+async fn intent(h: &Host, id: &str) -> Value {
+    let (_, v) = h.window("GET", "/api/intents", Value::Null).await;
+    v["intents"].as_array().cloned().unwrap_or_default().into_iter().find(|i| i["id"] == id).unwrap_or(Value::Null)
+}
+
+async fn intent_is(h: &Host, id: &str, state: &str) {
+    until(&format!("{id} {state} at {}", h.name), 20, || async { intent(h, id).await["state"] == state }).await;
+}
+
+/// An intent signed by laptop's device at its window, as laptop makes one,
+/// but not sent: its row and intent.make's body.
+fn signed_intent(b: &Host, goal: &str, target: &str, project: &str, delegation: &str) -> (xenonet_store::intents::IntentRow, Value) {
+    let identity = b.svc.node().shared().identity().clone();
+    let now = now_ms() as i64;
+    let mut row = xenonet_store::intents::IntentRow {
+        id: String::new(),
+        network: b.svc.node().shared().network().unwrap().id.clone(),
+        person: identity.person_id().unwrap(),
+        device: identity.device_id().unwrap(),
+        machine: "laptop".into(),
+        delegation: delegation.into(),
+        project: project.into(),
+        app: "claude".into(),
+        target: target.into(),
+        goal: goal.into(),
+        until: now + 3_600_000,
+        state: "made".into(),
+        agent: None,
+        note: None,
+        outcome: None,
+        nonce: xenonet_id::codec::b64(&xenonet_id::codec::random::<16>().unwrap()),
+        authority: String::new(),
+        made_at: now,
+        ended_at: None,
+    };
+    let (resource, act) = xenonet_runtime::intents::intend_of(&row).unwrap();
+    row.id = xenonet_runtime::intents::id_of(&resource, &act);
+    let authority = xenonet_runtime::ground::authority(&identity, true, &resource, &act, "", now).unwrap();
+    let body = xenonet_runtime::intents::make_body(&row, &authority);
+    (row, body)
+}
+
+/// An entry of `from`'s feed, written now and handed to `to` alone.
+fn entry_to(from: &Host, to: &Host, kind: xenonet_net::feed::Kind, body: Value) {
+    let e = from.svc.node().shared().write_entry(kind, body).unwrap();
+    to.svc.node().shared().frame(&hand(from, to, &xenonet_net::node::entry_body(&e, None)));
+}
+
+fn assign(id: &str, target: &str) -> Value {
+    json!({ "schema": "network/intent/v1", "op": "assign", "intent": id, "target": target, "until": now_ms() as i64 + 3_600_000 })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intent_made_on_one_machine_is_worked_on_the_one_it_names_and_reports_back() {
+    use xenonet_net::feed::Kind as EntryKind;
+    let root = std::env::temp_dir().join(format!("xenonet-net-intents-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let [lan] = common::free_ports();
+    let (a, b, c, project) = three_in_atlas(&root, lan).await;
+    // A delegation naming laptop's and desk's devices, not studio's.
+    delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
+    let made = json!({ "goal": "hold-on: make the build green", "target": "desk", "project": project, "delegation": DLG, "hours": 1 });
+
+    // Signing as the person is the window's: from a terminal it needs a
+    // presence block, which this machine asks for only at its window.
+    let (s, v) = b.call("POST", "/api/intents", made.clone(), &[]).await;
+    assert_eq!(s, 403, "{v}");
+    let e = b.ctx.cores.intents.make(made.clone(), false).unwrap_err();
+    assert_eq!(e.status, Some(403));
+    assert!(e.message.contains("needs your presence"), "{}", e.message);
+    assert!(b.ctx.cores.intents.list().unwrap()["intents"].as_array().unwrap().is_empty(), "nothing was made");
+
+    // Made at laptop's window, worked on desk.
+    let (s, v) = b.window("POST", "/api/intents", made).await;
+    assert_eq!((s, v["state"].clone(), v["target"].clone()), (200, json!("assigned"), json!("desk")), "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (args, prompt) = ran(&c, 1).await;
+    assert!(prompt.starts_with(&format!("[XenoNet] This is an intent your user made at laptop's console ({id}), which runs here on their standing delegation {DLG}")), "{prompt}");
+    assert!(prompt.contains("\n\nhold-on: make the build green\n\n"), "{prompt}");
+    let run = format!("claude:{}", args[2]);
+    intent_is(&b, &id, "running").await;
+    intent_is(&a, &id, "running").await;
+    assert!(intent(&b, &id).await["agent"].as_str().is_some_and(|a| a.starts_with("agt_")));
+
+    // Its session notes how it goes; another session on desk is refused.
+    let (s, v) = as_agent(&c, &run, "POST", &format!("/api/intents/{id}/note"), json!({ "text": "half way" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("laptop has the note", 10, || async { intent(&b, &id).await["note"] == "half way" }).await;
+    let (s, v) = as_agent(&c, D2, "POST", &format!("/api/intents/{id}/done"), json!({ "outcome": "not mine to say" })).await;
+    assert_eq!(s, 403, "{v}");
+    assert_eq!(intent(&c, &id).await["state"], "running");
+    // Nor from laptop's own session: it's worked on desk.
+    let (s, _) = as_agent(&b, L1, "POST", &format!("/api/intents/{id}/done"), json!({ "outcome": "x" })).await;
+    assert_eq!(s, 409);
+    let (s, v) = as_agent(&c, &run, "POST", &format!("/api/intents/{id}/done"), json!({ "outcome": "The build is green on main." })).await;
+    assert_eq!(s, 200, "{v}");
+    intent_is(&b, &id, "done").await;
+    assert_eq!(intent(&b, &id).await["outcome"], "The build is green on main.");
+    intent_is(&a, &id, "done").await;
+
+    // An intent for studio, which the delegation doesn't name: laptop
+    // wouldn't make it, so it's written into laptop's feed as laptop would
+    // have. studio refuses it and says so.
+    let e = b.ctx.cores.intents.make(json!({ "goal": "x", "target": "studio", "project": project, "delegation": DLG }), true).unwrap_err();
+    assert_eq!(e.status, Some(409), "{}", e.message);
+    let (row, body) = signed_intent(&b, "tidy the docs", "studio", &project, DLG);
+    entry_to(&b, &a, EntryKind::Intent, body);
+    entry_to(&b, &a, EntryKind::Assign, assign(&row.id, "studio"));
+    intent_is(&a, &row.id, "failed").await;
+    assert!(intent(&a, &row.id).await["outcome"].as_str().unwrap().starts_with("studio refused it"), "{}", intent(&a, &row.id).await);
+    assert_eq!(fake_runs(&a).len(), 0, "studio started nothing");
+
+    // An assign from studio, which didn't make it, is dropped; laptop's
+    // starts it.
+    let runs = fake_runs(&c).len();
+    let (row, body) = signed_intent(&b, "hold-on: write the release notes", "desk", &project, DLG);
+    entry_to(&b, &c, EntryKind::Intent, body);
+    until("desk holds the intent", 10, || async { intent(&c, &row.id).await["state"] == "made" }).await;
+    entry_to(&a, &c, EntryKind::Assign, assign(&row.id, "desk"));
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!((intent(&c, &row.id).await["state"].clone(), fake_runs(&c).len()), (json!("made"), runs), "an assign not from the maker is dropped");
+    entry_to(&b, &c, EntryKind::Assign, assign(&row.id, "desk"));
+    let _ = ran(&c, runs + 1).await;
+    intent_is(&c, &row.id, "running").await;
+
+    // Revoked before the start: laptop's device signed it under a
+    // delegation it then ended; desk holds the end, and refuses it.
+    const DLG2: &str = "dlg_fedcba9876543210";
+    delegate(&b, DLG2, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
+    let (row, body) = signed_intent(&b, "hold-on: never", "desk", &project, DLG2);
+    b.svc.node().shared().identity().undelegate(true, DLG2, now_ms() as i64).unwrap();
+    until("desk holds the delegation's end", 10, || async { c.svc.node().shared().identity().chain().person().is_some_and(|p| !p.delegations.contains_key(DLG2)) }).await;
+    let runs = fake_runs(&c).len();
+    entry_to(&b, &c, EntryKind::Intent, body);
+    entry_to(&b, &c, EntryKind::Assign, assign(&row.id, "desk"));
+    intent_is(&c, &row.id, "failed").await;
+    let why = intent(&c, &row.id).await["outcome"].as_str().unwrap().to_string();
+    assert!(why.contains(DLG2), "{why}");
+    assert_eq!(fake_runs(&c).len(), runs, "nothing started under a revoked delegation");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn an_intents_run_survives_its_machine_restarting_and_a_cancel_stops_it_through_a_compaction() {
+    let root = std::env::temp_dir().join(format!("xenonet-net-intent-runs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let [lan] = common::free_ports();
+    let (a, b, c, project) = three_in_atlas(&root, lan).await;
+    delegate(&b, DLG, vec![device(&b).await, device(&c).await], [&a, &b, &c]).await;
+    let make = |goal: &str| json!({ "goal": goal, "target": "desk", "project": project, "delegation": DLG, "hours": 1 });
+
+    // desk restarts while the intent's run is under way: the run is still
+    // the intent's, nothing starts it again, and its session finishes it.
+    let (s, v) = b.window("POST", "/api/intents", make("hold-on: tag the release")).await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (args, _) = ran(&c, 1).await;
+    let run = format!("claude:{}", args[2]);
+    intent_is(&c, &id, "running").await;
+    let c = c.restart().await;
+    live(&c, 3).await;
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    assert_eq!((fake_runs(&c).len(), intent(&c, &id).await["state"].clone()), (1, json!("running")), "started once");
+    let (s, v) = as_agent(&c, &run, "POST", &format!("/api/intents/{id}/done"), json!({ "outcome": "Tagged v1.2." })).await;
+    assert_eq!(s, 200, "{v}");
+    intent_is(&b, &id, "done").await;
+
+    // A cancel at laptop's window stops desk's run; laptop compacts its
+    // feed, which keeps the intent and its cancel live until it ends, and
+    // desk starts nothing again.
+    let (s, v) = b.window("POST", "/api/intents", make("hold-on: rebuild the docs")).await;
+    assert_eq!(s, 200, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (args, _) = ran(&c, 2).await;
+    let run = format!("claude:{}", args[2]);
+    intent_is(&c, &id, "running").await;
+    let runner = c.world.router.resume.as_ref().unwrap().runner.clone();
+    assert!(runner.running(&run));
+    let (s, v) = b.window("POST", &format!("/api/intents/{id}/cancel"), json!({})).await;
+    assert_eq!((s, v["state"].clone()), (200, json!("cancelled")), "{v}");
+    intent_is(&c, &id, "cancelled").await;
+    until("desk's run stopped", 10, || async { !runner.running(&run) }).await;
+    let compact = b.svc.node().shared().compact_entry(|_| false).unwrap();
+    let live_set = compact.compact().unwrap().live;
+    assert!(live_set.len() >= 4, "the intents, their assigns and the cancel stay live until they end: {live_set:?}");
+    c.svc.node().shared().frame(&hand(&b, &c, &xenonet_net::node::entry_body(&compact, None)));
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    assert_eq!((intent(&c, &id).await["state"].clone(), fake_runs(&c).len()), (json!("cancelled"), 2));
+    assert_eq!(intent(&a, &id).await["state"], "cancelled");
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(root);
+}
