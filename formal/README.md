@@ -1,11 +1,12 @@
 # Formal models
 
-Quint models of the protocols where a bug costs most ([goal 9](../docs/design/goals.md), the [verification plan](../docs/design/direction.md#verification-plan)). There is one so far, `delivery.qnt`: how a receiver takes the entries of other machines' feeds.
+Quint models of the protocols where a bug costs most ([goal 9](../docs/design/goals.md), the [verification plan](../docs/design/direction.md#verification-plan)): `delivery.qnt`, how a receiver takes the entries of other machines' feeds, and `space.qnt`, how a holder of a space of shared context reads its chain.
 
 ```bash
-npm run formal                               # typecheck, scenarios, random runs, seeded bugs
-npm run formal -- --samples 100000 --steps 70  # more runs, longer ones
-npm run formal -- --seed 0x6c7445f854ee425f    # reproduce one run of the design
+npm run formal                                    # both models: typecheck, scenarios, random runs, seeded bugs
+npm run formal -- --model space                   # one model
+npm run formal -- --samples 100000 --steps 70     # more runs, longer ones
+npm run formal -- --model delivery --seed 0x6c7445f854ee425f  # reproduce one run of a design
 ```
 
 `scripts/formal.mjs` runs Quint through `npx` at a pinned version (`@informalsystems/quint@0.33.1`), so it isn't a package dependency. The first run fetches Quint and its Rust evaluator (into `~/.quint`). The `formal` job in `.github/workflows/ci.yml` runs the same command.
@@ -59,7 +60,7 @@ Each module at the end of `delivery.qnt` breaks one rule. `npm run formal` fails
 
 ## Timings
 
-On a 16-core M3 Max, `npm run formal` takes about 25 s: typecheck 4 s, scenarios 2 s, 20,000 runs of 50 steps of the design 7 to 13 s, and each seeded bug found in 1 to 3 s. 200,000 runs of 70 steps take about 100 s. The runs spread over the cores: held to four threads, a CI runner's count, the design's 20,000 runs take 16 s here, so the job should finish in a minute or two against its five-minute limit.
+On a 16-core M3 Max, `npm run formal` takes about 50 s. For `delivery.qnt`: typecheck 4 s, scenarios 2 s, 20,000 runs of 50 steps of the design 7 to 13 s, and each seeded bug found in 1 to 3 s. For `space.qnt`: typecheck and scenarios 4 s, 10,000 runs of 40 steps 9 s, each seeded bug 2 s. A holder's view is built once each time what it holds changes and kept in the state, which makes the space runs about 25 times faster than building it in every invariant. 200,000 runs of 70 steps take about 100 s. The runs spread over the cores: held to four threads, a CI runner's count, the design's 20,000 runs take 16 s here, so the job should finish in a minute or two against its five-minute limit.
 
 ## What isn't modelled
 
@@ -71,6 +72,35 @@ On a 16-core M3 Max, `npm run formal` takes about 25 s: typecheck 4 s, scenarios
 - A compact entry is checked against the header chain of the range it covers (the ids and predecessors of the entries in it). The model takes that chain from the set of signed entries, so commit 17 has to send it with a compact entry to a receiver that holds or applied entries in the range, or a fork there goes unseen.
 - Receivers keep the id of every kept entry they applied (`FeedStore::kept`), which the fork rule needs; compaction on the receiver's side isn't modelled.
 - Liveness and fairness (above).
+
+## What `space.qnt` models
+
+The holder is `Space::rebuild` and `Space::level` ([crates/xenonet-log/src/space.rs](../crates/xenonet-log/src/space.rs), phase 6 revisions 10, 11 and 14): sequenced entries (the owner's shares, appended by the curator of their epoch) and side entries (the owner's unshares, takes and moves) give the effective chain by one rule, whatever order they arrive in. Each epoch's run grows with entries its curator signed and stops at a fork; of the takes and moves for the next epoch whose base is on the run, the lowest id wins and the run is cut after its base. A subject's level is its last share on the chain, unless the holder holds an unshare of it that no share of it lists as seen.
+
+- **The owner** acts at any holder (one of their devices is there): shares through the curator, unshares, takes, and moves together with the curator.
+- **Holders** A, B and C each keep their own copy. A is the founding curator. A curator sequences only while its own view says it is the curator, and it may equivocate: sign a second entry at a place it already signed.
+- **The adversary** is any member. It signs entries as itself (a share without the owner's signature, a take that isn't the owner's) and serves any signed entry to any holder at any time, or never: partitions, withholding, replays and every order of arrival. It can't forge the owner.
+
+Bounds: three holders, two subjects, two levels, twelve signed entries, four sequenced entries on a chain, three curator epochs.
+
+| # | Name | Says |
+|---|---|---|
+| 1 | `noWideningWithoutOwner` | Every level a holder gives a subject is one the owner gave it. |
+| 2 | `curatorFromOwner` | Every curator a holder follows is the founder or one the owner named in a take or a move. |
+| 3 | `agreement` | Two holders with the same entries have the same chain, epoch and curator, so once a partition heals there is one curator everywhere, under moves, competing takes and a curator that kept sequencing after it was taken. |
+| 4 | `unshareStopsReads` | A holder that holds an unshare serves the subject nothing after it stored it, unless it held by then a share of the owner's that lists the unshare as seen. Stated per holder: one that doesn't hold the unshare yet may still serve (revision 14). |
+| 5 | `forkFreezes` | No entry on a holder's chain has another at its place, after the same entry, signed by the same curator in the same epoch. |
+
+The witnesses: a take won, a run frozen, competing takes held, two holders that met after competing takes, a subject shared again after an unshare, and a subject served before an unshare and refused after. The scenarios (`quint test --main=space`): two takes in a partition (`twoTakesTest`), a share made beside an unshare (`shareBesideUnshareTest`), a share and a take without the owner (`rogueTest`), a curator's fork and the take that moves on from it (`forkTest`), and a move whose old curator signs on (`moveTest`).
+
+| Module | Broken rule | Caught by |
+|---|---|---|
+| `bugNoOwnerCheck` | takes a share or a take without the owner's signature | `noWideningWithoutOwner`, `curatorFromOwner` |
+| `bugFirstTakeWins` | of competing takes, the one stored first wins | `agreement` |
+| `bugServeAfterUnshare` | serves by the last share, whatever unshare it holds | `unshareStopsReads` |
+| `bugNoForkFreeze` | takes one side of a curator's fork and goes on | `forkFreezes` |
+
+Not modelled: signatures, presence and person devices (an entry is the owner's or not; the policy matrix in `space/tests.rs` covers who signs and with what), binding and moving the owner, sharing with networks (a subject is a name), holders' limits on what they keep and serve, and liveness. The model and the code are in step: `Space` implements this rule today, and `space/tests.rs` runs the same gates (two takes in a partition, a share beside an unshare, a fork, a member that saw one branch) against it. Driving the code from the model's traces with quint-connect (`=0.1.2`, as the phase 6 plan names it) isn't done: it needs a Rust driver per model and its own dependency tree for one dev crate, more than this step was worth while the code and the model are this small. It's the next step for both models.
 
 ## Why there's no `quint verify`
 
