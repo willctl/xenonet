@@ -200,7 +200,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 if !on(&st, "waiting") {
                     break st;
                 }
-                if started.elapsed() > std::time::Duration::from_secs(11 * 60) {
+                if started.elapsed() > std::time::Duration::from_mins(11) {
                     return Err(Fail::new(t(&st, "message"), 1));
                 }
                 if !said && !flags.on("json") {
