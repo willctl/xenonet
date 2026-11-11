@@ -168,6 +168,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "net_envelope"
+path = "fuzz_targets/net_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "net_roster"
 path = "fuzz_targets/net_roster.rs"
 test = false

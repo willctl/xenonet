@@ -12,7 +12,9 @@
 // (the standard one, every device, a year) signed by that device with its
 // presence, as a widening is. The message frame carries an entry of
 // studio's feed (`network/message/v3`), signed by studio's machine key as
-// the roster lists it.
+// the roster lists it. `sealedEnvelope` carries that same entry in an
+// envelope (`xenonet-net/2`), sealed for laptop with a fixed ephemeral
+// key, and `envelope` is a live presence envelope from studio, unsealed.
 //
 // XENONET_WRITE_FIXTURES=1 cargo test -p xenonet-net --test known_answers
 // writes the file again.
@@ -24,6 +26,7 @@ use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer};
 use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
 use xenonet_net::codec::{b64, unb64_n};
+use xenonet_net::envelope::{Envelope, Me};
 use xenonet_net::feed::{FeedEntry, Kind, Writer};
 use xenonet_net::frame::{gateway_frame, host_frame, open_frame, Draft, Frame};
 use xenonet_net::keys::HostKey;
@@ -141,6 +144,12 @@ fn answers() -> Value {
     let b = block(&device, person::DELEGATE, dlg.digest(), 0x33, 1_792_512_200_000);
     dlg.sign(&device.public().id(), &device, Some(b)).unwrap();
     owner.offer(dlg).unwrap();
+    // The same entry in an envelope (xenonet-net/2), sealed for laptop's
+    // transport key and named for its machine signing key; and a live
+    // presence envelope from studio, unsealed.
+    let sealed = Envelope::seal_entry(&entry, &machine(8).id(), laptop.public(), Some(secret(11))).unwrap();
+    let presence = json!({ "op": "delta", "sessions": [{ "id": "claude:aaaaaaaa-0001", "state": "working" }] });
+    let live = Envelope::live(NET, &machine(7).id(), "presence", 1_792_512_345_679, &presence).unwrap();
     let req_body = br#"{"frames":[]}"#;
     let target = "/net/v1/frames";
     let headers = request::sign(&laptop, NET, "laptop", "POST", target, 1_792_512_345_000, "cmVxdWVzdC1ub25jZQ", req_body);
@@ -190,6 +199,14 @@ fn answers() -> Value {
         },
         "roster": r.to_json(),
         "rosterHead": r.head(),
+        "envelope": { "body": presence, "head": live.head(), "envelope": live.to_json() },
+        "sealedEnvelope": {
+            "ephemeralSecret": b64(&secret(11)),
+            "entry": entry.to_json(),
+            "sealingHead": sealed.sealing_head(),
+            "head": sealed.head(),
+            "envelope": sealed.to_json(),
+        },
     })
 }
 
@@ -245,6 +262,19 @@ fn the_fixtures_check_from_their_own_values() {
     assert_eq!(r.head().as_deref(), v["rosterHead"].as_str());
     // Without the owner's chain, the admit's presence can't be checked.
     assert!(Roster::from_json(&v["roster"]).is_err());
+    // The envelopes: the sealed one opens for laptop to the entry, checked
+    // against studio's machine key in the roster; the live one is taken
+    // from studio's own connection.
+    let view = r.view();
+    let sealed = Envelope::parse(&v["sealedEnvelope"]["envelope"]).unwrap();
+    assert_eq!(sealed.sealing_head(), v["sealedEnvelope"]["sealingHead"].as_str().unwrap());
+    assert_eq!(sealed.head(), v["sealedEnvelope"]["head"].as_str().unwrap());
+    let laptop_machine = view.member("laptop").unwrap().machine.id();
+    let opened = sealed.open_entry(&Me { machine: &laptop_machine, key: &laptop }, &view).unwrap();
+    assert_eq!(opened.to_json(), v["sealedEnvelope"]["entry"]);
+    let live = Envelope::parse(&v["envelope"]["envelope"]).unwrap();
+    assert_eq!(live.head(), v["envelope"]["head"].as_str().unwrap());
+    assert_eq!(live.open_live(&studio.public().sign, &view).unwrap(), v["envelope"]["body"]);
     let q = &v["request"];
     let h = |k: &str| q["headers"][k].as_str().map(str::to_string);
     let signed = request::Signed::from_headers(h).unwrap();

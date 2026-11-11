@@ -286,5 +286,73 @@
       ]
     }
   ],
-  "rosterHead": "37y5qg4bT_lQZW_sHcHh7z0LxIuQZP9YV0MZ6Xhw-I8"
+  "rosterHead": "37y5qg4bT_lQZW_sHcHh7z0LxIuQZP9YV0MZ6Xhw-I8",
+  "envelope": {
+    "body": {
+      "op": "delta",
+      "sessions": [
+        {
+          "id": "claude:aaaaaaaa-0001",
+          "state": "working"
+        }
+      ]
+    },
+    "head": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\nyjDlQc0mUfuVPWn-gBtvRhvkl2B5UDV1gWSDuZ0aVqE\npresence\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\n*\n-\n1792512345679\nlive\n0\nyjDlQc0mUfuVPWn-gBtvRhvkl2B5UDV1gWSDuZ0aVqE",
+    "envelope": {
+      "v": 2,
+      "network": "net_00112233445566778899aabbccddeeff",
+      "id": "yjDlQc0mUfuVPWn-gBtvRhvkl2B5UDV1gWSDuZ0aVqE",
+      "kind": "presence",
+      "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
+      "to": "*",
+      "pos": null,
+      "at": 1792512345679,
+      "class": "live",
+      "sealed": false,
+      "body": "eyJvcCI6ImRlbHRhIiwic2Vzc2lvbnMiOlt7ImlkIjoiY2xhdWRlOmFhYWFhYWFhLTAwMDEiLCJzdGF0ZSI6IndvcmtpbmcifV19"
+    }
+  },
+  "sealedEnvelope": {
+    "ephemeralSecret": "SwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws",
+    "entry": {
+      "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
+      "network": "net_00112233445566778899aabbccddeeff",
+      "inc": 1792512000000,
+      "seq": 1,
+      "kind": "message",
+      "at": 1792512345678,
+      "body": {
+        "schema": "network/send/v1",
+        "mid": "msg_00000000-0000-4000-8000-000000000001",
+        "sender": "claude:aaaaaaaa-0001",
+        "senderKind": "agent",
+        "target": "claude:bbbbbbbb-0001",
+        "body": "hello from studio",
+        "replyTo": null,
+        "scope": "direct",
+        "kind": "message",
+        "hops": 0,
+        "at": 1792512345678
+      },
+      "sig": "ynflkpcdODCch-H_xqUb019fHUj1Iw3YRJnexInpPEWSDF0cpn2GqZ55aCLfBYjyUVzBEt5yROrRRXKdUeXqBg"
+    },
+    "sealingHead": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\n1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY\nmessage\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\nxns1_gsapqx2xjzrx4stuvi4z2v7h75msycca\n1792512000000:1\n1792512345678\nloose\n1",
+    "head": "xenonet-net/2\nnet_00112233445566778899aabbccddeeff\n1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY\nmessage\nxns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue\nxns1_gsapqx2xjzrx4stuvi4z2v7h75msycca\n1792512000000:1\n1792512345678\nloose\n1\nvCykavYzX3qhYl6cDtn1NKUF0k028cEMGNLYeiyjuNs",
+    "envelope": {
+      "v": 2,
+      "network": "net_00112233445566778899aabbccddeeff",
+      "id": "1F1DdEa5dZE6RLgawoxYz7Klj1t9zACwZMy1iT0MjTY",
+      "kind": "message",
+      "author": "xns1_wkltapmsjvsnjz3o4rvwgfgnjfqosuue",
+      "to": "xns1_gsapqx2xjzrx4stuvi4z2v7h75msycca",
+      "pos": {
+        "inc": 1792512000000,
+        "seq": 1
+      },
+      "at": 1792512345678,
+      "class": "loose",
+      "sealed": true,
+      "body": "FWkxQqXBwbOUvxFRRY8z3KYqJVmQVuhrj8crnn0QXxaEqsUCx3C2N6YZFzxolcXlqB9hNkafJml9H7CNx_5U8ghlcyABLGHevA4TwC6LG_X9Q8vWsVuKnoP1Ez1pzPLIxTKefyUEZ8B_z0jZpRIggM4GBfacWeT7c9nxCXvnawC6eRpPmkddqP-rNPCcZxkeY3Mf-1Yyd9T6SSNscXavqWgXdHWEfpXqWIbOjf2B0oZI9OA_N5Ex6ZU1eN_VloltN87lqP16gQhGRaYBbFHDLBSA-4c1PB8x8qg3Z5sQUi2pPj4vz3zNn4xn9qZ2VmVvB6L_1Svdoa09W_kkI0-MB19Qdw5mZXD_0RjajM9finzvERpUJ77kRJgXNk1W-puWdWAVzVvYC1PA9ZDt5Kf02qWPyiEDYezz46uabHcyuk5YB4ajS3qFlVvyoxDMFG6zyp8uT3ItL54JMP0rZo6ErIBFwXodHdCY8tLZj3QXEP5nKUypmWEzlst5ZBKMNTWid_S07cGREdTO6D8YgeSUy0AOXr-p_-q6zimoFnjnBpwLuPvtdp0qkc6KG_WBbzrBKd8McFUscPjtXLP86pQmh-9lRLf2yjCCKWVeSBHK1KHC9th0EJ-VN50nMjDU9uaoea5Y9dKv5-gENx1Kp6X8O6m-714BKpD-UYk3rp8o3IUWuGYlvG3cQn_Dnq-qTCFL9r-JpvHy6MlMFwxHSsrvXLk-Kp1g1Gr51LVYf9ksJXJ76amH3ww7GfhFKlWBmENFy329tQ"
+    }
+  }
 }

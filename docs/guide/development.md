@@ -166,6 +166,7 @@ fuzz/run.sh lines 1800      # one target for 30 minutes
 | `state`, `hosts`, `misc` | `state.json`, frames from other machines, component packages, tokens and the remote actors' requests |
 | `tools` | What other tools print or keep: gh's and ssh's config, git's, ps, lsof, netstat, tmux, Codex's picks |
 | `net_frame`, `net_roster` | The network's frames and roster entries, checked against a roster and opened |
+| `net_envelope` | Envelopes (`xenonet-net/2`): decoded, opened for one machine and checked against the chain and the entry inside, and live ones read from one host's connection |
 | `net_request`, `net_bodies` | The gateway's routes, the answers a host reads from it, and the bodies the engine takes from other machines, read back through the engine's driver |
 | `net_relay` | The map between machines: a console's asks at a host's relay, the paths it serves, and the relay's answers at the console's hub |
 | `net_svc` | Services through the network: the paths, requests, answers, addresses and headers a host checks before it passes a request to a service it published, and before a program gets the answer |

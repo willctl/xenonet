@@ -478,6 +478,35 @@ xenonet-net/1
   may carry a service's own credential, are never queued either, and a
   host drops one older than two minutes (section 14).
 
+**The envelope** (`xenonet-net/2`, `crates/xenonet-net/src/envelope.rs`)
+is what carries one feed entry, or one live presence delta, between two
+machines, directly or through a mailbox or a holder. Its head is routing
+only, and nothing signs it: the network, the id (the feed entry's id, or
+a live body's hash), the kind, the author and the recipient (by their
+machine signing key ids, `*` for live), the place in the author's feed
+(`inc:seq`, `-` for live), the time, the class (`live`, `kept` or
+`loose`), whether it's sealed, and the body's hash. Nothing is wired to
+it yet: frames still carry the feeds.
+
+- Kept and loose envelopes are sealed for one recipient, as frames are,
+  with the head's first ten lines as HKDF info and as the associated
+  data. A mailbox or holder reads the head, but a changed line doesn't
+  open.
+- The entry inside is the authority. The receiver opens the envelope,
+  checks the entry's signature against the author's machine signing key
+  in its own copy of the chain, and drops the envelope if the head says
+  anything the entry doesn't. A holder that re-seals an entry for a
+  requester makes a new envelope around the same signed entry, which is
+  why the head has no signature.
+- Live envelopes are unsealed and never kept or forwarded: a receiver
+  takes one only from a connection whose peer is the author's transport
+  key.
+- A copy of an envelope taken already is refused, within a window of
+  recent ids. Past it, a feed still takes each entry once.
+
+`test/fixtures/net/known-answers.json` has a sealed envelope
+(`sealedEnvelope`) and a live one (`envelope`).
+
 **The roster** is the network's chain (`xenonet-roster/2`, the network
 policy of `crates/xenonet-log`, schema `network/roster-entry/v2`). Each
 entry holds:

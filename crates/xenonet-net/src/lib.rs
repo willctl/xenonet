@@ -6,6 +6,9 @@
 //!   to, in one owner-only file, and its key id (from `xenonet-id`).
 //! - `frame`: a frame on the wire (`network/frame/v1`), its head, its
 //!   signature and the sealing of its body.
+//! - `envelope`: the envelope (`xenonet-net/2`) that carries a feed entry,
+//!   sealed for one recipient, or a live presence delta: a head for
+//!   routing only, checked against the signed entry inside.
 //! - `roster`: the signed chain of hosts, and who may sign what.
 //! - `ticket`: the one-time code that lets one machine join.
 //! - `request`: how a host signs its requests to the gateway.
@@ -43,6 +46,7 @@ pub mod codec;
 pub mod dial;
 pub mod doctor;
 pub mod endpoint;
+pub mod envelope;
 pub mod files;
 pub mod frame;
 pub mod gateway;

@@ -18,7 +18,6 @@ use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer, VerifyingKey};
 use xenonet_log::feed::{Class, FeedEntry, Kind as FeedKind, Pos};
 use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
-use xenonet_net::persist::{Memory, Persist};
 use xenonet_model::ops::{Incoming, Sink};
 use xenonet_net::codec::b64;
 use xenonet_net::files::{Dir, NetFile, Pin, GATEWAY_DB, KEY};
@@ -27,6 +26,7 @@ use xenonet_net::gateway::Gateway;
 use xenonet_net::gwstore::{Caps, GwStore};
 use xenonet_net::keys::{HostKey, PublicKeys};
 use xenonet_net::node::{Node, Options, Shared, Timing};
+use xenonet_net::persist::{Memory, Persist};
 use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster};
 use xenonet_net::sink::SinkSlot;
 
@@ -327,8 +327,21 @@ pub fn sealing_differs(a: &Frame, b: &Frame) -> bool {
 /// field. Which, by `pick`.
 pub fn change_field(f: &Frame, pick: u8, v: Value) -> String {
     const FIELDS: [&str; 10] = ["v", "id", "seq", "kind", "from", "to", "at", "sealed", "body", "sig"];
-    let mut j = f.to_json();
-    let field = FIELDS[usize::from(pick) % FIELDS.len()];
+    change_json(f.to_json(), &FIELDS, pick, v)
+}
+
+/// Changes an object's JSON as `change_field` does, picking among its own
+/// fields: an envelope's, say.
+pub fn change_json_field(j: &Value, pick: u8, v: Value) -> String {
+    let fields: Vec<&str> = j.as_object().map(|m| m.keys().map(String::as_str).collect()).unwrap_or_default();
+    if fields.is_empty() {
+        return j.to_string();
+    }
+    change_json(j.clone(), &fields, pick, v)
+}
+
+fn change_json(mut j: Value, fields: &[&str], pick: u8, v: Value) -> String {
+    let field = fields[usize::from(pick) % fields.len()];
     match pick / 16 % 4 {
         0 => {
             if let Some(m) = j.as_object_mut() {
