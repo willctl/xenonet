@@ -248,3 +248,19 @@ fn the_fixtures_check_from_their_own_values() {
     let signed = request::Signed::from_headers(h).unwrap();
     assert!(signed.verify(laptop.public(), net, "POST", q["target"].as_str().unwrap(), q["body"].as_str().unwrap().as_bytes()));
 }
+
+#[test]
+fn each_hosts_endpoint_id_is_its_host_key() {
+    // The transport's endpoint id (iroh, on ed25519-dalek) from a host's
+    // seed is the `sign` key ring made from the same seed, so a member's
+    // chain entry names the endpoint to dial.
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(FILE).unwrap()).unwrap();
+    for h in v["hosts"].as_array().unwrap() {
+        let seed = unb64_n::<32>(h["signSeed"].as_str().unwrap()).unwrap();
+        let sign = unb64_n::<32>(h["sign"].as_str().unwrap()).unwrap();
+        assert_eq!(iroh::SecretKey::from_bytes(&seed).public().as_bytes(), &sign, "{}", h["id"]);
+        let key = HostKey::from_secrets(&seed, unb64_n::<32>(h["sealSecret"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(xenonet_net::endpoint::secret_key(&key).public().as_bytes(), &sign);
+        assert_eq!(xenonet_net::endpoint::peer_id(key.public()).0, sign);
+    }
+}

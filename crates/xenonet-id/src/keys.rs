@@ -59,6 +59,9 @@ impl PublicKeys {
 /// This host's private keys.
 pub struct HostKey {
     sign: Ed25519KeyPair,
+    // ring's key pair doesn't give its seed back, and the transport needs
+    // it (`transport_secret`).
+    seed: [u8; 32],
     seal: StaticSecret,
     public: PublicKeys,
 }
@@ -78,7 +81,7 @@ impl HostKey {
         let mut sign_pub = [0u8; 32];
         sign_pub.copy_from_slice(sign.public_key().as_ref());
         let public = PublicKeys { sign: sign_pub, seal: SealPublic::from(&seal).to_bytes() };
-        Ok(HostKey { sign, seal, public })
+        Ok(HostKey { sign, seed: *seed, seal, public })
     }
 
     /// New keys, from the system's random numbers.
@@ -92,6 +95,14 @@ impl HostKey {
 
     pub fn key_id(&self) -> String {
         self.public.key_id()
+    }
+
+    /// The Ed25519 seed, for the transport alone: the QUIC endpoint (iroh)
+    /// authenticates its handshakes with this key, and needs the raw
+    /// secret in this process to do it. Its public key is `public().sign`,
+    /// and that is the machine's endpoint id.
+    pub fn transport_secret(&self) -> [u8; 32] {
+        self.seed
     }
 
     /// An Ed25519 signature over `msg`.

@@ -26,9 +26,23 @@
 //! - `svc`: services a host publishes to the network, and requests to
 //!   other hosts' services, in `svc` frames.
 //! - `doctor`: what the doctor says about the network, from its files.
+//!
+//! The transport that replaces the gateway (phase 5), beside it until the
+//! node moves over:
+//!
+//! - `dial`: the `Dial` a transport implements, and the `Mesh` every
+//!   connection goes through (one per peer and protocol, crossing dials,
+//!   the networks a connection carries).
+//! - `admission`: who may hold a connection, on which protocol.
+//! - `endpoint`: the `Dial` over iroh, keyed by host.key: relays the
+//!   person names or none, the memory lookup and mDNS behind a setting,
+//!   and a door per protocol.
 
+pub mod admission;
 pub mod codec;
+pub mod dial;
 pub mod doctor;
+pub mod endpoint;
 pub mod files;
 pub mod frame;
 pub mod gateway;
