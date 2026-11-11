@@ -2,7 +2,7 @@
   "name": "xenonet",
   "displayName": "XenoNet",
   "version": "0.6.6",
-  "description": "Connects Claude Code sessions to XenoNet, so they can see each other, message each other and claim files. Install XenoNet first, since the plugin runs the xenonet command from your PATH.",
+  "description": "Connects Claude Code sessions to XenoNet, so they can see the other sessions and actors, message them, claim files and hand work to your other machines. Install XenoNet first, since the plugin runs the xenonet command from your PATH.",
   "author": {
     "name": "willctl",
     "url": "https://github.com/willctl"
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/willctl/xenonet",
   "repository": "https://github.com/willctl/xenonet",
   "license": "MIT",
-  "keywords": ["xenonet", "sessions", "coordination"]
+  "keywords": ["xenonet", "sessions", "coordination", "agents", "delegation"]
 }

@@ -3,7 +3,7 @@
   "productName": "XenoNet",
   "version": "0.6.6",
   "private": true,
-  "description": "The network for SI. See every Claude Code and Codex session on your machine on one live map. Sessions can message each other, claim files before editing, and wake agents running elsewhere.",
+  "description": "XenoNet helps people and bots take an intent to an outcome across machines. Claude Code, Codex and Grok Build sessions show on one live map, message each other, claim files and hand work to your other machines, and every actor works within a grant you set.",
   "author": "willctl",
   "license": "MIT",
   "type": "module",
