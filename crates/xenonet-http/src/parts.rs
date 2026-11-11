@@ -150,6 +150,9 @@ pub trait Network: Send + Sync {
     /// Revokes another of the person's devices: a lost machine. Asks them,
     /// so only from the window.
     fn revoke_device(&self, device: &str, at_window: bool) -> NetResult;
+    /// Takes a machine's feed again after a fork froze it (it signed two
+    /// entries at one place): the person's call, so only from the window.
+    fn unfreeze(&self, author: &str, at_window: bool) -> NetResult;
     fn svc_unpublish(&self, name: &str) -> NetResult;
     /// The port a service's target address names, when it's one.
     fn svc_port(&self, target: &str) -> Option<u16>;

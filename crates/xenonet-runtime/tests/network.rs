@@ -22,10 +22,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{Cores, Engine, State, R};
 use xenonet_api::wire::WireEnv;
+use xenonet_id::sign::Signer;
 use xenonet_log::network::{Member, View};
-use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
+use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, To};
+use xenonet_net::feed::{FeedEntry, Writer};
 use xenonet_net::ground::{Facts, Governance};
 use xenonet_net::identity::Identity;
+use xenonet_net::sink::{Arrived, Feeds};
 use xenonet_runtime::engine::EngineDriver;
 use xenonet_runtime::network;
 use xenonet_runtime::runtime::Runtime;
@@ -35,6 +38,7 @@ const A: &str = "claude:aaaaaaaa-0001";
 const A2: &str = "codex:aaaaaaaa-0002";
 const B: &str = "claude:bbbbbbbb-0001";
 const C: &str = "codex:cccccccc-0001";
+const NET: &str = "net_0123456789abcdef0123456789abcdef";
 
 fn now() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64)
@@ -53,9 +57,33 @@ struct Hub {
     titles: Mutex<Vec<String>>,
 }
 
+/// A machine's side of the stand-in: what it sends as messages,
+/// receipts and handoffs goes as entries of its feed, signed by its
+/// machine key, as xenonet-net makes them.
 struct FakeNet {
     host: String,
     hub: Arc<Hub>,
+    key: Arc<dyn Signer>,
+    writer: Mutex<Writer>,
+    /// The kept entries it wrote, for a want.
+    kept: Mutex<Vec<FeedEntry>>,
+}
+
+impl FakeNet {
+    fn new(host: &str, hub: Arc<Hub>, key: Arc<dyn Signer>) -> FakeNet {
+        let writer = Writer::start(key.public().id(), NET, now() as u64);
+        FakeNet { host: host.into(), hub, key, writer: Mutex::new(writer), kept: Mutex::new(Vec::new()) }
+    }
+
+    /// The next entry of this machine's feed.
+    fn entry(&self, kind: Kind, body: Value) -> FeedEntry {
+        let kind = xenonet_net::sink::entry_kind(kind).unwrap();
+        let e = self.writer.lock().unwrap().write(self.key.as_ref(), kind, now() as u64, body).unwrap();
+        if e.class() == xenonet_net::feed::Class::Kept {
+            self.kept.lock().unwrap().push(e.clone());
+        }
+        e
+    }
 }
 
 impl Net for FakeNet {
@@ -74,7 +102,20 @@ impl Net for FakeNet {
                 return Err(format!("{h} isn't in the roster"));
             }
         }
-        self.hub.sent.lock().unwrap().push((self.host.clone(), out.clone()));
+        // What the tests read of a message: its body, with the authority
+        // that goes beside it.
+        let mut seen = out.clone();
+        if let Some(a) = &out.authority {
+            seen.body["authority"] = a.clone();
+        }
+        self.hub.sent.lock().unwrap().push((self.host.clone(), seen));
+        let out = if out.kind.fed() {
+            let e = self.entry(out.kind, out.body.clone());
+            let to = if e.class() == xenonet_net::feed::Class::Kept { To::All } else { out.to };
+            Outgoing { to, kind: out.kind, body: json!({ "entry": e.to_json() }), authority: out.authority }
+        } else {
+            out
+        };
         let mut d = self.hub.drop.lock().unwrap();
         if *d > 0 {
             *d -= 1;
@@ -82,6 +123,13 @@ impl Net for FakeNet {
         }
         self.hub.queue.lock().unwrap().push_back((self.host.clone(), out));
         Ok(())
+    }
+    fn want(&self, host: &str, inc: u64, from: u64) {
+        let at = xenonet_net::feed::Pos::new(inc, from.saturating_sub(1));
+        for e in self.kept.lock().unwrap().iter().filter(|e| e.pos() > at) {
+            let out = Outgoing { to: To::Host(host.into()), kind: Kind::Handoff, body: json!({ "entry": e.to_json() }), authority: None };
+            self.hub.queue.lock().unwrap().push_back((self.host.clone(), out));
+        }
     }
 }
 
@@ -227,6 +275,7 @@ fn people(dir: &Path) -> (HashMap<String, Arc<Identity>>, View) {
 struct Net3 {
     hub: Arc<Hub>,
     worlds: HashMap<String, Arc<Runtime>>,
+    nets: HashMap<String, Arc<FakeNet>>,
     dir: PathBuf,
     detail: Detail,
 }
@@ -252,10 +301,32 @@ impl Net3 {
             };
             for t in to {
                 let Some(w) = self.worlds.get(&t).cloned() else { continue };
+                if out.kind.fed() {
+                    let a = self.arrived(&from, &out.body["entry"], out.authority.clone());
+                    tokio::task::spawn_blocking(move || network::entry_in(&w, a)).await.unwrap();
+                    continue;
+                }
                 let inc = Incoming { from: from.clone(), kind: out.kind, body: out.body.clone(), at: now(), from_window_host: true };
                 tokio::task::spawn_blocking(move || network::receive(&w, inc)).await.unwrap();
             }
         }
+    }
+
+    /// An entry from `from`, checked against its machine key, as the
+    /// network passes it on.
+    fn arrived(&self, from: &str, entry: &Value, authority: Option<Value>) -> Arrived {
+        let e = FeedEntry::parse(entry).unwrap().verify(&self.nets[from].key.public()).unwrap();
+        Arrived { host: from.into(), entry: e, authority: authority.unwrap_or_else(|| json!({})), window: true }
+    }
+
+    /// A body of `kind` that `from` sends `to` straight away, as a new entry
+    /// of `from`'s feed: its authority, if it says one, goes beside it.
+    async fn deliver(&self, from: &str, to: &str, kind: Kind, mut body: Value) {
+        let authority = body.as_object_mut().and_then(|o| o.remove("authority"));
+        let e = self.nets[from].entry(kind, body);
+        let a = self.arrived(from, &e.to_json(), authority);
+        let w = self.w(to).clone();
+        tokio::task::spawn_blocking(move || network::entry_in(&w, a)).await.unwrap();
     }
 
     async fn on(&self, host: &str, f: impl FnOnce(&Runtime) + Send + 'static) {
@@ -299,6 +370,7 @@ fn net3(name: &str) -> Net3 {
     let detail = Detail::default();
     let (identities, view) = people(&dir);
     let mut worlds = HashMap::new();
+    let mut nets = HashMap::new();
     for (host, sessions) in [
         (
             "studio",
@@ -333,11 +405,13 @@ fn net3(name: &str) -> Net3 {
         // The real adapters, as the binary installs them at start.
         xenonet_platforms::install();
         let w = xenonet_runtime::runtime(&cores, setup, &env).expect("the engine's parts");
-        network::set_net(&w, Arc::new(FakeNet { host: host.into(), hub: hub.clone() }));
+        let fake = Arc::new(FakeNet::new(host, hub.clone(), identities[host].machine_key().unwrap()));
+        network::set_net(&w, fake.clone());
+        nets.insert(host.to_string(), fake);
         xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Gov { machine: host.into(), view: view.clone(), identity: identities[host].clone() })));
         worlds.insert(host.to_string(), w);
     }
-    Net3 { hub, worlds, dir, detail }
+    Net3 { hub, worlds, nets, dir, detail }
 }
 
 fn ids(v: &Value) -> Vec<String> {
@@ -483,9 +557,9 @@ async fn the_hop_limit_counts_hosts_too() {
     let n = net3("hops");
     n.link_up().await;
     // A thread that's come five messages already, from studio.
-    let body = json!({ "schema": "network/message/v2", "mid": "msg_00000000-0000-4000-8000-000000000001", "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": "the fifth", "replyTo": null, "scope": "direct", "kind": "message", "hops": 5, "at": now() });
+    let body = json!({ "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000001", "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": "the fifth", "replyTo": null, "scope": "direct", "kind": "message", "hops": 5, "at": now() });
     let b2 = body.clone();
-    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: b2, at: now(), from_window_host: true })).await;
+    n.deliver("studio", "laptop", Kind::Message, b2).await;
     let got = n.e("laptop").inbox(B, Duration::ZERO).await.unwrap();
     let refused = n.e("laptop").send(B, json!({ "replyTo": got[0]["id"], "text": "the sixth" }), None).await.unwrap_err();
     assert_eq!(refused.code.as_deref(), Some("hops"), "{}", refused.message);
@@ -493,7 +567,7 @@ async fn the_hop_limit_counts_hosts_too() {
     let mut past = body;
     past["mid"] = json!("msg_00000000-0000-4000-8000-000000000002");
     past["hops"] = json!(6);
-    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: past, at: now(), from_window_host: true })).await;
+    n.deliver("studio", "laptop", Kind::Message, past).await;
     let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
     assert_eq!((r["state"].clone(), r["mid"].clone()), (json!("refused"), json!("msg_00000000-0000-4000-8000-000000000002")));
     assert_eq!(n.e("laptop").inbox(B, Duration::ZERO).await.unwrap(), json!([]));
@@ -669,7 +743,7 @@ async fn you_reach_a_session_on_another_machine_from_your_console() {
         f["mid"] = json!(format!("msg_00000000-0000-4000-8000-0000000000{tag}"));
         f["authority"] = authority;
         f["auth"] = json!({ "method": "window", "strength": "strong" });
-        n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: f, at: now(), from_window_host: true })).await;
+        n.deliver("studio", "laptop", Kind::Message, f).await;
         let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
         assert_eq!(r["state"], "refused", "{tag}");
     }
@@ -678,7 +752,7 @@ async fn you_reach_a_session_on_another_machine_from_your_console() {
     let mut f = frame.clone();
     f["mid"] = json!("msg_00000000-0000-4000-8000-0000000000b3");
     f["target"] = json!(C);
-    n.on("vm1", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: f, at: now(), from_window_host: true })).await;
+    n.deliver("studio", "vm1", Kind::Message, f).await;
     assert_eq!(n.sent("vm1", Kind::Receipt).pop().unwrap()["state"], "refused");
     assert_eq!(n.e("laptop").inbox(B, Duration::ZERO).await.unwrap(), json!([]));
 }
@@ -705,7 +779,7 @@ async fn another_host_keeps_only_so_much_here_and_as_the_schema_has_it() {
     for i in 0..101 {
         let body = json!({ "schema": "network/handoff/v1", "id": format!("hof_00000000-0000-4000-8000-{i:012}"), "op": "offer", "from": A, "to": { "agent": null, "repoKey": "github.com/acme/atlas", "host": null },
             "goal": "g".repeat(3000), "done": "d".repeat(9000), "next": null, "files": (0..300).map(|f| format!("src/{f}.ts")).collect::<Vec<_>>(), "branch": "main", "commit": "not-hex!", "by": null, "at": now() });
-        n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Handoff, body, at: now(), from_window_host: true })).await;
+        n.deliver("studio", "laptop", Kind::Handoff, body).await;
     }
     let open = n.w("laptop").store.with(|s| s.open_handoffs_from("studio", now()).unwrap());
     assert_eq!(open, 100.0);
@@ -742,8 +816,8 @@ async fn the_hop_limit_counts_the_thread_as_stored_here_whatever_the_sender_says
     })
     .await;
     // studio says it's the first hop; laptop knows better.
-    let body = json!({ "schema": "network/message/v2", "mid": "msg_00000000-0000-4000-8000-0000000000d7", "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": "and again", "replyTo": mid, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
-    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true })).await;
+    let body = json!({ "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-0000000000d7", "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": "and again", "replyTo": mid, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
+    n.deliver("studio", "laptop", Kind::Message, body).await;
     let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
     assert_eq!((r["state"].clone(), r["mid"].clone()), (json!("refused"), json!("msg_00000000-0000-4000-8000-0000000000d7")));
 }
@@ -825,8 +899,9 @@ async fn messages_from_one_host_reach_a_session_in_the_order_they_came() {
     // the sink keeps their order however busy the engine is.
     let sink = network::EngineSink::new(n.w("laptop"));
     for i in 0..20u32 {
-        let body = json!({ "schema": "network/message/v2", "mid": format!("msg_00000000-0000-4000-8000-{i:012}"), "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": format!("m{i}"), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
-        sink.receive(Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true });
+        let body = json!({ "schema": "network/send/v1", "mid": format!("msg_00000000-0000-4000-8000-{i:012}"), "sender": A, "senderKind": "agent", "target": B, "body": format!("m{i}"), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
+        let e = n.nets["studio"].entry(Kind::Message, body);
+        sink.entry(n.arrived("studio", &e.to_json(), None));
     }
     let mut heard: Vec<String> = Vec::new();
     let end = std::time::Instant::now() + Duration::from_secs(20);

@@ -1,15 +1,18 @@
 //! What this machine keeps of its network and its person
 //! (`xenonet_net::persist::Persist`), in the store: the network's row, its
-//! roster and each person's chain as chain entries, how the link stood,
-//! the services published, the presence blocks taken and the token roots'
-//! certificates (`xenonet_store::net`).
+//! roster and each person's chain as chain entries, how the link stood and
+//! where it stands in the gateway's stream, the services published, the
+//! presence blocks taken and the token roots' certificates
+//! (`xenonet_store::net`), and this machine's feed and how it stands with
+//! the others' (`xenonet_store::feed`).
 
 use serde_json::Value;
 use std::sync::Arc;
 use xenonet_id::codec::{b64, unb64_n};
+use xenonet_net::feed::{FeedEntry, Fork, Pos};
 use xenonet_net::files::{NetFile, Pin};
 use xenonet_net::identity::person::{self, PersonPolicy};
-use xenonet_net::persist::{Persist, Person, Seen};
+use xenonet_net::persist::{Persist, Person, Seen, WriterAt};
 use xenonet_net::roster::{self, NetworkPolicy};
 use xenonet_net::{NetError, R};
 use xenonet_store::net::{self as kept, Gateway, Network};
@@ -109,6 +112,34 @@ impl Persist for StorePersist {
     }
     fn put_token_roots(&self, certificates: &[Value]) -> R<()> {
         self.0.put_token_roots(certificates).map_err(store)
+    }
+    fn cursor(&self, network: &str) -> R<Option<(String, u64)>> {
+        self.0.link_cursor(network).map_err(store)
+    }
+    fn put_cursor(&self, network: &str, epoch: &str, seq: u64) -> R<()> {
+        self.0.put_link_cursor(network, epoch, seq).map_err(store)
+    }
+    fn feed_writer(&self, network: &str) -> R<Option<WriterAt>> {
+        Ok(self.0.feed_writer(network).map_err(store)?.map(|w| WriterAt { inc: w.inc, kept: w.kept, loose: w.loose, prev: w.prev }))
+    }
+    fn put_feed_writer(&self, network: &str, author: &str, at: WriterAt, kept: Option<&FeedEntry>) -> R<()> {
+        let at = xenonet_store::feed::WriterAt { inc: at.inc, kept: at.kept, loose: at.loose, prev: at.prev };
+        self.0.put_feed_writer(network, author, at, kept).map_err(store)
+    }
+    fn feed_out_after(&self, network: &str, after: Pos, limit: usize) -> R<Vec<FeedEntry>> {
+        self.0.feed_out_after(network, after, limit).map_err(store)
+    }
+    fn feed_ack(&self, network: &str, member: &str) -> R<Option<Pos>> {
+        self.0.feed_ack(network, member).map_err(store)
+    }
+    fn put_feed_ack(&self, network: &str, member: &str, at: Pos) -> R<()> {
+        self.0.put_feed_ack(network, member, at).map_err(store)
+    }
+    fn feed_heads(&self, network: &str) -> R<Vec<(String, Pos)>> {
+        self.0.feed_heads(network).map_err(store)
+    }
+    fn frozen_feeds(&self, network: &str) -> R<Vec<(String, Fork)>> {
+        Ok(self.0.frozen_feeds(network).map_err(store)?.into_iter().map(|f| (f.author, f.fork)).collect())
     }
 }
 

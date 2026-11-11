@@ -249,3 +249,83 @@ fn the_store_is_the_owners_alone() {
     assert_eq!(std::fs::metadata(dir.join(format!("{FILE}-wal"))).unwrap().permissions().mode() & 0o777, 0o600, "and its write-ahead log");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+mod feeds {
+    use super::*;
+    use crate::feed::WriterAt;
+    use xenonet_id::sign::Signer;
+    use xenonet_log::feed::{Feed, Kind, Offer, Pos, Verified, Writer};
+
+    const NET: &str = "net_00112233445566778899aabbccddeeff";
+
+    fn author() -> SeedSigner {
+        root(9)
+    }
+
+    fn entries(n: u64) -> Vec<Verified> {
+        let k = author();
+        let mut w = Writer::start(k.public().id(), NET, 1_792_000_000_000);
+        (0..n).map(|i| w.write(&k, Kind::Handoff, 1_792_000_000_000 + i, serde_json::json!({ "n": i })).unwrap().verify(&k.public()).unwrap()).collect()
+    }
+
+    fn seqs(o: &Offer) -> Vec<u64> {
+        match o {
+            Offer::New(es) => es.iter().map(|e| e.seq).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_feed_over_the_store_applies_each_entry_once_in_order() {
+        let db = Db::memory().unwrap();
+        let es = entries(3);
+        let id = author().public().id();
+        let mut f = Feed::new(db.feeds());
+        assert!(matches!(f.offer(es[1].clone()).unwrap(), Offer::Gap(_)));
+        assert_eq!(db.feed_held_count(NET).unwrap(), 1, "held, in the store");
+        assert_eq!(seqs(&f.offer(es[0].clone()).unwrap()), [1, 2], "the gap filled");
+        assert_eq!(f.offer(es[0].clone()).unwrap(), Offer::Duplicate);
+        assert_eq!(seqs(&f.offer(es[2].clone()).unwrap()), [3]);
+        assert_eq!(f.ack(&id, NET).unwrap().map(|a| (a.inc, a.high)), Some((es[0].inc, 3)));
+        assert_eq!(db.stored().unwrap(), 3, "each applied entry has its number in the store's order");
+        // A fork freezes the feed, which the store keeps until unfrozen.
+        let k = author();
+        let mut other = es[2].entry().clone();
+        other.body = serde_json::json!({ "n": "another" });
+        other.sign(&k).unwrap();
+        assert!(matches!(f.offer(other.verify(&k.public()).unwrap()).unwrap(), Offer::Fork(_)));
+        assert_eq!(db.frozen_feeds(NET).unwrap().len(), 1);
+        assert!(matches!(Feed::new(db.feeds()).offer(es[2].clone()).unwrap(), Offer::Frozen(_)), "a feed over the same store sees it frozen");
+        Feed::new(db.feeds()).unfreeze(&id, NET).unwrap();
+        assert_eq!(db.frozen_feeds(NET).unwrap(), []);
+    }
+
+    #[test]
+    fn what_a_transaction_applies_goes_with_it_or_not_at_all() {
+        let db = Db::memory().unwrap();
+        let es = entries(1);
+        let failed: Result<(), sql::SqlError> = db.transaction(|| {
+            let o = Feed::new(db.feeds()).offer(es[0].clone()).map_err(|e| sql::SqlError::from(rusqlite::Error::InvalidParameterName(e.message)))?;
+            assert_eq!(seqs(&o), [1]);
+            Err(sql::SqlError::from(rusqlite::Error::InvalidQuery))
+        });
+        assert!(failed.is_err());
+        assert_eq!(seqs(&Feed::new(db.feeds()).offer(es[0].clone()).unwrap()), [1], "rolled back, so it applies again");
+    }
+
+    #[test]
+    fn the_author_keeps_its_incarnation_and_kept_entries() {
+        let db = Db::memory().unwrap();
+        let k = author();
+        let mut w = Writer::start(k.public().id(), NET, 1_792_000_000_000);
+        let e = w.write(&k, Kind::Handoff, 1, serde_json::json!({})).unwrap();
+        let at = WriterAt { inc: w.inc(), kept: 1, loose: 0, prev: Pos::ORIGIN };
+        db.put_feed_writer(NET, &k.public().id(), at, Some(&e)).unwrap();
+        assert_eq!(db.feed_writer(NET).unwrap(), Some(at));
+        assert_eq!(db.feed_out_after(NET, Pos::ORIGIN, 10).unwrap(), std::slice::from_ref(&e));
+        assert_eq!(db.feed_out_after(NET, e.pos(), 10).unwrap(), []);
+        db.put_feed_ack(NET, "laptop", e.pos()).unwrap();
+        db.put_feed_ack(NET, "laptop", Pos::ORIGIN).unwrap();
+        assert_eq!(db.feed_ack(NET, "laptop").unwrap(), Some(e.pos()), "acks only move on");
+    }
+}

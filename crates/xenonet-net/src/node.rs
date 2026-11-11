@@ -3,24 +3,36 @@
 //! the gateway's own host, the gateway. It's what the engine sees through
 //! `xenonet_model::ops::Net`, and it calls the engine's `Sink` with
 //! what arrives, after checking each frame's signature against its own
-//! roster, opening it and dropping repeats.
+//! roster and opening it.
+//!
+//! **Its feed.** What the engine sends as messages, receipts and handoffs
+//! are entries of this machine's feed in the network (xenonet-log's
+//! `feed`), signed by its machine signing key and carried in `message`
+//! frames (`network/message/v3`): a message and a receipt loose, to the
+//! host they're for, and a handoff kept, to every member, in one gapless
+//! sequence. Where it writes, and the kept entries it wrote, are kept
+//! through `Persist`; each member acks the kept entries it applied, and
+//! what a member hasn't acked goes to it again when the link comes back,
+//! or when it asks with a `want` on a gap. An entry from another member is
+//! taken only when its author's key is that member's in the roster, and
+//! goes to the engine's `Feeds`, which applies it once.
 //!
 //! Nothing here waits on the gateway: `send` puts frames in the outbox and
-//! returns, and the link sends them when it can.
+//! returns, and the link sends them when it can. The outbox is in memory:
+//! what has to outlive a restart is sent again from the store.
 
 use crate::codec::{frame_id, is_b64};
-use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY};
+use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, KEY};
 use crate::frame::{host_frame, open_frame, Draft, Frame};
 use crate::gateway::{join_body, Gateway, NetRequest};
 use crate::ground::Facts;
 use crate::gwstore::{Caps, GwStore, TicketRow};
-use crate::hoststore::{HostStore, Size};
 use crate::identity::{self, Identity};
 use crate::keys::{HostKey, PublicKeys};
 use crate::link::{self, Transport};
-use crate::persist::Persist;
+use crate::persist::{Persist, WriterAt};
 use crate::roster::{Entry, HostRef, NetworkPolicy, Offered, Op, Removal, Roster};
-use crate::sink::{LogFn, SinkSlot};
+use crate::sink::{entry_kind, Arrived, LogFn, SinkSlot};
 use crate::svc::{self, Answer, Services};
 use crate::{request, ticket, NetError, R};
 use serde_json::{json, Value};
@@ -31,6 +43,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use xenonet_id::vault::Vault;
+use xenonet_log::feed::{Class, FeedEntry, Pos, Writer};
 use xenonet_model::ids::is_host_id;
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
 use xenonet_os::sync::{Locked, ReadWrite};
@@ -196,7 +209,13 @@ pub struct Shared {
     key: RwLock<Option<Arc<HostKey>>>,
     net: RwLock<Option<NetFile>>,
     roster: RwLock<Roster>,
-    store: Mutex<Option<HostStore>>,
+    /// The frames that wait for the gateway to take them.
+    outbox: Mutex<Outbox>,
+    /// The gateway's epoch this host last saw, and the last seq in it, as
+    /// `Persist` keeps them.
+    cursor: Mutex<(Option<String>, u64)>,
+    /// This machine's feed in its network, as its author.
+    writer: Mutex<Option<Writer>>,
     sink: Arc<SinkSlot>,
     status: Mutex<Status>,
     peers: Mutex<BTreeMap<String, Peer>>,
@@ -232,6 +251,92 @@ pub struct Shared {
     /// This host's own agents as its presence lists them, and whether each
     /// waits on the person, for its row: `peers` has only the others.
     me_agents: Mutex<BTreeMap<String, bool>>,
+}
+
+/// How full the outbox is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Size {
+    pub frames: u64,
+    pub bytes: u64,
+    pub oldest: Option<i64>,
+}
+
+/// The frames that wait for the gateway, oldest first: entries of this
+/// machine's feed, acks and wants, and the person's answers. A frame stays
+/// until the gateway takes it or refuses it for good; past the caps the
+/// oldest go, and are counted. Kept entries go again until each member
+/// acks them, and the engine sends again the messages that have no stored
+/// receipt, so what a full outbox or a restart loses comes back.
+#[derive(Default)]
+struct Outbox {
+    frames: VecDeque<(String, String, String, i64)>,
+    bytes: u64,
+    dropped: u64,
+}
+
+impl Outbox {
+    /// A frame for `host`, as its line, made at `now`.
+    fn push(&mut self, f: &Frame, host: &str, now: i64, caps: &Caps) {
+        let line = f.line().trim_end().to_string();
+        self.bytes += line.len() as u64;
+        self.frames.push_back((f.id.clone(), host.to_string(), line, now));
+        let floor = now - caps.keep_ms as i64;
+        while let Some((_, _, l, at)) = self.frames.front() {
+            if self.frames.len() as u64 <= caps.frames && self.bytes <= caps.bytes && *at >= floor {
+                break;
+            }
+            self.bytes -= l.len() as u64;
+            self.frames.pop_front();
+            self.dropped += 1;
+        }
+    }
+
+    /// The oldest frames, up to `max_bytes` (one at least) and
+    /// `max_frames`: (id, line).
+    fn batch(&self, max_bytes: u64, max_frames: u64) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut bytes = 0;
+        for (id, _, line, _) in self.frames.iter().take(usize::try_from(max_frames).unwrap_or(usize::MAX)) {
+            let size = line.len() as u64;
+            if !out.is_empty() && bytes + size > max_bytes {
+                break;
+            }
+            bytes += size;
+            out.push((id.clone(), line.clone()));
+        }
+        out
+    }
+
+    /// The gateway took these, or refused them for good.
+    fn done(&mut self, ids: &[String]) {
+        let mut bytes = self.bytes;
+        self.frames.retain(|(id, _, l, _)| {
+            let keep = !ids.contains(id);
+            if !keep {
+                bytes -= l.len() as u64;
+            }
+            keep
+        });
+        self.bytes = bytes;
+    }
+
+    /// Frames for `host` go: it was removed.
+    fn forget_host(&mut self, host: &str) {
+        self.frames.retain(|(_, h, _, _)| h != host);
+        self.bytes = self.frames.iter().map(|(_, _, l, _)| l.len() as u64).sum();
+    }
+
+    fn size(&self) -> Size {
+        Size { frames: self.frames.len() as u64, bytes: self.bytes, oldest: self.frames.front().map(|f| f.3) }
+    }
+}
+
+/// How many kept entries are read at a time to go to a member again.
+const RESEND: usize = 500;
+
+/// Where a writer stands, as `Persist` keeps it.
+fn writer_at(w: &Writer) -> WriterAt {
+    WriterAt { inc: w.inc(), kept: w.kept(), loose: w.loose(), prev: w.prev().unwrap_or(Pos::ORIGIN) }
 }
 
 /// A presence's agents folded into what a host had: all of them on a full
@@ -313,26 +418,26 @@ impl Recent {
     }
 }
 
-/// The reserved target a person's chain entries travel to, in `message`
-/// frames between machines: taken by the node, never by the engine.
+/// The reserved target a person's chain entries travel to, as message
+/// entries between machines: taken by the node, never by the engine.
 pub const PERSON_TARGET: &str = "xenonet:person";
 
-/// A `message` body to `xenonet:person` carrying `text`.
+/// A message entry's body to `xenonet:person` carrying `text`.
 fn person_body(text: &str) -> Value {
-    json!({
-        "schema": "network/message/v2",
-        "mid": format!("msg_{}", frame_id().map(|f| f.trim_start_matches("frm_").to_string()).unwrap_or_default()),
-        "sender": PERSON_TARGET,
-        "senderKind": "agent",
-        "target": PERSON_TARGET,
-        "body": text,
-        "replyTo": null,
-        "scope": "direct",
-        "kind": "message",
-        "hops": 0,
-        "at": now_ms() as i64,
-        "authority": {},
-    })
+    json!({ "target": PERSON_TARGET, "body": text })
+}
+
+/// What a message frame carries (`network/message/v3`).
+pub const MESSAGE_SCHEMA: &str = "network/message/v3";
+
+/// A message frame's body carrying `e`, with `authority` when its act
+/// rests on more than this machine's word.
+pub fn entry_body(e: &FeedEntry, authority: Option<&Value>) -> Value {
+    let mut b = json!({ "schema": MESSAGE_SCHEMA, "entry": e.to_json() });
+    if let Some(a) = authority.filter(|a| a.as_object().is_some_and(|o| !o.is_empty())) {
+        b["authority"] = a.clone();
+    }
+    b
 }
 
 fn not_in() -> NetError {
@@ -457,7 +562,7 @@ impl Shared {
             return;
         }
         let text = json!({ "op": "entries", "person": person, "entries": entries }).to_string();
-        if let Err(why) = self.send(Outgoing { to: To::All, kind: Kind::Message, body: person_body(&text) }) {
+        if let Err(why) = self.send(Outgoing::new(To::All, Kind::Message, person_body(&text))) {
             self.log("net.person", &format!("this person's new entries didn't go to the network: {why}"));
         }
     }
@@ -467,7 +572,7 @@ impl Shared {
     pub fn want_person(&self, host: &str, person: &str) {
         let from = self.identity.chain_of(person).map_or(0, |c| c.len());
         let text = json!({ "op": "want", "person": person, "from": from }).to_string();
-        let _ = self.send(Outgoing { to: To::Host(host.into()), kind: Kind::Message, body: person_body(&text) });
+        let _ = self.send(Outgoing::new(To::Host(host.into()), Kind::Message, person_body(&text)));
     }
 
     /// Who may start and wake sessions on `host`, as the chain's settings
@@ -509,7 +614,7 @@ impl Shared {
                 let entries = self.identity.since(person, from_n);
                 if !entries.is_empty() {
                     let text = json!({ "op": "entries", "person": person, "entries": entries }).to_string();
-                    let _ = self.send(Outgoing { to: To::Host(from.into()), kind: Kind::Message, body: person_body(&text) });
+                    let _ = self.send(Outgoing::new(To::Host(from.into()), Kind::Message, person_body(&text)));
                 }
                 false
             }
@@ -554,19 +659,21 @@ impl Shared {
         Some((rm.keys, rm))
     }
 
-    fn with_store<T>(&self, f: impl FnOnce(&HostStore) -> R<T>) -> R<T> {
-        match self.store.locked().as_ref() {
-            Some(s) => f(s),
-            None => Err(not_in()),
+    pub fn cursor(&self) -> (Option<String>, u64) {
+        self.cursor.locked().clone()
+    }
+
+    fn set_cursor(&self, epoch: &str, seq: u64) {
+        *self.cursor.locked() = (Some(epoch.to_string()), seq);
+        if let Some(net) = self.network() {
+            if let Err(e) = self.opts.persist.put_cursor(&net.id, epoch, seq) {
+                self.log("net.cursor", &format!("where this host stands in the gateway's stream wasn't kept: {}", e.message));
+            }
         }
     }
 
-    pub fn cursor(&self) -> (Option<String>, u64) {
-        self.with_store(HostStore::cursor).unwrap_or((None, 0))
-    }
-
     pub fn outbox(&self) -> Size {
-        self.with_store(HostStore::size).unwrap_or_default()
+        self.outbox.locked().size()
     }
 
     /// A request to the gateway, signed: the request and its nonce.
@@ -700,8 +807,10 @@ impl Shared {
         }
         let Some(net) = self.network() else { return };
         let s = self.status();
-        let o = self.outbox();
-        let dropped = self.with_store(|st| st.meta("dropped")).ok().flatten().and_then(|d| d.parse::<u64>().ok()).unwrap_or(0);
+        let (o, dropped) = {
+            let out = self.outbox.locked();
+            (out.size(), out.dropped)
+        };
         let gateway = self.gateway();
         let queues: Vec<Value> = gateway.as_ref().map(|g| g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect()).unwrap_or_default();
         let join_closed = gateway.as_ref().and_then(|g| g.join_closed_until(t)).map(|x| x as i64);
@@ -753,7 +862,7 @@ impl Shared {
         match e.op {
             Op::Remove => {
                 self.peers.locked().remove(&e.host.id);
-                let _ = self.with_store(|s| s.forget_host(&e.host.id));
+                self.outbox.locked().forget_host(&e.host.id);
                 if me.as_deref() == Some(e.host.id.as_str()) {
                     let by = e.signers.iter().map(|s| s.by.clone()).collect::<Vec<_>>();
                     self.set_removed(json!({ "by": by, "at": e.at, "n": e.n }));
@@ -862,13 +971,16 @@ impl Shared {
         }
         let epoch = body.get("epoch").and_then(Value::as_str).filter(|e| is_b64(e)).ok_or("the gateway's hello has no epoch")?;
         let (had, _) = self.cursor();
+        let mut lost = false;
         if had.as_deref() != Some(epoch) {
-            let _ = self.with_store(|s| s.set_cursor(epoch, 0));
+            self.set_cursor(epoch, 0);
             if had.is_some() {
                 // A new store at the gateway: what the old one held may be
-                // gone, so the engine sends again what has no receipt.
+                // gone, so the engine sends again what has no receipt, and
+                // the kept entries go again to whoever hasn't acked them.
                 self.log("net.epoch", "the gateway's queues are new: resuming from the start");
                 self.sink.gap();
+                lost = true;
             }
         }
         let now = self.now();
@@ -893,6 +1005,9 @@ impl Shared {
             self.set("live", None);
             self.sink.linked(true);
         }
+        if !was_live || lost {
+            self.feeds_linked();
+        }
         self.wake.notify_one();
         let behind = body.get("rosterN").and_then(Value::as_u64).is_some_and(|n| n > self.roster().len());
         Ok(behind)
@@ -910,7 +1025,7 @@ impl Shared {
         if let Some(seq) = f.seq {
             let (epoch, last) = self.cursor();
             if let Some(e) = epoch.filter(|_| seq > last) {
-                let _ = self.with_store(|s| s.set_cursor(&e, seq));
+                self.set_cursor(&e, seq);
             }
         }
         fetch
@@ -957,6 +1072,7 @@ impl Shared {
             "gap" => {
                 self.log("net.gap", &format!("the gateway let frames go: {body}"));
                 self.sink.gap();
+                self.feeds_linked();
                 false
             }
             "roster" => {
@@ -1114,10 +1230,11 @@ impl Shared {
         }
         let now = self.now();
         // The map's frames and services' are live: one older than RELAY_MS
-        // is dropped, and their ids are kept in memory until then rather
-        // than for the week.
-        let seen = if f.in_relay_batch() { !self.relay_ids.locked().take(&f.id, at, gw_now) } else { self.with_store(|s| s.seen(&f.id, now as i64)).unwrap_or(true) };
-        if seen {
+        // is dropped, and their ids are kept in memory until then. A feed
+        // entry is taken once by its place or id in the author's feed, and
+        // the rest are taken again harmlessly: presence by its counter,
+        // claims as a set, an answer once by its ask.
+        if f.in_relay_batch() && !self.relay_ids.locked().take(&f.id, at, gw_now) {
             return false;
         }
         let body = match open_frame(&net.id, key, f) {
@@ -1148,12 +1265,9 @@ impl Shared {
             self.svc_in(&f.from, body);
             return false;
         }
-        // A person's chain is this node's own: its entries, or a want.
-        if kind == Kind::Message && body.get("target").and_then(Value::as_str) == Some(PERSON_TARGET) {
-            if !self.decide_member(&f.from) {
-                return false;
-            }
-            return self.person_in(&f.from, &body);
+        // A message frame is a feed's: an entry, an ack or a want.
+        if kind == Kind::Message {
+            return self.message_in(&f.from, window, &body);
         }
         if kind == Kind::Presence && !self.note_presence(&f.from, &body) {
             return false;
@@ -1194,6 +1308,244 @@ impl Shared {
                 false
             }
         }
+    }
+
+    // ---------- the feed ----------
+
+    /// A message frame's body from `from`: an entry of its feed, which goes
+    /// to the engine's feeds (or, to `xenonet:person`, the person's chain
+    /// here), or its ack of or want for this machine's.
+    fn message_in(&self, from: &str, window: bool, body: &Value) -> bool {
+        let Some(net) = self.network() else { return false };
+        if body.get("schema").and_then(Value::as_str) != Some(MESSAGE_SCHEMA) {
+            self.log("net.frame", &format!("a message frame from {from} that isn't {MESSAGE_SCHEMA} was dropped"));
+            return false;
+        }
+        let place = |v: &Value, n: &str| -> Option<Pos> { Some(Pos::new(v.get("inc")?.as_u64()?, v.get(n)?.as_u64()?)) };
+        if let Some(at) = body.get("ack").and_then(|a| place(a, "high")) {
+            self.ack_in(&net, from, at);
+        }
+        if let Some(at) = body.get("want").and_then(|w| place(w, "from")) {
+            self.resend_to(&net, from, Pos::new(at.inc, at.seq.saturating_sub(1)));
+        }
+        let Some(entry) = body.get("entry") else { return false };
+        let (host, v) = match self.admit(&net, from, entry) {
+            Ok(a) => a,
+            Err(why) => {
+                self.log("net.feed", &why);
+                return false;
+            }
+        };
+        if v.kind == xenonet_log::feed::Kind::Message && v.body.get("target").and_then(Value::as_str) == Some(PERSON_TARGET) {
+            return self.decide_member(&host) && self.person_in(&host, &v.body);
+        }
+        let authority = body.get("authority").cloned().unwrap_or_else(|| json!({}));
+        self.sink.entry(Arrived { host, entry: v, authority, window });
+        false
+    }
+
+    /// An entry from `from`, taken only when its author is a member of the
+    /// network, by the machine signing key the chain lists for it, and it
+    /// checks against that key: the member's host id, and the entry. Its
+    /// time is shown, never a reason to drop it.
+    pub fn admit(&self, net: &NetFile, from: &str, entry: &Value) -> Result<(String, xenonet_log::feed::Verified), String> {
+        let e = FeedEntry::parse(entry).map_err(|e| format!("a feed entry from {from} was dropped: {}", e.message))?;
+        if e.network != net.id {
+            return Err(format!("a feed entry from {from} for another network was dropped"));
+        }
+        let member = {
+            let r = self.roster();
+            r.view_ref().and_then(|v| v.members.values().find(|m| m.machine.id() == e.author).map(|m| (m.id.clone(), m.machine.clone())))
+        };
+        let Some((host, key)) = member else {
+            return Err(format!("a feed entry from {from} whose author ({}) isn't a member of the network was refused", e.author));
+        };
+        // An entry comes from its author's own machine until the transport
+        // fetches feeds from any member that holds them (phase 5).
+        if host != from {
+            return Err(format!("{from} sent an entry of {host}'s feed, which was refused: entries come from their authors"));
+        }
+        let v = e.verify(&key).map_err(|e| format!("a feed entry from {from} was refused: {}", e.message))?;
+        Ok((host, v))
+    }
+
+    /// The writer of this machine's feed in `net`: as it was kept, or a new
+    /// one, kept before its first entry.
+    fn writer_in<'a>(&self, slot: &'a mut Option<Writer>, net: &NetFile) -> R<&'a mut Writer> {
+        if slot.is_none() {
+            let author = self.identity.machine_key()?.public().id();
+            let w = match self.opts.persist.feed_writer(&net.id)? {
+                Some(at) => Writer::resume(author, net.id.as_str(), at.inc, at.kept, at.loose, at.prev),
+                None => {
+                    let w = Writer::start(author.clone(), net.id.as_str(), self.now() as u64);
+                    self.opts.persist.put_feed_writer(&net.id, &author, writer_at(&w), None)?;
+                    w
+                }
+            };
+            *slot = Some(w);
+        }
+        slot.as_mut().ok_or_else(not_in)
+    }
+
+    /// The next entry of this machine's feed, signed by its machine signing
+    /// key, and kept (the writer's place, and a kept entry itself) before
+    /// it goes.
+    pub fn write_entry(&self, kind: xenonet_log::feed::Kind, body: Value) -> R<FeedEntry> {
+        let net = self.network().ok_or_else(not_in)?;
+        let key = self.identity.machine_key()?;
+        let mut slot = self.writer.locked();
+        let w = self.writer_in(&mut slot, &net)?;
+        let before = w.clone();
+        let e = w.write(key.as_ref(), kind, self.gateway_now().max(0.0) as u64, body)?;
+        let kept = (e.class() == Class::Kept).then_some(&e);
+        let done = e.well_formed().map_err(|err| NetError::bad(err.message)).and_then(|()| self.opts.persist.put_feed_writer(&net.id, &e.author, writer_at(w), kept));
+        if let Err(err) = done {
+            *w = before;
+            return Err(err);
+        }
+        Ok(e)
+    }
+
+    /// A frame of `body` for `to`, into the outbox.
+    fn queue(&self, net: &NetFile, key: &HostKey, to: &str, body: &Value) -> Result<(), String> {
+        let keys = {
+            let r = self.roster();
+            r.view_ref().and_then(|v| v.member(to).map(|m| m.keys)).ok_or_else(|| format!("{to} isn't in the network"))?
+        };
+        let d = Draft { network: &net.id, id: frame_id().map_err(|e| e.message)?, kind: Kind::Message.as_str(), from: &net.host, to, at: self.gateway_now() as i64 };
+        let f = host_frame(&d, key, &keys, body, None).map_err(|e| e.message)?;
+        self.outbox.locked().push(&f, to, self.now() as i64, &self.opts.outbox);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    /// A body the engine sends as an entry of this machine's feed: a loose
+    /// one to the host it's for (or every other host), a kept one to every
+    /// member, whoever the engine named.
+    fn send_entry(&self, net: &NetFile, key: &HostKey, out: Outgoing) -> Result<(), String> {
+        let kind = entry_kind(out.kind).ok_or("that isn't a feed's")?;
+        if !out.body.is_object() {
+            return Err(format!("a {} is a JSON object", out.kind.as_str()));
+        }
+        let others: Vec<String> = {
+            let r = self.roster();
+            let v = r.view_ref().ok_or("this machine's roster is empty")?;
+            let all = || v.members.keys().filter(|h| **h != net.host).cloned().collect::<Vec<_>>();
+            match (&out.to, kind.class()) {
+                (To::Host(h), Class::Loose) if *h == net.host => return Err("that's this machine".into()),
+                (To::Host(h), Class::Loose) if v.member(h).is_none() => return Err(format!("{h} isn't in the network")),
+                (To::Host(h), Class::Loose) => vec![h.clone()],
+                _ => all(),
+            }
+        };
+        let e = self.write_entry(kind, out.body).map_err(|e| e.message)?;
+        let body = entry_body(&e, out.authority.as_ref());
+        for to in others {
+            self.queue(net, key, &to, &body)?;
+        }
+        Ok(())
+    }
+
+    /// The kept entries `host` hasn't got, from after `after`: all of them,
+    /// a batch at a time.
+    fn resend_to(&self, net: &NetFile, host: &str, mut after: Pos) {
+        let Some(key) = self.key() else { return };
+        loop {
+            let entries = match self.opts.persist.feed_out_after(&net.id, after, RESEND) {
+                Ok(e) => e,
+                Err(e) => {
+                    self.log("net.feed", &format!("this machine's feed couldn't be read to send again: {}", e.message));
+                    return;
+                }
+            };
+            let Some(last) = entries.last().map(FeedEntry::pos) else { return };
+            for e in &entries {
+                if let Err(why) = self.queue(net, &key, host, &entry_body(e, None)) {
+                    self.log("net.feed", &format!("an entry for {host} wasn't queued again: {why}"));
+                    return;
+                }
+            }
+            if entries.len() < RESEND {
+                return;
+            }
+            after = last;
+        }
+    }
+
+    /// `from` holds this machine's feed up to `at`. When that's past what
+    /// this machine wrote, its store was restored from a backup: it writes
+    /// from a new incarnation from now on, so it never signs a second entry
+    /// at a place the others hold.
+    fn ack_in(&self, net: &NetFile, from: &str, at: Pos) {
+        if let Err(e) = self.opts.persist.put_feed_ack(&net.id, from, at) {
+            self.log("net.feed", &format!("{from}'s ack wasn't kept: {}", e.message));
+        }
+        let mut slot = self.writer.locked();
+        let Ok(w) = self.writer_in(&mut slot, net) else { return };
+        if at.inc < w.inc() || (at.inc == w.inc() && at.seq <= w.kept()) {
+            return;
+        }
+        let Ok(key) = self.identity.machine_key() else { return };
+        let author = key.public().id();
+        let fresh = Writer::restore(author.clone(), net.id.as_str(), w.head(), at.inc.max(w.inc()), self.now() as u64);
+        match self.opts.persist.put_feed_writer(&net.id, &author, writer_at(&fresh), None) {
+            Ok(()) => {
+                self.log("net.feed", &format!("{from} holds more of this machine's feed than it has: its store was restored, so it writes from a new incarnation"));
+                *w = fresh;
+            }
+            Err(e) => self.log("net.feed", &format!("a new incarnation wasn't kept: {}", e.message)),
+        }
+    }
+
+    /// The link came back, or the gateway lost frames: each member gets the
+    /// kept entries it hasn't acked, and hears how far this machine holds
+    /// its feed, so one restored from a backup learns it before it writes.
+    fn feeds_linked(&self) {
+        let Some(net) = self.network() else { return };
+        let members: Vec<(String, String)> = {
+            let r = self.roster();
+            r.view_ref().map(|v| v.members.values().filter(|m| m.id != net.host).map(|m| (m.id.clone(), m.machine.id())).collect()).unwrap_or_default()
+        };
+        for (host, _) in &members {
+            let after = self.opts.persist.feed_ack(&net.id, host).ok().flatten().unwrap_or(Pos::ORIGIN);
+            self.resend_to(&net, host, after);
+        }
+        let heads = self.opts.persist.feed_heads(&net.id).unwrap_or_default();
+        for (author, at) in heads {
+            if let Some((host, _)) = members.iter().find(|(_, k)| *k == author) {
+                Net::ack(self, host, at.inc, at.seq);
+            }
+        }
+    }
+
+    /// Takes a member's feed again after a fork froze it, keeping what this
+    /// machine had: the person's, from the window alone, since a fork is a
+    /// machine signing two things at one place and only they can say which
+    /// machine to trust again.
+    pub fn unfreeze(&self, author: &str, at_window: bool) -> R<Value> {
+        if !at_window {
+            return Err(NetError::new(403, "window", "unfreezing a machine's feed is yours, so it's done from XenoNet's window"));
+        }
+        let net = self.network().ok_or_else(not_in)?;
+        if !self.opts.persist.frozen_feeds(&net.id)?.iter().any(|(a, _)| a == author) {
+            return Err(NetError::new(404, "not-frozen", format!("no feed from {author} is frozen here")));
+        }
+        let applied = self.sink.unfreeze(author, &net.id).map_err(NetError::internal)?;
+        self.log("net.feed", &format!("you unfroze {author}'s feed: {applied} held entries applied"));
+        Ok(json!({ "unfrozen": author, "applied": applied }))
+    }
+
+    /// The members' feeds a fork froze here, as the state lists them.
+    fn frozen(&self, net: &NetFile) -> Vec<Value> {
+        let frozen = self.opts.persist.frozen_feeds(&net.id).unwrap_or_default();
+        let r = self.roster();
+        frozen
+            .into_iter()
+            .map(|(author, fork)| {
+                let host = r.view_ref().and_then(|v| v.members.values().find(|m| m.machine.id() == author).map(|m| m.id.clone()));
+                json!({ "author": author, "host": host, "at": { "inc": fork.at.inc, "seq": fork.at.seq } })
+            })
+            .collect()
     }
 
     /// This host's own presence on its way out: what it says of its agents
@@ -1240,7 +1592,7 @@ impl Shared {
     /// takes only as one.
     pub fn next_batch(&self) -> Option<Batch> {
         let volatile: Vec<Frame> = std::mem::take(&mut *self.volatile.locked());
-        let queued = self.with_store(|s| s.batch(BATCH_BYTES, BATCH_FRAMES)).unwrap_or_default();
+        let queued = self.outbox.locked().batch(BATCH_BYTES, BATCH_FRAMES);
         let (epoch, seq) = self.cursor();
         let ack = epoch.map_or(Value::Null, |e| json!({ "epoch": e, "seq": seq }));
         if volatile.is_empty() && queued.is_empty() {
@@ -1309,7 +1661,7 @@ impl Shared {
             }
         }
         done.retain(|id| b.ids.contains(id));
-        let _ = self.with_store(|s| s.done(&done));
+        self.outbox.locked().done(&done);
         self.write_link(false);
     }
 
@@ -1574,6 +1926,20 @@ impl Net for Shared {
         self.peers.locked().get(host).is_some_and(|p| p.can.iter().any(|c| c == what))
     }
 
+    fn ack(&self, host: &str, inc: u64, high: u64) {
+        let (Some(net), Some(key)) = (self.network(), self.key()) else { return };
+        if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "ack": { "inc": inc, "high": high } })) {
+            self.log("net.feed", &format!("an ack for {host} wasn't queued: {why}"));
+        }
+    }
+
+    fn want(&self, host: &str, inc: u64, from: u64) {
+        let (Some(net), Some(key)) = (self.network(), self.key()) else { return };
+        if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "want": { "inc": inc, "from": from } })) {
+            self.log("net.feed", &format!("a want for {host} wasn't queued: {why}"));
+        }
+    }
+
     fn hosts(&self) -> Vec<Host> {
         let Some(net) = self.network() else { return Vec::new() };
         let view = self.roster().view();
@@ -1604,6 +1970,11 @@ impl Net for Shared {
         if out.kind == Kind::Relay && body.to_string().len() > RELAY_BODY {
             return Err(format!("a relay body is at most {} MiB", RELAY_BODY >> 20));
         }
+        if out.kind.fed() {
+            let r = self.send_entry(&net, &key, Outgoing { body, ..out });
+            self.wake.notify_one();
+            return r;
+        }
         let targets: Vec<(String, PublicKeys)> = {
             let r = self.roster();
             let v = r.view_ref().ok_or("this machine's roster is empty")?;
@@ -1620,8 +1991,7 @@ impl Net for Shared {
             let d = Draft { network: &net.id, id, kind: out.kind.as_str(), from: &net.host, to: &to, at };
             let f = host_frame(&d, &key, &keys, &body, None).map_err(|e| e.message)?;
             if out.kind.queued() {
-                let line = f.line();
-                self.with_store(|s| s.push(&f.id, &to, &f.kind, line.trim_end(), now, &self.opts.outbox)).map_err(|e| e.message)?;
+                self.outbox.locked().push(&f, &to, now, &self.opts.outbox);
             } else if self.is_live() {
                 // Not kept while the link is down: a full set goes, or a
                 // console asks again, once it's back.
@@ -1650,12 +2020,13 @@ impl Node {
         let identity = Identity::open(dir.identity_dir(), opts.persist.clone(), opts.vault.clone())?;
         let policy = NetworkPolicy::with(identity.clone());
         let net = dir.read_network()?;
-        let (key, roster, store) = match &net {
+        let (key, roster, cursor) = match &net {
             Some(n) => {
                 let key = HostKey::load(&dir.file(KEY))?.ok_or_else(|| NetError::internal("this host's key is missing"))?;
-                (Some(Arc::new(key)), dir.read_roster(&n.id, policy)?, Some(HostStore::open(&dir.file(HOST_DB))?))
+                let cursor = opts.persist.cursor(&n.id)?.map_or((None, 0), |(e, s)| (Some(e), s));
+                (Some(Arc::new(key)), dir.read_roster(&n.id, policy)?, cursor)
             }
-            None => (None, Roster::with_policy(policy), None),
+            None => (None, Roster::with_policy(policy), (None, 0)),
         };
         let services = Services::open(opts.persist.clone());
         let shared = Arc::new_cyclic(|this| Shared {
@@ -1665,7 +2036,9 @@ impl Node {
             key: RwLock::new(key),
             net: RwLock::new(net),
             roster: RwLock::new(roster),
-            store: Mutex::new(store),
+            outbox: Mutex::new(Outbox::default()),
+            cursor: Mutex::new(cursor),
+            writer: Mutex::new(None),
             sink,
             status: Mutex::new(Status::default()),
             peers: Mutex::new(BTreeMap::new()),
@@ -1742,10 +2115,6 @@ impl Node {
             link::http(address)?
         };
         tasks.extend(link::spawn(n.clone(), transport));
-        let store = n.store.locked();
-        if let Some(s) = store.as_ref() {
-            let _ = s.prune(n.now() as i64);
-        }
         *self.tasks.locked() = tasks;
         Ok(())
     }
@@ -1782,8 +2151,9 @@ impl Node {
         // The network's row before its roster, which is kept under it.
         n.dir.write_network(&net)?;
         n.dir.write_roster(&net.id, &roster)?;
-        let store = HostStore::open(&n.dir.file(HOST_DB))?;
-        *n.store.locked() = Some(store);
+        *n.outbox.locked() = Outbox::default();
+        *n.cursor.locked() = (None, 0);
+        *n.writer.locked() = None;
         *n.key.writing() = Some(Arc::new(key));
         *n.roster.writing() = roster;
         *n.net.writing() = Some(net);
@@ -1967,7 +2337,9 @@ impl Node {
         if let Some(g) = gateway {
             g.close();
         }
-        *n.store.locked() = None;
+        *n.outbox.locked() = Outbox::default();
+        *n.cursor.locked() = (None, 0);
+        *n.writer.locked() = None;
         n.dir.forget()?;
         *n.key.writing() = None;
         *n.roster.writing() = Roster::with_policy(NetworkPolicy::with(n.identity.clone()));
@@ -2335,6 +2707,7 @@ impl Node {
             "outbox": { "frames": o.frames, "bytes": o.bytes, "oldest": o.oldest },
             "rosterHead": head,
             "rosterMismatch": n.roster_mismatch(),
+            "frozen": n.frozen(&net),
             "titlesOnly": net.titles_only,
             "shareLoad": net.share_load,
             "start": reach.start,

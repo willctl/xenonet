@@ -9,12 +9,15 @@
 //! - `roster`: the signed chain of hosts, and who may sign what.
 //! - `ticket`: the one-time code that lets one machine join.
 //! - `request`: how a host signs its requests to the gateway.
-//! - `gwstore` and `hoststore`: the gateway's queues and a host's outbox.
+//! - `gwstore`: the gateway's queues.
 //! - `gateway`: the gateway's routes, `/net/v1/…`, over any transport.
 //! - `link`: a host's link to its gateway, with backoff, the clock
 //!   offset, epochs and the long-poll fallback.
 //! - `node`: this machine in its network, behind
-//!   `xenonet_model::ops::Net`, calling a `Sink`.
+//!   `xenonet_model::ops::Net`, calling a `Sink`: its own feed in the
+//!   network as its author (xenonet-log's `feed`), whose entries carry
+//!   messages, receipts and handoffs, and the other members' entries,
+//!   checked against their keys in the roster, to the engine's `Feeds`.
 //! - `identity`: the person on this machine: their chain, device key,
 //!   sealed root, the people's chains it holds, the presence it took.
 //! - `ground`: the facts this machine decides incoming acts on
@@ -31,7 +34,6 @@ pub mod frame;
 pub mod gateway;
 pub mod ground;
 pub mod gwstore;
-pub mod hoststore;
 pub mod identity;
 pub mod keys;
 pub mod link;
@@ -43,6 +45,10 @@ pub mod roster;
 pub mod sink;
 pub mod svc;
 pub mod ticket;
+
+/// The feeds (xenonet-log's), as the network carries them, for the engine
+/// that applies their entries.
+pub use xenonet_log::feed;
 
 use std::fmt;
 

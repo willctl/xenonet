@@ -17,6 +17,8 @@
 //!   into the simulated outbox while its host is away;
 //! - the person's devices in the state, and revoking one from the window
 //!   (POST /api/net/devices/revoke);
+//! - a member's feed a fork froze (net-frozen), and unfreezing it from the
+//!   window (POST /api/net/feeds/unfreeze);
 //! - the services this machine publishes (GET /api/net/svc, and from the
 //!   window POST /api/net/svc/publish and svc/unpublish);
 //! - GET /api/system?hosts=1, with a made-up reading for each other host,
@@ -36,13 +38,15 @@ use xenonet_model::ids::{is_host_id, parse_qualified};
 use xenonet_os::sync::Locked;
 
 /// The simulations, for the console tools' list.
-pub const KINDS: [&str; 8] = ["net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting", "net-approval"];
+pub const KINDS: [&str; 9] = ["net-none", "net-founder", "net-member", "net-gateway-down", "net-ticket", "net-mismatch", "net-remote-waiting", "net-approval", "net-frozen"];
 
 const NETWORK_ID: &str = "net_5d1e0c7a9b3f4e2d8c6a1b0f9e7d3c25";
 const ADDRESS: &str = "gw.example.net";
 const ROSTER_HEAD: &str = "c2ltdWxhdGVkLXJvc3Rlci1oZWFkLTA0";
 const PROPOSAL_ID: &str = "c2ltdWxhdGVkLWFkZC1kZW4tYXMtd2luZG93";
 const PERSON_ID: &str = "prs_simulatedpersonofthehomenetwork2";
+/// laptop's machine signing key, as a frozen feed names its author.
+const LAPTOP_SIGNING: &str = "xns1_simulatedlaptopsigningkeysofhome";
 const TICKET_MS: f64 = 10.0 * 60e3;
 const MAX_TICKETS: usize = 5;
 const MAX_TEXT: usize = 16000;
@@ -228,6 +232,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreE
             | "/api/net/leave"
             | "/api/net/approve"
             | "/api/net/devices/revoke"
+            | "/api/net/feeds/unfreeze"
             | "/api/net/svc/publish"
             | "/api/net/svc/unpublish",
         )
@@ -457,7 +462,7 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
         return Some((s, vec![]));
     }
     let member = matches!(kind, "net-member" | "net-gateway-down");
-    if !member && !matches!(kind, "net-founder" | "net-ticket" | "net-mismatch" | "net-remote-waiting" | "net-approval") {
+    if !member && !matches!(kind, "net-founder" | "net-ticket" | "net-mismatch" | "net-remote-waiting" | "net-approval" | "net-frozen") {
         return None;
     }
     let down = kind == "net-gateway-down";
@@ -523,6 +528,9 @@ fn made_up_with(kind: &str, you_at: Option<&str>, titles_only: bool, now: f64) -
     match kind {
         "net-ticket" => state["tickets"] = json!([{ "host": "desk", "window": false, "expires": now + 8.5 * MINUTE }]),
         "net-mismatch" => state["rosterMismatch"] = json!(["laptop"]),
+        // laptop signed two different entries at one place in its feed:
+        // nothing more from it is taken until you unfreeze it.
+        "net-frozen" => state["frozen"] = json!([{ "author": LAPTOP_SIGNING, "host": "laptop", "at": { "inc": 1_794_400_000_000_u64, "seq": 7 } }]),
         // laptop, a window host but not the founder, signed den in as a
         // window host: that waits for the founder or a second window host.
         "net-approval" => state["proposals"] = json!([{ "id": PROPOSAL_ID, "op": "add", "host": "den", "window": true, "gateway": null, "signers": ["laptop"], "at": now - 40e3 }]),
@@ -821,6 +829,16 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
             }
             d["active"] = json!(false);
             Reply::json(200, json!({ "revoked": device }))
+        }
+        "/api/net/feeds/unfreeze" => {
+            if !in_network {
+                return outside();
+            }
+            let author = body.get("author").and_then(Value::as_str).unwrap_or("");
+            let Some(list) = sim.state["frozen"].as_array_mut() else { return fail(404, "not-frozen", format!("no feed from {author} is frozen here")) };
+            let Some(i) = list.iter().position(|f| f["author"] == author) else { return fail(404, "not-frozen", format!("no feed from {author} is frozen here")) };
+            list.remove(i);
+            Reply::json(200, json!({ "unfrozen": author, "applied": 0 }))
         }
         "/api/net/svc/publish" => {
             if !in_network {
@@ -1223,6 +1241,18 @@ mod tests {
         assert_eq!(made_up("net-none", None, now).unwrap().0["network"], Value::Null);
         let (a, _) = made_up("net-approval", None, now).unwrap();
         assert_eq!((a["proposals"][0]["host"].clone(), a["proposals"][0]["signers"].clone()), (json!("den"), json!(["laptop"])));
+    }
+
+    #[test]
+    fn a_frozen_feed_is_unfrozen_by_its_author_once() {
+        let now = 1.8e12;
+        let mut s = sim("net-frozen");
+        well_formed(&s.state);
+        assert_eq!(s.state["frozen"][0]["host"], "laptop");
+        assert_eq!(apply(&mut s, "/api/net/feeds/unfreeze", &json!({ "author": "xns1_nope" }), now).status, 404);
+        assert_eq!(apply(&mut s, "/api/net/feeds/unfreeze", &json!({ "author": LAPTOP_SIGNING }), now).status, 200);
+        assert_eq!(s.state["frozen"], json!([]));
+        assert_eq!(apply(&mut s, "/api/net/feeds/unfreeze", &json!({ "author": LAPTOP_SIGNING }), now).status, 404, "once");
     }
 
     #[test]

@@ -37,6 +37,13 @@ pub(crate) const TABLES: &[&str] = &[
         network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
         status TEXT NOT NULL
     ) STRICT",
+    // Where this machine stands in each network's gateway stream: the
+    // gateway's epoch and the last seq read in it.
+    "CREATE TABLE link_cursor (
+        network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
+        epoch TEXT NOT NULL,
+        seq INTEGER NOT NULL
+    ) STRICT",
     // The services this machine published to each network, in the order
     // they were published.
     "CREATE TABLE published_services (
@@ -205,12 +212,16 @@ impl Db {
         })
     }
 
-    /// A network left: its row, its roster's entries, how its link stood
-    /// and the services published to it, all at once.
+    /// A network left: its row, its roster's entries, how its link stood,
+    /// the services published to it and its feeds, all at once.
     pub fn forget_network(&self, id: &str) -> R<()> {
         self.write(|c| {
             c.execute("DELETE FROM chain_entries WHERE chain = ?1", params![network_chain(id)])?;
             c.execute("DELETE FROM link_status WHERE network = ?1", params![id])?;
+            c.execute("DELETE FROM link_cursor WHERE network = ?1", params![id])?;
+            for t in ["feed_writers", "feed_out", "feed_acks", "feed_in", "feed_loose", "feed_heads", "feed_held"] {
+                c.execute(&format!("DELETE FROM {t} WHERE network = ?1"), params![id])?;
+            }
             c.execute("DELETE FROM published_services WHERE network = ?1", params![id])?;
             c.execute("DELETE FROM networks WHERE id = ?1", params![id])?;
             Ok(())
@@ -244,6 +255,29 @@ impl Db {
                 "INSERT INTO link_status (network, status) SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM networks WHERE id = ?1)
                  ON CONFLICT (network) DO UPDATE SET status = excluded.status",
                 params![network, text],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Where this machine stands in a network's gateway stream: the
+    /// gateway's epoch and the last seq read in it.
+    pub fn link_cursor(&self, network: &str) -> R<Option<(String, u64)>> {
+        self.read(|c| {
+            Ok(c.query_row("SELECT epoch, seq FROM link_cursor WHERE network = ?1", params![network], |r| {
+                Ok((r.get::<_, String>(0)?, u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0)))
+            })
+            .optional()?)
+        })
+    }
+
+    /// Where this machine stands in a network's gateway stream now.
+    pub fn put_link_cursor(&self, network: &str, epoch: &str, seq: u64) -> R<()> {
+        self.write(|c| {
+            c.execute(
+                "INSERT INTO link_cursor (network, epoch, seq) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM networks WHERE id = ?1)
+                 ON CONFLICT (network) DO UPDATE SET epoch = excluded.epoch, seq = excluded.seq",
+                params![network, epoch, i64::try_from(seq).unwrap_or(i64::MAX)],
             )?;
             Ok(())
         })

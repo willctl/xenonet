@@ -9,7 +9,9 @@
 // presence block from studio's device that the chain checks it by. The
 // person's chain goes on past the head the roster names, with a delegation
 // (the standard one, every device, a year) signed by that device with its
-// presence, as a widening is.
+// presence, as a widening is. The message frame carries an entry of
+// studio's feed (`network/message/v3`), signed by studio's machine key as
+// the roster lists it.
 //
 // XENONET_WRITE_FIXTURES=1 cargo test -p xenonet-net --test known_answers
 // writes the file again.
@@ -21,6 +23,7 @@ use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer};
 use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
 use xenonet_net::codec::{b64, unb64_n};
+use xenonet_net::feed::{FeedEntry, Kind, Writer};
 use xenonet_net::frame::{gateway_frame, host_frame, open_frame, Draft, Frame};
 use xenonet_net::keys::HostKey;
 use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster, ADMIT};
@@ -70,7 +73,22 @@ fn person(root: &SeedSigner, device: &SeedSigner) -> PersonChain {
 fn answers() -> Value {
     let (studio, studio_v) = host("studio", 1, 2);
     let (laptop, laptop_v) = host("laptop", 3, 4);
-    let body = json!({ "schema": "network/message/v2", "mid": "msg_00000000-0000-4000-8000-000000000001", "body": "hello from studio" });
+    let send = json!({
+        "schema": "network/send/v1",
+        "mid": "msg_00000000-0000-4000-8000-000000000001",
+        "sender": "claude:aaaaaaaa-0001",
+        "senderKind": "agent",
+        "target": "claude:bbbbbbbb-0001",
+        "body": "hello from studio",
+        "replyTo": null,
+        "scope": "direct",
+        "kind": "message",
+        "hops": 0,
+        "at": 1_792_512_345_678_i64,
+    });
+    let studio_machine = SeedSigner::from_seed(&secret(7), KeyHome::File).unwrap();
+    let entry = Writer::start(studio_machine.public().id(), NET, 1_792_512_000_000).write(&studio_machine, Kind::Message, 1_792_512_345_678, send).unwrap();
+    let body = xenonet_net::node::entry_body(&entry, None);
     let d = Draft { network: NET, id: "frm_00000000-0000-4000-8000-0000000000aa".into(), kind: "message", from: "studio", to: "laptop", at: 1_792_512_345_678 };
     let f = host_frame(&d, &studio, laptop.public(), &body, Some(secret(9))).unwrap();
     assert_eq!(open_frame(NET, &laptop, &f).unwrap(), body);
@@ -130,6 +148,8 @@ fn answers() -> Value {
         "hosts": [studio_v, laptop_v],
         "frame": {
             "ephemeralSecret": b64(&secret(9)),
+            "machineSeed": b64(&secret(7)),
+            "entryId": entry.id(),
             "body": body,
             "sealingHead": f.sealing_head(NET),
             "head": f.head(NET),
@@ -196,6 +216,14 @@ fn the_fixtures_check_from_their_own_values() {
     assert_eq!(f.head(net), v["frame"]["head"]);
     assert!(f.verify(net, studio.public()));
     assert_eq!(open_frame(net, &laptop, &f).unwrap(), v["frame"]["body"]);
+    // The entry it carries checks against studio's machine key, as the
+    // roster lists it, and has its id.
+    let machine = SeedSigner::from_seed(&unb64_n::<32>(v["frame"]["machineSeed"].as_str().unwrap()).unwrap(), KeyHome::File).unwrap().public();
+    let entry = FeedEntry::parse(&v["frame"]["body"]["entry"]).unwrap();
+    assert_eq!(entry.id(), v["frame"]["entryId"]);
+    let studio_in_roster = v["roster"][0]["host"]["machine"].clone();
+    assert_eq!(studio_in_roster, machine.to_json(), "the roster's key for studio's machine");
+    entry.verify(&machine).unwrap();
     let s = Frame::parse(&v["svcFrame"]["frame"]).unwrap();
     assert_eq!((s.kind.as_str(), s.head(net)), ("svc", v["svcFrame"]["head"].as_str().unwrap().to_string()));
     assert!(s.verify(net, laptop.public()));

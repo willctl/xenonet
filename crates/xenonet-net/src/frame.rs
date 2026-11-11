@@ -37,12 +37,14 @@ use serde_json::{json, Map, Value};
 use x25519_dalek::{PublicKey as SealPublic, StaticSecret};
 use xenonet_model::ids::is_host_id;
 
-/// Every kind a frame can be.
-pub const FRAME_KINDS: [&str; 13] = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];
+/// Every kind a frame can be. Messages, receipts and handoffs are entries
+/// of their machine's feed, which `message` frames carry
+/// (`network/message/v3`).
+pub const FRAME_KINDS: [&str; 11] = ["hello", "ping", "gap", "roster", "removed", "presence", "claims", "message", "relay", "operator", "svc"];
 /// The gateway's own frames: unsealed, signed by the gateway's host key.
 pub const GATEWAY_KINDS: [&str; 5] = ["hello", "ping", "gap", "roster", "removed"];
 /// Frames between hosts: sealed, and signed by the host that sent them.
-pub const HOST_KINDS: [&str; 8] = ["presence", "claims", "message", "receipt", "handoff", "relay", "operator", "svc"];
+pub const HOST_KINDS: [&str; 6] = ["presence", "claims", "message", "relay", "operator", "svc"];
 /// Frames that go up in relay batches of their own (`frames?relay=1`): the
 /// map's, and services' requests and answers. They may be large, and
 /// they're live: never kept for a host that's away.
@@ -50,7 +52,7 @@ pub const RELAY_BATCH_KINDS: [&str; 2] = ["relay", "svc"];
 /// What the gateway keeps for a host that's away (core/schema/network.js's
 /// QUEUED_KINDS); the rest are dropped for it, since a full set goes when
 /// it's back.
-pub const QUEUED_KINDS: [&str; 5] = ["message", "receipt", "handoff", "operator", "roster"];
+pub const QUEUED_KINDS: [&str; 3] = ["message", "operator", "roster"];
 
 pub const HEAD_TAG: &str = "xenonet-net/1";
 const NONCE: [u8; 12] = [0u8; 12];
@@ -302,7 +304,7 @@ mod tests {
             match change {
                 0 => g.to = "desk".into(),
                 1 => g.at += 1,
-                2 => g.kind = "receipt".into(),
+                2 => g.kind = "operator".into(),
                 3 => g.id = crate::codec::frame_id().unwrap(),
                 _ => {
                     let last = g.body.len() - 1;

@@ -21,6 +21,7 @@ export const ALONE = Object.freeze({
   hosts: [],
   tickets: [],
   proposals: [],
+  frozen: [],
   outbox: { frames: 0, bytes: 0, oldest: null },
   rosterHead: null,
   rosterMismatch: [],
@@ -35,13 +36,14 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // The state as the page uses it: a network/state/v1 answer, or a machine on
 // its own for anything else (no answer, an older service, an error).
 export function stateOf(raw) {
-  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], proposals: [], rosterMismatch: [] };
+  if (!raw || typeof raw !== "object" || raw.schema !== "network/state/v1") return { ...ALONE, hosts: [], tickets: [], proposals: [], frozen: [], rosterMismatch: [] };
   return {
     ...ALONE,
     ...raw,
     hosts: list(raw.hosts).filter((x) => x && typeof x.id === "string"),
     tickets: list(raw.tickets),
     proposals: list(raw.proposals).filter((p) => p && typeof p.id === "string" && typeof p.host === "string"),
+    frozen: list(raw.frozen).filter((f) => f && typeof f.author === "string"),
     rosterMismatch: list(raw.rosterMismatch).filter((x) => typeof x === "string"),
     outbox: raw.outbox && typeof raw.outbox === "object" ? raw.outbox : ALONE.outbox,
   };
@@ -152,6 +154,14 @@ export function proposalWords(p) {
   const by = list(p?.signers).join(" and ") || "nobody yet";
   const what = p.op === "gateway" ? `${p.host} to be the gateway${p.gateway ? `, at ${p.gateway}` : ""}` : p.op === "add" ? `add ${p.host}${p.window ? " as a window host" : ""}` : `${p.op} ${p.host}`;
   return `${what}, asked by ${by}`;
+}
+
+// A member's feed a fork froze here (state.frozen): the machine signed two
+// different entries at one place, so nothing more from it is taken until
+// you unfreeze it.
+export function frozenWords(f) {
+  const at = Number.isFinite(f?.at?.seq) ? ` (entry ${f.at.seq})` : "";
+  return `${f?.host ?? f?.author} signed two different entries at one place in its feed${at}, so nothing more from it is taken here`;
 }
 
 // Text from another machine, as the page keeps it: a string, cut to `max`,

@@ -299,7 +299,7 @@ impl Host {
         // As the binary's serve closure plugs it.
         let plugged = world.clone();
         cores.on_net = Some(Arc::new(move |svc: &dyn NetLink| {
-            svc.sinks().set(xenonet_runtime::network::plug(&plugged, svc.net(), svc.governance()));
+            xenonet_runtime::network::plug(&plugged, svc);
         }));
         cores.verify = Arc::new(You);
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -919,15 +919,16 @@ async fn a_device_revoked_from_another_machine_signs_nothing_desk_takes() {
     let identity = b.svc.node().shared().identity().clone();
     let desk = xenonet_authz::Resource::Machine(xenonet_authz::MachineId::new("desk").unwrap());
     let authority = xenonet_runtime::ground::authority(&identity, true, &desk, &xenonet_authz::Act::Message, "", now_ms() as i64).unwrap();
-    let as_you = |mid: &str, text: &str| xenonet_model::ops::Incoming {
-        from: "laptop".into(),
-        kind: xenonet_model::ops::Kind::Message,
-        body: json!({ "schema": "network/message/v2", "mid": mid, "sender": xenonet_model::ids::YOU, "senderKind": "person", "target": D1, "body": text, "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms(), "authority": authority }),
-        at: now_ms(),
-        from_window_host: true,
+    // A message as you from laptop, signed by laptop's device: an entry of
+    // laptop's feed, with that signature beside it.
+    let as_you = |mid: &str, text: &str| {
+        let body = json!({ "schema": "network/send/v1", "mid": mid, "sender": xenonet_model::ids::YOU, "senderKind": "person", "target": D1, "body": text, "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now_ms() });
+        let e = b.svc.node().shared().write_entry(xenonet_net::feed::Kind::Message, body).unwrap();
+        c.svc.node().shared().frame(&hand(&b, &c, &xenonet_net::node::entry_body(&e, Some(&authority))));
     };
     let inbox = || async { texts(&c.agent(D1, "inbox", json!({})).await) };
-    xenonet_runtime::network::receive(&c.world, as_you("msg_0123456789abcdef01", "Before the laptop was lost"));
+    as_you("msg_0123456789abcdef01", "Before the laptop was lost");
+    until("the message as you at desk", 10, || async { c.world.store.with(|s| s.message_by_mid("msg_0123456789abcdef01", Some("laptop")).unwrap()).is_some() }).await;
     assert_eq!(inbox().await, ["Before the laptop was lost"]);
 
     // Only from the window, never this machine's own device.
@@ -943,8 +944,9 @@ async fn a_device_revoked_from_another_machine_signs_nothing_desk_takes() {
     until("the revocation at desk", 10, || async { listed(&c.state().await)["active"] == false }).await;
     until("the revocation at laptop", 10, || async { b.state().await["person"]["acts"] == false }).await;
     // What laptop's device signed before is refused at desk now.
-    xenonet_runtime::network::receive(&c.world, as_you("msg_0123456789abcdef02", "After the laptop was lost"));
-    assert!(inbox().await.is_empty(), "nothing a revoked device signed is taken");
+    as_you("msg_0123456789abcdef02", "After the laptop was lost");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(c.world.store.with(|s| s.message_by_mid("msg_0123456789abcdef02", Some("laptop")).unwrap()).is_none(), "nothing a revoked device signed is taken");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1220,16 +1222,9 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let (_, v) = a.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hello" })).await;
     let mid = v["request"].as_str().unwrap().to_string();
     let _ = studio.next("start", 15, |d| d["state"] == "started").await;
-    xenonet_runtime::network::receive(
-        &a.world,
-        xenonet_model::ops::Incoming {
-            from: "laptop".into(),
-            kind: xenonet_model::ops::Kind::Receipt,
-            body: json!({ "schema": "network/receipt/v1", "mid": mid, "agent": "xenonet:start", "state": "refused", "reason": "no session or actor here has that id", "at": now_ms() as i64 }),
-            at: now_ms(),
-            from_window_host: true,
-        },
-    );
+    let refusal = json!({ "schema": "network/receipt/v1", "mid": mid, "agent": "xenonet:start", "state": "refused", "reason": "no session or actor here has that id", "at": now_ms() as i64 });
+    let e = b.svc.node().shared().write_entry(xenonet_net::feed::Kind::Receipt, refusal).unwrap();
+    a.svc.node().shared().frame(&hand(&b, &a, &xenonet_net::node::entry_body(&e, None)));
     let old = studio.next("start", 10, |d| d["state"] == "refused").await;
     assert_eq!(old["reason"], "laptop's XenoNet is too old to start sessions: update it there", "{old}");
 
@@ -1526,4 +1521,132 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     assert_eq!(fake_runs(&c).len(), 2, "nothing started");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// A handoff offer from laptop's session to the repo, as its engine writes
+/// it into laptop's feed.
+fn offer(n: u32) -> Value {
+    json!({
+        "schema": "network/handoff/v1",
+        "id": format!("hof_00000000-0000-4000-8000-{n:012}"),
+        "op": "offer",
+        "from": L1,
+        "to": { "agent": null, "repoKey": "github.com/acme/atlas", "host": null },
+        "goal": format!("goal {n}"),
+        "done": null,
+        "next": null,
+        "files": [],
+        "branch": "main",
+        "commit": null,
+        "by": null,
+        "at": now_ms() as i64,
+    })
+}
+
+/// A message frame of `body` from `from` to `to`, signed and sealed as the
+/// link sends it, for `to`'s node to take as the stream hands it on.
+fn hand(from: &Host, to: &Host, body: &Value) -> xenonet_net::frame::Frame {
+    let n = from.svc.node().shared();
+    let net = n.network().unwrap();
+    let keys = *to.svc.node().shared().key().unwrap().public();
+    let d = xenonet_net::frame::Draft { network: &net.id, id: xenonet_net::codec::frame_id().unwrap(), kind: "message", from: from.name, to: to.name, at: n.gateway_now() as i64 };
+    xenonet_net::frame::host_frame(&d, &n.key().unwrap(), &keys, body, None).unwrap()
+}
+
+fn has_handoff(h: &Host, n: u32) -> bool {
+    h.world.store.with(|s| s.handoff(&format!("hof_00000000-0000-4000-8000-{n:012}")).unwrap().is_some())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn feeds_fill_a_gap_take_a_repeat_once_resend_after_a_restart_and_freeze_on_a_fork() {
+    use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
+    use xenonet_net::feed::{FeedEntry, Kind as EntryKind, Writer};
+    use xenonet_net::node::entry_body;
+    let root = std::env::temp_dir().join(format!("xenonet-net-feeds-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let [lan] = common::free_ports();
+    let (a, b, c) = three(&root, lan, [vec![], vec![], vec![]]).await;
+    let net = b.svc.node().shared().network().unwrap();
+    let laptop = b.svc.node().shared().clone();
+    let desk = c.svc.node().shared().clone();
+
+    // A gap: laptop's first handoff never left it, and its second came to
+    // desk alone. desk holds the second, asks laptop for what's before it,
+    // and applies both, in order.
+    let e1 = laptop.write_entry(EntryKind::Handoff, offer(1)).unwrap();
+    let e2 = laptop.write_entry(EntryKind::Handoff, offer(2)).unwrap();
+    desk.frame(&hand(&b, &c, &entry_body(&e2, None)));
+    until("desk filled the gap from laptop", 20, || async { has_handoff(&c, 1) && has_handoff(&c, 2) }).await;
+    // The same frames again, as a gateway that resends would: applied once.
+    for e in [&e2, &e1, &e2] {
+        desk.frame(&hand(&b, &c, &entry_body(e, None)));
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(c.world.store.with(|s| s.open_handoffs_from("laptop", now_ms()).unwrap()), 2.0, "each once");
+
+    // An entry whose author isn't a member is refused, and so is one whose
+    // signature isn't its author's: neither is applied, nor freezes laptop.
+    let stranger = SeedSigner::from_seed(&[9; 32], KeyHome::File).unwrap();
+    let mut w = Writer::start(stranger.public().id(), net.id.as_str(), now_ms() as u64);
+    let foreign = w.write(&stranger, EntryKind::Handoff, now_ms() as u64, offer(3)).unwrap();
+    desk.frame(&hand(&b, &c, &entry_body(&foreign, None)));
+    let mut forged = FeedEntry { seq: 3, prev: None, body: offer(4), ..e2.clone() };
+    forged.sig = stranger.sign(xenonet_id::sign::Purpose::FEED, b"another entry").unwrap();
+    desk.frame(&hand(&b, &c, &entry_body(&forged, None)));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!has_handoff(&c, 3) && !has_handoff(&c, 4), "neither taken");
+    assert_eq!(c.state().await["frozen"], json!([]), "a forged entry freezes nothing");
+
+    // A restart: laptop wrote its third handoff and stopped before it went.
+    // Started again, it sends every member what that member hasn't acked:
+    // desk its third, studio all three.
+    let _ = laptop.write_entry(EntryKind::Handoff, offer(5)).unwrap();
+    drop(laptop);
+    let b = b.restart().await;
+    live(&b, 3).await;
+    until("desk and studio have what laptop hadn't sent", 20, || async { has_handoff(&c, 5) && (1..=2).chain([5]).all(|n| has_handoff(&a, n)) }).await;
+
+    // A fork: another entry where desk holds laptop's second, signed by
+    // laptop's own machine key. desk freezes laptop's feed, and the doctor
+    // and the window say so.
+    let key = b.svc.node().shared().identity().machine_key().unwrap();
+    let mut fork = e2.clone();
+    fork.body = offer(6);
+    fork.sign(key.as_ref()).unwrap();
+    desk.frame(&hand(&b, &c, &entry_body(&fork, None)));
+    until("laptop frozen at desk", 10, || async { c.state().await["frozen"][0]["host"] == "laptop" }).await;
+    let frozen = c.state().await["frozen"][0].clone();
+    assert_eq!((frozen["author"].clone(), frozen["at"]["seq"].clone()), (json!(key.public().id()), json!(2)));
+    let kept = xenonet_service::serve::kept_network(&c.ctx.cores).unwrap();
+    let doctor = xenonet_net::doctor::checks(&xenonet_net::files::Dir::new(c.dir.join("state").join("network"), kept), now_ms());
+    let feeds = doctor.iter().find(|(id, _, _)| *id == "network.feeds").unwrap();
+    assert_eq!(feeds.2["status"], "fail", "{}", feeds.2);
+    assert!(feeds.2["detail"].as_str().unwrap().starts_with("laptop (at "), "{}", feeds.2);
+    // While it's frozen nothing from laptop is taken.
+    let laptop = b.svc.node().shared().clone();
+    let e7 = laptop.write_entry(EntryKind::Handoff, offer(7)).unwrap();
+    desk.frame(&hand(&b, &c, &entry_body(&e7, None)));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!has_handoff(&c, 7) && !has_handoff(&c, 6));
+    // Unfreezing is the person's at the window: never from a terminal or
+    // an agent, nor the node's own call without the window.
+    let author = frozen["author"].as_str().unwrap().to_string();
+    assert_eq!(desk.unfreeze(&author, false).unwrap_err().code, "window");
+    let (s, _) = c.call("POST", "/api/net/feeds/unfreeze", json!({ "author": author }), &[]).await;
+    assert_eq!(s, 403);
+    let (s, _) = c.call("POST", "/api/net/feeds/unfreeze", json!({ "author": author }), &[("x-xenonet-agent", D1)]).await;
+    assert_eq!(s, 403);
+    let (s, v) = c.window("POST", "/api/net/feeds/unfreeze", json!({ "author": author })).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(c.state().await["frozen"], json!([]));
+    // Taken again from where desk stood: its next entry is past a gap (the
+    // one desk dropped while frozen), which laptop fills; the fork's entry
+    // never lands, the one desk had stays.
+    let e8 = laptop.write_entry(EntryKind::Handoff, offer(8)).unwrap();
+    desk.frame(&hand(&b, &c, &entry_body(&e8, None)));
+    until("desk took laptop's feed again", 20, || async { has_handoff(&c, 7) && has_handoff(&c, 8) }).await;
+    assert!(has_handoff(&c, 2) && !has_handoff(&c, 6));
+    let _ = std::fs::remove_dir_all(&root);
 }

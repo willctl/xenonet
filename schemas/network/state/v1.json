@@ -772,6 +772,61 @@
       ],
       "description": "Who this machine acts as, while it's in a network",
       "additionalProperties": {}
+    },
+    "frozen": {
+      "type": "array",
+      "items": {
+        "description": "A member's feed that froze here: it signed two entries at one place",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "The member, by its machine signing key",
+            "type": "string",
+            "pattern": "^xns1_[a-z2-7]{32}$"
+          },
+          "host": {
+            "description": "The member's host id, while the network's chain lists it",
+            "anyOf": [
+              {
+                "description": "The host's id in the network, picked by the person: never the machine's own name",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at": {
+            "description": "Where the two entries are",
+            "type": "object",
+            "properties": {
+              "inc": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "inc",
+              "seq"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "author",
+          "host",
+          "at"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Members' feeds a fork froze here: nothing from them is taken until you unfreeze one at the window"
     }
   },
   "required": [

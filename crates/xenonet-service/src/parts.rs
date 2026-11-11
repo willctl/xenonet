@@ -159,6 +159,9 @@ impl parts::Network for NetService {
     fn svc_unpublish(&self, name: &str) -> NetResult {
         answered(self.node().shared().svc_unpublish(name))
     }
+    fn unfreeze(&self, author: &str, at_window: bool) -> NetResult {
+        answered(self.node().shared().unfreeze(author, at_window))
+    }
     fn svc_port(&self, target: &str) -> Option<u16> {
         svc::Target::parse(target).ok().map(|t| t.port)
     }

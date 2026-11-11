@@ -786,7 +786,7 @@ twins, are unchanged.
   console for five minutes.
 - **Acting as you from another machine.** An act in a window host's
   console carries its authority in the frame (`authority`, in
-  `network/message/v2` and `network/operator/v2`): your device's signature
+  `network/message/v3` and `network/operator/v2`): your device's signature
   over that one act, or, for an act that needs you there, a presence block
   for it, which stands for the signature. The receiving host maps the
   device to you through its own copy of your person chain, and decides the
@@ -865,9 +865,10 @@ twins, are unchanged.
 
 - Each host's map, messages, claims, warnings and delivery keep working
   for its own sessions.
-- Messages, receipts and handoffs for other hosts wait in the outbox
-  (`<state>/network/net.sqlite`). They wait a week, up to 10,000 frames
-  or 50 MB; past that, the oldest go first, with a doctor warning.
+- Messages, receipts and handoffs for other hosts wait in the outbox, in
+  memory, up to 10,000 frames or 50 MB; past that, the oldest go first,
+  with a doctor warning. What it loses goes again from the store: kept
+  entries until each member acks them, messages until their receipts.
 - Presence, claims and map frames aren't kept. A full set goes when the
   link is back.
 - Other hosts' agents stay in `peers`, marked offline since the link
@@ -1191,11 +1192,24 @@ does `xenonet svc --help`.
 - `seq` is set by the gateway, per recipient, within an epoch.
 - **Gateway frames** are `hello`, `ping`, `gap`, `roster` and `removed`.
   They aren't sealed, and they're signed by the gateway's host key.
-- **Host frames** are `presence`, `claims`, `message`, `receipt`,
-  `handoff`, `relay`, `operator` and `svc`. They're sealed and signed by
-  the sending host. `relay` and `svc` frames go up in relay batches of
-  their own (`frames?relay=1`).
-- Their bodies are in `schemas/network/<kind>/`: `message/v2` and
+- **Host frames** are `presence`, `claims`, `message`, `relay`,
+  `operator` and `svc`. They're sealed and signed by the sending host.
+  `relay` and `svc` frames go up in relay batches of their own
+  (`frames?relay=1`).
+- A `message` frame carries the sending machine's feed
+  (`network/message/v3`): an entry of it (xenonet-log's `feed`, signed by
+  the machine signing key the roster lists for it), with the act's
+  `authority` beside it, or that machine's `ack` of, or `want` for, the
+  recipient's feed. Messages (`send/v1`) and receipts are loose entries,
+  each taken once by its id; handoffs are kept entries, which go to every
+  member in one gapless sequence per author and network, are applied in
+  order, held behind a gap until a `want` fills it, and acked; what a
+  member hasn't acked goes to it again when the link comes back. Two
+  entries at one place freeze the author's feed until the person
+  unfreezes it at the window (`POST /api/net/feeds/unfreeze`); the doctor
+  says so. An entry is taken only from a member's machine, checked against
+  its key, and applied in the store's transaction with what it does.
+- Their bodies are in `schemas/network/<kind>/`: `message/v3` and
   `operator/v2` carry the act's `authority` (an actor's token and its
   root's certificate, or the person's device, signature and presence, and
   the head of their chain), and roster entries are `roster-entry/v2`. The
@@ -1228,6 +1242,7 @@ act among them that asks you is done from the window:
 | `POST gateway/take` | Make this host the gateway |
 | `PUT settings` | Titles only, the LAN address |
 | `GET svc`, `POST svc/publish`, `POST svc/unpublish` | The services this host publishes (section 14) |
+| `POST feeds/unfreeze` | Takes a machine's frozen feed again (window) |
 
 And for any program on the host, `/api/svc/<host>/<name>/<rest>`, with
 any method a service takes: another host's published service (section
@@ -1239,11 +1254,14 @@ any method a service takes: another host's published service (section
 - `<state>/network/network.json`: the id, name, this host's id, and the
   gateway's address and key id.
 - `<state>/network/roster.json`: the chain.
-- `<state>/network/net.sqlite`: the outbox, frame ids seen, and the epoch
-  and `seq` per gateway. A frame leaves the outbox once the gateway accepts
-  it; the gateway keeps it until the host it's for has read it. A frame
-  the gateway lets go is a `gap` to both hosts, and a new epoch is one
-  too: the engine then sends again the messages with no `stored` receipt.
+- The feeds, in the store: this machine's incarnation and the kept
+  entries it wrote, each member's ack, and what it applied and holds of
+  the others'; and the gateway's epoch and `seq`. The outbox is in memory:
+  a frame leaves it once the gateway accepts it, and the gateway keeps it
+  until the host it's for has read it. A frame the gateway lets go is a
+  `gap` to both hosts, and a new epoch is one too: the engine then sends
+  again the messages with no `stored` receipt, and kept entries go again
+  to whoever hasn't acked them.
 - `<state>/network/link.json`: how the link last stood, for the doctor.
 - `<state>/network/services.json`: the services this host publishes.
 - `<state>/identity/`: the person on this host, their chain, the device

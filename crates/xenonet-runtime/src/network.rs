@@ -11,13 +11,21 @@
 //!   engine's view of another host's agent, which agents read in `peers`,
 //!   never carries it.
 //! - **Messages.** A message to an agent on another host is stored here as
-//!   sent, with its id across the network (its envelope's mid), and its
-//!   frame waits in the outbox until a stored receipt comes back. One from
-//!   another host is stored with its sender qualified (`@laptop:claude:…`)
-//!   and an envelope that says how it came, then delivered as local mail.
-//!   Receipts go back: stored at once, then delivered, seen or held. One
-//!   stored there that no one read by the end of the outbox's week is
-//!   unread here.
+//!   sent, with its id across the network (its envelope's mid), and goes
+//!   as an entry of this machine's feed, again each time the link comes
+//!   back, until a stored receipt comes back. One from another host is
+//!   stored with its sender qualified (`@laptop:claude:…`) and an envelope
+//!   that says how it came, then delivered as local mail. Receipts go
+//!   back: stored at once, then delivered, seen or held. One stored there
+//!   that no one read in a week is unread here.
+//! - **Feeds.** What another member sends is an entry of its feed
+//!   (xenonet-log's `feed`), which the network checked against the member's
+//!   key: offered to the author's feed in the store and applied in the
+//!   transaction that writes what it does, so each is applied exactly once
+//!   (`entry_in`). Kept entries (handoffs) apply in their author's order,
+//!   held behind a gap until it fills; this machine acks what it applied
+//!   and asks for what's missing. A fork freezes the author's feed until
+//!   the person unfreezes it at the window.
 //! - **Claims across clones.** Claims and observed edits go out as a repo
 //!   key and a path inside the repo; others' come back for the edit
 //!   warning.
@@ -27,7 +35,7 @@
 //! Every act from another machine is decided here before it's taken
 //! (`crate::ground`, xenonet-authz): a message, a start, an ask, a
 //! handoff, claims, and the person's answer. The person's acts carry their
-//! device's signature (`network/message/v2`'s `authority`), checked
+//! device's signature (`network/message/v3`'s `authority`), checked
 //! against this machine's copy of their chain; an agent's is its
 //! machine's word, which checked its process.
 //!
@@ -48,6 +56,8 @@ use xenonet_engine::host::Collaborators;
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
 use xenonet_model::ids::{parse_actor_id, qualify, YOU};
 use xenonet_model::ops::{Host, Incoming, Kind, Net, Outgoing, Sink, To};
+use xenonet_net::feed::{Feed, Kind as EntryKind, Offer};
+use xenonet_net::sink::{Arrived, Feeds};
 use xenonet_os::sync::Locked;
 use xenonet_store::engine::EngineStore;
 use xenonet_store::sql::Row;
@@ -55,7 +65,7 @@ use xenonet_text::time::now_ms;
 
 /// How often presence and claims go out when they changed.
 pub const PRESENCE_MS: f64 = 2000.0;
-/// What waits in the outbox, at most: a week.
+/// How long a message is sent again until its receipt comes: a week.
 const OUTBOX_MS: f64 = 7.0 * 24.0 * 3600e3;
 /// A handoff no one takes lapses after a week.
 const HANDOFF_MS: f64 = 7.0 * 24.0 * 3600e3;
@@ -125,16 +135,20 @@ pub fn set_net(w: &Runtime, net: Arc<dyn Net>) {
 
 /// Puts the network's link behind the engine and starts telling the other
 /// hosts of this one (presence and claims every 2 s when they changed,
-/// handoffs that lapse). The sink is what the link calls with what
-/// arrives.
-pub fn plug(w: &Arc<Runtime>, net: Arc<dyn Net>, governance: Option<Arc<dyn xenonet_net::ground::Governance>>) -> Arc<EngineSink> {
-    set_net(w, net);
-    crate::ground::set_governance(w, governance);
+/// handoffs that lapse). The sink, which the link calls with what arrives,
+/// and the feeds, which take other members' entries, are plugged into the
+/// link's slot.
+pub fn plug(w: &Arc<Runtime>, link: &dyn xenonet_api::cores::NetLink) -> Arc<EngineSink> {
+    set_net(w, link.net());
+    crate::ground::set_governance(w, link.governance());
     let t = w.every(PRESENCE_MS, tick);
     if let Some(old) = w.net.ticker.locked().replace(t) {
         old.abort();
     }
-    EngineSink::new(w)
+    let sink = EngineSink::new(w);
+    link.sinks().set(sink.clone());
+    link.sinks().set_feeds(sink.clone());
+    sink
 }
 
 /// A call from the link, for the sink's own thread.
@@ -203,12 +217,30 @@ impl Sink for EngineSink {
     }
 }
 
+impl Feeds for EngineSink {
+    fn entry(&self, arrived: Arrived) {
+        self.run(move |w| entry_in(w, arrived));
+    }
+    // On the caller's thread: the window waits for it, and the store's
+    // transaction keeps it apart from what the sink's thread applies.
+    fn unfreeze(&self, author: &str, network: &str) -> std::result::Result<usize, String> {
+        let w = self.w.upgrade().ok_or("XenoNet is stopping")?;
+        unfreeze(&w, author, network)
+    }
+}
+
 pub(crate) fn net(w: &Runtime) -> Arc<dyn Net> {
     w.engine.net.get()
 }
 
 pub(crate) fn send(w: &Runtime, to: To, kind: Kind, body: Value) {
-    if let Err(e) = net(w).send(Outgoing { to, kind, body }) {
+    send_with(w, to, kind, body, None);
+}
+
+/// A body with the authority its act rests on, which goes beside its feed
+/// entry for its one recipient.
+pub(crate) fn send_with(w: &Runtime, to: To, kind: Kind, body: Value, authority: Option<Value>) {
+    if let Err(e) = net(w).send(Outgoing { to, kind, body, authority }) {
         w.log("warn", "net.send", &format!("a {} for the network wasn't queued: {e}", kind.as_str()));
     }
 }
@@ -338,14 +370,14 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
     if net(w).me().is_none() {
         return;
     }
-    let Incoming { from, kind, body, at, .. } = incoming;
+    let Incoming { from, kind, body, .. } = incoming;
     let _one = w.net.taking.locked();
     let done = match kind {
         Kind::Presence => presence_in(w, &from, &body),
         Kind::Claims => claims_in(w, &from, &body),
-        Kind::Message => message_in(w, &from, &body, at),
-        Kind::Receipt => receipt_in(w, &from, &body),
-        Kind::Handoff => handoff_in(w, &from, &body),
+        // Messages, receipts and handoffs come as entries of their
+        // author's feed (`entry_in`), never as bare bodies.
+        Kind::Message | Kind::Receipt | Kind::Handoff => Err(fail("it comes only as an entry of its machine's feed")),
         // The person's answer to a run's permission prompt, from another
         // machine's console (`network/operator/v2`).
         Kind::Operator => {
@@ -359,6 +391,141 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
     if let Err(e) = done {
         w.log("warn", "net.receive", &format!("a {} from {from} wasn't taken: {}", kind.as_str(), why(&e)));
     }
+}
+
+// ---------- feeds ----------
+
+fn kept_error(e: xenonet_store::StoreError) -> xenonet_store::sql::SqlError {
+    xenonet_store::sql::SqlError::Other(e.message)
+}
+
+/// An entry of another member's feed, which the network checked against
+/// the member's key: offered to its author's feed in the store and, when
+/// it applies, applied with the held entries it released, all in one
+/// transaction, so each is applied exactly once whatever way it came and
+/// however often. Then this machine acks what it holds of the author's
+/// kept entries, or asks for what's missing.
+pub fn entry_in(w: &Runtime, a: Arrived) {
+    if net(w).me().is_none() {
+        return;
+    }
+    let Some(db) = w.setup.db.clone() else { return };
+    let _one = w.net.taking.locked();
+    let Arrived { host, entry, authority, .. } = a;
+    let (author, network, kind, at) = (entry.author.clone(), entry.network.clone(), entry.kind, entry.pos());
+    let copy = entry.body.clone();
+    // A start or a run's ask waits on other threads that write the store
+    // (the run it starts, the prompt it holds): it's taken in the
+    // transaction, and acted on once that's committed, at most once.
+    let mut after = None;
+    let offered = db.transaction(|| -> std::result::Result<Offer, xenonet_store::sql::SqlError> {
+        let offer = Feed::new(db.feeds()).offer(entry).map_err(kept_error)?;
+        if let Offer::New(entries) = &offer {
+            for (i, e) in entries.iter().enumerate() {
+                // The authority came beside the entry that arrived, which
+                // is the first; the ones it released rest on their kind.
+                let none = json!({});
+                let auth = if i == 0 { &authority } else { &none };
+                if waits_on_others(e) {
+                    after = Some((e.clone(), auth.clone()));
+                } else {
+                    apply(w, &host, e, auth);
+                }
+            }
+        }
+        Ok(offer)
+    });
+    if let (Ok(_), Some((e, auth))) = (&offered, after) {
+        apply(w, &host, &e, &auth);
+    }
+    let ack = |w: &Runtime| match Feed::new(db.feeds()).ack(&author, &network) {
+        Ok(Some(a)) => net(w).ack(&host, a.inc, a.high),
+        Ok(None) => {}
+        Err(e) => w.log("warn", "net.feed", &format!("where this machine stands with {host}'s feed wasn't read: {}", e.message)),
+    };
+    let kept = kind.class() == xenonet_net::feed::Class::Kept;
+    match offered {
+        Ok(Offer::New(_)) if kept => ack(w),
+        Ok(Offer::New(_)) => {}
+        // The author didn't hear this machine took it: a message's stored
+        // receipt goes again, and a kept entry's ack.
+        Ok(Offer::Duplicate) => {
+            if kind == EntryKind::Message {
+                again(w, &host, &copy);
+            }
+            if kept {
+                ack(w);
+            }
+        }
+        Ok(Offer::Gap(want)) => net(w).want(&host, want.inc, want.from),
+        Ok(Offer::Fork(_)) => w.log(
+            "warn",
+            "net.feed",
+            &format!("{host} signed two different entries at {}.{} of its feed: nothing more from it is taken until you unfreeze it in XenoNet's window", at.inc, at.seq),
+        ),
+        Ok(Offer::Frozen(_)) => w.log("info", "net.feed", &format!("an entry from {host} was dropped: its feed is frozen here")),
+        // From history the author gave up in a restore: it hears how far
+        // this machine holds its feed.
+        Ok(Offer::Stale) => ack(w),
+        Err(e) => w.log("warn", "net.feed", &format!("an entry from {host} wasn't taken: {e}")),
+    }
+}
+
+/// Whether an entry is a start or a run's ask, which waits on what other
+/// threads write.
+fn waits_on_others(e: &xenonet_net::feed::FeedEntry) -> bool {
+    e.kind == EntryKind::Message && matches!(e.body.get("target").and_then(Value::as_str), Some(t) if t == xenonet_engine::delivery::starts::TARGET || t == crate::asks::TARGET)
+}
+
+/// What an applied entry does here. What it says is the author's member's
+/// act, decided by its kind's own rules; one that isn't right is noted and
+/// passed by, never taken again.
+fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &Value) {
+    let done = match e.kind {
+        EntryKind::Message => message_in(w, host, &e.body, authority, e.at as f64),
+        EntryKind::Receipt => receipt_in(w, host, &e.body),
+        EntryKind::Handoff => handoff_in(w, host, &e.body),
+        other => Err(fail(format!("XenoNet doesn't take {} entries yet", other.as_str()))),
+    };
+    if let Err(f) = done {
+        w.log("warn", "net.receive", &format!("a {} from {host} wasn't taken: {}", e.kind.as_str(), why(&f)));
+    }
+}
+
+/// A message entry this machine applied before, again: its stored receipt
+/// goes again, since the sender didn't hear it.
+fn again(w: &Runtime, host: &str, b: &Value) {
+    let (Some(mid), Some(target)) = (s(b, "mid"), s(b, "target")) else { return };
+    let Ok(Some(m)) = store(w, |st| st.message_by_mid(&mid, Some(host))) else { return };
+    let id = m.num("id").unwrap_or(f64::NAN);
+    if let Ok(Some(_)) = store(w, |st| st.delivery(id, &target)) {
+        receipt(w, host, &mid, &target, "stored", None);
+    }
+}
+
+/// Takes `author`'s feed in `network` again after a fork, keeping the entry
+/// this machine had, and applies the entries held behind it: the person's,
+/// from the window (the network checked that). How many it applied.
+pub fn unfreeze(w: &Runtime, author: &str, network: &str) -> std::result::Result<usize, String> {
+    let db = w.setup.db.clone().ok_or("this machine has no store")?;
+    let host = crate::ground::governance(w)
+        .and_then(|g| g.facts().view.and_then(|v| v.members.values().find(|m| m.machine.id() == author).map(|m| m.id.clone())))
+        .ok_or_else(|| format!("{author} isn't a member of the network"))?;
+    let _one = w.net.taking.locked();
+    let none = json!({});
+    let released = db
+        .transaction(|| -> std::result::Result<usize, xenonet_store::sql::SqlError> {
+            let entries = Feed::new(db.feeds()).unfreeze(author, network).map_err(kept_error)?;
+            for e in &entries {
+                apply(w, &host, e, &none);
+            }
+            Ok(entries.len())
+        })
+        .map_err(|e| e.to_string())?;
+    if let Ok(Some(a)) = Feed::new(db.feeds()).ack(author, network) {
+        net(w).ack(&host, a.inc, a.high);
+    }
+    Ok(released)
 }
 
 // ---------- presence ----------
@@ -666,8 +833,9 @@ pub(crate) fn sender_kind(me: &str) -> &'static str {
     }
 }
 
-/// A message stored here as sent goes to each agent on another host as a
-/// frame of its own, which waits in the outbox for its stored receipt. One
+/// A message stored here as sent goes to each agent on another host as an
+/// entry of this machine's feed of its own, which goes again until its
+/// stored receipt comes. One
 /// from you carries your device's signature for each machine it goes to,
 /// which only the window's own send makes (it asks the person where the
 /// device key asks: Touch ID); without one, the machine it's for refuses
@@ -701,7 +869,7 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             _ => json!({}),
         };
         let body = json!({
-            "schema": "network/message/v2",
+            "schema": "network/send/v1",
             "mid": mid,
             "sender": me,
             "senderKind": sender_kind(&me),
@@ -712,10 +880,10 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             "kind": "message",
             "hops": num_of(a, "hops").max(0.0),
             "at": ms(num_of(a, "at")),
-            "authority": authority,
         });
-        store(w, |s| s.set_delivery_net(id, &rid, &host, &body.to_string()))?;
-        send(w, To::Host(host), Kind::Message, body);
+        let kept = json!({ "body": body, "authority": authority });
+        store(w, |s| s.set_delivery_net(id, &rid, &host, &kept.to_string()))?;
+        send_with(w, To::Host(host), Kind::Message, body, Some(authority));
     }
     Ok(())
 }
@@ -751,8 +919,8 @@ pub fn resend(w: &Runtime) {
     let rows = store(w, |s| s.outbox(now_ms() - OUTBOX_MS)).unwrap_or_default();
     for r in rows {
         let (Some(host), Some(frame)) = (r.text("host"), r.text("frame")) else { continue };
-        let Ok(body) = serde_json::from_str::<Value>(frame) else { continue };
-        send(w, To::Host(host.to_string()), Kind::Message, body);
+        let Ok(kept) = serde_json::from_str::<Value>(frame) else { continue };
+        send_with(w, To::Host(host.to_string()), Kind::Message, kept["body"].clone(), kept.get("authority").cloned());
     }
 }
 
@@ -871,7 +1039,7 @@ pub(crate) fn judge_remote(
     crate::ground::judge_by(g, &crate::ground::remote(g, p, resource, act), token.as_ref(), None)
 }
 
-fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
+fn message_in(w: &Runtime, from: &str, b: &Value, authority: &Value, at: f64) -> Result<()> {
     let (Some(mid), Some(sender), Some(kind), Some(target), Some(body)) = (s(b, "mid"), s(b, "sender"), s(b, "senderKind"), s(b, "target"), s(b, "body")) else {
         return Err(fail("a message without its mid, sender, target or body"));
     };
@@ -884,9 +1052,9 @@ fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
         _ => false,
     };
     if !mid.starts_with("msg_") || !sender_ok || body.read().is_empty() || body.read().chars().count() > 16000 {
-        return Err(fail("a message that isn't network/message/v2"));
+        return Err(fail("a message that isn't network/send/v1"));
     }
-    let authority = b.get("authority").cloned().unwrap_or(Value::Null);
+    let authority = authority.clone();
     // A start request: the starts' own (starts.rs), answered by receipts
     // keyed by its mid. An older XenoNet refuses the target below.
     if target == xenonet_engine::delivery::starts::TARGET {
@@ -1410,13 +1578,13 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
     if let (Some(m), Some(row)) = (&me_net, store(w, |s| s.handoff(&id))?) {
         let body = body_of(&row, "offer", None);
         let dest = match (&to_agent, &to_host) {
-            (Some(a), _) => host_of(a).map(|h| To::Host(h.to_string())),
-            (None, Some(h)) if *h != m.host => Some(To::Host(h.clone())),
+            (Some(a), _) => host_of(a).map(|h| Some(h.to_string())),
+            (None, Some(h)) if *h != m.host => Some(Some(h.clone())),
             (None, Some(_)) => None,
-            (None, None) => key.as_ref().map(|_| To::All),
+            (None, None) => key.as_ref().map(|_| None),
         };
         if let Some(d) = dest {
-            send(w, d, Kind::Handoff, body);
+            send_handoff(w, d.as_deref(), body);
         }
     }
     Ok(
@@ -1424,7 +1592,16 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
     )
 }
 
-/// A handoff's frame, from its row here.
+/// A handoff, as an entry of this machine's feed: kept, so every member
+/// gets it in order, and it names the one machine it's for, if one.
+fn send_handoff(w: &Runtime, for_host: Option<&str>, mut body: Value) {
+    if let Some(h) = for_host {
+        body["for"] = json!(h);
+    }
+    send(w, To::All, Kind::Handoff, body);
+}
+
+/// A handoff's body, from its row here.
 fn body_of(r: &Row, op: &str, by: Option<&str>) -> Value {
     let files: Value = r.text("files").and_then(|f| serde_json::from_str(f).ok()).unwrap_or_else(|| json!([]));
     json!({
@@ -1539,7 +1716,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
             }
             if let Some(m) = &me_net {
                 let by = format!("@{}:{me}", m.host);
-                send(w, To::All, Kind::Handoff, body_of(&r, "taken", Some(&by)));
+                send_handoff(w, None, body_of(&r, "taken", Some(&by)));
             }
             Ok(json!({ "taken": true, "handoff": shown(&r, me_net.as_ref().map(|m| m.host.as_str())), "words": details(&r) }))
         }
@@ -1550,7 +1727,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
             };
             store(w, |s| s.ask_handoff(id, me))?;
             let by = format!("@{}:{me}", m.host);
-            send(w, To::Host(h.to_string()), Kind::Handoff, body_of(&r, "accept", Some(&by)));
+            send_handoff(w, Some(h), body_of(&r, "accept", Some(&by)));
             let away = !net(w).hosts().iter().any(|x| x.id == h && x.online);
             Ok(json!({
                 "taken": false,
@@ -1573,6 +1750,11 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
         return Err(fail("a handoff that isn't network/handoff/v1"));
     }
     let Some(me) = net(w).me() else { return Ok(()) };
+    // Every member gets every handoff, in its maker's order; one meant for
+    // another machine is passed by.
+    if s(b, "for").is_some_and(|h| h != me.host) {
+        return Ok(());
+    }
     let now = now_ms();
     // Ids as this host writes them: its own unqualified, others' with
     // their host.
@@ -1634,13 +1816,13 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
                 let maker = r.text("maker").unwrap_or("");
                 note(w, &by, maker, &format!("I took your handoff {id}."), Some(from));
                 let qualified = format!("@{from}:{}", local_of(&by));
-                send(w, To::All, Kind::Handoff, body_of(&r, "taken", Some(&qualified)));
+                send_handoff(w, None, body_of(&r, "taken", Some(&qualified)));
             } else if let Some(now_row) = store(w, |s| s.handoff(&id))? {
                 // Taken already: the asking host hears by whom.
                 let taker = now_row.text("taken_by").unwrap_or("");
                 let qualified = if is_remote(taker) { taker.to_string() } else { format!("@{}:{taker}", me.host) };
                 let state = now_row.text("state").unwrap_or("taken").to_string();
-                send(w, To::Host(from.to_string()), Kind::Handoff, body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(&qualified)));
+                send_handoff(w, Some(from), body_of(&now_row, if state == "lapsed" { "lapsed" } else { "taken" }, Some(&qualified)));
             }
         }
         // The making host decided.
@@ -1682,7 +1864,7 @@ fn lapse(w: &Runtime) {
             let maker = r.text("maker").unwrap_or("");
             note(w, maker, maker, &format!("No one took your handoff {id} in a week, so it lapsed."), None);
             if net(w).me().is_some() {
-                send(w, To::All, Kind::Handoff, body_of(&r, "lapsed", None));
+                send_handoff(w, None, body_of(&r, "lapsed", None));
             }
         }
     }

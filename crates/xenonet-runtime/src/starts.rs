@@ -690,11 +690,10 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         json!({})
     };
     let body = json!({
-        "schema": "network/message/v2",
+        "schema": "network/send/v1",
         "mid": mid,
         "sender": sender,
         "senderKind": sender_kind(&sender),
-        "authority": authority,
         "target": TARGET,
         "body": text,
         "replyTo": null,
@@ -704,7 +703,7 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
         "at": ms(now_ms()),
     });
     w.starts.asked.locked().insert(mid.clone(), Asked { by: by.clone(), host: host.clone(), at: now_ms() });
-    send(w, To::Host(host.clone()), FrameKind::Message, body);
+    crate::network::send_with(w, To::Host(host.clone()), FrameKind::Message, body, Some(authority));
     Ok(
         json!({ "request": mid, "host": host, "state": "sent", "way": format!("sent to {host}: the answer comes as a message, started or refused, and again when the session ends") }),
     )

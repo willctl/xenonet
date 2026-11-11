@@ -240,11 +240,10 @@ fn to_windows(w: &Runtime, me: &str, body: &Value) {
     for host in window_hosts(w) {
         let Ok(mid) = xenonet_engine::network::new_id("msg") else { continue };
         let frame = json!({
-            "schema": "network/message/v2",
+            "schema": "network/send/v1",
             "mid": mid,
             "sender": me,
             "senderKind": "agent",
-            "authority": {},
             "target": TARGET,
             "body": text,
             "replyTo": null,
@@ -488,7 +487,7 @@ fn send_answer(w: &Runtime, host: &str, id: &str, session: &str, decision: &str,
         "authority": authority,
         "at": ms(now as f64),
     });
-    net(w).send(xenonet_model::ops::Outgoing { to: To::Host(host.to_string()), kind: FrameKind::Operator, body })?;
+    net(w).send(xenonet_model::ops::Outgoing::new(To::Host(host.to_string()), FrameKind::Operator, body))?;
     answer_sent(w, id, decision);
     Ok(())
 }

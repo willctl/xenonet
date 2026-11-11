@@ -6,12 +6,64 @@
 //! The map's relay bodies go elsewhere, to the `RelaySink`s set here by
 //! role: the service's relay (`serve`) and the hub (`hear`). They never
 //! reach the engine.
+//!
+//! Entries of other members' feeds (messages, receipts, handoffs) go to
+//! the `Feeds` set here: the engine's, which applies each once in its
+//! store, in the transaction that writes what it does with it. Until one is
+//! set, and in a service without the engine, the slot's own feeds in
+//! memory take them, once each and in order, and hand what they apply to
+//! the sink as `Incoming` bodies.
 
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
-use xenonet_model::ops::{Incoming, RelaySink, Sink};
+use xenonet_log::feed::{Feed, Kind as EntryKind, MemoryStore, Offer, Verified};
+use xenonet_model::ops::{Incoming, Kind, RelaySink, Sink};
 use xenonet_os::sync::{Locked, ReadWrite};
+
+/// An entry of another member's feed, as this machine took it: its author's
+/// signature checked against the key the network's chain lists for the
+/// member, which is `host`.
+#[derive(Debug, Clone)]
+pub struct Arrived {
+    pub host: String,
+    pub entry: Verified,
+    /// What its act rests on, beside the entry in its frame (`{}` for none).
+    pub authority: Value,
+    /// Whether the chain makes `host` a window host.
+    pub window: bool,
+}
+
+/// Where other members' feed entries go.
+pub trait Feeds: Send + Sync {
+    /// An entry to offer to the author's feed here and apply.
+    fn entry(&self, arrived: Arrived);
+    /// Takes `author`'s feed in `network` again after a fork, keeping the
+    /// entry this machine had: the person's alone, from the window. How
+    /// many held entries it applied.
+    fn unfreeze(&self, author: &str, network: &str) -> Result<usize, String>;
+}
+
+/// The engine's kind for an entry's, for the ones it takes.
+pub fn kind_of(k: EntryKind) -> Option<Kind> {
+    match k {
+        EntryKind::Message => Some(Kind::Message),
+        EntryKind::Receipt => Some(Kind::Receipt),
+        EntryKind::Handoff => Some(Kind::Handoff),
+        _ => None,
+    }
+}
+
+/// An entry's kind for the engine's.
+pub fn entry_kind(k: Kind) -> Option<EntryKind> {
+    match k {
+        Kind::Message => Some(EntryKind::Message),
+        Kind::Receipt => Some(EntryKind::Receipt),
+        Kind::Handoff => Some(EntryKind::Handoff),
+        _ => None,
+    }
+}
 
 pub type LogFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
@@ -20,11 +72,46 @@ pub type LogFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub struct SinkSlot {
     inner: RwLock<Arc<dyn Sink>>,
     relays: RwLock<Vec<(&'static str, Arc<dyn RelaySink>)>>,
+    feeds: RwLock<Option<Arc<dyn Feeds>>>,
+    /// The feeds in memory, until the engine's are set.
+    memory: Mutex<Feed<MemoryStore>>,
 }
 
 impl SinkSlot {
     pub fn new(sink: Arc<dyn Sink>) -> SinkSlot {
-        SinkSlot { inner: RwLock::new(sink), relays: RwLock::new(Vec::new()) }
+        SinkSlot { inner: RwLock::new(sink), relays: RwLock::new(Vec::new()), feeds: RwLock::new(None), memory: Mutex::new(Feed::new(MemoryStore::new())) }
+    }
+
+    /// The engine's feeds plug in here.
+    pub fn set_feeds(&self, feeds: Arc<dyn Feeds>) {
+        *self.feeds.writing() = Some(feeds);
+    }
+
+    /// An entry of another member's feed: to the engine's feeds, or, with
+    /// none set, applied in memory and handed to the sink.
+    pub fn entry(&self, a: Arrived) {
+        let feeds = self.feeds.reading().clone();
+        if let Some(f) = feeds {
+            f.entry(a);
+            return;
+        }
+        let offered = self.memory.locked().offer(a.entry);
+        if let Ok(Offer::New(entries)) = offered {
+            for e in entries {
+                let Some(kind) = kind_of(e.kind) else { continue };
+                self.receive(Incoming { from: a.host.clone(), kind, body: e.body, at: e.at as f64, from_window_host: a.window });
+            }
+        }
+    }
+
+    /// Unfreezes `author`'s feed in `network`, in the engine's feeds or in
+    /// memory.
+    pub fn unfreeze(&self, author: &str, network: &str) -> Result<usize, String> {
+        let feeds = self.feeds.reading().clone();
+        match feeds {
+            Some(f) => f.unfreeze(author, network),
+            None => Ok(self.memory.locked().unfreeze(author, network).map_or(0, |v| v.len())),
+        }
     }
 
     /// The engine plugs in here.

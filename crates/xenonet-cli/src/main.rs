@@ -186,7 +186,7 @@ fn serve(args: &[String]) -> i32 {
             if let Some(world) = xenonet_runtime::wire(&mut cores, setup, env) {
                 cores.connect = std::sync::Arc::new(connect);
                 cores.on_net = Some(std::sync::Arc::new(move |svc: &dyn NetLink| {
-                    svc.sinks().set(xenonet_runtime::network::plug(&world, svc.net(), svc.governance()));
+                    xenonet_runtime::network::plug(&world, svc);
                 }));
             }
             let app = xenonet_service::compose::app::Settings {

@@ -31,8 +31,6 @@
         "presence",
         "claims",
         "message",
-        "receipt",
-        "handoff",
         "relay",
         "operator",
         "svc"

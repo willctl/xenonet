@@ -16,7 +16,9 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer, VerifyingKey};
+use xenonet_log::feed::{Class, FeedEntry, Kind as FeedKind, Pos};
 use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
+use xenonet_net::persist::{Memory, Persist};
 use xenonet_model::ops::{Incoming, Sink};
 use xenonet_net::codec::b64;
 use xenonet_net::files::{Dir, NetFile, Pin, GATEWAY_DB, KEY};
@@ -77,9 +79,33 @@ pub fn device(i: usize) -> &'static SeedSigner {
     &DEVICES.get_or_init(|| (0..HOSTS.len()).map(|i| SeedSigner::from_seed(&secret(0x30 + i as u8), KeyHome::File).expect("a device key")).collect())[i]
 }
 
-/// Host `i`'s machine signing key.
+/// Host `i`'s machine signing key, which signs its feed.
+pub fn machine_key(i: usize) -> SeedSigner {
+    SeedSigner::from_seed(&secret(0x50 + i as u8), KeyHome::File).expect("a machine key")
+}
+
 pub fn machine(i: usize) -> VerifyingKey {
-    SeedSigner::from_seed(&secret(0x50 + i as u8), KeyHome::File).expect("a machine key").public()
+    machine_key(i).public()
+}
+
+/// Entry `seq` of host `i`'s feed, of `kind`, saying `body`, signed by its
+/// machine key: kept entries in one sequence from the network's start,
+/// loose ones each its own.
+pub fn entry(i: usize, kind: FeedKind, seq: u64, body: Value) -> FeedEntry {
+    let kept = kind.class() == Class::Kept;
+    let mut e = FeedEntry {
+        author: machine(i).id(),
+        network: NET.into(),
+        inc: T0 as u64,
+        seq: seq.max(1),
+        prev: (kept && seq <= 1).then_some(Pos::ORIGIN),
+        kind,
+        at: now() as u64,
+        body,
+        sig: Vec::new(),
+    };
+    e.sign(&machine_key(i)).expect("a signature");
+    e
 }
 
 /// A presence block from host `i`'s device for `what` and `act`, with a
@@ -416,12 +442,15 @@ impl Machine {
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!("xenonet-fuzz-net-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&dir);
-        let files = Dir::new(dir.join("network"));
+        // What the machine keeps, in memory: the owner's chain, which the
+        // roster's admits are checked against, the network and its roster.
+        let kept: Arc<dyn Persist> = Arc::new(Memory::default());
+        let owner = person();
+        kept.put_person(owner.id().expect("the owner"), true, owner.entries()).expect("the owner's chain");
+        let files = Dir::new(dir.join("network"), kept.clone());
         let (sign, seal) = secrets(host);
         std::fs::create_dir_all(&files.path).expect("a folder for the machine");
-        // The owner's chain, which the roster's admits are checked against.
         std::fs::create_dir_all(files.identity_dir()).expect("the identity's folder");
-        std::fs::write(files.identity_dir().join("person.json"), format!("{}\n", person().to_json())).expect("person.json");
         let k = json!({ "v": 1, "sign": b64(&sign), "seal": b64(&seal), "keyId": key(host).key_id() });
         std::fs::write(files.file(KEY), format!("{k}\n")).expect("the host key");
         let gw = public(STUDIO);
@@ -437,9 +466,9 @@ impl Machine {
             joined: T0,
         };
         files.write_network(&net).expect("network.json");
-        files.write_roster(&roster()).expect("roster.json");
+        files.write_roster(NET, &roster()).expect("the roster");
         let caught = Arc::new(Caught::default());
-        let mut o = Options::new(&files.path, "0.0.0", "linux", Arc::new(|_: &str, _: &str| {}));
+        let mut o = Options::new(&files.path, kept, "0.0.0", "linux", Arc::new(|_: &str, _: &str| {}));
         let c = clock().clone();
         o.clock = Arc::new(move || c.load(Ordering::Relaxed) as f64);
         o.timing = timing();
@@ -520,12 +549,32 @@ pub fn body_for(kind: &str, c: &mut Choices<'_>) -> Value {
         "claims" => {
             json!({ "schema": "network/claims/v1", "full": c.bool(), "claims": [{ "repoKey": "github.com/acme/atlas", "path": "src/a.ts", "agent": "claude:aaaaaaaa-0001", "kind": "claim", "until": now + 60_000 }], "released": [] })
         }
-        "message" => json!({
-            "schema": "network/message/v2",
+        // A message frame: an entry of a member's feed (or of one that isn't
+        // its sender's), with an authority beside it, or an ack or a want.
+        "message" => {
+            let from = *c.pick(&[STUDIO, DESK, LAPTOP, GONE, SPARE]);
+            let kind = *c.pick(&[FeedKind::Message, FeedKind::Receipt, FeedKind::Handoff, FeedKind::Claim]);
+            let inner = match kind {
+                FeedKind::Message => body_for("send", c),
+                FeedKind::Receipt => body_for("receipt", c),
+                _ => body_for("handoff", c),
+            };
+            let inner = if inner.is_object() { inner } else { json!({}) };
+            let seq = u64::from(c.u8() % 4) + 1;
+            let mut b = json!({ "schema": "network/message/v3", "entry": entry(from, kind, seq, inner).to_json() });
+            match c.below(4) {
+                0 => b["authority"] = json!({ "person": { "person": person().id(), "device": device(STUDIO).public().id(), "sig": b64(&[1u8; 64]) } }),
+                1 => b["ack"] = json!({ "inc": T0, "high": c.below(8) }),
+                2 => b["want"] = json!({ "inc": T0, "from": c.below(8) }),
+                _ => {}
+            }
+            b
+        }
+        "send" => json!({
+            "schema": "network/send/v1",
             "mid": format!("msg_{:08x}", c.u16()),
             "sender": "claude:aaaaaaaa-0001",
             "senderKind": *c.pick(&["agent", "actor", "person"]),
-            "authority": *c.pick(&[json!({}), json!({ "person": { "person": person().id(), "device": device(STUDIO).public().id(), "sig": b64(&[1u8; 64]) } })]),
             "target": "claude:bbbbbbbb-0001",
             "body": "hi",
             "kind": "message",

@@ -20,6 +20,7 @@ pub mod a2a;
 mod chains;
 pub mod delivery;
 pub mod engine;
+pub mod feed;
 pub mod net;
 pub mod schema;
 pub mod sql;

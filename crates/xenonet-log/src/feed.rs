@@ -391,6 +391,22 @@ impl Writer {
         self.inc
     }
 
+    /// The kept entries written in this incarnation.
+    pub fn kept(&self) -> u64 {
+        self.kept
+    }
+
+    /// The loose entries written in this incarnation.
+    pub fn loose(&self) -> u64 {
+        self.loose
+    }
+
+    /// What the incarnation's first kept entry names, until it's written:
+    /// with `inc`, `kept` and `loose`, what `resume` takes back.
+    pub fn prev(&self) -> Option<Pos> {
+        self.prev
+    }
+
     /// The last kept entry written, or the one before this incarnation.
     pub fn head(&self) -> Pos {
         if self.kept == 0 {

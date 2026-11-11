@@ -197,8 +197,6 @@ pub enum FrameKind {
     Presence,
     Claims,
     Message,
-    Receipt,
-    Handoff,
     Relay,
     Operator,
     Svc,
@@ -283,9 +281,12 @@ pub struct Handoff {
     pub schema: HandoffTag,
     pub id: HandoffId,
     pub op: HandoffOp,
-    /// The maker, unqualified, on the frame's sender
+    /// The maker, unqualified, on the entry's author's machine
     pub from: Text<0, 200>,
     pub to: HandoffTo,
+    /// The one machine it's meant for: a handoff is a kept entry, which every member gets, and the others note it and pass it by. None: every member
+    #[serde(default, rename = "for", skip_serializing_if = "Opt::is_none")]
+    pub for_host: Opt<HostId>,
     pub goal: Nullable<Text<0, 2000>>,
     pub done: Nullable<Text<0, 8000>>,
     pub next: Nullable<Text<0, 8000>>,
@@ -303,9 +304,10 @@ impl Document for Handoff {
     const DESCRIPTION: &'static str = "Work one session leaves for another, perhaps on another machine; taken by the first that accepts it.";
 }
 
-// ---- network/message/v2
+// ---- network/send/v1, network/message/v3
 
-crate::tag!(pub MessageTag = "network/message/v2");
+crate::tag!(pub SendTag = "network/send/v1");
+crate::tag!(pub MessageTag = "network/message/v3");
 
 // Who sent a message: a session, an actor, or the person.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -407,11 +409,11 @@ pub enum MessageKind {
     Handoff,
 }
 
-/// A message between hosts.
+/// A message between hosts: the body of a message entry in its sender's machine's feed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Message {
-    pub schema: MessageTag,
+pub struct SendBody {
+    pub schema: SendTag,
     pub mid: Mid,
     /// The sender's id on its own host; the receiver qualifies it
     pub sender: Text<1, 200>,
@@ -427,13 +429,89 @@ pub struct Message {
     /// Messages in its thread so far, across hosts, for the hop limit
     pub hops: Uint,
     pub at: Ms,
-    pub authority: Authority,
+}
+
+impl Document for SendBody {
+    const ID: &'static str = "network/send/v1";
+    const TITLE: &'static str = "A message between hosts";
+    const DESCRIPTION: &'static str = "One message from an agent, actor or the person on one host to an agent or actor on another: the body of a message entry in its machine's feed, whose frame carries the authority the act rests on.";
+}
+
+/// What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and network; messages and receipts are loose, each taken once by its id
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    Claim,
+    Intent,
+    Handoff,
+    Assign,
+    Report,
+    Message,
+    Receipt,
+}
+
+// A place in a feed: an incarnation and a number in it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeedPlace {
+    pub inc: Uint,
+    pub seq: Uint,
+}
+
+/// One entry of a machine's feed in a network (xenonet-feed/1), signed by its machine signing key
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeedEntry {
+    /// The author: its machine signing key, which the network's chain lists for a member
+    pub author: SigningKeyId,
+    pub network: NetworkId,
+    /// The author's incarnation: it changes only when the author's store was restored or it was set up again
+    pub inc: Ranged<1>,
+    /// From 1 in each incarnation, kept and loose kinds each counted on their own
+    pub seq: Ranged<1>,
+    /// On the first kept entry of an incarnation only: the last kept entry before it, or 0, 0
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub prev: Opt<FeedPlace>,
+    pub kind: EntryKind,
+    /// When the author made it, by its clock: shown, never a reason to drop it
+    pub at: Ms,
+    /// What it says: network/send/v1 for a message, network/receipt/v1, network/handoff/v1
+    pub body: serde_json::Map<String, serde_json::Value>,
+    /// The author's signature over xenonet-feed/1, a newline and the entry's canonical JSON without it
+    pub sig: Base64Bytes,
+}
+
+// A receiver's word that it holds every kept entry of the frame's recipient's feed up to high in incarnation inc.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeedAck {
+    pub inc: Uint,
+    pub high: Uint,
+}
+
+// A receiver's ask, on a gap: every kept entry of the frame's recipient's feed from from in incarnation inc on.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeedWant {
+    pub inc: Uint,
+    pub from: Uint,
+}
+
+/// What a message frame carries between hosts: an entry of its sender's machine's feed, with the authority the act rests on; or, for the recipient's feed, the sender's ack or want
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Message {
+    pub schema: MessageTag,
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub entry: Opt<FeedEntry>,
+    /// For a message entry: what the act rests on, beside the entry since it's for this recipient alone
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub authority: Opt<Authority>,
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub ack: Opt<FeedAck>,
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub want: Opt<FeedWant>,
 }
 
 impl Document for Message {
-    const ID: &'static str = "network/message/v2";
-    const TITLE: &'static str = "A message between hosts";
-    const DESCRIPTION: &'static str = "One message from an agent, actor or the person on one host to an agent or actor on another, with the authority the act rests on.";
+    const ID: &'static str = "network/message/v3";
+    const TITLE: &'static str = "A message frame's body";
+    const DESCRIPTION: &'static str = "An entry of the sending machine's feed in the network, signed by its machine signing key, with the authority its act rests on; or that machine's ack of, or want for, the recipient's feed.";
 }
 
 // ---- network/operator/v2
@@ -1012,6 +1090,20 @@ pub struct State {
     /// Who this machine acts as, while it's in a network
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub person: Opt<PersonHere>,
+    /// Members' feeds a fork froze here: nothing from them is taken until you unfreeze one at the window
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub frozen: Opt<Vec<FrozenFeed>>,
+}
+
+/// A member's feed that froze here: it signed two entries at one place
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FrozenFeed {
+    /// The member, by its machine signing key
+    pub author: SigningKeyId,
+    /// The member's host id, while the network's chain lists it
+    pub host: Nullable<HostId>,
+    /// Where the two entries are
+    pub at: FeedPlace,
 }
 
 impl Document for State {
@@ -1139,6 +1231,7 @@ pub const DOCUMENTS: &[crate::schema::Writer] = &[
     crate::schema::file::<Receipt>,
     crate::schema::file::<Relay>,
     crate::schema::file::<RosterEntry>,
+    crate::schema::file::<SendBody>,
     crate::schema::file::<State>,
     crate::schema::file::<Svc>,
 ];

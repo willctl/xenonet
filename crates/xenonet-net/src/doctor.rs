@@ -2,8 +2,8 @@
 //! wire"), from what this machine keeps of it alone: the network, its
 //! roster and key, the link (up, or down since when and why), the
 //! gateway's key against the pinned one, the clock, the outbox and the
-//! queues, a roster mismatch, being removed, and what the gateway's
-//! address means.
+//! queues, a member's feed frozen by a fork, a roster mismatch, being
+//! removed, and what the gateway's address means.
 //!
 //! The link keeps how it stands; these checks read it, so they work
 //! whether the link is running or not.
@@ -85,7 +85,7 @@ pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
             verdict(
                 "warn",
                 format!("The network's gateway hasn't answered{at}: {why}"),
-                Some("Messages for other machines wait in the outbox, and go when the gateway is back. XenoNet tries again by itself."),
+                Some("What's for other machines goes again when the gateway is back. XenoNet tries again by itself."),
             )
         }
         _ => verdict("info", "the link isn't running: XenoNet's service runs it", Some("xenonet service start")),
@@ -154,6 +154,9 @@ pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
             verdict("ok", detail, None)
         },
     ));
+
+    // The members' feeds.
+    out.push(("network.feeds", "Every member's feed is taken", feeds(d, &net.id)));
 
     // The join route, on the gateway's host.
     if gateway_here {
@@ -285,6 +288,29 @@ pub fn standing(d: &Dir) -> Value {
 
 /// The roster, checked against the person chains kept beside it, which
 /// the doctor reads without opening any key.
+/// Whether a fork froze a member's feed here: it signed two different
+/// entries at one place, so nothing more from it is taken until the person
+/// unfreezes it at the window.
+fn feeds(d: &Dir, network: &str) -> Value {
+    let frozen = d.persist.frozen_feeds(network).unwrap_or_default();
+    if frozen.is_empty() {
+        return verdict("ok", "no member signed two entries at one place in its feed", None);
+    }
+    let roster = read_roster(d, network).ok();
+    let names: Vec<String> = frozen
+        .iter()
+        .map(|(author, fork)| {
+            let host = roster.as_ref().and_then(|r| r.view().members.values().find(|m| m.machine.id() == *author).map(|m| m.id.clone()));
+            format!("{} (at {}.{})", host.unwrap_or_else(|| author.clone()), fork.at.inc, fork.at.seq)
+        })
+        .collect();
+    verdict(
+        "fail",
+        format!("{} signed two different entries at one place in its feed, so nothing more from it is taken here", names.join(", ")),
+        Some("If you trust that machine again (it was restored from a backup, say), unfreeze its feed in XenoNet's window: Network, then Unfreeze beside it. Otherwise remove it from the network."),
+    )
+}
+
 fn read_roster(d: &Dir, network: &str) -> crate::R<crate::roster::Roster> {
     let identity = crate::identity::Identity::open(d.identity_dir(), d.persist.clone(), None)?;
     d.read_roster(network, crate::roster::NetworkPolicy::with(identity))

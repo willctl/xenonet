@@ -1,10 +1,12 @@
 #![no_main]
 
 // The engine's side of what other hosts send (docs/design/network.md,
-// sections 5, 6, 8 and 10): presence, claims, messages, receipts,
-// handoffs and the person's actions, as the network passes them on once a
-// frame checked and opened, through `network::receive` on a real engine
-// with its own state folder. Each run takes a few bodies, each one of the
+// sections 5, 6, 8 and 10): presence, claims and the person's actions as
+// the network passes them on once a frame checked and opened, through
+// `network::receive`, and messages, receipts and handoffs as entries of
+// the sending member's feed (`network/message/v3`), signed by its machine
+// key, through `network::entry_in`, on a real engine with its own state
+// folder and store. Each run takes a few bodies, each one of the
 // schemas' own with the input's fields over it, or the input's JSON
 // alone, and then reads them back as the engine does, through its driver
 // as the routes call it: other hosts' agents for peers and the console, a
@@ -24,7 +26,8 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use xenonet_fuzz::net::{body_for, overlay, Choices};
+use xenonet_fuzz::net::{body_for, entry, overlay, Choices};
+use xenonet_id::sign::Signer as _;
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing};
 use xenonet_runtime::engine::EngineDriver;
 use xenonet_runtime::network;
@@ -107,6 +110,8 @@ struct Engine {
     runs: u64,
     /// The last message id the checks read.
     last: f64,
+    /// Each host's next kept and loose entry.
+    seqs: std::collections::HashMap<&'static str, (u64, u64)>,
 }
 
 impl Drop for Engine {
@@ -130,7 +135,7 @@ fn engine() -> Engine {
     let vars = [("HOME", home.as_str()), ("XENONET_STATE_DIR", state.as_str()), ("XENONET_CACHE_DIR", state.as_str()), ("XENONET_ACTORS", "off"), ("XENONET_PORT", "47996")];
     let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_string());
     let config = Config::from(&[], &get);
-    let mut cores = Cores::pending(false, false, false);
+    let mut cores = Cores::pending(false, false);
     cores.state = Arc::new(Map { cwd: dir.join("home/atlas").to_string_lossy().into_owned() });
     let env = WireEnv::new("0.0.0");
     // As the binary's serve closure gives the engine its settings.
@@ -147,6 +152,7 @@ fn engine() -> Engine {
         permission_hold_ms: config.permission_hold_ms,
         launcher_exec: config.launcher_exec.clone(),
         made_up: xenonet_runtime::actors::MadeUp::none(),
+        db: Some(Arc::new(xenonet_store::Db::open(std::path::Path::new(&config.state_dir)).expect("the engine's store"))),
     };
     xenonet_fuzz::adapters();
     let _in = runtime().enter();
@@ -156,10 +162,12 @@ fn engine() -> Engine {
     // The fixed network's chain and its owner's, as studio holds them.
     let identity_dir = dir.join("state").join("identity");
     std::fs::create_dir_all(&identity_dir).expect("the identity's folder");
-    std::fs::write(identity_dir.join("person.json"), format!("{}\n", xenonet_fuzz::net::person().to_json())).expect("person.json");
-    let identity = xenonet_net::identity::Identity::open(identity_dir, None).expect("the identity");
+    let kept: Arc<dyn xenonet_net::persist::Persist> = Arc::new(xenonet_net::persist::Memory::default());
+    let owner = xenonet_fuzz::net::person();
+    kept.put_person(owner.id().expect("the owner"), true, owner.entries()).expect("the owner's chain");
+    let identity = xenonet_net::identity::Identity::open(identity_dir, kept, None).expect("the identity");
     xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Gov(identity))));
-    Engine { dir, w, net, runs: 0, last: 0.0 }
+    Engine { dir, w, net, runs: 0, last: 0.0, seqs: std::collections::HashMap::new() }
 }
 
 /// studio's governance: the fixed network's chain, its owner's.
@@ -190,9 +198,13 @@ fn body(kind: Kind, c: &mut Choices<'_>) -> Value {
     if c.rarely(24) {
         return c.value();
     }
-    let mut b = body_for(kind.as_str(), c);
+    let mut b = body_for(if kind == Kind::Message { "send" } else { kind.as_str() }, c);
     match kind {
         Kind::Message => {
+            // The person's signature beside it, as one that doesn't check.
+            if c.bool() {
+                b["authority"] = json!({ "person": { "person": xenonet_fuzz::net::person().id(), "device": xenonet_fuzz::net::device(xenonet_fuzz::net::STUDIO).public().id(), "sig": xenonet_net::codec::b64(&[1u8; 64]) } });
+            }
             b["target"] = json!(*c.pick(&[A, B, "claude:zzzzzzzz-0009", "actor:you", "actor:wren", "@laptop:claude:aaaaaaaa-0001", "hello"]));
             b["sender"] = json!(*c.pick(&["claude:bbbbbbbb-0001", "actor:you", "actor:wren", "@studio:claude:aaaaaaaa-0001", "codex:dddddddd-0002"]));
             if c.bool() {
@@ -259,8 +271,26 @@ fuzz_target!(|data: &[u8]| {
         let from = *c.pick(&["laptop", "laptop", "desk", "vm1"]);
         let window = HOSTS.iter().find(|(h, _)| *h == from).is_some_and(|(_, win)| *win) || c.rarely(16);
         let b = body(kind, &mut c);
-        let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: now_ms(), from_window_host: window };
-        xenonet_fuzz::run(data, || network::receive(w, incoming.clone()));
+        if let (Some(fed), true) = (xenonet_net::sink::entry_kind(kind), b.is_object()) {
+            // An entry of `from`'s feed: its next one, or a place picked
+            // from the input, so some come past a gap, again, or forked.
+            let i = xenonet_fuzz::net::index_of(from).unwrap_or(0);
+            let at = e.seqs.entry(from).or_insert((1, 1));
+            let kept = fed.class() == xenonet_net::feed::Class::Kept;
+            let seq = if c.rarely(8) { u64::from(c.u8() % 6) + 1 } else if kept { at.0 } else { at.1 };
+            if kept { at.0 = at.0.max(seq + 1) } else { at.1 = at.1.max(seq + 1) }
+            let authority = b.get("authority").cloned().unwrap_or_else(|| json!({}));
+            let mut inner = b.clone();
+            if let Some(o) = inner.as_object_mut() {
+                o.remove("authority");
+            }
+            let v = entry(i, fed, seq, Value::Object(inner.as_object().cloned().unwrap_or_default())).verify(&xenonet_fuzz::net::machine(i)).expect("its own key");
+            let arrived = xenonet_net::sink::Arrived { host: from.into(), entry: v, authority, window };
+            xenonet_fuzz::run(data, || network::entry_in(w, arrived.clone()));
+        } else {
+            let incoming = Incoming { from: from.into(), kind, body: b.clone(), at: now_ms(), from_window_host: window };
+            xenonet_fuzz::run(data, || network::receive(w, incoming.clone()));
+        }
         landed_as_theirs(w, &mut e.last, from, window, &b);
         if c.is_empty() {
             break;

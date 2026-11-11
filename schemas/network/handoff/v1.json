@@ -26,7 +26,7 @@
     },
     "from": {
       "type": "string",
-      "description": "The maker, unqualified, on the frame's sender",
+      "description": "The maker, unqualified, on the entry's author's machine",
       "maxLength": 200
     },
     "to": {
@@ -73,6 +73,11 @@
         "host"
       ],
       "additionalProperties": {}
+    },
+    "for": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$",
+      "description": "The one machine it's meant for: a handoff is a kept entry, which every member gets, and the others note it and pass it by. None: every member"
     },
     "goal": {
       "anyOf": [

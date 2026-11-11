@@ -216,7 +216,7 @@ impl RelayServer {
     /// The bye a host that isn't a window host gets.
     fn refuse(&self, host: &str, sub: &str) {
         let bye = json!({ "t": "bye", "code": "not-window", "message": "this machine shows its map only to a window host's console" });
-        let _ = self.parts.net.send(Outgoing { to: To::Host(host.into()), kind: Kind::Relay, body: wire::batch(sub, 1, &[bye]) });
+        let _ = self.parts.net.send(Outgoing::new(To::Host(host.into()), Kind::Relay, wire::batch(sub, 1, &[bye])));
     }
 
     fn open(&self, host: &str, sub: &str) {
@@ -600,7 +600,7 @@ impl Session {
     fn send(&mut self, frames: Vec<Value>) {
         self.seq += 1;
         let body = wire::batch(&self.sub, self.seq, &frames);
-        if let Err(why) = self.net.send(Outgoing { to: To::Host(self.host.clone()), kind: Kind::Relay, body }) {
+        if let Err(why) = self.net.send(Outgoing::new(To::Host(self.host.clone()), Kind::Relay, body)) {
             (self.log)("net.relay", &format!("this machine's map didn't go to {}: {why}", self.host));
         }
     }

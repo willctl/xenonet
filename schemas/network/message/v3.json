@@ -1,85 +1,100 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://xenonet.dev/schemas/network/message/v2.json",
+  "$id": "https://xenonet.dev/schemas/network/message/v3.json",
   "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
-  "title": "A message between hosts",
-  "description": "One message from an agent, actor or the person on one host to an agent or actor on another, with the authority the act rests on.",
+  "title": "A message frame's body",
+  "description": "An entry of the sending machine's feed in the network, signed by its machine signing key, with the authority its act rests on; or that machine's ack of, or want for, the recipient's feed.",
   "type": "object",
   "properties": {
     "schema": {
       "type": "string",
-      "const": "network/message/v2"
+      "const": "network/message/v3"
     },
-    "mid": {
-      "type": "string",
-      "pattern": "^msg_[0-9a-f-]{36}$",
-      "description": "The message's id across the network (its envelope's mid)"
-    },
-    "sender": {
-      "type": "string",
-      "description": "The sender's id on its own host; the receiver qualifies it",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "senderKind": {
-      "type": "string",
-      "enum": [
-        "agent",
-        "actor",
-        "person"
-      ]
-    },
-    "target": {
-      "type": "string",
-      "description": "The recipient's id on the receiving host, unqualified",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "body": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 16000
-    },
-    "replyTo": {
-      "anyOf": [
-        {
+    "entry": {
+      "type": "object",
+      "properties": {
+        "author": {
           "type": "string",
-          "pattern": "^msg_[0-9a-f-]{36}$",
-          "description": "The message's id across the network (its envelope's mid)"
+          "pattern": "^xns1_[a-z2-7]{32}$",
+          "description": "The author: its machine signing key, which the network's chain lists for a member"
         },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "scope": {
-      "anyOf": [
-        {
+        "network": {
           "type": "string",
-          "maxLength": 64
+          "pattern": "^net_[0-9a-f]{32}$"
         },
-        {
-          "type": "null"
+        "inc": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "The author's incarnation: it changes only when the author's store was restored or it was set up again"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "From 1 in each incarnation, kept and loose kinds each counted on their own"
+        },
+        "prev": {
+          "type": "object",
+          "properties": {
+            "inc": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "inc",
+            "seq"
+          ],
+          "description": "On the first kept entry of an incarnation only: the last kept entry before it, or 0, 0",
+          "additionalProperties": {}
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "claim",
+            "intent",
+            "handoff",
+            "assign",
+            "report",
+            "message",
+            "receipt"
+          ],
+          "description": "What a feed entry is about: claims, intents, handoffs, assigns and reports are kept, in one gapless sequence per author and network; messages and receipts are loose, each taken once by its id"
+        },
+        "at": {
+          "type": "number",
+          "description": "When the author made it, by its clock: shown, never a reason to drop it"
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "What it says: network/send/v1 for a message, network/receipt/v1, network/handoff/v1"
+        },
+        "sig": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "The author's signature over xenonet-feed/1, a newline and the entry's canonical JSON without it"
         }
+      },
+      "required": [
+        "author",
+        "network",
+        "inc",
+        "seq",
+        "kind",
+        "at",
+        "body",
+        "sig"
       ],
-      "description": "direct, repo or all: how the sender addressed it"
-    },
-    "kind": {
-      "type": "string",
-      "enum": [
-        "message",
-        "handoff"
-      ]
-    },
-    "hops": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991,
-      "description": "Messages in its thread so far, across hosts, for the hop limit"
-    },
-    "at": {
-      "type": "number",
-      "description": "Epoch milliseconds"
+      "description": "One entry of a machine's feed in a network (xenonet-feed/1), signed by its machine signing key",
+      "additionalProperties": {}
     },
     "authority": {
       "type": "object",
@@ -252,22 +267,52 @@
           "description": "The head of the person's chain the sender held: a receiver with an older one asks for the rest"
         }
       },
-      "description": "What an act rests on, for the receiver to check against its own chains: the sender's word on its own strength is never part of it",
+      "description": "For a message entry: what the act rests on, beside the entry since it's for this recipient alone",
+      "additionalProperties": {}
+    },
+    "ack": {
+      "type": "object",
+      "properties": {
+        "inc": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "inc",
+        "high"
+      ],
+      "additionalProperties": {}
+    },
+    "want": {
+      "type": "object",
+      "properties": {
+        "inc": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "inc",
+        "from"
+      ],
       "additionalProperties": {}
     }
   },
   "required": [
-    "schema",
-    "mid",
-    "sender",
-    "senderKind",
-    "target",
-    "body",
-    "replyTo",
-    "scope",
-    "hops",
-    "at",
-    "authority"
+    "schema"
   ],
   "additionalProperties": {}
 }

@@ -42,6 +42,7 @@ mod made {
             doc::<network::Receipt>(),
             doc::<network::Relay>(),
             doc::<network::RosterEntry>(),
+            doc::<network::SendBody>(),
             doc::<network::State>(),
             doc::<network::Svc>(),
             doc::<host::Hello>(),
@@ -492,9 +493,8 @@ fn every_pattern_in_the_schemas_compiles_and_its_sample_matches() {
 }
 
 // The network's known answers (test/fixtures/net, which crates/xenonet-net
-// writes and checks) are real frames, a service request and roster
-// entries: they read. (Its message body is a sketch, not a whole
-// network/message/v2.)
+// writes and checks) are real frames, a message frame's body with its feed
+// entry, a service request and roster entries: they read.
 #[test]
 fn the_networks_known_answers_read_as_the_model_types() {
     use xenonet_model::network;
@@ -508,6 +508,8 @@ fn the_networks_known_answers_read_as_the_model_types() {
         read(f, of::<network::Frame>(&k[f]["frame"]));
     }
     read("svcFrame.body", of::<network::Svc>(&k["svcFrame"]["body"]));
+    read("frame.body", of::<network::Message>(&k["frame"]["body"]));
+    read("frame.body.entry.body", of::<network::SendBody>(&k["frame"]["body"]["entry"]["body"]));
     let roster = k["roster"].as_array().unwrap();
     assert_ne!(roster.len(), 0, "the known answers have a roster");
     for (i, e) in roster.iter().enumerate() {

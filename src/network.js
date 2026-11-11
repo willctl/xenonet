@@ -33,7 +33,7 @@ import { hostOfId } from "./hosts.js";
 import { ARM_MS } from "./actor-requests.js";
 import { keepSecret, forgetSecrets, secretHtml, secretClick, hideOnBlur, secretValue } from "./secret.js";
 import { personOf, servicesOf, devicesHtml, servicesHtml, publishHtml, publishBody } from "./network-person.js";
-import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
+import { stateOf, inNetwork, clock, linkWords, skewWords, hostLine, hostTags, outboxWords, ticketWords, proposalWords, frozenWords, remoteAgents, remoteWaits, hostIdProblem, joinOf, joinFields, KIND_WORDS, TICKET_MS, STARTS, WAKES, START_WORDS, WAKE_WORDS, reachOf, hostCan, widenWords, delegationWords } from "./network-model.js";
 
 const EVERY_IN = 10e3;
 // What a session starts as, in the Start a session box.
@@ -243,7 +243,14 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
           .map((p) => `<li data-net-proposal="${h(p.id)}">${h(proposalWords(p))}. It needs the founder or a second window host.${state.self?.window && !mine(p) ? ` <button class="act" data-net-approve="${h(p.id)}" data-yours>Approve</button>` : ""}</li>`)
           .join("")}</ul>`
       : "";
-    return `${gatewayHtml()}${mismatch}
+    // A member that signed two entries at one place: its feed is frozen
+    // here until you unfreeze it, from the window alone.
+    const frozen = state.frozen.length
+      ? `<div class="panel-title sub"><span>Frozen</span><span class="tick">${state.frozen.length}</span></div><ul class="net-tickets" data-net-frozen>${state.frozen
+          .map((f) => `<li data-net-frozen-feed="${h(f.author)}">${h(frozenWords(f))}. Unfreeze it once you trust that machine again, or remove it.${state.self ? ` <button class="act" data-net-unfreeze="${h(f.author)}" data-yours>Unfreeze</button>` : ""}</li>`)
+          .join("")}</ul>`
+      : "";
+    return `${gatewayHtml()}${mismatch}${frozen}
       <div class="panel-title sub"><span>Machines</span><span class="tick">${hosts.length}</span></div>
       <ol class="ac-list" data-net-hosts>${hosts.map((x) => hostHtml(x, view.confirm)).join("")}</ol>
       ${approvals}${tickets}
@@ -604,6 +611,18 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     });
   }
 
+  async function unfreeze(author) {
+    const f = state.frozen.find((x) => x.author === author);
+    return busyWith(async () => {
+      const r = await calls.call("POST", "/api/net/feeds/unfreeze", { author });
+      if (!r.ok) return failed(r);
+      sfx("success");
+      toast(`${f?.host ?? author}'s feed is taken again.`);
+      await refresh();
+      return { ok: true, unfrozen: author };
+    });
+  }
+
   async function approve(id) {
     const p = state.proposals.find((x) => x.id === id);
     return busyWith(async () => {
@@ -703,6 +722,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
     if (t.closest("[data-net-publish]")) return publish();
     if (d.netReplace) return replace(d.netReplace);
     if (d.netApprove) return approve(d.netApprove);
+    if (d.netUnfreeze) return unfreeze(d.netUnfreeze);
     if (d.netStartSession != null) return startSession({ host: d.netStartSession || null });
     for (const attr of ["data-net-start-host", "data-net-start-app", "data-net-start-mode"]) {
       const b = t.closest(`[${attr}]`);
@@ -825,6 +845,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       })),
       tickets: state.tickets.map((t) => ({ host: t.host, window: !!t.window, expires: t.expires })),
       proposals: state.proposals.map((p) => ({ id: p.id, op: p.op, host: p.host, window: !!p.window, gateway: p.gateway ?? null, signers: p.signers ?? [], words: proposalWords(p) })),
+      frozen: state.frozen.map((f) => ({ author: f.author, host: f.host ?? null, at: f.at ?? null, words: frozenWords(f) })),
       outbox: { frames: state.outbox.frames ?? 0, bytes: state.outbox.bytes ?? 0, oldest: state.outbox.oldest ?? null },
       mismatch: state.rosterMismatch,
       titlesOnly: !!state.titlesOnly,
@@ -859,7 +880,7 @@ export function createNetwork({ modals, calls, sfx = () => {}, toast = () => {},
       error: isOpen() ? (view.error ?? null) : null,
       // What the panel says, with a join line shown masked all the same.
       text: isOpen() ? masked(body()?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
-      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish") } : null,
+      at: isOpen() ? { make: centre("[data-net-make]"), create: centre("[data-net-create]"), join: centre("[data-net-join]"), show: centre("[data-secret-show]"), titles: centre("[data-net-titles]"), load: centre("[data-net-load]"), add: centre('[data-net-go="add"]'), approve: centre("[data-net-approve]"), unfreeze: centres("data-net-unfreeze"), set: centres("data-net-set"), setOn: centres("data-net-set-on"), widen: centres("data-net-widen-approve"), startSession: centres("data-net-start-session"), revoke: centres("data-net-revoke"), revokeYes: centre("[data-net-revoke-yes]"), publish: centre("[data-net-publish]"), unpublish: centres("data-net-unpublish") } : null,
     };
   }
 

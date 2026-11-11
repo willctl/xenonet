@@ -2,8 +2,8 @@
 //! this host's id in it, and the gateway's address and pinned key
 //! (`NetFile`), the roster, how the link last stood, which the doctor
 //! reads, and the services this host published, all kept through
-//! `Persist`; and the files in `<state>/network/`: this host's key and the
-//! network's queues. Who may start and wake sessions here is the network's
+//! `Persist`; and the files in `<state>/network/`: this host's key and, on
+//! the gateway's host, the network's queues. Who may start and wake sessions here is the network's
 //! chain's (each member's `settings` entry).
 
 use crate::persist::Persist;
@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const KEY: &str = "host.key";
-pub const HOST_DB: &str = "net.sqlite";
 pub const GATEWAY_DB: &str = "gateway.sqlite";
 
 /// The gateway as this host pinned it.
@@ -149,7 +148,7 @@ impl Dir {
         if let Some(n) = self.persist.network()? {
             self.persist.forget(&n.id)?;
         }
-        for name in [KEY, HOST_DB, GATEWAY_DB] {
+        for name in [KEY, GATEWAY_DB] {
             for f in [name.to_string(), format!("{name}-wal"), format!("{name}-shm")] {
                 match std::fs::remove_file(self.file(&f)) {
                     Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),

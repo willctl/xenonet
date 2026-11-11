@@ -5,7 +5,7 @@
 // sounds, and the join line's secret part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
+import { stateOf, inNetwork, linkWords, skewWords, hostLine, hostTags, outboxWords, remoteAgents, remoteWaits, chimeHere, hostIdProblem, joinOf, joinFields, proposalWords, frozenWords, reachOf, hostCan, widenWords, delegationWords, STARTS, START_WORDS, ALONE, TICKET_MS, AWAY_MS } from "../src/network-model.js";
 import { parse } from "./harness/schema.js";
 
 const NOW = Date.UTC(2026, 9, 20, 14, 30);
@@ -160,6 +160,15 @@ test("what waits for approval says what it does and who asked", () => {
   const s = stateOf({ ...founder(), proposals: [add, { op: "add", host: "x1" }, null] });
   assert.deepEqual(s.proposals.map((p) => p.id), ["e1"]);
   assert.deepEqual(stateOf(null).proposals, []);
+});
+
+test("a frozen feed says which machine signed two entries at one place", () => {
+  const f = { author: "xns1_simulatedlaptopsigningkeysofhome", host: "laptop", at: { inc: 1794400000000, seq: 7 } };
+  assert.equal(frozenWords(f), "laptop signed two different entries at one place in its feed (entry 7), so nothing more from it is taken here");
+  assert.match(frozenWords({ author: f.author, host: null }), /^xns1_simulatedlaptopsigningkeysofhome signed/);
+  const s = stateOf({ ...founder(), frozen: [f, { host: "x1" }, null] });
+  assert.deepEqual(s.frozen.map((x) => x.host), ["laptop"]);
+  assert.deepEqual(stateOf(null).frozen, []);
 });
 
 test("who may start and wake sessions on each machine, and what its XenoNet takes", () => {

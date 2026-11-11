@@ -18,7 +18,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// What a body is, and so which frame kind carries it.
+/// What a body is, and so which frame kind carries it: a message, a
+/// receipt and a handoff are entries in this machine's feed
+/// (xenonet-log's `feed`), which `message` frames carry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -44,7 +46,8 @@ pub enum Kind {
 impl Kind {
     pub const ALL: [Self; 8] = [Self::Presence, Self::Claims, Self::Message, Self::Receipt, Self::Handoff, Self::Operator, Self::Relay, Self::Svc];
 
-    /// The frame kind on the wire, and the schema's folder.
+    /// Its name, and the schema's folder; the frame kind on the wire for
+    /// what isn't a feed entry.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Presence => "presence",
@@ -71,11 +74,22 @@ impl Kind {
         !matches!(self, Self::Presence | Self::Claims | Self::Relay | Self::Svc)
     }
 
-    /// The schema of a body of this kind: a message and the person's
-    /// answer are at v2, which carry the act's authority.
+    /// Whether it travels as an entry of this machine's feed: a message
+    /// and a receipt loose, each taken once by its id, and a handoff kept,
+    /// in the feed's gapless sequence to every member.
+    pub fn fed(self) -> bool {
+        matches!(self, Self::Message | Self::Receipt | Self::Handoff)
+    }
+
+    /// The schema of a body of this kind: a message's is the body of its
+    /// feed entry, and the person's answer is at v2, which carries the
+    /// act's authority.
     pub fn schema(self) -> String {
-        let v = if matches!(self, Self::Message | Self::Operator) { 2 } else { 1 };
-        format!("network/{}/v{v}", self.as_str())
+        match self {
+            Self::Message => "network/send/v1".into(),
+            Self::Operator => "network/operator/v2".into(),
+            _ => format!("network/{}/v1", self.as_str()),
+        }
     }
 }
 
@@ -95,6 +109,17 @@ pub struct Outgoing {
     pub to: To,
     pub kind: Kind,
     pub body: Value,
+    /// For a message: what the act rests on (`network/message/v3`'s
+    /// `authority`), which goes beside its feed entry, for its one
+    /// recipient.
+    pub authority: Option<Value>,
+}
+
+impl Outgoing {
+    /// A body that rests on nothing but this machine's word.
+    pub fn new(to: To, kind: Kind, body: Value) -> Outgoing {
+        Outgoing { to, kind, body, authority: None }
+    }
 }
 
 /// A body another host sent, after the network checked its signature
@@ -219,6 +244,13 @@ pub trait Net: Send + Sync {
     fn host_can(&self, _host: &str, _what: &str) -> bool {
         false
     }
+    /// Tells `host` that this machine has applied every kept entry of its
+    /// feed up to `high` of incarnation `inc`, so it resends only what's
+    /// after.
+    fn ack(&self, _host: &str, _inc: u64, _high: u64) {}
+    /// Asks `host` for the kept entries of its feed from `from` of
+    /// incarnation `inc` on: one arrived past a gap.
+    fn want(&self, _host: &str, _inc: u64, _from: u64) {}
 }
 
 /// What the network calls in the engine.
@@ -277,7 +309,7 @@ impl Net for NoNet {
 pub enum Op {
     Presence(crate::network::Presence),
     Claims(crate::network::Claims),
-    Message(crate::network::Message),
+    Message(crate::network::SendBody),
     Receipt(crate::network::Receipt),
     Handoff(crate::network::Handoff),
     Operator(crate::network::Operator),
@@ -312,8 +344,11 @@ mod tests {
         }
         assert!(Kind::Message.queued() && Kind::Handoff.queued() && Kind::Operator.queued() && Kind::Receipt.queued());
         assert!(!Kind::Presence.queued() && !Kind::Claims.queued() && !Kind::Relay.queued() && !Kind::Svc.queued());
+        assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed());
+        assert!(!Kind::Presence.fed() && !Kind::Operator.fed() && !Kind::Relay.fed());
         assert_eq!(Kind::parse("frame"), None);
         assert_eq!(Kind::Presence.schema(), "network/presence/v1");
+        assert_eq!(Kind::Message.schema(), "network/send/v1");
     }
 
     #[test]
@@ -322,7 +357,7 @@ mod tests {
         assert!(net.me().is_none());
         assert_eq!(net.hosts().len(), 0);
         assert_eq!(net.roster_head(), None);
-        let out = Outgoing { to: To::All, kind: Kind::Presence, body: Value::Null };
+        let out = Outgoing::new(To::All, Kind::Presence, Value::Null);
         assert!(net.send(out).is_err());
     }
 }

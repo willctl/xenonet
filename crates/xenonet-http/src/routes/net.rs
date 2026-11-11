@@ -30,6 +30,10 @@
 //!   service off is yours from your terminal too (`xenonet svc`).
 //! - `POST devices/revoke`: revokes another of the person's devices (a
 //!   lost machine), with their presence: the window's.
+//! - `POST feeds/unfreeze`: takes a machine's feed again after a fork froze
+//!   it here (`frozen` in the state), by its author's key: the window's,
+//!   since only the person can say a machine that signed two things at one
+//!   place is to be trusted again.
 //!
 //! The person's devices are in `GET state`'s `person.devices`.
 
@@ -104,7 +108,19 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         ("GET", "state" | "svc")
             | (
                 "POST",
-                "create" | "join" | "leave" | "ticket" | "remove" | "replace" | "approve" | "gateway/take" | "gateway/set" | "svc/publish" | "svc/unpublish" | "devices/revoke"
+                "create"
+                    | "join"
+                    | "leave"
+                    | "ticket"
+                    | "remove"
+                    | "replace"
+                    | "approve"
+                    | "gateway/take"
+                    | "gateway/set"
+                    | "svc/publish"
+                    | "svc/unpublish"
+                    | "devices/revoke"
+                    | "feeds/unfreeze"
             )
             | ("PUT", "settings")
     );
@@ -154,6 +170,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "svc" => Ok(net.svc_list()),
         "svc/publish" => publish(ctx, net, &body, window),
         "devices/revoke" => net.revoke_device(&text("device"), window),
+        "feeds/unfreeze" => net.unfreeze(&text("author"), window),
         "svc/unpublish" => net.svc_unpublish(&text("name")),
         _ => net.set_gateway(&text("address")).await,
     };

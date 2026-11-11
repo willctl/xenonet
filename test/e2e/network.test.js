@@ -463,6 +463,21 @@ test("net-approval: a window host another one signed in waits for an approval he
   await s.driver("network", "close");
 }));
 
+test("net-frozen: a machine that signed two entries at one place shows frozen, and Unfreeze takes its feed again", { timeout: limit(60000) }, shoot("network-frozen", async () => {
+  await simulate("net-frozen", {}, (n) => n.frozen.length === 1);
+  await served();
+  const { network: n } = await s.driver("network", "open");
+  assert.equal(n.frozen[0].host, "laptop");
+  assert.match(n.text, /frozen.*laptop signed two different entries at one place in its feed/i);
+  await clickAt(n.at.unfreeze[n.frozen[0].author], "Unfreeze");
+  const done = await until(async () => {
+    const got = await network();
+    return got.frozen.length === 0 ? got : null;
+  });
+  assert.ok(done, "laptop's feed is taken again");
+  await s.driver("network", "close");
+}));
+
 test("your devices: a lost machine's revoked from here, never this one's; a service published and taken off", { timeout: limit(60000) }, shoot("network-devices", async () => {
   await simulate("net-founder", {}, (n) => n.person?.devices.length === 3);
   const raw = await served();

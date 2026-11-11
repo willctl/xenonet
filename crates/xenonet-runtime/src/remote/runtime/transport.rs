@@ -51,7 +51,7 @@ pub struct NetTransport {
 
 impl NetTransport {
     fn send(&self, host: &str, sub: &str, op: &Op) -> Result<(), String> {
-        self.net.send(Outgoing { to: To::Host(host.into()), kind: Kind::Relay, body: wire::ask(sub, op) })
+        self.net.send(Outgoing::new(To::Host(host.into()), Kind::Relay, wire::ask(sub, op)))
     }
 }
 
