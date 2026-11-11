@@ -608,8 +608,8 @@ for the phase that needs them.
    revoke, disable and audit, are this grant's read right. The receiver
    decides every read and act with `xenonet-authz`. Issuing or widening
    a grant needs the person's presence, as an Allow does; narrowing and
-   revoking need none. The SSH hosts prototype is retired (Will,
-   2026-11-11): machines join through the network, and another machine's
+   revoking need none. The SSH hosts prototype is retired, as recommended
+   here: machines join through the network, and another machine's
    map reaches a console only through the network's relay.
 9. **The remote map.** Is it acceptable that other machines show as
    session cards from presence, not today's relayed full graph?
