@@ -195,7 +195,7 @@ fn act_of(what: Do) -> (Resource, Act) {
         Do::StartDelegated => (run(), start(StartMode::Delegated)),
         Do::Answer => (run(), Act::Answer { ask: AskId::new("q1").unwrap(), decision: AnswerDecision::Allow }),
         Do::Deny => (run(), Act::Answer { ask: AskId::new("q1").unwrap(), decision: AnswerDecision::Deny }),
-        Do::Claim => (m1(), Act::Claim),
+        Do::Claim => (Resource::Project(project()), Act::Claim { project: project() }),
         Do::Handoff => (m1(), Act::Handoff),
         Do::ReadMap => (m1(), Act::Read { scope: ReadScope::Map, filters: None }),
         Do::ReadTranscripts => (m1(), Act::Read { scope: ReadScope::Transcripts, filters: None }),
@@ -481,8 +481,14 @@ fn a_resource_or_door_that_doesnt_fit_is_refused() {
     let f = fixture();
     let agent = |m: &str| Principal::Agent { id: AgentId::new("a1").unwrap(), machine: machine(m), attestation: HarnessSigned };
     let refuse = |r: Request| decide(None, &r, &f.world, None).reason().map(Reason::code);
+    let claim = || Act::Claim { project: project() };
+    let atlas = || Resource::Project(project());
     // Another machine's resource: it decides for itself.
-    assert_eq!(refuse(Request::new(agent("m1"), Resource::Machine(machine("m2")), Act::Claim, Door::Local, NOW, None)), Some("resource"));
+    assert_eq!(refuse(Request::new(agent("m1"), Resource::Machine(machine("m2")), Act::Handoff, Door::Local, NOW, None)), Some("resource"));
+    // A claim is done to a project, the one it names.
+    assert_eq!(refuse(Request::new(agent("m1"), Resource::Machine(machine("m1")), claim(), Door::Local, NOW, None)), Some("resource"));
+    let other = Resource::Project(ProjectId::new("prj_other").unwrap());
+    assert_eq!(refuse(Request::new(agent("m1"), other, claim(), Door::Local, NOW, None)), Some("resource"));
     // A wake is done to a session.
     assert_eq!(refuse(Request::new(agent("m1"), Resource::Machine(machine("m1")), Act::Wake, Door::Local, NOW, None)), Some("resource"));
     // A start whose run isn't its act's.
@@ -490,14 +496,14 @@ fn a_resource_or_door_that_doesnt_fit_is_refused() {
     assert_eq!(refuse(Request::new(agent("m1"), other, act_of(Do::StartAsks).1, Door::Local, NOW, None)), Some("resource"));
     // Another machine's agent at a local door; this machine's from the
     // network; anything but an actor at the gateway.
-    assert_eq!(refuse(Request::new(agent("m2"), Resource::Machine(machine("m1")), Act::Claim, Door::Local, NOW, None)), Some("door"));
-    assert_eq!(refuse(Request::new(agent("m1"), Resource::Machine(machine("m1")), Act::Claim, Door::Network, NOW, Some(network()))), Some("door"));
-    assert_eq!(refuse(Request::new(agent("m1"), Resource::Machine(machine("m1")), Act::Claim, Door::Gateway, NOW, None)), Some("door"));
+    assert_eq!(refuse(Request::new(agent("m2"), atlas(), claim(), Door::Local, NOW, None)), Some("door"));
+    assert_eq!(refuse(Request::new(agent("m1"), atlas(), claim(), Door::Network, NOW, Some(network()))), Some("door"));
+    assert_eq!(refuse(Request::new(agent("m1"), atlas(), claim(), Door::Gateway, NOW, None)), Some("door"));
     // From the network without naming one, or one this machine isn't in.
-    assert_eq!(refuse(Request::new(agent("m2"), Resource::Machine(machine("m1")), Act::Claim, Door::Network, NOW, None)), Some("network"));
-    assert_eq!(refuse(Request::new(agent("m2"), Resource::Machine(machine("m1")), Act::Claim, Door::Network, NOW, Some(NetworkId::new("n9").unwrap()))), Some("network"));
+    assert_eq!(refuse(Request::new(agent("m2"), atlas(), claim(), Door::Network, NOW, None)), Some("network"));
+    assert_eq!(refuse(Request::new(agent("m2"), atlas(), claim(), Door::Network, NOW, Some(NetworkId::new("n9").unwrap()))), Some("network"));
     // A token where none is taken.
     let t = f.m1_root.mint_actor(&actor_grant("muse", &Action::ALL)).unwrap();
-    let r = Request::new(agent("m1"), Resource::Machine(machine("m1")), Act::Claim, Door::Local, NOW, None);
+    let r = Request::new(agent("m1"), atlas(), claim(), Door::Local, NOW, None);
     assert_eq!(decide(Some(&t), &r, &f.world, None).reason().unwrap().code(), "token");
 }

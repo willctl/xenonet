@@ -17,10 +17,10 @@ const local = () => ({ nodes: [{ id: "core", kind: "core", name: "~/Projects", p
 
 const agents = () =>
   remoteAgents([
-    { id: "@laptop:claude:6f1c", host: "laptop", app: "claude", title: "Fix the login redirect", status: "waiting", waitsOnYou: true, needsYou: "question", question: "Keep the <b>query</b> string?", repoKey: "github.com/acme/atlas-web", cwd: "~/src/atlas-web", lastActive: NOW - 20e3, lastMessage: "Moved it.", injected: "<img src=x>" },
-    { id: "@laptop:codex:019a", host: "laptop", app: "codex", title: "Tidy the billing tests", status: "working", stuck: ["ran cargo test 3 times in a row"], repoKey: "github.com/acme/ledger", cwd: "~/src/ledger", lastActive: NOW - 40e3 },
-    { id: "@laptop:claude:77aa", host: "laptop", app: "claude", title: "Second clone", status: "idle", repoKey: "github.com/acme/atlas-web", cwd: "~/work/atlas-web", lastActive: NOW - 3 * 3600e3 },
-    { id: "@rack:claude:8d0f", host: "rack", app: "claude", title: "Nightly import", status: "idle", repoKey: null, cwd: "~/jobs/importer", lastActive: NOW - 2 * 3600e3 },
+    { id: "@laptop:claude:6f1c", host: "laptop", app: "claude", title: "Fix the login redirect", status: "waiting", waitsOnYou: true, needsYou: "question", question: "Keep the <b>query</b> string?", projectKey: "prj_atlasweb", cwd: "~/src/atlas-web", lastActive: NOW - 20e3, lastMessage: "Moved it.", injected: "<img src=x>" },
+    { id: "@laptop:codex:019a", host: "laptop", app: "codex", title: "Tidy the billing tests", status: "working", stuck: ["ran cargo test 3 times in a row"], projectKey: "prj_ledger", cwd: "~/src/ledger", lastActive: NOW - 40e3 },
+    { id: "@laptop:claude:77aa", host: "laptop", app: "claude", title: "Second clone", status: "idle", projectKey: "prj_atlasweb", cwd: "~/work/atlas-web", lastActive: NOW - 3 * 3600e3 },
+    { id: "@rack:claude:8d0f", host: "rack", app: "claude", title: "Nightly import", status: "idle", projectKey: null, cwd: "~/jobs/importer", lastActive: NOW - 2 * 3600e3 },
     // Not its host's own: dropped.
     { id: "@laptop:@studio:claude:x", host: "laptop", title: "posing" },
   ]);
@@ -46,8 +46,8 @@ test("each other machine is a constellation: its host node, a project per repo o
   // last part, and one for a folder that isn't a repo.
   const projects = part.nodes.filter((n) => n.kind === "project");
   assert.deepEqual(projects.map((p) => [p.id, p.name, p.sessionCount]).sort(), [
-    ["@laptop:project:repo:github.com/acme/atlas-web", "atlas-web", 2],
-    ["@laptop:project:repo:github.com/acme/ledger", "ledger", 1],
+    ["@laptop:project:prj:prj_atlasweb", "atlas-web", 2],
+    ["@laptop:project:prj:prj_ledger", "ledger", 1],
     ["@rack:project:folder:~/jobs/importer", "importer", 1],
   ]);
   // Sessions with their app, title, state and what waits, from presence;
@@ -60,7 +60,7 @@ test("each other machine is a constellation: its host node, a project per repo o
   assert.equal(byId.get("@rack:claude:8d0f").activity, "idle", "a machine that's away has nothing active");
   // The tree: core → host → project → session.
   const parent = new Map(part.links.map((l) => [l.target, l.source]));
-  assert.deepEqual([parent.get("@laptop:core"), parent.get("@laptop:project:repo:github.com/acme/ledger"), parent.get("@laptop:codex:019a")], ["core", "@laptop:core", "@laptop:project:repo:github.com/acme/ledger"]);
+  assert.deepEqual([parent.get("@laptop:core"), parent.get("@laptop:project:prj:prj_ledger"), parent.get("@laptop:codex:019a")], ["core", "@laptop:core", "@laptop:project:prj:prj_ledger"]);
   assert.equal(part.links.find((l) => l.target === "@laptop:core").kind, "host");
 });
 
@@ -95,7 +95,7 @@ test("the part's key changes with what the map shows of it, and not with a machi
 test("what's drawn of machines you're not looking at is capped, waits first", () => {
   const many = [];
   for (const host of ["laptop", "desk", "rack"])
-    for (let i = 0; i < 40; i++) many.push({ id: `@${host}:claude:${String(i).padStart(4, "0")}`, host, app: "claude", title: `s${i}`, status: "idle", repoKey: `github.com/acme/r${i % 4}`, cwd: `~/src/r${i % 4}`, lastActive: NOW - i * 60e3, waitsOnYou: host === "rack" && i === 39 });
+    for (let i = 0; i < 40; i++) many.push({ id: `@${host}:claude:${String(i).padStart(4, "0")}`, host, app: "claude", title: `s${i}`, status: "idle", projectKey: `prj_r${i % 4}`, cwd: `~/src/r${i % 4}`, lastActive: NOW - i * 60e3, waitsOnYou: host === "rack" && i === 39 });
   const s = state([row("studio"), row("laptop"), row("desk"), row("rack")]);
   const part = networkPart(s, remoteAgents(many), NOW);
   const parentOf = new Map(part.links.map((l) => [l.target, l.source]));

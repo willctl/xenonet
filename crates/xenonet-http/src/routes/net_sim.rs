@@ -338,7 +338,7 @@ fn agents_of(host: &str, now: f64, seen: f64) -> Vec<Value> {
             "branch": a.branch,
             "cwd": cwd,
             "top": if a.repo { json!(cwd) } else { Value::Null },
-            "repoKey": if a.repo { json!(format!("github.com/acme/{}", a.project)) } else { Value::Null },
+            "projectKey": if a.repo { json!(format!("prj_acme_{}", a.project)) } else { Value::Null },
             "focus": a.focus,
             "lastActive": now - a.ago,
             "seen": seen,
@@ -1230,7 +1230,7 @@ mod tests {
         assert_eq!((row(&w, "laptop")["waitsOnYou"].clone(), row(&w, "laptop")["you"].clone(), row(&w, "studio")["you"].clone()), (json!(1), json!(true), json!(false)));
         assert!(row(&w, "laptop")["youAt"].as_f64().unwrap() > row(&w, "studio")["youAt"].as_f64().unwrap(), "you worked at laptop last");
         // Repo keys for the map's projects, and a folder that isn't a repo.
-        assert!(agents.iter().any(|a| a["repoKey"] == "github.com/acme/atlas-web") && agents.iter().any(|a| a["host"] == "rack" && a["repoKey"].is_null()));
+        assert!(agents.iter().any(|a| a["projectKey"] == "prj_acme_atlas-web") && agents.iter().any(|a| a["host"] == "rack" && a["projectKey"].is_null()));
         // net-founder has a question and a stuck session on laptop; with
         // titles only, neither's text.
         let (_, agents) = made_up("net-founder", None, now).unwrap();

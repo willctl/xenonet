@@ -124,53 +124,42 @@ pub struct Reach {
     pub delegated: Opt<Delegated>,
 }
 
-// ---- network/claims/v1
+// ---- network/claim/v1
 
-crate::tag!(pub ClaimsTag = "network/claims/v1");
+crate::tag!(pub ClaimTag = "network/claim/v1");
 
-/// claim: the agent claimed it; edit: XenoNet saw it change
+/// claim: an agent claimed the path; release: it let it go (with no path,
+/// all its claims in the project)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum ClaimKind {
+pub enum ClaimOp {
     Claim,
-    Edit,
+    Release,
 }
 
-// One claim or edit on a host.
+/// A claim in a project, or its release: a kept entry of its author's
+/// feed, which goes to every member. The agent is the author's own.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct HostClaim {
-    pub repo_key: Text<1, 300>,
-    /// Inside the repo, with / between parts
-    pub path: Text<1, 1000>,
+pub struct Claim {
+    pub schema: ClaimTag,
+    pub op: ClaimOp,
+    pub project: ids::ProjectId,
+    /// Inside the project, with / between parts: a file, a folder (ending
+    /// in /) or a glob; empty in a release of all the agent's claims there
+    pub path: Text<0, 1000>,
     pub agent: Text<1, 200>,
     pub branch: Nullable<Text<0, 200>>,
-    pub kind: ClaimKind,
-    pub until: Nullable<Ms>,
+    pub note: Nullable<Text<0, 500>>,
+    pub created_at: Nullable<Ms>,
+    pub expires_at: Nullable<Ms>,
 }
 
-// A claim an agent let go of.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ReleasedClaim {
-    pub repo_key: Text<0, 300>,
-    pub path: Text<0, 1000>,
-    pub agent: Text<0, 200>,
-}
-
-/// Claims across clones.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Claims {
-    pub schema: ClaimsTag,
-    pub full: bool,
-    pub claims: Bounded<HostClaim, 0, 5000>,
-    pub released: Bounded<ReleasedClaim, 0, 5000>,
-}
-
-impl Document for Claims {
-    const ID: &'static str = "network/claims/v1";
-    const TITLE: &'static str = "Claims across clones";
-    const DESCRIPTION: &'static str = "What a host's agents claimed or are changing, by repo remote and path inside the repo, so agents on other hosts are warned.";
+impl Document for Claim {
+    const ID: &'static str = "network/claim/v1";
+    const TITLE: &'static str = "A claim in a project";
+    const DESCRIPTION: &'static str =
+        "An agent's claim on a path inside a project, or its release, as a kept entry of its machine's feed, so agents on every machine with a checkout of the project are warned.";
 }
 
 // ---- network/frame/v1
@@ -266,12 +255,13 @@ pub enum HandoffOp {
     Lapsed,
 }
 
-// Who a handoff is for: any of an agent, a repo, a host.
+// Who a handoff is for: any of an agent, a project (its checkouts on
+// every machine), a host.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffTo {
     pub agent: Nullable<Text<0, 200>>,
-    pub repo_key: Nullable<Text<0, 300>>,
+    pub project_key: Nullable<Text<0, 300>>,
     pub host: Nullable<HostId>,
 }
 
@@ -584,8 +574,11 @@ pub struct PresenceAgent {
     pub state: Nullable<Text<0, 32>>,
     /// What it said it's doing (focus)
     pub doing: Nullable<Text<0, 280>>,
-    /// The normalized git remote of its folder (origin, else the first remote), or null when it has none
-    pub repo_key: Nullable<Text<0, 300>>,
+    /// The project its folder is a confirmed checkout of (prj_…), which agents on other machines are matched by, or null
+    pub project_key: Nullable<Text<0, 300>>,
+    /// What it's changing, inside its project, with / between parts
+    #[serde(default, skip_serializing_if = "Opt::is_none")]
+    pub edits: Opt<Bounded<Text<0, 1000>, 0, 50>>,
     pub branch: Nullable<Text<0, 200>>,
     /// Its folder, with the home folder as ~
     pub cwd: Nullable<Text<0, 500>>,
@@ -1246,7 +1239,7 @@ impl Document for Svc {
 
 /// The documents this module writes.
 pub const DOCUMENTS: &[crate::schema::Writer] = &[
-    crate::schema::file::<Claims>,
+    crate::schema::file::<Claim>,
     crate::schema::file::<Frame>,
     crate::schema::file::<Handoff>,
     crate::schema::file::<Message>,

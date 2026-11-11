@@ -90,6 +90,11 @@ impl policy::Host for Here<'_> {
             None => serde_json::json!({ "token": token, "actor": actor, "sessions": null, "at": now_ms(), "until": null }),
         };
         store.with(|s| s.put_scope(&row)).map_err(|e| e.to_string())?;
+        // The projects it may claim in: its scope's project terms, resolved
+        // now through checkouts the person confirmed (every such project
+        // when the scope names none), and none once the scope is gone.
+        let projects = scope.and_then(|g| g["selector"].as_str().map(str::to_string)).map(|sel| grant_projects_of(store, &sel)).unwrap_or_default();
+        store.with(|s| s.set_grant_projects(&token, &projects)).map_err(|e| e.to_string())?;
         Ok(had)
     }
     fn all_sessions(&mut self) -> Vec<(String, Value)> {
@@ -97,6 +102,21 @@ impl policy::Host for Here<'_> {
         let rows = store.with(xenonet_store::engine::EngineStore::actor_rows).unwrap_or_default();
         rows.iter().filter_map(|r| r.text("slug").map(|slug| format!("actor:{slug}"))).filter_map(|actor| self.sessions_of(&actor).map(|g| (actor, g))).collect()
     }
+}
+
+/// The projects a sessions scope names, resolved now: each `project:`
+/// term's (all of them must hold, as they do for sessions), or every
+/// project with a confirmed checkout here when the scope names none.
+pub fn grant_projects_of(store: &Shared, selector: &str) -> Vec<String> {
+    let Some(sel) = xenonet_model::selector::Selector::parse(selector) else { return Vec::new() };
+    let db = store.with(|s| s.db().clone());
+    let names: Vec<&str> = sel.terms.iter().filter(|t| t.key == "project").map(|t| t.value.as_str()).collect();
+    let mut out: Vec<String> = db.confirmed_projects(None).unwrap_or_default().iter().map(|p| p.as_str().to_string()).collect();
+    for n in names {
+        let named: Vec<String> = db.confirmed_projects(Some(n)).unwrap_or_default().iter().map(|p| p.as_str().to_string()).collect();
+        out.retain(|p| named.contains(p));
+    }
+    out
 }
 
 pub struct PolicySide {

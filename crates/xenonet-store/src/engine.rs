@@ -53,9 +53,17 @@ pub(crate) const TABLES: &[&str] = &[
         host TEXT, receipt TEXT, receipt_at INTEGER, frame TEXT,
         PRIMARY KEY (message_id, agent))",
     "CREATE INDEX deliveries_unseen ON deliveries (agent, seen_at)",
+    // Claims: a path (or folder, or glob) inside a project, made through
+    // the checkout it was in, by an agent of the machine that authored it
+    // (`author`, its signing key's id; `host`, another machine's name,
+    // NULL for this machine's own). This machine's own keep the pattern as
+    // the agent wrote it and the checkout it was mapped through.
     "CREATE TABLE claims (
-        id INTEGER PRIMARY KEY, agent TEXT NOT NULL, pattern TEXT NOT NULL,
-        note TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+        id INTEGER PRIMARY KEY, project TEXT NOT NULL, path TEXT NOT NULL,
+        agent TEXT NOT NULL, author TEXT NOT NULL, host TEXT, checkout TEXT,
+        pattern TEXT, branch TEXT, note TEXT,
+        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+    "CREATE INDEX claims_by_project ON claims (project, expires_at)",
     "CREATE TABLE focus (agent TEXT PRIMARY KEY, text TEXT NOT NULL, at INTEGER NOT NULL)",
     // The process (pid and start time) holding each session.
     "CREATE TABLE pins (
@@ -95,6 +103,11 @@ pub(crate) const TABLES: &[&str] = &[
     "CREATE TABLE revoked (
         id TEXT PRIMARY KEY, actor TEXT NOT NULL, reason TEXT NOT NULL,
         at INTEGER NOT NULL)",
+    // The projects an actor's grant may claim in, by its token's first
+    // revocation id: prj_ ids, resolved from its sessions scope when the
+    // person set it, through checkouts the person confirmed.
+    "CREATE TABLE grant_projects (
+        token TEXT NOT NULL, project TEXT NOT NULL, PRIMARY KEY (token, project))",
     "CREATE TABLE grant_scopes (
         token TEXT PRIMARY KEY, actor TEXT NOT NULL,
         sessions TEXT, projects TEXT, identities TEXT, intents TEXT,
@@ -144,14 +157,10 @@ pub(crate) const TABLES: &[&str] = &[
         latency_ms INTEGER, bytes INTEGER, projects INTEGER)",
     "CREATE INDEX assistant_audit_by_time ON assistant_audit (at)",
     // The network across machines (docs/design/network.md): the latest
-    // presence of each other host, their claims, and handoffs.
+    // presence of each other host, and handoffs.
     "CREATE TABLE net_presence (
         host TEXT PRIMARY KEY, counter INTEGER NOT NULL, at INTEGER NOT NULL,
         you INTEGER NOT NULL DEFAULT 0, roster TEXT, agents TEXT NOT NULL)",
-    "CREATE TABLE net_claims (
-        host TEXT NOT NULL, repo_key TEXT NOT NULL, path TEXT NOT NULL,
-        agent TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, until INTEGER,
-        at INTEGER NOT NULL, PRIMARY KEY (host, repo_key, path, agent, kind))",
     "CREATE TABLE handoffs (
         id TEXT PRIMARY KEY, host TEXT, maker TEXT NOT NULL,
         to_agent TEXT, to_repo TEXT, to_scope TEXT, to_host TEXT,
@@ -301,11 +310,11 @@ impl EngineStore {
     }
 
     /// What's kept, at start and every hour: messages and pins for a week,
-    /// claims until they expire. Actors' events for a week and at most
-    /// ACTOR_EVENTS_KEPT each, their targets for a week after they were
-    /// last touched, registrations a day, revoked tokens a week; the person
-    /// at the console's events, targets and status for a day. Other hosts'
-    /// claims until they lapse, and handoffs a week past theirs.
+    /// claims (this machine's and other hosts') until they expire. Actors'
+    /// events for a week and at most ACTOR_EVENTS_KEPT each, their targets
+    /// for a week after they were last touched, registrations a day,
+    /// revoked tokens a week; the person at the console's events, targets
+    /// and status for a day; handoffs a week past theirs.
     pub fn prune(&self, now: f64) -> Result<()> {
         self.transaction(|| {
             self.run("DELETE FROM deliveries WHERE message_id IN (SELECT id FROM messages WHERE created_at < ?)", &[n(now - WEEK_MS)])?;
@@ -330,7 +339,6 @@ impl EngineStore {
             // still verify: a token never outlives its root's year.
             self.run("DELETE FROM revoked WHERE at < ?", &[n(now - REVOKED_KEPT_MS)])?;
             self.run("UPDATE actors SET status = NULL, status_at = NULL WHERE slug = ? AND status_at < ?", &[you_slug().into(), n(now - DAY_MS)])?;
-            self.run("DELETE FROM net_claims WHERE until < ?", &[n(now)])?;
             self.run("DELETE FROM handoffs WHERE expires_at < ?", &[n(now - WEEK_MS)])?;
             self.prune_audit(now)
         })
@@ -364,48 +372,10 @@ impl EngineStore {
         let h = host.into();
         self.transaction(|| {
             self.run("DELETE FROM net_presence WHERE host = ?", std::slice::from_ref(&h))?;
-            self.run("DELETE FROM net_claims WHERE host = ?", std::slice::from_ref(&h))?;
+            self.run("DELETE FROM claims WHERE host = ?", std::slice::from_ref(&h))?;
             self.run("DELETE FROM handoffs WHERE host = ? AND state = 'open'", std::slice::from_ref(&h))?;
             Ok(())
         })
-    }
-    /// Other hosts' claims and edits that still hold.
-    pub fn net_claims(&self, now: f64) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM net_claims WHERE until IS NULL OR until >= ? ORDER BY host, repo_key, path", &[n(now)])
-    }
-    /// Other hosts' live claims in clones of one repo.
-    pub fn net_claims_in(&self, repo_key: &str, now: f64) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM net_claims WHERE repo_key = ? AND (until IS NULL OR until >= ?) ORDER BY host, path", &[repo_key.into(), n(now)])
-    }
-    /// How many claims a host has here.
-    pub fn net_claim_count(&self, host: &str) -> Result<f64> {
-        Ok(self.get("SELECT COUNT(*) AS n FROM net_claims WHERE host = ?", &[host.into()])?.and_then(|r| r.num("n")).unwrap_or(0.0))
-    }
-    /// Whether a host's claim is here already.
-    pub fn has_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, kind: &str) -> Result<bool> {
-        Ok(self
-            .get(
-                "SELECT 1 AS one FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ? AND kind = ?",
-                &[host.into(), repo_key.into(), path.into(), agent.into(), kind.into()],
-            )?
-            .is_some())
-    }
-    /// A host's whole set of claims, in place of what it had.
-    pub fn clear_net_claims(&self, host: &str) -> Result<()> {
-        self.run("DELETE FROM net_claims WHERE host = ?", &[host.into()])?;
-        Ok(())
-    }
-    #[expect(clippy::too_many_arguments, reason = "one row's columns")]
-    pub fn put_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str, branch: Option<&str>, kind: &str, until: Option<f64>, at: f64) -> Result<()> {
-        self.run(
-            "INSERT INTO net_claims (host, repo_key, path, agent, branch, kind, until, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(host, repo_key, path, agent, kind) DO UPDATE SET branch = excluded.branch, until = excluded.until, at = excluded.at",
-            &[host.into(), repo_key.into(), path.into(), agent.into(), branch.into(), kind.into(), until.into(), n(at)],
-        )?;
-        Ok(())
-    }
-    pub fn drop_net_claim(&self, host: &str, repo_key: &str, path: &str, agent: &str) -> Result<()> {
-        self.run("DELETE FROM net_claims WHERE host = ? AND repo_key = ? AND path = ? AND agent = ?", &[host.into(), repo_key.into(), path.into(), agent.into()])?;
-        Ok(())
     }
 
     /// Where a message came from (null: made here) and its id across the
@@ -665,27 +635,89 @@ impl EngineStore {
 
     // ---------- claims ----------
 
-    /// A claim, its note as the request gave it (a text, or null).
-    pub fn claim(&self, agent: &str, pattern: &str, note: &Value, expires_at: f64, now: f64) -> Result<()> {
-        let note = Bind::scalar(note).ok_or_else(|| sql::unbindable(3))?;
-        self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.into(), pattern.into()])?;
-        self.run("INSERT INTO claims (agent, pattern, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)", &[agent.into(), pattern.into(), note, n(now), n(expires_at)])?;
+    /// A claim: `{ project, path, agent, author, host, checkout, pattern,
+    /// branch, note, created_at, expires_at }`, in place of the same
+    /// agent's claim of that path in that project. `host` is null for this
+    /// machine's own.
+    pub fn claim(&self, r: &Value) -> Result<()> {
+        let f = |k: &str, at| field_or_null(r, k, at);
+        self.run(
+            "DELETE FROM claims WHERE project = ? AND path = ? AND agent = ? AND host IS ?",
+            &[field(r, "project", 1)?, field(r, "path", 2)?, field(r, "agent", 3)?, f("host", 4)?],
+        )?;
+        self.run(
+            "INSERT INTO claims (project, path, agent, author, host, checkout, pattern, branch, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            &[
+                field(r, "project", 1)?,
+                field(r, "path", 2)?,
+                field(r, "agent", 3)?,
+                field(r, "author", 4)?,
+                f("host", 5)?,
+                f("checkout", 6)?,
+                f("pattern", 7)?,
+                f("branch", 8)?,
+                f("note", 9)?,
+                field(r, "created_at", 10)?,
+                field(r, "expires_at", 11)?,
+            ],
+        )?;
         Ok(())
     }
-    /// The claims let go: all of an agent's (`patterns` None), or those of
-    /// `patterns`.
-    pub fn release(&self, agent: &str, patterns: Option<&[String]>) -> Result<f64> {
-        let Some(patterns) = patterns else {
-            return Ok(self.run("DELETE FROM claims WHERE agent = ?", &[agent.into()])?.changes as f64);
-        };
-        let mut count = 0.0;
-        for p in patterns {
-            count += self.run("DELETE FROM claims WHERE agent = ? AND pattern = ?", &[agent.into(), p.into()])?.changes as f64;
+    /// This machine's claims let go: all of an agent's (`patterns` None), or
+    /// those of `patterns`. The claims it let go, for the network.
+    pub fn release(&self, agent: &str, patterns: Option<&[String]>) -> Result<Vec<Row>> {
+        let mut out = Vec::new();
+        let rows = self.all("SELECT * FROM claims WHERE agent = ? AND host IS NULL ORDER BY id", &[agent.into()])?;
+        for r in rows {
+            if patterns.is_some_and(|ps| !ps.iter().any(|p| r.text("pattern") == Some(p.as_str()))) {
+                continue;
+            }
+            self.run("DELETE FROM claims WHERE id = ?", &[num(r.get("id"))])?;
+            out.push(r);
         }
-        Ok(count)
+        Ok(out)
     }
+    /// Another host's claims let go: one path of one agent's in a project,
+    /// or (`path` None) all that agent's there. How many went.
+    pub fn release_remote(&self, host: &str, agent: &str, project: &str, path: Option<&str>) -> Result<f64> {
+        let gone = match path {
+            Some(p) => self.run("DELETE FROM claims WHERE host = ? AND agent = ? AND project = ? AND path = ?", &[host.into(), agent.into(), project.into(), p.into()])?,
+            None => self.run("DELETE FROM claims WHERE host = ? AND agent = ? AND project = ?", &[host.into(), agent.into(), project.into()])?,
+        };
+        Ok(gone.changes as f64)
+    }
+    /// The claims that hold, this machine's and other hosts', earliest
+    /// first, ties by their author's key id: the first is the one that
+    /// stands (claims are advisory).
     pub fn claims(&self, now: f64) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM claims WHERE expires_at >= ? ORDER BY created_at", &[n(now)])
+        self.all("SELECT * FROM claims WHERE expires_at >= ? ORDER BY created_at, author", &[n(now)])
+    }
+    /// The claims that hold in one project, in the same order.
+    pub fn claims_in(&self, project: &str, now: f64) -> Result<Vec<Row>> {
+        self.all("SELECT * FROM claims WHERE project = ? AND expires_at >= ? ORDER BY created_at, author", &[project.into(), n(now)])
+    }
+    /// How many claims another host has here.
+    pub fn remote_claim_count(&self, host: &str) -> Result<f64> {
+        Ok(self.get("SELECT COUNT(*) AS n FROM claims WHERE host = ?", &[host.into()])?.and_then(|r| r.num("n")).unwrap_or(0.0))
+    }
+
+    // ---------- the projects an actor's grant claims in ----------
+
+    /// The projects a grant may claim in, in place of those before.
+    pub fn set_grant_projects(&self, token: &str, projects: &[String]) -> Result<()> {
+        self.transaction(|| {
+            self.run("DELETE FROM grant_projects WHERE token = ?", &[token.into()])?;
+            for p in projects {
+                self.run("INSERT OR IGNORE INTO grant_projects (token, project) VALUES (?, ?)", &[token.into(), p.into()])?;
+            }
+            Ok(())
+        })
+    }
+    /// The projects a grant may claim in; None when it names none.
+    pub fn grant_projects(&self, token: &str) -> Result<Option<Vec<String>>> {
+        let rows = self.all("SELECT project FROM grant_projects WHERE token = ? ORDER BY project", &[token.into()])?;
+        let out: Vec<String> = rows.iter().filter_map(|r| r.text("project").map(str::to_string)).collect();
+        Ok((!out.is_empty()).then_some(out))
     }
 
     // ---------- focus ----------
@@ -1218,8 +1250,21 @@ mod tests {
         assert!(s.set_receipt(later, "@laptop:claude:y", "seen", 5002.0).unwrap(), "read after all");
         assert_eq!(s.message_by_mid("msg_1", None).unwrap().unwrap().num("id"), Some(id));
         assert!(s.message_by_mid("msg_1", Some("laptop")).unwrap().is_none());
-        s.put_net_claim("laptop", "github.com/x/y", "src/a.rs", "claude:x", Some("main"), "edit", None, 1000.0).unwrap();
-        assert_eq!(s.net_claims(1000.0).unwrap().len(), 1);
+        let theirs = json!({ "project": "prj_a", "path": "src/a.rs", "agent": "@laptop:claude:x", "author": "xns1_laptop", "host": "laptop", "branch": "main", "created_at": 900.0, "expires_at": 2000.0 });
+        s.claim(&theirs).unwrap();
+        let mine = json!({ "project": "prj_a", "path": "src/", "agent": "claude:a", "author": "xns1_here", "pattern": "/w/a/src/", "created_at": 950.0, "expires_at": 2000.0 });
+        s.claim(&mine).unwrap();
+        let held: Vec<String> = s.claims_in("prj_a", 1000.0).unwrap().iter().map(|r| r.text("agent").unwrap().to_string()).collect();
+        assert_eq!(held, ["@laptop:claude:x", "claude:a"], "the earliest first");
+        assert_eq!(s.remote_claim_count("laptop").unwrap(), 1.0);
+        assert_eq!(s.release("claude:a", Some(&["/w/a/other".into()])).unwrap().len(), 0, "a pattern it doesn't hold");
+        assert_eq!(s.release("claude:a", None).unwrap()[0].text("path"), Some("src/"), "what went, for the network");
+        s.claim(&mine).unwrap();
+        assert_eq!(s.release_remote("laptop", "@laptop:claude:x", "prj_a", Some("src/b.rs")).unwrap(), 0.0);
+        s.set_grant_projects("t1", &["prj_a".into(), "prj_b".into()]).unwrap();
+        assert_eq!(s.grant_projects("t1").unwrap(), Some(vec!["prj_a".to_string(), "prj_b".to_string()]));
+        s.set_grant_projects("t1", &[]).unwrap();
+        assert_eq!(s.grant_projects("t1").unwrap(), None, "a grant that names none");
         let h = json!({ "id": "hof_1", "host": "laptop", "maker": "claude:x", "created_at": 1000.0, "expires_at": 2000.0 });
         assert!(s.add_handoff(&h).unwrap());
         assert!(!s.add_handoff(&h).unwrap(), "once");
@@ -1227,7 +1272,7 @@ mod tests {
         assert!(!s.take_handoff("hof_1", "claude:b", 1501.0).unwrap(), "the first take wins");
         s.drop_net_host("laptop").unwrap();
         assert!(s.net_presence("laptop").unwrap().is_none());
-        assert_eq!(s.net_claims(1000.0).unwrap().len(), 0);
+        assert_eq!(s.claims_in("prj_a", 1000.0).unwrap().len(), 1, "a removed host's claims go with it, this machine's stay");
     }
 
     #[test]

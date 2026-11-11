@@ -37,7 +37,7 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
         Action::Wake => (Resource::Session(SessionId::new("s1").unwrap()), Act::Wake),
         Action::Start => (run, Act::Start { app: AppId::new("claude").unwrap(), folder: Folder::new("/w").unwrap(), mode: StartMode::Asks }),
         Action::Answer => (run, Act::Answer { ask: AskId::new("q1").unwrap(), decision: AnswerDecision::Allow }),
-        Action::Claim => (m1(), Act::Claim),
+        Action::Claim => (Resource::Project(project()), Act::Claim { project: project() }),
         Action::Handoff => (m1(), Act::Handoff),
         Action::Read => (m1(), Act::Read { scope, filters: filters.map(|f| [u8::from(f); 32]) }),
         Action::Admit => (Resource::Network(network()), Act::Admit { machine: machine("m3"), role: Role::Member }),

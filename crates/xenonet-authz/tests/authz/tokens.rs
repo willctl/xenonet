@@ -153,7 +153,7 @@ fn a_gateway_token_works_only_at_the_gateway_and_needs_its_right() {
 fn narrowing_to_actions_and_times_takes_away_the_rest() {
     let f = fixture();
     let token = f.m1_root.mint_actor(&actor_grant("muse", &[Action::Message, Action::Claim])).unwrap();
-    let claim = |t: &Token, at| decide(Some(t), &Request::new(actor(), Resource::Machine(machine("m1")), Act::Claim, Door::Local, at, None), &f.world, None);
+    let claim = |t: &Token, at| decide(Some(t), &Request::new(actor(), Resource::Project(project()), Act::Claim { project: project() }, Door::Local, at, None), &f.world, None);
     let only_messages = token.attenuate(&Narrowing::Actions(vec![Action::Message])).unwrap();
     assert!(claim(&token, NOW).is_allow());
     assert!(!claim(&only_messages, NOW).is_allow());
@@ -210,4 +210,22 @@ fn a_tokens_ids_are_read_from_its_text_without_verifying_it() {
     assert_eq!((ids.len(), ids[0].clone()), (2, token.id()), "the grant's id first, then the narrowing's");
     assert_eq!(Token::ids_of(&text, ACTOR_PREFIX), None);
     assert_eq!(Token::ids_of("xenonet_gateway_nope", GATEWAY_PREFIX), None);
+}
+
+// An actor's claims are checked against its grant's projects, which the
+// receiver keeps (phase 4's grant_projects): a project its grant doesn't
+// name, or a grant naming none, is refused.
+#[test]
+fn an_actor_claims_only_in_the_projects_its_grant_names() {
+    let mut f = fixture();
+    let token = f.m1_root.mint_actor(&actor_grant("muse", &[Action::Claim])).unwrap();
+    let claim = |w: &World, p: &str| {
+        let p = ProjectId::new(p).unwrap();
+        decide(Some(&token), &Request::new(actor(), Resource::Project(p.clone()), Act::Claim { project: p }, Door::Local, NOW, None), w, None)
+    };
+    assert!(claim(&f.world, "prj_atlas").is_allow(), "inside its grant");
+    let outside = claim(&f.world, "prj_ledger");
+    assert_eq!(outside.reason().map(Reason::code), Some("scope"), "outside its grant");
+    f.world.projects = None;
+    assert_eq!(claim(&f.world, "prj_atlas").reason().map(Reason::code), Some("scope"), "a grant that names no projects");
 }

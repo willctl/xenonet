@@ -43,7 +43,7 @@
             }
           ]
         },
-        "repoKey": {
+        "projectKey": {
           "anyOf": [
             {
               "type": "string",
@@ -69,7 +69,7 @@
       },
       "required": [
         "agent",
-        "repoKey",
+        "projectKey",
         "host"
       ],
       "additionalProperties": {}

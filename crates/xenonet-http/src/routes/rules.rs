@@ -48,9 +48,9 @@
 //! to guard.
 //!
 //! **What** (`Doing`): the authz act a route is, where one fits. Reads,
-//! messages, claims and handoffs are decided here for the caller found
-//! (an actor's are its handler's); starts and answers by the engine, with
-//! the run or the ask they're for. A row marked `elsewhere` is the
+//! messages and handoffs are decided here for the caller found (an
+//! actor's are its handler's); starts, answers and claims by the engine,
+//! with the run, the ask or the project they're for. A row marked `elsewhere` is the
 //! window's alone when it names another machine (`?host=`, or an id that
 //! starts with `@`).
 
@@ -81,8 +81,8 @@ pub enum Who {
 }
 
 /// The acts a row names, by authz's names for them (xenonet-authz's
-/// `Action`): the local door decides a message, a claim and a handoff;
-/// the rest are their handlers'.
+/// `Action`): the local door decides a message and a handoff; the rest
+/// are their handlers'.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Message,
@@ -100,9 +100,10 @@ pub enum Doing {
     Nothing,
     /// A read, decided here.
     Read(ReadScope),
-    /// A message, claim or handoff, decided here.
+    /// A message or a handoff, decided here.
     Act(Action),
-    /// A start or an answer, decided by the engine with the run or ask.
+    /// A start, an answer or a claim, decided by the engine with the run,
+    /// the ask or the project its paths are in.
     Engine(Action),
 }
 
@@ -275,8 +276,8 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/engine/who-has", AGENTS, Read(Map)),
     r("POST",   "/api/engine/send", AGENTS, MESSAGE),
     r("POST",   "/api/engine/inbox", AGENTS, Nothing),
-    r("POST",   "/api/engine/claim", AGENTS, Doing::Act(Action::Claim)),
-    r("POST",   "/api/engine/release", AGENTS, Doing::Act(Action::Claim)),
+    r("POST",   "/api/engine/claim", AGENTS, Engine(Action::Claim)),
+    r("POST",   "/api/engine/release", AGENTS, Engine(Action::Claim)),
     r("POST",   "/api/engine/focus", AGENTS, Nothing),
     r("POST",   "/api/engine/channel", AGENTS, Nothing),
     r("POST",   "/api/engine/handoff", AGENTS, Doing::Act(Action::Handoff)),
@@ -506,7 +507,6 @@ fn act_of(doing: Doing) -> Option<Act> {
     match doing {
         Read(scope) => Some(Act::Read(scope)),
         Doing::Act(Action::Message) => Some(Act::Message),
-        Doing::Act(Action::Claim) => Some(Act::Claim),
         Doing::Act(Action::Handoff) => Some(Act::Handoff),
         _ => None,
     }

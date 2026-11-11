@@ -190,7 +190,7 @@ export function remoteAgents(raw) {
       title: words(a.title, 200) ?? a.id,
       status: a.status ?? null,
       project: words(a.project, 200),
-      repoKey: words(a.repoKey, 300),
+      projectKey: words(a.projectKey, 300),
       cwd: words(a.cwd, 500),
       branch: words(a.branch, 200),
       focus: words(a.focus ?? a.doing, 280),

@@ -61,16 +61,16 @@ export function networkPart(state, agents, now = Date.now()) {
     const projects = new Map();
     const sessions = [];
     for (const a of theirs) {
-      // A project per repo, else per folder; a session with neither hangs
-      // from the host node.
-      const where = a.repoKey ? `repo:${a.repoKey}` : a.cwd ? `folder:${a.cwd}` : null;
-      const name = lastPart(a.repoKey) ?? lastPart(a.cwd) ?? a.project;
+      // A project per project id (its checkouts share one), else per
+      // folder; a session with neither hangs from the host node.
+      const where = a.projectKey ? `prj:${a.projectKey}` : a.cwd ? `folder:${a.cwd}` : null;
+      const name = lastPart(a.cwd) ?? a.project;
       let parent = hostId;
       if (where && name) {
         const id = `@${host}:project:${where}`;
         let p = projects.get(id);
         if (!p) {
-          p = { id, kind: "project", host, name, path: a.cwd ?? null, repoKey: a.repoKey ?? undefined, group: false, satelliteOf: null, repo: null, stack: [], description: null, sessionCount: 0, activeCount: 0, lastActivity: null, lastSessionAt: null, active: false, stale, network: true, ...placed };
+          p = { id, kind: "project", host, name, path: a.cwd ?? null, projectKey: a.projectKey ?? undefined, group: false, satelliteOf: null, repo: null, stack: [], description: null, sessionCount: 0, activeCount: 0, lastActivity: null, lastSessionAt: null, active: false, stale, network: true, ...placed };
           projects.set(id, p);
         }
         parent = id;

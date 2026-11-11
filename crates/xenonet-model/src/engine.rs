@@ -134,9 +134,9 @@ pub struct Agent {
     /// For an agent on another host: whether its host's link is up; offline since seen when it isn't
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub online: Opt<bool>,
-    /// For an agent on another host: the normalized git remote of its folder, which clones of one repo share
+    /// For an agent on another host: the project its folder is a checkout of (prj_…), which its checkouts on every machine share
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo_key: Option<String>,
+    pub project_key: Option<String>,
     /// For an agent on another host: a question or a stuck state waits on the person
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub waits_on_you: Opt<bool>,

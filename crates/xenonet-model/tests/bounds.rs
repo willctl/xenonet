@@ -33,7 +33,7 @@ mod made {
     /// hello, and what actors send.
     pub fn untrusted() -> Vec<Doc> {
         vec![
-            doc::<network::Claims>(),
+            doc::<network::Claim>(),
             doc::<network::Frame>(),
             doc::<network::Handoff>(),
             doc::<network::Message>(),
@@ -79,6 +79,7 @@ mod made {
             "^hof_[0-9a-f-]{36}$" => "hof_00000000-0000-4000-8000-000000000000",
             "^dev_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" => "dev_00000000-0000-4000-8000-000000000000",
             "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" => "prj_00000000-0000-4000-8000-000000000000",
+            "^prj_[a-z2-7]{32}$" => "prj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "^r_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" => "r_00000000-0000-4000-8000-000000000000",
             "^(claude|codex|grok):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" => "claude:00000000-0000-4000-8000-000000000000",
             "^cn_[0-9a-f]{24}$" => "cn_0123456789abcdef01234567",

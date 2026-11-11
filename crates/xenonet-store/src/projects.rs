@@ -329,6 +329,12 @@ impl Db {
         *self.owner.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(f);
     }
 
+    /// Whether this machine's person is known: projects made before they
+    /// were are re-keyed into theirs when next found.
+    pub fn owner_known(&self) -> bool {
+        self.owner().person.is_some()
+    }
+
     fn owner(&self) -> Owner {
         let f = self.owner.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         f.map(|f| f()).unwrap_or_default()
@@ -370,6 +376,36 @@ impl Db {
                 }
             }
             Ok(None)
+        })
+    }
+
+    /// The projects this machine has a confirmed checkout of, not gone,
+    /// whose name or checkout folder is `name` (any case; a trailing `*`
+    /// for any that starts so); with None, every one. What a scope's
+    /// `project:` terms name, resolved when the person sets it: a
+    /// candidate checkout names nothing.
+    pub fn confirmed_projects(&self, name: Option<&str>) -> R<Vec<ProjectId>> {
+        let want = name.map(str::to_lowercase);
+        self.read(|c| {
+            let mut q = c.prepare_cached(
+                "SELECT DISTINCT p.id AS id, p.name AS name, k.path_key AS key FROM checkouts k JOIN projects p ON p.id = k.project WHERE k.machine = ?1 AND k.confirmed = 1 AND k.gone_at IS NULL ORDER BY p.id",
+            )?;
+            let rows: Vec<(String, String, String)> = q.query_map(params![LOCAL], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+            let mut out: Vec<ProjectId> = Vec::new();
+            for (id, pname, key) in rows {
+                let folder = key.rsplit('/').next().unwrap_or("").to_string();
+                let pname = pname.to_lowercase();
+                let named = want.as_ref().is_none_or(|w| match w.strip_suffix('*') {
+                    Some(pre) => pname.starts_with(pre) || folder.starts_with(pre),
+                    None => pname == *w || folder == *w,
+                });
+                if let (true, Ok(id)) = (named, ProjectId::parse(&id)) {
+                    if !out.contains(&id) {
+                        out.push(id);
+                    }
+                }
+            }
+            Ok(out)
         })
     }
 

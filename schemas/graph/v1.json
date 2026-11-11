@@ -295,8 +295,8 @@
                       "additionalProperties": {}
                     }
                   },
-                  "repoKey": {
-                    "description": "Its remote as its own host resolves it (repoKey in core/schema/ids.js): checkouts of one repo on different machines share it. With hosts on",
+                  "projectKey": {
+                    "description": "For another machine's project: the project id (prj_…) its checkouts on every machine share",
                     "type": "string"
                   },
                   "fx": {

@@ -34,7 +34,6 @@ pub enum ReadScope {
 pub enum Act {
     Read(ReadScope),
     Message,
-    Claim,
     Handoff,
 }
 

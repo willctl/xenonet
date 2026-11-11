@@ -623,7 +623,7 @@ A network is one gateway and the hosts that joined it (design:
 - Schemas (§1): `network/frame/v1`, a line of a link's stream, signed by
   the host that sent it and, between hosts, sealed for the one it's for.
   The engine's side is the bodies: `network/presence/v1`,
-  `network/message/v1`, `network/receipt/v1`, `network/claims/v1`,
+  `network/message/v1`, `network/receipt/v1`, `network/claim/v1`,
   `network/handoff/v1` and `network/operator/v1`. Then
   `network/roster-entry/v1`, one link in the chain of hosts, and
   `network/state/v1`, what `GET /api/net/state` answers a host's window.

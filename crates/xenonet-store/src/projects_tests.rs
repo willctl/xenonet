@@ -150,3 +150,22 @@ fn seeded_ids_are_the_same_each_run() {
     assert_eq!(ids("s"), ids("s"));
     assert_ne!(ids("s"), ids("t"));
 }
+
+#[test]
+fn a_scopes_project_terms_name_confirmed_checkouts_only() {
+    let db = db();
+    db.reconcile(&[repo("/w/atlas", "x/atlas"), repo("/w/copy/atlas", "x/atlas"), repo("/w/other", "x/ledger"), folder("/w/notes")], 1).unwrap();
+    let atlas = db.place("/w/atlas").unwrap().unwrap().checkout.project;
+    assert_eq!(db.confirmed_projects(Some("Atlas")).unwrap(), vec![atlas], "by its name, any case");
+    let ledger = db.place("/w/other").unwrap().unwrap().checkout.project;
+    assert_eq!(db.confirmed_projects(Some("other")).unwrap(), vec![ledger], "or its checkout's folder");
+    assert_eq!(db.confirmed_projects(None).unwrap().len(), 3, "every project with a confirmed checkout");
+    // A project whose only checkout here is a candidate is named by nothing.
+    let lone = Db::memory().unwrap();
+    lone.use_ids(Ids::seeded("lone"));
+    lone.reconcile(&[repo("/w/a", "x/a")], 1).unwrap();
+    lone.reconcile(&[repo("/w/b", "x/a")], 2).unwrap();
+    assert!(lone.place("/w/a").unwrap().is_none(), "the founding checkout went");
+    assert!(!lone.place("/w/b").unwrap().unwrap().checkout.confirmed, "the copy is a candidate");
+    assert_eq!(lone.confirmed_projects(Some("b")).unwrap(), Vec::new(), "a candidate checkout gives no project rights");
+}

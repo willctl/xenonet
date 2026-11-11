@@ -22,6 +22,11 @@ pub fn network() -> NetworkId {
     NetworkId::new("n1").unwrap()
 }
 
+/// The project the tests claim in, which every actor grant here names.
+pub fn project() -> ProjectId {
+    ProjectId::new("prj_atlas").unwrap()
+}
+
 pub fn person() -> PersonId {
     PersonId::new("prs_owner").unwrap()
 }
@@ -66,6 +71,8 @@ pub struct World {
     pub delegations: Vec<StandingGrant>,
     pub machine_devices: HashMap<MachineId, DeviceId>,
     pub scopes: HashMap<Vec<u8>, AllowScope>,
+    /// The projects every actor grant here may claim in.
+    pub projects: Option<Vec<ProjectId>>,
     pub asks: HashMap<AskId, Asked>,
     pub synced: Option<i64>,
     pub outbound: HashMap<ActorSlug, OutboundScope>,
@@ -110,6 +117,9 @@ impl Ground for World {
     }
     fn allow_scope(&self, token: &[u8]) -> Option<AllowScope> {
         self.scopes.get(token).cloned()
+    }
+    fn grant_projects(&self, _token: &[u8]) -> Option<Vec<ProjectId>> {
+        self.projects.clone()
     }
     fn ask(&self, ask: &AskId) -> Option<Asked> {
         self.asks.get(ask).cloned()
@@ -172,6 +182,7 @@ pub fn fixture() -> Fixture {
         delegations: Vec::new(),
         machine_devices: HashMap::from([(machine("m1"), device_id(&bio_device())), (machine("m2"), device_id(&weak_device()))]),
         scopes: HashMap::new(),
+        projects: Some(vec![project()]),
         asks: HashMap::from([(AskId::new("q1").unwrap(), asked(Attestation::HarnessSigned))]),
         synced: Some(NOW - 60_000),
         outbound: HashMap::new(),

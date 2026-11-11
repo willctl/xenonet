@@ -55,6 +55,7 @@ impl Fake {
             waits: self,
             events: self,
             net: None,
+            projects: None,
         }
     }
 

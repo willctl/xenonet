@@ -101,7 +101,9 @@ id!(
     "a service's id"
 );
 id!(
-    /// A project, by the name this machine's map gives it (its repo's).
+    /// A project: the id the store minted (`prj_…`), the same on every
+    /// machine of one person's for one repo; for a delegation to an
+    /// outbound actor, the name this machine's map gives it.
     ProjectId,
     "a project's id"
 );
@@ -284,6 +286,9 @@ pub enum Resource {
     Actor(ActorSlug),
     /// A space this machine holds the chain of.
     Space(SpaceId),
+    /// A project, on whichever machines hold its checkouts: what a claim is
+    /// done to.
+    Project(ProjectId),
 }
 
 /// How a started run's permission prompts are answered.
@@ -389,9 +394,11 @@ pub enum Act {
         ask: AskId,
         decision: AnswerDecision,
     },
-    /// What's claimed doesn't change who may claim; claims name (project,
-    /// path) once projects have stored ids.
-    Claim,
+    /// A claim in a project: its path doesn't change who may claim, its
+    /// project does (an actor claims only in the projects its grant names).
+    Claim {
+        project: ProjectId,
+    },
     Handoff,
     /// `filters` is the hash of the filters a page was read with, which a
     /// page cursor is bound to.
@@ -445,7 +452,7 @@ impl Act {
             Act::Wake => Action::Wake,
             Act::Start { .. } => Action::Start,
             Act::Answer { .. } => Action::Answer,
-            Act::Claim => Action::Claim,
+            Act::Claim { .. } => Action::Claim,
             Act::Handoff => Action::Handoff,
             Act::Read { .. } => Action::Read,
             Act::Admit { .. } => Action::Admit,
@@ -597,10 +604,12 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         Resource::Session(s) => c.field("session").field(s.as_str()),
         Resource::Actor(a) => c.field("actor").field(a.as_str()),
         Resource::Space(s) => c.field("space").field(s.as_str()),
+        Resource::Project(p) => c.field("project").field(p.as_str()),
     };
     c.field(act.action().as_str());
     match act {
-        Act::Message | Act::Wake | Act::Claim | Act::Handoff | Act::UseGateway => &mut c,
+        Act::Message | Act::Wake | Act::Handoff | Act::UseGateway => &mut c,
+        Act::Claim { project } => c.field(project.as_str()),
         Act::Start { app, folder, mode } => c.field(app.as_str()).field(folder.as_str()).field(match mode {
             StartMode::Asks => "asks",
             StartMode::Delegated => "delegated",
@@ -660,7 +669,8 @@ mod tests {
         let hashes = [
             act_hash(&m, &Act::Message),
             act_hash(&Resource::Machine(MachineId::new("m2").unwrap()), &Act::Message),
-            act_hash(&m, &Act::Claim),
+            act_hash(&Resource::Project(ProjectId::new("prj_a").unwrap()), &Act::Claim { project: ProjectId::new("prj_a").unwrap() }),
+            act_hash(&Resource::Project(ProjectId::new("prj_a").unwrap()), &Act::Claim { project: ProjectId::new("prj_b").unwrap() }),
             act_hash(&run("/a"), &answer("q1", AnswerDecision::Allow)),
             act_hash(&run("/a"), &answer("q1", AnswerDecision::Deny)),
             act_hash(&run("/a"), &answer("q2", AnswerDecision::Allow)),

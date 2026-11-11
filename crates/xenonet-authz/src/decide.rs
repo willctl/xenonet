@@ -30,7 +30,7 @@
 //!   wake           wake      wake      wake      reach
 //!   start          -         start     start     start
 //!   answer         answer    -         answer    answer
-//!   claim          reach     claim     reach     reach
+//!   claim          reach     claim     claim     reach
 //!   handoff        reach     reach     reach     reach
 //!   read           read      read      read      reach
 //!   admit          -         -         -         presence
@@ -55,7 +55,8 @@
 //!             (the person needs none) and a delegation of the person's
 //!             for starts that names this machine's device and the device
 //!             the start came from
-//!   claim     reach, but an unchecked agent claims only on its own machine
+//!   claim     reach, but an unchecked agent claims only on its own machine,
+//!             and an actor only in the projects its grant names
 //!   read      the map: reach; transcripts, search and state: here, an
 //!             agent process-checked at least; from another machine, an admin
 //!             member, never an unchecked agent
@@ -242,7 +243,7 @@ const TABLE: [(Action, [Rule; 4]); 18] = [
     (Action::Wake,          [Wake,     Wake,     Wake,     Reach]),
     (Action::Start,         [No,       Start,    Start,    Start]),
     (Action::Answer,        [Answer,   No,       Answer,   Answer]),
-    (Action::Claim,         [Reach,    Claim,    Reach,    Reach]),
+    (Action::Claim,         [Reach,    Claim,    Claim,    Reach]),
     (Action::Handoff,       [Reach,    Reach,    Reach,    Reach]),
     (Action::Read,          [Read,     Read,     Read,     Reach]),
     (Action::Admit,         [No,       No,       No,       Presence]),
@@ -327,7 +328,8 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
             | (Action::Wake, Resource::Session(_))
             | (Action::Start, Resource::Run { .. })
             | (Action::Answer, Resource::Run { .. } | Resource::Session(_))
-            | (Action::Claim | Action::Handoff | Action::Read | Action::RegisterActor | Action::UseGateway, Resource::Machine(_))
+            | (Action::Claim, Resource::Project(_))
+            | (Action::Handoff | Action::Read | Action::RegisterActor | Action::UseGateway, Resource::Machine(_))
             | (Action::Admit | Action::Widen | Action::Publish, Resource::Network(_))
             | (Action::Revoke, Resource::Machine(_) | Resource::Network(_))
             | (Action::Delegate, Resource::Actor(_))
@@ -347,6 +349,7 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
         (Act::Start { app, folder, .. }, Resource::Run { app: a, folder: f, .. }) if app != a || folder != f => {
             Err(Reason::new("resource", "the start names another run than its resource"))
         }
+        (Act::Claim { project }, Resource::Project(p)) if project != p => Err(Reason::new("resource", "the claim names another project than its resource")),
         (Act::Answer { ask, .. }, resource) => match ground.ask(ask) {
             None => Err(Reason::new("ask", format!("no question {ask} waits here"))),
             Some(a) if matches!(resource, Resource::Session(s) if s != &a.session) => Err(Reason::new("ask", format!("{ask} wasn't asked by that session"))),
@@ -525,6 +528,17 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
         }
         Claim => match principal {
             Principal::Agent { attestation: Attestation::Unchecked, .. } if !arrival.own => Err(Reason::new("attestation", "an unchecked agent claims only on its own machine")),
+            // An actor claims only in the projects its grant names.
+            Principal::Actor { .. } => {
+                let (Act::Claim { project }, Authority::Token { revocation_id }) = (request.act(), &authority) else {
+                    return Err(Reason::new("token", "an actor proves itself with its token"));
+                };
+                let projects = ground.grant_projects(revocation_id).ok_or_else(|| Reason::new("scope", "that actor's grant names no projects to claim in"))?;
+                if !projects.contains(project) {
+                    return Err(Reason::new("scope", format!("that actor's grant doesn't name {project}")));
+                }
+                Ok((authority, None))
+            }
             _ => Ok((authority, None)),
         },
         Read => {

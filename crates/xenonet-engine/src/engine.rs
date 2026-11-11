@@ -27,7 +27,7 @@
 use crate::attest::quoted;
 use crate::delivery::policy;
 use crate::delivery::selector::{format_selector, Selector};
-use crate::host::{Collaborators, Repo, StatusSet};
+use crate::host::{Collaborators, Place, Repo, StatusSet};
 use crate::index::SessionIndex;
 use crate::network::{self, network_host, NetHandle};
 use crate::store::Kept;
@@ -279,6 +279,23 @@ fn short(id: &str) -> String {
     let end = id.find(':').map_or(8, |i| i + 9);
     let units: Vec<u16> = id.encode_utf16().collect();
     String::from_utf16_lossy(&units[..end.min(units.len())])
+}
+
+/// A claim or its release as it goes to the network's other members
+/// (`network/claim/v1`).
+#[expect(clippy::too_many_arguments, reason = "one body's fields, each its own")]
+fn claim_body(op: &str, project: &str, path: &str, agent: &str, branch: &Value, note: &Value, created_at: Option<f64>, expires_at: Option<f64>) -> Value {
+    obj(vec![
+        ("schema", string("network/claim/v1")),
+        ("op", string(op)),
+        ("project", string(project)),
+        ("path", string(path)),
+        ("agent", string(agent)),
+        ("branch", branch.clone()),
+        ("note", note.clone()),
+        ("createdAt", created_at.map_or(Value::Null, number)),
+        ("expiresAt", expires_at.map_or(Value::Null, number)),
+    ])
 }
 
 /// A claim's pattern against a file: an exact path, a folder ("src/" or
@@ -552,9 +569,10 @@ fn hops_of(m: &Value) -> Option<f64> {
     get(&env, "hops").and_then(Value::as_f64)
 }
 
-/// Whether an agent's repo key across the network is `key`.
+/// Whether an agent on another host works in a checkout of the project
+/// `key` (a `prj_…`).
 fn in_clone(a: &Value, key: Option<&str>) -> bool {
-    key.is_some_and(|k| as_str(get(a, "repoKey")) == Some(k))
+    key.is_some_and(|k| as_str(get(a, "projectKey")) == Some(k))
 }
 
 impl Engine {
@@ -586,11 +604,12 @@ impl Engine {
         Ok(out)
     }
 
-    /// An agent's repo across the network, from the remote of its folder.
+    /// The project an agent's folder is a checkout of, which agents on
+    /// other hosts are matched by.
     fn net_repo_key(c: &Collaborators<'_>, view: &Value) -> Result<Option<String>> {
         let cwd = get(view, "cwd");
         let (true, Some(net)) = (truthy(cwd), c.net) else { return Ok(None) };
-        net.repo_key(&text(cwd))
+        net.project_key(&text(cwd))
     }
 
     /// An agent on another host as the engine sees it, from that host's
@@ -1631,12 +1650,80 @@ impl Engine {
                 }
             })
             .collect();
-        if is_actor_agent(me) {
-            Self::actor_claims(c, me, &abs)?;
+        let Some(projects) = c.projects else {
+            return err("claims are kept by project, and this XenoNet has no projects to keep them in");
+        };
+        // A session's folder is a checkout of its own, the map's or made now.
+        if let Some(folder) = [get(&me_view, "top"), get(&me_view, "cwd")].into_iter().flatten().find(|x| truthy(Some(*x))) {
+            projects.ensure(&text(Some(folder)))?;
         }
+        // Each path once, through the checkout it's in: a project and the
+        // path inside it. A checkout the person hasn't confirmed in its
+        // project gives no rights there.
+        let mut mapped: Vec<(String, Place)> = Vec::new();
         for p in &abs {
+            // A path in no checkout yet: the folder it's in is one, the
+            // repo's it's in or the folder itself.
+            if projects.place(p)?.is_none() {
+                let head = p.split('*').next().unwrap_or(p);
+                let folder = if head.ends_with(['/', '\\']) { head.trim_end_matches(['/', '\\']).to_string() } else { style_of(head).dirname(head) };
+                if !folder.is_empty() {
+                    projects.ensure(&folder)?;
+                }
+            }
+            match projects.place(p)? {
+                None => return Err(Fail::Bad(format!("{p} isn't in a project or folder XenoNet knows"))),
+                Some(pl) if !pl.confirmed => {
+                    return Err(Fail::Bad(format!(
+                        "{p} is in {}, a checkout of a project that already had one, and your user hasn't confirmed it there yet: they do in XenoNet's window",
+                        pl.top
+                    )))
+                }
+                Some(pl) => mapped.push((p.clone(), pl)),
+            }
+        }
+        let mut decided: Vec<&str> = Vec::new();
+        for (_, pl) in &mapped {
+            if !decided.contains(&pl.project.as_str()) {
+                projects.may_claim(me, &pl.project)?;
+                decided.push(&pl.project);
+            }
+        }
+        if is_actor_agent(me) {
+            Self::actor_claims(c, me, &mapped)?;
+        }
+        let author = projects.author();
+        let branch = or_null(get(&me_view, "branch"));
+        for (p, pl) in &mapped {
             let t = c.clock.now();
-            c.store.claim(me, p.as_str(), &note, until, t)?;
+            let row = obj(vec![
+                ("project", string(&pl.project)),
+                ("path", string(&pl.rel)),
+                ("agent", string(me)),
+                ("author", string(&author)),
+                ("host", Value::Null),
+                ("checkout", string(&pl.checkout)),
+                ("pattern", string(p)),
+                ("branch", branch.clone()),
+                ("note", note.clone()),
+                ("created_at", number(t)),
+                ("expires_at", number(until)),
+            ]);
+            c.store.claim(&row)?;
+            projects.claimed(claim_body("claim", &pl.project, &pl.rel, me, &branch, &note, Some(t), Some(until)));
+        }
+        // The claim that stands is the earliest (claims are advisory).
+        let mut first: Option<(f64, String, String)> = None;
+        for (_, pl) in &mapped {
+            for r in c.store.claims_in(&pl.project, c.clock.now())? {
+                let path = text(get(&r, "path"));
+                if matches(&path, &pl.rel) || matches(&pl.rel, &path) {
+                    let at = (num(get(&r, "created_at")), text(get(&r, "author")), text(get(&r, "agent")));
+                    if first.as_ref().is_none_or(|f| (at.0, &at.1) < (f.0, &f.1)) {
+                        first = Some(at);
+                    }
+                }
+            }
         }
         // Claiming what someone else holds is allowed; say so.
         let plain: Vec<String> = abs.iter().filter(|p| !p.contains('*') && !p.ends_with('/')).cloned().collect();
@@ -1644,6 +1731,7 @@ impl Engine {
         Ok(obj(vec![
             ("claimed", Value::Array(abs.into_iter().map(string).collect())),
             ("until", number(until)),
+            ("first", first.map_or(Value::Null, |f| string(f.2))),
             (
                 "alsoHeldBy",
                 Value::Array(
@@ -1653,33 +1741,17 @@ impl Engine {
         ]))
     }
 
-    /// An actor's claims stay inside the projects and folders XenoNet knows,
-    /// never a whole folder that isn't a project, and it holds at most 50 at
-    /// once.
-    fn actor_claims(c: &Collaborators<'_>, me: &str, abs: &[String]) -> Result<()> {
-        for p in abs {
-            let head = p.split('*').next().unwrap_or("");
-            let dir = head.trim_end_matches(['\\', '/']);
-            let dir = if dir.is_empty() { "/" } else { dir };
-            let place = match c.actors {
-                Some(actors) => actors.place_of(dir)?,
-                None => None,
-            };
-            let Some(place) = place.filter(|p| truthy(Some(p))) else {
-                return Err(Fail::Bad(format!("an actor's claims stay inside the projects and folders XenoNet knows, and {p} isn't in one")));
-            };
-            let node = c.map.node(&text(Some(&place)))?.unwrap_or(Value::Null);
-            let path = get(&node, "path");
-            if as_str(get(&node, "kind")) != Some("project") && truthy(path) && key_of(&text(path)).trim_end_matches('/') == key_of(dir) {
-                return Err(Fail::Bad(format!(
-                    "an actor can claim files and folders inside {}, but not all of a folder that isn't a project",
-                    some(get(&node, "name")).map_or_else(|| "a folder".to_string(), |n| text(Some(n)))
-                )));
+    /// An actor claims files and folders inside a project, never all of
+    /// it at once, and it holds at most 50 claims at once.
+    fn actor_claims(c: &Collaborators<'_>, me: &str, mapped: &[(String, Place)]) -> Result<()> {
+        for (p, pl) in mapped {
+            if pl.rel.trim_matches(['/', '*']).is_empty() {
+                return Err(Fail::Bad(format!("an actor can claim files and folders inside {}, but not all of it ({p})", pl.top)));
             }
         }
         let now = c.clock.now();
         let mut held: Vec<String> = c.store.claims(now)?.iter().filter(|cl| as_str(get(cl, "agent")) == Some(me)).map(|cl| text(get(cl, "pattern"))).collect();
-        for p in abs {
+        for (p, _) in mapped {
             if !held.contains(p) {
                 held.push(p.clone());
             }
@@ -1700,8 +1772,13 @@ impl Engine {
             Value::String(s) => Some(s.chars().map(String::from).collect()),
             _ => return Err(Thrown::new("that isn't a list").into()),
         };
-        let n = c.store.release(me, patterns.as_deref())?;
-        Ok(obj(vec![("released", number(n))]))
+        let released = c.store.release(me, patterns.as_deref())?;
+        if let Some(projects) = c.projects {
+            for r in &released {
+                projects.claimed(claim_body("release", &text(get(r, "project")), &text(get(r, "path")), me, &Value::Null, &Value::Null, None, None));
+            }
+        }
+        Ok(obj(vec![("released", number(released.len() as f64))]))
     }
 
     /// What an agent says it's doing. An actor's focus is its status line,
@@ -2229,7 +2306,7 @@ impl Engine {
                 }
                 put(&mut b, "editing", number(0.0));
                 put(&mut b, "claims", Value::Array(vec![]));
-                for k in ["reachable", "host", "seen", "online", "waitsOnYou", "repoKey", "cwd", "lastActive", "question", "lastMessage", "stuck"] {
+                for k in ["reachable", "host", "seen", "online", "waitsOnYou", "projectKey", "cwd", "lastActive", "question", "lastMessage", "stuck"] {
                     let v = get(&a, k);
                     if k == "lastActive" && nullish(v) {
                         continue;

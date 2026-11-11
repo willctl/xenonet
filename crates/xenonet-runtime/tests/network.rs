@@ -451,10 +451,11 @@ async fn presence_puts_other_hosts_agents_in_peers_after_this_ones() {
     let repo = e.peers(A, "repo").await.unwrap();
     assert_eq!(ids(&repo), vec![A2.to_string(), format!("@laptop:{B}")], "{repo}");
     let far = &repo[1];
-    assert_eq!(
-        (far["host"].clone(), far["online"].clone(), far["branch"].clone(), far["repoKey"].clone()),
-        (json!("laptop"), json!(true), json!("fix/login"), json!("github.com/acme/atlas"))
-    );
+    // Its project is studio's own for its clone of the same repo: one
+    // person's machines make one id of one repo.
+    let studio_atlas = n.dir.join("studio/atlas").to_string_lossy().into_owned();
+    let atlas = xenonet_runtime::checkouts::project_of(n.w("studio").setup.db.as_ref().unwrap(), &studio_atlas).unwrap();
+    assert_eq!((far["host"].clone(), far["online"].clone(), far["branch"].clone(), far["projectKey"].clone()), (json!("laptop"), json!(true), json!("fix/login"), json!(atlas)));
     assert!(far["seen"].is_number());
     // Every row says which machine it's on, this one's too, for showing:
     // the local one has no host, so nothing goes to it over the network.
@@ -641,11 +642,46 @@ async fn an_edit_warns_of_an_agent_changing_the_same_file_in_another_clone() {
     let changing = said(n.e("studio").hook("claude", Some("PreToolUse"), &edit("src/ledger.ts")).await.unwrap());
     assert!(changing.contains("An agent on laptop (branch fix/login) is changing this file in its clone. Expect a merge conflict."), "{changing}");
     assert_eq!(said(n.e("studio").hook("claude", Some("PreToolUse"), &edit("src/other.ts")).await.unwrap()), "");
-    // Released: the next change goes out, and the warning with it.
+    // Released: the release goes to every member as an entry of laptop's
+    // feed, and the warning goes with the claim.
     laptop.release(B, Value::Null).await.unwrap();
-    n.on("laptop", network::tick).await;
     let last = n.sent("laptop", Kind::Claims).pop().unwrap();
-    assert_eq!(last["released"][0]["path"], "src/refunds.ts");
+    assert_eq!((last["op"].clone(), last["path"].clone(), last["project"].as_str().map(|p| &p[..4])), (json!("release"), json!("src/refunds.ts"), Some("prj_")));
+    n.pump().await;
+    let after = said(n.e("studio").hook("claude", Some("PreToolUse"), &edit("src/refunds.ts")).await.unwrap());
+    assert!(!after.contains("claimed this file"), "{after}");
+}
+
+// A claim is a project's: a candidate checkout (a second clone of a repo
+// on one machine, not yet confirmed by the person) gives no rights in it,
+// and another host's claim entry names one of its own agents.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_claim_needs_a_confirmed_checkout_and_names_its_authors_own_agent() {
+    let n = net3("candidate");
+    n.link_up().await;
+    let copy = clone(&n.dir.join("studio/atlas-copy"), "git@github.com:acme/atlas.git", "main");
+    let w = n.w("studio").clone();
+    let db = w.setup.db.clone().unwrap();
+    // studio's own checkout founds the project; the copy is a candidate.
+    let studio_atlas = n.dir.join("studio/atlas").to_string_lossy().into_owned();
+    assert!(xenonet_runtime::checkouts::project_of(&db, &studio_atlas).is_some());
+    assert_eq!(xenonet_runtime::checkouts::project_of(&db, &copy), None, "a candidate gives no project");
+    n.e("studio").touch(A2, json!({ "app": "codex", "cwd": copy, "via": "mcp" })).unwrap();
+    let refused = n.e("studio").claim(A2, json!({ "paths": [format!("{copy}/src/refunds.ts")] })).await.unwrap_err();
+    assert!(refused.message.contains("hasn't confirmed it there yet"), "{}", refused.message);
+    // Confirmed at the window, it's in.
+    let ch = xenonet_runtime::checkouts::place(&db, &copy).unwrap().unwrap();
+    db.confirm(&xenonet_model::ids::CheckoutId::parse(&ch.checkout).unwrap()).unwrap();
+    n.e("studio").claim(A2, json!({ "paths": [format!("{copy}/src/refunds.ts")] })).await.unwrap();
+    // vm1 claims for an agent it names as studio's: refused where it lands.
+    let project = ch.project.clone();
+    let forged = json!({ "schema": "network/claim/v1", "op": "claim", "project": project, "path": "src/a.ts", "agent": format!("@studio:{A}"), "branch": null, "note": null, "createdAt": now(), "expiresAt": null });
+    n.deliver("vm1", "laptop", Kind::Claims, forged).await;
+    let own = json!({ "schema": "network/claim/v1", "op": "claim", "project": project, "path": "src/b.ts", "agent": C, "branch": null, "note": null, "createdAt": now(), "expiresAt": null });
+    n.deliver("vm1", "laptop", Kind::Claims, own).await;
+    let kept: Vec<String> = n.w("laptop").store.with(|s| s.claims_in(&project, now()).unwrap()).iter().filter_map(|r| r.text("path").map(str::to_string)).collect();
+    assert!(!kept.contains(&"src/a.ts".to_string()), "another machine's agent isn't vm1's to claim for: {kept:?}");
+    assert!(kept.contains(&"src/b.ts".to_string()), "its own is kept: {kept:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -795,23 +831,25 @@ async fn you_reach_a_session_on_another_machine_from_your_console() {
 async fn another_host_keeps_only_so_much_here_and_as_the_schema_has_it() {
     let n = net3("limits");
     n.link_up().await;
-    // Claims: cut to the schema's lengths, and 5000 a host at most.
+    // Claims: as the schema has them, never past eight hours from now, and
+    // 5000 a host at most.
+    let prj = "prj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let claim = |path: &str, expires: Value| json!({ "schema": "network/claim/v1", "op": "claim", "project": prj, "path": path, "agent": A, "branch": "main", "note": null, "createdAt": now(), "expiresAt": expires });
     let long = "x".repeat(2000);
-    let mut claims: Vec<Value> =
-        (0..5001).map(|i| json!({ "repoKey": "github.com/acme/atlas", "path": format!("src/f{i}.ts"), "agent": A, "branch": "main", "kind": "claim", "until": null })).collect();
-    claims.push(json!({ "repoKey": long, "path": long, "agent": A, "branch": long, "kind": "edit", "until": null }));
-    let body = json!({ "schema": "network/claims/v1", "full": true, "claims": claims, "released": [] });
-    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Claims, body, at: now(), from_window_host: true })).await;
-    let count = n.w("laptop").store.with(|s| s.net_claim_count("studio").unwrap());
-    assert_eq!(count, 5000.0);
-    let body = json!({ "schema": "network/claims/v1", "full": true, "claims": [{ "repoKey": long, "path": long, "agent": A, "branch": long, "kind": "edit", "until": null }], "released": [] });
-    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Claims, body, at: now(), from_window_host: true })).await;
-    let rows = n.w("laptop").store.with(|s| s.net_claims(0.0).unwrap());
-    let r = rows.iter().find(|r| r.text("host") == Some("studio")).unwrap();
-    assert_eq!((r.text("repo_key").unwrap().len(), r.text("path").unwrap().len(), r.text("branch").unwrap().len()), (300, 1000, 200));
+    n.deliver("studio", "laptop", Kind::Claims, claim(&long, Value::Null)).await;
+    n.deliver("studio", "laptop", Kind::Claims, claim("/etc/passwd", Value::Null)).await;
+    n.deliver("studio", "laptop", Kind::Claims, claim("src/../../x", Value::Null)).await;
+    assert_eq!(n.w("laptop").store.with(|s| s.remote_claim_count("studio").unwrap()), 0.0, "past the schema, or outside the project");
+    n.deliver("studio", "laptop", Kind::Claims, claim("src/far.ts", json!(now() + 400.0 * 24.0 * 3600e3))).await;
+    let far = n.w("laptop").store.with(|s| s.claims_in(prj, now()).unwrap());
+    assert!(far[0].num("expires_at").unwrap() <= now() + 8.0 * 3600e3, "held to eight hours");
+    for i in 0..5000 {
+        n.deliver("studio", "laptop", Kind::Claims, claim(&format!("src/f{i}.ts"), Value::Null)).await;
+    }
+    assert_eq!(n.w("laptop").store.with(|s| s.remote_claim_count("studio").unwrap()), 5000.0);
     // Handoffs: cut likewise, and 100 open from a host at most.
     for i in 0..101 {
-        let body = json!({ "schema": "network/handoff/v1", "id": format!("hof_00000000-0000-4000-8000-{i:012}"), "op": "offer", "from": A, "to": { "agent": null, "repoKey": "github.com/acme/atlas", "host": null },
+        let body = json!({ "schema": "network/handoff/v1", "id": format!("hof_00000000-0000-4000-8000-{i:012}"), "op": "offer", "from": A, "to": { "agent": null, "projectKey": "prj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "host": null },
             "goal": "g".repeat(3000), "done": "d".repeat(9000), "next": null, "files": (0..300).map(|f| format!("src/{f}.ts")).collect::<Vec<_>>(), "branch": "main", "commit": "not-hex!", "by": null, "at": now() });
         n.deliver("studio", "laptop", Kind::Handoff, body).await;
     }
@@ -885,7 +923,7 @@ async fn detail_crosses_for_the_console_never_for_agents_and_titles_only_keeps_i
     let snap = n.e("studio").snapshot().await.unwrap();
     let far = snap["agents"].as_array().unwrap().iter().find(|x| x["id"] == far_id).unwrap().clone();
     assert_eq!((far["question"].clone(), far["stuck"][0].clone()), (json!("Should ~/work/atlas/src/login.ts keep the old redirect?"), json!("ran npm test 3 times in a row")));
-    assert_eq!(far["repoKey"], "github.com/acme/atlas");
+    assert!(far["projectKey"].as_str().is_some_and(|k| k.starts_with("prj_")), "{far}");
     let peers = n.e("studio").peers(A, "machine").await.unwrap();
     let seen = peers.as_array().unwrap().iter().find(|x| x["id"] == far_id).unwrap();
     assert!(seen.get("question").is_none() && seen.get("lastMessage").is_none() && seen.get("stuck").is_none(), "{seen}");

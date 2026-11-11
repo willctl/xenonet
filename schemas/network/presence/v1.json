@@ -78,8 +78,8 @@
               }
             ]
           },
-          "repoKey": {
-            "description": "The normalized git remote of its folder (origin, else the first remote), or null when it has none",
+          "projectKey": {
+            "description": "The project its folder is a confirmed checkout of (prj_…), which agents on other machines are matched by, or null",
             "anyOf": [
               {
                 "type": "string",
@@ -89,6 +89,15 @@
                 "type": "null"
               }
             ]
+          },
+          "edits": {
+            "description": "What it's changing, inside its project, with / between parts",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "maxItems": 50
           },
           "branch": {
             "anyOf": [
@@ -163,7 +172,7 @@
           "title",
           "state",
           "doing",
-          "repoKey",
+          "projectKey",
           "branch",
           "cwd",
           "lastActive",

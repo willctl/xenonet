@@ -75,6 +75,10 @@ const EDIT_HOLD_MS: f64 = 30.0 * 60e3;
 const MAX_HOPS: f64 = 6.0;
 /// What another host may keep here: its claims, and handoffs open.
 const MAX_CLAIMS: f64 = 5000.0;
+/// The longest a claim from another host holds here.
+const CLAIM_MAX_MS: f64 = 8.0 * 3600e3;
+/// The most files presence says an agent is changing.
+const EDITS_SENT: usize = 50;
 const MAX_HANDOFFS: f64 = 100.0;
 /// An agent's detail, at most, as network/presence/v1 has it: a waiting
 /// question's text, its last message (as the live state keeps it), and its
@@ -87,8 +91,8 @@ const REASON_MAX: usize = 280;
 /// so presence doesn't change every tick while they type.
 const YOU_STEP_MS: f64 = 30e3;
 
-/// What this host last told the others: its presence (each agent as sent)
-/// and its claims, and the timer that tells them again.
+/// What this host last told the others: its presence (each agent as sent),
+/// and the timer that tells it again.
 #[derive(Default)]
 pub struct NetState {
     out: Mutex<Out>,
@@ -112,9 +116,6 @@ struct Out {
     roster: String,
     /// Who may start and wake sessions here, as the last presence said.
     reach: Value,
-    claims: BTreeMap<String, Value>,
-    /// The roster head when the claims last went: a new one sends them all.
-    claims_roster: String,
 }
 
 impl Drop for NetState {
@@ -322,26 +323,27 @@ fn row_json(r: &Row) -> Value {
     r.to_json()
 }
 
-/// A folder's repo key across the network, or None off git, with no
-/// remote, or for a cwd that isn't a path.
-fn remote_key(w: &Runtime, cwd: Option<&Value>) -> Option<String> {
-    cwd.and_then(Value::as_str).filter(|c| !c.is_empty()).and_then(|c| w.repos.remote_key_of(c))
+/// The project a folder is a confirmed checkout of here (`prj_…`), what
+/// agents are matched by across machines; None for a folder in no project
+/// yet, or a cwd that isn't a path.
+fn project_key(w: &Runtime, cwd: Option<&Value>) -> Option<String> {
+    let db = w.setup.db.as_ref()?;
+    cwd.and_then(Value::as_str).filter(|c| !c.is_empty()).and_then(|c| crate::checkouts::project_of(db, c))
 }
 
 // ---------- from the link ----------
 
 /// The link came up, or went down. On the way up this host sends its full
-/// presence and claims, and again what has no stored receipt.
+/// presence, and again what has no stored receipt.
 pub fn linked(w: &Runtime, up: bool) {
     if up && net(w).me().is_some() {
         presence(w, true);
-        claims(w, true);
         resend(w);
     }
 }
 
-/// The gateway lost frames: a full presence and claims, and again what has
-/// no stored receipt.
+/// The gateway lost frames: a full presence, and again what has no stored
+/// receipt.
 pub fn gap(w: &Runtime) {
     linked(w, true);
 }
@@ -353,14 +355,13 @@ pub fn removed(w: &Runtime, host: &str) {
     }
 }
 
-/// What this host tells the others now, if it changed: presence and
-/// claims; and handoffs made here that lapsed, and messages no one read.
+/// What this host tells the others now, if it changed: presence; and
+/// handoffs made here that lapsed, and messages no one read.
 pub fn tick(w: &Runtime) {
     if net(w).me().is_none() {
         return;
     }
     presence(w, false);
-    claims(w, false);
     lapse(w);
     unread(w);
 }
@@ -374,10 +375,9 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
     let _one = w.net.taking.locked();
     let done = match kind {
         Kind::Presence => presence_in(w, &from, &body),
-        Kind::Claims => claims_in(w, &from, &body),
-        // Messages, receipts and handoffs come as entries of their
+        // Messages, receipts, claims and handoffs come as entries of their
         // author's feed (`entry_in`), never as bare bodies.
-        Kind::Message | Kind::Receipt | Kind::Handoff => Err(fail("it comes only as an entry of its machine's feed")),
+        Kind::Message | Kind::Receipt | Kind::Claims | Kind::Handoff => Err(fail("it comes only as an entry of its machine's feed")),
         // The person's answer to a run's permission prompt, from another
         // machine's console (`network/operator/v2`).
         Kind::Operator => {
@@ -495,6 +495,7 @@ fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &
         // The feed applies a compact entry itself: what it leaves out is
         // closed there (`Applied::ended`).
         EntryKind::Compact => Ok(()),
+        EntryKind::Claim => claim_in(w, host, &e.author, &e.body),
         other => Err(fail(format!("XenoNet doesn't take {} entries yet", other.as_str()))),
     };
     if let Err(f) = done {
@@ -584,7 +585,20 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
         if is_remote(&id) || id == YOU {
             continue;
         }
-        let key = remote_key(w, a.get("cwd"));
+        let key = project_key(w, a.get("cwd"));
+        // What it's changing, inside its project, so another machine's
+        // agent about to edit the same file in its checkout is warned.
+        let edits: Vec<Value> = match (&key, &w.setup.db) {
+            (Some(k), Some(db)) => items(&a, "editing")
+                .iter()
+                .filter(|e| n(e, "at").is_some_and(|at| now - at < EDIT_HOLD_MS))
+                .filter_map(|e| crate::checkouts::place(db, &s(e, "path")?).ok().flatten())
+                .filter(|p| p.project == *k && !p.rel.is_empty())
+                .map(|p| json!(clip(&p.rel, 1000)))
+                .take(EDITS_SENT)
+                .collect(),
+            _ => Vec::new(),
+        };
         let waits = a.get("needsYou").is_some_and(|v| xenonet_text::text::truthy(Some(v)));
         let state = if waits { "waiting".to_string() } else { a.get("status").and_then(Value::as_str).unwrap_or("idle").to_string() };
         out.insert(
@@ -595,7 +609,8 @@ fn agents_now(w: &Runtime, titles_only: bool) -> Result<BTreeMap<String, Value>>
                 "title": opt(s(&a, "title"), 200),
                 "state": clip(&state, 32),
                 "doing": opt(s(&a, "focus"), 280),
-                "repoKey": opt(key, 300),
+                "projectKey": opt(key, 300),
+                "edits": edits,
                 "branch": opt(s(&a, "branch"), 200),
                 "cwd": opt(s(&a, "cwd").map(|p| tilde(w, &p)), 500),
                 // To the half minute, so an agent at work isn't a change
@@ -645,7 +660,8 @@ fn declared(a: &Value) -> Option<Value> {
         "title": text("title", 200),
         "state": text("state", 32),
         "doing": text("doing", 280),
-        "repoKey": text("repoKey", 300),
+        "projectKey": text("projectKey", 300),
+        "edits": a.get("edits").and_then(Value::as_array).map_or_else(Vec::new, |e| e.iter().filter_map(Value::as_str).take(EDITS_SENT).map(|p| json!(clip(p, 1000))).collect()),
         "branch": text("branch", 200),
         "cwd": text("cwd", 500),
         "lastActive": n(a, "lastActive").map_or(Value::Null, ms),
@@ -758,10 +774,9 @@ fn presence_in(w: &Runtime, from: &str, body: &Value) -> Result<()> {
 /// seems stuck, which no agent's view carries.
 fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
     let local = s(a, "id").unwrap_or_default();
-    let key = s(a, "repoKey");
+    let key = s(a, "projectKey");
     let cwd = s(a, "cwd");
-    let project =
-        key.as_deref().and_then(|k| k.rsplit('/').next()).or_else(|| cwd.as_deref().and_then(|c| c.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next())).map(str::to_string);
+    let project = cwd.as_deref().and_then(|c| c.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next()).map(str::to_string);
     let state = s(a, "state").unwrap_or_else(|| "idle".into());
     let status = match state.as_str() {
         "working" => "working",
@@ -791,7 +806,7 @@ fn view_of(host: &Host, a: &Value, detail: bool) -> Value {
         "host": host.id,
         "seen": host.seen.map_or(Value::Null, ms),
         "online": host.online,
-        "repoKey": key,
+        "projectKey": key,
         "waitsOnYou": a.get("waitsOnYou").and_then(Value::as_bool).unwrap_or(false),
     });
     if detail {
@@ -1257,86 +1272,18 @@ pub fn delivered(w: &Runtime, m: &Value) {
     }
 }
 
-// ---------- claims across clones ----------
+// ---------- claims ----------
 
-/// A path inside a working tree, with / between its parts, or None for one
-/// outside it.
-fn inside(top: &str, p: &str) -> Option<String> {
-    let t = top.replace('\\', "/");
-    let t = t.trim_end_matches('/');
-    let f = p.replace('\\', "/");
-    let rest = f.strip_prefix(t)?.strip_prefix('/')?;
-    (!rest.is_empty()).then(|| rest.to_string())
-}
-
-/// This host's claims and edits as the others see them: by repo key and
-/// path inside the repo.
-fn claims_now(w: &Runtime) -> Result<BTreeMap<String, Value>> {
-    let agents = engine(w, |e, c| e.agents(c, ACTIVE_MS))?;
-    let mut out = BTreeMap::new();
-    for a in agents {
-        let (Some(top), Some(key)) = (s(&a, "top"), remote_key(w, a.get("cwd"))) else { continue };
-        let agent = s(&a, "id").unwrap_or_default();
-        let branch = s(&a, "branch").map(|b| clip(&b, 200));
-        let mut add = |path: String, kind: &str, until: Value| {
-            let k = format!("{key}|{path}|{agent}|{kind}");
-            out.insert(k, json!({ "repoKey": clip(&key, 300), "path": clip(&path, 1000), "agent": clip(&agent, 200), "branch": branch, "kind": kind, "until": until }));
-        };
-        for cl in items(&a, "claims") {
-            if let Some(p) = s(&cl, "pattern").and_then(|pat| inside(&top, &pat)) {
-                add(p, "claim", ms(num_of(&cl, "until")));
-            }
-        }
-        for e in items(&a, "editing") {
-            if let Some(p) = s(&e, "path").and_then(|path| inside(&top, &path)) {
-                add(p, "edit", ms(num_of(&e, "at") + EDIT_HOLD_MS));
-            }
-        }
+/// A claim or a release this machine made (`network/claim/v1`), to every
+/// other member as a kept entry of its feed.
+pub(crate) fn claimed(w: &Runtime, body: Value) {
+    if net(w).me().is_some() {
+        send(w, To::All, Kind::Claims, body);
     }
-    Ok(out)
 }
 
-/// This host's claims, sent when they changed (or in full).
-pub fn claims(w: &Runtime, full: bool) -> Option<Value> {
-    net(w).me()?;
-    let now = match claims_now(w) {
-        Ok(c) => c,
-        Err(e) => {
-            w.log("warn", "net.claims", &why(&e));
-            return None;
-        }
-    };
-    // A host that joined since the last claims has none of them yet.
-    let roster = net(w).roster_head().unwrap_or_default();
-    let body = {
-        let mut out = w.net.out.locked();
-        let full = full || roster != out.claims_roster;
-        let (put, released): (Vec<Value>, Vec<Value>) = if full {
-            (now.values().take(5000).cloned().collect(), vec![])
-        } else {
-            let put = now.iter().filter(|(k, v)| out.claims.get(*k) != Some(*v)).map(|(_, v)| v.clone()).take(5000).collect::<Vec<_>>();
-            let gone = out
-                .claims
-                .iter()
-                .filter(|(k, _)| !now.contains_key(*k))
-                .map(|(_, v)| json!({ "repoKey": v["repoKey"], "path": v["path"], "agent": v["agent"] }))
-                .take(5000)
-                .collect::<Vec<_>>();
-            (put, gone)
-        };
-        if !full && put.is_empty() && released.is_empty() {
-            return None;
-        }
-        out.claims = now;
-        out.claims_roster = roster;
-        json!({ "schema": "network/claims/v1", "full": full, "claims": put, "released": released })
-    };
-    send(w, To::All, Kind::Claims, body.clone());
-    Some(body)
-}
-
-/// `from`'s machine-level act here (its claims, a handoff), decided: a
-/// member of the network.
+/// `from`'s machine-level act here (a handoff), decided: a member of the
+/// network.
 fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act) -> Result<()> {
     let Some(g) = crate::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
     let id = crate::ground::machine(from).map_err(fail)?;
@@ -1344,64 +1291,92 @@ fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act) -> Result<()> {
     crate::ground::judge(&g, &request, None).map_err(fail)
 }
 
-fn claims_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
-    member_act(w, from, xenonet_authz::Act::Claim)?;
-    let at = now_ms();
-    if b.get("full").and_then(Value::as_bool).unwrap_or(false) {
-        store(w, |s| s.clear_net_claims(from))?;
+/// A claim entry of `from`'s feed (its author's key id `author`): decided
+/// as that member's claim in its project, of one of its own agents, and
+/// kept as its; or a release of what it kept.
+fn claim_in(w: &Runtime, from: &str, author: &str, b: &Value) -> Result<()> {
+    let c: xenonet_model::network::Claim = serde_json::from_value(b.clone()).map_err(|e| fail(format!("a claim that isn't network/claim/v1: {e}")))?;
+    let (agent, path) = (c.agent.as_str().to_string(), c.path.as_str().to_string());
+    if !own_id(&agent) {
+        return Err(fail(format!("{from} claimed for {agent}, which isn't one of its own agents")));
     }
-    for r in b.get("released").and_then(Value::as_array).into_iter().flatten() {
-        if let (Some(k), Some(p), Some(a)) = (s(r, "repoKey"), s(r, "path"), s(r, "agent")) {
-            store(w, |s| s.drop_net_claim(from, &k, &p, &a))?;
-        }
+    if path.starts_with('/') || path.split('/').any(|p| p == "..") {
+        return Err(fail("a claim's path is inside its project"));
     }
-    // As the schema has them: what's past its limits is cut, and a host
-    // keeps at most 5000 claims here.
-    let mut count = store(w, |st| st.net_claim_count(from))?;
-    for cl in b.get("claims").and_then(Value::as_array).into_iter().flatten() {
-        let (Some(k), Some(p), Some(a), Some(kind)) = (s(cl, "repoKey"), s(cl, "path"), s(cl, "agent"), s(cl, "kind")) else { continue };
-        if !own_id(&a) || !matches!(kind.as_str(), "claim" | "edit") || a.chars().count() > 200 {
-            continue;
-        }
-        let (k, p) = (clip(&k, 300), clip(&p, 1000));
-        let branch = s(cl, "branch").map(|x| clip(&x, 200));
-        if count >= MAX_CLAIMS && !store(w, |st| st.has_net_claim(from, &k, &p, &a, &kind))? {
-            continue;
-        }
-        store(w, |st| st.put_net_claim(from, &k, &p, &a, branch.as_deref(), &kind, n(cl, "until"), at))?;
-        count = store(w, |st| st.net_claim_count(from))?;
+    let project = c.project.as_str().to_string();
+    let Some(g) = crate::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
+    let id = crate::ground::machine(from).map_err(fail)?;
+    let p = xenonet_authz::ProjectId::new(&project).map_err(|e| fail(e.message))?;
+    let request = crate::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Project(p.clone()), xenonet_authz::Act::Claim { project: p });
+    crate::ground::judge(&g, &request, None).map_err(fail)?;
+    let shown = format!("@{from}:{agent}");
+    if c.op == xenonet_model::network::ClaimOp::Release {
+        store(w, |s| s.release_remote(from, &shown, &project, (!path.is_empty()).then_some(path.as_str())))?;
+        return Ok(());
     }
-    if count >= MAX_CLAIMS {
+    if path.is_empty() {
+        return Err(fail("a claim names a path"));
+    }
+    // A host keeps at most MAX_CLAIMS here, and none longer than eight
+    // hours from now, whatever it says.
+    if store(w, |s| s.remote_claim_count(from))? >= MAX_CLAIMS {
         w.log("warn", "net.claims", &format!("{from} has {MAX_CLAIMS} claims here, the most a host keeps: the rest were left out"));
+        return Ok(());
     }
-    Ok(())
+    let now = now_ms();
+    let created = c.created_at.as_ref().map_or(now, |m| m.0.min(now));
+    let until = c.expires_at.as_ref().map_or(now + CLAIM_MAX_MS, |m| m.0.min(now + CLAIM_MAX_MS));
+    let row = json!({
+        "project": project, "path": path, "agent": shown, "author": author, "host": from,
+        "branch": c.branch.as_ref().map(|b| b.as_str().to_string()), "note": c.note.as_ref().map(|n| n.as_str().to_string()),
+        "created_at": created, "expires_at": until,
+    });
+    store(w, |s| s.claim(&row))
 }
 
 /// Agents on other hosts with a hand in the files `me` is about to edit,
-/// in their clones of the same repo.
+/// in their checkouts of the same project: their claims, kept here, and
+/// what their presence says they're changing.
 pub(crate) fn claim_hits(w: &Runtime, me: &str, files: &[String]) -> Result<Vec<Value>> {
-    let view = engine(w, |e, c| e.view(c, me))?;
-    let (Some(top), Some(key)) = (s(&view, "top"), remote_key(w, view.get("cwd"))) else {
-        return Ok(Vec::new());
-    };
-    let rows = store(w, |s| s.net_claims_in(&key, now_ms()))?;
+    let Some(db) = w.setup.db.clone() else { return Ok(Vec::new()) };
+    let now = now_ms();
+    let presences = store(w, EngineStore::net_presences)?;
     let mut out = Vec::new();
+    let _ = me;
     for file in files {
-        let Some(rel) = inside(&top, file) else { continue };
-        for r in &rows {
-            let path = r.text("path").unwrap_or("");
-            if !xenonet_engine::engine::matches(path, &rel) {
+        let Ok(Some(at)) = crate::checkouts::place(&db, file) else { continue };
+        if !at.confirmed {
+            continue;
+        }
+        for r in store(w, |s| s.claims_in(&at.project, now))? {
+            let (Some(host), Some(path)) = (r.text("host"), r.text("path")) else { continue };
+            if !xenonet_engine::engine::matches(path, &at.rel) {
                 continue;
             }
-            let host = r.text("host").unwrap_or("");
             out.push(obj(vec![
                 ("host", json!(host)),
-                ("agent", json!(format!("@{host}:{}", r.text("agent").unwrap_or("")))),
+                ("agent", json!(r.text("agent"))),
                 ("branch", r.get("branch").to_json()),
-                ("kind", r.get("kind").to_json()),
+                ("kind", json!("claim")),
                 ("file", json!(file)),
-                ("path", json!(rel)),
+                ("path", json!(at.rel)),
             ]));
+        }
+        for p in &presences {
+            let host = p.text("host").unwrap_or("");
+            let agents: Vec<Value> = p.text("agents").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
+            for a in agents.iter().filter(|a| s(a, "projectKey").as_deref() == Some(at.project.as_str())) {
+                if a.get("edits").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).any(|e| e == at.rel) {
+                    out.push(obj(vec![
+                        ("host", json!(host)),
+                        ("agent", json!(format!("@{host}:{}", s(a, "id").unwrap_or_default()))),
+                        ("branch", a.get("branch").cloned().unwrap_or(Value::Null)),
+                        ("kind", json!("edit")),
+                        ("file", json!(file)),
+                        ("path", json!(at.rel)),
+                    ]));
+                }
+            }
         }
     }
     Ok(out)
@@ -1454,7 +1429,7 @@ pub(crate) fn offers(w: &Runtime, me: &Value) -> Result<Vec<Value>> {
     }
     let id = s(me, "id").unwrap_or_default();
     let me_host = net(w).me().map(|m| m.host);
-    let key = remote_key(w, me.get("cwd"));
+    let key = project_key(w, me.get("cwd"));
     let scope = scope_of(me);
     let mut out = Vec::new();
     for r in &rows {
@@ -1535,7 +1510,7 @@ fn offer(w: &Runtime, me: &str, a: &Value, envelope: &Value) -> Result<Value> {
             return Err(Fail::Bad(format!("{h} isn't a machine in your XenoNet network")));
         }
     }
-    let key = remote_key(w, view.get("cwd"));
+    let key = project_key(w, view.get("cwd"));
     let scope = scope_of(&view);
     let id = new_id("hof")?;
     let now = now_ms();
@@ -1638,7 +1613,7 @@ fn body_of(r: &Row, op: &str, by: Option<&str>) -> Value {
         "id": r.text("id"),
         "op": op,
         "from": r.text("maker"),
-        "to": { "agent": r.text("to_agent"), "repoKey": r.text("to_repo"), "host": r.text("to_host") },
+        "to": { "agent": r.text("to_agent"), "projectKey": r.text("to_repo"), "host": r.text("to_host") },
         "goal": r.text("goal"),
         "done": r.text("done"),
         "next": r.text("next"),
@@ -1814,7 +1789,7 @@ fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
                 ("host", json!(from)),
                 ("maker", json!(maker)),
                 ("to_agent", json!(to_agent)),
-                ("to_repo", json!(s(&to, "repoKey").map(|k| clip(&k, 300)))),
+                ("to_repo", json!(s(&to, "projectKey").map(|k| clip(&k, 300)))),
                 ("to_scope", Value::Null),
                 ("to_host", json!(s(&to, "host").filter(|h| xenonet_model::ids::is_host_id(h)))),
                 ("goal", json!(text(&goal))),
@@ -1917,14 +1892,6 @@ pub fn unread_at(w: &Runtime, now: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn paths_inside_a_working_tree() {
-        assert_eq!(inside("/w/atlas", "/w/atlas/src/a.ts").as_deref(), Some("src/a.ts"));
-        assert_eq!(inside("/w/atlas/", "/w/atlas/src/a.ts").as_deref(), Some("src/a.ts"));
-        assert_eq!(inside("/w/atlas", "/w/atlas-zoom/a.ts"), None);
-        assert_eq!(inside("C:\\w\\atlas", "C:\\w\\atlas\\src\\a.ts").as_deref(), Some("src/a.ts"));
-    }
 
     #[test]
     fn an_envelope_says_what_this_machine_decided_it_rests_on() {

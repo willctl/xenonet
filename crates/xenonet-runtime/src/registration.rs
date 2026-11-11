@@ -137,14 +137,18 @@ impl Host for RegHost<'_> {
             return Checked::Unknown;
         }
         // What it may do at its door, decided now: the acts the routes ask
-        // of a token (reads, messages, handoffs, claims). Starts are
-        // decided with the run they start.
+        // of a token (reads, messages, handoffs). Starts are decided with
+        // the run they start, and claims in each project their paths are
+        // in: here, a claim only needs its token to hold the right.
         let principal = Principal::Actor { slug: slug.clone(), machine: own.clone() };
-        let allows = [Act::Read { scope: xenonet_authz::ReadScope::Map, filters: None }, Act::Message, Act::Handoff, Act::Claim]
+        let mut allows: Vec<String> = [Act::Read { scope: xenonet_authz::ReadScope::Map, filters: None }, Act::Message, Act::Handoff]
             .into_iter()
             .filter(|act| decide(Some(&token), &Request::new(principal.clone(), Resource::Machine(own.clone()), act.clone(), door, g.facts.now, None), &g, None).is_allow())
             .map(|act| act.action().as_str().to_string())
             .collect();
+        if token.rights().contains(&Action::Claim) {
+            allows.push(Action::Claim.as_str().to_string());
+        }
         Checked::Valid { slug: slug.as_str().to_string(), id: token.id(), allows }
     }
 }

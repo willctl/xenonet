@@ -183,9 +183,9 @@ pub struct ProjectPlace {
     /// Left out when identities are off
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub identities: Opt<Vec<ProjectIdentity>>,
-    /// Its remote as its own host resolves it (repoKey in core/schema/ids.js): checkouts of one repo on different machines share it. With hosts on
+    /// For another machine's project: the project id (prj_…) its checkouts on every machine share
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub repo_key: Opt<String>,
+    pub project_key: Opt<String>,
     #[serde(flatten)]
     pub place: Place,
     #[serde(flatten)]

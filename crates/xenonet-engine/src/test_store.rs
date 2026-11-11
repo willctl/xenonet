@@ -59,14 +59,17 @@ impl Store for Tables {
     fn recent(&self, since: f64) -> Kept<Vec<Value>> {
         all(self.0.with(|s| s.recent(since)))
     }
-    fn claim(&self, agent: &str, pattern: &str, note: &Value, expires_at: f64, now: f64) -> Kept<()> {
-        self.0.with(|s| s.claim(agent, pattern, note, expires_at, now)).map_err(thrown)
+    fn claim(&self, row: &Value) -> Kept<()> {
+        self.0.with(|s| s.claim(row)).map_err(thrown)
     }
-    fn release(&self, agent: &str, patterns: Option<&[String]>) -> Kept<f64> {
-        self.0.with(|s| s.release(agent, patterns)).map_err(thrown)
+    fn release(&self, agent: &str, patterns: Option<&[String]>) -> Kept<Vec<Value>> {
+        all(self.0.with(|s| s.release(agent, patterns)))
     }
     fn claims(&self, now: f64) -> Kept<Vec<Value>> {
         all(self.0.with(|s| s.claims(now)))
+    }
+    fn claims_in(&self, project: &str, now: f64) -> Kept<Vec<Value>> {
+        all(self.0.with(|s| s.claims_in(project, now)))
     }
     fn set_focus(&self, agent: &str, text: &str, now: f64) -> Kept<()> {
         self.0.with(|s| s.set_focus(agent, text, now)).map(|_| ()).map_err(thrown)

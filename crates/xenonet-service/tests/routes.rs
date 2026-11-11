@@ -501,7 +501,11 @@ async fn an_actors_calls_need_its_token_its_own_process_and_what_you_allowed_it(
     assert!(f.was("send").is_empty() && f.was("claim").is_empty());
     f.allowed.lock().unwrap().extend(["message-agents", "edit-repos"]);
     assert_eq!(go(&ctx, "POST", "/api/engine/claim", &as_wren, Some(json!({ "paths": ["src/"] }))).await.status, 200);
-    assert_eq!(f.was("claim")[0], json!(["actor:wren", { "paths": ["src/"] }]));
+    // Its claim goes to the engine with its own token, which decides it in
+    // each project its paths are in; a token in the body never does.
+    assert_eq!(f.was("claim")[0], json!(["actor:wren", { "paths": ["src/"], "token": wren.trim_start_matches("Bearer ") }]));
+    go(&ctx, "POST", "/api/engine/claim", &as_wren, Some(json!({ "paths": ["src/"], "token": "xenonet_actor_forged" }))).await;
+    assert_eq!(f.was("claim")[1][1]["token"], json!(wren.trim_start_matches("Bearer ")), "the route's, never the body's");
     // A send says how XenoNet knew who sent it: the token, from a process it checked.
     assert_eq!(go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "claude:x", "text": "hi" }))).await.status, 200);
     assert_eq!(f.was("send")[0], json!(["actor:wren", { "to": "claude:x", "text": "hi" }, { "method": "token", "process": "checked", "attestation": "process-checked" }]));

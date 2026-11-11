@@ -228,12 +228,12 @@
       "type": "boolean",
       "description": "For an agent on another host: whether its host's link is up; offline since seen when it isn't"
     },
-    "repoKey": {
+    "projectKey": {
       "type": [
         "string",
         "null"
       ],
-      "description": "For an agent on another host: the normalized git remote of its folder, which clones of one repo share"
+      "description": "For an agent on another host: the project its folder is a checkout of (prj_…), which its checkouts on every machine share"
     },
     "waitsOnYou": {
       "type": "boolean",

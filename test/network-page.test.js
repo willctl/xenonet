@@ -96,12 +96,12 @@ test("other machines' agents come from the engine's list by their @<host>: ids, 
 
 test("detail from another machine: the question's text, the last message and why it seems stuck, cut to the schema's lengths", () => {
   const [a, b, c] = remoteAgents([
-    { id: "@laptop:claude:6f1c2b9e-0d4a-4c1e-9b7a-3e5d2a1f0c11", host: "laptop", title: "Fix the login redirect", waitsOnYou: true, needsYou: "question", question: "q".repeat(500), lastMessage: "<b>done</b>", stuck: null, repoKey: "github.com/acme/atlas-web", cwd: "~/src/atlas-web" },
+    { id: "@laptop:claude:6f1c2b9e-0d4a-4c1e-9b7a-3e5d2a1f0c11", host: "laptop", title: "Fix the login redirect", waitsOnYou: true, needsYou: "question", question: "q".repeat(500), lastMessage: "<b>done</b>", stuck: null, projectKey: "prj_atlasweb", cwd: "~/src/atlas-web" },
     { id: "@laptop:codex:019a7c55-1e2f-7a3b-8c4d-5e6f7a8b9c0d", host: "laptop", title: "Tidy the tests", status: "working", stuck: ["ran cargo test 3 times in a row", 7, ""], lastMessage: "  " },
     // A machine that shares titles only: it waits, with no text.
     { id: "@rack:claude:8d0f6a21-7b3c-4e9d-a1f2-5c6e7d8b9a03", host: "rack", title: "Import", waitsOnYou: true, question: null, focus: "importing" },
   ]);
-  assert.deepEqual([a.text.length, a.lastMessage, a.repoKey, a.cwd, a.stuck], [320, "<b>done</b>", "github.com/acme/atlas-web", "~/src/atlas-web", null]);
+  assert.deepEqual([a.text.length, a.lastMessage, a.projectKey, a.cwd, a.stuck], [320, "<b>done</b>", "prj_atlasweb", "~/src/atlas-web", null]);
   assert.deepEqual([b.waits, b.stuck, b.lastMessage], [false, ["ran cargo test 3 times in a row"], null]);
   assert.deepEqual([c.waits, c.text], [true, null], "what it says it's doing is never taken for its question");
   // An id that isn't its host's is dropped.

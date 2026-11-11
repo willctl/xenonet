@@ -94,7 +94,15 @@ impl EngineRoutes<'_> {
                 let secs = if secs.is_nan() || secs <= 0.0 { 0.0 } else { secs };
                 e.inbox(me, Duration::from_secs_f64(secs)).await
             }
-            "claim" => e.claim(me, pick(b, &[("paths", "paths"), ("note", "note"), ("minutes", "minutes")])).await,
+            "claim" => {
+                // An actor's claim is decided in each project with its own
+                // token, which only the route puts here, never the body.
+                let mut args = pick(b, &[("paths", "paths"), ("note", "note"), ("minutes", "minutes")]);
+                if let Some(t) = extra.as_ref().and_then(|x| x.get("token")).filter(|t| t.is_string()) {
+                    args["token"] = t.clone();
+                }
+                e.claim(me, args).await
+            }
             "release" => {
                 let paths = match b.get("paths") {
                     Some(Value::Array(a)) if !a.is_empty() => Value::Array(a.clone()),
@@ -188,11 +196,15 @@ impl EngineRoutes<'_> {
                 );
             }
         }
-        let extra = (name == "send" || name == "handoff").then(|| {
-            let info = self.actors.as_ref().and_then(|a| a.info(&id));
-            let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map_or_else(|| slug.clone(), str::to_string);
-            let product = info.as_ref().and_then(|i| i.get("product")).and_then(|p| p.get("id")).and_then(Value::as_str).map(str::to_string);
-            json!({ "envelope": attest(Sender { id: &id, kind: "actor", name: Some(name), product }, "token", &verdict, self.home, self.now, platform()) })
+        let token = req.header("authorization").and_then(xenonet_api::bearer::bearer_of).map(str::to_string);
+        let extra = if name == "claim" { token.map(|t| json!({ "token": t })) } else { None };
+        let extra = extra.or_else(|| {
+            (name == "send" || name == "handoff").then(|| {
+                let info = self.actors.as_ref().and_then(|a| a.info(&id));
+                let name = info.as_ref().and_then(|i| i.get("name")).and_then(Value::as_str).map_or_else(|| slug.clone(), str::to_string);
+                let product = info.as_ref().and_then(|i| i.get("product")).and_then(|p| p.get("id")).and_then(Value::as_str).map(str::to_string);
+                json!({ "envelope": attest(Sender { id: &id, kind: "actor", name: Some(name), product }, "token", &verdict, self.home, self.now, platform()) })
+            })
         });
         match self.op(name, &id, &body, extra).await {
             Ok(v) => Reply::json(200, v),

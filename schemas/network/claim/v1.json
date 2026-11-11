@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/claim/v1.json",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
+  "title": "A claim in a project",
+  "description": "An agent's claim on a path inside a project, or its release, as a kept entry of its machine's feed, so agents on every machine with a checkout of the project are warned.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/claim/v1"
+    },
+    "op": {
+      "type": "string",
+      "enum": [
+        "claim",
+        "release"
+      ],
+      "description": "claim: an agent claimed the path; release: it let it go (with no path,\nall its claims in the project)"
+    },
+    "project": {
+      "type": "string",
+      "pattern": "^prj_[a-z2-7]{32}$"
+    },
+    "path": {
+      "type": "string",
+      "description": "Inside the project, with / between parts: a file, a folder (ending\nin /) or a glob; empty in a release of all the agent's claims there",
+      "maxLength": 1000
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "branch": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "note": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 500
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "createdAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expiresAt": {
+      "anyOf": [
+        {
+          "type": "number",
+          "description": "Epoch milliseconds"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "op",
+    "project",
+    "path",
+    "agent",
+    "branch",
+    "note",
+    "createdAt",
+    "expiresAt"
+  ],
+  "additionalProperties": {}
+}

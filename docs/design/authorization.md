@@ -285,6 +285,16 @@ revocation id:
 | `identities` | Reserved for the accounts it may act as; no code yet | |
 | `intents` | Reserved for phase 4's intents; no code yet | |
 
+Beside the row, `grant_projects` lists the projects (`prj_` ids) the grant
+may claim in, read through `Ground::grant_projects`. They're resolved when
+the person sets the sessions scope: each `project:` term names the
+projects with a checkout here the person confirmed (by the project's name
+or the checkout's folder), and a scope with no `project:` term names every
+such project. A candidate checkout (a second checkout of a project, not yet
+confirmed at the window) names nothing. An actor's claim is decided as
+`Act::Claim { project }` on `Resource::Project` with its own token, once
+for each project its paths are in.
+
 **Issuing and widening** a grant (its rights or any scope) is the act
 `register-actor`, which needs the person's presence at the window. The
 presence block is bound to the actor, its rights and the hash of its
@@ -403,7 +413,7 @@ answer:
   wake           wake      wake      wake      reach
   start          -         start     start     start
   answer         answer    -         answer    answer
-  claim          reach     claim     reach     reach
+  claim          reach     claim     claim     reach
   handoff        reach     reach     reach     reach
   read           read      read      read      reach
   admit          -         -         -         presence
@@ -420,7 +430,7 @@ answer:
 | `reach` | steps 1 to 3 are enough (an actor's token has the right) |
 | `wake` | the machine's wake setting is `network`, or the session's consent allows it; actors need consent for actors |
 | `start` | start `off` refuses everyone; `you` lets only the person; `network` and `delegate` let agents and actors too, never an unchecked agent; a delegated run needs start `delegate` (the person needs none) and a delegation of the person's for starts that names this machine's device and the one the start came from |
-| `claim` | reach, but an unchecked agent claims only on its own machine |
+| `claim` | reach, but an unchecked agent claims only on its own machine, and an actor only in the projects its grant names (`grant_projects`) |
 | `read` | the map: reach. Transcripts, search and state: here, an agent process-checked at least; from another machine, an admin member, never an unchecked agent |
 | `presence` | the person, with a presence block for this act from the device that signed it; a weaker device is allowed and the decision says so. `register-actor` is issuing an actor's grant or widening it; narrowing and revoking need no act |
 | `answer` | A Deny only narrows, so it needs no presence: the person; this machine for its own window; a window host (an admin) relaying its window's; an actor whose token has the right. An Allow widens, and never for a run whose agent is unchecked: the person, with a presence block for it; an actor, inside its allow scope here; this machine itself, for a run started under a delegation of the person's that answers that kind of prompt and names this machine's device and the device the run was started from |
@@ -523,9 +533,9 @@ route can't ship unguarded. Callers:
 | `Session` | a session named in `x-xenonet-agent`, its process checked |
 | `Actor` | an actor's token, decided by the handler as the actor, with the right the row's act names |
 
-Reads, messages, claims and handoffs are decided at the local door for the
-caller found; starts and answers by the engine, with the run or the prompt
-they're for. A session whose process check passed because nothing could
+Reads, messages and handoffs are decided at the local door for the caller
+found; starts, answers and claims by the engine, with the run, the prompt
+or the project they're for. A session whose process check passed because nothing could
 be seen is decided as unchecked. Routes that ask the person (Allow, a
 start as you, issuing a grant, adding a machine) are `Window` rows, or
 check that the window called, so no prompt starts from anywhere else.

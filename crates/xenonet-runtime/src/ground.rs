@@ -106,6 +106,11 @@ impl Ground for EngineGround {
     fn governance_synced_at(&self) -> Option<i64> {
         self.facts.governance_synced_at()
     }
+    fn grant_projects(&self, token: &[u8]) -> Option<Vec<xenonet_authz::ProjectId>> {
+        let store = self.store.as_ref()?;
+        let ids = store.with(|s| s.grant_projects(&xenonet_id::codec::hex(token))).ok().flatten()?;
+        Some(ids.iter().filter_map(|p| xenonet_authz::ProjectId::new(p).ok()).collect())
+    }
 }
 
 /// This machine's governance, once the network's link plugged it in.

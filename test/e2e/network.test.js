@@ -262,7 +262,7 @@ test("net-founder: the other machines on the map from their presence, one dimmed
   assert.ok(!drawn.hosts.some((x) => x.id === "studio"), "this machine isn't one of them");
   // Projects by repo, and a folder that isn't one.
   const projects = await s.driver("find", { kind: "project", query: "@laptop:" });
-  assert.deepEqual(projects.nodes.map((p) => p.id).sort(), ["@laptop:project:repo:github.com/acme/atlas-web", "@laptop:project:repo:github.com/acme/ledger"]);
+  assert.deepEqual(projects.nodes.map((p) => p.id).sort(), ["@laptop:project:prj:prj_acme_atlas-web", "@laptop:project:prj:prj_acme_ledger"]);
   assert.equal((await s.driver("find", { kind: "project", query: "importer" })).nodes[0]?.id, "@rack:project:folder:~/jobs/importer");
   // A session there, found by its title.
   const found = await s.driver("find", { kind: "session", query: "login redirect" });

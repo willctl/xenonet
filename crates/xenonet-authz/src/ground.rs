@@ -266,6 +266,16 @@ pub trait Ground {
     /// is `token`, when this machine keeps one.
     fn allow_scope(&self, token: &[u8]) -> Option<AllowScope>;
 
+    /// The projects the actor grant whose token's first revocation id is
+    /// `token` may claim in, as this machine keeps them (prj_ ids, resolved
+    /// from its scope when the person set it); None for a grant with no
+    /// projects. A project is in it only through a checkout the person
+    /// confirmed there.
+    fn grant_projects(&self, token: &[u8]) -> Option<Vec<ProjectId>> {
+        let _ = token;
+        None
+    }
+
     /// The permission prompt `ask`, when it waits here.
     fn ask(&self, ask: &AskId) -> Option<Asked>;
 

@@ -138,9 +138,6 @@ impl Mail {
 #[derive(Default)]
 pub struct Repos {
     cache: Mutex<Vec<(String, f64, Option<Repo>)>>,
-    /// Each folder's repo key across the network (origin, normalized),
-    /// kept as long as its repo.
-    remotes: Mutex<Vec<(String, f64, Option<String>)>>,
 }
 
 const REPO_TTL_MS: f64 = 60e3;
@@ -150,25 +147,6 @@ impl Repos {
     fn read(cwd: &str) -> Option<Repo> {
         let ch = xenonet_adapter::repo::checkouts().find(std::path::Path::new(cwd))?;
         Some(Repo { top: ch.top.to_string_lossy().into_owned(), common: ch.common.to_string_lossy().into_owned(), branch: ch.branch.filter(|_| !ch.detached) })
-    }
-
-    /// A folder's repo key across the network: its repo's origin,
-    /// normalized; None outside a repo or with no origin.
-    pub fn remote_key_of(&self, cwd: &str) -> Option<String> {
-        if cwd.is_empty() {
-            return None;
-        }
-        let now = now_ms();
-        if let Some((_, _, v)) = self.remotes.locked().iter().find(|(k, at, _)| k == cwd && now - at < REPO_TTL_MS) {
-            return v.clone();
-        }
-        let v = xenonet_adapter::repo::checkouts().find(std::path::Path::new(cwd)).and_then(|c| c.key);
-        let mut c = self.remotes.locked();
-        c.retain(|(k, at, _)| k != cwd && now - at < REPO_TTL_MS);
-        c.push((cwd.to_string(), now, v.clone()));
-        let over = c.len().saturating_sub(REPOS_KEPT);
-        c.drain(..over);
-        v
     }
 
     pub fn of(&self, cwd: &str) -> Option<Repo> {
@@ -202,11 +180,14 @@ pub struct Side<'a> {
     /// Live delivery, which holds the world: None only while the world is
     /// going.
     router: Option<RouterDriver>,
+    /// The token an actor called with, for the decisions taken with it
+    /// (a claim in each project its paths are in).
+    token: Option<String>,
 }
 
 impl<'a> Side<'a> {
     pub fn new(w: &'a Runtime, signal: Option<Arc<Signal>>) -> Side<'a> {
-        Side { w, signal, router: w.arc().map(RouterDriver) }
+        Side { w, signal, router: w.arc().map(RouterDriver), token: None }
     }
 
     pub fn collaborators(&self) -> Collaborators<'_> {
@@ -223,6 +204,7 @@ impl<'a> Side<'a> {
             waits: self,
             events: self,
             net: Some(self),
+            projects: self.w.setup.db.as_ref().map(|_| self as &dyn host::Projects),
         }
     }
 
@@ -294,6 +276,37 @@ impl host::MapReader for Side<'_> {
     fn identities(&self) -> xenonet_engine::engine::Result<Vec<Value>> {
         self.w.map.identities()
     }
+}
+
+impl host::Projects for Side<'_> {
+    fn ensure(&self, folder: &str) -> xenonet_engine::engine::Result<()> {
+        let Some(db) = &self.w.setup.db else { return Ok(()) };
+        let Some(key) = xenonet_os::paths::path_key(folder) else { return Ok(()) };
+        if db.place(&key).map_err(store_fail)?.is_some() {
+            return Ok(());
+        }
+        let Some(found) = crate::checkouts::found_of(folder, crate::checkouts::Why::Session) else { return Ok(()) };
+        db.ensure(&found, now_ms() as i64).map_err(store_fail)?;
+        Ok(())
+    }
+    fn place(&self, path: &str) -> xenonet_engine::engine::Result<Option<host::Place>> {
+        let Some(db) = &self.w.setup.db else { return Ok(None) };
+        crate::checkouts::place(db, path).map_err(store_fail)
+    }
+    fn may_claim(&self, me: &str, project: &str) -> xenonet_engine::engine::Result<()> {
+        crate::checkouts::may_claim(self.w, me, project, self.token.as_deref()).map_err(Fail::Bad)
+    }
+    fn author(&self) -> String {
+        crate::checkouts::author(self.w)
+    }
+    fn claimed(&self, body: Value) {
+        crate::network::claimed(self.w, body);
+    }
+}
+
+// What the store failed with, as the engine passes it on.
+fn store_fail(e: xenonet_store::StoreError) -> Fail {
+    Fail::Thrown(xenonet_engine::engine::Thrown::coded(e.message, e.code))
 }
 
 impl host::ActorsView for Side<'_> {
@@ -384,8 +397,8 @@ impl host::Net for Side<'_> {
     fn view(&self, id: &str) -> xenonet_engine::engine::Result<Value> {
         Ok(crate::network::remote_view(self.w, id))
     }
-    fn repo_key(&self, cwd: &str) -> xenonet_engine::engine::Result<Option<String>> {
-        Ok(self.w.repos.remote_key_of(cwd))
+    fn project_key(&self, cwd: &str) -> xenonet_engine::engine::Result<Option<String>> {
+        Ok(self.w.setup.db.as_ref().and_then(|db| crate::checkouts::project_of(db, cwd)))
     }
     fn sent(&self, message: &Value) -> xenonet_engine::engine::Result<()> {
         crate::network::sent(self.w, message)
@@ -533,7 +546,17 @@ impl Engine for EngineDriver {
         let me = me.to_string();
         let minutes = args.get("minutes").cloned().unwrap_or_else(|| xenonet_text::json::number(CLAIM_MINUTES));
         let ask = fields(vec![("paths", args.get("paths").cloned()), ("note", Some(or_null(args.get("note")))), ("minutes", Some(minutes))]);
-        self.run(None, move |e, c| e.claim(c, &me, &ask)).await
+        // An actor's own token, which the route took from its call: each
+        // project its claim is in is decided with it.
+        let token = args.get("token").and_then(Value::as_str).map(str::to_string);
+        let w = self.0.clone();
+        let out = tokio::task::spawn_blocking(move || {
+            let mut side = Side::new(&w, None);
+            side.token = token;
+            w.engine.claim(&side.collaborators(), &me, &ask).map_err(error)
+        })
+        .await;
+        out.map_err(|e| CoreError::new(e.to_string()))?
     }
     async fn release(&self, me: &str, paths: Value) -> R<Value> {
         let me = me.to_string();

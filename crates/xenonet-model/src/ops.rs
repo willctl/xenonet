@@ -65,20 +65,20 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.as_str() == kind)
     }
 
-    /// Whether a gateway keeps it for a host that's away. Presence and
-    /// claims aren't kept: a full set goes when the host is back. Nor is
-    /// the map: a console asks for a fresh snapshot. Nor is a service's
-    /// request, which may carry the service's own credential and is
-    /// answered now or not at all.
+    /// Whether a gateway keeps it for a host that's away. Presence isn't
+    /// kept: a full set goes when the host is back. Nor is the map: a
+    /// console asks for a fresh snapshot. Nor is a service's request,
+    /// which may carry the service's own credential and is answered now or
+    /// not at all.
     pub fn queued(self) -> bool {
-        !matches!(self, Self::Presence | Self::Claims | Self::Relay | Self::Svc)
+        !matches!(self, Self::Presence | Self::Relay | Self::Svc)
     }
 
     /// Whether it travels as an entry of this machine's feed: a message
-    /// and a receipt loose, each taken once by its id, and a handoff kept,
-    /// in the feed's gapless sequence to every member.
+    /// and a receipt loose, each taken once by its id, and a claim and a
+    /// handoff kept, in the feed's gapless sequence to every member.
     pub fn fed(self) -> bool {
-        matches!(self, Self::Message | Self::Receipt | Self::Handoff)
+        matches!(self, Self::Message | Self::Receipt | Self::Claims | Self::Handoff)
     }
 
     /// The schema of a body of this kind: a message's is the body of its
@@ -308,7 +308,7 @@ impl Net for NoNet {
 #[serde(tag = "kind", content = "body", rename_all = "lowercase")]
 pub enum Op {
     Presence(crate::network::Presence),
-    Claims(crate::network::Claims),
+    Claims(crate::network::Claim),
     Message(crate::network::SendBody),
     Receipt(crate::network::Receipt),
     Handoff(crate::network::Handoff),
@@ -342,9 +342,9 @@ mod tests {
             assert_eq!(Kind::parse(k.as_str()), Some(k));
             assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{}\"", k.as_str()));
         }
-        assert!(Kind::Message.queued() && Kind::Handoff.queued() && Kind::Operator.queued() && Kind::Receipt.queued());
-        assert!(!Kind::Presence.queued() && !Kind::Claims.queued() && !Kind::Relay.queued() && !Kind::Svc.queued());
-        assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed());
+        assert!(Kind::Message.queued() && Kind::Handoff.queued() && Kind::Claims.queued() && Kind::Operator.queued() && Kind::Receipt.queued());
+        assert!(!Kind::Presence.queued() && !Kind::Relay.queued() && !Kind::Svc.queued());
+        assert!(Kind::Message.fed() && Kind::Receipt.fed() && Kind::Handoff.fed() && Kind::Claims.fed());
         assert!(!Kind::Presence.fed() && !Kind::Operator.fed() && !Kind::Relay.fed());
         assert_eq!(Kind::parse("frame"), None);
         assert_eq!(Kind::Presence.schema(), "network/presence/v1");

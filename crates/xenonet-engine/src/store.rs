@@ -45,13 +45,17 @@ pub trait Store: Send + Sync {
 
     // ---------- claims ----------
 
-    /// A claim, its note as the request gave it (a text, or null).
-    fn claim(&self, agent: &str, pattern: &str, note: &Value, expires_at: f64, now: f64) -> Kept<()>;
-    /// How many claims went: all of an agent's (`patterns` None), or those
-    /// of `patterns`.
-    fn release(&self, agent: &str, patterns: Option<&[String]>) -> Kept<f64>;
-    /// The claims that haven't expired, oldest first.
+    /// A claim: `{ project, path, agent, author, host, checkout, pattern,
+    /// branch, note, created_at, expires_at }`, in place of the same
+    /// agent's claim of that path in that project.
+    fn claim(&self, row: &Value) -> Kept<()>;
+    /// This machine's claims let go: all of an agent's (`patterns` None),
+    /// or those of `patterns`. The rows that went.
+    fn release(&self, agent: &str, patterns: Option<&[String]>) -> Kept<Vec<Value>>;
+    /// The claims that haven't expired, earliest first, ties by author.
     fn claims(&self, now: f64) -> Kept<Vec<Value>>;
+    /// The same, in one project.
+    fn claims_in(&self, project: &str, now: f64) -> Kept<Vec<Value>>;
 
     // ---------- focus ----------
 

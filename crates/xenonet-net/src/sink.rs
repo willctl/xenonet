@@ -51,6 +51,7 @@ pub fn kind_of(k: EntryKind) -> Option<Kind> {
         EntryKind::Message => Some(Kind::Message),
         EntryKind::Receipt => Some(Kind::Receipt),
         EntryKind::Handoff => Some(Kind::Handoff),
+        EntryKind::Claim => Some(Kind::Claims),
         _ => None,
     }
 }
@@ -61,6 +62,7 @@ pub fn entry_kind(k: Kind) -> Option<EntryKind> {
         Kind::Message => Some(EntryKind::Message),
         Kind::Receipt => Some(EntryKind::Receipt),
         Kind::Handoff => Some(EntryKind::Handoff),
+        Kind::Claims => Some(EntryKind::Claim),
         _ => None,
     }
 }

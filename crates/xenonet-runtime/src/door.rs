@@ -77,7 +77,6 @@ fn act(a: door::Act) -> Act {
     match a {
         door::Act::Read(s) => Act::Read { scope: scope(s), filters: None },
         door::Act::Message => Act::Message,
-        door::Act::Claim => Act::Claim,
         door::Act::Handoff => Act::Handoff,
     }
 }
@@ -127,9 +126,9 @@ mod tests {
             let why = d.decide(&Caller::Agent(String::new(), Checked::Unchecked), DoorAct::Read(scope), 0.0).unwrap_err();
             assert!(why.contains("unchecked agent"), "{why}");
         }
-        // The map, a message, a claim and a handoff are anyone's here.
+        // The map, a message and a handoff are anyone's here.
         let anyone = Caller::Agent(String::new(), Checked::Unchecked);
-        for act in [DoorAct::Read(Scope::Map), DoorAct::Message, DoorAct::Claim, DoorAct::Handoff] {
+        for act in [DoorAct::Read(Scope::Map), DoorAct::Message, DoorAct::Handoff] {
             assert!(d.decide(&anyone, act, 0.0).is_ok());
         }
     }

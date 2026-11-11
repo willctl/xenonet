@@ -152,18 +152,55 @@ pub trait Net {
     /// An agent on another host by its qualified id: as presence shows
     /// it, or a stand-in.
     fn view(&self, id: &str) -> Result<Value>;
-    /// A folder's repo key across the network (its remote), or None.
-    fn repo_key(&self, cwd: &str) -> Result<Option<String>>;
+    /// The project a folder is a confirmed checkout of (`prj_…`), what
+    /// agents are matched by across machines, or None.
+    fn project_key(&self, cwd: &str) -> Result<Option<String>>;
     /// A message stored here goes to its recipients on other hosts.
     fn sent(&self, message: &Value) -> Result<()>;
-    /// Agents on other hosts with a hand in `files`, in clones of `me`'s
-    /// repo.
+    /// Agents on other hosts with a hand in `files`, in their checkouts of
+    /// the same project.
     fn claim_hits(&self, me: &str, files: &[String]) -> Result<Vec<Value>>;
     /// The handoffs open to a session with this view.
     fn handoffs(&self, view: &Value) -> Result<Vec<Value>>;
     /// What another host last said of a delivery: { host, receipt }, or
     /// None.
     fn receipt(&self, message_id: f64, agent: &str) -> Result<Option<Value>>;
+}
+
+/// Where a path is in its project: the checkout with the longest path at
+/// or above it, the project that checkout is in (or, for a candidate, the
+/// one it would join), and the path inside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub checkout: String,
+    /// The checkout's folder.
+    pub top: String,
+    pub project: String,
+    /// Inside the checkout, with / between parts, a folder's trailing /
+    /// kept; empty for its top.
+    pub rel: String,
+    /// In its project: the founding checkout, or one the person confirmed.
+    pub confirmed: bool,
+}
+
+/// This machine's projects, as claims need them (xenonet-store's
+/// projects): where a path is, who may claim in a project, and the
+/// network's copy of each claim.
+pub trait Projects {
+    /// A session's folder is a checkout: its own, made when the map hasn't
+    /// made it yet.
+    fn ensure(&self, folder: &str) -> Result<()>;
+    /// Where an absolute path (or a glob's folder) is, or None outside
+    /// every checkout.
+    fn place(&self, path: &str) -> Result<Option<Place>>;
+    /// Whether `me` may claim in `project`: an actor only in the projects
+    /// its grant names, decided with its token. Why not, when it may not.
+    fn may_claim(&self, me: &str, project: &str) -> Result<()>;
+    /// Whom this machine's claims are authored by: its signing key's id.
+    fn author(&self) -> String;
+    /// A claim or a release (a `network/claim/v1` body) goes to the
+    /// network's other members, when this machine is in one.
+    fn claimed(&self, body: Value);
 }
 
 /// The engine's collaborators, for one call. The actors, live delivery,
@@ -183,4 +220,6 @@ pub struct Collaborators<'a> {
     pub waits: &'a dyn Waits,
     pub events: &'a dyn Events,
     pub net: Option<&'a dyn Net>,
+    /// Without projects, nothing can be claimed.
+    pub projects: Option<&'a dyn Projects>,
 }

@@ -34,13 +34,12 @@ fn request(g: &EngineGround, slug: &str, act: Act) -> Option<Request> {
 }
 
 // The act a right is checked with, for the rights that act on this
-// machine itself.
+// machine itself (a claim is decided in its project, by the engine).
 fn act_of(action: Action) -> Option<Act> {
     Some(match action {
         Action::Read => Act::Read { scope: ReadScope::Map, filters: None },
         Action::Message => Act::Message,
         Action::Handoff => Act::Handoff,
-        Action::Claim => Act::Claim,
         _ => return None,
     })
 }
