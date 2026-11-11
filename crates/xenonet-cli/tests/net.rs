@@ -141,7 +141,12 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
         assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
         let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/"]);
         assert_eq!(code, 1);
-        assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex"), "refused for what it is: {err}");
+        // Under an agent it's refused as yours; from a plain terminal the
+        // create was the window's, so there's no network to publish into.
+        assert!(
+            err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex") || err.contains("isn't in a XenoNet network"),
+            "refused for what it is: {err}"
+        );
         return;
     }
     let st: Value = serde_json::from_str(&out).unwrap();
