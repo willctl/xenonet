@@ -13,11 +13,12 @@ XenoNet tries these in order and uses the first that works:
 | Way in | For | What it takes |
 |---|---|---|
 | Listening after a turn | Claude Code, including headless runs (`claude -p`) | Start the session with XenoNet's listen settings (below). |
+| ACP | a Grok Build or Hermes Agent session XenoNet started and holds open | Allow the session. The message is its next turn, between its turns. |
 | Claude Code channel | an idle Claude Code CLI session | Claude Code 2.1.80 or later, started with XenoNet as a channel (below). A working session gets the message from its hooks during its turn, which is sooner. |
 | OpenCode's server | OpenCode TUI | Start OpenCode with `--hostname 127.0.0.1`, and allow the session: `xenonet live allow <session>`. |
 | Typing into tmux | any harness in a tmux pane | Allow the session. The sender must be you, or an actor with a token. |
 | Headless resume | a Claude Code or Codex session that has ended | Allow the session. XenoNet starts it again for one turn. |
-| Hooks (next turn) | Claude Code, Codex, Grok Build | Nothing: this is how messages always arrived. |
+| Hooks (next turn) | Claude Code, Codex, Grok Build | Nothing beyond connecting your agents. |
 
 If nothing picks a message up within a minute, XenoNet notifies you. A
 message pushed through a channel or typed into a pane that nothing
@@ -46,7 +47,7 @@ you to confirm each time the session starts. Team and Enterprise
 organizations have to turn channels on first (`channelsEnabled`). XenoNet
 only pushes to a session that was started this way, naming its own server
 (`server:xenonet`, or `server:xenonet-dev` for XenoNet Dev). Any other
-session gets messages through its hooks, as before.
+session gets messages through its hooks.
 
 Claude Code asks MCP servers for protocol revision 2026-07-28 first, but
 registers a channel only on the 2025 handshake, since the newer revision has
@@ -114,9 +115,8 @@ service does.
 
 Each resumed turn's output goes to `runs/<id>.log` in XenoNet's state
 folder. A log keeps the first 1 MB, and logs older than a week are
-deleted. `delivery-runs.json`, beside it, records when each run started,
-its exit code and how long it took, and `timedOut` for one stopped at its
-limit. At most 4 turns run at once on a machine, one per session, and
+deleted. XenoNet's store records when each run started, its exit code and
+how long it took, and `timedOut` for one stopped at its limit. At most 4 turns run at once on a machine, one per session, and
 each is stopped after 30 minutes. A message that comes while 4 are running
 waits for the session's next turn. The records survive a restart, so a
 turn the previous XenoNet started still counts while its process runs. It
@@ -241,9 +241,8 @@ terms, all of which must hold.
 A value ending in `*` matches a prefix. Separate terms with spaces or `+`,
 for example `project:atlas app:opencode` or `identity:adal+status:idle`.
 
-Everything `to` took before still works the same: a session's id
-(`claude:…`), an actor's id (`actor:hermes`), words from a title, `repo` and
-`all`.
+`to` also takes a session's id (`claude:…`), an actor's id
+(`actor:hermes`), words from a title, `repo` and `all`.
 
 ## What actors may see: scopes
 
@@ -267,7 +266,7 @@ xenonet live revoke hermes
 - `by:` matches what actors report they work on, so a scope can't use the
   actor's own slug: an actor's reports never widen its own scope.
 
-You and the sessions on this machine see everything, as before.
+You and the sessions on this machine see everything.
 
 ## Who decides
 
@@ -290,12 +289,12 @@ machine's start setting (see [Starting sessions](network.md#starting-sessions)).
 | Fan-out | 25 recipients per message |
 | Duplicates | the same text to the same recipients within a minute is refused |
 | Loops | 24 messages between the same two agents in ten minutes stops the thread until you step in. So does a reply chain 6 deep (`MAX_HOPS`), counted on every machine it crosses; a message sent without `reply_to` starts a new thread. |
-| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes, from XenoNet's live readings of Claude Code's and Codex's limits; `xenonet live` shows them. The counts are kept in `delivery-wakes.json` in the state folder, so restarting XenoNet doesn't reset them. |
-| Consent | waking an OpenCode session, typing into any session, or resuming one that ended needs your allowance for that session, which expires, unless the machine's wake setting is the network. When an actor sends, on this machine or another, the allowance has to cover actors (`xenonet live allow <session> --remote`). You need only the allowance itself, whether you write here or from another machine's console. |
+| Wake budget | 12 wakes an hour per sender, 30 per session. A provider at 90% of its plan limit takes no wakes, from XenoNet's live readings of Claude Code's and Codex's limits; `xenonet live` shows them. The counts are kept in XenoNet's store, so restarting XenoNet doesn't reset them. |
+| Consent | waking an OpenCode session or one XenoNet holds open over ACP, typing into any session, or resuming one that ended needs your allowance for that session, which expires, unless the machine's wake setting is the network. When an actor sends, on this machine or another, the allowance has to cover actors (`xenonet live allow <session> --remote`). You need only the allowance itself, whether you write here or from another machine's console. |
 | Headless turns | at most 4 at once on a machine, one per session, 30 minutes each, each one logged; 20 started sessions an hour on a machine, 10 for any one machine that asks |
 | Secrets | key- and token-like strings are redacted when a message crosses identities, or goes to or from an actor |
 | Framing | every delivered message names its sender and says it's another agent's message, not your user's instruction |
-| Audit | `xenonet live audit`: an append-only log of grants, consents, pauses, refusals, deliveries and typing, with message hashes, never text |
+| Audit | `xenonet live audit`: a log of grants, consents, pauses, refusals, deliveries and typing, with message hashes, never text. The store keeps its latest 10,000 lines. |
 
 ## Threat model
 
@@ -310,7 +309,7 @@ machine's start setting (see [Starting sessions](network.md#starting-sessions)).
 | A resumed turn doing more than you expected | Only sessions you allowed, one turn per message, in the session's own folder, under Claude Code's or Codex's own permission settings for headless runs; every resume is audited and its output logged |
 | A token or key passed along | Redaction across identities and actors |
 | Something goes wrong at scale | The pause switch in the CLI and the command palette |
-| Finding out what happened | The append-only audit log |
+| Finding out what happened | The audit log |
 
 What it doesn't stop: a session or actor you allowed can still say
 misleading things within its scope, and a model can still choose to act on a
