@@ -2,10 +2,10 @@
 
 **The network for SI.**
 
-See every Claude Code, Codex and Grok Build session on your machine on one
-live map.
-Sessions can message each other, claim files before editing, and wake
-agents running elsewhere.
+XenoNet helps actors, people and bots, take an intent to an outcome
+together. The work runs on hosts (your machines), as identities (the
+accounts it's done as), in running sessions (Claude Code, Codex, Grok Build
+and other agents), and each actor works only within what it's allowed.
 
 <p align="center">
   <a href="docs/showcase.mp4"><img src="docs/showcase-preview.gif" alt="Watch XenoNet in action. It finds a waiting question, compares two sessions' edits, shows what an always-on agent is doing, and changes themes and environments." width="100%"></a>
@@ -13,15 +13,24 @@ agents running elsewhere.
 
 [Watch XenoNet in action](docs/showcase.mp4) · [Still preview](docs/showcase-poster.png)
 
-XenoNet is the network for SI (super intelligence) on your machine. On its
-map, a session that asks you a question turns amber and chimes. Two
+You act with your own keys. Every other actor holds the same kind of
+grant, whether it's a bot such as Grok Bot or Hermes Agent, a cloud
+assistant, or a program of your own. A grant says what the actor may read
+and what it may do, scoped to the machines, projects and sessions you
+allow. Issuing or widening one takes you, present at your machine (Touch ID
+on a Mac).
+
+You see the work on one live map. A session that asks you a question turns
+amber and chimes. Two
 sessions that edit the same file get a red arc between them. A session that
 keeps failing the same command flickers orange.
 
 Connect Claude Code, Codex and Grok Build to XenoNet once. Then each session
-can see the others in its repo, and XenoNet warns it before it edits a file
-another session is changing. Agents that run elsewhere, such as Grok Bot, join
-through a gateway, and XenoNet wakes them when a message arrives.
+can see the others in its repo, message them, claim files, and hear before
+it edits a file another session is changing. Join your machines into a
+network, and a session on one can hand work to another. Agents that run
+elsewhere, such as Grok Bot, reach XenoNet through its actor gateway, and
+XenoNet wakes them when a message arrives.
 
 [Download XenoNet](https://github.com/willctl/xenonet/releases/latest) · [Get started](#try-it) · [What it does](#what-it-does) · [Install](#install) · [Guide](docs/guide/README.md)
 
@@ -148,9 +157,10 @@ Muse from the outside, reads metadata only, and changes nothing in them.
 [Actors](docs/guide/actors.md) explains what XenoNet reads and how to
 register a program of your own.
 
-An agent in the cloud, such as an OpenAI dot, can read session statuses
-and counts through a connection you pair. It reads only the projects you pick,
-changes nothing, and loses access when the connection expires. This is
+An agent in the cloud, such as an OpenAI dot, holds the same kind of grant
+as any actor. Through a connection you pair, it uses the grant's read right
+for session statuses and counts. It reads only the projects you pick,
+changes nothing, and loses access when the grant expires. This is
 experimental, and nobody has tested it with a real dot yet.
 [Remote actors](docs/guide/cloud-assistants.md) says what it can read and
 how to stop it.
@@ -239,7 +249,7 @@ programs on the other machines reach it through their own XenoNet.
 [A network across your machines](docs/guide/network.md) shows how.
 
 You can tell an assistant "do this on the other machine" and have it done
-there. Set a machine to take delegated work once, from your own console, and
+there, on one machine or each of several. Set a machine to take delegated work once, from your own console, and
 an assistant's `delegate` hands it a task. The task runs under your standing
 delegation: reading, editing files under its folder and routine commands run
 without a question, and anything that deletes, handles secrets, reaches the
@@ -296,7 +306,7 @@ Build already write.
   - When you join a network, this machine keeps one outbound link to the
     network's gateway and sends what
     [A network across your machines](docs/guide/network.md#what-crosses-and-what-doesnt)
-    lists. When you add an SSH host, XenoNet connects to it over SSH.
+    lists.
   - With an OpenRouter key, XenoNet asks OpenRouter what the key has spent,
     at most once a minute while a window is open.
   - When you pair a remote actor, it reads the statuses and counts of
@@ -307,8 +317,9 @@ Build already write.
   your user name. `Hide or show identities` in the palette masks your
   accounts as "GitHub A" or "Claude B" for screen sharing.
 - On macOS, XenoNet checks which process sent each coordination request.
-  Only you can allow actors, connect your agents, trust hosts, and start,
-  join or leave a network.
+  Only you can allow actors, connect your agents, and start, join or leave
+  a network. Issuing or widening a grant, and allowing a permission prompt,
+  take your presence.
 
 [Privacy and security](docs/guide/privacy.md) has the full list.
 
@@ -325,6 +336,11 @@ XenoNet checks for new releases itself. On Windows it downloads updates and
 waits for you to choose **Restart and update**. Mac builds link to the new
 download. Open **Check for XenoNet updates** in the command palette to check
 by hand or turn off background checks.
+
+XenoNet's core is being rewritten, and there's no upgrade path between
+builds while it is: a build refuses a store, a network or a grant another
+build made. After an update that changes them, set the machine up again
+([When something goes wrong](docs/guide/troubleshooting.md)).
 
 Desktop, the background service and the command-line tools update
 separately. Restarting Desktop keeps terminals running and sessions
@@ -431,14 +447,19 @@ data. `xenonet drift` shows it, and the doctor warns about new drift.
 
 ## Where it's going
 
-Today XenoNet joins the machines you use into one network, through a
-gateway. Here is what's planned:
+XenoNet's core is being rewritten in six phases.
+[direction.md](docs/design/direction.md) says where each stands, and
+[goals.md](docs/design/goals.md) what it's for. Today a network's machines
+link through a gateway, and `xenonet net invite` and `xenonet net join` let
+a new machine join straight from the machine that invited it, over
+[iroh](https://www.iroh.computer). Here is what's
+next:
 
-- Peer to peer. Machines that trust each other link directly, with no
-  machine as the gateway.
-- Intents. You say what you want across any number of projects, such as
-  "move every service to Node 24". XenoNet hands the work to sessions
-  and tracks it until it's done.
+- Peer to peer. Machines link to each other over iroh, with relays and
+  mailboxes you choose, and no machine as the gateway.
+- Intents. You make an intent at your window on one machine, and provider
+  sessions work it on any of your machines your delegation names, then
+  report what came of it.
 - Cost. XenoNet will show usage and spend across Claude, OpenAI and other
   model APIs, by project, session and provider.
 - More sources. Besides Claude Code, Codex and Grok Build, XenoNet reads
@@ -467,7 +488,7 @@ npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this ch
 npm run cargo -- test --workspace  # the Rust tests, with the golden files of the API, the command and the MCP servers
 npm test          # the page's, Desktop's and the scripts' unit tests
 npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data
-npm run formal    # the Quint model of feed delivery (formal/README.md)
+npm run formal    # the Quint models of feed delivery and shared-context spaces (formal/README.md)
 npm run drive -- launch shot:overview  # drive XenoNet Dev from a terminal
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
@@ -477,14 +498,15 @@ The desktop app you run from source is XenoNet Dev. It has its own settings,
 port and layout, so it runs beside an installed XenoNet. It reloads as you
 save. Agents, scripts and tests drive XenoNet Dev through a control channel,
 with the `xenonet-console` MCP tools, `xenonet console` and the end-to-end
-tests. XenoNet's core is Rust, in `crates/`; Desktop and the console page
-are JS. [Development](docs/guide/development.md) covers driving XenoNet, the
-test instances, the VM lab, the golden files and how the code is laid out.
+tests. XenoNet's core is Rust, in `crates/`, with a crate per platform in
+`adapters/`; Desktop and the console page are JS.
+[Development](docs/guide/development.md) covers driving XenoNet, the test
+instances, the VM lab, the golden files and how the code is laid out.
 
 ## Contributing
 
-Issues and pull requests are welcome. Run `npm test` before you send a
-change, and `npm run test:e2e` too if it touches the UI. Write commit
+Issues and pull requests are welcome. Run `npm run cargo -- test --workspace`
+and `npm test` before you send a change, and `npm run test:e2e` too if it touches the UI. Write commit
 messages as [Conventional Commits](https://www.conventionalcommits.org),
 such as `feat: ...`, `fix: ...` or `docs: ...`. [CONTRIBUTING.md](CONTRIBUTING.md)
 has the whole of it, and `AGENTS.md` says the same for coding agents, and
