@@ -3,7 +3,7 @@
   "$id": "https://xenonet.dev/schemas/network/roster-entry/v2.json",
   "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
   "title": "A roster entry",
-  "description": "One link in a network's chain of hosts: who joined, who left, who's the gateway, each one's settings, and which hosts signed it, with the person's presence where it admits or widens.",
+  "description": "One link in a network's chain of hosts: who joined, who left, who's the gateway, each one's settings and transport keys, the network's relays and mailboxes, and which hosts signed it, with the person's presence where it admits or widens.",
   "type": "object",
   "properties": {
     "n": {
@@ -28,7 +28,10 @@
         "remove",
         "window",
         "gateway",
-        "settings"
+        "settings",
+        "relays",
+        "mailboxes",
+        "rekey"
       ]
     },
     "host": {
@@ -42,12 +45,12 @@
         "sign": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]*$",
-          "description": "Ed25519 public key"
+          "description": "Its transport key, Ed25519: QUIC authentication, never an entry's signature"
         },
         "seal": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]*$",
-          "description": "X25519 public key"
+          "description": "X25519 public key, what envelopes are sealed to"
         },
         "keyId": {
           "type": "string",
@@ -90,7 +93,7 @@
             "alg",
             "key"
           ],
-          "description": "Its machine signing key, which roots its tokens",
+          "description": "Its machine signing key: it signs the machine's entries, feeds and address records, and roots its tokens",
           "additionalProperties": {}
         }
       },
@@ -180,6 +183,32 @@
         }
       ],
       "description": "For op settings: the machine's settings from now"
+    },
+    "relays": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "description": "For op relays: the iroh relay URLs the network uses from now, with no credential in them",
+      "maxItems": 8
+    },
+    "mailboxes": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "description": "The host's id in the network, picked by the person: never the machine's own name",
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,31}$"
+      },
+      "description": "For op mailboxes: the members that keep sealed envelopes for away members from now",
+      "maxItems": 8
     },
     "personHead": {
       "anyOf": [

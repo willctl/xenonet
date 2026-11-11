@@ -555,7 +555,10 @@
               "remove",
               "window",
               "gateway",
-              "settings"
+              "settings",
+              "relays",
+              "mailboxes",
+              "rekey"
             ]
           },
           "host": {

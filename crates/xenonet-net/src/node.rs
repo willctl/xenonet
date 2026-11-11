@@ -1164,7 +1164,6 @@ impl Shared {
     /// device key).
     pub fn sign_in(&self, host: &str, keys: PublicKeys, window: bool, join: &Value) -> R<Entry> {
         let net = self.network().ok_or_else(not_in)?;
-        let key = self.key().ok_or_else(not_in)?;
         let now = self.gateway_now() as i64;
         let owner = self.roster().view_ref().and_then(|v| v.owner.clone());
         let machine = join.get("machine").and_then(xenonet_id::sign::VerifyingKey::parse).ok_or_else(|| NetError::bad("the join request names no machine key"))?;
@@ -1188,7 +1187,7 @@ impl Shared {
         let mut e = self.roster().draft(Op::Add, HostRef { id: host.into(), keys, window, device, machine }, None, now);
         e.person_head = owner.as_deref().and_then(|o| self.identity.chain_of(o)).and_then(|c| c.head());
         let block = self.identity.prove(true, crate::roster::ADMIT, &e.digest(), &format!("add {host} to your XenoNet network"), now)?;
-        e.sign_with(&net.host, &key, Some(block));
+        e.sign_with(&net.host, self.identity.machine_key()?.as_ref(), Some(block))?;
         Ok(e)
     }
 
@@ -2194,7 +2193,8 @@ impl Node {
         let me = HostRef { id: host.into(), keys: *key.public(), window: true, device: device.clone(), machine };
         let owner = device.and(identity.person_id());
         let head = owner.as_ref().and(identity.head());
-        let roster = Roster::from_entries_with(NetworkPolicy::with(identity.clone()), vec![crate::roster::found(&id, me, &key, owner, head, None, at)])?;
+        let roster =
+            Roster::from_entries_with(NetworkPolicy::with(identity.clone()), vec![crate::roster::found(&id, me, identity.machine_key()?.as_ref(), owner, head, None, at)?])?;
         let p = key.public();
         let net = NetFile {
             id,
@@ -2307,7 +2307,7 @@ impl Node {
     /// `xenonet net leave`: asks to be removed, then forgets the network.
     pub async fn leave(&self, force: bool) -> R<Value> {
         let n = &self.shared;
-        let (net, key) = self.me()?;
+        let (net, _) = self.me()?;
         // The founder's key is the network's root, which nothing hands on,
         // so the founder leaves only with --force, alone or not; the
         // gateway's machine can move the gateway first.
@@ -2326,7 +2326,7 @@ impl Node {
             let me = n.roster().host_ref(&net.host);
             if let Some(m) = me {
                 let mut e = n.draft(Op::Remove, m, None);
-                e.sign_by(&net.host, &key);
+                e.sign_by(&net.host, n.identity.machine_key()?.as_ref())?;
                 asked = self.submit(e).await.is_ok();
             }
         }
@@ -2434,13 +2434,13 @@ impl Node {
     /// rules decide.
     pub async fn remove(&self, host: &str) -> R<Value> {
         let n = &self.shared;
-        let (net, key) = self.me()?;
+        let (net, _) = self.me()?;
         if host == net.host {
             return Err(NetError::bad("to take this machine out, run xenonet net leave"));
         }
         let m = n.roster().host_ref(host).ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
         let mut e = n.draft(Op::Remove, m, None);
-        e.sign_by(&net.host, &key);
+        e.sign_by(&net.host, n.identity.machine_key()?.as_ref())?;
         self.submit(e).await?;
         n.log("net.remove", &format!("{host} was removed from the network"));
         Ok(json!({ "removed": host, "state": self.state() }))
@@ -2516,7 +2516,7 @@ impl Node {
     /// limits, for a year), signed by this machine's device with presence.
     pub async fn set_reach(&self, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
-        let (net, key) = self.me()?;
+        let (net, _) = self.me()?;
         let start = start.map(|s| crate::roster::Start::parse(s).ok_or_else(|| NetError::bad("start is off, you, network or delegate"))).transpose()?;
         let wake = wake.map(|w| crate::roster::Wake::parse(w).ok_or_else(|| NetError::bad("wake is consent or network"))).transpose()?;
         let (target, had, device) = {
@@ -2548,7 +2548,7 @@ impl Node {
             Some(what) => Some(n.identity.prove(at_window, what, &e.digest(), &format!("let your network reach {host} further"), now)?),
             None => None,
         };
-        e.sign_with(&net.host, &key, presence);
+        e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), presence)?;
         self.decide_entry(e, "this machine asked to widen what the network may do there; the founder or another window host approves it").await
     }
 
@@ -2757,7 +2757,7 @@ impl Node {
     /// with `gateway set`.
     pub async fn take_gateway(&self, address: Option<&str>, lan: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
-        let (net, key) = self.me()?;
+        let (net, _) = self.me()?;
         let view = n.roster().view();
         if view.gateway == net.host {
             return Err(NetError::new(409, "already", "this machine is the network's gateway already"));
@@ -2768,7 +2768,7 @@ impl Node {
         let m = n.roster().host_ref(&net.host).ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
         let mut e = n.draft(Op::Gateway, m, Some(crate::roster::GatewayAt { address, version: view.gateway_version + 1 }));
         let block = n.identity.prove(at_window, crate::roster::WIDEN, &e.digest(), "move your XenoNet network's gateway here", n.gateway_now() as i64)?;
-        e.sign_with(&net.host, &key, Some(block));
+        e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), Some(block))?;
         {
             let mut guard = n.net.writing();
             if let Some(f) = guard.as_mut() {
@@ -2807,7 +2807,7 @@ impl Node {
     /// the person's presence where it admits or widens (from the window).
     pub async fn approve(&self, id: &str, at_window: bool) -> R<Value> {
         let n = &self.shared;
-        let (net, key) = self.me()?;
+        let (net, _) = self.me()?;
         if !n.roster().view().is_window(&net.host) {
             return Err(NetError::new(403, "not-window", "approving is a window host's"));
         }
@@ -2819,7 +2819,7 @@ impl Node {
             Some(what) => Some(n.identity.prove(at_window, what, &e.digest(), &format!("approve {op} for {host} in your XenoNet network"), n.gateway_now() as i64)?),
             None => None,
         };
-        e.sign_with(&net.host, &key, presence);
+        e.sign_with(&net.host, n.identity.machine_key()?.as_ref(), presence)?;
         self.submit(e).await?;
         n.log("net.approve", &format!("this machine approved {op} for {host}"));
         Ok(self.state())

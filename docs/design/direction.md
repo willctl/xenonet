@@ -317,10 +317,13 @@ key file or run the binary a keychain trusts, and sign as any agent on the
 machine. Presence checks guard the person's key; nothing guards the
 machine's. iroh needs the raw Ed25519 secret of the endpoint key for its
 QUIC handshake, so that key can never be hardware-backed. So a machine has
-two keys: a **transport key** in a file (`host.key`, which signs frames
-and network chain entries), and a **machine signing key** behind the
-`Signer` trait, which certifies token roots and, with feeds, will sign
-feed entries. The machine's chain entry binds the two. By Will's decision
+two keys: a **transport key** in a file (`host.key`: QUIC authentication,
+today's frames, and the X25519 key envelopes are sealed to), and a
+**machine signing key** behind the `Signer` trait, which signs network
+chain entries, feed entries and address records and certifies token
+roots. The machine's chain entry binds the two, and a `rekey` entry,
+signed by the machine signing key with the person's presence, replaces a
+stolen transport key without removing the machine. By Will's decision
 the signing key is hardware-backed and non-exportable where the platform
 has a secure element: on macOS it's in the Secure Enclave; the TPM on
 Windows isn't used yet, so there and on Linux it's a file, and the key

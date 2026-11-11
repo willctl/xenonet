@@ -115,9 +115,12 @@ with an older head asks for the rest.
 **The machine signing key** roots the machine's tokens. On a Mac with a
 Secure Enclave it lives there, without biometry: it can't leave the Mac,
 though any program of the account can ask it to sign. Elsewhere it's a
-file. The **host key** (`<state>/network/host.key`) is the transport key:
-it signs frames and network chain entries and seals frames, and is always
-a file. The network chain binds the two.
+file. It signs network chain entries, feed entries and address records.
+The **host key** (`<state>/network/host.key`) is the transport key: it
+authenticates the machine's connections (QUIC, and today's frames) and
+holds the X25519 key envelopes are sealed to. iroh needs it raw, so it is
+always a file, and it signs no entry. The network chain binds the two, and
+a `rekey` entry replaces a stolen transport key.
 
 ## Presence
 
@@ -201,14 +204,21 @@ under (`personHead`).
 | `remove` the founder | nobody |
 | `settings` that narrow | any admin, or the machine itself |
 | `settings` that widen (start to `network` or `delegate`, wake to `network`) | the founder, or two admins, each with presence (`widen`) |
+| `relays` that add a relay | the founder, or two admins, each with presence (`widen`) |
+| `relays` that only drop relays | the founder, or two admins |
+| `mailboxes` that add a mailbox | any admin, with presence (`widen`) |
+| `mailboxes` that only drop mailboxes | any admin, or each mailbox it drops |
+| `rekey`: a member's new transport keys | the member itself, with presence (`admit`) |
 
 An admin's signature counts toward an admit or a widening only with a
 presence block from that admin's device, the one its `add` entry named,
 and only when the owner's chain had that device active at the head the
 entry names. A live receiver refuses a head older than the one it holds.
 An entry signed rightly but by too few waits at the gateway as a proposal
-for the founder or a second admin to approve. Signers sign with their host
-keys.
+for the founder or a second admin to approve. Signers sign with their
+machine signing keys, never their host keys. A relay URL in the chain
+carries no credential: a relay's auth token is a setting of the machine
+that uses it, since the chain is kept forever and sent to every member.
 
 The facts a decision reads from it: each member's role (member, admin,
 founder), its settings, its device and its machine signing key.
@@ -551,9 +561,11 @@ check that the window called, so no prompt starts from anywhere else.
   isn't used. Either way a program running as the account can certify a
   root and mint tokens for this machine's actors. Running the service as
   its own OS user is the hardening for that, and isn't built.
-- **The host key** is a file. A program of the account can send frames as
-  this machine, speak for its agents, and sign entries that need no
-  presence (removing ordinary members, narrowing settings).
+- **The host key** is a file. A program of the account that copies it can
+  authenticate as this machine, send frames as it and speak for its
+  agents, and open what is sealed to it, until the person rekeys it. It
+  signs no chain entry, feed entry or address record: those take the
+  machine signing key.
 - **No nonce on start and message acts.** A device's signature over a
   start or a message as you covers the act and its target, not a nonce or
   a time, so the receiver relies on the frame's own replay checks.

@@ -765,6 +765,9 @@ pub enum RosterOp {
     Window,
     Gateway,
     Settings,
+    Relays,
+    Mailboxes,
+    Rekey,
 }
 
 // A signing key: Ed25519, or P-256 as a secure element signs.
@@ -794,16 +797,16 @@ pub struct RosterSettings {
 #[serde(rename_all = "camelCase")]
 pub struct RosterHost {
     pub id: HostId,
-    /// Ed25519 public key
+    /// Its transport key, Ed25519: QUIC authentication, never an entry's signature
     pub sign: Base64Bytes,
-    /// X25519 public key
+    /// X25519 public key, what envelopes are sealed to
     pub seal: Base64Bytes,
     pub key_id: KeyId,
     /// An admin: a XenoNet window the person uses
     pub window: bool,
     /// The person's device key on it, by id; null on a machine with no way to ask them
     pub device: Nullable<SigningKeyId>,
-    /// Its machine signing key, which roots its tokens
+    /// Its machine signing key: it signs the machine's entries, feeds and address records, and roots its tokens
     pub machine: PublicKey,
 }
 
@@ -814,7 +817,7 @@ pub struct RosterGateway {
     pub version: Uint,
 }
 
-// A host's signature on an entry, with its device's presence where the entry admits or widens.
+// A host's signature on an entry by its machine signing key, with its device's presence where the entry admits or widens.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Signer {
     pub host: HostId,
@@ -838,6 +841,12 @@ pub struct RosterEntry {
     pub owner: Nullable<PersonId>,
     /// For op settings: the machine's settings from now
     pub settings: Nullable<RosterSettings>,
+    /// For op relays: the iroh relay URLs the network uses from now, with no credential in them
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relays: Option<Bounded<Text<1, 300>, 0, 8>>,
+    /// For op mailboxes: the members that keep sealed envelopes for away members from now
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mailboxes: Option<Bounded<HostId, 0, 8>>,
     /// The owner's person chain head the entry was made under
     #[serde(rename = "personHead")]
     pub person_head: Nullable<Base64Bytes>,
@@ -848,7 +857,7 @@ pub struct RosterEntry {
 impl Document for RosterEntry {
     const ID: &'static str = "network/roster-entry/v2";
     const TITLE: &'static str = "A roster entry";
-    const DESCRIPTION: &'static str = "One link in a network's chain of hosts: who joined, who left, who's the gateway, each one's settings, and which hosts signed it, with the person's presence where it admits or widens.";
+    const DESCRIPTION: &'static str = "One link in a network's chain of hosts: who joined, who left, who's the gateway, each one's settings and transport keys, the network's relays and mailboxes, and which hosts signed it, with the person's presence where it admits or widens.";
 }
 
 // ---- network/state/v1

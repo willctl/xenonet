@@ -484,16 +484,20 @@ entry holds:
 
 - `n` and `prev`: its index, and the hash of the entry before it;
 - `op`: `found`, `add`, `remove`, `window` (turning "admin" on or off),
-  `gateway` or `settings`;
+  `gateway`, `settings`, `relays`, `mailboxes` or `rekey`;
 - the host it's about: its id, its transport keys, whether it's a window
   host, the person's device on it (none on a host with no way to ask
   them), and its machine signing key, which roots its tokens;
 - for `found`, the network's owner: the person it's theirs; for `gateway`,
-  the address; for `settings`, the host's start and wake;
+  the address; for `settings`, the host's start and wake; for `relays`, the
+  iroh relay URLs the network uses from then on; for `mailboxes`, the
+  members that keep sealed envelopes for away members from then on; for
+  `rekey`, the host's new transport keys;
 - `personHead`: the head of the owner's person chain it was made under;
 - a time;
-- `signers`: one to four host ids, each with its signature by its host
-  key, and with a presence block where the entry admits or widens.
+- `signers`: one to four host ids, each with its signature by its machine
+  signing key (never its host key), and with a presence block where the
+  entry admits or widens.
 
 What each `op` needs, with a window host as an admin and the founder
 counted as one:
@@ -510,6 +514,24 @@ counted as one:
 | `remove` the founder | nobody: a network whose founder is lost is made again |
 | `remove` the gateway's host | nobody, until the gateway moves |
 | `remove` itself (leaving), any host but the founder | that host |
+| `relays` that add a relay | the founder, or two window hosts, each with presence |
+| `relays` that only drop relays | the founder, or two window hosts |
+| `mailboxes` that add a mailbox | any window host, with presence |
+| `mailboxes` that only drop mailboxes | any window host, or each mailbox it drops |
+| `rekey` (new transport keys for a host) | that host, with presence |
+
+A relay URL carries no user info, query or fragment: a relay's auth token
+is a setting of the machine that uses it, never a chain entry, since the
+chain is kept forever and sent to every member. A removed host is a
+mailbox no more.
+
+**Address records** (`xenonet-address/1`, `crates/xenonet-log/src/address.rs`)
+say where a member's endpoint is reached: the network, the host, its
+endpoint id (its transport key), at most one home relay, its direct
+addresses, a time and a TTL of up to a day, signed by its machine signing
+key. A receiver takes one only when its own copy of the chain has the host
+as a member with that transport key now, the signature checks against its
+machine signing key, and the relay is one the network lists.
 
 **Presence.** A window host's signature counts toward an admit or a
 widening only with a presence block from the person's device on that host
@@ -531,7 +553,7 @@ person's chain and what each prompt is are in
 - A gateway that's been broken into can withhold entries, which shows,
   but it can't add or change one.
 - A stolen window laptop, without the person there, can remove ordinary
-  hosts and narrow settings, which its host key signs alone. It can't
+  hosts and narrow settings, which its machine signing key signs alone. It can't
   admit a host, widen anything, move the gateway, remove another window
   host or make itself the founder.
 - With only two machines, the founder can do everything and the other can
@@ -1042,6 +1064,7 @@ message, a handoff or Xenolith. That keeps context selective, which the
 | Someone on the internet joins | A join needs a one-time ticket (50 bits, ten minutes) made in a window; anything else gets a 404, and bad tickets shut the route |
 | A wrong or hijacked gateway address | The new host pins the gateway's key from an answer only a gateway that knew the ticket could make; after that, every link starts with a `hello` signed over the host's nonce |
 | The gateway is broken into | It sees heads only; it can't forge a host (signatures) or add or change a roster entry (the chain). It can drop or delay frames, which shows as a gap, an offline host or a roster mismatch in presence |
+| A host's `host.key` is copied | It's the transport key, so the copy authenticates as the machine, sends frames as it and opens what is sealed to it, until the person rekeys it (`rekey`, signed by the machine signing key with their presence). It signs no chain entry, feed entry or address record: those take the machine signing key |
 | A window laptop is stolen | Without the person there (Touch ID on a Mac) it can remove ordinary hosts and narrow settings, never admit a host or widen anything. Moving the gateway, removing a window host and adding one need the founder or two window hosts. The founder removes the laptop, and revoking its device in the person's chain stops every act as the person from it |
 | Prompt injection across machines | Messages are framed as information. Bypassed sessions hold them. Hop and fan-out caps, and per-link limits: 600 frames and 60 messages a minute, and the map's relay frames, 120 a minute, apart |
 | An agent reading other machines' transcripts | Another machine's transcript, stats and diffs are read only for the window: its credential, and no token. A host serves its map only to a window host's console, and a host that shares titles only keeps its transcripts. The relay reads its own API with the service's own credential, through its allowlist of GETs |

@@ -146,7 +146,7 @@ fn body_for(gw: &net::Machine, path: &str, signer: usize, c: &mut Choices<'_>) -
             e.person_head = net::person().head();
             for _ in 0..=c.below(3) {
                 let s = c.below(net::HOSTS.len());
-                e.sign_by(net::HOSTS[s], net::key(s));
+                let _ = e.sign_by(net::HOSTS[s], &net::machine_key(s));
             }
             json!({ "entry": e.to_json(), "propose": c.bool() }).to_string().into_bytes()
         }

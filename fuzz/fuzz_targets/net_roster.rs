@@ -3,13 +3,15 @@
 // The roster (network/roster-entry/v2): entries parsed and offered to a
 // Roster, one after another, from the fixed network's chain or from
 // nothing. Each step is an entry as it came, an entry built from the
-// fixed keys (any op, host, window choice and gateway, signed by any of
-// the hosts, with their own key or another's, with or without their
-// device's presence, at its index or not) and
+// fixed keys (any op, host, window choice, gateway, relays and
+// mailboxes, signed by any of the hosts, with their own machine key or
+// another's, or with a transport key, with or without their device's
+// presence, at its index or not) and
 // maybe changed in its JSON, two copies of one merged, or a whole chain.
 //
 // Nothing may panic. An entry is taken only when each of its signers
-// signed it with the key the roster has for them, at the roster's head;
+// signed it with the machine key the roster has for them, at the roster's
+// head;
 // the founder and the gateway stay in the network; a chain reads back
 // from its own JSON as the same chain.
 
@@ -18,7 +20,8 @@ use serde_json::Value;
 use xenonet_fuzz::net::{self, Choices};
 use xenonet_net::roster::{Entry, GatewayAt, Offered, Op, Roster, Settings, Start, Wake};
 
-const OPS: [Op; 6] = [Op::Found, Op::Add, Op::Remove, Op::Window, Op::Gateway, Op::Settings];
+const OPS: [Op; 9] = Op::ALL;
+const RELAYS: [&str; 4] = ["https://relay.example.net", "http://192.168.1.20:3340", "https://u:t@relay.example.net", "https://relay.example.net/?token=x"];
 
 /// Whether `e`'s signers signed it as `r` (before `e`) has them.
 fn rightly_signed(r: &Roster, e: &Entry) -> bool {
@@ -27,8 +30,8 @@ fn rightly_signed(r: &Roster, e: &Entry) -> bool {
         return false;
     }
     match r.view_ref() {
-        None => e.signers.iter().all(|s| s.by == e.host.id && e.host.keys.verify(&bytes, &s.sig)),
-        Some(v) => e.signers.iter().all(|s| v.member(&s.by).is_some_and(|m| m.keys.verify(&bytes, &s.sig))),
+        None => e.signers.iter().all(|s| s.by == e.host.id && e.host.machine.verify_raw(&bytes, &s.sig)),
+        Some(v) => e.signers.iter().all(|s| v.member(&s.by).is_some_and(|m| m.machine.verify_raw(&bytes, &s.sig))),
     }
 }
 
@@ -40,6 +43,8 @@ fn holds(r: &Roster) {
     assert!(v.member(&v.founder).is_some(), "the founder left the network");
     assert!(v.is_window(&v.founder));
     assert!(v.member(&v.gateway).is_some(), "the gateway's host left the network");
+    assert!(v.mailboxes.iter().all(|m| v.member(m).is_some()), "a mailbox isn't a member");
+    assert!(v.relays.iter().all(|u| xenonet_net::roster::is_relay_url(u)), "a relay URL carries a credential");
     let back = Roster::from_json_with(net::policy(), &r.to_json()).expect("a roster reads back from its own JSON");
     assert_eq!(back.view(), r.view());
     assert_eq!(back.head(), r.head());
@@ -81,7 +86,7 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
     // Sometimes another host's keys under this one's id.
     let window = c.bool();
     let mut host_ref = net::host_ref(host, window);
-    if c.rarely(24) {
+    if c.rarely(24) || (op == Op::Rekey && c.bool()) {
         host_ref.keys = net::public(c.below(net::HOSTS.len()));
     }
     let gateway = (op == Op::Gateway || c.rarely(16)).then(|| {
@@ -94,6 +99,12 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
     if op == Op::Settings {
         e.settings = Some(Settings { start: *c.pick(&Start::ALL), wake: *c.pick(&Wake::ALL) });
     }
+    if op == Op::Relays || c.rarely(8) {
+        e.relays = Some((0..c.below(3)).map(|_| (*c.pick(&RELAYS)).to_string()).collect());
+    }
+    if op == Op::Mailboxes || c.rarely(8) {
+        e.mailboxes = Some((0..c.below(3)).map(|_| net::HOSTS[c.below(net::HOSTS.len())].to_string()).collect());
+    }
     let what = e.presence_for(&r.view());
     match c.below(8) {
         0 => e.n = e.n.wrapping_add(u64::from(c.u8() % 3)).wrapping_sub(1),
@@ -105,7 +116,13 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
         let signer = c.below(net::HOSTS.len());
         let with = if c.rarely(32) { c.below(net::HOSTS.len()) } else { signer };
         let presence = what.filter(|_| c.bool()).map(|w| net::presence(with, w, e.digest(), net::T0));
-        e.sign_with(net::HOSTS[with], net::key(with), presence);
+        if c.rarely(16) {
+            // Its transport key, which signs no entry.
+            let sig = net::key(with).sign(&e.signing_bytes());
+            e.add_signature(net::HOSTS[with], sig, presence);
+        } else {
+            let _ = e.sign_with(net::HOSTS[with], &net::machine_key(with), presence);
+        }
         // Named for one host, signed with another's key.
         if let Some(s) = e.signers.last_mut() {
             s.by = net::HOSTS[signer].into();
@@ -132,6 +149,8 @@ fn changed(e: &Entry, c: &mut Choices<'_>) -> Option<Entry> {
         &["host", "keyId"],
         &["host", "window"],
         &["gateway"],
+        &["relays"],
+        &["mailboxes"],
         &["at"],
         &["signers"],
         &["signers", "0"],
@@ -179,7 +198,7 @@ fuzz_target!(|data: &[u8]| {
                 let mut b = a.clone();
                 b.signers.clear();
                 let s = c.below(net::HOSTS.len());
-                b.sign_by(net::HOSTS[s], net::key(s));
+                let _ = b.sign_by(net::HOSTS[s], &net::machine_key(s));
                 a.merge_signers(&b);
                 assert!(a.signers.len() <= xenonet_net::roster::MAX_SIGNERS);
                 offer(&mut r, a);

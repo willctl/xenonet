@@ -4,7 +4,8 @@
 // proofs, request signatures and roster hashes against these, byte for
 // byte. Ed25519 signs deterministically, and the presence blocks have
 // fixed nonces, so all of it is reproducible. The roster is
-// `xenonet-roster/2`: entry 0 names its owner person, whose chain (a root
+// `xenonet-roster/2`, signed by each signer's machine signing key (seed 7
+// for studio), never its host key: entry 0 names its owner person, whose chain (a root
 // key and studio's device) is here too, and laptop's admit carries the
 // presence block from studio's device that the chain checks it by. The
 // person's chain goes on past the head the roster names, with a delegation
@@ -123,15 +124,16 @@ fn answers() -> Value {
     let nonce = "bm9uY2Utb2YtdGhlLWpvaW4";
     let root = SeedSigner::from_seed(&secret(5), KeyHome::File).unwrap();
     let device = SeedSigner::from_seed(&secret(6), KeyHome::File).unwrap();
-    let machine = |n: u8| SeedSigner::from_seed(&secret(n), KeyHome::File).unwrap().public();
+    let machine_key = |n: u8| SeedSigner::from_seed(&secret(n), KeyHome::File).unwrap();
+    let machine = |n: u8| machine_key(n).public();
     let owner = person(&root, &device);
     let mut r = Roster::with_policy(NetworkPolicy::with(std::sync::Arc::new(owner.clone())));
     let me = HostRef { id: "studio".into(), keys: *studio.public(), window: true, device: Some(device.public().id()), machine: machine(7) };
-    r.offer(found(NET, me, &studio, owner.id().map(str::to_string), owner.head(), None, 1_792_512_000_000)).unwrap();
+    r.offer(found(NET, me, &machine_key(7), owner.id().map(str::to_string), owner.head(), None, 1_792_512_000_000).unwrap()).unwrap();
     let mut add = r.draft(Op::Add, HostRef { id: "laptop".into(), keys: *laptop.public(), window: false, device: None, machine: machine(8) }, None, 1_792_512_100_000);
     add.person_head = owner.head();
     let admit = block(&device, ADMIT, add.digest(), 0x22, 1_792_512_100_000);
-    add.sign_with("studio", &studio, Some(admit));
+    add.sign_with("studio", &machine_key(7), Some(admit)).unwrap();
     r.offer(add).unwrap();
     let mut owner = owner;
     let mut dlg =

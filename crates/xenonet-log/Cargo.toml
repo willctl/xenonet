@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-log"
-description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster) and a person's chain of device keys; and the feeds a machine signs to its network. Usable alone."
+description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster) and a person's chain of device keys; the feeds a machine signs to its network; and its signed address records. Usable alone."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

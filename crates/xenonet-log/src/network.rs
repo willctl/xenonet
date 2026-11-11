@@ -20,9 +20,30 @@
 //! | `remove` the founder | nobody |
 //! | `settings` that narrow | any admin, or the machine itself |
 //! | `settings` that widen (start to network or delegate, wake to network) | the founder, or two admins, each with presence (`widen`) |
+//! | `relays` that add a relay | the founder, or two admins, each with presence (`widen`) |
+//! | `relays` that only drop relays | the founder, or two admins |
+//! | `mailboxes` that add a mailbox | any admin, with presence (`widen`) |
+//! | `mailboxes` that only drop mailboxes | any admin, or each mailbox it drops |
+//! | `rekey` (a member's new transport keys) | the member itself, with presence (`admit`) |
 //!
 //! And one more, for leaving: a machine may sign its own `remove` (any but
 //! the founder), since taking yourself out harms no one.
+//!
+//! **Keys.** Every signer signs with its machine signing key (the `machine`
+//! its `add` entry named), never its transport key (`host.key`, the
+//! `sign` and `seal` keys of `HostRef`). The transport key is a file that
+//! iroh needs raw, so a program that copies it can authenticate as the
+//! machine and open what's sealed to it, but signs no entry. `rekey`
+//! replaces a member's transport keys, under its machine signing key and
+//! the person's presence, without removing it.
+//!
+//! **Relays and mailboxes.** `relays` lists the iroh relay URLs the
+//! network uses, and `mailboxes` the members that keep sealed envelopes
+//! for members that are away. Each entry gives the whole list from then
+//! on. One that adds anything widens; one that only drops narrows. A
+//! relay URL carries no credential: no user info, query or fragment,
+//! since a chain is kept forever and sent to every member. A relay's auth
+//! token is a setting of the machine that uses it.
 //!
 //! **Presence.** An admin's signature counts toward an admit or a widening
 //! only with a presence block from that admin's device (the device its
@@ -49,12 +70,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use xenonet_id::codec::is_b64;
-use xenonet_id::keys::{HostKey, PublicKeys};
-use xenonet_id::sign::{Purpose, VerifyingKey};
+use xenonet_id::keys::PublicKeys;
+use xenonet_id::sign::{Purpose, Signer, VerifyingKey};
 
 pub const ROSTER_TAG: &str = Purpose::ROSTER.tag();
-/// The longest gateway address an entry carries, in bytes.
+/// The longest gateway address or relay URL an entry carries, in bytes.
 pub const ADDRESS_MAX: usize = 300;
+/// The most relays a network lists.
+pub const MAX_RELAYS: usize = 8;
+/// The most mailboxes a network names.
+pub const MAX_MAILBOXES: usize = 8;
 /// What a presence block approves to add a machine.
 pub const ADMIT: &str = "admit";
 /// What a presence block approves to widen what the network may do.
@@ -67,6 +92,25 @@ pub type Entry = chain::Entry<NetworkPolicy>;
 
 fn address_ok(address: &str) -> bool {
     !address.is_empty() && address.len() <= ADDRESS_MAX
+}
+
+/// Whether `url` is a relay's URL as a chain may carry it: `https://` or
+/// `http://` (a relay on a LAN or in a lab), a host, printable ASCII, and
+/// nothing that holds a credential: no user info, query or fragment.
+pub fn is_relay_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")) else { return false };
+    let host = rest.split('/').next().unwrap_or("");
+    address_ok(url) && !host.is_empty() && url.bytes().all(|b| b.is_ascii_graphic()) && !url.contains(['@', '?', '#'])
+}
+
+/// Whether `list` holds each of its items once, and no more than `max`.
+fn list_ok(list: &[String], max: usize, item_ok: impl Fn(&str) -> bool) -> bool {
+    list.len() <= max && list.iter().all(|i| item_ok(i)) && list.iter().enumerate().all(|(i, x)| !list[..i].contains(x))
+}
+
+/// Whether `to` has anything `from` hasn't.
+fn adds(from: &[String], to: &[String]) -> bool {
+    to.iter().any(|x| !from.contains(x))
 }
 
 /// `net_<32 hex>`, as the founder makes it.
@@ -91,10 +135,13 @@ pub enum Op {
     Window,
     Gateway,
     Settings,
+    Relays,
+    Mailboxes,
+    Rekey,
 }
 
 impl Op {
-    pub const ALL: [Op; 6] = [Op::Found, Op::Add, Op::Remove, Op::Window, Op::Gateway, Op::Settings];
+    pub const ALL: [Op; 9] = [Op::Found, Op::Add, Op::Remove, Op::Window, Op::Gateway, Op::Settings, Op::Relays, Op::Mailboxes, Op::Rekey];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -104,6 +151,9 @@ impl Op {
             Op::Window => "window",
             Op::Gateway => "gateway",
             Op::Settings => "settings",
+            Op::Relays => "relays",
+            Op::Mailboxes => "mailboxes",
+            Op::Rekey => "rekey",
         }
     }
 
@@ -210,13 +260,15 @@ impl Settings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRef {
     pub id: String,
-    /// Its transport keys: they sign frames and entries.
+    /// Its transport keys (`host.key`): QUIC authentication and the key
+    /// envelopes are sealed to. They sign no entry.
     pub keys: PublicKeys,
     pub window: bool,
     /// The person's device key on it, by id; None on a machine with no way
     /// to ask the person.
     pub device: Option<String>,
-    /// Its machine signing key, which roots its tokens.
+    /// Its machine signing key: it signs the machine's entries, feeds and
+    /// address records, and roots its tokens.
     pub machine: VerifyingKey,
 }
 
@@ -239,6 +291,10 @@ pub struct Body {
     pub owner: Option<String>,
     /// For `settings`: the machine's settings from now.
     pub settings: Option<Settings>,
+    /// For `relays`: the network's relay URLs from now.
+    pub relays: Option<Vec<String>>,
+    /// For `mailboxes`: the members that are its mailboxes from now.
+    pub mailboxes: Option<Vec<String>>,
     /// The owner's person chain head the entry was made under.
     pub person_head: Option<String>,
     pub at: i64,
@@ -283,6 +339,11 @@ pub struct View {
     pub gateway: String,
     pub gateway_address: Option<String>,
     pub gateway_version: u64,
+    /// The iroh relays the network uses, by URL, as the last `relays`
+    /// entry listed them.
+    pub relays: Vec<String>,
+    /// The members that keep sealed envelopes for members that are away.
+    pub mailboxes: Vec<String>,
 }
 
 impl View {
@@ -293,6 +354,15 @@ impl View {
     /// Whether `id` is an admin (a window host): the founder is one.
     pub fn is_window(&self, id: &str) -> bool {
         id == self.founder || self.members.get(id).is_some_and(|m| m.window)
+    }
+
+    pub fn is_mailbox(&self, id: &str) -> bool {
+        self.mailboxes.iter().any(|m| m == id)
+    }
+
+    /// The member whose machine signing key has id `key_id`.
+    pub fn by_machine(&self, key_id: &str) -> Option<&Member> {
+        self.members.values().find(|m| m.machine.id() == key_id)
     }
 
     pub fn gateway_member(&self) -> Option<&Member> {
@@ -316,10 +386,6 @@ pub fn needs_approval() -> ChainError {
 
 fn no_host(id: &str) -> ChainError {
     ChainError::new(404, "no-host", format!("{id} isn't in the network with those keys"))
-}
-
-fn ed25519(keys: &PublicKeys) -> VerifyingKey {
-    VerifyingKey::Ed25519(keys.sign)
 }
 
 /// The roster's rules, with the person chains it checks admins' presence
@@ -361,6 +427,15 @@ impl NetworkPolicy {
         block.signed_for(&d.key, what, &e.digest()).err().map(|err| format!("{}: {}", s.by, err.message))
     }
 
+    /// Why `s` doesn't bring the person's presence for `what` on `e`, or
+    /// None when it does.
+    fn own_presence_fault(&self, view: &View, e: &Entry, s: &Signature, what: &str) -> Option<String> {
+        if s.presence.is_none() {
+            return Some(format!("{} signed without the person's presence", s.by));
+        }
+        self.presence_fault(view, e, s, what)
+    }
+
     /// The founder's and the admins' signatures that count for `e`: with a
     /// presence for `what` when one is needed. The first fault seen, for a
     /// refusal that says why a signature didn't count.
@@ -371,8 +446,7 @@ impl NetworkPolicy {
                 continue;
             }
             if let Some(what) = what {
-                let why = if s.presence.is_none() { Some(format!("{} signed without the person's presence", s.by)) } else { self.presence_fault(view, e, s, what) };
-                if let Some(why) = why {
+                if let Some(why) = self.own_presence_fault(view, e, s, what) {
                     fault.get_or_insert(why);
                     continue;
                 }
@@ -447,6 +521,14 @@ impl Policy for NetworkPolicy {
         out.insert("gateway".into(), b.gateway.as_ref().map_or(Value::Null, |g| json!({ "address": g.address, "version": g.version })));
         out.insert("owner".into(), b.owner.as_ref().map_or(Value::Null, |o| Value::String(o.clone())));
         out.insert("settings".into(), b.settings.as_ref().map_or(Value::Null, Settings::to_json));
+        // Only on their own ops, so every other entry's bytes stay as
+        // they were.
+        if let Some(r) = &b.relays {
+            out.insert("relays".into(), Value::from(r.clone()));
+        }
+        if let Some(m) = &b.mailboxes {
+            out.insert("mailboxes".into(), Value::from(m.clone()));
+        }
         out.insert("personHead".into(), b.person_head.as_ref().map_or(Value::Null, |h| Value::String(h.clone())));
         out.insert("at".into(), Value::from(b.at));
     }
@@ -482,12 +564,24 @@ impl Policy for NetworkPolicy {
             None | Some(Value::Null) => None,
             Some(s) => Some(Settings::parse(s).ok_or_else(|| bad("settings"))?),
         };
+        let list = |k: &str| -> R<Option<Vec<String>>> {
+            match v.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(l) => {
+                    let items = l.as_array().ok_or_else(|| bad(k))?;
+                    items.iter().map(|i| i.as_str().map(str::to_string).ok_or_else(|| bad(k))).collect::<R<Vec<_>>>().map(Some)
+                }
+            }
+        };
+        let relays = list("relays")?;
+        let mailboxes = list("mailboxes")?;
         let person_head = match v.get("personHead") {
             None | Some(Value::Null) => None,
             Some(p) => Some(p.as_str().filter(|p| is_b64(p) && !p.is_empty()).ok_or_else(|| bad("person head"))?.to_string()),
         };
         let at = v.get("at").and_then(Value::as_i64).ok_or_else(|| bad("time"))?;
-        let body = Body { network: network.into(), op, host: HostRef { id: id.into(), keys, window, device, machine }, gateway, owner, settings, person_head, at };
+        let body =
+            Body { network: network.into(), op, host: HostRef { id: id.into(), keys, window, device, machine }, gateway, owner, settings, relays, mailboxes, person_head, at };
         Self::body_well_formed(&body)?;
         Ok(body)
     }
@@ -512,6 +606,12 @@ impl Policy for NetworkPolicy {
         if b.settings.is_some() != (b.op == Op::Settings) {
             return Err(bad("settings"));
         }
+        if b.relays.is_some() != (b.op == Op::Relays) || b.relays.as_deref().is_some_and(|r| !list_ok(r, MAX_RELAYS, is_relay_url)) {
+            return Err(bad("relays"));
+        }
+        if b.mailboxes.is_some() != (b.op == Op::Mailboxes) || b.mailboxes.as_deref().is_some_and(|m| !list_ok(m, MAX_MAILBOXES, is_host_id)) {
+            return Err(bad("mailboxes"));
+        }
         if b.person_head.as_deref().is_some_and(|p| p.is_empty() || !is_b64(p)) {
             return Err(bad("person head"));
         }
@@ -522,12 +622,22 @@ impl Policy for NetworkPolicy {
         is_host_id(id)
     }
 
+    // Ed25519's 64 bytes, or a P-256 signature in ASN.1, as a secure
+    // element's machine key signs.
     fn sig_ok(sig: &[u8]) -> bool {
-        sig.len() == 64
+        (64..=72).contains(&sig.len())
     }
 
     fn same(a: &Body, b: &Body) -> bool {
-        a.op == b.op && a.host == b.host && a.gateway == b.gateway && a.network == b.network && a.owner == b.owner && a.settings == b.settings && a.person_head == b.person_head
+        a.op == b.op
+            && a.host == b.host
+            && a.gateway == b.gateway
+            && a.network == b.network
+            && a.owner == b.owner
+            && a.settings == b.settings
+            && a.relays == b.relays
+            && a.mailboxes == b.mailboxes
+            && a.person_head == b.person_head
     }
 
     fn scope(&self, view: Option<&View>, e: &Entry) -> R<()> {
@@ -547,10 +657,12 @@ impl Policy for NetworkPolicy {
         Ok(())
     }
 
+    // The machine signing key, never the transport key: a copied
+    // host.key signs no entry.
     fn signer_key(&self, view: Option<&View>, e: &Entry, by: &str) -> R<VerifyingKey> {
         match view {
-            None => Ok(ed25519(&e.host.keys)),
-            Some(view) => view.member(by).map(|m| ed25519(&m.keys)).ok_or_else(|| Self::FORMAT.refused(format!("{by} isn't in the network"))),
+            None => Ok(e.host.machine.clone()),
+            Some(view) => view.member(by).map(|m| m.machine.clone()).ok_or_else(|| Self::FORMAT.refused(format!("{by} isn't in the network"))),
         }
     }
 
@@ -621,6 +733,52 @@ impl Policy for NetworkPolicy {
                 }
                 self.strong(view, e, Some(WIDEN))
             }
+            Op::Relays => {
+                if current.is_none_or(|m| !same_host(m)) {
+                    return Err(no_host(&e.host.id));
+                }
+                let Some(to) = &e.relays else { return Err(ChainError::bad("a relays entry names the relays")) };
+                if *to == view.relays {
+                    return Err(ChainError::no_change("those are the relays the network has"));
+                }
+                self.strong(view, e, adds(&view.relays, to).then_some(WIDEN))
+            }
+            Op::Mailboxes => {
+                if current.is_none_or(|m| !same_host(m)) {
+                    return Err(no_host(&e.host.id));
+                }
+                let Some(to) = &e.mailboxes else { return Err(ChainError::bad("a mailboxes entry names the mailboxes")) };
+                if *to == view.mailboxes {
+                    return Err(ChainError::no_change("those are the mailboxes the network has"));
+                }
+                if let Some(m) = to.iter().find(|m| view.member(m).is_none()) {
+                    return Err(no_host(m));
+                }
+                if adds(&view.mailboxes, to) {
+                    return self.any(view, e, Some(WIDEN), "adding a mailbox needs a window host");
+                }
+                // Only dropping: a mailbox may step down itself.
+                let dropped: Vec<&String> = view.mailboxes.iter().filter(|m| !to.contains(m)).collect();
+                if dropped.iter().all(|m| e.signers.iter().any(|s| &&s.by == m)) {
+                    return Ok(());
+                }
+                self.any(view, e, None, "dropping a mailbox needs a window host, or the mailbox itself")
+            }
+            Op::Rekey => {
+                // The same machine, with new transport keys.
+                let Some(m) = current.filter(|m| m.device == e.host.device && m.machine == e.host.machine && m.window == e.host.window) else { return Err(no_host(&e.host.id)) };
+                if m.keys == e.host.keys {
+                    return Err(ChainError::no_change("those are the transport keys it has"));
+                }
+                if view.members.values().any(|o| o.keys == e.host.keys) || view.removed.values().any(|r| r.keys == e.host.keys) {
+                    return Err(ChainError::taken("those keys are another host's"));
+                }
+                let Some(s) = e.signers.iter().find(|s| s.by == m.id) else { return Err(refused(format!("{} rekeys itself, with the person there", m.id))) };
+                match self.own_presence_fault(view, e, s, ADMIT) {
+                    None => Ok(()),
+                    Some(why) => Err(presence_refused(why)),
+                }
+            }
             Op::Settings => {
                 let Some(m) = current.filter(|m| same_host(m)) else { return Err(no_host(&e.host.id)) };
                 let Some(to) = &e.settings else { return Err(ChainError::bad("a settings entry names the settings")) };
@@ -667,6 +825,8 @@ impl Policy for NetworkPolicy {
             }
             Op::Remove => {
                 v.members.remove(&e.host.id);
+                // A machine out of the network keeps nothing for it.
+                v.mailboxes.retain(|m| *m != e.host.id);
                 v.removed.insert(e.host.id.clone(), Removal { n: e.n, by: e.signers.iter().map(|s| s.by.clone()).collect(), at: e.at, keys: e.host.keys });
             }
             Op::Window => {
@@ -687,6 +847,13 @@ impl Policy for NetworkPolicy {
                     m.settings_by = Some((e.signers.iter().map(|s| s.by.clone()).collect(), e.at));
                 }
             }
+            Op::Relays => v.relays.clone_from(e.relays.as_ref().unwrap_or(&Vec::new())),
+            Op::Mailboxes => v.mailboxes.clone_from(e.mailboxes.as_ref().unwrap_or(&Vec::new())),
+            Op::Rekey => {
+                if let Some(m) = v.members.get_mut(&e.host.id) {
+                    m.keys = e.host.keys;
+                }
+            }
         }
         v
     }
@@ -697,23 +864,26 @@ fn founder_alone() -> ChainError {
 }
 
 impl Entry {
-    /// Adds `host`'s signature, with the presence block it brings.
-    pub fn sign_by(&mut self, host: &str, key: &HostKey) {
-        self.sign_with(host, key, None);
+    /// Adds `host`'s signature by its machine signing key.
+    pub fn sign_by(&mut self, host: &str, key: &dyn Signer) -> xenonet_id::R<()> {
+        self.sign_with(host, key, None)
     }
 
-    /// Adds `host`'s signature and its device's presence block.
-    pub fn sign_with(&mut self, host: &str, key: &HostKey, presence: Option<xenonet_id::presence::PresenceBlock>) {
-        let sig = key.sign(&self.signing_bytes());
-        self.add_signature(host, sig, presence);
+    /// Adds `host`'s signature by its machine signing key, and its
+    /// device's presence block.
+    pub fn sign_with(&mut self, host: &str, key: &dyn Signer, presence: Option<xenonet_id::presence::PresenceBlock>) -> xenonet_id::R<()> {
+        self.sign(host, key, presence)
     }
 
     /// What a presence block for this entry approves, when its signers
-    /// need one: `admit` for an add, `widen` for a widening (as `view`,
-    /// the chain before it, has the machine's settings).
+    /// need one: `admit` for an add or a rekey, `widen` for a widening (as
+    /// `view`, the chain before it, has the machine's settings, relays and
+    /// mailboxes).
     pub fn presence_for(&self, view: &View) -> Option<&'static str> {
         match self.op {
-            Op::Add => Some(ADMIT),
+            Op::Add | Op::Rekey => Some(ADMIT),
+            Op::Relays => self.relays.as_ref().filter(|to| adds(&view.relays, to)).map(|_| WIDEN),
+            Op::Mailboxes => self.mailboxes.as_ref().filter(|to| adds(&view.mailboxes, to)).map(|_| WIDEN),
             Op::Window if self.host.window => Some(WIDEN),
             Op::Gateway => Some(WIDEN),
             Op::Settings => {
@@ -727,9 +897,9 @@ impl Entry {
 
 impl Roster {
     /// The next entry, unsigned: its index, `prev` and network filled in,
-    /// with no owner, settings or person head.
+    /// with no owner, settings, relays, mailboxes or person head.
     pub fn draft(&self, op: Op, host: HostRef, gateway: Option<GatewayAt>, at: i64) -> Entry {
-        self.next(Body { network: self.view().network, op, host, gateway, owner: None, settings: None, person_head: None, at })
+        self.next(Body { network: self.view().network, op, host, gateway, owner: None, settings: None, relays: None, mailboxes: None, person_head: None, at })
     }
 
     /// The `HostRef` the chain has for member `id`, for an entry about it.
@@ -739,13 +909,19 @@ impl Roster {
     }
 }
 
-/// Entry 0 of a new network, signed by its founder: `owner` is the person
-/// it's theirs, at their chain's head `person_head`.
-pub fn found(network: &str, host: HostRef, key: &HostKey, owner: Option<String>, person_head: Option<String>, gateway: Option<GatewayAt>, at: i64) -> Entry {
+/// Entry 0 of a new network, signed by its founder's machine signing key
+/// `key`, which `host` names: `owner` is the person it's theirs, at their
+/// chain's head `person_head`.
+pub fn found(network: &str, host: HostRef, key: &dyn Signer, owner: Option<String>, person_head: Option<String>, gateway: Option<GatewayAt>, at: i64) -> xenonet_id::R<Entry> {
+    if key.public() != host.machine {
+        return Err(xenonet_id::IdError::refused("the founder signs with the machine signing key its entry names"));
+    }
     let id = host.id.clone();
-    let mut e = Entry::new(0, "", Body { network: network.into(), op: Op::Found, host: HostRef { window: true, ..host }, gateway, owner, settings: None, person_head, at });
-    e.sign_by(&id, key);
-    e
+    let body =
+        Body { network: network.into(), op: Op::Found, host: HostRef { window: true, ..host }, gateway, owner, settings: None, relays: None, mailboxes: None, person_head, at };
+    let mut e = Entry::new(0, "", body);
+    e.sign_by(&id, key)?;
+    Ok(e)
 }
 
 #[cfg(test)]

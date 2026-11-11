@@ -7,7 +7,8 @@
 
 pub use xenonet_log::chain::{ChainError, Offered, Signature, MAX_SIGNERS};
 pub use xenonet_log::network::{
-    found, needs_approval, Body, Entry, GatewayAt, HostRef, Member, NetworkPolicy, Op, Removal, Roster, Settings, Start, View, Wake, ADDRESS_MAX, ADMIT, ROSTER_TAG, WIDEN,
+    found, is_relay_url, needs_approval, Body, Entry, GatewayAt, HostRef, Member, NetworkPolicy, Op, Removal, Roster, Settings, Start, View, Wake, ADDRESS_MAX, ADMIT,
+    MAX_MAILBOXES, MAX_RELAYS, ROSTER_TAG, WIDEN,
 };
 
 #[cfg(test)]

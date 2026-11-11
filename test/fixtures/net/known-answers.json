@@ -244,13 +244,13 @@
       "signers": [
         {
           "host": "studio",
-          "sig": "YDYplrhCf9XvEvBq_6kWVBFRdDVA_0oj5kRvjCcpovHHKcG8cfT4Kd0-TpI18zngxmGOOMrB6K3cFf2lEwmkBg"
+          "sig": "Xn2TiUefCLZ5UrWnsvNag241YIcUZNtj0rnNBEPiIopadHWIsjKVcxZrGlWRpxNVDGM4nO5lE9SlX-mKtilgAQ"
         }
       ]
     },
     {
       "n": 1,
-      "prev": "0tFj-I3sEA7Pwt1iVPGCJebikOBSScOyvEXj7uBO6iQ",
+      "prev": "c361HoYxpHeT63DXek0vx1fERri8VEkUv9bXGtCBaEw",
       "network": "net_00112233445566778899aabbccddeeff",
       "op": "add",
       "host": {
@@ -273,18 +273,18 @@
       "signers": [
         {
           "host": "studio",
-          "sig": "gbTxkqMHHekiPb4Q4oh7wNN_SdEz-2mU3JlIe0rtes6hTcfvI9gwuRy-XAZP4g_8fu-3UpShdDlJ-Y0TBe3EBg",
+          "sig": "RaNUWq6rDuQAY0AGyudWQzOlIJc9q7SRIOgL6ZkcguaWDmkgVN6KijkMBUcFGPKJsA1f38qxhUjLdcI9uFQnBw",
           "presence": {
             "device": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
             "what": "admit",
-            "act": "g3G4zn3vq9sfUTGrYJAlWGJZTXn4LH5qAPbT9dehRqw",
+            "act": "StFyfAbQMSyJSBbZHi29FAmlorVg4LD_2qRy6tir9pI",
             "nonce": "IiIiIiIiIiIiIiIiIiIiIg",
             "at": 1792512100000,
-            "sig": "3fldADA7IZNbC6YB2pGNCZpQj5dnK6QLl72Nuc2WN0loM-AeVKk2FibM5rpGa4MxNLpHmTSC38tqJnVNrvUZCA"
+            "sig": "q3SyT38aEApZuFPP9GVqTat3ACqndgjx24jFmZ81cxhtlI4tSVygHZ5Me24tg0F2dzIuZbZkywLE9Ws3OW4NCg"
           }
         }
       ]
     }
   ],
-  "rosterHead": "z-NcjY37I-AiOaFS3Rsvo39nRjyJ1B0yidPBTbAw5m0"
+  "rosterHead": "37y5qg4bT_lQZW_sHcHh7z0LxIuQZP9YV0MZ6Xhw-I8"
 }

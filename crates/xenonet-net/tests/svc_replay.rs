@@ -80,11 +80,11 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
     let machine = |seed: u8| xenonet_id::sign::Signer::public(&xenonet_id::sign::SeedSigner::from_seed(&[seed; 32], xenonet_id::sign::KeyHome::File).unwrap());
     let me = HostRef { id: "studio".into(), keys: *studio.public(), window: true, device: identity.device_id(), machine: identity.machine_key().unwrap().public() };
     let mut roster = Roster::with_policy(NetworkPolicy::with(identity.clone()));
-    roster.offer(found(NET, me, &studio, identity.person_id(), identity.head(), None, T0)).unwrap();
+    roster.offer(found(NET, me, identity.machine_key().unwrap().as_ref(), identity.person_id(), identity.head(), None, T0).unwrap()).unwrap();
     let mut add = roster.draft(Op::Add, HostRef { id: "laptop".into(), keys: *laptop.public(), window: false, device: None, machine: machine(9) }, None, T0 + 1);
     add.person_head = identity.head();
     let block = identity.prove(true, ADMIT, &add.digest(), "", T0 + 1).unwrap();
-    add.sign_with("studio", &studio, Some(block));
+    add.sign_with("studio", identity.machine_key().unwrap().as_ref(), Some(block)).unwrap();
     roster.offer(add).unwrap();
     files.write_roster(NET, &roster).unwrap();
     let p = studio.public();

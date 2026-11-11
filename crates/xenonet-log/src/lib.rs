@@ -15,6 +15,9 @@
 //!   root key, the devices it or two devices pair, and what they revoke.
 //! - `feed`: a machine's feed in a network (`xenonet-feed/1`), what it
 //!   tells the other members, applied once and in order by each receiver.
+//! - `address`: a machine's address record (`xenonet-address/1`), where
+//!   its endpoint is reached, signed by its machine signing key and
+//!   checked against the network's chain.
 //!
 //! Why `Policy` is a trait rather than one chain with a kind field: each
 //! chain kind (network, person, and later org, project, space) has its own
@@ -27,6 +30,7 @@
 //! signer's device against the person chain at the head an entry names)
 //! holds what it consults, such as an `Arc<dyn person::Devices>`.
 
+pub mod address;
 pub mod chain;
 pub mod feed;
 pub mod network;

@@ -35,6 +35,9 @@ impl Purpose {
     pub const ACT: Purpose = Purpose("xenonet-act/1");
     /// An entry of a machine's feed in a network (`xenonet-log`'s feeds).
     pub const FEED: Purpose = Purpose("xenonet-feed/1");
+    /// A machine's address record: where its endpoint is reached
+    /// (`xenonet-log`'s `address`).
+    pub const ADDRESS: Purpose = Purpose("xenonet-address/1");
 
     pub const fn tag(self) -> &'static str {
         self.0

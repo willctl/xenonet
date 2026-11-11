@@ -6,6 +6,7 @@ use super::*;
 use crate::chain::Offered;
 use crate::person::{self, DeviceKind, NewDevice, PersonChain};
 use serde_json::json;
+use xenonet_id::keys::HostKey;
 use xenonet_id::presence::{prove, FixedCheck, PresenceBlock};
 use xenonet_id::sign::{KeyHome, SeedSigner, Signer};
 
@@ -74,7 +75,7 @@ impl Hosts {
     }
 
     fn found(&self) -> Entry {
-        found(NET, self.r("studio", true), &self.keys["studio"], Some(self.owner()), Some(self.head()), None, 1)
+        found(NET, self.r("studio", true), &self.machines["studio"], Some(self.owner()), Some(self.head()), None, 1).unwrap()
     }
 
     fn draft(&self, r: &Roster, op: Op, host: HostRef) -> Entry {
@@ -87,7 +88,7 @@ impl Hosts {
     /// `s` signs `e`, with its device's presence for what `e` needs.
     fn sign(&self, r: &Roster, e: &mut Entry, s: &'static str) {
         let presence = e.presence_for(&r.view()).map(|what| self.block(s, what, e));
-        e.sign_with(s, &self.keys[s], presence);
+        e.sign_with(s, &self.machines[s], presence).unwrap();
     }
 
     fn block(&self, s: &'static str, what: &str, e: &Entry) -> PresenceBlock {
@@ -133,15 +134,20 @@ fn found_is_entry_0_signed_by_the_founder_alone_and_names_its_owner() {
     let h = hosts();
     let mut r = h.roster();
     let mut e = h.found();
-    e.sign_by("desk", &h.keys["desk"]);
+    e.sign_by("desk", &h.machines["desk"]).unwrap();
     assert_eq!(r.clone().offer(e).unwrap_err().code, "roster-refused", "alone");
     let mut e = h.found();
-    e.signers[0].sig = h.keys["desk"].sign(&e.signing_bytes());
+    e.signers.clear();
+    e.sign_by("studio", &h.machines["desk"]).unwrap();
     assert!(r.clone().offer(e).is_err(), "by its own key");
+    // Its transport key signs no entry: a copied host.key can't.
+    let mut e = h.found();
+    e.signers[0].sig = h.keys["studio"].sign(&e.signing_bytes());
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "roster-refused", "by its transport key");
     let e = h.entry(&r, Op::Add, h.r("desk", false), &["desk"]);
     assert!(r.offer(e).is_err(), "a roster starts with found");
     let r = network(&h);
-    let again = found(NET, h.r("spare", true), &h.keys["spare"], None, None, None, 9);
+    let again = found(NET, h.r("spare", true), &h.machines["spare"], None, None, None, 9).unwrap();
     let again = Entry { n: r.len(), prev: r.head().unwrap(), ..again };
     assert!(r.clone().offer(again).is_err(), "once");
     let v = r.view();
@@ -183,7 +189,7 @@ fn an_admit_counts_an_admin_only_with_its_own_devices_presence_for_that_entry() 
     let e = h.draft(&r, Op::Add, h.r("spare", false));
     let try_with = |presence: Option<PresenceBlock>| {
         let mut e = e.clone();
-        e.sign_with("desk", &h.keys["desk"], presence);
+        e.sign_with("desk", &h.machines["desk"], presence).unwrap();
         r.clone().offer(e)
     };
     // No presence at all.
@@ -255,7 +261,7 @@ fn window_hosts_gateway_moves_and_their_removal_need_the_founder_or_two() {
         assert_eq!(with(&["desk", "nook"]).unwrap(), Offered::Appended, "{what}: two window hosts");
         // Two admins, one of them without presence, where it's needed.
         let mut e = h.entry(&r, op, host.clone(), &["desk"]);
-        e.sign_by("nook", &h.keys["nook"]);
+        e.sign_by("nook", &h.machines["nook"]).unwrap();
         let needs = e.presence_for(&r.view()).is_some();
         assert_eq!(r.clone().offer(e).map_err(|e| e.code), if needs { Err("presence") } else { Ok(Offered::Appended) }, "{what}");
     }
@@ -286,15 +292,15 @@ fn settings_narrow_by_one_admin_or_the_machine_and_widen_by_the_founder_or_two()
     // Widening needs presence from each admin that counts.
     let mut e = h.draft(&r, Op::Settings, r.host_ref("desk").unwrap());
     e.settings = Some(set(Start::Delegate, Wake::Consent));
-    e.sign_by("studio", &h.keys["studio"]);
+    e.sign_by("studio", &h.machines["studio"]).unwrap();
     assert_eq!(r.clone().offer(e).unwrap_err().code, "presence");
     // Narrowing: any admin, or the machine itself, with no presence.
     let mut narrow = h.draft(&r, Op::Settings, r.host_ref("laptop").unwrap());
     narrow.settings = Some(set(Start::Off, Wake::Consent));
-    narrow.sign_by("laptop", &h.keys["laptop"]);
+    narrow.sign_by("laptop", &h.machines["laptop"]).unwrap();
     assert_eq!(r.clone().offer(narrow.clone()).unwrap(), Offered::Appended);
     narrow.signers.clear();
-    narrow.sign_by("nook", &h.keys["nook"]);
+    narrow.sign_by("nook", &h.machines["nook"]).unwrap();
     r.offer(narrow).unwrap();
     // Settings are start and wake alone: what a delegated run may do is
     // the person's delegation, in their chain. The same settings again
@@ -308,7 +314,7 @@ fn settings_narrow_by_one_admin_or_the_machine_and_widen_by_the_founder_or_two()
     // A settings entry about a machine names it as the chain has it.
     let mut e = h.settings(&r, "laptop", set(Start::Off, Wake::Consent), &[]);
     e.host.device = None;
-    e.sign_by("laptop", &h.keys["laptop"]);
+    e.sign_by("laptop", &h.machines["laptop"]).unwrap();
     assert_eq!(r.offer(e).unwrap_err().code, "no-host");
 }
 
@@ -346,7 +352,7 @@ fn the_founder_is_unremovable_and_a_host_may_remove_itself() {
     let e = h.entry(&r, Op::Remove, h.r("desk", true), &["desk", "studio"]);
     assert!(r.clone().offer(e).is_ok());
     let mut e = h.entry(&r, Op::Remove, h.r("desk", true), &[]);
-    e.sign_by("desk", &h.keys["desk"]);
+    e.sign_by("desk", &h.machines["desk"]).unwrap();
     e.signers[0].by = "studio".into();
     assert!(r.offer(e).is_err(), "a signature checks against its signer's key");
 }
@@ -452,4 +458,171 @@ fn the_whole_chain_is_checked_and_survives_its_json() {
     assert_eq!(r.since(2).len(), 2);
     assert_eq!(r.since(99).len(), 0);
     assert!(format!("{:?}", h.policy()).contains("with person chains"));
+}
+
+impl Hosts {
+    /// A `relays` or `mailboxes` entry from studio, listing `list`.
+    fn list(&self, r: &Roster, op: Op, list: &[&str], signers: &[&'static str]) -> Entry {
+        let mut e = self.draft(r, op, r.host_ref("studio").unwrap());
+        let list: Vec<String> = list.iter().map(|x| (*x).to_string()).collect();
+        match op {
+            Op::Relays => e.relays = Some(list),
+            _ => e.mailboxes = Some(list),
+        }
+        for s in signers {
+            self.sign(r, &mut e, s);
+        }
+        e
+    }
+
+    /// `id`'s rekey to fresh transport keys, signed by `signers`.
+    fn rekey(&self, r: &Roster, id: &str, signers: &[&'static str]) -> (Entry, PublicKeys) {
+        let keys = *HostKey::generate().unwrap().public();
+        let e = self.entry(r, Op::Rekey, HostRef { keys, ..r.host_ref(id).unwrap() }, signers);
+        (e, keys)
+    }
+}
+
+const RELAY: &str = "https://relay.example.net";
+const RELAY2: &str = "http://192.168.1.20:3340";
+
+#[test]
+fn adding_a_relay_needs_the_founder_or_two_admins_present_and_dropping_one_needs_no_presence() {
+    let h = hosts();
+    let mut r = network(&h);
+    let add = |r: &Roster, signers: &[&'static str]| r.clone().offer(h.list(r, Op::Relays, &[RELAY], signers)).map_err(|e| e.code);
+    assert_eq!(add(&r, &["desk"]), Err("needs-approval"), "one admin");
+    assert_eq!(add(&r, &["laptop"]), Err("needs-approval"), "an ordinary member");
+    assert_eq!(add(&r, &["desk", "nook"]), Ok(Offered::Appended), "two admins");
+    // Two admins, one without presence: a widening counts only presence.
+    let mut e = h.list(&r, Op::Relays, &[RELAY], &["desk"]);
+    e.sign_by("nook", &h.machines["nook"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "presence");
+    let mut e = h.list(&r, Op::Relays, &[RELAY], &[]);
+    e.sign_by("studio", &h.machines["studio"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "presence", "the founder without presence");
+    r.offer(h.list(&r, Op::Relays, &[RELAY, RELAY2], &["studio"])).unwrap();
+    assert_eq!(r.view().relays, vec![RELAY.to_string(), RELAY2.to_string()]);
+    // Dropping one narrows: the founder or two admins, with no presence.
+    let mut e = h.list(&r, Op::Relays, &[RELAY2], &[]);
+    assert_eq!(e.presence_for(&r.view()), None);
+    e.sign_by("desk", &h.machines["desk"]).unwrap();
+    assert_eq!(r.clone().offer(e.clone()).unwrap_err().code, "needs-approval", "one admin");
+    e.sign_by("nook", &h.machines["nook"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap(), Offered::Appended);
+    // Swapping one for another adds one: a widening.
+    let e = h.list(&r, Op::Relays, &[RELAY2, "https://other.example.org"], &[]);
+    assert_eq!(e.presence_for(&r.view()), Some(WIDEN));
+    // The same list again changes nothing.
+    assert_eq!(r.clone().offer(h.list(&r, Op::Relays, &[RELAY, RELAY2], &["studio"])).unwrap_err().code, "no-change");
+    let back = Roster::from_json_with(h.policy(), &r.to_json()).unwrap();
+    assert_eq!(back.view(), r.view());
+}
+
+#[test]
+fn a_relay_url_carries_no_credential_and_a_list_has_each_relay_once() {
+    let h = hosts();
+    let r = network(&h);
+    for bad in [
+        "https://user:token@relay.example.net",
+        "https://relay.example.net/?token=abc",
+        "https://relay.example.net/#token",
+        "ftp://relay.example.net",
+        "https://",
+        "https://relay .example.net",
+        "relay.example.net",
+    ] {
+        assert_eq!(r.clone().offer(h.list(&r, Op::Relays, &[bad], &["studio"])).unwrap_err().code, "bad-request", "{bad}");
+        assert!(!is_relay_url(bad), "{bad}");
+    }
+    assert_eq!(r.clone().offer(h.list(&r, Op::Relays, &[RELAY, RELAY], &["studio"])).unwrap_err().code, "bad-request", "twice");
+    let many: Vec<String> = (0..=MAX_RELAYS).map(|i| format!("https://r{i}.example.net")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert_eq!(r.clone().offer(h.list(&r, Op::Relays, &many, &["studio"])).unwrap_err().code, "bad-request", "too many");
+    // Only a relays entry names relays; every other entry's JSON is as it
+    // was.
+    let mut e = h.draft(&r, Op::Add, h.r("spare", false));
+    e.relays = Some(vec![RELAY.into()]);
+    h.sign(&r, &mut e, "studio");
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "bad-request");
+    let add = h.entry(&r, Op::Add, h.r("spare", false), &["studio"]);
+    assert!(add.to_json().get("relays").is_none() && add.to_json().get("mailboxes").is_none());
+    // A relays entry from a machine that isn't in the network.
+    let mut e = h.list(&r, Op::Relays, &[RELAY], &[]);
+    e.host = h.r("spare", false);
+    h.sign(&r, &mut e, "studio");
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "no-host");
+}
+
+#[test]
+fn adding_a_mailbox_needs_one_admin_present_and_a_mailbox_may_step_down() {
+    let h = hosts();
+    let mut r = network(&h);
+    assert_eq!(r.clone().offer(h.list(&r, Op::Mailboxes, &["laptop"], &["laptop"])).unwrap_err().code, "roster-refused", "an ordinary member");
+    let mut e = h.list(&r, Op::Mailboxes, &["laptop"], &[]);
+    e.sign_by("desk", &h.machines["desk"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "presence");
+    assert_eq!(r.clone().offer(h.list(&r, Op::Mailboxes, &["spare"], &["desk"])).unwrap_err().code, "no-host", "not a member");
+    r.offer(h.list(&r, Op::Mailboxes, &["laptop", "nook"], &["desk"])).unwrap();
+    assert!(r.view().is_mailbox("laptop") && r.view().is_mailbox("nook"));
+    // laptop steps down; it can't drop nook.
+    let mut e = h.list(&r, Op::Mailboxes, &["nook"], &[]);
+    e.sign_by("laptop", &h.machines["laptop"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap(), Offered::Appended);
+    let mut e = h.list(&r, Op::Mailboxes, &["laptop"], &[]);
+    e.sign_by("laptop", &h.machines["laptop"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "roster-refused");
+    // Any admin drops one, with no presence.
+    let mut e = h.list(&r, Op::Mailboxes, &[], &[]);
+    e.sign_by("desk", &h.machines["desk"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap(), Offered::Appended);
+    // A removed member is a mailbox no more.
+    r.offer(h.entry(&r, Op::Remove, h.r("laptop", false), &["desk"])).unwrap();
+    assert_eq!(r.view().mailboxes, vec!["nook".to_string()]);
+    let back = Roster::from_json_with(h.policy(), &r.to_json()).unwrap();
+    assert_eq!(back.view(), r.view());
+}
+
+#[test]
+fn a_member_rekeys_itself_with_the_person_there_and_stays_in() {
+    let h = hosts();
+    let mut r = network(&h);
+    let before = r.view().member("laptop").unwrap().clone();
+    // Not by an admin, nor the founder: the member's own act.
+    for by in ["desk", "studio"] {
+        assert_eq!(r.clone().offer(h.rekey(&r, "laptop", &[by]).0).unwrap_err().code, "roster-refused", "{by}");
+    }
+    // Without the person's presence: the machine signing key alone can't.
+    let (mut e, _) = h.rekey(&r, "laptop", &[]);
+    e.sign_by("laptop", &h.machines["laptop"]).unwrap();
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "presence");
+    let (e, keys) = h.rekey(&r, "laptop", &["laptop"]);
+    assert_eq!(e.presence_for(&r.view()), Some(ADMIT));
+    r.offer(e).unwrap();
+    let after = r.view().member("laptop").unwrap().clone();
+    assert_eq!(after.keys, keys);
+    assert_eq!((after.since, after.machine, after.device, after.window), (before.since, before.machine, before.device, before.window), "the same member");
+    assert!(r.view().removal("laptop").is_none());
+    // Another member's keys, or the ones it has, are refused.
+    let e = h.entry(&r, Op::Rekey, HostRef { keys: *h.keys["desk"].public(), ..r.host_ref("laptop").unwrap() }, &["laptop"]);
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "taken");
+    let e = h.entry(&r, Op::Rekey, r.host_ref("laptop").unwrap(), &["laptop"]);
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "no-change");
+    // A rekey changes the transport keys alone.
+    let (mut e, _) = h.rekey(&r, "laptop", &[]);
+    e.host.window = true;
+    h.sign(&r, &mut e, "laptop");
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "no-host");
+    let (mut e, _) = h.rekey(&r, "laptop", &[]);
+    e.host.machine = h.machines["spare"].public();
+    h.sign(&r, &mut e, "laptop");
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "no-host");
+    // A member with no device has no way to ask the person, so it can't.
+    let mut e = h.draft(&r, Op::Add, HostRef { device: None, ..h.r("spare", false) });
+    h.sign(&r, &mut e, "studio");
+    r.offer(e).unwrap();
+    let (e, _) = h.rekey(&r, "spare", &["spare"]);
+    assert_eq!(r.clone().offer(e).unwrap_err().code, "presence");
+    let back = Roster::from_json_with(h.policy(), &r.to_json()).unwrap();
+    assert_eq!(back.view(), r.view());
 }

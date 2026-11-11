@@ -154,17 +154,17 @@ pub fn roster() -> Roster {
         .get_or_init(|| {
             let p = person();
             let mut r = Roster::with_policy(policy());
-            r.offer(found(NET, host_ref(STUDIO, true), key(STUDIO), p.id().map(str::to_string), p.head(), None, T0)).expect("entry 0");
+            r.offer(found(NET, host_ref(STUDIO, true), &machine_key(STUDIO), p.id().map(str::to_string), p.head(), None, T0).expect("entry 0")).expect("entry 0");
             for (i, window) in [(DESK, true), (LAPTOP, false), (GONE, false)] {
                 let mut e = r.draft(Op::Add, host_ref(i, window), None, T0 + r.len() as i64);
                 e.person_head = p.head();
                 let block = presence(STUDIO, xenonet_net::roster::ADMIT, e.digest(), T0);
-                e.sign_with("studio", key(STUDIO), Some(block));
+                e.sign_with("studio", &machine_key(STUDIO), Some(block)).expect("a signature");
                 r.offer(e).expect("an add");
             }
             let mut e = r.draft(Op::Remove, host_ref(GONE, false), None, T0 + r.len() as i64);
             e.person_head = p.head();
-            e.sign_by("studio", key(STUDIO));
+            e.sign_by("studio", &machine_key(STUDIO)).expect("a signature");
             r.offer(e).expect("a remove");
             r
         })
@@ -451,6 +451,10 @@ impl Machine {
         let (sign, seal) = secrets(host);
         std::fs::create_dir_all(&files.path).expect("a folder for the machine");
         std::fs::create_dir_all(files.identity_dir()).expect("the identity's folder");
+        // Its machine signing key, the one the roster names: it signs the
+        // entries this node makes.
+        let m = json!({ "v": 1, "seed": b64(&secret(0x50 + host as u8)), "keyId": machine(host).id() });
+        std::fs::write(files.identity_dir().join("machine-sign.key"), format!("{m}\n")).expect("the machine key");
         let k = json!({ "v": 1, "sign": b64(&sign), "seal": b64(&seal), "keyId": key(host).key_id() });
         std::fs::write(files.file(KEY), format!("{k}\n")).expect("the host key");
         let gw = public(STUDIO);

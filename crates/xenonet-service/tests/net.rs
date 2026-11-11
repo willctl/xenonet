@@ -366,20 +366,21 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
     }
     let key = |seed: u8| xenonet_id::sign::Signer::public(&xenonet_id::sign::SeedSigner::from_seed(&[seed; 32], xenonet_id::sign::KeyHome::File).unwrap());
     let spare = || HostRef { id: "spare".into(), keys: *xenonet_net::keys::HostKey::generate().unwrap().public(), window: false, device: None, machine: key(9) };
-    let host_key = xenonet_net::keys::HostKey::load(&a.dir.join("state").join("network").join("host.key")).unwrap().unwrap();
+    // Entries are signed by the machine signing key, never host.key.
+    let machine = id.machine_key().unwrap();
     let now = now_ms() as i64;
     let admit = |e: &xenonet_net::roster::Entry| id.prove(true, ADMIT, &e.digest(), "", now).unwrap();
     // With presence for it: taken. Without, or with a block lifted off
     // another entry: refused, as presence.
     let mut e = n.draft(Op::Add, spare(), None);
     let block = admit(&e);
-    e.sign_with("studio", &host_key, Some(block.clone()));
+    e.sign_with("studio", machine.as_ref(), Some(block.clone())).unwrap();
     n.roster().would_take(&e).unwrap();
     let mut bare = n.draft(Op::Add, spare(), None);
-    bare.sign_by("studio", &host_key);
+    bare.sign_by("studio", machine.as_ref()).unwrap();
     assert_eq!(n.roster().would_take(&bare).unwrap_err().code, "presence");
     let mut lifted = n.draft(Op::Add, spare(), None);
-    lifted.sign_with("studio", &host_key, Some(block));
+    lifted.sign_with("studio", machine.as_ref(), Some(block)).unwrap();
     assert_eq!(n.roster().would_take(&lifted).unwrap_err().code, "presence", "a block lifted off another entry");
     // Asking presence away from the window asks nobody.
     assert_eq!(id.prove(false, ADMIT, &e.digest(), "", now).unwrap_err().code, "window");
@@ -408,7 +409,7 @@ async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head(
     assert!(!id.can_act());
     let mut e = n.draft(Op::Add, spare(), None);
     let block = xenonet_id::presence::prove(device.signer.as_ref(), device.check.as_deref(), ADMIT, &e.digest(), "", now).unwrap();
-    e.sign_with("studio", &host_key, Some(block));
+    e.sign_with("studio", machine.as_ref(), Some(block)).unwrap();
     assert_eq!(n.roster().would_take(&e).unwrap_err().code, "presence", "a revoked device's presence");
     let (s, v) = a.call("POST", "/api/net/ticket", json!({ "host": "spare" }), true).await;
     assert_eq!((s, v["code"].clone()), (409, json!("no-person")), "{v}");
