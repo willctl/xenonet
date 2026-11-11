@@ -37,7 +37,9 @@ fn world() -> World {
     let cfg = MapConfig::new(true, false, env, &home, Some(&w));
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
-    let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
+    // What the service saves as it starts the demo: Nova's identities.
+    let store = crate::runtime::saved::in_memory();
+    crate::runtime::saved::seed(&store, &demo.remembered().expect("the demo's world"));
     let codex_sessions = std::path::Path::new(&cfg.codex_home).join("sessions").to_string_lossy().into_owned();
     let live = Live::new(
         &[(cfg.claude_projects_dir.clone(), "claude".into()), (codex_sessions.clone(), "codex".into())],
@@ -401,7 +403,7 @@ async fn a_home_folders_own_sessions_and_projects() {
     assert!(!cfg.demo && cfg.claude_projects_dir.starts_with(&home_s), "nothing of yours is read");
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
     let vendor = Vendor::new(dir, Arc::new(Mutex::new(xenonet_schema::drift::DriftLog::default())));
-    let store = StateStore::new(&cfg.state_dir, &cfg.projects_dir);
+    let store = crate::runtime::saved::in_memory();
     let live = Live::new(&[(cfg.claude_projects_dir.clone(), "claude".into())], None, false, &cfg.home_dir, vendor.clone());
     let s = MapState::new(cfg, store, vendor, &WireEnv::new("0.0.0"), Readers::Real, live);
     let g = s.refresh_map().await.expect("a map");

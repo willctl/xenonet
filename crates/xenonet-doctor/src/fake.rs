@@ -66,9 +66,6 @@ impl DoctorHost for Fake {
     async fn statfs(&self, _dir: &str) -> Option<Value> {
         unreachable!("statfs")
     }
-    async fn state_file(&self, _dir: &str) -> Value {
-        unreachable!("state_file")
-    }
     async fn command(&self) -> Value {
         unreachable!("command")
     }

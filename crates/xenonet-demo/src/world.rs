@@ -714,6 +714,9 @@ pub struct Demo {
     sessions: Vec<Value>,
     writers: Vec<Writer>,
     pub client_repos: Vec<ClientRepo>,
+    /// What XenoNet would remember of Nova's identities (`{ names, known,
+    /// signins }`), which the service saves as it starts.
+    remembered: Option<Value>,
 }
 
 const CLAUDE_PERSONAL: (&str, &str) = ("0190d3e0-0000-7000-a000-000000000001", "0190d3e0-0000-7000-b000-000000000001");
@@ -747,14 +750,14 @@ impl Demo {
     /// wipe each other's. `today` is the local date, as en-CA writes it.
     pub fn new(tmpdir: &str, port: &str, today: &str) -> Self {
         let root = NATIVE.join(&[tmpdir, &format!("xenonet-demo-{port}")]);
-        Demo { world: World::at(&root), today: today.into(), sessions: sessions(today), writers: Vec::new(), client_repos: Vec::new() }
+        Demo { world: World::at(&root), today: today.into(), sessions: sessions(today), writers: Vec::new(), client_repos: Vec::new(), remembered: None }
     }
 
     /// The demo over a world `create_world` wrote at `root` before (a
     /// test's copy of one): its sessions and the files they're in, named as
     /// they were at `around.now()`, without writing a file.
     pub fn over(root: &str, today: &str, around: &mut dyn Around) -> Result<Self, files::FsError> {
-        let mut demo = Demo { world: World::at(root), today: today.into(), sessions: sessions(today), writers: Vec::new(), client_repos: Vec::new() };
+        let mut demo = Demo { world: World::at(root), today: today.into(), sessions: sessions(today), writers: Vec::new(), client_repos: Vec::new(), remembered: None };
         for (i, s) in demo.sessions.iter().enumerate() {
             demo.writers.push(Writer::new(s, i, &demo.world, around)?);
         }
@@ -810,7 +813,7 @@ impl Demo {
         self.write_history(now, around)?;
         self.write_wiki(now, around)?;
         self.write_claude_limits(now)?;
-        self.write_identities(now, around, git_ok)?;
+        self.remembered = Some(self.write_identities(now, around, git_ok)?);
         Ok(self.world.to_value())
     }
 
@@ -893,9 +896,9 @@ impl Demo {
     // Who the demo's work runs as, all made up. Nova works at Atlas (the
     // atlas-co organization on GitHub, a work Claude account in the Atlas
     // team) and has a side identity, orbitworks, for pathfinder and the
-    // experiments in labs. XenoNet's state remembers the work Claude
-    // account from before Nova signed in to the personal one.
-    fn write_identities(&self, now: f64, around: &mut dyn Around, git_ok: bool) -> Result<(), files::FsError> {
+    // experiments in labs. What XenoNet would remember comes back: the
+    // work Claude account from before Nova signed in to the personal one.
+    fn write_identities(&self, now: f64, around: &mut dyn Around, git_ok: bool) -> Result<Value, files::FsError> {
         let home_file = |rel: &str, text: &str| -> Result<(), files::FsError> {
             let f = NATIVE.join(&[&self.world.home, rel]);
             files::mkdir_p(&NATIVE.dirname(&f), None)?;
@@ -952,11 +955,13 @@ impl Demo {
         known.insert(work.clone(), json!({ "kind": "claude", "handle": "nova@atlas.example", "detail": { "plan": "Team", "org": "Atlas" }, "firstSeen": n(now - 30.0 * 86400e3), "lastSeen": n(now - 8.0 * 3600e3) }));
         let signins = json!({ "claude": [{ "id": work, "from": n(now - 30.0 * 86400e3), "to": n(now - 8.0 * 3600e3) }, { "id": personal, "from": n(now - 8.0 * 3600e3), "to": n(now - 3600e3) }] });
         files::mkdir_p(&self.world.state_dir, None)?;
-        files::write_file(
-            &NATIVE.join(&[&self.world.state_dir, "state.json"]),
-            stringify(&json!({ "identities": { "names": names, "known": known, "signins": signins } }), 2).as_bytes(),
-            None,
-        )
+        Ok(json!({ "names": names, "known": known, "signins": signins }))
+    }
+
+    /// What XenoNet would remember of the made-up identities, once the
+    /// world is made: `{ names, known, signins }`.
+    pub fn remembered(&self) -> Option<&Value> {
+        self.remembered.as_ref()
     }
 
     /// The sessions of an app as its adapter would return them.

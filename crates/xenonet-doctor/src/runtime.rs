@@ -37,8 +37,6 @@ const FIRST_AFTER_MS: u64 = 60 * 1000;
 pub const DEMO_ONLY: [&str; 9] =
     ["xenonet.server", "xenonet.sources", "xenonet.blocks", "contracts.drift", "claude.transcripts", "codex.sessions", "grok.sessions", "system.projects", "system.runtime"];
 
-const STATE_VERSION: f64 = 2.0;
-
 /// The service's settings the doctor reads.
 #[derive(Clone, Debug)]
 pub struct Settings {
@@ -238,59 +236,6 @@ pub fn restart_exe() -> Value {
     xenonet_os::fs::realpath_native(&exe).map_or(Value::Null, Value::String)
 }
 
-/// inspectState(dir) (core/statefile.js): state.json's version and
-/// whether it fits its schema, and the files XenoNet moved aside.
-pub fn inspect_state(dir: &str) -> Value {
-    let file = xenonet_os::paths::join(dir, "state.json");
-    let names: Vec<String> =
-        xenonet_os::paths::read_dir_sorted(std::path::Path::new(dir)).map(|v| v.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
-    let (mut broken, mut backups) = (Vec::new(), Vec::new());
-    for name in &names {
-        let mid = |prefix: &str| name.strip_prefix(prefix).and_then(|r| r.strip_suffix(".json"));
-        if mid("state.broken-").is_some_and(|m| !m.is_empty()) {
-            broken.push(xenonet_os::paths::join(dir, name));
-        } else if let Some(m) = mid("state.v") {
-            let digits = m.bytes().take_while(u8::is_ascii_digit).count();
-            if digits > 0 && (digits == m.len() || (m.as_bytes()[digits] == b'-' && m.len() > digits + 1)) {
-                backups.push(xenonet_os::paths::join(dir, name));
-            }
-        }
-    }
-    let exists = names.iter().any(|n| n == "state.json");
-    let mut out = json!({ "file": file, "exists": exists, "known": xenonet_text::json::number(STATE_VERSION), "version": null, "unreadable": null, "issues": [], "broken": broken, "backups": backups });
-    if !exists {
-        return out;
-    }
-    let text = match std::fs::read(&file) {
-        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
-        Err(e) => {
-            let f = xenonet_os::fs::FsError::of(e, "open", &file);
-            out["unreadable"] = json!(format!("can't be read ({})", f.code.unwrap_or(f.message)));
-            return out;
-        }
-    };
-    let Ok(data) = xenonet_text::json::parse(&text) else {
-        out["unreadable"] = json!("isn't valid JSON");
-        return out;
-    };
-    if !data.is_object() {
-        out["unreadable"] = json!("isn't a JSON object");
-        return out;
-    }
-    let version = data.get("version").cloned().unwrap_or(json!(1));
-    out["version"] = version.clone();
-    if let Some(v) = version.as_f64().filter(|v| v.fract() == 0.0 && (1.0..=STATE_VERSION).contains(v)) {
-        // The file read as its version's type: the first part that isn't one.
-        let issue = if v == 1.0 {
-            xenonet_schema::typed::read::<xenonet_model::state::StateV1>(&data).err()
-        } else {
-            xenonet_schema::typed::read::<xenonet_model::state::State>(&data).err()
-        };
-        out["issues"] = Value::Array(issue.into_iter().map(|i| json!({ "path": i.path, "message": i.message })).collect());
-    }
-    out
-}
-
 /// The process lookups' self-test (core/procs.js's selfTest): whether a
 /// connection this process makes to itself comes back as this process,
 /// with the processes above it and the program it runs.
@@ -434,9 +379,6 @@ impl DoctorHost for Here {
     async fn statfs(&self, dir: &str) -> Option<Value> {
         statfs(dir)
     }
-    async fn state_file(&self, dir: &str) -> Value {
-        inspect_state(dir)
-    }
     async fn store(&self, dir: &str) -> Option<String> {
         (self.m.parts.standing)(dir)
     }
@@ -534,7 +476,6 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
         json!({ "limits": limits })
     });
     let connect = if parts.config.demo { Value::Null } else { c.connect.preview().await.unwrap_or(Value::Null) };
-    let state_load = c.store.load_report().unwrap_or(Value::Null);
     let mut facts = json!({
         "self": { "port": parts.config.port, "name": parts.config.name, "exe": xenonet_os::fs::running_exe() },
         "base": null,
@@ -553,7 +494,6 @@ async fn facts(parts: &Parts, by_hand: bool) -> Value {
         m.extend(
             json!({
                 "byHand": by_hand,
-                "stateLoad": state_load,
                 "projectsDirSet": fx::env_set("XENONET_PROJECTS_DIR").is_some(),
                 "grokKeySet": fx::env_set("XAI_API_KEY").is_some(),
                 "actors": if c.actors.is_some() { "on" } else { "off" },
@@ -975,13 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn state_files_and_times() {
-        let dir = tmp("state");
-        assert_eq!(inspect_state(&dir)["exists"], false);
-        std::fs::write(format!("{dir}/state.json"), "{nope").unwrap();
-        assert_eq!(inspect_state(&dir)["unreadable"], "isn't valid JSON");
-        std::fs::write(format!("{dir}/state.broken-2026.json"), "{}").unwrap();
-        assert_eq!(inspect_state(&dir)["broken"].as_array().unwrap().len(), 1);
+    fn local_times() {
         let t = xenonet_os::clock::local_time(0.0);
         assert!(t.ends_with("AM") || t.ends_with("PM"), "{t}");
         assert_eq!(xenonet_os::clock::local_time(f64::NAN), "Invalid Date");

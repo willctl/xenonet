@@ -85,6 +85,12 @@ impl DemoWorld {
         Ok(w)
     }
 
+    /// What XenoNet would remember of the made-up identities, once the
+    /// world is made.
+    pub fn remembered(&self) -> Option<Value> {
+        lock(&self.demo).remembered().cloned()
+    }
+
     /// The sessions of an app as its adapter would list them.
     pub fn sessions(&self, app: &str) -> Result<Vec<Value>, String> {
         lock(&self.demo).sessions_of(app).map_err(|e| e.message)

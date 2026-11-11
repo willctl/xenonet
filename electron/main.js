@@ -210,9 +210,9 @@ function tellDrawing() {
 let themeMenu = null;
 let appMenu = null;
 
-// XenoNet Dev's service keeps its layout and search index apart from the
-// installed XenoNet's, starting from a copy of its layout. It also relays the
-// control channel (XENONET_CONTROL). The demo instances keep everything in
+// XenoNet Dev's service keeps its store and search index apart from the
+// installed XenoNet's. It also relays the control channel
+// (XENONET_CONTROL). The demo instances keep everything in
 // their made-up world.
 function serverEnv() {
   // XENONET_EXEC: this app, which agents' XenoNet tools run on, as Node (see
@@ -228,12 +228,6 @@ function serverEnv() {
   }
   env.XENONET_STATE_DIR ??= appDir("state", { name: instance.name });
   env.XENONET_CACHE_DIR ??= appDir("cache", { name: instance.name });
-  const own = path.join(env.XENONET_STATE_DIR, "state.json");
-  const installed = path.join(appDir("state"), "state.json");
-  if (!fs.existsSync(own) && fs.existsSync(installed)) {
-    fs.mkdirSync(env.XENONET_STATE_DIR, { recursive: true });
-    fs.copyFileSync(installed, own);
-  }
   return env;
 }
 

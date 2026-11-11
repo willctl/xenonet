@@ -30,6 +30,7 @@ pub mod remote;
 pub mod reports;
 pub mod runs;
 pub mod runtime;
+pub mod saved;
 pub mod spend;
 pub mod starts;
 pub mod store;
@@ -90,17 +91,30 @@ pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtim
     Some(w)
 }
 
-/// The runtime, made on the map the cores already have; None when the
-/// store (`<state>/xenonet.sqlite`) can't be opened, as when the folder
-/// holds data from an earlier build, and the engine's routes stay pending.
+/// The one store, `<state>/xenonet.sqlite`, which the service opens once
+/// and gives every part that keeps something; None, with why in the log,
+/// when it can't be opened, as when the folder holds data from an earlier
+/// build (the doctor says to set the machine up again).
+pub fn open_store(state_dir: &str, env: &WireEnv) -> Option<Arc<Db>> {
+    match Db::open(Path::new(state_dir)) {
+        Ok(db) => Some(Arc::new(db)),
+        Err(e) => {
+            log_later(env, "error", "engine.store", format!("the store can't be opened: {}", e.message));
+            None
+        }
+    }
+}
+
+/// The runtime, made on the map the cores already have; None without the
+/// store (`Setup::db`), and the engine's routes stay pending.
 pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime>> {
     let now = xenonet_text::time::now_ms();
     let mut life = Lifecycle::new(now);
-    let opened = Db::open(Path::new(&setup.state_dir)).map_err(|e| e.message).and_then(|db| EngineStore::new(Arc::new(db), now));
+    let opened = EngineStore::new(setup.db.clone()?, now);
     let store = match opened {
         Ok(s) => Shared::new(s),
         Err(e) => {
-            log_later(env, "error", "engine.store", format!("the store can't be opened: {e}"));
+            log_later(env, "error", "engine.store", format!("the engine's tables can't be read: {e}"));
             return None;
         }
     };

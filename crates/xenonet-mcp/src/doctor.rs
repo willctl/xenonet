@@ -19,9 +19,6 @@ use xenonet_os::error::Failure;
 const CHECK_MS: u64 = 8000;
 const DAY_MS: f64 = 24.0 * 3600e3;
 
-/// The schemas state.json is checked against, as schemas/ has them.
-const STATE_VERSION: f64 = 2.0;
-
 /// The folders the checks look at (core/config.js's, with the projects
 /// folder in use): stateDir, cacheDir, projectsDir, claudeProjectsDir,
 /// codexHome, grokHome and homeDir.
@@ -183,59 +180,6 @@ pub fn launcher() -> Result<Option<Value>, String> {
     Ok(Some(json!({ "dir": dir, "said": said, "version": xenonet_text::json::number(version), "ships": xenonet_text::json::number(ships) })))
 }
 
-/// inspectState(dir) (core/statefile.js): state.json's version and
-/// whether it fits its schema, and the files XenoNet moved aside.
-pub fn inspect_state(dir: &str) -> Value {
-    let file = xenonet_os::paths::join(dir, "state.json");
-    let names: Vec<String> =
-        xenonet_os::paths::read_dir_sorted(std::path::Path::new(dir)).map(|v| v.iter().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
-    let (mut broken, mut backups) = (Vec::new(), Vec::new());
-    for name in &names {
-        let mid = |prefix: &str| name.strip_prefix(prefix).and_then(|r| r.strip_suffix(".json"));
-        if mid("state.broken-").is_some_and(|m| !m.is_empty()) {
-            broken.push(xenonet_os::paths::join(dir, name));
-        } else if let Some(m) = mid("state.v") {
-            let digits = m.bytes().take_while(u8::is_ascii_digit).count();
-            if digits > 0 && (digits == m.len() || (m.as_bytes()[digits] == b'-' && m.len() > digits + 1)) {
-                backups.push(xenonet_os::paths::join(dir, name));
-            }
-        }
-    }
-    let exists = names.iter().any(|n| n == "state.json");
-    let mut out = json!({ "file": file, "exists": exists, "known": xenonet_text::json::number(STATE_VERSION), "version": null, "unreadable": null, "issues": [], "broken": broken, "backups": backups });
-    if !exists {
-        return out;
-    }
-    let text = match std::fs::read(&file) {
-        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
-        Err(e) => {
-            let f = xenonet_os::fs::FsError::of(e, "open", &file);
-            out["unreadable"] = json!(format!("can't be read ({})", f.code.unwrap_or(f.message)));
-            return out;
-        }
-    };
-    let Ok(data) = xenonet_text::json::parse(&text) else {
-        out["unreadable"] = json!("isn't valid JSON");
-        return out;
-    };
-    if !data.is_object() {
-        out["unreadable"] = json!("isn't a JSON object");
-        return out;
-    }
-    let version = data.get("version").cloned().unwrap_or(json!(1));
-    out["version"] = version.clone();
-    if let Some(v) = version.as_f64().filter(|v| v.fract() == 0.0 && (1.0..=STATE_VERSION).contains(v)) {
-        // The file read as its version's type: the first part that isn't one.
-        let issue = if v == 1.0 {
-            xenonet_schema::typed::read::<xenonet_model::state::StateV1>(&data).err()
-        } else {
-            xenonet_schema::typed::read::<xenonet_model::state::State>(&data).err()
-        };
-        out["issues"] = Value::Array(issue.into_iter().map(|i| json!({ "path": i.path, "message": i.message })).collect());
-    }
-    out
-}
-
 /// readDriftFile in the cache folder, or an empty record of none.
 fn drift(cache_dir: &str) -> Value {
     let file = xenonet_os::paths::join(cache_dir, xenonet_schema::drift::DRIFT_FILE);
@@ -376,9 +320,6 @@ impl DoctorHost for Machine {
     async fn statfs(&self, dir: &str) -> Option<Value> {
         statfs(dir)
     }
-    async fn state_file(&self, dir: &str) -> Value {
-        inspect_state(dir)
-    }
     async fn command(&self) -> Value {
         let st = xenonet_components::command::command_state(
             Some(&xenonet_components::command::command_dir(&self.home, platform(), var("LOCALAPPDATA").as_deref())),
@@ -457,7 +398,7 @@ pub fn run_doctor(paths: &Paths, only: Option<&[String]>) -> Value {
     let facts = json!({
         "self": null, "base": null, "baseName": null, "health": null, "live": null, "connect": null,
         "paths": paths, "home": home, "platform": platform(), "electron": null, "node": null,
-        "codexBin": codex_bin(), "byHand": null, "stateLoad": null,
+        "codexBin": codex_bin(), "byHand": null,
         "projectsDirSet": var("XENONET_PROJECTS_DIR").is_some(), "grokKeySet": var("XAI_API_KEY").is_some(), "actors": "none",
     });
     let all = checks::all();
@@ -502,8 +443,7 @@ pub fn checkup_here(paths: &Paths, only: Option<&[String]>) -> Value {
 /// The folders of the XenoNet asked about, as config.js and workspace.js
 /// find them in a process with no --demo: XENONET_STATE_DIR and
 /// XENONET_CACHE_DIR, else the instance's own (XenoNet Dev's when that's
-/// the one asked about, `name`), and the projects folder in use, as
-/// state.json has it.
+/// the one asked about, `name`), and the projects folder in use.
 pub fn paths_for(name: Option<&str>) -> Paths {
     let home = home();
     let app = |kind: &str, n: &str| {
@@ -522,8 +462,10 @@ pub fn paths_for(name: Option<&str>) -> Paths {
     };
     let (state_dir, cache_dir) = (dir("state", "XENONET_STATE_DIR"), dir("cache", "XENONET_CACHE_DIR"));
     let claude = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_else(|_| xenonet_os::paths::join(&home, ".claude"));
-    let saved = xenonet_state::workspace::saved_root(&xenonet_os::paths::join(&state_dir, "state.json")).map(Value::String);
-    let root = xenonet_state::workspace::root(std::env::var("XENONET_PROJECTS_DIR").ok().as_deref(), saved.as_ref(), &home);
+    // The folder you chose is kept in the store, which the service reads:
+    // with none running, the projects folder is XENONET_PROJECTS_DIR's or
+    // the default.
+    let root = xenonet_state::workspace::root(std::env::var("XENONET_PROJECTS_DIR").ok().as_deref(), None, &home);
     json!({
         "homeDir": home,
         "projectsDir": root["path"],
@@ -556,33 +498,15 @@ mod tests {
     fn the_checks_run_here_on_the_folders_given() {
         let state = tmp("state");
         let chosen = tmp("code");
-        std::fs::write(format!("{state}/state.json"), json!({ "version": 2, "workspace": { "root": chosen } }).to_string()).unwrap();
         let paths = json!({ "stateDir": state, "cacheDir": tmp("cache"), "projectsDir": chosen, "claudeProjectsDir": "/nowhere/claude", "codexHome": "/nowhere/codex", "homeDir": "/nowhere" });
         let r = checkup_here(&paths, Some(&["system.runtime".into(), "xenonet.server".into(), "system.projects".into(), "xenonet.state".into()]));
         let got: Vec<(String, String)> = r["results"].as_array().unwrap().iter().map(|x| (text(x.get("id")), text(x.get("status")))).collect();
         assert_eq!(
             got,
-            [("xenonet.server".into(), "warn".into()), ("xenonet.state".into(), "warn".into()), ("system.projects".into(), "ok".into()), ("system.runtime".into(), "ok".into())]
+            [("xenonet.server".into(), "warn".into()), ("xenonet.state".into(), "ok".into()), ("system.projects".into(), "ok".into()), ("system.runtime".into(), "ok".into())]
         );
-        // A state.json of a workspace alone lacks the parts XenoNet writes.
-        assert_eq!(r["results"][1]["detail"], json!("state.json has 1 part XenoNet can't use, such as the whole file: missing field `layout`"));
         assert_eq!(r["results"][2]["detail"], json!(format!("{chosen}, 0 entries")));
         assert_eq!(r["by"], Value::Null);
-        assert_eq!(r["summary"]["warn"], json!(2));
-    }
-
-    #[test]
-    fn state_json_as_the_doctor_reads_it() {
-        let dir = tmp("inspect");
-        assert_eq!(inspect_state(&dir)["exists"], json!(false));
-        std::fs::write(format!("{dir}/state.json"), "{").unwrap();
-        std::fs::write(format!("{dir}/state.broken-1.json"), "{").unwrap();
-        std::fs::write(format!("{dir}/state.v1.json"), "{}").unwrap();
-        let st = inspect_state(&dir);
-        assert_eq!((st["unreadable"].clone(), st["broken"].as_array().unwrap().len(), st["backups"].as_array().unwrap().len()), (json!("isn't valid JSON"), 1, 1));
-        std::fs::write(format!("{dir}/state.json"), "{\"version\":2,\"theme\":7}").unwrap();
-        let st = inspect_state(&dir);
-        assert_eq!(st["version"], json!(2));
-        assert!(!st["issues"].as_array().unwrap().is_empty(), "a theme that isn't one: {st}");
+        assert_eq!(r["summary"]["warn"], json!(1));
     }
 }

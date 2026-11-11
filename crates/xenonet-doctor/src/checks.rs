@@ -164,9 +164,6 @@ pub trait DoctorHost {
     /// The file system's numbers where a folder is (`bavail`, `bsize`…),
     /// or None when they can't be read.
     async fn statfs(&self, dir: &str) -> Option<Value>;
-    /// state.json in a folder: its version, whether it fits its schema,
-    /// and the files moved aside.
-    async fn state_file(&self, dir: &str) -> Value;
     /// Why the store in a folder can't be used (data from an earlier
     /// build, or another version's store), or None when it can.
     async fn store(&self, _dir: &str) -> Option<String> {
@@ -692,44 +689,6 @@ async fn state(c: &Ctx<'_>) -> Result<Value, Failure> {
     // is set up again.
     if let Some(why) = c.host.store(&dir).await {
         return Ok(fail(c.tilde(&why), Some("Set this machine up again: quit XenoNet, move its state folder aside, start XenoNet, and join your network again.")));
-    }
-    // The file itself: one moved aside, one it can't read now, one from a
-    // newer XenoNet, one it isn't saving to, or parts that don't fit.
-    let file = Some(c.host.state_file(&dir).await).filter(|v| truthy(Some(v)));
-    let loaded = f.get("stateLoad");
-    let file_get = |k: &str| file.as_ref().and_then(|x| x.get(k)).filter(|v| !v.is_null());
-    let broken = list(file_get("broken"));
-    if let Some(last) = broken.last() {
-        return Ok(warn(
-            format!("{} is a state.json XenoNet couldn't read, so it moved it aside and started afresh", c.tilde(&display(last))),
-            Some("To get back what was in it, fix it and put it back as state.json while XenoNet is closed; delete it once you don't need it."),
-        ));
-    }
-    if let Some(u) = file_get("unreadable").filter(|v| truthy(Some(v))) {
-        return Ok(warn(format!("state.json {}, so XenoNet will move it aside and start afresh", display(u)), Some("To keep what's in it, fix it before XenoNet next starts.")));
-    }
-    if file.is_some() && xenonet_text::value::less(file_get("known"), file_get("version")) && file_get("version").is_some() && file_get("known").is_some() {
-        return Ok(warn(
-            format!("state.json is from a newer XenoNet (version {}), so this one reads it but doesn't save changes to it", s(file_get("version"))),
-            Some("Use the newer XenoNet, or update this one."),
-        ));
-    }
-    if let Some(l) = loaded.filter(|l| truthy(l.get("readOnly"))) {
-        return Ok(warn(format!("{}; changes last only until XenoNet quits", s(l.get("problem"))), Some("Fix the file or its folder, then restart XenoNet.")));
-    }
-    let issues = list(file_get("issues"));
-    if let Some(first) = issues.first() {
-        let path = c.tilde(&first.get("path").map(display).unwrap_or_default());
-        let message = s(first.get("message"));
-        return Ok(warn(
-            format!(
-                "state.json has {} XenoNet can't use, such as {}: {}",
-                plural(issues.len() as f64, "part", None),
-                if path.is_empty() { "the whole file".into() } else { path },
-                message.strip_prefix("Invalid input: ").unwrap_or(&message)
-            ),
-            Some("Fix that part, or move state.json aside while XenoNet is closed to start afresh."),
-        ));
     }
     if let Some(st) = c.host.statfs(&dir).await {
         let free = n(st.get("bavail")) * n(st.get("bsize"));

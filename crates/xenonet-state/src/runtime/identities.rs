@@ -9,7 +9,7 @@ use crate::identities::{self as ids, LinkInput, Signin, TranscriptOwners};
 use crate::runtime::blocks::{health_of, Block};
 use crate::runtime::gatherer::{Gather, Options};
 use crate::runtime::git::Git;
-use crate::runtime::store::{obj_at, StateStore};
+use crate::runtime::saved::Saved;
 use crate::runtime::util::{lock, s, Clock};
 use crate::runtime::vendor::Vendor;
 use serde_json::{json, Map, Value};
@@ -255,7 +255,7 @@ impl IdentityWatch {
     /// Links the map's sessions and projects to identities, and keeps what
     /// that changes of the saved state. Gives the identities, and whether
     /// the saved state changed.
-    pub fn link(&self, graph: &mut Value, store: &StateStore) -> Result<Vec<Value>, String> {
+    pub fn link(&self, graph: &mut Value, store: &Saved) -> Result<Vec<Value>, String> {
         let now = self.clock.now();
         let saved = store.identities();
         let nodes = crate::runtime::util::items(graph.get("nodes")).to_vec();
@@ -329,43 +329,43 @@ impl IdentityWatch {
             }
         }
         // What linking changed of the saved state: the sign-in timelines
-        // and what's remembered of each identity.
-        store.with(|d| {
-            let signins = obj_at(d, &["identities", "signins"]);
-            for (app, op) in &out.signins {
-                let spans = signins.entry(app.to_string()).or_insert_with(|| json!([]));
-                if !spans.is_array() {
-                    *spans = json!([]);
-                }
-                if let Some(list) = spans.as_array_mut() {
-                    match op {
-                        Signin::Same => {}
-                        Signin::Extend(to) => {
-                            if let Some(last) = list.last_mut().and_then(Value::as_object_mut) {
-                                last.insert("to".into(), crate::runtime::util::num(*to));
-                            }
-                        }
-                        Signin::Push { span, drop } => {
-                            list.push(span.clone());
-                            let n = (*drop).min(list.len());
-                            list.drain(..n);
-                        }
+        // and what's remembered of each identity, each kept as it changes.
+        for (app, op) in &out.signins {
+            let had = saved.get("signins").and_then(|s| s.get(*app));
+            let mut list = had.and_then(Value::as_array).cloned().unwrap_or_default();
+            match op {
+                Signin::Same if had.is_some_and(Value::is_array) => continue,
+                Signin::Same => {}
+                Signin::Extend(to) => {
+                    if let Some(last) = list.last_mut().and_then(Value::as_object_mut) {
+                        last.insert("to".into(), crate::runtime::util::num(*to));
                     }
                 }
-            }
-            let known = obj_at(d, &["identities", "known"]);
-            for (id, whole, value) in &out.known {
-                if *whole {
-                    known.insert(id.clone(), value.clone());
-                } else if let (Some(Value::Object(k)), Value::Object(v)) = (known.get_mut(id), value) {
-                    for (a, b) in v {
-                        k.insert(a.clone(), b.clone());
-                    }
+                Signin::Push { span, drop } => {
+                    list.push(span.clone());
+                    let n = (*drop).min(list.len());
+                    list.drain(..n);
                 }
             }
-        });
-        if out.dirty {
-            store.save();
+            store.set_signins(app, &Value::Array(list));
+        }
+        // Only what changed is written: a refresh that saw the same leaves
+        // the store alone.
+        for (id, whole, value) in &out.known {
+            let had = saved.get("known").and_then(|k| k.get(id));
+            if *whole {
+                if had != Some(value) {
+                    store.set_identity_known(id, value);
+                }
+            } else if let (Some(Value::Object(k)), Value::Object(v)) = (had, value) {
+                let mut next = k.clone();
+                for (a, b) in v {
+                    next.insert(a.clone(), b.clone());
+                }
+                if &next != k {
+                    store.set_identity_known(id, &Value::Object(next));
+                }
+            }
         }
         if let Some(g) = graph.as_object_mut() {
             g.insert("identities".into(), Value::Array(out.list.clone()));

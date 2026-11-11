@@ -291,6 +291,7 @@ impl Host {
             permission_hold_ms: config.permission_hold_ms,
             launcher_exec: config.launcher_exec.clone(),
             made_up: xenonet_runtime::actors::MadeUp::none(),
+            db: Some(Arc::new(xenonet_store::Db::open(Path::new(&config.state_dir)).expect("the test machine's store"))),
         };
         // The real adapters, as the binary installs them at start.
         xenonet_platforms::install();

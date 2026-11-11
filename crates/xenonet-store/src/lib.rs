@@ -21,6 +21,7 @@ pub mod engine;
 pub mod net;
 pub mod schema;
 pub mod sql;
+pub mod state;
 
 pub use chains::Put;
 

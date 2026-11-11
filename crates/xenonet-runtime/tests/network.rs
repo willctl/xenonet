@@ -325,6 +325,7 @@ fn net3(name: &str) -> Net3 {
             permission_hold_ms: None,
             launcher_exec: None,
             made_up: xenonet_runtime::actors::MadeUp::none(),
+            db: Some(Arc::new(xenonet_store::Db::open(Path::new(&state)).expect("the test machine's store"))),
         };
         let mut cores = Cores::pending(false, false);
         cores.state = Arc::new(Fake { at, sessions, detail: detail.clone() });

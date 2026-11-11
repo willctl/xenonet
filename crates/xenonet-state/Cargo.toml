@@ -36,6 +36,10 @@ xenonet-sources.workspace = true
 [dev-dependencies]
 ruzstd.workspace = true
 xenonet-platforms.workspace = true
+# What XenoNet saves for you, kept in a store in memory, as the service
+# keeps it (the runtime's Store core).
+xenonet-runtime.workspace = true
+xenonet-store.workspace = true
 
 [lints]
 workspace = true

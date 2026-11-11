@@ -186,3 +186,24 @@ fn a_new_own_person_takes_the_place_of_the_one_before() {
     assert_eq!(db.persons().unwrap().len(), 1);
     assert_eq!(db.person::<PersonPolicy>("prs_b").unwrap().len(), 1);
 }
+
+#[test]
+fn what_you_saved_keeps_the_order_it_was_saved_in() {
+    let db = Db::memory().unwrap();
+    db.set_layout(&[("b".into(), Some([1.0, 2.0, 3.5])), ("a".into(), Some([0.0, 0.0, 0.0]))]).unwrap();
+    db.set_layout(&[("b".into(), Some([4.0, 4.0, 4.0]))]).unwrap();
+    assert_eq!(xenonet_text::json::stringify(&db.layout().unwrap(), 0), r#"{"b":{"x":4,"y":4,"z":4},"a":{"x":0,"y":0,"z":0}}"#, "a place moved keeps its turn");
+    db.set_layout(&[("b".into(), None)]).unwrap();
+    assert_eq!(db.layout().unwrap().as_object().unwrap().len(), 1);
+    db.set_setting("theme", Some(&serde_json::json!("rime"))).unwrap();
+    assert_eq!((db.setting("theme").unwrap(), db.setting("environment").unwrap()), (serde_json::json!("rime"), serde_json::Value::Null));
+    db.set_app_setting("sorter", "picks", "/p", Some(&serde_json::json!({ "picks": [] }))).unwrap();
+    assert_eq!(db.app_setting("sorter", "picks", "/p").unwrap(), Some(serde_json::json!({ "picks": [] })));
+    db.set_identity_name("git:a", Some("work")).unwrap();
+    db.set_identity_pin("claude:x", Some(("git:a", 5.0))).unwrap();
+    db.set_signins("an-app", &serde_json::json!([{ "id": "claude:x", "from": 1, "to": 2 }])).unwrap();
+    let ids = db.identities().unwrap();
+    assert_eq!(ids["names"]["git:a"], "work");
+    assert_eq!(ids["pins"]["claude:x"], serde_json::json!({ "identity": "git:a", "at": 5 }));
+    assert_eq!(ids["signins"]["an-app"][0]["to"], 2);
+}

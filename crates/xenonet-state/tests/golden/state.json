@@ -2754,20 +2754,7 @@
    "checkedAt": 1791028830000
   }
  },
- "stateLoad": {
-  "file": "<world>/state/state.json",
-  "version": 1,
-  "migrated": {
-   "from": 1,
-   "to": 2
-  },
-  "backup": "<world>/state/state.v1.json",
-  "broken": null,
-  "readOnly": false,
-  "problem": null
- },
- "stateFile": {
-  "version": 2,
+ "saved": {
   "workspace": {
    "root": null
   },
@@ -2779,6 +2766,8 @@
     "github:github.com/orbitworks": "orbit",
     "git:8bed4c8b3ce0bd80": "orbit"
    },
+   "hidden": {},
+   "pins": {},
    "known": {
     "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": {
      "kind": "claude",
@@ -2884,57 +2873,11 @@
       "to": 1791028830000
      }
     ]
-   },
-   "hidden": {},
-   "pins": {}
+   }
   },
-  "projects": {
-   "codexByRoot": {},
-   "rules": {}
-  },
+  "rules": {},
   "layout": {},
   "acks": {},
   "marks": {}
- },
- "stateBackup": {
-  "identities": {
-   "names": {
-    "github:github.com/atlas-co": "work",
-    "git:f28de9788483a200": "work",
-    "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": "work",
-    "github:github.com/orbitworks": "orbit",
-    "git:8bed4c8b3ce0bd80": "orbit"
-   },
-   "known": {
-    "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002": {
-     "kind": "claude",
-     "handle": "nova@atlas.example",
-     "detail": {
-      "plan": "Team",
-      "org": "Atlas"
-     },
-     "firstSeen": 1788436800000,
-     "lastSeen": 1791000000000
-    }
-   },
-   "signins": {
-    "claude": [
-     {
-      "id": "claude:0190d3e0-0000-7000-a000-000000000002:0190d3e0-0000-7000-b000-000000000002",
-      "from": 1788436800000,
-      "to": 1791000000000
-     },
-     {
-      "id": "claude:0190d3e0-0000-7000-a000-000000000001:0190d3e0-0000-7000-b000-000000000001",
-      "from": 1791000000000,
-      "to": 1791025200000
-     }
-    ]
-   }
-  }
- },
- "stateFiles": [
-  "state.json",
-  "state.v1.json"
- ]
+ }
 }

@@ -44,6 +44,9 @@ pub struct Setup {
     pub launcher_exec: Option<String>,
     /// The demo's world as the actors' requests name it.
     pub made_up: crate::actors::MadeUp,
+    /// The one store (`crate::open_store`); without it the engine isn't
+    /// made.
+    pub db: Option<Arc<xenonet_store::Db>>,
 }
 
 pub struct Runtime {

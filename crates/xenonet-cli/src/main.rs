@@ -138,8 +138,9 @@ fn log_error(fail: &Fail, argv: &[String]) {
 
 /// `xenonet serve`: the service, with each core its crate's
 /// implementation: the demo's world first, which moves the
-/// folders the rest use, then the map, the engine and actors, then the
-/// app's parts and the console's, each given the settings it reads.
+/// folders the rest use, then the one store, what it saves for you, the
+/// map, the engine and actors, then the app's parts and the console's,
+/// each given the settings it reads.
 fn serve(args: &[String]) -> i32 {
     xenonet_service::serve::run_with(
         args,
@@ -157,6 +158,12 @@ fn serve(args: &[String]) -> i32 {
                 root: config.root.clone(),
                 world: config.world.clone(),
             };
+            // The one store, which every part that keeps something keeps in;
+            // what XenoNet saves for you is its first core.
+            let db = xenonet_runtime::open_store(&config.state_dir, env);
+            if let Some(db) = &db {
+                cores.store = std::sync::Arc::new(xenonet_runtime::saved::Saved::new(db.clone()));
+            }
             xenonet_state::runtime::wire(&mut cores, &map, demo, env);
             let setup = xenonet_runtime::runtime::Setup {
                 demo: config.demo,
@@ -171,6 +178,7 @@ fn serve(args: &[String]) -> i32 {
                 permission_hold_ms: config.permission_hold_ms,
                 launcher_exec: config.launcher_exec.clone(),
                 made_up: xenonet_runtime::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
+                db,
             };
             // The engine's world, which the network's link plugs into once
             // the service has made it.

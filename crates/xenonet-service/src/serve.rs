@@ -243,7 +243,7 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
                 parts.net = Some(svc);
             }
             Err(e) => {
-                ctx.log("warn", "net.open", &format!("the network couldn't be read: {}", e.message), None, Some("xenonet doctor says more; xenonet net leave forgets the network"))
+                ctx.log("warn", "net.open", &format!("the network couldn't be read: {}", e.message), None, Some("xenonet doctor says more; xenonet net leave forgets the network"));
             }
         }
     }

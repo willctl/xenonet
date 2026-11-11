@@ -56,6 +56,7 @@ fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBu
         permission_hold_ms: None,
         launcher_exec: None,
         made_up: xenonet_runtime::actors::MadeUp { sessions: xenonet_demo::session_titles(), claude_account: xenonet_demo::demo_claude_account },
+        db: Some(Arc::new(xenonet_store::Db::open(std::path::Path::new(&state)).expect("the test machine's store"))),
     };
     let empty = Arc::new(Empty::default());
     let mut cores = Cores::pending(true, false);

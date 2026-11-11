@@ -12,14 +12,6 @@ use xenonet_os::paths::{self, is_under, path_key};
 use xenonet_text::json::number_string;
 use xenonet_text::text::{display, trim, truthy};
 
-/// The folder state.json says you chose, read as the file is (nothing moved
-/// up, set aside or written); None without one.
-pub fn saved_root(file: &str) -> Option<String> {
-    let b = std::fs::read(file).ok()?;
-    let v = xenonet_text::json::parse(&String::from_utf8_lossy(&b)).ok()?;
-    v.get("workspace")?.get("root")?.as_str().map(String::from)
-}
-
 // paths.tilde: nothing to do without a home.
 fn tilde(text: &str, home: &str) -> String {
     if text.is_empty() || home.is_empty() {
@@ -31,10 +23,10 @@ fn tilde(text: &str, home: &str) -> String {
 
 /// The folder in use and where that comes from: `env_dir` is
 /// XENONET_PROJECTS_DIR (as set; the demo has none), `saved` the choice as
-/// the store or state.json has it.
+/// the store has it.
 pub fn root(env_dir: Option<&str>, saved: Option<&Value>, home: &str) -> Value {
     let env = env_dir.filter(|d| !d.is_empty()).map(paths::resolve);
-    // One that isn't a full path (state.json edited by hand) is no choice.
+    // One that isn't a full path is no choice.
     let chosen = saved.and_then(Value::as_str).filter(|s| NATIVE.is_absolute(s)).map(String::from);
     let fallback = paths::join(home, "Projects");
     let path = env.clone().or_else(|| chosen.clone()).unwrap_or_else(|| fallback.clone());

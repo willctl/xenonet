@@ -68,7 +68,7 @@ export function createRootPanel({ modals, sfx, toast, desktop = null }) {
         <button class="act primary" data-root-use disabled>Use this folder</button>
         ${info.source === "chosen" ? `<button class="act" data-root-reset>Back to ${h(tildePath(info.default))}</button>` : ""}
         <span class="grow"></span>
-        <span class="pj-foot">Kept in XenoNet's state.json</span>
+        <span class="pj-foot">Kept by XenoNet on this computer</span>
       </div>`;
 
     const field = body.querySelector("[data-root-field]");

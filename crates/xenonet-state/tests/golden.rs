@@ -59,10 +59,10 @@ use xenonet_state::projects::{FactsCache, Scan, SCAN_DEPTH, SCAN_MAX_DIRS, SCAN_
 use xenonet_state::runtime::config::MapConfig;
 use xenonet_state::runtime::demo::DemoWorld;
 use xenonet_state::runtime::git::{Git, GitHost, Ran};
+use xenonet_state::runtime::saved::{seed, Saved};
 use xenonet_state::runtime::search::TranscriptSearch;
 use xenonet_state::runtime::state::{transcript_dirs, MapState, Readers};
 use xenonet_state::runtime::stats::Stats;
-use xenonet_state::runtime::store::StateStore;
 use xenonet_state::runtime::util::{fields, num, Clock};
 use xenonet_state::runtime::vendor::Vendor;
 
@@ -716,7 +716,9 @@ impl GitHost for FixtureGit {
 // What the map's refresh makes of the world, as the service's state does
 // it in the demo, read with the clock where the live tailer's test left
 // it: refresh, the repos' pass, and refresh again; then the map, the
-// identities, the projects, the repos, and state.json as it's saved.
+// identities, the projects, the repos, and what the store keeps. The
+// world's state/state.json is what XenoNet remembered when the fixture was
+// recorded: saved first, as the service saves the demo's made-up person.
 async fn map(w: &World, c: &mut Check) {
     let made = w.clock();
     let clock = Clock::fixed(made + 30e3);
@@ -727,10 +729,13 @@ async fn map(w: &World, c: &mut Check) {
     cfg.clock = clock.clone();
     cfg.git = Git::new(FixtureGit { home: w.dir("home") });
     let vendor = vendor();
-    let store = StateStore::with_clock(&cfg.state_dir, &cfg.projects_dir, clock.clone());
+    let db = Arc::new(xenonet_store::Db::memory().expect("a store in memory"));
+    let tick = clock.clone();
+    let store = Saved::new(Arc::new(xenonet_runtime::saved::Saved::with_clock(db, Arc::new(move || tick.now()))));
+    let remembered = xenonet_text::json::parse(&std::fs::read_to_string(Path::new(&cfg.state_dir).join("state.json")).expect("the fixture's state")).expect("JSON");
+    seed(&store, &remembered["identities"]);
     let roots: Vec<(String, String)> = xenonet_adapter::platforms().iter().filter_map(|p| Some((transcript_dirs(&cfg, p.id()).into_iter().next()?, p.id().to_string()))).collect();
     let live = xenonet_state::runtime::live::Live::with_clock(&roots, cfg.claude_desktop_dir.as_deref(), cfg.claude_usage, &cfg.home_dir, vendor.clone(), clock);
-    let state_dir = cfg.state_dir.clone();
     let state = MapState::new(cfg, store.clone(), vendor, &xenonet_api::wire::WireEnv::new("0.0.0"), Readers::Demo(demo), live);
     state.refresh_map().await.expect("a map");
     state.refresh_repos().await;
@@ -748,16 +753,18 @@ async fn map(w: &World, c: &mut Check) {
         "identities": state.identity_detection().expect("the identities"),
         "projects": state.project_detection().await.expect("the projects"),
         "repos": Value::Object(repos.into_iter().collect()),
-        "stateLoad": store.load_report(),
     });
     state.end();
-    let read = |name: &str| xenonet_text::json::parse(&std::fs::read_to_string(Path::new(&state_dir).join(name)).expect(name)).expect(name);
-    let mut files: Vec<String> = std::fs::read_dir(&state_dir).expect("the state folder").filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    files.sort();
+    let core = store.core();
     let mut out = out;
-    out["stateFile"] = read("state.json");
-    out["stateBackup"] = read("state.v1.json");
-    out["stateFiles"] = json!(files);
+    out["saved"] = json!({
+        "workspace": { "root": core.workspace_root().expect("the folder") },
+        "identities": core.identities().expect("the identities"),
+        "rules": core.project_rules().expect("the rules"),
+        "layout": core.layout().expect("the layout"),
+        "acks": core.acks().expect("the acks"),
+        "marks": core.marks().expect("the marks"),
+    });
     c.golden("state", &out);
 }
 

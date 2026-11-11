@@ -1,4 +1,5 @@
-//! Your standing settings and what reads them: state.json's (core/store.js),
+//! Your standing settings and what reads them: what XenoNet saves for you
+//! (core/store.js, now the store's),
 //! themes (core/themefiles.js), the xenonet command on your PATH
 //! (core/command.js), opening things (core/open.js), the schema checks
 //! (core/schema/index.js) and the demo's made-up world (core/demo.js).
@@ -13,13 +14,28 @@ const OPEN: &str = "core/open.js";
 const SCHEMAS: &str = "core/schema/index.js";
 const DEMO: &str = "core/demo.js";
 
+/// What XenoNet saves for you on this machine (the store's state domain):
+/// the map's layout, dismissed alerts, markers, the projects folder you
+/// chose and your rules for it, each app's settings, your theme and
+/// environment, and what you said of identities with what XenoNet has
+/// seen of them. Each part answers as its JSON object, in the order its
+/// keys were saved.
 pub trait Store: Send + Sync {
     fn ack(&self, _session: &str) -> R<()> {
+        pending(STORE)
+    }
+    /// The alerts dismissed: `{ session: at }`.
+    fn acks(&self) -> R<Value> {
+        pending(STORE)
+    }
+    fn marks(&self) -> R<Value> {
         pending(STORE)
     }
     fn layout(&self) -> R<Value> {
         pending(STORE)
     }
+    /// Each id's new place (`{ x, y, z }`, kept to two decimals), or null
+    /// to forget it; a place that isn't three numbers is left alone.
     fn set_layout(&self, _positions: &Value) -> R<()> {
         pending(STORE)
     }
@@ -39,14 +55,58 @@ pub trait Store: Send + Sync {
     fn set_environment(&self, _id: &str) -> R<()> {
         pending(STORE)
     }
-    /// `store.loadReport()`, for the doctor.
-    fn load_report(&self) -> R<Value> {
+    /// The projects folder you chose, or null.
+    fn workspace_root(&self) -> R<Value> {
         pending(STORE)
     }
-    /// `store.getIdentities()`: the names you gave identities and the ones
-    /// you hid (`{ names, hidden, … }`), which a hub's merged map applies to
-    /// other hosts' identities too.
+    fn set_workspace_root(&self, _dir: Option<&str>) -> R<()> {
+        pending(STORE)
+    }
+    /// Your rules for the projects folder: `{ key: rule }`.
+    fn project_rules(&self) -> R<Value> {
+        pending(STORE)
+    }
+    /// A rule, or (None) its removal.
+    fn set_project_rule(&self, _key: &str, _rule: Option<&Value>) -> R<()> {
+        pending(STORE)
+    }
+    /// Every rule, or with a projects folder's path key only those for the
+    /// folders inside it.
+    fn clear_project_rules(&self, _under_key: Option<&str>) -> R<()> {
+        pending(STORE)
+    }
+    /// An app's setting for a scope (`picks` for a projects folder's key),
+    /// if it was saved.
+    fn app_setting(&self, _app: &str, _name: &str, _scope: &str) -> R<Option<Value>> {
+        pending(STORE)
+    }
+    fn set_app_setting(&self, _app: &str, _name: &str, _scope: &str, _value: Option<&Value>) -> R<()> {
+        pending(STORE)
+    }
+    /// `store.getIdentities()`: the names you gave identities, the ones
+    /// you hid, the ones you pinned to a node, what XenoNet knows of each
+    /// and the sign-ins it has seen (`{ names, hidden, pins, known,
+    /// signins }`), which a hub's merged map applies to other hosts'
+    /// identities too.
     fn identities(&self) -> R<Value> {
+        pending(STORE)
+    }
+    fn set_identity_name(&self, _id: &str, _name: Option<&str>) -> R<()> {
+        pending(STORE)
+    }
+    fn set_identity_hidden(&self, _id: &str, _hidden: bool) -> R<()> {
+        pending(STORE)
+    }
+    /// The identity pinned to a node, now, or (None) no pin.
+    fn set_identity_pin(&self, _node: &str, _identity: Option<&str>) -> R<()> {
+        pending(STORE)
+    }
+    /// What XenoNet knows of an identity, in place of what it knew.
+    fn set_identity_known(&self, _id: &str, _value: &Value) -> R<()> {
+        pending(STORE)
+    }
+    /// An app's sign-ins as XenoNet has seen them, in place of what was.
+    fn set_signins(&self, _app: &str, _spans: &Value) -> R<()> {
         pending(STORE)
     }
 }

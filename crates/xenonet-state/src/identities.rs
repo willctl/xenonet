@@ -19,8 +19,8 @@ use xenonet_sources::lines::{opt_prop, prop, Js, TypeError};
 use xenonet_text::text::{display, is_line_terminator, to_number, trim, trim_start, truthy, DOT, SPACE};
 use xenonet_text::{json as js_json, utf16};
 
-// A sign-in's span is extended this often while it lasts, so state.json
-// isn't rewritten on every refresh.
+// A sign-in's span is extended this often while it lasts, so the store
+// isn't written on every refresh.
 pub const SIGNIN_STEP_MS: f64 = 10.0 * 60e3;
 pub const MAX_SPANS: usize = 50;
 pub const HEAD_BYTES: u64 = 64 * 1024;

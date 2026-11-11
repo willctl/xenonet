@@ -3,7 +3,8 @@
 //! drives it (`live`), the drivers of the crate's `stats`, `search`,
 //! `projects` and `identities` (each in the module of the same name here),
 //! the gatherer, git and the narration, the demo world's driver (`demo`),
-//! the vendor readers (`vendor`, `observed`), the store, and the schemas'
+//! the vendor readers (`vendor`, `observed`), what XenoNet saves for you
+//! (`saved`, over the Store core the service gives it), and the schemas'
 //! drift report. The service calls `demo_world`, then `wire`.
 
 // A core's failure is the api's CoreError, as its traits return it.
@@ -19,11 +20,11 @@ pub mod live;
 pub mod narrate;
 pub mod observed;
 pub mod projects;
+pub mod saved;
 pub mod schemas;
 pub mod search;
 pub mod state;
 pub mod stats;
-pub mod store;
 pub mod util;
 pub mod vendor;
 
@@ -58,7 +59,8 @@ pub fn demo_world(cores: &mut Cores, on: bool, port: u16) -> Option<Arc<demo::De
 }
 
 /// Puts this area's cores in place of the pending ones, over the demo's
-/// world when there is one (`demo`).
+/// world when there is one (`demo`), and over what XenoNet saves for you
+/// (`cores.store`, which the service puts in place first).
 pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoWorld>>, env: &WireEnv) {
     util::set_log(&env.emitter);
     // The service's one drift log, where the readers record what they
@@ -75,7 +77,12 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
     // check their records through too.
     let readers = env.readers.get_or_make(|| xenonet_schema::vendor::Readers::new(dir.clone(), env.drift.clone()));
     let vendor = vendor::Vendor::with_readers(readers);
-    let store = store::StateStore::with_clock(&cfg.state_dir, &cfg.projects_dir, cfg.clock.clone());
+    let store = saved::Saved::new(cores.store.clone());
+    // What the demo's made-up person would have saved: the names Nova
+    // gave, and the accounts XenoNet saw.
+    if let Some(remembered) = demo.as_ref().and_then(|d| d.remembered()) {
+        saved::seed(&store, &remembered);
+    }
     // The folder each app writes its transcripts in now, which the tailer
     // follows.
     let roots: Vec<(String, String)> =
@@ -88,7 +95,6 @@ pub fn wire(cores: &mut Cores, settings: &Settings, demo: Option<Arc<demo::DemoW
     };
     let map = state::MapState::new(cfg, store.clone(), vendor.clone(), env, readers, live);
     cores.state = map.clone();
-    cores.store = Arc::new(store::StoreCore(store));
     cores.schemas = Arc::new(schemas::SchemaCore);
     cores.drift = Arc::new(schemas::Drift { vendor });
     // Runs actors report, when there are actors.

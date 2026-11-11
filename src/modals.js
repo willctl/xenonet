@@ -396,7 +396,7 @@ export function createModals({ sfx, toast, select, onPoster, identities = null, 
         <div class="m-foot">
           <button class="act" data-id-mask>${m ? "Show identities" : "Hide identities"}</button>
           <span class="grow"></span>
-          <span class="pj-foot">Names and pins stay in XenoNet's state.json</span>
+          <span class="pj-foot">Names and pins stay with XenoNet on this computer</span>
           <button class="act" data-id-rescan>Detect identities again</button>
         </div>`;
     }

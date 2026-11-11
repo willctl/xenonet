@@ -85,8 +85,6 @@ const NOT_AN_APP = [
   { file: "crates/xenonet-assistant/src/runtime/reads.rs", text: `("cursor", &cursor)`, why: "a read's page cursor argument" },
   { file: "crates/xenonet-runtime/src/remote/relay.rs", text: `k == "cursor" && chars_ok`, why: "a relayed read's page cursor parameter" },
   { file: "crates/xenonet-state/src/state.rs", text: `"rules": list, "codex": codex })`, why: "the project detection answer's field for the sorter's picks, a wire name the HTTP goldens pin" },
-  { file: "crates/xenonet-state/src/statefile.rs", text: `projects.get("codex")`, why: "state.json v1's field for the projects folder's picks, a stored document's name" },
-  { file: "crates/xenonet-state/src/statefile.rs", text: `k != "codex" && k != "codexByRoot"`, why: "state.json v1's field for the projects folder's picks, a stored document's name" },
 ];
 
 const apps = JSON.parse(fs.readFileSync(path.join(root, "crates/xenonet-adapter/src/apps.json"), "utf8"));

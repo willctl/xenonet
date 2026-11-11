@@ -15,9 +15,9 @@ use crate::runtime::git::RepoWatch;
 use crate::runtime::identities::IdentityWatch;
 use crate::runtime::live::{Event, Live};
 use crate::runtime::projects::Projects;
+use crate::runtime::saved::Saved;
 use crate::runtime::search::TranscriptSearch;
 use crate::runtime::stats::Stats;
-use crate::runtime::store::StateStore;
 use crate::runtime::util::{get, items, lock, log, num, obj, s};
 use crate::runtime::vendor::Vendor;
 use crate::state::{self as decide, Memory};
@@ -88,7 +88,7 @@ type Done = Option<Result<Value, String>>;
 pub struct MapState {
     me: Weak<MapState>,
     pub cfg: MapConfig,
-    store: Arc<StateStore>,
+    store: Saved,
     vendor: Arc<Vendor>,
     emitter: Emitter,
     /// The decider the project picks ask, once the service has it.
@@ -204,7 +204,7 @@ impl MapState {
     /// A state over `cfg`, with a lister for each app the adapters list
     /// sessions of, made on the runtime this is called on: its events,
     /// version and decider are `env`'s.
-    pub fn new(cfg: MapConfig, store: Arc<StateStore>, vendor: Arc<Vendor>, env: &WireEnv, readers: Readers, live: Arc<Live>) -> Arc<MapState> {
+    pub fn new(cfg: MapConfig, store: Saved, vendor: Arc<Vendor>, env: &WireEnv, readers: Readers, live: Arc<Live>) -> Arc<MapState> {
         let (emitter, decider, version) = (env.emitter.clone(), env.decider.clone(), env.version.as_str());
         // Each app's transcript folders, in the registry's order.
         let dirs: Vec<(String, Vec<String>)> =
@@ -227,11 +227,9 @@ impl MapState {
             )
         });
         let gatherer = |name: &str| Arc::new(Gather::new(name, Options { fallback: json!([]), clock: cfg.clock.clone(), ..Default::default() }));
-        // The projects folder you chose, if you did (`crate::workspace`), as
-        // state.json has it: the store itself is read at the first refresh,
-        // with the rest of what it saves then.
-        let saved = workspace::saved_root(&std::path::Path::new(&cfg.state_dir).join("state.json").to_string_lossy()).map(Value::String);
-        let root = workspace::root(cfg.env_projects_dir.as_deref(), saved.as_ref(), &cfg.home_dir);
+        // The projects folder you chose, if you did (`crate::workspace`).
+        let saved = store.workspace_root();
+        let root = workspace::root(cfg.env_projects_dir.as_deref(), Some(&saved), &cfg.home_dir);
         let projects_dir = root["path"].as_str().unwrap_or(&cfg.projects_dir).to_string();
         let handle = tokio::runtime::Handle::current();
         let listers: Vec<(&'static App, Arc<dyn Lister>)> = xenonet_adapter::platforms()
@@ -288,7 +286,6 @@ impl MapState {
         // The building blocks it's made of, for /api/health and the doctor.
         // The ones that read for a source of the map say which.
         let b = &state.blocks;
-        let _ = b.add(store, None);
         // Each listed app's: its sessions' gatherer, its own projects', and
         // the block of a client its lister keeps running.
         for g in &state.gathers {
@@ -942,7 +939,6 @@ impl MapState {
             l.stop();
         }
         self.search.close();
-        self.store.flush();
     }
 
     // ---------- the projects folder ----------
@@ -1599,12 +1595,7 @@ impl State for MapState {
     fn forget_layout(&self, prefix: &str) -> R<usize> {
         let gone: Vec<String> = self.store.layout().as_object().map(|m| m.keys().filter(|k| k.starts_with(prefix)).cloned().collect()).unwrap_or_default();
         if !gone.is_empty() {
-            self.store.change(|d| {
-                let layout = crate::runtime::store::obj_at(d, &["layout"]);
-                for k in &gone {
-                    layout.shift_remove(k);
-                }
-            });
+            self.store.forget_layout(&gone);
         }
         Ok(gone.len())
     }

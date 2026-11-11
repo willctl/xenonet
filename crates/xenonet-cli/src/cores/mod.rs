@@ -119,9 +119,9 @@ pub fn connect_remove(opts: &Value) -> Res<Value> {
 
 /// checkup({ ...flags, only }) with no XenoNet running: the checks run
 /// here, on the folders of the XenoNet asked about. XenoNet Dev keeps its
-/// state.json and drift.json apart from the installed XenoNet's; in them,
-/// the projects folder it would read, the one you chose included, as
-/// state.json has it.
+/// store and drift.json apart from the installed XenoNet's. The folder you
+/// chose is the store's, which only the service reads: here the projects
+/// folder is XENONET_PROJECTS_DIR's or the default.
 pub fn checkup_here(flags: &crate::args::Flags, only: Option<&[String]>) -> Res<Value> {
     let cfg = crate::config::config()?;
     let demo = crate::config::demo();
@@ -130,10 +130,9 @@ pub fn checkup_here(flags: &crate::args::Flags, only: Option<&[String]>) -> Res<
         Some(n) => (crate::config::instance_dir("state", n), crate::config::instance_dir("cache", n)),
         None => (cfg.state_dir.clone(), cfg.cache_dir.clone()),
     };
-    let saved = xenonet_state::workspace::saved_root(&sys::join(&state_dir, "state.json")).map(Value::String);
     // XENONET_PROJECTS_DIR doesn't apply to the demo, whose world has its own.
     let env_dir = if demo { None } else { std::env::var("XENONET_PROJECTS_DIR").ok() };
-    let root = xenonet_state::workspace::root(env_dir.as_deref(), saved.as_ref(), &cfg.home_dir);
+    let root = xenonet_state::workspace::root(env_dir.as_deref(), None, &cfg.home_dir);
     let paths = json!({
         "homeDir": cfg.home_dir,
         "projectsDir": root["path"],
