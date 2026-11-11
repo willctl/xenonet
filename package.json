@@ -23,6 +23,7 @@
     "lint:rust": "node scripts/rust-lint.mjs",
     "coverage:rust": "node scripts/rust-coverage.mjs",
     "rust:bin": "node scripts/rust-bin.mjs",
+    "formal": "node scripts/formal.mjs",
     "drive": "node scripts/xenonet.mjs console",
     "bench:gpu": "node scripts/gpu-bench.mjs",
     "bench:service": "node scripts/bench-service.mjs",

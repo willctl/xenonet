@@ -95,6 +95,19 @@ jobs:
       - if: steps.tools.outputs.cache-hit != 'true'
         run: cargo install --locked cargo-deny@0.20.2 cargo-shear@1.14.0
       - run: npm run lint:rust
+  # The formal model of feed delivery (formal/README.md): its scenarios,
+  # random runs of the design against the safety invariants, and every
+  # seeded bug found. Quint comes through npx, at the version
+  # scripts/formal.mjs pins, so nothing is installed first.
+  formal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: npm run formal
   updates:
     runs-on: windows-latest
     timeout-minutes: 30

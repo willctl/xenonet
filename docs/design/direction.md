@@ -536,7 +536,9 @@ Will's step on inix and NEO-REX.
 | 8 | Presence converges after quiet; a restored or reinstalled machine writes from a new incarnation and never collides with its old entries; a fork within one incarnation is detected and freezes the author | turmoil plus proptest |
 | 9 | Relation schema: no userset cycle or unintended inheritance across org, network, project and space roles | Alloy 6, run when the role or subject enums change |
 
-One `formal` CI job under five minutes; larger bounds nightly. A protocol
+The models live in `formal/` ([formal/README.md](../../formal/README.md)),
+run by one `formal` CI job under five minutes (`npm run formal`). There is
+no nightly `quint verify` (Apalache) yet; the README says why. A protocol
 change edits the spec first. Not verified formally: parsers and drift
 (fuzz and golden files), the UI and hook plumbing (e2e), crypto primitives
 (audited crates), migrations (round-trip tests).

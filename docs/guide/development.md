@@ -16,6 +16,7 @@ npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
 npm run lint:rust   # the layering check, formatting, clippy, docs and the dependency checks
 npm run cargo -- test --workspace  # the Rust tests, golden files included, on the pinned toolchain
 npm run coverage:rust  # how much of the Rust core the tests run, crate by crate (see Coverage)
+npm run formal    # the Quint model of feed delivery: scenarios, random runs, seeded bugs (formal/README.md)
 ```
 
 ## XenoNet Dev
@@ -343,6 +344,7 @@ Its contract with the outside is held by golden files, recorded from the JS impl
 
 - `xenonet.mjs`, which runs the checkout's newer build of the binary (`npm run drive`, and the xenonet-console MCP server)
 - `cargo.mjs`, `rust-bin.mjs`, `rust-lint.mjs`, `rust-layers.mjs`, `rust-coverage.mjs`, `rust-release.mjs`: cargo on the pinned toolchain, the binary, the lint checks, the layering check, coverage, and a release's binary
+- `formal.mjs` (`npm run formal`), the Quint models in `formal/` on the pinned Quint version
 - `apps.mjs`, which writes `crates/xenonet-adapter/src/apps.json` from `src/shared/apps.js`
 - `gpu-bench.mjs` (`npm run bench:gpu`), what the console costs the machine on a Mac: GPU time, frame time, and the CPU and memory of Desktop and the service, with the window at rest, turning, busy, behind another app, covered, minimized and hidden, beside the machine's GPU use without XenoNet
 - `bench-service.mjs` (`npm run bench:service`), the service's own timings

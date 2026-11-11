@@ -467,6 +467,7 @@ npm run dev:install  # macOS: XenoNet Dev.app in ~/Applications, running this ch
 npm run cargo -- test --workspace  # the Rust tests, with the golden files of the API, the command and the MCP servers
 npm test          # the page's, Desktop's and the scripts' unit tests
 npm run test:e2e  # end-to-end tests, on a hidden XenoNet Dev with made-up data
+npm run formal    # the Quint model of feed delivery (formal/README.md)
 npm run drive -- launch shot:overview  # drive XenoNet Dev from a terminal
 npm run lab -- status  # macOS: the VM lab, Linux VMs to try other machines in
 npm run dist      # the installers for this OS, in release/ (dist:win, dist:mac)
