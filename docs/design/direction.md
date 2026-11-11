@@ -1,6 +1,6 @@
 # Direction: from the prototype to the system
 
-Status: analysis and target shape, 2026-11-08. Written for the goals in
+Status: analysis and target shape, last updated 2026-11-11. Written for the goals in
 [goals.md](goals.md). Phases 1 to 3 of the order of work are done;
 phases 4 to 6 are being built on `main`, and each says below what has
 landed and what is left. "Where the code stands" is the measure taken
@@ -147,7 +147,9 @@ xenonet-engine    coordination rules; defines Store and Transport, depends on ne
 xenonet-store     one SQLite per machine, single writer
 xenonet-api       the typed local protocol; the only crate surfaces import
 xenonet-service   composition root; no logic
-surfaces/         cli, mcp, a2a edge, the console's HTTP and SSE bridge
+xenonet-keys      the platform keys behind id's Signer and Vault (Secure Enclave, TPM, Windows Hello, polkit)
+xenonet-http      the local HTTP and SSE routes; imports xenonet-api alone
+surfaces          xenonet-cli, xenonet-mcp, xenonet-console and the A2A edge, crates under crates/
 adapters/         claude-code, codex, grok-build, hermes, opencode, acp, git
 xenonet-doctor    runs every Check the crates and adapters expose
 * usable alone by another project
@@ -382,9 +384,10 @@ Spotify) moves out of the core into the console.
 
 ### Xenolith
 
-Xenolith stays a separate program that depends on four libraries
-(`xenonet-id`, `-log`, `-authz`, `-net`, with the base crates they bring),
-never on the app: not the service, the runtime, the surfaces or the
+Xenolith stays a separate program that depends on XenoNet's libraries
+and never on the app: `xenonet-id`, `-log`, `-authz` and `-net`, the
+base crates `-model`, `-os` and `-text`, and `xenonet-keys`, which
+`-net` brings. It never takes the service, the runtime, the surfaces or the
 adapters (decided by Will on 2026-11-11: "Libraries OK, never app"). It
 runs fully on its own, on its own iroh endpoint, and uses a running
 XenoNet only through an optional forward. A space is a chain bound to a
@@ -567,7 +570,7 @@ Will's step on inix and NEO-REX.
    networks per machine, `svc/2`, intents for any machine, the
    three-service tests on iroh, and deleting the gateway and the remote
    relay.
-6. **Xenolith and the edges.** Xenolith adopts the four libraries, never
+6. **Xenolith and the edges.** Xenolith adopts the libraries, never
    the app, and deletes its own pairing, tokens and crypto; spaces bind to
    model ids; the generic ACP adapter; A2A outbound; MCP 2026-07-28.
    Landed: the Windows TPM key; the ACP client (`xenonet-acp`), which
@@ -680,8 +683,8 @@ for the phase that needs them.
     (recommended) or any member may volunteer? Networks start titles-only?
     Direct LAN paths on by default?
 11. **Xenolith and XenoNet's code.** Decided by Will on 2026-11-11:
-    "Libraries OK, never app." Xenolith may take `xenonet-id`, `-log`,
-    `-authz` and `-net` as libraries, never the service, runtime, surfaces
+    "Libraries OK, never app." Xenolith may take the libraries (`xenonet-id`,
+    `-log`, `-authz`, `-net`, with `-model`, `-os`, `-text` and `-keys`), never the service, runtime, surfaces
     or adapters, and keeps running fully on its own.
 
 ## Risks

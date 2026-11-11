@@ -4,7 +4,7 @@ Xenolith is shared context for every app and agent on a machine: an MCP server o
 plain Markdown, a curator that files notes into pages, sync between machines, a tray app with a
 window, and an installer. It stands alone and runs fully on its own. From XenoNet it may take
 only the libraries `xenonet-id`, `xenonet-log`, `xenonet-authz` and `xenonet-net` (with the base
-crates they bring: model, os, text), as path dependencies into `../crates`, never the app: not the
+crates they bring: model, os, text, and keys through net), as path dependencies into `../crates`, never the app: not the
 service, the runtime, the surfaces or the adapters (`scripts/rust-layers.mjs` fails on one). Other
 programs (XenoNet among them) read its folder through `FORMAT.md`. README.md describes what
 it does; this file is what an agent changing the code needs. While Xenolith lives in XenoNet's
@@ -86,7 +86,7 @@ A release is a tag `xenolith-v<version>` and four archives, built by
 | --- | --- |
 | Public commits use the repository identity; private paths and data stay out of tracked files | `scripts/check-public.mjs`; see `SECURITY.md` |
 | Lint every OS target before pushing Rust code | `scripts/check-rust.sh` (local) |
-| From XenoNet, only its libraries (xenonet-id, -log, -authz, -net and the base crates), never the app; nothing of XenoNet's depends on Xenolith | `scripts/rust-layers.mjs` (the root's `npm run lint:rust`) |
+| From XenoNet, only its libraries (xenonet-id, -log, -authz, -net, the base crates and -keys, which -net brings), never the app; nothing of XenoNet's depends on Xenolith | `scripts/rust-layers.mjs` (the root's `npm run lint:rust`) |
 | What XenoNet's libraries reach has the same versions, sources and checksums in both lockfiles, and no feature only Xenolith turns on | `scripts/xenolith-lock.mjs` (`npm run lint:rust`, Xenolith's CI) |
 | `xenolith` (the hook) and the tray reach no tokio, reqwest, rustls, hyper, iroh or quinn | `scripts/light.mjs` (`check-rust.sh`, Xenolith's CI) |
 | `package.json` and `rust/Cargo.toml` carry the same version | `scripts/build.mjs` fails |
