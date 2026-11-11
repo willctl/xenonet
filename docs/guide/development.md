@@ -19,6 +19,17 @@ npm run coverage:rust  # how much of the Rust core the tests run, crate by crate
 npm run formal    # the Quint model of feed delivery: scenarios, random runs, seeded bugs (formal/README.md)
 ```
 
+## How work runs
+
+XenoNet is a prototype with one user, so the loop is local and quick. [AGENTS.md](../../AGENTS.md) has the full rules.
+
+- While you build, run only the tests for what you touched: `npm run cargo -- test -p <crate>`, one test file, or one e2e spec.
+- Before a push, run the whole suite once: `npm run cargo -- test --workspace`, `npm test`, `npm run lint:rust` when `crates/` or `adapters/` changed, and `npm run test:e2e` when the change reaches the page, the API or tokens.
+- Land work on `main` in small Conventional Commits and push in batches. Open a pull request only for a change Will wants to read first.
+- Don't wait on CI. It catches what can't run here (Windows-only code, paths refused from under an agent); fix what it finds in the next commit.
+- Use [the VM lab](#the-vm-lab) for changes that span machines.
+- There is no backwards compatibility. Old networks, keys, tokens and state files are refused or ignored, and machines are set up again from scratch after a change to them.
+
 ## XenoNet Dev
 
 The desktop app run from source is XenoNet Dev. It has its own settings, port, layout and search index, so it runs beside an installed XenoNet without writing over its files. Its port is 47842. The first run copies the installed XenoNet's layout. `npm run dev`, the service alone, uses XenoNet Dev's port and folders too.
@@ -57,7 +68,7 @@ The page runs under a Content-Security-Policy, set in `crates/xenonet-http/src/s
 
 `npm run lab -- check` checks that each VM's XenoNets answer, that the VM is walled off from the Mac, and that only made-up names are in it.
 
-[scripts/lab/README.md](../../scripts/lab/README.md) says how to build and use the lab. Signing in inside the VMs, and adding them as hosts to a console, are yours to do.
+[scripts/lab/README.md](../../scripts/lab/README.md) says how to build and use the lab. Signing in inside the VMs, and joining them into a network, are yours to do.
 
 ## Developing on another computer
 
@@ -111,36 +122,42 @@ rustup component add llvm-tools --toolchain 1.99.1  # the channel rust-toolchain
 
 The instrumented builds go to `target/llvm-cov-target`, apart from the usual ones, so `cargo test` and `npm run lint:rust` don't build again after a run. From nothing, a run took about two and a half minutes on a 16-core Mac. llvm-cov counts the `#[cfg(test)]` modules in a crate's own files among its lines. The table has a row for each crate in `crates/`, and one row for all of `adapters/`.
 
-On 2026-11-09 the tests ran this share of each crate's lines:
+Last measured on 2026-11-11, the tests ran this share of each crate's lines:
 
 | Crate | Lines | Run |
 | --- | --- | --- |
-| adapters (all eleven) | 9,898 | 72.6% |
-| xenonet-actors | 6,822 | 59.7% |
-| xenonet-adapter | 3,008 | 69.6% |
-| xenonet-api | 1,227 | 50.6% |
-| xenonet-assistant | 3,558 | 53.1% |
-| xenonet-blocks | 1,046 | 86.3% |
-| xenonet-cli | 8,219 | 24.1% |
-| xenonet-components | 4,103 | 86.6% |
-| xenonet-console | 2,319 | 54.0% |
-| xenonet-demo | 774 | 94.4% |
-| xenonet-doctor | 2,648 | 63.5% |
-| xenonet-engine | 7,992 | 84.1% |
+| adapters (all fourteen) | 11,410 | 75.1% |
+| xenonet-actors | 6,772 | 60.5% |
+| xenonet-adapter | 4,206 | 75.7% |
+| xenonet-api | 1,808 | 59.2% |
+| xenonet-assistant | 3,716 | 54.6% |
+| xenonet-authz | 1,273 | 90.3% |
+| xenonet-blocks | 856 | 86.4% |
+| xenonet-cli | 7,442 | 25.8% |
+| xenonet-components | 4,100 | 86.6% |
+| xenonet-console | 2,307 | 53.7% |
+| xenonet-demo | 780 | 94.5% |
+| xenonet-doctor | 2,490 | 63.9% |
+| xenonet-engine | 6,564 | 83.8% |
+| xenonet-http | 6,256 | 66.6% |
+| xenonet-id | 702 | 94.0% |
 | xenonet-integrations | 3,761 | 60.5% |
-| xenonet-mcp | 3,653 | 57.3% |
-| xenonet-model | 1,670 | 84.1% |
-| xenonet-net | 5,923 | 91.6% |
-| xenonet-os | 3,194 | 80.9% |
-| xenonet-runtime | 6,246 | 73.1% |
+| xenonet-keys | 1,020 | 62.5% |
+| xenonet-log | 3,103 | 90.5% |
+| xenonet-mcp | 3,647 | 56.2% |
+| xenonet-model | 2,020 | 85.6% |
+| xenonet-net | 8,077 | 88.4% |
+| xenonet-os | 3,289 | 81.1% |
+| xenonet-runtime | 12,587 | 72.6% |
 | xenonet-schema | 1,603 | 75.9% |
-| xenonet-service | 11,418 | 70.7% |
-| xenonet-sources | 7,128 | 88.2% |
-| xenonet-state | 10,869 | 83.9% |
-| xenonet-text | 1,618 | 93.5% |
-| All | 114,551 | 71.1% |
+| xenonet-service | 6,211 | 73.1% |
+| xenonet-sources | 6,978 | 88.0% |
+| xenonet-state | 10,568 | 84.4% |
+| xenonet-store | 3,312 | 89.6% |
+| xenonet-text | 1,634 | 93.6% |
+| All | 128,492 | 73.1% |
 
-The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-api`, `xenonet-assistant`, `xenonet-console`, `xenonet-mcp` and `xenonet-actors`. Rerun `npm run coverage:rust` after a large change and replace the table.
+The least covered, where a change most needs a test of its own, are `xenonet-cli`, `xenonet-console`, `xenonet-assistant`, `xenonet-mcp`, `xenonet-api` and `xenonet-actors`. Rerun `npm run coverage:rust` after a large change and replace the table.
 
 ## Fuzzing
 
@@ -232,7 +249,7 @@ The `xenonet` command, the MCP servers, the hooks and the e2e harness (`apiCrede
 
 The installed XenoNet and the `dev` instance use the machine's own keys: the Secure Enclave and Touch ID on a Mac, Windows Hello, polkit or a passphrase elsewhere. Every other instance (`demo`, `test`, `film`, `showcase`, and any `XENONET_INSTANCE` of your own) gets fake keys (`xenonet_keys::Fake`): key files in its own state folder and a presence check that answers yes, so nothing ever prompts or touches the hardware. Use those to try acts that ask you. In `dev`, an act that asks you shows the real prompt, so leave it to the person.
 
-The person on a machine lives in `identity/` in the instance's state folder: their chain (`person.json`), the other people's chains (`persons.json`), the root key (`root.json`), the device and machine keys (`device-sign.key`, `machine-sign.key`), the presence blocks taken (`presence-seen.json`) and the token roots' certificates (`token-roots.json`). XenoNet Dev's `dev` instance has its own, apart from the installed XenoNet's, so its identity and the tokens it mints are its own. There's no upgrade path between builds: when a change to the chains or tokens lands, delete a test instance's state folder and set it up again.
+The person's keys live in `identity/` in the instance's state folder: the root key (`root.json`) and, where they are files, the device and machine signing keys (`device-sign.key`, `machine-sign.key`). Everything else XenoNet keeps of the person and the network is in the instance's one store, `xenonet.sqlite` in its state folder: the person's chain, the other people's chains, the presence blocks taken and the token roots' certificates. XenoNet Dev's `dev` instance has its own, apart from the installed XenoNet's, so its identity and the tokens it mints are its own. There's no upgrade path between builds: when a change to the store, the chains or the tokens lands, delete a test instance's state folder and set it up again.
 
 ### Launching and quitting
 
@@ -273,17 +290,17 @@ The console page and Desktop share the modules in `src/shared/`, which have no N
 
 ### `crates/` and `adapters/`
 
-`crates/` and `adapters/` are the Rust core, one cargo workspace that builds the `xenonet` binary. [Rust core](../design/rust-core.md) lists every crate, its job and what it may depend on. In short: the model and formats (`xenonet-text`, `xenonet-model`, `xenonet-schema`), the machine (`xenonet-os`, `xenonet-blocks`), the registry (`xenonet-adapter`), the domains (`xenonet-sources`, `xenonet-state`, `xenonet-engine`, `xenonet-actors`, `xenonet-net`, `xenonet-assistant`, `xenonet-components`, `xenonet-integrations`, `xenonet-doctor`), the engine's runtime (`xenonet-runtime`), the demo's world (`xenonet-demo`), the local protocol (`xenonet-api`), the surfaces (`xenonet-http`, the local HTTP API on `xenonet-api` alone; `xenonet-mcp`; `xenonet-console`), and the composition root (`xenonet-service` and `xenonet-cli`, whose `serve()` composes with `crates/xenonet-service/src/compose/`). `node scripts/rust-layers.mjs --report` lists each crate's class and dependency count.
+`crates/` and `adapters/` are the Rust core, one cargo workspace that builds the `xenonet` binary. [Rust core](../design/rust-core.md) lists every crate, its job and what it may depend on. In short: the model and formats (`xenonet-text`, `xenonet-model`, `xenonet-schema`), keys, chains and authorization (`xenonet-id`, `xenonet-log`, `xenonet-authz`, `xenonet-keys`), the machine (`xenonet-os`, `xenonet-blocks`), the registry (`xenonet-adapter`), the one store (`xenonet-store`), the domains (`xenonet-sources`, `xenonet-state`, `xenonet-engine`, `xenonet-actors`, `xenonet-net`, `xenonet-assistant`, `xenonet-components`, `xenonet-integrations`, `xenonet-doctor`), the engine's runtime (`xenonet-runtime`), the demo's world (`xenonet-demo`), the local protocol (`xenonet-api`), the surfaces (`xenonet-http`, the local HTTP API on `xenonet-api` alone; `xenonet-mcp`; `xenonet-console`), and the composition root (`xenonet-service` and `xenonet-cli`, whose `serve()` composes with `crates/xenonet-service/src/compose/`). `node scripts/rust-layers.mjs --report` lists each crate's class and dependency count.
 
-`adapters/` holds one crate per platform: Claude Code, Codex, Grok Build and OpenCode; the readers of Cursor's, Gemini CLI's and Copilot CLI's records; and the actor products Hermes Agent, Grok Bot and Muse. Each implements `xenonet_adapter::Platform`: how its processes are told apart, how live delivery reaches its sessions, how it's connected, its readers, its doctor checks, and for an actor product its observer (`xenonet_adapter::observe`). `adapters/all` (`xenonet-platforms`) is every adapter, which the binary installs at start. The core asks `xenonet_adapter::platforms()` and never names a platform itself: `npm run lint:rust` fails when a core crate depends on a surface or an adapter crate or holds a registry id literal, or a crate leaves its class's limit on internal dependencies (`scripts/rust-layers.mjs`; `node scripts/rust-layers.mjs --report` lists every breach and each crate's count without failing). [Rust core](../design/rust-core.md#the-layering) has the classes.
+`adapters/` holds one crate per platform: Claude Code, Codex, Grok Build and OpenCode; the readers of Cursor's, Gemini CLI's and Copilot CLI's records; the actor products Hermes Agent, Grok Bot and Muse; and three that serve every platform: `acp`, the ACP client that starts and drives Grok Build and Hermes Agent sessions, `a2a`, outbound A2A actors, and `git`, which reads checkouts. Each implements `xenonet_adapter::Platform`: how its processes are told apart, how live delivery reaches its sessions, how it's connected, its readers, its doctor checks, and for an actor product its observer (`xenonet_adapter::observe`). `adapters/all` (`xenonet-platforms`) is every adapter, which the binary installs at start. The core asks `xenonet_adapter::platforms()` and never names a platform itself: `npm run lint:rust` fails when a core crate depends on a surface or an adapter crate or holds a registry id literal, or a crate leaves its class's limit on internal dependencies (`scripts/rust-layers.mjs`; `node scripts/rust-layers.mjs --report` lists every breach and each crate's count without failing). [Rust core](../design/rust-core.md#the-layering) has the classes.
 
-Its contract with the outside is held by golden files, recorded from the JS implementation XenoNet had before the Rust and replayed by the Rust tests:
+Golden files hold its contract with the outside, and the Rust tests replay them. One changes only when the behaviour should, and the commit says why:
 
 | Golden files | What they pin | Test |
 | --- | --- | --- |
 | `crates/xenonet-mcp/tests/golden/` | The MCP servers' answers (`xenonet mcp`, `mcp assistant`, `mcp console`): the probe, the handshake, `tools/list` with every schema key for key, and refused calls | `crates/xenonet-mcp/tests/contract.rs` |
 | `crates/xenonet-cli/tests/golden/` | The HTTP API's reads and the command's output, over the made-up home in `tests/fixtures/home/` | `crates/xenonet-cli/tests/golden.rs` |
-| `crates/xenonet-state/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search, the map's refresh (`state.json`: the map, identities, projects, repos and the saved state, through `MapState` with its clock fixed and git answered from the fixture) and the projects scan | `crates/xenonet-state/tests/golden.rs` |
+| `crates/xenonet-state/tests/golden/` | What XenoNet makes of a fixed world (`tests/fixtures/golden-world/`, with its clock and mtimes in `manifest.json`): the live state and history, each session's stats, search, the map's refresh (`state.json`: the map, identities, projects, repos and the saved state, through `MapState` with its clock and ids fixed and git answered from the fixture) and the projects scan | `crates/xenonet-state/tests/golden.rs` |
 | `crates/xenonet-service/tests/fixtures/gateway.json` | The actor gateway's answers to 69 requests, byte for byte: the status, the headers that matter and the body | `crates/xenonet-service/tests/gateway.rs` |
 | `test/fixtures/net/` | The network's frames, signatures and sealing, as known answers | `crates/xenonet-net/tests/known_answers.rs` |
 
@@ -299,13 +316,13 @@ Its contract with the outside is held by golden files, recorded from the JS impl
 | `fx.js` | The textures, lines, sky and shaders the map uses |
 | `looks/` | Drawing the stars, the floor, the sweep, the sonar, the lines between nodes and the actors' forms, in each theme's styles |
 | `actors.js`, `actors-model.js` | The actors' layer |
-| `hosts.js`, `hosts-draw.js`, `network-map.js` | Other machines' constellations: over SSH, and a network's machines, drawn from their presence |
+| `hosts.js`, `hosts-draw.js`, `network-map.js` | Other machines' constellations in a network, drawn from their maps or their presence |
 | `framing.js` | Where the camera stands to frame the map |
 | `hud.js`, `telemetry.js`, `actor-spend-view.js`, `alerts.js`, `needs-you.js`, `modals.js`, `palette.js`, `replay.js`, `terminal.js`, `identities.js` | The panels around the map. `actor-spend-view.js` has Token use's rows of spend by actor. |
 | `export-panel.js`, `poster.js`, `poster-draw.js`, `mark.js` | The export panel, and posters of the day: the preview, the sizes, what an export reveals, and the mark |
 | `connect.js` | The panel for connecting Claude Code, Codex and Grok Build |
 | `background.js` | The Background service panel, and Desktop's offer of it during setup |
-| `network.js`, `network-model.js` | The Network panel (Network settings, Add a machine) for a network across machines, and the words for it, which the attention strip shares |
+| `network.js`, `network-model.js`, `network-person.js` | The Network panel (Network settings, Add a machine) for a network across machines, and the words for it, which the attention strip shares |
 | `doctor.js` | The panel for XenoNet's doctor |
 | `stats.js` | The panel for a session's stats |
 | `system-panel.js`, `machines.js`, `machines-model.js` | The load panel (This computer, or Machines in a network), the Machines view it opens, and the network's sums and each machine's part of them |
