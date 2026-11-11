@@ -220,6 +220,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
         return started;
     }
+    let asker = id.to_string();
     let id = uuid()?;
     let ways = xenonet_engine::delivery::apps::of(&r.app).unwrap_or_default();
     let session = (!ways.picks_id).then(|| format!("{}:{id}", r.app));
@@ -269,6 +270,21 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         }
     };
     w.starts.history.locked().push((now, bucket));
+    // The session's agent, from the start: its own id when the app takes
+    // the one XenoNet gave it, else a pending row its process takes over
+    // once the app names it.
+    let db = w.store.0.db();
+    let agent = match &session {
+        Some(s) => db.agent_of(s, Some(i64::from(pid)), now as i64),
+        None => db.pending_agent(&r.app, Some(i64::from(pid)), Some(&asker), Some(&cwd), now as i64),
+    };
+    let agent = match agent {
+        Ok(a) => Some(a.as_str().to_string()),
+        Err(e) => {
+            w.log("warn", "start.agent", &format!("the started session's agent couldn't be kept: {}", e.message));
+            None
+        }
+    };
     if let (Some(session), Some(_)) = (&session, &delegation) {
         // Kept in the store, so its prompts are judged against the
         // delegation after a restart too; a week on, its runs are over.
@@ -289,7 +305,7 @@ pub fn run_here(w: &Runtime, by: &Value, from: Option<&str>, kind: Kind, id: &st
         let (session, folder, prompt_file) = (session.clone(), folder.clone(), prompt_file);
         std::thread::spawn(move || watch(&world, &runner, &key, pid, &app, &logs, session, &folder, prompt_file, &answer));
     }
-    Ok(json!({ "session": session, "pid": pid, "folder": folder, "app": app }))
+    Ok(json!({ "session": session, "agent": agent, "pid": pid, "folder": folder, "app": app }))
 }
 
 /// A start over ACP, for an app the registry gives `acp`, with no mode

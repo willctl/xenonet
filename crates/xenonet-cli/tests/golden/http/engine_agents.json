@@ -4,6 +4,7 @@
   "body": [
     {
       "id": "claude:0190d3e0-0000-7000-8000-000000000001",
+      "agent": "agt_2s63p2wlk2vmvrnz5rnnb7buw4dcrm4m",
       "app": "claude",
       "title": "Add partial refunds to the orders API. Keep the existing full-refund path working.",
       "reader": null,
@@ -30,6 +31,7 @@
     },
     {
       "id": "claude:0190d3e0-0000-7000-8000-000000000003",
+      "agent": "agt_w7fegidwhqbbd5axkv7tpxljnitpjwes",
       "app": "claude",
       "title": "The solver takes 40 seconds for 500 stops. Get it under 5.",
       "reader": null,

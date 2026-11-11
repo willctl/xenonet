@@ -17,6 +17,7 @@
 //! own, so a domain moving in doesn't spread rusqlite through the core.
 
 pub mod a2a;
+pub mod agents;
 mod chains;
 pub mod delivery;
 pub mod engine;

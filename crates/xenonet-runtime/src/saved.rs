@@ -112,6 +112,10 @@ impl Store for Saved {
         out["fixes"] = Value::Array(fixes.iter().map(|f| Value::String(f.words())).collect());
         Ok(out)
     }
+    fn agents_of(&self, sessions: &[String]) -> R<Value> {
+        let all = self.db.agents_of(sessions, (self.clock)() as i64).map_err(failed)?;
+        Ok(Value::Object(all.into_iter().map(|(s, a)| (s, Value::String(a.as_str().to_string()))).collect()))
+    }
     fn checkouts(&self) -> R<Value> {
         let all = self.db.checkouts().map_err(failed)?;
         Ok(serde_json::json!({ "checkouts": all.iter().map(crate::checkouts::json_of).collect::<Vec<_>>() }))

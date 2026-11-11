@@ -547,6 +547,10 @@ impl Engine for EngineDriver {
         let ask = fields(vec![("app", info.get("app").cloned()), ("cwd", info.get("cwd").cloned()), ("via", info.get("via").cloned()), ("pid", Some(or_null(info.get("pid"))))]);
         self.now(|e, c| e.touch(c, me, &ask))
     }
+    fn session_of_agent(&self, id: &str) -> R<Option<String>> {
+        let Ok(id) = xenonet_model::ids::AgentId::parse(id) else { return Ok(None) };
+        self.0.store.with(|s| s.db().session_of(&id)).map_err(|e| CoreError::new(e.message))
+    }
     async fn view(&self, me: &str) -> R<Option<Value>> {
         let me = me.to_string();
         self.run(None, move |e, c| e.view(c, &me)).await.map(Some)

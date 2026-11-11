@@ -489,7 +489,7 @@ fn waits_on_others(e: &xenonet_net::feed::FeedEntry) -> bool {
 /// passed by, never taken again.
 fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &Value) {
     let done = match e.kind {
-        EntryKind::Message => message_in(w, host, &e.body, authority, e.at as f64),
+        EntryKind::Message => agent_in(w, &e.author, &e.body).and_then(|()| message_in(w, host, &e.body, authority, e.at as f64)),
         EntryKind::Receipt => receipt_in(w, host, &e.body),
         EntryKind::Handoff => handoff_in(w, host, &e.body),
         // The feed applies a compact entry itself: what it leaves out is
@@ -499,6 +499,21 @@ fn apply(w: &Runtime, host: &str, e: &xenonet_net::feed::FeedEntry, authority: &
     };
     if let Err(f) = done {
         w.log("warn", "net.receive", &format!("a {} from {host} wasn't taken: {}", e.kind.as_str(), why(&f)));
+    }
+}
+
+/// The agent an entry names as its sender (`agent`, an `agt_…`): another
+/// machine's, kept as the entry's author's the first time, and refused
+/// when the store has it as another machine's (this one's included), so
+/// no machine speaks as another's agent.
+fn agent_in(w: &Runtime, author: &str, b: &Value) -> Result<()> {
+    let Some(named) = b.get("agent").filter(|a| !a.is_null()) else { return Ok(()) };
+    let id = named.as_str().and_then(|a| xenonet_model::ids::AgentId::parse(a).ok()).ok_or_else(|| fail("its agent isn't an agent's id"))?;
+    let session = s(b, "sender");
+    match w.store.with(|s| s.db().remote_agent(&id, author, session.as_deref(), now_ms() as i64)) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(fail(format!("{id} isn't {author}'s agent"))),
+        Err(e) => Err(fail(e.message)),
     }
 }
 
@@ -866,6 +881,9 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     };
     let text = s(a, "text").unwrap_or_default();
     let scope = a.get("scope").map_or(Value::Null, |v| Value::String(xenonet_text::text::display(v)));
+    // A session's own id, the store's, which the receiver keeps as this
+    // machine's agent.
+    let agent = w.store.with(|s| s.db().agent_known(&me)).ok().flatten().map(|a| a.as_str().to_string());
     let mut signed: BTreeMap<String, Value> = BTreeMap::new();
     // An actor's message carries a token minted for it here, once, whatever
     // machines it goes to: its own token was decided when it sent it.
@@ -883,6 +901,7 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             "mid": mid,
             "sender": me,
             "senderKind": sender_kind(&me),
+            "agent": agent,
             "target": local_of(&rid),
             "body": text,
             "replyTo": reply_mid,

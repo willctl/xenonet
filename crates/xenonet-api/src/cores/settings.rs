@@ -78,6 +78,11 @@ pub trait Store: Send + Sync {
     fn reconcile_checkouts(&self, _found: &Value) -> R<Value> {
         pending(STORE)
     }
+    /// The agents of these sessions of this machine's (`<app>:<vendor
+    /// id>`), each made the first time it's seen: `{ session: agt_… }`.
+    fn agents_of(&self, _sessions: &[String]) -> R<Value> {
+        pending(STORE)
+    }
     /// This machine's checkouts, as `reconcile_checkouts` answers them.
     fn checkouts(&self) -> R<Value> {
         pending(STORE)

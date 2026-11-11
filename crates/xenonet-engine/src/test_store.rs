@@ -86,6 +86,14 @@ impl Store for Tables {
     fn contacts(&self, since: f64) -> Kept<Vec<Value>> {
         all(self.0.with(|s| s.contacts(since)))
     }
+    fn agent_known(&self, session: &str) -> Kept<Option<String>> {
+        let db = self.0.with(|s| s.db().clone());
+        db.agent_known(session).map(|a| a.map(|a| a.as_str().to_string())).map_err(kept)
+    }
+    fn session_of(&self, agent: &xenonet_model::ids::AgentId) -> Kept<Option<String>> {
+        let db = self.0.with(|s| s.db().clone());
+        db.session_of(agent).map_err(kept)
+    }
     fn pins(&self, agent: &str) -> Kept<Vec<Pin>> {
         let rows = self.0.with(|s| s.pins(agent)).map_err(thrown)?;
         Ok(rows.iter().map(|p| Pin { pid: p.num("pid").unwrap_or(f64::NAN), start: p.num("start").unwrap_or(f64::NAN), sure: p.num("sure").is_some_and(|s| s != 0.0) }).collect())

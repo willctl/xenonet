@@ -12,6 +12,7 @@
 
 use crate::engine::Thrown;
 use serde_json::{Map, Value};
+use xenonet_model::ids::AgentId;
 
 pub type Kept<T> = Result<T, Thrown>;
 
@@ -67,6 +68,13 @@ pub trait Store: Send + Sync {
     fn contact(&self, agent: &str) -> Kept<Option<Value>>;
     /// The contacts heard from since `since`.
     fn contacts(&self, since: f64) -> Kept<Vec<Value>>;
+
+    // ---------- agents ----------
+
+    /// This machine's session's own id (`agt_…`), when it has one.
+    fn agent_known(&self, session: &str) -> Kept<Option<String>>;
+    /// The session an agent of this machine's is, `<app>:<vendor id>`.
+    fn session_of(&self, agent: &AgentId) -> Kept<Option<String>>;
 
     // ---------- pins ----------
 

@@ -114,6 +114,13 @@ impl Saved {
         self.store.set_roots(roots).map_err(|e| e.message)
     }
 
+    /// The agents of this machine's sessions, made the first time each is
+    /// seen: session to `agt_…`. Nothing without a store.
+    pub fn agents_of(&self, sessions: &[String]) -> std::collections::HashMap<String, String> {
+        let v = read("the agents", self.store.agents_of(sessions), json!({}));
+        v.as_object().into_iter().flatten().filter_map(|(k, a)| Some((k.clone(), a.as_str()?.to_string()))).collect()
+    }
+
     /// What the map found (`[{ path, why }]`) diffed into the store's
     /// checkouts, each change logged: this machine's checkouts by path key.
     /// None without a store.

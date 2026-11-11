@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_adapter::apps::is_session_id;
 use xenonet_adapter::products::product_of;
-use xenonet_model::ids::YOU;
+use xenonet_model::ids::{AgentId, YOU};
 use xenonet_os::nodepath::{style_of, NATIVE};
 use xenonet_os::sync::Locked;
 use xenonet_text::json::number;
@@ -853,8 +853,11 @@ impl Engine {
         let focus = or_null(get(&row(c.store.focus(id.as_str()))?, "text"));
         let claims = Self::claims_of(c, &id, now)?;
         let reachable = (truthy(Some(&contact)) && !truthy(ended_at) && now - num(get(&contact, "at")) < REACHABLE_MS) || c.delivery.is_some_and(|d| d.reaches(&id));
+        // Its own id, the store's: made when it was first seen.
+        let agent = c.store.agent_known(&id).ok().flatten().map_or(Value::Null, string);
         let mut v = obj(vec![
             ("id", string(&id)),
+            ("agent", agent),
             ("app", string(app)),
             ("title", clip(&title, 90)),
             ("reader", or_null(get(&node, "reader"))),
@@ -1391,7 +1394,14 @@ impl Engine {
     }
 
     fn resolve(&self, c: &Collaborators<'_>, me: &str, to: &Value, answered: &Value) -> Result<Value> {
-        let to_text = text(Some(to));
+        let mut to_text = text(Some(to));
+        // An agent named by its own id is the session it is here.
+        if let Ok(agent) = AgentId::parse(&to_text) {
+            match c.store.session_of(&agent)? {
+                Some(session) => to_text = session,
+                None => return err(format!("no agent here is {to_text}; peers lists them")),
+            }
+        }
         if is_agent_id(&to_text) || is_actor_agent(&to_text) {
             if is_actor_agent(&to_text) {
                 let has = match c.actors {

@@ -554,7 +554,7 @@ impl MapState {
         let titles: HashMap<String, Value> = lock(&self.inner).demo_titles.iter().cloned().collect();
         let ok = |st: &Value| st.get("ok") == Some(&Value::Bool(true));
         let lists: Vec<(&str, bool, &[Value])> = lists_found.iter().map(|(app, list, st)| (*app, ok(st), items(Some(list)))).collect();
-        let sessions = decide::merge_sessions(&prev, &lists, &observed, &titles);
+        let mut sessions = decide::merge_sessions(&prev, &lists, &observed, &titles);
         // Where sessions ran is evidence of where the projects are, so the
         // scan comes after the session lists.
         let session_dirs = decide::session_dirs(&sessions);
@@ -589,6 +589,18 @@ impl MapState {
             }
         }
         self.checkouts(&mut projects, &session_dirs);
+        // Each of this machine's sessions is an agent, its id made the
+        // first time the map lists it.
+        let mine: Vec<String> =
+            sessions.iter().filter(|s| s.get("host").is_none() && s.get("observed").is_none()).filter_map(|s| s.get("id").and_then(Value::as_str).map(String::from)).collect();
+        let agents = self.store.agents_of(&mine);
+        for s in &mut sessions {
+            if let Some(a) = s.get("id").and_then(Value::as_str).and_then(|id| agents.get(id)).cloned() {
+                if let Some(m) = s.as_object_mut() {
+                    m.insert("agent".into(), Value::String(a));
+                }
+            }
+        }
         if let Some(sc) = scan.as_ref().filter(|sc| truthy(sc.get("ok"))) {
             projects_st["count"] = sc.get("projects").cloned().unwrap_or(Value::Null);
             projects_st["note"] = json!(decide::projects_note(sc));

@@ -14,6 +14,7 @@
 //! takes them. Every call answers rows; `row_json` reads one as the engine
 //! does, with every integer a number.
 
+use crate::projects::LOCAL;
 use crate::sql::{self, Bind, Cell, Changes, Result, Row, SqlError};
 use crate::Db;
 use serde_json::{json, Value};
@@ -56,10 +57,6 @@ pub(crate) const TABLES: &[&str] = &[
         id INTEGER PRIMARY KEY, agent TEXT NOT NULL, pattern TEXT NOT NULL,
         note TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
     "CREATE TABLE focus (agent TEXT PRIMARY KEY, text TEXT NOT NULL, at INTEGER NOT NULL)",
-    // When XenoNet last heard from each agent directly, and its process.
-    "CREATE TABLE contacts (
-        agent TEXT PRIMARY KEY, app TEXT NOT NULL, cwd TEXT, via TEXT NOT NULL,
-        at INTEGER NOT NULL, ended_at INTEGER, pid INTEGER)",
     // The process (pid and start time) holding each session.
     "CREATE TABLE pins (
         agent TEXT NOT NULL, pid INTEGER NOT NULL, start INTEGER NOT NULL,
@@ -163,6 +160,11 @@ pub(crate) const TABLES: &[&str] = &[
         state TEXT NOT NULL DEFAULT 'open', taken_by TEXT, taken_at INTEGER,
         asked_by TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
 ];
+
+// The contacts, as the engine has always read them, from the agents
+// heard from directly.
+const CONTACT: &str =
+    "SELECT app || ':' || vendor_id AS agent, app, cwd, via, last_seen AS at, ended_at, pid, id FROM agents WHERE machine = ? AND via IS NOT NULL AND vendor_id IS NOT NULL";
 
 /// How long a revoked token is remembered: past the year its root lasts.
 const REVOKED_KEPT_MS: f64 = 400.0 * DAY_MS;
@@ -539,26 +541,42 @@ impl EngineStore {
         Ok(())
     }
 
-    // ---------- contacts ----------
+    // ---------- contacts: agents heard from directly (xenonet-store's agents) ----------
 
     /// An agent heard from directly: `contact` is `{ app, cwd, via, pid }`,
-    /// cwd and pid left as they were when it hasn't them.
+    /// cwd and pid left as they were when it hasn't them. Its agent row is
+    /// made the first time (`agents`), a started session's pending row
+    /// taken over by its process.
     pub fn touch(&self, agent: &str, contact: &Value, now: f64) -> Result<()> {
+        // The app is the session's own, its id's first part; a contact
+        // names it too.
+        field(contact, "app", 2)?;
+        let (cwd, via, pid) = (field_or_null(contact, "cwd", 3)?, field(contact, "via", 4)?, field_or_null(contact, "pid", 6)?);
+        let started = match &pid {
+            Bind::Real(p) => Some(*p as i64),
+            _ => None,
+        };
+        let id = self.db.agent_of(agent, started, now as i64).map_err(|e| SqlError::Other(e.message))?;
         self.run(
-            "INSERT INTO contacts (agent, app, cwd, via, at, pid) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent) DO UPDATE SET app = excluded.app, cwd = COALESCE(excluded.cwd, contacts.cwd), via = excluded.via, at = excluded.at, pid = COALESCE(excluded.pid, contacts.pid), ended_at = NULL",
-            &[agent.into(), field(contact, "app", 2)?, field_or_null(contact, "cwd", 3)?, field(contact, "via", 4)?, n(now), field_or_null(contact, "pid", 6)?],
+            "UPDATE agents SET cwd = COALESCE(?, cwd), via = ?, last_seen = ?, pid = COALESCE(?, pid), ended_at = NULL WHERE id = ?",
+            &[cwd, via, n(now), pid, id.as_str().into()],
         )?;
         Ok(())
     }
     pub fn ended(&self, agent: &str, now: f64) -> Result<()> {
-        self.run("UPDATE contacts SET ended_at = ? WHERE agent = ?", &[n(now), agent.into()])?;
+        let Some((app, vendor)) = crate::agents::split_session(agent) else { return Ok(()) };
+        self.run("UPDATE agents SET ended_at = ? WHERE machine = ? AND app = ? AND vendor_id = ? AND via IS NOT NULL", &[n(now), LOCAL.into(), app.into(), vendor.into()])?;
         Ok(())
     }
+    /// An agent's contact: `{ agent, app, cwd, via, at, ended_at, pid, id }`,
+    /// its session as `agent` and its `agt_` as `id`; none for an agent
+    /// never in touch.
     pub fn contact(&self, agent: &str) -> Result<Option<Row>> {
-        self.get("SELECT * FROM contacts WHERE agent = ?", &[agent.into()])
+        let Some((app, vendor)) = crate::agents::split_session(agent) else { return Ok(None) };
+        self.get(&format!("{CONTACT} AND app = ? AND vendor_id = ?"), &[LOCAL.into(), app.into(), vendor.into()])
     }
     pub fn contacts(&self, since: f64) -> Result<Vec<Row>> {
-        self.all("SELECT * FROM contacts WHERE at >= ?", &[n(since)])
+        self.all(&format!("{CONTACT} AND last_seen >= ? ORDER BY rowid"), &[LOCAL.into(), n(since)])
     }
 
     // ---------- pins: the process (pid and start time) holding a session ----------

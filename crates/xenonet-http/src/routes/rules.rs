@@ -601,7 +601,13 @@ async fn who(ctx: &Ctx, req: &Req, row: &Rule, creds: &Creds, by: &mut By) -> Re
     }
     // A session that says who it is, checked against its process.
     if (has(Session) || checked.is_some()) && !creds.token {
-        if let Some(me) = req.header("x-xenonet-agent").filter(|m| ctx.cores.apps.is_session_id(m)).map(str::to_string) {
+        // An agent's own id (agt_…) is mapped to its session at the edge.
+        let named = req.header("x-xenonet-agent").map(str::to_string);
+        let named = match named {
+            Some(n) if n.starts_with("agt_") => ctx.cores.engine.session_of_agent(&n).ok().flatten(),
+            n => n,
+        };
+        if let Some(me) = named.filter(|m| ctx.cores.apps.is_session_id(m)) {
             let verdict = ctx.cores.verify.check(req.peer, &me, false).await;
             if !ok(&verdict) {
                 return Err(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));

@@ -62,6 +62,12 @@ pub trait Engine: Send + Sync {
     fn touch(&self, _me: &str, _info: Value) -> R<()> {
         pending(ENGINE)
     }
+    /// The session an agent of this machine's is (`agt_…` to
+    /// `<app>:<vendor id>`), what the edge maps an agent's id to; None for
+    /// one that isn't this machine's or isn't known.
+    fn session_of_agent(&self, _id: &str) -> R<Option<String>> {
+        pending(ENGINE)
+    }
     /// `engine.view(me)`, the agent as the engine sees it (its title).
     async fn view(&self, _me: &str) -> R<Option<Value>> {
         pending(ENGINE)

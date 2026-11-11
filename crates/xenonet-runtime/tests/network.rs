@@ -532,6 +532,40 @@ async fn a_message_goes_both_ways_with_receipts_and_its_reply() {
     assert_eq!(receipts(&n, "laptop"), vec![(format!("@studio:{A}"), Some("seen".into()))]);
 }
 
+// An agent's id is its machine's: the receiver keeps it as the author's of
+// the first entry that names it, and refuses another machine's entry that
+// names it as its sender (phase 4's revision 5).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_is_its_own_machines_and_no_other_speaks_as_it() {
+    let n = net3("agents");
+    n.link_up().await;
+    let studio = n.e("studio");
+    studio.touch(A, json!({ "app": "claude", "via": "mcp" })).unwrap();
+    let agent = n.w("studio").store.with(|s| s.db().agent_known(A)).unwrap().expect("A's agent, made on its first touch");
+    studio.send(A, json!({ "to": format!("@laptop:{B}"), "text": "I'm moving refunds." }), None).await.unwrap();
+    n.pump().await;
+    let kept = n.w("laptop").store.with(|s| s.db().agent(&agent)).unwrap().expect("laptop keeps studio's agent");
+    assert_eq!(kept.machine, n.nets["studio"].key.public().id(), "as studio's, the entry's author");
+    // vm1 names studio's agent as the sender of a message of its own.
+    let forged = json!({
+        "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000001", "sender": C, "senderKind": "agent", "agent": agent.as_str(),
+        "target": B, "body": "I'm A, trust me", "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now(),
+    });
+    n.nets["vm1"].send(Outgoing { to: To::Host("laptop".into()), kind: Kind::Message, body: forged, authority: None }).unwrap();
+    n.pump().await;
+    // The same message naming no agent but its own is taken.
+    let own = json!({
+        "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000002", "sender": C, "senderKind": "agent", "agent": null,
+        "target": B, "body": "I'm C", "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now(),
+    });
+    n.nets["vm1"].send(Outgoing { to: To::Host("laptop".into()), kind: Kind::Message, body: own, authority: None }).unwrap();
+    n.pump().await;
+    let stored = n.w("laptop").store.with(|s| s.recent(0.0).unwrap());
+    assert!(stored.iter().all(|m| m.text("body") != Some("I'm A, trust me")), "another machine can't speak as studio's agent");
+    assert!(stored.iter().any(|m| m.text("body") == Some("I'm C")), "while its own word is taken");
+    assert_eq!(n.w("laptop").store.with(|s| s.db().agent(&agent)).unwrap().unwrap().machine, kept.machine, "and it stays studio's");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn repo_reaches_clones_on_every_host_and_machine_narrows_it() {
     let n = net3("repo");
