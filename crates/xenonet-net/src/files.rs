@@ -1,23 +1,21 @@
-//! A host's network files in `<state>/network/` (docs/design/network.md,
-//! "The wire"): `network.json` (the network, this host's id, and the
-//! gateway's address and pinned key), `roster.json` (the chain),
-//! `link.json`, how the link last stood, which the doctor reads, and
-//! `services.json`, the services this host published to the network.
-//! Who may start and wake sessions here is the network's chain's (each
-//! member's `settings` entry), not this file's.
+//! A host's network (docs/design/network.md, "The wire"): the network,
+//! this host's id in it, and the gateway's address and pinned key
+//! (`NetFile`), the roster, how the link last stood, which the doctor
+//! reads, and the services this host published, all kept through
+//! `Persist`; and the files in `<state>/network/`: this host's key and the
+//! network's queues. Who may start and wake sessions here is the network's
+//! chain's (each member's `settings` entry).
 
+use crate::persist::Persist;
 use crate::roster::{NetworkPolicy, Roster};
-use crate::{NetError, R};
-use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use crate::R;
+use serde_json::Value;
+use std::path::PathBuf;
+use std::sync::Arc;
 
-pub const NETWORK: &str = "network.json";
-pub const ROSTER: &str = "roster.json";
-pub const LINK: &str = "link.json";
 pub const KEY: &str = "host.key";
 pub const HOST_DB: &str = "net.sqlite";
 pub const GATEWAY_DB: &str = "gateway.sqlite";
-pub const SERVICES: &str = "services.json";
 
 /// The gateway as this host pinned it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +29,7 @@ pub struct Pin {
     pub address: Option<String>,
 }
 
-/// `network.json`.
+/// The network as this host keeps it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetFile {
     pub id: String,
@@ -49,51 +47,6 @@ pub struct NetFile {
     /// unless the person turns it off.
     pub share_load: bool,
     pub joined: i64,
-}
-
-impl NetFile {
-    pub fn to_json(&self) -> Value {
-        json!({
-            "id": self.id,
-            "name": self.name,
-            "host": self.host,
-            "founder": self.founder,
-            "gateway": {
-                "host": self.gateway.host,
-                "keyId": self.gateway.key_id,
-                "sign": self.gateway.sign,
-                "seal": self.gateway.seal,
-                "address": self.gateway.address,
-            },
-            "lan": self.lan,
-            "titlesOnly": self.titles_only,
-            "shareLoad": self.share_load,
-            "joined": self.joined,
-        })
-    }
-
-    pub fn from_json(v: &Value) -> R<NetFile> {
-        let bad = || NetError::internal("network.json isn't readable");
-        let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(bad);
-        let g = v.get("gateway").ok_or_else(bad)?;
-        Ok(NetFile {
-            id: s(v, "id")?,
-            name: s(v, "name")?,
-            host: s(v, "host")?,
-            founder: s(v, "founder")?,
-            gateway: Pin {
-                host: s(g, "host")?,
-                key_id: s(g, "keyId")?,
-                sign: s(g, "sign")?,
-                seal: s(g, "seal")?,
-                address: g.get("address").and_then(Value::as_str).map(str::to_string),
-            },
-            lan: v.get("lan").and_then(Value::as_str).map(str::to_string),
-            titles_only: v.get("titlesOnly").and_then(Value::as_bool).unwrap_or(false),
-            share_load: v.get("shareLoad").and_then(Value::as_bool).unwrap_or(true),
-            joined: v.get("joined").and_then(Value::as_i64).unwrap_or(0),
-        })
-    }
 }
 
 /// What kind of address a gateway has: through a tunnel (a name), on the
@@ -136,15 +89,23 @@ pub fn base_url(address: &str) -> String {
     }
 }
 
-/// The folder's files.
-#[derive(Debug, Clone)]
+/// The network as this host keeps it, and the folder with its key and
+/// queues.
+#[derive(Clone)]
 pub struct Dir {
     pub path: PathBuf,
+    pub persist: Arc<dyn Persist>,
+}
+
+impl std::fmt::Debug for Dir {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dir").field("path", &self.path).finish_non_exhaustive()
+    }
 }
 
 impl Dir {
-    pub fn new(path: impl Into<PathBuf>) -> Dir {
-        Dir { path: path.into() }
+    pub fn new(path: impl Into<PathBuf>, persist: Arc<dyn Persist>) -> Dir {
+        Dir { path: path.into(), persist }
     }
 
     pub fn file(&self, name: &str) -> PathBuf {
@@ -152,44 +113,43 @@ impl Dir {
     }
 
     pub fn read_network(&self) -> R<Option<NetFile>> {
-        match read_json(&self.file(NETWORK))? {
-            Some(v) => NetFile::from_json(&v).map(Some),
-            None => Ok(None),
-        }
+        self.persist.network()
     }
 
-    /// `<state>/identity`, beside this folder: the person on this machine.
+    /// `<state>/identity`, beside this folder: the person's keys on this
+    /// machine.
     pub fn identity_dir(&self) -> PathBuf {
         self.path.parent().map_or_else(|| self.path.join("identity"), |p| p.join("identity"))
     }
 
     pub fn write_network(&self, n: &NetFile) -> R<()> {
-        write_json(&self.file(NETWORK), &n.to_json())
+        self.persist.put_network(n)
     }
 
-    /// The roster, checked whole under `policy`.
-    pub fn read_roster(&self, policy: NetworkPolicy) -> R<Roster> {
-        match read_json(&self.file(ROSTER))? {
-            Some(v) => Ok(Roster::from_json_with(policy, &v)?),
-            None => Ok(Roster::with_policy(policy)),
-        }
+    /// The network's roster, checked whole under `policy`.
+    pub fn read_roster(&self, network: &str, policy: NetworkPolicy) -> R<Roster> {
+        Ok(Roster::from_entries_with(policy, self.persist.roster(network)?)?)
     }
 
-    pub fn write_roster(&self, r: &Roster) -> R<()> {
-        write_json(&self.file(ROSTER), &r.to_json())
+    pub fn write_roster(&self, network: &str, r: &Roster) -> R<()> {
+        self.persist.put_roster(network, r.entries())
     }
 
-    pub fn write_link(&self, v: &Value) -> R<()> {
-        write_json(&self.file(LINK), v)
+    pub fn write_link(&self, network: &str, v: &Value) -> R<()> {
+        self.persist.put_link(network, v)
     }
 
-    pub fn read_link(&self) -> Option<Value> {
-        read_json(&self.file(LINK)).ok().flatten()
+    pub fn read_link(&self, network: &str) -> Option<Value> {
+        self.persist.link(network).ok().flatten()
     }
 
-    /// Forgets the network: every file here goes, the key with it.
+    /// Forgets the network: what's kept of it, and every file here, the
+    /// key with them.
     pub fn forget(&self) -> R<()> {
-        for name in [NETWORK, ROSTER, LINK, KEY, HOST_DB, GATEWAY_DB, SERVICES] {
+        if let Some(n) = self.persist.network()? {
+            self.persist.forget(&n.id)?;
+        }
+        for name in [KEY, HOST_DB, GATEWAY_DB] {
             for f in [name.to_string(), format!("{name}-wal"), format!("{name}-shm")] {
                 match std::fs::remove_file(self.file(&f)) {
                     Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
@@ -199,23 +159,6 @@ impl Dir {
         }
         Ok(())
     }
-}
-
-pub fn read_json(file: &Path) -> R<Option<Value>> {
-    match std::fs::read_to_string(file) {
-        Ok(t) => serde_json::from_str(&t).map(Some).map_err(|_| NetError::internal(format!("{} isn't JSON", file.display()))),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Writes JSON whole or not at all: to a file beside it, then renamed.
-pub fn write_json(file: &Path, v: &Value) -> R<()> {
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    xenonet_os::fs::write_atomic(file, format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())).as_bytes())?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -234,46 +177,5 @@ mod tests {
         assert_eq!(base_url("192.168.1.5:48200"), "http://192.168.1.5:48200");
         assert_eq!(base_url("http://gw.example.net:8080/"), "http://gw.example.net:8080");
         assert_eq!(host_of("https://GW.example.net/x"), "gw.example.net");
-    }
-
-    fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("xenonet-files-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    #[test]
-    fn writers_at_once_never_fail_or_tear_a_file() {
-        let dir = scratch("race");
-        let file = dir.join("network.json");
-        let threads: Vec<_> = (0..8)
-            .map(|t| {
-                let file = file.clone();
-                std::thread::spawn(move || {
-                    for i in 0..60 {
-                        write_json(&file, &json!({ "t": t, "i": i, "pad": "x".repeat(4000) })).expect("every write lands");
-                    }
-                })
-            })
-            .collect();
-        for t in threads {
-            t.join().unwrap();
-        }
-        assert!(read_json(&file).unwrap().is_some(), "whole JSON");
-        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        assert_eq!(left, vec!["network.json".to_string()], "no temp files left");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_failed_write_leaves_no_temp_file() {
-        let dir = scratch("fail");
-        let file = dir.join("network.json");
-        std::fs::create_dir(&file).unwrap(); // a rename onto a folder fails
-        assert!(write_json(&file, &json!({})).is_err());
-        let left = std::fs::read_dir(&dir).unwrap().count();
-        assert_eq!(left, 1, "only the folder");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

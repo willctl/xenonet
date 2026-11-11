@@ -181,7 +181,8 @@ impl TokenScan {
             .collect();
         // The tokens that work now, read for each look: None when the
         // store can't be read, and then every token counts.
-        let issued: Option<HashSet<String>> = w.actors.as_ref().and_then(|a| a.store.with(xenonet_store::engine::EngineStore::issued_token_ids).ok()).map(|h| h.into_iter().collect());
+        let issued: Option<HashSet<String>> =
+            w.actors.as_ref().and_then(|a| a.store.with(xenonet_store::engine::EngineStore::issued_token_ids).ok()).map(|h| h.into_iter().collect());
         let found = find_token_files(&repos, issued.as_ref());
         let mut out = json!({ "at": number(now_ms()), "repos": repos.len(), "checked": found["checked"], "files": found["files"] });
         if found.get("unchecked").is_some() {

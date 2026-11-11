@@ -28,7 +28,7 @@ const TABLES: &[&str] = &[
 /// The statements that make an empty store, in order: the store's own,
 /// then each domain's.
 pub(crate) fn tables() -> impl Iterator<Item = &'static str> {
-    TABLES.iter().chain(crate::engine::TABLES).copied()
+    TABLES.iter().chain(crate::engine::TABLES).chain(crate::net::TABLES).copied()
 }
 
 /// The version an up-to-date store has in `PRAGMA user_version`: the first

@@ -23,6 +23,7 @@ pub mod ground;
 pub mod map;
 pub mod network;
 pub mod observers;
+pub mod persist;
 pub mod procs;
 pub mod registration;
 pub mod remote;

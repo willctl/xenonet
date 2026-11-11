@@ -1,16 +1,16 @@
 //! What the doctor says about the network (docs/design/network.md, "The
-//! wire"), from the files in `<state>/network/` alone: the network's files
-//! and key, the link (up, or down since when and why), the gateway's key
-//! against the pinned one, the clock, the outbox and the queues, a roster
-//! mismatch, being removed, and what the gateway's address means.
+//! wire"), from what this machine keeps of it alone: the network, its
+//! roster and key, the link (up, or down since when and why), the
+//! gateway's key against the pinned one, the clock, the outbox and the
+//! queues, a roster mismatch, being removed, and what the gateway's
+//! address means.
 //!
-//! The link writes how it stands to `link.json`; these checks read it, so
-//! they work whether the service is running or not.
+//! The link keeps how it stands; these checks read it, so they work
+//! whether the link is running or not.
 
 use crate::files::{Dir, KEY};
 use crate::keys::HostKey;
 use serde_json::{json, Map, Value};
-use std::path::Path;
 
 /// One check: its id, title and verdict ({ status, detail, fix? }).
 pub type Check = (&'static str, &'static str, Value);
@@ -43,16 +43,15 @@ fn clock_time(ms: f64) -> String {
 }
 
 /// The checks, or none when this machine isn't in a network.
-pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
-    let d = Dir::new(dir);
+pub fn checks(d: &Dir, now: f64) -> Vec<Check> {
     let net = match d.read_network() {
         Ok(Some(n)) => n,
         Ok(None) => return Vec::new(),
         Err(e) => return vec![("network.files", "The network's files are in order", verdict("fail", e.message, Some("xenonet net leave, then join the network again")))],
     };
     let mut out = Vec::new();
-    out.push(("network.files", "The network's files are in order", files(&d, &net.host)));
-    let link = d.read_link().unwrap_or(Value::Null);
+    out.push(("network.files", "The network's files are in order", files(d, &net.id, &net.host)));
+    let link = d.read_link(&net.id).unwrap_or(Value::Null);
     let s = |k: &str| link.get(k).and_then(Value::as_str);
     let gateway_here = link.get("gateway").and_then(Value::as_bool) == Some(true);
 
@@ -225,24 +224,23 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
     out
 }
 
-/// How this machine asks you and keeps your identity's root key, from the
-/// identity folder beside `dir` (the network's), without opening any key:
-/// none when no identity was set up here.
+/// How this machine asks you and keeps your identity's root key, from what
+/// it keeps of you and the identity folder beside the network's, without
+/// opening any key: none when no identity was set up here.
 ///
 /// - `network.presence`: how this machine's device asks you before it acts
 ///   as you, as your chain recorded it when the device was paired:
 ///   biometric, weaker, or none (no active device of yours here).
 /// - `network.root`: whether the root key is sealed to the device key, kept
 ///   in an owner-only file (a warning), or held by another machine.
-pub fn identity_checks(dir: &Path) -> Vec<Check> {
-    let d = Dir::new(dir);
-    let Ok(identity) = crate::identity::Identity::open(d.identity_dir(), None) else { return Vec::new() };
+pub fn identity_checks(d: &Dir) -> Vec<Check> {
+    let Ok(identity) = crate::identity::Identity::open(d.identity_dir(), d.persist.clone(), None) else { return Vec::new() };
     let chain = identity.chain();
     let Some(person) = chain.person() else { return Vec::new() };
     // This machine's device: the one its roster entry names, or, with no
     // network, the one device the person has (it was set up here).
-    let host = d.read_network().ok().flatten().map(|n| n.host);
-    let named = host.and_then(|h| read_roster(&d).ok()?.view().member(&h)?.device.clone());
+    let net = d.read_network().ok().flatten();
+    let named = net.and_then(|n| read_roster(d, &n.id).ok()?.view().member(&n.host)?.device.clone());
     let device = match named {
         Some(id) => person.device(&id),
         None => {
@@ -274,28 +272,28 @@ pub fn identity_checks(dir: &Path) -> Vec<Check> {
 
 /// What the doctor's firewall check (xenonet-doctor's firewall.rs) reads of
 /// the network: null when this machine isn't in one, else whether it's the
-/// network's gateway (as the roster says, or network.json when the roster
-/// can't be read), the gateway's address and its kind (address_kind).
-pub fn standing(dir: &Path) -> Value {
-    let d = Dir::new(dir);
+/// network's gateway (as the roster says, or the pinned gateway when the
+/// roster can't be read), the gateway's address and its kind
+/// (address_kind).
+pub fn standing(d: &Dir) -> Value {
     let Ok(Some(net)) = d.read_network() else { return Value::Null };
-    let gateway = read_roster(&d).map_or(net.gateway.host == net.host, |r| r.view().gateway == net.host);
+    let gateway = read_roster(d, &net.id).map_or(net.gateway.host == net.host, |r| r.view().gateway == net.host);
     let address = net.gateway.address.filter(|a| !a.is_empty());
     let kind = address.as_deref().map(crate::files::address_kind);
     json!({ "gateway": gateway, "address": address, "kind": kind })
 }
 
-/// The roster, checked against the person chains in the identity folder
-/// beside it, which the doctor reads without opening any key.
-fn read_roster(d: &Dir) -> crate::R<crate::roster::Roster> {
-    let identity = crate::identity::Identity::open(d.identity_dir(), None)?;
-    d.read_roster(crate::roster::NetworkPolicy::with(identity))
+/// The roster, checked against the person chains kept beside it, which
+/// the doctor reads without opening any key.
+fn read_roster(d: &Dir, network: &str) -> crate::R<crate::roster::Roster> {
+    let identity = crate::identity::Identity::open(d.identity_dir(), d.persist.clone(), None)?;
+    d.read_roster(network, crate::roster::NetworkPolicy::with(identity))
 }
 
-fn files(d: &Dir, host: &str) -> Value {
-    let roster = match read_roster(d) {
+fn files(d: &Dir, network: &str, host: &str) -> Value {
+    let roster = match read_roster(d, network) {
         Ok(r) => r,
-        Err(e) => return verdict("fail", format!("roster.json doesn't check: {}", e.message), Some("xenonet net leave, then join the network again")),
+        Err(e) => return verdict("fail", format!("the roster doesn't check: {}", e.message), Some("xenonet net leave, then join the network again")),
     };
     let key = match HostKey::load(&d.file(KEY)) {
         Ok(Some(k)) => k,
@@ -324,17 +322,22 @@ fn files(d: &Dir, host: &str) -> Value {
 mod tests {
     use super::*;
 
+    use std::path::Path;
+
+    fn kept(dir: &Path) -> Dir {
+        Dir::new(dir, std::sync::Arc::new(crate::persist::Memory::default()))
+    }
+
     #[test]
     fn no_network_no_checks() {
-        let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-none-{}", std::process::id()));
-        assert_eq!(checks(&dir, 0.0).len(), 0);
-        assert_eq!(standing(&dir), Value::Null);
+        let d = kept(&std::env::temp_dir().join(format!("xenonet-net-doctor-none-{}", std::process::id())));
+        assert_eq!(checks(&d, 0.0).len(), 0);
+        assert_eq!(standing(&d), Value::Null);
     }
 
     #[test]
     fn a_funnel_name_is_no_address_for_a_network() {
-        let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-funnel-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let d = kept(&std::env::temp_dir().join(format!("xenonet-net-doctor-funnel-{}", std::process::id())));
         let pin = |address: &str| crate::files::Pin { host: "studio".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: Some(address.into()) };
         let net = |host: &str, address: &str| crate::files::NetFile {
             id: "net_0".into(),
@@ -348,8 +351,8 @@ mod tests {
             joined: 0,
         };
         let address = |host: &str, a: &str| {
-            Dir::new(&dir).write_network(&net(host, a)).unwrap();
-            checks(&dir, 0.0).into_iter().find(|c| c.0 == "network.address").unwrap().2
+            d.write_network(&net(host, a)).unwrap();
+            checks(&d, 0.0).into_iter().find(|c| c.0 == "network.address").unwrap().2
         };
         let here = address("studio", "studio.example-tailnet.ts.net");
         assert_eq!(here["status"], "warn");
@@ -359,7 +362,6 @@ mod tests {
         assert!(there["fix"].as_str().unwrap().starts_with("Use studio's tailnet address"), "{there}");
         assert_eq!(address("laptop", "100.64.0.7:48114")["status"], "info", "a tailnet address is a LAN one");
         assert_eq!(address("laptop", "gw.example.com")["status"], "ok");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -389,9 +391,9 @@ mod tests {
         let checks = |name: &str, biometric: bool| {
             let dir = std::env::temp_dir().join(format!("xenonet-net-doctor-identity-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
-            let network = dir.join("network");
+            let network = kept(&dir.join("network"));
             assert!(identity_checks(&network).is_empty(), "no identity, no checks");
-            let id = crate::identity::Identity::open(Dir::new(&network).identity_dir(), Some(Arc::new(Fake(biometric)))).unwrap();
+            let id = crate::identity::Identity::open(network.identity_dir(), network.persist.clone(), Some(Arc::new(Fake(biometric)))).unwrap();
             id.found(true, "laptop", 1).unwrap();
             let out: Vec<(String, Value)> = identity_checks(&network).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
             let _ = std::fs::remove_dir_all(&dir);

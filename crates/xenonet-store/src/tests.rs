@@ -142,3 +142,47 @@ fn another_threads_call_waits_for_a_transaction_to_end() {
     assert_eq!(names, ["u"], "the rolled back transaction's table is gone, the other thread's stays");
     assert!(!db.in_transaction());
 }
+
+#[test]
+fn a_network_and_what_goes_with_it_are_forgotten_together() {
+    use net::{Gateway, Network};
+    let db = Db::memory().unwrap();
+    let n = Network {
+        id: "net_a".into(),
+        name: "home".into(),
+        host: "laptop".into(),
+        founder: "laptop".into(),
+        gateway: Gateway { host: "laptop".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: None },
+        lan: None,
+        titles_only: false,
+        share_load: true,
+        joined: 5,
+    };
+    db.put_link_status("net_a", &serde_json::json!({ "state": "live" })).unwrap();
+    assert_eq!(db.link_status("net_a").unwrap(), None, "nothing kept for a network this machine isn't in");
+    db.put_network(&n).unwrap();
+    db.put_network(&Network { name: "house".into(), ..n.clone() }).unwrap();
+    assert_eq!(db.networks().unwrap().iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["house"], "one row a network");
+    db.put_link_status("net_a", &serde_json::json!({ "state": "live" })).unwrap();
+    db.put_services("net_a", &[serde_json::json!({ "name": "b" }), serde_json::json!({ "name": "a" })]).unwrap();
+    assert_eq!(db.services("net_a").unwrap()[0]["name"], "b", "in the order published");
+    db.forget_network("net_a").unwrap();
+    assert!(db.networks().unwrap().is_empty() && db.link_status("net_a").unwrap().is_none() && db.services("net_a").unwrap().is_empty());
+}
+
+#[test]
+fn a_new_own_person_takes_the_place_of_the_one_before() {
+    let db = Db::memory().unwrap();
+    let (a, b) = (found(1), found(2));
+    db.put_person("prs_a", true, std::slice::from_ref(&a)).unwrap();
+    db.put_person("prs_x", false, std::slice::from_ref(&b)).unwrap();
+    db.put_person("prs_a", true, std::slice::from_ref(&a)).unwrap();
+    assert_eq!(db.stored().unwrap(), 2, "an entry held is kept once");
+    db.put_person("prs_b", true, std::slice::from_ref(&b)).unwrap();
+    let persons: Vec<(String, bool)> = db.persons().unwrap().into_iter().map(|p| (p.id, p.own)).collect();
+    assert_eq!(persons, [("prs_b".to_string(), true), ("prs_x".to_string(), false)]);
+    assert!(db.person::<PersonPolicy>("prs_a").unwrap().is_empty(), "the old own chain goes");
+    db.forget_others().unwrap();
+    assert_eq!(db.persons().unwrap().len(), 1);
+    assert_eq!(db.person::<PersonPolicy>("prs_b").unwrap().len(), 1);
+}

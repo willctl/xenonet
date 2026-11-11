@@ -116,6 +116,7 @@ fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
     let who = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let mut o = Options::new(
         dir.join("state").join("network"),
+        common::kept(&dir.join("state")),
         "0.0.0-test",
         "linux",
         Arc::new(move |code: &str, words: &str| {
@@ -159,6 +160,18 @@ impl Host {
         let _ = ctx.net.set(svc.clone());
         svc.start().await.unwrap();
         Host { ctx, svc, sink, dir, shift, caps }
+    }
+
+    /// What this machine keeps of its network, as the doctor reads it.
+    fn kept(&self) -> xenonet_net::files::Dir {
+        xenonet_net::files::Dir::new(self.dir.join("state").join("network"), common::kept(&self.dir.join("state")))
+    }
+
+    /// The roster's entries this machine keeps, as JSON.
+    fn roster(&self) -> Vec<Value> {
+        let kept = self.kept();
+        let net = kept.read_network().unwrap().expect("in a network");
+        kept.persist.roster(&net.id).unwrap().iter().map(xenonet_net::roster::Entry::to_json).collect()
     }
 
     /// The same machine started again: its files as they were.
@@ -432,8 +445,8 @@ async fn adding_a_machine_is_the_windows_and_its_join_pairs_the_device() {
     let st = b.state().await;
     assert_eq!(st["person"]["id"], a.state().await["person"]["id"]);
     assert_eq!(st["person"]["acts"], true);
-    let roster: Value = serde_json::from_str(&std::fs::read_to_string(b.dir.join("state").join("network").join("roster.json")).unwrap()).unwrap();
-    let add = roster.as_array().unwrap().last().unwrap().clone();
+    let roster: Vec<Value> = b.roster();
+    let add = roster.last().unwrap().clone();
     assert_eq!((add["op"].clone(), add["host"]["device"].clone()), (json!("add"), st["person"]["device"].clone()), "{add}");
     assert!(add["signers"][0]["presence"]["what"] == "admit", "{add}");
 }
@@ -485,7 +498,8 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
     assert_eq!(s, 200, "{v}");
     assert_eq!(c.state().await["network"], Value::Null);
     let files = c.dir.join("state").join("network");
-    assert!(["network.json", "host.key", "net.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
+    assert!(["host.key", "net.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
+    assert!(c.kept().read_network().unwrap().is_none(), "the network is forgotten");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -570,9 +584,10 @@ async fn a_clock_five_minutes_off_still_links() {
     until("the message", 10, || c.sink.texts("message") == ["ten minutes apart"]).await;
     let at = c.sink.got.lock().unwrap()[0].2.clone();
     assert_eq!(at["body"], "ten minutes apart");
-    // The doctor reads it from the files: the skew, the link, the address.
+    // The doctor reads it from what the machine keeps: the skew, the link,
+    // the address.
     let checks = |h: &Host| -> std::collections::HashMap<String, Value> {
-        xenonet_net::doctor::checks(&h.dir.join("state").join("network"), now_ms() + h.shift).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect()
+        xenonet_net::doctor::checks(&h.kept(), now_ms() + h.shift).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect()
     };
     let b_checks = checks(&b);
     assert_eq!(b_checks["network.clock"]["status"], "warn", "{:?}", b_checks["network.clock"]);
@@ -585,7 +600,7 @@ async fn a_clock_five_minutes_off_still_links() {
     assert!(a_checks["network.address"]["detail"].as_str().unwrap().contains("this computer alone"));
     assert_eq!(a_checks["network.link"]["detail"], "this machine is the network's gateway");
     // What the firewall check reads: a is the gateway, on this computer alone.
-    let standing = |h: &Host| xenonet_net::doctor::standing(&h.dir.join("state").join("network"));
+    let standing = |h: &Host| xenonet_net::doctor::standing(&h.kept());
     assert_eq!((standing(&a)["gateway"].clone(), standing(&a)["kind"].clone()), (json!(true), json!("loopback")));
     assert_eq!(standing(&b)["gateway"], json!(false));
 }
@@ -752,8 +767,7 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     let st = a.state().await;
     assert!(st["joinClosedUntil"].as_f64().is_some_and(|t| t > now_ms()), "{st}");
     a.svc.node().shared().write_link(true);
-    let doctor: std::collections::HashMap<String, Value> =
-        xenonet_net::doctor::checks(&a.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
+    let doctor: std::collections::HashMap<String, Value> = xenonet_net::doctor::checks(&a.kept(), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
     assert_eq!(doctor["network.join"]["status"], "warn", "{:?}", doctor["network.join"]);
     // The routes are the owner's: an agent's process is refused.
     let mut cores = Cores::pending(false, false);
@@ -796,7 +810,8 @@ async fn a_founder_alone_leaves_only_with_force_and_its_lan_door_closes() {
     assert_eq!((v["left"].clone(), v["removed"].clone(), v["founder"].clone()), (json!("home"), json!(false), json!(true)), "the founder never asks to be removed");
     assert_eq!(a.state().await["network"], Value::Null);
     let files = a.dir.join("state").join("network");
-    assert!(["network.json", "host.key", "net.sqlite", "gateway.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
+    assert!(["host.key", "net.sqlite", "gateway.sqlite"].iter().all(|f| !files.join(f).exists()), "{}", files.display());
+    assert!(a.kept().read_network().unwrap().is_none(), "the network is forgotten");
     until("the LAN door closed", 10, || std::net::TcpStream::connect(("127.0.0.1", port)).is_err()).await;
 }
 
@@ -1080,9 +1095,8 @@ async fn a_gateway_that_takes_connections_and_says_nothing_puts_the_link_offline
     let since = st["gateway"]["since"].as_f64().unwrap();
     assert!(since > was, "since it went offline: {st}");
     assert!(!b.sink.up(), "the engine heard the link went down");
-    // The doctor reads it from link.json.
-    let doctor: std::collections::HashMap<String, Value> =
-        xenonet_net::doctor::checks(&b.dir.join("state").join("network"), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
+    // The doctor reads how the link stood, as the link kept it.
+    let doctor: std::collections::HashMap<String, Value> = xenonet_net::doctor::checks(&b.kept(), now_ms()).into_iter().map(|(id, _, v)| (id.to_string(), v)).collect();
     assert_eq!(doctor["network.link"]["status"], "warn", "{:?}", doctor["network.link"]);
     assert!(doctor["network.link"]["detail"].as_str().unwrap().contains("didn't answer"), "{:?}", doctor["network.link"]);
     // The gateway saw laptop give up on its stream: the others see it

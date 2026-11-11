@@ -36,6 +36,7 @@ pub mod identity;
 pub mod keys;
 pub mod link;
 pub mod node;
+pub mod persist;
 pub mod request;
 pub mod roots;
 pub mod roster;

@@ -9,7 +9,7 @@
 //! returns, and the link sends them when it can.
 
 use crate::codec::{frame_id, is_b64};
-use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY, SERVICES};
+use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY};
 use crate::frame::{host_frame, open_frame, Draft, Frame};
 use crate::gateway::{join_body, Gateway, NetRequest};
 use crate::ground::Facts;
@@ -18,6 +18,7 @@ use crate::hoststore::{HostStore, Size};
 use crate::identity::{self, Identity};
 use crate::keys::{HostKey, PublicKeys};
 use crate::link::{self, Transport};
+use crate::persist::Persist;
 use crate::roster::{Entry, HostRef, NetworkPolicy, Offered, Op, Removal, Roster};
 use crate::sink::{LogFn, SinkSlot};
 use crate::svc::{self, Answer, Services};
@@ -82,11 +83,15 @@ pub struct Options {
     /// key, sealing the person's root. None: no device, so nothing is done
     /// as the person (a test's node, a machine with no way to ask).
     pub vault: Option<Arc<dyn Vault>>,
+    /// Where the network and the person are kept (the store, through the
+    /// runtime).
+    pub persist: Arc<dyn Persist>,
 }
 
 impl Options {
-    pub fn new(dir: impl Into<PathBuf>, version: &str, platform: &str, log: LogFn) -> Options {
+    pub fn new(dir: impl Into<PathBuf>, persist: Arc<dyn Persist>, version: &str, platform: &str, log: LogFn) -> Options {
         Options {
+            persist,
             dir: dir.into(),
             version: version.into(),
             platform: platform.into(),
@@ -719,7 +724,7 @@ impl Shared {
             "rosterMismatch": self.roster_mismatch(),
             "at": t as i64,
         });
-        let _ = self.dir.write_link(&v);
+        let _ = self.dir.write_link(&net.id, &v);
     }
 
     pub fn woken(&self) -> tokio::sync::futures::Notified<'_> {
@@ -735,7 +740,9 @@ impl Shared {
             let mut r = self.roster.writing();
             let o = r.offer(e.clone())?;
             if o == Offered::Appended {
-                self.dir.write_roster(&r)?;
+                if let Some(net) = self.network() {
+                    self.dir.write_roster(&net.id, &r)?;
+                }
             }
             o
         };
@@ -1639,18 +1646,18 @@ pub struct Node {
 impl Node {
     /// The node, as its files leave it; nothing runs until `start`.
     pub fn open(opts: Options, sink: Arc<SinkSlot>) -> R<Arc<Node>> {
-        let dir = Dir::new(opts.dir.clone());
-        let identity = Identity::open(dir.identity_dir(), opts.vault.clone())?;
+        let dir = Dir::new(opts.dir.clone(), opts.persist.clone());
+        let identity = Identity::open(dir.identity_dir(), opts.persist.clone(), opts.vault.clone())?;
         let policy = NetworkPolicy::with(identity.clone());
         let net = dir.read_network()?;
         let (key, roster, store) = match &net {
-            Some(_) => {
+            Some(n) => {
                 let key = HostKey::load(&dir.file(KEY))?.ok_or_else(|| NetError::internal("this host's key is missing"))?;
-                (Some(Arc::new(key)), dir.read_roster(policy)?, Some(HostStore::open(&dir.file(HOST_DB))?))
+                (Some(Arc::new(key)), dir.read_roster(&n.id, policy)?, Some(HostStore::open(&dir.file(HOST_DB))?))
             }
             None => (None, Roster::with_policy(policy), None),
         };
-        let services = Services::open(dir.file(SERVICES));
+        let services = Services::open(opts.persist.clone());
         let shared = Arc::new_cyclic(|this| Shared {
             this: this.clone(),
             opts,
@@ -1772,8 +1779,9 @@ impl Node {
 
     fn adopt(&self, net: NetFile, key: HostKey, roster: Roster) -> R<()> {
         let n = &self.shared;
-        n.dir.write_roster(&roster)?;
+        // The network's row before its roster, which is kept under it.
         n.dir.write_network(&net)?;
+        n.dir.write_roster(&net.id, &roster)?;
         let store = HostStore::open(&n.dir.file(HOST_DB))?;
         *n.store.locked() = Some(store);
         *n.key.writing() = Some(Arc::new(key));

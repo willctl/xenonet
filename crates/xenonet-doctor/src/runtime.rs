@@ -70,9 +70,18 @@ pub struct Parts {
     /// Why the store in a state folder can't be used, if it can't
     /// (`xenonet_store::standing`, which the composition gives).
     pub standing: fn(&str) -> Option<String>,
+    /// Where the network and the person are kept, while the store is open.
+    pub net: Option<Arc<dyn xenonet_net::persist::Persist>>,
 }
 
 impl Parts {
+    // The network as this machine keeps it, with its folder's key; None
+    // with no store, where there's no network either.
+    fn network(&self) -> Option<xenonet_net::files::Dir> {
+        let kept = self.net.clone()?;
+        Some(xenonet_net::files::Dir::new(std::path::Path::new(&self.config.state_dir).join("network"), kept))
+    }
+
     fn home(&self) -> String {
         self.config.home.clone()
     }
@@ -467,7 +476,7 @@ impl DoctorHost for Here {
     // The network's gateway, for the firewall's check: whether it's this
     // machine, and its address.
     async fn network(&self) -> Option<Value> {
-        Some(xenonet_net::doctor::standing(&std::path::Path::new(&self.m.parts.config.state_dir).join("network")))
+        Some(self.m.parts.network().map_or(Value::Null, |d| xenonet_net::doctor::standing(&d)))
     }
     async fn restart_exe(&self) -> Option<Value> {
         Some(restart_exe())
@@ -587,12 +596,10 @@ pub async fn run_doctor(parts: Arc<Parts>, only: Option<&[String]>, by_hand: boo
     let started = now_ms();
     // Each check: its id, group, title, and its verdict when it's ready.
     let mut all: Vec<(String, String, String, Option<Value>)> = checks::all().into_iter().map(|(id, g, t)| (id.to_string(), g.to_string(), t.to_string(), None)).collect();
-    // The network across machines, from its files, when this machine is in
-    // one: each verdict is ready.
-    let network = std::path::Path::new(&parts.config.state_dir).join("network");
-    // How this machine asks the person and keeps their root key, once an
-    // identity was set up here.
-    let checks = xenonet_net::doctor::checks(&network, now_ms()).into_iter().chain(xenonet_net::doctor::identity_checks(&network));
+    // The network across machines, as this machine keeps it, when it's in
+    // one: each verdict is ready. How this machine asks the person and
+    // keeps their root key, once an identity was set up here.
+    let checks: Vec<_> = parts.network().map_or_else(Vec::new, |d| xenonet_net::doctor::checks(&d, now_ms()).into_iter().chain(xenonet_net::doctor::identity_checks(&d)).collect());
     for (id, title, verdict) in checks {
         all.push((id.into(), "Network".into(), title.into(), Some(json!({ "network": verdict }))));
     }
@@ -905,6 +912,7 @@ mod tests {
             emitter: Emitter::new(),
             gateway: Slot::default(),
             standing: |_| None,
+            net: None,
         })
     }
 

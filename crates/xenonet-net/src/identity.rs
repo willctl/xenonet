@@ -1,11 +1,10 @@
 //! The person on this machine (docs/design/direction.md, "Authorization"):
-//! `<state>/identity/` holds their chain (`person.json`), the device key
-//! the machine's `Vault` keeps there, their root seed sealed to the device
-//! key (`root.json`; on a machine that can't seal, an owner-only file,
-//! which is weaker and says so), the other people's chains this machine
-//! holds to check a network's chain (`persons.json`), and the presence
-//! blocks it has taken (`presence-seen.json`), so a block counts once
-//! across restarts.
+//! their chain, the other people's chains this machine holds to check a
+//! network's chain, and the presence blocks it has taken, so a block
+//! counts once across restarts, all kept through `Persist`; and in
+//! `<state>/identity/`, the device key the machine's `Vault` keeps there
+//! and their root seed sealed to the device key (`root.json`; on a machine
+//! that can't seal, an owner-only file, which is weaker and says so).
 //!
 //! One person per machine, in this first cut. The person is founded from
 //! XenoNet's window, when the first network is made or the first act as
@@ -25,7 +24,7 @@
 //! `at_window`, refusing without asking when the act didn't come from
 //! XenoNet's window.
 
-use crate::files::{read_json, write_json};
+use crate::persist::Persist;
 use crate::{NetError, R};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -36,13 +35,11 @@ use xenonet_id::presence::{prove, PresenceBlock, PresenceCheck};
 use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer, VerifyingKey};
 use xenonet_id::vault::{DeviceKey, Vault};
 use xenonet_log::chain::Offered;
-use xenonet_log::person::{self, Device, DeviceKind, Devices, NewDevice, PersonChain};
+pub use xenonet_log::person;
+use xenonet_log::person::{Device, DeviceKind, Devices, NewDevice, PersonChain};
 use xenonet_os::sync::{Locked, ReadWrite};
 
-pub const PERSON: &str = "person.json";
-pub const PERSONS: &str = "persons.json";
 pub const ROOT: &str = "root.json";
-pub const SEEN: &str = "presence-seen.json";
 /// The most entries a person's chain sends in one go.
 pub const CHAIN_MAX: usize = 64;
 
@@ -62,6 +59,7 @@ fn no_person() -> NetError {
 
 pub struct Identity {
     dir: PathBuf,
+    persist: Arc<dyn Persist>,
     vault: Option<Arc<dyn Vault>>,
     own: RwLock<PersonChain>,
     others: RwLock<BTreeMap<String, PersonChain>>,
@@ -84,34 +82,43 @@ impl std::fmt::Debug for Identity {
 /// What's told of each entry appended to this person's chain.
 type OnAppend = Box<dyn Fn(&person::Entry) + Send + Sync>;
 
-fn chain_from(v: &Value) -> R<PersonChain> {
-    Ok(PersonChain::from_json(v)?)
+fn chain_from(entries: Vec<person::Entry>) -> R<PersonChain> {
+    Ok(PersonChain::from_entries(entries)?)
+}
+
+// root.json, a key file: None when it isn't there.
+fn read_root(file: &Path) -> R<Option<Value>> {
+    match std::fs::read_to_string(file) {
+        Ok(t) => serde_json::from_str(&t).map(Some).map_err(|_| NetError::internal("root.json isn't readable")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 impl Identity {
-    /// The identity in `dir`, as its files leave it. Nothing is made and
-    /// nothing asks: keys come when they're first needed.
-    pub fn open(dir: impl Into<PathBuf>, vault: Option<Arc<dyn Vault>>) -> R<Arc<Identity>> {
+    /// The identity as `persist` keeps it, with its keys in `dir`. Nothing
+    /// is made and nothing asks: keys come when they're first needed.
+    pub fn open(dir: impl Into<PathBuf>, persist: Arc<dyn Persist>, vault: Option<Arc<dyn Vault>>) -> R<Arc<Identity>> {
         let dir = dir.into();
-        let own = match read_json(&dir.join(PERSON))? {
-            Some(v) => chain_from(&v)?,
-            None => PersonChain::new(),
-        };
+        let mut own = PersonChain::new();
         let mut others = BTreeMap::new();
-        if let Some(Value::Object(m)) = read_json(&dir.join(PERSONS))? {
-            for (id, v) in m {
-                // A chain that doesn't read is dropped: it's sent again with
-                // the network's next roster.
-                if let Ok(c) = chain_from(&v) {
-                    if c.id() == Some(id.as_str()) {
-                        others.insert(id, c);
-                    }
+        for (id, is_own, entries) in persist.persons()? {
+            if is_own {
+                own = chain_from(entries)?;
+                continue;
+            }
+            // A chain that doesn't read is dropped: it's sent again with the
+            // network's next roster.
+            if let Ok(c) = chain_from(entries) {
+                if c.id() == Some(id.as_str()) {
+                    others.insert(id, c);
                 }
             }
         }
-        let seen = read_json(&dir.join(SEEN))?.and_then(|v| v.as_array().cloned()).unwrap_or_default();
-        let seen = seen.iter().filter_map(|s| Some((s.get("device")?.as_str()?.to_string(), unb64_n::<16>(s.get("nonce")?.as_str()?)?, s.get("at")?.as_i64()?)));
+        let seen = persist.presence_seen()?;
         Ok(Arc::new(Identity {
+            roots: crate::roots::TokenRoots::open(persist.clone()),
+            persist,
             vault,
             own: RwLock::new(own),
             others: RwLock::new(others),
@@ -119,7 +126,6 @@ impl Identity {
             machine: Mutex::new(None),
             seen: Mutex::new(PresenceCheck::from_seen(seen)),
             on_append: Mutex::new(None),
-            roots: crate::roots::TokenRoots::open(&dir),
             dir,
         }))
     }
@@ -216,12 +222,14 @@ impl Identity {
     }
 
     fn write_own(&self, c: &PersonChain) -> R<()> {
-        write_json(&self.dir.join(PERSON), &c.to_json())
+        match c.id() {
+            Some(id) => self.persist.put_person(id, true, c.entries()),
+            None => Ok(()),
+        }
     }
 
-    fn write_others(&self, m: &BTreeMap<String, PersonChain>) -> R<()> {
-        let v: serde_json::Map<String, Value> = m.iter().map(|(id, c)| (id.clone(), c.to_json())).collect();
-        write_json(&self.dir.join(PERSONS), &Value::Object(v))
+    fn write_other(&self, id: &str, c: &PersonChain) -> R<()> {
+        self.persist.put_person(id, false, c.entries())
     }
 
     fn told(&self, entries: &[person::Entry]) {
@@ -299,13 +307,13 @@ impl Identity {
     /// Whether the root seed is sealed to the device key (else it's in an
     /// owner-only file), for the doctor.
     pub fn root_sealed(&self) -> Option<bool> {
-        let v = read_json(&self.dir.join(ROOT)).ok().flatten()?;
+        let v = read_root(&self.dir.join(ROOT)).ok().flatten()?;
         Some(v["kind"] == "sealed")
     }
 
     /// The root key, opened: asks the person where it's sealed.
     fn root(&self, reason: &str) -> R<SeedSigner> {
-        let v = read_json(&self.dir.join(ROOT))?
+        let v = read_root(&self.dir.join(ROOT))?
             .ok_or_else(|| NetError::new(409, "no-root", "this machine doesn't hold your identity's root key: pair from the machine that made it"))?;
         let seed: [u8; 32] = match v["kind"].as_str() {
             Some("sealed") => {
@@ -463,8 +471,8 @@ impl Identity {
             return Err(NetError::bad("that isn't the chain of the person it names"));
         }
         if appended {
+            self.write_other(person, &chain)?;
             others.insert(person.to_string(), chain);
-            self.write_others(&others)?;
         }
         Ok(appended)
     }
@@ -475,17 +483,16 @@ impl Identity {
     }
 
     /// Takes `block` for a live act, once (`PresenceCheck::accept`), and
-    /// keeps what it took on disk.
+    /// keeps what it took.
     pub fn accept(&self, block: &PresenceBlock, device: &VerifyingKey, what: &str, act: &[u8; 32], now: i64) -> R<()> {
         self.with_seen(|seen| seen.accept(block, device, what, act, now).map_err(refused))
     }
 
-    /// Runs `f` on the blocks taken so far, then keeps them on disk.
+    /// Runs `f` on the blocks taken so far, then keeps them.
     pub fn with_seen<T>(&self, f: impl FnOnce(&mut PresenceCheck) -> R<T>) -> R<T> {
         let mut seen = self.seen.locked();
         let out = f(&mut seen)?;
-        let list: Vec<Value> = seen.seen().into_iter().map(|(d, n, at)| json!({ "device": d, "nonce": b64(&n), "at": at })).collect();
-        write_json(&self.dir.join(SEEN), &Value::Array(list))?;
+        self.persist.put_presence_seen(&seen.seen())?;
         Ok(out)
     }
 
@@ -507,7 +514,7 @@ impl Identity {
     pub fn forget_others(&self) {
         let mut others = self.others.writing();
         others.clear();
-        let _ = std::fs::remove_file(self.dir.join(PERSONS));
+        let _ = self.persist.forget_others();
     }
 }
 
@@ -577,22 +584,28 @@ mod tests {
         }
     }
 
-    fn dir(name: &str) -> PathBuf {
+    // A machine: its keys' folder, and what it keeps, which outlives a
+    // restart as the store does.
+    fn dir(name: &str) -> (PathBuf, Arc<dyn Persist>) {
         let d = std::env::temp_dir().join(format!("xenonet-identity-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        d
+        (d, Arc::new(crate::persist::Memory::default()))
+    }
+
+    fn open(m: &(PathBuf, Arc<dyn Persist>)) -> Arc<Identity> {
+        Identity::open(&m.0, m.1.clone(), Some(Arc::new(Fake))).unwrap()
     }
 
     #[test]
     fn a_person_is_founded_at_the_window_and_pairs_another_device() {
         let (a, b) = (dir("a"), dir("b"));
-        let studio = Identity::open(&a, Some(Arc::new(Fake))).unwrap();
+        let studio = open(&a);
         assert!(studio.found(false, "studio", 1).is_err(), "only from the window");
         studio.found(true, "studio", 1).unwrap();
         assert!(studio.can_act());
         let person = studio.person_id().unwrap();
         // laptop's device, paired by studio; laptop takes the chain.
-        let laptop = Identity::open(&b, Some(Arc::new(Fake))).unwrap();
+        let laptop = open(&b);
         let key = laptop.device_key().unwrap().unwrap().signer.public();
         assert!(studio.pair(false, NewDevice { key: key.clone(), kind: DeviceKind::Weaker, label: "laptop".into() }, 2).is_err());
         let made = studio.pair(true, NewDevice { key, kind: DeviceKind::Weaker, label: "laptop".into() }, 2).unwrap();
@@ -601,24 +614,24 @@ mod tests {
         assert_eq!(laptop.person_id().as_deref(), Some(person.as_str()));
         assert!(laptop.can_act());
         // Kept across a restart, the presence it took too.
-        let again = Identity::open(&b, Some(Arc::new(Fake))).unwrap();
+        let again = open(&b);
         assert_eq!(again.head(), studio.head());
         let act = xenonet_id::codec::sha256(b"answer");
         let block = studio.prove(true, "answer", &act, "", 10).unwrap();
         let device = studio.device_key().unwrap().unwrap().signer.public();
         laptop.accept(&block, &device, "answer", &act, 20).unwrap();
-        let later = Identity::open(&b, Some(Arc::new(Fake))).unwrap();
+        let later = open(&b);
         assert!(later.accept(&block, &device, "answer", &act, 30).is_err(), "seen before a restart");
-        let _ = std::fs::remove_dir_all(a);
-        let _ = std::fs::remove_dir_all(b);
+        let _ = std::fs::remove_dir_all(a.0);
+        let _ = std::fs::remove_dir_all(b.0);
     }
 
     #[test]
     fn another_device_is_revoked_from_the_window_and_never_this_one() {
         let (a, b) = (dir("revoke-a"), dir("revoke-b"));
-        let studio = Identity::open(&a, Some(Arc::new(Fake))).unwrap();
+        let studio = open(&a);
         studio.found(true, "studio", 1).unwrap();
-        let laptop = Identity::open(&b, Some(Arc::new(Fake))).unwrap();
+        let laptop = open(&b);
         let key = laptop.device_key().unwrap().unwrap().signer.public();
         studio.pair(true, NewDevice { key: key.clone(), kind: DeviceKind::Weaker, label: "laptop".into() }, 2).unwrap();
         assert!(laptop.adopt(&studio.chain()) && laptop.can_act());
@@ -638,7 +651,7 @@ mod tests {
         let person = studio.person_id().unwrap();
         assert!(laptop.offer(&person, &[made[0].to_json()]).unwrap());
         assert!(!laptop.can_act());
-        let _ = std::fs::remove_dir_all(a);
-        let _ = std::fs::remove_dir_all(b);
+        let _ = std::fs::remove_dir_all(a.0);
+        let _ = std::fs::remove_dir_all(b.0);
     }
 }

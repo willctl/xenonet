@@ -850,13 +850,12 @@ fn cursor_of(token: &str) -> Option<(f64, i64)> {
     Some((at.parse::<i64>().ok()? as f64, seq.parse().ok()?))
 }
 
-/// The network's name, or this host's id in it, from
-/// `<state>/network/network.json`; None outside a network.
-pub fn network_name(state_dir: &str) -> Option<String> {
-    let text = std::fs::read_to_string(std::path::Path::new(state_dir).join("network").join("network.json")).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    let pick = |k: &str| v.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty() && s.len() <= 64).map(str::to_string);
-    pick("name").or_else(|| pick("host"))
+/// The network's name, or this host's id in it, as this machine keeps
+/// it; None outside a network.
+pub fn network_name(kept: &dyn xenonet_net::persist::Persist) -> Option<String> {
+    let n = kept.network().ok()??;
+    let pick = |s: &str| Some(s.trim()).filter(|s| !s.is_empty() && s.len() <= 64).map(str::to_string);
+    pick(&n.name).or_else(|| pick(&n.host))
 }
 
 #[cfg(test)]

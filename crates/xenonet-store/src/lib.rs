@@ -18,6 +18,7 @@
 
 mod chains;
 pub mod engine;
+pub mod net;
 pub mod schema;
 pub mod sql;
 

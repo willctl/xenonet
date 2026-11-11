@@ -212,10 +212,11 @@ fn timing() -> Timing {
     Timing { ping_ms: 400, stream_ms: 12_000, idle_ms: 2500, poll_ms: 3000, answer_ms: 4000, backoff_min_ms: 150.0, backoff_max_ms: 800.0, handover_ms: 1000 }
 }
 
-fn options(dir: &Path, who: &str) -> Options {
+fn options(dir: &Path, who: &str, kept: Arc<dyn xenonet_net::persist::Persist>) -> Options {
     let who = who.to_string();
     let mut o = Options::new(
         dir.join("state").join("network"),
+        kept,
         "0.0.0-test",
         "linux",
         Arc::new(move |code: &str, words: &str| {
@@ -304,7 +305,9 @@ impl Host {
         // Its engine's events reach its console's stream, as they do in
         // `xenonet serve`.
         env.emitter.bind(&ctx);
-        let svc = NetService::open(options(&dir, name)).unwrap();
+        // The network kept in the engine's store, as `xenonet serve` keeps it.
+        let kept = xenonet_service::serve::kept_network(&ctx.cores).expect("the engine's store");
+        let svc = NetService::open(options(&dir, name, kept)).unwrap();
         if let Some(plug) = &ctx.cores.on_net {
             plug(&*svc);
         }
@@ -1003,11 +1006,12 @@ async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_
     assert_eq!((s, v["proposed"].clone(), v["start"].clone()), (200, json!(true), json!("off")), "{v}");
     let (s, _) = c.window("PUT", "/api/net/settings", json!({ "start": "everyone" })).await;
     assert_eq!(s, 400);
-    // The chain keeps them, not network.json.
-    let kept: Value = serde_json::from_str(&std::fs::read_to_string(c.dir.join("state").join("network").join("network.json")).unwrap()).unwrap();
-    assert!(kept.get("start").is_none() && kept.get("wake").is_none(), "{kept}");
-    let roster: Value = serde_json::from_str(&std::fs::read_to_string(c.dir.join("state").join("network").join("roster.json")).unwrap()).unwrap();
-    let last = roster.as_array().unwrap().last().unwrap().clone();
+    // The chain keeps them: the network's row has no place for them.
+    // Read from the folder, as the doctor would with the service down.
+    let kept = common::kept(&c.dir.join("state"));
+    let net = kept.network().unwrap().expect("in a network");
+    let roster: Vec<Value> = kept.roster(&net.id).unwrap().iter().map(xenonet_net::roster::Entry::to_json).collect();
+    let last = roster.last().unwrap().clone();
     assert_eq!((last["op"].clone(), last["host"]["id"].clone(), last["settings"]["wake"].clone()), (json!("settings"), json!("desk"), json!("consent")), "{last}");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);

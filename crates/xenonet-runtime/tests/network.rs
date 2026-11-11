@@ -190,7 +190,7 @@ impl Governance for Gov {
 /// in: each machine's identity, and the network's view.
 fn people(dir: &Path) -> (HashMap<String, Arc<Identity>>, View) {
     let vault = || -> Arc<dyn xenonet_id::vault::Vault> { Arc::new(xenonet_keys::Fake { allow: true }) };
-    let open = |h: &str| Identity::open(dir.join(h).join("state").join("identity"), Some(vault())).unwrap();
+    let open = |h: &str| Identity::open(dir.join(h).join("state").join("identity"), Arc::new(xenonet_net::persist::Memory::default()), Some(vault())).unwrap();
     let studio = open("studio");
     studio.found(true, "studio", now() as i64).unwrap();
     let mut out = HashMap::from([("studio".to_string(), studio.clone())]);

@@ -423,7 +423,7 @@ mod tests {
     fn ground(name: &str, settings: chain::Settings, synced: Option<i64>) -> (EngineGround, Arc<Identity>, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("xenonet-runtime-ground-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let identity = Identity::open(&dir, Some(Arc::new(Fake))).unwrap();
+        let identity = Identity::open(&dir, Arc::new(xenonet_net::persist::Memory::default()), Some(Arc::new(Fake))).unwrap();
         identity.found(true, "laptop", NOW).unwrap();
         let mut view = View { network: NET.into(), founder: "studio".into(), owner: identity.person_id(), gateway: "studio".into(), ..View::default() };
         for (id, window, s) in

@@ -9,8 +9,8 @@
 //! - **Publishing** is the owner's (`xenonet svc publish`): a name, a
 //!   target that is a loopback IP literal and a port over plain http, the
 //!   path prefixes callers may reach, and, if the owner narrows it, the
-//!   hosts that may call. It's kept in `<state>/network/services.json`,
-//!   which goes with the network.
+//!   hosts that may call. It's kept with the network (`Persist`), and goes
+//!   with it.
 //! - **The caller's host** sends a request (`network/svc/v1`, op
 //!   `request`) only while its own link is live and the gateway last said
 //!   the target host is linked, since the gateway takes a live frame for a
@@ -28,15 +28,15 @@
 //! nothing here logs a header.
 
 use crate::codec::{b64, random, unb64};
-use crate::files::{read_json, write_json};
 use crate::gateway::Bucket;
+use crate::persist::Persist;
 use crate::{NetError, R};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock, RwLock};
+
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use xenonet_os::sync::{Locked, ReadWrite};
@@ -585,7 +585,9 @@ struct Waiting {
 
 /// This host's services: what it published, and the requests it waits on.
 pub struct Services {
-    file: PathBuf,
+    persist: Arc<dyn Persist>,
+    /// The network the services are published to, while there's one.
+    network: RwLock<Option<String>>,
     published: RwLock<Vec<Published>>,
     waiting: Mutex<HashMap<String, Waiting>>,
     limiter: Limiter,
@@ -631,10 +633,11 @@ impl Drop for Wait<'_> {
 }
 
 impl Services {
-    /// The services in `file`, which may not be there yet.
-    pub fn open(file: PathBuf) -> Services {
+    /// The services kept for the network this machine is in, if any.
+    pub fn open(persist: Arc<dyn Persist>) -> Services {
         let s = Services {
-            file,
+            persist,
+            network: RwLock::new(None),
             published: RwLock::new(Vec::new()),
             waiting: Mutex::new(HashMap::new()),
             limiter: Limiter::new(A_MINUTE),
@@ -646,23 +649,25 @@ impl Services {
         s
     }
 
-    /// What `services.json` holds, in place of what was here.
+    /// What's kept for the network this machine is in, in place of what
+    /// was here.
     pub fn load(&self) {
-        let list = read_json(&self.file)
-            .ok()
-            .flatten()
-            .and_then(|v| v.get("services").and_then(Value::as_array).map(|a| a.iter().filter_map(Published::from_json).collect()))
-            .unwrap_or_default();
+        let network = self.persist.network().ok().flatten().map(|n| n.id);
+        let list = network.as_deref().and_then(|n| self.persist.services(n).ok()).map(|l| l.iter().filter_map(Published::from_json).collect()).unwrap_or_default();
+        *self.network.writing() = network;
         *self.published.writing() = list;
     }
 
-    /// The network was left: its services go with it (its files went).
+    /// The network was left: its services go with it (what was kept of it
+    /// went).
     pub fn forget(&self) {
+        *self.network.writing() = None;
         self.published.writing().clear();
     }
 
     fn save(&self, list: &[Published]) -> R<()> {
-        write_json(&self.file, &json!({ "services": list.iter().map(Published::to_json).collect::<Vec<_>>() }))
+        let network = self.network.reading().clone().ok_or_else(|| NetError::new(409, "no-network", "this machine isn't in a XenoNet network"))?;
+        self.persist.put_services(&network, &list.iter().map(Published::to_json).collect::<Vec<_>>())
     }
 
     pub fn list(&self) -> Vec<Published> {
@@ -1104,10 +1109,29 @@ mod tests {
         assert!(l.take("laptop", "xenolith", t + 60e3).is_ok());
     }
 
+    // What a machine in a network keeps, in memory.
+    fn in_a_network() -> Arc<dyn Persist> {
+        let kept = crate::persist::Memory::default();
+        let gateway = crate::files::Pin { host: "studio".into(), key_id: "k".into(), sign: "s".into(), seal: "x".into(), address: None };
+        let net = crate::files::NetFile {
+            id: "net_0".into(),
+            name: "home".into(),
+            host: "studio".into(),
+            founder: "studio".into(),
+            gateway,
+            lan: None,
+            titles_only: false,
+            share_load: true,
+            joined: 0,
+        };
+        kept.put_network(&net).unwrap();
+        Arc::new(kept)
+    }
+
     #[test]
     fn requests_are_checked_in_order_before_they_go() {
-        let dir = std::env::temp_dir().join(format!("xenonet-svc-{}", std::process::id()));
-        let s = Services::open(dir.join("services.json"));
+        let kept = in_a_network();
+        let s = Services::open(kept.clone());
         s.publish(Published::new("xenolith", "http://127.0.0.1:4790", &["/sync/v1/".into()], &["laptop".into()], 0).unwrap()).unwrap();
         let req = |name: &str, method: &str, path: &str, body: usize| Request {
             id: request_id().unwrap(),
@@ -1127,16 +1151,15 @@ mod tests {
         let (p, n) = s.check("laptop", &req("xenolith", "POST", "/sync/v1/x?a=1", REQUEST_BODY), 0.0).unwrap();
         assert_eq!((p.name.as_str(), n.target(&p.target.prefix)), ("xenolith", "/sync/v1/x?a=1".to_string()));
         // Kept, and read again.
-        assert_eq!(Services::open(dir.join("services.json")).list(), s.list());
+        assert_eq!(Services::open(kept.clone()).list(), s.list());
         assert!(s.unpublish("xenolith").unwrap());
         assert!(!s.unpublish("xenolith").unwrap());
-        assert_eq!(Services::open(dir.join("services.json")).list(), Vec::new());
-        let _ = std::fs::remove_dir_all(dir);
+        assert_eq!(Services::open(kept).list(), Vec::new());
     }
 
     #[test]
     fn a_caller_hears_only_from_the_host_it_asked() {
-        let s = Services::open(std::env::temp_dir().join("xenonet-svc-none").join("services.json"));
+        let s = Services::open(in_a_network());
         let mut w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
         assert!(!s.answered("desk", "svq_00000000000000000000000000000001", Answer::refused(200, "x", "x")), "another host can't answer it");
         assert!(w.answer.try_recv().is_err());
@@ -1153,7 +1176,7 @@ mod tests {
 
     #[test]
     fn a_wait_ends_when_its_call_goes() {
-        let s = Services::open(std::env::temp_dir().join("xenonet-svc-none").join("services.json"));
+        let s = Services::open(in_a_network());
         // The program that asked went away: its call, and the wait in it,
         // are dropped before any answer.
         let w = s.wait("svq_00000000000000000000000000000001", "studio", "frm_1").unwrap();
@@ -1171,7 +1194,7 @@ mod tests {
 
     #[test]
     fn no_one_caller_holds_every_forwarding_slot() {
-        let s = Services::open(std::env::temp_dir().join("xenonet-svc-none").join("services.json"));
+        let s = Services::open(in_a_network());
         let laptop: Vec<Flight<'_>> = (0..IN_FLIGHT_EACH).map(|_| s.fly("laptop").ok().unwrap()).collect();
         assert_eq!(s.fly("laptop").err().map(|a| a.status), Some(503));
         let others: Vec<Flight<'_>> = (0..IN_FLIGHT - IN_FLIGHT_EACH).map(|i| s.fly(&format!("host{}", i / IN_FLIGHT_EACH)).ok().unwrap()).collect();

@@ -13,6 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use xenonet_model::ops::Net;
 use xenonet_net::node::{Node, Options};
+use xenonet_net::persist::Persist;
 use xenonet_net::sink::{LogFn, LogSink, SinkSlot};
 use xenonet_net::{NetError, R};
 use xenonet_os::sync::Locked;
@@ -76,10 +77,11 @@ impl NetService {
         }
     }
 
-    /// The service's own options: its state folder, version and platform,
-    /// and whether Desktop is installed here, which a join request says.
-    pub fn options(state_dir: &str, home: &str, version: &str, log: LogFn) -> Options {
-        let mut o = Options::new(Path::new(state_dir).join("network"), version, crate::borrowed::platform(), log);
+    /// The service's own options: its state folder, where the network is
+    /// kept, version and platform, and whether Desktop is installed here,
+    /// which a join request says.
+    pub fn options(state_dir: &str, persist: Arc<dyn Persist>, home: &str, version: &str, log: LogFn) -> Options {
+        let mut o = Options::new(Path::new(state_dir).join("network"), persist, version, crate::borrowed::platform(), log);
         o.desktop = desktop_installed(home);
         o
     }

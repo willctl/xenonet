@@ -187,16 +187,20 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
         let _ = ctx.gateway.set(g.clone());
         parts.gateway = Some(g);
     }
+    // What this machine keeps of its network and person, in the store the
+    // engine's runtime opened: none when it couldn't be, and then no
+    // network either.
+    let kept = kept_network(&ctx.cores);
     // A2A agents, which reach the sessions as actors through the gateway
     // (a2a/): off until you turn it on in the Actors panel.
     if let Some(actors) = ctx.cores.actors.clone() {
-        let state_dir = config.state_dir.clone();
+        let named = kept.clone();
         let a2a_parts = crate::a2a::A2aParts {
             cores: crate::a2a::A2aCores { engine: ctx.cores.engine.clone(), actors: actors.clone() },
             file: (!config.demo).then(|| Path::new(&config.state_dir).join("a2a.sqlite")),
             version: version.clone(),
             home: config.home.clone(),
-            name: Arc::new(move || crate::a2a::network_name(&state_dir)),
+            name: Arc::new(move || named.as_deref().and_then(crate::a2a::network_name)),
             now: Arc::new(now_ms),
             limits: crate::a2a::Limits::default(),
         };
@@ -221,10 +225,10 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
     // The network across machines (docs/design/network.md): this machine's
     // node, whose gateway routes the actor gateway's front door serves
     // while this host is the network's gateway.
-    {
+    if let Some(kept) = kept {
         let c = ctx.clone();
         let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
-        let mut opts = NetService::options(&config.state_dir, &config.home, &version, log);
+        let mut opts = NetService::options(&config.state_dir, kept, &config.home, &version, log);
         opts.vault = Some(crate::compose::keys::vault(config.instance.as_deref(), config.demo));
         match NetService::open(opts) {
             Ok(svc) => {
@@ -238,13 +242,9 @@ pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env:
                 let _ = ctx.net.set(svc.clone());
                 parts.net = Some(svc);
             }
-            Err(e) => ctx.log(
-                "warn",
-                "net.open",
-                &format!("the network's files couldn't be read: {}", e.message),
-                None,
-                Some("xenonet doctor says more; xenonet net leave forgets the network"),
-            ),
+            Err(e) => {
+                ctx.log("warn", "net.open", &format!("the network couldn't be read: {}", e.message), None, Some("xenonet doctor says more; xenonet net leave forgets the network"))
+            }
         }
     }
 
@@ -524,4 +524,13 @@ fn shutdown(ctx: &Arc<Ctx>, parts: &Parts) {
     c.doctor.stop();
     ctx.drift.locked().flush();
     let _ = json!(null);
+}
+
+/// Where the network and the person are kept: the store the engine's
+/// runtime opened (`xenonet_runtime::persist`), or None when the engine is
+/// pending.
+pub fn kept_network(cores: &Cores) -> Option<Arc<dyn xenonet_net::persist::Persist>> {
+    let native = cores.engine_store.native()?;
+    let tables = native.downcast_ref::<xenonet_store::engine::Shared>()?;
+    Some(Arc::new(xenonet_runtime::persist::StorePersist(tables.0.db().clone())))
 }

@@ -147,6 +147,7 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         emitter: env.emitter.clone(),
         gateway: env.gateway.clone(),
         standing: store_standing,
+        net: crate::serve::kept_network(cores),
     });
     let service = doctor::DoctorService::new(parts.clone());
     cores.doctor = Arc::new(doctor::DoctorCore(service.clone()));

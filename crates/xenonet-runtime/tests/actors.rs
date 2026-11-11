@@ -67,7 +67,12 @@ fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBu
     // A machine in no network, with its own identity: what roots and
     // decides its actors' tokens.
     // Its person's device is a fake that says yes, never the machine's own.
-    let identity = xenonet_net::identity::Identity::open(dir.join("state").join("identity"), Some(Arc::new(xenonet_keys::Fake { allow: true }))).expect("an identity");
+    let identity = xenonet_net::identity::Identity::open(
+        dir.join("state").join("identity"),
+        Arc::new(xenonet_net::persist::Memory::default()),
+        Some(Arc::new(xenonet_keys::Fake { allow: true })),
+    )
+    .expect("an identity");
     xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Alone(identity))));
     (w, empty, dir)
 }

@@ -188,6 +188,7 @@ fn options(dir: &Path, who: &str) -> Options {
     let who = who.to_string();
     let mut o = Options::new(
         dir.join("state").join("network"),
+        common::kept(&dir.join("state")),
         "0.0.0-test",
         "linux",
         Arc::new(move |code: &str, words: &str| {
