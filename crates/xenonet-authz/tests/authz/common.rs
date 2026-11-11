@@ -79,9 +79,19 @@ pub struct World {
     /// The spaces this machine holds, and the level each gives every
     /// principal.
     pub spaces: HashMap<SpaceId, Option<SpaceLevel>>,
+    /// The intents this machine holds.
+    pub intents: HashMap<IntentId, HeldIntent>,
+    /// The intents every actor grant here may report on.
+    pub grant_intents: Option<Vec<IntentId>>,
 }
 
 impl Ground for World {
+    fn intent(&self, id: &IntentId) -> Option<HeldIntent> {
+        self.intents.get(id).cloned()
+    }
+    fn grant_intents(&self, _token: &[u8]) -> Option<Vec<IntentId>> {
+        self.grant_intents.clone()
+    }
     fn own_machine(&self) -> &MachineId {
         &self.own
     }
@@ -146,13 +156,13 @@ pub fn space() -> SpaceId {
 /// The question q1: session s1's run asks to run a command, a run m2
 /// started under the person's delegation.
 pub fn asked(by: Attestation) -> Asked {
-    Asked { session: SessionId::new("s1").unwrap(), by, kind: PromptKind::Command, delegated_by: Some(machine("m2")) }
+    Asked { session: SessionId::new("s1").unwrap(), by, kind: PromptKind::Command, delegated_by: Some(machine("m2")), delegation: None }
 }
 
 /// A delegation of every device, for starts and command prompts, for an
 /// hour.
 pub fn delegation() -> StandingGrant {
-    StandingGrant { devices: Set::All, starts: true, answers: vec![PromptKind::Command], until: NOW + HOUR }
+    StandingGrant { id: DelegationId::new("dlg_a").unwrap(), devices: Set::All, starts: true, answers: vec![PromptKind::Command], until: NOW + HOUR }
 }
 
 /// The world and the token roots of m1 (this machine) and m2.
@@ -187,6 +197,8 @@ pub fn fixture() -> Fixture {
         synced: Some(NOW - 60_000),
         outbound: HashMap::new(),
         spaces: HashMap::from([(space(), Some(SpaceLevel::Append))]),
+        intents: HashMap::new(),
+        grant_intents: None,
     };
     Fixture { world, m1_root, m2_root }
 }

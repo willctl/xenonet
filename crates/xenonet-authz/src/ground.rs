@@ -2,11 +2,14 @@
 //! of each network's chain (members, admins, the founder, each member's
 //! settings), the person's chain (devices, revocations, delegations), the
 //! token roots it trusts, its consent rows, the actors' allow scopes and
-//! the prompts waiting. They come through a trait so the crate needs no
-//! store of its own, and another project can bring its own. Everything
-//! here is the receiver's; nothing comes from the sender's word.
+//! the prompts waiting and the intents it holds. They come through a trait
+//! so the crate needs no store of its own, and another project can bring
+//! its own. Everything here is the receiver's; nothing comes from the
+//! sender's word.
 
-use crate::vocab::{Action, ActorSlug, AgentId, AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, Principal, ProjectId, PromptKind, SessionId, SpaceId};
+use crate::vocab::{
+    Action, ActorSlug, AgentId, AskId, Attestation, DelegationId, DeviceId, IntentId, MachineId, NetworkId, PersonId, Principal, ProjectId, PromptKind, SessionId, SpaceId,
+};
 use crate::RootCertificate;
 use xenonet_id::sign::VerifyingKey;
 
@@ -170,6 +173,9 @@ impl<T: PartialEq> Set<T> {
 /// checked by whoever answers under it, before it asks `decide`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StandingGrant {
+    /// Its id in the person's chain: what an intent names, so the intent
+    /// runs under that delegation and no other.
+    pub id: DelegationId,
     /// The person's devices it names, or all of them, those paired later
     /// too.
     pub devices: Set<DeviceId>,
@@ -216,6 +222,21 @@ pub struct Asked {
     /// The machine whose principal started the run under the person's
     /// delegation; None for a run that wasn't started under it.
     pub delegated_by: Option<MachineId>,
+    /// The delegation it runs under, when it was started for an intent,
+    /// which names one: only that delegation answers its prompts.
+    pub delegation: Option<DelegationId>,
+}
+
+/// An intent this machine holds, as its store keeps it: the machine of the
+/// device that made it (the maker), the machine it's worked on, the agent
+/// working it there once its run started, and whether it's still open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldIntent {
+    pub maker: MachineId,
+    pub target: MachineId,
+    pub agent: Option<AgentId>,
+    /// Neither done, failed, cancelled nor expired.
+    pub open: bool,
 }
 
 /// The facts the receiver holds. Object-safe, so a decision takes
@@ -273,6 +294,21 @@ pub trait Ground {
     /// confirmed there.
     fn grant_projects(&self, token: &[u8]) -> Option<Vec<ProjectId>> {
         let _ = token;
+        None
+    }
+
+    /// The intents the actor grant whose token's first revocation id is
+    /// `token` may read and report on, as this machine keeps them; None for
+    /// a grant that names none.
+    fn grant_intents(&self, token: &[u8]) -> Option<Vec<IntentId>> {
+        let _ = token;
+        None
+    }
+
+    /// The intent `id`, when this machine holds it. A machine that holds
+    /// none answers no (the default).
+    fn intent(&self, id: &IntentId) -> Option<HeldIntent> {
+        let _ = id;
         None
     }
 

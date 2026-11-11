@@ -112,6 +112,17 @@ id!(
     SpaceId,
     "a space's id"
 );
+id!(
+    /// An intent, by the id the hash of the act that made it gives it
+    /// (`int_…`).
+    IntentId,
+    "an intent's id"
+);
+id!(
+    /// One of the person's delegations, by its id in their chain (`dlg_…`).
+    DelegationId,
+    "a delegation's id"
+);
 
 /// The folder a run starts in. A path, so longer than an id and with any
 /// printable character, but never a control character, so it can't hold a
@@ -216,10 +227,16 @@ pub enum Action {
     CtxWrite,
     /// What a space's owner hands on: everything but owning it.
     CtxAdmin,
+    /// Making an intent: work the person asks for, to be done on the
+    /// machine it names under one of their delegations.
+    Intend,
+    /// Saying how an intent stands: its run started, a note, done, or the
+    /// person's cancel.
+    Report,
 }
 
 impl Action {
-    pub const ALL: [Action; 18] = [
+    pub const ALL: [Action; 20] = [
         Action::Message,
         Action::Wake,
         Action::Start,
@@ -238,6 +255,8 @@ impl Action {
         Action::CtxAppend,
         Action::CtxWrite,
         Action::CtxAdmin,
+        Action::Intend,
+        Action::Report,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -260,6 +279,8 @@ impl Action {
             Action::CtxAppend => "ctx-append",
             Action::CtxWrite => "ctx-write",
             Action::CtxAdmin => "ctx-admin",
+            Action::Intend => "intend",
+            Action::Report => "report",
         }
     }
 
@@ -289,6 +310,13 @@ pub enum Resource {
     /// A project, on whichever machines hold its checkouts: what a claim is
     /// done to.
     Project(ProjectId),
+    /// An intent worked on `machine`: one being made, which has no id yet
+    /// (its id is the hash of the act that makes it), or one this machine
+    /// holds, by its id.
+    Intent {
+        machine: MachineId,
+        id: Option<IntentId>,
+    },
 }
 
 /// How a started run's permission prompts are answered.
@@ -298,6 +326,33 @@ pub enum StartMode {
     Asks,
     /// The person's standing grant judges them.
     Delegated,
+}
+
+/// How an intent stands, as a report says it: its run started, a note on
+/// the way, done (well or not), or the person's cancel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntentStep {
+    Start,
+    Note,
+    Done,
+    Cancel,
+}
+
+impl IntentStep {
+    pub const ALL: [IntentStep; 4] = [IntentStep::Start, IntentStep::Note, IntentStep::Done, IntentStep::Cancel];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IntentStep::Start => "start",
+            IntentStep::Note => "note",
+            IntentStep::Done => "done",
+            IntentStep::Cancel => "cancel",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<IntentStep> {
+        IntentStep::ALL.into_iter().find(|k| k.as_str() == s)
+    }
 }
 
 /// The person's answer to a permission prompt.
@@ -443,6 +498,27 @@ pub enum Act {
     /// Reading, appending to, writing or administering a space: the level
     /// it needs.
     Ctx(SpaceLevel),
+    /// Making an intent, as the person signs it: the hash of its goal (the
+    /// goal itself is Information, beside the request), the project and app
+    /// it's worked in, the delegation it runs under, when it ends, the
+    /// network it travels in and a random nonce, so two intents with the
+    /// same words are two. The machine it's worked on is its resource's.
+    Intend {
+        goal: [u8; 32],
+        project: ProjectId,
+        app: AppId,
+        delegation: DelegationId,
+        until: i64,
+        network: NetworkId,
+        nonce: [u8; 16],
+    },
+    /// A report on the intent `intent`: its step decides who may make it (a
+    /// cancel is the person's). A note's or an outcome's words are
+    /// Information, beside the request.
+    Report {
+        intent: IntentId,
+        step: IntentStep,
+    },
 }
 
 impl Act {
@@ -463,6 +539,8 @@ impl Act {
             Act::Revoke { .. } => Action::Revoke,
             Act::Delegate { .. } => Action::Delegate,
             Act::Ctx(level) => level.action(),
+            Act::Intend { .. } => Action::Intend,
+            Act::Report { .. } => Action::Report,
         }
     }
 
@@ -605,6 +683,7 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         Resource::Actor(a) => c.field("actor").field(a.as_str()),
         Resource::Space(s) => c.field("space").field(s.as_str()),
         Resource::Project(p) => c.field("project").field(p.as_str()),
+        Resource::Intent { machine, id } => c.field("intent").field(machine.as_str()).field(id.as_ref().map_or("", IntentId::as_str)),
     };
     c.field(act.action().as_str());
     match act {
@@ -638,6 +717,10 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         },
         Act::Delegate { project } => c.field(project.as_ref().map_or("", ProjectId::as_str)),
         Act::Ctx(level) => c.field(level.as_str()),
+        Act::Intend { goal, project, app, delegation, until, network, nonce } => {
+            c.bytes(goal).field(project.as_str()).field(app.as_str()).field(delegation.as_str()).field(&until.to_string()).field(network.as_str()).bytes(nonce)
+        }
+        Act::Report { intent, step } => c.field(intent.as_str()).field(step.as_str()),
     };
     sha256(&c.0)
 }
@@ -659,6 +742,24 @@ mod tests {
         assert!(Folder::new("~/Projects/my app").is_ok());
         assert!(Folder::new("a\nb").is_err());
         assert_eq!(Action::ALL.map(|a| Action::parse(a.as_str())), Action::ALL.map(Some));
+    }
+
+    type Intend = ([u8; 32], ProjectId, AppId, DelegationId, i64, NetworkId, [u8; 16]);
+
+    fn intend(change: impl Fn(&mut Intend)) -> Act {
+        let mut a: Intend =
+            ([0; 32], ProjectId::new("prj_a").unwrap(), AppId::new("claude").unwrap(), DelegationId::new("dlg_a").unwrap(), 1, NetworkId::new("net_a").unwrap(), [0; 16]);
+        change(&mut a);
+        let (goal, project, app, delegation, until, network, nonce) = a;
+        Act::Intend { goal, project, app, delegation, until, network, nonce }
+    }
+
+    fn intent_on(m: &str) -> Resource {
+        Resource::Intent { machine: MachineId::new(m).unwrap(), id: None }
+    }
+
+    fn held(id: &str) -> Resource {
+        Resource::Intent { machine: MachineId::new("m1").unwrap(), id: Some(IntentId::new(id).unwrap()) }
     }
 
     #[test]
@@ -685,6 +786,18 @@ mod tests {
             act_hash(&Resource::Space(SpaceId::new("spc_a").unwrap()), &Act::Ctx(SpaceLevel::Read)),
             act_hash(&Resource::Space(SpaceId::new("spc_b").unwrap()), &Act::Ctx(SpaceLevel::Read)),
             act_hash(&Resource::Space(SpaceId::new("spc_a").unwrap()), &Act::Ctx(SpaceLevel::Admin)),
+            act_hash(&intent_on("m1"), &intend(|_| {})),
+            act_hash(&intent_on("m2"), &intend(|_| {})),
+            act_hash(&intent_on("m1"), &intend(|a| a.0 = [1; 32])),
+            act_hash(&intent_on("m1"), &intend(|a| a.1 = ProjectId::new("prj_b").unwrap())),
+            act_hash(&intent_on("m1"), &intend(|a| a.2 = AppId::new("codex").unwrap())),
+            act_hash(&intent_on("m1"), &intend(|a| a.3 = DelegationId::new("dlg_b").unwrap())),
+            act_hash(&intent_on("m1"), &intend(|a| a.4 += 1)),
+            act_hash(&intent_on("m1"), &intend(|a| a.5 = NetworkId::new("net_b").unwrap())),
+            act_hash(&intent_on("m1"), &intend(|a| a.6 = [1; 16])),
+            act_hash(&held("int_a"), &Act::Report { intent: IntentId::new("int_a").unwrap(), step: IntentStep::Note }),
+            act_hash(&held("int_a"), &Act::Report { intent: IntentId::new("int_a").unwrap(), step: IntentStep::Cancel }),
+            act_hash(&held("int_b"), &Act::Report { intent: IntentId::new("int_b").unwrap(), step: IntentStep::Cancel }),
         ];
         let distinct: std::collections::HashSet<_> = hashes.iter().collect();
         assert_eq!(distinct.len(), hashes.len());

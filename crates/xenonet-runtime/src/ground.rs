@@ -145,7 +145,7 @@ fn asked(own: &MachineId, a: crate::asks::Waiting) -> Option<Asked> {
         Some(None) => Some(own.clone()),
         Some(Some(host)) => Some(MachineId::new(&host).ok()?),
     };
-    Some(Asked { session: SessionId::new(&a.session).ok()?, by: a.by, kind: a.kind, delegated_by })
+    Some(Asked { session: SessionId::new(&a.session).ok()?, by: a.by, kind: a.kind, delegated_by, delegation: None })
 }
 
 /// An allow scope from its row's JSON: `{ sessions: "all" | [ids], kinds:
@@ -453,6 +453,7 @@ mod tests {
             by: Attestation::ProcessChecked,
             kind: PromptKind::Command,
             delegated_by: delegated_by.map(|m| MachineId::new(m).unwrap()),
+            delegation: None,
         }
     }
 

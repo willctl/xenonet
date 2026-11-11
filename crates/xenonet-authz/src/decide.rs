@@ -10,7 +10,8 @@
 //!
 //! 1. **The resource** fits the action and is this machine's: a machine or
 //!    run here, a network this machine is in, a session here, a space whose
-//!    chain this machine holds.
+//!    chain this machine holds, an intent to be worked here or one this
+//!    machine holds.
 //! 2. **The door**: at a local door, only this machine's principals and
 //!    the person; from the network, a member of the network the envelope
 //!    names, never this machine itself; at the gateway and A2A, only this
@@ -44,6 +45,8 @@
 //!   ctx-append     ctx       ctx       ctx       ctx
 //!   ctx-write      ctx       ctx       ctx       ctx
 //!   ctx-admin      ctx       -         ctx       ctx
+//!   intend         -         -         -         intend
+//!   report         report    report    report    report
 //!
 //!   -         refused
 //!   reach     steps 1 to 3 are enough (an actor's token has the right)
@@ -87,9 +90,19 @@
 //!             ctx right. An unchecked agent reads and appends only on its
 //!             own machine, and writes nowhere. Administering widens, so
 //!             the person does it only with a presence block for it
+//!   intend    an intent worked here, made by the person (their device's
+//!             signature: the delegation it names took their presence),
+//!             until it ends: start off refuses it, and the delegation it
+//!             names, that one and no other, must be unended, cover starts
+//!             and name this machine's device and the device that signed
+//!   report    on an intent this machine holds, still open: a cancel is the
+//!             person's alone; a start, a note or done comes from the
+//!             machine it's worked on, or there from the agent working it
+//!             (process-checked at least) or an actor whose grant names it
+//!             (a note or done); never a start from an agent or an actor
 //! ```
 //!
-//! 5. **Hold**: start, answer, admit, widen and publish for another machine
+//! 5. **Hold**: start, intend, answer, admit, widen and publish for another machine
 //!    (a principal not of this machine, or the person over the network)
 //!    hold instead of allowing when governance was last synced more than
 //!    ten minutes ago, or never. This machine acting on its own is exempt,
@@ -97,7 +110,7 @@
 //!    Deny, which only narrows.
 
 use crate::proof::VerifiedPresence;
-use crate::vocab::{Act, Action, AnswerDecision, Attestation, DeviceId, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
+use crate::vocab::{Act, Action, AnswerDecision, Attestation, DelegationId, DeviceId, IntentStep, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
 use crate::{DeviceKind, Door, Ground, Role, SpaceLevel, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
 
@@ -230,14 +243,16 @@ enum Rule {
     Answer,
     Delegate,
     Ctx,
+    Intend,
+    Report,
 }
 
-use Rule::{Answer, Claim, Ctx, Delegate, No, Presence, Reach, Read, Start, Wake};
+use Rule::{Answer, Claim, Ctx, Delegate, Intend, No, Presence, Reach, Read, Report, Start, Wake};
 
 /// The rule table (the module's doc draws it). Columns: machine, agent,
 /// actor, person.
 #[rustfmt::skip]
-const TABLE: [(Action, [Rule; 4]); 18] = [
+const TABLE: [(Action, [Rule; 4]); 20] = [
     //                       machine   agent     actor     person
     (Action::Message,       [Reach,    Reach,    Reach,    Reach]),
     (Action::Wake,          [Wake,     Wake,     Wake,     Reach]),
@@ -257,10 +272,12 @@ const TABLE: [(Action, [Rule; 4]); 18] = [
     (Action::CtxAppend,     [Ctx,      Ctx,      Ctx,      Ctx]),
     (Action::CtxWrite,      [Ctx,      Ctx,      Ctx,      Ctx]),
     (Action::CtxAdmin,      [Ctx,      No,       Ctx,      Ctx]),
+    (Action::Intend,        [No,       No,       No,       Intend]),
+    (Action::Report,        [Report,   Report,   Report,   Report]),
 ];
 
 /// The actions that hold for another machine on stale governance.
-const HOLDS: [Action; 5] = [Action::Start, Action::Answer, Action::Admit, Action::Widen, Action::Publish];
+const HOLDS: [Action; 6] = [Action::Start, Action::Intend, Action::Answer, Action::Admit, Action::Widen, Action::Publish];
 
 fn rule(action: Action, principal: &Principal) -> Rule {
     let column = match principal {
@@ -334,6 +351,8 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
             | (Action::Revoke, Resource::Machine(_) | Resource::Network(_))
             | (Action::Delegate, Resource::Actor(_))
             | (Action::CtxRead | Action::CtxAppend | Action::CtxWrite | Action::CtxAdmin, Resource::Space(_))
+            | (Action::Intend, Resource::Intent { id: None, .. })
+            | (Action::Report, Resource::Intent { id: Some(_), .. })
     );
     if !fits {
         return Err(Reason::new("resource", format!("a {} isn't done to that", request.action().as_str())));
@@ -343,6 +362,16 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
         Resource::Network(n) if ground.role(n, own).is_none() => return Err(Reason::new("resource", format!("this machine isn't in {n}"))),
         Resource::Actor(a) if ground.outbound(a).is_none() => return Err(Reason::new("resource", format!("{own} has no outbound actor {a}"))),
         Resource::Space(s) if !ground.holds_space(s) => return Err(Reason::new("resource", format!("this machine doesn't hold {s}"))),
+        // An intent being made is decided by the machine it's to be worked
+        // on; a report, by a machine that holds the intent, worked where
+        // the report says.
+        Resource::Intent { machine, id: None } if machine != own => return Err(Reason::new("resource", format!("{machine} decides an intent worked there; this is {own}"))),
+        Resource::Intent { machine, id: Some(id) } => match ground.intent(id) {
+            None => return Err(Reason::new("intent", format!("this machine doesn't hold {id}"))),
+            Some(held) if &held.target != machine => return Err(Reason::new("intent", format!("{id} is worked on {}, not {machine}", held.target))),
+            Some(held) if !held.open => return Err(Reason::new("intent", format!("{id} has ended"))),
+            Some(_) => {}
+        },
         _ => {}
     }
     match (request.act(), request.resource()) {
@@ -350,6 +379,7 @@ fn resource(request: &Request, ground: &dyn Ground) -> Step<()> {
             Err(Reason::new("resource", "the start names another run than its resource"))
         }
         (Act::Claim { project }, Resource::Project(p)) if project != p => Err(Reason::new("resource", "the claim names another project than its resource")),
+        (Act::Report { intent, .. }, Resource::Intent { id: Some(id), .. }) if intent != id => Err(Reason::new("resource", "the report names another intent than its resource")),
         (Act::Answer { ask, .. }, resource) => match ground.ask(ask) {
             None => Err(Reason::new("ask", format!("no question {ask} waits here"))),
             Some(a) if matches!(resource, Resource::Session(s) if s != &a.session) => Err(Reason::new("ask", format!("{ask} wasn't asked by that session"))),
@@ -446,8 +476,9 @@ fn token_holds(token: &Token, request: &Request, ground: &dyn Ground) -> Step<Au
 
 // A delegation of the person's, unended at the request's time, that names
 // this machine's device and `from`'s (the device the work was started on)
-// and passes `covers`.
-fn delegation(ground: &dyn Ground, request: &Request, from: Option<&DeviceId>, covers: impl Fn(&StandingGrant) -> bool) -> Option<StandingGrant> {
+// and passes `covers`: the one whose id is `id` when the work names one
+// (an intent does), and no other.
+fn delegation(ground: &dyn Ground, request: &Request, from: Option<&DeviceId>, id: Option<&DelegationId>, covers: impl Fn(&StandingGrant) -> bool) -> Option<StandingGrant> {
     let person = ground.own_person()?;
     let here = ground.device_of(ground.own_machine())?;
     let from = from?;
@@ -455,7 +486,7 @@ fn delegation(ground: &dyn Ground, request: &Request, from: Option<&DeviceId>, c
     if !held(&here) || !held(from) {
         return None;
     }
-    ground.delegations().into_iter().find(|g| g.until >= request.at() && g.devices.has(&here) && g.devices.has(from) && covers(g))
+    ground.delegations().into_iter().find(|g| id.is_none_or(|id| &g.id == id) && g.until >= request.at() && g.devices.has(&here) && g.devices.has(from) && covers(g))
 }
 
 // The device a principal's work comes from: the person's signing device,
@@ -501,7 +532,7 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
                 Principal::Agent { attestation, .. } => Some(*attestation),
                 _ => None,
             };
-            let delegated = || delegation(ground, request, origin(ground, principal).as_ref(), |g| g.starts).is_some();
+            let delegated = || delegation(ground, request, origin(ground, principal).as_ref(), None, |g| g.starts).is_some();
             let no_grant =
                 || Reason::new("grant", "a delegated run needs a delegation of the person's for starts that names this machine's device and the one it was started from");
             if matches!(principal, Principal::Person(_)) {
@@ -570,6 +601,70 @@ fn row(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPresenc
         Answer => answer(request, ground, presence, arrival, authority),
         Delegate => delegate(request, ground, arrival, authority),
         Ctx => ctx(request, ground, presence, arrival, authority),
+        Intend => intend(request, ground, authority),
+        Report => report(request, ground, arrival, authority),
+    }
+}
+
+// An intent to be worked here, made by the person: under the delegation it
+// names, which must still cover starts and name this machine's device and
+// the one that signed it.
+fn intend(request: &Request, ground: &dyn Ground, authority: Authority) -> Step<(Authority, Option<&'static str>)> {
+    let (Act::Intend { delegation: id, until, network, .. }, Principal::Person(signed)) = (request.act(), request.principal()) else {
+        return Err(Reason::new("act", "an intent is the person's, made by their device's signature"));
+    };
+    if ground.settings(request.network()).start == StartSetting::Off {
+        return Err(Reason::new("settings", "this machine starts no runs: its start setting is off"));
+    }
+    if *until < request.at() {
+        return Err(Reason::new("ended", "that intent's time is over"));
+    }
+    if request.network().is_some_and(|n| n != network) {
+        return Err(Reason::new("network", format!("that intent travels in {network}, not the network it came through")));
+    }
+    if delegation(ground, request, Some(signed.device()), Some(id), |g| g.starts).is_none() {
+        return Err(Reason::new("grant", format!("the person's delegation {id} doesn't name this machine's device and the one the intent was made on for starts, or it ended")));
+    }
+    Ok((authority, None))
+}
+
+// A report on an intent this machine holds: the person's cancel; or how it
+// stands, from the machine it's worked on, or there from its agent or an
+// actor its grant names.
+fn report(request: &Request, ground: &dyn Ground, arrival: &Arrival, authority: Authority) -> Step<(Authority, Option<&'static str>)> {
+    let (Act::Report { intent, step }, Resource::Intent { machine: target, .. }) = (request.act(), request.resource()) else {
+        return Err(Reason::new("act", "a report names an intent this machine holds"));
+    };
+    // Step 1 found it here, open.
+    let held = ground.intent(intent).ok_or_else(|| Reason::new("intent", format!("this machine doesn't hold {intent}")))?;
+    let principal = request.principal();
+    if *step == IntentStep::Cancel {
+        return match principal {
+            Principal::Person(_) => Ok((authority, None)),
+            p => Err(Reason::new("principal", format!("only the person cancels an intent, not a {}", p.kind()))),
+        };
+    }
+    let worked_here = target == ground.own_machine();
+    match principal {
+        Principal::Machine { id } if id == target => Ok((authority, None)),
+        Principal::Machine { id } => Err(Reason::new("intent", format!("{intent} is worked on {target}, so {id} doesn't report on it"))),
+        _ if *step == IntentStep::Start => Err(Reason::new("principal", format!("only the machine an intent is worked on says its run started, not a {}", principal.kind()))),
+        _ if !worked_here || !arrival.own => Err(Reason::new("intent", format!("{intent} is reported on by its agent and actors on {target}, at its own door"))),
+        Principal::Agent { attestation, .. } if *attestation < Attestation::ProcessChecked => Err(Reason::new("attestation", "an unchecked agent doesn't report on an intent")),
+        Principal::Agent { id, .. } if held.agent.as_ref() == Some(id) => Ok((authority, None)),
+        Principal::Agent { id, .. } => Err(Reason::new("intent", format!("{id} isn't the agent working {intent}"))),
+        Principal::Actor { .. } => {
+            let Authority::Token { revocation_id } = &authority else {
+                return Err(Reason::new("token", "an actor proves itself with its token"));
+            };
+            let named = ground.grant_intents(revocation_id).is_some_and(|ids| ids.contains(intent));
+            if named {
+                Ok((authority, None))
+            } else {
+                Err(Reason::new("scope", format!("that actor's grant doesn't name {intent}")))
+            }
+        }
+        Principal::Person(_) => Err(Reason::new("principal", "the person cancels an intent; how it stands is its machine's to say")),
     }
 }
 
@@ -686,7 +781,7 @@ fn answer(request: &Request, ground: &dyn Ground, presence: Option<&VerifiedPres
                 return Err(Reason::new("grant", "only this machine allows under the person's delegation, for its own runs"));
             }
             let from = asked.delegated_by.as_ref().ok_or_else(|| Reason::new("grant", "that run wasn't started under the person's delegation, so its prompts are the person's"))?;
-            let covered = delegation(ground, request, ground.device_of(from).as_ref(), |g| g.answers.contains(&asked.kind)).is_some();
+            let covered = delegation(ground, request, ground.device_of(from).as_ref(), asked.delegation.as_ref(), |g| g.answers.contains(&asked.kind)).is_some();
             if !covered {
                 return Err(Reason::new("grant", format!("no delegation of the person's answers {} prompts for a run started from {from} on this machine", asked.kind.as_str())));
             }

@@ -36,13 +36,13 @@ mod token;
 mod vocab;
 
 pub use decide::{decide, Authority, Authorized, Decision, Reason, HOLD_AFTER_MS};
-pub use ground::{AllowScope, Asked, Consent, Device, DeviceKind, Ground, OutboundScope, Role, Set, Settings, SpaceLevel, StandingGrant, StartSetting, WakeSetting};
+pub use ground::{AllowScope, Asked, Consent, Device, DeviceKind, Ground, HeldIntent, OutboundScope, Role, Set, Settings, SpaceLevel, StandingGrant, StartSetting, WakeSetting};
 pub use info::Information;
 pub use proof::{PersonSigned, VerifiedPresence};
 pub use token::{is_alpn, ActorGrant, Bearer, Binding, Narrowing, RootCertificate, Schema, Token, TokenRoot, ACTOR_PREFIX, CURSOR_MS, GATEWAY_PREFIX};
 pub use vocab::{
-    act_hash, Act, Action, ActorSlug, AgentId, AnswerDecision, AppId, AskId, Attestation, DeviceId, Door, Folder, MachineId, NetworkId, PersonId, Principal, ProjectId, PromptKind,
-    ReadScope, Request, Resource, Revocation, ServiceId, SessionId, SpaceId, StartMode,
+    act_hash, Act, Action, ActorSlug, AgentId, AnswerDecision, AppId, AskId, Attestation, DelegationId, DeviceId, Door, Folder, IntentId, IntentStep, MachineId, NetworkId,
+    PersonId, Principal, ProjectId, PromptKind, ReadScope, Request, Resource, Revocation, ServiceId, SessionId, SpaceId, StartMode,
 };
 
 use std::fmt;

@@ -51,6 +51,22 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
             let level = SpaceLevel::ALL.into_iter().find(|l| l.action() == action).unwrap();
             (Resource::Space(space()), Act::Ctx(level))
         }
+        Action::Intend => (
+            Resource::Intent { machine: machine("m1"), id: None },
+            Act::Intend {
+                goal: [0; 32],
+                project: project(),
+                app: AppId::new("claude").unwrap(),
+                delegation: DelegationId::new("dlg_a").unwrap(),
+                until: NOW + HOUR,
+                network: network(),
+                nonce: [0; 16],
+            },
+        ),
+        Action::Report => {
+            let id = IntentId::new("int_a").unwrap();
+            (Resource::Intent { machine: machine("m1"), id: Some(id.clone()) }, Act::Report { intent: id, step: IntentStep::Note })
+        }
     };
     Request::new(Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") }, resource, act, door, at, None)
 }
@@ -60,6 +76,10 @@ fn world() -> Fixture {
     // Settings that let an actor do all an actor may, so the token decides.
     f.world.settings = Settings { start: StartSetting::Network, wake: WakeSetting::Network };
     f.world.consent = Consent { here: true, actors: true };
+    // An intent made on m2 and worked here, which every grant may report on.
+    let id = IntentId::new("int_a").unwrap();
+    f.world.intents.insert(id.clone(), HeldIntent { maker: machine("m2"), target: machine("m1"), agent: None, open: true });
+    f.world.grant_intents = Some(vec![id]);
     f
 }
 
@@ -140,7 +160,7 @@ fn an_actors_allow_is_never_wider_than_its_scope() {
                 };
                 let scope = AllowScope { sessions: within, kinds: kinds(kind_mask), until: NOW + until };
                 f.world.scopes.insert(id, scope.clone());
-                let asked = Asked { session: sessions[s].clone(), by: Attestation::ALL[by], kind: PromptKind::ALL[k], delegated_by: None };
+                let asked = Asked { session: sessions[s].clone(), by: Attestation::ALL[by], kind: PromptKind::ALL[k], delegated_by: None, delegation: None };
                 f.world.asks.insert(AskId::new("q1").unwrap(), asked.clone());
                 let decision = if deny { AnswerDecision::Deny } else { AnswerDecision::Allow };
                 let r = Request::new(

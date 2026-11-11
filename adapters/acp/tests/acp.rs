@@ -376,7 +376,7 @@ mod person {
     /// window with `decision`, Touch ID and all.
     pub fn allow(ask: &AskId, decision: AnswerDecision) -> Box<Authorized> {
         let session = xenonet_authz::SessionId::new("s1").unwrap();
-        let asked = Asked { session: session.clone(), by: Attestation::HarnessSigned, kind: PromptKind::Command, delegated_by: None };
+        let asked = Asked { session: session.clone(), by: Attestation::HarnessSigned, kind: PromptKind::Command, delegated_by: None, delegation: None };
         let world = World { own: MachineId::new("m1").unwrap(), device: SeedSigner::from_seed(&[21; 32], KeyHome::File).unwrap(), asks: HashMap::from([(ask.clone(), asked)]) };
         let resource = Resource::Session(session);
         let act = Act::Answer { ask: ask.clone(), decision };

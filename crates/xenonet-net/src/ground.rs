@@ -11,8 +11,8 @@
 use crate::identity::Identity;
 use std::sync::Arc;
 use xenonet_authz::{
-    AllowScope, Asked, Consent, Device, DeviceId, DeviceKind, Ground, MachineId, NetworkId, PersonId, PromptKind, Role, RootCertificate, SessionId, Set, Settings, StandingGrant,
-    StartSetting, WakeSetting,
+    AllowScope, Asked, Consent, DelegationId, Device, DeviceId, DeviceKind, Ground, MachineId, NetworkId, PersonId, PromptKind, Role, RootCertificate, SessionId, Set, Settings,
+    StandingGrant, StartSetting, WakeSetting,
 };
 use xenonet_id::sign::VerifyingKey;
 use xenonet_log::network::{self, Start, View, Wake};
@@ -131,7 +131,7 @@ impl Ground for Facts {
     fn delegations(&self) -> Vec<StandingGrant> {
         let Some(person) = self.own_person() else { return Vec::new() };
         let Some(chain) = self.identity.chain_of(person.as_str()) else { return Vec::new() };
-        chain.person().map(|p| p.delegations.values().map(|(d, _)| grant_of(d)).collect()).unwrap_or_default()
+        chain.person().map(|p| p.delegations.values().filter_map(|(d, _)| grant_of(d)).collect()).unwrap_or_default()
     }
 
     /// Actors' allow scopes are the engine's rows: the runtime's ground
@@ -150,15 +150,17 @@ impl Ground for Facts {
     }
 }
 
-/// A delegation as a decision reads it. One that names a device id that
-/// doesn't read is taken as naming the ones that do.
-pub fn grant_of(d: &person::Delegation) -> StandingGrant {
+/// A delegation as a decision reads it, with its id, which an intent names.
+/// One that names a device id that doesn't read is taken as naming the
+/// ones that do; one whose id doesn't read is none (the chain never takes
+/// one).
+pub fn grant_of(d: &person::Delegation) -> Option<StandingGrant> {
     let devices = match &d.devices {
         person::DeviceSet::All => Set::All,
         person::DeviceSet::Only(list) => Set::Only(list.iter().filter_map(|id| DeviceId::new(id).ok()).collect()),
     };
     let answers = if d.covers("answer") { d.prompts.iter().filter_map(|p| PromptKind::parse(p)).collect() } else { Vec::new() };
-    StandingGrant { devices, starts: d.covers("start"), answers, until: d.until }
+    Some(StandingGrant { id: DelegationId::new(&d.id).ok()?, devices, starts: d.covers("start"), answers, until: d.until })
 }
 
 /// What the engine reads this machine's governance through: the facts for
