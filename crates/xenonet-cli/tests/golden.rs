@@ -41,7 +41,9 @@
 // so the service refuses its reads that matter from under an agent, as it
 // refuses everything that's yours from under one; there the test takes
 // the refusal for what it is (and the log's and the readers' traces of it)
-// and leaves the comparison to CI, as tests/net.rs does.
+// and leaves the comparison to CI, as tests/net.rs does. Under an agent
+// means under its process, as the service sees it (`agents_above`), not
+// only with its variables set.
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, clippy::panic, reason = "a test fails where its helpers unwrap or panic")]
@@ -564,25 +566,60 @@ fn differences(a: &Value, b: &Value, at: &str, out: &mut Vec<String>) {
     }
 }
 
-// The session this test runs in, when it runs in one, as the MCP servers
-// say it: its reads are that session's, which the service checks against
-// its process, as it does an MCP server's. Under no agent (CI), none, and
-// the reads are from your own terminal.
+// The agent apps above this test's process, nearest first, as the
+// service's process check sees them. An agent's variables don't say it on
+// their own: a run that outlives the shell it was started from (a long
+// workspace run on a busy machine, put in the background with nohup) is
+// left under launchd with them still set, and a read in that session's
+// name is then refused, rightly, as not from its process.
+fn agents_above() -> &'static [&'static str] {
+    static ABOVE: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    ABOVE.get_or_init(|| {
+        xenonet_platforms::install();
+        let sys = xenonet_runtime::procs::System::new();
+        let me = f64::from(std::process::id());
+        sys.procs.chain(&mut sys.io(), Some(me), true, false).unwrap_or_default().into_iter().filter_map(|l| l.agent).collect()
+    })
+}
+
+// The session `env` names, as the MCP servers say it, when its app's
+// process is `above` this test's.
+fn session_in(env: impl Fn(&str) -> Option<String>, above: &[&str]) -> Option<String> {
+    [("CLAUDE_CODE_SESSION_ID", "claude"), ("GROK_SESSION_ID", "grok"), ("CODEX_THREAD_ID", "codex")]
+        .into_iter()
+        .filter(|(_, app)| above.contains(app))
+        .find_map(|(k, app)| env(k).filter(|v| !v.is_empty()).map(|s| format!("{app}:{s}")))
+}
+
+// The session this test runs in, when it runs in one: its reads are that
+// session's, which the service checks against its process, as it does an
+// MCP server's. Under no agent (CI), none, and the reads are from your own
+// terminal.
 fn session() -> Option<String> {
-    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    env("CLAUDE_CODE_SESSION_ID")
-        .map(|s| format!("claude:{s}"))
-        .or_else(|| env("GROK_SESSION_ID").map(|s| format!("grok:{s}")))
-        .or_else(|| env("CODEX_THREAD_ID").map(|s| format!("codex:{s}")))
+    session_in(|k| std::env::var(k).ok(), agents_above())
 }
 
 // Whether a refusal is the service's of a request from under an agent,
-// and this test runs under one (Claude Code, Codex or Grok Build say so in
-// their sessions' environments): then there's nothing of the JS's to
+// and this test runs under one: then there's nothing of the JS's to
 // compare it with here, and CI, under no agent, compares it.
 fn refused_under_agent(words: &str) -> bool {
-    let agent = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "GROK_SESSION_ID"].iter().any(|k| std::env::var(k).is_ok_and(|v| !v.is_empty()));
-    agent && words.contains("from under")
+    !agents_above().is_empty() && words.contains("from under")
+}
+
+#[test]
+fn the_reads_are_a_sessions_only_from_under_its_apps_process() {
+    let env = |k: &str| match k {
+        "CLAUDE_CODE_SESSION_ID" => Some("a".to_string()),
+        "CODEX_THREAD_ID" => Some("b".to_string()),
+        _ => None,
+    };
+    assert_eq!(session_in(env, &["claude"]).as_deref(), Some("claude:a"));
+    assert_eq!(session_in(env, &["codex", "claude"]).as_deref(), Some("claude:a"));
+    assert_eq!(session_in(env, &["codex"]).as_deref(), Some("codex:b"));
+    // Under launchd with a Claude Code session's variables still set: the
+    // service would refuse a read in its name, so none is made.
+    assert_eq!(session_in(env, &[]), None);
+    assert_eq!(session_in(|_| Some(String::new()), &["claude"]), None);
 }
 
 fn version() -> String {
