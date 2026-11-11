@@ -52,15 +52,9 @@ pub fn open_code_id(id: &str) -> String {
     xenonet_adapter::formats::opencode::open_code_id(id)
 }
 
-/// XenoNet's id for a session named the way OpenCode shows it (ses_…, or
-/// opencode:ses_…). Any other id comes back as it was.
-pub fn xenonet_id(id: &str) -> String {
-    let s = xenonet_text::text::trim(id);
-    match crate::re!(r"^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$").captures(s) {
-        Some(m) => format!("opencode:{}", xenonet_adapter::formats::opencode::local_id(&m[1])),
-        None => s.to_string(),
-    }
-}
+// XenoNet's id for a session named the way OpenCode shows it is the
+// registry's reading of OpenCode's ids.
+pub use xenonet_adapter::formats::opencode::xenonet_id;
 
 /// A process: its pid and command line.
 #[derive(Clone, Debug, PartialEq)]

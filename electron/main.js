@@ -130,9 +130,9 @@ let quitting = false;
 // How long a loaded page has to start before it's loaded again.
 const BOOT_MS = 30e3;
 let updates = null;
-// The window key (crates/xenonet-service/src/window_key.rs), from the
+// The window key (crates/xenonet-http/src/window_key.rs), from the
 // service this app connects to: the window's credential for the API
-// (crates/xenonet-service/src/routes/rules.rs). Held here while connected,
+// (crates/xenonet-http/src/routes/rules.rs). Held here while connected,
 // given only to XenoNet's own page (app:window-key and its cookie), and
 // never written down.
 let windowKey = null;

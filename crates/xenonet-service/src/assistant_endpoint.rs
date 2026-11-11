@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use xenonet_actors::limits::Bucket;
+use xenonet_api::limits::Bucket;
 use xenonet_os::sync::Locked;
 
 const HELLO: Duration = Duration::from_secs(5);

@@ -43,7 +43,7 @@ use xenonet_os::sync::{Locked, ReadWrite};
 
 pub const SCHEMA: &str = "network/svc/v1";
 /// A request's body, at most.
-pub const REQUEST_BODY: usize = 1 << 20;
+pub const REQUEST_BODY: usize = xenonet_model::network::SVC_REQUEST_BODY;
 /// An answer's body, at most.
 pub const ANSWER_BODY: usize = 4 << 20;
 /// Requests a caller host may make to one service in a minute.
@@ -79,7 +79,7 @@ const HOP_BY_HOP: [&str; 10] =
     ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "proxy-connection", "te", "trailer", "trailers", "transfer-encoding", "upgrade"];
 /// The header XenoNet's own refusals carry, with their code, so a caller
 /// can tell them from the service's answers.
-pub const REFUSED_HEADER: &str = "x-xenonet-refused";
+pub const REFUSED_HEADER: &str = xenonet_model::network::SVC_REFUSED_HEADER;
 
 /// A service's name: 2 to 32 lowercase letters, digits and dashes,
 /// starting with a letter, as a host id is.
@@ -440,12 +440,8 @@ pub struct Answer {
 impl Answer {
     /// XenoNet's own answer: `{ error, code }`, with `X-XenoNet-Refused`.
     pub fn refused(status: u16, code: &str, message: impl Into<String>) -> Answer {
-        Answer {
-            status,
-            headers: vec![("content-type".into(), "application/json; charset=utf-8".into()), ("cache-control".into(), "no-store".into()), (REFUSED_HEADER.into(), code.into())],
-            body: json!({ "error": message.into(), "code": code }).to_string().into_bytes(),
-            code: Some(code.into()),
-        }
+        let (headers, body) = xenonet_model::network::svc_refusal(code, &message.into());
+        Answer { status, headers, body, code: Some(code.into()) }
     }
 
     /// The words of a refusal, for the log.

@@ -22,9 +22,10 @@ use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use xenonet_engine::engine::{is_actor_agent, is_agent_id};
+use xenonet_api::cores::Apps;
+use xenonet_api::needs_you;
+use xenonet_model::ids::is_actor_agent;
 use xenonet_os::sync::Locked;
-use xenonet_state::needs_you;
 use xenonet_text::text::truthy;
 
 /// The most items a status lists (core/schema/tray.js's TRAY_ITEMS).
@@ -203,8 +204,8 @@ fn events(ctx: &Arc<Ctx>) -> mpsc::UnboundedReceiver<Bytes> {
 }
 
 /// A session's or an actor's id, here or on another machine of the network.
-fn selectable(id: &str) -> bool {
-    let local = |id: &str| is_agent_id(id) || is_actor_agent(id);
+fn selectable(apps: &dyn Apps, id: &str) -> bool {
+    let local = |id: &str| apps.is_session_id(id) || is_actor_agent(id);
     id.len() <= 300 && (local(id) || xenonet_model::ids::parse_qualified(id).is_some_and(|q| q.host.is_some() && local(q.local)))
 }
 
@@ -221,7 +222,7 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Answer {
             let body = req.json(4 << 10).await.unwrap_or(Value::Null);
             let id = match body.get("id") {
                 None | Some(Value::Null) => None,
-                Some(Value::String(id)) if selectable(id) => Some(id.clone()),
+                Some(Value::String(id)) if selectable(&*ctx.cores.apps, id) => Some(id.clone()),
                 Some(_) => return Ok(Reply::coded(400, "bad-request", "open the console at a session or an actor by its id")),
             };
             let components = ctx.components.locked().clone();
@@ -291,11 +292,12 @@ mod tests {
 
     #[test]
     fn the_console_opens_at_a_session_or_an_actor_and_nothing_else() {
-        assert!(selectable("claude:0190d3e0-0000-7000-8000-000000000001"));
-        assert!(selectable("actor:wren"));
-        assert!(selectable("@studio:actor:wren"));
+        let apps = xenonet_platforms::Registry;
+        assert!(selectable(&apps, "claude:0190d3e0-0000-7000-8000-000000000001"));
+        assert!(selectable(&apps, "actor:wren"));
+        assert!(selectable(&apps, "@studio:actor:wren"));
         for bad in ["", "project:/x", "https://example.com", "@studio:", "javascript:alert(1)"] {
-            assert!(!selectable(bad), "{bad}");
+            assert!(!selectable(&apps, bad), "{bad}");
         }
     }
 

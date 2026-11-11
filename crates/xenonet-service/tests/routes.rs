@@ -14,7 +14,7 @@ use xenonet_api::cores::{self, CoreError, Cores, Kind, R};
 use xenonet_service::ctx::Ctx;
 use xenonet_service::http::{Peer, Reply, Req};
 use xenonet_service::routes::api;
-use xenonet_service::serve::answered;
+use xenonet_service::server::answered;
 
 const ME: &str = "claude:11111111-2222-3333-4444-555555555555";
 const S: &str = "claude:0190d3e0-0000-7000-8000-000000000001";
@@ -339,6 +339,7 @@ impl cores::Integrations for Fake {
 fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
     let mut c = Cores::pending(true, true, hub);
+    xenonet_service::serve::wire_root(&mut c);
     c.engine = f.clone();
     c.connect = f.clone();
     c.verify = f.clone();
@@ -357,6 +358,7 @@ fn service(hub: bool) -> (Arc<Ctx>, Arc<Fake>) {
 fn with_actors() -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
     let mut c = Cores::pending(true, false, false);
+    xenonet_service::serve::wire_root(&mut c);
     c.engine = f.clone();
     c.verify = f.clone();
     c.policy = f.clone();
@@ -690,6 +692,7 @@ async fn an_actor_reports_only_as_itself_from_its_own_process_and_within_its_rat
 async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_window() {
     let f = Arc::new(Fake::new());
     let mut c = Cores::pending(true, true, false);
+    xenonet_service::serve::wire_root(&mut c);
     c.verify = f.clone();
     let ctx = Ctx::for_tests(c);
     let key = ctx.window_key.reveal().to_string();
@@ -747,6 +750,7 @@ async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_windo
     assert_eq!(code(&go(&ctx, "GET", "/api/assistant/audit?grant=everyone", &[], None).await), (400, json!("bad-request"), json!("grant is a grant's id")));
     // With remote actors off, there's nothing to reach.
     let mut c = Cores::pending(true, false, false);
+    xenonet_service::serve::wire_root(&mut c);
     c.verify = f.clone();
     let off = Ctx::for_tests(c);
     assert_eq!(code(&go(&off, "GET", "/api/assistant", &[], None).await).1, json!("off"));
@@ -755,6 +759,7 @@ async fn remote_access_narrows_from_your_terminal_and_widens_only_from_the_windo
 #[tokio::test]
 async fn with_actors_off_a_token_reaches_nothing() {
     let mut c = Cores::pending(false, false, false);
+    xenonet_service::serve::wire_root(&mut c);
     c.engine = Arc::new(Fake::new());
     let off = Ctx::for_tests(c);
     let r = go(&off, "POST", "/api/engine/whoami", &[("authorization", &token('a'))], Some(json!({}))).await;
@@ -1118,6 +1123,7 @@ async fn claude_codes_hooks_are_checked_against_the_sessions_process() {
 fn tray_service() -> (Arc<Ctx>, Arc<Fake>) {
     let f = Arc::new(Fake::new());
     let mut c = Cores::pending(false, false, false);
+    xenonet_service::serve::wire_root(&mut c);
     c.verify = f.clone();
     c.state = f.clone();
     (Ctx::for_tests(c), f)

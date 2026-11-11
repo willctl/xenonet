@@ -19,7 +19,8 @@ const checks = [
 
 let failed = 0;
 // The core's layering (scripts/rust-layers.mjs): no core crate depends on a
-// surface or an adapter crate, or names a platform by its id.
+// surface or an adapter crate, or names a platform by its id, and each crate
+// keeps to its class's limit on internal dependencies.
 {
   process.stderr.write("\n== layering: node scripts/rust-layers.mjs\n");
   const run = spawnSync(process.execPath, [new URL("./rust-layers.mjs", import.meta.url).pathname], { stdio: "inherit", windowsHide: true });

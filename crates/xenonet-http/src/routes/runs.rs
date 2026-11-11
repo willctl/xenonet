@@ -29,8 +29,7 @@ use crate::ctx::{fail, pending_reply, Answer, Ctx};
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_actors::tokens::bearer_of;
-use xenonet_engine::engine::is_agent_id;
+use xenonet_api::bearer::bearer_of;
 
 /// Why a call as you is refused away from the window: it's signed by your
 /// device, which asks you (Touch ID on a Mac), so it's done from
@@ -88,7 +87,7 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
     }
     // A session, as rules.rs checked it against its process.
     if let Some(me) = req.header("x-xenonet-agent").map(str::to_string) {
-        let Some((me, _)) = req.by.session.clone().filter(|(id, _)| *id == me && is_agent_id(id)) else {
+        let Some((me, _)) = req.by.session.clone().filter(|(id, _)| *id == me && cores.apps.is_session_id(id)) else {
             return Err(Reply::error(400, "say which session is calling, in x-xenonet-agent (claude:<session id> or codex:<thread id>)"));
         };
         let title = cores.engine.view(&me).await.ok().flatten().and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_string));

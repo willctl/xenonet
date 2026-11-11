@@ -3,7 +3,6 @@
 //!
 //! - `themes`: the built-in themes and how one is checked and folded on
 //!   another; `themefiles`: your own, JSON files in the state folder;
-//!   `environments`: the place around the map, chosen apart from its theme;
 //! - `spotify`: Spotify as a remote for the app you already use;
 //! - `control`: the client of a XenoNet Dev instance's control channel
 //!   (launch, call, quit); `script`: the steps `xenonet console` and
@@ -18,7 +17,6 @@
 
 pub mod control;
 pub mod cores;
-pub mod environments;
 pub mod script;
 pub mod spotify;
 pub mod themefiles;

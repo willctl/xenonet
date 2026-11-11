@@ -52,7 +52,7 @@ Each crate has one job. "Depends on" lists the XenoNet crates it uses
 | Crate | Its job | Depends on |
 | --- | --- | --- |
 | `xenonet-text` | The formats XenoNet writes and reads, which its files, answers and the golden files pin character for character: JSON (numbers, key order, escapes), text, UTF-16 strings, ISO times, units, orderings, URL encoding, JSON values read field by field | nothing |
-| `xenonet-model` | The data model: typed ids, every document XenoNet keeps, serves or carries between machines as a serde type, the operations' kinds and the action vocabulary, the seam between the engine and the network (`ops`: `Net`, `Sink`), a call's tokens and their API prices. `schemas/` is written from these types ([schemas.md](schemas.md)) | text |
+| `xenonet-model` | The data model: typed ids, every document XenoNet keeps, serves or carries between machines as a serde type, the operations' kinds and the action vocabulary, the seam between the engine and the network (`ops`: `Net`, `Sink`), the selector grammar, the words a start says to its asker, a call's tokens and their API prices. `schemas/` is written from these types ([schemas.md](schemas.md)) | text |
 | `xenonet-schema` | Vendor data read leniently against `schemas/vendor/`, which keys are fields, the vendor readers, the drift log, and XenoNet's own documents read as their types | os, text |
 
 **The machine.**
@@ -70,7 +70,7 @@ Each crate has one job. "Depends on" lists the XenoNet crates it uses
 | `adapters/claude-code`, `codex`, `grok-build`, `opencode` | A platform each: its processes, its ways in for live delivery, its connect, its readers and its doctor checks | adapter, os, text, sources; codex also blocks, model, schema; grok-build also model, claude-code; opencode also schema |
 | `adapters/cursor`, `gemini-cli`, `copilot` | The reader of each app's own records | adapter, os, text, sources; cursor also schema |
 | `adapters/hermes`, `grok-bot`, `muse` | The observer of each actor product; Hermes also XenoNet's plugin for Hermes and the doctor's check on it | adapter, os, text; hermes also actors, schema |
-| `adapters/all` (`xenonet-platforms`) | Every adapter, in the registry's order, and `install()`, which puts them in place | adapter and every adapter |
+| `adapters/all` (`xenonet-platforms`) | Every adapter, in the registry's order, and `install()`, which puts them in place; and `Registry`, the registry as the HTTP routes ask it (`xenonet-api`'s `Apps`) | adapter, api and every adapter |
 
 **The core's domains.**
 
@@ -93,7 +93,7 @@ timers, child processes, files and the waits between them. Most of it is a
 
 | Crate or module | Its job | Depends on |
 | --- | --- | --- |
-| `xenonet-runtime` | The engine running here: its store's sides, the map's readers, the process table and its checks, the engine and delivery's drivers, the network across machines, starts, asks and runs, and the actors' sides (registration, wakes, reports, tokens, spend, observers) | adapter, text, api, os, actors, blocks, engine, schema, model, hosts |
+| `xenonet-runtime` | The engine running here: its store's sides, the map's readers, the process table and its checks, the engine and delivery's drivers, the network across machines, starts, asks and runs, the actors' sides (registration, wakes, reports, tokens, spend, observers), and the local door's decisions through `xenonet-authz` (`door`) | adapter, text, api, os, actors, blocks, engine, schema, model, hosts |
 | `xenonet-state`'s `runtime` | The map kept current: the refresh from the vendor files, the live tailer, identities, projects, search, stats and the demo's world | (its crate's) |
 | `runtime` in `xenonet-hosts`, `-assistant`, `-doctor`, `-integrations`, and `xenonet-sources`' `refusals::runtime` | Each domain's cores, as the service runs them | (their crates') |
 | `xenonet-demo` | The made-up world the demo runs on: projects, transcripts, rollouts and a shared context in a temporary folder, kept busy | os, text |
@@ -102,16 +102,22 @@ timers, child processes, files and the waits between them. Most of it is a
 
 | Crate | Its job | Depends on |
 | --- | --- | --- |
-| `xenonet-api` | The local protocol between the service and the drivers of its cores: the core traits the routes call (`cores/`, JSON in and out), what every driver is given (`wire.rs`: settings, the `Emitter` and `EventSink` that carry events to the service), the event stream a relay follows, who sent a request, and the HTTP client of a running XenoNet that the command, the hook and the MCP servers use | model, text, net, schema |
+| `xenonet-api` | The local protocol between the service and the drivers of its cores, and the only XenoNet crate the HTTP surface imports besides the base crates: the core traits the routes call (`cores/`, JSON in and out), the local door (`LocalDoor`) and the app registry (`Apps`) as the routes ask them, what every driver is given (`wire.rs`: settings, the `Emitter` and `EventSink` that carry events to the service, the drift log), a message's envelope (`attest`), how a request carries a token (`bearer`), rates (`limits`), the Needs you queue, the event stream a relay follows, who sent a request, and the HTTP client of a running XenoNet that the command, the hook and the MCP servers use | model, os, text, net, schema |
 
 **The surfaces.**
 
 | Crate | Its job | Depends on |
 | --- | --- | --- |
-| `xenonet-service` | `xenonet serve`: the HTTP API, its event stream, the component service's socket, the assistant's endpoint, the actor gateway, A2A, the terminal drawer's shells | most of the workspace |
+| `xenonet-http` | The local HTTP API on 127.0.0.1: the routes, the rules table each is checked by before its handler runs (`routes/rules.rs`), the requests and answers, the event stream, the cores' events on their way to the pages, the page's files, and the traits of the service's parts it reaches (`parts.rs`: the actor gateway, the component service, the assistant's endpoint, A2A, the network) | api, model, os, text |
 | `xenonet-mcp` | The MCP servers, on `rmcp` | most of the core, and platforms |
+| `xenonet-console` | What only the console has: themes, the Spotify remote, the system panel, opening things, the control channel's client and the steps scripts run; and those cores | api, components, os, text, actors, adapter |
+
+**The composition root.**
+
+| Crate | Its job | Depends on |
+| --- | --- | --- |
+| `xenonet-service` | `xenonet serve`: makes the cores and the service's own parts (the component service's socket, the assistant's endpoint, the actor gateway, A2A, the network, the terminal drawer's shells), hands them to `xenonet-http` behind its parts' traits (`parts.rs`), and listens | most of the workspace |
 | `xenonet-cli` | The `xenonet` binary and every command | everything |
-| `xenonet-console` | What only the console has: themes, environments, the Spotify remote, the system panel, opening things, the control channel's client and the steps scripts run; and those cores | api, components, os, text, actors, adapter |
 
 **The composition root** is the cli's `serve()` (`crates/xenonet-cli/src/main.rs`)
 with `crates/xenonet-service/src/compose/`. `serve()` calls the service's
@@ -123,7 +129,9 @@ your agents and the network's plug), the app's cores
 (`compose::app::wire`: opening things, refusals, the decision model, the
 system panel, the MCP catalog, hosts, remote actors, integrations, the
 doctor) and the console's (`xenonet_console::wire`), and puts in the
-service's terminals. Each part gets only the settings it reads, and the
+service's terminals. Whatever made the cores, `serve::wire_root` puts in
+the local door (`xenonet_runtime::door`) and the app registry
+(`xenonet_platforms::Registry`) before the service starts. Each part gets only the settings it reads, and the
 parts reach each other only through the traits in `xenonet-api`. A core
 left pending answers its routes with 501 and `{ error, code: "pending" }`,
 and a check that can't run refuses. The service's own binary
@@ -152,28 +160,53 @@ one needs a reason too.
 
 ## The layering
 
-The rules, from goal 6:
+The rules, from goal 6. Every crate in `crates/` is in one class:
 
-- A core crate (any crate in `crates/` other than the surfaces
-  `xenonet-cli`, `xenonet-mcp`, `xenonet-service` and `xenonet-console`)
-  never depends on a surface crate or an adapter crate (`adapters/*`,
+- **Base crates**: `xenonet-text`, `xenonet-os` and `xenonet-model`, the
+  formats, the machine and the shared vocabulary every crate uses. They
+  count toward no limit.
+- **Core library crates**: every crate not classed below, a new one
+  included. Each has at most three internal dependencies besides the base
+  crates.
+- **Composition crates**: `xenonet-runtime`, `-state`, `-hosts`,
+  `-assistant`, `-doctor` and `-integrations` each hold a domain's
+  runtime and wire several domains together. Each has a ceiling at its
+  count when the ceilings were set, with the phase of
+  [direction.md](direction.md#order-of-work) it dissolves in (hosts and
+  state in phase 4, integrations in phase 6, the rest in phase 5).
+- **Surfaces**: `xenonet-http` imports `xenonet-api` and the base crates
+  and nothing else. `xenonet-mcp` and `xenonet-console` have a ceiling like
+  the composition crates', until they reach `xenonet-api` alone in phase 5.
+- **The composition root**: `xenonet-service` and `xenonet-cli`, with no
+  limit. No other crate depends on either.
+
+And for every crate but the surfaces and the root:
+
+- It never depends on a surface crate or an adapter crate (`adapters/*`,
   `xenonet-platforms` included).
-- Only the surfaces and `xenonet-state`, whose runtime drives the demo's
-  world, depend on `xenonet-demo`.
-- A core crate never names a platform. What it knows of Claude Code,
-  Codex, Grok Build, Hermes and the rest comes through
-  `xenonet_adapter::platforms()`, the adapters the binary installed at its
-  start (`xenonet_platforms::install()`, the first thing each `main` does).
+- Only the surfaces, the root and `xenonet-state`, whose runtime drives
+  the demo's world, depend on `xenonet-demo`.
+- It never names a platform. What it knows of Claude Code, Codex, Grok
+  Build, Hermes and the rest comes through `xenonet_adapter::platforms()`,
+  the adapters the binary installed at its start
+  (`xenonet_platforms::install()`, the first thing each `main` does).
   `xenonet-adapter`, which is the registry, and `xenonet-demo`, which makes
   sessions for named apps, are exempt, and each adapter may name its own
   platform.
 
 `scripts/rust-layers.mjs` checks them, and `npm run lint:rust` runs it
 first (in CI's `rust-lint` job too). `node scripts/rust-layers.mjs` fails on
-a breach; `--report` lists every breach without failing. It reads each
-crate's `Cargo.toml` for the dependencies, and each core crate's `src/`
-for a registry id in a string literal: an app's id from `apps.json`, or an
-actor product's (`hermes-agent`, `grok-bot`, `muse`, `dots`). It leaves out:
+a breach; `--report` lists every breach and each crate's count without
+failing. The classes and the ceilings, each with its phase and why, are at
+the top of the script. A ceiling only comes down: the check fails when a
+crate goes over its ceiling, and when it drops below without the ceiling
+being lowered there. A crate the script classes that no longer exists fails
+it too.
+
+It reads each crate's `Cargo.toml` for the dependencies (a target's
+included, dev-dependencies left out), and each core crate's `src/` for a
+registry id in a string literal: an app's id from `apps.json`, or an actor
+product's (`hermes-agent`, `grok-bot`, `muse`, `dots`). It leaves out:
 
 - test code: whatever follows a `#[cfg(test)]` in a file, files a test
   module includes by `#[path]`, `tests/`, and dev-dependencies;
@@ -191,13 +224,11 @@ in `state.json` v1 and in the project detection answer the HTTP golden
 files pin. An entry goes there only where the word means something other
 than the app, never for a branch on it.
 
-What the check doesn't hold yet: the target shape's limit of three
-internal dependencies per core crate, and surfaces importing only
-`xenonet-api`, both waiting for phase 3 of
-[direction.md](direction.md#order-of-work). Nor does it look at the
-adapters' own dependencies (`grok-build` builds on `claude-code`'s, and
-`hermes` on `xenonet-actors`) or at a surface naming an adapter (the
-service reads Grok Build's config through its adapter for the MCP
+What the check doesn't look at: the adapters' own dependencies
+(`grok-build` builds on `claude-code`'s, `hermes` on `xenonet-actors`, and
+`xenonet-platforms` on `xenonet-api` for `Registry`), and a surface or the
+root naming a platform (the routes' fallbacks name the apps XenoNet asks,
+and the service reads Grok Build's config through its adapter for the MCP
 catalog).
 
 ## The processes
@@ -238,7 +269,8 @@ how to build one.
 
 ## The service
 
-`xenonet serve` (`crates/xenonet-service`):
+`xenonet serve` (`crates/xenonet-service`, with the HTTP API in
+`crates/xenonet-http`):
 
 - Listens on 127.0.0.1 only: 47840 for installed XenoNet, and each
   instance's own port.
@@ -254,9 +286,10 @@ how to build one.
 - Takes JSON bodies, 1 MiB by default and smaller where a route says (413
   over it, 400 when it isn't JSON), and answers errors as
   `{ error, code? }`.
-- Has a rule on each route for who may call it: the window key with the
-  process check, you, a session's process check, an actor's bearer token,
-  or a gateway token.
+- Has a rule on each route for who may call it, in one table
+  (`xenonet-http`'s `routes/rules.rs`): the window key with the process
+  check, you, a session's process check, an actor's bearer token, or a
+  gateway token.
 - Streams the page's events on `GET /api/events` (`retry: 3000`, a ping
   every 25 seconds) and an actor's on `/api/actors/me/stream`.
 - Runs the actor gateway on its own port (the API's plus 1010) while it's

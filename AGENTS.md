@@ -30,8 +30,12 @@ answer the alignment check in `goals.md` in the design doc or the PR.
   Run both after every change, and `npm run lint:rust` before a commit
   that touches `crates/` or `adapters/`. It runs the layering check first
   (`scripts/rust-layers.mjs`), which fails when a core crate depends on a
-  surface or an adapter crate or names a platform by its id: what a core
-  crate knows of a platform comes through `xenonet_adapter::platforms()`.
+  surface or an adapter crate or names a platform by its id (what a core
+  crate knows of a platform comes through `xenonet_adapter::platforms()`),
+  when a core crate has more than three internal dependencies besides the
+  base crates, when `xenonet-http` imports anything but `xenonet-api`, or
+  when a composition crate or another surface leaves its ceiling. A crate
+  that drops below its ceiling lowers it in the script.
 - A golden file changes only when the behaviour should: say why in the
   commit, never re-record one to make a test pass.
 - To see a change the way a person would, use the `xenonet-console` MCP tools

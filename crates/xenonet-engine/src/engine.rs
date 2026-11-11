@@ -37,7 +37,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use xenonet_adapter::apps::is_session_id;
 use xenonet_adapter::products::product_of;
-use xenonet_model::ids::{parse_actor_id, YOU};
+use xenonet_model::ids::YOU;
 use xenonet_os::nodepath::{style_of, NATIVE};
 use xenonet_os::sync::Locked;
 use xenonet_text::json::number;
@@ -243,9 +243,7 @@ pub fn is_agent_id(id: &str) -> bool {
 }
 
 /// An actor of this machine as the engine has it, never you.
-pub fn is_actor_agent(id: &str) -> bool {
-    parse_actor_id(id).is_some_and(|(host, _)| host.is_none()) && id != YOU
-}
+pub use xenonet_model::ids::is_actor_agent;
 
 /// Whether a document's id names an actor here.
 fn actor_value(id: Option<&Value>) -> bool {

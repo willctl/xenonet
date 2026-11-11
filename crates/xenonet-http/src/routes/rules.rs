@@ -58,11 +58,7 @@ use crate::cores::{ok, reason};
 use crate::ctx::Ctx;
 use crate::http::{decode_uri_component, By, Reply, Req};
 use serde_json::{json, Value};
-use xenonet_authz::{
-    Act, Action, AgentId, Attestation, Consent, DeviceId, Door, Ground, MachineId, NetworkId, PersonId, Principal, ReadScope, Request, Resource, Role, RootCertificate, SessionId,
-    Settings, StandingGrant,
-};
-use xenonet_engine::engine::is_agent_id;
+use xenonet_api::cores::door::{Act, Attestation, Caller, ReadScope};
 
 /// The header the file's credential comes in.
 pub const CREDENTIAL: &str = "x-xenonet-credential";
@@ -82,6 +78,19 @@ pub enum Who {
     Window,
     Session,
     Actor,
+}
+
+/// The acts a row names, by authz's names for them (xenonet-authz's
+/// `Action`): the local door decides a message, a claim and a handoff;
+/// the rest are their handlers'.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Message,
+    Claim,
+    Handoff,
+    RegisterActor,
+    Start,
+    Answer,
 }
 
 /// What a route reads or does, as an authz act.
@@ -476,88 +485,15 @@ fn names_elsewhere(req: &Req) -> bool {
     req.param("host").is_some_and(|h| !h.is_empty()) || ["a", "b"].iter().any(|k| req.param(k).is_some_and(at)) || req.path.split('/').any(at)
 }
 
-/// This machine as its own local door sees it. Local acts are decided
-/// with no network: nothing here is another machine's, so only who asks
-/// and how they were checked matter, and the machine's name doesn't.
-struct Here(MachineId);
-
-impl Ground for Here {
-    fn own_machine(&self) -> &MachineId {
-        &self.0
-    }
-    fn role(&self, _: &NetworkId, _: &MachineId) -> Option<Role> {
-        None
-    }
-    fn settings(&self, _: Option<&NetworkId>) -> Settings {
-        Settings::default()
-    }
-    fn own_person(&self) -> Option<PersonId> {
-        None
-    }
-    fn device(&self, _: &PersonId, _: &DeviceId) -> Option<xenonet_authz::Device> {
-        None
-    }
-    fn revoked(&self, _: &[u8]) -> bool {
-        false
-    }
-    fn token_roots(&self, _: u32) -> Vec<RootCertificate> {
-        Vec::new()
-    }
-    fn signing_key(&self, _: &MachineId) -> Option<xenonet_id::sign::VerifyingKey> {
-        None
-    }
-    fn consent(&self, _: &SessionId) -> Consent {
-        Consent::default()
-    }
-    fn device_of(&self, _: &MachineId) -> Option<DeviceId> {
-        None
-    }
-    fn delegations(&self) -> Vec<StandingGrant> {
-        Vec::new()
-    }
-    fn allow_scope(&self, _: &[u8]) -> Option<xenonet_authz::AllowScope> {
-        None
-    }
-    fn ask(&self, _: &xenonet_authz::AskId) -> Option<xenonet_authz::Asked> {
-        None
-    }
-    fn governance_synced_at(&self) -> Option<i64> {
-        None
-    }
-}
-
-/// Who the caller is, for authz: this machine (its window, its own reads,
-/// you at your terminal), or an agent with how it was checked.
-enum Caller {
-    Machine,
-    Agent(String, Attestation),
-}
-
-fn here() -> Option<MachineId> {
-    MachineId::new("this-machine").ok()
-}
-
-/// Decides `act` for `caller` at this machine's local door: Ok, or why
-/// not.
-fn decide(caller: &Caller, act: Act, now: f64) -> Result<(), String> {
-    let machine = here().ok_or("this machine has no id to decide by")?;
-    let principal = match caller {
-        Caller::Machine => Principal::Machine { id: machine.clone() },
-        Caller::Agent(id, attestation) => {
-            let id = AgentId::new(id).or_else(|_| AgentId::new("unchecked")).map_err(|e| e.message)?;
-            Principal::Agent { id, machine: machine.clone(), attestation: *attestation }
-        }
-    };
-    let request = Request::new(principal, Resource::Machine(machine.clone()), act, Door::Local, now as i64, None);
-    match xenonet_authz::decide(None, &request, &Here(machine), None) {
-        xenonet_authz::Decision::Allow(_) => Ok(()),
-        d => Err(d.reason().map_or_else(|| "not allowed".to_string(), |r| r.text().to_string())),
-    }
+/// Decides `act` for `caller` at this machine's local door (the
+/// composition root's, through xenonet-authz): Ok, or why not.
+fn decide(ctx: &Ctx, caller: &Caller, act: Act) -> Result<(), String> {
+    ctx.cores.door.decide(caller, act, ctx.now())
 }
 
 fn act_of(doing: Doing) -> Option<Act> {
     match doing {
-        Read(scope) => Some(Act::Read { scope, filters: None }),
+        Read(scope) => Some(Act::Read(scope)),
         Doing::Act(Action::Message) => Some(Act::Message),
         Doing::Act(Action::Claim) => Some(Act::Claim),
         Doing::Act(Action::Handoff) => Some(Act::Handoff),
@@ -621,7 +557,7 @@ pub async fn admit(ctx: &Ctx, req: &mut Req) -> Result<(), Reply> {
     let caller = who(ctx, req, row, &creds, &mut by).await?;
     // The act, for whoever isn't an actor: an actor's is its handler's.
     if let (Some(caller), Some(act)) = (caller, act_of(row.act)) {
-        if let Err(why) = decide(&caller, act, ctx.now()) {
+        if let Err(why) = decide(ctx, &caller, act) {
             return Err(refused(403, "not-allowed", why));
         }
     }
@@ -654,7 +590,7 @@ async fn who(ctx: &Ctx, req: &Req, row: &Rule, creds: &Creds, by: &mut By) -> Re
     }
     // A session that says who it is, checked against its process.
     if (has(Session) || checked.is_some()) && !creds.token {
-        if let Some(me) = req.header("x-xenonet-agent").filter(|m| is_agent_id(m)).map(str::to_string) {
+        if let Some(me) = req.header("x-xenonet-agent").filter(|m| ctx.cores.apps.is_session_id(m)).map(str::to_string) {
             let verdict = ctx.cores.verify.check(req.peer, &me, false).await;
             if !ok(&verdict) {
                 return Err(Reply::send(403, &json!({ "error": verdict.get("reason").cloned().unwrap_or(Value::Null) }), &[]));
@@ -681,7 +617,7 @@ async fn who(ctx: &Ctx, req: &Req, row: &Rule, creds: &Creds, by: &mut By) -> Re
             return Ok(Some(Caller::Machine));
         }
         let caller = Caller::Agent(String::new(), Attestation::Unchecked);
-        let why = decide(&caller, Act::Read { scope, filters: None }, ctx.now()).err().unwrap_or_default();
+        let why = decide(ctx, &caller, Act::Read(scope)).err().unwrap_or_default();
         return Err(refused(
             403,
             "checked",
@@ -759,21 +695,6 @@ mod tests {
             let method = if row.method == "*" { "GET" } else { row.method };
             let first = RULES.iter().position(|r| (r.method == "*" || r.method == method) && matches(r.path, &probe)).unwrap();
             assert!(first == i || RULES[first].path != row.path, "{} {} is shadowed by row {first}", row.method, row.path);
-        }
-    }
-
-    #[test]
-    fn reads_that_matter_need_more_than_the_file() {
-        for scope in [Transcripts, Search, State] {
-            assert!(decide(&Caller::Machine, Act::Read { scope, filters: None }, 0.0).is_ok());
-            assert!(decide(&Caller::Agent("claude:s".into(), Attestation::ProcessChecked), Act::Read { scope, filters: None }, 0.0).is_ok());
-            let why = decide(&Caller::Agent(String::new(), Attestation::Unchecked), Act::Read { scope, filters: None }, 0.0).unwrap_err();
-            assert!(why.contains("unchecked agent"), "{why}");
-        }
-        // The map, a message, a claim and a handoff are anyone's here.
-        let anyone = Caller::Agent(String::new(), Attestation::Unchecked);
-        for act in [Act::Read { scope: Map, filters: None }, Act::Message, Act::Claim, Act::Handoff] {
-            assert!(decide(&anyone, act, 0.0).is_ok());
         }
     }
 

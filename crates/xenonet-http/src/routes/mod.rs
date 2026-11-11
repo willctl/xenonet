@@ -5,6 +5,7 @@
 //! part of the contract, since a route that answers first is the one that
 //! answers.
 
+pub mod a2a;
 pub mod actors;
 pub mod assistant;
 pub mod delivery;
@@ -34,7 +35,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use xenonet_engine::engine::{is_actor_agent, is_agent_id};
+use xenonet_model::ids::is_actor_agent;
 use xenonet_model::ids::YOU;
 use xenonet_os::log::{log_dir, read_logs, summarize, LEVELS};
 use xenonet_os::sync::Locked;
@@ -99,7 +100,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         let body = req.json(16 << 10).await.unwrap_or(Value::Null);
         let to = body.get("to").and_then(Value::as_str).unwrap_or("").to_string();
         // Another host's session or actor, by its qualified id.
-        let local_id = |id: &str| is_agent_id(id) || is_actor_agent(id);
+        let local_id = |id: &str| ctx.cores.apps.is_session_id(id) || is_actor_agent(id);
         let remote = xenonet_model::ids::parse_qualified(&to).is_some_and(|q| q.host.is_some() && local_id(q.local));
         if !(local_id(&to) || remote) {
             return Ok(Reply::coded(400, "bad-request", "write to a session or an actor by its id (claude:<session id>, actor:<slug>, or @<host>:<id> on another machine)"));
@@ -126,14 +127,14 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(r.route(req).await);
     }
     if route == "/api/delivery" || route.starts_with("/api/delivery/") {
-        let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone() };
+        let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), apps: cores.apps.clone() };
         return Ok(r.route(req).await);
     }
     // A2A's switch and the agents that called, for the Actors panel: the
-    // owner's (a2a/routes.rs). Not under /api/actors/, where it would be a
+    // owner's (routes/a2a.rs). Not under /api/actors/, where it would be a
     // slug.
     if route == "/api/a2a" {
-        return Ok(if m == "GET" || m == "POST" { crate::a2a::routes::route(ctx, req).await } else { Reply::error(404, "not found") });
+        return Ok(if m == "GET" || m == "POST" { a2a::route(ctx, req).await } else { Reply::error(404, "not found") });
     }
     if route == "/api/actors" || route.starts_with("/api/actors/") {
         let taken = std::mem::replace(req, Req::fake("GET", "/", &[], None));
@@ -379,8 +380,9 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         }
         let body = req.json(4096).await?;
         // Codex, unless you ask for Claude Code; another app is refused.
-        let Some(app) = xenonet_adapter::apps::asked_or(body.get("app"), Some("codex")) else {
-            return Ok(Reply::error(400, xenonet_adapter::apps::app_refusal_among("app", body.get("app").unwrap_or(&Value::Null), &xenonet_adapter::apps::ASKED)));
+        let app = match cores.apps.asked("app", body.get("app"), "codex") {
+            Ok(app) => app,
+            Err(words) => return Ok(Reply::error(400, words)),
         };
         let model = body.get("model").and_then(Value::as_str).filter(|s| model_ok(s)).map(str::to_string);
         let b = cores.diagnostics.bundle().await?;
@@ -466,11 +468,10 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     if route == "/api/handoff" {
         if m == "GET" {
             // Claude Code, unless you ask for Codex; another app is refused.
-            let Some(target) = xenonet_adapter::apps::asked_or_text(req.param("target"), Some("claude")) else {
-                return Ok(Reply::error(
-                    400,
-                    xenonet_adapter::apps::app_refusal_among("target", &Value::String(req.param("target").unwrap_or_default().to_string()), &xenonet_adapter::apps::ASKED),
-                ));
+            let asked = req.param("target").map(|t| Value::String(t.to_string()));
+            let target = match cores.apps.asked("target", asked.as_ref(), "claude") {
+                Ok(target) => target,
+                Err(words) => return Ok(Reply::error(400, words)),
             };
             let node = req.param("nodeId").map(str::to_string);
             return Ok(match cores.state.handoff(node.as_deref(), target).await {
@@ -679,7 +680,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         // Cursor and Grok Build run Claude Code's hooks too, with payloads
         // of their own. Such an event isn't a Claude Code session's: it's
         // passed over, not refused.
-        if xenonet_adapter::apps::hook_written_by(&body).is_some() {
+        if cores.apps.hook_written_by(&body).is_some() {
             return Ok(Reply::empty(204));
         }
         // XenoNet's plugin for Claude Code posts the same events as
@@ -767,7 +768,7 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
     // over. If the session stops waiting first, the message stays unread.
     if m == "POST" && route == "/api/hook/claude/listen" {
         let body = req.json_body().await.unwrap_or_else(|_| json!({}));
-        let sid = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s) && xenonet_adapter::apps::hook_written_by(&body).is_none());
+        let sid = body.get("session_id").and_then(Value::as_str).filter(|s| is_uuid_like(s) && cores.apps.hook_written_by(&body).is_none());
         if let (Some("Stop"), Some(sid)) = (body.get("hook_event_name").and_then(Value::as_str), sid) {
             let me = format!("claude:{sid}");
             let verdict = cores.verify.check(req.peer, &me, true).await;
@@ -1064,7 +1065,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
             let (code, state, error) = (req.param("code").map(str::to_string), req.param("state").map(str::to_string), req.param("error").map(str::to_string));
             return Ok(Some(match s.callback(code.as_deref(), state.as_deref(), error.as_deref()).await {
                 Ok(()) => {
-                    crate::serve::poll_spotify_soon(ctx, 0);
+                    crate::server::poll_spotify_soon(ctx, 0);
                     page("Spotify is connected", "You can close this tab and go back to XenoNet.")
                 }
                 Err(e) if e.is_pending() => pending_reply(&e),
@@ -1091,7 +1092,7 @@ async fn spotify(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreErr
                     let op = body.get("op").filter(|o| !o.is_null()).map(display).unwrap_or_default();
                     s.command(&op, body.get("value").unwrap_or(&Value::Null)).await?;
                     ctx.music.locked().last.clear();
-                    crate::serve::poll_spotify_soon(ctx, 400);
+                    crate::server::poll_spotify_soon(ctx, 400);
                     return Ok(Some(Reply::json(200, json!({ "ok": true }))));
                 }
                 _ => {}
@@ -1174,7 +1175,7 @@ fn simulate(ctx: &Arc<Ctx>, kind: &Value, body: &Value) -> Result<Option<Value>,
         let results = Value::Array(results);
         let now = xenonet_text::json::number(ctx.now());
         cores.doctor.report(json!({ "at": now, "ms": 1, "results": results, "summary": cores.doctor.summarize(&results)? }))?;
-        crate::serve::notify_doctor(ctx, &[problem]);
+        crate::glue::notify_doctor(ctx, &[problem]);
         return Ok(Some(json!({ "ok": true, "kind": kind_s })));
     }
     if kind_s == "clear" {

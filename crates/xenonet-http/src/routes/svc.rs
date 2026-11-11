@@ -14,8 +14,9 @@
 
 use crate::ctx::{Answer, Ctx};
 use crate::http::{Reply, ReplyBody, Req, TOO_BIG};
+use crate::parts::{SvcAnswer, SvcCall};
 use std::sync::Arc;
-use xenonet_net::svc::{self, Call};
+use xenonet_model::network::SVC_REQUEST_BODY;
 
 /// `/api/svc/…`, or None for any other path.
 pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
@@ -23,13 +24,13 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
     Some(Ok(answer(ctx, req, &rest).await))
 }
 
-fn reply(a: svc::Answer) -> Reply {
+fn reply(a: SvcAnswer) -> Reply {
     Reply { status: a.status, headers: a.headers, body: ReplyBody::Full(a.body.into()) }
 }
 
 async fn answer(ctx: &Arc<Ctx>, req: &mut Req, rest: &str) -> Reply {
     if req.header("origin").is_some() || req.header("sec-fetch-site").is_some_and(|s| s != "none") {
-        return reply(svc::Answer::refused(403, "web-page", "a web page can't reach other hosts' services through XenoNet"));
+        return reply(SvcAnswer::refused(403, "web-page", "a web page can't reach other hosts' services through XenoNet"));
     }
     let mut parts = rest.splitn(3, '/');
     let (host, name) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
@@ -38,12 +39,12 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, rest: &str) -> Reply {
         Some(q) => format!("{path}?{q}"),
         None => path,
     };
-    let Some(net) = ctx.net.get().cloned() else { return reply(svc::Answer::refused(503, "no-network", "the network isn't available in this XenoNet")) };
-    let body = match req.bytes(svc::REQUEST_BODY).await {
+    let Some(net) = ctx.net.get().cloned() else { return reply(SvcAnswer::refused(503, "no-network", "the network isn't available in this XenoNet")) };
+    let body = match req.bytes(SVC_REQUEST_BODY).await {
         Ok(b) => b,
-        Err(e) if e == TOO_BIG => return reply(svc::Answer::refused(413, "too-big", "a request's body is at most 1 MiB")),
-        Err(_) => return reply(svc::Answer::refused(400, "bad-request", "the request's body didn't all come")),
+        Err(e) if e == TOO_BIG => return reply(SvcAnswer::refused(413, "too-big", "a request's body is at most 1 MiB")),
+        Err(_) => return reply(SvcAnswer::refused(400, "bad-request", "the request's body didn't all come")),
     };
-    let call = Call { method: req.method.clone(), path, headers: req.headers.clone(), body };
-    reply(net.node().shared().svc_call(host, name, call).await)
+    let call = SvcCall { method: req.method.clone(), path, headers: req.headers.clone(), body };
+    reply(net.svc_call(host, name, call).await)
 }

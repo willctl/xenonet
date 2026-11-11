@@ -2,7 +2,8 @@
 //! (`runtime`), the drivers for the engine, delivery and the network
 //! across machines, starts, asks and runs, the process checks and the
 //! store's sides, the actors' sides (registration, wakes, reports, tokens,
-//! spend, observers), and the timers, processes and waits they need. The
+//! spend, observers), the local door's decisions (`door`), and the timers,
+//! processes and waits they need. The
 //! adapters are the ones in place (`xenonet_adapter::platforms()`), which
 //! the binary installs at start.
 
@@ -13,6 +14,7 @@
 pub mod actors;
 pub mod asks;
 pub mod delivery;
+pub mod door;
 pub mod engine;
 pub mod exec;
 pub mod fs;

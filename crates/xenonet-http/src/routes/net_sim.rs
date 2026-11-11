@@ -776,7 +776,7 @@ fn apply(sim: &mut Sim, path: &str, body: &Value, now: f64) -> Reply {
 /// A permission prompt of a made-up run on laptop, as its machine would
 /// send it (asks.rs); `env`, one that may read the run's environment.
 fn made_up_ask(now: f64, env: bool) -> Value {
-    let (input, warning) = if env { ("printenv | grep -i token", json!(xenonet_engine::delivery::starts::ENV_WARNING)) } else { ("cargo test --package billing", Value::Null) };
+    let (input, warning) = if env { ("printenv | grep -i token", json!(xenonet_model::starts::ENV_WARNING)) } else { ("cargo test --package billing", Value::Null) };
     json!({
         "id": format!("ask_{}", random_uuid()),
         "host": "laptop",
@@ -869,14 +869,14 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
             let started = json!({ "session": session, "folder": folder });
-            let words = xenonet_engine::delivery::starts::answer_words("started", &machine, &started);
+            let words = xenonet_model::starts::answer_words("started", &machine, &started);
             c.broadcast(
                 "start",
                 &json!({ "state": "started", "host": machine, "session": session, "folder": folder, "words": words, "at": xenonet_text::json::number(c.now()), "simulated": true }),
             );
             tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
             let ended = json!({ "session": session, "exit": 0, "minutes": 0 });
-            let words = xenonet_engine::delivery::starts::answer_words("ended", &machine, &ended);
+            let words = xenonet_model::starts::answer_words("ended", &machine, &ended);
             c.broadcast("start", &json!({ "state": "ended", "host": machine, "session": session, "exit": 0, "minutes": 0, "words": words, "at": xenonet_text::json::number(c.now()), "simulated": true }));
         });
     }
@@ -888,7 +888,7 @@ async fn start(ctx: &Arc<Ctx>, req: &mut Req) -> Result<Option<Reply>, CoreError
 
 /// Who may start and wake sessions, set in the simulated state: this
 /// machine's at once; another's (`host`) as that machine would take it
-/// (xenonet_net::operator): narrowing at once, widening to network (or, for
+/// (the network chain's settings entries): narrowing at once, widening to network (or, for
 /// a start, to delegate) at once from the founder, else waiting for a
 /// second window host, which the made-up laptop is when this machine is
 /// studio.
@@ -1229,6 +1229,9 @@ mod tests {
     fn dev_ctx() -> Arc<Ctx> {
         let mut cores = Cores::pending(false, false, false);
         cores.verify = Arc::new(Window);
+        // The local door and the registry as the composition root wires them.
+        cores.door = xenonet_runtime::door::local();
+        cores.apps = xenonet_platforms::registry();
         let home = |k: &str| (k == "HOME" || k == "USERPROFILE").then(|| "/home/nova".to_string());
         let mut config = crate::config::Config::from(&["--demo".to_string(), "--dev".to_string()], &home);
         config.dev = true;

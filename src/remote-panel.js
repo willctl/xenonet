@@ -6,7 +6,7 @@
 // what would leave this computer before anything is approved.
 //
 // Everything here goes through the window's own routes with its key
-// (crates/xenonet-service/src/routes/assistant.rs): pairing, widening a grant and turning
+// (crates/xenonet-http/src/routes/assistant.rs): pairing, widening a grant and turning
 // access back on are the window's alone. A credential never reaches the
 // page: XenoNet writes it where only your account can read it, and the page
 // shows the command the tunnel client runs, which holds none.

@@ -98,6 +98,8 @@ xenonet-api = { path = "crates/xenonet-api" }
 # The system as XenoNet reads it: home, platform, random ids, fetch, lines.
 xenonet-os = { path = "crates/xenonet-os" }
 xenonet-service = { path = "crates/xenonet-service" }
+# The local HTTP API and its event stream, over xenonet-api alone.
+xenonet-http = { path = "crates/xenonet-http" }
 # The binary's processes: the service's sockets, timers and children, its
 # HTTP API (hyper, with XenoNet's own router on top), and the MCP servers
 # (rmcp, which needs Rust 1.88: rust-toolchain.toml pins the checkout's).

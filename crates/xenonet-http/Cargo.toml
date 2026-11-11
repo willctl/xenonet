@@ -1,0 +1,49 @@
+[package]
+name = "xenonet-http"
+description = "XenoNet's local HTTP API: the routes on 127.0.0.1, the rules table each is checked by, the event stream and the page's files, over xenonet-api alone."
+version.workspace = true
+edition.workspace = true
+# It runs on tokio beside the MCP servers, in the one binary (Rust 1.88+).
+rust-version = "1.88"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# A surface: xenonet-api and the base crates (text, os, model) only
+# (scripts/rust-layers.mjs). Whatever else a route needs comes through
+# xenonet-api's cores or the service's parts (parts.rs).
+[dependencies]
+# The cores' traits, the local door, the app registry as the routes ask
+# it, the envelopes, rates and the Needs you queue.
+xenonet-api.workspace = true
+# Ids, the selector grammar, the network's documents and the words a
+# start says, which the routes check and the made-up network writes.
+xenonet-model.workspace = true
+# Home, platform, random ids, the error log and locks.
+xenonet-os.workspace = true
+# JSON, text and times as XenoNet writes them.
+xenonet-text.workspace = true
+# The parts and the cores are async traits, on tokio.
+async-trait.workspace = true
+tokio.workspace = true
+# The requests and answers themselves: hyper's types, and the bodies.
+bytes.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+serde_json.workspace = true
+# The window's, the tray's and the API's keys (window_key.rs).
+getrandom.workspace = true
+
+[dev-dependencies]
+# The app registry as the composition root wires it in, for the tests
+# that name sessions.
+xenonet-platforms.workspace = true
+# The local door as the composition root wires it in, for the tests that
+# go through the rules table.
+xenonet-runtime.workspace = true
+# The tray's status and a made-up machine's load, checked as their types.
+xenonet-schema.workspace = true
+
+[lints]
+workspace = true

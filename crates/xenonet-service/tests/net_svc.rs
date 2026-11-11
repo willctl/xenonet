@@ -131,6 +131,7 @@ impl Host {
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let config = Config::from(&[], &get);
         let mut cores = Cores::pending(false, false, false);
+        xenonet_service::serve::wire_root(&mut cores);
         let peers = Arc::new(Peers::default());
         cores.verify = peers.clone();
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -492,7 +493,7 @@ async fn listen(ctx: Arc<Ctx>, port: u16) -> tokio::task::JoinHandle<()> {
             tokio::spawn(async move {
                 let answer = hyper::service::service_fn(move |req| {
                     let ctx = ctx.clone();
-                    async move { Ok::<_, Infallible>(xenonet_service::serve::to_response(xenonet_service::serve::handle(&ctx, req, peer).await)) }
+                    async move { Ok::<_, Infallible>(xenonet_service::server::to_response(xenonet_service::server::handle(&ctx, req, peer).await)) }
                 });
                 let _ = hyper::server::conn::http1::Builder::new().serve_connection(hyper_util::rt::TokioIo::new(stream), answer).await;
             });

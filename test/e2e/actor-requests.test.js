@@ -1,5 +1,5 @@
 // End to end: registrations wait for XenoNet's window (core/actors/
-// registration.js, crates/xenonet-service/src/routes) on XenoNet Dev's test instance,
+// registration.js, crates/xenonet-http/src/routes) on XenoNet Dev's test instance,
 // whose data is made up. The demo's made-up requests (simulate
 // actor-request) are allowed and denied from the page itself, with the
 // window key only it holds, as the Actors panel will; a program without the

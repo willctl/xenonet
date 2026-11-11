@@ -1,14 +1,39 @@
-// The Rust core's layering (docs/design/direction.md, "The target shape"):
-// a core crate never depends on a surface crate or an adapter crate, and
-// never holds a registry id literal (an app's or an actor product's id),
-// since what it knows of a platform comes through the adapter registry.
-// The demo's made-up world (xenonet-demo) is wired in by the surfaces and
-// the map's demo driver alone.
+// The Rust core's layering (docs/design/direction.md, "The target shape";
+// docs/design/rust-core.md, "The layering"). Every crate in crates/ is in
+// one class, and each class has its rules:
+//
+// - Base crates (BASE): xenonet-text, xenonet-os and xenonet-model, the
+//   formats, the machine and the shared vocabulary every crate uses. They
+//   count toward no limit.
+// - Core library crates: every crate in crates/ not classed below, a new
+//   one included. Each has at most three internal dependencies besides the
+//   base crates.
+// - Composition crates (COMPOSITION): each holds a domain's runtime and
+//   wires several domains together, on its way to dissolving in the phase
+//   of docs/design/direction.md's order of work its entry names. Each has a
+//   ceiling at its count when the ceilings were set: the check fails when
+//   it goes over, and when it drops below without its ceiling being
+//   lowered here, so a ceiling only ever comes down.
+// - Surfaces (SURFACES): xenonet-http imports xenonet-api and the base
+//   crates and nothing else. xenonet-mcp and xenonet-console have a
+//   ceiling like the composition crates', until they reach xenonet-api
+//   alone in the phase their entry names.
+// - The composition root (ROOT): xenonet-service (compose/, serve.rs, the
+//   gateway, A2A and the other servers) and xenonet-cli (the binary, whose
+//   `serve()` composes). No limit, and no other crate depends on either.
+//
+// And for every crate but the surfaces and the root: it never depends on a
+// surface crate or an adapter crate, and never holds a registry id literal
+// (an app's or an actor product's id), since what it knows of a platform
+// comes through the adapter registry. The demo's made-up world
+// (xenonet-demo) is wired in by the surfaces, the root and the map's demo
+// driver alone. Dependencies count as Cargo.toml lists them, a target's
+// included and dev-dependencies left out.
 //
 //   node scripts/rust-layers.mjs            fails on a breach
-//   node scripts/rust-layers.mjs --report   lists every breach without failing
+//   node scripts/rust-layers.mjs --report   lists every breach and each
+//                                           crate's count, without failing
 //
-// Surfaces: the command, the MCP servers, the service and the console.
 // xenonet-adapter is the registry itself, and adapters (adapters/*) may
 // name their own platform; the demo names the apps it makes sessions for.
 // Test code is left out: what follows a `#[cfg(test)]`, files a test
@@ -22,9 +47,27 @@ import path from "node:path";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const report = process.argv.includes("--report");
-const SURFACES = new Set(["xenonet-cli", "xenonet-mcp", "xenonet-service", "xenonet-console"]);
-// What may depend on the demo besides the surfaces: the map's demo driver.
-const DEMO_USERS = new Set([...SURFACES, "xenonet-state"]);
+const BASE = new Set(["xenonet-text", "xenonet-os", "xenonet-model"]);
+// The composition crates' ceilings, and the phase each dissolves in.
+const COMPOSITION = {
+  "xenonet-runtime": { ceiling: 11, phase: 5, why: "the engine's drivers go to the engine, the store and the transport" },
+  "xenonet-state": { ceiling: 7, phase: 4, why: "the map's state goes into the one store" },
+  "xenonet-hosts": { ceiling: 6, phase: 4, why: "deleted: other machines' maps are the network's" },
+  "xenonet-assistant": { ceiling: 8, phase: 5, why: "remote actors' connections and tunnels go to the transport" },
+  "xenonet-doctor": { ceiling: 8, phase: 5, why: "it runs the checks the crates and adapters expose, through the registry" },
+  "xenonet-integrations": { ceiling: 5, phase: 6, why: "the edges: ACP, A2A outbound and MCP's catalog become adapters" },
+};
+// The surfaces: xenonet-api and the base crates alone, or a ceiling until
+// the phase they reach that in.
+const SURFACES = {
+  "xenonet-http": { only: ["xenonet-api"] },
+  "xenonet-mcp": { ceiling: 11, phase: 5, why: "once the composition crates it reaches into have dissolved" },
+  "xenonet-console": { ceiling: 4, phase: 5, why: "once the composition crates it reaches into have dissolved" },
+};
+const ROOT = new Set(["xenonet-service", "xenonet-cli"]);
+// What may depend on the demo besides the surfaces and the root: the map's
+// demo driver.
+const DEMO_USERS = new Set([...Object.keys(SURFACES), ...ROOT, "xenonet-state"]);
 // Crates whose literals aren't the core's: the registry and the demo.
 const NAMING = new Set(["xenonet-adapter", "xenonet-demo"]);
 
@@ -98,10 +141,42 @@ function testFiles(src) {
 }
 
 const breaches = [];
+const counts = [];
+const names = new Set(crates("crates").map((c) => c.name));
+for (const n of [...BASE, ...Object.keys(COMPOSITION), ...Object.keys(SURFACES), ...ROOT]) {
+  if (!names.has(n)) breaches.push(`${n} is classed in scripts/rust-layers.mjs, and there's no such crate: take it out`);
+}
 for (const c of crates("crates")) {
-  if (SURFACES.has(c.name)) continue;
-  for (const d of deps(path.join(c.dir, "Cargo.toml"))) {
-    if (SURFACES.has(d)) breaches.push(`${c.name} depends on the surface crate ${d}`);
+  const all = deps(path.join(c.dir, "Cargo.toml"));
+  const counted = [...all].filter((d) => !BASE.has(d)).sort();
+  const n = counted.length;
+  if (ROOT.has(c.name)) {
+    counts.push(`${c.name}: ${n} (the root, no limit)`);
+    continue;
+  }
+  for (const d of all) {
+    if (ROOT.has(d)) breaches.push(`${c.name} depends on the composition root's ${d}`);
+  }
+  const surface = SURFACES[c.name];
+  const kept = surface ?? COMPOSITION[c.name];
+  if (surface?.only) {
+    const others = counted.filter((d) => !surface.only.includes(d));
+    if (others.length) breaches.push(`${c.name} is a surface on ${surface.only.join(", ")} and the base crates alone, and depends on ${others.join(", ")}`);
+    counts.push(`${c.name}: ${n} (surface: ${surface.only.join(", ")} and the base crates only)`);
+  } else if (kept) {
+    const kind = surface ? "surface" : "composition";
+    if (n > kept.ceiling) breaches.push(`${c.name} has ${n} internal dependencies besides the base crates, over its ceiling of ${kept.ceiling} (${counted.join(", ")})`);
+    if (n < kept.ceiling) breaches.push(`${c.name} has ${n} internal dependencies besides the base crates, under its ceiling of ${kept.ceiling}: lower the ceiling to ${n} in scripts/rust-layers.mjs`);
+    counts.push(`${c.name}: ${n} (${kind}, ceiling ${kept.ceiling} until phase ${kept.phase}: ${kept.why})`);
+  } else if (BASE.has(c.name)) {
+    counts.push(`${c.name}: ${n} (base)`);
+  } else {
+    if (n > 3) breaches.push(`${c.name} has ${n} internal dependencies besides the base crates, and a core crate has at most 3 (${counted.join(", ")})`);
+    counts.push(`${c.name}: ${n} (core, at most 3)`);
+  }
+  if (surface) continue;
+  for (const d of all) {
+    if (SURFACES[d]) breaches.push(`${c.name} depends on the surface crate ${d}`);
     if (ADAPTERS.has(d) && c.name !== "xenonet-adapter") breaches.push(`${c.name} depends on the adapter crate ${d}`);
     if (d === "xenonet-demo" && !DEMO_USERS.has(c.name)) breaches.push(`${c.name} depends on the demo's world (xenonet-demo)`);
   }
@@ -125,9 +200,10 @@ for (const c of crates("crates")) {
   }
 }
 
+if (report) process.stderr.write(`Internal dependencies besides the base crates:\n  ${counts.join("\n  ")}\n`);
 if (breaches.length) {
   process.stderr.write(`${breaches.length} layering breach${breaches.length === 1 ? "" : "es"}:\n  ${breaches.join("\n  ")}\n`);
   if (!report) process.exit(1);
 } else {
-  process.stderr.write("The core depends on no surface and names no platform.\n");
+  process.stderr.write("Every crate keeps to its class: the core depends on no surface and names no platform, and no crate is over its limit.\n");
 }

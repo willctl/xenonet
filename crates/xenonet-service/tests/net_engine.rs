@@ -273,6 +273,7 @@ impl Host {
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let config = Config::from(&[], &get);
         let mut cores = Cores::pending(on, false, false);
+        xenonet_service::serve::wire_root(&mut cores);
         cores.state = Arc::new(Map { at: now_ms(), sessions: sessions.clone() });
         let env = WireEnv::new("0.0.0-test");
         // As the binary's serve closure gives the engine its settings.

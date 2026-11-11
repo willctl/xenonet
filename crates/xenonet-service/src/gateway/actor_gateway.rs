@@ -33,8 +33,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use xenonet_actors::limits::Buckets;
-use xenonet_actors::tokens::{bearer_of, token_in_url};
+use xenonet_api::bearer::{bearer_of, token_in_url};
+use xenonet_api::limits::Buckets;
 use xenonet_os::sync::Locked;
 use xenonet_text::json;
 
@@ -401,7 +401,7 @@ impl ActorGateway {
         (self.inner.hooks.on_call)(id, slug, public.as_deref().filter(|p| *p == host), t);
     }
 
-    pub(crate) async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::serve::OutBody> {
+    pub(crate) async fn serve_hyper(&self, req: hyper::Request<hyper::body::Incoming>) -> hyper::Response<crate::server::OutBody> {
         let method = req.method().as_str().to_string();
         let target = req.uri().to_string();
         let headers = node_headers(req.headers());
@@ -419,7 +419,7 @@ impl ActorGateway {
             }
         }
         let reply = self.serve(GatewayRequest { method, target, headers, body: data }, too_big).await;
-        crate::serve::to_response(reply)
+        crate::server::to_response(reply)
     }
 
     fn reply(status: u16, body: Value, extra: &[(&str, &str)]) -> Reply {

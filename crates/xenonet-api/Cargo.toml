@@ -26,5 +26,9 @@ xenonet-net.workspace = true
 # The drift log and the vendor readers the drivers share (wire.rs).
 xenonet-schema.workspace = true
 
+[dev-dependencies]
+# The token prefixes bearer.rs looks for are authz's (a test holds them so).
+xenonet-authz.workspace = true
+
 [lints]
 workspace = true

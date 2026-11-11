@@ -221,6 +221,7 @@ impl Host {
         let get = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let config = Config::from(&[], &get);
         let mut cores = Cores::pending(false, false, false);
+        xenonet_service::serve::wire_root(&mut cores);
         let map = Arc::new(Map { home: home.clone(), sessions });
         cores.state = map.clone();
         let peers = Arc::new(Peers::default());

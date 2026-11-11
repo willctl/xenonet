@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-service"
-description = "The XenoNet service in Rust (xenonet serve): the HTTP API on 127.0.0.1, its event stream, the component service's socket, and the actor gateway."
+description = "The XenoNet service in Rust (xenonet serve), the composition root: the cores and the service's parts, made and handed to the HTTP API (xenonet-http), the component service's socket, the actor gateway, A2A and the network."
 version.workspace = true
 edition.workspace = true
 # It runs on tokio beside the MCP servers, in the one binary (Rust 1.88+).
@@ -34,36 +34,37 @@ serde_json.workspace = true
 tokio.workspace = true
 # The core traits, settings and event sink it shares with the drivers.
 xenonet-api.workspace = true
+# The local HTTP API: its routes, rules table, requests and event stream,
+# which the service listens with and hands its parts to (parts.rs).
+xenonet-http.workspace = true
 # Home, platform, random ids, fetch and output lines.
 xenonet-os.workspace = true
-# The adapters the binary runs with (adapters/*), put in place at start.
+# The adapters the binary runs with (adapters/*), put in place at start,
+# and the registry as the routes ask it (serve.rs's wire_root).
 xenonet-platforms.workspace = true
 xenonet-adapter.workspace = true
 xenonet-actors.workspace = true
-# The places around the map (core/environments.js).
+# JSON, text and times as XenoNet writes them.
 xenonet-text.workspace = true
-# The engine's ids, selectors and envelopes, which the routes check with.
+# A2A's targets are the engine's selectors (a2a/tasks.rs), and the
+# composition's engine parts (compose/app.rs).
 xenonet-engine.workspace = true
 # One network across machines: the gateway's routes behind the front door,
-# the link, and /api/net.
+# the link, and the node /api/net reaches (parts.rs).
 xenonet-net.workspace = true
 # The machine's own keys (the Secure Enclave, polkit) for the installed and
 # dev instances, fakes for every other: given to the network's node as its
 # vault (compose/keys.rs).
 xenonet-keys.workspace = true
 xenonet-id.workspace = true
-# Every route's rule is decided through it (routes/rules.rs).
-xenonet-authz.workspace = true
-# Ids, and the engine's seam to the network; the tray's status and a
-# made-up machine's load are checked as their types in the tests.
+# The engine's seam to the network (gateway/network.rs), and the drift
+# log's file (serve.rs).
 xenonet-model.workspace = true
 xenonet-schema.workspace = true
-# The Needs you queue as the console has it (core/needs-you.js's twin), for
-# the tray's status (routes/tray.rs).
-xenonet-state.workspace = true
 # The composition's connect driver (compose/connect.rs): the runtime's
 # files and processes, the setup it's made from, and XenoNet's install
-# (the xenonet command the hooks run, the instances).
+# (the xenonet command the hooks run, the instances); and the local door's
+# decisions, which every service's cores get (serve.rs's wire_root).
 xenonet-runtime.workspace = true
 xenonet-components.workspace = true
 # The composition's other cores (compose/app.rs): hosts and the hub,

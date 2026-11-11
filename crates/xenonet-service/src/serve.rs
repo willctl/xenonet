@@ -4,16 +4,16 @@
 //! when it runs standalone, and the background work, and stops on SIGINT,
 //! SIGTERM or the component service's stop.
 
+use crate::a2a::A2a;
 use crate::borrowed::now_ms;
-use crate::component::{self, Hooks};
+use crate::component::{self, Components, Hooks};
 use crate::config::Config;
-use crate::cores::{CoreError, Cores};
+use crate::cores::Cores;
 use crate::ctx::Ctx;
-use crate::http::{node_headers, parse_target, raw_query, Body, By, Peer, Reply, ReplyBody, Req};
-use crate::routes;
+use crate::gateway::control::GatewayControl;
+use crate::gateway::network::NetService;
+use crate::http::Peer;
 use crate::wire::WireEnv;
-use bytes::Bytes;
-use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
@@ -21,187 +21,30 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use xenonet_os::log::{log_dir, ErrInfo, Log, MAX_BYTES};
+use xenonet_http::server::{handle, poll_spotify, to_response};
+use xenonet_os::log::{log_dir, Log, MAX_BYTES};
 use xenonet_os::sync::Locked;
 use xenonet_schema::drift::DRIFT_FILE;
 
-pub use crate::glue::notify_doctor;
-
-/// What an answer's body is to hyper: all of it, or a stream.
-pub enum OutBody {
-    Full(Option<Bytes>),
-    Stream(mpsc::UnboundedReceiver<Bytes>),
+/// The service's own parts, as it made them: what it starts and stops
+/// itself, beside the routes' view of them (`Ctx`'s parts).
+#[derive(Default)]
+struct Parts {
+    gateway: Option<Arc<GatewayControl>>,
+    net: Option<Arc<NetService>>,
+    components: Option<Arc<Components>>,
 }
 
-impl hyper::body::Body for OutBody {
-    type Data = Bytes;
-    type Error = Infallible;
-
-    fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
-        match self.get_mut() {
-            OutBody::Full(b) => Poll::Ready(b.take().filter(|b| !b.is_empty()).map(|b| Ok(Frame::data(b)))),
-            OutBody::Stream(rx) => rx.poll_recv(cx).map(|b| b.map(|b| Ok(Frame::data(b)))),
-        }
-    }
-
-    fn is_end_stream(&self) -> bool {
-        matches!(self, OutBody::Full(None))
-    }
-
-    fn size_hint(&self) -> hyper::body::SizeHint {
-        match self {
-            OutBody::Full(Some(b)) => hyper::body::SizeHint::with_exact(b.len() as u64),
-            OutBody::Full(None) => hyper::body::SizeHint::with_exact(0),
-            OutBody::Stream(_) => hyper::body::SizeHint::default(),
-        }
-    }
-}
-
-pub fn to_response(reply: Reply) -> hyper::Response<OutBody> {
-    let mut b = hyper::Response::builder().status(reply.status);
-    for (k, v) in &reply.headers {
-        b = b.header(k.as_str(), v.as_str());
-    }
-    let body = match reply.body {
-        ReplyBody::Full(bytes) => OutBody::Full(Some(bytes)),
-        ReplyBody::Stream(rx) => OutBody::Stream(rx),
-    };
-    b.body(body).unwrap_or_else(|_| hyper::Response::new(OutBody::Full(None)))
-}
-
-/// One request, as server.on("request") handles it: transcripts are
-/// private, so DNS-rebinding hosts and cross-site posts are refused before
-/// anything else.
-pub async fn handle(ctx: &Arc<Ctx>, req: hyper::Request<Incoming>, peer: Peer) -> Reply {
-    let headers = node_headers(req.headers());
-    let get = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
-    let host = get("host").unwrap_or_default();
-    let port = ctx.config.port;
-    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
-        return Reply::error(421, "bad host");
-    }
-    let method = req.method().as_str().to_string();
-    if method != "GET" {
-        if let Some(origin) = get("origin") {
-            if origin != format!("http://127.0.0.1:{port}") && origin != format!("http://localhost:{port}") {
-                return Reply::error(403, "bad origin");
-            }
-        }
-    }
-    let target = req.uri().to_string();
-    let (path, query) = parse_target(&target);
-    if !path.starts_with("/api/") {
-        return crate::static_files::serve(&ctx.config.root.join("dist"), &path);
-    }
-    let incoming = req.into_body();
-    let mut request = Req { method: method.clone(), path: path.clone(), query, raw_query: raw_query(&target), headers, peer, body: Body::Incoming(incoming), by: By::default() };
-    // XenoNet Dev reading another XenoNet passes on only what this one's
-    // rules let in.
-    if let Some(up) = ctx.upstream.as_ref().filter(|u| u.handles(&path)) {
-        if let Err(refused) = routes::rules::admit(ctx, &mut request).await {
-            return refused;
-        }
-        return up.pass(&method, &target, &request.headers).await;
-    }
-    let answer = routes::api(ctx, request).await;
-    answered(ctx, &method, &path, answer)
-}
-
-/// What the service answers for a route's result: what a core threw goes
-/// out with its status, a core not in Rust yet says so, and anything else
-/// is logged and an internal error.
-pub fn answered(ctx: &Ctx, method: &str, path: &str, answer: Result<Reply, CoreError>) -> Reply {
-    match answer {
-        Ok(r) => r,
-        Err(e) if e.is_pending() => Reply::coded(501, "pending", e.message),
-        Err(CoreError { status: Some(status), message, .. }) => Reply::error(status, message),
-        Err(e) => {
-            eprintln!("{}", e.message);
-            let short = shorten(path);
-            ctx.log("error", "service.route", &format!("{method} {short}: {}", e.message), Some(&ErrInfo { message: Some(e.message), stack: None, code: None }), None);
-            Reply::error(500, "internal error")
-        }
-    }
-}
-
-/// A path for the log, with long segments (ids, tokens) cut: [^/]{24,} → …
-fn shorten(path: &str) -> String {
-    path.split('/').map(|s| if s.chars().count() >= 24 { "…" } else { s }).collect::<Vec<_>>().join("/")
-}
-
-/// Pokes Spotify's poll to look again after `ms`.
-pub fn poll_spotify_soon(ctx: &Ctx, ms: u64) {
-    if let Some(tx) = &ctx.music.locked().again {
-        let _ = tx.send(ms);
-    }
-}
-
-// What's playing goes to the page, a few seconds apart while a window is
-// open; with the dip on, your volume dips while a session waits on you.
-async fn poll_spotify(ctx: Arc<Ctx>, mut again: mpsc::UnboundedReceiver<u64>) {
-    let mut wait = 0u64;
-    loop {
-        tokio::select! {
-            () = tokio::time::sleep(Duration::from_millis(wait)) => {}
-            got = again.recv() => match got {
-                Some(ms) => {
-                    tokio::time::sleep(Duration::from_millis(ms)).await;
-                }
-                None => return,
-            },
-        }
-        let s = &ctx.cores.spotify;
-        wait = if ctx.events.count() > 0 { 5000 } else { 30000 };
-        let looked: Result<(), CoreError> = async {
-            let st = s.status().await?;
-            if xenonet_text::text::truthy(st.get("connected")) {
-                let now = s.player().await?;
-                let text = xenonet_text::json::stringify(&now, 0);
-                let changed = {
-                    let mut m = ctx.music.locked();
-                    let changed = m.last != text;
-                    m.last = text;
-                    changed
-                };
-                if changed {
-                    ctx.broadcast("spotify", &now);
-                }
-                if xenonet_text::text::truthy(st.get("duck")) {
-                    let waiting = ctx.cores.state.someone_waits(now_ms()).unwrap_or(false);
-                    let held = ctx.music.locked().held.clone();
-                    let plan = s.duck_plan(waiting, &now, st.get("device").unwrap_or(&Value::Null), &held)?;
-                    ctx.music.locked().held = plan.get("held").cloned().unwrap_or(Value::Null);
-                    if plan["op"] == "volume" {
-                        s.command("volume", &plan["volume"]).await?;
-                    }
-                }
-            }
-            Ok(())
-        }
-        .await;
-        match looked {
-            Ok(()) => {}
-            // Spotify isn't in the Rust service yet: no poll, and nothing to log.
-            Err(e) if e.is_pending() => return,
-            Err(e) => {
-                // Spotify's asked XenoNet to wait, needs Premium, or isn't
-                // reachable: say so once in a while, and look again later.
-                let t = now_ms();
-                let quiet = ctx.music.locked().quiet_until;
-                if t > quiet {
-                    ctx.log("warn", &format!("spotify.{}", e.code.as_deref().unwrap_or("error")), &e.message, None, None);
-                    ctx.music.locked().quiet_until = t + 10.0 * 60e3;
-                }
-                wait = 60000;
-            }
-        }
-    }
+/// What the composition root puts in every service's cores, whatever made
+/// the rest: the local door's decisions (xenonet-authz, through the
+/// runtime) and the app registry as the routes ask it (the adapters).
+pub fn wire_root(cores: &mut Cores) {
+    cores.door = xenonet_runtime::door::local();
+    cores.apps = xenonet_platforms::registry();
 }
 
 /// Who holds a port, when it's another XenoNet.
@@ -264,7 +107,9 @@ pub async fn main(args: Vec<String>, built: String) -> i32 {
     serve_with(&mut config, cores, &built, WireEnv::default()).await
 }
 
-pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: WireEnv) -> i32 {
+pub async fn serve_with(config: &mut Config, mut cores: Cores, built: &str, env: WireEnv) -> i32 {
+    wire_root(&mut cores);
+    let mut parts = Parts::default();
     let emitter = env.emitter.clone();
     // Demo mode swaps every source for a made-up workspace in a temp
     // folder, which the drivers made first when they could.
@@ -306,7 +151,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     if let (Some(actors), Some(registration)) = (ctx.cores.actors.clone(), ctx.cores.registration.clone()) {
         let (state, targets) = (ctx.cores.state.clone(), actors.clone());
         let c = ctx.clone();
-        let parts = crate::gateway::control::ControlParts {
+        let gateway_parts = crate::gateway::control::ControlParts {
             cores: crate::gateway::actor_gateway::GatewayCores {
                 engine: ctx.cores.engine.clone(),
                 registration,
@@ -336,16 +181,17 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             network: Arc::new(crate::gateway::reach::SystemNetwork),
             now: Arc::new(now_ms),
         };
-        let g = crate::gateway::control::GatewayControl::new(parts);
+        let g = GatewayControl::new(gateway_parts);
         // The doctor reads its status.
         let _ = env.gateway.set(g.clone());
-        let _ = ctx.gateway.set(g);
+        let _ = ctx.gateway.set(g.clone());
+        parts.gateway = Some(g);
     }
     // A2A agents, which reach the sessions as actors through the gateway
     // (a2a/): off until you turn it on in the Actors panel.
     if let Some(actors) = ctx.cores.actors.clone() {
         let state_dir = config.state_dir.clone();
-        let parts = crate::a2a::A2aParts {
+        let a2a_parts = crate::a2a::A2aParts {
             cores: crate::a2a::A2aCores { engine: ctx.cores.engine.clone(), actors: actors.clone() },
             file: (!config.demo).then(|| Path::new(&config.state_dir).join("a2a.sqlite")),
             version: version.clone(),
@@ -354,7 +200,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             now: Arc::new(now_ms),
             limits: crate::a2a::Limits::default(),
         };
-        match crate::a2a::A2a::new(parts) {
+        match A2a::new(a2a_parts) {
             Ok(a) => {
                 // A removed actor's tasks go with its record.
                 let weak = Arc::downgrade(&a);
@@ -364,7 +210,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
                     }
                 }));
                 // The gateway's front door answers /a2a and the card with it.
-                if let Some(g) = ctx.gateway.get() {
+                if let Some(g) = &parts.gateway {
                     g.gateway().set_a2a(a.clone());
                 }
                 let _ = ctx.a2a.set(a);
@@ -378,18 +224,19 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     {
         let c = ctx.clone();
         let log: xenonet_net::sink::LogFn = Arc::new(move |code: &str, words: &str| c.log("info", code, words, None, None));
-        let mut opts = crate::gateway::network::NetService::options(&config.state_dir, &config.home, &version, log);
+        let mut opts = NetService::options(&config.state_dir, &config.home, &version, log);
         opts.vault = Some(crate::compose::keys::vault(config.instance.as_deref(), config.demo));
-        match crate::gateway::network::NetService::open(opts) {
+        match NetService::open(opts) {
             Ok(svc) => {
-                if let Some(g) = ctx.gateway.get() {
+                if let Some(g) = &parts.gateway {
                     g.gateway().set_net(svc.node().clone());
                 }
                 // The engine takes what arrives, and sends through it.
                 if let Some(plug) = &ctx.cores.on_net {
                     plug(&*svc);
                 }
-                let _ = ctx.net.set(svc);
+                let _ = ctx.net.set(svc.clone());
+                parts.net = Some(svc);
             }
             Err(e) => ctx.log(
                 "warn",
@@ -434,7 +281,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     let (stop_tx, mut stop_rx) = mpsc::unbounded_channel::<()>();
     // Desktop's window, as it last said: shown, hidden or closed.
     let window: Arc<Mutex<Option<String>>> = Arc::default();
-    plug_hub(&ctx, port, &window);
+    plug_hub(&ctx, parts.net.as_ref(), port, &window);
 
     if config.standalone {
         // No app started this service, so the Desktop that connects is the
@@ -488,7 +335,10 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             terminals: ctx.cores.terminals.clone(),
         };
         match component::start(config.descriptor_file(), hooks).await {
-            Ok(c) => *ctx.components.locked() = Some(c),
+            Ok(c) => {
+                *ctx.components.locked() = Some(c.clone());
+                parts.components = Some(c);
+            }
             Err(e) => {
                 eprintln!("[xenonet] {e}");
                 return 1;
@@ -529,7 +379,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
     if let Some(h) = &ctx.cores.hub {
         h.start();
     }
-    if let Some(g) = ctx.gateway.get().cloned() {
+    if let Some(g) = parts.gateway.clone() {
         tokio::spawn(async move {
             g.init().await;
             if g.gateway().listening() {
@@ -542,7 +392,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
             let _ = t.autostart().await;
         });
     }
-    if let Some(n) = ctx.net.get().cloned() {
+    if let Some(n) = parts.net.clone() {
         let c = ctx.clone();
         tokio::spawn(async move {
             if let Err(e) = n.start().await {
@@ -587,7 +437,7 @@ pub async fn serve_with(config: &mut Config, cores: Cores, built: &str, env: Wir
         _ = stop_rx.recv() => {}
         () = signal() => {}
     }
-    shutdown(&ctx);
+    shutdown(&ctx, &parts);
     // The credential goes with this service, unless another start wrote
     // its own over it.
     if std::fs::read_to_string(&cred_file).is_ok_and(|c| ctx.api_key.matches(Some(c.trim()))) {
@@ -618,9 +468,9 @@ async fn signal() {
 /// with the service's own key (the network decided what they may read). Every two seconds it's told
 /// whether a console is open here, from Desktop's window as it last said
 /// and the pages reading the event stream.
-fn plug_hub(ctx: &Arc<Ctx>, port: u16, window: &Arc<Mutex<Option<String>>>) {
+fn plug_hub(ctx: &Arc<Ctx>, net: Option<&Arc<NetService>>, port: u16, window: &Arc<Mutex<Option<String>>>) {
     let Some(hub) = ctx.cores.hub.clone() else { return };
-    if let Some(svc) = ctx.net.get() {
+    if let Some(svc) = net {
         hub.plug_net(crate::cores::HubNet {
             net: svc.net(),
             sinks: svc.sinks().clone(),
@@ -646,7 +496,7 @@ fn plug_hub(ctx: &Arc<Ctx>, port: u16, window: &Arc<Mutex<Option<String>>>) {
     });
 }
 
-fn shutdown(ctx: &Arc<Ctx>) {
+fn shutdown(ctx: &Arc<Ctx>, parts: &Parts) {
     let c = &ctx.cores;
     c.system.stop();
     c.terminals.kill_all();
@@ -656,14 +506,15 @@ fn shutdown(ctx: &Arc<Ctx>) {
     if let Some(w) = &c.wakes {
         w.stop();
     }
-    if let Some(g) = ctx.gateway.get() {
+    if let Some(g) = &parts.gateway {
         g.tunnel().stop();
         g.gateway().stop();
     }
-    if let Some(n) = ctx.net.get() {
+    if let Some(n) = &parts.net {
         n.stop();
     }
-    if let Some(comp) = ctx.components.locked().take() {
+    ctx.components.locked().take();
+    if let Some(comp) = &parts.components {
         comp.close();
     }
     if let Some(h) = &c.hub {

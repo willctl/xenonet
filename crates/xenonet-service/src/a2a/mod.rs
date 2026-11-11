@@ -26,10 +26,10 @@
 //! - **No outbound calls**: no push notifications.
 //!
 //! The tasks are kept in `<state>/a2a.sqlite` (store.rs), with the switch,
-//! which is off until the owner turns it on in the Actors panel.
+//! which is off until the owner turns it on in the Actors panel
+//! (xenonet-http's routes/a2a.rs, through parts.rs).
 
 pub mod card;
-pub mod routes;
 pub mod rpc;
 pub mod store;
 pub mod tasks;
@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 use store::{ReplyRow, Store, TaskRow};
 use tasks::Shown;
 use tokio::sync::{mpsc, watch};
-use xenonet_actors::limits::Buckets;
+use xenonet_api::limits::Buckets;
 use xenonet_os::sync::Locked;
 
 /// The most of a body XenoNet reads, as the gateway's own limit.

@@ -13,6 +13,7 @@
 pub mod actors;
 pub mod assistant;
 pub mod delivery;
+pub mod door;
 pub mod engine;
 pub mod hosts;
 pub mod services;
@@ -27,6 +28,7 @@ use xenonet_net::sink::SinkSlot;
 pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
 pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Grants, Tunnels};
 pub use delivery::{Policy, Router};
+pub use door::{Apps, LocalDoor};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
 pub use hosts::{HostsConfig, HttpApi, Hub, HubNet, SelfApi};
 pub use services::{Decider, Diagnostics, Doctor, DriftReport, Integrations, McpInfo, OpenRouter, Refusals, Spotify, SystemStats, Terminals};
@@ -178,6 +180,10 @@ pub struct Cores {
     pub mcp_info: Arc<dyn McpInfo>,
     pub terminals: Arc<dyn Terminals>,
     pub demo: Arc<dyn Demo>,
+    /// The local door's decisions, and the app registry as the routes ask
+    /// it: the composition root's (xenonet-authz, the adapters).
+    pub door: Arc<dyn LocalDoor>,
+    pub apps: Arc<dyn Apps>,
     /// What plugs the engine into the network's link once the service has
     /// made it (the service's gateway/network.rs): the engine's driver sets
     /// it, and the service calls it once, before the link starts. The link
@@ -249,7 +255,9 @@ impl Cores {
             integrations: p.clone(),
             mcp_info: p.clone(),
             terminals: p.clone(),
-            demo: p,
+            demo: p.clone(),
+            door: p.clone(),
+            apps: p,
             on_net: None,
         }
     }

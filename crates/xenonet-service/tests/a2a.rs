@@ -19,7 +19,7 @@ use xenonet_service::a2a::{A2a, A2aActor, A2aCores, A2aParts, A2aRequest, Limits
 use xenonet_service::ctx::Ctx;
 use xenonet_service::http::{Peer, ReplyBody, Req};
 use xenonet_service::routes::api;
-use xenonet_service::serve::answered;
+use xenonet_service::server::answered;
 
 const CASES: &str = include_str!("../../../test/fixtures/a2a/cases.json");
 const NOW: f64 = 1_792_512_345_678.0;
@@ -128,6 +128,7 @@ impl cores::Verify for Weather {
 async fn the_switch_is_the_owners() {
     let w = Arc::new(Weather::default());
     let mut c = Cores::pending(true, false, false);
+    xenonet_service::serve::wire_root(&mut c);
     c.verify = w.clone();
     let ctx = Ctx::for_tests(c);
     let go = |method: &str, headers: Vec<(&str, String)>, body: Option<Value>| {

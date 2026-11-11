@@ -1,7 +1,7 @@
 // End to end: the network across machines in the console (src/network.js),
 // on a real XenoNet Dev, the test instance with the demo's made-up data. The
 // net-… simulations make up a network, with other machines and their
-// agents (crates/xenonet-service/src/routes/net_sim.rs), since a real one
+// agents (crates/xenonet-http/src/routes/net_sim.rs), since a real one
 // needs a second machine. The Network panel on a machine on its own and in
 // a network, a machine that's offline and where you are, Add a machine and
 // its join line shown once and masked, another machine's agent waiting on

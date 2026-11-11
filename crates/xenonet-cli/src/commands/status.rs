@@ -8,7 +8,7 @@ use crate::out::{ago, c, json, now, plural, print, table, Done, Layout};
 use crate::reach::{find, where_};
 use serde_json::{json, Map, Value};
 use xenonet_api::client::name_of;
-use xenonet_state::needs_you::{queue_of_summary, waits_words};
+use xenonet_api::needs_you::{queue_of_summary, waits_words};
 
 pub const HELP: &str = include_str!("help/status.txt");
 

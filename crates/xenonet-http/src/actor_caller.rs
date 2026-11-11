@@ -12,11 +12,11 @@ use crate::http::Req;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use xenonet_actors::limits::Buckets;
-use xenonet_actors::tokens::bearer_of;
+use xenonet_api::bearer::bearer_of;
+use xenonet_api::limits::Buckets;
 use xenonet_os::sync::Locked;
 
-/// A bucket's rate (xenonet_actors::limits): up to `burst` at once, filled
+/// A bucket's rate (xenonet_api::limits): up to `burst` at once, filled
 /// again at `rate` a second.
 #[derive(Clone, Copy, Debug)]
 pub struct Rate {

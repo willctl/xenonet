@@ -7,7 +7,10 @@ use crate::cores::{Decider, R};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use xenonet_schema::drift::DriftLog;
+// The drift log every driver is given (WireEnv::drift), and the view of it
+// the drift report takes (cores::DriftReport): the API's own, so what holds
+// one names it here.
+pub use xenonet_schema::drift::{DriftLog, DriftView};
 use xenonet_schema::vendor::Readers;
 
 /// The events the cores send, by where they come from.

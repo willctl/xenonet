@@ -187,14 +187,10 @@ pub fn desktop_installed(home: &str) -> bool {
     desktop_places(home).iter().any(|p| p.exists())
 }
 
-/// A LAN address as the person gives it: an IP address this machine has
-/// and a port, never 0.0.0.0.
+/// A LAN address as the person gives it (xenonet-http's net routes read it
+/// so too): an IP address this machine has and a port, never 0.0.0.0.
 pub fn parse_lan(text: &str) -> R<SocketAddr> {
-    let addr: SocketAddr = text.trim().parse().map_err(|_| NetError::bad("a LAN address is an IP address and a port, such as 192.168.1.5:47850"))?;
-    if addr.ip().is_unspecified() || addr.port() == 0 {
-        return Err(NetError::bad("a LAN address is one this machine has, with a port: never 0.0.0.0"));
-    }
-    Ok(addr)
+    xenonet_http::routes::net::parse_lan(text).map_err(NetError::bad)
 }
 
 #[cfg(test)]

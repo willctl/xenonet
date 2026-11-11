@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use xenonet_actors::tokens::token_in_url;
+use xenonet_api::bearer::token_in_url;
 use xenonet_model::ids::{parse_actor_id, YOU};
 use xenonet_os::sync::Locked;
 
@@ -736,6 +736,6 @@ impl ActorRoutes<'_> {
     }
 }
 
-pub fn you_reports_bucket(now: f64) -> xenonet_actors::limits::Bucket {
-    xenonet_actors::limits::Bucket::new(YOU_REPORTS.rate, YOU_REPORTS.burst, now)
+pub fn you_reports_bucket(now: f64) -> xenonet_api::limits::Bucket {
+    xenonet_api::limits::Bucket::new(YOU_REPORTS.rate, YOU_REPORTS.burst, now)
 }

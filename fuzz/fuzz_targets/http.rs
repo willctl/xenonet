@@ -21,7 +21,7 @@ use xenonet_service::gateway::actor_gateway::{self, ActorGateway, GatewayCores, 
 use xenonet_service::gateway::tunnel;
 use xenonet_service::http::{self, Peer, Req};
 use xenonet_service::routes::{self, api};
-use xenonet_service::{serve, upstream};
+use xenonet_service::{serve, server, upstream};
 
 // What the router may be sent here: the routes that read requests from
 // sessions, hooks, actors and pages. Routes that open apps, run
@@ -120,6 +120,7 @@ fn service() -> &'static Arc<Ctx> {
     CTX.get_or_init(|| {
         runtime().block_on(async {
             let mut c = Cores::pending(true, true, true);
+            serve::wire_root(&mut c);
             c.verify = Arc::new(Permit);
             Ctx::for_tests(c)
         })
@@ -160,9 +161,9 @@ fuzz_target!(|data: &[u8]| {
     let _ = http::percent_decode(target.as_bytes());
     let _ = routes::integrations::params_object(&query);
     let _ = (routes::assistant::grant_id(&path), routes::themes::theme_id(&path), Selector::parse(&path));
-    let _ = xenonet_actors::tokens::token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path);
+    let _ = xenonet_api::bearer::token_in_url(query.iter().map(|(k, v)| (k.as_str(), v.as_str())), &path);
     for (k, v) in &headers {
-        let _ = xenonet_actors::tokens::bearer_of(v);
+        let _ = xenonet_api::bearer::bearer_of(v);
         let _ = actor_gateway::normal_host(Some(v));
         if k == "x-upstream" {
             let _ = upstream::upstream_of(Some(v));
@@ -189,7 +190,7 @@ fuzz_target!(|data: &[u8]| {
             runtime().block_on(async {
                 let answer = tokio::time::timeout(Duration::from_secs(2), api(ctx, req)).await;
                 if let Ok(answer) = answer {
-                    let _ = serve::answered(ctx, &method, &path, answer);
+                    let _ = server::answered(ctx, &method, &path, answer);
                 }
             });
         } else {

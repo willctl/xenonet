@@ -2969,6 +2969,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "xenonet-http"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "getrandom 0.3.4",
+ "http-body-util",
+ "hyper",
+ "serde_json",
+ "tokio",
+ "xenonet-api",
+ "xenonet-model",
+ "xenonet-os",
+ "xenonet-text",
+]
+
+[[package]]
 name = "xenonet-id"
 version = "0.2.0"
 dependencies = [
@@ -3097,7 +3114,9 @@ dependencies = [
 name = "xenonet-platforms"
 version = "0.2.0"
 dependencies = [
+ "serde_json",
  "xenonet-adapter",
+ "xenonet-api",
  "xenonet-claude-code",
  "xenonet-codex",
  "xenonet-copilot",
@@ -3167,13 +3186,13 @@ dependencies = [
  "xenonet-adapter",
  "xenonet-api",
  "xenonet-assistant",
- "xenonet-authz",
  "xenonet-components",
  "xenonet-console",
  "xenonet-doctor",
  "xenonet-engine",
  "xenonet-grok-build",
  "xenonet-hosts",
+ "xenonet-http",
  "xenonet-id",
  "xenonet-integrations",
  "xenonet-keys",
@@ -3184,7 +3203,6 @@ dependencies = [
  "xenonet-runtime",
  "xenonet-schema",
  "xenonet-sources",
- "xenonet-state",
  "xenonet-text",
 ]
 

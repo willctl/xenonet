@@ -24,6 +24,20 @@ pub fn local_id(id: &str) -> String {
     }
 }
 
+/// XenoNet's id for a session named the way OpenCode shows it (ses_…, or
+/// opencode:ses_…). Any other id comes back as it was, trimmed.
+pub fn xenonet_id(id: &str) -> String {
+    let s = xenonet_text::text::trim(id);
+    let named = s.strip_prefix("opencode:").unwrap_or(s);
+    // /^(?:opencode:)?(ses(?:_[0-9A-Za-z]+)+)$/
+    let ours = named.strip_prefix("ses").and_then(|r| r.strip_prefix('_')).is_some_and(plain);
+    if ours {
+        format!("opencode:{}", local_id(named))
+    } else {
+        s.to_string()
+    }
+}
+
 /// XenoNet's id for an OpenCode session (`opencode:…`, or what follows it)
 /// as OpenCode's own. Hex that isn't UTF-8 reads as the plain form would.
 pub fn open_code_id(id: &str) -> String {

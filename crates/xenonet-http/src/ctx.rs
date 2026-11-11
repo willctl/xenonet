@@ -1,23 +1,24 @@
 //! What every route reaches: the service's settings, its cores, the event
 //! stream, the API's credentials, the error log, and the parts server/index.js
 //! keeps at its top level (the component service, the actor gateway, the
-//! assistant's endpoint, Spotify's poll).
+//! assistant's endpoint, A2A and the network, each one of the service's
+//! parts behind a trait of parts.rs, and Spotify's poll).
 
 use crate::actor_caller::{ActorCaller, Rate};
 use crate::borrowed::now_ms;
-use crate::component::Components;
 use crate::config::Config;
 use crate::cores::{CoreError, Cores};
 use crate::events::Events;
-use crate::gateway::control::GatewayControl;
 use crate::http::{BodyError, Reply};
+use crate::parts::{A2a, Components, Endpoint, Gateway, Network};
+use crate::upstream::Upstream;
 use crate::window_key::{ApiKey, SelfKey, TrayKey, WindowKey};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use xenonet_actors::limits::Bucket;
+use xenonet_api::limits::Bucket;
+use xenonet_api::wire::DriftLog;
 use xenonet_os::log::{ErrInfo, Log};
 use xenonet_os::sync::Locked;
-use xenonet_schema::drift::DriftLog;
 
 pub struct Ctx {
     pub config: Config,
@@ -35,22 +36,22 @@ pub struct Ctx {
     pub log: Mutex<Log>,
     pub drift: Arc<Mutex<DriftLog>>,
     pub caller: Option<ActorCaller>,
-    pub components: Mutex<Option<Arc<Components>>>,
+    pub components: Mutex<Option<Arc<dyn Components>>>,
     /// The actor gateway's switch, made once the service is (it logs to it).
-    pub gateway: std::sync::OnceLock<Arc<GatewayControl>>,
-    /// A2A agents' side of the gateway (a2a/), made with it.
-    pub a2a: std::sync::OnceLock<Arc<crate::a2a::A2a>>,
-    pub endpoint: Mutex<Option<Arc<crate::assistant_endpoint::Endpoint>>>,
+    pub gateway: std::sync::OnceLock<Arc<dyn Gateway>>,
+    /// A2A agents' side of the gateway, made with it.
+    pub a2a: std::sync::OnceLock<Arc<dyn A2a>>,
+    pub endpoint: Mutex<Option<Arc<dyn Endpoint>>>,
     pub themes_dir: String,
     pub music: Mutex<Music>,
     /// The window reports you at most once a second; this leaves room for bursts.
     pub you_reports: Mutex<Bucket>,
     pub refusal_notes: Mutex<RefusalNotes>,
     /// XenoNet Dev reading another XenoNet (XENONET_UPSTREAM).
-    pub upstream: Option<crate::upstream::Upstream>,
-    /// The network across machines (gateway/network.rs), made once the
-    /// service is: its node, link and LAN listener.
-    pub net: std::sync::OnceLock<Arc<crate::gateway::network::NetService>>,
+    pub upstream: Option<Upstream>,
+    /// The network across machines (the service's gateway/network.rs),
+    /// made once the service is: its node, link and LAN listener.
+    pub net: std::sync::OnceLock<Arc<dyn Network>>,
 }
 
 /// What Spotify's poll keeps between looks (server/index.js's `music`).
@@ -81,9 +82,9 @@ impl From<BodyError> for CoreError {
 }
 
 impl Ctx {
-    /// The service's parts around its cores, as serve.rs makes them: no
-    /// log folder unless one's given, the drift log in memory unless it's
-    /// opened, new keys.
+    /// The service's parts around its cores, as the service's serve.rs
+    /// makes them: no log folder unless one's given, the drift log in
+    /// memory unless it's opened, new keys.
     pub fn new(config: Config, version: String, cores: Cores, log: Log) -> Ctx {
         let caller = cores.registration.clone().map(|r| ActorCaller::new(r, cores.verify.clone()));
         let themes_dir = std::path::Path::new(&config.state_dir).join("themes").to_string_lossy().into_owned();

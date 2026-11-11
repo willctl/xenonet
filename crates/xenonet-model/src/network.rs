@@ -965,6 +965,19 @@ impl Document for State {
 
 // ---- network/svc/v1
 
+/// A svc request's body, at most.
+pub const SVC_REQUEST_BODY: usize = 1 << 20;
+/// The header XenoNet's own refusals of a svc call carry, with their code,
+/// so a caller can tell them from the service's answers.
+pub const SVC_REFUSED_HEADER: &str = "x-xenonet-refused";
+
+/// XenoNet's own answer to a svc call, rather than the service's: its
+/// headers and its body, `{ error, code }`.
+pub fn svc_refusal(code: &str, message: &str) -> (Vec<(String, String)>, Vec<u8>) {
+    let headers = vec![("content-type".into(), "application/json; charset=utf-8".into()), ("cache-control".into(), "no-store".into()), (SVC_REFUSED_HEADER.into(), code.into())];
+    (headers, serde_json::json!({ "error": message, "code": code }).to_string().into_bytes())
+}
+
 crate::tag!(pub SvcTag = "network/svc/v1");
 crate::tag!(pub SvcRequestOp = "request");
 crate::tag!(pub SvcAnswerOp = "answer");

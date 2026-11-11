@@ -23,7 +23,7 @@
 use super::actor_gateway::{ActorGateway, CONNECTION_SECS};
 use crate::a2a::{A2aActor, A2aRequest};
 use crate::http::{node_headers, parse_target, Reply, ReplyBody};
-use crate::serve::{to_response, OutBody};
+use crate::server::{to_response, OutBody};
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;

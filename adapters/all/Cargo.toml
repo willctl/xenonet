@@ -11,6 +11,9 @@ publish.workspace = true
 
 [dependencies]
 xenonet-adapter.workspace = true
+# The registry as the HTTP routes ask it (xenonet_api::cores::Apps).
+xenonet-api.workspace = true
+serde_json.workspace = true
 xenonet-claude-code.workspace = true
 xenonet-codex.workspace = true
 xenonet-grok-build.workspace = true
@@ -25,7 +28,6 @@ xenonet-muse.workspace = true
 [dev-dependencies]
 # tests/native.rs makes an OpenCode database to read.
 rusqlite.workspace = true
-serde_json.workspace = true
 xenonet-text.workspace = true
 xenonet-sources.workspace = true
 xenonet-adapter = { workspace = true, features = ["testing"] }

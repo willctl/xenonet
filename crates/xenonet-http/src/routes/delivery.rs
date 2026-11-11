@@ -3,19 +3,18 @@
 //! session, and the audit log. GET /api/delivery reads them, the POSTs
 //! change them; who may is rules.rs's (a read that matters, and yours).
 
-use crate::cores::{CoreError, Engine, Policy, Router};
+use crate::cores::{Apps, CoreError, Engine, Policy, Router};
 use crate::ctx::pending_reply;
 use crate::http::{Reply, Req};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use xenonet_adapter::apps::is_session_id;
-use xenonet_engine::delivery::opencode::xenonet_id;
 use xenonet_text::text::{display, to_number, truthy};
 
 pub struct DeliveryRoutes {
     pub policy: Arc<dyn Policy>,
     pub router: Arc<dyn Router>,
     pub engine: Arc<dyn Engine>,
+    pub apps: Arc<dyn Apps>,
 }
 
 // Consent is kept under the id the router looks it up by, so an OpenCode
@@ -23,13 +22,13 @@ pub struct DeliveryRoutes {
 // isn't a session's id is refused rather than kept where nothing would
 // ever read it.
 // XenoNet's id for a session named as the request names it, null as none.
-fn open_code_id(text: &Value) -> String {
-    xenonet_id(&if text.is_null() { String::new() } else { display(text) })
+fn open_code_id(apps: &dyn Apps, text: &Value) -> String {
+    apps.session_id_of(&if text.is_null() { String::new() } else { display(text) })
 }
 
-fn session_of(text: &Value) -> Result<String, CoreError> {
-    let id = open_code_id(text);
-    if !is_session_id(&id) {
+fn session_of(apps: &dyn Apps, text: &Value) -> Result<String, CoreError> {
+    let id = open_code_id(apps, text);
+    if !apps.is_session_id(&id) {
         let shown = if text.is_null() { String::new() } else { display(text) };
         return Err(CoreError::new(format!("\"{shown}\" isn't a session's id: give its id, such as opencode:ses-… or claude:…, which xenonet agents --json lists")));
     }
@@ -93,7 +92,7 @@ impl DeliveryRoutes {
             "/api/delivery/grant" => ans(self.policy.grant(&str_of(&b["actor"]), &str_of(&b["scope"]), hours(b.get("hours"), 24.0 * 30.0), window)?),
             "/api/delivery/revoke" => ans(self.policy.revoke(&str_of(&b["actor"]))?),
             "/api/delivery/allow" => {
-                let session = session_of(b.get("session").unwrap_or(&Value::Null))?;
+                let session = session_of(&*self.apps, b.get("session").unwrap_or(&Value::Null))?;
                 let mut out = json!({ "session": session });
                 if let Value::Object(more) = self.policy.allow(&session, truthy(b.get("remote")), hours(b.get("hours"), 8.0))? {
                     for (k, v) in more {
@@ -105,7 +104,7 @@ impl DeliveryRoutes {
             // Taking consent back works for any key, so one kept before this
             // check can still go.
             "/api/delivery/disallow" => {
-                self.policy.disallow(&open_code_id(b.get("session").unwrap_or(&Value::Null)))?;
+                self.policy.disallow(&open_code_id(&*self.apps, b.get("session").unwrap_or(&Value::Null)))?;
                 ans(json!({ "ok": true }))
             }
             _ => Ok(Reply::error(404, "not found")),

@@ -194,6 +194,11 @@ pub fn parse_actor_id(id: &str) -> Option<(Option<&str>, &str)> {
     is_actor_slug(slug).then_some((q.host, slug))
 }
 
+/// An actor of this machine, never you.
+pub fn is_actor_agent(id: &str) -> bool {
+    parse_actor_id(id).is_some_and(|(host, _)| host.is_none()) && id != YOU
+}
+
 /// A harness session: `<app>:<run>`, on this host or another.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AgentId {

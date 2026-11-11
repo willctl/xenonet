@@ -8,7 +8,7 @@ use super::schema;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
-use xenonet_actors::limits::Buckets;
+use xenonet_api::limits::Buckets;
 use xenonet_assistant::fixtures;
 use xenonet_assistant::pages::Standalone;
 use xenonet_assistant::service::{self, Config, Inflight, ReadHost, LIMITS};

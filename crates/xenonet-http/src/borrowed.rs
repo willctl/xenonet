@@ -1,6 +1,6 @@
 //! What the routes, the gateway and the wire crates take from JS's
 //! built-ins (Date.now(), crypto.randomUUID(), process.platform), and the
-//! engine's attest for a sender they name with plain values.
+//! envelope (xenonet-api's attest) for a sender they name with plain values.
 
 use serde_json::Value;
 
@@ -18,13 +18,12 @@ pub struct Sender<'a> {
     pub product: Option<String>,
 }
 
-/// attest (core/engine/attest.js), the engine's: the envelope for a
+/// attest (core/engine/attest.js), xenonet-api's: the envelope for a
 /// message from `sender`, authenticated by `method`, with the route's
 /// verdict.
 pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now: f64, platform: &str) -> Value {
-    let sender = xenonet_engine::attest::Sender { id: sender.id, kind: sender.kind, name: sender.name.as_deref(), product: sender.product.as_deref() };
-    // It fails only when the system has no random numbers for the id.
-    xenonet_engine::attest::attest(sender, method, verdict, home, now, platform).expect("the system's random numbers")
+    let sender = xenonet_api::attest::Sender { id: sender.id, kind: sender.kind, name: sender.name.as_deref(), product: sender.product.as_deref() };
+    xenonet_api::attest::attest(sender, method, verdict, home, now, platform)
 }
 
 #[cfg(test)]

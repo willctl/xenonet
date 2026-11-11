@@ -20,7 +20,6 @@
 //! scopes, rows kept beside the token by its revocation id.
 
 use xenonet_authz::Action;
-use xenonet_text::text::is_space;
 
 pub use xenonet_authz::{ACTOR_PREFIX as TOKEN_PREFIX, GATEWAY_PREFIX};
 /// Either kind anywhere in a file, as `git grep -E` reads it: a prefix and
@@ -70,40 +69,8 @@ pub fn rights(capabilities: &[String]) -> Vec<Action> {
     out
 }
 
-/// What a request's Authorization header says (RFC 6750): None for a header
-/// that isn't a Bearer, and otherwise the token as sent, which may still be
-/// one XenoNet doesn't know. (No header at all is the caller's to tell.)
-pub fn bearer_of(raw: &str) -> Option<&str> {
-    // /^Bearer[ \t]+(\S+)[ \t]*$/i
-    let scheme = raw.get(..6).filter(|s| s.eq_ignore_ascii_case("bearer"))?;
-    let rest = &raw[scheme.len()..];
-    let after = rest.trim_start_matches([' ', '\t']);
-    if after.len() == rest.len() {
-        return None;
-    }
-    let end = after.find(is_space).unwrap_or(after.len());
-    let (token, tail) = after.split_at(end);
-    (!token.is_empty() && tail.chars().all(|c| c == ' ' || c == '\t')).then_some(token)
-}
-
-fn holds_prefix(s: &str) -> bool {
-    s.contains(TOKEN_PREFIX) || s.contains(GATEWAY_PREFIX)
-}
-
-/// Whether a URL carries a token, which XenoNet refuses: tokens "SHOULD NOT
-/// be passed in page URLs" (RFC 6750, section 5.3), where logs and history
-/// keep them. Any parameter named token or access_token, or any value
-/// holding a token's prefix; the parameters as the URL's search params
-/// decode them.
-pub fn token_in_url<'a>(params: impl IntoIterator<Item = (&'a str, &'a str)>, path: &str) -> bool {
-    for (k, v) in params {
-        let k = k.to_ascii_lowercase();
-        if k == "token" || k == "access_token" || holds_prefix(v) {
-            return true;
-        }
-    }
-    holds_prefix(path)
-}
+// How a request carries a token (Authorization: Bearer, never a URL) is
+// the local protocol's, xenonet_api::bearer.
 
 #[cfg(test)]
 mod tests {
@@ -124,24 +91,5 @@ mod tests {
         assert_eq!(rights(&words(&["edit-repos", "run-commands"])), [Action::Claim, Action::Read]);
         assert_eq!(rights(&words(&["use-computer"])), [Action::Read], "every actor reads");
         assert_eq!(rights(&words(&["answer-prompts"])), [Action::Answer, Action::Read]);
-    }
-
-    #[test]
-    fn bearers() {
-        assert_eq!(bearer_of("Bearer abc"), Some("abc"));
-        assert_eq!(bearer_of("bearer \t abc \t"), Some("abc"));
-        assert_eq!(bearer_of("Bearer a b"), None);
-        assert_eq!(bearer_of("Bearerabc"), None);
-        assert_eq!(bearer_of("Basic abc"), None);
-        assert_eq!(bearer_of("Bearer "), None);
-        assert_eq!(bearer_of("Bearer abc\u{a0}"), None, "a JS space ends the token, and isn't a space or tab");
-    }
-
-    #[test]
-    fn tokens_in_urls() {
-        assert!(token_in_url([("Access_Token", "x")], "/"));
-        assert!(token_in_url([("q", "xenonet_gateway_1")], "/"));
-        assert!(token_in_url([], "/api/xenonet_actor_x"));
-        assert!(!token_in_url([("tokens", "x")], "/api/actors"));
     }
 }

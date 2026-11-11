@@ -168,6 +168,28 @@ pub fn type_of(v: Option<&Value>) -> &'static str {
     }
 }
 
+/// What a name every plain record has without being given it (its
+/// constructor, toString and the rest) reads as in a sentence: the member's
+/// text, or None for any other name. A sender's method or app named so is
+/// worded as it always was.
+pub fn object_member(name: &str) -> Option<String> {
+    match name {
+        "constructor" => Some("function Object() { [native code] }".into()),
+        "__proto__" => Some("[object Object]".into()),
+        "__defineGetter__"
+        | "__defineSetter__"
+        | "hasOwnProperty"
+        | "__lookupGetter__"
+        | "__lookupSetter__"
+        | "isPrototypeOf"
+        | "propertyIsEnumerable"
+        | "toString"
+        | "valueOf"
+        | "toLocaleString" => Some(format!("function {name}() {{ [native code] }}")),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

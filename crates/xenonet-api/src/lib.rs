@@ -13,10 +13,14 @@
     reason = "a core's error carries what the JS errors do (a status, a code, extra fields), and is rare: boxing it would only make each route wordier"
 )]
 
+pub mod attest;
+pub mod bearer;
 pub mod client;
 pub mod cores;
 pub mod events;
 pub mod http;
+pub mod limits;
+pub mod needs_you;
 pub mod peer;
 pub mod wire;
 
