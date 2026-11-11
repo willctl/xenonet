@@ -319,14 +319,19 @@ The owner asked for Muse and Grok Bot to talk through XenoNet.
   `V9WTTPBFK9`, checked with `codesign`), should Meta enable it later.
 - **The gateway.** Muse's custom connectors reach HTTPS hosts with an API
   key that Meta's token proxy adds (as a bearer header, among others). So
-  Muse reaches XenoNet's actor gateway (`server/actor-gateway.js`): an MCP
+  Muse reaches XenoNet's actor gateway
+  (`crates/xenonet-service/src/gateway/actor_gateway.rs`): an MCP
   server, over HTTP, that the owner turns on and puts on the internet with
   a tunnel they pick (`gateway.md`). Muse's agent posts JSON-RPC to it from its cloud
   computer (`tools/call` with `send`, `inbox`, `peers`, `whoami`,
-  `heartbeat`). Making Muse's gateway token in XenoNet's window registers
-  `actor:muse`, joining the actor XenoNet observes. Its messages reach agents
-  marked as coming by a gateway token from outside this machine (weak, the
-  token alone). The file mailbox Muse's file access would allow was turned
+  `heartbeat`). Making Muse's gateway token in XenoNet's window, which asks
+  your presence, registers `actor:muse`, joining the actor XenoNet observes.
+  The token is Muse's grant narrowed to the gateway's door, written
+  `xenonet_gateway_` and base64url, and goes in the connector's API key
+  field; XenoNet keeps only its revocation id
+  ([authorization.md](../authorization.md), "The actor grant"). Its
+  messages reach agents with an envelope saying they came by its gateway
+  token alone, from outside this machine. The file mailbox Muse's file access would allow was turned
   down by the owner in favour of this.
 
 ### Routes to more, later

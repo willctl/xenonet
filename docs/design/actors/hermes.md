@@ -753,8 +753,10 @@ owner's, and connect prints them:
    Hermes's registration only from a command under Hermes's own processes),
    at most once every six hours. An Allow card for Hermes Agent
    (`actor:hermes`, which joins the observed actor) appears in XenoNet's
-   window, and the token is written to `plugins/xenonet/token`. The plugin uses the file
-   only if others can't read it, keeps the token in memory, sends it only to
+   window, and the token (the actor's grant, `xenonet_actor_` and base64url,
+   [authorization.md](../authorization.md)) is written to
+   `plugins/xenonet/token`. The plugin uses the file only if others can't
+   read it and it holds a token written that way, keeps the token in memory, sends it only to
    127.0.0.1 as a bearer, and never prints or logs it. On macOS XenoNet also
    holds the token to Hermes's own processes.
 2. **Turning it on.** Hermes loads a plugin only when its name is in

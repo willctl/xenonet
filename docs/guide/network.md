@@ -162,18 +162,14 @@ When the network's gateway runs the actor gateway with A2A on (see [Agents that 
 
 A machine can publish a local HTTP service to the network, and programs on the other machines reach it as if it ran on theirs. XenoNet carries each request and its answer between the two machines, sealed like every frame, and knows nothing of what the service is.
 
-On the machine that runs the service:
-
-```bash
-xenonet svc publish files http://127.0.0.1:8080 --paths /api/v1/
-```
+Publishing widens what the network can reach, so it asks you (Touch ID on a Mac) and is done in XenoNet's window on the machine that runs the service: **Network settings › Publish a service**. Give its name (`files`), its address (`http://127.0.0.1:8080`), its paths (`/api/v1/`) and, if you like, the machines that may call it.
 
 - The address is where the service listens on this machine: `127.0.0.1` or `[::1]` and a port, over plain http. XenoNet looks up no names, follows no redirects, uses no proxy, and refuses its own ports.
-- `--paths` says what's reachable, as path prefixes that start and end with `/`. Repeat it for each prefix. A request for any other path is refused before it reaches the service.
-- Every machine in the network may call it. `--hosts laptop`, repeated for each machine, narrows it to the machines named.
-- `xenonet svc list` shows what this machine publishes, and `xenonet svc unpublish files` takes one off. Publishing a name again replaces it. Leaving the network takes them all off.
+- The paths say what's reachable, as path prefixes that start and end with `/`. A request for any other path is refused before it reaches the service.
+- Every machine in the network may call it, unless you name the machines that may.
+- Publishing a name again replaces it. The Network panel's Services list shows what this machine publishes, with **Take off**; in a terminal, `xenonet svc list` and `xenonet svc unpublish files`. Leaving the network takes them all off.
 
-Publishing and taking a service off are yours to do: XenoNet refuses them from under an agent.
+Taking a service off asks nothing, and is yours from the window or your own terminal: XenoNet refuses it from under an agent. `xenonet svc publish` says to use the window.
 
 On another machine in the network, a program calls its own XenoNet:
 
@@ -194,7 +190,7 @@ Its answer goes back with its status, headers and body, without `Set-Cookie` and
 
 A request's body is at most 1 MiB and an answer's 4 MiB, or the caller gets 413. Each machine may call each service 300 times a minute, then 429. A caller waits 90 seconds at most for the answer, then gets 504. When either machine isn't linked to the gateway, the caller gets 503 at once: a request is never kept for later, or written to disk on the way, since it may carry the service's credential. A machine passes on 8 requests from one other machine at once, and waits on 64 answers from one, so no single machine holds them all. XenoNet's own refusals have an `X-XenoNet-Refused` header with a code, such as `offline`, `not-published`, `not-allowed`, `path-refused` or `rate`, and a JSON body that says why, so a program can tell them from the service's own answers.
 
-**A published service with no sign-in of its own is open to every program on every machine allowed to call it.** Give it tokens of its own, or name the machines that may call it with `--hosts`.
+**A published service with no sign-in of its own is open to every program on every machine allowed to call it.** Give it tokens of its own, or name the machines that may call it.
 
 ### Xenolith's sync between two machines
 
@@ -205,8 +201,9 @@ On studio, where Xenolith's service listens on its usual port, 47850:
 ```bash
 xenolith grant machine:laptop ctx:write:project:atlas
 xenolith token create machine:laptop
-xenonet svc publish xenolith http://127.0.0.1:47850 --paths /sync/v1/
 ```
+
+Then, in studio's XenoNet window, **Network settings › Publish a service**: name `xenolith`, address `http://127.0.0.1:47850`, paths `/sync/v1/`.
 
 On laptop, with the token in `studio.token`:
 
@@ -217,7 +214,7 @@ xenolith sync follow project:atlas studio
 xenolith sync
 ```
 
-Xenolith on studio gets each request with laptop's token and a `Forwarded` header, so it treats it as remote, and what studio granted `machine:laptop` decides what laptop may do.
+Xenolith on laptop sends laptop's XenoNet API credential with each request to a `/api/svc/` address on 127.0.0.1 or localhost, read from XenoNet's `runtime` folder (or `XENONET_RUNTIME_DIR`) each time, so nothing more is needed when XenoNet restarts. Xenolith on studio gets each request with laptop's token and a `Forwarded` header, so it treats it as remote, and what studio granted `machine:laptop` decides what laptop may do.
 
 ## When the gateway is down
 
@@ -245,6 +242,10 @@ A machine that was set up again keeps its id with **Replace**, which takes its o
 
 To take a machine out from the machine itself, run `xenonet net leave`. Its XenoNet forgets the network and carries on alone. The founder and the gateway's machine leave only with `--force`, since the others would lose them.
 
+### A lost machine
+
+Each machine you act from holds a device key of yours, which signs what you do there as you. When a machine is lost, revoke its device from another machine's window: **Network settings › Your devices**, then **Revoke** on that machine's device. It asks you once. Every machine in the network then refuses what that device signs, as you or with your presence, from then on. Then remove the machine from the network too, so its frames are refused as well. A machine can't revoke its own device, and `xenonet net revoke-device` only says to use the window.
+
 ## What crosses and what doesn't
 
 Crosses, signed and sealed:
@@ -271,7 +272,7 @@ The gateway sees, for each frame, which machine sent it, which it's for, its kin
 ## Checking the network
 
 - `xenonet net status` shows the network, this machine, the gateway and its link, what waits for approval, and what waits in the outbox. `xenonet net hosts` lists the machines.
-- `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut and, on a LAN or tailnet address, whether the firewall lets other machines in.
+- `xenonet doctor` checks the network's files and key, the link, the gateway's key against the pinned one, the clock, the outbox and the gateway's queues, a roster another machine sees differently, whether this machine was removed, what the gateway's address means, and on the gateway, whether the join route is shut and, on a LAN or tailnet address, whether the firewall lets other machines in. It also says how this machine asks you before it acts as you (Touch ID, something weaker such as Windows Hello, polkit or a passphrase, or not at all), and warns when your identity's root key is kept in a file here rather than sealed to the device key.
 
 The link is `live` while this machine hears the gateway. It's `offline` when the gateway can't be reached, doesn't answer a request within 35 seconds, or sends nothing for 45 seconds, which is what a gateway behind a firewall that blocks XenoNet looks like. `xenonet net status`, the Network panel and the doctor then say since when and why. XenoNet keeps trying by itself, and the link is `live` again as soon as the gateway answers. `refused` means the gateway answered and turned this machine away; the reason says why.
 

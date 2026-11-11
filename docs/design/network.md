@@ -249,7 +249,9 @@ Not built yet:
   `XENONET_HOSTS=1`, needs SSH, can't write anything, and doesn't resume.
 - **The actor gateway** is a Streamable HTTP MCP endpoint, one per machine
   and off by default, behind a tunnel the owner picks from five kinds.
-  - It has hashed tokens minted only in the window, an ask flow for
+  - It takes gateway tokens minted only in the window (an actor's grant
+    narrowed to the gateway's door, of which XenoNet keeps only the
+    revocation id), an ask flow for
     agents, rate limits, Host and Origin checks and a reach probe
     (`crates/xenonet-service/src/gateway`).
   - Its listener answers `/mcp` only and wants a bearer token first
@@ -1068,12 +1070,14 @@ local API. XenoNet knows nothing of what the service is: it carries the
 request and the answer, and checks them at both ends. The first use is
 Xenolith's sync, with a follower on one host and the curator on another.
 
-**Publishing** is the owner's, refused from under an agent as `net
-create` and `net join` are (the local API's `You` rows), and off until
-they do it:
+**Publishing** widens what the network reaches, so it's the person's act
+`publish` ([authorization.md](authorization.md)), with their presence for
+that publication, from the window alone (Network settings › Publish a
+service, `POST /api/net/svc/publish`), and off until they do it. Taking a
+service off is theirs from the window or their own terminal, refused from
+under an agent as `net create` and `net join` are:
 
 ```text
-xenonet svc publish <name> http://127.0.0.1:<port> --paths /sync/v1/ [--paths …] [--hosts <host>…]
 xenonet svc unpublish <name>
 xenonet svc list
 ```
@@ -1084,10 +1088,10 @@ xenonet svc list
   looked up, no redirects are followed, no proxy is used, and XenoNet's
   own ports (its API, its actor gateway, its LAN door) are refused, since
   publishing them would let other hosts act as this machine's owner.
-- `--paths` are prefixes that start and end with `/`. At least one is
+- The paths are prefixes that start and end with `/`. At least one is
   required: nothing else of the service is reachable.
-- Any roster host may call; `--hosts` narrows that to the hosts named,
-  which must be in the roster.
+- Any roster host may call, or only the hosts named, which must be in the
+  roster.
 - What's published is kept in `<state>/network/services.json`, and goes
   with the network when the host leaves.
 
@@ -1267,9 +1271,10 @@ xenonet net status [--json]
 xenonet net hosts
 xenonet net add-machine <id> [--window]   (the window's: in a terminal it says so)
 xenonet net remove <host>
+xenonet net revoke-device                 (the window's: in a terminal it says so)
 xenonet net leave
 xenonet net gateway take | set <address>
-xenonet svc publish <name> http://127.0.0.1:<port> --paths <prefix>… [--hosts <host>…]
+xenonet svc publish                       (the window's: in a terminal it says so)
 xenonet svc unpublish <name>
 xenonet svc list
 ```
@@ -1283,7 +1288,10 @@ xenonet svc list
 - outbox and queue sizes;
 - a roster mismatch;
 - being removed;
-- a quick tunnel or LAN-only gateway, with what that means.
+- a quick tunnel or LAN-only gateway, with what that means;
+- how this machine's device asks the person (biometric, weaker or none),
+  and whether their root key is sealed to it or in a file, which it warns
+  of (`network.presence`, `network.root`).
 
 ## What this changes in earlier decisions
 

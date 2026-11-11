@@ -82,6 +82,16 @@ when it's added; a presence block never says so itself. A device that was
 removed or revoked can't sign, and doesn't come back: a machine that
 returns makes a new key.
 
+**Revoking a device** is for a lost machine: Network settings › Your
+devices, then Revoke, which calls `POST /api/net/devices/revoke` from the
+window (`xenonet net revoke-device` says so and does nothing). This
+machine's device signs the `revoke` entry with its presence; it never
+revokes itself, so the person revokes a machine from another one. The
+entry is pushed to the network's machines, and each refuses what the
+revoked device signs from then on: its act signatures and its presence
+blocks alike. The network state lists the person's devices
+(`person.devices`), each with how it asks and whether it can sign.
+
 **On each machine** the person lives in `<state>/identity/`:
 
 | File | Holds |
@@ -127,7 +137,9 @@ age, since a machine catching up reads entries that were fresh when made.
 | Linux and the BSDs | polkit (`pkcheck`, XenoNet's own action once a package installs it, else pkexec's), or a passphrase read from the terminal with echo off | weaker |
 
 A weaker device is allowed, and the decision says so in its note. The
-doctor doesn't show the device's kind or whether the root is sealed yet.
+doctor shows how this machine's device asks (`network.presence`:
+biometric, weaker or none) and where the root key is (`network.root`:
+sealed to the device key, or in an owner-only file, which it warns of).
 
 **One prompt per act.** An act that needs the person there carries the
 presence block alone: the block is the device's signature over the act's
@@ -157,7 +169,9 @@ to the device key:
 | Allowing a permission prompt, here or from another machine | 1 |
 | Denying one | none |
 | Issuing or widening an actor's grant: allowing a registration, adding an actor, a new token, a gateway token, an allow scope, a sessions scope, pairing or widening a remote connection | 1 |
-| Narrowing, revoking or removing a grant or an actor; narrowing a machine's start or wake; removing a machine; leaving | none |
+| Publishing a service to the network | 1 |
+| Revoking another of your devices (a lost machine) | 1 |
+| Narrowing, revoking or removing a grant or an actor; narrowing a machine's start or wake; removing a machine; taking a service off; leaving | none |
 
 On Windows and Linux the root key is in a file, so pairing asks once, and
 a device's act signature asks nothing: there only presence blocks ask.
@@ -266,6 +280,14 @@ revocation id:
 presence block is bound to the actor, its rights and the hash of its
 scopes, so a presence for one grant can't stand for a wider one.
 Narrowing, revoking and removing need nothing.
+
+**Setting the scopes.** The Actors panel shows each actor's sessions scope
+and, for one that answers prompts, its allow scope, and its Scope… view
+sets and narrows both: the sessions scope with `POST /api/delivery/grant`
+(which always asks, since selectors can't be compared) and `POST
+/api/delivery/revoke`, the allow scope with `PUT /api/actors/<slug>/allows`
+(which asks only when it widens) and `DELETE`. `GET /api/actors/tokens`
+lists each actor's allow scope (`actor/tokens/v1`'s `allows`).
 
 **Allow scopes.** An actor whose grant has `answer` may Deny any prompt it
 sees. It may Allow only a prompt inside its allow scope, never for a run
@@ -402,8 +424,13 @@ answer:
 
 Admits and widenings of the network are decided by the network chain's
 policy, which holds the same rule: an admin's signature with the person's
-presence. Publishing a service takes the person at the window or their own
-terminal (the local API's `You`), not a presence block.
+presence. Publishing a service is the act `publish` on the network, by the
+person at this machine's own door, with a presence block bound to the
+publication: its name and the hash of its address, paths and callers, so
+a presence for one publication can't stand for a wider one
+(`crates/xenonet-net/src/node.rs`, `decide_publish`). It's done from the
+window (Network settings › Publish a service); `xenonet svc publish` says
+so and does nothing. Taking a service off needs nothing.
 
 **How it's tested** (`crates/xenonet-authz/tests/authz/`): an exhaustive
 matrix of 86,400 decisions (every action by every kind of principal, here
@@ -437,6 +464,16 @@ The types hold that:
 tests: information isn't authorized, isn't a request, an act or a
 principal, isn't a token and can't be read as one, and an `Authorized`
 can't be built outside the crate or changed after `decide` made it.
+
+The runtime wraps text in `Information` where it comes in from another
+machine or an actor (`crates/xenonet-runtime`): a message's body
+(`network.rs`, `message_in`), an ask's question and input (`asks.rs`,
+`ask_in`), a handoff's goal and notes (`handoff_in`), and a start's
+prompt, which is taken out of the request before the start is decided and
+handed to the run only once it was allowed (`starts.rs`, `apart`,
+`run_here`). It's read where it's stored and shown, never where a request
+is made. The engine's own crate keeps plain text: it stays out of
+`xenonet-authz`.
 
 ## The local API: the credential and the rules table
 
@@ -487,13 +524,14 @@ check that the window called, so no prompt starts from anywhere else.
 
 - **The window's alone:** adding a machine (its ticket), every act that
   asks the person (setting up the identity, pairing, admitting, widening,
-  delegation, a start or message as you, Allow), issuing or widening an
-  actor's grant, gateway tokens, allow scopes and sessions scopes, pairing
-  and turning on remote connections, and answering permission prompts (the
-  window or an actor with the right).
+  delegation, a start or message as you, Allow, publishing a service,
+  revoking a device), issuing or widening an actor's grant, gateway
+  tokens, allow scopes and sessions scopes (the Actors panel's Scope…),
+  pairing and turning on remote connections, and answering permission
+  prompts (the window or an actor with the right).
 - **Yours, from the window or your own terminal:** creating, joining and
   leaving a network, removing and replacing machines, approving, moving
-  the gateway, a machine's settings, publishing a service, revoking and
+  the gateway, a machine's settings, taking a service off, revoking and
   removing actors, connecting your agents, and `xenonet service install`.
 - **Reads that matter** (transcripts, search, the engine's state, delivery,
   other machines' state) from an unchecked caller.
@@ -530,12 +568,12 @@ check that the window called, so no prompt starts from anywhere else.
 - **An actor's Allow stays on its machine.** Allow scopes are rows on the
   actor's own machine, so from another machine an actor can only Deny.
 - **The process check.** Where XenoNet can't see the calling process, a
-  `You` row passes on the credential alone and a session is unchecked. A
-  prompt is recorded as asked by a process-checked agent, since only runs
-  XenoNet started ask.
+  `You` row passes on the credential alone and a session is unchecked.
+  Only a run XenoNet started asks a permission prompt, and the ask keeps
+  what the process check found of its caller: one it couldn't see is
+  unchecked, so only the person may Allow it.
 - **Governance freshness** is the last chain sync from any member, as the
   gateway's link reports it.
-- **Publishing a service** is yours, not presence-gated.
 - **Hardware keys** (FIDO2) for the widest acts aren't built.
 
 ## Alignment check

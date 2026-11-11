@@ -79,7 +79,9 @@ settled by the owner's calls at merge point B and in Wave 3.
   A).** A Bot can register `actor:grok-bot` by running `xenonet actor
   register --product grok-bot` through local execution, each run approved
   in the app, and the owner's Allow. It joins the observed actor; its token
-  lives in a 0600 file on the Mac, not in a Bot's instructions. The token
+  (the actor's grant, `xenonet_actor_` and base64url,
+  [authorization.md](../authorization.md)) lives in a 0600 file on the Mac,
+  not in a Bot's instructions. The token
   works only from a command under Grok Bot's app as Cursor signed it (team
   `DCNK4UB866`, checked with `codesign` on the app process nearest the
   caller), never from the app's own processes or a bundle that only calls
@@ -89,9 +91,11 @@ settled by the owner's calls at merge point B and in Wave 3.
   own included, can read the token file; that's the trust this gives a
   Bot, and why each command still needs approval.
 - **Or the gateway.** A Bot can also reach XenoNet from Cursor's cloud,
-  through XenoNet's actor gateway (`server/actor-gateway.js`), added as an
-  MCP server by URL with a gateway token as its Authorization header. That
-  token works only at the gateway; messages through it are marked as such.
+  through XenoNet's actor gateway
+  (`crates/xenonet-service/src/gateway/actor_gateway.rs`), added as an MCP
+  server by URL with a gateway token (`xenonet_gateway_…`, the same grant
+  narrowed to the gateway's door) as its Authorization header. That token
+  works only at the gateway; messages through it are marked as such.
 - **The doctor** says whether the app is installed and whether XenoNet
   could read the processes, the app and its version.
 

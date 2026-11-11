@@ -470,8 +470,13 @@ Will's step on inix and NEO-REX.
    the receiver keeps; an Allow, and issuing or widening a grant or a
    delegation, take the person's presence, and a Deny takes none.
    Delegation is an entry in the person's chain naming a set of their
-   devices. The local API takes a credential on every route, with one rules
-   table. The frame head stays `xenonet-net/1` and its kinds stay closed.
+   devices; a lost machine's device is revoked from the window, with
+   presence, and every machine then refuses what it signs. Publishing a
+   service is the person's `publish` act, with presence for that
+   publication. The local API takes a credential on every route, with one
+   rules table, and Xenolith's sync sends it to a local XenoNet. Text from
+   another machine or an actor is `Information<T>` at the runtime's
+   boundary. The frame head stays `xenonet-net/1` and its kinds stay closed.
    Deleted: `reach.rs`, `operator.rs`'s acts but answers, the node's widen
    and operator nonces, `attest.rs`'s strength ladder and the model's
    `Strength` and `CheckedBy`; actor tokens as hashes, the capability
@@ -486,9 +491,9 @@ Will's step on inix and NEO-REX.
    nonce in the device's signature over start and message acts; reading
    the person chain's token revocations at the receiver; the TPM for the
    machine key on Windows, hardware keys for the widest acts, and the
-   service as its own OS user; the doctor showing the device's kind and
-   whether the root is sealed; the network state's `person` in its schema;
-   typed requests in `xenonet-api` (its core traits still pass JSON); the
+   service as its own OS user; `Information<T>` inside the engine's own
+   crate, which would need it in `xenonet-model`; typed requests in
+   `xenonet-api` (its core traits still pass JSON); the
    MCP and console surfaces on `xenonet-api` alone (held to ceilings until
    phase 5), and the composition crates' ceilings lowered as each phase
    dissolves them ([rust-core.md](rust-core.md)); and project- and agent-scoped tokens and

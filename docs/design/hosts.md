@@ -671,8 +671,8 @@ host's `/api/graph` returns, filtered by `--since` and with paths as `~`.
 - **A tailnet listener.**
   - Bind to the tailnet address only, never `0.0.0.0`, and serve only the
     host routes.
-  - Require a pairing token: shown once and stored hashed, as actor
-    registration does (contracts section 3).
+  - Require a pairing token: shown once and never kept, as an actor's
+    grant is ([authorization.md](authorization.md), "The actor grant").
   - Check the peer with `tailscale whois`, which returns the peer's
     machine and user ([Tailscale CLI](https://tailscale.com/kb/1080/cli)).
   - Accept only the MagicDNS name as Host, and refuse any request with an

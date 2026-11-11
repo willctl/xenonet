@@ -266,8 +266,7 @@ default and isn't an error.
   demo's made-up actor), `expiresAt` is when it stops working unless it's
   used (null unless it works), and `usedAt` is when it was last used,
   exactly the first time and to within the hour after, or null for a
-  token never used, which a new token is again. Never a token, nor its
-  hash. `GET /api/actors/observers` lists the observers and whether each
+  token never used, which a new token is again. Never a token. `GET /api/actors/observers` lists the observers and whether each
   is on, for any local program.
 - Driver (`src/driver.js`): `actors()`, `actorRequests()`, `actorTokens()`
   (how each token stands, as the window reads it) and `feed()` (the
@@ -320,7 +319,10 @@ The proposal from Phase 0, which the interface doc refines:
 
 - `POST /api/actors/register` with an `actor/registration/v1` body
   (`{name, product?, capabilities?, heartbeatMs?, pid?}`) returns an id and
-  a token, shown once and stored hashed.
+  a token, shown once: the actor's grant, a Biscuit rooted at this machine
+  and written `xenonet_actor_` and base64url. XenoNet keeps its revocation
+  id and the capability words it was minted for, never the token
+  ([authorization.md](authorization.md), "The actor grant").
 - Then `POST /api/actors/heartbeat {presence?, status?}`,
   `POST /api/actors/events {events}`, `POST /api/actors/targets {targets}`
   and `DELETE /api/actors/me`, each with `Authorization: Bearer <token>`.

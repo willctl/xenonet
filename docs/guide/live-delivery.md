@@ -247,7 +247,7 @@ Everything `to` took before still works the same: a session's id
 
 ## What actors may see: scopes
 
-An actor sees and reaches no session until you give its grant a scope of sessions. Giving one, or a wider one, asks you (Touch ID on a Mac), so only XenoNet's window can, through `POST /api/delivery/grant`. The window has no control for it yet, and `xenonet live grant` in a terminal refuses and says so. Taking a scope away works from your own terminal:
+An actor sees and reaches no session until you give its grant a scope of sessions. Set it in the Actors panel: **Scope…** on the actor's row, then **Sessions it reaches**, with a selector and how many days it lasts. Setting one asks you (Touch ID on a Mac), so only XenoNet's window can (`POST /api/delivery/grant`), and `xenonet live grant` in a terminal refuses and says so. To narrow one, take it away and set the narrower one. **Take away** asks nothing, and works from your own terminal too:
 
 ```
 xenonet live revoke hermes

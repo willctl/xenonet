@@ -152,7 +152,8 @@ one needs a reason too.
 | `rmcp` | The MCP servers over stdio |
 | `reqwest`, `rustls` (on ring) | HTTPS to the APIs XenoNet calls, with the system's certificates and proxy |
 | `ring`, `x25519-dalek`, `base64` | The network's signatures, sealing, HMAC and hashes, and its keys on disk |
-| `sha2`, `getrandom` | Tokens and their hashes |
+| `sha2`, `getrandom` | Hashes and random values: ids, nonces and the keys made at each start |
+| `biscuit-auth` (6) | Actors' grants and their page cursors, in `xenonet-authz` |
 | `ruzstd`, `flate2` | Codex's archived rollouts, in Rust alone so no build needs a C compiler; the refusals' gzip context and the component packages |
 | `regex`, `url`, `unicode-normalization`, `icu_normalizer` | Patterns without lookaround, URLs as the WHATWG standard reads them, names compared after NFKC and NFD, labels in NFC |
 | `portable-pty` | The terminal drawer's shells, in the service (a pty, ConPTY on Windows) |
@@ -506,11 +507,13 @@ lists what XenoNet holds to now, not a promise for every release.
 - **Hooks and MCP.** The endpoints, payloads, tool names and schemas, as
   `crates/xenonet-mcp/tests/golden/` pins them; and an earlier XenoNet's
   entries in the apps' settings are still recognized as XenoNet's.
-- **Tokens and ids.** `xenonet_actor_`, `xenonet_gateway_` and
-  `xenonet_assistant_` followed by 64 hex digits; XenoNet keeps only their
-  SHA-256 in hex. The window key and the component service's token (new at
-  each start), the assistant's page cursors (base64url JSON with an
-  HMAC-SHA256), and every id format in `xenonet-model`'s `ids`.
+- **Tokens and ids.** `xenonet_actor_` and `xenonet_gateway_` followed by
+  the base64url of a Biscuit v6 token rooted at the actor's machine;
+  XenoNet keeps only their revocation ids ([authorization.md](authorization.md),
+  "The actor grant"). The local API's credential, the window key and the
+  component service's token (new at each start), the assistant's page
+  cursors (its grant narrowed to one read), and every id format in
+  `xenonet-model`'s `ids`.
 - **SQLite.** `engine.sqlite` (WAL, foreign keys, `user_version` 8) and
   `search.sqlite` (FTS5 with `porter unicode61 remove_diacritics 2`, its
   own `user_version`). A migration continues the numbered steps
