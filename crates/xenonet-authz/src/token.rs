@@ -45,9 +45,13 @@ const PAGE_MAX: usize = 1024;
 const FACTS: [&str; 5] = ["actor", "machine", "network", "right", "expires"];
 const EXPIRY: &str = "check if time($time), expires($until), $time <= $until";
 
-// Datalog that a token can't make slow: a decision is on a hot path.
+// Datalog that a token can't make slow: a decision is on a hot path. The
+// fact and iteration caps are what bound the work, since a token holds only
+// the facts above and one check. The time cap is wall-clock, so on a loaded
+// machine a small one refused tokens it should allow; it stays as a backstop
+// well above what a real decision takes.
 fn limits() -> AuthorizerLimits {
-    AuthorizerLimits { max_facts: 1000, max_iterations: 100, max_time: Duration::from_millis(50) }
+    AuthorizerLimits { max_facts: 1000, max_iterations: 100, max_time: Duration::from_secs(2) }
 }
 
 fn refused(message: impl Into<String>) -> AuthzError {
