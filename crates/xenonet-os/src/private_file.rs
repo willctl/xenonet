@@ -2,12 +2,16 @@
 //! ACLs, never Windows mode bits. On Windows XenoNet asks whoami and icacls,
 //! through a `run` it's given (a command's output, or its error), so a test
 //! can be a made-up Windows.
+//!
+//! `write` and `write_new` make such a file private from the moment it
+//! exists instead (mode 0600, or a protected DACL), and let other accounts
+//! read it by SID, as a Windows service's account reads what its user wrote.
 
 use crate::fs::FsError;
 use regex::Regex;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::LazyLock;
@@ -211,6 +215,219 @@ pub fn protect_file(file: &str, windows: bool, run: &mut Run<'_>) -> Result<(), 
     chmod_600(Path::new(file)).map_err(|e| Error::Fs(FsError::of(e, "chmod", file)))
 }
 
+/// Writes `data` to `file`, readable by this account alone (with SYSTEM and, on Windows, `readers`:
+/// string SIDs of the accounts that may read it too, as a service's account reads what its user
+/// wrote). It goes to a new file nobody else can open from the moment it exists (`create_new`),
+/// flushed, then renamed over the old one: no other account ever sees it readable, and a reader
+/// sees the old file or the new one, never part of either.
+pub fn write(file: &Path, data: &[u8], readers: &[String]) -> std::io::Result<()> {
+    staged(file, data, readers, |tmp| renaming(tmp, file))
+}
+
+/// `write`, for a file that must not be replaced (a key): linked into place, which fails with
+/// AlreadyExists when the file is there, so of two writers at once one wins and the other can read
+/// what it wrote.
+pub fn write_new(file: &Path, data: &[u8], readers: &[String]) -> std::io::Result<()> {
+    staged(file, data, readers, |tmp| std::fs::hard_link(tmp, file))
+}
+
+// `data` in a new private file beside `file`, then `place` puts it there; the staged file is gone
+// afterwards either way.
+fn staged(file: &Path, data: &[u8], readers: &[String], place: impl FnOnce(&Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    let dir = file.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.{}.tmp", std::process::id(), random_hex()));
+    let placed = (|| {
+        let mut f = create_new(&tmp, readers)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        drop(f);
+        place(&tmp)
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    placed?;
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
+}
+
+// A rename Windows refuses while another process has the file open (a reader, a scan): again, for
+// up to about four seconds.
+fn renaming(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut i = 0u64;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if cfg!(windows) && i < 20 && (e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5 | 32 | 33))) => {
+                std::thread::sleep(Duration::from_millis(20 + i * 20));
+                i += 1;
+            }
+            r => return r,
+        }
+    }
+}
+
+/// A new file (never one that's there) only this account may open from the moment it exists:
+/// mode 0600 on Unix; on Windows a protected DACL (`sddl`) that names SYSTEM, the file's owner and
+/// this account in full, and each of `readers` reading.
+pub fn create_new(file: &Path, readers: &[String]) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = readers;
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(file)
+    }
+    #[cfg(windows)]
+    {
+        win::create_new(file, readers)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = readers;
+        std::fs::OpenOptions::new().write(true).create_new(true).open(file)
+    }
+}
+
+/// Whether a string is a SID as SDDL takes it (S-1-…, digits and dashes).
+pub fn valid_sid(s: &str) -> bool {
+    s.len() > 4 && s.starts_with("S-1-") && s[4..].bytes().all(|b| b.is_ascii_digit() || b == b'-')
+}
+
+/// The SDDL `create_new` gives a file on Windows: protected (nothing inherited); SYSTEM, the file's
+/// owner (OW) and `me` in full; each valid reader reading.
+pub fn sddl(me: Option<&str>, readers: &[String]) -> String {
+    use std::fmt::Write as _;
+    let me = me.filter(|m| valid_sid(m));
+    let mut s = String::from("D:P(A;;FA;;;SY)(A;;FA;;;OW)");
+    if let Some(me) = me {
+        let _ = write!(s, "(A;;FA;;;{me})");
+    }
+    for r in readers.iter().filter(|r| valid_sid(r) && Some(r.as_str()) != me) {
+        let _ = write!(s, "(A;;FR;;;{r})");
+    }
+    s
+}
+
+/// An account's SID by name (`NT SERVICE\Xenolith`), or None when there's no such account, and
+/// always None off Windows, where a service runs as its user.
+pub fn account_sid(name: &str) -> Option<String> {
+    #[cfg(windows)]
+    {
+        win::account_sid(name)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        None
+    }
+}
+
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "the Win32 calls that make a file with its DACL from the start and name accounts by SID, which std doesn't wrap")]
+mod win {
+    use std::path::Path;
+    use windows_sys::Win32::Security::PSID;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain([0]).collect()
+    }
+
+    /// # Safety
+    /// `sid` must point to a valid SID.
+    unsafe fn sid_string(sid: PSID) -> Option<String> {
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+        let mut s: windows_sys::core::PWSTR = std::ptr::null_mut();
+        // SAFETY: the caller passes a valid SID; the string is read up to its NUL and freed with
+        // LocalFree.
+        unsafe {
+            if ConvertSidToStringSidW(sid, &raw mut s) == 0 || s.is_null() {
+                return None;
+            }
+            let mut len = 0;
+            while *s.add(len) != 0 {
+                len += 1;
+            }
+            let out = String::from_utf16_lossy(std::slice::from_raw_parts(s, len));
+            LocalFree(s.cast());
+            Some(out)
+        }
+    }
+
+    pub fn account_sid(name: &str) -> Option<String> {
+        use windows_sys::Win32::Security::{LookupAccountNameW, SID_NAME_USE};
+        let w = wide(name);
+        let mut sid = [0u8; 128];
+        let mut sid_len = sid.len() as u32;
+        let mut domain = [0u16; 256];
+        let mut domain_len = domain.len() as u32;
+        let mut kind: SID_NAME_USE = 0;
+        // SAFETY: the buffers and their lengths are passed in; the SID is read from our own buffer.
+        unsafe {
+            if LookupAccountNameW(std::ptr::null(), w.as_ptr(), sid.as_mut_ptr().cast(), &raw mut sid_len, domain.as_mut_ptr(), &raw mut domain_len, &raw mut kind) == 0 {
+                return None;
+            }
+            sid_string(sid.as_mut_ptr().cast())
+        }
+    }
+
+    /// The SID this process runs as.
+    fn current_sid() -> Option<String> {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: the token handle is closed below; the buffer is ours, aligned for TOKEN_USER, and
+        // its size passed in.
+        unsafe {
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) == 0 {
+                return None;
+            }
+            let mut buf = [0u64; 64];
+            let mut len = 0u32;
+            let ok = GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), size_of_val(&buf) as u32, &raw mut len) != 0;
+            CloseHandle(token);
+            if !ok {
+                return None;
+            }
+            let user = &*buf.as_ptr().cast::<TOKEN_USER>();
+            sid_string(user.User.Sid)
+        }
+    }
+
+    /// CreateFileW with CREATE_NEW and a protected DACL from the start (super::sddl).
+    pub fn create_new(p: &Path, readers: &[String]) -> std::io::Result<std::fs::File> {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::Foundation::{LocalFree, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+        use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+        use windows_sys::Win32::Storage::FileSystem::{CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL};
+        let sddl = wide(&super::sddl(current_sid().as_deref(), readers));
+        let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        // SAFETY: a valid, NUL-terminated SDDL string; the descriptor is freed with LocalFree below.
+        if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &raw mut sd, std::ptr::null_mut()) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let sa = SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd, bInheritHandle: 0 };
+        let path: Vec<u16> = {
+            use std::os::windows::ffi::OsStrExt;
+            p.as_os_str().encode_wide().chain([0]).collect()
+        };
+        // SAFETY: a valid, NUL-terminated path and security attributes; the handle becomes the File's.
+        let h = unsafe { CreateFileW(path.as_ptr(), GENERIC_WRITE, 0, &raw const sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, std::ptr::null_mut()) };
+        let err = std::io::Error::last_os_error();
+        // SAFETY: allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW above.
+        unsafe { LocalFree(sd) };
+        if h == INVALID_HANDLE_VALUE {
+            return Err(err);
+        }
+        // SAFETY: a handle CreateFileW just opened, owned by nothing else.
+        Ok(unsafe { std::fs::File::from_raw_handle(h) })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +520,52 @@ mod tests {
         let mut no_whoami = |file: &str, _: &[&str]| Err(format!("{file} failed"));
         assert_eq!(protect_file("x.token", true, &mut no_whoami), Err(Error::Run("whoami failed".into())));
         assert_eq!(Error::Fs(FsError { code: Some("EPERM".into()), message: "EPERM: operation not permitted".into() }).message(), "EPERM: operation not permitted");
+    }
+
+    #[test]
+    fn the_sddl_names_the_owner_system_and_each_reader() {
+        assert_eq!(sddl(None, &[]), "D:P(A;;FA;;;SY)(A;;FA;;;OW)");
+        let svc = "S-1-5-80-1-2-3-4-5".to_string();
+        assert_eq!(sddl(Some(SID), &[svc.clone(), "not a sid".into(), SID.into()]), format!("D:P(A;;FA;;;SY)(A;;FA;;;OW)(A;;FA;;;{SID})(A;;FR;;;{svc})"));
+        assert!(!valid_sid("S-1-") && !valid_sid("S-1-5)(A;;FA;;;WD") && valid_sid(SID));
+        if !cfg!(windows) {
+            assert_eq!(account_sid(r"NT SERVICE\Xenolith"), None, "off Windows a service is its user");
+        }
+    }
+
+    #[test]
+    fn written_private_from_the_start_and_a_new_file_never_replaces_one() {
+        let dir = std::env::temp_dir().join(format!("xenonet-private-write-{}-{}", std::process::id(), random_hex()));
+        let file = dir.join("sub").join("secret.json");
+        write(&file, b"one\n", &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
+        write(&file, b"two\n", &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "two\n", "write replaces");
+        assert_eq!(write_new(&file, b"three\n", &[]).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "two\n", "write_new never replaces");
+        let key = dir.join("sub").join("a.key");
+        write_new(&key, b"k\n", &[]).unwrap();
+        assert_eq!(std::fs::read_dir(dir.join("sub")).unwrap().count(), 2, "nothing staged is left");
+        let mut never = |_: &str, _: &[&str]| -> Result<String, String> { panic!("no commands needed off Windows") };
+        if !cfg!(windows) {
+            for f in [&file, &key] {
+                assert_eq!(other_readers(&f.to_string_lossy(), false, &mut never).unwrap(), Vec::<String>::new(), "{}", f.display());
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Replacing a file others could read leaves it private.
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+            write(&file, b"four\n", &[]).unwrap();
+            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        #[cfg(windows)]
+        {
+            let mut run = |f: &str, a: &[&str]| run_private(f, a);
+            assert_eq!(other_readers(&key.to_string_lossy(), true, &mut run).unwrap(), Vec::<String>::new(), "only SYSTEM, the owner and this account");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]

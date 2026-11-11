@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use xenolith_core::access::{self, Level, Principal};
 use xenolith_core::audit;
 use xenolith_core::inbox;
+use xenolith_core::keys::Keys;
 use xenolith_core::lock::lock_info;
 use xenolith_core::owner::{self, OwnerKey};
 use xenolith_core::paths::AppPaths;
@@ -116,6 +117,9 @@ pub struct App {
     inflight: AtomicUsize,
     /// This start's owner key, or why it could not be written (approvals then wait for a restart).
     owner: Result<OwnerKey, String>,
+    /// The keys this Xenolith signs and connects with (xenolith_core::keys), or why they couldn't
+    /// be read. Nothing signs with them yet.
+    keys: Result<Arc<Keys>, String>,
     bad_tokens: BadTokens,
 }
 
@@ -294,6 +298,12 @@ pub fn status_report(app: &App, st: &State) -> Value {
     let mut reasons: Vec<String> = vec![];
     if let Some(p) = app.owner_problem() {
         reasons.push(format!("approvals need the owner key, which could not be written: {p}"));
+    }
+    match &app.keys {
+        Ok(k) => {
+            s.insert("keys".into(), k.describe());
+        }
+        Err(p) => reasons.push(format!("this Xenolith's keys could not be read: {p}")),
     }
     let (audit_health, audit_problem) = audit::health(&AppPaths::current());
     s.insert("audit".into(), audit_health);
@@ -987,9 +997,16 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
     let mode = if state.curated { "curated" } else { "direct" };
     let wiki_shown = state.wiki_dir.as_ref().map(|d| wiki::disp(d)).unwrap_or_else(|| "(unavailable)".into());
     // A new owner key each start, for the tray and `xenolith held` (owner.rs).
-    let owner = owner::create(&AppPaths::current(), actual, &owner_sid.into_iter().collect::<Vec<_>>()).map_err(|e| e.to_string());
+    let owner_readers: Vec<String> = owner_sid.into_iter().collect();
+    let owner = owner::create(&AppPaths::current(), actual, &owner_readers).map_err(|e| e.to_string());
     if let Err(e) = &owner {
         log(&format!("the owner key could not be written ({e}); deciding held changes in the window waits for a restart"));
+    }
+    // The context signing key, the transport key and the standalone owner key, made the first time.
+    // On Windows the installing user may read the context key too: the curator signs with it.
+    let keys = Keys::load_or_create(&AppPaths::current(), &owner_readers).map(Arc::new);
+    if let Err(e) = &keys {
+        log(&format!("this Xenolith's keys could not be read: {e}"));
     }
     let app = Arc::new(App {
         state: RwLock::new(state),
@@ -1000,6 +1017,7 @@ pub fn serve(port: u16, stop: Arc<Waker>, watch_exe: bool, owner_sid: Option<Str
         closing: AtomicBool::new(false),
         inflight: AtomicUsize::new(0),
         owner,
+        keys,
         bad_tokens: BadTokens::default(),
     });
     log(&format!("v{} listening on http://127.0.0.1:{actual}/mcp ({mode} writes); wiki at {wiki_shown}", xenolith_core::VERSION));

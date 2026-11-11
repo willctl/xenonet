@@ -28,9 +28,10 @@ xenonet-text.workspace = true
 libc.workspace = true
 
 # Windows's job objects, so a headless turn and every process it starts
-# stop together (process.rs).
+# stop together (process.rs), and files made with their DACL from the start
+# (private_file.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 # Both on by default, for XenoNet. A crate that needs only files, paths and
 # private_file (xenonet-id, so Xenolith's hook and tray) turns them off and

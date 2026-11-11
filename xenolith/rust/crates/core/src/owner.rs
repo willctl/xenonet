@@ -1,7 +1,7 @@
 //! The owner key: what deciding a held change or a proposal, changing the approvals setting,
 //! forgetting text and leaving a note as the person need in the window's API (/api). The HTTP
 //! service makes a new random key each time it starts and writes it to <state>/runtime/owner.key,
-//! readable by the owner alone (private.rs; on Windows, by the installing user the service ini
+//! readable by the owner alone (wiki::write_private; on Windows, by the installing user the service ini
 //! names). The tray reads it and opens the window with it; `xenolith held approve` reads it too.
 //! A process that only sends the window's X-Xenolith header can read the window's API, not decide.
 //!
@@ -40,7 +40,7 @@ pub fn create(paths: &AppPaths, port: u16, readers: &[String]) -> std::io::Resul
     getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(format!("no random numbers for the owner key: {e}")))?;
     let key = OwnerKey { key: crate::text::hex(&bytes), pid: std::process::id(), port };
     let text = json!({ "v": 1, "key": key.key, "pid": key.pid, "port": port, "at": local_iso(&now()) });
-    crate::private::write(&key_file(paths), &format!("{text}\n"), readers)?;
+    crate::wiki::write_private(&key_file(paths), &format!("{text}\n"), readers)?;
     Ok(key)
 }
 

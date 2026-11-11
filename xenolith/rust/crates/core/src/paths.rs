@@ -16,6 +16,15 @@ pub struct AppPaths {
     pub legacy_home: PathBuf,
 }
 
+/// The Windows service's account, which runs the HTTP service there.
+pub const SERVICE_ACCOUNT: &str = r"NT SERVICE\Xenolith";
+
+/// The readers a private file the service must read gets on Windows: the service's account, when
+/// that service is installed. Nobody on Unix, where the service is the user.
+pub fn service_readers() -> Vec<String> {
+    xenonet_os::private_file::account_sid(SERVICE_ACCOUNT).into_iter().collect()
+}
+
 /// The environment as a map, so tests (and the installer) can pass another one.
 pub type Env = HashMap<String, String>;
 

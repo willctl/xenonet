@@ -158,7 +158,7 @@ impl State {
                 v["offer"]["used"] = json!({ "at": u.at, "name": u.name, "token": u.token, "source": u.source });
             }
         }
-        crate::private::write(&state_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::private::service_readers())?;
+        crate::wiki::write_private(&state_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::paths::service_readers())?;
         Ok(())
     }
 }

@@ -271,6 +271,16 @@ pub fn fsync_dir(dir: &Path) {
     let _ = dir;
 }
 
+/// Writes a file only its owner may read (access.json, sync.json, peer tokens, the owner key): on
+/// Unix mode 0600 from the moment it exists, on Windows a protected DACL that also lets `readers`
+/// (SIDs: `paths::service_readers`, or the installing user for what the service writes) read it.
+/// Atomic, as xenonet_os::private_file::write is; and forgotten by the read cache.
+pub fn write_private(file: &Path, text: &str, readers: &[String]) -> std::io::Result<()> {
+    xenonet_os::private_file::write(file, text.as_bytes(), readers)?;
+    crate::readcache::forget(file);
+    Ok(())
+}
+
 /// Writes and fsyncs a file in place. `create_new`: fail if it exists (the idempotency keys).
 pub fn write_synced(file: &Path, content: &str, create_new: bool) -> std::io::Result<()> {
     let mut f = if create_new { fs::OpenOptions::new().write(true).create_new(true).open(file)? } else { fs::File::create(file)? };

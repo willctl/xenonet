@@ -34,6 +34,10 @@ xenonet-id = { path = "../../crates/xenonet-id" }
 xenonet-log = { path = "../../crates/xenonet-log" }
 xenonet-authz = { path = "../../crates/xenonet-authz" }
 xenonet-net = { path = "../../crates/xenonet-net" }
+# Two of the base crates they bring, taken directly: private files (without fetch() and tokio, which
+# only xenonet-net turns on) and the data model's ids.
+xenonet-os = { path = "../../crates/xenonet-os", default-features = false }
+xenonet-model = { path = "../../crates/xenonet-model" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }

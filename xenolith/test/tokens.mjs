@@ -41,6 +41,19 @@ function cli(env, ...args) {
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 
+/** A file only you may read: mode 0600, or on Windows an ACL of its own (nothing inherited) that
+ * names no group of other users. */
+function ownerOnly(file) {
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600, `${file} is readable by you alone`);
+    return;
+  }
+  const acl = spawnSync('icacls', [file], { encoding: 'utf8' });
+  assert.equal(acl.status, 0, acl.stderr);
+  assert.doesNotMatch(acl.stdout, /\(I\)/, `${file} inherits nothing:\n${acl.stdout}`);
+  assert.doesNotMatch(acl.stdout, /Everyone|BUILTIN\\Users|Authenticated Users|INTERACTIVE/i, `${file} names no other users:\n${acl.stdout}`);
+}
+
 function startHttp(env) {
   return new Promise((resolve, reject) => {
     const proc = spawn(...srv('--http', '--port', '0', '--parent-stdin'), { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -312,6 +325,21 @@ describe('tokens over HTTP', { timeout: 60_000 }, () => {
     }
   });
 
+  test("the service's keys are files only you can read, and /status names them, never their secrets", async () => {
+    const st = (await request(server.port, { method: 'GET', path: '/status' })).json;
+    const ids = ['context', 'transport', 'owner'].map((k) => st.keys?.[k]?.id);
+    for (const id of ids) assert.match(String(id), /^xns1_[a-z2-7]{32}$/, JSON.stringify(st.keys));
+    assert.equal(new Set(ids).size, 3, 'a key for each use');
+    assert.equal(st.keys.owner.weaker, true, 'the standalone owner key counts for less than a person');
+    for (const name of ['context', 'transport', 'owner-signing']) {
+      const file = path.join(E.home, 'keys', `${name}.key`);
+      const key = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.equal(key.use, name);
+      assert.ok(!JSON.stringify(st).includes(key.seed), 'no secret in /status');
+      ownerOnly(file);
+    }
+  });
+
   test('an audit chain that cannot be written is never silent: /status and `xenolith status` say so', async () => {
     const E6 = makeEnv();
     fs.mkdirSync(path.join(E6.home, 'audit', 'chain.jsonl'), { recursive: true }); // a folder where the chain goes
@@ -424,7 +452,7 @@ describe('XENOLITH_TOKEN for a stdio server, and the token commands', { timeout:
     assert.equal(policy.tokens[0].label, 'Hermes on the server');
     assert.equal(policy.tokens[0].hash, undefined, 'access --json shows ids, not hashes');
     assert.ok(!fs.readFileSync(path.join(E.home, 'access.json'), 'utf8').includes(plain.out.trim()), 'only the hash is kept');
-    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(E.home, 'access.json')).mode & 0o777, 0o600, 'readable by you alone');
+    ownerOnly(path.join(E.home, 'access.json'));
     assert.match(cli(E.env, 'token', 'create', 'actor:hermes', '--scope', 'ctx:read nope').err, /"nope" is not a scope/);
     assert.equal(cli(E.env, 'token', 'revoke', 'tok_000000000000').code, 1, 'nothing to revoke');
   });

@@ -22,6 +22,12 @@ unicode-normalization.workspace = true
 xenonet-id.workspace = true
 xenonet-log.workspace = true
 xenonet-authz.workspace = true
+# Files only their owner may read, from the moment they exist (private_file).
+xenonet-os.workspace = true
+
+[dev-dependencies]
+# What a space is about, for founding one with this Xenolith's keys in keys.rs's tests.
+xenonet-model.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

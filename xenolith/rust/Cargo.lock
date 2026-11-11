@@ -6095,6 +6095,8 @@ dependencies = [
  "xenonet-authz",
  "xenonet-id",
  "xenonet-log",
+ "xenonet-model",
+ "xenonet-os",
 ]
 
 [[package]]

@@ -386,6 +386,27 @@ read, and the audit chain records it. A sandboxed agent that can't read
 Xenolith's state folder can't approve its own change. An agent running
 unsandboxed as you can read the file, as it can any of your files.
 
+### Keys
+
+The service also keeps three keys, made the first time it starts, each in a
+file of its own in `keys/` in the state folder, readable by you alone (on
+Windows the user who installed the service may read the context key too):
+
+- `context.key` signs what this Xenolith adds to a space when it shares spaces
+  with other machines.
+- `transport.key` is its own endpoint's key for connections between machines.
+  It signs nothing else.
+- `owner-signing.key` owns this computer's spaces while no person in XenoNet
+  does. The service signs with it only for a request that carries the owner
+  key. Any program running as you can read the file, so it counts for less than
+  a person's device: it can't share a space into a XenoNet network, and it can
+  hand a space only to a person, never to another key.
+
+`/status` names each key's id under `keys`. A key file that can't be read stops
+nothing silently: `/status` says so, and Xenolith never makes a new key over it,
+since a new key is a new identity to every other machine. Move the file aside
+to have a new one made.
+
 ### Tokens
 
 A grant does nothing until its subject holds a token. Tokens are
@@ -988,7 +1009,7 @@ folder in your home. On Windows:
 | Task Scheduler `\XenolithTray`, `HKCU\...\CurrentVersion\Run\XenolithTray` | start the tray at sign-in |
 | `%LOCALAPPDATA%\Xenolith\curator\codex-home\` | the curator's own Codex home and sign-in (Local, not Roaming: it stays on this PC) |
 | `%LOCALAPPDATA%\Xenolith\logs\` | `service.log`, `curator.log`, `tray.log`, `requests-*.jsonl`, `http-sessions.json` |
-| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start), `migrate-agent-wiki\` (the journal, backups and log of a [move from agent-wiki](#moving-from-agent-wiki)) |
+| `%LOCALAPPDATA%\Xenolith\state\` | `install-state.json` (what the installer created, for uninstall), `audit\chain.jsonl`, `runtime\owner.key` (the [owner key](#the-owner-key), new at each service start), `keys\` (the service's [keys](#keys)), `migrate-agent-wiki\` (the journal, backups and log of a [move from agent-wiki](#moving-from-agent-wiki)) |
 | `%LOCALAPPDATA%\Xenolith\marketplace\` | local marketplace (Claude and Codex formats) and the rendered plugin |
 | `%LOCALAPPDATA%\Xenolith\paste-into-app-settings.md` | the pointer text, for app personal-instruction settings |
 | `~/Xenolith/` | the shared context (a folder of your documents, not app data) |

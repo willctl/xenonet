@@ -409,7 +409,7 @@ impl Policy {
     /// it holds token hashes and the grants.
     pub fn save(&self, file: &Path) -> Result<()> {
         let text = serde_json::to_string_pretty(&self.to_json()).unwrap_or_default();
-        crate::private::write(file, &format!("{text}\n"), &crate::private::service_readers())?;
+        crate::wiki::write_private(file, &format!("{text}\n"), &crate::paths::service_readers())?;
         Ok(())
     }
 

@@ -187,7 +187,7 @@ impl Journal {
     }
 }
 
-/// A file only you may read, written atomically and flushed to disk (private::write). The unit
+/// A file only you may read, written atomically and flushed to disk (wiki::write_private). The unit
 /// tests, which write the journal some ten thousand times to stop a run at every write, skip the
 /// flush on Unix; nothing else differs.
 fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
@@ -202,7 +202,7 @@ fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
     }
     #[cfg(not(all(unix, test)))]
     {
-        xenolith_core::private::write(file, text, &[])
+        xenolith_core::wiki::write_private(file, text, &[])
     }
 }
 

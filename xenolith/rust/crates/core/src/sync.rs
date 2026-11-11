@@ -156,7 +156,7 @@ impl Config {
         if let Some(h) = &self.home {
             v["home"] = json!(h);
         }
-        crate::private::write(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::private::service_readers())?;
+        crate::wiki::write_private(&config_file(paths), &format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()), &crate::paths::service_readers())?;
         Ok(())
     }
 
@@ -216,7 +216,7 @@ pub fn update<T>(paths: &AppPaths, f: impl FnOnce(&mut Config) -> Result<T>) -> 
 
 /// Keeps a peer's token, readable by you alone from the moment it exists (on Windows too).
 pub fn save_token(paths: &AppPaths, peer: &str, token: &str) -> Result<()> {
-    crate::private::write(&token_file(paths, peer), &format!("{}\n", token.trim()), &[])?;
+    crate::wiki::write_private(&token_file(paths, peer), &format!("{}\n", token.trim()), &[])?;
     Ok(())
 }
 
