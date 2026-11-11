@@ -64,7 +64,26 @@ fn world(name: &str, demo: bool) -> (Arc<Runtime>, Arc<Empty>, std::path::PathBu
     // The real adapters, as the binary installs them at start.
     xenonet_platforms::install();
     let w = xenonet_runtime::runtime(&cores, setup, &env).expect("the area's parts");
+    // A machine in no network, with its own identity: what roots and
+    // decides its actors' tokens.
+    // Its person's device is a fake that says yes, never the machine's own.
+    let identity = xenonet_net::identity::Identity::open(dir.join("state").join("identity"), Some(Arc::new(xenonet_keys::Fake { allow: true }))).expect("an identity");
+    xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Alone(identity))));
     (w, empty, dir)
+}
+
+/// The governance of a machine in no network.
+struct Alone(Arc<xenonet_net::identity::Identity>);
+
+impl xenonet_net::ground::Governance for Alone {
+    fn facts(&self) -> xenonet_net::ground::Facts {
+        let now = xenonet_text::time::now_ms() as i64;
+        xenonet_net::ground::Facts { machine: xenonet_authz::MachineId::new("local").expect("a machine's id"), view: None, identity: self.0.clone(), synced_at: None, now }
+    }
+    fn identity(&self) -> Arc<xenonet_net::identity::Identity> {
+        self.0.clone()
+    }
+    fn want_person(&self, _host: &str, _person: &str) {}
 }
 
 #[tokio::test(flavor = "multi_thread")]

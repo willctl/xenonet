@@ -57,10 +57,8 @@ fn res() -> &'static Res {
     R.get_or_init(|| Res {
         // \b and /i as JS has them without /u: ASCII words, ASCII case.
         bearer: Regex::new(&format!(r"(?-u:\b)((?i-u:bearer|token|password|passwd|secret|api[_-]?key))(?-u:\b)[{SPACE}]*[:=][{SPACE}]*[^{SPACE}]+")).expect("a fixed pattern"),
-        key: Regex::new(
-            r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)[A-Za-z0-9_-]*",
-        )
-        .expect("a fixed pattern"),
+        key: Regex::new(r"(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_gateway_)[A-Za-z0-9_-]*")
+            .expect("a fixed pattern"),
         email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").expect("a fixed pattern"),
         // Followed by a separator or the end, checked after (a lookahead).
         user_folder: Regex::new(r#"(?:[A-Za-z]:)?[\\/](?i-u:Users|home)[\\/][^\\/"'`]+"#).expect("a fixed pattern"),
@@ -547,5 +545,23 @@ mod tests {
         assert_eq!(clean_label("\u{202e}\u{200b} "), None);
         assert_eq!(clean_label(&"é".repeat(300)).unwrap().chars().count(), 240);
         assert_eq!(clean_label("e\u{301}").as_deref(), Some("é"));
+    }
+
+    // A grant's token and a page cursor are base64url after their prefix,
+    // so a label that holds one loses all of it.
+    #[test]
+    fn labels_lose_a_grants_token_and_its_cursors() {
+        use crate::service::{For, Pages};
+        use xenonet_api::cores::Grants;
+        let grants = crate::pages::Memory::new();
+        let grant = "gr_0123456789abcdef01234567";
+        let (token, _) = grants.mint("dots", &["read".to_string()], None).unwrap();
+        let g = serde_json::json!(grant);
+        let cursor = crate::pages::Granted { grants: &grants, token: &token, slug: "dots" }
+            .make(&For { grant: &g, revision: &Value::from(1), op: "sessions", filters: &Value::Null }, &serde_json::json!([1, "x"]))
+            .unwrap();
+        for secret in [token, cursor] {
+            assert_eq!(clean_label(&format!("paste {secret} here")).as_deref(), Some("paste [withheld] here"));
+        }
     }
 }

@@ -160,9 +160,89 @@ const STEP_EIGHT_COLUMNS: [(&str, &str, &str); 6] = [
     ("deliveries", "frame", "ALTER TABLE deliveries ADD COLUMN frame TEXT"),
 ];
 
+/// Step 9: one grant for every actor (docs/design/direction.md,
+/// "Authorization"). An actor's token is a Biscuit minted here, bots and
+/// cloud assistants alike, and what it may do is the token's rights, so
+/// XenoNet keeps a token's revocation id, never the token, and the
+/// capability words it was minted for, for the window. Which sessions and
+/// identities a grant may use are its scopes, a row keyed by the same id;
+/// `intents` is kept for intents, which aren't built. One revoked table
+/// holds every token taken back. There's no going back: the actors'
+/// tables start afresh (their children first, as their foreign keys ask),
+/// so every actor, token, registration and remote connection from before
+/// is gone and is given again at the window.
+const STEP_NINE: &str = r"
+      DROP TABLE IF EXISTS actor_grants;
+      DROP TABLE IF EXISTS actor_external_refs;
+      DROP TABLE IF EXISTS actor_account_links;
+      DROP TABLE IF EXISTS actor_connections;
+      DROP TABLE IF EXISTS actor_requests;
+      DROP TABLE IF EXISTS actor_revoked;
+      DROP TABLE IF EXISTS actors;
+      CREATE TABLE actors (
+        slug TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+        product TEXT, via TEXT NOT NULL,
+        heartbeat_ms INTEGER, identity TEXT,
+        token_id TEXT UNIQUE, token_rights TEXT, token_at INTEGER,
+        gateway_id TEXT UNIQUE, gateway_at INTEGER,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL, allowed_at INTEGER, last_seen INTEGER,
+        presence TEXT NOT NULL DEFAULT 'unknown', presence_at INTEGER,
+        status TEXT, status_at INTEGER,
+        seq INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE actor_requests (
+        id TEXT PRIMARY KEY, slug TEXT NOT NULL, ask TEXT NOT NULL,
+        token_id TEXT NOT NULL UNIQUE, asker TEXT,
+        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        decision TEXT, decided_at INTEGER);
+      CREATE TABLE revoked (
+        id TEXT PRIMARY KEY, actor TEXT NOT NULL, reason TEXT NOT NULL,
+        at INTEGER NOT NULL);
+      CREATE TABLE grant_scopes (
+        token TEXT PRIMARY KEY, actor TEXT NOT NULL,
+        sessions TEXT, projects TEXT, identities TEXT, intents TEXT,
+        at INTEGER NOT NULL, until INTEGER);
+      CREATE TABLE actor_connections (
+        connection_id TEXT PRIMARY KEY,
+        actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
+        adapter_id TEXT NOT NULL, provider TEXT NOT NULL,
+        transport_kind TEXT NOT NULL, transport_binding TEXT,
+        label TEXT NOT NULL, device_alias TEXT,
+        audience_description TEXT NOT NULL, audience_verification TEXT NOT NULL,
+        audience_scope TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER);
+      CREATE INDEX actor_connections_by_actor ON actor_connections (actor_slug);
+      CREATE TABLE actor_grants (
+        grant_id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES actor_connections (connection_id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL, permissions TEXT NOT NULL,
+        field_policy TEXT NOT NULL, data_mode TEXT NOT NULL, lookback_ms INTEGER NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1, token_id TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        revoked_at INTEGER, revoked_reason TEXT, last_used_at INTEGER);
+      CREATE INDEX actor_grants_by_connection ON actor_grants (connection_id);
+      CREATE TABLE actor_account_links (
+        link_id TEXT PRIMARY KEY,
+        actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
+        identity_id TEXT, issuer TEXT, provider TEXT NOT NULL, workspace TEXT,
+        proof_status TEXT NOT NULL, proof_method TEXT, subject_binding TEXT,
+        checked_at INTEGER, expires_at INTEGER, created_at INTEGER NOT NULL);
+      CREATE INDEX actor_account_links_by_actor ON actor_account_links (actor_slug);
+      CREATE TABLE actor_external_refs (
+        external_ref_id TEXT PRIMARY KEY,
+        actor_slug TEXT NOT NULL REFERENCES actors (slug) ON DELETE CASCADE,
+        adapter_id TEXT NOT NULL, issuer TEXT NOT NULL, account_binding TEXT NOT NULL,
+        external_actor_id TEXT NOT NULL, verified_at INTEGER NOT NULL,
+        UNIQUE (adapter_id, issuer, account_binding, external_actor_id));
+    ";
+
+/// How long a revoked token is remembered: past the year its root lasts.
+const REVOKED_KEPT_MS: f64 = 400.0 * DAY_MS;
+
 /// The steps the database's shape takes; PRAGMA user_version counts those
 /// taken.
-pub const ENGINE_VERSION: usize = 8;
+pub const ENGINE_VERSION: usize = 9;
 
 /// The statements step `i` (0 for the first) runs, given whether a table
 /// has a column already: a database from before versions were counted can
@@ -225,6 +305,8 @@ pub fn engine_step<E>(i: usize, has_column: &mut dyn FnMut(&str, &str) -> std::r
             out.push(STEP_EIGHT);
             out
         }
+        // 9: one grant for every actor: the actors' tables afresh.
+        8 => vec![STEP_NINE],
         _ => vec![],
     })
 }
@@ -259,7 +341,6 @@ fn actor_defaults() -> Vec<(&'static str, Value)> {
         ("name", Value::Null),
         ("product", Value::Null),
         ("via", json!("[]")),
-        ("capabilities", json!("[]")),
         ("heartbeat_ms", Value::Null),
         ("identity", Value::Null),
         ("enabled", json!(1.0)),
@@ -413,7 +494,9 @@ impl EngineStore {
             }
             self.run("DELETE FROM actor_targets WHERE last_at < ? OR (actor = ? AND last_at < ?)", &[n(now - WEEK_MS), YOU.into(), n(now - DAY_MS)])?;
             self.run("DELETE FROM actor_requests WHERE created_at < ?", &[n(now - DAY_MS)])?;
-            self.run("DELETE FROM actor_revoked WHERE at < ?", &[n(now - WEEK_MS)])?;
+            // A revocation is kept as long as the token it takes back could
+            // still verify: a token never outlives its root's year.
+            self.run("DELETE FROM revoked WHERE at < ?", &[n(now - REVOKED_KEPT_MS)])?;
             self.run("UPDATE actors SET status = NULL, status_at = NULL WHERE slug = ? AND status_at < ?", &[you_slug().into(), n(now - DAY_MS)])?;
             self.run("DELETE FROM net_claims WHERE until < ?", &[n(now)])?;
             self.run("DELETE FROM handoffs WHERE expires_at < ?", &[n(now - WEEK_MS)])?;
@@ -789,9 +872,9 @@ impl EngineStore {
     pub fn save_actor(&self, row: &Value) -> Result<()> {
         let values: serde_json::Map<String, Value> = actor_defaults().into_iter().map(|(k, d)| (k.to_string(), row.get(k).cloned().unwrap_or(d))).collect();
         self.run_record(
-            "INSERT INTO actors (slug, kind, name, product, via, capabilities, heartbeat_ms, identity, enabled, created_at, allowed_at, last_seen, presence, presence_at, status, status_at, seq)
-         VALUES (:slug, :kind, :name, :product, :via, :capabilities, :heartbeat_ms, :identity, :enabled, :created_at, :allowed_at, :last_seen, :presence, :presence_at, :status, :status_at, :seq)
-         ON CONFLICT(slug) DO UPDATE SET kind = excluded.kind, name = excluded.name, product = excluded.product, via = excluded.via, capabilities = excluded.capabilities,
+            "INSERT INTO actors (slug, kind, name, product, via, heartbeat_ms, identity, enabled, created_at, allowed_at, last_seen, presence, presence_at, status, status_at, seq)
+         VALUES (:slug, :kind, :name, :product, :via, :heartbeat_ms, :identity, :enabled, :created_at, :allowed_at, :last_seen, :presence, :presence_at, :status, :status_at, :seq)
+         ON CONFLICT(slug) DO UPDATE SET kind = excluded.kind, name = excluded.name, product = excluded.product, via = excluded.via,
            heartbeat_ms = excluded.heartbeat_ms, identity = excluded.identity, enabled = excluded.enabled, allowed_at = excluded.allowed_at, last_seen = excluded.last_seen,
            presence = excluded.presence, presence_at = excluded.presence_at, status = excluded.status, status_at = excluded.status_at, seq = excluded.seq",
             &values,
@@ -887,74 +970,78 @@ impl EngineStore {
     }
 
     // ---------- actors' tokens, registrations, revoked tokens ----------
+    //
+    // A token is kept by its first Biscuit revocation id, in hex: never
+    // the token. `rights` is the JSON list of the capability words it was
+    // minted for.
 
-    pub fn set_actor_token(&self, slug: &str, hash: &str, at: f64) -> Result<()> {
-        self.run("UPDATE actors SET token_hash = ?, token_at = ? WHERE slug = ?", &[hash.into(), n(at), slug.into()])?;
+    pub fn set_actor_token(&self, slug: &str, id: &str, rights: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actors SET token_id = ?, token_rights = ?, token_at = ? WHERE slug = ?", &[id.into(), rights.into(), n(at), slug.into()])?;
         Ok(())
     }
     pub fn drop_actor_token(&self, slug: &str) -> Result<()> {
-        self.run("UPDATE actors SET token_hash = NULL, token_at = NULL WHERE slug = ?", &[slug.into()])?;
+        // What it was allowed stays, for the window and for a new token.
+        self.run("UPDATE actors SET token_id = NULL, token_at = NULL WHERE slug = ?", &[slug.into()])?;
         Ok(())
     }
     pub fn touch_actor_token(&self, slug: &str, at: f64) -> Result<()> {
         self.run("UPDATE actors SET token_at = ? WHERE slug = ?", &[n(at), slug.into()])?;
         Ok(())
     }
-    pub fn actor_by_token(&self, hash: &str) -> Result<Option<Row>> {
-        self.get("SELECT slug, token_hash, token_at FROM actors WHERE token_hash = ?", &[hash.into()])
+    pub fn actor_by_token(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT slug, token_id, token_rights, token_at FROM actors WHERE token_id = ?", &[id.into()])
     }
     /// Each actor's token as XenoNet's window may see it: whether it has
-    /// one, and when it was last used (or made). Never the hash.
+    /// one, and when it was last used (or made). Never its id.
     pub fn actor_token_times(&self) -> Result<Vec<Value>> {
         Ok(self
-            .all("SELECT slug, token_hash IS NOT NULL AS has_token, token_at, gateway_hash IS NOT NULL AS has_gateway, gateway_at FROM actors", &[])?
+            .all("SELECT slug, token_id IS NOT NULL AS has_token, token_at, gateway_id IS NOT NULL AS has_gateway, gateway_at FROM actors", &[])?
             .iter()
             .map(|r| json!({ "slug": r.get("slug").to_json(), "hasToken": truthy(r.get("has_token")), "at": r.get("token_at").to_json(), "hasGateway": truthy(r.get("has_gateway")), "gatewayAt": r.get("gateway_at").to_json() }))
             .collect())
     }
     pub fn actor_token(&self, slug: &str) -> Result<Option<Row>> {
-        self.get("SELECT token_hash, token_at FROM actors WHERE slug = ? AND token_hash IS NOT NULL", &[slug.into()])
+        self.get("SELECT token_id, token_rights, token_at FROM actors WHERE slug = ? AND token_id IS NOT NULL", &[slug.into()])
     }
     pub fn stale_actor_tokens(&self, before: f64) -> Result<Vec<Row>> {
-        self.all("SELECT slug, token_hash, token_at FROM actors WHERE token_hash IS NOT NULL AND token_at < ?", &[n(before)])
+        self.all("SELECT slug, token_id, token_at FROM actors WHERE token_id IS NOT NULL AND token_at < ?", &[n(before)])
     }
     /// Actors you allowed whose token is gone (unused for 30 days): their
-    /// slugs and names, never a hash. One that reports only through the
+    /// slugs and names, never an id. One that reports only through the
     /// gateway isn't listed while its gateway token stands.
     pub fn expired_actor_tokens(&self) -> Result<Vec<Value>> {
         Ok(self
-            .all("SELECT slug, name FROM actors WHERE allowed_at IS NOT NULL AND token_hash IS NULL AND gateway_hash IS NULL ORDER BY allowed_at, rowid", &[])?
+            .all("SELECT slug, name FROM actors WHERE allowed_at IS NOT NULL AND token_id IS NULL AND gateway_id IS NULL ORDER BY allowed_at, rowid", &[])?
             .iter()
             .map(|r| json!({ "slug": r.get("slug").to_json(), "name": r.get("name").to_json() }))
             .collect())
     }
-    /// The hashes of the tokens that work now: each actor's own, its
-    /// gateway token, and those of the registrations still waiting. The
-    /// doctor holds the token-shaped strings it finds in repos to these,
-    /// so a made-up one in a test fixture isn't taken for a leak. Never
-    /// shown.
-    pub fn issued_token_hashes(&self) -> Result<Vec<String>> {
+    /// The ids of the tokens that work now: each actor's own, its gateway
+    /// token, and those of the registrations still waiting. The doctor
+    /// holds the tokens it finds in repos to these, so a made-up one in a
+    /// test fixture isn't taken for a leak. Never shown.
+    pub fn issued_token_ids(&self) -> Result<Vec<String>> {
         Ok(self
             .all(
-                "SELECT token_hash AS hash FROM actors WHERE token_hash IS NOT NULL
-                 UNION SELECT gateway_hash FROM actors WHERE gateway_hash IS NOT NULL
-                 UNION SELECT token_hash FROM actor_requests WHERE decision IS NULL",
+                "SELECT token_id AS id FROM actors WHERE token_id IS NOT NULL
+                 UNION SELECT gateway_id FROM actors WHERE gateway_id IS NOT NULL
+                 UNION SELECT token_id FROM actor_requests WHERE decision IS NULL",
                 &[],
             )?
             .iter()
-            .filter_map(|r| r.text("hash").map(str::to_string))
+            .filter_map(|r| r.text("id").map(str::to_string))
             .collect())
     }
-    /// A registration waiting for you: `{ id, slug, ask, token_hash, asker,
+    /// A registration waiting for you: `{ id, slug, ask, token_id, asker,
     /// created_at, expires_at }`.
     pub fn add_actor_request(&self, r: &Value) -> Result<()> {
         self.run(
-            "INSERT INTO actor_requests (id, slug, ask, token_hash, asker, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO actor_requests (id, slug, ask, token_id, asker, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             &[
                 field(r, "id", 1)?,
                 field(r, "slug", 2)?,
                 field(r, "ask", 3)?,
-                field(r, "token_hash", 4)?,
+                field(r, "token_id", 4)?,
                 field_or_null(r, "asker", 5)?,
                 field(r, "created_at", 6)?,
                 field(r, "expires_at", 7)?,
@@ -965,8 +1052,8 @@ impl EngineStore {
     pub fn actor_request(&self, id: &str) -> Result<Option<Row>> {
         self.get("SELECT * FROM actor_requests WHERE id = ?", &[id.into()])
     }
-    pub fn actor_request_by_token(&self, hash: &str) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_requests WHERE token_hash = ?", &[hash.into()])
+    pub fn actor_request_by_token(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM actor_requests WHERE token_id = ?", &[id.into()])
     }
     pub fn waiting_actor_requests(&self, now: f64) -> Result<Vec<Row>> {
         self.all("SELECT * FROM actor_requests WHERE decision IS NULL AND expires_at > ? ORDER BY created_at, rowid", &[n(now)])
@@ -982,38 +1069,74 @@ impl EngineStore {
     pub fn actor_request_times(&self, since: f64) -> Result<Vec<Value>> {
         Ok(self.all("SELECT created_at FROM actor_requests WHERE created_at >= ? ORDER BY created_at", &[n(since)])?.iter().map(|r| r.get("created_at").to_json()).collect())
     }
-    pub fn set_gateway_token(&self, slug: &str, hash: &str, at: f64) -> Result<()> {
-        self.run("UPDATE actors SET gateway_hash = ?, gateway_at = ? WHERE slug = ?", &[hash.into(), n(at), slug.into()])?;
+    pub fn set_gateway_token(&self, slug: &str, id: &str, at: f64) -> Result<()> {
+        self.run("UPDATE actors SET gateway_id = ?, gateway_at = ? WHERE slug = ?", &[id.into(), n(at), slug.into()])?;
         Ok(())
     }
     pub fn drop_gateway_token(&self, slug: &str) -> Result<()> {
-        self.run("UPDATE actors SET gateway_hash = NULL, gateway_at = NULL WHERE slug = ?", &[slug.into()])?;
+        self.run("UPDATE actors SET gateway_id = NULL, gateway_at = NULL WHERE slug = ?", &[slug.into()])?;
         Ok(())
     }
     pub fn touch_gateway_token(&self, slug: &str, at: f64) -> Result<()> {
         self.run("UPDATE actors SET gateway_at = ? WHERE slug = ?", &[n(at), slug.into()])?;
         Ok(())
     }
-    pub fn actor_by_gateway_token(&self, hash: &str) -> Result<Option<Row>> {
-        self.get("SELECT slug, gateway_hash, gateway_at FROM actors WHERE gateway_hash = ?", &[hash.into()])
+    pub fn actor_by_gateway_token(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT slug, gateway_id, gateway_at FROM actors WHERE gateway_id = ?", &[id.into()])
     }
     pub fn gateway_token(&self, slug: &str) -> Result<Option<Row>> {
-        self.get("SELECT gateway_hash, gateway_at FROM actors WHERE slug = ? AND gateway_hash IS NOT NULL", &[slug.into()])
+        self.get("SELECT gateway_id, gateway_at FROM actors WHERE slug = ? AND gateway_id IS NOT NULL", &[slug.into()])
     }
     pub fn stale_gateway_tokens(&self, before: f64) -> Result<Vec<Row>> {
-        self.all("SELECT slug, gateway_hash, gateway_at FROM actors WHERE gateway_hash IS NOT NULL AND gateway_at < ?", &[n(before)])
+        self.all("SELECT slug, gateway_id, gateway_at FROM actors WHERE gateway_id IS NOT NULL AND gateway_at < ?", &[n(before)])
     }
-    /// A token that stopped working, and why: `{ token_hash, actor, reason,
-    /// at }`. The first reason stands.
-    pub fn revoke_actor_token(&self, r: &Value) -> Result<()> {
+    /// A token that stopped working, and why: `{ id, actor, reason, at }`,
+    /// `id` its revocation id in hex, `actor` whom it was for (an actor's
+    /// id, or an assistant's grant). The first reason stands.
+    pub fn revoke_token(&self, r: &Value) -> Result<()> {
         self.run(
-            "INSERT OR IGNORE INTO actor_revoked (token_hash, actor, reason, at) VALUES (?, ?, ?, ?)",
-            &[field(r, "token_hash", 1)?, field(r, "actor", 2)?, field(r, "reason", 3)?, field(r, "at", 4)?],
+            "INSERT OR IGNORE INTO revoked (id, actor, reason, at) VALUES (?, ?, ?, ?)",
+            &[field(r, "id", 1)?, field(r, "actor", 2)?, field(r, "reason", 3)?, field(r, "at", 4)?],
         )?;
         Ok(())
     }
-    pub fn revoked_actor_token(&self, hash: &str) -> Result<Option<Row>> {
-        self.get("SELECT * FROM actor_revoked WHERE token_hash = ?", &[hash.into()])
+    /// A revoked token, by any of its revocation ids in hex.
+    pub fn revoked(&self, id: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM revoked WHERE id = ?", &[id.into()])
+    }
+
+    // ---------- grants' scopes ----------
+    //
+    // What a grant may use, beside its token: `sessions` (the selector of
+    // sessions it may see and reach), `projects` (the JSON list of project
+    // ids it may read), `identities` (the JSON list of accounts it may act
+    // as; none set is today's default, the machine's own), and `intents`,
+    // kept for when intents are built. Keyed by the token's revocation id,
+    // so the scope goes with the token.
+
+    /// A grant's scopes, made or changed: `{ token, actor, sessions?,
+    /// projects?, identities?, at, until? }`; a field left out stays.
+    pub fn put_scope(&self, r: &Value) -> Result<()> {
+        let token = field(r, "token", 1)?;
+        self.transaction(|| {
+            self.run("INSERT OR IGNORE INTO grant_scopes (token, actor, at) VALUES (?, ?, ?)", &[token.clone(), field(r, "actor", 2)?, field(r, "at", 3)?])?;
+            self.run("UPDATE grant_scopes SET at = ? WHERE token = ?", &[field(r, "at", 1)?, token.clone()])?;
+            // Each column the caller names; the names are this list's.
+            for k in ["sessions", "projects", "identities", "until"] {
+                if r.get(k).is_some() {
+                    self.run(&format!("UPDATE grant_scopes SET {k} = ? WHERE token = ?"), &[field_or_null(r, k, 1)?, token.clone()])?;
+                }
+            }
+            Ok(())
+        })
+    }
+    /// A grant's scopes, by its token's revocation id.
+    pub fn scope(&self, token: &str) -> Result<Option<Row>> {
+        self.get("SELECT * FROM grant_scopes WHERE token = ?", &[token.into()])
+    }
+    pub fn drop_scope(&self, token: &str) -> Result<()> {
+        self.run("DELETE FROM grant_scopes WHERE token = ?", &[token.into()])?;
+        Ok(())
     }
 
     // ---------- remote connections ----------
@@ -1074,8 +1197,8 @@ impl EngineStore {
     /// A grant: a record with its columns' names.
     pub fn add_grant(&self, row: &Value) -> Result<()> {
         self.run_record(
-            "INSERT INTO actor_grants (grant_id, connection_id, device_id, permissions, project_allowlist, field_policy, data_mode, lookback_ms, revision, token_hash, created_at, expires_at)
-         VALUES (:grant_id, :connection_id, :device_id, :permissions, :project_allowlist, :field_policy, :data_mode, :lookback_ms, 1, :token_hash, :created_at, :expires_at)",
+            "INSERT INTO actor_grants (grant_id, connection_id, device_id, permissions, field_policy, data_mode, lookback_ms, revision, token_id, created_at, expires_at)
+         VALUES (:grant_id, :connection_id, :device_id, :permissions, :field_policy, :data_mode, :lookback_ms, 1, :token_id, :created_at, :expires_at)",
             &record(row),
         )?;
         Ok(())
@@ -1087,11 +1210,10 @@ impl EngineStore {
         self.all("SELECT * FROM actor_grants ORDER BY created_at, rowid", &[])
     }
     /// A grant's scope changed (the fields of `c` it has of
-    /// project_allowlist, field_policy, data_mode, token_hash and
-    /// expires_at): its revision moves on. Whether it was changed (it isn't
+    /// field_policy, data_mode, token_id and expires_at): its revision moves on. Whether it was changed (it isn't
     /// once revoked).
     pub fn change_grant(&self, id: &str, c: &Value) -> Result<bool> {
-        let sets: Vec<(&str, &Value)> = ["project_allowlist", "field_policy", "data_mode", "token_hash", "expires_at"].into_iter().filter_map(|k| Some((k, c.get(k)?))).collect();
+        let sets: Vec<(&str, &Value)> = ["field_policy", "data_mode", "token_id", "expires_at"].into_iter().filter_map(|k| Some((k, c.get(k)?))).collect();
         let mut parts: Vec<String> = sets.iter().map(|(k, _)| format!("{k} = ?")).collect();
         parts.push("revision = revision + 1".into());
         let q = format!("UPDATE actor_grants SET {} WHERE grant_id = ? AND revoked_at IS NULL", parts.join(", "));
@@ -1208,7 +1330,7 @@ mod tests {
     #[test]
     fn a_new_store_takes_every_step_and_keeps_messages() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
-        assert_eq!(s.version().unwrap(), Version { from: 0, version: 8, newer: false });
+        assert_eq!(s.version().unwrap(), Version { from: 0, version: 9, newer: false });
         let id = s.send(&json!({ "sender": "claude:a", "target": "codex:b", "body": "hi", "recipients": ["codex:b"] }), 1000.0).unwrap();
         assert_eq!(id, 1.0);
         let unseen = s.unseen("codex:b").unwrap();
@@ -1261,25 +1383,61 @@ mod tests {
     #[test]
     fn the_issued_tokens_are_the_ones_that_work_now() {
         let s = EngineStore::open(":memory:", 1000.0).unwrap();
-        assert_eq!(s.issued_token_hashes().unwrap(), Vec::<String>::new());
-        for (slug, token, gateway) in [("muse", Some("h-muse"), Some("g-muse")), ("wren", Some("h-wren"), None), ("moth", None, None)] {
+        assert_eq!(s.issued_token_ids().unwrap(), Vec::<String>::new());
+        for (slug, token, gateway) in [("muse", Some("i-muse"), Some("g-muse")), ("wren", Some("i-wren"), None), ("moth", None, None)] {
             s.run(
-                "INSERT INTO actors (slug, kind, name, via, capabilities, created_at, token_hash, gateway_hash) VALUES (?, 'agent', ?, '[]', '[]', 1, ?, ?)",
+                "INSERT INTO actors (slug, kind, name, via, created_at, token_id, gateway_id) VALUES (?, 'agent', ?, '[]', 1, ?, ?)",
                 &[slug.into(), slug.into(), token.into(), gateway.into()],
             )
             .unwrap();
         }
-        for (id, hash, decision) in [("r1", "h-waiting", None), ("r2", "h-denied", Some("deny")), ("r3", "h-wren", Some("allow"))] {
+        for (id, token, decision) in [("r1", "i-waiting", None), ("r2", "i-denied", Some("deny")), ("r3", "i-wren", Some("allow"))] {
             s.run(
-                "INSERT INTO actor_requests (id, slug, ask, token_hash, created_at, expires_at, decision) VALUES (?, 'heron', '{}', ?, 1, 2, ?)",
-                &[id.into(), hash.into(), decision.into()],
+                "INSERT INTO actor_requests (id, slug, ask, token_id, created_at, expires_at, decision) VALUES (?, 'heron', '{}', ?, 1, 2, ?)",
+                &[id.into(), token.into(), decision.into()],
             )
             .unwrap();
         }
-        s.revoke_actor_token(&json!({ "token_hash": "h-old", "actor": "actor:muse", "reason": "rotated", "at": 5.0 })).unwrap();
-        let mut hashes = s.issued_token_hashes().unwrap();
-        hashes.sort();
-        assert_eq!(hashes, ["g-muse", "h-muse", "h-waiting", "h-wren"], "a revoked token, or a refused registration's, no longer works");
+        s.revoke_token(&json!({ "id": "i-old", "actor": "actor:muse", "reason": "rotated", "at": 5.0 })).unwrap();
+        assert_eq!(s.revoked("i-old").unwrap().and_then(|r| r.text("reason").map(str::to_string)).as_deref(), Some("rotated"));
+        let mut ids = s.issued_token_ids().unwrap();
+        ids.sort();
+        assert_eq!(ids, ["g-muse", "i-muse", "i-waiting", "i-wren"], "a revoked token, or a refused registration's, no longer works");
+    }
+
+    #[test]
+    fn step_nine_starts_the_actors_tables_afresh() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        let steps = engine_steps();
+        for step in &steps[..8] {
+            step(&db).unwrap();
+        }
+        db.execute_batch(
+            "INSERT INTO actors (slug, kind, name, via, capabilities, created_at, token_hash) VALUES ('muse', 'agent', 'Muse', '[]', '[]', 1, 'h1');
+             INSERT INTO actor_connections (connection_id, actor_slug, adapter_id, provider, transport_kind, label, audience_description, audience_verification, audience_scope, created_at)
+               VALUES ('cn_1', 'muse', 'a', 'p', 't', 'l', 'd', 'v', 's', 1);",
+        )
+        .unwrap();
+        steps[8](&db).unwrap();
+        let count = |t: &str| db.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!([count("actors"), count("actor_connections"), count("revoked"), count("grant_scopes")], [0; 4]);
+        assert!(!has_column(&db, "actors", "capabilities").unwrap() && has_column(&db, "actors", "token_rights").unwrap());
+    }
+
+    #[test]
+    fn a_grants_scopes_go_by_its_token() {
+        let s = EngineStore::open(":memory:", 1000.0).unwrap();
+        s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "sessions": "project:atlas", "at": 1.0, "until": 9.0 })).unwrap();
+        s.put_scope(&json!({ "token": "i1", "actor": "actor:muse", "projects": "[\"prj_1\"]", "at": 2.0 })).unwrap();
+        let r = s.scope("i1").unwrap().unwrap();
+        assert_eq!(
+            (r.text("sessions"), r.text("projects"), r.num("until"), r.text("identities")),
+            (Some("project:atlas"), Some("[\"prj_1\"]"), Some(9.0), None),
+            "a field left out stays"
+        );
+        s.drop_scope("i1").unwrap();
+        assert!(s.scope("i1").unwrap().is_none());
     }
 }
 

@@ -3,11 +3,12 @@
 //! paging, shape, size and the four-at-a-time limit, the grant's
 //! standing and rate, the audit of every read, and what a read says of its
 //! actor on the map. The made-up reads (a grant you haven't verified, and
-//! the pairing's preview) are the fixtures'.
+//! the pairing's preview) are the fixtures'. A read's page cursors are the
+//! token it came in with, narrowed (`pages`).
 
 use super::connections::Remote;
-use crate::cursors::Cursors;
-use crate::service::{self, Config, Inflight, ReadHost, LIMITS};
+use crate::pages::{Granted, Standalone};
+use crate::service::{self, Config, Inflight, Pages, ReadHost, LIMITS};
 use crate::{audit, fixtures, projection, source};
 use async_trait::async_trait;
 use regex::Regex;
@@ -17,7 +18,7 @@ use std::time::Duration;
 use xenonet_actors::adapters::{ADAPTERS, TRANSPORTS};
 use xenonet_actors::limits::Buckets;
 use xenonet_actors::remote_presence::{self, RemotePresence};
-use xenonet_api::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, State, R};
+use xenonet_api::cores::{Actors, AssistantService, AssistantSource, Audit, CoreError, EngineStore, Grants, State, R};
 use xenonet_api::wire::Emitter;
 use xenonet_os::error::Failure;
 use xenonet_os::fx;
@@ -68,7 +69,7 @@ pub fn input_ok(tool: &str, args: &Value) -> bool {
     static SESSION: OnceLock<Regex> = OnceLock::new();
     static ISO: OnceLock<Regex> = OnceLock::new();
     let Some(o) = args.as_object() else { return false };
-    let cursor = |v: &Value| v.as_str().is_some_and(|s| re(&CURSOR, r"^[A-Za-z0-9_-]{1,900}\.[A-Za-z0-9_-]{43}$").is_match(s));
+    let cursor = |v: &Value| v.as_str().is_some_and(|s| re(&CURSOR, r"^xenonet_actor_[A-Za-z0-9_-]{64,4096}$").is_match(s));
     let limit = |v: &Value| v.as_f64().is_some_and(|n| n.fract() == 0.0 && (1.0..=50.0).contains(&n));
     let project = |v: &Value| v.as_str().is_some_and(|s| re(&PROJECT, &format!("^prj_{UUID}$")).is_match(s));
     let session = |v: &Value| v.as_str().is_some_and(|s| re(&SESSION, &format!("^(claude|codex|grok):{UUID}$")).is_match(s));
@@ -96,16 +97,19 @@ fn result_ok(envelope: &Value) -> bool {
     typed::fits::<xenonet_model::assistant::Answer>(envelope)
 }
 
-fn key() -> Vec<u8> {
-    xenonet_os::files::random_hex(32).into_bytes()
-}
-
 /// What answering a read needs of the world: the view, an actor, a
 /// session's stats and the key for ids.
 #[derive(Clone)]
 enum World {
     Real(Arc<Reads>),
     Fixture,
+}
+
+/// Where a read's page cursors come from: the grant it came in with (its
+/// text, and its actor's slug), or the made-up reads' own.
+enum Cursors {
+    Granted(Arc<dyn Grants>, String, String),
+    Standalone(Arc<Standalone>),
 }
 
 /// One read to answer: its operation and tool, its arguments, the grant's
@@ -132,9 +136,6 @@ fn failure(e: CoreError) -> Failure {
 #[async_trait(?Send)]
 impl ReadHost for Here {
     async fn now(&self) -> f64 {
-        now_ms()
-    }
-    async fn cursor_now(&self) -> f64 {
         now_ms()
     }
     async fn view(&self) -> Result<Value, Failure> {
@@ -175,12 +176,20 @@ impl ReadHost for Here {
 
 /// One answer: its envelope and what it read, or its refusal (`{ refused,
 /// code, reason }`) or what it failed with.
-async fn answer(world: World, version: String, cursor_key: Vec<u8>, a: Asked) -> Result<Value, Value> {
+async fn answer(world: World, version: String, cursors: Cursors, a: Asked) -> Result<Value, Value> {
     let Asked { op, tool, args, policy, request_id } = a;
     let rt = tokio::runtime::Handle::current();
     let done = fx::local(move || async move {
-        let (cfg, cursors) = (config(&version), Cursors::new(Some(cursor_key)));
-        service::answer(&Here { world, rt }, &cfg, &cursors, &op, &tool, &args, &policy, &request_id).await
+        let cfg = config(&version);
+        let granted;
+        let pages: &dyn Pages = match &cursors {
+            Cursors::Granted(grants, token, slug) => {
+                granted = Granted { grants: grants.as_ref(), token, slug };
+                &granted
+            }
+            Cursors::Standalone(s) => s.as_ref(),
+        };
+        service::answer(&Here { world, rt }, &cfg, pages, &op, &tool, &args, &policy, &request_id).await
     })
     .await;
     match done {
@@ -204,7 +213,8 @@ pub struct Reads {
     pub store: Option<xenonet_engine::store::Shared>,
     pub version: String,
     pub emitter: Emitter,
-    cursor_key: Vec<u8>,
+    /// The made-up reads' page cursors, for the pairing's preview.
+    standalone: OnceLock<Arc<Standalone>>,
     view: Mutex<Option<(f64, Value)>>,
     buckets: Mutex<Buckets>,
     inflight: Arc<Mutex<Inflight>>,
@@ -281,7 +291,7 @@ impl Reads {
             store,
             version: version.into(),
             emitter,
-            cursor_key: key(),
+            standalone: OnceLock::new(),
             view: Mutex::new(None),
             buckets: Mutex::new(Buckets::new(1024)),
             inflight: Arc::new(Mutex::new(Inflight::default())),
@@ -371,6 +381,10 @@ impl Reads {
         }
         let (Some(op_s), Some(tool)) = (b.op.clone(), b.tool.clone()) else { return no("INVALID_ARGUMENT", "bad-request", Map::new()) };
         let Some(remote) = self.remote.clone() else { return no("SERVICE_UNAVAILABLE", "no-connections", Map::new()) };
+        // The token the adapter said hello with, which its page cursors
+        // narrow.
+        let token = session["token"].as_str().unwrap_or_default().to_string();
+        let slug = xenonet_text::text::display(&session["actorId"]).trim_start_matches("actor:").to_string();
         let mut standing = remote.recheck_at(&session["grantId"], &json!(-1));
         if standing["ok"] != json!(true) {
             return no(&xenonet_text::text::display(&standing["code"]), &xenonet_text::text::display(&standing["reason"]), Map::new());
@@ -394,7 +408,7 @@ impl Reads {
                 let running = tokio::spawn(answer(
                     World::Real(self.clone()),
                     self.version.clone(),
-                    self.cursor_key.clone(),
+                    Cursors::Granted(remote.grants.clone(), token.clone(), slug.clone()),
                     Asked { op: op_s.clone(), tool: tool.clone(), args: b.args.clone(), policy: policy.clone(), request_id: request_id.clone() },
                 ));
                 let got = {
@@ -459,7 +473,8 @@ impl Reads {
         let b = service::begin(&cfg, &json!({ "request_id": request_id, "operation": operation, "arguments": {} }));
         let (Some(op), Some(tool), None) = (b.op.clone(), b.tool.clone(), b.no.as_ref()) else { return Value::Null };
         let policy = fixtures::standalone_policy(labels);
-        match answer(World::Fixture, self.version.clone(), self.cursor_key.clone(), Asked { op, tool, args: b.args.clone(), policy, request_id }).await {
+        let standalone = self.standalone.get_or_init(|| Arc::new(Standalone::new(xenonet_text::text::display(&policy["actorId"]).trim_start_matches("actor:")))).clone();
+        match answer(World::Fixture, self.version.clone(), Cursors::Standalone(standalone), Asked { op, tool, args: b.args.clone(), policy, request_id }).await {
             Ok(out) => out["envelope"].get("data").cloned().unwrap_or(Value::Null),
             Err(_) => Value::Null,
         }

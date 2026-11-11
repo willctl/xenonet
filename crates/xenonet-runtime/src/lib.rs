@@ -16,6 +16,7 @@ pub mod delivery;
 pub mod engine;
 pub mod exec;
 pub mod fs;
+pub mod grants;
 pub mod ground;
 pub mod map;
 pub mod network;
@@ -70,6 +71,7 @@ pub fn wire(cores: &mut Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtim
     cores.router = Arc::new(delivery::RouterDriver(w.clone()));
     cores.reports = Arc::new(reports::ReportsDriver(w.clone()));
     cores.spend = Arc::new(spend::SpendDriver::new(w.clone()));
+    cores.grants = Arc::new(grants::GrantsDriver(w.clone()));
     if w.actors.is_some() {
         cores.actors = Some(Arc::new(actors::ActorsDriver(w.clone())));
         cores.registration = Some(Arc::new(registration::RegistrationDriver(w.clone())));
@@ -126,6 +128,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
     let wakes = actors.as_ref().map(|_| wakes::WakeSide::new(store.clone(), setup.demo, &env.version));
     let (demo, state_dir) = (setup.demo, setup.state_dir.clone());
     let state_dir = Path::new(&state_dir);
+    let policy_store = store.clone();
     let w = Arc::new(Runtime {
         setup,
         env: env.clone(),
@@ -140,6 +143,7 @@ pub fn runtime(cores: &Cores, setup: Setup, env: &WireEnv) -> Option<Arc<Runtime
         policy: delivery::PolicySide::new(
             Some(state_dir.join("delivery.json").to_string_lossy().into_owned()),
             Some(state_dir.join("delivery-audit.jsonl").to_string_lossy().into_owned()),
+            Some(policy_store),
         ),
         router: delivery::RouterSide::new(demo, listen_file, state_dir),
         channels: delivery::ChannelSide::default(),

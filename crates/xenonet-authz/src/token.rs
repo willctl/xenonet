@@ -6,17 +6,18 @@
 //! so they're kept and travel, and tokens outlive restarts; the root's
 //! private half never touches a disk.
 //!
-//! Tokens name machines and networks only, in this phase: an actor token
-//! holds the actor's slug, its machine, the network it may act in and one
-//! `right(...)` per action; an assistant token holds its grant's id, its
-//! revision and `right("read")`. Both expire. Attenuation appends checks
-//! (a door, an earlier end, fewer actions, a page cursor), which in Biscuit
-//! can only narrow. Verifying refuses a root the ground doesn't hold, one
+//! One kind of token, for every actor, a bot or a cloud assistant: its
+//! grant. It holds the actor's slug, its machine, the network it may act
+//! in (its hosts) and one `right(...)` per action, reads (`right("read")`)
+//! and acts alike, and it expires. Which sessions and identities it may
+//! use are rows the receiver keeps by the token's revocation id. Attenuation
+//! appends checks (a door, an earlier end, fewer actions, a page cursor),
+//! which in Biscuit can only narrow. Verifying refuses a root the ground doesn't hold, one
 //! out of its time, one whose machine's key didn't sign it, a revoked
 //! token, and any authority block that isn't exactly what's minted here, so
 //! no root can slip a rule or a fact of the ground's into a decision.
 
-use crate::vocab::{Act, Action, ActorSlug, GrantId, MachineId, NetworkId, ReadScope, Request};
+use crate::vocab::{Act, Action, ActorSlug, MachineId, NetworkId, ReadScope, Request};
 use crate::{AuthzError, Door, Ground, R};
 use biscuit_auth::builder::{date, fact, int, string, Algorithm, Term};
 use biscuit_auth::error::{FailedCheck, Logic, Token as BiscuitError};
@@ -32,16 +33,16 @@ use xenonet_id::sign::{Purpose, Signer, VerifyingKey};
 pub const ACTOR_PREFIX: &str = "xenonet_actor_";
 /// The prefix of an actor's token narrowed to the gateway.
 pub const GATEWAY_PREFIX: &str = "xenonet_gateway_";
-/// The prefix of an assistant's read token.
-pub const ASSISTANT_PREFIX: &str = "xenonet_assistant_";
 /// How long a page cursor lasts.
 pub const CURSOR_MS: i64 = 5 * 60_000;
 
 /// The longest token text read.
 const TEXT_MAX: usize = 16 * 1024;
+/// The longest place a page cursor holds.
+const PAGE_MAX: usize = 1024;
 
 // What an authority block may hold: these facts, and this one check.
-const FACTS: [&str; 7] = ["actor", "grant", "machine", "network", "right", "revision", "expires"];
+const FACTS: [&str; 5] = ["actor", "machine", "network", "right", "expires"];
 const EXPIRY: &str = "check if time($time), expires($until), $time <= $until";
 
 // Datalog that a token can't make slow: a decision is on a hot path.
@@ -164,15 +165,6 @@ pub struct ActorGrant {
     pub until: i64,
 }
 
-/// An assistant's read grant, by its id and revision: what it may read
-/// (projects, data, lookback) stays in the receiver's rows for the grant.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssistantGrant {
-    pub grant: GrantId,
-    pub revision: u64,
-    pub until: i64,
-}
-
 impl TokenRoot {
     /// A new root for `machine`, certified by `signer`, the machine's
     /// signing key, from `from` to `until`.
@@ -194,12 +186,7 @@ impl TokenRoot {
         }
         let b = || -> Result<Biscuit, BiscuitError> {
             let mut b = Biscuit::builder().root_key_id(self.cert.key_id());
-            b = match &bearer {
-                Bearer::Actor { slug, machine } => b.fact(fact("actor", &[string(slug.as_str())]))?.fact(fact("machine", &[string(machine.as_str())]))?,
-                Bearer::Assistant { grant, machine, revision } => {
-                    b.fact(fact("grant", &[string(grant.as_str())]))?.fact(fact("machine", &[string(machine.as_str())]))?.fact(fact("revision", &[int(*revision as i64)]))?
-                }
-            };
+            b = b.fact(fact("actor", &[string(bearer.slug.as_str())]))?.fact(fact("machine", &[string(bearer.machine.as_str())]))?;
             if let Some(n) = &network {
                 b = b.fact(fact("network", &[string(n.as_str())]))?;
             }
@@ -217,23 +204,15 @@ impl TokenRoot {
         let mut rights = grant.rights.clone();
         rights.sort();
         rights.dedup();
-        self.mint(Bearer::Actor { slug: grant.actor.clone(), machine: self.cert.machine.clone() }, grant.network.clone(), rights, grant.until)
-    }
-
-    /// An assistant's read token.
-    pub fn mint_assistant(&self, grant: &AssistantGrant) -> R<Token> {
-        if grant.revision > i64::MAX as u64 {
-            return Err(AuthzError::new("token", "that revision is too large"));
-        }
-        self.mint(Bearer::Assistant { grant: grant.grant.clone(), machine: self.cert.machine.clone(), revision: grant.revision }, None, vec![Action::Read], grant.until)
+        self.mint(Bearer { slug: grant.actor.clone(), machine: self.cert.machine.clone() }, grant.network.clone(), rights, grant.until)
     }
 }
 
-/// Who a token speaks for.
+/// Whom a token speaks for: an actor of a machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Bearer {
-    Actor { slug: ActorSlug, machine: MachineId },
-    Assistant { grant: GrantId, machine: MachineId, revision: u64 },
+pub struct Bearer {
+    pub slug: ActorSlug,
+    pub machine: MachineId,
 }
 
 /// One way to narrow a token.
@@ -246,8 +225,9 @@ pub enum Narrowing {
     /// Only these actions.
     Actions(Vec<Action>),
     /// A page cursor: only this read, with these filters (their hash),
-    /// until then.
-    Cursor { scope: ReadScope, filters: [u8; 32], until: i64 },
+    /// until then. `after` is where the last page ended, base64url, which
+    /// the cursor holds as data: it narrows nothing.
+    Cursor { scope: ReadScope, filters: [u8; 32], until: i64, after: Option<String> },
 }
 
 /// A token, verified: minted here, or parsed against the ground's
@@ -263,10 +243,7 @@ pub struct Token {
 
 impl fmt::Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.bearer {
-            Bearer::Actor { slug, machine } => write!(f, "[the token of the actor {slug} on {machine}]"),
-            Bearer::Assistant { grant, machine, .. } => write!(f, "[the token of the grant {grant} on {machine}]"),
-        }
+        write!(f, "[the token of the actor {} on {}]", self.bearer.slug, self.bearer.machine)
     }
 }
 
@@ -316,6 +293,22 @@ impl Token {
         self.biscuit.revocation_identifiers()
     }
 
+    /// Its first revocation id, in hex: what the receiver keeps of a token
+    /// it minted, and revokes it by.
+    pub fn id(&self) -> String {
+        self.biscuit.revocation_identifiers().first().map(|id| hex(id)).unwrap_or_default()
+    }
+
+    /// The revocation ids of a token's text, in hex, without verifying it:
+    /// only to look up what this machine already holds of them (why it was
+    /// revoked, whether it issued it), never to allow anything.
+    pub fn ids_of(text: &str, prefix: &str) -> Option<Vec<String>> {
+        let body = text.strip_prefix(prefix).filter(|b| b.len() <= TEXT_MAX)?;
+        let bytes = unb64(body)?;
+        let unverified = UnverifiedBiscuit::from(&bytes).ok()?;
+        Some(unverified.revocation_identifiers().iter().map(|id| hex(id)).collect())
+    }
+
     /// The text to hand over: `prefix` and the base64url of the token.
     pub fn encode(&self, prefix: &str) -> R<String> {
         check_prefix(prefix)?;
@@ -337,8 +330,9 @@ impl Token {
                     let any: Vec<String> = list.iter().map(|a| format!("action(\"{}\")", a.as_str())).collect();
                     b.check(format!("check if {}", any.join(" or ")).as_str())
                 }
-                Narrowing::Cursor { scope, filters, until } => {
-                    until_check(b.check(format!("check if op(\"{}\"), filters(\"{}\")", scope.as_str(), hex(filters)).as_str())?, *until)
+                Narrowing::Cursor { scope, filters, until, after } => {
+                    let b = until_check(b.check(format!("check if op(\"{}\"), filters(\"{}\")", scope.as_str(), hex(filters)).as_str())?, *until)?;
+                    b.fact(fact("page", &[string(after.as_deref().unwrap_or("")), int(*until)]))
                 }
             }
         };
@@ -346,13 +340,31 @@ impl Token {
         Ok(Token { biscuit, root: self.root.clone(), bearer: self.bearer.clone(), network: self.network.clone(), rights: self.rights.clone(), until: self.until })
     }
 
-    /// A page cursor for an assistant: this token, narrowed to one read
-    /// with these filters, for five minutes from `now`.
-    pub fn cursor(&self, scope: ReadScope, filters: &[u8; 32], now: i64) -> R<Token> {
-        if !matches!(self.bearer, Bearer::Assistant { .. }) {
-            return Err(AuthzError::new("token", "only an assistant's token makes page cursors"));
+    /// A page cursor: this token, narrowed to one read with these filters,
+    /// for five minutes from `now`, holding where the last page ended
+    /// (`after`, base64url). Only a token with the right to read makes one.
+    pub fn cursor(&self, scope: ReadScope, filters: &[u8; 32], now: i64, after: Option<&str>) -> R<Token> {
+        if !self.rights.contains(&Action::Read) {
+            return Err(AuthzError::new("token", "only a token with the right to read makes page cursors"));
         }
-        self.attenuate(&Narrowing::Cursor { scope, filters: *filters, until: now.saturating_add(CURSOR_MS) })
+        if after.is_some_and(|a| a.len() > PAGE_MAX || !a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) {
+            return Err(AuthzError::new("token", "a page's place is base64url, 1 KiB at most"));
+        }
+        self.attenuate(&Narrowing::Cursor { scope, filters: *filters, until: now.saturating_add(CURSOR_MS), after: after.map(str::to_string) })
+    }
+
+    /// A page cursor's place and when it ends: where the last page ended
+    /// (empty for none) and the end its last block names, as data the
+    /// holder wrote. What the cursor allows is `decide`'s.
+    pub fn page(&self) -> Option<(String, i64)> {
+        let last = self.biscuit.block_count().checked_sub(1).filter(|n| *n > 0)?;
+        let source = self.biscuit.print_block_source(last).ok()?;
+        let line = source.split(";\n").map(str::trim).find(|l| l.starts_with("page(\""))?.trim_end_matches(';');
+        let (after, until) = line.strip_prefix("page(\"")?.strip_suffix(')')?.split_once("\", ")?;
+        if after.len() > PAGE_MAX || !after.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+            return None;
+        }
+        Some((after.to_string(), until.parse().ok()?))
     }
 
     /// A token from its text, verified against the roots the ground holds
@@ -416,16 +428,7 @@ impl Token {
         if machine != root.machine {
             return Err(refused(format!("that token speaks for {machine}, and its root for {}", root.machine)));
         }
-        let actors = values::<String>(&mut a, "actor")?;
-        let grants = values::<String>(&mut a, "grant")?;
-        let bearer = match (actors.is_empty(), grants.is_empty()) {
-            (false, true) => Bearer::Actor { slug: ActorSlug::new(&one(actors, "actor")?)?, machine },
-            (true, false) => {
-                let revision = u64::try_from(one(values::<i64>(&mut a, "revision")?, "revision")?).map_err(|_| refused("that token's revision isn't one"))?;
-                Bearer::Assistant { grant: GrantId::new(&one(grants, "grant")?)?, machine, revision }
-            }
-            _ => return Err(refused("that token is for neither an actor nor a grant")),
-        };
+        let bearer = Bearer { slug: ActorSlug::new(&one(values::<String>(&mut a, "actor")?, "actor")?)?, machine };
         let network = match values::<String>(&mut a, "network")? {
             v if v.is_empty() => None,
             v => Some(NetworkId::new(&one(v, "network")?)?),
@@ -435,9 +438,6 @@ impl Token {
             rights.push(Action::parse(&r).ok_or_else(|| refused(format!("{r} isn't a right")))?);
         }
         rights.sort();
-        if matches!(bearer, Bearer::Assistant { .. }) && rights != [Action::Read] {
-            return Err(refused("an assistant's token reads, and nothing else"));
-        }
         let until = from_date(one(values::<SystemTime>(&mut a, "expires")?, "end")?);
         if until / 1000 < now / 1000 {
             return Err(AuthzError::new("expired", "that token expired"));
@@ -547,9 +547,6 @@ mod tests {
         fn asker(&self, _: &crate::AskId) -> Option<Attestation> {
             None
         }
-        fn assistant_grant(&self, _: &GrantId) -> Option<u64> {
-            None
-        }
         fn governance_synced_at(&self) -> Option<i64> {
             None
         }
@@ -582,7 +579,7 @@ mod tests {
         Token::parse(&crafted(&root, GOOD), ACTOR_PREFIX, &one, NOW).unwrap();
         // A rule that would make any right, a fact of the request's, a
         // second machine, a fact with two terms, a missing or second end,
-        // an actor and a grant at once: all refused.
+        // a fact XenoNet doesn't mint: all refused.
         for code in [
             GOOD.replace(r#"right("message");"#, r"right($a) <- action($a);"),
             GOOD.replace(r#"right("message");"#, r#"door("local");"#),
@@ -590,7 +587,7 @@ mod tests {
             GOOD.replace(r#"right("message");"#, r#"right("message", "m2");"#),
             GOOD.replace("check if time($time), expires($until), $time <= $until;", ""),
             GOOD.replace("check if time($time), expires($until), $time <= $until;", "check if true;"),
-            GOOD.replace(r#"actor("muse");"#, r#"actor("muse"); grant("g1");"#),
+            GOOD.replace(r#"actor("muse");"#, r#"actor("muse"); revision(1);"#),
             GOOD.replace(r#"machine("m1");"#, r#"machine("m2");"#),
             GOOD.replace(r#"right("message");"#, r#"right("fly");"#),
             GOOD.replace(r#"actor("muse");"#, r#"actor("two words");"#),

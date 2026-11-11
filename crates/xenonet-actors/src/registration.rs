@@ -19,8 +19,9 @@
 //!     observes stays, as observed, and one XenoNet only observes can't be
 //!     removed.
 //!
-//! Tokens are kept as their SHA-256 only. A token unused for 30 days is
-//! revoked. Limits: 16 registered actors, 4 registrations waiting and 20
+//! Tokens are Biscuits minted and decided by xenonet-authz, through
+//! `Host`: XenoNet keeps only a token's revocation id, and the capability
+//! words it was minted for. A token unused for 30 days is revoked. Limits: 16 registered actors, 4 registrations waiting and 20
 //! an hour.
 //!
 //! What it asks of the actors and the clock goes through `Host`; its rows
@@ -31,7 +32,7 @@
 use crate::detail::{clip, status_line};
 use crate::names::{check_name, product_word_refusal, slug_from, slug_refusal, suggest_slug};
 use crate::store::{self, Tx};
-use crate::tokens::{hash_token, is_gateway_token, is_token, new_gateway_token, new_token};
+use crate::tokens::{is_gateway_token, is_token};
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use xenonet_adapter::products::{product_of, PRODUCTS, WHY_NOT};
@@ -69,6 +70,16 @@ pub fn revoked_words(reason: &str) -> Option<&'static str> {
 }
 
 pub const REVOKED_REASONS: [&str; 5] = ["rotated", "denied", "expired", "left", "removed"];
+
+/// The answer that holds an actor's token, and the one that holds its
+/// gateway token.
+pub const CREDENTIALS: &str = "actor/credentials/v2";
+pub const GATEWAY_CREDENTIALS: &str = "actor/gateway-credentials/v2";
+
+/// Capability words, as a list of text.
+fn words(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
+}
 
 /// Whether a token last used (or made) `at` has gone unused for 30 days by
 /// `t`: from that very millisecond, wherever it's asked.
@@ -125,33 +136,58 @@ pub trait Host {
     fn of_product(&mut self, product: &str) -> Vec<String>;
     fn enabled(&mut self, id: &str) -> bool;
     fn set_enabled(&mut self, id: &str, on: bool) -> Result<()>;
+    /// The person's presence for issuing the actor `slug` a token with the
+    /// rights these capability words map onto (and the gateway's, with
+    /// `gateway`), asked at XenoNet's window; `reason` says what for.
+    fn present(&mut self, slug: &str, capabilities: &[String], gateway: bool, reason: &str) -> Result<()>;
+    /// A token for the actor `slug` with the rights these capability words
+    /// map onto, for its own use or, with `gateway`, the gateway's only:
+    /// its text, and the revocation id XenoNet keeps of it.
+    fn mint(&mut self, slug: &str, capabilities: &[String], gateway: bool) -> Result<(String, String)>;
+    /// A token's text as this machine decides it: for its own use or, with
+    /// `gateway`, at the gateway.
+    fn verify(&mut self, token: &str, gateway: bool) -> Checked;
+}
+
+/// A token's text, checked against this machine's token roots and its
+/// revocations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Checked {
+    /// A token this machine minted for `slug`, standing: its revocation id,
+    /// and the actions its Datalog allows at its door.
+    Valid { slug: String, id: String, allows: Vec<String> },
+    /// One that was revoked, with its revocation ids.
+    Revoked(Vec<String>),
+    /// Anything else.
+    Unknown,
 }
 
 /// What registering keeps in the engine's database: requests, tokens,
-/// gateway tokens and revoked tokens, each row a JSON object of its
-/// columns.
+/// gateway tokens and revoked tokens (each by its revocation id), each row
+/// a JSON object of its columns.
 pub trait Store: Tx + Send + Sync {
     fn waiting_actor_requests(&self, now: f64) -> store::Result<Vec<Value>>;
     fn lapsed_actor_requests(&self, now: f64) -> store::Result<Vec<Value>>;
     fn actor_request(&self, id: &str) -> store::Result<Option<Value>>;
-    fn actor_request_by_token(&self, hash: &str) -> store::Result<Option<Value>>;
+    fn actor_request_by_token(&self, id: &str) -> store::Result<Option<Value>>;
     fn add_actor_request(&self, row: &Value) -> store::Result<()>;
     /// Whether the request was still undecided.
     fn decide_actor_request(&self, id: &Value, decision: &str, at: f64) -> store::Result<bool>;
     /// When each request since `since` was made, oldest first.
     fn actor_request_times(&self, since: f64) -> store::Result<Vec<Value>>;
-    fn revoke_actor_token(&self, row: &Value) -> store::Result<()>;
-    fn set_actor_token(&self, slug: &str, hash: &Value, at: f64) -> store::Result<()>;
+    fn revoke_token(&self, row: &Value) -> store::Result<()>;
+    /// `rights`: the capability words it was minted for, as JSON.
+    fn set_actor_token(&self, slug: &str, id: &Value, rights: &str, at: f64) -> store::Result<()>;
     fn drop_actor_token(&self, slug: &str) -> store::Result<()>;
     fn touch_actor_token(&self, slug: &str, at: f64) -> store::Result<()>;
-    fn actor_by_token(&self, hash: &str) -> store::Result<Option<Value>>;
+    fn actor_by_token(&self, id: &str) -> store::Result<Option<Value>>;
     fn actor_token(&self, slug: &str) -> store::Result<Option<Value>>;
     fn stale_actor_tokens(&self, before: f64) -> store::Result<Vec<Value>>;
-    fn revoked_actor_token(&self, hash: &str) -> store::Result<Option<Value>>;
-    fn set_gateway_token(&self, slug: &str, hash: &str, at: f64) -> store::Result<()>;
+    fn revoked(&self, id: &str) -> store::Result<Option<Value>>;
+    fn set_gateway_token(&self, slug: &str, id: &str, at: f64) -> store::Result<()>;
     fn drop_gateway_token(&self, slug: &str) -> store::Result<()>;
     fn touch_gateway_token(&self, slug: &str, at: f64) -> store::Result<()>;
-    fn actor_by_gateway_token(&self, hash: &str) -> store::Result<Option<Value>>;
+    fn actor_by_gateway_token(&self, id: &str) -> store::Result<Option<Value>>;
     fn gateway_token(&self, slug: &str) -> store::Result<Option<Value>>;
     fn stale_gateway_tokens(&self, before: f64) -> store::Result<Vec<Value>>;
     /// An actor's claims released and its focus cleared, as it goes.
@@ -221,10 +257,6 @@ fn random_id(n: usize) -> Result<String> {
     let mut b = vec![0u8; n];
     getrandom::fill(&mut b).map_err(|e| Fail::Error(store::Error::new(format!("no random bytes: {e}"))))?;
     Ok(base64url(&b))
-}
-
-fn token() -> Result<(String, String)> {
-    new_token().map_err(|e| Fail::Error(store::Error::new(format!("no random bytes: {e}"))))
 }
 
 /// A registration as asked, checked.
@@ -439,15 +471,25 @@ impl Registration {
 
     // ---------- tokens ----------
 
-    fn revoke(&self, hash: &Value, id: &str, reason: &str, t: f64) -> Result<()> {
-        let row = json!({ "token_hash": hash, "actor": id, "reason": reason, "at": num(t) });
-        Ok(self.store.revoke_actor_token(&row)?)
+    fn revoke(&self, token: &Value, id: &str, reason: &str, t: f64) -> Result<()> {
+        let row = json!({ "id": token, "actor": id, "reason": reason, "at": num(t) });
+        Ok(self.store.revoke_token(&row)?)
+    }
+
+    // Why a revoked token stopped working, by any of its ids.
+    fn revoked_row(&self, ids: &[String]) -> Result<Option<Value>> {
+        for id in ids {
+            if let Some(r) = self.store.revoked(id)? {
+                return Ok(Some(r));
+            }
+        }
+        Ok(None)
     }
 
     // A registration that waited too long: its token is revoked.
     fn lapse(&self, r: &Value, t: f64) -> Result<()> {
         if self.store.decide_actor_request(&col(r, "id"), "expired", t)? {
-            self.revoke(&col(r, "token_hash"), &id_of(text(r, "slug").unwrap_or("")), "expired", t)?;
+            self.revoke(&col(r, "token_id"), &id_of(text(r, "slug").unwrap_or("")), "expired", t)?;
         }
         Ok(())
     }
@@ -481,6 +523,8 @@ impl Registration {
     // A registration, waiting from now: its credentials, and the request's
     // id.
     fn open(&mut self, c: &mut dyn Host, ask: &Ask, asker: &Value, t: f64) -> Result<(String, Value)> {
+        // A registration's token is minted for what it asks; it works only
+        // once you allow it.
         self.transaction(|me| {
             let waiting = me.store.waiting_actor_requests(t)?;
             // The same program asking again with the same name takes its old
@@ -511,24 +555,21 @@ impl Registration {
             if let Some(i) = same {
                 let r = &waiting[i];
                 me.store.decide_actor_request(&col(r, "id"), "replaced", t)?;
-                me.revoke(&col(r, "token_hash"), &id_of(text(r, "slug").unwrap_or("")), "rotated", t)?;
+                me.revoke(&col(r, "token_id"), &id_of(text(r, "slug").unwrap_or("")), "rotated", t)?;
             }
-            let (token, hash) = token()?;
+            let (token, token_id) = c.mint(&ask.slug, &ask.capabilities, false)?;
             let id = random_id(9)?;
             let row = json!({
                 "id": id,
                 "slug": ask.slug,
                 "ask": xenonet_text::json::stringify(&ask.json(), 0),
-                "token_hash": hash,
+                "token_id": token_id,
                 "asker": if asker.is_null() { Value::Null } else { Value::String(xenonet_text::json::stringify(asker, 0)) },
                 "created_at": num(t),
                 "expires_at": num(t + REQUEST_MS),
             });
             me.store.add_actor_request(&row)?;
-            Ok((
-                id,
-                json!({ "schema": "actor/credentials/v1", "id": id_of(&ask.slug), "token": token, "state": "waiting", "expiresAt": num(t + REQUEST_MS), "ignored": ask.ignored }),
-            ))
+            Ok((id, json!({ "schema": CREDENTIALS, "id": id_of(&ask.slug), "token": token, "state": "waiting", "expiresAt": num(t + REQUEST_MS), "ignored": ask.ignored })))
         })
     }
 
@@ -609,6 +650,14 @@ impl Registration {
             let credentials = self.gateway(c, &gate.slug, &json!({}))?;
             return Ok(json!({ "request": gate.id, "decision": decision, "actor": id_of(&gate.slug), "credentials": credentials }));
         }
+        // Allowing it issues its grant: the person is asked first, outside
+        // the store's transaction, since asking waits on them.
+        if decision == "allow" {
+            if let Some(r) = self.store.actor_request(&rid)?.filter(|r| col(r, "decision").is_null()) {
+                let ask = parse(text(&r, "ask"));
+                c.present(text(&r, "slug").unwrap_or(""), &words(ask.get("capabilities")), false, &format!("allow {} into XenoNet", template(ask.get("name"))))?;
+            }
+        }
         let out = self.transaction(|me| {
             let Some(r) = me.store.actor_request(&rid)?.filter(|r| col(r, "decision").is_null()) else {
                 return fail(404.0, "not-found", "no registration with that id is waiting; it may have been answered or have lapsed", json!({}));
@@ -617,7 +666,7 @@ impl Registration {
             let id = id_of(&slug);
             if decision == "deny" {
                 me.store.decide_actor_request(&col(&r, "id"), "deny", t)?;
-                me.revoke(&col(&r, "token_hash"), &id, "denied", t)?;
+                me.revoke(&col(&r, "token_id"), &id, "denied", t)?;
                 return Ok(json!({ "request": col(&r, "id"), "decision": decision, "actor": id }));
             }
             let ask = parse(text(&r, "ask"));
@@ -631,7 +680,7 @@ impl Registration {
                 return Self::full_error();
             }
             if let Some(old) = me.store.actor_token(&slug)? {
-                me.revoke(&col(&old, "token_hash"), &id, "rotated", t)?;
+                me.revoke(&col(&old, "token_id"), &id, "rotated", t)?;
             }
             let there_product = there.get("product").filter(|v| !v.is_null()).cloned();
             let mut def = Map::new();
@@ -644,12 +693,15 @@ impl Registration {
             if let Some(h) = ask.get("heartbeatMs") {
                 def.insert("heartbeatMs".into(), h.clone());
             }
-            def.insert("capabilities".into(), ask.get("capabilities").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!([])));
+            let capabilities = ask.get("capabilities").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!([]));
+            def.insert("capabilities".into(), capabilities.clone());
             def.insert("identity".into(), col(&there, "identity"));
             def.insert("allowedAt".into(), num(t));
             def.insert("at".into(), num(t));
             c.upsert(&Value::Object(def))?;
-            me.store.set_actor_token(&slug, &col(&r, "token_hash"), t)?;
+            // The token it was given when it asked works from now: it was
+            // minted for what it asked, which is what you allowed.
+            me.store.set_actor_token(&slug, &col(&r, "token_id"), &xenonet_text::json::stringify(&capabilities, 0), t)?;
             me.store.decide_actor_request(&col(&r, "id"), "allow", t)?;
             if let Some(pid) = ask.get("pid").filter(|p| truthy(Some(p))) {
                 c.watch_pid(&id, pid)?;
@@ -667,6 +719,7 @@ impl Registration {
         let t = c.now();
         let ask = Self::read_ask(body, true)?;
         self.expire_lapsed(t)?;
+        c.present(&ask.slug, &ask.capabilities, false, &format!("add {} to XenoNet", ask.name))?;
         self.transaction(|me| {
             let id = id_of(&ask.slug);
             let product = ask.product_id();
@@ -678,7 +731,7 @@ impl Registration {
             }
             let there = c.info(&id);
             if let Some(old) = me.store.actor_token(&ask.slug)? {
-                me.revoke(&col(&old, "token_hash"), &id, "rotated", t)?;
+                me.revoke(&col(&old, "token_id"), &id, "rotated", t)?;
             }
             let product = there.get("product").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| ask.product.clone());
             let def = json!({
@@ -693,14 +746,14 @@ impl Registration {
                 "at": num(t),
             });
             c.upsert(&def)?;
-            let (token, hash) = token()?;
-            me.store.set_actor_token(&ask.slug, &Value::String(hash), t)?;
-            Ok(json!({ "schema": "actor/credentials/v1", "id": id, "token": token, "state": "allowed", "ignored": ask.ignored }))
+            let (token, token_id) = c.mint(&ask.slug, &ask.capabilities, false)?;
+            me.store.set_actor_token(&ask.slug, &Value::String(token_id), &xenonet_text::json::stringify(&json!(ask.capabilities), 0), t)?;
+            Ok(json!({ "schema": CREDENTIALS, "id": id, "token": token, "state": "allowed", "ignored": ask.ignored }))
         })
     }
 
-    /// A new token for a registered actor, from the window: the old one
-    /// stops working at once.
+    /// A new token for a registered actor, from the window, for what it was
+    /// allowed: the old one stops working at once.
     pub fn rotate(&mut self, c: &mut dyn Host, slug: &str) -> Result<Value> {
         let slug = slug.to_string();
         let id = id_of(&slug);
@@ -709,14 +762,16 @@ impl Registration {
             return fail(404.0, "not-found", "XenoNet has no registered actor by that slug", json!({}));
         }
         let t = c.now();
+        let capabilities = words(there.get("capabilities"));
+        c.present(&slug, &capabilities, false, &format!("give actor:{slug} a new token"))?;
         self.transaction(|me| {
             if let Some(old) = me.store.actor_token(&slug)? {
-                me.revoke(&col(&old, "token_hash"), &id, "rotated", t)?;
+                me.revoke(&col(&old, "token_id"), &id, "rotated", t)?;
             }
-            let (token, hash) = token()?;
-            me.store.set_actor_token(&slug, &Value::String(hash), t)?;
+            let (token, token_id) = c.mint(&slug, &capabilities, false)?;
+            me.store.set_actor_token(&slug, &Value::String(token_id), &xenonet_text::json::stringify(&json!(capabilities), 0), t)?;
             c.allow(&id, t)?;
-            Ok(json!({ "schema": "actor/credentials/v1", "id": id, "token": token, "state": "allowed", "ignored": [] }))
+            Ok(json!({ "schema": CREDENTIALS, "id": id, "token": token, "state": "allowed", "ignored": [] }))
         })
     }
 
@@ -754,11 +809,11 @@ impl Registration {
         }
         self.transaction(|me| {
             if let Some(old) = me.store.actor_token(&slug)? {
-                me.revoke(&col(&old, "token_hash"), &id, reason, t)?;
+                me.revoke(&col(&old, "token_id"), &id, reason, t)?;
             }
             me.store.drop_actor_token(&slug)?;
             if let Some(gate) = me.store.gateway_token(&slug)? {
-                me.revoke(&col(&gate, "gateway_hash"), &id, reason, t)?;
+                me.revoke(&col(&gate, "gateway_id"), &id, reason, t)?;
             }
             me.store.drop_gateway_token(&slug)?;
             me.store.release_claims(&id)?;
@@ -776,51 +831,66 @@ impl Registration {
         Ok(if observed { json!({ "removed": id, "observed": true }) } else { json!({ "removed": id }) })
     }
 
-    /// The actor a token belongs to, or the 401 it gets.
+    /// The actor a token belongs to, or the 401 it gets: `{ ok, id, slug,
+    /// state, allows, capabilities }`, `allows` the actions its token has
+    /// the right to here and `capabilities` the words it was minted for.
     pub fn authenticate(&mut self, c: &mut dyn Host, token: &str) -> Result<Value> {
         let unknown = json!({ "ok": false, "status": 401, "code": "bad-token", "error": "XenoNet doesn't know that token" });
         if !is_token(token) {
             return Ok(unknown);
         }
-        let hash = hash_token(token);
         let t = c.now();
-        if let Some(held) = self.store.actor_by_token(&hash)? {
-            let slug = text(&held, "slug").unwrap_or("").to_string();
+        let (slug, token_id, allows) = match c.verify(token, false) {
+            Checked::Valid { slug, id, allows } => (slug, id, allows),
+            Checked::Revoked(ids) => return Ok(self.revoked_answer(&ids, false)?.unwrap_or(unknown)),
+            Checked::Unknown => return Ok(unknown),
+        };
+        if let Some(held) = self.store.actor_by_token(&token_id)?.filter(|h| text(h, "slug") == Some(slug.as_str())) {
             if c.has(&id_of(&slug)) {
                 let at = num_of(&held, "token_at");
                 if token_expired(at, t) {
                     self.transaction(|me| {
-                        me.revoke(&Value::String(hash.clone()), &id_of(&slug), "expired", t)?;
+                        me.revoke(&Value::String(token_id.clone()), &id_of(&slug), "expired", t)?;
                         Ok(me.store.drop_actor_token(&slug)?)
                     })?;
-                } else {
-                    // Its first use is written exactly; after that, at most
-                    // once an hour.
-                    let made = c.info(&id_of(&slug)).get("allowedAt").and_then(Value::as_f64);
-                    let at = at.unwrap_or(f64::NAN);
-                    if made.is_some_and(|m| at <= m) || t - at >= TOUCH_MS {
-                        self.store.touch_actor_token(&slug, t)?;
-                    }
-                    return Ok(json!({ "ok": true, "id": id_of(&slug), "slug": slug, "state": "allowed" }));
+                    return Ok(self.revoked_answer(&[token_id], false)?.unwrap_or(unknown));
                 }
+                // Its first use is written exactly; after that, at most
+                // once an hour.
+                let made = c.info(&id_of(&slug)).get("allowedAt").and_then(Value::as_f64);
+                let at = at.unwrap_or(f64::NAN);
+                if made.is_some_and(|m| at <= m) || t - at >= TOUCH_MS {
+                    self.store.touch_actor_token(&slug, t)?;
+                }
+                let capabilities = parse(text(&held, "token_rights"));
+                return Ok(
+                    json!({ "ok": true, "id": id_of(&slug), "slug": slug, "state": "allowed", "allows": allows, "capabilities": if capabilities.is_array() { capabilities } else { json!([]) } }),
+                );
             }
         }
-        if let Some(revoked) = self.store.revoked_actor_token(&hash)? {
-            let reason = text(&revoked, "reason").unwrap_or("").to_string();
-            return Ok(
-                json!({ "ok": false, "status": 401, "code": "revoked", "reason": col(&revoked, "reason"), "error": revoked_words(&reason).unwrap_or("that token was revoked") }),
-            );
-        }
-        if let Some(r) = self.store.actor_request_by_token(&hash)?.filter(|r| !truthy(r.get("decision"))) {
+        if let Some(r) = self.store.actor_request_by_token(&token_id)?.filter(|r| !truthy(r.get("decision"))) {
             let slug = text(&r, "slug").unwrap_or("").to_string();
             if num_of(&r, "expires_at").is_some_and(|e| e > t) {
-                return Ok(json!({ "ok": true, "id": id_of(&slug), "slug": slug, "state": "waiting", "request": r }));
+                return Ok(json!({ "ok": true, "id": id_of(&slug), "slug": slug, "state": "waiting", "allows": [], "capabilities": [], "request": r }));
             }
             self.lapse(&r, t)?;
             self.changed(t)?;
             return Ok(json!({ "ok": false, "status": 401, "code": "revoked", "reason": "expired", "error": revoked_words("expired") }));
         }
         Ok(unknown)
+    }
+
+    // The 401 a revoked token gets, with why (and whose it was, at the
+    // gateway), when this machine holds its revocation.
+    fn revoked_answer(&self, ids: &[String], gateway: bool) -> Result<Option<Value>> {
+        let Some(revoked) = self.revoked_row(ids)? else { return Ok(None) };
+        let reason = text(&revoked, "reason").unwrap_or("").to_string();
+        let mut out =
+            json!({ "ok": false, "status": 401, "code": "revoked", "reason": col(&revoked, "reason"), "error": revoked_words(&reason).unwrap_or("that token was revoked") });
+        if gateway {
+            out["actor"] = col(&revoked, "actor");
+        }
+        Ok(Some(out))
     }
 
     // ---------- the actor gateway ----------
@@ -834,6 +904,12 @@ impl Registration {
         }
         let t = c.now();
         self.expire_lapsed(t)?;
+        // The person is asked first, for what the token will allow, outside
+        // the store's transaction, since asking waits on them.
+        let there = c.info(&id);
+        let asked = if via_has(&there, "registered") { there.get("capabilities").cloned() } else { body.get("capabilities").filter(|v| v.is_array()).cloned() };
+        let asked = words(Some(&asked.unwrap_or_else(|| json!(["message-agents"]))));
+        c.present(&slug, &asked, true, &format!("give actor:{slug} a gateway token"))?;
         let out = self.transaction(|me| {
             let there = c.info(&id);
             if !via_has(&there, "registered") {
@@ -868,14 +944,17 @@ impl Registration {
                 c.upsert(&def)?;
             }
             if let Some(old) = me.store.gateway_token(&slug)? {
-                me.revoke(&col(&old, "gateway_hash"), &id, "rotated", t)?;
+                me.revoke(&col(&old, "gateway_id"), &id, "rotated", t)?;
             }
-            let (token, hash) = new_gateway_token().map_err(|e| Fail::Error(store::Error::new(format!("no random bytes: {e}"))))?;
-            me.store.set_gateway_token(&slug, &hash, t)?;
+            // Minted for what the actor may do, with the gateway's right,
+            // and narrowed to the gateway door.
+            let capabilities = words(c.info(&id).get("capabilities"));
+            let (token, token_id) = c.mint(&slug, &capabilities, true)?;
+            me.store.set_gateway_token(&slug, &token_id, t)?;
             // Any session's ask for this token is answered by it.
             me.gateway_asks.retain(|g| g.slug != slug);
             me.changed(t)?;
-            Ok(json!({ "schema": "actor/gateway-credentials/v1", "id": id, "token": token }))
+            Ok(json!({ "schema": GATEWAY_CREDENTIALS, "id": id, "token": token }))
         })?;
         Ok(out)
     }
@@ -936,14 +1015,14 @@ impl Registration {
             let Some(old) = me.store.gateway_token(&slug)? else {
                 return fail(404.0, "not-found", "that actor has no gateway token", json!({}));
             };
-            me.revoke(&col(&old, "gateway_hash"), &id, "removed", t)?;
+            me.revoke(&col(&old, "gateway_id"), &id, "removed", t)?;
             me.store.drop_gateway_token(&slug)?;
             Ok(json!({ "actor": id, "gateway": false }))
         })
     }
 
-    /// The actor a gateway token belongs to, or a 401. An actor's own
-    /// token is refused here by name.
+    /// The actor a gateway token belongs to, or a 401, as `authenticate`
+    /// answers. An actor's own token is refused here by name.
     pub fn authenticate_gateway(&mut self, c: &mut dyn Host, token: &str) -> Result<Value> {
         let unknown = json!({ "ok": false, "status": 401, "code": "bad-token", "error": "XenoNet doesn't know that gateway token" });
         if is_token(token) {
@@ -954,30 +1033,28 @@ impl Registration {
         if !is_gateway_token(token) {
             return Ok(unknown);
         }
-        let hash = hash_token(token);
         let t = c.now();
-        if let Some(held) = self.store.actor_by_gateway_token(&hash)? {
-            let slug = text(&held, "slug").unwrap_or("").to_string();
+        let (slug, token_id, allows) = match c.verify(token, true) {
+            Checked::Valid { slug, id, allows } => (slug, id, allows),
+            Checked::Revoked(ids) => return Ok(self.revoked_answer(&ids, true)?.unwrap_or(unknown)),
+            Checked::Unknown => return Ok(unknown),
+        };
+        if let Some(held) = self.store.actor_by_gateway_token(&token_id)?.filter(|h| text(h, "slug") == Some(slug.as_str())) {
             if c.is_registered(&id_of(&slug)) {
                 let at = num_of(&held, "gateway_at");
                 if token_expired(at, t) {
                     self.transaction(|me| {
-                        me.revoke(&Value::String(hash.clone()), &id_of(&slug), "expired", t)?;
+                        me.revoke(&Value::String(token_id.clone()), &id_of(&slug), "expired", t)?;
                         Ok(me.store.drop_gateway_token(&slug)?)
                     })?;
-                } else {
-                    if t - at.unwrap_or(f64::NAN) >= TOUCH_MS {
-                        self.store.touch_gateway_token(&slug, t)?;
-                    }
-                    return Ok(json!({ "ok": true, "id": id_of(&slug), "slug": slug, "state": "allowed" }));
+                    return Ok(self.revoked_answer(&[token_id], true)?.unwrap_or(unknown));
                 }
+                if t - at.unwrap_or(f64::NAN) >= TOUCH_MS {
+                    self.store.touch_gateway_token(&slug, t)?;
+                }
+                let capabilities = c.info(&id_of(&slug)).get("capabilities").cloned().filter(Value::is_array).unwrap_or_else(|| json!([]));
+                return Ok(json!({ "ok": true, "id": id_of(&slug), "slug": slug, "state": "allowed", "allows": allows, "capabilities": capabilities }));
             }
-        }
-        if let Some(revoked) = self.store.revoked_actor_token(&hash)? {
-            let reason = text(&revoked, "reason").unwrap_or("").to_string();
-            return Ok(
-                json!({ "ok": false, "status": 401, "code": "revoked", "reason": col(&revoked, "reason"), "actor": col(&revoked, "actor"), "error": revoked_words(&reason).unwrap_or("that token was revoked") }),
-            );
         }
         Ok(unknown)
     }
@@ -1025,7 +1102,7 @@ impl Registration {
             self.transaction(|me| {
                 for row in &stale {
                     let slug = text(row, "slug").unwrap_or("");
-                    me.revoke(&col(row, "token_hash"), &id_of(slug), "expired", t)?;
+                    me.revoke(&col(row, "token_id"), &id_of(slug), "expired", t)?;
                     me.store.drop_actor_token(slug)?;
                 }
                 Ok(())
@@ -1036,7 +1113,7 @@ impl Registration {
             self.transaction(|me| {
                 for row in &gates {
                     let slug = text(row, "slug").unwrap_or("");
-                    me.revoke(&col(row, "gateway_hash"), &id_of(slug), "expired", t)?;
+                    me.revoke(&col(row, "gateway_id"), &id_of(slug), "expired", t)?;
                     me.store.drop_gateway_token(slug)?;
                 }
                 Ok(())

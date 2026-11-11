@@ -20,8 +20,14 @@
 //!
 //! The rows are the engine's, reached through `Store`. The rest is the
 //! world's, through `Host`: the actors' registry, the credentials' files on
-//! disk, the clock, the adapters, the map's places and the identities for
-//! a pairing, and whoever listens for events.
+//! disk, the actors' grants, the clock, the adapters, the map's places and
+//! the identities for a pairing, and whoever listens for events. A
+//! connection's credential is its actor's grant, the same kind every actor
+//! holds (`xenonet_actor_`, with the right to read), issued with you there.
+//! The engine keeps only its revocation id, and what it may read beside
+//! the right (its projects) in the grant's scope row under that id. A
+//! rotation, a revocation or the end of a grant takes its token back for
+//! good; a change of scope changes the row and moves the revision on.
 
 use crate::account_links::{self, LinkFail, Links};
 use crate::adapters::TRANSPORTS;
@@ -29,6 +35,7 @@ use crate::detail::looks_like_key;
 use crate::names::{check_name, slug_from, slug_refusal, suggest_slug};
 use crate::re;
 use crate::store;
+use crate::tokens::is_token;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -132,12 +139,19 @@ pub trait Host {
     fn mark_revoked(&mut self, grant: &str, at: f64) -> Result<()>;
     fn delete_credential(&mut self, grant: &str) -> Result<()>;
     fn marked_revoked(&mut self) -> Vec<String>;
-    /// A new credential: (token, its hash).
-    fn new_token(&mut self) -> (String, String);
     fn mark_disabled(&mut self, at: f64) -> Result<()>;
     fn clear_disabled(&mut self) -> Result<()>;
-    fn is_token(&mut self, token: &Value) -> bool;
-    fn hash_token(&mut self, token: &Value) -> String;
+    // The actors' grants (xenonet-authz's Biscuits, minted from this
+    // machine's token root), by the actor's slug.
+    /// You, there, for issuing `slug` a grant with these rights and scopes
+    /// or widening one to them: Ok, or why not.
+    fn present(&mut self, slug: &str, rights: &[String], scopes: &Value, reason: &str) -> Result<()>;
+    /// A grant for `slug` with these rights, until `until` (ms): its text,
+    /// and the revocation id XenoNet keeps of it.
+    fn mint_token(&mut self, slug: &str, rights: &[String], until: f64) -> Result<(String, String)>;
+    /// Whether `token` is `slug`'s grant with the right to `action` now:
+    /// its revocation id, or `revoked`, `no-right` or `invalid`.
+    fn check_token(&mut self, slug: &str, token: &str, action: &str) -> std::result::Result<String, &'static str>;
     // The actors' registry.
     fn ids(&mut self) -> Vec<String>;
     fn remote_of(&mut self, id: &str) -> Value;
@@ -167,6 +181,15 @@ pub trait Store: Links {
     fn revoke_grant(&self, id: &str, reason: &str, at: f64) -> store::Result<bool>;
     fn end_connection(&self, id: &str, at: f64) -> store::Result<()>;
     fn touch_grant(&self, id: &str, at: f64) -> store::Result<()>;
+    /// A token taken back for good, by its revocation id: `{ id, actor,
+    /// reason, at }`, where the first reason stands.
+    fn revoke_token(&self, row: &Value) -> store::Result<()>;
+    /// A grant's scope row, made or changed: `{ token, actor, projects?,
+    /// at, until? }`, where a field left out stays.
+    fn put_scope(&self, row: &Value) -> store::Result<()>;
+    /// A grant's scope row, by its token's revocation id.
+    fn scope(&self, token: &str) -> store::Result<Option<Value>>;
+    fn drop_scope(&self, token: &str) -> store::Result<()>;
     fn add_audit(&self, row: &Value) -> store::Result<()>;
     /// A place's project id, made by `make` when it has none yet.
     fn project_id_of(&self, place: &Value, make: &mut dyn FnMut() -> store::Result<Value>, now: f64) -> store::Result<Value>;
@@ -257,28 +280,21 @@ fn js_round(x: f64) -> f64 {
     }
 }
 
-/// Node's Buffer.from(text, "hex"): pairs of hex digits until the first
-/// that isn't one.
-fn hex_bytes(s: &str) -> Vec<u8> {
-    let b = s.as_bytes();
-    let digit = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
-    let mut out = Vec::new();
-    for pair in b.as_chunks::<2>().0 {
-        match (digit(pair[0]), digit(pair[1])) {
-            (Some(h), Some(l)) => out.push(h << 4 | l),
-            _ => break,
-        }
-    }
-    out
-}
-
-/// crypto.timingSafeEqual for two of the same length.
-fn timing_safe_eq(a: &[u8], b: &[u8]) -> bool {
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
 fn is_grant_id(v: &str) -> bool {
     re!(r"^gr_[0-9a-f]{24}$").is_match(v)
+}
+
+/// What a connection's grant may do: read, and nothing else.
+pub const RIGHTS: [&str; 1] = ["read"];
+
+fn rights() -> Vec<String> {
+    RIGHTS.iter().map(ToString::to_string).collect()
+}
+
+/// What you approve when a grant is issued or widened: the places it may
+/// read, as you picked them, and whether names and titles go too.
+fn scopes(places: &[Value], labels: bool) -> Value {
+    json!({ "projects": places, "labels": labels })
 }
 
 /// One line of your own words (a connection's name, a computer's, who can
@@ -549,6 +565,49 @@ impl Connections {
         Ok(())
     }
 
+    /// A grant's token, as its row names it, taken back for good with its
+    /// scope: the ground refuses it from then on, whatever the grant's row
+    /// says.
+    fn take_back(&self, g: &Value, reason: &str, t: f64) -> Result<()> {
+        let token = text(g, "token_id");
+        self.store.revoke_token(&json!({ "id": token, "actor": self.actor_of(g)?, "reason": reason, "at": number(t) }))?;
+        self.store.drop_scope(&token)?;
+        Ok(())
+    }
+
+    /// The slug of a grant's actor, by its connection.
+    fn slug_of(&self, g: &Value) -> Result<Option<String>> {
+        Ok(self.store.connection(&text(g, "connection_id"))?.and_then(|c| c.get("actor_slug").and_then(Value::as_str).map(str::to_string)))
+    }
+
+    /// A grant's actor's id, as its token and scope name it.
+    fn actor_of(&self, g: &Value) -> Result<String> {
+        Ok(format!("actor:{}", self.slug_of(g)?.unwrap_or_else(|| "?".into())))
+    }
+
+    /// A grant's connection's name, for what you're asked to approve.
+    fn label_of(&self, g: &Value) -> Result<String> {
+        Ok(self.store.connection(&text(g, "connection_id"))?.map(|c| text(&c, "label")).unwrap_or_default())
+    }
+
+    /// The project ids a grant may read, as its scope row has them.
+    fn projects_of(&self, g: &Value) -> Result<Vec<Value>> {
+        let row = self.store.scope(&text(g, "token_id"))?;
+        Ok(row.map_or_else(Vec::new, |r| items(parse(&col(&r, "projects"), json!([])))))
+    }
+
+    /// The places these project ids are of, those still known.
+    fn places_of(&self, ids: &[Value]) -> Result<Vec<Value>> {
+        let mut places = Vec::new();
+        for id in ids {
+            let place = self.store.place_of_project(id)?;
+            if truthy(Some(&place)) {
+                places.push(place);
+            }
+        }
+        Ok(places)
+    }
+
     fn revoke_row(&self, h: &mut dyn Host, g: &Value, reason: &str, t: f64, by: &str) -> Result<bool> {
         let grant = text(g, "grant_id");
         let connection = text(g, "connection_id");
@@ -556,6 +615,7 @@ impl Connections {
         h.delete_credential(&grant)?;
         let changed = self.transaction(|| -> Result<bool> {
             let r = self.store.revoke_grant(&grant, reason, t)?;
+            self.take_back(g, reason, t)?;
             self.store.end_connection(&connection, t)?;
             let slug = self.store.connection(&connection)?.map_or("?".to_string(), |r| match r.get("actor_slug") {
                 None | Some(Value::Null) => "?".to_string(),
@@ -778,8 +838,12 @@ impl Connections {
         let dev = self.device(h)?;
         let connection_id = new_id("cn")?;
         let grant_id = new_id("gr")?;
-        let (made_token, made_hash) = h.new_token();
         let expires = t + days * DAY_MS;
+        // The actor's grant, issued with you there, before anything is made.
+        let slug: String = plan.id.chars().skip("actor:".len()).collect();
+        let labels = ask.get("labels") == Some(&Value::Bool(true));
+        h.present(&slug, &rights(), &scopes(&chosen, labels), &format!("Pair {label}"))?;
+        let (made_token, made_id) = h.mint_token(&slug, &rights(), expires)?;
         // The credential first: if it can't be kept private, nothing is made.
         h.write_credential(&grant_id, &Value::String(made_token), &dev, &number(expires))?;
         let made_all = self.transaction(|| -> Result<()> {
@@ -801,7 +865,6 @@ impl Connections {
                     h.add_via(&plan.id, "remote")?;
                 }
             }
-            let slug: String = plan.id.chars().skip("actor:".len()).collect();
             let mut projects = Vec::new();
             for place in &chosen {
                 projects.push(self.store.project_id_of(place, &mut || Ok(Value::String(uuid_id("prj")?)), t)?);
@@ -827,15 +890,16 @@ impl Connections {
                 "connection_id": connection_id,
                 "device_id": dev,
                 "permissions": stringify(&json!(capabilities), 0),
-                "project_allowlist": stringify(&Value::Array(projects.clone()), 0),
-                "field_policy": stringify(&json!({ "labels": ask.get("labels") == Some(&Value::Bool(true)) }), 0),
+                "field_policy": stringify(&json!({ "labels": labels }), 0),
                 "data_mode": if verification.as_str() == Some("owner_verified") { "real" } else { "fixture" },
                 "lookback_ms": number(lookback * DAY_MS),
-                "token_hash": made_hash,
+                "token_id": made_id,
                 "created_at": number(t),
                 "expires_at": number(expires),
             });
             self.store.add_grant(&grant)?;
+            self.store
+                .put_scope(&json!({ "token": made_id, "actor": plan.id, "projects": stringify(&Value::Array(projects.clone()), 0), "at": number(t), "until": number(expires) }))?;
             if asserted {
                 let known = h.identities();
                 account_links::assert_link(self.links(), &slug, identity.unwrap_or(&Value::Null), &adapter.provider, Some(&known), t)?;
@@ -855,7 +919,9 @@ impl Connections {
             Ok(())
         });
         if let Err(e) = made_all {
+            // The grant minted for it is taken back too: nothing names it.
             h.delete_credential(&grant_id)?;
+            self.store.revoke_token(&json!({ "id": made_id, "actor": plan.id, "reason": "pair-failed", "at": number(t) }))?;
             return Err(e);
         }
         self.note_revision(h, &grant_id)?;
@@ -885,15 +951,16 @@ impl Connections {
     pub fn update(&self, h: &mut dyn Host, grant_id: &str, change_to: &Value) -> Result<Value> {
         let t = h.now();
         let g = self.active(h, grant_id, t)?;
+        let had = self.projects_of(&g)?;
+        let had_labels = parse(&col(&g, "field_policy"), json!({})).get("labels") == Some(&Value::Bool(true));
         let mut change = Map::new();
-        let mut count = None;
-        if let Some(projects) = change_to.get("projects") {
-            let chosen = unique(Some(projects));
+        let mut projects: Option<(Vec<Value>, Vec<Value>)> = None;
+        if let Some(asked) = change_to.get("projects") {
+            let chosen = unique(Some(asked));
             if chosen.len() > PROJECTS_MAX {
                 return fail(400.0, "bad-request", format!("a grant names at most {PROJECTS_MAX} projects"));
             }
             // A place the grant names already may stay, on the map or not.
-            let had = items(parse(&col(&g, "project_allowlist"), json!([])));
             for p in &chosen {
                 if !h.places_has(&display(p)) {
                     let id = self.store.project_id_for(p)?;
@@ -911,10 +978,10 @@ impl Connections {
             for place in &chosen {
                 ids.push(self.store.project_id_of(place, &mut || Ok(Value::String(uuid_id("prj")?)), t)?);
             }
-            count = Some(ids.len());
-            change.insert("project_allowlist".into(), Value::String(stringify(&Value::Array(ids), 0)));
+            projects = Some((chosen, ids));
         }
-        if let Some(labels) = change_to.get("labels") {
+        let mut labels = had_labels;
+        if let Some(asked) = change_to.get("labels") {
             let mut policy = Map::new();
             match parse(&col(&g, "field_policy"), json!({})) {
                 Value::Object(o) => policy.extend(o),
@@ -922,16 +989,31 @@ impl Connections {
                 Value::String(s) => policy.extend(s.chars().enumerate().map(|(i, ch)| (i.to_string(), Value::String(ch.to_string())))),
                 _ => {}
             }
-            policy.insert("labels".into(), Value::Bool(*labels == Value::Bool(true)));
+            labels = *asked == Value::Bool(true);
+            policy.insert("labels".into(), Value::Bool(labels));
             change.insert("field_policy".into(), Value::String(stringify(&Value::Object(policy), 0)));
         }
-        if change.is_empty() {
+        if change.is_empty() && projects.is_none() {
             return self.view_of(h, Some(&g), t);
+        }
+        // Taking projects or names away needs nothing more; adding any is a
+        // new approval, with you there.
+        let added = projects.as_ref().is_some_and(|(_, ids)| ids.iter().any(|id| !had.contains(id)));
+        if added || (labels && !had_labels) {
+            let places = match &projects {
+                Some((chosen, _)) => chosen.clone(),
+                None => self.places_of(&had)?,
+            };
+            let slug = self.slug_of(&g)?.unwrap_or_default();
+            h.present(&slug, &rights(), &scopes(&places, labels), &format!("Let {} read more", self.label_of(&g)?))?;
         }
         let revision = num(&col(&g, "revision")) + 1.0;
         let change = Value::Object(change);
         self.transaction(|| -> Result<()> {
             self.store.change_grant(grant_id, &change)?;
+            if let Some((_, ids)) = &projects {
+                self.store.put_scope(&json!({ "token": col(&g, "token_id"), "actor": self.actor_of(&g)?, "projects": stringify(&json!(ids), 0), "at": number(t) }))?;
+            }
             let audit = json!({
                 "at": number(t),
                 "kind": "owner",
@@ -940,7 +1022,7 @@ impl Connections {
                 "connection_id": col(&g, "connection_id"),
                 "operation": "change",
                 "result": "ok",
-                "projects": count.map_or(Value::Null, |n| number(n as f64)),
+                "projects": projects.as_ref().map_or(Value::Null, |(_, ids)| number(ids.len() as f64)),
             });
             self.store.add_audit(&audit)?;
             Ok(())
@@ -952,15 +1034,23 @@ impl Connections {
     }
 
     /// A new credential: the old one stops at once, and adapters holding
-    /// it are let go.
+    /// it are let go. It's a grant issued again, so you're asked to be
+    /// there; its scope goes with it.
     pub fn rotate(&self, h: &mut dyn Host, grant_id: &str) -> Result<Value> {
         let t = h.now();
         let g = self.active(h, grant_id, t)?;
-        let (token, hash) = h.new_token();
+        let slug = self.slug_of(&g)?.unwrap_or_default();
+        let had = self.projects_of(&g)?;
+        let labels = parse(&col(&g, "field_policy"), json!({})).get("labels") == Some(&Value::Bool(true));
+        h.present(&slug, &rights(), &scopes(&self.places_of(&had)?, labels), &format!("Give {} a new credential", self.label_of(&g)?))?;
+        let (token, made_id) = h.mint_token(&slug, &rights(), num(&col(&g, "expires_at")))?;
         h.write_credential(grant_id, &Value::String(token), &col(&g, "device_id"), &col(&g, "expires_at"))?;
         let revision = num(&col(&g, "revision")) + 1.0;
         self.transaction(|| -> Result<()> {
-            self.store.change_grant(grant_id, &json!({ "token_hash": hash }))?;
+            self.store.change_grant(grant_id, &json!({ "token_id": made_id }))?;
+            let scope = json!({ "token": made_id, "actor": self.actor_of(&g)?, "projects": stringify(&json!(had), 0), "at": number(t), "until": col(&g, "expires_at") });
+            self.store.put_scope(&scope)?;
+            self.take_back(&g, "rotated", t)?;
             let audit = json!({
                 "at": number(t),
                 "kind": "owner",
@@ -1054,19 +1144,28 @@ impl Connections {
     /// A wrong credential is refused the same way as an unknown grant; one
     /// that's right hears how its grant stands.
     pub fn authenticate(&self, h: &mut dyn Host, ask: &Value) -> Result<Standing> {
-        let (grant, token) = (col(ask, "grant"), col(ask, "token"));
-        if !is_grant_id(&display(&grant)) || !h.is_token(&token) {
+        let grant = display(&col(ask, "grant"));
+        let token = ask.get("token").and_then(Value::as_str).filter(|t| is_token(t));
+        let (true, Some(token)) = (is_grant_id(&grant), token) else {
             return Ok(Standing::no("NOT_AUTHORIZED", "malformed"));
-        }
-        let Some(g) = self.store.grant(&display(&grant))? else {
+        };
+        let Some(g) = self.store.grant(&grant)? else {
             return Ok(Standing::no("NOT_AUTHORIZED", "unknown-grant"));
         };
-        let theirs = hex_bytes(&h.hash_token(&token));
-        let ours = hex_bytes(&text(&g, "token_hash"));
-        if theirs.len() != ours.len() || !timing_safe_eq(&theirs, &ours) {
+        let Some(slug) = self.slug_of(&g)? else {
             return Ok(Standing::no("NOT_AUTHORIZED", "wrong-token"));
+        };
+        match h.check_token(&slug, token, "read") {
+            // The grant's token as its row has it now.
+            Ok(id) if Some(id.as_str()) == g.get("token_id").and_then(Value::as_str) => self.standing(h, Some(&g), None),
+            // A token of the grant's, taken back: a grant that no longer
+            // stands says why, and one that does was given a newer token.
+            Ok(_) | Err("revoked") => match self.standing(h, Some(&g), None)? {
+                Standing::Ok { .. } => Ok(Standing::no("NOT_AUTHORIZED", "wrong-token")),
+                no @ Standing::No { .. } => Ok(no),
+            },
+            Err(_) => Ok(Standing::no("NOT_AUTHORIZED", "wrong-token")),
         }
-        self.standing(h, Some(&g), None)
     }
 
     /// The same, again, by grant and the revision a read began under, just
@@ -1097,7 +1196,7 @@ impl Connections {
                 v => serde_json::from_str(&display(v)).unwrap_or(fallback),
             }
         };
-        let projects = parse_col(&col(&g, "project_allowlist"), json!([]));
+        let projects = Value::Array(self.projects_of(&g)?);
         let mut places = Vec::new();
         for p in items(projects.clone()) {
             let place = self.store.place_of_project(&p)?;
@@ -1173,7 +1272,7 @@ impl Connections {
         };
         let (link, identity) = account_links::link_state(self.links(), &text(&conn, "actor_slug"), t)?;
         let mut projects = Vec::new();
-        for p in items(parse(&col(g, "project_allowlist"), json!([]))) {
+        for p in self.projects_of(g)? {
             let place = self.store.place_of_project(&p)?;
             let name = if truthy(Some(&place)) { h.describe(&display(&place)) } else { Value::Null };
             projects.push(json!({ "project_id": p, "place": place, "name": name }));
@@ -1244,6 +1343,7 @@ impl Connections {
                 continue;
             }
             self.expired.locked().insert(id);
+            self.take_back(&g, "expired", t)?;
             h.emit("expired", json!({ "grant": col(&g, "grant_id"), "connection": col(&g, "connection_id") }));
         }
         self.sync(h, t)
@@ -1282,13 +1382,6 @@ impl Connections {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hex_reads_as_node_reads_it() {
-        assert_eq!(hex_bytes("0aff"), vec![0x0a, 0xff]);
-        assert_eq!(hex_bytes("0az1"), vec![0x0a]);
-        assert_eq!(hex_bytes("abc"), vec![0xab]);
-    }
 
     #[test]
     fn words_are_one_line_of_text_and_never_a_key() {

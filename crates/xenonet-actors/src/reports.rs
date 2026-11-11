@@ -35,7 +35,8 @@ const SUBJECTS: [&str; 5] = ["session", "task", "job", "turn", "command"];
 /// What a report asks of the world: the registry, the map, the engine's
 /// pins, and the actor's own processes.
 pub trait Host {
-    /// Whether the actor was allowed a capability.
+    /// Whether the actor's token was minted for a capability: what it may
+    /// say it did. (What it may do in XenoNet is the token's rights.)
     fn can(&mut self, id: &str, capability: &str) -> bool;
     /// The project or folder holding an absolute path, as a node id, or
     /// null.

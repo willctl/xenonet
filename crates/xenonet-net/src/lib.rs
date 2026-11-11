@@ -37,6 +37,7 @@ pub mod keys;
 pub mod link;
 pub mod node;
 pub mod request;
+pub mod roots;
 pub mod roster;
 pub mod sink;
 pub mod svc;
@@ -91,6 +92,12 @@ impl From<xenonet_id::IdError> for NetError {
             "refused" => NetError::new(403, "refused", e.message),
             _ => NetError::internal(e.message),
         }
+    }
+}
+
+impl From<xenonet_authz::AuthzError> for NetError {
+    fn from(e: xenonet_authz::AuthzError) -> Self {
+        NetError::internal(e.message)
     }
 }
 

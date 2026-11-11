@@ -450,7 +450,7 @@
               "properties": {
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -655,7 +655,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -723,7 +723,7 @@
                 },
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -940,7 +940,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -1006,7 +1006,7 @@
                 },
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -1210,7 +1210,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -1593,7 +1593,7 @@
                 },
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -1832,7 +1832,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {

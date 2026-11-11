@@ -434,9 +434,6 @@ impl Actors for ActorsDriver {
     fn tokens(&self, now: f64) -> R<Value> {
         self.side()?.read(|r| r.tokens(now)).map(Value::Array).map_err(|f| core_error(thrown(f)))
     }
-    fn can(&self, id: &str, capability: &str) -> bool {
-        self.side().is_ok_and(|a| a.read(|r| r.can(id, &json!(capability))))
-    }
     fn info(&self, id: &str) -> Option<Value> {
         let v = self.side().ok()?.read(|r| r.info(id));
         (!v.is_null()).then_some(v)

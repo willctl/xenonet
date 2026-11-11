@@ -25,7 +25,9 @@ pub trait Policy: Send + Sync {
     fn set_paused(&self, _paused: bool) -> R<Value> {
         pending(POLICY)
     }
-    fn grant(&self, _actor: &str, _scope: &str, _ttl_ms: f64) -> R<Value> {
+    /// A sessions scope for an actor's grant; `at_window` says the request
+    /// came from XenoNet's window, where the person can be asked.
+    fn grant(&self, _actor: &str, _scope: &str, _ttl_ms: f64, _at_window: bool) -> R<Value> {
         pending(POLICY)
     }
     fn revoke(&self, _actor: &str) -> R<Value> {

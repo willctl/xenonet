@@ -58,7 +58,7 @@ impl ReportHost<'_> {
 
 impl reports::Host for ReportHost<'_> {
     fn can(&mut self, id: &str, capability: &str) -> bool {
-        self.read(|r| r.can(id, &Value::String(capability.into())))
+        self.read(|r| r.info(id).get("capabilities").and_then(Value::as_array).is_some_and(|c| c.iter().any(|w| w == capability)))
     }
     fn place_of(&mut self, path: &Value) -> Value {
         self.with("placeOf", |r, h| Ok(r.place_of(path, h))).unwrap_or(Value::Null)

@@ -18,6 +18,11 @@ sha2.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
 xenonet-components.workspace = true
+# Page cursors, which narrow an actor's grant (a Biscuit), and the grants
+# held in memory for the made-up reads: decided as the service decides
+# them, under a token root certified with a key held in memory.
+xenonet-authz.workspace = true
+xenonet-id.workspace = true
 # The runtime (src/runtime): the cores it implements, the engine's store
 # the grants are kept in, the actors' connections and limits, the
 # products' names, the answers' types, your credential store for the

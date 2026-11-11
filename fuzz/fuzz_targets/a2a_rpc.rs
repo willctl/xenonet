@@ -73,9 +73,6 @@ impl Actors for Fake {
     fn info(&self, _id: &str) -> Option<Value> {
         Some(json!({ "name": "Wren", "product": null }))
     }
-    fn can(&self, _id: &str, _capability: &str) -> bool {
-        true
-    }
 }
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -196,7 +193,7 @@ fuzz_target!(|data: &[u8]| {
         one => vec![one],
     };
     let a = a2a(inbox);
-    let actor = A2aActor { id: "actor:wren".into(), slug: "wren".into() };
+    let actor = A2aActor { id: "actor:wren".into(), slug: "wren".into(), messages: true };
     let mut ids: Vec<String> = Vec::new();
     for _ in 0..=c.below(4) {
         let pick = c.u8();

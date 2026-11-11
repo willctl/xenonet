@@ -10,9 +10,8 @@
 //! The grant's standing, its rate and the schemas are other modules'; what
 //! an answer reads of them comes through its host (`ReadHost`): the view,
 //! the actor, a session's stats, the attention ids' key, the schema's check
-//! and the time.
+//! and the time. Its page cursors come through `Pages`.
 
-use crate::cursors::{Cursors, For};
 use crate::fixtures;
 use crate::projection::{self as p, Visible};
 use async_trait::async_trait;
@@ -183,12 +182,42 @@ fn iso(ms: f64) -> Result<Value, Failure> {
     }
 }
 
+/// What a page cursor is for: the grant, at its revision, the operation
+/// and its filters.
+pub struct For<'a> {
+    pub grant: &'a Value,
+    pub revision: &'a Value,
+    pub op: &'a str,
+    pub filters: &'a Value,
+}
+
+impl For<'_> {
+    /// What a cursor is bound to, as its text: the grant, the operation and
+    /// the filters as JSON writes them. The revision isn't: a cursor of the
+    /// one before is refused as expired, not as another read's.
+    pub fn bound(&self) -> String {
+        format!("{}\n{}\n{}", display(self.grant), self.op, xenonet_text::json::stringify(self.filters, 0))
+    }
+}
+
+/// The lists' page cursors, opaque to the caller and good for five
+/// minutes: each is bound to what it's `For`, can't be changed or made up,
+/// and holds where the last page ended.
+pub trait Pages {
+    /// A cursor for the page after `after`, or the code the read fails
+    /// with when none can be made.
+    fn make(&self, f: &For<'_>, after: &Value) -> Result<String, &'static str>;
+    /// Where a cursor says to go on from (None for the start), or the code
+    /// it's refused with: INVALID_ARGUMENT for one changed, made up, or for
+    /// another grant, operation or filters; CURSOR_EXPIRED for one too old
+    /// or from before the grant changed.
+    fn read(&self, cursor: &str, f: &For<'_>) -> Result<Option<Value>, &'static str>;
+}
+
 /// What an answer reads of the rest of XenoNet.
 #[async_trait(?Send)]
 pub trait ReadHost {
     async fn now(&self) -> f64;
-    /// The time the cursors are signed at.
-    async fn cursor_now(&self) -> f64;
     /// The map, as the reads see it.
     async fn view(&self) -> Result<Value, Failure>;
     /// An actor, or null.
@@ -233,33 +262,31 @@ struct Out {
 
 struct Ctx<'a> {
     cfg: &'a Config,
-    cursors: &'a Cursors,
+    pages: &'a dyn Pages,
     view: &'a Value,
     policy: &'a Value,
     t: f64,
-    /// The page tokens' clock.
-    ct: f64,
     args: &'a Value,
     limit: f64,
 }
 
 impl Ctx<'_> {
-    fn for_<'b>(&'b self, op: &'b Value, filters: &'b Value) -> For<'b> {
-        For { grant: self.policy.get("grantId"), revision: self.policy.get("revision"), op: Some(op), filters: Some(filters) }
+    fn for_<'b>(&'b self, op: &'b str, filters: &'b Value) -> For<'b> {
+        let field = |k: &str| self.policy.get(k).unwrap_or(&Value::Null);
+        For { grant: field("grantId"), revision: field("revision"), op, filters }
     }
 
     fn after(&self, op: &str, filters: &Value) -> Result<Option<Value>, Failure> {
         let Some(c) = self.args.get("cursor").filter(|c| truthy(Some(c))) else { return Ok(None) };
-        let o = json!(op);
-        match self.cursors.read(&display(c), &self.for_(&o, filters), self.ct) {
+        match self.pages.read(&display(c), &self.for_(op, filters)) {
             Ok(a) => Ok(a),
             Err(code) => Err(refuse(code, if code == "CURSOR_EXPIRED" { "cursor-cursor_expired" } else { "cursor-invalid_argument" })),
         }
     }
 
-    fn next(&self, key: Option<Value>, op: &str, filters: &Value) -> Value {
-        let o = json!(op);
-        key.map_or(Value::Null, |k| json!(self.cursors.make(&self.for_(&o, filters), Some(&k), self.ct)))
+    fn next(&self, key: Option<Value>, op: &str, filters: &Value) -> Result<Value, Failure> {
+        let Some(k) = key else { return Ok(Value::Null) };
+        self.pages.make(&self.for_(op, filters), &k).map(Value::String).map_err(|code| refuse(code, "cursor-unmade"))
     }
 
     fn place_of(&self, project: &Value) -> Option<Value> {
@@ -364,7 +391,7 @@ fn projects(c: &Ctx<'_>) -> Result<Out, Failure> {
         })
         .collect();
     let (shown, next) = page(all, after.as_ref(), c.limit);
-    Ok(Out { freshness: f, data: json!({ "window_start": iso(window_start)?, "projects": shown, "next_cursor": c.next(next, "projects", &filters) }), targets: vec![] })
+    Ok(Out { freshness: f, data: json!({ "window_start": iso(window_start)?, "projects": shown, "next_cursor": c.next(next, "projects", &filters)? }), targets: vec![] })
 }
 
 fn sessions(c: &Ctx<'_>) -> Result<Out, Failure> {
@@ -425,7 +452,7 @@ fn sessions(c: &Ctx<'_>) -> Result<Out, Failure> {
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
     Ok(Out {
         freshness: f,
-        data: json!({ "sessions": shown.iter().map(|v| p::session_summary(v, policy)).collect::<Vec<_>>(), "next_cursor": c.next(next, "sessions", &filters), "window_start": iso(since)? }),
+        data: json!({ "sessions": shown.iter().map(|v| p::session_summary(v, policy)).collect::<Vec<_>>(), "next_cursor": c.next(next, "sessions", &filters)?, "window_start": iso(since)? }),
         targets: c.targets_of(&project),
     })
 }
@@ -470,7 +497,7 @@ fn attention(c: &Ctx<'_>, id_key: &[u8]) -> Result<Out, Failure> {
     });
     let (shown, next) = page(items, after.as_ref(), c.limit);
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
-    Ok(Out { freshness: f, data: json!({ "items": shown, "next_cursor": c.next(next, "attention", &filters) }), targets: c.targets_of(&project) })
+    Ok(Out { freshness: f, data: json!({ "items": shown, "next_cursor": c.next(next, "attention", &filters)? }), targets: c.targets_of(&project) })
 }
 
 fn actors(c: &Ctx<'_>) -> Result<Out, Failure> {
@@ -494,7 +521,7 @@ fn actors(c: &Ctx<'_>) -> Result<Out, Failure> {
     });
     let (shown, next) = page(list, after.as_ref(), c.limit);
     let f = p::freshness_of(c.view, c.t, &p::all_sources());
-    Ok(Out { freshness: f, data: json!({ "self_actor_id": me, "actors": shown, "next_cursor": c.next(next, "actors", &filters) }), targets: c.targets_of(&project) })
+    Ok(Out { freshness: f, data: json!({ "self_actor_id": me, "actors": shown, "next_cursor": c.next(next, "actors", &filters)? }), targets: c.targets_of(&project) })
 }
 
 async fn session(host: &dyn ReadHost, c: &Ctx<'_>, fixture: bool) -> Result<Out, Failure> {
@@ -564,7 +591,7 @@ async fn view_for(host: &dyn ReadHost, policy0: &Value) -> Result<(Value, Value)
 /// One operation, within its limits, as an envelope, shortened until it
 /// fits: { envelope, bytes, targets, reach, projects }.
 #[expect(clippy::too_many_arguments, reason = "an answer's settings and its request, each its own")]
-pub async fn answer(host: &dyn ReadHost, cfg: &Config, cursors: &Cursors, op: &str, tool: &str, args: &Value, policy0: &Value, request_id: &Value) -> Result<Value, Failure> {
+pub async fn answer(host: &dyn ReadHost, cfg: &Config, pages: &dyn Pages, op: &str, tool: &str, args: &Value, policy0: &Value, request_id: &Value) -> Result<Value, Failure> {
     let (view, policy) = view_for(host, policy0).await?;
     let fixture_view = truthy(view.get("fixture"));
     let given = args.get("limit").filter(|v| !v.is_null()).map_or(cfg.limits.page, |v| xenonet_text::text::to_number(Some(v)));
@@ -573,8 +600,7 @@ pub async fn answer(host: &dyn ReadHost, cfg: &Config, cursors: &Cursors, op: &s
     let id_key = if op == "attention" { host.id_key().await? } else { Vec::new() };
     loop {
         let t = host.now().await;
-        let ct = host.cursor_now().await;
-        let c = Ctx { cfg, cursors, view: &view, policy: &policy, t, ct, args, limit };
+        let c = Ctx { cfg, pages, view: &view, policy: &policy, t, args, limit };
         let out = match op {
             "status" => status(&c),
             "projects" => projects(&c)?,

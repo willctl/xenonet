@@ -253,7 +253,7 @@ fn key_prefix() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
     R.get_or_init(|| {
         regex::Regex::new(
-            r"(?:^|[^A-Za-z0-9])(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_assistant_)",
+            r"(?:^|[^A-Za-z0-9])(?:sk-|sk_|pk_|rk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|npm_|pypi-|hf_|xenonet_actor_|xenonet_gateway_)",
         )
         .expect("a fixed pattern")
     })

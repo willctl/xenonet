@@ -730,7 +730,7 @@ impl ActorGateway {
             }
             "peers" => c.engine.peers(id, if a["scope"] == "repo" { "repo" } else { "machine" }).await.map_err(msg),
             "send" => {
-                if !c.actors.can(id, "message-agents") {
+                if !auth["allows"].as_array().is_some_and(|a| a.iter().any(|x| x == "message")) {
                     return Err("send needs the message-agents capability, which your user didn't allow this actor".into());
                 }
                 let to = a.get("to").and_then(Value::as_str);

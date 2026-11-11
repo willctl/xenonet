@@ -4,13 +4,16 @@
 //! redaction across identities, and the audit log: core/delivery/policy.js.
 //!
 //! Scopes. You and the sessions on this machine see everything. An actor
-//! sees and reaches nothing until you grant its token a scope (default
-//! deny): a selector such as "identity:adal project:xenonet", with an
-//! expiry, revoked at once with revoke(). A broadcast from an actor only
+//! sees and reaches nothing until you give its grant a sessions scope
+//! (default deny): a selector such as "identity:adal project:xenonet", with
+//! an expiry, revoked at once with revoke(). A broadcast from an actor only
 //! reaches what lies inside its scope, and separate identities never see
-//! each other's sessions unless a grant names both.
+//! each other's sessions unless a scope names both. The scope is the
+//! grant's, kept beside it by its token's revocation id (the engine
+//! store's grant scopes, through `Host`), never in its token, so it goes
+//! with the token.
 //!
-//! The policy keeps its data in its file (delivery.json) and its audit log
+//! The policy keeps the rest of its data in its file (delivery.json) and its audit log
 //! beside it, through `Host`. The wake budget's counts go in
 //! delivery-wakes.json beside the policy's file, so a restart doesn't hand
 //! every sender a fresh budget.
@@ -26,10 +29,20 @@ use xenonet_text::json::stringify;
 
 pub const YOU: &str = xenonet_model::ids::YOU;
 
-/// The policy's clock, and the files it keeps.
+/// The policy's clock, the files it keeps, and the actors' grants' sessions
+/// scopes.
 pub trait Host: Files {
     /// The time, in epoch ms.
     fn now(&mut self) -> f64;
+    /// The sessions scope of this machine's actor `actor`'s grant, `{
+    /// selector, at, until }`, or None when its grant has none (or it has
+    /// no grant).
+    fn sessions_of(&mut self, actor: &str) -> Option<Value>;
+    /// Sets (or with None, takes away) the sessions scope of `actor`'s
+    /// grant; Err when it has no grant to scope.
+    fn set_sessions(&mut self, actor: &str, scope: Option<&Value>) -> std::result::Result<bool, String>;
+    /// Every actor whose grant has a sessions scope, with it.
+    fn all_sessions(&mut self) -> Vec<(String, Value)>;
 }
 
 /// The limits, as LIMITS has them.
@@ -286,7 +299,7 @@ pub trait Guard {
 }
 
 pub struct Policy {
-    /// { paused, grants, consent }, and whatever else the file had.
+    /// { paused, consent }, and whatever else the file had.
     pub data: Map<String, Value>,
     /// key → the times it was taken.
     hits: HashMap<String, Vec<f64>>,
@@ -305,7 +318,6 @@ impl Default for Policy {
     fn default() -> Self {
         let mut data = Map::new();
         data.insert("paused".into(), Value::Bool(false));
-        data.insert("grants".into(), json!({}));
         data.insert("consent".into(), json!({}));
         Policy { data, hits: HashMap::new(), recent: Vec::new(), memory_audit: Vec::new(), limits: Limits::default(), file: None, audit_file: None }
     }
@@ -406,7 +418,7 @@ impl Policy {
 
     // ---------- scopes ----------
 
-    /// The grant: { selector, at, expiresAt }.
+    /// The scope: { selector, at, expiresAt }, kept with the actor's grant.
     pub fn grant(&mut self, h: &mut dyn Host, actor: &str, selector: &str, ttl_ms: Option<f64>, by: &str) -> Result<Value> {
         if actor_of(actor).is_none_or(|(host, _)| host.is_some()) {
             return Err(Fail::Error("scopes are granted to actors (actor:<slug>)".into()));
@@ -422,28 +434,23 @@ impl Policy {
         let ttl = if ttl.is_nan() { f64::NAN } else { ttl.max(60e3) };
         let expires_at = h.now() + ttl;
         let g = json!({ "selector": Selector::format(Some(&sel)), "at": xenonet_text::json::number(at), "expiresAt": xenonet_text::json::number(expires_at) });
-        self.table("grants")?.insert(actor.to_string(), g.clone());
-        self.save(h)?;
+        h.set_sessions(actor, Some(&g)).map_err(Fail::Error)?;
         self.audit(h, json!({ "kind": "grant", "actor": actor, "selector": g["selector"], "expiresAt": xenonet_text::json::number(expires_at), "by": by }))?;
         Ok(g)
     }
 
-    /// { revoked }: whether there was a grant.
+    /// { revoked }: whether there was a scope.
     pub fn revoke(&mut self, h: &mut dyn Host, actor: &str, by: &str) -> Result<Value> {
-        let had = truthy(self.data.get("grants").and_then(|g| g.get(actor)));
-        if let Some(Value::Object(g)) = self.data.get_mut("grants") {
-            g.shift_remove(actor);
-        }
-        self.save(h)?;
+        let had = h.sessions_of(actor).is_some() && h.set_sessions(actor, None).unwrap_or(false);
         self.audit(h, json!({ "kind": "revoke", "actor": actor, "by": by }))?;
         Ok(json!({ "revoked": had }))
     }
 
-    /// Every grant, { actor, ...grant, expired }.
+    /// Every scope, { actor, ...scope, expired }.
     pub fn grants(&self, h: &mut dyn Host) -> Vec<Value> {
         let t = h.now();
         let mut out = Vec::new();
-        for (actor, g) in spread(self.data.get("grants").unwrap_or(&Value::Null)) {
+        for (actor, g) in h.all_sessions() {
             // { actor, ...g, expired }: a key g has too keeps its place.
             let mut f = Map::new();
             f.insert("actor".into(), Value::String(actor));
@@ -457,20 +464,20 @@ impl Policy {
     }
 
     /// The scope a caller works within: Free for no limit (you, sessions on
-    /// this machine); for an actor its live grant, or Deny. An actor on
-    /// another machine works within the scope its own machine granted it,
-    /// which that machine checked before the message left: here it's open,
-    /// and what this machine lets it do is `reach`'s to decide.
+    /// this machine); for an actor its grant's live sessions scope, or Deny.
+    /// An actor on another machine works within the scope its own machine
+    /// gave it, which that machine checked before the message left: here
+    /// it's open, and what this machine lets it do is decided on its token.
     pub fn scope_of(&self, h: &mut dyn Host, id: &str) -> Scope {
         if actor_of(id).is_none_or(|(host, _)| host.is_some()) {
             return Scope::Free;
         }
-        let g = self.data.get("grants").and_then(|g| g.get(id));
-        if !truthy(g) || num(g.and_then(|g| g.get("expiresAt"))) <= h.now() {
+        let g = h.sessions_of(id);
+        if !truthy(g.as_ref()) || num(g.as_ref().and_then(|g| g.get("expiresAt"))) <= h.now() {
             return Scope::Deny;
         }
-        // A grant whose selector doesn't parse limits nothing.
-        let sel = text_of(g.and_then(|g| g.get("selector")));
+        // A scope whose selector doesn't parse limits nothing.
+        let sel = text_of(g.as_ref().and_then(|g| g.get("selector")));
         match Selector::parse(&sel) {
             Some(s) => Scope::Within(s),
             None => Scope::Free,
@@ -782,8 +789,13 @@ mod tests {
         assert!(f.ends_with(")\nhi"));
     }
 
-    /// The policy's clock, with nothing kept on disk.
-    struct Clock(f64);
+    /// The policy's clock, with nothing kept on disk, and the grants'
+    /// sessions scopes in memory (wren, muse and kite have grants).
+    struct Clock(f64, std::collections::BTreeMap<String, Value>);
+
+    fn clock(t: f64) -> Clock {
+        Clock(t, std::collections::BTreeMap::new())
+    }
 
     impl Files for Clock {
         fn read_file(&mut self, path: &str) -> std::result::Result<String, String> {
@@ -807,6 +819,21 @@ mod tests {
         fn now(&mut self) -> f64 {
             self.0
         }
+        fn sessions_of(&mut self, actor: &str) -> Option<Value> {
+            self.1.get(actor).cloned()
+        }
+        fn set_sessions(&mut self, actor: &str, scope: Option<&Value>) -> std::result::Result<bool, String> {
+            if !["actor:wren", "actor:muse", "actor:kite"].contains(&actor) {
+                return Err(format!("{actor} has no grant to scope"));
+            }
+            Ok(match scope {
+                Some(s) => self.1.insert(actor.into(), s.clone()).is_some(),
+                None => self.1.remove(actor).is_some(),
+            })
+        }
+        fn all_sessions(&mut self) -> Vec<(String, Value)> {
+            self.1.iter().map(|(a, s)| (a.clone(), s.clone())).collect()
+        }
     }
 
     /// A session's or an actor's facts, as a selector matches them.
@@ -823,7 +850,7 @@ mod tests {
 
     #[test]
     fn an_actor_sees_and_reaches_nothing_until_you_grant_it_a_scope() {
-        let mut c = Clock(1_000_000.0);
+        let mut c = clock(1_000_000.0);
         let mut p = Policy::load(&mut c, None, None);
         let (wren, muse, you) = ("actor:wren", "actor:muse", "actor:you");
         let atlas = facts("claude:a", "claude", "atlas", &[]);
@@ -845,7 +872,7 @@ mod tests {
             assert_eq!(error(p.grant(&mut c, wren, bad, None, you)), use_terms(bad), "{bad}");
         }
         assert_eq!(error(p.grant(&mut c, wren, "+", None, you)), "say what the scope covers");
-        assert!(p.data["grants"].as_object().unwrap().is_empty());
+        assert!(c.1.is_empty());
         // A grant: what it covers, for at least a minute.
         let g = p.grant(&mut c, wren, "Project:Atlas", Some(1000.0), you).unwrap();
         assert_eq!((g["selector"].clone(), g["expiresAt"].clone()), (json!("project:atlas"), json!(1_060_000)));
@@ -867,9 +894,10 @@ mod tests {
         assert_eq!(
             p.grants(&mut c),
             vec![
-                json!({ "actor": wren, "selector": "by:wren", "at": 1_000_000, "expiresAt": xenonet_text::json::number(1_000_000.0 + 30.0 * 24.0 * 3600e3), "expired": false }),
                 json!({ "actor": muse, "selector": "all", "at": 1_000_000, "expiresAt": 1_060_000, "expired": true }),
-            ]
+                json!({ "actor": wren, "selector": "by:wren", "at": 1_000_000, "expiresAt": xenonet_text::json::number(1_000_000.0 + 30.0 * 24.0 * 3600e3), "expired": false }),
+            ],
+            "in the order the host keeps them"
         );
         assert_eq!(p.revoke(&mut c, wren, you).unwrap(), json!({ "revoked": true }));
         assert_eq!(p.revoke(&mut c, wren, you).unwrap(), json!({ "revoked": false }));
@@ -885,7 +913,7 @@ mod tests {
         for not in ["you", "actor:you", "@studio:actor:you", "@studio:claude:aaaaaaaa-0001", "claude:aaaaaaaa-0001", "@Studio:actor:muse", "@studio:actor:", ""] {
             assert_eq!(actor_of(not), None, "{not}");
         }
-        let mut c = Clock(1_000_000.0);
+        let mut c = clock(1_000_000.0);
         let mut p = Policy::load(&mut c, None, None);
         let (wren, you) = ("actor:wren", "you");
         let muse = |machine: &str| json!({ "id": format!("@{machine}:actor:muse"), "app": "actor", "machine": machine });
@@ -915,7 +943,7 @@ mod tests {
 
     #[test]
     fn a_message_stops_at_the_pause_the_fan_out_the_depth_and_the_rates() {
-        let mut c = Clock(1_000_000.0);
+        let mut c = clock(1_000_000.0);
         let mut p = Policy::load(&mut c, None, None);
         let (a, b, you) = ("claude:a", "codex:b", "actor:you");
         let to_b = [json!(b)];
@@ -963,7 +991,7 @@ mod tests {
 
     #[test]
     fn a_wake_needs_consent_and_fits_a_budget() {
-        let mut c = Clock(1_000_000.0);
+        let mut c = clock(1_000_000.0);
         let mut p = Policy::load(&mut c, None, None);
         let (a, b, you) = ("claude:a", "codex:b", "actor:you");
         assert!(!p.consented(&mut c, b, false));

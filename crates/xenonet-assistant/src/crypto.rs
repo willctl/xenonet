@@ -1,6 +1,5 @@
 //! The hashes the assistant's JS took from node:crypto: SHA-256, HMAC
-//! with it, base64url both ways and a comparison that takes as long
-//! whatever it finds.
+//! with it, and base64url both ways.
 
 use sha2::{Digest, Sha256};
 
@@ -10,11 +9,6 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 
 pub fn hex(bytes: &[u8]) -> String {
     xenonet_text::utf16::hex(bytes)
-}
-
-/// crypto.createHash("sha256").update(text).digest("hex").
-pub fn sha256_hex(text: &str) -> String {
-    hex(&sha256(text.as_bytes()))
 }
 
 /// crypto.createHmac("sha256", key).update(data).digest() (RFC 2104).
@@ -73,22 +67,6 @@ pub fn b64url_decode(text: &str) -> Vec<u8> {
         }
     }
     out
-}
-
-/// crypto.timingSafeEqual for two of the same length; false for two that
-/// aren't, as the JS checked the lengths first.
-pub fn same(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
-}
-
-/// n random bytes from the system.
-pub fn random_bytes(n: usize) -> Vec<u8> {
-    let mut b = vec![0u8; n];
-    getrandom::fill(&mut b).expect("the system's random numbers");
-    b
 }
 
 #[cfg(test)]

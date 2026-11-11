@@ -7,10 +7,13 @@
 //! written inside a git working tree or the projects folder, where agents
 //! read freely and tokens get committed, unless you say so.
 //!
+//! Whether what a file holds is a token is the service's to decide
+//! (xenonet-authz): here it's only named by its prefix.
+//!
 //! The doctor's look for tokens left in repos (findTokenFiles) moves with
 //! the doctor.
 
-use crate::tokens::is_token;
+use crate::tokens::TOKEN_PREFIX;
 use std::path::Path;
 use xenonet_os::fs::FsError;
 use xenonet_os::paths::{is_under, path_key, resolve};
@@ -25,6 +28,11 @@ pub const HEAVY_FOLDERS: [&str; 15] =
 
 /// How long whoami or icacls may take when a token file is read or written.
 pub const TOKEN_COMMAND_MS: u64 = 10000;
+
+// Text that names itself an actor's token.
+fn named(token: &str) -> bool {
+    token.len() > TOKEN_PREFIX.len() && token.starts_with(TOKEN_PREFIX)
+}
 
 /// Runs whoami or icacls for the token files: the `run` to give them.
 pub fn run_token_command(file: &str, args: &[&str]) -> Result<String, String> {
@@ -59,7 +67,7 @@ pub fn read_token_file(file: &str, windows: bool, run: &mut Run<'_>) -> Result<S
     }
     let raw = std::fs::read(file).map_err(|e| Error::Fs(FsError::of(e, "open", file)))?;
     let token = trim(&String::from_utf8_lossy(&raw)).to_string();
-    if !is_token(&token) {
+    if !named(&token) {
         return Err(said(format!("{file} doesn't hold an actor's token")));
     }
     Ok(token)
@@ -74,7 +82,7 @@ pub fn token_from_env(env: &dyn Fn(&str) -> Option<String>, windows: bool, run: 
     }
     if let Some(token) = env("XENONET_ACTOR_TOKEN").filter(|t| !t.is_empty()) {
         let token = trim(&token).to_string();
-        if !is_token(&token) {
+        if !named(&token) {
             return Err(said("XENONET_ACTOR_TOKEN doesn't hold an actor's token".into()));
         }
         return Ok(Some((token, None)));
@@ -132,7 +140,7 @@ fn write_new(full: &str, text: &str) -> Result<(), Error> {
 /// with your account alone and nothing inherited), in a folder made only
 /// for you if it isn't there. Says where.
 pub fn write_token_file(file: &str, token: &str, windows: bool, run: &mut Run<'_>, force: bool, projects_dir: Option<&str>) -> Result<String, Error> {
-    if !is_token(token) {
+    if !named(token) {
         return Err(said("that isn't an actor's token".into()));
     }
     if let Some(why) = token_file_refusal(file, force, projects_dir) {
@@ -234,7 +242,7 @@ mod tests {
         }
         // Nor one that isn't a file, or holds no token.
         assert_eq!(read_token_file(&dir.to_string_lossy(), true, &mut windows(None, true)).unwrap_err().message(), format!("{} isn't a file", dir.to_string_lossy()));
-        std::fs::write(&file, "xenonet_actor_short\n").unwrap();
+        std::fs::write(&file, "a session's secret\n").unwrap();
         assert_eq!(read(Some(format!("D:P(A;;FA;;;{SID})")), true), Err(format!("{file} doesn't hold an actor's token")));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -281,8 +289,11 @@ mod tests {
         assert_eq!(token_from_env(&none, false, &mut run).unwrap(), None);
         let empty = |_: &str| Some(String::new());
         assert_eq!(token_from_env(&empty, false, &mut run).unwrap(), None);
-        let bad = |k: &str| (k == "XENONET_ACTOR_TOKEN").then(|| "xenonet_actor_nope".to_string());
+        let bad = |k: &str| (k == "XENONET_ACTOR_TOKEN").then(|| "xenonet_gateway_abc".to_string());
         assert_eq!(token_from_env(&bad, false, &mut run).unwrap_err().message(), "XENONET_ACTOR_TOKEN doesn't hold an actor's token");
+        // Whether one named as an actor's is one is the service's to say.
+        let named = |k: &str| (k == "XENONET_ACTOR_TOKEN").then(|| "xenonet_actor_nope".to_string());
+        assert_eq!(token_from_env(&named, false, &mut run).unwrap(), Some(("xenonet_actor_nope".to_string(), None)));
         // The file, when both are set, and its own checks with it.
         let both = |k: &str| Some(if k == "XENONET_ACTOR_TOKEN_FILE" { "/no/such/xenonet.token".to_string() } else { TOKEN.to_string() });
         assert_eq!(token_from_env(&both, false, &mut run).unwrap_err().message(), "there's no token file at /no/such/xenonet.token");

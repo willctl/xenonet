@@ -96,9 +96,6 @@ impl cores::Actors for Stand {
     fn info(&self, _: &str) -> Option<Value> {
         Some(json!({ "name": "Muse", "product": { "id": "muse" } }))
     }
-    fn can(&self, _: &str, _: &str) -> bool {
-        true
-    }
 }
 
 impl cores::Reports for Stand {

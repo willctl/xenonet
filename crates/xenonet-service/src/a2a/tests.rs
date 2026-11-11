@@ -16,7 +16,6 @@ struct Fake {
     inbox: Mutex<Vec<Value>>,
     arrived: Notify,
     next: Mutex<i64>,
-    deny_messages: AtomicBool,
     pending: AtomicBool,
 }
 
@@ -72,9 +71,6 @@ impl Actors for Fake {
     fn info(&self, _id: &str) -> Option<Value> {
         Some(json!({ "name": "Wren", "product": null }))
     }
-    fn can(&self, _id: &str, capability: &str) -> bool {
-        capability != "message-agents" || !self.deny_messages.load(Ordering::SeqCst)
-    }
 }
 
 fn limits() -> Limits {
@@ -109,7 +105,7 @@ fn setup() -> (Arc<A2a>, Arc<Fake>) {
 }
 
 fn wren() -> A2aActor {
-    A2aActor { id: "actor:wren".into(), slug: "wren".into() }
+    A2aActor { id: "actor:wren".into(), slug: "wren".into(), messages: true }
 }
 
 fn post(body: &Value) -> A2aRequest {
@@ -250,7 +246,7 @@ async fn a_task_is_the_message_until_its_reply() {
     assert_eq!(short["history"].as_array().unwrap().len(), 1);
     assert_eq!(short["history"][0]["role"], "ROLE_AGENT", "the latest");
     // Another agent sees none of it.
-    let moth = A2aActor { id: "actor:moth".into(), slug: "moth".into() };
+    let moth = A2aActor { id: "actor:moth".into(), slug: "moth".into(), messages: true };
     assert_eq!(call(&a, &moth, post(&rpc("GetTask", json!({ "id": id })))).await.1["error"]["code"], -32001);
 }
 
@@ -287,12 +283,11 @@ async fn refusals_reject_the_task_with_why() {
     a.set_default_target("actor:wren", Some("claude:x")).unwrap();
     let t = ask(&a, "SendMessage", send("m3", json!({}))).await["result"]["task"].clone();
     assert_eq!(t["status"]["state"], "TASK_STATE_WORKING");
-    // Without the capability.
-    fake.deny_messages.store(true, Ordering::SeqCst);
-    let t = ask(&a, "SendMessage", send("m4", json!({ "target": "claude:x" }))).await["result"]["task"].clone();
+    // A token without the right to send.
+    let mute = A2aActor { messages: false, ..wren() };
+    let t = call(&a, &mute, post(&rpc("SendMessage", send("m4", json!({ "target": "claude:x" }))))).await.1["result"]["task"].clone();
     assert_eq!(t["status"]["state"], "TASK_STATE_REJECTED");
     assert!(t["status"]["message"]["parts"][0]["text"].as_str().unwrap().contains("message-agents"));
-    fake.deny_messages.store(false, Ordering::SeqCst);
     // An engine that isn't there fails it.
     fake.pending.store(true, Ordering::SeqCst);
     let t = ask(&a, "SendMessage", send("m5", json!({ "target": "claude:x" }))).await["result"]["task"].clone();
@@ -487,7 +482,9 @@ async fn a_subscription_follows_an_open_task_and_keeps_alive() {
 
 #[tokio::test]
 async fn auth_from_the_gateway() {
-    assert_eq!(A2aActor::from_auth(&json!({ "ok": true, "id": "actor:wren", "slug": "wren" })), Some(wren()));
+    assert_eq!(A2aActor::from_auth(&json!({ "ok": true, "id": "actor:wren", "slug": "wren", "allows": ["message", "handoff"] })), Some(wren()));
+    let mute = A2aActor::from_auth(&json!({ "ok": true, "id": "actor:wren", "slug": "wren", "allows": ["claim"] })).unwrap();
+    assert!(!mute.messages, "what its token allows, as the gateway decided it");
     assert_eq!(A2aActor::from_auth(&json!({ "ok": false, "id": "actor:wren" })), None);
     assert_eq!(A2aActor::from_auth(&json!({ "ok": true, "id": "claude:x" })), None, "only an actor");
 }

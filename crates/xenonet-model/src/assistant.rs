@@ -78,7 +78,7 @@ patterned!(
 );
 patterned!(
     /// An opaque page token.
-    Cursor = r"^[A-Za-z0-9_-]{1,900}\.[A-Za-z0-9_-]{43}$",
+    Cursor = r"^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
     "description": "An opaque page token from next_cursor, good for five minutes"
 );
 patterned!(

@@ -3,8 +3,9 @@
 //!
 //!   `credentials/<grant>.json`  a grant's credential, written once at your
 //!                             approval, readable only by your account, and
-//!                             deleted when the grant is revoked; XenoNet
-//!                             keeps only its SHA-256
+//!                             deleted when the grant is revoked, and
+//!                             written again when it changes; XenoNet keeps
+//!                             only the token's revocation id
 //!   `revoked/<grant>`           a grant revoked, whatever engine.sqlite says
 //!   `revisions/<grant>`         a grant's revision now
 //!   disabled                  every cloud connection off
@@ -13,33 +14,18 @@
 //! or a log: the adapter reads it here and sends it only over XenoNet's
 //! private local connection.
 
-use crate::crypto::{hex, random_bytes, sha256_hex};
 use serde_json::{json, Map, Value};
 use xenonet_os::files::{self, FsError};
 use xenonet_os::nodepath::NATIVE;
 use xenonet_text::text::display;
 
-pub const TOKEN_PREFIX: &str = "xenonet_assistant_";
-
-/// /^xenonet_assistant_[0-9a-f]{64}$/
-pub fn is_token(s: &str) -> bool {
-    s.strip_prefix(TOKEN_PREFIX).is_some_and(|h| h.len() == 64 && h.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')))
-}
+/// Whether a credential holds an actor's grant's shape (`xenonet_actor_`
+/// and base64url); the service checks the grant itself.
+pub use xenonet_actors::tokens::is_token;
 
 /// GRANT_ID in core/schema/assistant.js: /^gr_[0-9a-f]{24}$/.
 pub fn is_grant(s: &str) -> bool {
     s.strip_prefix("gr_").is_some_and(|h| h.len() == 24 && h.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')))
-}
-
-pub fn hash_token(token: &str) -> String {
-    sha256_hex(token)
-}
-
-/// A new credential and the hash XenoNet keeps of it: 256 random bits.
-pub fn new_token() -> (String, String) {
-    let token = format!("{TOKEN_PREFIX}{}", hex(&random_bytes(32)));
-    let hash = hash_token(&token);
-    (token, hash)
 }
 
 pub fn assistant_dir(state_dir: &str) -> String {
@@ -202,8 +188,8 @@ mod tests {
     fn a_credential_only_its_owner_can_read() {
         let dir = files::mkdtemp(&format!("{}/xn-cred-", std::env::temp_dir().display())).unwrap();
         let grant = json!("gr_0123456789abcdef01234567");
-        let (token, hash) = new_token();
-        assert!(is_token(&token) && hash.len() == 64);
+        let token = format!("xenonet_actor_{}", "AbC-_09".repeat(10));
+        assert!(is_token(&token) && !is_token("xenonet_actor_a.b"));
         let file = write_credential(&dir, &grant, &json!(token), Some(&json!("dev_x")), &Value::Null, &mut Fine(vec![])).unwrap();
         assert_eq!(read_credential(&dir, &grant).unwrap()["token"], json!(token));
         let err = write_credential(&dir, &grant, &json!(token), None, &Value::Null, &mut Fine(vec!["Everyone".into()])).unwrap_err();

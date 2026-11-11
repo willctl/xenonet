@@ -64,9 +64,6 @@ impl cores::Actors for Weather {
     fn info(&self, _id: &str) -> Option<Value> {
         Some(json!({ "name": "Wren" }))
     }
-    fn can(&self, _id: &str, _capability: &str) -> bool {
-        true
-    }
 }
 
 /// The ids XenoNet made (msg_<uuid>, ctx_<uuid>), named in the order they
@@ -193,7 +190,7 @@ async fn the_specs_examples_answered() {
         problems.push("the card".to_string());
     }
 
-    let wren = A2aActor { id: "actor:wren".into(), slug: "wren".into() };
+    let wren = A2aActor { id: "actor:wren".into(), slug: "wren".into(), messages: true };
     let mut names = Names::default();
     let cases = kept["cases"].as_array_mut().unwrap();
     for (i, c) in cases.iter().enumerate() {

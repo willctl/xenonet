@@ -6,7 +6,7 @@
 //! project can bring its own. Everything here is the receiver's; nothing
 //! comes from the sender's word.
 
-use crate::vocab::{AskId, Attestation, DeviceId, GrantId, MachineId, NetworkId, PersonId, SessionId};
+use crate::vocab::{AskId, Attestation, DeviceId, MachineId, NetworkId, PersonId, SessionId};
 use crate::RootCertificate;
 use xenonet_id::sign::VerifyingKey;
 
@@ -168,9 +168,6 @@ pub trait Ground {
     /// How the agent of the run that asked `ask` was checked, when the
     /// question is waiting here.
     fn asker(&self, ask: &AskId) -> Option<Attestation>;
-
-    /// The current revision of an assistant's read grant, when it's there.
-    fn assistant_grant(&self, grant: &GrantId) -> Option<u64>;
 
     /// When this machine last synced governance (the chains) from another
     /// member, in milliseconds since 1970.

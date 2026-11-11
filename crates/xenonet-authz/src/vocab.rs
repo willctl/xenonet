@@ -96,11 +96,6 @@ id!(
     "an app's id"
 );
 id!(
-    /// An assistant's read grant.
-    GrantId,
-    "a grant's id"
-);
-id!(
     /// A service a machine publishes to its network.
     ServiceId,
     "a service's id"
@@ -161,9 +156,6 @@ pub enum Principal {
     /// The person, at one of their devices: only once the device's
     /// signature over the act was checked.
     Person(crate::PersonSigned),
-    /// The holder of an assistant read grant from `machine`; it proves
-    /// itself with the grant's token.
-    Assistant { grant: GrantId, machine: MachineId },
 }
 
 impl Principal {
@@ -171,7 +163,7 @@ impl Principal {
     pub fn machine(&self) -> Option<&MachineId> {
         match self {
             Principal::Machine { id } => Some(id),
-            Principal::Actor { machine, .. } | Principal::Agent { machine, .. } | Principal::Assistant { machine, .. } => Some(machine),
+            Principal::Actor { machine, .. } | Principal::Agent { machine, .. } => Some(machine),
             Principal::Person(_) => None,
         }
     }
@@ -182,7 +174,6 @@ impl Principal {
             Principal::Actor { .. } => "actor",
             Principal::Agent { .. } => "agent",
             Principal::Person(_) => "person",
-            Principal::Assistant { .. } => "assistant",
         }
     }
 }
@@ -346,8 +337,13 @@ pub enum Act {
     Publish {
         service: ServiceId,
     },
+    /// Issuing an actor's grant, or widening it: its rights and its
+    /// scopes (the hash of the rows the receiver keeps of them), so a
+    /// presence for one grant can't be put on a wider one.
     RegisterActor {
         slug: ActorSlug,
+        rights: Vec<Action>,
+        scopes: [u8; 32],
     },
     UseGateway,
     Revoke {
@@ -383,6 +379,7 @@ impl Act {
             Act::Widen { .. } => Some("widen"),
             Act::Publish { .. } => Some("publish"),
             Act::Revoke { .. } => Some("revoke"),
+            Act::RegisterActor { .. } => Some("grant"),
             _ => None,
         }
     }
@@ -513,7 +510,16 @@ pub fn act_hash(resource: &Resource, act: &Act) -> [u8; 32] {
         Act::Admit { machine, role } => c.field(machine.as_str()).field(role.as_str()),
         Act::Widen { machine, settings } => c.field(machine.as_str()).field(settings.start.as_str()).field(settings.wake.as_str()),
         Act::Publish { service } => c.field(service.as_str()),
-        Act::RegisterActor { slug } => c.field(slug.as_str()),
+        Act::RegisterActor { slug, rights, scopes } => {
+            c.field(slug.as_str());
+            let mut rights = rights.clone();
+            rights.sort();
+            rights.dedup();
+            for r in rights {
+                c.field(r.as_str());
+            }
+            c.bytes(scopes)
+        }
         Act::Revoke { what } => match what {
             Revocation::Token(id) => c.field("token").bytes(id),
             Revocation::Device(d) => c.field("device").field(d.as_str()),

@@ -350,10 +350,30 @@ pub struct PresenceProof {
     pub sig: Base64Bytes,
 }
 
+// A token root's certificate: the machine signing key's word that this root speaks for the machine, for a while.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RootCertificate {
+    pub v: Uint,
+    /// The machine, by its host id
+    pub machine: Text<1, 128>,
+    /// The root's Ed25519 key
+    pub root: PublicKey,
+    pub from: Ms,
+    pub until: Ms,
+    /// The machine signing key's signature over it
+    pub sig: Base64Bytes,
+}
+
 /// What an act rests on, for the receiver to check against its own chains: the sender's word on its own strength is never part of it
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Authority {
+    /// For an act by an actor: a token its machine minted for this act (xenonet_actor_ and a Biscuit, base64url)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<Text<1, 16384>>,
+    /// The certificate of the token's root, which the receiver checks against the sending machine's signing key in the network's chain
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<RootCertificate>,
     /// For an act as the person: their device's signature over it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub person: Option<PersonAuthority>,

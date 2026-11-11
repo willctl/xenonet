@@ -688,10 +688,17 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     let text = s(a, "text").unwrap_or_default();
     let scope = a.get("scope").map_or(Value::Null, |v| Value::String(xenonet_text::text::display(v)));
     let mut signed: BTreeMap<String, Value> = BTreeMap::new();
+    // An actor's message carries a token minted for it here, once, whatever
+    // machines it goes to: its own token was decided when it sent it.
+    let mut minted: Option<Value> = None;
     for r in items(a, "recipients") {
         let rid = s(&r, "id").unwrap_or_default();
         let Some(host) = host_of(&rid).map(str::to_string) else { continue };
-        let authority = if me == YOU { signed.entry(host.clone()).or_insert_with(|| person_authority(w, &host, at_window)).clone() } else { json!({}) };
+        let authority = match parse_actor_id(&me) {
+            _ if me == YOU => signed.entry(host.clone()).or_insert_with(|| person_authority(w, &host, at_window)).clone(),
+            Some((None, slug)) => minted.get_or_insert_with(|| actor_authority(w, slug)).clone(),
+            _ => json!({}),
+        };
         let body = json!({
             "schema": "network/message/v2",
             "mid": mid,
@@ -728,6 +735,16 @@ fn person_authority(w: &Runtime, host: &str, at_window: bool) -> Value {
     }
 }
 
+/// The authority of a message from this machine's actor `slug`: a token
+/// for messages, minted for it here. Empty when it can't be made, which
+/// the machine it goes to refuses.
+fn actor_authority(w: &Runtime, slug: &str) -> Value {
+    crate::ground::actor_authority(w, slug, vec![xenonet_authz::Action::Message]).unwrap_or_else(|why| {
+        w.log("info", "net.message", &format!("a message from actor:{slug} goes without a token, and will be refused: {why}"));
+        json!({})
+    })
+}
+
 /// Sends again what has no stored receipt, oldest first.
 pub fn resend(w: &Runtime) {
     let rows = store(w, |s| s.outbox(now_ms() - OUTBOX_MS)).unwrap_or_default();
@@ -750,26 +767,39 @@ fn receipt(w: &Runtime, to: &str, mid: &str, agent: &str, state: &str, reason: O
 /// device signature, or the sending machine's word for its own agent.
 fn envelope(from: &str, mid: &str, at: f64, sender: &str, kind: &str, name: Option<&str>, hops: f64) -> Value {
     let person = kind == "person";
+    let actor = kind == "actor";
+    let tail = "This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.";
     let line = if person {
-        format!("verified: you, by your device's signature, checked against this machine's copy of your identity; it came from {from}'s signed frame. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.")
-    } else {
-        let what = if kind == "actor" { "the actor" } else { "the session" };
+        format!("verified: you, by your device's signature, checked against this machine's copy of your identity; it came from {from}'s signed frame. {tail}")
+    } else if actor {
         format!(
-            "verified: {what} \"{}\" ({sender}), on {from}, another machine in your XenoNet network, by {from}'s signed frame; {from} checked its process. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.",
+            "verified: the actor \"{}\" ({sender}), on {from}, another machine in your XenoNet network, by a token {from} minted for it, checked against {from}'s signing key in your network's chain. {tail}",
             name.unwrap_or(sender),
+        )
+    } else {
+        format!(
+            "verified: the session \"{}\" ({sender}), on {from}, another machine in your XenoNet network, by {from}'s signed frame; {from} checked its process. {tail}",
+            name.unwrap_or(sender)
         )
     };
     let shown = if person { "you" } else { kind };
+    let authority = if person {
+        "person"
+    } else if actor {
+        "token"
+    } else {
+        "machine"
+    };
     json!({
         "schema": "message/envelope/v1",
         "mid": mid,
         "at": ms(at),
         "sender": { "id": sender, "kind": shown, "name": name, "product": null },
-        "auth": { "method": "host", "process": "n/a", "attestation": if person { "n/a" } else { "process-checked" } },
+        "auth": { "method": "host", "process": "n/a", "attestation": if person || actor { "n/a" } else { "process-checked" } },
         "client": null,
         "transport": "network",
         "host": from,
-        "original": { "kind": shown, "authority": if person { "person" } else { "machine" } },
+        "original": { "kind": shown, "authority": authority },
         "hops": hops,
         "line": line,
     })
@@ -801,20 +831,43 @@ pub(crate) struct SentBy<'a> {
 }
 
 /// Who sent an act, as this machine takes them: the person by their
-/// device's signature over `act` done to `resource`, else an agent (or an
-/// actor) of that machine, vouched for by it.
+/// device's signature over `act` done to `resource`; an actor by the token
+/// its machine minted for the act, which must be for the actor the frame
+/// names (kept, with its root, for the decision); else an agent of that
+/// machine, vouched for by it.
 pub(crate) fn principal_of(
     w: &Runtime,
-    g: &crate::ground::EngineGround,
+    g: &mut crate::ground::EngineGround,
     from: &SentBy<'_>,
     resource: &xenonet_authz::Resource,
     act: &xenonet_authz::Act,
-) -> std::result::Result<xenonet_authz::Principal, String> {
+) -> std::result::Result<(xenonet_authz::Principal, Option<xenonet_authz::Token>), String> {
     let machine = crate::ground::machine(from.host)?;
-    if from.kind == "person" {
-        return crate::ground::person(w, g, Some(from.host), &crate::ground::Carried::parse(from.authority), resource, act);
+    let carried = crate::ground::Carried::parse(from.authority);
+    match from.kind {
+        "person" => crate::ground::person(w, g, Some(from.host), &carried, resource, act).map(|p| (p, None)),
+        "actor" => {
+            let (p, token) = crate::ground::actor(g, &machine, &carried)?;
+            let named = parse_actor_id(from.sender).map(|(_, slug)| slug.to_string());
+            match &p {
+                xenonet_authz::Principal::Actor { slug, .. } if named.as_deref() == Some(slug.as_str()) => Ok((p, Some(token))),
+                _ => Err(format!("that token isn't {}'s", from.sender)),
+            }
+        }
+        _ => crate::ground::agent(from.sender, &machine).map(|p| (p, None)),
     }
-    crate::ground::agent(from.sender, &machine)
+}
+
+/// `principal_of`, then the request it makes from another machine, judged.
+pub(crate) fn judge_remote(
+    w: &Runtime,
+    g: &mut crate::ground::EngineGround,
+    from: &SentBy<'_>,
+    resource: xenonet_authz::Resource,
+    act: xenonet_authz::Act,
+) -> std::result::Result<(), String> {
+    let (p, token) = principal_of(w, g, from, &resource, &act)?;
+    crate::ground::judge_by(g, &crate::ground::remote(g, p, resource, act), token.as_ref(), None)
 }
 
 fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
@@ -836,15 +889,14 @@ fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
         crate::starts::start_in(w, from, &mid, &kind, &sender, &body, &authority, at);
         return Ok(());
     }
-    let Some(g) = crate::ground::ground(w, None) else {
+    let Some(mut g) = crate::ground::ground(w, None) else {
         return Err(fail("this machine's governance isn't plugged in, so it takes nothing from another machine"));
     };
     // A permission prompt of a run on another machine, for this console,
     // or its end (asks.rs): a member's message to this machine.
     if target == crate::asks::TARGET {
         let own = xenonet_authz::Resource::Machine(g.facts.machine.clone());
-        let decided = principal_of(w, &g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, &own, &xenonet_authz::Act::Message)
-            .and_then(|p| crate::ground::judge(&g, &crate::ground::remote(&g, p, own, xenonet_authz::Act::Message), None));
+        let decided = judge_remote(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, own, xenonet_authz::Act::Message);
         match decided {
             Ok(()) => crate::asks::ask_in(w, from, &body),
             Err(why) => w.log("info", "net.ask", &format!("an ask from {from} was refused: {why}")),
@@ -858,8 +910,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
     // Decided here: who sent it, on this machine's own facts. A message as
     // you carries your device's signature, bound to this machine.
     let resource = xenonet_authz::Resource::Machine(g.facts.machine.clone());
-    let decided = principal_of(w, &g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, &resource, &xenonet_authz::Act::Message)
-        .and_then(|p| crate::ground::judge(&g, &crate::ground::remote(&g, p, resource, xenonet_authz::Act::Message), None));
+    let decided = judge_remote(w, &mut g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, resource, xenonet_authz::Act::Message);
     if let Err(why) = decided {
         receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());

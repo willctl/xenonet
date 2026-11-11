@@ -1,5 +1,5 @@
 //! Tokens: round trips, roots and their certificates, revocation,
-//! narrowing to the gateway, and an assistant's page cursors.
+//! narrowing to the gateway, and page cursors.
 
 use crate::common::*;
 use xenonet_authz::*;
@@ -23,7 +23,7 @@ fn a_token_round_trips_through_its_text() {
     let text = token.encode(ACTOR_PREFIX).unwrap();
     assert!(text.starts_with("xenonet_actor_") && !text.contains('='), "base64url without padding");
     let back = Token::parse(&text, ACTOR_PREFIX, &f.world, NOW).unwrap();
-    assert_eq!(back.bearer(), &Bearer::Actor { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") });
+    assert_eq!(back.bearer(), &Bearer { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") });
     assert_eq!(back.rights(), &[Action::Message, Action::Wake]);
     assert_eq!(back.network(), Some(&network()));
     assert_eq!(back.until(), NOW + HOUR);
@@ -168,33 +168,46 @@ fn narrowing_to_actions_and_times_takes_away_the_rest() {
 }
 
 #[test]
-fn an_assistant_reads_under_its_grant_and_a_cursor_pins_the_page() {
+fn an_actor_with_the_right_to_read_reads_and_a_cursor_pins_the_page() {
     let mut f = fixture();
-    let grant = AssistantGrant { grant: GrantId::new("g1").unwrap(), revision: 3, until: NOW + HOUR };
-    let token = f.m1_root.mint_assistant(&grant).unwrap();
-    let text = token.encode(ASSISTANT_PREFIX).unwrap();
-    let token = Token::parse(&text, ASSISTANT_PREFIX, &f.world, NOW).unwrap();
-    assert_eq!(token.bearer(), &Bearer::Assistant { grant: GrantId::new("g1").unwrap(), machine: machine("m1"), revision: 3 });
+    let token = f.m1_root.mint_actor(&actor_grant("muse", &[Action::Read])).unwrap();
+    let text = token.encode(ACTOR_PREFIX).unwrap();
+    let token = Token::parse(&text, ACTOR_PREFIX, &f.world, NOW).unwrap();
+    assert_eq!(token.bearer(), &Bearer { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") });
     assert_eq!(token.rights(), &[Action::Read]);
-    let assistant = Principal::Assistant { grant: GrantId::new("g1").unwrap(), machine: machine("m1") };
+    let muse = Principal::Actor { slug: ActorSlug::new("muse").unwrap(), machine: machine("m1") };
     let read = |t: &Token, w: &World, scope, filters, at| {
-        decide(Some(t), &Request::new(assistant.clone(), Resource::Machine(machine("m1")), Act::Read { scope, filters }, Door::Local, at, None), w, None)
+        decide(Some(t), &Request::new(muse.clone(), Resource::Machine(machine("m1")), Act::Read { scope, filters }, Door::Local, at, None), w, None)
     };
     assert!(read(&token, &f.world, ReadScope::Search, None, NOW).is_allow());
-    let msg = decide(Some(&token), &Request::new(assistant.clone(), Resource::Machine(machine("m1")), Act::Message, Door::Local, NOW, None), &f.world, None);
-    assert!(!msg.is_allow(), "an assistant only reads");
+    let msg = decide(Some(&token), &Request::new(muse.clone(), Resource::Machine(machine("m1")), Act::Message, Door::Local, NOW, None), &f.world, None);
+    assert!(!msg.is_allow(), "it reads, and has no right to message");
     // The cursor: one op, one set of filters, five minutes.
     let filters = [7u8; 32];
-    let cursor = token.cursor(ReadScope::Search, &filters, NOW).unwrap();
+    let cursor = token.cursor(ReadScope::Search, &filters, NOW, Some("WzUsImEiXQ")).unwrap();
+    assert_eq!(cursor.page(), Some(("WzUsImEiXQ".to_string(), NOW + CURSOR_MS)), "where the page ended, as data");
+    assert_eq!(token.page(), None, "the grant's own token is no cursor");
+    assert!(token.cursor(ReadScope::Search, &filters, NOW, Some("not\"base64")).is_err());
     assert!(read(&cursor, &f.world, ReadScope::Search, Some(filters), NOW + 60_000).is_allow());
     assert!(!read(&cursor, &f.world, ReadScope::Search, Some([8; 32]), NOW + 60_000).is_allow(), "other filters");
     assert!(!read(&cursor, &f.world, ReadScope::Search, None, NOW + 60_000).is_allow(), "no filters");
     assert!(!read(&cursor, &f.world, ReadScope::Transcripts, Some(filters), NOW + 60_000).is_allow(), "another op");
     assert!(!read(&cursor, &f.world, ReadScope::Search, Some(filters), NOW + CURSOR_MS + 1000).is_allow(), "after five minutes");
-    assert!(f.m1_root.mint_actor(&actor_grant("muse", &[])).unwrap().cursor(ReadScope::Map, &filters, NOW).is_err(), "only an assistant's");
-    // A new revision of the grant, or none, stops the old token.
-    f.world.assistant.insert(GrantId::new("g1").unwrap(), 4);
+    assert!(f.m1_root.mint_actor(&actor_grant("muse", &[Action::Message])).unwrap().cursor(ReadScope::Map, &filters, NOW, None).is_err(), "only a token that reads");
+    // Revoking the grant stops it and every cursor made from it.
+    f.world.revoked.insert(token.revocation_ids()[0].clone());
     assert_eq!(read(&token, &f.world, ReadScope::Search, None, NOW).reason().unwrap().code(), "revoked");
-    f.world.assistant.clear();
-    assert_eq!(read(&token, &f.world, ReadScope::Search, None, NOW).reason().unwrap().code(), "revoked");
+    assert_eq!(read(&cursor, &f.world, ReadScope::Search, Some(filters), NOW).reason().unwrap().code(), "revoked");
+}
+
+#[test]
+fn a_tokens_ids_are_read_from_its_text_without_verifying_it() {
+    let f = fixture();
+    let token = f.m1_root.mint_actor(&actor_grant("muse", &[Action::Message])).unwrap();
+    let narrowed = token.attenuate(&Narrowing::Door(Door::Gateway)).unwrap();
+    let text = narrowed.encode(GATEWAY_PREFIX).unwrap();
+    let ids = Token::ids_of(&text, GATEWAY_PREFIX).unwrap();
+    assert_eq!((ids.len(), ids[0].clone()), (2, token.id()), "the grant's id first, then the narrowing's");
+    assert_eq!(Token::ids_of(&text, ACTOR_PREFIX), None);
+    assert_eq!(Token::ids_of("xenonet_gateway_nope", GATEWAY_PREFIX), None);
 }

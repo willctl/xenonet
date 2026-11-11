@@ -673,7 +673,7 @@ async fn three_hosts_with_their_engines_work_as_one_network() {
     reg.decide(&request, &json!("allow")).unwrap();
     assert_eq!(asked["id"], "actor:wren");
     let token = reg.gateway("wren", None).unwrap()["token"].as_str().unwrap().to_string();
-    a.ctx.cores.policy.grant("actor:wren", "machine:laptop", 3600e3).unwrap();
+    a.ctx.cores.policy.grant("actor:wren", "machine:laptop", 3600e3, true).unwrap();
     let bearer = format!("Bearer {token}");
     let host = format!("127.0.0.1:{port}");
     let rpc = |body: Value| {
@@ -823,7 +823,7 @@ async fn actors_reach_actors_on_other_machines() {
     // names it: by:kite is kite on laptop.
     let refused = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap_err();
     assert!(refused.to_string().contains("no session or actor you can reach is @laptop:actor:kite"), "{refused}");
-    a.ctx.cores.policy.grant(&wren, "by:kite by:grok", 3600e3).unwrap();
+    a.ctx.cores.policy.grant(&wren, "by:kite by:grok", 3600e3, true).unwrap();
     let sent = send(&a, &wren, json!({ "to": "@laptop:actor:kite", "text": "Is the mix done?" })).await.unwrap();
     assert_eq!(sent["to"][0]["host"], "laptop", "{sent}");
     // The answer says laptop is online, though kite isn't among the agents
@@ -837,10 +837,10 @@ async fn actors_reach_actors_on_other_machines() {
     assert_eq!((got["text"].clone(), got["from"]["id"].clone()), (json!("Is the mix done?"), json!("@studio:actor:wren")), "{got}");
     until("the stored receipt at studio", 10, || async { a.receipts().iter().any(|(who, r)| who == "@laptop:actor:kite" && r.is_some()) }).await;
     // kite answers with a grant of its own; a machine: term names the host.
-    b.ctx.cores.policy.grant(&kite, "by:wren machine:desk", 3600e3).unwrap();
+    b.ctx.cores.policy.grant(&kite, "by:wren machine:desk", 3600e3, true).unwrap();
     let refused = send(&b, &kite, json!({ "replyTo": got["id"], "text": "Mixed." })).await.unwrap_err();
     assert!(refused.to_string().contains("no session or actor you can reach is @studio:actor:wren"), "{refused}");
-    b.ctx.cores.policy.grant(&kite, "by:wren machine:studio", 3600e3).unwrap();
+    b.ctx.cores.policy.grant(&kite, "by:wren machine:studio", 3600e3, true).unwrap();
     send(&b, &kite, json!({ "replyTo": got["id"], "text": "Mixed." })).await.unwrap();
     until("kite's answer at wren", 10, || async { texts(&a.ctx.cores.engine.inbox(&wren, Duration::ZERO).await.unwrap()) == ["Mixed."] }).await;
 

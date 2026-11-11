@@ -597,20 +597,31 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     let me = net(w).me();
     let machine = s(req, "machine").filter(|m| !m.is_empty() && me.as_ref().is_none_or(|me| me.host != *m));
     let kind = kind_of(by.get("kind").and_then(Value::as_str).unwrap_or(""));
+    // An actor's own token, as it called with it: decided here, and never
+    // kept with the start.
+    let mut by = by;
+    let token_text = by.as_object_mut().and_then(|o| o.remove("token")).and_then(|t| t.as_str().map(str::to_string));
     let Some(g) = crate::ground::ground(w, None) else { return Err((503, "this machine's governance isn't plugged in, so it starts nothing".into())) };
+    let token = match (kind, &token_text) {
+        (Kind::Actor, Some(t)) => Some(xenonet_authz::Token::parse(t, xenonet_authz::ACTOR_PREFIX, &g, g.facts.now).map_err(|e| (403, e.message))?),
+        (Kind::Actor, None) => return Err((403, "an actor starts a session with its token".into())),
+        _ => None,
+    };
     let Some(host) = machine else {
         // Decided at this machine's own door.
         let id = s(&by, "id").unwrap_or_default();
         let (resource, act) = run_act(&g.facts.machine, &r).map_err(|why| (400, why))?;
-        let principal = if kind == Kind::You {
-            let auth = crate::ground::authority(&g.facts.identity, at_window, &resource, &act, &format!("start {} in {} as you", r.app, r.folder), g.facts.now)
-                .map_err(|why| (403, why))?;
-            crate::ground::person(w, &g, None, &crate::ground::Carried::parse(&auth), &resource, &act)
-        } else {
-            crate::ground::agent(&id, &g.facts.machine)
+        let principal = match (&token, kind) {
+            (_, Kind::You) => {
+                let auth = crate::ground::authority(&g.facts.identity, at_window, &resource, &act, &format!("start {} in {} as you", r.app, r.folder), g.facts.now)
+                    .map_err(|why| (403, why))?;
+                crate::ground::person(w, &g, None, &crate::ground::Carried::parse(&auth), &resource, &act)
+            }
+            (Some(t), _) => Ok(xenonet_authz::Principal::Actor { slug: t.bearer().slug.clone(), machine: t.bearer().machine.clone() }),
+            _ => crate::ground::agent(&id, &g.facts.machine),
         }
         .map_err(|why| (403, why))?;
-        crate::ground::judge(&g, &crate::ground::local(&g, principal, resource, act), None).map_err(|why| (409, delegated_words(w, &r, kind).unwrap_or(why)))?;
+        crate::ground::judge_by(&g, &crate::ground::local(&g, principal, resource, act), token.as_ref(), None).map_err(|why| (409, delegated_words(w, &r, kind).unwrap_or(why)))?;
         let who = by.clone();
         let answer: Answer = Arc::new(move |w: &Runtime, state: &str, a: Value| tell(w, &who, "this machine", state, &a));
         let first = run_here(w, &by, None, kind, &id, &r, answer).map_err(|why| (409, why))?;
@@ -640,11 +651,18 @@ pub fn ask(w: &Runtime, by: Value, req: &Value, at_window: bool) -> Result<Value
     if text.chars().count() > 16000 {
         return Err((400, "that prompt is too long to send to another machine: keep it under 15,000 characters".into()));
     }
-    // As you: your device's signature over the run it starts there.
+    // As you: your device's signature over the run it starts there. An
+    // actor: a token minted for the start, once its own has the right.
     let authority = if kind == "you" {
         let there = crate::ground::machine(&host).map_err(|why| (400, why))?;
         let (resource, act) = run_act(&there, &r).map_err(|why| (400, why))?;
         crate::ground::authority(&g.facts.identity, at_window, &resource, &act, &format!("start {} on {host} as you", r.app), g.facts.now).map_err(|why| (403, why))?
+    } else if let Some(t) = &token {
+        let slug = &t.bearer().slug;
+        if !t.rights().contains(&xenonet_authz::Action::Start) {
+            return Err((403, "starting a session needs the spawn-sessions capability, which this actor wasn't allowed".into()));
+        }
+        crate::ground::actor_authority(w, slug.as_str(), vec![xenonet_authz::Action::Start]).map_err(|why| (503, why))?
     } else {
         json!({})
     };
@@ -701,11 +719,9 @@ pub fn start_in(w: &Runtime, from: &str, mid: &str, kind: &str, sender: &str, bo
         Err(why) => return refuse(&why),
     };
     let k = kind_of(kind);
-    let Some(g) = crate::ground::ground(w, None) else { return refuse("this machine's governance isn't plugged in, so it starts nothing") };
-    let decided = run_act(&g.facts.machine, &r).and_then(|(resource, act)| {
-        let p = crate::network::principal_of(w, &g, &crate::network::SentBy { host: from, kind, sender, authority }, &resource, &act)?;
-        crate::ground::judge(&g, &crate::ground::remote(&g, p, resource, act), None)
-    });
+    let Some(mut g) = crate::ground::ground(w, None) else { return refuse("this machine's governance isn't plugged in, so it starts nothing") };
+    let decided = run_act(&g.facts.machine, &r)
+        .and_then(|(resource, act)| crate::network::judge_remote(w, &mut g, &crate::network::SentBy { host: from, kind, sender, authority }, resource, act));
     if let Err(why) = decided {
         let why = delegated_words(w, &r, k).unwrap_or(why);
         w.log("info", "start", &format!("a start from {from} was refused: {why}"));

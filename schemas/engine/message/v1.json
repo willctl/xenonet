@@ -353,6 +353,7 @@
                       "type": "string",
                       "enum": [
                         "person",
+                        "token",
                         "machine"
                       ]
                     },

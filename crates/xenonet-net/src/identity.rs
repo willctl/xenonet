@@ -69,6 +69,8 @@ pub struct Identity {
     /// Hears each entry appended to the own chain here, to push it to the
     /// network's other machines.
     on_append: Mutex<Option<OnAppend>>,
+    /// The roots this machine mints tokens with, and their certificates.
+    roots: crate::roots::TokenRoots,
 }
 
 impl std::fmt::Debug for Identity {
@@ -108,7 +110,6 @@ impl Identity {
         let seen = read_json(&dir.join(SEEN))?.and_then(|v| v.as_array().cloned()).unwrap_or_default();
         let seen = seen.iter().filter_map(|s| Some((s.get("device")?.as_str()?.to_string(), unb64_n::<16>(s.get("nonce")?.as_str()?)?, s.get("at")?.as_i64()?)));
         Ok(Arc::new(Identity {
-            dir,
             vault,
             own: RwLock::new(own),
             others: RwLock::new(others),
@@ -116,6 +117,8 @@ impl Identity {
             machine: Mutex::new(None),
             seen: Mutex::new(PresenceCheck::from_seen(seen)),
             on_append: Mutex::new(None),
+            roots: crate::roots::TokenRoots::open(&dir),
+            dir,
         }))
     }
 
@@ -145,6 +148,18 @@ impl Identity {
         };
         *m = Some(key.clone());
         Ok(key)
+    }
+
+    /// The root to mint this machine's tokens with as `machine`, now,
+    /// certified by the machine signing key. Signing it never asks.
+    pub fn token_root(&self, machine: &xenonet_authz::MachineId, now: i64) -> R<Arc<xenonet_authz::TokenRoot>> {
+        let key = self.machine_key()?;
+        self.roots.root(machine, key.as_ref(), now)
+    }
+
+    /// This machine's token root certificates whose key id is `key_id`.
+    pub fn token_roots(&self, key_id: u32) -> Vec<xenonet_authz::RootCertificate> {
+        self.roots.certificates(key_id)
     }
 
     /// The person's device key here, made the first time where this device

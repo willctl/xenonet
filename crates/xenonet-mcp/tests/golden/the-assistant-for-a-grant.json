@@ -603,7 +603,7 @@
               "properties": {
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -808,7 +808,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -876,7 +876,7 @@
                 },
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -1093,7 +1093,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -1159,7 +1159,7 @@
                 },
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -1363,7 +1363,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -1746,7 +1746,7 @@
                 },
                 "cursor": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                  "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                   "description": "An opaque page token from next_cursor, good for five minutes"
                 },
                 "limit": {
@@ -1985,7 +1985,7 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$",
+                          "pattern": "^xenonet_actor_[A-Za-z0-9_-]{64,4096}$",
                           "description": "An opaque page token from next_cursor, good for five minutes"
                         },
                         {
@@ -2040,7 +2040,7 @@
         "content": [
           {
             "type": "text",
-            "text": "Input validation error: Invalid arguments for tool xenonet_sessions: statuses: Too small: expected array to have >=1 items, updated_since: Invalid ISO datetime, cursor: Invalid string: must match pattern /^[A-Za-z0-9_-]{1,900}\\.[A-Za-z0-9_-]{43}$/, limit: Too big: expected number to be <=50"
+            "text": "Input validation error: Invalid arguments for tool xenonet_sessions: statuses: Too small: expected array to have >=1 items, updated_since: Invalid ISO datetime, cursor: Invalid string: must match pattern /^xenonet_actor_[A-Za-z0-9_-]{64,4096}$/, limit: Too big: expected number to be <=50"
           }
         ],
         "isError": true

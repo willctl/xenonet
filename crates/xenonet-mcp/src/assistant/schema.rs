@@ -60,8 +60,9 @@ const RELATIONS: [&str; 6] = ["works-on", "spawned", "edited", "messaged", "watc
 const UUID: &str = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const ATTENTION_ID: &str = "^att_[0-9a-f]{24}$";
 const ACTOR_ID: &str = "^actor:[a-z0-9][a-z0-9-]{0,31}$";
-// An opaque page token: a payload and its signature, both base64url.
-const CURSOR: &str = r"^[A-Za-z0-9_-]{1,900}\.[A-Za-z0-9_-]{43}$";
+// An opaque page token: the actor's grant narrowed to one read, its prefix
+// and base64url.
+const CURSOR: &str = r"^xenonet_actor_[A-Za-z0-9_-]{64,4096}$";
 
 pub fn request_id() -> String {
     format!("^r_{UUID}$")

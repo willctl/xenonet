@@ -12,7 +12,8 @@ spec = importlib.util.spec_from_file_location("xenonet_plugin", os.path.join(HER
 plug = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plug)
 
-TOKEN = "xenonet_actor_" + "a" * 43
+# A Biscuit as the service writes it: base64url, with its - and _.
+TOKEN = "xenonet_actor_" + "Ab-_" * 40
 
 
 class FakeCtx:

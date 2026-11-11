@@ -2,9 +2,9 @@
 //! (crates/xenonet-actors/src/connections.rs), over the engine's store.
 //! Every check, what a grant may read and how it stands are the core's;
 //! this answers what it asks of the world: the actors' registry, the
-//! credentials' files (`credentials`), the adapters, the
-//! map's places and the identities for a pairing, and its events go to
-//! whoever listens (the endpoint, the tunnels).
+//! credentials' files (`credentials`), the actors' grants (`Grants`),
+//! the adapters, the map's places and the identities for a pairing, and its
+//! events go to whoever listens (the endpoint, the tunnels).
 
 use super::{connection_error, row_json};
 use crate::credentials as disk;
@@ -16,7 +16,7 @@ use xenonet_actors::adapters::ADAPTERS;
 use xenonet_actors::connections::{self as core, Adapter, Connections as Core, Host, Store};
 use xenonet_actors::store::{self, Tx};
 use xenonet_api::cores::assistant::ConnectionEvents;
-use xenonet_api::cores::{Actors, Connections, EngineStore, State, R};
+use xenonet_api::cores::{Actors, Connections, EngineStore, Grants, State, R};
 use xenonet_engine::sql::SqlError;
 use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
@@ -29,6 +29,7 @@ pub struct Remote {
     actors: Arc<dyn Actors>,
     engine_store: Arc<dyn EngineStore>,
     state: Arc<dyn State>,
+    pub grants: Arc<dyn Grants>,
     listeners: Mutex<Vec<mpsc::UnboundedSender<(String, Value)>>>,
     /// The adapter a pairing picked, by its index among ADAPTERS.
     picked: Mutex<Option<usize>>,
@@ -127,20 +128,21 @@ impl Host for Base<'_> {
     fn marked_revoked(&mut self) -> Vec<String> {
         disk::marked_revoked(&self.r.dir)
     }
-    fn new_token(&mut self) -> (String, String) {
-        disk::new_token()
-    }
     fn mark_disabled(&mut self, at: f64) -> core::Result<()> {
         disk::mark_disabled(&self.r.dir, at).map_err(fs)
     }
     fn clear_disabled(&mut self) -> core::Result<()> {
         disk::clear_disabled(&self.r.dir).map_err(fs)
     }
-    fn is_token(&mut self, token: &Value) -> bool {
-        disk::is_token(&display(token))
+    fn present(&mut self, slug: &str, rights: &[String], scopes: &Value, reason: &str) -> core::Result<()> {
+        // Refused, it's the window's word that no grant was issued.
+        self.r.grants.present(slug, rights, scopes, reason).map_err(|e| core::Fail::Connection { status: 403.0, code: "presence", message: e, extra: json!({}) })
     }
-    fn hash_token(&mut self, token: &Value) -> String {
-        disk::hash_token(&display(token))
+    fn mint_token(&mut self, slug: &str, rights: &[String], until: f64) -> core::Result<(String, String)> {
+        self.r.grants.mint(slug, rights, Some(until)).map_err(|e| core::Fail::Error(store::Error::new(e)))
+    }
+    fn check_token(&mut self, slug: &str, token: &str, action: &str) -> Result<String, &'static str> {
+        self.r.grants.check(slug, token, action)
     }
     fn ids(&mut self) -> Vec<String> {
         self.r.actors.ids()
@@ -281,6 +283,18 @@ impl Store for EngineRows {
     fn touch_grant(&self, id: &str, at: f64) -> store::Result<()> {
         self.0.with(|s| s.touch_grant(id, at)).map_err(sql)
     }
+    fn revoke_token(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.revoke_token(row)).map_err(sql)
+    }
+    fn put_scope(&self, row: &Value) -> store::Result<()> {
+        self.0.with(|s| s.put_scope(row)).map_err(sql)
+    }
+    fn scope(&self, token: &str) -> store::Result<Option<Value>> {
+        row(self.0.with(|s| s.scope(token)))
+    }
+    fn drop_scope(&self, token: &str) -> store::Result<()> {
+        self.0.with(|s| s.drop_scope(token)).map_err(sql)
+    }
     fn add_audit(&self, row: &Value) -> store::Result<()> {
         self.0.with(|s| s.add_audit(row)).map_err(sql)
     }
@@ -300,9 +314,20 @@ impl Store for EngineRows {
 }
 
 impl Remote {
-    /// The connections over this store, their credentials in `dir`, or the
-    /// error that kept them from starting.
-    pub fn start(store: Shared, dir: &str, state_dir: &str, port: u16, actors: Arc<dyn Actors>, engine_store: Arc<dyn EngineStore>, state: Arc<dyn State>) -> R<Arc<Remote>> {
+    /// The connections over this store, their credentials in `dir` and
+    /// their actors' grants issued and checked by `grants`, or the error
+    /// that kept them from starting.
+    #[expect(clippy::too_many_arguments, reason = "what the connections are over, each its own")]
+    pub fn start(
+        store: Shared,
+        dir: &str,
+        state_dir: &str,
+        port: u16,
+        actors: Arc<dyn Actors>,
+        engine_store: Arc<dyn EngineStore>,
+        state: Arc<dyn State>,
+        grants: Arc<dyn Grants>,
+    ) -> R<Arc<Remote>> {
         let (host, user) = super::host_and_user();
         let fingerprint = core::fingerprint_of(&host, &user, state_dir);
         let r = Arc::new(Remote {
@@ -311,6 +336,7 @@ impl Remote {
             actors: actors.clone(),
             engine_store,
             state,
+            grants,
             listeners: Mutex::new(Vec::new()),
             picked: Mutex::new(None),
         });
@@ -528,7 +554,8 @@ mod tests {
         let store = Shared::new(xenonet_engine::store::EngineStore::open(&dir.join("engine.sqlite").to_string_lossy(), now_ms()).unwrap());
         let creds = dir.join("assistant").to_string_lossy().into_owned();
         let actors = Arc::new(FakeActors { store: store.clone(), known: Mutex::new(HashMap::new()), hooks: Mutex::new(Vec::new()) });
-        let remote = Remote::start(store.clone(), &creds, &dir.to_string_lossy(), 47999, actors.clone(), Arc::new(Pending), Arc::new(Pending)).unwrap();
+        let grants = Arc::new(crate::pages::Memory::new());
+        let remote = Remote::start(store.clone(), &creds, &dir.to_string_lossy(), 47999, actors.clone(), Arc::new(Pending), Arc::new(Pending), grants).unwrap();
         assert_eq!(actors.hooks.locked().len(), 1, "its connections go before an actor does");
         let c = ConnectionsCore(remote.clone());
         let places = json!({ ATLAS: { "place": ATLAS, "name": "atlas-api" } });
@@ -539,7 +566,9 @@ mod tests {
         let token = disk::read_credential(&creds, &json!(grant)).unwrap()["token"].clone();
         let s = c.authenticate(&json!(grant), &token);
         assert_eq!(s["ok"], true, "{s}");
-        assert_eq!(c.authenticate(&json!(grant), &json!("xenonet_assistant_nope"))["ok"], false);
+        assert_eq!(c.authenticate(&json!(grant), &json!(format!("xenonet_actor_{}", "a".repeat(64))))["reason"], "wrong-token");
+        assert_eq!(c.authenticate(&json!(grant), &json!("xenonet_actor_a.b"))["reason"], "malformed");
+        assert_eq!(c.authenticate(&json!("gr_ffffffffffffffffffffffff"), &token)["reason"], "unknown-grant");
         let p = c.policy(&s).unwrap();
         assert_eq!(p["dataMode"], "real");
         assert_eq!(c.recheck(&grant)["ok"], true);
@@ -563,8 +592,33 @@ mod tests {
         use xenonet_api::cores::Audit;
         let recent = audit.recent(w["grant_id"].as_str(), 10.0).unwrap();
         assert_eq!(recent.as_array().unwrap().iter().filter(|r| r["kind"] == "access").count(), 2, "both reads are in the audit: {recent}");
+        // A change of scope keeps the grant's token and changes its scope
+        // row; a rotation gives it a new token, in its file, moves the row
+        // to it and takes the one before back for good.
+        let credential = || disk::read_credential(&creds, &json!(grant)).unwrap()["token"].clone();
+        let id_of = || store.with(|s| s.grant(&grant)).unwrap().unwrap().text("token_id").unwrap().to_string();
+        let projects_of = |id: &str| store.with(|s| s.scope(id)).unwrap().and_then(|r| r.text("projects").map(str::to_string));
+        let first = id_of();
+        assert_eq!(store.with(|s| s.scope(&first)).unwrap().unwrap().text("actor"), Some("actor:dots"));
+        let changed = c.update(&grant, &Value::Null, &json!(true), &places).unwrap();
+        assert_eq!(changed["revision"], 2);
+        assert_eq!(c.authenticate(&json!(grant), &token)["ok"], true, "the same token, at the new revision");
+        let narrowed = c.update(&grant, &json!([]), &Value::Null, &places).unwrap();
+        assert_eq!((narrowed["revision"].clone(), narrowed["projects"].clone()), (json!(3), json!([])));
+        assert_eq!(projects_of(&first).as_deref(), Some("[]"));
+        c.update(&grant, &json!([ATLAS]), &Value::Null, &places).unwrap();
+        c.rotate(&grant).unwrap();
+        assert_eq!(c.authenticate(&json!(grant), &token)["reason"], "wrong-token", "the token from before the rotation");
+        assert!(store.with(|s| s.revoked(&first)).unwrap().is_some());
+        let second = id_of();
+        assert_eq!((projects_of(&first), projects_of(&second).map(|p| p.contains("prj_"))), (None, Some(true)), "the scope moved with the token");
+        let fresh = credential();
+        assert_eq!(c.authenticate(&json!(grant), &fresh)["ok"], true);
         let mut events = c.subscribe().unwrap();
         c.revoke(&grant).unwrap();
+        assert_eq!(c.authenticate(&json!(grant), &fresh)["code"], "GRANT_REVOKED", "a grant taken back says so");
+        assert!(store.with(|s| s.revoked(&second)).unwrap().is_some());
+        assert_eq!(projects_of(&second), None);
         assert_eq!(c.recheck(&grant)["ok"], false);
         assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|(name, _)| name == "revoked"));
         assert!(c.pair(&json!({ "label": "" }), &places, &[]).unwrap_err().is(xenonet_api::cores::Kind::Connection));

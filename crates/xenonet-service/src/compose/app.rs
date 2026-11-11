@@ -107,7 +107,8 @@ pub fn wire(cores: &mut Cores, config: &Settings, env: &WireEnv) {
         cores.assistant_source = Some(Arc::new(assistant::reads::SourceCore(reads_of(None, None))));
         if let (Some(store), Some(actors)) = (native, cores.actors.clone()) {
             let dir = xenonet_assistant::credentials::assistant_dir(&state_dir);
-            match assistant::connections::Remote::start(store.clone(), &dir, &state_dir, config.port, actors, cores.engine_store.clone(), cores.state.clone()) {
+            match assistant::connections::Remote::start(store.clone(), &dir, &state_dir, config.port, actors, cores.engine_store.clone(), cores.state.clone(), cores.grants.clone())
+            {
                 Ok(remote) => {
                     let reads = reads_of(Some(remote.clone()), Some(store.clone()));
                     cores.connections = Some(Arc::new(assistant::connections::ConnectionsCore(remote.clone())));

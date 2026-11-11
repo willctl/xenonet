@@ -63,7 +63,6 @@ pub struct World {
     pub consent: Consent,
     pub grant: Option<StandingGrant>,
     pub askers: HashMap<AskId, Attestation>,
-    pub assistant: HashMap<GrantId, u64>,
     pub synced: Option<i64>,
 }
 
@@ -101,9 +100,6 @@ impl Ground for World {
     fn asker(&self, ask: &AskId) -> Option<Attestation> {
         self.askers.get(ask).copied()
     }
-    fn assistant_grant(&self, grant: &GrantId) -> Option<u64> {
-        self.assistant.get(grant).copied()
-    }
     fn governance_synced_at(&self) -> Option<i64> {
         self.synced
     }
@@ -135,7 +131,6 @@ pub fn fixture() -> Fixture {
         consent: Consent::default(),
         grant: None,
         askers: HashMap::from([(AskId::new("q1").unwrap(), Attestation::HarnessSigned)]),
-        assistant: HashMap::from([(GrantId::new("g1").unwrap(), 3)]),
         synced: Some(NOW - 60_000),
     };
     Fixture { world, m1_root, m2_root }

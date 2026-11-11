@@ -66,18 +66,22 @@ pub struct A2aActor {
     /// `actor:<slug>`.
     pub id: String,
     pub slug: String,
+    /// Whether its token has the right to send messages, as authenticating
+    /// it at the gateway decided (A2A is served at the gateway's door).
+    pub messages: bool,
 }
 
 impl A2aActor {
     /// From what `Registration::authenticate_gateway` answered for a token
-    /// it took (`{ ok: true, id, slug }`); None for anything else.
+    /// it took (`{ ok: true, id, slug, allows }`); None for anything else.
     pub fn from_auth(auth: &Value) -> Option<A2aActor> {
         if auth.get("ok") != Some(&Value::Bool(true)) {
             return None;
         }
         let id = auth.get("id")?.as_str()?;
         let slug = auth.get("slug").and_then(Value::as_str).map_or_else(|| id.trim_start_matches("actor:").to_string(), str::to_string);
-        id.starts_with("actor:").then(|| A2aActor { id: id.to_string(), slug })
+        let messages = auth.get("allows").and_then(Value::as_array).is_some_and(|a| a.iter().any(|x| x == "message"));
+        id.starts_with("actor:").then(|| A2aActor { id: id.to_string(), slug, messages })
     }
 }
 
@@ -93,7 +97,7 @@ pub struct A2aRequest {
 }
 
 /// The cores A2A calls: the engine's send and inbox, as the gateway's
-/// tools do, and the actors (capabilities, names).
+/// tools do, and the actors (names).
 #[derive(Clone)]
 pub struct A2aCores {
     pub engine: Arc<dyn Engine>,
@@ -697,7 +701,7 @@ impl A2a {
                 "Say which session to reach: put its id (claude:…, codex:…) or repo:<name> in the message's metadata as \"target\", or ask your user to set a default target for this agent in XenoNet's Actors panel.",
             );
         };
-        if !self.cores.actors.can(&actor.id, "message-agents") {
+        if !actor.messages {
             return refuse(store::REJECTED, "Sending needs the message-agents capability, which your user didn't allow this agent.");
         }
         if let Some(why) = self.take(actor, &to) {

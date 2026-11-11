@@ -1,39 +1,47 @@
 //! Actors' tokens (docs/design/actors/interface.md, section 2, "Tokens";
-//! core/actors/tokens.js): 32 random bytes written as
-//! xenonet_actor_<64 hex digits>. The prefix makes a leaked token easy to
-//! recognize, by people and by secret scanners, and hex never holds an
-//! underscore, so a double-click still selects the whole token. XenoNet
-//! keeps only the SHA-256: a token has 256 bits of randomness, so a fast
-//! hash is enough, and XenoNet finds an actor by the hash, so no comparison
-//! leaks timing. A token is shown once and travels only as Authorization:
-//! Bearer, never in a URL.
+//! docs/design/direction.md, "Authorization"): Biscuits rooted at this
+//! machine, minted and decided by xenonet-authz, written as
+//! `xenonet_actor_<base64url>`. The prefix makes a leaked token easy to
+//! recognize, by people and by secret scanners. XenoNet keeps only a
+//! token's revocation id, never the token. A token is shown once and
+//! travels only as Authorization: Bearer, never in a URL.
 //!
-//! A gateway token (the actor gateway's) is xenonet_gateway_<64 hex
-//! digits>: a credential apart from the actor's own token, which works only
-//! at the gateway, so a token that leaks from this machine can't be used
+//! A gateway token (the actor gateway's) is `xenonet_gateway_<base64url>`:
+//! a token minted for the actor with the gateway's right, narrowed to the
+//! gateway door, so a token that leaks from this machine can't be used
 //! from the internet, and one made for the gateway can't stand in for the
 //! process checks here.
+//!
+//! What an actor may do in XenoNet is its token's `right(...)` facts: the
+//! capability words it was allowed map onto authz's actions (`rights`),
+//! with reading for every actor. The other words (browsing, running
+//! commands…) say what it does elsewhere; they allow nothing here but
+//! reporting it. Which sessions and identities it may use are its grant's
+//! scopes, rows kept beside the token by its revocation id.
 
-use sha2::{Digest, Sha256};
+use xenonet_authz::Action;
 use xenonet_text::text::is_space;
 
-pub const TOKEN_PREFIX: &str = "xenonet_actor_";
-pub const GATEWAY_PREFIX: &str = "xenonet_gateway_";
-/// Either kind anywhere in a file, as `git grep -E` reads it.
-pub const TOKEN_GREP: &str = "xenonet_(actor|gateway)_[0-9a-f]{64}";
-pub const TOKEN_PATTERN: &str = "^xenonet_actor_[0-9a-f]{64}$";
-pub const GATEWAY_PATTERN: &str = "^xenonet_gateway_[0-9a-f]{64}$";
+pub use xenonet_authz::{ACTOR_PREFIX as TOKEN_PREFIX, GATEWAY_PREFIX};
+/// Either kind anywhere in a file, as `git grep -E` reads it: a prefix and
+/// the base64url of a Biscuit, which is never shorter than this.
+pub const TOKEN_GREP: &str = "xenonet_(actor|gateway)_[A-Za-z0-9_-]{64,}";
+/// The shortest and longest base64url a token's text holds.
+const BODY_MIN: usize = 64;
+const BODY_MAX: usize = 16 * 1024;
 
-fn hex64(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+fn b64url(s: &str) -> bool {
+    (BODY_MIN..=BODY_MAX).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// Whether `s` is written as an actor's token: its prefix and base64url.
+/// Only xenonet-authz says whether it is one.
 pub fn is_token(s: &str) -> bool {
-    s.strip_prefix(TOKEN_PREFIX).is_some_and(hex64)
+    s.strip_prefix(TOKEN_PREFIX).is_some_and(b64url)
 }
 
 pub fn is_gateway_token(s: &str) -> bool {
-    s.strip_prefix(GATEWAY_PREFIX).is_some_and(hex64)
+    s.strip_prefix(GATEWAY_PREFIX).is_some_and(b64url)
 }
 
 pub fn hex(bytes: &[u8]) -> String {
@@ -41,26 +49,23 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().flat_map(|b| [DIGITS[usize::from(b >> 4)] as char, DIGITS[usize::from(b & 15)] as char]).collect()
 }
 
-/// The SHA-256 XenoNet keeps of a token, in hex.
-pub fn hash_token(token: &str) -> String {
-    hex(&Sha256::digest(token.as_bytes()))
-}
-
-/// A token with this prefix and 32 random bytes, and its hash.
-pub fn new_with(prefix: &str) -> Result<(String, String), getrandom::Error> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes)?;
-    let token = format!("{prefix}{}", hex(&bytes));
-    let hash = hash_token(&token);
-    Ok((token, hash))
-}
-
-pub fn new_token() -> Result<(String, String), getrandom::Error> {
-    new_with(TOKEN_PREFIX)
-}
-
-pub fn new_gateway_token() -> Result<(String, String), getrandom::Error> {
-    new_with(GATEWAY_PREFIX)
+/// The actions a token minted for these capability words has the right
+/// to: reading what its scopes let it see, which every actor does, and
+/// sessions it may start, messages and handoffs it may send, files it may
+/// claim.
+pub fn rights(capabilities: &[String]) -> Vec<Action> {
+    let mut out = vec![Action::Read];
+    for c in capabilities {
+        out.extend_from_slice(match c.as_str() {
+            "spawn-sessions" => &[Action::Start][..],
+            "message-agents" => &[Action::Message, Action::Handoff],
+            "edit-repos" => &[Action::Claim],
+            _ => &[],
+        });
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// What a request's Authorization header says (RFC 6750): None for a header
@@ -103,11 +108,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tokens_and_their_hashes() {
-        let (t, h) = new_token().unwrap();
-        assert!(is_token(&t) && !is_gateway_token(&t) && h == hash_token(&t) && h.len() == 64);
-        assert!(!is_token("xenonet_actor_ABC") && !is_token(&format!("{t}0")));
-        assert_eq!(hash_token("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    fn tokens_are_written_as_their_prefix_and_base64url() {
+        let t = format!("{TOKEN_PREFIX}{}", "Ab-_".repeat(20));
+        assert!(is_token(&t) && !is_gateway_token(&t));
+        assert!(is_gateway_token(&format!("{GATEWAY_PREFIX}{}", "x".repeat(64))));
+        assert!(!is_token("xenonet_actor_nope") && !is_token(&format!("{t}=")) && !is_token(&format!("{TOKEN_PREFIX}{}", "a".repeat(BODY_MAX + 1))));
+    }
+
+    #[test]
+    fn capabilities_map_onto_rights() {
+        let words = |w: &[&str]| w.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(rights(&words(&["browse", "message-agents", "spawn-sessions"])), [Action::Message, Action::Start, Action::Handoff, Action::Read]);
+        assert_eq!(rights(&words(&["edit-repos", "run-commands"])), [Action::Claim, Action::Read]);
+        assert_eq!(rights(&words(&["use-computer"])), [Action::Read], "every actor reads");
     }
 
     #[test]

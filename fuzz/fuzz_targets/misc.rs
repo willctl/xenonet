@@ -10,13 +10,26 @@ use libfuzzer_sys::fuzz_target;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use xenonet_assistant::cursors::{Cursors, For};
-use xenonet_assistant::service::{self, Config};
+use xenonet_api::cores::Grants as _;
+use xenonet_assistant::pages::{Granted, Memory};
+use xenonet_assistant::service::{self, Config, For, Pages};
 use xenonet_assistant::{crypto, tunnel_client};
 use xenonet_components::rpc::Rpc;
 use xenonet_components::{packages, protocol, tar};
 
 const NOW: f64 = 1_791_230_000_000.0;
+
+// Grants held in memory, on a fixed clock, and one read grant of theirs:
+// made once, since minting signs.
+fn grants() -> (&'static Memory, &'static str) {
+    static HELD: OnceLock<(Memory, String)> = OnceLock::new();
+    let (m, t) = HELD.get_or_init(|| {
+        let m = Memory::with(&[7; 32], Box::new(|| NOW as i64));
+        let (token, _) = m.mint("fuzz", &["read".to_string()], None).expect("a read grant");
+        (m, token)
+    });
+    (m, t.as_str())
+}
 
 fn dir() -> &'static PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -63,14 +76,16 @@ fuzz_target!(|data: &[u8]| {
             let b = service::begin(&cfg, v.as_ref().unwrap_or(&Value::Null));
             let _ = (b.request_id, b.op, b.tool, b.args);
             let _ = service::is_request_id(&text);
-            // A cursor as the actor hands it back: read under this key, and
-            // one this key made, with the input as its filters.
-            let cursors = Cursors::new(Some(vec![7; 32]));
-            let grant = json!("grant-1");
-            let f = For { grant: Some(&grant), revision: Some(&json!(3)), op: Some(&json!("sessions")), filters: v.as_ref() };
-            let _ = cursors.read(&text, &f, NOW);
-            let made = cursors.make(&f, v.as_ref(), NOW);
-            let _ = cursors.read(&made, &f, NOW + 1000.0);
+            // A cursor as the actor hands it back: read under its grant, and
+            // one that grant made, with the input as its filters.
+            let (grants, token) = grants();
+            let pages = Granted { grants, token, slug: "fuzz" };
+            let (grant, revision, filters) = (json!("grant-1"), json!(3), v.clone().unwrap_or(Value::Null));
+            let f = For { grant: &grant, revision: &revision, op: "sessions", filters: &filters };
+            let _ = pages.read(&text, &f);
+            if let Ok(made) = pages.make(&f, &filters) {
+                let _ = pages.read(&made, &f);
+            }
             let _ = crypto::b64url_decode(&text);
         }
         3 => {

@@ -127,7 +127,8 @@ pub async fn api(ctx: &Arc<Ctx>, mut req: Req) -> Answer {
         return Ok(r.route(req).await);
     }
     if route == "/api/delivery" || route.starts_with("/api/delivery/") {
-        let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), verify: cores.verify.clone() };
+        let window = net::at_window(ctx, req).await;
+        let r = delivery::DeliveryRoutes { policy: cores.policy.clone(), router: cores.router.clone(), engine: cores.engine.clone(), verify: cores.verify.clone(), window };
         return Ok(r.route(req).await);
     }
     // A2A's switch and the agents that called, for the Actors panel: the

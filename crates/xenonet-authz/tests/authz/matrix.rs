@@ -20,10 +20,9 @@ enum Kind {
     Person {
         presence: bool,
     },
-    Assistant,
 }
 
-const KINDS: [Kind; 9] = [
+const KINDS: [Kind; 8] = [
     Kind::Machine,
     Kind::Agent(Unchecked),
     Kind::Agent(ProcessChecked),
@@ -32,7 +31,6 @@ const KINDS: [Kind; 9] = [
     Kind::Actor { rights: false },
     Kind::Person { presence: true },
     Kind::Person { presence: false },
-    Kind::Assistant,
 ];
 
 /// Here at a local door, or from the network with the sender's machine in
@@ -109,10 +107,8 @@ fn expected(c: &Case) -> Outcome {
         Place::Here => None,
         Place::Remote(r) => r,
     };
-    // From another machine: a member's, or the person; an assistant only
-    // here.
+    // From another machine: a member's, or the person.
     let reaches = match c.kind {
-        Assistant => !remote,
         Person { .. } => true,
         _ => !remote || role.is_some(),
     };
@@ -125,7 +121,7 @@ fn expected(c: &Case) -> Outcome {
     let starts = || match c.kind {
         _ if c.start == StartSetting::Off => false,
         Person { .. } => c.what == Do::StartAsks || c.grant,
-        Agent(Unchecked) | Machine | Assistant => false,
+        Agent(Unchecked) | Machine => false,
         _ if c.start == StartSetting::You => false,
         _ if c.what == Do::StartAsks => true,
         _ => c.start == StartSetting::Delegate && c.grant && attested(ProcessChecked),
@@ -133,9 +129,8 @@ fn expected(c: &Case) -> Outcome {
     let allowed = reaches
         && tokened
         && match c.what {
-            Do::Message | Do::Handoff => c.kind != Assistant,
+            Do::Message | Do::Handoff => true,
             Do::Wake => match c.kind {
-                Assistant => false,
                 Person { .. } => true,
                 Actor { .. } => c.wake == WakeSetting::Network || c.consent.actors,
                 _ => c.wake == WakeSetting::Network || c.consent.here,
@@ -144,7 +139,7 @@ fn expected(c: &Case) -> Outcome {
             // The question's asker is harness-signed, and the grant asks
             // for process-checked.
             Do::Answer => present || (c.kind == Machine && !remote && c.grant),
-            Do::Claim => c.kind != Assistant && !(remote && c.kind == Agent(Unchecked)),
+            Do::Claim => !(remote && c.kind == Agent(Unchecked)),
             Do::ReadMap => true,
             Do::ReadTranscripts => match c.kind {
                 Person { .. } => true,
@@ -152,7 +147,8 @@ fn expected(c: &Case) -> Outcome {
                 _ => role >= Some(Role::Admin) && attested(ProcessChecked),
             },
             Do::Admit | Do::Widen | Do::Publish | Do::Revoke => present,
-            Do::RegisterActor => matches!(c.kind, Actor { .. } | Person { .. }),
+            // Issuing or widening an actor's grant needs the person there.
+            Do::RegisterActor => matches!(c.kind, Actor { .. }) || present,
             Do::UseGateway => matches!(c.kind, Actor { .. }),
         };
     let holds = matches!(c.what, Do::StartAsks | Do::StartDelegated | Do::Answer | Do::Admit | Do::Widen | Do::Publish);
@@ -181,7 +177,7 @@ fn act_of(what: Do) -> (Resource, Act) {
         Do::Admit => (n1(), Act::Admit { machine: machine("m3"), role: Role::Member }),
         Do::Widen => (n1(), Act::Widen { machine: machine("m1"), settings: Settings { start: StartSetting::Network, wake: WakeSetting::Network } }),
         Do::Publish => (n1(), Act::Publish { service: ServiceId::new("web").unwrap() }),
-        Do::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("helper").unwrap() }),
+        Do::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("helper").unwrap(), rights: vec![Action::Message], scopes: [0; 32] }),
         Do::UseGateway => (m1(), Act::UseGateway),
         Do::Revoke => (m1(), Act::Revoke { what: Revocation::Device(device_id(&weak_device())) }),
     }
@@ -192,7 +188,6 @@ fn act_of(what: Do) -> (Resource, Act) {
 struct Made {
     f: Fixture,
     tokens: Vec<(MachineId, bool, Token)>,
-    assistant: Token,
     person: Vec<(Do, Principal, VerifiedPresence)>,
 }
 
@@ -205,7 +200,6 @@ fn made() -> Made {
             tokens.push((machine(m), rights, root.mint_actor(&actor_grant("muse", &all)).unwrap()));
         }
     }
-    let assistant = f.m1_root.mint_assistant(&AssistantGrant { grant: GrantId::new("g1").unwrap(), revision: 3, until: NOW + HOUR }).unwrap();
     let person = DOS
         .iter()
         .map(|&what| {
@@ -223,7 +217,7 @@ fn made() -> Made {
             (what, principal, p)
         })
         .collect();
-    Made { f, tokens, assistant, person }
+    Made { f, tokens, person }
 }
 
 fn run_case(m: &mut Made, c: &Case) -> Decision {
@@ -258,10 +252,6 @@ fn run_case(m: &mut Made, c: &Case) -> Decision {
             let (_, principal, p) = m.person.iter().find(|(d, _, _)| *d == c.what).unwrap();
             presence = with.then_some(p);
             principal.clone()
-        }
-        Kind::Assistant => {
-            token = Some(&m.assistant);
-            Principal::Assistant { grant: GrantId::new("g1").unwrap(), machine: here }
         }
     };
     let r = Request::new(principal, resource, act, door, NOW, net);
@@ -304,7 +294,7 @@ fn every_case_decides_as_the_rules_say() {
             }
         }
     }
-    assert_eq!(n, 15 * 9 * 5 * 4 * 2 * 4 * 2 * 2);
+    assert_eq!(n, 15 * 8 * 5 * 4 * 2 * 4 * 2 * 2);
     // Neither side of the matrix is empty.
     assert!(allowed > 1000 && held > 100, "{allowed} allowed, {held} held of {n}");
 }
@@ -316,7 +306,7 @@ const ROWS: [(Do, Kind, Place, StartSetting, Outcome, &str); 22] = [
     (Do::Message,         Kind::Agent(Unchecked),           Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),
     (Do::Message,         Kind::Agent(HarnessSigned),       Place::Remote(None),               StartSetting::You,      Outcome::Refuse, "member"),
     (Do::Message,         Kind::Actor { rights: false },    Place::Here,                       StartSetting::You,      Outcome::Refuse, "right"),
-    (Do::Message,         Kind::Assistant,                  Place::Here,                       StartSetting::You,      Outcome::Refuse, "right"),
+    (Do::ReadMap,         Kind::Actor { rights: false },    Place::Here,                       StartSetting::You,      Outcome::Refuse, "right"),
     // Starts: off refuses all; you is the person's; never an unchecked agent.
     (Do::StartAsks,       Kind::Person { presence: false }, Place::Here,                       StartSetting::Off,      Outcome::Refuse, "settings"),
     (Do::StartAsks,       Kind::Person { presence: false }, Place::Here,                       StartSetting::You,      Outcome::Allow,  ""),

@@ -59,6 +59,8 @@ struct Session {
     grant: String,
     actor: Value,
     connection: String,
+    /// The token it said hello with, which its reads' page cursors narrow.
+    token: Value,
 }
 
 struct Inner {
@@ -172,7 +174,8 @@ impl Endpoint {
         }
         let grant = s["grant"]["grant_id"].as_str().unwrap_or("").to_string();
         let connection = s["connection"]["connection_id"].as_str().unwrap_or("").to_string();
-        let session = Arc::new(Session { client: client.clone(), grant: grant.clone(), actor: s["actorId"].clone(), connection: connection.clone() });
+        let session =
+            Arc::new(Session { client: client.clone(), grant: grant.clone(), actor: s["actorId"].clone(), connection: connection.clone(), token: params["token"].clone() });
         self.inner.sessions.locked().push(session.clone());
         self.inner.connections.bridge(&connection, 1);
         if let Some(a) = &self.inner.audit {
@@ -198,7 +201,7 @@ impl Endpoint {
                     if method != "assistant.read" {
                         return Err("Unsupported request.".into());
                     }
-                    let who = json!({ "grantId": session.grant, "actorId": session.actor, "connectionId": session.connection });
+                    let who = json!({ "grantId": session.grant, "actorId": session.actor, "connectionId": session.connection, "token": session.token });
                     return me.inner.service.read(&who, &params).await.map_err(|e| e.message);
                 }
                 if method != "hello" {

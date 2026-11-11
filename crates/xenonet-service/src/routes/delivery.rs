@@ -17,6 +17,9 @@ pub struct DeliveryRoutes {
     pub router: Arc<dyn Router>,
     pub engine: Arc<dyn Engine>,
     pub verify: Arc<dyn Verify>,
+    /// Whether the request came from XenoNet's window, where widening an
+    /// actor's scope may ask the person.
+    pub window: bool,
 }
 
 // Consent is kept under the id the router looks it up by, so an OpenCode
@@ -95,7 +98,7 @@ impl DeliveryRoutes {
         let ans = |v: Value| Ok(Reply::json(200, v));
         match route.as_str() {
             "/api/delivery/pause" => ans(self.policy.set_paused(b.get("paused") != Some(&Value::Bool(false)))?),
-            "/api/delivery/grant" => ans(self.policy.grant(&str_of(&b["actor"]), &str_of(&b["scope"]), hours(b.get("hours"), 24.0 * 30.0))?),
+            "/api/delivery/grant" => ans(self.policy.grant(&str_of(&b["actor"]), &str_of(&b["scope"]), hours(b.get("hours"), 24.0 * 30.0), self.window)?),
             "/api/delivery/revoke" => ans(self.policy.revoke(&str_of(&b["actor"]))?),
             "/api/delivery/allow" => {
                 let session = session_of(b.get("session").unwrap_or(&Value::Null))?;

@@ -16,7 +16,12 @@ fn narrowing() -> impl Strategy<Value = Narrowing> {
         (0..Door::ALL.len()).prop_map(|i| Narrowing::Door(Door::ALL[i])),
         (-HOUR..2 * HOUR).prop_map(|d| Narrowing::Until(NOW + d)),
         any::<u16>().prop_map(|m| Narrowing::Actions(rights(m))),
-        (0..ReadScope::ALL.len(), any::<bool>(), 0..CURSOR_MS * 2).prop_map(|(s, f, d)| Narrowing::Cursor { scope: ReadScope::ALL[s], filters: [u8::from(f); 32], until: NOW + d }),
+        (0..ReadScope::ALL.len(), any::<bool>(), 0..CURSOR_MS * 2).prop_map(|(s, f, d)| Narrowing::Cursor {
+            scope: ReadScope::ALL[s],
+            filters: [u8::from(f); 32],
+            until: NOW + d,
+            after: None
+        }),
     ]
 }
 
@@ -36,7 +41,7 @@ fn request(action: Action, door: Door, at: i64, scope: ReadScope, filters: Optio
         Action::Admit => (Resource::Network(network()), Act::Admit { machine: machine("m3"), role: Role::Member }),
         Action::Widen => (Resource::Network(network()), Act::Widen { machine: machine("m1"), settings: Settings::default() }),
         Action::Publish => (Resource::Network(network()), Act::Publish { service: ServiceId::new("web").unwrap() }),
-        Action::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("x").unwrap() }),
+        Action::RegisterActor => (m1(), Act::RegisterActor { slug: ActorSlug::new("x").unwrap(), rights: vec![Action::Message], scopes: [0; 32] }),
         Action::UseGateway => (m1(), Act::UseGateway),
         Action::Revoke => (m1(), Act::Revoke { what: Revocation::Token(vec![1]) }),
     };

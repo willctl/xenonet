@@ -84,6 +84,79 @@
     "authority": {
       "type": "object",
       "properties": {
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For an act by an actor: a token its machine minted for this act (xenonet_actor_ and a Biscuit, base64url)",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "root": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "v": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "machine": {
+              "type": "string",
+              "description": "The machine, by its host id",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "root": {
+              "type": "object",
+              "properties": {
+                "alg": {
+                  "type": "string",
+                  "enum": [
+                    "ed25519",
+                    "p256"
+                  ]
+                },
+                "key": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]*$"
+                }
+              },
+              "required": [
+                "alg",
+                "key"
+              ],
+              "description": "The root's Ed25519 key",
+              "additionalProperties": {}
+            },
+            "from": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            "until": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            "sig": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$",
+              "description": "The machine signing key's signature over it"
+            }
+          },
+          "required": [
+            "v",
+            "machine",
+            "root",
+            "from",
+            "until",
+            "sig"
+          ],
+          "description": "The certificate of the token's root, which the receiver checks against the sending machine's signing key in the network's chain",
+          "additionalProperties": {}
+        },
         "person": {
           "type": [
             "object",

@@ -1,14 +1,16 @@
 //! The facts this machine decides on (`xenonet_authz::Ground`), from its
 //! own copies: the network's chain (members, admins, the founder, each
-//! member's settings and machine key), the person's chain (devices), and
-//! when governance was last synced. A `Facts` is a snapshot, taken for one
-//! decision. What only the engine holds (the asks waiting, consent rows)
-//! is the runtime's to add over it (xenonet-runtime's ground).
+//! member's settings and machine key), the person's chain (devices), this
+//! machine's token root certificates, and when governance was last
+//! synced. A `Facts` is a snapshot, taken for one decision. What only the
+//! engine holds (the asks waiting, consent rows, revocations, another
+//! machine's token roots as an act carried them) is the runtime's to add
+//! over it (xenonet-runtime's ground).
 
 use crate::identity::Identity;
 use std::sync::Arc;
 use xenonet_authz::{
-    Attestation, Consent, Device, DeviceId, DeviceKind, GrantId, Ground, MachineId, NetworkId, PersonId, Role, RootCertificate, SessionId, Settings, StandingGrant, StartSetting,
+    Attestation, Consent, Device, DeviceId, DeviceKind, Ground, MachineId, NetworkId, PersonId, Role, RootCertificate, SessionId, Settings, StandingGrant, StartSetting,
     WakeSetting,
 };
 use xenonet_id::sign::VerifyingKey;
@@ -91,15 +93,24 @@ impl Ground for Facts {
         Some(Device { key: d.key, kind: if d.kind == Kind::Biometric { DeviceKind::Biometric } else { DeviceKind::Weaker } })
     }
 
+    /// Revocations are the engine's (its revoked table): the runtime's
+    /// ground answers them.
     fn revoked(&self, _revocation_id: &[u8]) -> bool {
         false
     }
 
-    fn token_roots(&self, _key_id: u32) -> Vec<RootCertificate> {
-        Vec::new()
+    /// This machine's own certificates; another machine's travel with the
+    /// act that uses them (the runtime's ground adds those).
+    fn token_roots(&self, key_id: u32) -> Vec<RootCertificate> {
+        self.identity.token_roots(key_id)
     }
 
+    /// Another machine's key as the network's chain binds it; this
+    /// machine's own, in a network or not, from its identity.
     fn signing_key(&self, machine: &MachineId) -> Option<VerifyingKey> {
+        if machine == &self.machine {
+            return self.identity.machine_key().ok().map(|k| k.public());
+        }
         Some(self.view.as_ref()?.member(machine.as_str())?.machine.clone())
     }
 
@@ -117,10 +128,6 @@ impl Ground for Facts {
     }
 
     fn asker(&self, _ask: &xenonet_authz::AskId) -> Option<Attestation> {
-        None
-    }
-
-    fn assistant_grant(&self, _grant: &GrantId) -> Option<u64> {
         None
     }
 

@@ -1,45 +1,15 @@
-// Actors' token files (electron/lib/token-file.js): the doctor's look for
-// tokens left in repos, kept for a day unless you ask, and on a made-up
-// Windows, a token file's ACL, read and written. The made-up tokens are
+// Actors' token files (electron/lib/token-file.js): on a made-up Windows, a
+// token file's ACL, read and written. The made-up tokens are
 // built here, so no file of XenoNet's holds one.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findTokenFiles, createTokenScan, TOKEN_SCAN_MS, readTokenFile, writeTokenFile } from "../electron/lib/token-file.js";
+import { readTokenFile, writeTokenFile } from "../electron/lib/token-file.js";
 const dirs = [];
 after(() => dirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
 const TOKEN = `xenonet_actor_${"0a".repeat(32)}`;
-const write = (file, text) => {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, text);
-};
-
-test("createTokenScan: a look kept for a day, unless you run the doctor yourself; never two at once", async () => {
-  let t = 0;
-  let looks = 0;
-  let repos = ["/Users/nova/Projects/atlas-api"];
-  // A made-up git: each repo answered with nothing found.
-  const run = async () => (looks++, { code: 1, stdout: "", timedOut: false });
-  const scan = createTokenScan({ repos: () => repos, run, issued: () => [], now: () => t });
-  assert.equal(scan.last(), null);
-  const first = await scan.look();
-  assert.deepEqual(first, { at: 0, repos: 1, checked: 1, files: [] });
-  const each = looks;
-  t += TOKEN_SCAN_MS - 1;
-  assert.equal(await scan.look(), first, "the schedule's runs within a day take the last look");
-  assert.equal(looks, each);
-  repos = [...repos, "/Users/nova/Projects/ledger"];
-  assert.deepEqual(await scan.look({ fresh: true }), { at: t, repos: 2, checked: 2, files: [] }, "a doctor you run looks again");
-  t += TOKEN_SCAN_MS;
-  const [a, b] = await Promise.all([scan.look(), scan.look({ fresh: true })]);
-  assert.equal(a, b, "one look at a time");
-  assert.equal(TOKEN_SCAN_MS, 24 * 3600e3);
-  // A store that can't be read leaves the look unchecked.
-  const blind = createTokenScan({ repos: () => repos, run, issued: () => { throw new Error("database is locked"); }, now: () => t });
-  assert.deepEqual(await blind.look(), { at: t, repos: 2, checked: 2, files: [], unchecked: true });
-});
 
 // A made-up Windows: whoami says the account's SID, and icacls answers with
 // the ACL a test gives, written as icacls /save writes it (UTF-16, after a

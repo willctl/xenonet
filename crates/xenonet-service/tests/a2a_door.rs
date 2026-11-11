@@ -61,7 +61,7 @@ impl cores::Engine for Stand {
 impl cores::Registration for Stand {
     fn authenticate_gateway(&self, t: &str) -> Value {
         if t == token() {
-            json!({ "ok": true, "id": "actor:wren", "slug": "wren", "state": "allowed" })
+            json!({ "ok": true, "id": "actor:wren", "slug": "wren", "state": "allowed", "allows": ["message", "handoff"] })
         } else {
             json!({ "ok": false, "status": 401, "code": "bad-token", "error": "XenoNet doesn't know that token" })
         }
@@ -71,9 +71,6 @@ impl cores::Registration for Stand {
 impl cores::Actors for Stand {
     fn info(&self, _id: &str) -> Option<Value> {
         Some(json!({ "name": "Wren" }))
-    }
-    fn can(&self, _id: &str, _capability: &str) -> bool {
-        true
     }
 }
 

@@ -19,6 +19,46 @@ const SERVICE: &str = "core/assistant/service.js";
 /// | enabled | changed, its data).
 pub type ConnectionEvents = mpsc::UnboundedReceiver<(String, Value)>;
 
+/// Actors' grants (xenonet-authz's Biscuits): one kind for every actor, a
+/// bot or a cloud assistant, `xenonet_actor_` and its base64url, rooted at
+/// this machine. Its rights are authz's actions (`read`, `message`,
+/// `start`…); which sessions and identities it may use are rows kept by its
+/// revocation id (the engine store's grant scopes). Minted, presence-checked
+/// and decided by the engine's driver, where the roots and the ground are.
+pub trait Grants: Send + Sync {
+    /// The person's presence for issuing `slug` a grant with these rights
+    /// and scopes, or widening one to them, asked at XenoNet's window: Ok,
+    /// or why not. Narrowing or revoking needs none.
+    fn present(&self, _slug: &str, _rights: &[String], _scopes: &Value, _reason: &str) -> Result<(), String> {
+        Err(format!("{CONNECTIONS}'s grants aren't in the Rust service yet"))
+    }
+    /// A grant for this machine's actor `slug` with these rights, until
+    /// `until` (ms; None for as long as its root lasts): its text, and the
+    /// revocation id XenoNet keeps of it.
+    fn mint(&self, _slug: &str, _rights: &[String], _until: Option<f64>) -> Result<(String, String), String> {
+        Err(format!("{CONNECTIONS}'s grants aren't in the Rust service yet"))
+    }
+    /// Whether `token` is `slug`'s grant and has the right to `action` here
+    /// now: its revocation id, or `revoked`, `no-right` or `invalid`.
+    fn check(&self, _slug: &str, _token: &str, _action: &str) -> Result<String, &'static str> {
+        Err("invalid")
+    }
+    /// A page cursor: `token` narrowed to one read, bound to `bound` (the
+    /// grant, the operation and its filters, as the reads write them), for
+    /// five minutes, holding `after` (base64url).
+    fn cursor(&self, _token: &str, _bound: &str, _after: Option<&str>) -> Result<String, String> {
+        Err(format!("{CONNECTIONS}'s grants aren't in the Rust service yet"))
+    }
+    /// Where a page cursor of `slug`'s goes on from (base64url, or None for
+    /// the start), when it's bound to `bound`: else CURSOR_EXPIRED (too old,
+    /// or its grant taken back) or INVALID_ARGUMENT.
+    fn page(&self, _slug: &str, _cursor: &str, _bound: &str) -> Result<Option<String>, &'static str> {
+        Err("INVALID_ARGUMENT")
+    }
+}
+
+impl Grants for Pending {}
+
 #[async_trait]
 pub trait Connections: Send + Sync {
     fn list(&self) -> R<Value> {

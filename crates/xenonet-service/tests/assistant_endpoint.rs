@@ -100,7 +100,9 @@ async fn an_adapter_says_which_grant_and_then_may_only_read() {
     );
     assert_eq!(e.info()["sessions"], json!(1));
     let read = ask(&mut c, 6, "assistant.read", json!({ "request_id": "r1", "operation": "projects", "arguments": {} })).await;
-    assert_eq!(read["result"], json!({ "session": { "grantId": GRANT, "actorId": "actor:dot", "connectionId": "cn_1" }, "op": "projects" }));
+    // The read hears the token the adapter said hello with: its page
+    // cursors are that token, narrowed.
+    assert_eq!(read["result"], json!({ "session": { "grantId": GRANT, "actorId": "actor:dot", "connectionId": "cn_1", "token": "secret" }, "op": "projects" }));
     assert_eq!(ask(&mut c, 7, "status", json!({})).await["error"], json!("Unsupported request."));
     let audit = grants.audit.lock().unwrap().clone();
     let results: Vec<Value> = audit.iter().map(|a| a["result"].clone()).collect();

@@ -25,7 +25,7 @@ use xenonet_model::ops::Net;
 use xenonet_net::sink::SinkSlot;
 
 pub use actors::{Actors, Registration, Reports, Runs, Spend, Wakes};
-pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Tunnels};
+pub use assistant::{AssistantService, AssistantSource, Audit, Connections, Grants, Tunnels};
 pub use delivery::{Policy, Router};
 pub use engine::{Channels, Connect, Engine, EngineStore, Verify};
 pub use hosts::{HostsConfig, HttpApi, Hub, HubNet, SelfApi};
@@ -162,6 +162,8 @@ pub struct Cores {
     pub audit: Option<Arc<dyn Audit>>,
     pub assistant_source: Option<Arc<dyn AssistantSource>>,
     pub assistant: Option<Arc<dyn AssistantService>>,
+    /// Actors' grants, minted and decided by the engine's driver.
+    pub grants: Arc<dyn Grants>,
     pub doctor: Arc<dyn Doctor>,
     pub diagnostics: Arc<dyn Diagnostics>,
     pub themes: Arc<dyn Themes>,
@@ -233,6 +235,7 @@ impl Cores {
             audit: (actors && assistant).then(|| p.clone() as Arc<dyn Audit>),
             assistant_source: (actors && assistant).then(|| p.clone() as Arc<dyn AssistantSource>),
             assistant: (actors && assistant).then(|| p.clone() as Arc<dyn AssistantService>),
+            grants: p.clone(),
             doctor: p.clone(),
             diagnostics: p.clone(),
             themes: p.clone(),

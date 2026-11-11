@@ -532,7 +532,7 @@ mod tests {
         let dir = folder("gone");
         let state = join_all(&[&dir, "assistant"]);
         std::fs::create_dir_all(join_all(&[&state, "credentials"])).unwrap();
-        let token = format!("xenonet_assistant_{}", "a".repeat(64));
+        let token = format!("xenonet_actor_{}", "a".repeat(64));
         std::fs::write(
             join_all(&[&state, "credentials", &format!("{GRANT}.json")]),
             format!("{{\"schema\":\"assistant/credential/v1\",\"grant_id\":\"{GRANT}\",\"device_id\":\"dev_x\",\"expires_at\":5000,\"token\":\"{token}\"}}\n"),

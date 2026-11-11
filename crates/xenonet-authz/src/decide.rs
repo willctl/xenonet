@@ -15,8 +15,8 @@
 //!    names, never this machine itself; at the gateway and A2A, only this
 //!    machine's actors.
 //! 3. **Who**: the person's device signature is for this act, from an
-//!    unrevoked device of this machine's person; an actor or an assistant
-//!    holds a token for exactly them, whose root is still certified, with
+//!    unrevoked device of this machine's person; an actor (a bot or a cloud
+//!    assistant too) holds a token for exactly them, whose root is still certified, with
 //!    no id revoked, whose Datalog grants the action's right (and the
 //!    gateway's, at the gateway or A2A) and whose own checks pass. Nobody
 //!    else brings a token.
@@ -24,20 +24,20 @@
 //!    kind of principal:
 //!
 //! ```text
-//!                  machine   agent     actor     person    assistant
-//!   message        reach     reach     reach     reach     -
-//!   wake           wake      wake      wake      reach     -
-//!   start          -         start     start     start     -
-//!   answer         grant     -         -         presence  -
-//!   claim          reach     claim     reach     reach     -
-//!   handoff        reach     reach     reach     reach     -
-//!   read           read      read      read      reach     read
-//!   admit          -         -         -         presence  -
-//!   widen          -         -         -         presence  -
-//!   publish        -         -         -         presence  -
-//!   register-actor -         -         reach     reach     -
-//!   use-gateway    -         -         reach     -         -
-//!   revoke         -         -         -         presence  -
+//!                  machine   agent     actor     person
+//!   message        reach     reach     reach     reach
+//!   wake           wake      wake      wake      reach
+//!   start          -         start     start     start
+//!   answer         grant     -         -         presence
+//!   claim          reach     claim     reach     reach
+//!   handoff        reach     reach     reach     reach
+//!   read           read      read      read      reach
+//!   admit          -         -         -         presence
+//!   widen          -         -         -         presence
+//!   publish        -         -         -         presence
+//!   register-actor -         -         reach     presence
+//!   use-gateway    -         -         reach     -
+//!   revoke         -         -         -         presence
 //!
 //!   -         refused
 //!   reach     steps 1 to 3 are enough (an actor's token has the right)
@@ -54,7 +54,8 @@
 //!             member, never an unchecked agent
 //!   presence  the person, with a presence block for this act from the
 //!             device that signed it; a weaker device is allowed and the
-//!             decision says so
+//!             decision says so. Register-actor is issuing an actor's
+//!             grant or widening it; narrowing and revoking need no act
 //!   grant     this machine itself, under the person's standing grant for
 //!             answers, for a question whose asker is process-checked at
 //!             least and at least what the grant requires
@@ -67,7 +68,6 @@
 //!    so a laptop on a plane still answers its own prompts.
 
 use crate::proof::VerifiedPresence;
-use crate::token::Bearer;
 use crate::vocab::{Act, Action, Attestation, DeviceId, NetworkId, Principal, ReadScope, Request, Resource, StartMode};
 use crate::{DeviceKind, Door, Ground, Role, StandingGrant, StartSetting, Token, WakeSetting};
 use std::fmt;
@@ -202,23 +202,23 @@ enum Rule {
 use Rule::{Claim, Grant, No, Presence, Reach, Read, Start, Wake};
 
 /// The rule table (the module's doc draws it). Columns: machine, agent,
-/// actor, person, assistant.
+/// actor, person.
 #[rustfmt::skip]
-const TABLE: [(Action, [Rule; 5]); 13] = [
-    //                       machine   agent     actor     person    assistant
-    (Action::Message,       [Reach,    Reach,    Reach,    Reach,    No]),
-    (Action::Wake,          [Wake,     Wake,     Wake,     Reach,    No]),
-    (Action::Start,         [No,       Start,    Start,    Start,    No]),
-    (Action::Answer,        [Grant,    No,       No,       Presence, No]),
-    (Action::Claim,         [Reach,    Claim,    Reach,    Reach,    No]),
-    (Action::Handoff,       [Reach,    Reach,    Reach,    Reach,    No]),
-    (Action::Read,          [Read,     Read,     Read,     Reach,    Read]),
-    (Action::Admit,         [No,       No,       No,       Presence, No]),
-    (Action::Widen,         [No,       No,       No,       Presence, No]),
-    (Action::Publish,       [No,       No,       No,       Presence, No]),
-    (Action::RegisterActor, [No,       No,       Reach,    Reach,    No]),
-    (Action::UseGateway,    [No,       No,       Reach,    No,       No]),
-    (Action::Revoke,        [No,       No,       No,       Presence, No]),
+const TABLE: [(Action, [Rule; 4]); 13] = [
+    //                       machine   agent     actor     person
+    (Action::Message,       [Reach,    Reach,    Reach,    Reach]),
+    (Action::Wake,          [Wake,     Wake,     Wake,     Reach]),
+    (Action::Start,         [No,       Start,    Start,    Start]),
+    (Action::Answer,        [Grant,    No,       No,       Presence]),
+    (Action::Claim,         [Reach,    Claim,    Reach,    Reach]),
+    (Action::Handoff,       [Reach,    Reach,    Reach,    Reach]),
+    (Action::Read,          [Read,     Read,     Read,     Reach]),
+    (Action::Admit,         [No,       No,       No,       Presence]),
+    (Action::Widen,         [No,       No,       No,       Presence]),
+    (Action::Publish,       [No,       No,       No,       Presence]),
+    (Action::RegisterActor, [No,       No,       Reach,    Presence]),
+    (Action::UseGateway,    [No,       No,       Reach,    No]),
+    (Action::Revoke,        [No,       No,       No,       Presence]),
 ];
 
 /// The actions that hold for another machine on stale governance.
@@ -230,7 +230,6 @@ fn rule(action: Action, principal: &Principal) -> Rule {
         Principal::Agent { .. } => 1,
         Principal::Actor { .. } => 2,
         Principal::Person(_) => 3,
-        Principal::Assistant { .. } => 4,
     };
     TABLE.iter().find(|(a, _)| *a == action).map_or(No, |(_, row)| row[column])
 }
@@ -350,21 +349,9 @@ fn who(token: Option<&Token>, request: &Request, ground: &dyn Ground, arrival: &
     match request.principal() {
         Principal::Actor { slug, machine } => {
             let token = token.ok_or_else(|| Reason::new("token", "an actor proves itself with its token"))?;
-            match token.bearer() {
-                Bearer::Actor { slug: s, machine: m } if s == slug && m == machine => {}
-                _ => return Err(Reason::new("token", format!("that token isn't the actor {slug}'s on {machine}"))),
-            }
-            token_holds(token, request, ground)
-        }
-        Principal::Assistant { grant, machine } => {
-            let token = token.ok_or_else(|| Reason::new("token", "an assistant proves itself with its grant's token"))?;
-            match token.bearer() {
-                Bearer::Assistant { grant: g, machine: m, revision } if g == grant && m == machine => {
-                    if ground.assistant_grant(grant) != Some(*revision) {
-                        return Err(Reason::new("revoked", format!("the grant {grant} was changed or taken back")));
-                    }
-                }
-                _ => return Err(Reason::new("token", format!("that token isn't the grant {grant}'s on {machine}"))),
+            let b = token.bearer();
+            if &b.slug != slug || &b.machine != machine {
+                return Err(Reason::new("token", format!("that token isn't the actor {slug}'s on {machine}")));
             }
             token_holds(token, request, ground)
         }

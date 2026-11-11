@@ -48,9 +48,6 @@ pub trait Actors: Send + Sync {
     fn tokens(&self, _now: f64) -> R<Value> {
         pending(ACTORS)
     }
-    fn can(&self, _id: &str, _capability: &str) -> bool {
-        false
-    }
     /// `actors.info(id)`: its name and product.
     fn info(&self, _id: &str) -> Option<Value> {
         None

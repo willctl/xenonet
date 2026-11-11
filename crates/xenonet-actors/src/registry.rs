@@ -447,9 +447,6 @@ impl Actors {
     pub fn is_public(&self, id: &str) -> bool {
         self.demo || id != YOU
     }
-    pub fn can(&self, id: &str, capability: &Value) -> bool {
-        self.get(id).is_some_and(|a| a.capabilities.contains(capability))
-    }
     pub fn enabled(&self, id: &str) -> bool {
         self.get(id).is_none_or(|a| a.enabled)
     }
@@ -561,7 +558,9 @@ impl Actors {
                 name: col(&r, "name"),
                 product: parse_json(text(&r, "product"), Value::Null),
                 via: parse_json(text(&r, "via"), json!([])).as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default(),
-                capabilities: parse_json(text(&r, "capabilities"), json!([])).as_array().cloned().unwrap_or_default(),
+                // What its token was minted for; an observer says its
+                // product's again when it next looks.
+                capabilities: parse_json(text(&r, "token_rights"), json!([])).as_array().cloned().unwrap_or_default(),
                 heartbeat_ms: num(&r, "heartbeat_ms"),
                 identity: col(&r, "identity"),
                 enabled: num(&r, "enabled") != Some(0.0),
@@ -614,7 +613,6 @@ impl Actors {
             "name": a.name,
             "product": if a.product.is_null() { Value::Null } else { json_text(&a.product) },
             "via": json_text(&json!(a.via)),
-            "capabilities": json_text(&Value::Array(a.capabilities.clone())),
             "heartbeat_ms": opt(a.heartbeat_ms),
             "identity": a.identity,
             "enabled": i32::from(a.enabled),

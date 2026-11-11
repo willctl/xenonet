@@ -15,16 +15,20 @@
 //!   else that needs them there) a presence block for the act, taken once;
 //! - an agent on another machine: vouched for by that machine, which
 //!   checked its process before it sent (process-checked);
-//! - an actor on another machine: the same until actor tokens travel with
-//!   its acts (they're the actor tokens' commit);
+//! - an actor: its token. Here, the token it called with; from another
+//!   machine, a token that machine minted for the act, which travels in
+//!   the act's authority with its root's certificate, checked against
+//!   that machine's signing key in the network's chain. Revocations are
+//!   the issuing machine's: it checked the actor's own token before it
+//!   minted one for the act, and only that machine could mint for it;
 //! - another machine itself: a member of the network.
 
 use crate::runtime::Runtime;
 use std::collections::HashMap;
 use std::sync::Arc;
 use xenonet_authz::{
-    decide, Act, AskId, Attestation, Consent, Decision, Device, DeviceId, Door, GrantId, Ground, MachineId, NetworkId, PersonId, PersonSigned, Principal, Request, Resource, Role,
-    RootCertificate, SessionId, Settings, StandingGrant, VerifiedPresence,
+    decide, Act, Action, ActorGrant, ActorSlug, AskId, Attestation, Consent, Decision, Device, DeviceId, Door, Ground, MachineId, Narrowing, NetworkId, PersonId, PersonSigned,
+    Principal, Request, Resource, Role, RootCertificate, SessionId, Settings, StandingGrant, Token, VerifiedPresence, ACTOR_PREFIX,
 };
 use xenonet_id::presence::PresenceBlock;
 use xenonet_id::sign::VerifyingKey;
@@ -32,12 +36,18 @@ use xenonet_net::ground::{Facts, Governance};
 use xenonet_net::identity::Identity;
 use xenonet_os::sync::ReadWrite;
 
-/// The network's facts, with the asks waiting here.
+/// The network's facts, with the asks waiting here, the revoked tokens,
+/// and the token roots of other machines that came with an act.
 pub struct EngineGround {
     pub facts: Facts,
     /// Each ask waiting here, with how its run's agent was checked: a run
     /// XenoNet started, so process-checked.
     pub asks: HashMap<String, Attestation>,
+    /// The engine's store, whose revoked table holds every token taken back.
+    pub store: Option<xenonet_engine::store::Shared>,
+    /// Another machine's root certificates an act carried, unverified: a
+    /// token's parse checks each against that machine's signing key.
+    pub roots: Vec<RootCertificate>,
 }
 
 impl Ground for EngineGround {
@@ -56,11 +66,16 @@ impl Ground for EngineGround {
     fn device(&self, person: &PersonId, device: &DeviceId) -> Option<Device> {
         self.facts.device(person, device)
     }
+    /// Revoked when the revoked table holds it, or when the store can't
+    /// say.
     fn revoked(&self, revocation_id: &[u8]) -> bool {
-        self.facts.revoked(revocation_id)
+        let id = xenonet_id::codec::hex(revocation_id);
+        self.facts.revoked(revocation_id) || self.store.as_ref().is_some_and(|s| s.with(|s| s.revoked(&id)).map_or(true, |r| r.is_some()))
     }
     fn token_roots(&self, key_id: u32) -> Vec<RootCertificate> {
-        self.facts.token_roots(key_id)
+        let mut out = self.facts.token_roots(key_id);
+        out.extend(self.roots.iter().filter(|c| c.key_id() == key_id && c.machine() != self.facts.own_machine()).cloned());
+        out
     }
     fn signing_key(&self, machine: &MachineId) -> Option<VerifyingKey> {
         self.facts.signing_key(machine)
@@ -73,9 +88,6 @@ impl Ground for EngineGround {
     }
     fn asker(&self, ask: &AskId) -> Option<Attestation> {
         self.asks.get(ask.as_str()).copied()
-    }
-    fn assistant_grant(&self, grant: &GrantId) -> Option<u64> {
-        self.facts.assistant_grant(grant)
     }
     fn governance_synced_at(&self) -> Option<i64> {
         self.facts.governance_synced_at()
@@ -100,7 +112,7 @@ pub fn ground(w: &Runtime, extra: Option<&str>) -> Option<EngineGround> {
     if let Some(id) = extra {
         asks.insert(id.to_string(), Attestation::ProcessChecked);
     }
-    Some(EngineGround { facts, asks })
+    Some(EngineGround { facts, asks, store: Some(w.store.clone()), roots: Vec::new() })
 }
 
 /// Why something wasn't allowed, in words for a receipt or a refusal.
@@ -112,13 +124,16 @@ pub fn why(d: &Decision) -> String {
     }
 }
 
-/// The person's authority as a body carries it (`network/message/v2`'s
-/// and `network/operator/v2`'s `authority`).
+/// The authority a body carries (`network/message/v2`'s and
+/// `network/operator/v2`'s `authority`): the person's, or an actor's
+/// token with its root's certificate.
 #[derive(Debug, Clone, Default)]
 pub struct Carried {
     pub person: Option<(String, String, Vec<u8>)>,
     pub presence: Option<PresenceBlock>,
     pub person_head: Option<String>,
+    pub token: Option<String>,
+    pub root: Option<RootCertificate>,
 }
 
 impl Carried {
@@ -129,7 +144,13 @@ impl Carried {
             (Some(a), Some(b), Some(c)) => Some((a, b, c)),
             _ => None,
         };
-        Carried { person, presence: v.get("presence").and_then(PresenceBlock::parse), person_head: text(Some(v), "personHead") }
+        Carried {
+            person,
+            presence: v.get("presence").and_then(PresenceBlock::parse),
+            person_head: text(Some(v), "personHead"),
+            token: text(Some(v), "token"),
+            root: v.get("root").and_then(RootCertificate::parse),
+        }
     }
 }
 
@@ -168,12 +189,96 @@ pub fn person(w: &Runtime, g: &EngineGround, from: Option<&str>, carried: &Carri
     PersonSigned::verify(g, &person, &device, resource, act, sig).map(Principal::Person).map_err(|e| e.message)
 }
 
+/// How long a token minted for one act to another machine lasts: past the
+/// week the outbox sends a message again while that machine is away.
+pub const ACT_TOKEN_MS: i64 = 8 * 24 * 3600 * 1000;
+
+/// A token for this machine's actor `slug` with `rights`, minted from this
+/// start's token root: for `network` alone when it names one, until
+/// `until` or the root's end, narrowed to `door` when it names one.
+pub fn mint(w: &Runtime, slug: &str, rights: Vec<Action>, network: Option<NetworkId>, until: Option<i64>, door: Option<Door>) -> Result<Token, String> {
+    let gov = governance(w).ok_or("this machine's governance isn't plugged in, so it mints no tokens")?;
+    let facts = gov.facts();
+    let root = facts.identity.token_root(&facts.machine, facts.now).map_err(|e| e.message)?;
+    let end = root.certificate().until();
+    let grant = ActorGrant { actor: ActorSlug::new(slug).map_err(|e| e.message)?, network, rights, until: until.map_or(end, |u| u.min(end)) };
+    let token = root.mint_actor(&grant).map_err(|e| e.message)?;
+    match door {
+        Some(d) => token.attenuate(&Narrowing::Door(d)).map_err(|e| e.message),
+        None => Ok(token),
+    }
+}
+
+/// The authority an act of this machine's actor `slug` carries to another
+/// machine: a token for `rights` minted for the act, in this network, for
+/// `ACT_TOKEN_MS`, and its root's certificate, which that machine checks against
+/// this one's signing key in the network's chain. The actor's own token
+/// was decided here before.
+pub fn actor_authority(w: &Runtime, slug: &str, rights: Vec<Action>) -> Result<serde_json::Value, String> {
+    let gov = governance(w).ok_or("this machine's governance isn't plugged in, so it mints no tokens")?;
+    let facts = gov.facts();
+    let token = mint(w, slug, rights, facts.network(), Some(facts.now + ACT_TOKEN_MS), None)?;
+    Ok(serde_json::json!({ "token": token.encode(ACTOR_PREFIX).map_err(|e| e.message)?, "root": token.root().to_json() }))
+}
+
+/// An actor of the machine `from` as an act's principal, by the token that
+/// machine minted for the act: parsed against the root certificate the act
+/// carried (kept in `g` for the decision), which must be that machine's.
+pub fn actor(g: &mut EngineGround, from: &MachineId, carried: &Carried) -> Result<(Principal, Token), String> {
+    let text = carried.token.as_deref().ok_or("an actor's act from another machine comes with a token its machine minted for it")?;
+    if let Some(r) = &carried.root {
+        g.roots.push(r.clone());
+    }
+    let token = Token::parse(text, ACTOR_PREFIX, g, g.facts.now).map_err(|e| e.message)?;
+    let b = token.bearer();
+    if &b.machine != from {
+        return Err(format!("that token isn't for an actor of {from}"));
+    }
+    Ok((Principal::Actor { slug: b.slug.clone(), machine: b.machine.clone() }, token))
+}
+
+/// The person's presence for issuing this machine's actor `slug` a grant
+/// with `rights` and the scopes whose hash is `scopes`, or widening one to
+/// them: their device's signature over that act and a presence block for
+/// it, made at XenoNet's window (it asks them: Touch ID on a Mac), then
+/// decided here. Only from the window (`at_window`), where the person can
+/// be asked. A machine whose person isn't set up yet sets them up first,
+/// as the first act as them does.
+pub fn present(w: &Runtime, at_window: bool, slug: &str, rights: Vec<Action>, scopes: [u8; 32], reason: &str) -> Result<(), String> {
+    if !at_window {
+        return Err("that gives an actor more, which asks you, so it's done from XenoNet's window".into());
+    }
+    let g = ground(w, None).ok_or("this machine's governance isn't plugged in, so it issues no grants")?;
+    let identity = g.facts.identity.clone();
+    if identity.person_id().is_none() {
+        identity.found(true, g.facts.machine.as_str(), g.facts.now).map_err(|e| e.message)?;
+    }
+    let resource = Resource::Machine(g.facts.machine.clone());
+    let act = Act::RegisterActor { slug: ActorSlug::new(slug).map_err(|e| e.message)?, rights, scopes };
+    let auth = authority(&identity, true, &resource, &act, reason, g.facts.now)?;
+    let carried = Carried::parse(&auth);
+    let p = person(w, &g, None, &carried, &resource, &act)?;
+    judge(&g, &local(&g, p, resource, act), carried.presence.as_ref())
+}
+
 /// Decides `request` here, taking the presence block it came with once
 /// (the blocks taken are kept across restarts). A block that doesn't
 /// count for this act is no presence at all, which decide refuses where
 /// the act needs one.
 pub fn decide_with(g: &EngineGround, request: &Request, presence: Option<&PresenceBlock>) -> Decision {
     decide(None, request, g, verified(g, request, presence).ok().flatten().as_ref())
+}
+
+/// `judge`, for an act whose principal brought a token (an actor's).
+pub fn judge_by(g: &EngineGround, request: &Request, token: Option<&Token>, presence: Option<&PresenceBlock>) -> Result<(), String> {
+    let v = match verified(g, request, presence) {
+        Ok(v) => v,
+        Err(e) => return Err(format!("that presence doesn't count: {e}")),
+    };
+    match decide(token, request, g, v.as_ref()) {
+        Decision::Allow(_) => Ok(()),
+        d => Err(why(&d)),
+    }
 }
 
 fn verified(g: &EngineGround, request: &Request, presence: Option<&PresenceBlock>) -> Result<Option<VerifiedPresence>, String> {
@@ -188,14 +293,7 @@ fn verified(g: &EngineGround, request: &Request, presence: Option<&PresenceBlock
 /// `decide_with`, as Ok or why not, with what was wrong with a presence
 /// block when there was one and it didn't count.
 pub fn judge(g: &EngineGround, request: &Request, presence: Option<&PresenceBlock>) -> Result<(), String> {
-    let v = match verified(g, request, presence) {
-        Ok(v) => v,
-        Err(e) => return Err(format!("that presence doesn't count: {e}")),
-    };
-    match decide(None, request, g, v.as_ref()) {
-        Decision::Allow(_) => Ok(()),
-        d => Err(why(&d)),
-    }
+    judge_by(g, request, None, presence)
 }
 
 /// A request at this machine's own door, now.
@@ -279,7 +377,7 @@ mod tests {
             view.members.insert(id.into(), member(id, window, s));
         }
         let facts = Facts { machine: MachineId::new("laptop").unwrap(), view: Some(view), identity: identity.clone(), synced_at: synced, now: NOW };
-        (EngineGround { facts, asks: HashMap::from([("ask_1".to_string(), Attestation::ProcessChecked)]) }, identity, dir)
+        (EngineGround { facts, asks: HashMap::from([("ask_1".to_string(), Attestation::ProcessChecked)]), store: None, roots: Vec::new() }, identity, dir)
     }
 
     fn run() -> Resource {

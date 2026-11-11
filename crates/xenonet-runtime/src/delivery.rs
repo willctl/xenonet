@@ -25,6 +25,7 @@ use xenonet_engine::delivery::router::{self, Delivery, Router as RouterCore};
 use xenonet_engine::delivery::tmux::Tmux;
 use xenonet_engine::delivery::usage::plan_usage;
 use xenonet_engine::delivery::{Delivered, Error, Files};
+use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
 use xenonet_text::text::to_number;
 use xenonet_text::time::now_ms;
@@ -54,14 +55,71 @@ impl Files for Fs {
 
 // ---------- the policy ----------
 
-impl policy::Host for Fs {
+/// The policy's host: the disk, and the engine's store, where each actor's
+/// grant keeps its sessions scope by its token's revocation id.
+struct Here<'a> {
+    store: Option<&'a Shared>,
+}
+
+impl Files for Here<'_> {
+    fn read_file(&mut self, path: &str) -> Result<String, String> {
+        Fs.read_file(path)
+    }
+    fn mkdir_all(&mut self, dir: &str) -> Result<(), String> {
+        Fs.mkdir_all(dir)
+    }
+    fn write_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
+        Fs.write_file(path, body, mode)
+    }
+    fn append_file(&mut self, path: &str, body: &str, mode: Option<u32>) -> Result<(), String> {
+        Fs.append_file(path, body, mode)
+    }
+    fn rename(&mut self, from: &str, to: &str) -> Result<(), String> {
+        Fs.rename(from, to)
+    }
+}
+
+/// The token an actor's grant scopes are kept by: its own token's id, else
+/// its gateway token's (an actor that reaches XenoNet only through the
+/// gateway).
+fn grant_id(store: &Shared, actor: &str) -> Option<String> {
+    let slug = actor.strip_prefix("actor:")?;
+    let row = store.with(|s| s.actor_row(slug)).ok().flatten()?;
+    row.text("token_id").or_else(|| row.text("gateway_id")).map(str::to_string)
+}
+
+impl policy::Host for Here<'_> {
     fn now(&mut self) -> f64 {
         now_ms()
+    }
+    fn sessions_of(&mut self, actor: &str) -> Option<Value> {
+        let store = self.store?;
+        let token = grant_id(store, actor)?;
+        let row = store.with(|s| s.scope(&token)).ok().flatten()?;
+        let selector = row.text("sessions")?;
+        Some(serde_json::json!({ "selector": selector, "at": row.get("at").to_json(), "expiresAt": row.get("until").to_json() }))
+    }
+    fn set_sessions(&mut self, actor: &str, scope: Option<&Value>) -> Result<bool, String> {
+        let store = self.store.ok_or("there's no store for grants here")?;
+        let token = grant_id(store, actor).ok_or_else(|| format!("{actor} has no grant to scope: allow it, or give it a token, first"))?;
+        let had = store.with(|s| s.scope(&token)).ok().flatten().is_some_and(|r| r.text("sessions").is_some());
+        let row = match scope {
+            Some(g) => serde_json::json!({ "token": token, "actor": actor, "sessions": g["selector"], "at": g["at"], "until": g["expiresAt"] }),
+            None => serde_json::json!({ "token": token, "actor": actor, "sessions": null, "at": now_ms(), "until": null }),
+        };
+        store.with(|s| s.put_scope(&row)).map_err(|e| e.to_string())?;
+        Ok(had)
+    }
+    fn all_sessions(&mut self) -> Vec<(String, Value)> {
+        let Some(store) = self.store else { return Vec::new() };
+        let rows = store.with(|s| s.actor_rows()).unwrap_or_default();
+        rows.iter().filter_map(|r| r.text("slug").map(|slug| format!("actor:{slug}"))).filter_map(|actor| self.sessions_of(&actor).map(|g| (actor, g))).collect()
     }
 }
 
 pub struct PolicySide {
     core: Mutex<PolicyCore>,
+    store: Option<Shared>,
 }
 
 /// A refusal's or error's words.
@@ -79,14 +137,15 @@ fn core_error(f: Fail) -> CoreError {
 }
 
 impl PolicySide {
-    pub fn new(file: Option<String>, audit_file: Option<String>) -> PolicySide {
-        PolicySide { core: Mutex::new(PolicyCore::load(&mut Fs, file, audit_file)) }
+    pub fn new(file: Option<String>, audit_file: Option<String>, store: Option<Shared>) -> PolicySide {
+        let core = PolicyCore::load(&mut Here { store: store.as_ref() }, file, audit_file);
+        PolicySide { core: Mutex::new(core), store }
     }
 
     /// The policy, with its host, under its lock.
     pub fn with<T>(&self, f: impl FnOnce(&mut PolicyCore, &mut dyn policy::Host) -> T) -> T {
         let mut p = self.core.locked();
-        f(&mut p, &mut Fs)
+        f(&mut p, &mut Here { store: self.store.as_ref() })
     }
 
     /// `policy.data.consent`.
@@ -128,7 +187,15 @@ impl Policy for PolicyDriver {
     fn set_paused(&self, paused: bool) -> R<Value> {
         self.0.policy.with(|p, h| p.set_paused(h, paused, "you")).map_err(core_error)
     }
-    fn grant(&self, actor: &str, scope: &str, ttl_ms: f64) -> R<Value> {
+    /// A sessions scope for an actor's grant widens what it may do: the
+    /// person is asked first, which only the window can do.
+    fn grant(&self, actor: &str, scope: &str, ttl_ms: f64, at_window: bool) -> R<Value> {
+        let slug = actor.strip_prefix("actor:").unwrap_or(actor);
+        let caps: Vec<String> =
+            self.0.actors.as_ref().map(|a| a.read(|r| r.info(actor))).and_then(|i| i.get("capabilities").cloned()).and_then(|c| serde_json::from_value(c).ok()).unwrap_or_default();
+        let scopes = serde_json::json!({ "sessions": scope });
+        crate::ground::present(&self.0, at_window, slug, xenonet_actors::tokens::rights(&caps), crate::grants::scopes_hash(&scopes), &format!("let {actor} reach {scope}"))
+            .map_err(|why| CoreError::of(xenonet_api::cores::Kind::Error, 403, "presence", why))?;
         self.0.policy.with(|p, h| p.grant(h, actor, scope, Some(ttl_ms), "you")).map_err(core_error)
     }
     fn revoke(&self, actor: &str) -> R<Value> {

@@ -1,6 +1,8 @@
 //! Registering actors (crates/xenonet-actors/src/registration.rs): their
 //! requests, tokens, the gateway's asks and the limits. The registry and
-//! the clock answer its host; its rows are the engine store's; what it
+//! the clock answer its host, and so does xenonet-authz: tokens are
+//! minted from this start's token root and decided on the engine's
+//! ground; its rows are the engine store's; what it
 //! tells (requests, asked, asked-gateway) goes to the page once the call
 //! is done.
 
@@ -8,10 +10,11 @@ use crate::actors::{row_of, rows_json, thrown, Rows};
 use crate::runtime::Runtime;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use xenonet_actors::registration::{Fail, Host, Registration as Core, Store};
+use xenonet_actors::registration::{Checked, Fail, Host, Registration as Core, Store};
 use xenonet_actors::store as rows;
 use xenonet_api::cores::{CoreError, Kind, Registration, R};
 use xenonet_api::From;
+use xenonet_authz::{decide, Act, Action, Door, Principal, Request, Resource, Token};
 use xenonet_engine::engine::Thrown;
 use xenonet_engine::store::Shared;
 use xenonet_os::sync::Locked;
@@ -99,6 +102,51 @@ impl Host for RegHost<'_> {
     fn set_enabled(&mut self, id: &str, on: bool) -> Result<(), Fail> {
         self.change(|r, _| r.set_enabled(id, on))
     }
+    fn present(&mut self, slug: &str, capabilities: &[String], gateway: bool, reason: &str) -> Result<(), Fail> {
+        let mut rights = xenonet_actors::tokens::rights(capabilities);
+        if gateway {
+            rights.push(Action::UseGateway);
+        }
+        // Only the window's routes issue tokens.
+        crate::ground::present(self.w, true, slug, rights, crate::grants::scopes_hash(&json!({})), reason)
+            .map_err(|why| Fail::Actor(xenonet_actors::registration::ActorError { status: 403.0, code: "presence", message: why, extra: json!({}) }))
+    }
+    fn mint(&mut self, slug: &str, capabilities: &[String], gateway: bool) -> Result<(String, String), Fail> {
+        let mut rights = xenonet_actors::tokens::rights(capabilities);
+        let (door, prefix) = if gateway {
+            rights.push(Action::UseGateway);
+            (Some(Door::Gateway), xenonet_authz::GATEWAY_PREFIX)
+        } else {
+            (None, xenonet_authz::ACTOR_PREFIX)
+        };
+        let token = crate::ground::mint(self.w, slug, rights, None, None, door).map_err(|why| Fail::Error(rows::Error::new(why)))?;
+        let text = token.encode(prefix).map_err(|e| Fail::Error(rows::Error::new(e.message)))?;
+        Ok((text, token.id()))
+    }
+    fn verify(&mut self, text: &str, gateway: bool) -> Checked {
+        let Some(g) = crate::ground::ground(self.w, None) else { return Checked::Unknown };
+        let (prefix, door) = if gateway { (xenonet_authz::GATEWAY_PREFIX, Door::Gateway) } else { (xenonet_authz::ACTOR_PREFIX, Door::Local) };
+        let token = match Token::parse(text, prefix, &g, g.facts.now) {
+            Ok(t) => t,
+            Err(e) if e.code == "revoked" => return Checked::Revoked(Token::ids_of(text, prefix).unwrap_or_default()),
+            Err(_) => return Checked::Unknown,
+        };
+        let own = g.facts.machine.clone();
+        let (slug, machine) = (&token.bearer().slug, &token.bearer().machine);
+        if machine != &own {
+            return Checked::Unknown;
+        }
+        // What it may do at its door, decided now: the acts the routes ask
+        // of a token (reads, messages, handoffs, claims). Starts are
+        // decided with the run they start.
+        let principal = Principal::Actor { slug: slug.clone(), machine: own.clone() };
+        let allows = [Act::Read { scope: xenonet_authz::ReadScope::Map, filters: None }, Act::Message, Act::Handoff, Act::Claim]
+            .into_iter()
+            .filter(|act| decide(Some(&token), &Request::new(principal.clone(), Resource::Machine(own.clone()), act.clone(), door, g.facts.now, None), &g, None).is_allow())
+            .map(|act| act.action().as_str().to_string())
+            .collect();
+        Checked::Valid { slug: slug.as_str().to_string(), id: token.id(), allows }
+    }
 }
 
 impl Store for Rows {
@@ -111,8 +159,8 @@ impl Store for Rows {
     fn actor_request(&self, id: &str) -> rows::Result<Option<Value>> {
         row_of(self.0.with(|s| s.actor_request(id)))
     }
-    fn actor_request_by_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        row_of(self.0.with(|s| s.actor_request_by_token(hash)))
+    fn actor_request_by_token(&self, id: &str) -> rows::Result<Option<Value>> {
+        row_of(self.0.with(|s| s.actor_request_by_token(id)))
     }
     fn add_actor_request(&self, r: &Value) -> rows::Result<()> {
         self.direct(|s| s.add_actor_request(r))
@@ -123,11 +171,11 @@ impl Store for Rows {
     fn actor_request_times(&self, since: f64) -> rows::Result<Vec<Value>> {
         self.direct(|s| s.actor_request_times(since))
     }
-    fn revoke_actor_token(&self, r: &Value) -> rows::Result<()> {
-        self.direct(|s| s.revoke_actor_token(r))
+    fn revoke_token(&self, r: &Value) -> rows::Result<()> {
+        self.direct(|s| s.revoke_token(r))
     }
-    fn set_actor_token(&self, slug: &str, hash: &Value, at: f64) -> rows::Result<()> {
-        self.direct(|s| s.set_actor_token(slug, &display(hash), at))
+    fn set_actor_token(&self, slug: &str, id: &Value, rights: &str, at: f64) -> rows::Result<()> {
+        self.direct(|s| s.set_actor_token(slug, &display(id), rights, at))
     }
     fn drop_actor_token(&self, slug: &str) -> rows::Result<()> {
         self.direct(|s| s.drop_actor_token(slug))
@@ -135,8 +183,8 @@ impl Store for Rows {
     fn touch_actor_token(&self, slug: &str, at: f64) -> rows::Result<()> {
         self.direct(|s| s.touch_actor_token(slug, at))
     }
-    fn actor_by_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        row_of(self.0.with(|s| s.actor_by_token(hash)))
+    fn actor_by_token(&self, id: &str) -> rows::Result<Option<Value>> {
+        row_of(self.0.with(|s| s.actor_by_token(id)))
     }
     fn actor_token(&self, slug: &str) -> rows::Result<Option<Value>> {
         row_of(self.0.with(|s| s.actor_token(slug)))
@@ -144,11 +192,11 @@ impl Store for Rows {
     fn stale_actor_tokens(&self, before: f64) -> rows::Result<Vec<Value>> {
         rows_json(self.0.with(|s| s.stale_actor_tokens(before)))
     }
-    fn revoked_actor_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        row_of(self.0.with(|s| s.revoked_actor_token(hash)))
+    fn revoked(&self, id: &str) -> rows::Result<Option<Value>> {
+        row_of(self.0.with(|s| s.revoked(id)))
     }
-    fn set_gateway_token(&self, slug: &str, hash: &str, at: f64) -> rows::Result<()> {
-        self.direct(|s| s.set_gateway_token(slug, hash, at))
+    fn set_gateway_token(&self, slug: &str, id: &str, at: f64) -> rows::Result<()> {
+        self.direct(|s| s.set_gateway_token(slug, id, at))
     }
     fn drop_gateway_token(&self, slug: &str) -> rows::Result<()> {
         self.direct(|s| s.drop_gateway_token(slug))
@@ -156,8 +204,8 @@ impl Store for Rows {
     fn touch_gateway_token(&self, slug: &str, at: f64) -> rows::Result<()> {
         self.direct(|s| s.touch_gateway_token(slug, at))
     }
-    fn actor_by_gateway_token(&self, hash: &str) -> rows::Result<Option<Value>> {
-        row_of(self.0.with(|s| s.actor_by_gateway_token(hash)))
+    fn actor_by_gateway_token(&self, id: &str) -> rows::Result<Option<Value>> {
+        row_of(self.0.with(|s| s.actor_by_gateway_token(id)))
     }
     fn gateway_token(&self, slug: &str) -> rows::Result<Option<Value>> {
         row_of(self.0.with(|s| s.gateway_token(slug)))

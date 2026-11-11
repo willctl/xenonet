@@ -327,8 +327,9 @@ pub struct Client {
 }
 
 // What a message from another host rests on, as this one decided it:
-// the person's device signature, or the sending machine's word.
-crate::open!(OriginalAuthority of KnownOriginalAuthority { Person = "person", Machine = "machine" });
+// the person's device signature, a token the sending machine minted for
+// its actor, or the sending machine's word.
+crate::open!(OriginalAuthority of KnownOriginalAuthority { Person = "person", Token = "token", Machine = "machine" });
 
 /// For transport network: who sent it and what this host checked of it
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

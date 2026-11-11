@@ -163,7 +163,12 @@ fn token(which: char) -> String {
 impl cores::Registration for Fake {
     fn authenticate(&self, token: &str) -> Value {
         match token.chars().last() {
-            Some('a') => json!({ "ok": true, "id": "actor:wren", "slug": "wren", "state": "allowed" }),
+            // What its token allows: the rights what you allowed it maps onto.
+            Some('a') => {
+                let allowed: Vec<String> = self.allowed.lock().unwrap().iter().map(ToString::to_string).collect();
+                let allows: Vec<&str> = xenonet_actors::tokens::rights(&allowed).iter().map(|a| a.as_str()).collect();
+                json!({ "ok": true, "id": "actor:wren", "slug": "wren", "state": "allowed", "allows": allows })
+            }
             Some('b') => json!({ "ok": true, "id": "actor:kite", "slug": "kite", "state": "waiting" }),
             _ => json!({ "ok": false, "code": "bad-token", "error": "XenoNet doesn't know that token" }),
         }
@@ -171,9 +176,6 @@ impl cores::Registration for Fake {
 }
 
 impl cores::Actors for Fake {
-    fn can(&self, _id: &str, capability: &str) -> bool {
-        self.allowed.lock().unwrap().contains(&capability)
-    }
     fn info(&self, _id: &str) -> Option<Value> {
         Some(json!({ "name": "Wren", "product": null }))
     }
@@ -242,7 +244,7 @@ impl cores::Policy for Fake {
         self.note("setPaused", json!(paused));
         Ok(json!({ "paused": paused }))
     }
-    fn grant(&self, actor: &str, scope: &str, ttl: f64) -> R<Value> {
+    fn grant(&self, actor: &str, scope: &str, ttl: f64, _at_window: bool) -> R<Value> {
         if !scope.contains(':') {
             return Err(CoreError::new(format!("\"{scope}\" isn't a scope")));
         }

@@ -1029,7 +1029,7 @@
         "content": [
           {
             "type": "text",
-            "text": "XenoNet can't tell which actor is calling: XENONET_ACTOR_TOKEN doesn't hold an actor's token"
+            "text": "XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong."
           }
         ],
         "isError": true
@@ -1076,7 +1076,7 @@
         "content": [
           {
             "type": "text",
-            "text": "XenoNet can't tell which actor is calling: XENONET_ACTOR_TOKEN doesn't hold an actor's token"
+            "text": "XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong."
           }
         ],
         "isError": true
@@ -1089,7 +1089,7 @@
         "content": [
           {
             "type": "text",
-            "text": "XenoNet can't tell which actor is calling: XENONET_ACTOR_TOKEN doesn't hold an actor's token"
+            "text": "XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong."
           }
         ],
         "isError": true
@@ -1123,7 +1123,7 @@
         "content": [
           {
             "type": "text",
-            "text": "XenoNet can't tell which actor is calling: XENONET_ACTOR_TOKEN doesn't hold an actor's token"
+            "text": "XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong."
           }
         ],
         "isError": true
@@ -1136,7 +1136,7 @@
         "content": [
           {
             "type": "text",
-            "text": "XenoNet can't tell which actor is calling: XENONET_ACTOR_TOKEN doesn't hold an actor's token"
+            "text": "XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong."
           }
         ],
         "isError": true
@@ -1149,7 +1149,7 @@
         "content": [
           {
             "type": "text",
-            "text": "XenoNet can't tell which actor is calling: XENONET_ACTOR_TOKEN doesn't hold an actor's token"
+            "text": "XenoNet isn't running, so you can't see or reach the other sessions. Your user can open it, and the doctor tool says what else is wrong."
           }
         ],
         "isError": true

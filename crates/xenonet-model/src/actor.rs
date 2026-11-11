@@ -1,11 +1,11 @@
 //! Actors: the programs and people XenoNet knows of beside its sessions.
 //! An actor registers (`actor/registration/v1`) and gets its credentials
-//! (`actor/credentials/v1`), reports what it does (`actor/report/v1`) and
+//! (`actor/credentials/v2`), reports what it does (`actor/report/v1`) and
 //! sees itself (`actor/me/v1`); the console draws each one
 //! (`actor/snapshot/v1`, `actor/list/v1`) and what they did
 //! (`actor/event/v1`, `actor/events/v1`), and the owner sees what waits
 //! for an Allow (`actor/requests/v1`), the tokens (`actor/tokens/v1`, the
-//! gateway's in `actor/gateway-ask/v1` and `actor/gateway-credentials/v1`)
+//! gateway's in `actor/gateway-ask/v1` and `actor/gateway-credentials/v2`)
 //! and the remote connections (`actor/connection/v1`). The person at the
 //! console is an actor too (`actor/console/v1`).
 
@@ -51,12 +51,12 @@ crate::pattern! {
 crate::pattern! {
     #[schemars(extend("x-bounds-last" = true))]
     // An actor's token.
-    pub struct ActorTokenValue(r"^xenonet_actor_[0-9a-f]{64}$");
+    pub struct ActorTokenValue(r"^xenonet_actor_[A-Za-z0-9_-]{64,16384}$");
 }
 crate::pattern! {
     #[schemars(extend("x-bounds-last" = true))]
     // An actor's gateway token.
-    pub struct GatewayTokenValue(r"^xenonet_gateway_[0-9a-f]{64}$");
+    pub struct GatewayTokenValue(r"^xenonet_gateway_[A-Za-z0-9_-]{64,16384}$");
 }
 crate::pattern! {
     #[schemars(extend("x-bounds-last" = true))]
@@ -353,9 +353,9 @@ impl Document for Console {
     const DESCRIPTION: &'static str = "What XenoNet's own window reports of you to POST /api/actors/you, with the key only the window holds: your presence, and what you did as node ids and action names. Never what you type.";
 }
 
-// ---------- actor/credentials/v1 ----------
+// ---------- actor/credentials/v2 ----------
 
-crate::tag!(pub CredentialsTag = "actor/credentials/v1");
+crate::tag!(pub CredentialsTag = "actor/credentials/v2");
 
 /// An actor's credentials.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -364,7 +364,7 @@ pub struct Credentials {
     pub schema: CredentialsTag,
     /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
     pub id: ActorId,
-    /// Shown once: XenoNet keeps only its SHA-256
+    /// Shown once: a Biscuit minted at this machine, of which XenoNet keeps only its revocation id
     pub token: ActorTokenValue,
     pub state: ActorState,
     /// While it waits: when the request lapses. Left out once it's allowed
@@ -375,7 +375,7 @@ pub struct Credentials {
 }
 
 impl Document for Credentials {
-    const ID: &'static str = "actor/credentials/v1";
+    const ID: &'static str = "actor/credentials/v2";
     const TITLE: &'static str = "An actor's credentials";
     const DESCRIPTION: &'static str = "The answer to registering, to adding an actor from XenoNet's window and to a new token: the actor's id and its token, once.";
 }
@@ -470,9 +470,9 @@ impl Document for GatewayAsk {
     const DESCRIPTION: &'static str = "The answer to asking for an actor's gateway token: that it waits for an Allow in XenoNet's window. It never holds a token, so whoever asks never sees one: the token is made, and shown masked, only in the window.";
 }
 
-// ---------- actor/gateway-credentials/v1 ----------
+// ---------- actor/gateway-credentials/v2 ----------
 
-crate::tag!(pub GatewayCredentialsTag = "actor/gateway-credentials/v1");
+crate::tag!(pub GatewayCredentialsTag = "actor/gateway-credentials/v2");
 
 /// An actor's gateway credentials.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -480,7 +480,7 @@ pub struct GatewayCredentials {
     pub schema: GatewayCredentialsTag,
     /// actor:<slug>, or @<host>:actor:<slug> from another host; the person at the console is actor:you
     pub id: ActorId,
-    /// Shown once: XenoNet keeps only its SHA-256. It works only at XenoNet's actor gateway, as Authorization: Bearer
+    /// Shown once: a Biscuit minted at this machine and narrowed to the gateway, of which XenoNet keeps only its revocation id. It works only at XenoNet's actor gateway, as Authorization: Bearer
     pub token: GatewayTokenValue,
     /// The gateway's address, when XenoNet knows it: where the program sends its MCP requests
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -488,7 +488,7 @@ pub struct GatewayCredentials {
 }
 
 impl Document for GatewayCredentials {
-    const ID: &'static str = "actor/gateway-credentials/v1";
+    const ID: &'static str = "actor/gateway-credentials/v2";
     const TITLE: &'static str = "An actor's gateway credentials";
     const DESCRIPTION: &'static str = "The answer to making a gateway token in XenoNet's window: the actor's id and a token that works only at XenoNet's actor gateway, once.";
 }

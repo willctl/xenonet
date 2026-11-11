@@ -9,13 +9,14 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use xenonet_actors::limits::Buckets;
-use xenonet_assistant::cursors::Cursors;
 use xenonet_assistant::fixtures;
+use xenonet_assistant::pages::Standalone;
 use xenonet_assistant::service::{self, Config, Inflight, ReadHost, LIMITS};
 use xenonet_os::error::Failure;
 
 /// The made-up session's grant, actor and connection.
 const GRANT: &str = "gr_000000000000000000000000";
+const ACTOR: &str = "fixture-client";
 // The service's rate for a grant: one a second, ten at once.
 const RATE: (f64, f64) = (1.0, 10.0);
 
@@ -32,9 +33,9 @@ struct State {
 
 pub struct Fixture {
     version: String,
-    /// The page tokens' key, made when the service starts and never
-    /// written down.
-    key: Vec<u8>,
+    /// The page cursors: a grant's token minted in memory when the
+    /// service starts, narrowed, and good nowhere else.
+    pages: Standalone,
     policy: Value,
     state: Mutex<State>,
 }
@@ -45,9 +46,12 @@ fn now() -> f64 {
 
 impl Fixture {
     pub fn new(version: &str) -> Fixture {
-        let mut key = vec![0u8; 32];
-        let _ = getrandom::fill(&mut key);
-        Fixture { version: version.into(), key, policy: fixtures::standalone_policy(true), state: Mutex::new(State { buckets: Buckets::new(1024), inflight: Inflight::default() }) }
+        Fixture {
+            version: version.into(),
+            pages: Standalone::new(ACTOR),
+            policy: fixtures::standalone_policy(true),
+            state: Mutex::new(State { buckets: Buckets::new(1024), inflight: Inflight::default() }),
+        }
     }
 
     fn config(&self) -> Config {
@@ -92,12 +96,11 @@ impl Fixture {
     }
 
     // The arguments checked again, then the answer, its reads answered
-    // here: the time, the made-up view and stats, the page tokens' clock and
-    // the check of the answer against its schema.
+    // here: the time, the made-up view and stats, and the check of the
+    // answer against its schema.
     fn answer(&self, cfg: Config, op: &str, tool: &str, args: &Value, request_id: &Value) -> Result<Value, String> {
         let parsed = schema::input(tool).parse(args).map_err(|_| "INVALID_ARGUMENT".to_string())?;
-        let cursors = Cursors::new(Some(self.key.clone()));
-        let done = ready(service::answer(&MadeUp, &cfg, &cursors, op, tool, &parsed, &self.policy, request_id));
+        let done = ready(service::answer(&MadeUp, &cfg, &self.pages, op, tool, &parsed, &self.policy, request_id));
         match done {
             Ok(out) => Ok(out.get("envelope").cloned().unwrap_or(Value::Null)),
             Err(f) if f.fields.get("refused") == Some(&json!(true)) => Err(f.code().unwrap_or("INTERNAL_ERROR").to_string()),
@@ -112,9 +115,6 @@ struct MadeUp;
 #[async_trait(?Send)]
 impl ReadHost for MadeUp {
     async fn now(&self) -> f64 {
-        now()
-    }
-    async fn cursor_now(&self) -> f64 {
         now()
     }
     async fn view(&self) -> Result<Value, Failure> {

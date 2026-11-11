@@ -55,11 +55,13 @@ fn scope_of(s: &Value) -> String {
 
 const OPS: [&str; 11] = ["whoami", "peers", "who-has", "send", "inbox", "claim", "release", "focus", "channel", "handoff", "opencode-event"];
 
-/// The capability each operation needs from an actor.
-fn needs(op: &str) -> Option<&'static str> {
+/// The action each operation needs the right to, from an actor's token,
+/// and the capability word that gives it.
+fn needs(op: &str) -> Option<(&'static str, &'static str)> {
     match op {
-        "send" | "handoff" => Some("message-agents"),
-        "claim" => Some("edit-repos"),
+        "send" => Some(("message", "message-agents")),
+        "handoff" => Some(("handoff", "message-agents")),
+        "claim" => Some(("claim", "edit-repos")),
         _ => None,
     }
 }
@@ -139,7 +141,7 @@ impl EngineRoutes<'_> {
     }
 
     // An operation called by an actor, with its token: who it is, checked;
-    // what it may do; then the operation as actor:<slug>.
+    // what its token allows; then the operation as actor:<slug>.
     async fn as_actor(&self, req: &mut Req, name: &str) -> Reply {
         let Some(caller) = self.caller else { return fail(503, "off", "Actors are off here (XENONET_ACTORS=off)", &[], &json!({})) };
         let auth = match caller.authenticate(req, false).await {
@@ -157,9 +159,10 @@ impl EngineRoutes<'_> {
             Err(e) if e.status == 413 => return fail(413, "too-big", "that body is over the size this route takes", &[], &json!({})),
             Err(_) => return fail(400, "bad-request", "that body isn't JSON", &[], &json!({})),
         };
-        if let Some(need) = needs(name) {
-            if !self.actors.as_ref().is_some_and(|a| a.can(&id, need)) {
-                return fail(403, "not-allowed", format!("{name} needs the {need} capability, which this actor wasn't allowed"), &[], &json!({}));
+        // What its token allows here, as authenticating it decided.
+        if let Some((action, word)) = needs(name) {
+            if !auth["allows"].as_array().is_some_and(|a| a.iter().any(|x| x == action)) {
+                return fail(403, "not-allowed", format!("{name} needs the {word} capability, which this actor wasn't allowed"), &[], &json!({}));
             }
         }
         if name == "send" || name == "handoff" {
