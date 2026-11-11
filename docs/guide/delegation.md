@@ -10,7 +10,7 @@ This widens what the network may do there, so it asks you (Touch ID on a Mac, Wi
 
 The first time, it also issues your **delegation**: an entry in your identity, signed by your key, that lets your machines start sessions and answer their routine prompts for work you started on any of them. It names all your machines' keys, those you add later too, and lasts a year. Issuing it asks you twice: once to approve it, once to sign it. A machine needs a key of yours to be named in it, so a machine that joined without your identity can't take delegated work, and XenoNet says so when you press it.
 
-The machine that does the work checks both: its own start setting, and a delegation of yours that names both its key and the key of the machine the task came from. The console shows who set it and when under the machine's settings: "Delegated by inix, Nov 1."
+The machine that does the work checks both: its own start setting, and a delegation of yours that names both its key and the key of the machine the task came from. Since the standard delegation names every machine of yours, a session on any of them can hand work to any other you set to Delegated: one machine, or each of several. The console shows who set it and when under the machine's settings: "Delegated by inix, Nov 1."
 
 ## What an assistant does
 
@@ -23,6 +23,8 @@ delegate machine: neo-rex, task: "Update XenoNet to the latest release, then rep
 The answer comes at once. When the new session stops, the assistant is told what it came to (finished, stopped to ask something, was denied a tool, failed, or left nothing), with its last words, and is woken if it is idle. The session needn't be told to report: XenoNet does it.
 
 A machine that isn't set to Delegated refuses the task, and says how you set it. The assistant isn't started as a plain agent start instead: `delegate` is for machines you decided to delegate to, and `start_session` is the tool for a machine that lets the network start sessions without a delegation.
+
+To hand a task to an agent outside your machines that speaks A2A, the assistant calls `delegate` with `actor` instead: see [Handing work to an A2A agent](actors.md#handing-work-to-an-a2a-agent). Intents, where you make the request at your window and name the machine that works it, are next on the plan ([direction.md](../design/direction.md)).
 
 ## What the machine tells the new session
 
@@ -51,7 +53,7 @@ Always a question, whatever the task says:
 - writing through a redirect, and a command inside a command;
 - any file outside the session's folder, and any command or tool not listed above, including starting another session.
 
-The question says why it wasn't covered: "[outside what you delegated: it has rm in it] rm -rf build". Nobody answering in ten minutes is a deny. After XenoNet's service restarts, a delegated session's prompts come to you as questions, since the delegation is remembered only while the service runs.
+The question says why it wasn't covered: "[outside what you delegated: it has rm in it] rm -rf build". Nobody answering in ten minutes is a deny. XenoNet keeps which sessions run under a delegation in its store for a week, so their prompts are judged against it after the service restarts too.
 
 ## Limits and logs
 
