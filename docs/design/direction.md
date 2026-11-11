@@ -360,16 +360,19 @@ Spotify) moves out of the core into the console.
 ### Xenolith
 
 Xenolith stays a separate program that depends on four libraries
-(`xenonet-id`, `-log`, `-authz`, `-net`), never on the app. A space is a
-chain bound to a real entity (project, person, org, actor, machine)
-instead of a free-text name; whoever reads project P reads the space about
-P unless the space narrows it. The space policy allows exactly one
-curator machine, which makes today's home-and-satellite rule
-unrepresentable to break, and `MoveCurator` is the signed handover. Notes
-are per-author feeds; pages are the curator's feed of versions, so no CRDT
-is needed while pages have one writer. Grants are Biscuit tokens; pairing
-is the same invite flow; sync is an ALPN on the shared endpoint. Xenolith's
-copies of the private-file, X25519 and token code go.
+(`xenonet-id`, `-log`, `-authz`, `-net`, with the base crates they bring),
+never on the app: not the service, the runtime, the surfaces or the
+adapters (decided by Will on 2026-11-11: "Libraries OK, never app"). It
+runs fully on its own, on its own iroh endpoint, and uses a running
+XenoNet only through an optional forward. A space is a chain bound to a
+real entity (project, person, org, actor, machine) instead of a free-text
+name. The space policy allows exactly one curator machine, which makes
+today's home-and-satellite rule unrepresentable to break, and
+`MoveCurator` is the signed handover. Notes are per-author feeds; pages
+are the curator's feed of versions, so no CRDT is needed while pages have
+one writer. Grants are Biscuit tokens; pairing is an invite flow; sync is
+its own ALPN, `xenolith/sync/2`. Xenolith's copies of the private-file,
+X25519 and token code go.
 
 ## Reuse decisions
 
@@ -527,9 +530,9 @@ Will's step on inix and NEO-REX.
    the `xenonet-net/2` head. Then delete the HTTP link, signed requests,
    the clock offset, `gateway.sqlite`, `relay` and `svc` frames. The
    three-service tests move under turmoil.
-6. **Xenolith and the edges.** Xenolith adopts the four libraries and
-   deletes its own pairing, tokens and crypto; spaces bind to model ids;
-   the generic ACP adapter; A2A outbound; MCP 2026-07-28.
+6. **Xenolith and the edges.** Xenolith adopts the four libraries, never
+   the app, and deletes its own pairing, tokens and crypto; spaces bind to
+   model ids; the generic ACP adapter; A2A outbound; MCP 2026-07-28.
 
 ## Verification plan
 
@@ -627,6 +630,10 @@ for the phase that needs them.
 10. **Defaults.** Two mailboxes per network, named by the person
     (recommended) or any member may volunteer? Networks start titles-only?
     Direct LAN paths on by default?
+11. **Xenolith and XenoNet's code.** Decided by Will on 2026-11-11:
+    "Libraries OK, never app." Xenolith may take `xenonet-id`, `-log`,
+    `-authz` and `-net` as libraries, never the service, runtime, surfaces
+    or adapters, and keeps running fully on its own.
 
 ## Risks
 

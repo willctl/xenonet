@@ -2,8 +2,10 @@
 
 Xenolith is shared context for every app and agent on a machine: an MCP server over a folder of
 plain Markdown, a curator that files notes into pages, sync between machines, a tray app with a
-window, and an installer. It stands alone: nothing in it needs XenoNet's code or concepts, and
-other programs (XenoNet among them) read its folder through `FORMAT.md`. README.md describes what
+window, and an installer. It stands alone and runs fully on its own. From XenoNet it may take
+only the libraries `xenonet-id`, `xenonet-log`, `xenonet-authz` and `xenonet-net` (with the base
+crates they bring), never the app: not the service, the runtime, the surfaces or the adapters.
+Other programs (XenoNet among them) read its folder through `FORMAT.md`. README.md describes what
 it does; this file is what an agent changing the code needs. While Xenolith lives in XenoNet's
 repository, that repository's AGENTS.md (one folder up) applies too: its commit conventions, and
 its rules for working beside other agents.
