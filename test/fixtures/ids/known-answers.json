@@ -58,5 +58,36 @@
       "agt_2agortv4h7d6eep2zdkousz2ekyx3w5o",
       "agt_qbs7abxkkkkx3jc3uh3zpczxixzok5zd"
     ]
-  }
+  },
+  "space": {
+    "genesisHash": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+    "id": "spc_k6ualzwxpemlg5pzzkfmwl7syfef3jf2",
+    "ofBytes": "spc_aaaqeayeaudaocajbifqydiob4ibceqt"
+  },
+  "spaceAbout": [
+    {
+      "text": "prj_y5yxzivp2ggstrnktac5mae3mbk26xvx",
+      "kind": "project"
+    },
+    {
+      "text": "prs_aaaqeayeaudaocajbifqydiob4ibceqt",
+      "kind": "person"
+    },
+    {
+      "text": "xns1_aaaqeayeaudaocajbifqydiob4ibceqt",
+      "kind": "machine"
+    },
+    {
+      "text": "actor:hermes@xns1_aaaqeayeaudaocajbifqydiob4ibceqt",
+      "kind": "actor"
+    },
+    {
+      "text": "identity:github:github.com/willctl",
+      "kind": "identity"
+    },
+    {
+      "text": "name:project:atlas",
+      "kind": "name"
+    }
+  ]
 }

@@ -1,4 +1,5 @@
-//! The store's ids (`prj_`, `chk_`, `agt_`, `int_`): their known answers,
+//! The store's ids (`prj_`, `chk_`, `agt_`, `int_`, `spc_`) and what a
+//! space is about (`EntityRef`): their known answers,
 //! which another implementation can check itself against, and their
 //! round trips. The known answers are test/fixtures/ids/known-answers.json;
 //! after a change to how an id is made, write them again with
@@ -7,7 +8,7 @@
 
 use proptest::prelude::*;
 use serde_json::{json, Value};
-use xenonet_model::ids::{normalize_remote, AgentId, CheckoutId, Ids, IntentId, ProjectId, STORED_BYTES};
+use xenonet_model::ids::{normalize_remote, AgentId, CheckoutId, EntityRef, Ids, IntentId, ProjectId, SpaceId, STORED_BYTES};
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/fixtures/ids/known-answers.json");
 
@@ -40,12 +41,24 @@ fn answers() -> Value {
         "in order": [ids.project().to_string(), ids.checkout().to_string(), ids.agent().to_string(), ids.agent().to_string()],
     });
     let bytes: [u8; STORED_BYTES] = std::array::from_fn(|i| i as u8);
+    let genesis = [0x3c_u8; 32];
+    let about = [
+        "prj_y5yxzivp2ggstrnktac5mae3mbk26xvx",
+        "prs_aaaqeayeaudaocajbifqydiob4ibceqt",
+        "xns1_aaaqeayeaudaocajbifqydiob4ibceqt",
+        "actor:hermes@xns1_aaaqeayeaudaocajbifqydiob4ibceqt",
+        "identity:github:github.com/willctl",
+        "name:project:atlas",
+    ];
+    let about: Vec<Value> = about.iter().map(|a| json!({ "text": a, "kind": EntityRef::parse(a).expect("an entity").kind() })).collect();
     json!({
         "about": "The store's ids, as xenonet-model's ids.rs makes them (crates/xenonet-model/tests/ids.rs).",
         "projects": { "salt": hex(&salt), "of": projects },
         "intent": { "actHash": hex(&act), "id": IntentId::of_act(&act).to_string() },
         "bytes": { "of": hex(&bytes), "project": ProjectId::from_bytes(&bytes).to_string(), "checkout": CheckoutId::from_bytes(&bytes).to_string(), "agent": AgentId::from_bytes(&bytes).to_string() },
         "seeded": seeded,
+        "space": { "genesisHash": hex(&genesis), "id": SpaceId::of_genesis(&genesis).to_string(), "ofBytes": SpaceId::from_bytes(&bytes).to_string() },
+        "spaceAbout": about,
     })
 }
 
@@ -96,6 +109,55 @@ fn ids_are_their_kinds_and_nothing_else() {
     assert!(serde_json::from_value::<AgentId>(json!("agt_x")).is_err());
 }
 
+#[test]
+fn a_space_is_its_genesis_and_nothing_else() {
+    let a = SpaceId::of_genesis(&[1; 32]);
+    assert_ne!(a, SpaceId::of_genesis(&[2; 32]));
+    assert_eq!(SpaceId::parse(a.as_str()).unwrap(), a);
+    assert!(ProjectId::parse(a.as_str()).is_err(), "a space's id isn't a project's");
+}
+
+#[test]
+fn what_a_space_is_about_reads_back_and_refuses_the_rest() {
+    let key = "xns1_aaaqeayeaudaocajbifqydiob4ibceqt";
+    let pattern = regex::Regex::new(xenonet_model::ids::ENTITY_REF).unwrap();
+    for good in [
+        "prj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        "prs_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        key.to_string(),
+        format!("actor:grok-bot@{key}"),
+        "identity:claude:acct:org".to_string(),
+        "name:machine:local".to_string(),
+        "name:project:a.b_c-d".to_string(),
+    ] {
+        let e = EntityRef::parse(&good).unwrap();
+        assert_eq!(e.to_string(), good);
+        assert_eq!(serde_json::from_value::<EntityRef>(serde_json::to_value(&e).unwrap()).unwrap(), e);
+        assert_eq!(e.is_bound(), !good.starts_with("name:"));
+        assert!(pattern.is_match(&good), "{good} matches the schema's pattern");
+    }
+    for bad in [
+        "",
+        "prj_x",
+        "actor:hermes",
+        "actor:Hermes@xns1_aaaqeayeaudaocajbifqydiob4ibceqt",
+        "actor:hermes@prs_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "identity:",
+        "identity:github:has space",
+        "identity:Github:x",
+        "name:project:",
+        "name:project:a..b",
+        "name:project:Atlas",
+        "name:person:will",
+        "name:project:.hidden",
+        "project:atlas",
+        "spc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ] {
+        assert!(EntityRef::parse(bad).is_err(), "{bad:?}");
+    }
+    assert!(serde_json::from_value::<EntityRef>(json!("name:project:a..b")).is_err());
+}
+
 proptest! {
     #[test]
     fn every_id_reads_back_as_it_was_written(bytes in proptest::array::uniform20(any::<u8>())) {
@@ -119,11 +181,12 @@ proptest! {
     }
 
     #[test]
-    fn text_that_parses_is_written_back_the_same(s in "(prj|chk|agt|int)_[a-z2-7]{32}") {
+    fn text_that_parses_is_written_back_the_same(s in "(prj|chk|agt|int|spc)_[a-z2-7]{32}") {
         let back = match &s[..4] {
             "prj_" => ProjectId::parse(&s).map(|i| i.to_string()),
             "chk_" => CheckoutId::parse(&s).map(|i| i.to_string()),
             "agt_" => AgentId::parse(&s).map(|i| i.to_string()),
+            "spc_" => SpaceId::parse(&s).map(|i| i.to_string()),
             _ => IntentId::parse(&s).map(|i| i.to_string()),
         };
         prop_assert_eq!(back.unwrap(), s);

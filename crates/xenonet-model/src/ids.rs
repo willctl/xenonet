@@ -14,7 +14,8 @@
 //! - A repo is a project merged across hosts by its git remote,
 //!   `repo:<host>/<path>`.
 //! - The store's ids, `prj_`, `chk_`, `agt_` and `int_`, are below
-//!   ("stored ids").
+//!   ("stored ids"), with a shared-context space's `spc_` and the
+//!   `EntityRef` that says what a space is about.
 
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -582,6 +583,10 @@ text_serde!(SchemaId, "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*/v[1-9][0-9]*$")
 //   session; the store keeps which app's session it is.
 // - An intent is `int_`: the first 20 bytes of the hash of the act that
 //   made it.
+// - A space (a layer of shared context, xenonet-log's `xenolith-space/1`
+//   chain) is `spc_`: the first 20 bytes of SHA-256 over
+//   `xenonet-space/1`, a zero byte and the hash of the chain's entry 0, so
+//   every holder of the chain derives the same id and nobody can pick one.
 //
 // Random ones come from an `Ids`, which the demo and the golden files seed
 // so the same run makes the same ids.
@@ -706,6 +711,12 @@ stored_id!(
     "int_",
     "^int_[a-z2-7]{32}$"
 );
+stored_id!(
+    /// A space of shared context, by its chain: `spc_` and 32 base32 characters.
+    SpaceId,
+    "spc_",
+    "^spc_[a-z2-7]{32}$"
+);
 
 /// A person's salt for their projects' ids: 32 bytes their person chain
 /// holds from its founding.
@@ -725,6 +736,156 @@ impl IntentId {
         Self::from_bytes(&first20(hash))
     }
 }
+
+impl SpaceId {
+    /// What a space's id is made under, before the zero byte.
+    pub const DOMAIN: &'static str = "xenonet-space/1";
+
+    /// The space whose chain's entry 0 hashes to `genesis` (the SHA-256 of
+    /// its canonical JSON with its signers, xenonet-log's `Entry::hash`).
+    pub fn of_genesis(genesis: &[u8; 32]) -> Self {
+        Self::from_bytes(&first20(&sha256(&[Self::DOMAIN.as_bytes(), b"\0", genesis])))
+    }
+}
+
+// ---------- what a space is about ----------
+//
+// A space is about one entity, named by its id: a project (`prj_`), a
+// person (`prs_`), a machine by its signing key (`xns1_`), an actor of a
+// machine (`actor:<slug>@xns1_…`, since a slug means something only on its
+// machine), or an account (`identity:<its id>`, as `identity/v1` writes
+// it). A space made before it's tied to one names it by kind and name,
+// `name:<kind>:<name>`, as Xenolith's folders do (`name:project:atlas`);
+// xenonet-log's `bind` ties it to an id once. Orgs come later.
+
+/// The kinds a space not yet tied to an entity names it by.
+pub const NAME_KINDS: [&str; 4] = ["project", "identity", "actor", "machine"];
+/// The longest account id a space names.
+const IDENTITY_MAX: usize = 160;
+/// The longest name an unbound space names.
+const NAME_MAX: usize = 64;
+
+/// The text of an `EntityRef` (its schema's pattern). A name may not hold
+/// `..`, which `EntityRef::parse` refuses and the pattern doesn't say.
+pub const ENTITY_REF: &str = "^(prj_[a-z2-7]{32}|prs_[a-z2-7]{32}|xns1_[a-z2-7]{32}|actor:[a-z0-9][a-z0-9-]{0,31}@xns1_[a-z2-7]{32}|identity:[a-z][a-z0-9-]{0,31}:[!-~]{1,160}|name:(project|identity|actor|machine):[a-z0-9][a-z0-9._-]{0,63})$";
+
+fn prefixed_base32(s: &str, prefix: &str) -> bool {
+    s.strip_prefix(prefix).is_some_and(is_base32)
+}
+
+/// Whether `id` is a signing key's id: `xns1_` and 32 base32 characters.
+pub fn is_signing_key_id(id: &str) -> bool {
+    prefixed_base32(id, "xns1_")
+}
+
+/// Whether `id` is a person's id: `prs_` and 32 base32 characters.
+pub fn is_person_id(id: &str) -> bool {
+    prefixed_base32(id, "prs_")
+}
+
+// An account's id as identity/v1 has it: a lowercase kind, a colon, then
+// printable ASCII with no space (`github:github.com/willctl`).
+fn is_identity_id(id: &str) -> bool {
+    let Some((kind, rest)) = id.split_once(':') else { return false };
+    let k = kind.as_bytes();
+    (1..=32).contains(&k.len()) && k[0].is_ascii_lowercase() && lower_dash(k) && (1..=IDENTITY_MAX).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// Whether `name` is a space's name as Xenolith's folders have them:
+/// lowercase letters, digits, `.`, `_` and `-`, starting with a letter or
+/// digit, 64 at most, never `..`.
+pub fn is_space_name(name: &str) -> bool {
+    let b = name.as_bytes();
+    (1..=NAME_MAX).contains(&b.len())
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._-".contains(c))
+        && !name.contains("..")
+}
+
+/// What a space is about.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EntityRef {
+    Project(ProjectId),
+    /// A person, by their `prs_`.
+    Person(String),
+    /// A machine, by its signing key's `xns1_`.
+    Machine(String),
+    /// An actor of the machine whose signing key is `machine`.
+    Actor {
+        slug: ActorSlug,
+        machine: String,
+    },
+    /// An account, by its identity/v1 id.
+    Identity(String),
+    /// Not tied to an entity yet: a kind of `NAME_KINDS` and a name.
+    Name {
+        kind: String,
+        name: String,
+    },
+}
+
+impl EntityRef {
+    pub fn parse(s: &str) -> Result<Self, NotAnId> {
+        let bad = || NotAnId(s.to_string());
+        if let Ok(p) = ProjectId::parse(s) {
+            return Ok(EntityRef::Project(p));
+        }
+        if is_person_id(s) {
+            return Ok(EntityRef::Person(s.to_string()));
+        }
+        if is_signing_key_id(s) {
+            return Ok(EntityRef::Machine(s.to_string()));
+        }
+        if let Some(rest) = s.strip_prefix("actor:") {
+            let (slug, machine) = rest.split_once('@').ok_or_else(bad)?;
+            if !is_signing_key_id(machine) {
+                return Err(bad());
+            }
+            return Ok(EntityRef::Actor { slug: ActorSlug::parse(slug).map_err(|_| bad())?, machine: machine.to_string() });
+        }
+        if let Some(id) = s.strip_prefix("identity:") {
+            return if is_identity_id(id) { Ok(EntityRef::Identity(id.to_string())) } else { Err(bad()) };
+        }
+        if let Some(rest) = s.strip_prefix("name:") {
+            let (kind, name) = rest.split_once(':').ok_or_else(bad)?;
+            if NAME_KINDS.contains(&kind) && is_space_name(name) {
+                return Ok(EntityRef::Name { kind: kind.to_string(), name: name.to_string() });
+            }
+        }
+        Err(bad())
+    }
+
+    /// `project`, `person`, `machine`, `actor`, `identity` or `name`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            EntityRef::Project(_) => "project",
+            EntityRef::Person(_) => "person",
+            EntityRef::Machine(_) => "machine",
+            EntityRef::Actor { .. } => "actor",
+            EntityRef::Identity(_) => "identity",
+            EntityRef::Name { .. } => "name",
+        }
+    }
+
+    /// Whether it names an entity by its id, rather than a kind and a name.
+    pub fn is_bound(&self) -> bool {
+        !matches!(self, EntityRef::Name { .. })
+    }
+}
+
+impl fmt::Display for EntityRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EntityRef::Project(p) => p.fmt(f),
+            EntityRef::Person(id) | EntityRef::Machine(id) => f.write_str(id),
+            EntityRef::Actor { slug, machine } => write!(f, "actor:{slug}@{machine}"),
+            EntityRef::Identity(id) => write!(f, "identity:{id}"),
+            EntityRef::Name { kind, name } => write!(f, "name:{kind}:{name}"),
+        }
+    }
+}
+
+text_serde!(EntityRef, ENTITY_REF);
 
 /// Where random ids come from: the system's random numbers, or a seed, so
 /// the demo and the golden files make the same ids each run. A seeded
