@@ -13,6 +13,7 @@
 //! with nothing to keep them in, uses `Memory`.
 
 use crate::files::NetFile;
+use crate::mailbox::Mail;
 use crate::share::Sharing;
 use crate::{roster, R};
 use serde_json::Value;
@@ -107,6 +108,30 @@ pub trait Persist: Send + Sync {
     fn held(&self, _network: &str, _author: &str, _from: Pos, _limit: usize) -> R<Vec<crate::holder::Held>> {
         Ok(Vec::new())
     }
+    /// As a mailbox (`mailbox`): keeps `mail` at the end of its queue,
+    /// unless one with its id is there, after letting go the `evict` oldest
+    /// of the queue, both or neither. Whether it was new. A store that
+    /// keeps no mail refuses, so this machine is no mailbox.
+    fn put_mail(&self, _mail: &Mail, _evict: usize) -> R<bool> {
+        Err(crate::NetError::new(501, "not-kept", "this machine doesn't keep mail for other members"))
+    }
+    /// The queue for `recipient` (its machine signing key id) in
+    /// `network`, oldest first, at most `limit`.
+    fn mail_for(&self, _network: &str, _recipient: &str, _limit: usize) -> R<Vec<Mail>> {
+        Ok(Vec::new())
+    }
+    /// The sizes of what the queue holds, oldest first.
+    fn mail_sizes(&self, _network: &str, _recipient: &str) -> R<Vec<u64>> {
+        Ok(Vec::new())
+    }
+    /// The recipient took these: they go.
+    fn mail_took(&self, _network: &str, _recipient: &str, _ids: &[String]) -> R<()> {
+        Ok(())
+    }
+    /// What was kept before `before` (ms) goes: how many.
+    fn prune_mail(&self, _before: u64) -> R<u64> {
+        Ok(0)
+    }
     /// What the person shares into a network (`share`), once they said:
     /// None until then, when the network's default holds.
     fn sharing(&self, _network: &str) -> R<Option<Sharing>> {
@@ -138,6 +163,7 @@ struct Kept {
     out: BTreeMap<String, Vec<FeedEntry>>,
     acks: BTreeMap<(String, String), Pos>,
     sharing: BTreeMap<String, Sharing>,
+    mail: Vec<Mail>,
 }
 
 // The entries of `had` and those of `more` past them.
@@ -190,6 +216,7 @@ impl Persist for Memory {
         k.cursors.remove(network);
         k.writers.remove(network);
         k.out.remove(network);
+        k.mail.retain(|m| m.network != network);
         k.acks.retain(|(n, _), _| n != network);
         k.sharing.remove(network);
         Ok(())
@@ -269,5 +296,36 @@ impl Persist for Memory {
     fn put_sharing(&self, network: &str, sharing: &Sharing) -> R<()> {
         self.0.locked().sharing.insert(network.to_string(), sharing.clone());
         Ok(())
+    }
+    fn put_mail(&self, mail: &Mail, evict: usize) -> R<bool> {
+        let mut k = self.0.locked();
+        let same = |m: &Mail| m.network == mail.network && m.recipient == mail.recipient;
+        if k.mail.iter().any(|m| same(m) && m.id == mail.id) {
+            return Ok(false);
+        }
+        let mut gone = 0;
+        k.mail.retain(|m| {
+            let go = gone < evict && same(m);
+            gone += usize::from(go);
+            !go
+        });
+        k.mail.push(mail.clone());
+        Ok(true)
+    }
+    fn mail_for(&self, network: &str, recipient: &str, limit: usize) -> R<Vec<Mail>> {
+        Ok(self.0.locked().mail.iter().filter(|m| m.network == network && m.recipient == recipient).take(limit).cloned().collect())
+    }
+    fn mail_sizes(&self, network: &str, recipient: &str) -> R<Vec<u64>> {
+        Ok(self.0.locked().mail.iter().filter(|m| m.network == network && m.recipient == recipient).map(Mail::size).collect())
+    }
+    fn mail_took(&self, network: &str, recipient: &str, ids: &[String]) -> R<()> {
+        self.0.locked().mail.retain(|m| !(m.network == network && m.recipient == recipient && ids.contains(&m.id)));
+        Ok(())
+    }
+    fn prune_mail(&self, before: u64) -> R<u64> {
+        let mut k = self.0.locked();
+        let had = k.mail.len();
+        k.mail.retain(|m| m.kept >= before);
+        Ok((had - k.mail.len()) as u64)
     }
 }

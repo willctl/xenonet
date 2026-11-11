@@ -6,8 +6,9 @@
 //! **Streams.** Each connection has four kinds:
 //!
 //! - *control*, the one bi stream, opened by the machine that dialled: a
-//!   hello from each side first, then Want, Ack and Compacted for feeds,
-//!   Held receipts and address records, each naming its network;
+//!   hello from each side first, then Want, Ack, DontHave and Compacted
+//!   for feeds, Held receipts and Took for mailboxes, and address records,
+//!   each naming its network;
 //! - *kept*, a uni stream each way: kept feed entries, in their gapless
 //!   order;
 //! - *loose*, a uni stream each way: messages and receipts;
@@ -169,8 +170,11 @@ pub enum Control {
     /// A holder's answer to a Want it sends nothing for, and why: the
     /// receiver asks the next holder or the author.
     DontHave { network: String, author: String, inc: u64, from: u64, why: Lack },
-    /// A mailbox's receipt for what it holds.
+    /// A mailbox's receipt for what it holds (`mailbox::Held`).
     Held { network: String, body: Value },
+    /// The recipient took these envelopes a mailbox handed it, by id: they
+    /// go from its queue.
+    Took { network: String, ids: Vec<String> },
     /// The sender's address record in `network` (xenonet-log's
     /// `AddressRecord`).
     Address { network: String, record: Value },
@@ -202,6 +206,7 @@ impl Control {
             | Control::DontHave { network, .. }
             | Control::Compacted { network, .. }
             | Control::Held { network, .. }
+            | Control::Took { network, .. }
             | Control::Address { network, .. } => Some(network),
         }
     }
@@ -216,6 +221,7 @@ impl Control {
             }
             Control::Compacted { network, author, body } => json!({ "t": "compacted", "network": network, "author": author, "body": body }),
             Control::Held { network, body } => json!({ "t": "held", "network": network, "body": body }),
+            Control::Took { network, ids } => json!({ "t": "took", "network": network, "ids": ids }),
             Control::Address { network, record } => json!({ "t": "address", "network": network, "record": record }),
         }
     }
@@ -248,6 +254,10 @@ impl Control {
             }),
             Some("compacted") => Ok(Control::Compacted { network: network_of(v)?, author: author_of(v)?, body: body("body")? }),
             Some("held") => Ok(Control::Held { network: network_of(v)?, body: body("body")? }),
+            Some("took") => {
+                let ids = v.get("ids").and_then(Value::as_array).filter(|i| i.len() <= crate::mailbox::HAND).ok_or_else(|| bad("ids"))?;
+                Ok(Control::Took { network: network_of(v)?, ids: ids.iter().map(|i| i.as_str().map(str::to_string).ok_or_else(|| bad("ids"))).collect::<R<_>>()? })
+            }
             Some("address") => Ok(Control::Address { network: network_of(v)?, record: body("record")? }),
             _ => Err(bad("kind")),
         }
@@ -306,7 +316,7 @@ pub trait Machine: Send + Sync {
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out>;
     /// The peer holds `author`'s feed in `network` up to `at`.
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos);
-    /// A DontHave, Compacted, Held or Address record.
+    /// A DontHave, Compacted, Held, Took or Address record.
     fn other_in(&self, _peer: PeerId, _record: Control) {}
     /// A connection to the peer came up, or went.
     fn up(&self, _peer: PeerId, _up: bool) {}

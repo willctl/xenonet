@@ -38,6 +38,9 @@ impl Purpose {
     /// A machine's address record: where its endpoint is reached
     /// (`xenonet-log`'s `address`).
     pub const ADDRESS: Purpose = Purpose("xenonet-address/1");
+    /// A mailbox's receipt for the entries it keeps for away members
+    /// (`xenonet-net`'s `mailbox`).
+    pub const HELD: Purpose = Purpose("xenonet-held/1");
     /// An entry of a space's chain, or a side entry beside it
     /// (`xenonet-log`'s `space`): who reads, appends, writes and curates
     /// one layer of shared context.

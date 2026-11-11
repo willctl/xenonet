@@ -23,6 +23,7 @@ pub mod delivery;
 pub mod engine;
 pub mod feed;
 pub mod intents;
+pub mod mailbox;
 pub mod net;
 pub mod projects;
 pub mod schema;

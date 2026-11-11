@@ -100,6 +100,7 @@ use crate::holder::Fetching;
 /// A machine: its keys, its own copy of each network's chain, its feed in
 /// each network as an author, and the feeds it takes as a receiver.
 struct Party {
+    this: Weak<Party>,
     n: u8,
     transport: HostKey,
     signer: SeedSigner,
@@ -127,6 +128,12 @@ struct Party {
     /// where.
     served: AtomicU64,
     asked: Mutex<Vec<(u8, Pos)>>,
+    /// As a mailbox: what it keeps (in memory, kept across its own
+    /// connections dropping), its queues' caps, and its receipts and
+    /// hand-offs; as an author, what it handed mailboxes.
+    mail: crate::persist::Memory,
+    caps: Mutex<crate::mailbox::Caps>,
+    post: Mutex<crate::mailbox::Post>,
     links: OnceLock<Arc<Links>>,
     /// What another host's task asks of this machine, done on its own
     /// simulated host: a socket is written only from the host it's on.
@@ -141,7 +148,8 @@ impl Party {
     }
 
     fn with_clock(n: u8, networks: &[(&str, &[u8])], offset: i64) -> Arc<Party> {
-        Arc::new(Party {
+        Arc::new_cyclic(|this| Party {
+            this: this.clone(),
             n,
             transport: transport(n),
             signer: signer(n),
@@ -162,6 +170,9 @@ impl Party {
             admitted: Mutex::new(BTreeMap::new()),
             served: AtomicU64::new(0),
             asked: Mutex::new(Vec::new()),
+            mail: crate::persist::Memory::default(),
+            caps: Mutex::new(crate::mailbox::Caps::default()),
+            post: Mutex::new(crate::mailbox::Post::default()),
             links: OnceLock::new(),
             own: OnceLock::new(),
         })
@@ -255,6 +266,60 @@ impl Party {
         let n = [A, B, C, D].into_iter().find(|n| peer(*n) == a.to).unwrap_or(0);
         self.asked.locked().push((n, a.from));
         let _ = self.links().send(a.to, Out::Control(Control::Want { network: a.network, author: a.author, inc: a.from.inc, from: a.from.seq }));
+    }
+
+    /// Lists `n` as the mailbox of `network` in this machine's chain.
+    fn mailboxes(&self, network: &str, ns: &[u8]) {
+        self.views.locked().get_mut(network).unwrap().mailboxes = ns.iter().map(|n| host_of(*n).to_string()).collect();
+    }
+
+    /// Hands an entry for `to`, which isn't connected, to the network's
+    /// connected mailboxes: how many took it on the way.
+    fn hand_off(&self, e: &FeedEntry, to: u8) -> usize {
+        let view = self.views.locked()[&e.group].clone();
+        let Ok(boxes) = crate::mailbox::route(&view, host_of(self.n), host_of(to), |p| self.links().is_connected(p), None) else { return 0 };
+        let env = Party::seal(e, to);
+        let sent = boxes.iter().filter(|p| self.links().send(**p, Out::Envelope(env.clone())).is_ok()).count();
+        if sent > 0 && e.class() == xenonet_log::feed::Class::Kept {
+            self.post.locked().handed.handed(&e.group, &author(to), &e.id(), e.pos());
+        }
+        sent
+    }
+
+    /// How this machine's entries for `to` stand at the mailboxes.
+    fn standing(&self, network: &str, to: u8) -> crate::mailbox::Standing {
+        self.post.locked().handed.standing(network, &author(to))
+    }
+
+    /// As a mailbox: keeps an envelope for another member, receipts it to
+    /// the author soon, and hands it over now if the recipient is here.
+    fn keep_mail(self: &Arc<Self>, peer: PeerId, env: &Envelope, view: &View) {
+        let now = self.now_ms();
+        let caps = *self.caps.locked();
+        let Ok(item) = crate::mailbox::take(&self.mail, view, host_of(self.n), peer, env, now, &caps) else {
+            self.refused.fetch_add(1, Ordering::SeqCst);
+            return;
+        };
+        let to = item.to.clone();
+        if self.post.locked().batcher.add(&env.network, &env.author, item) {
+            let me = self.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let receipts = me.post.locked().batcher.take(host_of(me.n), me.now_ms());
+                for mut h in receipts {
+                    let Some(author) = me.views.locked().get(&h.network).and_then(|v| v.by_machine(&h.author).map(|m| PeerId(m.keys.sign))) else { continue };
+                    if h.sign(&me.signer).is_ok() {
+                        let _ = me.links().send(author, Out::Control(Control::Held { network: h.network.clone(), body: h.to_json() }));
+                    }
+                }
+            });
+        }
+        if let Some(r) = view.by_machine(&to).map(|m| PeerId(m.keys.sign)).filter(|p| self.links().is_connected(*p)) {
+            let out = self.post.locked().handing.start(&self.mail, &env.network, &to, false).unwrap_or_default();
+            for e in out {
+                let _ = self.links().send(r, Out::Envelope(e));
+            }
+        }
     }
 
     /// The head of `author`'s feed in `network` here.
@@ -360,6 +425,12 @@ impl Machine for Party {
 
     fn hello_in(&self, peer: PeerId, hello: &NetHello) -> Vec<Out> {
         self.hellos.locked().push(hello.network.clone());
+        // As a mailbox: what it keeps for the peer, from the start.
+        let mut out = Vec::new();
+        if let Some(m) = self.member_by_peer(&hello.network, peer) {
+            let mail = self.post.locked().handing.start(&self.mail, &hello.network, &m.machine.id(), true).unwrap_or_default();
+            out.extend(mail.into_iter().map(Out::Envelope));
+        }
         // A peer that holds more of a third member's feed than this
         // machine does: it is asked for the rest.
         for (author, at) in &hello.feeds {
@@ -372,7 +443,8 @@ impl Machine for Party {
                 self.fetch(&hello.network, author, from);
             }
         }
-        self.resend(&hello.network, peer, hello.head_of(&self.me()))
+        out.extend(self.resend(&hello.network, peer, hello.head_of(&self.me())));
+        out
     }
 
     fn envelope_in(&self, peer: PeerId, env: Envelope) -> Vec<Out> {
@@ -390,6 +462,17 @@ impl Machine for Party {
             return Vec::new();
         }
         let me = self.me();
+        if env.to.as_str() != me {
+            if let Some(this) = self.this.upgrade() {
+                this.keep_mail(peer, &env, &view);
+            }
+            return Vec::new();
+        }
+        // From a mailbox: it hears the envelope was taken, whatever came of
+        // it, so it lets it go.
+        let from_mailbox = view.members.values().any(|m| m.keys.sign == peer.0 && view.is_mailbox(&m.id)) && view.by_machine(&env.author).is_some_and(|a| a.keys.sign != peer.0);
+        let took = from_mailbox.then(|| Out::Control(Control::Took { network: env.network.clone(), ids: vec![env.id.clone()] }));
+        let mut out: Vec<Out> = took.into_iter().collect();
         let opened = env.open_entry(&Recipient { machine: &me, key: &self.transport }, &view);
         let Ok(v) = opened else {
             self.refused.fetch_add(1, Ordering::SeqCst);
@@ -397,7 +480,7 @@ impl Machine for Party {
             if view.by_machine(&env.author).is_some_and(|m| m.keys.sign != peer.0) {
                 self.lacks(&env.network, &env.author, peer);
             }
-            return Vec::new();
+            return out;
         };
         let (author, network, kept) = (v.author.clone(), v.group.clone(), v.class() == xenonet_log::feed::Class::Kept);
         let offered = self.feed.locked().offer(v).unwrap();
@@ -414,15 +497,21 @@ impl Machine for Party {
             Offer::Gap(w) => {
                 self.wants.fetch_add(1, Ordering::SeqCst);
                 self.fetch(&w.group, &w.author, Pos::new(w.inc, w.from));
-                return Vec::new();
+                return out;
             }
-            _ => return Vec::new(),
+            _ => return out,
         }
         if kept {
-            self.ack(&author, &network).into_iter().collect()
-        } else {
-            Vec::new()
+            // The ack goes to the author, wherever the entry came from.
+            if let (Some(a), Some(to)) = (self.ack(&author, &network), view.by_machine(&author).map(|m| PeerId(m.keys.sign))) {
+                if to == peer {
+                    out.push(a);
+                } else {
+                    let _ = self.links().send(to, a);
+                }
+            }
         }
+        out
     }
 
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out> {
@@ -457,11 +546,33 @@ impl Machine for Party {
         out
     }
 
-    fn ack_in(&self, _peer: PeerId, _network: &str, _author: &str, _at: Pos) {}
+    fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos) {
+        if author == self.me() {
+            if let Some(m) = self.member_by_peer(network, peer) {
+                self.post.locked().handed.acked(network, &m.machine.id(), at);
+            }
+        }
+    }
 
     fn other_in(&self, peer: PeerId, record: Control) {
         match record {
             Control::DontHave { network, author, .. } => self.lacks(&network, &author, peer),
+            Control::Held { network, body } => {
+                let Some(view) = self.views.locked().get(&network).cloned() else { return };
+                match crate::mailbox::Held::parse(&body).and_then(|h| h.verify(&view, peer, &self.me()).map(|()| h)) {
+                    Ok(h) => self.post.locked().handed.held(&h),
+                    Err(_) => {
+                        self.refused.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            }
+            Control::Took { network, ids } => {
+                let Some(m) = self.member_by_peer(&network, peer) else { return };
+                let next = self.post.locked().handing.took(&self.mail, &network, &m.machine.id(), &ids).unwrap_or_default();
+                for e in next {
+                    let _ = self.links().send(peer, Out::Envelope(e));
+                }
+            }
             Control::Compacted { network, author, body } => {
                 let Some(m) = self.views.locked().get(&network).and_then(|v| v.by_machine(&author).cloned()) else { return };
                 let Some(c) = crate::holder::compacted_of(&body).and_then(|c| c.verify(&m.machine).ok()) else {
@@ -936,7 +1047,9 @@ fn records_read_back_and_a_record_past_the_limit_is_refused() {
     let want = Control::Want { network: N1.into(), author: author(A), inc: T, from: 3 };
     let ack = Control::Ack { network: N2.into(), author: author(B), inc: T, high: 9 };
     let held = Control::Held { network: N1.into(), body: json!({ "ids": [] }) };
-    for c in [hello, want, ack, held] {
+    let took = Control::Took { network: N1.into(), ids: vec!["e1".into()] };
+    let lacks = Control::DontHave { network: N1.into(), author: author(A), inc: T, from: 3, why: Lack::History };
+    for c in [hello, want, ack, held, took, lacks] {
         assert_eq!(Control::decode(&c.encode()).unwrap(), c);
     }
     assert!(Control::decode(br#"{"t":"want","network":"net_x","author":"a","inc":1,"from":1}"#).is_err());
@@ -957,3 +1070,6 @@ fn records_read_back_and_a_record_past_the_limit_is_refused() {
 
 #[path = "holder_tests.rs"]
 mod holder;
+
+#[path = "mailbox_tests.rs"]
+mod mailboxes;

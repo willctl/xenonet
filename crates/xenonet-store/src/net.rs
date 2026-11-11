@@ -227,7 +227,7 @@ impl Db {
             c.execute("DELETE FROM link_status WHERE network = ?1", params![id])?;
             c.execute("DELETE FROM link_cursor WHERE network = ?1", params![id])?;
             c.execute("DELETE FROM network_sharing WHERE network = ?1", params![id])?;
-            for t in ["feed_writers", "feed_out", "feed_acks", "feed_in", "feed_loose", "feed_heads", "feed_held"] {
+            for t in ["feed_writers", "feed_out", "feed_acks", "feed_in", "feed_loose", "feed_heads", "feed_held", "mailbox"] {
                 c.execute(&format!("DELETE FROM {t} WHERE network = ?1"), params![id])?;
             }
             c.execute("DELETE FROM published_services WHERE network = ?1", params![id])?;

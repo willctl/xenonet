@@ -15,6 +15,7 @@ use xenonet_net::feed::{FeedEntry, Fork, Pos};
 use xenonet_net::files::{NetFile, Pin};
 use xenonet_net::holder::Held;
 use xenonet_net::identity::person::{self, PersonPolicy};
+use xenonet_net::mailbox::Mail;
 use xenonet_net::persist::{Persist, Person, Seen, WriterAt};
 use xenonet_net::roster::{self, NetworkPolicy};
 use xenonet_net::share::Sharing;
@@ -154,6 +155,30 @@ impl Persist for StorePersist {
     }
     fn held(&self, network: &str, author: &str, from: Pos, limit: usize) -> R<Vec<Held>> {
         Ok(self.0.feed_in_from(author, network, from, limit).map_err(store)?.into_iter().map(|(entry, open)| Held { entry, open }).collect())
+    }
+    fn put_mail(&self, m: &Mail, evict: usize) -> R<bool> {
+        let kept = xenonet_store::mailbox::Mail {
+            network: m.network.clone(),
+            recipient: m.recipient.clone(),
+            author: m.author.clone(),
+            id: m.id.clone(),
+            kept: m.kept,
+            envelope: m.envelope.clone(),
+        };
+        self.0.put_mail(&kept, evict).map_err(store)
+    }
+    fn mail_for(&self, network: &str, recipient: &str, limit: usize) -> R<Vec<Mail>> {
+        let rows = self.0.mail_for(network, recipient, limit).map_err(store)?;
+        Ok(rows.into_iter().map(|m| Mail { network: m.network, recipient: m.recipient, author: m.author, id: m.id, kept: m.kept, envelope: m.envelope }).collect())
+    }
+    fn mail_sizes(&self, network: &str, recipient: &str) -> R<Vec<u64>> {
+        self.0.mail_sizes(network, recipient).map_err(store)
+    }
+    fn mail_took(&self, network: &str, recipient: &str, ids: &[String]) -> R<()> {
+        self.0.mail_took(network, recipient, ids).map_err(store)
+    }
+    fn prune_mail(&self, before: u64) -> R<u64> {
+        self.0.prune_mail(before).map_err(store)
     }
 }
 

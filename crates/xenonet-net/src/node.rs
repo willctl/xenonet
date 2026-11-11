@@ -1564,6 +1564,7 @@ impl Shared {
         if let Err(e) = self.opts.persist.put_feed_ack(&net.id, from, at) {
             self.log("net.feed", &format!("{from}'s ack wasn't kept: {}", e.message));
         }
+        self.link2_acked(net, from, at);
         let mut slot = self.writer.locked();
         let Ok(w) = self.writer_in(&mut slot, net) else { return };
         if at.inc < w.inc() || (at.inc == w.inc() && at.seq <= w.kept()) {
@@ -2797,6 +2798,9 @@ impl Node {
                 "path": if me { None } else { on_link.get(&crate::endpoint::peer_id(&m.keys)).and_then(|l| l.path) },
                 "found": if me { None } else { found.get(id).map(|f| f.iter().copied().collect::<Vec<_>>()) },
                 "skewMs": if me { None } else { on_link.get(&crate::endpoint::peer_id(&m.keys)).and_then(|l| l.skew_ms) },
+                // This machine's entries a mailbox holds for it, not
+                // delivered yet.
+                "held": if me { None } else { Some(n.mail_standing(&net.id, id).held) },
             }));
         }
         // The gateway's host lists every ticket that waits; another window

@@ -68,6 +68,7 @@ pub mod join;
 pub mod keys;
 pub mod link;
 pub mod link2;
+pub mod mailbox;
 pub mod node;
 pub mod persist;
 pub mod request;

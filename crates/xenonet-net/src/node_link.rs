@@ -24,12 +24,18 @@
 //! entries it applied of the others' feeds to the current members of the
 //! network, as `holder::serve` rules.
 //!
+//! **Mailboxes** (`mailbox`): an entry for a member that isn't connected
+//! goes to the network's mailboxes that are, sealed for the member; each
+//! receipts it to this machine (Held), which shows it held, not
+//! delivered, until the member acks it. As a mailbox, this machine keeps
+//! what authors of its networks hand it for their other members, on its
+//! store's tables, and hands it over when the member connects.
+//!
 //! What link/2 doesn't carry yet: a message whose act rests on an
 //! authority (the envelope has no place for it beside the entry yet), so
-//! those go through the gateway alone; svc/2 and the map's relay; Held
-//! receipts and Compacted answers, which are read and set aside (a
-//! holder's Compacted answer counts as "don't have", so the next holder or
-//! the author is asked).
+//! those go through the gateway alone; svc/2 and the map's relay; and
+//! Compacted answers, which are set aside (a holder's counts as "don't
+//! have", so the next holder or the author is asked).
 //!
 //! **Finding members.** Each machine signs an address record (its endpoint
 //! id and direct addresses, under its machine signing key) and puts it in
@@ -43,6 +49,7 @@ use crate::endpoint::{peer_id, IrohDial, Relay, Relays, Settings};
 use crate::envelope::{Class as EnvClass, Envelope, Me as Recipient};
 use crate::holder::{self, Ask, Fetching};
 use crate::link2::{Control, Links, Machine, NetHello, Out};
+use crate::mailbox::{self, Post};
 use crate::roster::Member;
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -113,6 +120,9 @@ pub struct Transport2 {
     pub fetching: std::sync::Mutex<Fetching>,
     /// A fetch began: the clock that moves fetches on looks again.
     fetch_due: tokio::sync::Notify,
+    /// What this machine owes and hands over as a mailbox, and what it
+    /// handed mailboxes as an author.
+    pub post: std::sync::Mutex<Post>,
 }
 
 /// This machine's clock, and how far its HLC is ahead of it.
@@ -186,15 +196,94 @@ impl Shared {
             let Some(v) = r.view_ref() else { return };
             to.iter().filter_map(|h| v.member(h).cloned()).collect()
         };
+        let view = self.roster().view();
         for m in members {
-            match Envelope::seal_entry(e, &m.machine.id(), &m.keys, None) {
-                Ok(env) => {
-                    let _ = t.links.send(peer_id(&m.keys), Out::Envelope(env));
+            let env = match Envelope::seal_entry(e, &m.machine.id(), &m.keys, None) {
+                Ok(env) => env,
+                Err(err) => {
+                    self.log("net.link2", &format!("an entry for {} wasn't sealed: {}", m.id, err.message));
+                    continue;
                 }
-                Err(err) => self.log("net.link2", &format!("an entry for {} wasn't sealed: {}", m.id, err.message)),
+            };
+            let peer = peer_id(&m.keys);
+            if t.links.is_connected(peer) {
+                let _ = t.links.send(peer, Out::Envelope(env));
+                continue;
+            }
+            // Away: to the network's mailboxes that are connected.
+            match mailbox::route(&view, &net.host, &m.id, |p| t.links.is_connected(p), authority) {
+                Ok(boxes) => {
+                    let sent = boxes.iter().filter(|p| t.links.send(**p, Out::Envelope(env.clone())).is_ok()).count();
+                    if sent > 0 && e.class() == xenonet_log::feed::Class::Kept {
+                        t.post.locked().handed.handed(&net.id, &m.machine.id(), &e.id(), e.pos());
+                    }
+                }
+                Err(why) => self.log("net.link2", &why.message),
             }
         }
-        let _ = net;
+    }
+
+    /// `host` holds this machine's kept entries up to `at`: what mailboxes
+    /// held of them for it is delivered.
+    pub(super) fn link2_acked(&self, net: &NetFile, host: &str, at: Pos) {
+        let (Some(t), Some(m)) = (self.link2(), self.roster().view_ref().and_then(|v| v.member(host).cloned())) else { return };
+        t.post.locked().handed.acked(&net.id, &m.machine.id(), at);
+    }
+
+    /// How this machine's entries for `host` stand at the mailboxes.
+    pub fn mail_standing(&self, network: &str, host: &str) -> mailbox::Standing {
+        let (Some(t), Some(m)) = (self.link2(), self.roster().view_ref().and_then(|v| v.member(host).cloned())) else { return mailbox::Standing::default() };
+        let s = t.post.locked().handed.standing(network, &m.machine.id());
+        s
+    }
+
+    /// As a mailbox: keeps an envelope `from` handed this machine for
+    /// another member, receipts it to the author soon, and hands it over
+    /// at once if the member is connected.
+    fn keep_mail(&self, from: PeerId, env: &Envelope, view: &crate::roster::View, host: &str) {
+        let Some(t) = self.link2() else { return };
+        let now = self.now().max(0.0) as u64;
+        let item = match mailbox::take(self.opts.persist.as_ref(), view, host, from, env, now, &mailbox::Caps::default()) {
+            Ok(i) => i,
+            Err(e) => {
+                self.log("net.link2", &format!("an envelope for another member wasn't kept: {}", e.message));
+                return;
+            }
+        };
+        let to = item.to.clone();
+        if t.post.locked().batcher.add(&env.network, &env.author, item) {
+            let me = self.this.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if let Some(s) = me.upgrade() {
+                    s.send_receipts();
+                }
+            });
+        }
+        if let Some(r) = view.by_machine(&to).map(|m| peer_id(&m.keys)).filter(|p| t.links.is_connected(*p)) {
+            let out = t.post.locked().handing.start(self.opts.persist.as_ref(), &env.network, &to, false).unwrap_or_default();
+            for e in out {
+                let _ = t.links.send(r, Out::Envelope(e));
+            }
+        }
+    }
+
+    /// The receipts this machine owes as a mailbox, signed and sent.
+    fn send_receipts(&self) {
+        let (Some(t), Some(net), Ok(key)) = (self.link2(), self.network(), self.identity.machine_key()) else { return };
+        let now = self.now().max(0.0) as u64;
+        let receipts = t.post.locked().batcher.take(&net.host, now);
+        let view = self.roster().view();
+        for mut h in receipts {
+            let Some(author) = view.by_machine(&h.author).map(|m| peer_id(&m.keys)) else { continue };
+            if let Err(e) = h.sign(key.as_ref()) {
+                self.log("net.link2", &format!("a receipt wasn't signed: {}", e.message));
+                continue;
+            }
+            if t.links.send(author, Out::Control(Control::Held { network: h.network.clone(), body: h.to_json() })).is_err() {
+                self.log("net.link2", "a receipt didn't go: its author isn't connected now");
+            }
+        }
     }
 
     /// A control record for `host` on link/2, when it's connected.
@@ -418,7 +507,14 @@ impl Machine for NodeMachine {
                 n.link2_fetch(&net.id, author, from);
             }
         }
-        let mut out = n.resend_sealed(&net, &m, at);
+        // As a mailbox: what it keeps for the peer, from the start of its
+        // queue, since what was on the way before may not have come.
+        let mut out = Vec::new();
+        if let Some(t) = n.link2() {
+            let mail = t.post.locked().handing.start(n.opts.persist.as_ref(), &net.id, &peer_machine, true);
+            out.extend(mail.unwrap_or_default().into_iter().map(Out::Envelope));
+        }
+        out.extend(n.resend_sealed(&net, &m, at));
         if let Some(record) = n.address_record() {
             out.push(Out::Control(Control::Address { network: net.id, record }));
         }
@@ -439,7 +535,15 @@ impl Machine for NodeMachine {
             return Vec::new();
         }
         let Some(me) = n.machine_id() else { return Vec::new() };
+        if env.to.as_str() != me {
+            n.keep_mail(peer, &env, &view, &net.host);
+            return Vec::new();
+        }
         let from_holder = env.author != m.machine.id();
+        // From a mailbox: it hears the envelope was taken, whatever came of
+        // it here, and lets it go.
+        let from_mailbox = from_holder && view.is_mailbox(&m.id);
+        let out: Vec<Out> = from_mailbox.then(|| Out::Control(Control::Took { network: env.network.clone(), ids: vec![env.id.clone()] })).into_iter().collect();
         let v = match env.open_entry(&Recipient { machine: &me, key: &key }, &view) {
             Ok(v) => v,
             Err(e) => {
@@ -448,23 +552,23 @@ impl Machine for NodeMachine {
                 if from_holder && env.class == EnvClass::Kept {
                     n.link2_lacks(&env.network, &env.author, peer);
                 }
-                return Vec::new();
+                return out;
             }
         };
         if !from_holder {
             n.take_entry(m.id, v, json!({}), window, Via::Link);
-            return Vec::new();
+            return out;
         }
-        // Another member's entry, which `m` holds: a kept one, checked
-        // against its author's key above, and against what this machine
-        // applied of its feed by the feed. Loose entries come from their
-        // authors.
-        let Some(author) = view.by_machine(&v.author).cloned().filter(|_| env.class == EnvClass::Kept) else {
-            n.log("net.link2", &format!("{} sent a message of another member's feed, which was refused: messages come from their authors", m.id));
-            return Vec::new();
+        // Another member's entry, which `m` holds or kept as a mailbox,
+        // checked against its author's key above, and against what this
+        // machine applied of its feed by the feed. Loose entries come from
+        // their authors or a mailbox.
+        let Some(author) = view.by_machine(&v.author).cloned().filter(|_| env.class == EnvClass::Kept || from_mailbox) else {
+            n.log("net.link2", &format!("{} sent a message of another member's feed, which was refused: messages come from their authors or a mailbox", m.id));
+            return out;
         };
         n.take_entry(author.id.clone(), v, json!({}), view.is_window(&author.id), Via::Link);
-        Vec::new()
+        out
     }
 
     fn want_in(&self, peer: PeerId, network: &str, author: &str, from: Pos) -> Vec<Out> {
@@ -511,7 +615,21 @@ impl Machine for NodeMachine {
                 n.log("net.link2", &format!("a compacted range from {} was set aside: not taken yet", m.id));
                 n.link2_lacks(&network, &author, peer);
             }
-            // Held receipts and Compacted answers are commits 11 and 17's.
+            Control::Held { network, body } => {
+                let (Some(me), Some(t)) = (n.machine_id(), n.link2()) else { return };
+                let view = n.roster().view();
+                match mailbox::Held::parse(&body).and_then(|h| h.verify(&view, peer, &me).map(|()| h)) {
+                    Ok(h) => t.post.locked().handed.held(&h),
+                    Err(e) => n.log("net.link2", &format!("a receipt for {network} from {} was dropped: {}", m.id, e.message)),
+                }
+            }
+            Control::Took { network, ids } => {
+                let Some(t) = n.link2() else { return };
+                let next = t.post.locked().handing.took(n.opts.persist.as_ref(), &network, &m.machine.id(), &ids);
+                for e in next.unwrap_or_default() {
+                    let _ = t.links.send(peer, Out::Envelope(e));
+                }
+            }
             other => n.log("net.link2", &format!("a {} record from {} was set aside: not taken yet", other.to_json()["t"].as_str().unwrap_or("control"), m.id)),
         }
     }
@@ -559,6 +677,7 @@ pub async fn run(n: Weak<Shared>) {
         record: std::sync::Mutex::new(None),
         fetching: std::sync::Mutex::default(),
         fetch_due: tokio::sync::Notify::new(),
+        post: std::sync::Mutex::default(),
     });
     *s.link2.writing() = Some(t);
     s.members_changed();
