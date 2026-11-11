@@ -20,7 +20,10 @@
 //!   the first checkout of a project founds it. Until then it's a
 //!   candidate: it names the project it would join, and gives no rights in
 //!   it, so a folder that copies a repo's remote can't take its claims,
-//!   its grants or its intents.
+//!   its grants or its intents. The one exception is a linked worktree of
+//!   a confirmed main checkout here that shares its git folder (the same
+//!   refs and objects): it's in as its main checkout is, since nothing
+//!   but that repo can be it.
 //!
 //! This machine's own rows have `machine` = `LOCAL`; another machine's
 //! carry its signing key's id.
@@ -54,10 +57,11 @@ pub(crate) const TABLES: &[&str] = &[
         UNIQUE (owner, repo_key)
     ) STRICT",
     // A checkout: one folder of a project on one machine (its path none on
-    // another machine), what its version control says of it, the checkout
-    // it belongs to (a worktree's main one, a submodule's superproject),
-    // whether the person confirmed it in its project, and when it was
-    // found, last seen and gone.
+    // another machine), what its version control says of it (with the
+    // path key of the folder its refs and objects are in, which a repo's
+    // worktrees share), the checkout it belongs to (a worktree's main one,
+    // a submodule's superproject), whether the person confirmed it in its
+    // project, and when it was found, last seen and gone.
     "CREATE TABLE checkouts (
         id TEXT PRIMARY KEY,
         project TEXT NOT NULL,
@@ -67,6 +71,7 @@ pub(crate) const TABLES: &[&str] = &[
         vcs TEXT,
         branch TEXT,
         head TEXT,
+        common TEXT,
         parent TEXT,
         kind TEXT NOT NULL,
         confirmed INTEGER NOT NULL,
@@ -154,9 +159,14 @@ pub struct Checkout {
     pub vcs: Option<String>,
     pub branch: Option<String>,
     pub head: Option<String>,
+    /// The path key of the folder its refs and objects are in, the same
+    /// for every worktree of one repo; None for a folder.
+    pub common: Option<String>,
     pub parent: Option<CheckoutId>,
     pub kind: CheckoutKind,
-    /// In its project: the founding checkout, or one the person confirmed.
+    /// In its project: the founding checkout, one the person confirmed, or
+    /// a linked worktree of a confirmed main checkout sharing its git
+    /// folder.
     pub confirmed: bool,
     pub found_at: i64,
     pub seen_at: i64,
@@ -175,6 +185,9 @@ pub struct Found {
     pub head: Option<String>,
     /// origin normalized, for a repo that has one.
     pub repo_key: Option<String>,
+    /// The path key of the folder its refs and objects are in (a linked
+    /// worktree's main `.git`), for a repo.
+    pub common: Option<String>,
     pub kind: CheckoutKind,
     /// The path key of the checkout it belongs to.
     pub parent: Option<String>,
@@ -259,6 +272,7 @@ fn checkout_of(r: &Row<'_>) -> rusqlite::Result<Checkout> {
         vcs: r.get("vcs")?,
         branch: r.get("branch")?,
         head: r.get("head")?,
+        common: r.get("common")?,
         parent: r.get::<_, Option<String>>("parent")?.and_then(|s| CheckoutId::parse(&s).ok()),
         kind: CheckoutKind::parse(&r.get::<_, String>("kind")?).unwrap_or(CheckoutKind::Folder),
         confirmed: r.get::<_, i64>("confirmed")? != 0,
@@ -295,6 +309,16 @@ fn resolved(c: &Connection, id: &ProjectId) -> R<ProjectId> {
 // Whether a project has any checkout yet, on any machine.
 fn has_checkouts(c: &Connection, project: &ProjectId) -> R<bool> {
     Ok(c.prepare_cached("SELECT 1 FROM checkouts WHERE project = ?1 LIMIT 1")?.query_row(params![project.as_str()], |_| Ok(())).optional()?.is_some())
+}
+
+// Whether a linked worktree is in its project as its main checkout is:
+// `parent` is a main checkout here, confirmed, not gone and in `project`,
+// and both name the same git folder, so the worktree reads that repo's
+// own refs and objects and can't be a copy that only names its remote.
+fn joins_with_main(c: &Connection, kind: CheckoutKind, common: Option<&str>, parent: Option<&str>, project: &ProjectId) -> R<bool> {
+    let (CheckoutKind::Worktree, Some(common), Some(parent)) = (kind, common, parent) else { return Ok(false) };
+    let Some(main) = one_checkout(c, parent)? else { return Ok(false) };
+    Ok(main.machine == LOCAL && main.confirmed && main.gone_at.is_none() && main.common.as_deref() == Some(common) && resolved(c, &main.project)? == *project)
 }
 
 // The key and its parents, longest first: `/a/b/c`, `/a/b`, `/a`.
@@ -443,6 +467,14 @@ impl Db {
             };
             let project = resolved(c, &ch.project)?;
             c.execute("UPDATE checkouts SET confirmed = 1, project = ?2 WHERE id = ?1", params![id.as_str(), project.as_str()])?;
+            // Its linked worktrees that share its git folder are in with it.
+            let mut q = c.prepare_cached("SELECT * FROM checkouts WHERE parent = ?1 AND confirmed = 0")?;
+            let waiting: Vec<Checkout> = q.query_map(params![id.as_str()], checkout_of)?.collect::<Result<_, _>>()?;
+            for w in waiting {
+                if resolved(c, &w.project)? == project && joins_with_main(c, w.kind, w.common.as_deref(), Some(id.as_str()), &project)? {
+                    c.execute("UPDATE checkouts SET confirmed = 1, project = ?2 WHERE id = ?1", params![w.id.as_str(), project.as_str()])?;
+                }
+            }
             one_checkout(c, id.as_str())?.ok_or_else(|| StoreError::new("not-found", format!("no checkout {id} here")))
         })
     }
@@ -557,16 +589,18 @@ fn upsert(c: &Connection, ids: &Ids, owner: &Owner, f: &Found, by_key: &mut std:
     let parent = parent.as_ref().map(CheckoutId::as_str);
     let id = match had {
         None => {
-            // The first checkout of a project founds it; any other waits
-            // for the person.
+            // The first checkout of a project founds it, and a linked
+            // worktree of its confirmed main checkout is in with it; any
+            // other waits for the person.
             let founds = !has_checkouts(c, &project)?;
+            let confirmed = founds || joins_with_main(c, f.kind, f.common.as_deref(), parent, &project)?;
             let id = ids.checkout();
             c.execute(
-                "INSERT INTO checkouts (id, project, machine, path, path_key, vcs, branch, head, parent, kind, confirmed, found_at, seen_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-                params![id.as_str(), project.as_str(), LOCAL, f.path, f.path_key, f.vcs, f.branch, f.head, parent, f.kind.as_str(), founds, now],
+                "INSERT INTO checkouts (id, project, machine, path, path_key, vcs, branch, head, common, parent, kind, confirmed, found_at, seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
+                params![id.as_str(), project.as_str(), LOCAL, f.path, f.path_key, f.vcs, f.branch, f.head, f.common, parent, f.kind.as_str(), confirmed, now],
             )?;
-            fixes.push(Fix::Found { checkout: id.clone(), path: f.path.clone(), project, candidate: !founds });
+            fixes.push(Fix::Found { checkout: id.clone(), path: f.path.clone(), project, candidate: !confirmed });
             id
         }
         Some(h) => {
@@ -584,10 +618,12 @@ fn upsert(c: &Connection, ids: &Ids, owner: &Owner, f: &Found, by_key: &mut std:
                 if alone && one_project(c, was.as_str())?.is_some_and(|p| p.kind == ProjectKind::Folder) {
                     c.execute("UPDATE projects SET merged_into = ?2 WHERE id = ?1", params![was.as_str(), project.as_str()])?;
                 }
-                fixes.push(Fix::Rejoined { checkout: h.id.clone(), path: f.path.clone(), from: was, to: project.clone(), candidate: !founds });
-                founds
+                let confirmed = founds || joins_with_main(c, f.kind, f.common.as_deref(), parent, &project)?;
+                fixes.push(Fix::Rejoined { checkout: h.id.clone(), path: f.path.clone(), from: was, to: project.clone(), candidate: !confirmed });
+                confirmed
             } else {
-                h.confirmed
+                // A candidate worktree is in once its main checkout is.
+                h.confirmed || joins_with_main(c, f.kind, f.common.as_deref(), parent, &project)?
             };
             if h.gone_at.is_some() {
                 fixes.push(Fix::Back { checkout: h.id.clone(), path: f.path.clone() });
@@ -595,8 +631,8 @@ fn upsert(c: &Connection, ids: &Ids, owner: &Owner, f: &Found, by_key: &mut std:
                 fixes.push(Fix::Moved { checkout: h.id.clone(), path: f.path.clone(), branch: f.branch.clone() });
             }
             c.execute(
-                "UPDATE checkouts SET project = ?2, path = ?3, vcs = ?4, branch = ?5, head = ?6, parent = ?7, kind = ?8, confirmed = ?9, seen_at = ?10, gone_at = NULL WHERE id = ?1",
-                params![h.id.as_str(), project.as_str(), f.path, f.vcs, f.branch, f.head, parent, f.kind.as_str(), confirmed, now],
+                "UPDATE checkouts SET project = ?2, path = ?3, vcs = ?4, branch = ?5, head = ?6, common = ?7, parent = ?8, kind = ?9, confirmed = ?10, seen_at = ?11, gone_at = NULL WHERE id = ?1",
+                params![h.id.as_str(), project.as_str(), f.path, f.vcs, f.branch, f.head, f.common, parent, f.kind.as_str(), confirmed, now],
             )?;
             h.id
         }

@@ -484,6 +484,7 @@ mod tests {
             branch: None,
             head: None,
             repo_key: repo_key.map(Into::into),
+            common: repo_key.map(|_| format!("{path}/.git")),
             kind: if repo_key.is_some() { xenonet_store::projects::CheckoutKind::Repo } else { xenonet_store::projects::CheckoutKind::Folder },
             parent: None,
             name: path.rsplit('/').next().unwrap_or(path).into(),

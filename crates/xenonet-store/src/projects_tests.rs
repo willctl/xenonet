@@ -14,6 +14,7 @@ fn repo(path: &str, key: &str) -> Found {
         branch: Some("main".into()),
         head: Some("abc".into()),
         repo_key: Some(key.into()),
+        common: Some(format!("{}/.git", path.to_lowercase())),
         kind: CheckoutKind::Repo,
         parent: None,
         name: path.rsplit('/').next().unwrap_or(path).into(),
@@ -21,7 +22,7 @@ fn repo(path: &str, key: &str) -> Found {
 }
 
 fn folder(path: &str) -> Found {
-    Found { vcs: None, branch: None, head: None, repo_key: None, kind: CheckoutKind::Folder, ..repo(path, "") }
+    Found { vcs: None, branch: None, head: None, repo_key: None, common: None, kind: CheckoutKind::Folder, ..repo(path, "") }
 }
 
 fn owned(db: &Db, person: &str, salt: u8) {
@@ -47,12 +48,17 @@ fn the_first_checkout_founds_its_project_and_the_next_waits_for_the_person() {
     assert!(db.checkout(&copy.id).unwrap().unwrap().confirmed);
 }
 
+// A linked worktree of `main`, whose git folder is `common`.
+fn worktree(path: &str, main: &str, key: &str, common: &str) -> Found {
+    Found { kind: CheckoutKind::Worktree, parent: Some(main.into()), common: Some(common.into()), ..repo(path, key) }
+}
+
 #[test]
 fn a_folder_gets_a_project_of_its_own_and_a_worktree_is_a_candidate_after_its_main() {
     let db = db();
-    let mut wt = repo("/w/app/.claude/worktrees/x", "github.com/a/app");
-    wt.kind = CheckoutKind::Worktree;
-    wt.parent = Some("/w/app".into());
+    // A worktree whose git folder isn't its main checkout's: it only names
+    // the remote, so it waits for the person.
+    let wt = worktree("/w/app/.claude/worktrees/x", "/w/app", "github.com/a/app", "/elsewhere/app/.git");
     // Listed before its main checkout, the worktree still comes second.
     db.reconcile(&[wt, repo("/w/app", "github.com/a/app"), folder("/w/notes")], 1).unwrap();
     let app = db.place("/w/app/src/main.rs").unwrap().unwrap();
@@ -186,4 +192,49 @@ fn a_project_reads_through_its_confirmed_checkouts_only() {
     assert_eq!(ids(db.confirmed_checkouts_of(&main.project).unwrap()), vec![copy.id]);
     assert_eq!(db.project_of_checkout(&main.id).unwrap(), Some(main.project));
     assert_eq!(db.confirmed_checkouts_of(&ProjectId::parse("prj_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()).unwrap(), Vec::new(), "one the store doesn't hold");
+}
+
+#[test]
+fn a_worktree_sharing_its_confirmed_mains_git_folder_is_in_with_it() {
+    let db = db();
+    let wt = worktree("/w/app/.claude/worktrees/x", "/w/app", "github.com/a/app", "/w/app/.git");
+    // One with a git folder of its own, beside it, and a main checkout of
+    // the same remote elsewhere, a candidate, with its own worktree.
+    let other = worktree("/w/app/.claude/worktrees/y", "/w/app", "github.com/a/app", "/tmp/y/.git");
+    let copy = repo("/w/copy/app", "github.com/a/app");
+    let copy_wt = worktree("/w/copy/app/wt", "/w/copy/app", "github.com/a/app", "/w/copy/app/.git");
+    let fixes = db.reconcile(&[wt.clone(), other.clone(), repo("/w/app", "github.com/a/app"), copy.clone(), copy_wt.clone()], 1).unwrap();
+    let at = |p: &str| db.place(p).unwrap().unwrap().checkout;
+    let main = at("/w/app");
+    assert!(main.confirmed, "the main checkout founds the project");
+    let x = at("/w/app/.claude/worktrees/x");
+    assert_eq!((x.confirmed, x.project.clone(), x.common.as_deref()), (true, main.project.clone(), Some("/w/app/.git")), "the same refs and objects: in with its main");
+    assert!(fixes.iter().any(|f| matches!(f, Fix::Found { checkout, candidate: false, .. } if *checkout == x.id)), "{fixes:?}");
+    assert!(!at("/w/app/.claude/worktrees/y").confirmed, "another git folder: the person's to confirm");
+    assert!(!at("/w/copy/app").confirmed && !at("/w/copy/app/wt").confirmed, "a candidate's worktree waits with it");
+    // Confirming the copy brings in its worktree that shares its git
+    // folder, and nothing else.
+    db.confirm(&at("/w/copy/app").id).unwrap();
+    assert!(at("/w/copy/app/wt").confirmed);
+    assert!(!at("/w/app/.claude/worktrees/y").confirmed);
+    // Found again, it stays as it is.
+    db.reconcile(&[wt, other, repo("/w/app", "github.com/a/app"), copy, copy_wt], 2).unwrap();
+    assert!(at("/w/app/.claude/worktrees/x").confirmed && !at("/w/app/.claude/worktrees/y").confirmed);
+}
+
+#[test]
+fn a_candidate_worktree_is_in_once_its_main_is() {
+    let db = db();
+    db.reconcile(&[repo("/w/app", "github.com/a/app")], 1).unwrap();
+    // The same repo's second clone, a candidate, and a worktree of it
+    // found later, by a session's folder.
+    db.reconcile(&[repo("/w/app", "github.com/a/app"), repo("/w/clone", "github.com/a/app")], 2).unwrap();
+    let (wt, _) = db.ensure(&worktree("/w/clone/wt", "/w/clone", "github.com/a/app", "/w/clone/.git"), 3).unwrap();
+    assert!(!wt.confirmed, "its main checkout is a candidate");
+    let clone = db.place("/w/clone").unwrap().unwrap().checkout;
+    // The person confirms the clone outside a reconcile; the worktree's
+    // next sighting brings it in.
+    db.write(|c| Ok(c.execute("UPDATE checkouts SET confirmed = 1 WHERE id = ?1", params![clone.id.as_str()])?)).unwrap();
+    let (wt, _) = db.ensure(&worktree("/w/clone/wt", "/w/clone", "github.com/a/app", "/w/clone/.git"), 4).unwrap();
+    assert!(wt.confirmed);
 }

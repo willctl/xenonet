@@ -37,7 +37,18 @@ fn name_of(path: &str) -> String {
 }
 
 fn folder(path: &str, key: String) -> Found {
-    Found { path: path.to_string(), path_key: key, vcs: None, branch: None, head: None, repo_key: None, kind: CheckoutKind::Folder, parent: None, name: name_of(path) }
+    Found {
+        path: path.to_string(),
+        path_key: key,
+        vcs: None,
+        branch: None,
+        head: None,
+        repo_key: None,
+        common: None,
+        kind: CheckoutKind::Folder,
+        parent: None,
+        name: name_of(path),
+    }
 }
 
 /// What's at `path`, as a checkout to keep: a repo's working tree, or a
@@ -65,6 +76,7 @@ pub fn found_of(path: &str, why: Why) -> Option<Found> {
         branch: ch.branch,
         head: ch.head,
         repo_key: ch.key,
+        common: path_key(&ch.common.to_string_lossy()),
         kind,
         parent,
     })

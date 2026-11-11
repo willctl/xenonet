@@ -12,7 +12,7 @@ A project is an id XenoNet makes (`prj_…`), never a path. A checkout is one fo
 
 XenoNet finds checkouts on its own: every refresh compares what the scans below find, and every folder a session ran in, with the checkouts it keeps in its store, and updates them. Claims name a project and a path inside it.
 
-The first checkout of a project joins it at once. Another checkout of a project that already has one, such as a second clone, is a candidate until you confirm it: its inspector says "not in its project yet", with **Confirm**. Confirming is yours alone, in XenoNet's window. Until then, claims, grants and starts in the project don't reach it, and a claim on a path in it is refused.
+The first checkout of a project joins it at once. Another checkout of a project that already has one, such as a second clone, is a candidate until you confirm it: its inspector says "not in its project yet", with **Confirm**. Confirming is yours alone, in XenoNet's window. Until then, claims, grants and starts in the project don't reach it, and a claim on a path in it is refused. A linked worktree (`git worktree add`) of a checkout that's in its project joins with it, without asking, when it uses that checkout's own git folder: it reads the same refs and objects, so it can't be a copy that only names the remote. Confirming a candidate brings in its worktrees the same way.
 
 The projects folder is the root XenoNet scans by default. Other roots can be added through the local API: `GET /api/workspace/roots` lists them, and `PUT` sets them, which is yours to do and refused from under an agent.
 
