@@ -282,7 +282,8 @@ Each stream kind declares its order and retention:
   put on another. This replaces the window key. The person alone founds,
   admits, widens, publishes, revokes, and answers permission prompts,
   unless they issued a standing grant for answers; the receiver accepts
-  an answer only under authority that chains to a person.
+  an Allow only under authority that chains to a person, with presence or
+  under that grant. A Deny narrows, so it needs no presence.
 - **Revocation** is a chain entry. It takes effect on a machine the
   moment that machine holds it, and from then on a revoked proof is
   ineffective for every entry the machine had not already stored. The
@@ -458,7 +459,10 @@ service runs a local build.
    the engine's resend; fetching a missing range from any holder arrives
    with the transport. This order (ids and store before transport) keeps
    the widest data change on the wire that already works, and lets the
-   transport phase change one thing.
+   transport phase change one thing. Intents come with the stored ids:
+   an intent the person makes on one of their devices can be worked by
+   provider sessions on any device their delegation grant names (question
+   4), so delegation spans the person's machines, not one machine.
 5. **The transport.** Add `xenonet-net` on iroh beside the gateway link
    for one release, with mailboxes (the gateway queue code moves there),
    relay lists, presence deltas, the HLC, several networks per machine and
@@ -490,7 +494,7 @@ change edits the spec first. Not verified formally: parsers and drift
 
 ## Open questions for Will
 
-Questions 1, 2 and 5 are decided, so nothing gates phase 3. The rest
+Questions 1, 2, 4 and 5 are decided, so nothing gates phase 3. The rest
 can wait for the phase that needs them.
 
 1. **The person's root key, the presence check and the chain rules.**
@@ -518,10 +522,19 @@ can wait for the phase that needs them.
 3. **Out of contact.** May a machine that has not heard from any other
    member in ten minutes still start runs, admit, widen or answer remote
    prompts? Recommended: it holds them and answers only for itself.
-4. **Unattended answers.** May a standing grant answer permission prompts
-   with no person present, as today's delegation does? Recommended: yes,
-   per machine, as an explicit person-signed grant with limits, and only
-   for runs the asker's attestation is `HarnessSigned` or `ProcessChecked`.
+4. **Answers and delegation.** Decided by Will on 2026-11-10. Allowing
+   a permission prompt widens access, so an Allow needs presence, local
+   and remote; a Deny can't widen anything and needs none. Delegation is
+   a standing grant the person signs, not one machine acting for the
+   person: it names a set of the person's own devices (from their person
+   chain, or all of them) that may run provider sessions for work the
+   person started on any one of them, with limits on the grant (which
+   machines, which kinds of work, until when). Under it a machine may
+   answer prompts with no person present, only for runs whose asker's
+   attestation is `HarnessSigned` or `ProcessChecked`. Phase 3 builds the
+   grant's authorization shape with tokens naming machines and networks;
+   an intent made on one device fanning out to sessions on the others
+   needs the stored ids of phase 4 and is built there.
 5. **The first cut.** Decided by Will on 2026-11-08: one person with
    many machines and several networks. Phases 2 to 4 build the person,
    machine, network, project and space chains and no org chain; orgs are
