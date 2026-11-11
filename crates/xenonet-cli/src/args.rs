@@ -65,6 +65,7 @@ const TAKES_VALUE: &[&str] = &[
     "exec",
     // xenonet net
     "lan",
+    "at",
     "op",
     "on",
     "wake",

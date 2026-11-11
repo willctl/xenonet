@@ -99,6 +99,9 @@ pub struct Options {
     /// Where the network and the person are kept (the store, through the
     /// runtime).
     pub persist: Arc<dyn Persist>,
+    /// Where the endpoint for a join with an invite binds: None for every
+    /// interface (the tests give loopback).
+    pub join_bind: Option<std::net::SocketAddr>,
 }
 
 impl Options {
@@ -116,6 +119,7 @@ impl Options {
             log,
             svc_ms: svc::TIMEOUT_MS,
             vault: None,
+            join_bind: None,
         }
     }
 }
@@ -2010,6 +2014,8 @@ impl Net for Shared {
 pub struct Node {
     shared: Arc<Shared>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// The invites open here, and their door on join/2.
+    invites: join2::Invites,
 }
 
 impl Node {
@@ -2064,7 +2070,7 @@ impl Node {
                 n.push_person(e.n);
             }
         }));
-        Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()) }))
+        Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()), invites: join2::Invites::default() }))
     }
 
     pub fn shared(&self) -> &Arc<Shared> {
@@ -2348,6 +2354,7 @@ impl Node {
         n.peers.locked().clear();
         n.svc.forget();
         n.identity.forget_others();
+        self.invites.close();
         n.log("net.leave", &format!("this machine left the network {}", net.name));
         Ok(json!({ "left": net.name, "removed": asked, "founder": founder }))
     }
@@ -2715,6 +2722,7 @@ impl Node {
             "delegated": reach.delegated.as_ref().map(|(by, at)| json!({ "by": by, "at": at })),
             "person": person,
         });
+        out["invites"] = self.invites.json(now as i64);
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());
             out["epoch"] = json!(g.epoch());
@@ -2889,8 +2897,13 @@ impl Drop for Node {
         for t in self.tasks.locked().drain(..) {
             t.abort();
         }
+        self.invites.close();
     }
 }
+
+// join/2: `invite` and `join_invite`.
+#[path = "node_join.rs"]
+mod join2;
 
 #[cfg(test)]
 mod tests {

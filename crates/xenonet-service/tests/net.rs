@@ -130,6 +130,8 @@ fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
     // Fake keys: a test never touches the machine's own, or prompts.
     o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = caps;
+    // join/2's endpoints on loopback alone.
+    o.join_bind = Some("127.0.0.1:0".parse().unwrap());
     o
 }
 
@@ -451,6 +453,65 @@ async fn adding_a_machine_is_the_windows_and_its_join_pairs_the_device() {
     let add = roster.last().unwrap().clone();
     assert_eq!((add["op"].clone(), add["host"]["device"].clone()), (json!("add"), st["person"]["device"].clone()), "{add}");
     assert!(add["signers"][0]["presence"]["what"] == "admit", "{add}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_machine_joins_with_an_invite_over_join2() {
+    let a = Host::new("invite", "studio", 0.0, Caps::default()).await;
+    let (s, v) = loop {
+        let [port] = common::free_ports();
+        let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
+        if s != 400 || !v["error"].as_str().is_some_and(|e| e.contains("already in use")) {
+            break (s, v);
+        }
+    };
+    assert_eq!(s, 200, "{v}");
+    // An invite only from the window, since the join asks the person.
+    let (s, v) = a.call("POST", "/api/net/invite", json!({ "host": "laptop" }), false).await;
+    assert_eq!(s, 403, "{v}");
+    let (s, inv) = a.call("POST", "/api/net/invite", json!({ "host": "laptop" }), true).await;
+    assert_eq!(s, 200, "{inv}");
+    let invite = inv["invite"].as_str().unwrap().to_string();
+    let code = inv["code"].as_str().unwrap().to_string();
+    assert!(invite.starts_with("xni2_") && !inv["line"].as_str().unwrap().contains(&code), "the code goes apart: {inv}");
+    // The invite names no address: the person says where studio is.
+    let at = inv["at"].as_array().unwrap().iter().filter_map(Value::as_str).find(|a| a.starts_with("127.0.0.1:")).unwrap_or_else(|| panic!("{inv}")).to_string();
+    // desk's invite keeps studio's door open after laptop's is used.
+    let (s, desk) = a.call("POST", "/api/net/invite", json!({ "host": "desk" }), true).await;
+    assert_eq!(s, 200, "{desk}");
+    let b = Host::new("invite", "laptop", 0.0, Caps::default()).await;
+    let join = |invite: &Value, code: &str| json!({ "invite": invite, "code": code, "at": at });
+    let (s, v) = b.call("POST", "/api/net/join", json!({ "invite": invite, "code": code }), true).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("no-path")), "{v}");
+    let (s, v) = b.call("POST", "/api/net/join", join(&inv["invite"], "0000-0000-00"), true).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("wrong-code")), "{v}");
+    assert_eq!(a.state().await["invites"]["open"][0]["wrong"], 1);
+    let (s, v) = b.call("POST", "/api/net/join", join(&inv["invite"], &code), true).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!((v["network"]["name"].clone(), v["self"]["id"].clone()), (json!("home"), json!("laptop")), "{v}");
+    // laptop links through the gateway, by the address studio sent, and
+    // its device is the person's.
+    live(&b, 2).await;
+    let st = b.state().await;
+    assert_eq!((st["person"]["id"].clone(), st["person"]["acts"].clone()), (a.state().await["person"]["id"].clone(), json!(true)));
+    assert_eq!(a.state().await["invites"]["open"].as_array().unwrap().len(), 1, "laptop's is used");
+    // It worked once: another machine with the same invite and code is
+    // told no such ticket is open.
+    let c = Host::new("invite", "desk", 0.0, Caps::default()).await;
+    let (s, v) = c.call("POST", "/api/net/join", join(&inv["invite"], &code), true).await;
+    assert_eq!((s, v["code"].clone()), (404, json!("no-ticket")), "{v}");
+    // Five wrong codes retire desk's invite, and studio's console says so.
+    // (A third keeps the door open, so the last try below is answered.)
+    let (s, _) = a.call("POST", "/api/net/invite", json!({ "host": "spare" }), true).await;
+    assert_eq!(s, 200);
+    for i in 1..=5 {
+        let (s, v) = c.call("POST", "/api/net/join", join(&desk["invite"], "0000-0000-00"), true).await;
+        assert_eq!(s, if i < 5 { 403 } else { 410 }, "try {i}: {v}");
+    }
+    let (s, v) = c.call("POST", "/api/net/join", join(&desk["invite"], desk["code"].as_str().unwrap()), true).await;
+    assert_eq!((s, v["code"].clone()), (404, json!("no-ticket")), "the right code after it's retired: {v}");
+    let burned = a.state().await["invites"]["burned"].clone();
+    assert_eq!((burned[0]["host"].clone(), burned[0]["retired"].clone()), (json!("desk"), json!(true)), "{burned}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -780,6 +841,12 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     let _ = ctx.net.set(b.svc.clone());
     let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/net/create", &[], Some("{}")))).await.unwrap();
     assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("yours")));
+    // So is joining with an invite, before anything is dialled, and making
+    // one.
+    let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/net/join", &[], Some(r#"{"invite":"xni2_AAAA","code":"KX7Q-49MZ-T2","at":"127.0.0.1:9"}"#)))).await.unwrap();
+    assert_eq!((r.status, r.body_json()["code"].clone()), (403, json!("yours")));
+    let r = api(&ctx, common::local(&ctx, Req::fake("POST", "/api/net/invite", &[], Some(r#"{"host":"x1"}"#)))).await.unwrap();
+    assert_eq!(r.status, 403);
     let r = api(&ctx, common::local(&ctx, Req::fake("GET", "/api/net/state", &[], None))).await.unwrap();
     assert_eq!(r.status, 403);
     // A ticket from a terminal is macOS's alone, and the person's there.

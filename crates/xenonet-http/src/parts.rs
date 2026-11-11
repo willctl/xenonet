@@ -157,11 +157,20 @@ pub trait Network: Send + Sync {
     /// A new network, founded here: `address` is the gateway's public host,
     /// `lan` its LAN address.
     fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, at_window: bool) -> NetResult;
+    /// Joins through the gateway's join route with a ticket: the window's
+    /// Add a machine, until the gateway goes.
     async fn join(&self, address: &str, ticket: &str) -> NetResult;
+    /// Joins over join/2 with an invite and its code, finding the inviter
+    /// at `at`, through the invite's relay, or by mDNS (`lan`).
+    async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult;
     async fn leave(&self, force: bool) -> NetResult;
     /// The address a ticket names for the gateway, through its tunnel.
     fn tunnel_address(&self, address: Option<&str>);
+    /// A ticket the gateway keeps, for `join`.
     async fn ticket(&self, host: &str, window: bool, at_window: bool) -> NetResult;
+    /// An invite for `host`, and its code apart, for join/2; `lan` has the
+    /// inviter announce itself on the LAN by mDNS while it's open.
+    async fn invite(&self, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult;
     async fn remove(&self, host: &str) -> NetResult;
     async fn replace(&self, host: &str, at_window: bool) -> NetResult;
     async fn approve(&self, id: &str, at_window: bool) -> NetResult;

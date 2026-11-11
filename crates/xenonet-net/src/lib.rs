@@ -40,6 +40,10 @@
 //! - `endpoint`: the `Dial` over iroh, keyed by host.key: relays the
 //!   person names or none, the memory lookup and mDNS behind a setting,
 //!   and a door per protocol.
+//! - `join`: joining over `xenonet/join/2`: the invite, the code apart
+//!   from it, proofs both ways, the inviter's tickets, and the joiner's
+//!   check of the chain from its genesis. `ticket`'s gateway proofs stay
+//!   beside it for the gateway's join route until the gateway goes.
 
 pub mod admission;
 pub mod codec;
@@ -53,6 +57,7 @@ pub mod gateway;
 pub mod ground;
 pub mod gwstore;
 pub mod identity;
+pub mod join;
 pub mod keys;
 pub mod link;
 pub mod node;

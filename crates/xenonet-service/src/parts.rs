@@ -156,6 +156,9 @@ impl parts::Network for NetService {
     async fn join(&self, address: &str, ticket: &str) -> NetResult {
         answered(self.node().join(address, ticket).await)
     }
+    async fn join_invite(&self, invite: &str, code: &str, at: Option<&str>, lan: bool) -> NetResult {
+        answered(self.node().join_invite(invite, code, at, lan).await)
+    }
     async fn leave(&self, force: bool) -> NetResult {
         answered(self.node().leave(force).await)
     }
@@ -164,6 +167,9 @@ impl parts::Network for NetService {
     }
     async fn ticket(&self, host: &str, window: bool, at_window: bool) -> NetResult {
         answered(self.node().ticket(host, window, at_window).await)
+    }
+    async fn invite(&self, host: &str, window: bool, lan: bool, at_window: bool) -> NetResult {
+        answered(self.node().invite(host, window, lan, at_window).await)
     }
     async fn remove(&self, host: &str) -> NetResult {
         answered(self.node().remove(host).await)

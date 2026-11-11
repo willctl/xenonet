@@ -184,19 +184,31 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
                 if str(&st["gateway"], "address").is_none_or(str::is_empty) {
                     print(c::yellow("  The gateway has no address yet: xenonet net set --lan <ip:port>, with this machine's tailnet or LAN address."));
                 }
-                print(c::dim("  Add a machine: xenonet net add-machine <id> on macOS, or Add a machine in XenoNet's window."));
+                print(c::dim("  Add a machine: xenonet net invite <id> on macOS, or Add a machine in XenoNet's window."));
             })
         }
         "join" => {
-            let address = arg(args, 1, "the gateway's address and the ticket, as Add a machine showed them")?;
-            let ticket = arg(args, 2, "the ticket, as Add a machine showed it")?;
+            let first = arg(args, 1, "the invite and its code: xenonet net join <invite> <code>")?;
+            let second = arg(args, 2, "the code that came with the invite")?;
+            // An invite goes over join/2 to the machine that made it; a line
+            // from Add a machine (an address and a ticket) through the
+            // gateway, until the gateway goes.
+            let body = if first.trim().starts_with("xni2_") {
+                let mut b = json!({ "invite": first, "code": second, "lan": flags.on("mdns") });
+                if let Some(at) = flags.text("at") {
+                    b["at"] = json!(at);
+                }
+                b
+            } else {
+                json!({ "address": first, "ticket": second })
+            };
             // While the ticket's maker hasn't signed this machine in, or a
             // second window host hasn't approved it, the join waits: it says
             // why once, and asks again until the ticket lapses.
             let started = std::time::Instant::now();
             let mut said = false;
             let st = loop {
-                let st = call(&s, "POST", "/api/net/join", Some(&json!({ "address": address, "ticket": ticket })))?;
+                let st = call(&s, "POST", "/api/net/join", Some(&body))?;
                 if !on(&st, "waiting") {
                     break st;
                 }
@@ -212,6 +224,24 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             out(&st, &|st| {
                 print(format!("{} joined {} as {}", c::green("✓"), c::bold(t(&st["network"], "name")), t(&st["self"], "id")));
                 print(format!("  {}  {}", c::dim("gateway key"), t(&st["gateway"], "keyId")));
+            })
+        }
+        "invite" => {
+            let host = arg(args, 1, "the new machine's id: xenonet net invite <id>")?;
+            let r = call(&s, "POST", "/api/net/invite", Some(&json!({ "host": host, "window": flags.on("window"), "lan": flags.on("mdns") })))?;
+            out(&r, &|r| {
+                print(format!("Give {} this invite. It works once, for ten minutes:", c::bold(t(r, "host"))));
+                print(format!("\n  {}\n", t(r, "invite")));
+                print(format!("and tell it the code some other way than the invite went: {}", c::bold(t(r, "code"))));
+                let how = if str(r, "relay").is_some() {
+                    String::new()
+                } else if on(r, "lan") {
+                    " --mdns".to_string()
+                } else {
+                    let at = list(r, "at").iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>();
+                    format!(" --at <{}>", if at.is_empty() { "this machine's address".to_string() } else { at.join(" or ") })
+                };
+                print(format!("\nOn {}: xenonet net join <invite> <code>{how}", t(r, "host")));
             })
         }
         "add-machine" => {
@@ -333,6 +363,6 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             }
             _ => Err(Fail::new("xenonet net gateway take, or xenonet net gateway set <address>", 2)),
         },
-        w => Err(Fail::new(format!("xenonet net doesn't know {w}: create, join, status, hosts, add-machine, remove, replace, leave, set, approve or gateway"), 2)),
+        w => Err(Fail::new(format!("xenonet net doesn't know {w}: create, join, invite, status, hosts, add-machine, remove, replace, leave, set, approve or gateway"), 2)),
     }
 }

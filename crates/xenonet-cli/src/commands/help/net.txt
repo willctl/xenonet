@@ -11,12 +11,22 @@ on and can't read them.
                                    tunnel (xenonet gateway on --tunnel …), or
                                    on your LAN at --lan, an address this
                                    machine has (never 0.0.0.0)
-  xenonet net join <address> <ticket>
-                                   joins the network, with the line Add a
-                                   machine showed: it works once, for ten
-                                   minutes. A ticket made on a machine that
-                                   isn't the gateway waits for that machine
-                                   to sign this one in
+  xenonet net invite <id> [--window] [--mdns]
+                                   an invite for a new machine, and its code
+                                   apart: give it the invite, and tell it the
+                                   code some other way. It works once, for
+                                   ten minutes, and five wrong codes retire
+                                   it. --mdns lets the new machine find this
+                                   one on your LAN. It's XenoNet's window's,
+                                   since signing the machine in asks you
+  xenonet net join <invite> <code> [--at <ip:port>] [--mdns]
+                                   joins the network straight from the
+                                   machine that made the invite: at its
+                                   address (--at, such as its tailnet or LAN
+                                   address), on your LAN (--mdns), or through
+                                   the network's relay when it has one. The
+                                   line Add a machine shows (an address and
+                                   a ticket) joins through the gateway
   xenonet net status [--json]      the network, this machine, the gateway and
                                    the link, and what waits to be sent
   xenonet net hosts [--json]       the machines in the network

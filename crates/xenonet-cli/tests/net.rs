@@ -126,7 +126,16 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     assert!(out.contains("net "), "the command is listed: {out}");
     let (code, out, _) = s.run(&["net", "--help"]);
     assert_eq!(code, 0);
-    assert!(out.contains("xenonet net join <address> <ticket>"), "{out}");
+    assert!(out.contains("xenonet net join <invite> <code>") && out.contains("xenonet net invite <id>"), "{out}");
+    // Joining is yours: from under an agent it's refused before anything
+    // is dialled, and from your terminal this invite is no invite.
+    let (code, _, err) = s.run(&["net", "join", "xni2_AAAA", "KX7Q-49MZ-T2", "--at", "127.0.0.1:9"]);
+    assert_eq!(code, 1, "{err}");
+    let agent = |e: &str| e.contains("yours") || e.contains("agent") || e.contains("Claude Code") || e.contains("Codex");
+    assert!(agent(&err) || err.contains("isn't an invite"), "refused for what it is: {err}");
+    // An invite is the window's, and asks the person when the machine joins.
+    let (code, _, err) = s.run(&["net", "invite", "laptop"]);
+    assert_eq!(code, 1, "{err}");
     let (code, out, _) = s.run(&["svc", "--help"]);
     assert_eq!(code, 0);
     assert!(out.contains("done in XenoNet's window"), "{out}");

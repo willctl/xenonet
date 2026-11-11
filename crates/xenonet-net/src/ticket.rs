@@ -60,11 +60,11 @@ pub fn hash_b64(code: &str) -> String {
     b64(&hash(code))
 }
 
-fn mac(hash: &[u8], msg: &str) -> String {
+pub(crate) fn mac(hash: &[u8], msg: &str) -> String {
     b64(hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, hash), msg.as_bytes()).as_ref())
 }
 
-fn check(hash: &[u8], msg: &str, proof: &str) -> bool {
+pub(crate) fn check(hash: &[u8], msg: &str, proof: &str) -> bool {
     unb64(proof).is_some_and(|p| hmac::verify(&hmac::Key::new(hmac::HMAC_SHA256, hash), msg.as_bytes(), &p).is_ok())
 }
 

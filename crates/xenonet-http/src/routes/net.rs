@@ -11,7 +11,14 @@
 //! there, never prompted for.
 //!
 //! - `GET state`: `network/state/v1`.
-//! - `POST create`, `POST join`, `POST leave`: on this machine only.
+//! - `POST create`, `POST join`, `POST leave`: on this machine only. A
+//!   join with `invite` and `code` goes over join/2 to the machine that
+//!   made the invite (`at`, its address, or `lan`, mDNS, when the invite
+//!   names no relay); one with `address` and `ticket` goes through the
+//!   gateway's join route, for the window's Add a machine until the
+//!   gateway goes.
+//! - `POST invite`: an invite and its code, for join/2; the window's, as a
+//!   ticket is.
 //! - `POST ticket`, `POST remove`, `POST replace`.
 //! - `POST approve`: signs an entry that waits for the founder or a second
 //!   window host (a move of the gateway, or a window host's add), by the
@@ -112,6 +119,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
                     | "join"
                     | "leave"
                     | "ticket"
+                    | "invite"
                     | "remove"
                     | "replace"
                     | "approve"
@@ -150,6 +158,10 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     let result = match rest {
         "state" => Ok(net.state()),
         "create" => create(ctx, net, &body, window).await,
+        "join" if body.get("invite").is_some() => {
+            let at = text("at");
+            net.join_invite(&text("invite"), &text("code"), Some(at.as_str()).filter(|a| !a.is_empty()), on("lan")).await
+        }
         "join" => net.join(&text("address"), &text("ticket")).await,
         "leave" => {
             let r = net.leave(on("force")).await;
@@ -161,6 +173,10 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         "ticket" => {
             net.tunnel_address(public_host(ctx).as_deref());
             net.ticket(&text("host"), on("window"), window).await
+        }
+        "invite" => {
+            net.tunnel_address(public_host(ctx).as_deref());
+            net.invite(&text("host"), on("window"), on("lan"), window).await
         }
         "remove" => net.remove(&text("host")).await,
         "replace" => net.replace(&text("host"), window).await,

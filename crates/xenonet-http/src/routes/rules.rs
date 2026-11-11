@@ -367,6 +367,7 @@ pub const RULES: &[Rule] = &[
     r("POST",   "/api/net/join", YOU, Nothing),
     r("POST",   "/api/net/leave", YOU, Nothing),
     r("POST",   "/api/net/ticket", WINDOW, Nothing),
+    r("POST",   "/api/net/invite", WINDOW, Nothing),
     r("POST",   "/api/net/remove", YOU, Nothing),
     r("POST",   "/api/net/replace", YOU, Nothing),
     r("POST",   "/api/net/approve", YOU, Nothing),
