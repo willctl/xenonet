@@ -1,10 +1,10 @@
 # Waking actors when a message arrives
 
-Status: built on `feat/actor-wake`, 2026-10-09 (`core/actors/wake.js`).
+How an actor hears that a message is waiting, without polling (`crates/xenonet-actors/src/wake.rs`).
 
 ## Why
 
-An actor learned of a message only when it asked. Grok Bot asked from an hourly routine, so an answer could take an hour. The owner asked for "near real time messages, so that actors don't need to poll".
+An actor that only asks for its messages hears of them when it next asks. Grok Bot asks from a routine, so without a wake an answer could take an hour. The person asked for near real time messages, so that actors don't need to poll.
 
 ## What each actor can take
 
@@ -27,10 +27,10 @@ A wake to run a local command was left out on purpose. `xenonet actor listen --e
    - Any other key goes as `Authorization: Bearer`, which a Grok Bot routine expects.
 3. **The webhook's secrets stay in the credential store.**
    - The URL and the key are both kept there, because a URL can be a secret by itself, like Slack's.
-   - XenoNet's database keeps only the host, whether the key signs, and when it was set.
+   - The store keeps only the host, whether the key signs, and when it was set.
    - Only the window, with its key, can set a webhook. Seeing, testing and turning one off are the owner's, from a terminal too.
    - Logs name the host, never the path, query or key. The doctor, which any local program can read, doesn't name even the host: it gives a reason such as "HTTP 401".
-   - The store doesn't protect against programs running as the owner. On a Mac, an item made through `/usr/bin/security` is readable and writable by any of them, agents included. So `fire()` checks the stored URL again and calls it only if its host matches the one set in the window. Restricting the item's access list to XenoNet itself is a follow-up for `core/secret-store.js`, and would cover every secret XenoNet keeps.
+   - The store doesn't protect against programs running as the owner. On a Mac, an item made through `/usr/bin/security` is readable and writable by any of them, agents included. So `fire` checks the stored URL again and calls it only if its host matches the one set in the window. Restricting the item's access list to XenoNet itself, in `crates/xenonet-actors/src/secret_store.rs`, would cover every secret XenoNet keeps; it isn't built.
 4. **Requests are narrow.**
    - Only `https://`, or `http://` on this computer. No user name or password in the URL, at most 2,048 characters.
    - Nothing link-local: 169.254/16, fe80::/10 and their IPv4-mapped forms, checked in the URL and again in what its name resolves to before each call. A name that resolves differently by the time of the connection could still get through; covering that needs the address pinned in the connection itself.
@@ -56,6 +56,6 @@ A wake to run a local command was left out on purpose. `xenonet actor listen --e
 
 ## Tests
 
-- `test/actor-wake.test.js`: the signature vector, URL rules, batching and gaps, backoff and the words for each failure, secrets in the store and out of logs, Notify me, streams and the stream route.
-- `test/cli-actor.test.js`: `listen`, `listen --exec`, `wake`.
+- `crates/xenonet-actors/src/wake.rs`'s tests: the signature vector, URL rules, batching and gaps, backoff and the words for each failure, secrets in the store and out of logs, Notify me, streams.
+- `crates/xenonet-cli/src/commands/actor.rs`'s tests: a stream's events read as they come, for `listen`.
 - `test/e2e/actor-requests.test.js`: a webhook set in the window, tested, then called within seconds of a message through the gateway.

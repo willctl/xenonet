@@ -1,29 +1,19 @@
 # The actor gateway: tunnels, checks and reconnecting
 
-Status: built on `feat/actors-talk`, 2026-10-08. The gateway itself
-(`server/actor-gateway.js`) is described in `interface.md`; this note
-covers how it gets on the internet and stays there.
+How the actor gateway gets on the internet and stays there. The gateway
+itself (`crates/xenonet-service/src/gateway/actor_gateway.rs`) is
+described in [interface.md](interface.md).
 
 ## Why
 
-The first live run between Grok Bot and Muse (2026-10-08) worked, but
-setting it up took six manual steps across four apps:
-
-- turn the gateway on;
-- run `tailscale funnel` in a terminal;
-- make a token per actor;
-- paste each token into an app that hides its settings.
-
-It also failed quietly. Homebrew's `tailscale` (1.98.8) set Funnel up
-against a newer running Tailscale (1.104.1), and the name never reached
-public DNS. Nothing said so.
-
-It also assumed things that don't hold for everyone who runs XenoNet:
-
-- that Tailscale is there;
-- that the address never changes;
-- that someone notices when a reboot, a rename or a token expiry breaks the
-  connection.
+Without help, connecting an actor such as Grok Bot or Muse takes manual
+steps across several apps: turning the gateway on, running a tunnel in a
+terminal, making a token per actor and pasting each into an app that hides
+its settings. A tunnel can also fail quietly: a `tailscale` command older
+than the running Tailscale can set Funnel up against it and leave the name
+out of public DNS, with nothing saying so. And the gateway can't assume
+that Tailscale is there, that the address never changes, or that someone
+notices when a reboot, a rename or a token expiry breaks the connection.
 
 XenoNet is a public project, so the gateway can't assume any one way onto
 the internet.
@@ -31,7 +21,7 @@ the internet.
 ## Decisions
 
 1. **No tunnel is assumed.** The owner picks one of five kinds
-   (`server/gateway-tunnel.js`). XenoNet finds which tools are installed and
+   (`crates/xenonet-service/src/gateway/tunnel.rs`). XenoNet finds which tools are installed and
    offers all five:
 
    | Kind | XenoNet runs | Address | Why it's here |
@@ -69,7 +59,7 @@ the internet.
    (`public`), the panel says them, and the doctor warns when they're more
    than `/mcp`. Turning the gateway off turns Funnel off only when it
    serves the gateway alone.
-5. **Checked from the internet side.** `server/gateway-reach.js` first
+5. **Checked from the internet side.** `gateway/reach.rs` first
    asks public resolvers (1.1.1.1, 8.8.8.8, 9.9.9.9) for the name, so it
    gets the internet's answer rather than what MagicDNS or a hosts file
    says. It then sends `GET https://<name>/mcp` to that address, carrying a
@@ -84,12 +74,8 @@ the internet.
    - the tunnel up but the gateway not reached (502–504);
    - something else answering.
 
-   Checked on this Mac on 2026-10-08:
-   - through Funnel, it passed;
-   - with the gateway down, it said 502.
-6. **It comes back by itself** (`server/gateway-control.js`). The settings
-   `{ on, host, tunnel: { kind, name, host } }` are kept in the engine's
-   database. At start XenoNet applies them again. A one-minute clock then
+6. **It comes back by itself** (`gateway/control.rs`). The settings
+   `{ on, host, tunnel: { kind, name, host } }` are kept in the store. At start XenoNet applies them again. A one-minute clock then
    checks the address:
    - every ten minutes while it passes;
    - every two minutes while it fails;
@@ -103,7 +89,7 @@ the internet.
    ngrok refuses a second agent on the same domain.
 7. **An address change names the apps it strands.** The gateway records
    each actor's last call and the public host it came by (`gateway.seen` in
-   the engine's meta). When the address in use differs from that host, the
+   the store's meta). When the address in use differs from that host, the
    actor's row and `xenonet doctor` say its app has an old address. The
    app's token still works, since tokens don't depend on the address. **New
    address…** shows what to tell it.
@@ -111,7 +97,8 @@ the internet.
    - a gateway token within a week of its 30 unused days;
    - calls with a token that was replaced, taken away or expired, with
      the actor named from the revocation record.
-9. **What to tell each app, written out** (`core/actors/handoff.js`).
+9. **What to tell each app, written out** (`crates/xenonet-actors/src/handoff.rs`,
+   and `src/shared/handoff.js` for the page).
    - **Grok Bot** is set up from its chat, and its message never carries
      the token: it asks Grok Bot to request the token with its secure
      secret card, whose value Grok Bot's model never sees, and to send it
@@ -134,10 +121,11 @@ base64url ([authorization.md](../authorization.md), "The actor grant").
 It works at `/mcp` and `/a2a` and nowhere else, and XenoNet keeps only its
 revocation id.
 
-## Asking for a token (2026-10-13)
+## Asking for a token
 
 An agent can start a connection without ever holding its secret. The ask
-(`registration.askGateway`, `POST /api/actors/<slug>/gateway/ask`, the
+(`ask_gateway` in `crates/xenonet-actors/src/registration.rs`,
+`POST /api/actors/<slug>/gateway/ask`, the
 `ask_gateway_token` MCP tool and `xenonet gateway token`) is open to any
 program on this machine, as registering is, because it holds nothing:
 
@@ -152,7 +140,7 @@ program on this machine, as registering is, because it holds nothing:
   break a connection. An ask lapses with a registration's ten minutes, one
   waits per actor, four at a time and twenty an hour.
 - It's refused from an actor's token, and from under an actor product's own
-  processes (`verify.asker`), which could be relaying for its cloud. A
+  processes (the verifier's `asker`), which could be relaying for its cloud. A
   session, or your own terminal, may ask.
 - The token shows masked (`src/secret.js`): out of the page until Show,
   ten seconds, masked again in a screenshot or when the window loses
@@ -186,20 +174,14 @@ A delivery that needs no click would need somewhere safe to put the token
 
 ## Tests
 
-- `test/gateway-tunnel.test.js`:
-  - Tailscale with stand-in commands: version matching, Funnel's
-    states, the link Tailscale asks you to visit;
-  - the lines each tool writes;
-  - a child's restarts and failure;
-  - the check's every answer;
-  - the handoff text.
-- `test/actor-gateway.test.js`:
-  - the routes;
-  - the one-time word;
-  - an address change;
-  - a refused token;
-  - a restart that brings a quick tunnel back with a new address;
-  - a wake.
+- `crates/xenonet-service/tests/tunnel.rs`: Tailscale with stand-in
+  commands (version matching, Funnel's states, the link Tailscale asks you
+  to visit), the lines each tool writes, a child's restarts and failure,
+  and a tunnel left running stopped only while it is still that tool.
+- `crates/xenonet-service/tests/gateway.rs` and `gateway_control.rs`: the
+  routes, the one-time word, refused tokens, the gateway's port, and on
+  and off with a tunnel of your own.
+- `test/gateway-tunnel.test.js`: the handoff text the page shows.
 - `test/e2e/actor-requests.test.js`: setting up in the window, with
   `XENONET_GATEWAY_PROBE=local` checking through the gateway's own port
   instead of the internet.
