@@ -74,7 +74,7 @@ impl Sink for TestSink {
             // Off the link's task, as the engine sends it from its own.
             std::thread::spawn(move || {
                 let body = json!({ "schema": "network/presence/v1", "counter": counter, "full": true, "agents": [], "removed": [], "you": false, "roster": "" });
-                net.send(Outgoing { authority: None, to: To::All, kind: Kind::Presence, body }).unwrap();
+                net.send(Outgoing { network: None, authority: None, to: To::All, kind: Kind::Presence, body }).unwrap();
             });
         }
     }
@@ -199,7 +199,7 @@ impl Host {
 
     fn send(&self, to: &str, kind: Kind, text: &str) {
         let body = json!({ "schema": format!("network/{}/v1", kind.as_str()), "body": text });
-        self.svc.net().send(Outgoing { authority: None, to: To::Host(to.into()), kind, body }).unwrap();
+        self.svc.net().send(Outgoing { network: None, authority: None, to: To::Host(to.into()), kind, body }).unwrap();
     }
 }
 
@@ -284,7 +284,7 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
     assert_eq!(*a.sink.window.lock().unwrap(), [("laptop".to_string(), false)]);
     assert_eq!(*c.sink.window.lock().unwrap(), [("laptop".to_string(), false)]);
     // Presence goes to every host.
-    b.svc.net().send(Outgoing { authority: None, to: To::All, kind: Kind::Presence, body: json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": "claude:1", "waitsOnYou": true }], "removed": [], "you": false, "roster": "x" }) }).unwrap();
+    b.svc.net().send(Outgoing { network: None, authority: None, to: To::All, kind: Kind::Presence, body: json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [{ "id": "claude:1", "waitsOnYou": true }], "removed": [], "you": false, "roster": "x" }) }).unwrap();
     until("presence", 10, || a.sink.got.lock().unwrap().iter().any(|g| g.1 == "presence") && c.sink.got.lock().unwrap().iter().any(|g| g.1 == "presence")).await;
     let s = a.state().await;
     let laptop = s["hosts"].as_array().unwrap().iter().find(|h| h["id"] == "laptop").unwrap().clone();
@@ -296,6 +296,7 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
     b.svc
         .net()
         .send(Outgoing {
+            network: None,
             authority: None,
             to: To::All,
             kind: Kind::Presence,
@@ -349,6 +350,31 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
     let again = req.clone();
     assert_eq!(gw.handle(req).await.status, 200);
     assert_eq!(gw.handle(again).await.status, 409);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn what_goes_names_its_network_and_presence_shows_only_what_is_shared_into_it() {
+    let [port] = common::free_ports();
+    let (a, b, _c) = network("sharing", port, Caps::default(), [0.0; 3]).await;
+    let id = b.state().await["network"]["id"].as_str().unwrap().to_string();
+    let mine = b.svc.net().networks();
+    assert_eq!((mine.len(), mine[0].network.as_str(), mine[0].host.as_str()), (1, id.as_str(), "laptop"));
+    // A body for a network this machine isn't in is refused, never sent in
+    // the one it is in.
+    let other = Outgoing::new(To::Host("studio".into()), Kind::Message, json!({ "schema": "network/message/v1", "body": "x" })).within("net_ffffffffffffffffffffffffffffffff");
+    assert!(b.svc.net().send(other).unwrap_err().contains("isn't in net_ffff"));
+    let agents = json!([{ "id": "claude:web", "projectKey": "prj_web" }, { "id": "claude:api", "projectKey": "prj_api" }, { "id": "claude:loose" }]);
+    let presence = |counter: u64| json!({ "schema": "network/presence/v1", "counter": counter, "full": true, "agents": agents, "removed": [], "you": false, "roster": "" });
+    let heard = |counter: u64| a.sink.got.lock().unwrap().iter().find(|g| g.0 == "laptop" && g.1 == "presence" && g.2["counter"] == counter).map(|g| g.2["agents"].clone());
+    // The first network shares everything, as the one network did.
+    b.svc.net().send(Outgoing::new(To::All, Kind::Presence, presence(1)).within(id.clone())).unwrap();
+    until("the first presence", 10, || heard(1).is_some()).await;
+    assert_eq!(heard(1).unwrap().as_array().map(Vec::len), Some(3));
+    // Shared down to one project, presence carries its sessions alone.
+    b.kept().persist.put_sharing(&id, &xenonet_net::share::Sharing::Projects(["prj_web".to_string()].into())).unwrap();
+    b.svc.net().send(Outgoing::new(To::All, Kind::Presence, presence(2))).unwrap();
+    until("the second presence", 10, || heard(2).is_some()).await;
+    assert_eq!(heard(2).unwrap(), json!([{ "id": "claude:web", "projectKey": "prj_web" }]));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -545,8 +571,8 @@ async fn a_full_queue_gives_a_gap_and_a_removed_host_is_refused() {
     let st = c.state().await;
     assert_eq!(st["gateway"]["link"], "removed");
     assert!(st["gateway"]["reason"].as_str().unwrap().contains("by studio"), "{st}");
-    assert!(c.svc.net().send(Outgoing { authority: None, to: To::Host("laptop".into()), kind: Kind::Message, body: json!({}) }).is_err());
-    assert!(b.svc.net().send(Outgoing { authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: json!({}) }).is_err());
+    assert!(c.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("laptop".into()), kind: Kind::Message, body: json!({}) }).is_err());
+    assert!(b.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("desk".into()), kind: Kind::Message, body: json!({}) }).is_err());
     assert_eq!(b.state().await["hosts"].as_array().unwrap().len(), 2);
     // The founder can't be removed, from anywhere.
     let (s, v) = b.call("POST", "/api/net/remove", json!({ "host": "studio" }), true).await;
@@ -912,7 +938,13 @@ async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
     // desk sends laptop the map: it reaches laptop's relay sink, never its
     // engine, and so does the gateway's host's.
     let relay = |h: &Host, to: &str, n: u64| {
-        h.svc.net().send(Outgoing { authority: None, to: To::Host(to.into()), kind: Kind::Relay, body: json!({ "sub": "s1", "seq": n, "frames": [{ "t": "ping", "now": n }] }) })
+        h.svc.net().send(Outgoing {
+            network: None,
+            authority: None,
+            to: To::Host(to.into()),
+            kind: Kind::Relay,
+            body: json!({ "sub": "s1", "seq": n, "frames": [{ "t": "ping", "now": n }] }),
+        })
     };
     relay(&c, "laptop", 1).unwrap();
     relay(&a, "laptop", 2).unwrap();
@@ -923,7 +955,7 @@ async fn the_maps_relay_frames_cross_in_batches_and_a_bucket_of_their_own() {
     assert!(b.sink.got.lock().unwrap().iter().all(|g| g.1 != "relay"), "never the engine's");
     // A relay body is 8 MiB at most, before it's sealed.
     let big = json!({ "sub": "s1", "seq": 3, "frames": [{ "t": "snapshot", "graph": "x".repeat(9 << 20) }] });
-    assert!(c.svc.net().send(Outgoing { authority: None, to: To::Host("laptop".into()), kind: Kind::Relay, body: big }).unwrap_err().contains("8 MiB"));
+    assert!(c.svc.net().send(Outgoing { network: None, authority: None, to: To::Host("laptop".into()), kind: Kind::Relay, body: big }).unwrap_err().contains("8 MiB"));
 
     // At the gateway: relay frames only in a relay batch, and nothing else
     // in one.

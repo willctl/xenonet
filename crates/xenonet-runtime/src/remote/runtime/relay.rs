@@ -688,8 +688,8 @@ mod tests {
     }
 
     impl Net for FakeNet {
-        fn me(&self) -> Option<Me> {
-            Some(Me { network: "net_0123456789abcdef0123456789abcdef".into(), name: "home".into(), host: "laptop".into() })
+        fn networks(&self) -> Vec<Me> {
+            vec![Me { network: "net_0123456789abcdef0123456789abcdef".into(), name: "home".into(), host: "laptop".into() }]
         }
         fn hosts(&self) -> Vec<Host> {
             self.hosts.locked().clone()
@@ -767,7 +767,7 @@ mod tests {
     }
 
     fn ask(from: &str, window: bool, op: &Op) -> Incoming {
-        Incoming { from: from.into(), kind: Kind::Relay, body: wire::ask(SUB, op), at: now_ms(), from_window_host: window }
+        Incoming { network: "net_0123456789abcdef0123456789abcdef".into(), from: from.into(), kind: Kind::Relay, body: wire::ask(SUB, op), at: now_ms(), from_window_host: window }
     }
 
     /// Every frame sent to `host` so far, in order, with the seqs checked.
@@ -837,8 +837,9 @@ mod tests {
         // A POST, by its method or as an op, never reaches the API.
         let mut post = wire::ask(SUB, &Op::Get { id: 7, path: "/api/session/claude:abc/stats".into() });
         post["method"] = json!("POST");
-        s.relay(Incoming { from: "studio".into(), kind: Kind::Relay, body: post, at: now_ms(), from_window_host: true });
+        s.relay(Incoming { network: "net_0123456789abcdef0123456789abcdef".into(), from: "studio".into(), kind: Kind::Relay, body: post, at: now_ms(), from_window_host: true });
         s.relay(Incoming {
+            network: "net_0123456789abcdef0123456789abcdef".into(),
             from: "studio".into(),
             kind: Kind::Relay,
             body: json!({ "schema": wire::SCHEMA, "op": "post", "sub": SUB, "id": 8, "path": "/api/open" }),

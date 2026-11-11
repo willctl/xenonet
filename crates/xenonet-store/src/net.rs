@@ -37,6 +37,13 @@ pub(crate) const TABLES: &[&str] = &[
         network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
         status TEXT NOT NULL
     ) STRICT",
+    // What the person shares into each network: "all", or the projects
+    // whose sessions its presence carries. A network with no row has its
+    // default, all for the first and none for the rest.
+    "CREATE TABLE network_sharing (
+        network TEXT PRIMARY KEY REFERENCES networks (id) ON DELETE CASCADE,
+        sharing TEXT NOT NULL
+    ) STRICT",
     // Where this machine stands in each network's gateway stream: the
     // gateway's epoch and the last seq read in it.
     "CREATE TABLE link_cursor (
@@ -219,6 +226,7 @@ impl Db {
             c.execute("DELETE FROM chain_entries WHERE chain = ?1", params![network_chain(id)])?;
             c.execute("DELETE FROM link_status WHERE network = ?1", params![id])?;
             c.execute("DELETE FROM link_cursor WHERE network = ?1", params![id])?;
+            c.execute("DELETE FROM network_sharing WHERE network = ?1", params![id])?;
             for t in ["feed_writers", "feed_out", "feed_acks", "feed_in", "feed_loose", "feed_heads", "feed_held"] {
                 c.execute(&format!("DELETE FROM {t} WHERE network = ?1"), params![id])?;
             }
@@ -254,6 +262,26 @@ impl Db {
             c.execute(
                 "INSERT INTO link_status (network, status) SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM networks WHERE id = ?1)
                  ON CONFLICT (network) DO UPDATE SET status = excluded.status",
+                params![network, text],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// What the person shares into a network, once they said.
+    pub fn sharing(&self, network: &str) -> R<Option<Value>> {
+        let text: Option<String> = self.read(|c| Ok(c.query_row("SELECT sharing FROM network_sharing WHERE network = ?1", params![network], |r| r.get(0)).optional()?))?;
+        text.map(|t| json_of(&t, "what a network is shared")).transpose()
+    }
+
+    /// What the person shares into a network now. Nothing is kept for a
+    /// network this machine isn't in.
+    pub fn put_sharing(&self, network: &str, sharing: &Value) -> R<()> {
+        let text = json_text(sharing);
+        self.write(|c| {
+            c.execute(
+                "INSERT INTO network_sharing (network, sharing) SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM networks WHERE id = ?1)
+                 ON CONFLICT (network) DO UPDATE SET sharing = excluded.sharing",
                 params![network, text],
             )?;
             Ok(())

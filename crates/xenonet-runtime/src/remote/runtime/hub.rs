@@ -1214,7 +1214,7 @@ mod tests {
     }
 
     fn from(host: &str, sub: &str, seq: u64, frames: &[Value]) -> Incoming {
-        Incoming { from: host.into(), kind: xenonet_model::ops::Kind::Relay, body: wire::batch(sub, seq, frames), at: now_ms(), from_window_host: true }
+        Incoming { network: NETWORK.into(), from: host.into(), kind: xenonet_model::ops::Kind::Relay, body: wire::batch(sub, seq, frames), at: now_ms(), from_window_host: true }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1301,8 +1301,8 @@ mod tests {
     }
 
     impl Net for Roster {
-        fn me(&self) -> Option<xenonet_model::ops::Me> {
-            Some(xenonet_model::ops::Me { network: NETWORK.into(), name: "home".into(), host: "studio".into() })
+        fn networks(&self) -> Vec<xenonet_model::ops::Me> {
+            vec![xenonet_model::ops::Me { network: NETWORK.into(), name: "home".into(), host: "studio".into() }]
         }
         fn hosts(&self) -> Vec<xenonet_model::ops::Host> {
             self.hosts.locked().clone()

@@ -16,6 +16,7 @@ use xenonet_net::files::{NetFile, Pin};
 use xenonet_net::identity::person::{self, PersonPolicy};
 use xenonet_net::persist::{Persist, Person, Seen, WriterAt};
 use xenonet_net::roster::{self, NetworkPolicy};
+use xenonet_net::share::Sharing;
 use xenonet_net::{NetError, R};
 use xenonet_store::net::{self as kept, Gateway, Network};
 use xenonet_store::{Db, StoreError};
@@ -136,6 +137,13 @@ impl Persist for StorePersist {
     }
     fn put_feed_ack(&self, network: &str, member: &str, at: Pos) -> R<()> {
         self.0.put_feed_ack(network, member, at).map_err(store)
+    }
+    fn sharing(&self, network: &str) -> R<Option<Sharing>> {
+        // One that doesn't read is taken as said by nobody: the default.
+        Ok(self.0.sharing(network).map_err(store)?.as_ref().and_then(Sharing::parse))
+    }
+    fn put_sharing(&self, network: &str, sharing: &Sharing) -> R<()> {
+        self.0.put_sharing(network, &sharing.to_json()).map_err(store)
     }
     fn feed_heads(&self, network: &str) -> R<Vec<(String, Pos)>> {
         self.0.feed_heads(network).map_err(store)

@@ -166,8 +166,13 @@ fn a_network_and_what_goes_with_it_are_forgotten_together() {
     db.put_link_status("net_a", &serde_json::json!({ "state": "live" })).unwrap();
     db.put_services("net_a", &[serde_json::json!({ "name": "b" }), serde_json::json!({ "name": "a" })]).unwrap();
     assert_eq!(db.services("net_a").unwrap()[0]["name"], "b", "in the order published");
+    db.put_sharing("net_b", &serde_json::json!("all")).unwrap();
+    assert_eq!(db.sharing("net_b").unwrap(), None, "nothing shared into a network this machine isn't in");
+    db.put_sharing("net_a", &serde_json::json!(["prj_web"])).unwrap();
+    assert_eq!(db.sharing("net_a").unwrap(), Some(serde_json::json!(["prj_web"])));
     db.forget_network("net_a").unwrap();
     assert!(db.networks().unwrap().is_empty() && db.link_status("net_a").unwrap().is_none() && db.services("net_a").unwrap().is_empty());
+    assert_eq!(db.sharing("net_a").unwrap(), None);
 }
 
 #[test]

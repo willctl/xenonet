@@ -119,6 +119,10 @@ pub enum To {
 /// A body the engine asks the network to carry.
 #[derive(Debug, Clone)]
 pub struct Outgoing {
+    /// The network it goes in, by id: one of `Net::networks`. None is the
+    /// first of them, the one network the gateway's path carries. A network
+    /// this machine isn't in is refused, never another taken in its place.
+    pub network: Option<String>,
     pub to: To,
     pub kind: Kind,
     pub body: Value,
@@ -129,9 +133,17 @@ pub struct Outgoing {
 }
 
 impl Outgoing {
-    /// A body that rests on nothing but this machine's word.
+    /// A body that rests on nothing but this machine's word, in its first
+    /// network.
     pub fn new(to: To, kind: Kind, body: Value) -> Outgoing {
-        Outgoing { to, kind, body, authority: None }
+        Outgoing { network: None, to, kind, body, authority: None }
+    }
+
+    /// The same body in `network`.
+    #[must_use]
+    pub fn within(mut self, network: impl Into<String>) -> Outgoing {
+        self.network = Some(network.into());
+        self
     }
 }
 
@@ -139,6 +151,9 @@ impl Outgoing {
 /// against the roster and opened it.
 #[derive(Debug, Clone)]
 pub struct Incoming {
+    /// The network it came in, by id: presence and the rest are each
+    /// network's own, even from a machine in several with this one.
+    pub network: String,
     /// The host that sent it, which is in the roster.
     pub from: String,
     pub kind: Kind,
@@ -151,7 +166,8 @@ pub struct Incoming {
     pub from_window_host: bool,
 }
 
-/// This machine in its network.
+/// This machine in one of its networks: the network, and the host id it
+/// has there, which may differ from one network to the next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Me {
     pub network: String,
@@ -217,10 +233,16 @@ impl Reach {
 pub const CAN: [&str; 2] = ["start", "answer"];
 
 /// The network as the engine sees it. The service puts xenonet-net's link
-/// behind it; with no network, `me` is `None` and `send` refuses.
+/// behind it; with no network, `networks` is empty and `send` refuses.
 pub trait Net: Send + Sync {
-    /// This machine's host id and network, when it's in one.
-    fn me(&self) -> Option<Me>;
+    /// Every network this machine is in, with its host id in each: the one
+    /// it founded or joined first, first.
+    fn networks(&self) -> Vec<Me>;
+    /// The first of `networks`, which the paths that name no network yet
+    /// (the gateway's) go through; None when this machine is in none.
+    fn me(&self) -> Option<Me> {
+        self.networks().into_iter().next()
+    }
     /// The other hosts in the roster.
     fn hosts(&self) -> Vec<Host>;
     /// Queues a body. It refuses only when this machine isn't in a network
@@ -258,12 +280,12 @@ pub trait Net: Send + Sync {
         false
     }
     /// Tells `host` that this machine has applied every kept entry of its
-    /// feed up to `high` of incarnation `inc`, so it resends only what's
-    /// after.
-    fn ack(&self, _host: &str, _inc: u64, _high: u64) {}
-    /// Asks `host` for the kept entries of its feed from `from` of
-    /// incarnation `inc` on: one arrived past a gap.
-    fn want(&self, _host: &str, _inc: u64, _from: u64) {}
+    /// feed in `network` up to `high` of incarnation `inc`, so it resends
+    /// only what's after. An author has a feed of its own in each network.
+    fn ack(&self, _network: &str, _host: &str, _inc: u64, _high: u64) {}
+    /// Asks `host` for the kept entries of its feed in `network` from
+    /// `from` of incarnation `inc` on: one arrived past a gap.
+    fn want(&self, _network: &str, _host: &str, _inc: u64, _from: u64) {}
 }
 
 /// What the network calls in the engine.
@@ -302,8 +324,8 @@ pub trait RelaySink: Send + Sync {
 pub struct NoNet;
 
 impl Net for NoNet {
-    fn me(&self) -> Option<Me> {
-        None
+    fn networks(&self) -> Vec<Me> {
+        Vec::new()
     }
     fn hosts(&self) -> Vec<Host> {
         Vec::new()
@@ -367,7 +389,7 @@ mod tests {
     #[test]
     fn no_net_refuses() {
         let net = NoNet;
-        assert!(net.me().is_none());
+        assert!(net.me().is_none() && net.networks().is_empty());
         assert_eq!(net.hosts().len(), 0);
         assert_eq!(net.roster_head(), None);
         let out = Outgoing::new(To::All, Kind::Presence, Value::Null);

@@ -40,6 +40,8 @@
 //! - `endpoint`: the `Dial` over iroh, keyed by host.key: relays the
 //!   person names or none, the memory lookup and mDNS behind a setting,
 //!   and a door per protocol.
+//! - `share`: what each network is shown of this machine: the sessions
+//!   in projects shared into it, all of them in the first network.
 //! - `join`: joining over `xenonet/join/2`: the invite, the code apart
 //!   from it, proofs both ways, the inviter's tickets, and the joiner's
 //!   check of the chain from its genesis. `ticket`'s gateway proofs stay
@@ -65,6 +67,7 @@ pub mod persist;
 pub mod request;
 pub mod roots;
 pub mod roster;
+pub mod share;
 #[cfg(test)]
 pub mod sim;
 pub mod sink;

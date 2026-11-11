@@ -474,6 +474,32 @@ impl Shared {
         self.net.reading().clone()
     }
 
+    /// The network with id `network`, when this machine is in it: what
+    /// names a network is checked against the ones it is in, and never
+    /// taken for another.
+    pub fn in_network(&self, network: &str) -> Option<NetFile> {
+        self.network().filter(|n| n.id == network)
+    }
+
+    /// What the person shares into `network`: what they said, or the
+    /// default, everything for the first network and nothing for the rest.
+    pub fn sharing(&self, network: &str) -> crate::share::Sharing {
+        let first = self.network().is_some_and(|n| n.id == network);
+        self.opts.persist.sharing(network).ok().flatten().unwrap_or_else(|| crate::share::Sharing::default_for(first))
+    }
+
+    /// What each network `host` is in with this machine shares: what it
+    /// may be shown, the union of them.
+    pub fn sharings_with(&self, host: &str) -> Vec<crate::share::Sharing> {
+        let Some(net) = self.network() else { return Vec::new() };
+        let member = self.roster().view_ref().is_some_and(|v| v.member(host).is_some());
+        if member {
+            vec![self.sharing(&net.id)]
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn key(&self) -> Option<Arc<HostKey>> {
         self.key.reading().clone()
     }
@@ -1260,7 +1286,7 @@ impl Shared {
         // decided here, and the relay serves only an allowed read.
         if kind == Kind::Relay {
             let allowed = self.decide_read(&f.from);
-            self.sink.relay(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: allowed });
+            self.sink.relay(Incoming { network: net.id.clone(), from: f.from.clone(), kind, body, at: at.min(now), from_window_host: allowed });
             return false;
         }
         // Services' requests and answers are this node's own.
@@ -1275,7 +1301,7 @@ impl Shared {
         if kind == Kind::Presence && !self.note_presence(&f.from, &body) {
             return false;
         }
-        self.sink.receive(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
+        self.sink.receive(Incoming { network: net.id.clone(), from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
         false
     }
 
@@ -1538,7 +1564,7 @@ impl Shared {
         let heads = self.opts.persist.feed_heads(&net.id).unwrap_or_default();
         for (author, at) in heads {
             if let Some((host, _)) = members.iter().find(|(_, k)| *k == author) {
-                Net::ack(self, host, at.inc, at.seq);
+                Net::ack(self, &net.id, host, at.inc, at.seq);
             }
         }
     }
@@ -1921,8 +1947,10 @@ impl Shared {
 }
 
 impl Net for Shared {
-    fn me(&self) -> Option<Me> {
-        self.network().map(|n| Me { network: n.id, name: n.name, host: n.host })
+    // One network on the gateway's path: several come with link/2's
+    // networks (phase 5's commit 13), which this list already names.
+    fn networks(&self) -> Vec<Me> {
+        self.network().map(|n| Me { network: n.id, name: n.name, host: n.host }).into_iter().collect()
     }
 
     fn roster_head(&self) -> Option<String> {
@@ -1951,15 +1979,15 @@ impl Net for Shared {
         self.peers.locked().get(host).is_some_and(|p| p.can.iter().any(|c| c == what))
     }
 
-    fn ack(&self, host: &str, inc: u64, high: u64) {
-        let (Some(net), Some(key)) = (self.network(), self.key()) else { return };
+    fn ack(&self, network: &str, host: &str, inc: u64, high: u64) {
+        let (Some(net), Some(key)) = (self.in_network(network), self.key()) else { return };
         if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "ack": { "inc": inc, "high": high } })) {
             self.log("net.feed", &format!("an ack for {host} wasn't queued: {why}"));
         }
     }
 
-    fn want(&self, host: &str, inc: u64, from: u64) {
-        let (Some(net), Some(key)) = (self.network(), self.key()) else { return };
+    fn want(&self, network: &str, host: &str, inc: u64, from: u64) {
+        let (Some(net), Some(key)) = (self.in_network(network), self.key()) else { return };
         if let Err(why) = self.queue(&net, &key, host, &json!({ "schema": MESSAGE_SCHEMA, "want": { "inc": inc, "from": from } })) {
             self.log("net.feed", &format!("a want for {host} wasn't queued: {why}"));
         }
@@ -1981,6 +2009,9 @@ impl Net for Shared {
 
     fn send(&self, out: Outgoing) -> Result<(), String> {
         let net = self.network().ok_or("this machine isn't in a XenoNet network")?;
+        if let Some(n) = out.network.as_deref().filter(|n| *n != net.id) {
+            return Err(format!("this machine isn't in {n}"));
+        }
         if self.is_removed() {
             return Err("this machine was removed from its network".into());
         }
@@ -2012,9 +2043,18 @@ impl Net for Shared {
         let at = self.gateway_now() as i64;
         let now = self.now() as i64;
         for (to, keys) in targets {
+            // Each member sees what this machine shares into the networks
+            // it is in with it.
+            let shown;
+            let body = if out.kind == Kind::Presence {
+                shown = crate::share::presence_for(&body, &self.sharings_with(&to));
+                &shown
+            } else {
+                &body
+            };
             let id = frame_id().map_err(|e| e.message)?;
             let d = Draft { network: &net.id, id, kind: out.kind.as_str(), from: &net.host, to: &to, at };
-            let f = host_frame(&d, &key, &keys, &body, None).map_err(|e| e.message)?;
+            let f = host_frame(&d, &key, &keys, body, None).map_err(|e| e.message)?;
             if out.kind.queued() {
                 self.outbox.locked().push(&f, &to, now, &self.opts.outbox);
             } else if self.is_live() {

@@ -61,7 +61,7 @@ async fn answer(link: &Link, kept: &Kept) -> R<()> {
     while let Some(m) = take(&mut r).await.map_err(io)? {
         link.check("n1")?;
         let body = serde_json::from_slice(&m).map_err(|e| NetError::bad(e.to_string()))?;
-        kept.sink.receive(Incoming { from: link.peer().to_string(), kind: Kind::Message, body, at: 0.0, from_window_host: false });
+        kept.sink.receive(Incoming { network: "n1".into(), from: link.peer().to_string(), kind: Kind::Message, body, at: 0.0, from_window_host: false });
         put(&mut w, &m).await.map_err(io)?;
     }
     w.shutdown().await.map_err(io)

@@ -243,7 +243,7 @@ pub(crate) fn send(w: &Runtime, to: To, kind: Kind, body: Value) {
 /// A body with the authority its act rests on, which goes beside its feed
 /// entry for its one recipient.
 pub(crate) fn send_with(w: &Runtime, to: To, kind: Kind, body: Value, authority: Option<Value>) {
-    if let Err(e) = net(w).send(Outgoing { to, kind, body, authority }) {
+    if let Err(e) = net(w).send(Outgoing { network: None, to, kind, body, authority }) {
         w.log("warn", "net.send", &format!("a {} for the network wasn't queued: {e}", kind.as_str()));
     }
 }
@@ -449,7 +449,7 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
         apply(w, &host, &e, &auth);
     }
     let ack = |w: &Runtime| match Feed::new(db.feeds()).ack(&author, &network) {
-        Ok(Some(a)) => net(w).ack(&host, a.inc, a.high),
+        Ok(Some(a)) => net(w).ack(&network, &host, a.inc, a.high),
         Ok(None) => {}
         Err(e) => w.log("warn", "net.feed", &format!("where this machine stands with {host}'s feed wasn't read: {}", e.message)),
     };
@@ -467,7 +467,7 @@ pub fn entry_in(w: &Runtime, a: Arrived) {
                 ack(w);
             }
         }
-        Ok(Offer::Gap(want)) => net(w).want(&host, want.inc, want.from),
+        Ok(Offer::Gap(want)) => net(w).want(&network, &host, want.inc, want.from),
         Ok(Offer::Fork(_)) => w.log(
             "warn",
             "net.feed",
@@ -555,7 +555,7 @@ pub fn unfreeze(w: &Runtime, author: &str, network: &str) -> std::result::Result
         })
         .map_err(|e| e.to_string())?;
     if let Ok(Some(a)) = Feed::new(db.feeds()).ack(author, network) {
-        net(w).ack(&host, a.inc, a.high);
+        net(w).ack(network, &host, a.inc, a.high);
     }
     Ok(released)
 }

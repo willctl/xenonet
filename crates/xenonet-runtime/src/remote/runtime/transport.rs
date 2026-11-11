@@ -89,8 +89,8 @@ pub struct LoopNet {
 }
 
 impl Net for LoopNet {
-    fn me(&self) -> Option<Me> {
-        Some(Me { network: "net_00000000000000000000000000000000".into(), name: "made up".into(), host: self.host.clone() })
+    fn networks(&self) -> Vec<Me> {
+        vec![Me { network: "net_00000000000000000000000000000000".into(), name: "made up".into(), host: self.host.clone() }]
     }
     fn hosts(&self) -> Vec<Host> {
         vec![Host { id: self.console.clone(), window: true, online: true, seen: None }]
@@ -99,7 +99,9 @@ impl Net for LoopNet {
         let Some(hub) = self.hub.upgrade() else { return Err("the hub stopped".into()) };
         let from = self.host.clone();
         // Apart from the caller, which may hold the hub's lock.
-        tokio::spawn(async move { hub.relay(Incoming { from, kind: out.kind, body: out.body, at: xenonet_text::time::now_ms(), from_window_host: false }) });
+        tokio::spawn(async move {
+            hub.relay(Incoming { network: out.network.unwrap_or_default(), from, kind: out.kind, body: out.body, at: xenonet_text::time::now_ms(), from_window_host: false });
+        });
         Ok(())
     }
 }
@@ -113,7 +115,7 @@ pub struct LoopTransport {
 impl LoopTransport {
     fn send(&self, sub: &str, op: &Op) {
         let (relay, from, body) = (self.relay.clone(), self.console.clone(), wire::ask(sub, op));
-        tokio::spawn(async move { relay.relay(Incoming { from, kind: Kind::Relay, body, at: xenonet_text::time::now_ms(), from_window_host: true }) });
+        tokio::spawn(async move { relay.relay(Incoming { network: String::new(), from, kind: Kind::Relay, body, at: xenonet_text::time::now_ms(), from_window_host: true }) });
     }
 }
 

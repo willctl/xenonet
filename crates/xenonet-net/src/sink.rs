@@ -107,7 +107,7 @@ impl SinkSlot {
         if let Ok(Offer::New(entries)) = offered {
             for e in entries {
                 let Some(kind) = kind_of(e.kind) else { continue };
-                self.receive(Incoming { from: a.host.clone(), kind, body: e.body, at: e.at as f64, from_window_host: a.window });
+                self.receive(Incoming { network: e.group.clone(), from: a.host.clone(), kind, body: e.body, at: e.at as f64, from_window_host: a.window });
             }
         }
     }
@@ -239,7 +239,7 @@ mod tests {
         slot.set_relay("serve", a.clone());
         slot.set_relay("hear", b.clone());
         slot.set_relay("serve", a2.clone());
-        slot.relay(Incoming { from: "laptop".into(), kind: Kind::Relay, body: json!({}), at: 0.0, from_window_host: true });
+        slot.relay(Incoming { network: String::new(), from: "laptop".into(), kind: Kind::Relay, body: json!({}), at: 0.0, from_window_host: true });
         slot.removed("desk");
         slot.gap();
         assert!(a.0.locked().is_empty(), "a sink set again by its role replaces the one before");

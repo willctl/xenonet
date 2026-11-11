@@ -13,6 +13,7 @@
 //! with nothing to keep them in, uses `Memory`.
 
 use crate::files::NetFile;
+use crate::share::Sharing;
 use crate::{roster, R};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -93,6 +94,16 @@ pub trait Persist: Send + Sync {
     fn feed_heads(&self, network: &str) -> R<Vec<(String, Pos)>>;
     /// The authors whose feeds a fork froze here, with the fork.
     fn frozen_feeds(&self, network: &str) -> R<Vec<(String, Fork)>>;
+    /// What the person shares into a network (`share`), once they said:
+    /// None until then, when the network's default holds.
+    fn sharing(&self, _network: &str) -> R<Option<Sharing>> {
+        Ok(None)
+    }
+    /// Keeps what the person shares into a network. A store that keeps
+    /// nothing of it refuses, so a choice is never lost silently.
+    fn put_sharing(&self, _network: &str, _sharing: &Sharing) -> R<()> {
+        Err(crate::NetError::new(501, "not-kept", "this machine doesn't keep what is shared into each network yet"))
+    }
 }
 
 /// Everything kept in memory, gone with it: for tests, and the doctor's
@@ -113,6 +124,7 @@ struct Kept {
     writers: BTreeMap<String, WriterAt>,
     out: BTreeMap<String, Vec<FeedEntry>>,
     acks: BTreeMap<(String, String), Pos>,
+    sharing: BTreeMap<String, Sharing>,
 }
 
 // The entries of `had` and those of `more` past them.
@@ -166,6 +178,7 @@ impl Persist for Memory {
         k.writers.remove(network);
         k.out.remove(network);
         k.acks.retain(|(n, _), _| n != network);
+        k.sharing.remove(network);
         Ok(())
     }
     fn persons(&self) -> R<Vec<Person>> {
@@ -236,5 +249,12 @@ impl Persist for Memory {
     }
     fn frozen_feeds(&self, _network: &str) -> R<Vec<(String, Fork)>> {
         Ok(Vec::new())
+    }
+    fn sharing(&self, network: &str) -> R<Option<Sharing>> {
+        Ok(self.0.locked().sharing.get(network).cloned())
+    }
+    fn put_sharing(&self, network: &str, sharing: &Sharing) -> R<()> {
+        self.0.locked().sharing.insert(network.to_string(), sharing.clone());
+        Ok(())
     }
 }

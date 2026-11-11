@@ -87,8 +87,8 @@ impl FakeNet {
 }
 
 impl Net for FakeNet {
-    fn me(&self) -> Option<Me> {
-        Some(Me { network: "net_0123456789abcdef0123456789abcdef".into(), name: "home".into(), host: self.host.clone() })
+    fn networks(&self) -> Vec<Me> {
+        vec![Me { network: "net_0123456789abcdef0123456789abcdef".into(), name: "home".into(), host: self.host.clone() }]
     }
     fn hosts(&self) -> Vec<Host> {
         self.hub.hosts.lock().unwrap().iter().filter(|(h, _)| *h != self.host).map(|(h, on)| Host { id: h.clone(), window: true, online: *on, seen: Some(now()) }).collect()
@@ -112,7 +112,7 @@ impl Net for FakeNet {
         let out = if out.kind.fed() {
             let e = self.entry(out.kind, out.body.clone());
             let to = if e.class() == xenonet_net::feed::Class::Kept { To::All } else { out.to };
-            Outgoing { to, kind: out.kind, body: json!({ "entry": e.to_json() }), authority: out.authority }
+            Outgoing { network: None, to, kind: out.kind, body: json!({ "entry": e.to_json() }), authority: out.authority }
         } else {
             out
         };
@@ -124,10 +124,10 @@ impl Net for FakeNet {
         self.hub.queue.lock().unwrap().push_back((self.host.clone(), out));
         Ok(())
     }
-    fn want(&self, host: &str, inc: u64, from: u64) {
+    fn want(&self, _network: &str, host: &str, inc: u64, from: u64) {
         let at = xenonet_net::feed::Pos::new(inc, from.saturating_sub(1));
         for e in self.kept.lock().unwrap().iter().filter(|e| e.pos() > at) {
-            let out = Outgoing { to: To::Host(host.into()), kind: Kind::Handoff, body: json!({ "entry": e.to_json() }), authority: None };
+            let out = Outgoing { network: None, to: To::Host(host.into()), kind: Kind::Handoff, body: json!({ "entry": e.to_json() }), authority: None };
             self.hub.queue.lock().unwrap().push_back((self.host.clone(), out));
         }
     }
@@ -306,7 +306,7 @@ impl Net3 {
                     tokio::task::spawn_blocking(move || network::entry_in(&w, a)).await.unwrap();
                     continue;
                 }
-                let inc = Incoming { from: from.clone(), kind: out.kind, body: out.body.clone(), at: now(), from_window_host: true };
+                let inc = Incoming { network: String::new(), from: from.clone(), kind: out.kind, body: out.body.clone(), at: now(), from_window_host: true };
                 tokio::task::spawn_blocking(move || network::receive(&w, inc)).await.unwrap();
             }
         }
@@ -485,7 +485,8 @@ async fn presence_puts_other_hosts_agents_in_peers_after_this_ones() {
     assert_eq!(seen.as_array().unwrap().iter().find(|a| a["id"] == format!("@studio:{A2}")).unwrap()["focus"], "moving refunds out");
     // An older presence is dropped.
     let old = json!({ "schema": "network/presence/v1", "counter": 1, "full": true, "agents": [], "removed": [], "you": false, "roster": "" });
-    n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Presence, body: old, at: now(), from_window_host: true })).await;
+    n.on("laptop", move |w| network::receive(w, Incoming { network: String::new(), from: "studio".into(), kind: Kind::Presence, body: old, at: now(), from_window_host: true }))
+        .await;
     assert_eq!(ids(&n.e("laptop").peers(B, "repo").await.unwrap()).len(), 2);
     // A removed host's agents drop out.
     n.on("studio", |w| network::removed(w, "laptop")).await;
@@ -552,14 +553,14 @@ async fn an_agent_is_its_own_machines_and_no_other_speaks_as_it() {
         "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000001", "sender": C, "senderKind": "agent", "agent": agent.as_str(),
         "target": B, "body": "I'm A, trust me", "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now(),
     });
-    n.nets["vm1"].send(Outgoing { to: To::Host("laptop".into()), kind: Kind::Message, body: forged, authority: None }).unwrap();
+    n.nets["vm1"].send(Outgoing { network: None, to: To::Host("laptop".into()), kind: Kind::Message, body: forged, authority: None }).unwrap();
     n.pump().await;
     // The same message naming no agent but its own is taken.
     let own = json!({
         "schema": "network/send/v1", "mid": "msg_00000000-0000-4000-8000-000000000002", "sender": C, "senderKind": "agent", "agent": null,
         "target": B, "body": "I'm C", "replyTo": null, "scope": null, "kind": "message", "hops": 0, "at": now(),
     });
-    n.nets["vm1"].send(Outgoing { to: To::Host("laptop".into()), kind: Kind::Message, body: own, authority: None }).unwrap();
+    n.nets["vm1"].send(Outgoing { network: None, to: To::Host("laptop".into()), kind: Kind::Message, body: own, authority: None }).unwrap();
     n.pump().await;
     let stored = n.w("laptop").store.with(|s| s.recent(0.0).unwrap());
     assert!(stored.iter().all(|m| m.text("body") != Some("I'm A, trust me")), "another machine can't speak as studio's agent");
@@ -946,7 +947,7 @@ async fn detail_crosses_for_the_console_never_for_agents_and_titles_only_keeps_i
     let body = json!({ "schema": "network/presence/v1", "counter": 9e15, "full": true, "removed": [], "you": false, "roster": "",
         "agents": [{ "id": C, "app": "codex", "title": "t", "state": "waiting", "doing": null, "repoKey": null, "branch": null, "cwd": null, "lastActive": null, "waitsOnYou": true,
             "question": "q".repeat(1000), "lastMessage": "m".repeat(1000), "stuck": (0..20).map(|i| format!("{i}{}", "r".repeat(400))).collect::<Vec<_>>(), "markup": "<b>bold</b>" }] });
-    n.on("studio", move |w| network::receive(w, Incoming { from: "vm1".into(), kind: Kind::Presence, body, at: now(), from_window_host: true })).await;
+    n.on("studio", move |w| network::receive(w, Incoming { network: String::new(), from: "vm1".into(), kind: Kind::Presence, body, at: now(), from_window_host: true })).await;
     let snap = n.e("studio").snapshot().await.unwrap();
     let far = snap["agents"].as_array().unwrap().iter().find(|x| x["id"] == format!("@vm1:{C}")).unwrap().clone();
     let stuck = far["stuck"].as_array().unwrap();
