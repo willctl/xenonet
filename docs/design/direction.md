@@ -1,8 +1,8 @@
 # Direction: from the prototype to the system
 
 Status: analysis and target shape, last updated 2026-11-11. Written for the goals in
-[goals.md](goals.md). Phases 1 to 3 of the order of work are done;
-phases 4 to 6 are being built on `main`, and each says below what has
+[goals.md](goals.md). Phases 1 to 4 of the order of work are done;
+phases 5 and 6 are being built on `main`, and each says below what has
 landed and what is left. "Where the code stands" is the measure taken
 before phase 1, with the rows phase 3 answered stated as they stand; the
 order of work says what each phase changed. Will decides the open
@@ -535,7 +535,7 @@ Will's step on inix and NEO-REX.
    phase 5), and the composition crates' ceilings lowered as each phase
    dissolves them ([rust-core.md](rust-core.md)); and project- and agent-scoped tokens and
    store-order revocation, which come with phase 4's stored ids and feeds.
-4. **Many-to-many ids, one store.** Add feeds and stored ids (project,
+4. **Many-to-many ids, one store. Done (2026-11-11).** Add feeds and stored ids (project,
    agent, org, space) with checkouts as rows; claims become (project,
    relative path) with a one-time mapping; consolidate the dozen state
    files into one SQLite; adapters push from watchers and the rescan
@@ -553,8 +553,18 @@ Will's step on inix and NEO-REX.
    Landed: one store, `xenonet.sqlite` (`xenonet-store`); feeds on the
    wire as `network/message/v3`; watchers in place of polling, with
    kqueue for followed transcripts on macOS; projects and checkouts as
-   rows, confirmed at the window; agents as `agt_` ids; claims as
-   (project, path). Left: intents, and this phase's docs and cleanup.
+   rows, confirmed at the window, with a linked worktree joining once its
+   main checkout is confirmed and shares its git common dir; agents as
+   `agt_` ids; claims as (project, path); the cloud assistant reading the
+   store's project ids; and intents (`network/intent/v1`): the person makes
+   one at the window naming a machine, a project and a delegation, the
+   machine works it in a confirmed checkout and reports start, notes and
+   done, and a cancel from any of the person's machines stops it.
+   Deleted: state.json's types and schemas, and the assistant's own place
+   ids. Left for later: a way to set which intents an actor may report on
+   (the store and the check are built); stopping, on cancel, a run that
+   outlived a restart; and ending intents from a compact entry, which the
+   intent's `until` covers meanwhile.
 5. **The transport.** `xenonet-net` on iroh with mailboxes, relay lists,
    presence deltas, the HLC, several networks per machine and the
    `xenonet-net/2` head; then the HTTP link, signed requests, the clock
@@ -596,7 +606,7 @@ Will's step on inix and NEO-REX.
 | 4 | Join: the admitted machine gets exactly the role the ticket named; a code is useless without its proof; expiry arithmetic cannot overflow | Quint; Kani on ticket and HLC arithmetic; a one-off Verifpal model of the handshake |
 | 5 | Claims converge: overlapping claims are visible to both holders once in contact, and every machine computes the same winner | Quint `coord.qnt`; proptest that the resolver is commutative and idempotent |
 | 6 | One answer: the run's machine is the arbiter; the first answer in its store order under authority chaining to a person is the one, later ones get a refused receipt; `Hold` becomes `Refuse` after ten minutes | Quint plus quint-connect |
-| 7 | Codecs: envelope, feed and chain decoding never panic; encoding round-trips; a sealed body opens only for its recipient under its head | The 23 fuzz targets retargeted; Kani on decode bounds; proptest round trips |
+| 7 | Codecs: envelope, feed and chain decoding never panic; encoding round-trips; a sealed body opens only for its recipient under its head | The fuzz targets retargeted (`fuzz/`); Kani on decode bounds; proptest round trips |
 | 8 | Presence converges after quiet; a restored or reinstalled machine writes from a new incarnation and never collides with its old entries; a fork within one incarnation is detected and freezes the author | turmoil plus proptest |
 | 9 | Relation schema: no userset cycle or unintended inheritance across org, network, project and space roles | Alloy 6, run when the role or subject enums change |
 
