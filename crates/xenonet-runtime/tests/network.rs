@@ -4,7 +4,10 @@
 //! presence and peers, messages both ways with receipts, replies, a repo
 //! across clones, machine: selectors, the hop limit, a bypassed session's
 //! hold, a claim warning across clones, a handoff raced and taken once, a
-//! removed host and a gap's resend.
+//! removed host and a gap's resend. Each engine decides what the others
+//! send on its own copy of the network's chain and the person's, which a
+//! governance of the test's own gives it (one person, a device on each
+//! machine, fake keys that never prompt).
 
 // Git's paths and the clones' folders are Unix's here; the engine's own
 // paths are tested on every platform in its unit tests.
@@ -19,7 +22,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use xenonet_api::cores::{Cores, Engine, State, R};
 use xenonet_api::wire::WireEnv;
+use xenonet_log::network::{Member, View};
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
+use xenonet_net::ground::{Facts, Governance};
+use xenonet_net::identity::Identity;
 use xenonet_runtime::engine::EngineDriver;
 use xenonet_runtime::network;
 use xenonet_runtime::runtime::Runtime;
@@ -156,6 +162,68 @@ fn clone(dir: &Path, remote: &str, branch: &str) -> String {
     dir.to_string_lossy().into_owned()
 }
 
+/// A machine's governance: the network's chain as a view (studio its
+/// founder, every machine an admin), and the person on it.
+struct Gov {
+    machine: String,
+    view: View,
+    identity: Arc<Identity>,
+}
+
+impl Governance for Gov {
+    fn facts(&self) -> Facts {
+        Facts {
+            machine: xenonet_authz::MachineId::new(&self.machine).unwrap(),
+            view: Some(self.view.clone()),
+            identity: self.identity.clone(),
+            synced_at: Some(now() as i64),
+            now: now() as i64,
+        }
+    }
+    fn identity(&self) -> Arc<Identity> {
+        self.identity.clone()
+    }
+    fn want_person(&self, _host: &str, _person: &str) {}
+}
+
+/// One person, founded on studio, with laptop's and vm1's devices paired
+/// in: each machine's identity, and the network's view.
+fn people(dir: &Path) -> (HashMap<String, Arc<Identity>>, View) {
+    let vault = || -> Arc<dyn xenonet_id::vault::Vault> { Arc::new(xenonet_keys::Fake { allow: true }) };
+    let open = |h: &str| Identity::open(dir.join(h).join("state").join("identity"), Some(vault())).unwrap();
+    let studio = open("studio");
+    studio.found(true, "studio", now() as i64).unwrap();
+    let mut out = HashMap::from([("studio".to_string(), studio.clone())]);
+    for h in ["laptop", "vm1"] {
+        let id = open(h);
+        let key = id.device_key().unwrap().unwrap().signer.public();
+        studio.pair(true, xenonet_log::person::NewDevice { key, kind: xenonet_log::person::DeviceKind::Weaker, label: h.into() }, now() as i64).unwrap();
+        out.insert(h.to_string(), id);
+    }
+    for h in ["laptop", "vm1"] {
+        assert!(out[h].adopt(&studio.chain()));
+    }
+    let mut view =
+        View { network: "net_0123456789abcdef0123456789abcdef".into(), founder: "studio".into(), owner: studio.person_id(), gateway: "studio".into(), ..View::default() };
+    for (h, id) in &out {
+        let keys = *xenonet_id::keys::HostKey::generate().unwrap().public();
+        view.members.insert(
+            h.clone(),
+            Member {
+                id: h.clone(),
+                keys,
+                window: true,
+                device: id.device_id(),
+                machine: id.machine_key().unwrap().public(),
+                settings: xenonet_log::network::Settings::default(),
+                settings_by: None,
+                since: 0,
+            },
+        );
+    }
+    (out, view)
+}
+
 struct Net3 {
     hub: Arc<Hub>,
     worlds: HashMap<String, Arc<Runtime>>,
@@ -229,6 +297,7 @@ fn net3(name: &str) -> Net3 {
     let vm1_ledger = clone(&dir.join("vm1/ledger"), "git@github.com:acme/ledger.git", "main");
     let at = now();
     let detail = Detail::default();
+    let (identities, view) = people(&dir);
     let mut worlds = HashMap::new();
     for (host, sessions) in [
         (
@@ -264,6 +333,7 @@ fn net3(name: &str) -> Net3 {
         xenonet_platforms::install();
         let w = xenonet_runtime::runtime(&cores, setup, &env).expect("the engine's parts");
         network::set_net(&w, Arc::new(FakeNet { host: host.into(), hub: hub.clone() }));
+        xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Gov { machine: host.into(), view: view.clone(), identity: identities[host].clone() })));
         worlds.insert(host.to_string(), w);
     }
     Net3 { hub, worlds, dir, detail }
@@ -365,9 +435,9 @@ async fn a_message_goes_both_ways_with_receipts_and_its_reply() {
     let stored = n.w("laptop").store.with(|s| s.recent(0.0).unwrap());
     let env: Value = serde_json::from_str(stored[0].text("envelope").unwrap()).unwrap();
     assert_eq!(
-        (env["transport"].clone(), env["auth"]["method"].clone(), env["host"].clone(), env["original"]["strength"].clone()),
-        (json!("network"), json!("host"), json!("studio"), json!("weak")),
-        "a weak original stays weak"
+        (env["transport"].clone(), env["auth"]["method"].clone(), env["host"].clone(), env["original"]["authority"].clone()),
+        (json!("network"), json!("host"), json!("studio"), json!("machine")),
+        "another machine's agent rests on that machine's word"
     );
     n.pump().await;
     assert_eq!(receipts(&n, "studio"), vec![(format!("@laptop:{B}"), Some("seen".into()))]);
@@ -412,7 +482,7 @@ async fn the_hop_limit_counts_hosts_too() {
     let n = net3("hops");
     n.link_up().await;
     // A thread that's come five messages already, from studio.
-    let body = json!({ "schema": "network/message/v1", "mid": "msg_00000000-0000-4000-8000-000000000001", "sender": A, "senderKind": "agent", "auth": { "method": "session", "strength": "strong" }, "target": B, "body": "the fifth", "replyTo": null, "scope": "direct", "kind": "message", "hops": 5, "at": now() });
+    let body = json!({ "schema": "network/message/v2", "mid": "msg_00000000-0000-4000-8000-000000000001", "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": "the fifth", "replyTo": null, "scope": "direct", "kind": "message", "hops": 5, "at": now() });
     let b2 = body.clone();
     n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: b2, at: now(), from_window_host: true })).await;
     let got = n.e("laptop").inbox(B, Duration::ZERO).await.unwrap();
@@ -567,23 +637,48 @@ async fn a_gap_sends_again_what_has_no_receipt_and_a_repeat_lands_once() {
 async fn you_reach_a_session_on_another_machine_from_your_console() {
     let n = net3("you");
     n.link_up().await;
-    let envelope = json!({ "envelope": { "schema": "message/envelope/v1", "mid": "msg_00000000-0000-4000-8000-0000000000aa", "auth": { "method": "window", "process": "n/a", "strength": "strong" } } });
+    let envelope = json!({ "envelope": { "schema": "message/envelope/v1", "mid": "msg_00000000-0000-4000-8000-0000000000aa", "auth": { "method": "window", "process": "n/a", "attestation": "n/a" } } });
     let sent = n.e("studio").send("actor:you", json!({ "to": format!("@laptop:{B}"), "text": "Ship it when green." }), Some(envelope)).await.unwrap();
     assert_eq!(ids(&sent["to"]), vec![format!("@laptop:{B}")]);
     let frame = n.sent("studio", Kind::Message).pop().unwrap();
-    assert_eq!((frame["senderKind"].clone(), frame["auth"].clone()), (json!("you"), json!({ "method": "window", "strength": "strong" })));
+    // As you: the person's device signed it, for laptop.
+    assert_eq!(frame["senderKind"], "person");
+    assert!(frame["authority"]["person"]["sig"].is_string() && frame.get("auth").is_none(), "{frame}");
     n.pump().await;
     let heard = said(n.e("laptop").hook("claude", Some("UserPromptSubmit"), &prompt(B, json!({}))).await.unwrap());
     assert!(heard.contains("from your user, at studio's console") && heard.contains("From you, at studio's console."), "{heard}");
-    // Only a window host's console speaks as you, checked by its key.
-    for (window, strength) in [(false, "strong"), (true, "weak")] {
+    // As you without the device's signature, with a signature that isn't
+    // the device's, or naming a device the person doesn't have: refused,
+    // whatever the sender says of its own strength.
+    let cases = [
+        ("b0", json!({})),
+        ("b1", {
+            let mut a = frame["authority"].clone();
+            a["person"]["sig"] = json!(xenonet_id::codec::b64(&[7u8; 64]));
+            a
+        }),
+        ("b2", {
+            let mut a = frame["authority"].clone();
+            a["person"]["device"] = json!("xns1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            a
+        }),
+    ];
+    for (tag, authority) in cases {
         let mut f = frame.clone();
-        f["mid"] = json!(format!("msg_00000000-0000-4000-8000-0000000000{}", if window { "b1" } else { "b0" }));
-        f["auth"]["strength"] = json!(strength);
-        n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: f, at: now(), from_window_host: window })).await;
+        f["mid"] = json!(format!("msg_00000000-0000-4000-8000-0000000000{tag}"));
+        f["authority"] = authority;
+        f["auth"] = json!({ "method": "window", "strength": "strong" });
+        n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: f, at: now(), from_window_host: true })).await;
         let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
-        assert_eq!(r["state"], "refused", "window host {window}, {strength}");
+        assert_eq!(r["state"], "refused", "{tag}");
     }
+    // The signature is bound to laptop: lifted onto a message for vm1, it
+    // doesn't verify there.
+    let mut f = frame.clone();
+    f["mid"] = json!("msg_00000000-0000-4000-8000-0000000000b3");
+    f["target"] = json!(C);
+    n.on("vm1", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body: f, at: now(), from_window_host: true })).await;
+    assert_eq!(n.sent("vm1", Kind::Receipt).pop().unwrap()["state"], "refused");
     assert_eq!(n.e("laptop").inbox(B, Duration::ZERO).await.unwrap(), json!([]));
 }
 
@@ -646,7 +741,7 @@ async fn the_hop_limit_counts_the_thread_as_stored_here_whatever_the_sender_says
     })
     .await;
     // studio says it's the first hop; laptop knows better.
-    let body = json!({ "schema": "network/message/v1", "mid": "msg_00000000-0000-4000-8000-0000000000d7", "sender": A, "senderKind": "agent", "auth": { "method": "session", "strength": "strong" }, "target": B, "body": "and again", "replyTo": mid, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
+    let body = json!({ "schema": "network/message/v2", "mid": "msg_00000000-0000-4000-8000-0000000000d7", "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": "and again", "replyTo": mid, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
     n.on("laptop", move |w| network::receive(w, Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true })).await;
     let r = n.sent("laptop", Kind::Receipt).pop().unwrap();
     assert_eq!((r["state"].clone(), r["mid"].clone()), (json!("refused"), json!("msg_00000000-0000-4000-8000-0000000000d7")));
@@ -729,7 +824,7 @@ async fn messages_from_one_host_reach_a_session_in_the_order_they_came() {
     // the sink keeps their order however busy the engine is.
     let sink = network::EngineSink::new(n.w("laptop"));
     for i in 0..20u32 {
-        let body = json!({ "schema": "network/message/v1", "mid": format!("msg_00000000-0000-4000-8000-{i:012}"), "sender": A, "senderKind": "agent", "auth": { "method": "session", "strength": "strong" }, "target": B, "body": format!("m{i}"), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
+        let body = json!({ "schema": "network/message/v2", "mid": format!("msg_00000000-0000-4000-8000-{i:012}"), "sender": A, "senderKind": "agent", "authority": {}, "target": B, "body": format!("m{i}"), "replyTo": null, "scope": "direct", "kind": "message", "hops": 0, "at": now() });
         sink.receive(Incoming { from: "studio".into(), kind: Kind::Message, body, at: now(), from_window_host: true });
     }
     let mut heard: Vec<String> = Vec::new();

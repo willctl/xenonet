@@ -9,14 +9,16 @@
 //! returns, and the link sends them when it can.
 
 use crate::codec::{frame_id, is_b64};
-use crate::files::{address_kind, Delegated, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY, SERVICES};
+use crate::files::{address_kind, Dir, NetFile, Pin, GATEWAY_DB, HOST_DB, KEY, SERVICES};
 use crate::frame::{host_frame, open_frame, Draft, Frame};
 use crate::gateway::{join_body, Gateway, NetRequest};
+use crate::ground::Facts;
 use crate::gwstore::{Caps, GwStore, TicketRow};
 use crate::hoststore::{HostStore, Size};
+use crate::identity::{self, Identity};
 use crate::keys::{HostKey, PublicKeys};
 use crate::link::{self, Transport};
-use crate::roster::{Entry, HostRef, Offered, Op, Removal, Roster};
+use crate::roster::{Entry, HostRef, NetworkPolicy, Offered, Op, Removal, Roster};
 use crate::sink::{LogFn, SinkSlot};
 use crate::svc::{self, Answer, Services};
 use crate::{request, ticket, NetError, R};
@@ -27,6 +29,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, Weak};
 use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use xenonet_id::vault::Vault;
 use xenonet_model::ids::is_host_id;
 use xenonet_model::ops::{Host, Incoming, Kind, Me, Net, Outgoing, Sink, To};
 use xenonet_os::sync::{Locked, ReadWrite};
@@ -75,6 +78,10 @@ pub struct Options {
     pub log: LogFn,
     /// How long a request to another host's service waits for its answer.
     pub svc_ms: u64,
+    /// This machine's keys: the machine signing key, the person's device
+    /// key, sealing the person's root. None: no device, so nothing is done
+    /// as the person (a test's node, a machine with no way to ask).
+    pub vault: Option<Arc<dyn Vault>>,
 }
 
 impl Options {
@@ -90,6 +97,7 @@ impl Options {
             timing: Timing::default(),
             log,
             svc_ms: svc::TIMEOUT_MS,
+            vault: None,
         }
     }
 }
@@ -131,7 +139,8 @@ pub struct Change {
     pub share_load: Option<bool>,
     /// The gateway's LAN address, or None to take it away.
     pub lan: Option<Option<String>>,
-    /// Who may start sessions here: off, you or network.
+    /// Who may start sessions here: off, you, network or delegate. A
+    /// settings entry in the chain.
     pub start: Option<String>,
     /// Who may wake them: consent or network.
     pub wake: Option<String>,
@@ -150,9 +159,6 @@ pub struct Peer {
     pub you_at: Option<f64>,
     pub roster: Option<String>,
     pub platform: Option<String>,
-    /// Who may start and wake sessions there, and the widenings that wait,
-    /// as its presence last said (`network/presence/v1`'s reach).
-    pub reach: Option<Value>,
     /// What it takes beyond messages (`xenonet_model::ops::CAN`).
     pub can: Vec<String>,
 }
@@ -202,10 +208,8 @@ pub struct Shared {
     /// The services this host published, and the requests it waits on.
     svc: Services,
     gateway: RwLock<Option<Arc<Gateway>>>,
-    operator_nonces: Mutex<HashMap<String, f64>>,
-    /// Widenings of this host's settings another window host asked for,
-    /// waiting for a second one (operator.rs).
-    widens: Mutex<Vec<crate::operator::Widen>>,
+    /// The person on this machine, and the people's chains it holds.
+    identity: Arc<Identity>,
     link_written: Mutex<f64>,
     /// Entries signed by too few, waiting for this host or another to approve.
     proposals: Mutex<Vec<Entry>>,
@@ -304,15 +308,26 @@ impl Recent {
     }
 }
 
-/// Records who put this machine on delegate and when, as `start` becomes
-/// delegate; takes it away as it leaves. `before` is the start setting
-/// before the change.
-fn note_delegation(net: &mut NetFile, before: &str, by: &str, now: f64) {
-    if net.start != "delegate" {
-        net.delegated = None;
-    } else if before != "delegate" || net.delegated.is_none() {
-        net.delegated = Some(Delegated { by: by.to_string(), at: now.round() as i64 });
-    }
+/// The reserved target a person's chain entries travel to, in `message`
+/// frames between machines: taken by the node, never by the engine.
+pub const PERSON_TARGET: &str = "xenonet:person";
+
+/// A `message` body to `xenonet:person` carrying `text`.
+fn person_body(text: &str) -> Value {
+    json!({
+        "schema": "network/message/v2",
+        "mid": format!("msg_{}", frame_id().map(|f| f.trim_start_matches("frm_").to_string()).unwrap_or_default()),
+        "sender": PERSON_TARGET,
+        "senderKind": "agent",
+        "target": PERSON_TARGET,
+        "body": text,
+        "replyTo": null,
+        "scope": "direct",
+        "kind": "message",
+        "hops": 0,
+        "at": now_ms() as i64,
+        "authority": {},
+    })
 }
 
 fn not_in() -> NetError {
@@ -351,6 +366,150 @@ impl Shared {
 
     pub fn roster(&self) -> RwLockReadGuard<'_, Roster> {
         self.roster.reading()
+    }
+
+    /// The person on this machine.
+    pub fn identity(&self) -> &Arc<Identity> {
+        &self.identity
+    }
+
+    /// When governance (the chains) was last synced from another member:
+    /// now on the gateway's host, which every entry passes through; else
+    /// the gateway's last word on the link.
+    pub fn synced_at(&self) -> Option<i64> {
+        self.network()?;
+        if self.is_gateway() {
+            return Some(self.gateway_now() as i64);
+        }
+        let s = self.status.locked();
+        s.last_ok.map(|t| (t + s.offset_ms) as i64)
+    }
+
+    /// The facts a decision here rests on, as of now.
+    pub fn facts(&self) -> Facts {
+        let net = self.network();
+        let machine = net.as_ref().map_or(crate::ground::LOCAL.to_string(), |n| n.host.clone());
+        let machine = xenonet_authz::MachineId::new(&machine).unwrap_or_else(|_| xenonet_authz::MachineId::new(crate::ground::LOCAL).expect("a word"));
+        Facts { machine, view: net.and_then(|_| self.roster().view_ref().cloned()), identity: self.identity.clone(), synced_at: self.synced_at(), now: self.gateway_now() as i64 }
+    }
+
+    /// The network's owner's chain, as roster frames, answers and joins
+    /// carry it beside the entries it checks: `{ person, entries }`, or
+    /// null when the network names no owner or this machine holds none.
+    pub fn person_json(&self) -> Value {
+        let owner = self.roster().view_ref().and_then(|v| v.owner.clone()).or_else(|| self.identity.person_id());
+        let Some(owner) = owner else { return Value::Null };
+        let entries = self.identity.since(&owner, 0);
+        if entries.is_empty() {
+            return Value::Null;
+        }
+        json!({ "person": owner, "entries": entries })
+    }
+
+    /// A person's chain from another machine (`person_json`'s shape),
+    /// offered before the entries it checks. True when it brought
+    /// something new.
+    pub fn offer_person(&self, v: &Value) -> bool {
+        let (Some(person), Some(entries)) = (v.get("person").and_then(Value::as_str), v.get("entries").and_then(Value::as_array)) else { return false };
+        match self.identity.offer(person, entries) {
+            Ok(new) => new,
+            Err(e) => {
+                self.log("net.person", &format!("a person's chain from the network wasn't taken: {}", e.message));
+                false
+            }
+        }
+    }
+
+    /// Refuses an entry made under a person head older than the one this
+    /// machine holds: a live receiver's check. A chain catching up checks
+    /// entries by what they sign, never this.
+    pub fn fresh_person_head(&self, e: &Entry) -> R<()> {
+        let owner = self.roster().view_ref().and_then(|v| v.owner.clone()).or_else(|| e.owner.clone());
+        let (Some(owner), Some(head)) = (owner, e.person_head.as_deref()) else { return Ok(()) };
+        match self.identity.where_is(&owner, head) {
+            (Some(now), Some(at)) if at < now => {
+                Err(NetError::new(409, "stale-person-head", "that entry was made under an older person chain than this machine holds: make it again"))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// The next roster entry, unsigned, made under the owner's person head
+    /// as this machine holds it.
+    pub fn draft(&self, op: Op, host: HostRef, gateway: Option<crate::roster::GatewayAt>) -> Entry {
+        let r = self.roster();
+        let mut e = r.draft(op, host, gateway, self.gateway_now() as i64);
+        e.person_head = r.view_ref().and_then(|v| v.owner.as_deref()).and_then(|o| self.identity.chain_of(o)).and_then(|c| c.head());
+        e
+    }
+
+    /// Pushes entries of this machine's person's chain to the network's
+    /// other machines, as `message` frames to `xenonet:person`.
+    fn push_person(&self, from: u64) {
+        let Some(person) = self.identity.person_id() else { return };
+        let entries = self.identity.since(&person, from);
+        if entries.is_empty() || self.network().is_none() {
+            return;
+        }
+        let text = json!({ "op": "entries", "person": person, "entries": entries }).to_string();
+        if let Err(why) = self.send(Outgoing { to: To::All, kind: Kind::Message, body: person_body(&text) }) {
+            self.log("net.person", &format!("this person's new entries didn't go to the network: {why}"));
+        }
+    }
+
+    /// Asks `host` for `person`'s chain past where this machine's copy
+    /// stands: a newer head came from it.
+    pub fn want_person(&self, host: &str, person: &str) {
+        let from = self.identity.chain_of(person).map_or(0, |c| c.len());
+        let text = json!({ "op": "want", "person": person, "from": from }).to_string();
+        let _ = self.send(Outgoing { to: To::Host(host.into()), kind: Kind::Message, body: person_body(&text) });
+    }
+
+    /// Who may start and wake sessions on `host`, as the chain's settings
+    /// for it say, with the settings entries for it that wait for a second
+    /// admin (as presence and the state list them).
+    pub fn reach_of(&self, host: &str) -> xenonet_model::ops::Reach {
+        let view = self.roster().view();
+        let Some(m) = view.member(host) else { return xenonet_model::ops::Reach::default() };
+        let pending = self
+            .proposals()
+            .iter()
+            .filter(|p| p.op == Op::Settings && p.host.id == host)
+            .flat_map(|p| {
+                let to = p.settings.clone().unwrap_or_default();
+                let by = p.signers.first().map(|s| s.by.clone()).unwrap_or_default();
+                let mut out = Vec::new();
+                if to.start != m.settings.start {
+                    out.push(json!({ "id": p.id(), "setting": "start", "value": to.start.as_str(), "by": by, "at": p.at }));
+                }
+                if to.wake != m.settings.wake {
+                    out.push(json!({ "id": p.id(), "setting": "wake", "value": to.wake.as_str(), "by": by, "at": p.at }));
+                }
+                out
+            })
+            .collect();
+        let delegated = (m.settings.start == crate::roster::Start::Delegate).then(|| m.settings_by.clone()).flatten().map(|(by, at)| (by.join(" and "), at));
+        xenonet_model::ops::Reach { start: m.settings.start.as_str().into(), wake: m.settings.wake.as_str().into(), pending, delegated }
+    }
+
+    /// A `message` to `xenonet:person` from `from`: a person's entries, or
+    /// a want for them. True when the roster may now take entries it
+    /// couldn't before, so it's fetched again.
+    fn person_in(&self, from: &str, body: &Value) -> bool {
+        let Some(v) = body.get("body").and_then(Value::as_str).and_then(|t| serde_json::from_str::<Value>(t).ok()) else { return false };
+        match v.get("op").and_then(Value::as_str) {
+            Some("entries") => self.offer_person(&v),
+            Some("want") => {
+                let (Some(person), Some(from_n)) = (v.get("person").and_then(Value::as_str), v.get("from").and_then(Value::as_u64)) else { return false };
+                let entries = self.identity.since(person, from_n);
+                if !entries.is_empty() {
+                    let text = json!({ "op": "entries", "person": person, "entries": entries }).to_string();
+                    let _ = self.send(Outgoing { to: To::Host(from.into()), kind: Kind::Message, body: person_body(&text) });
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     pub fn gateway(&self) -> Option<Arc<Gateway>> {
@@ -795,6 +954,9 @@ impl Shared {
             }
             "roster" => {
                 let mut fetch = false;
+                if let Some(p) = body.get("person") {
+                    self.offer_person(p);
+                }
                 for e in body.get("entries").and_then(Value::as_array).into_iter().flatten() {
                     match Entry::parse(e).map_err(NetError::from).and_then(|e| self.append(e)) {
                         Ok(_) => {}
@@ -853,21 +1015,57 @@ impl Shared {
         if !ok {
             return Err(format!("the join request for {host} didn't prove its ticket"));
         }
-        let key = self.key().ok_or("this machine has no key")?;
-        let r = self.roster();
-        let v = r.view_ref().ok_or("this machine's roster is empty")?;
-        if !v.is_window(&net.host) {
-            return Err("this machine isn't a window host now".into());
+        {
+            let r = self.roster();
+            let v = r.view_ref().ok_or("this machine's roster is empty")?;
+            if !v.is_window(&net.host) {
+                return Err("this machine isn't a window host now".into());
+            }
+            match v.member(&host) {
+                Some(m) if m.keys == keys => return Err(format!("{host} is in already")),
+                Some(_) => return Err(format!("{host} is in the network already, with other keys")),
+                None => {}
+            }
         }
-        match v.member(&host) {
-            Some(m) if m.keys == keys => return Err(format!("{host} is in already")),
-            Some(_) => return Err(format!("{host} is in the network already, with other keys")),
-            None => {}
-        }
-        let mut e = r.draft(Op::Add, HostRef { id: host.clone(), keys, window }, None, self.gateway_now() as i64);
-        drop(r);
-        e.sign_by(&net.host, &key);
+        let e = self.sign_in(&host, keys, window, &join).map_err(|e| e.message)?;
         self.log("net.ticket", &format!("this machine signed {host} into the network, with the ticket it made"));
+        Ok(e)
+    }
+
+    /// Signs `host` in as this admin: pairs the device its join request
+    /// brings into the person, when this machine acts as the network's
+    /// owner, then signs the `add` entry with this device's presence. The
+    /// person made the ticket at XenoNet's window, and this is its join,
+    /// within the ticket's ten minutes, so it may ask them: once to admit,
+    /// and to pair once more (twice where the root key is sealed to the
+    /// device key).
+    pub fn sign_in(&self, host: &str, keys: PublicKeys, window: bool, join: &Value) -> R<Entry> {
+        let net = self.network().ok_or_else(not_in)?;
+        let key = self.key().ok_or_else(not_in)?;
+        let now = self.gateway_now() as i64;
+        let owner = self.roster().view_ref().and_then(|v| v.owner.clone());
+        let machine = join.get("machine").and_then(xenonet_id::sign::VerifyingKey::parse).ok_or_else(|| NetError::bad("the join request names no machine key"))?;
+        let mut device = None;
+        if let Some(d) = join.get("device").and_then(identity::parse_device) {
+            if owner.is_some() && owner == self.identity.person_id() {
+                let id = d.key.id();
+                match self.identity.pair(true, d, now) {
+                    Ok(_) => device = Some(id),
+                    // Only the machine holding the person's root key pairs a
+                    // device (copying the root to others is to come): from
+                    // another admin the machine joins as a plain member,
+                    // which does nothing as the person.
+                    Err(e) if e.code == "no-root" => {
+                        self.log("net.ticket", &format!("{host} joins without your identity: this machine doesn't hold its root key, which pairs a device"));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        let mut e = self.roster().draft(Op::Add, HostRef { id: host.into(), keys, window, device, machine }, None, now);
+        e.person_head = owner.as_deref().and_then(|o| self.identity.chain_of(o)).and_then(|c| c.head());
+        let block = self.identity.prove(true, crate::roster::ADMIT, &e.digest(), &format!("add {host} to your XenoNet network"), now)?;
+        e.sign_with(&net.host, &key, Some(block));
         Ok(e)
     }
 
@@ -931,8 +1129,11 @@ impl Shared {
         let Some(kind) = Kind::parse(&f.kind) else { return false };
         let at = f.at as f64 - self.status.locked().offset_ms;
         // The map's frames go to the relay and the hub, never the engine.
+        // What a relay reads (the map, transcripts) is an admin's to read:
+        // decided here, and the relay serves only an allowed read.
         if kind == Kind::Relay {
-            self.sink.relay(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: window });
+            let allowed = self.decide_read(&f.from);
+            self.sink.relay(Incoming { from: f.from.clone(), kind, body, at: at.min(now), from_window_host: allowed });
             return false;
         }
         // Services' requests and answers are this node's own.
@@ -940,16 +1141,12 @@ impl Shared {
             self.svc_in(&f.from, body);
             return false;
         }
-        if kind == Kind::Operator {
-            if let Err(why) = self.check_operator(&f.from, window, &body) {
-                self.log("net.operator", &format!("an action from {} was refused: {why}", f.from));
+        // A person's chain is this node's own: its entries, or a want.
+        if kind == Kind::Message && body.get("target").and_then(Value::as_str) == Some(PERSON_TARGET) {
+            if !self.decide_member(&f.from) {
                 return false;
             }
-            // Who may start and wake sessions here is this node's own.
-            if body.get("action").and_then(Value::as_str) == Some("settings") {
-                self.settings_in(&f.from, body.get("args").unwrap_or(&Value::Null));
-                return false;
-            }
+            return self.person_in(&f.from, &body);
         }
         if kind == Kind::Presence && !self.note_presence(&f.from, &body) {
             return false;
@@ -958,41 +1155,37 @@ impl Shared {
         false
     }
 
-    /// Whether the person's action from another host may be acted on
-    /// (operator.rs): by the gateway's clock, with the nonces seen lately.
-    fn check_operator(&self, from: &str, window: bool, body: &Value) -> Result<(), String> {
-        crate::operator::check(from, window, body, self.gateway_now(), &mut self.operator_nonces.locked())
+    /// `from`'s act at this machine, decided on its own facts: a member of
+    /// the network, which a frame it signed came from. Why it was refused.
+    fn decide(&self, from: &str, resource: xenonet_authz::Resource, act: xenonet_authz::Act) -> Result<(), String> {
+        let facts = self.facts();
+        let id = xenonet_authz::MachineId::new(from).map_err(|e| e.message)?;
+        let request = xenonet_authz::Request::new(xenonet_authz::Principal::Machine { id }, resource, act, xenonet_authz::Door::Network, facts.now, facts.network());
+        match xenonet_authz::decide(None, &request, &facts, None) {
+            xenonet_authz::Decision::Allow(_) => Ok(()),
+            d => Err(d.reason().map(|r| r.text().to_string()).unwrap_or_default()),
+        }
     }
 
-    /// Another window host's change to who may start and wake sessions
-    /// here (operator.rs): narrowing at once, widening with the founder or
-    /// a second window host.
-    fn settings_in(&self, from: &str, args: &Value) {
-        let founder = self.roster().view_ref().is_some_and(|v| v.founder == from);
-        let now = self.now();
-        let outcome = {
-            let mut guard = self.net.writing();
-            let Some(net) = guard.as_mut() else { return };
-            let mut widens = self.widens.locked();
-            let mut id = || crate::codec::nonce().map_or_else(|_| format!("wid_{}", now as i64), |n| format!("wid_{n}"));
-            let outcome = crate::operator::settings((&net.start, &net.wake), args, from, founder, &mut widens, now, &mut id);
-            if let Ok(crate::operator::Outcome::Set { start, wake } | crate::operator::Outcome::Waits { start, wake, .. }) = &outcome {
-                let before = net.start.clone();
-                net.start.clone_from(start);
-                net.wake.clone_from(wake);
-                note_delegation(net, &before, from, now);
-                if let Err(e) = self.dir.write_network(net) {
-                    self.log("net.operator", &format!("{from}'s change to this machine's settings wasn't kept: {}", e.message));
-                }
+    /// Whether `from` may read this machine's map and what it relays
+    /// (transcripts, search): an admin member's read.
+    fn decide_read(&self, from: &str) -> bool {
+        let own = self.facts().machine;
+        let d = self.decide(from, xenonet_authz::Resource::Machine(own), xenonet_authz::Act::Read { scope: xenonet_authz::ReadScope::Transcripts, filters: None });
+        d.is_ok()
+    }
+
+    /// Whether `from` is a member whose machine may message this one: what
+    /// a person's entries and a want for them need besides their own
+    /// signatures.
+    fn decide_member(&self, from: &str) -> bool {
+        let own = self.facts().machine;
+        match self.decide(from, xenonet_authz::Resource::Machine(own), xenonet_authz::Act::Message) {
+            Ok(()) => true,
+            Err(why) => {
+                self.log("net.person", &format!("a person's entries from {from} were refused: {why}"));
+                false
             }
-            outcome
-        };
-        match outcome {
-            Ok(crate::operator::Outcome::Set { start, wake }) => self.log("net.settings", &format!("{from} set who may start sessions here to {start}, and wake them to {wake}")),
-            Ok(crate::operator::Outcome::Waits { widen, .. }) => {
-                self.log("net.settings", &format!("{from} asked to let the network {} sessions here: it waits for the founder or another window host", widen.setting));
-            }
-            Err(why) => self.log("net.settings", &format!("{from}'s change to this machine's settings was refused: {why}")),
         }
     }
 
@@ -1028,8 +1221,6 @@ impl Shared {
         p.you_at = body.get("youAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t > 0.0).map(|t| t - offset);
         // An empty head says nothing about the sender's roster: no mismatch.
         p.roster = body.get("roster").and_then(Value::as_str).filter(|r| !r.is_empty()).map(str::to_string);
-        // An older XenoNet says neither.
-        p.reach = body.get("reach").filter(|r| r.is_object()).cloned();
         p.can = body.get("can").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).take(16).map(str::to_string).collect()).unwrap_or_default();
         true
     }
@@ -1326,9 +1517,7 @@ impl Net for Shared {
 
     fn reach(&self) -> xenonet_model::ops::Reach {
         let Some(n) = self.network() else { return xenonet_model::ops::Reach::default() };
-        let now = self.now();
-        let pending = self.widens.locked().iter().filter(|w| now - w.at < crate::operator::WIDEN_MS).map(crate::operator::Widen::to_json).collect();
-        xenonet_model::ops::Reach { start: n.start, wake: n.wake, pending, delegated: n.delegated.map(|d| (d.by, d.at)) }
+        self.reach_of(&n.host)
     }
 
     fn host_can(&self, host: &str, what: &str) -> bool {
@@ -1408,13 +1597,23 @@ impl Node {
     /// The node, as its files leave it; nothing runs until `start`.
     pub fn open(opts: Options, sink: Arc<SinkSlot>) -> R<Arc<Node>> {
         let dir = Dir::new(opts.dir.clone());
+        let identity = Identity::open(dir.identity_dir(), opts.vault.clone())?;
+        let policy = NetworkPolicy::with(identity.clone());
+        // Who may start and wake sessions here moved into the chain: a
+        // network.json from before keeps them no longer.
+        if dir.has_dropped_fields() {
+            if let Some(n) = dir.read_network()? {
+                dir.write_network(&n)?;
+                (opts.log)("net.upgrade", "network.json's start, wake and delegation settings were dropped: they're the network chain's now, and start at you and your consent");
+            }
+        }
         let net = dir.read_network()?;
         let (key, roster, store) = match &net {
             Some(_) => {
                 let key = HostKey::load(&dir.file(KEY))?.ok_or_else(|| NetError::internal("this host's key is missing"))?;
-                (Some(Arc::new(key)), dir.read_roster()?, Some(HostStore::open(&dir.file(HOST_DB))?))
+                (Some(Arc::new(key)), dir.read_roster(policy)?, Some(HostStore::open(&dir.file(HOST_DB))?))
             }
-            None => (None, Roster::new(), None),
+            None => (None, Roster::with_policy(policy), None),
         };
         let services = Services::open(dir.file(SERVICES));
         let shared = Arc::new_cyclic(|this| Shared {
@@ -1435,8 +1634,7 @@ impl Node {
             svc_out: Mutex::new(VecDeque::new()),
             svc: services,
             gateway: RwLock::new(None),
-            operator_nonces: Mutex::new(HashMap::new()),
-            widens: Mutex::new(Vec::new()),
+            identity: identity.clone(),
             link_written: Mutex::new(0.0),
             proposals: Mutex::new(Vec::new()),
             relink: Notify::new(),
@@ -1445,6 +1643,13 @@ impl Node {
             me_you: Mutex::new((false, None)),
             me_agents: Mutex::new(BTreeMap::new()),
         });
+        // What the person appends here, the network's other machines hear.
+        let weak = Arc::downgrade(&shared);
+        identity.on_append(Box::new(move |e| {
+            if let Some(n) = weak.upgrade() {
+                n.push_person(e.n);
+            }
+        }));
         Ok(Arc::new(Node { shared, tasks: Mutex::new(Vec::new()) }))
     }
 
@@ -1546,9 +1751,13 @@ impl Node {
     }
 
     /// `xenonet net create`: a new network with this machine as its founder
-    /// and gateway. `address` is where hosts reach it: the LAN address its
-    /// gateway listens on, or the tunnel's host name.
-    pub fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>) -> R<Value> {
+    /// and gateway, owned by the person here. `address` is where hosts
+    /// reach it: the LAN address its gateway listens on, or the tunnel's
+    /// host name. With no person here yet, it's founded first, which asks
+    /// them once: from the window (`at_window`) only. A machine that can't
+    /// ask the person makes a network with no owner, where nobody can admit
+    /// another machine.
+    pub fn create(&self, name: &str, host: &str, address: Option<&str>, lan: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
         if let Some(net) = n.network() {
             return Err(NetError::new(409, "in-network", format!("this machine is in the network {} already: xenonet net leave first", net.name)));
@@ -1560,10 +1769,19 @@ impl Node {
         if !is_host_id(host) {
             return Err(NetError::bad("a host id is 2 to 32 lowercase letters, digits and dashes, starting with a letter"));
         }
+        let at = n.now() as i64;
+        let identity = n.identity.clone();
+        if identity.device_key()?.is_some() {
+            identity.found(at_window, host, at)?;
+        }
+        let machine = identity.machine_key()?.public();
+        let device = identity.can_act().then(|| identity.device_id()).flatten();
         let key = HostKey::load_or_create(&n.dir.file(KEY))?;
         let id = crate::codec::network_id()?;
-        let at = n.now() as i64;
-        let roster = Roster::from_entries(vec![crate::roster::found(&id, host, &key, None, at)])?;
+        let me = HostRef { id: host.into(), keys: *key.public(), window: true, device: device.clone(), machine };
+        let owner = device.and(identity.person_id());
+        let head = owner.as_ref().and(identity.head());
+        let roster = Roster::from_entries_with(NetworkPolicy::with(identity.clone()), vec![crate::roster::found(&id, me, &key, owner, head, None, at)])?;
         let p = key.public();
         let net = NetFile {
             id,
@@ -1574,9 +1792,6 @@ impl Node {
             lan: lan.map(str::to_string),
             titles_only: false,
             share_load: true,
-            start: "you".into(),
-            wake: "consent".into(),
-            delegated: None,
             joined: at,
         };
         self.adopt(net, key, roster)?;
@@ -1598,7 +1813,16 @@ impl Node {
         let code = ticket::normalize(typed).ok_or_else(|| NetError::bad("a ticket is 10 letters and digits, as KX7Q-49MZ-T2"))?;
         let key = HostKey::load_or_create(&n.dir.file(KEY))?;
         let nonce = crate::codec::nonce()?;
-        let body = join_body(&key, &code, &nonce, &n.opts.platform, &n.opts.version, n.opts.desktop);
+        let mut body = join_body(&key, &code, &nonce, &n.opts.platform, &n.opts.version, n.opts.desktop);
+        // This machine's signing key, and its device for the inviter to
+        // pair into the person: unless it holds a person of its own that
+        // other devices share, which stays its own.
+        let identity = n.identity.clone();
+        body["machine"] = identity.machine_key()?.public().to_json();
+        let local = identity.chain().person().is_none_or(|p| p.active_devices().all(|d| Some(&d.id) == identity.device_id().as_ref()));
+        if let (Some(d), Some(kind), true) = (identity.device_key()?, identity.device_kind(), local) {
+            body["device"] = identity::device_json(&d.signer.public(), kind, &n.opts.platform);
+        }
         let t = link::http(address)?;
         let req = NetRequest { method: "POST".into(), target: "/net/v1/join".into(), headers: Vec::new(), body: body.to_string().into_bytes(), source: None };
         let reply =
@@ -1626,7 +1850,22 @@ impl Node {
         if s(&g, "keyId") != gw_keys.key_id() || !ticket::check_gateway(&ticket::hash(&code), &gw_keys.key_id(), &nonce, &s(&v, "proof")) {
             return Err(NetError::new(502, "bad-answer", "the gateway couldn't prove it knew the ticket: check the address"));
         }
-        let roster = Roster::from_json(v.get("roster").unwrap_or(&Value::Null))?;
+        // The owner's chain first, which the roster's admits are checked
+        // against: this machine's own person from now, when it pairs this
+        // device.
+        if let Some(p) = v.get("person").filter(|p| p.is_object()) {
+            let person = p.get("person").and_then(Value::as_str).unwrap_or("");
+            let entries = p.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+            let chain = xenonet_log::person::PersonChain::from_json(&Value::Array(entries))
+                .map_err(|e| NetError::new(502, "bad-answer", format!("the gateway's person chain didn't check: {}", e.message)))?;
+            if chain.id() != Some(person) {
+                return Err(NetError::new(502, "bad-answer", "the gateway's person chain isn't the person it names"));
+            }
+            if !identity.adopt(&chain) {
+                identity.offer(person, &chain.to_json().as_array().cloned().unwrap_or_default())?;
+            }
+        }
+        let roster = Roster::from_json_with(NetworkPolicy::with(identity.clone()), v.get("roster").unwrap_or(&Value::Null))?;
         let view = roster.view();
         let host = s(&v, "host");
         let mine = view.member(&host).is_some_and(|m| m.keys == *key.public());
@@ -1643,9 +1882,6 @@ impl Node {
             lan: None,
             titles_only: false,
             share_load: true,
-            start: "you".into(),
-            wake: "consent".into(),
-            delegated: None,
             joined: n.now() as i64,
         };
         let name = net.name.clone();
@@ -1674,9 +1910,9 @@ impl Node {
         }
         let mut asked = false;
         if net.founder != net.host && !n.is_removed() {
-            let me = n.roster().view().member(&net.host).cloned();
+            let me = n.roster().host_ref(&net.host);
             if let Some(m) = me {
-                let mut e = n.roster().draft(Op::Remove, HostRef { id: m.id.clone(), keys: m.keys, window: m.window }, None, n.gateway_now() as i64);
+                let mut e = n.draft(Op::Remove, m, None);
                 e.sign_by(&net.host, &key);
                 asked = self.submit(e).await.is_ok();
             }
@@ -1691,11 +1927,12 @@ impl Node {
         *n.store.locked() = None;
         n.dir.forget()?;
         *n.key.writing() = None;
-        *n.roster.writing() = Roster::new();
+        *n.roster.writing() = Roster::with_policy(NetworkPolicy::with(n.identity.clone()));
         *n.net.writing() = None;
         *n.status.locked() = Status::default();
         n.peers.locked().clear();
         n.svc.forget();
+        n.identity.forget_others();
         n.log("net.leave", &format!("this machine left the network {}", net.name));
         Ok(json!({ "left": net.name, "removed": asked, "founder": founder }))
     }
@@ -1709,7 +1946,7 @@ impl Node {
             return g.append(n, e);
         }
         let t = self.transport()?;
-        link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json() })).await?;
+        link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "person": n.person_json() })).await?;
         match n.append(e) {
             Ok(o) => Ok(o),
             Err(err) if err.code == "roster-fork" => Ok(Offered::Duplicate),
@@ -1723,14 +1960,25 @@ impl Node {
     /// gateway over the link (its hash and terms, in a signed request), and
     /// this host signs the new host in when it joins. A window host added by
     /// anyone but the founder waits, at its join, for a second window host
-    /// to approve it.
-    pub async fn ticket(&self, host: &str, window: bool) -> R<Value> {
+    /// to approve it. The person's act at the window (`at_window`), since
+    /// signing the machine in asks them, at its join.
+    pub async fn ticket(&self, host: &str, window: bool, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, _) = self.me()?;
+        if !at_window {
+            return Err(identity::not_at_window("Add a machine"));
+        }
         if !is_host_id(host) {
             return Err(NetError::bad("a host id is 2 to 32 lowercase letters, digits and dashes, starting with a letter"));
         }
         let view = n.roster().view();
+        if view.owner.is_none() || view.owner != n.identity.person_id() || !n.identity.can_act() {
+            return Err(NetError::new(
+                409,
+                "no-person",
+                "this machine can't sign a machine in: adding one needs your presence at a device of the network's owner, and this machine has none",
+            ));
+        }
         if view.member(host).is_some() {
             return Err(NetError::new(409, "taken", format!("{host} is in the network already: Replace it to add a reinstalled machine")));
         }
@@ -1775,8 +2023,8 @@ impl Node {
         if host == net.host {
             return Err(NetError::bad("to take this machine out, run xenonet net leave"));
         }
-        let m = n.roster().view().member(host).cloned().ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
-        let mut e = n.roster().draft(Op::Remove, HostRef { id: m.id.clone(), keys: m.keys, window: m.window }, None, n.gateway_now() as i64);
+        let m = n.roster().host_ref(host).ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
+        let mut e = n.draft(Op::Remove, m, None);
         e.sign_by(&net.host, &key);
         self.submit(e).await?;
         n.log("net.remove", &format!("{host} was removed from the network"));
@@ -1785,26 +2033,23 @@ impl Node {
 
     /// **Replace**: the old entry goes, and a ticket comes for the same id
     /// and window choice, for the reinstalled machine to join with.
-    pub async fn replace(&self, host: &str) -> R<Value> {
+    pub async fn replace(&self, host: &str, at_window: bool) -> R<Value> {
         let window = self.shared.roster().view().member(host).map(|m| m.window).ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
+        if !at_window {
+            return Err(identity::not_at_window("Replace"));
+        }
         self.remove(host).await?;
-        let mut t = self.ticket(host, window).await?;
+        let mut t = self.ticket(host, window, at_window).await?;
         t["replaced"] = json!(host);
         Ok(t)
     }
 
-    /// Settings: titles only, whether this host shares its load, who may
-    /// start and wake sessions here, and the LAN address the gateway
-    /// listens on. At its own keyboard the person sets any of them.
-    pub fn settings(&self, change: Change) -> R<Value> {
+    /// Settings: titles only, whether this host shares its load, and the
+    /// LAN address the gateway listens on, kept here; who may start and
+    /// wake sessions here, a settings entry in the chain (`set_reach`).
+    pub async fn settings(&self, change: Change, at_window: bool) -> R<Value> {
         let Change { titles_only, share_load, lan, start, wake } = change;
         let n = &self.shared;
-        if start.as_deref().is_some_and(|s| !xenonet_model::ops::STARTS.contains(&s)) {
-            return Err(NetError::bad("start is off, you, network or delegate"));
-        }
-        if wake.as_deref().is_some_and(|w| !xenonet_model::ops::WAKES.contains(&w)) {
-            return Err(NetError::bad("wake is consent or network"));
-        }
         {
             let mut guard = n.net.writing();
             let net = guard.as_mut().ok_or_else(not_in)?;
@@ -1814,19 +2059,6 @@ impl Node {
             if let Some(s) = share_load {
                 net.share_load = s;
             }
-            // Set here, a setting takes back what waits to widen it.
-            let before = net.start.clone();
-            for (k, v) in [("start", start), ("wake", wake)] {
-                let Some(v) = v else { continue };
-                n.widens.locked().retain(|w| w.setting != k);
-                if k == "start" {
-                    net.start = v;
-                } else {
-                    net.wake = v;
-                }
-            }
-            let (me, now) = (net.host.clone(), n.now());
-            note_delegation(net, &before, &me, now);
             if let Some(lan) = lan {
                 if net.gateway.host != net.host {
                     return Err(NetError::new(409, "not-gateway", "the LAN address is the gateway's: set it on its host"));
@@ -1835,6 +2067,10 @@ impl Node {
                 net.lan = lan;
             }
             n.dir.write_network(net)?;
+        }
+        if start.is_some() || wake.is_some() {
+            let me = n.network().ok_or_else(not_in)?.host;
+            return self.set_reach(&me, start.as_deref(), wake.as_deref(), at_window).await;
         }
         Ok(self.state())
     }
@@ -1852,61 +2088,78 @@ impl Node {
         let _ = n.dir.write_network(net);
     }
 
-    /// Who may start and wake sessions on another host, set from this
-    /// window host's console as you (`{ start?, wake? }`, or `{ approve }`
-    /// for a widening that waits there): an `operator` frame, which that
-    /// host checks (operator.rs). Only a window host sends one.
-    pub fn settings_on(&self, host: &str, args: &Value, checked: &str, strong: bool) -> R<Value> {
+    /// Who may start and wake sessions on `host` (this machine or another),
+    /// as a settings entry this machine signs. A narrowing is done at once
+    /// by an admin, or by the machine itself; a widening (start to network
+    /// or delegate, wake to network) takes the founder, or waits for a
+    /// second admin, each with the person's presence, so it's done from
+    /// the window. Delegate brings the person's standing grant: starts and
+    /// answers under the delegation's limits, for process-checked agents,
+    /// for a year unless it's narrowed first.
+    pub async fn set_reach(&self, host: &str, start: Option<&str>, wake: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
-        let net = n.network().ok_or_else(not_in)?;
-        if host == net.host {
-            return Err(NetError::bad("that's this machine: set its own settings without a host"));
-        }
-        {
+        let (net, key) = self.me()?;
+        let start = start.map(|s| crate::roster::Start::parse(s).ok_or_else(|| NetError::bad("start is off, you, network or delegate"))).transpose()?;
+        let wake = wake.map(|w| crate::roster::Wake::parse(w).ok_or_else(|| NetError::bad("wake is consent or network"))).transpose()?;
+        let (target, had) = {
             let r = n.roster();
             let v = r.view_ref().ok_or_else(not_in)?;
-            if v.member(host).is_none() {
-                return Err(NetError::new(404, "no-host", format!("{host} isn't in the network")));
-            }
-            if !v.is_window(&net.host) {
+            let m = v.member(host).ok_or_else(|| NetError::new(404, "no-host", format!("{host} isn't in the network")))?;
+            if host != net.host && !v.is_window(&net.host) {
                 return Err(NetError::new(403, "not-window", "another machine's settings are changed from a window host"));
             }
+            (r.host_ref(host).ok_or_else(not_in)?, m.settings.clone())
+        };
+        let now = n.gateway_now() as i64;
+        let mut to = had.clone();
+        if let Some(s) = start {
+            to.start = s;
         }
-        let keep = |k: &str| args.get(k).filter(|v| v.is_string()).cloned();
-        let mut a = serde_json::Map::new();
-        for k in ["start", "wake", "approve"] {
-            if let Some(v) = keep(k) {
-                a.insert(k.into(), v);
-            }
+        if let Some(w) = wake {
+            to.wake = w;
         }
-        if a.is_empty() {
-            return Err(NetError::bad("say what to set: start or wake, or approve a change that waits"));
+        to.grant = match (to.start, &had.grant) {
+            (crate::roster::Start::Delegate, Some(g)) if start.is_none() || had.start == crate::roster::Start::Delegate => Some(g.clone()),
+            (crate::roster::Start::Delegate, _) => Some(crate::roster::Grant::standard(now + 365 * 24 * 3600 * 1000)),
+            _ => None,
+        };
+        if to == had {
+            return Ok(self.state());
         }
-        if a.get("start").and_then(Value::as_str).is_some_and(|s| !xenonet_model::ops::STARTS.contains(&s)) {
-            return Err(NetError::bad("start is off, you, network or delegate"));
-        }
-        if a.get("wake").and_then(Value::as_str).is_some_and(|w| !xenonet_model::ops::WAKES.contains(&w)) {
-            return Err(NetError::bad("wake is consent or network"));
-        }
-        self.operator(host, "settings", Value::Object(a), checked, strong)?;
-        let mut st = self.state();
-        st["sent"] = json!({ "host": host, "action": "settings" });
-        Ok(st)
+        let mut e = n.draft(Op::Settings, target, None);
+        e.settings = Some(to);
+        let presence = match e.presence_for(&n.roster().view()) {
+            Some(what) => Some(n.identity.prove(at_window, what, &e.digest(), &format!("let your network reach {host} further"), now)?),
+            None => None,
+        };
+        e.sign_with(&net.host, &key, presence);
+        self.decide_entry(e, "this machine asked to widen what the network may do there; the founder or another window host approves it").await
     }
 
-    /// An `operator` frame for another host: the person's action, with how
-    /// it was checked here.
-    pub fn operator(&self, to: &str, action: &str, args: Value, checked: &str, strong: bool) -> R<()> {
-        let body = json!({
-            "schema": "network/operator/v1",
-            "action": action,
-            "args": args,
-            "checked": checked,
-            "strength": if strong { "strong" } else { "weak" },
-            "nonce": crate::codec::nonce()?,
-            "at": self.shared.gateway_now() as i64,
-        });
-        self.shared.send(Outgoing { to: To::Host(to.into()), kind: Kind::Operator, body }).map_err(|e| NetError::new(409, "refused", e))
+    /// An entry this machine signed: to the gateway, or, signed by too few,
+    /// kept there as a proposal for another admin to approve.
+    async fn decide_entry(&self, e: Entry, waits: &str) -> R<Value> {
+        let n = &self.shared;
+        let verdict = n.roster().would_take(&e);
+        match verdict {
+            Ok(()) => {}
+            Err(err) if err.code == "needs-approval" => {
+                if let Some(g) = n.gateway() {
+                    g.propose(n, e, n.now())?;
+                } else {
+                    let t = self.transport()?;
+                    link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true, "person": n.person_json() })).await?;
+                    n.note_proposals(vec![e]);
+                }
+                n.log("net.settings", waits);
+                let mut out = self.state();
+                out["proposed"] = json!(true);
+                return Ok(out);
+            }
+            Err(err) => return Err(err.into()),
+        }
+        self.submit(e).await?;
+        Ok(self.state())
     }
 
     /// `network/state/v1`: the network, this host, its gateway and link,
@@ -1967,7 +2220,7 @@ impl Node {
                 "self": me,
                 // Who may start and wake sessions there, and what it takes:
                 // null and none for a host whose XenoNet doesn't say.
-                "reach": if me { n.reach().to_json() } else { p.and_then(|p| p.reach.clone()).unwrap_or(Value::Null) },
+                "reach": n.reach_of(id).to_json(),
                 "can": if me { json!(xenonet_model::ops::CAN) } else { json!(p.map(|p| p.can.clone()).unwrap_or_default()) },
             }));
         }
@@ -1978,6 +2231,18 @@ impl Node {
             None => n.pending_tickets().into_iter().map(|(host, window, expires)| json!({ "host": host, "window": window, "expires": expires })).collect(),
         };
         let o = n.outbox();
+        let reach = n.reach_of(&net.host);
+        // Who this machine acts as, as the window shows it: the person, the
+        // device here and how it asks, and whether it's the network's owner.
+        let id = &n.identity;
+        let person = json!({
+            "id": id.person_id(),
+            "owner": view.owner.is_some() && view.owner == id.person_id(),
+            "device": id.device_id(),
+            "kind": id.device_kind().map(xenonet_log::person::DeviceKind::as_str),
+            "acts": id.can_act(),
+            "rootSealed": id.root_sealed(),
+        });
         let address = net.gateway.address.clone().unwrap_or_default();
         let kind = if address.is_empty() { "tunnel" } else { address_kind(&address) };
         let mut out = json!({
@@ -2000,9 +2265,10 @@ impl Node {
             "rosterMismatch": n.roster_mismatch(),
             "titlesOnly": net.titles_only,
             "shareLoad": net.share_load,
-            "start": net.start,
-            "wake": net.wake,
-            "delegated": net.delegated.as_ref().map(|d| json!({ "by": d.by, "at": d.at })),
+            "start": reach.start,
+            "wake": reach.wake,
+            "delegated": reach.delegated.as_ref().map(|(by, at)| json!({ "by": by, "at": at })),
+            "person": person,
         });
         if let Some(g) = gw {
             out["queues"] = Value::Array(g.queues().into_iter().map(|(h, f, b)| json!({ "host": h, "frames": f, "bytes": b })).collect());
@@ -2015,9 +2281,11 @@ impl Node {
         if let Some(lan) = net.lan {
             out["lan"] = json!(lan);
         }
+        // Settings proposals show in their machine's reach instead.
         let proposals: Vec<Value> = n
             .proposals()
             .iter()
+            .filter(|p| p.op != Op::Settings)
             .map(|p| {
                 json!({
                     "id": p.id(),
@@ -2042,7 +2310,7 @@ impl Node {
     /// founder or a second window host to approve it. A gateway that's gone
     /// for good isn't asked: the move is this host's, and the others follow
     /// with `gateway set`.
-    pub async fn take_gateway(&self, address: Option<&str>, lan: Option<&str>) -> R<Value> {
+    pub async fn take_gateway(&self, address: Option<&str>, lan: Option<&str>, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, key) = self.me()?;
         let view = n.roster().view();
@@ -2052,14 +2320,10 @@ impl Node {
         let Some(address) = lan.or(address).map(str::to_string) else {
             return Err(NetError::new(409, "no-address", "give this machine an address first: use a tailnet or LAN address (--lan <ip:port>)"));
         };
-        let m = view.member(&net.host).cloned().ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
-        let mut e = n.roster().draft(
-            Op::Gateway,
-            HostRef { id: m.id.clone(), keys: m.keys, window: m.window },
-            Some(crate::roster::GatewayAt { address, version: view.gateway_version + 1 }),
-            n.gateway_now() as i64,
-        );
-        e.sign_by(&net.host, &key);
+        let m = n.roster().host_ref(&net.host).ok_or_else(|| NetError::new(410, "removed", "this machine isn't in the network"))?;
+        let mut e = n.draft(Op::Gateway, m, Some(crate::roster::GatewayAt { address, version: view.gateway_version + 1 }));
+        let block = n.identity.prove(at_window, crate::roster::WIDEN, &e.digest(), "move your XenoNet network's gateway here", n.gateway_now() as i64)?;
+        e.sign_with(&net.host, &key, Some(block));
         {
             let mut guard = n.net.writing();
             if let Some(f) = guard.as_mut() {
@@ -2072,7 +2336,7 @@ impl Node {
             Ok(()) => {}
             Err(err) if err.code == "needs-approval" => {
                 let t = self.transport()?;
-                link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true })).await?;
+                link::call(n, &t, "POST", "/net/v1/roster", json!({ "entry": e.to_json(), "propose": true, "person": n.person_json() })).await?;
                 n.note_proposals(vec![e]);
                 n.log("net.gateway", "this machine asked to become the network's gateway; the founder or another window host approves it");
                 let mut out = self.state();
@@ -2094,8 +2358,9 @@ impl Node {
     }
 
     /// Approves an entry waiting for approval, by its id (`Entry::id`, as
-    /// the state lists it): this host signs exactly that entry too.
-    pub async fn approve(&self, id: &str) -> R<Value> {
+    /// the state lists it): this host signs exactly that entry too, with
+    /// the person's presence where it admits or widens (from the window).
+    pub async fn approve(&self, id: &str, at_window: bool) -> R<Value> {
         let n = &self.shared;
         let (net, key) = self.me()?;
         if !n.roster().view().is_window(&net.host) {
@@ -2105,7 +2370,11 @@ impl Node {
             return Err(NetError::new(404, "nothing", "nothing waits for approval by that id: xenonet net status lists what does"));
         };
         let (op, host) = (e.op.as_str(), e.host.id.clone());
-        e.sign_by(&net.host, &key);
+        let presence = match e.presence_for(&n.roster().view()) {
+            Some(what) => Some(n.identity.prove(at_window, what, &e.digest(), &format!("approve {op} for {host} in your XenoNet network"), n.gateway_now() as i64)?),
+            None => None,
+        };
+        e.sign_with(&net.host, &key, presence);
         self.submit(e).await?;
         n.log("net.approve", &format!("this machine approved {op} for {host}"));
         Ok(self.state())
@@ -2126,6 +2395,9 @@ impl Node {
         let t = link::http(address)?;
         let had = n.roster().view();
         let v = link::call(n, &t, "GET", &format!("/net/v1/roster?from={}", n.roster().len()), Value::Null).await?;
+        if let Some(p) = v.get("person") {
+            n.offer_person(p);
+        }
         let mut r = n.roster().clone();
         let mut new = Vec::new();
         for e in v.get("entries").and_then(Value::as_array).into_iter().flatten() {

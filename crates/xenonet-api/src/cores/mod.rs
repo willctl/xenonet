@@ -189,6 +189,11 @@ pub struct Cores {
 pub trait NetLink {
     fn net(&self) -> Arc<dyn Net>;
     fn sinks(&self) -> &Arc<SinkSlot>;
+    /// The network's chains and the person on this machine, which the
+    /// engine decides every incoming act on.
+    fn governance(&self) -> Option<Arc<dyn xenonet_net::ground::Governance>> {
+        None
+    }
 }
 
 /// See `Cores::on_net`.

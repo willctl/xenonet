@@ -106,6 +106,8 @@ fn options(dir: &Path, who: &str) -> Options {
         }),
     );
     o.timing = timing();
+    // Fake keys: a test never touches the machine's own, or prompts.
+    o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = Caps::default();
     // A caller waits 6 s here, not 90, so the timeout shows quickly.
     o.svc_ms = 6000;

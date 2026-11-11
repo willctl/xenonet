@@ -378,7 +378,7 @@ async fn read(n: &Arc<Shared>, t: &Transport, body: NetBody, nonce: &str, hello_
 /// is a window host and this one isn't the founder.
 async fn submit_signed(n: Arc<Shared>, t: Transport, entries: Vec<Entry>) {
     for e in entries {
-        let body = serde_json::json!({ "entry": e.to_json(), "propose": true });
+        let body = serde_json::json!({ "entry": e.to_json(), "propose": true, "person": n.person_json() });
         if let Err(err) = call(&n, &t, "POST", "/net/v1/roster", body).await {
             n.log("net.ticket", &format!("{} was signed in here, and the gateway didn't take it: {}", e.host.id, err.message));
         }
@@ -394,6 +394,9 @@ pub async fn fetch_roster(n: &Arc<Shared>, t: &Transport) {
         return;
     }
     let v = reply.body_json();
+    if let Some(p) = v.get("person") {
+        n.offer_person(p);
+    }
     for e in v.get("entries").and_then(Value::as_array).into_iter().flatten() {
         match Entry::parse(e).map_err(NetError::from).and_then(|e| n.append(e)) {
             Ok(_) => {}

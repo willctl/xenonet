@@ -17,9 +17,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use xenonet_net::codec::frame_id;
 use xenonet_net::files::{Dir, NetFile, Pin, KEY};
 use xenonet_net::frame::{host_frame, Draft};
+use xenonet_net::identity::Identity;
 use xenonet_net::keys::HostKey;
 use xenonet_net::node::{Batch, Node, Options};
-use xenonet_net::roster::{found, HostRef, Op, Roster};
+use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster, ADMIT};
 use xenonet_net::sink::{LogSink, SinkSlot};
 use xenonet_net::svc::{request_id, Request};
 
@@ -67,13 +68,21 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
     let dir = std::env::temp_dir().join(format!("xenonet-svc-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let files = Dir::new(&dir);
+    let files = Dir::new(dir.join("network"));
     let studio = HostKey::load_or_create(&files.file(KEY)).unwrap();
     let laptop = HostKey::generate().unwrap();
-    let mut roster = Roster::new();
-    roster.offer(found(NET, "studio", &studio, None, T0)).unwrap();
-    let mut add = roster.draft(Op::Add, HostRef { id: "laptop".into(), keys: *laptop.public(), window: false }, None, T0 + 1);
-    add.sign_by("studio", &studio);
+    // The person, on studio's fake device, who admits laptop.
+    let vault: Arc<dyn xenonet_id::vault::Vault> = Arc::new(xenonet_keys::Fake { allow: true });
+    let identity = Identity::open(files.identity_dir(), Some(vault.clone())).unwrap();
+    identity.found(true, "studio", T0).unwrap();
+    let machine = |seed: u8| xenonet_id::sign::Signer::public(&xenonet_id::sign::SeedSigner::from_seed(&[seed; 32], xenonet_id::sign::KeyHome::File).unwrap());
+    let me = HostRef { id: "studio".into(), keys: *studio.public(), window: true, device: identity.device_id(), machine: identity.machine_key().unwrap().public() };
+    let mut roster = Roster::with_policy(NetworkPolicy::with(identity.clone()));
+    roster.offer(found(NET, me, &studio, identity.person_id(), identity.head(), None, T0)).unwrap();
+    let mut add = roster.draft(Op::Add, HostRef { id: "laptop".into(), keys: *laptop.public(), window: false, device: None, machine: machine(9) }, None, T0 + 1);
+    add.person_head = identity.head();
+    let block = identity.prove(true, ADMIT, &add.digest(), "", T0 + 1).unwrap();
+    add.sign_with("studio", &studio, Some(block));
     roster.offer(add).unwrap();
     files.write_roster(&roster).unwrap();
     let p = studio.public();
@@ -88,14 +97,12 @@ fn studio(tag: &str) -> (std::path::PathBuf, Arc<Node>, Arc<AtomicI64>, HostKey,
             lan: None,
             titles_only: false,
             share_load: true,
-            start: "you".into(),
-            wake: "consent".into(),
-            delegated: None,
             joined: T0,
         })
         .unwrap();
     let clock = Arc::new(AtomicI64::new(T0 + 10 * MIN));
-    let mut o = Options::new(&dir, "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
+    let mut o = Options::new(dir.join("network"), "0.0.0-test", "linux", Arc::new(|_: &str, _: &str| {}));
+    o.vault = Some(vault);
     let c = clock.clone();
     o.clock = Arc::new(move || c.load(Ordering::SeqCst) as f64);
     let node = Node::open(o, Arc::new(SinkSlot::new(Arc::new(LogSink::new(Arc::new(|_: &str, _: &str| {})))))).unwrap();

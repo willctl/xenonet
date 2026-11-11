@@ -516,7 +516,7 @@ async fn an_actors_calls_need_its_token_its_own_process_and_what_you_allowed_it(
     assert_eq!(f.was("claim")[0], json!(["actor:wren", { "paths": ["src/"] }]));
     // A send says how XenoNet knew who sent it: the token, from a process it checked.
     assert_eq!(go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "claude:x", "text": "hi" }))).await.status, 200);
-    assert_eq!(f.was("send")[0], json!(["actor:wren", { "to": "claude:x", "text": "hi" }, { "method": "token", "process": "checked", "strength": "partial" }]));
+    assert_eq!(f.was("send")[0], json!(["actor:wren", { "to": "claude:x", "text": "hi" }, { "method": "token", "process": "checked", "attestation": "process-checked" }]));
     // Six messages an hour to a repo or to all, sixty in all.
     for i in 0..6 {
         assert_eq!(go(&ctx, "POST", "/api/engine/send", &as_wren, Some(json!({ "to": "all", "text": format!("all {i}") }))).await.status, 200);
@@ -1034,7 +1034,7 @@ async fn the_windows_message_needs_its_key_and_a_session_or_an_actor() {
     let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": "actor:muse", "text": "hi" }))).await;
     assert_eq!(r.status, 200);
     assert_eq!(f.was("send")[0][0], json!("actor:you"));
-    assert_eq!(f.was("send")[0][2], json!({ "method": "window", "process": "n/a", "strength": "strong" }));
+    assert_eq!(f.was("send")[0][2], json!({ "method": "window", "process": "n/a", "attestation": "n/a" }));
     // A session here, or one on another machine of the network, as you.
     for to in [ME.to_string(), format!("@laptop:{ME}")] {
         let r = go(&ctx, "POST", "/api/actors/you/message", &[("x-xenonet-window", &key)], Some(json!({ "to": to, "text": "hi" }))).await;

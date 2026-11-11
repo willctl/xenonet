@@ -31,8 +31,9 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::path::Path;
 use xenonet_id::presence::{FixedCheck, UserCheck};
-use xenonet_id::sign::{Purpose, SeedSigner, Signer};
+use xenonet_id::sign::{Purpose, SeedSigner, Signer, VerifyingKey};
 use xenonet_id::store::MemoryKeyStore;
+use xenonet_id::vault::{DeviceKey, Vault};
 use xenonet_id::{IdError, R};
 
 /// The machine signing key's file in a machine's key folder.
@@ -129,6 +130,66 @@ impl Keys for Fake {
     }
     fn available(&self, _dir: &Path) -> Presence {
         Presence::Weaker
+    }
+}
+
+// Both kinds of keys are a `Vault` too, which is how the rest of XenoNet
+// takes them: it sees the trait, never this crate.
+impl Vault for System {
+    fn machine_signer(&self, dir: &Path) -> R<Box<dyn Signer>> {
+        machine_signer(dir)
+    }
+    fn device(&self, dir: &Path) -> R<Option<DeviceKey>> {
+        Ok(device(dir)?.map(Device::into_key))
+    }
+    fn seal(&self, to: &VerifyingKey, secret: &[u8]) -> R<Option<Vec<u8>>> {
+        #[cfg(target_os = "macos")]
+        if matches!(to, VerifyingKey::P256(_)) {
+            return macos::wrap(to, secret).map(Some);
+        }
+        let _ = (to, secret);
+        Ok(None)
+    }
+    fn open(&self, dir: &Path, sealed: &[u8], reason: &str) -> R<Vec<u8>> {
+        #[cfg(target_os = "macos")]
+        {
+            let device = macos::SecureEnclaveSigner::load(&dir.join(DEVICE_FILE))?;
+            device.unwrap_with_reason(sealed, reason)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (dir, sealed, reason);
+            Err(IdError::internal("only a Mac seals the person's key to its device key"))
+        }
+    }
+    fn asking(&self, reason: &str, f: &mut dyn FnMut()) {
+        with_reason(reason, f);
+    }
+}
+
+impl Vault for Fake {
+    fn machine_signer(&self, dir: &Path) -> R<Box<dyn Signer>> {
+        Keys::machine_signer(self, dir)
+    }
+    fn device(&self, dir: &Path) -> R<Option<DeviceKey>> {
+        Ok(Keys::device(self, dir)?.map(Device::into_key))
+    }
+    /// A fake seals nothing: the seed goes in an owner-only file, as on a
+    /// machine with no secure element.
+    fn seal(&self, _to: &VerifyingKey, _secret: &[u8]) -> R<Option<Vec<u8>>> {
+        Ok(None)
+    }
+    fn open(&self, _dir: &Path, _sealed: &[u8], _reason: &str) -> R<Vec<u8>> {
+        Err(IdError::internal("a fake's keys seal nothing"))
+    }
+    fn asking(&self, _reason: &str, f: &mut dyn FnMut()) {
+        f();
+    }
+}
+
+impl Device {
+    fn into_key(self) -> DeviceKey {
+        DeviceKey { signer: self.signer, check: self.check, biometric: self.kind == Presence::Biometric }
     }
 }
 
@@ -355,16 +416,16 @@ mod tests {
     fn fakes_are_file_keys_that_keep_and_answer_as_told() {
         let d = dir("fake");
         let keys = Fake { allow: true };
-        let machine = keys.machine_signer(&d).unwrap();
+        let machine = Keys::machine_signer(&keys, &d).unwrap();
         assert_eq!(machine.home(), KeyHome::File);
-        assert_eq!(keys.machine_signer(&d).unwrap().public(), machine.public(), "made once");
-        let device = keys.device(&d).unwrap().unwrap();
+        assert_eq!(Keys::machine_signer(&keys, &d).unwrap().public(), machine.public(), "made once");
+        let device = Keys::device(&keys, &d).unwrap().unwrap();
         assert_eq!(device.kind, Presence::Weaker);
         assert!(!device.signer.asks_person());
         let act = sha256(b"admit laptop");
         let block = prove(device.signer.as_ref(), device.check.as_deref(), "admit", &act, "add laptop", 1_000).unwrap();
         PresenceCheck::new().accept(&block, &device.signer.public(), "admit", &act, 1_500).unwrap();
-        let no = Fake { allow: false }.device(&d).unwrap().unwrap();
+        let no = Keys::device(&Fake { allow: false }, &d).unwrap().unwrap();
         assert!(prove(no.signer.as_ref(), no.check.as_deref(), "admit", &act, "add laptop", 1_000).is_err());
         assert_eq!(keys.available(&d), Presence::Weaker);
         let _ = std::fs::remove_dir_all(&d);

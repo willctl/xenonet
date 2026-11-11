@@ -8,8 +8,14 @@
 //! - The ask shows in Needs you on this machine and on every window host:
 //!   it crosses as a message frame to `xenonet:ask`, one to each window
 //!   host, never in presence. Done, it's taken back the same way.
-//! - Allow or Deny from another machine comes back as an `operator` frame
-//!   with the action `answer`: yours, from a window host, checked strongly.
+//! - An answer is yours: your device's signature over it, and a presence
+//!   block for it (Touch ID, or polkit or a passphrase where that's what
+//!   the device has), here and from another machine, which sends it as
+//!   `network/operator/v2`. This machine decides it (xenonet-authz) on its
+//!   own copy of your identity, and takes each presence block once. The
+//!   one exception is a run started under your standing grant (start:
+//!   delegate): what the grant's limits cover (the delegation judge), the
+//!   machine answers itself.
 //! - The call is held until you answer, the hold at most (ten minutes
 //!   unless XENONET_PERMISSION_HOLD_MS says otherwise); no answer is a
 //!   deny that says nobody answered.
@@ -207,11 +213,11 @@ fn to_windows(w: &Runtime, me: &str, body: &Value) {
     for host in window_hosts(w) {
         let Ok(mid) = xenonet_engine::network::new_id("msg") else { continue };
         let frame = json!({
-            "schema": "network/message/v1",
+            "schema": "network/message/v2",
             "mid": mid,
             "sender": me,
             "senderKind": "agent",
-            "auth": { "method": "session", "strength": "weak" },
+            "authority": {},
             "target": TARGET,
             "body": text,
             "replyTo": null,
@@ -238,12 +244,16 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value) -> Result<V
     // delegation covers is allowed here and now; the rest comes to you,
     // with why it wasn't covered.
     let mut outside = None;
+    let id = xenonet_engine::network::new_id("ask").map_err(|t| (500, t.message))?;
     if let Some(folder) = crate::starts::delegated_folder(w, me) {
         match delegation::judge(&tool, &input, &folder, &w.setup.home, cfg!(windows)) {
-            Verdict::Allow if !reads_env(&input) => {
-                w.log("info", "ask", &format!("{me}'s {tool} ({}) is allowed by this machine's standing delegation", input_words(&input, &w.setup.home)));
-                return Ok(answer_json("allow", &input, ""));
-            }
+            Verdict::Allow if !reads_env(&input) => match granted(w, me, &id) {
+                Ok(()) => {
+                    w.log("info", "ask", &format!("{me}'s {tool} ({}) is allowed by your standing grant for this machine", input_words(&input, &w.setup.home)));
+                    return Ok(answer_json("allow", &input, ""));
+                }
+                Err(why) => outside = Some(why),
+            },
             Verdict::Allow => outside = Some("it may read the run's environment".to_string()),
             Verdict::Ask(why) => outside = Some(why),
         }
@@ -254,7 +264,7 @@ pub fn ask(w: &Runtime, me: &str, title: Option<&str>, body: &Value) -> Result<V
     let now = now_ms();
     let hold = hold_ms(w);
     let a = Ask {
-        id: xenonet_engine::network::new_id("ask").map_err(|t| (500, t.message))?,
+        id,
         host: None,
         session: me.to_string(),
         run,
@@ -316,23 +326,72 @@ pub fn decide(w: &Runtime, id: &str, decision: &str, by: &str) -> bool {
     true
 }
 
-/// Your answer from this console: an ask here is answered at once; for one
-/// from another machine, its host (Some), where the service sends the
-/// `operator` frame that answers it. That ask stays until the frame is on
-/// its way (`answer_sent`), so a send that fails leaves it to answer again.
-/// Err for one that isn't waiting.
+/// Whether this machine answers `me`'s ask `id` itself, under your
+/// standing grant for it: decided as the machine's own act.
+fn granted(w: &Runtime, me: &str, id: &str) -> Result<(), String> {
+    let g = crate::ground::ground(w, Some(id)).ok_or("this machine's governance isn't plugged in")?;
+    let (resource, act) = answer_act(me, id, "allow")?;
+    let request = crate::ground::local(&g, xenonet_authz::Principal::Machine { id: g.facts.machine.clone() }, resource, act);
+    crate::ground::judge(&g, &request, None)
+}
+
+/// An answer's resource and act: the session whose run asked, the ask and
+/// the decision, which your device signs and a presence block names.
+fn answer_act(session: &str, ask: &str, decision: &str) -> Result<(xenonet_authz::Resource, xenonet_authz::Act), String> {
+    let session = xenonet_authz::SessionId::new(session).map_err(|e| e.message)?;
+    let ask = xenonet_authz::AskId::new(ask).map_err(|e| e.message)?;
+    let decision = if decision == "allow" { xenonet_authz::AnswerDecision::Allow } else { xenonet_authz::AnswerDecision::Deny };
+    Ok((xenonet_authz::Resource::Session(session), xenonet_authz::Act::Answer { ask, decision }))
+}
+
+/// The ids of the asks waiting here, for the ground's facts.
+pub fn waiting_ids(w: &Runtime) -> Vec<String> {
+    w.asks.here.locked().iter().filter(|(_, h)| h.answer.is_none()).map(|(id, _)| id.clone()).collect()
+}
+
+/// Your answer from this console, which only the window gives: signed by
+/// your device here, with your presence for it (it asks you: Touch ID on a
+/// Mac, twice, once for the signature and once for the presence). An ask
+/// here is decided and answered at once; for one from another machine, the
+/// answer goes there as `network/operator/v2`, for it to decide, and its
+/// host comes back (Some). That ask stays until the frame is on its way, so
+/// a send that fails leaves it to answer again. Err for one that isn't
+/// waiting, or an answer that wasn't allowed.
 pub fn answer(w: &Runtime, id: &str, decision: &str) -> Result<Option<String>, String> {
     if !matches!(decision, "allow" | "deny") {
         return Err("the answer is allow or deny".into());
     }
     let label = net(w).me().map_or_else(|| "this machine's console".to_string(), |m| format!("{}'s console", m.host));
-    if decide(w, id, decision, &label) {
-        return Ok(None);
+    let g = crate::ground::ground(w, None).ok_or("this machine's governance isn't plugged in, so it answers nothing")?;
+    let reason = |tool: &str| format!("{} {tool}", if decision == "allow" { "allow" } else { "deny" });
+    let here = w.asks.here.locked().get(id).filter(|h| h.answer.is_none()).map(|h| (h.ask.session.clone(), h.ask.tool.clone()));
+    if let Some((session, tool)) = here {
+        let (resource, act) = answer_act(&session, id, decision)?;
+        let auth = crate::ground::authority(&g.facts.identity, true, &resource, &act, &reason(&tool), g.facts.now)?;
+        let carried = crate::ground::Carried::parse(&auth);
+        let principal = crate::ground::person(w, &g, None, &carried, &resource, &act)?;
+        crate::ground::judge(&g, &crate::ground::local(&g, principal, resource, act), carried.presence.as_ref())?;
+        if decide(w, id, decision, &label) {
+            return Ok(None);
+        }
     }
     let now = now_ms();
-    let there = w.asks.there.locked();
-    let Some(a) = there.iter().find(|a| a.id == id && a.until > now) else { return Err("that ask isn't waiting: it was answered, or its time ran out".into()) };
-    Ok(a.host.clone())
+    let (host, session, tool) = {
+        let there = w.asks.there.locked();
+        let Some(a) = there.iter().find(|a| a.id == id && a.until > now) else { return Err("that ask isn't waiting: it was answered, or its time ran out".into()) };
+        (a.host.clone().unwrap_or_default(), a.session.clone(), a.tool.clone())
+    };
+    let (resource, act) = answer_act(&session, id, decision)?;
+    let authority = crate::ground::authority(&g.facts.identity, true, &resource, &act, &reason(&tool), g.facts.now)?;
+    let body = json!({
+        "schema": "network/operator/v2",
+        "answer": { "ask": id, "session": session, "decision": decision },
+        "authority": authority,
+        "at": ms(g.facts.now as f64),
+    });
+    net(w).send(xenonet_model::ops::Outgoing { to: To::Host(host.clone()), kind: FrameKind::Operator, body })?;
+    answer_sent(w, id, decision);
+    Ok(Some(host))
 }
 
 /// Another machine's ask, once your answer's frame is on its way there:
@@ -384,15 +443,34 @@ pub fn ask_in(w: &Runtime, from: &str, body: &str) {
     }
 }
 
-/// Your Allow or Deny from another window host's console: an `operator`
-/// frame's `answer` (`{ ask, decision }`), which the network checked came
-/// from a window host, strongly, fresh.
-pub fn answer_in(w: &Runtime, from: &str, args: &Value) {
-    let (Some(id), Some(decision)) = (args.get("ask").and_then(Value::as_str), args.get("decision").and_then(Value::as_str)) else { return };
-    if !matches!(decision, "allow" | "deny") {
+/// Your Allow or Deny from another machine's console
+/// (`network/operator/v2`): decided here, on this machine's own copy of
+/// your identity, with the presence block it came with taken once.
+pub fn answer_in(w: &Runtime, from: &str, body: &Value) {
+    let a = body.get("answer").cloned().unwrap_or(Value::Null);
+    let text = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let (id, session, decision) = (text("ask"), text("session"), text("decision"));
+    if !matches!(decision.as_str(), "allow" | "deny") {
         return;
     }
-    if !decide(w, id, decision, &format!("{from}'s console")) {
+    let refused = |why: String| w.log("info", "ask", &format!("an answer from {from} was refused: {why}"));
+    // The ask is this machine's own, waiting, for that session.
+    let waits = w.asks.here.locked().get(&id).is_some_and(|h| h.answer.is_none() && h.ask.session == session);
+    if !waits {
+        return w.log("info", "ask", &format!("{from} answered an ask that isn't waiting here"));
+    }
+    let Some(g) = crate::ground::ground(w, None) else { return refused("this machine's governance isn't plugged in".into()) };
+    let (resource, act) = match answer_act(&session, &id, &decision) {
+        Ok(x) => x,
+        Err(why) => return refused(why),
+    };
+    let carried = crate::ground::Carried::parse(body.get("authority").unwrap_or(&Value::Null));
+    let decided = crate::ground::person(w, &g, Some(from), &carried, &resource, &act)
+        .and_then(|p| crate::ground::judge(&g, &crate::ground::remote(&g, p, resource, act), carried.presence.as_ref()));
+    if let Err(why) = decided {
+        return refused(why);
+    }
+    if !decide(w, &id, &decision, &format!("{from}'s console")) {
         w.log("info", "ask", &format!("{from} answered an ask that isn't waiting here"));
     }
 }

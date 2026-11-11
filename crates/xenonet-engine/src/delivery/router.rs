@@ -10,16 +10,17 @@
 //!   notified   nothing picked it up within ackMs, so XenoNet told you
 //!
 //! Waking a session spends its plan, so every wake is checked first:
-//! against the policy (pause switch, wake budget), and with `reach`, which
-//! decides what this machine lets the sender do (your consent); a message
-//! that may not wake anything still waits for the next turn.
+//! against the policy (pause switch, wake budget), and against this
+//! machine's wake setting and your consent for the session (`may_wake`); a
+//! message that may not wake anything still waits for the next turn. Who
+//! may send the message at all was decided where it came in (a message
+//! from another machine by xenonet-authz, at the receiver).
 //!
 //! The records are the router's; what it asks of the machine and the other
 //! cores (the clock, the engine's views and store, the policy, the
 //! channels, the ways in, the ack timers and the events) is `Host`'s.
 
-use super::policy::{framed, hash_text, is_you, WakeAllowed};
-use super::reach::{self, Action, Consent, Decision, Kind, Settings, Wake};
+use super::policy::{actor_of, framed, hash_text, is_you, WakeAllowed};
 use super::{template, text_of, truthy, Delivered, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -27,6 +28,39 @@ use std::sync::Mutex;
 use xenonet_os::sync::Locked;
 
 pub const ACK_MS: f64 = 60e3;
+
+/// Who may wake this machine's sessions for a message, as the network's
+/// chain records its settings: your consent per session, or the network.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wake {
+    #[default]
+    Consent,
+    Network,
+}
+
+impl Wake {
+    /// consent or network; anything else is consent.
+    pub fn parse(s: &str) -> Wake {
+        if s == "network" {
+            Wake::Network
+        } else {
+            Wake::Consent
+        }
+    }
+}
+
+/// Whether a wake may go ahead, or why not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Allow,
+    Refuse(String),
+}
+
+impl Decision {
+    pub fn allowed(&self) -> bool {
+        *self == Decision::Allow
+    }
+}
 const KEEP: usize = 500;
 
 /// The router's collaborators.
@@ -206,10 +240,19 @@ impl Router {
         Self::may_wake(h, from, agent)
     }
 
+    /// The wake setting network lets any sender wake a session, within
+    /// the budgets; else your allowance for it, which has to cover actors
+    /// (`--remote`) when an actor sends.
     fn may_wake(h: &mut dyn Host, from: &str, agent: &str) -> Decision {
-        let consent = Consent { here: h.consented(agent, false), remote: h.consented(agent, true) };
-        let wake = h.wake_setting();
-        reach::decide(Action::Wake, &reach::Sender::from_id(from), agent, &Settings { consent, wake, ..Settings::default() })
+        if h.wake_setting() == Wake::Network {
+            return Decision::Allow;
+        }
+        let actor = !is_you(from) && actor_of(from).is_some();
+        if h.consented(agent, actor) {
+            Decision::Allow
+        } else {
+            Decision::Refuse("no consent".into())
+        }
     }
 
     fn wake_network(h: &mut dyn Host) -> bool {
@@ -471,8 +514,7 @@ impl Router {
                 // waiting on its user.
                 if idle && !ended && !view.as_ref().is_some_and(|v| truthy(v.get("needsYou"))) {
                     // Only you, or an actor this machine checked by its token.
-                    let who = reach::Sender::from_id(&from);
-                    let sender = who.kind == Kind::You || (who.kind == Kind::Actor && who.host.is_none());
+                    let sender = is_you(&from) || actor_of(&from).is_some_and(|(host, _)| host.is_none());
                     let pid = h.contact_pid(&agent).filter(|p| *p != 0.0 && !p.is_nan());
                     if let Decision::Refuse(why) = Self::may_wake_for(h, &from, &agent, granted) {
                         tried.push(format!("tmux: {why}"));

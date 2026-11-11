@@ -2,9 +2,13 @@
 //! network.md, "The wire" and section 8), for its window and the `xenonet
 //! net` command. Every route is the owner's: from XenoNet's window or the
 //! person's own terminal, never from under an agent or with an actor's
-//! token. `POST ticket` (**Add a machine**) is the window's, or a
-//! terminal's on macOS alone, where process checks can tell the person
-//! from an agent; it answers the join line once, and nothing keeps it.
+//! token. What asks the person (their presence, Touch ID on a Mac) is done
+//! only for a request that came with the window's key: making the first
+//! network (it sets up their identity), **Add a machine** (`POST ticket`,
+//! whose join then asks to sign the machine in; it answers the join line
+//! once, and nothing keeps it), **Replace**, approving or making an entry
+//! that admits or widens, and moving the gateway. Anything else is refused
+//! there, never prompted for.
 //!
 //! - `GET state`: `network/state/v1`.
 //! - `POST create`, `POST join`, `POST leave`: on this machine only.
@@ -16,7 +20,9 @@
 //! - `PUT settings`: titles only, whether this machine shares its load,
 //!   who may start and wake sessions here (`start`, `wake`), and a
 //!   LAN-only gateway's address. With `host`, another machine's `start`
-//!   and `wake`, sent from this window host as an `operator` frame.
+//!   and `wake`. Start and wake are settings entries in the network's
+//!   chain, signed here (with presence where they widen); `approve` signs
+//!   one that waits, by its id.
 //! - `GET svc`, `POST svc/publish`, `POST svc/unpublish`: the services this
 //!   host publishes to the network (`xenonet svc`). Other hosts reach them
 //!   at `/api/svc/…` (routes/svc.rs).
@@ -54,16 +60,19 @@ fn public_host(ctx: &Ctx) -> Option<String> {
     g.gateway().public_host()
 }
 
-/// Whether a request may make a ticket: the window's, or on macOS the
-/// person's own terminal. The reason it may not, or None.
+/// Whether a request may make a ticket: the window's, since signing the
+/// new machine in asks the person. The reason it may not, or None.
 async fn ticket_check(ctx: &Ctx, req: &Req) -> Option<String> {
-    if req.header("x-xenonet-window").is_some() || req.header("authorization").is_some() {
-        return ctx.from_window(req).await;
+    if req.header("x-xenonet-window").is_none() && req.header("authorization").is_none() {
+        return Some("Add a machine is XenoNet's window's, since it asks you: choose Add a machine in the palette".into());
     }
-    if !cfg!(target_os = "macos") {
-        return Some("Add a machine is XenoNet's window's: choose Add a machine in the palette".into());
-    }
-    ctx.from_you(req).await
+    ctx.from_window(req).await
+}
+
+/// Whether the request came with the window's key, from the window: only
+/// then may an act ask the person.
+pub async fn at_window(ctx: &Ctx, req: &Req) -> bool {
+    req.header("x-xenonet-window").is_some() && ctx.from_window(req).await.is_none()
 }
 
 /// `/api/net/…`, or None for any other path.
@@ -105,9 +114,10 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let on = |k: &str| body.get(k) == Some(&Value::Bool(true));
     let node = svc.node();
+    let window = at_window(ctx, req).await;
     let result = match rest {
         "state" => Ok(svc.state()),
-        "create" => create(ctx, &svc, &body).await,
+        "create" => create(ctx, &svc, &body, window).await,
         "join" => node.join(&text("address"), &text("ticket")).await,
         "leave" => {
             let r = node.leave(on("force")).await;
@@ -118,13 +128,13 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
         }
         "ticket" => {
             node.tunnel_address(public_host(ctx).as_deref());
-            node.ticket(&text("host"), on("window")).await
+            node.ticket(&text("host"), on("window"), window).await
         }
         "remove" => node.remove(&text("host")).await,
-        "replace" => node.replace(&text("host")).await,
-        "settings" => settings(ctx, req, &svc, &body).await,
-        "approve" => node.approve(&text("id")).await,
-        "gateway/take" => take(ctx, &svc, &body).await,
+        "replace" => node.replace(&text("host"), window).await,
+        "settings" => settings(&svc, &body, window).await,
+        "approve" => node.approve(&text("id"), window).await,
+        "gateway/take" => take(ctx, &svc, &body, window).await,
         "svc" => Ok(node.shared().svc_list()),
         "svc/publish" => publish(ctx, &svc, &body),
         "svc/unpublish" => node.shared().svc_unpublish(&text("name")),
@@ -140,7 +150,7 @@ async fn answer(ctx: &Arc<Ctx>, req: &mut Req, method: &str, rest: &str) -> Repl
     }
 }
 
-async fn create(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
+async fn create(ctx: &Ctx, svc: &NetService, body: &Value, window: bool) -> R<Value> {
     let node = svc.node();
     if let Some(n) = node.shared().network() {
         return Err(NetError::new(409, "in-network", format!("this machine is in the network {} already: xenonet net leave first", n.name)));
@@ -156,7 +166,7 @@ async fn create(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
         svc.listen(addr).await?;
     }
     let lan_text = lan.map(|a| a.to_string());
-    let made = node.create(&text("name"), &text("host"), public_host(ctx).as_deref(), lan_text.as_deref());
+    let made = node.create(&text("name"), &text("host"), public_host(ctx).as_deref(), lan_text.as_deref(), window);
     if made.is_err() && lan.is_some() {
         svc.unlisten();
     }
@@ -165,7 +175,7 @@ async fn create(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
 
 /// **Make this the network's gateway**: at the LAN address given, which it
 /// listens on first, or at the actor gateway's tunnel.
-async fn take(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
+async fn take(ctx: &Ctx, svc: &NetService, body: &Value, window: bool) -> R<Value> {
     let lan = match body.get("lan").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
         Some(l) => Some(parse_lan(l)?),
         None => None,
@@ -174,7 +184,7 @@ async fn take(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
         svc.listen(addr).await?;
     }
     let lan_text = lan.map(|a| a.to_string());
-    let took = svc.node().take_gateway(public_host(ctx).as_deref(), lan_text.as_deref()).await;
+    let took = svc.node().take_gateway(public_host(ctx).as_deref(), lan_text.as_deref(), window).await;
     if took.is_err() && lan.is_some() && !svc.node().shared().is_gateway() {
         svc.unlisten();
     }
@@ -208,20 +218,20 @@ fn publish(ctx: &Ctx, svc: &NetService, body: &Value) -> R<Value> {
     svc.node().shared().svc_publish(&text("name"), &target, &list("paths")?, &list("hosts")?)
 }
 
-async fn settings(ctx: &Ctx, req: &Req, svc: &NetService, body: &Value) -> R<Value> {
-    // Another machine's: who may start and wake sessions there, sent from
-    // this window host as you, for that machine to check.
-    if let Some(host) = body.get("host").and_then(Value::as_str).filter(|h| svc.node().shared().network().is_some_and(|n| n.host != *h)) {
-        let window = req.header("x-xenonet-window").is_some() && ctx.from_window(req).await.is_none();
-        // Strong from the window, or from a terminal where the process
-        // checks also see who signed the program: macOS. The machine it's
-        // for would refuse anything weaker, so it isn't sent.
-        if !window && !cfg!(target_os = "macos") {
-            return Err(NetError::new(403, "weak", super::runs::AS_YOU));
-        }
-        return svc.node().settings_on(host, body, if window { "window" } else { "person" }, true);
-    }
+async fn settings(svc: &NetService, body: &Value, window: bool) -> R<Value> {
     let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+    // An entry that waits for a second admin, approved by its id.
+    if let Some(id) = text("approve") {
+        return svc.node().approve(&id, window).await;
+    }
+    // Another machine's: who may start and wake sessions there, an entry
+    // this machine signs.
+    if let Some(host) = body.get("host").and_then(Value::as_str).filter(|h| svc.node().shared().network().is_some_and(|n| n.host != *h)) {
+        if text("start").is_none() && text("wake").is_none() {
+            return Err(NetError::bad("say what to set: start or wake, or approve a change that waits"));
+        }
+        return svc.node().set_reach(host, text("start").as_deref(), text("wake").as_deref(), window).await;
+    }
     let titles = body.get("titlesOnly").and_then(Value::as_bool);
     let load = body.get("shareLoad").and_then(Value::as_bool);
     let lan = match body.get("lan") {
@@ -241,5 +251,5 @@ async fn settings(ctx: &Ctx, req: &Req, svc: &NetService, body: &Value) -> R<Val
         }
     }
     let change = Change { titles_only: titles, share_load: load, lan: lan.map(|l| l.map(|a| a.to_string())), start: text("start"), wake: text("wake") };
-    svc.node().settings(change)
+    svc.node().settings(change, window).await
 }

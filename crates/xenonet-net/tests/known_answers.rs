@@ -2,7 +2,11 @@
 // fixed keys, a fixed ephemeral key and fixed ids, so another
 // implementation can check its key ids, heads, signatures, sealing, ticket
 // proofs, request signatures and roster hashes against these, byte for
-// byte. Ed25519 signs deterministically, so all of it is reproducible.
+// byte. Ed25519 signs deterministically, and the presence blocks have
+// fixed nonces, so all of it is reproducible. The roster is
+// `xenonet-roster/2`: entry 0 names its owner person, whose chain (a root
+// key and studio's device) is here too, and laptop's admit carries the
+// presence block from studio's device that the chain checks it by.
 //
 // XENONET_WRITE_FIXTURES=1 cargo test -p xenonet-net --test known_answers
 // writes the file again.
@@ -10,10 +14,13 @@
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
 
 use serde_json::{json, Value};
+use xenonet_id::presence::PresenceBlock;
+use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer};
+use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
 use xenonet_net::codec::{b64, unb64_n};
 use xenonet_net::frame::{gateway_frame, host_frame, open_frame, Draft, Frame};
 use xenonet_net::keys::HostKey;
-use xenonet_net::roster::{found, HostRef, Op, Roster};
+use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster, ADMIT};
 use xenonet_net::{request, ticket};
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/fixtures/net/known-answers.json");
@@ -38,10 +45,29 @@ fn host(name: &str, sign: u8, seal: u8) -> (HostKey, Value) {
     (k, v)
 }
 
+/// A presence block from `device` for `what` and `act`, with a fixed nonce.
+fn block(device: &SeedSigner, what: &str, act: [u8; 32], nonce: u8, at: i64) -> PresenceBlock {
+    let mut b = PresenceBlock { device: device.public().id(), what: what.into(), act, nonce: [nonce; 16], at, sig: Vec::new() };
+    b.sig = device.sign(Purpose::PRESENCE, &b.signed_bytes()).unwrap();
+    b
+}
+
+/// The owner's chain: a root key, and studio's device paired under its own
+/// presence.
+fn person(root: &SeedSigner, device: &SeedSigner) -> PersonChain {
+    let mut c = PersonChain::new();
+    c.offer(person::found(root, 1_792_511_000_000).unwrap()).unwrap();
+    let mut add = c.next(person::Body { op: person::Op::AddDevice(NewDevice { key: device.public(), kind: DeviceKind::Weaker, label: "studio".into() }), at: 1_792_511_000_001 });
+    let b = block(device, person::PAIR, add.digest(), 0x11, 1_792_511_000_001);
+    add.sign(&root.public().id(), root, Some(b)).unwrap();
+    c.offer(add).unwrap();
+    c
+}
+
 fn answers() -> Value {
     let (studio, studio_v) = host("studio", 1, 2);
     let (laptop, laptop_v) = host("laptop", 3, 4);
-    let body = json!({ "schema": "network/message/v1", "mid": "msg_00000000-0000-4000-8000-000000000001", "body": "hello from studio" });
+    let body = json!({ "schema": "network/message/v2", "mid": "msg_00000000-0000-4000-8000-000000000001", "body": "hello from studio" });
     let d = Draft { network: NET, id: "frm_00000000-0000-4000-8000-0000000000aa".into(), kind: "message", from: "studio", to: "laptop", at: 1_792_512_345_678 };
     let f = host_frame(&d, &studio, laptop.public(), &body, Some(secret(9))).unwrap();
     assert_eq!(open_frame(NET, &laptop, &f).unwrap(), body);
@@ -74,10 +100,17 @@ fn answers() -> Value {
     let code = "KX7Q49MZT2";
     let hash = ticket::hash(code);
     let nonce = "bm9uY2Utb2YtdGhlLWpvaW4";
-    let mut r = Roster::new();
-    r.offer(found(NET, "studio", &studio, None, 1_792_512_000_000)).unwrap();
-    let mut add = r.draft(Op::Add, HostRef { id: "laptop".into(), keys: *laptop.public(), window: false }, None, 1_792_512_100_000);
-    add.sign_by("studio", &studio);
+    let root = SeedSigner::from_seed(&secret(5), KeyHome::File).unwrap();
+    let device = SeedSigner::from_seed(&secret(6), KeyHome::File).unwrap();
+    let machine = |n: u8| SeedSigner::from_seed(&secret(n), KeyHome::File).unwrap().public();
+    let owner = person(&root, &device);
+    let mut r = Roster::with_policy(NetworkPolicy::with(std::sync::Arc::new(owner.clone())));
+    let me = HostRef { id: "studio".into(), keys: *studio.public(), window: true, device: Some(device.public().id()), machine: machine(7) };
+    r.offer(found(NET, me, &studio, owner.id().map(str::to_string), owner.head(), None, 1_792_512_000_000)).unwrap();
+    let mut add = r.draft(Op::Add, HostRef { id: "laptop".into(), keys: *laptop.public(), window: false, device: None, machine: machine(8) }, None, 1_792_512_100_000);
+    add.person_head = owner.head();
+    let admit = block(&device, ADMIT, add.digest(), 0x22, 1_792_512_100_000);
+    add.sign_with("studio", &studio, Some(admit));
     r.offer(add).unwrap();
     let req_body = br#"{"frames":[]}"#;
     let target = "/net/v1/frames";
@@ -116,6 +149,13 @@ fn answers() -> Value {
             "body": String::from_utf8_lossy(req_body),
             "signingString": request::signing_string(NET, "POST", target, 1_792_512_345_000, "cmVxdWVzdC1ub25jZQ", "laptop", req_body),
             "headers": headers.into_iter().map(|(k, v)| (k, Value::String(v))).collect::<serde_json::Map<_, _>>(),
+        },
+        "person": {
+            "rootSeed": b64(&secret(5)),
+            "deviceSeed": b64(&secret(6)),
+            "id": owner.id(),
+            "chain": owner.to_json(),
+            "head": owner.head(),
         },
         "roster": r.to_json(),
         "rosterHead": r.head(),
@@ -157,8 +197,14 @@ fn the_fixtures_check_from_their_own_values() {
     let hash = ticket::hash(t["code"].as_str().unwrap());
     assert!(ticket::check_join(&hash, t["nonce"].as_str().unwrap(), t["joinerKeyId"].as_str().unwrap(), t["joinProof"].as_str().unwrap()));
     assert!(ticket::check_gateway(&hash, t["gatewayKeyId"].as_str().unwrap(), t["nonce"].as_str().unwrap(), t["gatewayProof"].as_str().unwrap()));
-    let r = Roster::from_json(&v["roster"]).unwrap();
+    let owner = PersonChain::from_json(&v["person"]["chain"]).unwrap();
+    assert_eq!(owner.id(), v["person"]["id"].as_str());
+    let device = SeedSigner::from_seed(&unb64_n::<32>(v["person"]["deviceSeed"].as_str().unwrap()).unwrap(), KeyHome::File).unwrap();
+    assert!(owner.person().unwrap().active_device(&device.public().id()).is_some());
+    let r = Roster::from_json_with(NetworkPolicy::with(std::sync::Arc::new(owner)), &v["roster"]).unwrap();
     assert_eq!(r.head().as_deref(), v["rosterHead"].as_str());
+    // Without the owner's chain, the admit's presence can't be checked.
+    assert!(Roster::from_json(&v["roster"]).is_err());
     let q = &v["request"];
     let h = |k: &str| q["headers"][k].as_str().map(str::to_string);
     let signed = request::Signed::from_headers(h).unwrap();

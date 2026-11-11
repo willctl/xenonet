@@ -24,6 +24,13 @@
 //! - **Handoffs.** Work left for another session, kept by the host that
 //!   made it, which decides who takes it.
 //!
+//! Every act from another machine is decided here before it's taken
+//! (`crate::ground`, xenonet-authz): a message, a start, an ask, a
+//! handoff, claims, and the person's answer. The person's acts carry their
+//! device's signature (`network/message/v2`'s `authority`), checked
+//! against this machine's copy of their chain; an agent's is its
+//! machine's word, which checked its process.
+//!
 //! Every path here runs only while `Net::me()` says this machine is in a
 //! network, except handoffs, which work on one machine too.
 
@@ -35,7 +42,6 @@ use std::sync::{Arc, Mutex, Weak};
 use xenonet_adapter::apps::is_session_id;
 use xenonet_api::From;
 use xenonet_engine::delivery::policy::Guard;
-use xenonet_engine::delivery::reach::{self, Action, Decision, Sender, Settings};
 use xenonet_engine::engine::{is_actor_agent, is_agent_id, Engine, Fail, Result, ACTIVE_MS};
 use xenonet_engine::host::Collaborators;
 use xenonet_engine::network::{host_of, is_remote, local_of, new_id};
@@ -79,6 +85,9 @@ pub struct NetState {
     /// Held while a body from another host is taken, one at a time, so a
     /// repeat that arrives beside its first copy is still seen as one.
     taking: Mutex<()>,
+    /// The network's governance: its chains and the person here, which
+    /// every act from another machine is decided on.
+    pub(crate) governance: std::sync::RwLock<Option<Arc<dyn xenonet_net::ground::Governance>>>,
 }
 
 #[derive(Default)]
@@ -117,8 +126,9 @@ pub fn set_net(w: &Runtime, net: Arc<dyn Net>) {
 /// hosts of this one (presence and claims every 2 s when they changed,
 /// handoffs that lapse). The sink is what the link calls with what
 /// arrives.
-pub fn plug(w: &Arc<Runtime>, net: Arc<dyn Net>) -> Arc<EngineSink> {
+pub fn plug(w: &Arc<Runtime>, net: Arc<dyn Net>, governance: Option<Arc<dyn xenonet_net::ground::Governance>>) -> Arc<EngineSink> {
     set_net(w, net);
+    crate::ground::set_governance(w, governance);
     let t = w.every(PRESENCE_MS, tick);
     if let Some(old) = w.net.ticker.locked().replace(t) {
         old.abort();
@@ -327,21 +337,18 @@ pub fn receive(w: &Runtime, incoming: Incoming) {
     if net(w).me().is_none() {
         return;
     }
-    let Incoming { from, kind, body, from_window_host, at } = incoming;
+    let Incoming { from, kind, body, at, .. } = incoming;
     let _one = w.net.taking.locked();
     let done = match kind {
         Kind::Presence => presence_in(w, &from, &body),
         Kind::Claims => claims_in(w, &from, &body),
-        Kind::Message => message_in(w, &from, &body, from_window_host, at),
+        Kind::Message => message_in(w, &from, &body, at),
         Kind::Receipt => receipt_in(w, &from, &body),
         Kind::Handoff => handoff_in(w, &from, &body),
-        // The person's actions from another console are the network's
-        // own (section 8), but for your answer to a run's permission
-        // prompt; a message from them comes as a message.
+        // The person's answer to a run's permission prompt, from another
+        // machine's console (`network/operator/v2`).
         Kind::Operator => {
-            if body.get("action").and_then(Value::as_str) == Some("answer") {
-                crate::asks::answer_in(w, &from, body.get("args").unwrap_or(&Value::Null));
-            }
+            crate::asks::answer_in(w, &from, &body);
             Ok(())
         }
         // The map's frames go to the relay and the hub, and services'
@@ -650,7 +657,7 @@ fn stub(id: &str) -> Value {
 
 pub(crate) fn sender_kind(me: &str) -> &'static str {
     if me == YOU {
-        "you"
+        "person"
     } else if parse_actor_id(me).is_some() {
         "actor"
     } else {
@@ -659,7 +666,11 @@ pub(crate) fn sender_kind(me: &str) -> &'static str {
 }
 
 /// A message stored here as sent goes to each agent on another host as a
-/// frame of its own, which waits in the outbox for its stored receipt.
+/// frame of its own, which waits in the outbox for its stored receipt. One
+/// from you carries your device's signature for each machine it goes to,
+/// which only the window's own send makes (it asks the person where the
+/// device key asks: Touch ID); without one, the machine it's for refuses
+/// it as you.
 pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     let id = num_of(a, "id");
     let env = a.get("envelope").cloned().unwrap_or(Value::Null);
@@ -669,24 +680,23 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
     };
     store(w, |s| s.set_message_net(id, None, &mid))?;
     let me = s(a, "sender").unwrap_or_default();
-    let auth = env.get("auth").cloned().unwrap_or(Value::Null);
-    let method = auth.get("method").and_then(Value::as_str).unwrap_or(if me == YOU { "window" } else { "session" }).to_string();
-    let strength = if auth.get("strength").and_then(Value::as_str) == Some("strong") { "strong" } else { "weak" };
+    let at_window = env.get("auth").and_then(|a| a.get("method")).and_then(Value::as_str) == Some("window");
     let reply_mid = match n(a, "replyTo") {
         Some(r) => store(w, |s| s.message(r))?.and_then(|m| m.text("mid").map(str::to_string)),
         None => None,
     };
     let text = s(a, "text").unwrap_or_default();
     let scope = a.get("scope").map_or(Value::Null, |v| Value::String(xenonet_text::text::display(v)));
+    let mut signed: BTreeMap<String, Value> = BTreeMap::new();
     for r in items(a, "recipients") {
         let rid = s(&r, "id").unwrap_or_default();
         let Some(host) = host_of(&rid).map(str::to_string) else { continue };
+        let authority = if me == YOU { signed.entry(host.clone()).or_insert_with(|| person_authority(w, &host, at_window)).clone() } else { json!({}) };
         let body = json!({
-            "schema": "network/message/v1",
+            "schema": "network/message/v2",
             "mid": mid,
             "sender": me,
             "senderKind": sender_kind(&me),
-            "auth": { "method": clip(&method, 32), "strength": strength },
             "target": local_of(&rid),
             "body": text,
             "replyTo": reply_mid,
@@ -694,11 +704,28 @@ pub(crate) fn sent(w: &Runtime, a: &Value) -> Result<()> {
             "kind": "message",
             "hops": num_of(a, "hops").max(0.0),
             "at": ms(num_of(a, "at")),
+            "authority": authority,
         });
         store(w, |s| s.set_delivery_net(id, &rid, &host, &body.to_string()))?;
         send(w, To::Host(host), Kind::Message, body);
     }
     Ok(())
+}
+
+/// The person's authority for a message to `host`: their device's
+/// signature, bound to that machine. Empty when it can't be made here
+/// (not from the window, or no identity yet), which that machine refuses.
+fn person_authority(w: &Runtime, host: &str, at_window: bool) -> Value {
+    let (Some(gov), Ok(machine)) = (crate::ground::governance(w), crate::ground::machine(host)) else { return json!({}) };
+    let resource = xenonet_authz::Resource::Machine(machine);
+    let now = gov.facts().now;
+    match crate::ground::authority(&gov.identity(), at_window, &resource, &xenonet_authz::Act::Message, &format!("send a message as you to {host}"), now) {
+        Ok(a) => a,
+        Err(why) => {
+            w.log("info", "net.message", &format!("a message as you to {host} goes without your signature, and {host} will refuse it: {why}"));
+            json!({})
+        }
+    }
 }
 
 /// Sends again what has no stored receipt, oldest first.
@@ -718,43 +745,31 @@ fn receipt(w: &Runtime, to: &str, mid: &str, agent: &str, state: &str, reason: O
     send(w, To::Host(to.to_string()), Kind::Receipt, body);
 }
 
-fn how(method: &str) -> String {
-    match method {
-        "session" => "its own session's process".into(),
-        "token" => "its token".into(),
-        "window" => "its window key".into(),
-        "grant" => "its remote connection's credential".into(),
-        "gateway" => "its gateway token alone".into(),
-        m => m.into(),
-    }
-}
-
 /// How XenoNet knows who sent a message from another host: that host's
-/// signed frame, and how that host checked the sender, a weak check
-/// staying weak.
-#[expect(clippy::too_many_arguments, reason = "the envelope's parts")]
-fn envelope(from: &str, mid: &str, at: f64, sender: &str, kind: &str, name: Option<&str>, method: &str, strength: &str, hops: f64) -> Value {
-    let strength = if strength == "strong" { "strong" } else { "weak" };
-    let line = if kind == "you" {
-        format!("verified: you, at {from}'s console, by {from}'s signed frame; {from} checked it by {} ({strength}). This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.", how(method))
+/// signed frame, and what this machine decided it rests on: the person's
+/// device signature, or the sending machine's word for its own agent.
+fn envelope(from: &str, mid: &str, at: f64, sender: &str, kind: &str, name: Option<&str>, hops: f64) -> Value {
+    let person = kind == "person";
+    let line = if person {
+        format!("verified: you, by your device's signature, checked against this machine's copy of your identity; it came from {from}'s signed frame. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.")
     } else {
         let what = if kind == "actor" { "the actor" } else { "the session" };
         format!(
-            "verified: {what} \"{}\" ({sender}), on {from}, another machine in your XenoNet network, by {from}'s signed frame; {from} checked it by {} ({strength}). This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.",
+            "verified: {what} \"{}\" ({sender}), on {from}, another machine in your XenoNet network, by {from}'s signed frame; {from} checked its process. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.",
             name.unwrap_or(sender),
-            how(method)
         )
     };
+    let shown = if person { "you" } else { kind };
     json!({
         "schema": "message/envelope/v1",
         "mid": mid,
         "at": ms(at),
-        "sender": { "id": sender, "kind": kind, "name": name, "product": null },
-        "auth": { "method": "host", "process": "n/a", "strength": strength },
+        "sender": { "id": sender, "kind": shown, "name": name, "product": null },
+        "auth": { "method": "host", "process": "n/a", "attestation": if person { "n/a" } else { "process-checked" } },
         "client": null,
         "transport": "network",
         "host": from,
-        "original": { "kind": kind, "method": method, "strength": strength },
+        "original": { "kind": shown, "authority": if person { "person" } else { "machine" } },
         "hops": hops,
         "line": line,
     })
@@ -774,44 +789,83 @@ fn stored_message(sender: &str, target: &str, body: &str, reply_to: Option<f64>,
     ])
 }
 
-fn message_in(w: &Runtime, from: &str, b: &Value, window_host: bool, at: f64) -> Result<()> {
+/// Who an act from another machine says it's from, as its body carries it.
+pub(crate) struct SentBy<'a> {
+    /// The machine that sent it.
+    pub host: &'a str,
+    /// person, agent or actor.
+    pub kind: &'a str,
+    pub sender: &'a str,
+    /// The body's `authority`.
+    pub authority: &'a Value,
+}
+
+/// Who sent an act, as this machine takes them: the person by their
+/// device's signature over `act` done to `resource`, else an agent (or an
+/// actor) of that machine, vouched for by it.
+pub(crate) fn principal_of(
+    w: &Runtime,
+    g: &crate::ground::EngineGround,
+    from: &SentBy<'_>,
+    resource: &xenonet_authz::Resource,
+    act: &xenonet_authz::Act,
+) -> std::result::Result<xenonet_authz::Principal, String> {
+    let machine = crate::ground::machine(from.host)?;
+    if from.kind == "person" {
+        return crate::ground::person(w, g, Some(from.host), &crate::ground::Carried::parse(from.authority), resource, act);
+    }
+    crate::ground::agent(from.sender, &machine)
+}
+
+fn message_in(w: &Runtime, from: &str, b: &Value, at: f64) -> Result<()> {
     let (Some(mid), Some(sender), Some(kind), Some(target), Some(body)) = (s(b, "mid"), s(b, "sender"), s(b, "senderKind"), s(b, "target"), s(b, "body")) else {
         return Err(fail("a message without its mid, sender, target or body"));
     };
     let sender_ok = match kind.as_str() {
-        "you" => sender == YOU,
+        "person" => sender == YOU,
         "agent" | "actor" => own_id(&sender),
         _ => false,
     };
     if !mid.starts_with("msg_") || !sender_ok || body.is_empty() || body.chars().count() > 16000 {
-        return Err(fail("a message that isn't network/message/v1"));
+        return Err(fail("a message that isn't network/message/v2"));
     }
+    let authority = b.get("authority").cloned().unwrap_or(Value::Null);
     // A start request: the starts' own (starts.rs), answered by receipts
     // keyed by its mid. An older XenoNet refuses the target below.
     if target == xenonet_engine::delivery::starts::TARGET {
-        let strong = b.get("auth").and_then(|a| a.get("strength")).and_then(Value::as_str) == Some("strong");
-        crate::starts::start_in(w, from, &mid, &kind, &sender, &body, strong, window_host, at);
+        crate::starts::start_in(w, from, &mid, &kind, &sender, &body, &authority, at);
         return Ok(());
     }
+    let Some(g) = crate::ground::ground(w, None) else {
+        return Err(fail("this machine's governance isn't plugged in, so it takes nothing from another machine"));
+    };
     // A permission prompt of a run on another machine, for this console,
-    // or its end (asks.rs).
+    // or its end (asks.rs): a member's message to this machine.
     if target == crate::asks::TARGET {
-        crate::asks::ask_in(w, from, &body);
+        let own = xenonet_authz::Resource::Machine(g.facts.machine.clone());
+        let decided = principal_of(w, &g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, &own, &xenonet_authz::Act::Message)
+            .and_then(|p| crate::ground::judge(&g, &crate::ground::remote(&g, p, own, xenonet_authz::Act::Message), None));
+        match decided {
+            Ok(()) => crate::asks::ask_in(w, from, &body),
+            Err(why) => w.log("info", "net.ask", &format!("an ask from {from} was refused: {why}")),
+        }
         return Ok(());
     }
     if !(is_agent_id(&target) || is_actor_agent(&target)) {
         receipt(w, from, &mid, &target, "refused", Some("no session or actor here has that id"));
         return Ok(());
     }
-    // The person speaks only from a window host's console, checked by its
-    // window key (section 8): anything less isn't taken as you.
-    let strong = b.get("auth").and_then(|a| a.get("strength")).and_then(Value::as_str) == Some("strong");
-    if kind == "you" && !(window_host && strong) {
-        receipt(w, from, &mid, &target, "refused", Some("a message as you comes only from a window host's console, checked by its window key"));
+    // Decided here: who sent it, on this machine's own facts. A message as
+    // you carries your device's signature, bound to this machine.
+    let resource = xenonet_authz::Resource::Machine(g.facts.machine.clone());
+    let decided = principal_of(w, &g, &SentBy { host: from, kind: &kind, sender: &sender, authority: &authority }, &resource, &xenonet_authz::Act::Message)
+        .and_then(|p| crate::ground::judge(&g, &crate::ground::remote(&g, p, resource, xenonet_authz::Act::Message), None));
+    if let Err(why) = decided {
+        receipt(w, from, &mid, &target, "refused", Some(&why));
         return Ok(());
     }
     // `@laptop:actor:you` is `actor:you`: the person is one person.
-    let sender_id = if kind == "you" { YOU.to_string() } else { format!("@{from}:{sender}") };
+    let sender_id = if kind == "person" { YOU.to_string() } else { format!("@{from}:{sender}") };
     // A repeat (the sender didn't hear the stored receipt): say so again.
     let had = store(w, |s| s.message_by_mid(&mid, Some(from)))?;
     if let Some(m) = &had {
@@ -833,11 +887,6 @@ fn message_in(w: &Runtime, from: &str, b: &Value, window_host: bool, at: f64) ->
         receipt(w, from, &mid, &target, "refused", Some("this thread has gone back and forth too many times; XenoNet stops agent-to-agent threads at 6 messages"));
         return Ok(());
     }
-    // What this machine lets the sender do here.
-    if let Decision::Refuse(why) = reach::decide(Action::Message, &Sender::from_id(&sender_id), &target, &Settings::default()) {
-        receipt(w, from, &mid, &target, "refused", Some(&why));
-        return Ok(());
-    }
     let view = engine(w, |e, c| e.view(c, &target))?;
     // An actor XenoNet only observes reads nothing: refused, as a message
     // sent on this machine is, rather than stored for no one.
@@ -852,9 +901,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, window_host: bool, at: f64) ->
         return Ok(());
     }
     let name = remote_views(w, false).into_iter().find(|v| v["id"] == sender_id).and_then(|v| s(&v, "title"));
-    let auth = b.get("auth").cloned().unwrap_or(Value::Null);
-    let env =
-        envelope(from, &mid, now_ms(), &sender_id, &kind, name.as_deref(), &s(&auth, "method").unwrap_or_else(|| "?".into()), &s(&auth, "strength").unwrap_or_default(), hops);
+    let env = envelope(from, &mid, now_ms(), &sender_id, &kind, name.as_deref(), hops);
     let now = now_ms();
     let id = match &had {
         Some(m) => {
@@ -874,7 +921,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, window_host: bool, at: f64) ->
     receipt(w, from, &mid, &target, if held { "held" } else { "stored" }, None);
     w.mail.wake(&target);
     // How it reads when it's pushed into the session: its framing first.
-    let framing = if kind == "you" { xenonet_engine::network::from_you_line(from) } else { xenonet_engine::network::from_host_line(from) };
+    let framing = if kind == "person" { xenonet_engine::network::from_you_line(from) } else { xenonet_engine::network::from_host_line(from) };
     let mut event_body = obj(vec![
         ("id", number(id)),
         ("from", json!(sender_id)),
@@ -883,7 +930,7 @@ fn message_in(w: &Runtime, from: &str, b: &Value, window_host: bool, at: f64) ->
         ("text", json!(format!("{framing}\n{body}"))),
         ("ts", number(now)),
         ("verified", env["line"].clone()),
-        ("strength", env["auth"]["strength"].clone()),
+        ("attestation", env["auth"]["attestation"].clone()),
         ("host", json!(from)),
         ("mid", json!(mid)),
     ]);
@@ -1036,7 +1083,17 @@ pub fn claims(w: &Runtime, full: bool) -> Option<Value> {
     Some(body)
 }
 
+/// `from`'s machine-level act here (its claims, a handoff), decided: a
+/// member of the network.
+fn member_act(w: &Runtime, from: &str, act: xenonet_authz::Act) -> Result<()> {
+    let Some(g) = crate::ground::ground(w, None) else { return Err(fail("this machine's governance isn't plugged in")) };
+    let id = crate::ground::machine(from).map_err(fail)?;
+    let request = crate::ground::remote(&g, xenonet_authz::Principal::Machine { id }, xenonet_authz::Resource::Machine(g.facts.machine.clone()), act);
+    crate::ground::judge(&g, &request, None).map_err(fail)
+}
+
 fn claims_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
+    member_act(w, from, xenonet_authz::Act::Claim)?;
     let at = now_ms();
     if b.get("full").and_then(Value::as_bool).unwrap_or(false) {
         store(w, |s| s.clear_net_claims(from))?;
@@ -1364,7 +1421,7 @@ fn note_with(w: &Runtime, sender: &str, target: &str, words: &str, host: Option<
     let mut env = Value::Null;
     if let Some(h) = host {
         if let Ok(mid) = new_id("msg") {
-            env = envelope(h, &mid, now_ms(), sender, "agent", None, "host", "weak", 0.0);
+            env = envelope(h, &mid, now_ms(), sender, "agent", None, 0.0);
         }
     }
     let stored = stored_message(sender, target, words, None, &env);
@@ -1455,6 +1512,7 @@ fn accept(w: &Runtime, me: &str, id: &str, envelope: &Value) -> Result<Value> {
 }
 
 fn handoff_in(w: &Runtime, from: &str, b: &Value) -> Result<()> {
+    member_act(w, from, xenonet_authz::Act::Handoff)?;
     let (Some(id), Some(op)) = (s(b, "id"), s(b, "op")) else { return Err(fail("a handoff without its id or op")) };
     if !id.starts_with("hof_") {
         return Err(fail("a handoff that isn't network/handoff/v1"));
@@ -1598,12 +1656,15 @@ mod tests {
     }
 
     #[test]
-    fn a_weak_check_stays_weak() {
-        let env = envelope("laptop", "msg_1", 1.0, "@laptop:claude:abcdefgh", "agent", Some("Docs"), "session", "partial", 2.0);
-        assert_eq!(env["auth"], json!({ "method": "host", "process": "n/a", "strength": "weak" }));
-        assert_eq!(env["original"]["method"], "session");
+    fn an_envelope_says_what_this_machine_decided_it_rests_on() {
+        let env = envelope("laptop", "msg_1", 1.0, "@laptop:claude:abcdefgh", "agent", Some("Docs"), 2.0);
+        assert_eq!(env["auth"], json!({ "method": "host", "process": "n/a", "attestation": "process-checked" }));
+        assert_eq!(env["original"], json!({ "kind": "agent", "authority": "machine" }));
         assert_eq!(env["transport"], "network");
         assert!(env["line"].as_str().unwrap().contains("on laptop, another machine in your XenoNet network"));
+        let you = envelope("laptop", "msg_2", 1.0, YOU, "person", None, 0.0);
+        assert_eq!((you["sender"]["kind"].clone(), you["original"]["authority"].clone()), (json!("you"), json!("person")));
+        assert!(you["line"].as_str().unwrap().starts_with("verified: you, by your device's signature"));
         assert!(own_id("claude:abcdefgh") && !own_id("@vm1:claude:abcdefgh") && !own_id(YOU) && !own_id("hello"));
     }
 }

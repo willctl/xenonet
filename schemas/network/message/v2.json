@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/message/v2.json",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
+  "title": "A message between hosts",
+  "description": "One message from an agent, actor or the person on one host to an agent or actor on another, with the authority the act rests on.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/message/v2"
+    },
+    "mid": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f-]{36}$",
+      "description": "The message's id across the network (its envelope's mid)"
+    },
+    "sender": {
+      "type": "string",
+      "description": "The sender's id on its own host; the receiver qualifies it",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "senderKind": {
+      "type": "string",
+      "enum": [
+        "agent",
+        "actor",
+        "person"
+      ]
+    },
+    "target": {
+      "type": "string",
+      "description": "The recipient's id on the receiving host, unqualified",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
+    "replyTo": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^msg_[0-9a-f-]{36}$",
+          "description": "The message's id across the network (its envelope's mid)"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 64
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "direct, repo or all: how the sender addressed it"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "message",
+        "handoff"
+      ]
+    },
+    "hops": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Messages in its thread so far, across hosts, for the hop limit"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "authority": {
+      "type": "object",
+      "properties": {
+        "person": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "person": {
+              "type": "string",
+              "pattern": "^prs_[a-z2-7]{32}$",
+              "description": "A person's id: prs_ and 32 base32 characters"
+            },
+            "device": {
+              "type": "string",
+              "pattern": "^xns1_[a-z2-7]{32}$",
+              "description": "The device that signed, by its key's id"
+            },
+            "sig": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$",
+              "description": "The device's signature over the act's hash (xenonet-authz's act_hash), base64url"
+            }
+          },
+          "required": [
+            "person",
+            "device",
+            "sig"
+          ],
+          "description": "For an act as the person: their device's signature over it",
+          "additionalProperties": {}
+        },
+        "presence": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "device": {
+              "type": "string",
+              "pattern": "^xns1_[a-z2-7]{32}$",
+              "description": "A signing key's id: xns1_ and 32 base32 characters"
+            },
+            "what": {
+              "type": "string",
+              "description": "What it approves: answer, admit, widen, publish, revoke or pair",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "act": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$",
+              "description": "The SHA-256 of the act, base64url"
+            },
+            "nonce": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$"
+            },
+            "at": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            "sig": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$"
+            }
+          },
+          "required": [
+            "device",
+            "what",
+            "act",
+            "nonce",
+            "at",
+            "sig"
+          ],
+          "description": "For an act that needs the person there: a presence block for it",
+          "additionalProperties": {}
+        },
+        "personHead": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "The head of the person's chain the sender held: a receiver with an older one asks for the rest"
+        }
+      },
+      "description": "What an act rests on, for the receiver to check against its own chains: the sender's word on its own strength is never part of it",
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "schema",
+    "mid",
+    "sender",
+    "senderKind",
+    "target",
+    "body",
+    "replyTo",
+    "scope",
+    "hops",
+    "at",
+    "authority"
+  ],
+  "additionalProperties": {}
+}

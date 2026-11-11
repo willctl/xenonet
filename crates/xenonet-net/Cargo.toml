@@ -23,9 +23,15 @@ x25519-dalek.workspace = true
 xenonet-id.workspace = true
 # The roster is its chain under the network policy.
 xenonet-log.workspace = true
+# Relayed reads and person entries are decided as every incoming act is.
+xenonet-authz.workspace = true
 xenonet-model.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
+
+[dev-dependencies]
+# Fake keys for the tests' person and devices: never the machine's own.
+xenonet-keys.workspace = true
 
 [lints]
 workspace = true

@@ -9,7 +9,8 @@
 //!   most), their signatures, entries signed rightly by too few
 //!   (`needs-approval`), and the JSON a chain is kept and sent as.
 //! - `network`: a network's chain of machines, the roster
-//!   (`xenonet-roster/1`), as the network crate runs it.
+//!   (`xenonet-roster/2`), as the network crate runs it, with its
+//!   members' settings and the presence its admits and widenings need.
 //! - `person`: a person's chain of device keys (`xenonet-person/1`): the
 //!   root key, the devices it or two devices pair, and what they revoke.
 //!

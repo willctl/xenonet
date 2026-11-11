@@ -4,7 +4,7 @@
 
 use crate::ids;
 use crate::num::{Int, Ms, Ranged, Uint};
-use crate::schema::{Any, Bounded, Document, Nullable, Opt, Record, Text};
+use crate::schema::{Bounded, Document, Nullable, Opt, Text};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -58,14 +58,6 @@ pub struct Line(pub Text<0, 280>);
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Capability(pub Text<0, 32>);
-
-/// strong: checked by the window key, or by process checks on macOS; weak: claimed, not checked
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum Strength {
-    Strong,
-    Weak,
-}
 
 /// Who may start sessions there: nobody, you (from a window host's console), the network (you, and the sessions and actors on window hosts), or delegate (the network, and what a session or actor starts there runs on your standing delegation, within its limits)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -311,9 +303,9 @@ impl Document for Handoff {
     const DESCRIPTION: &'static str = "Work one session leaves for another, perhaps on another machine; taken by the first that accepts it.";
 }
 
-// ---- network/message/v1
+// ---- network/message/v2
 
-crate::tag!(pub MessageTag = "network/message/v1");
+crate::tag!(pub MessageTag = "network/message/v2");
 
 // Who sent a message: a session, an actor, or the person.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -321,14 +313,56 @@ crate::tag!(pub MessageTag = "network/message/v1");
 pub enum SenderKind {
     Agent,
     Actor,
-    You,
+    Person,
 }
 
-/// How the sender's own host checked it
+crate::pattern! {
+    /// A person's id: prs_ and 32 base32 characters
+    pub struct PersonId(r"^prs_[a-z2-7]{32}$");
+}
+
+crate::pattern! {
+    /// A signing key's id: xns1_ and 32 base32 characters
+    pub struct SigningKeyId(r"^xns1_[a-z2-7]{32}$");
+}
+
+/// The person, by one of their devices' signature over the act
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct MessageAuth {
-    pub method: Text<0, 32>,
-    pub strength: Strength,
+pub struct PersonAuthority {
+    pub person: PersonId,
+    /// The device that signed, by its key's id
+    pub device: SigningKeyId,
+    /// The device's signature over the act's hash (xenonet-authz's act_hash), base64url
+    pub sig: Base64Bytes,
+}
+
+// A presence block: the device's signed word that the person was there,
+// for one act.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PresenceProof {
+    pub device: SigningKeyId,
+    /// What it approves: answer, admit, widen, publish, revoke or pair
+    pub what: Text<1, 32>,
+    /// The SHA-256 of the act, base64url
+    pub act: Base64Bytes,
+    pub nonce: Base64Bytes,
+    pub at: Ms,
+    pub sig: Base64Bytes,
+}
+
+/// What an act rests on, for the receiver to check against its own chains: the sender's word on its own strength is never part of it
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Authority {
+    /// For an act as the person: their device's signature over it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<PersonAuthority>,
+    /// For an act that needs the person there: a presence block for it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence: Option<PresenceProof>,
+    /// The head of the person's chain the sender held: a receiver with an older one asks for the rest
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_head: Option<Base64Bytes>,
 }
 
 // A message, or a handoff carried as one.
@@ -348,7 +382,6 @@ pub struct Message {
     /// The sender's id on its own host; the receiver qualifies it
     pub sender: Text<1, 200>,
     pub sender_kind: SenderKind,
-    pub auth: MessageAuth,
     /// The recipient's id on the receiving host, unqualified
     pub target: Text<1, 200>,
     pub body: Text<1, 16000>,
@@ -360,55 +393,51 @@ pub struct Message {
     /// Messages in its thread so far, across hosts, for the hop limit
     pub hops: Uint,
     pub at: Ms,
+    pub authority: Authority,
 }
 
 impl Document for Message {
-    const ID: &'static str = "network/message/v1";
+    const ID: &'static str = "network/message/v2";
     const TITLE: &'static str = "A message between hosts";
-    const DESCRIPTION: &'static str = "One message from an agent, actor or the person on one host to an agent or actor on another.";
+    const DESCRIPTION: &'static str = "One message from an agent, actor or the person on one host to an agent or actor on another, with the authority the act rests on.";
 }
 
-// ---- network/operator/v1
+// ---- network/operator/v2
 
-crate::tag!(pub OperatorTag = "network/operator/v1");
+crate::tag!(pub OperatorTag = "network/operator/v2");
 
-// What the person did.
+/// allow or deny
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum OperatorAction {
-    Message,
-    Ticket,
-    Remove,
-    Replace,
-    Settings,
-    Answer,
+pub enum Decision {
+    Allow,
+    Deny,
 }
 
-/// window: the window key; person: a terminal, by process checks
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum CheckedBy {
-    Window,
-    Person,
+// The person's answer to a run's permission prompt.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AnswerAct {
+    /// The prompt's id on the machine it waits on
+    pub ask: Text<1, 64>,
+    /// The session whose run asked it
+    pub session: Text<1, 200>,
+    pub decision: Decision,
 }
 
-/// An action for the person.
+/// The person's answer from another machine.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Operator {
     pub schema: OperatorTag,
-    pub action: OperatorAction,
-    /// For settings: { start?, wake? } or { approve } with a waiting widening's id. For answer: { ask, decision }, decision allow or deny
-    pub args: Record<Any>,
-    pub checked: CheckedBy,
-    pub strength: Strength,
-    pub nonce: Base64Url,
+    pub answer: AnswerAct,
+    /// The person's device signature over the answer, and their presence for it
+    pub authority: Authority,
     pub at: Ms,
 }
 
 impl Document for Operator {
-    const ID: &'static str = "network/operator/v1";
-    const TITLE: &'static str = "An action for the person";
-    const DESCRIPTION: &'static str = "Something the person did in a console on one host, for another host to carry out.";
+    const ID: &'static str = "network/operator/v2";
+    const TITLE: &'static str = "The person's answer from another machine";
+    const DESCRIPTION: &'static str = "Allow or deny for a run's permission prompt, given at another machine's console, signed by the person's device there with their presence.";
 }
 
 // ---- network/presence/v1
@@ -611,7 +640,7 @@ impl Document for Relay {
     const DESCRIPTION: &'static str = "A console's subscription to another host's map, and that host's answers: the SSH relay's frames, sealed between the two hosts.";
 }
 
-// ---- network/roster-entry/v1
+// ---- network/roster-entry/v2
 
 // What a roster entry does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -622,6 +651,45 @@ pub enum RosterOp {
     Remove,
     Window,
     Gateway,
+    Settings,
+}
+
+// A signing key: Ed25519, or P-256 as a secure element signs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyAlg {
+    Ed25519,
+    P256,
+}
+
+// A public signing key.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PublicKey {
+    pub alg: KeyAlg,
+    pub key: Base64Bytes,
+}
+
+// The person's standing grant for a machine set to delegate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RosterGrant {
+    /// Runs may be started under it
+    pub starts: bool,
+    /// It answers those runs' permission prompts, within its limits
+    pub answers: bool,
+    /// The weakest check of an agent it covers: process-checked or harness-signed
+    pub requires: Text<1, 32>,
+    /// What it allows: routine-in-folder, the delegation judge's rules
+    pub limits: Text<1, 32>,
+    pub until: Ms,
+}
+
+// A machine's settings, for op settings.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RosterSettings {
+    pub start: StartReach,
+    pub wake: WakeReach,
+    /// Exactly when start is delegate
+    pub grant: Nullable<RosterGrant>,
 }
 
 // The host an entry is about, with its keys.
@@ -634,8 +702,12 @@ pub struct RosterHost {
     /// X25519 public key
     pub seal: Base64Bytes,
     pub key_id: KeyId,
-    /// A XenoNet window the person uses: this host may act for them
+    /// An admin: a XenoNet window the person uses
     pub window: bool,
+    /// The person's device key on it, by id; null on a machine with no way to ask them
+    pub device: Nullable<SigningKeyId>,
+    /// Its machine signing key, which roots its tokens
+    pub machine: PublicKey,
 }
 
 // Where the gateway is, for op gateway.
@@ -645,11 +717,13 @@ pub struct RosterGateway {
     pub version: Uint,
 }
 
-// A host's signature on an entry.
+// A host's signature on an entry, with its device's presence where the entry admits or widens.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Signer {
     pub host: HostId,
     pub sig: Base64Url,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence: Option<PresenceProof>,
 }
 
 /// A roster entry.
@@ -663,14 +737,21 @@ pub struct RosterEntry {
     pub host: RosterHost,
     /// For op gateway: where the network's gateway is now
     pub gateway: Nullable<RosterGateway>,
+    /// For op found: the person the network is theirs
+    pub owner: Nullable<PersonId>,
+    /// For op settings: the machine's settings from now
+    pub settings: Nullable<RosterSettings>,
+    /// The owner's person chain head the entry was made under
+    #[serde(rename = "personHead")]
+    pub person_head: Nullable<Base64Bytes>,
     pub at: Ms,
     pub signers: Bounded<Signer, 1, 4>,
 }
 
 impl Document for RosterEntry {
-    const ID: &'static str = "network/roster-entry/v1";
+    const ID: &'static str = "network/roster-entry/v2";
     const TITLE: &'static str = "A roster entry";
-    const DESCRIPTION: &'static str = "One link in a network's chain of hosts: who joined, who left, who's the gateway, and which hosts signed it.";
+    const DESCRIPTION: &'static str = "One link in a network's chain of hosts: who joined, who left, who's the gateway, each one's settings, and which hosts signed it, with the person's presence where it admits or widens.";
 }
 
 // ---- network/state/v1

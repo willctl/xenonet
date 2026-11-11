@@ -284,26 +284,28 @@
                   ],
                   "description": "What XenoNet saw of the program that sent it"
                 },
-                "strength": {
+                "attestation": {
                   "anyOf": [
                     {
                       "type": "string",
                       "enum": [
-                        "strong",
-                        "partial",
-                        "weak"
+                        "unchecked",
+                        "process-checked",
+                        "harness-signed",
+                        "n/a"
                       ]
                     },
                     {
                       "type": "string"
                     }
-                  ]
+                  ],
+                  "description": "How the agent was checked, as policy reads it"
                 }
               },
               "required": [
                 "method",
                 "process",
-                "strength"
+                "attestation"
               ],
               "additionalProperties": {}
             },
@@ -345,16 +347,13 @@
                 "kind": {
                   "type": "string"
                 },
-                "method": {
-                  "type": "string"
-                },
-                "strength": {
+                "authority": {
                   "anyOf": [
                     {
                       "type": "string",
                       "enum": [
-                        "strong",
-                        "weak"
+                        "person",
+                        "machine"
                       ]
                     },
                     {
@@ -365,10 +364,9 @@
               },
               "required": [
                 "kind",
-                "method",
-                "strength"
+                "authority"
               ],
-              "description": "For transport network: how the host it came from checked the sender; a weak check stays weak",
+              "description": "For transport network: who sent it and what this host checked of it",
               "additionalProperties": {}
             },
             "hops": {
@@ -440,14 +438,15 @@
           "type": "string",
           "description": "How XenoNet knows who sent it, in a sentence"
         },
-        "strength": {
+        "attestation": {
           "anyOf": [
             {
               "type": "string",
               "enum": [
-                "strong",
-                "partial",
-                "weak"
+                "unchecked",
+                "process-checked",
+                "harness-signed",
+                "n/a"
               ]
             },
             {

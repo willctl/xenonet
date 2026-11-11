@@ -29,10 +29,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use xenonet_engine::engine::is_agent_id;
 
-/// Why a call as you is refused where you can't be told from an agent: a
-/// start, or another machine's settings, from a terminal on Linux or
-/// Windows. Every machine that takes them would refuse them.
-pub const AS_YOU: &str = "as you, this runs only from XenoNet's window, or a terminal on a Mac";
+/// Why a call as you is refused away from the window: it's signed by your
+/// device, which asks you (Touch ID on a Mac), so it's done from
+/// XenoNet's window. Every machine that takes it checks the signature.
+pub const AS_YOU: &str = "as you, this runs only from XenoNet's window, where your device signs it";
 
 const BODY: usize = 64 << 10;
 
@@ -68,7 +68,8 @@ pub async fn route(ctx: &Arc<Ctx>, req: &mut Req) -> Option<Answer> {
 }
 
 /// Who asks for a start, as this machine checked them: { kind, id, title },
-/// and whether you were checked strongly. Or the refusal.
+/// and whether it came from the window (so a start as you may be signed by
+/// your device there). Or the refusal.
 async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
     let cores = &ctx.cores;
     if req.header("authorization").is_some() {
@@ -96,15 +97,13 @@ async fn who(ctx: &Ctx, req: &mut Req) -> Result<(Value, bool), Reply> {
     if let Some(why) = ctx.from_you(req).await {
         return Err(Reply::coded(403, "yours", why));
     }
-    // Strong from the window's key, or from a terminal where the process
-    // checks also see who signed the program: macOS. Anything weaker would
-    // be refused by whichever machine starts it, so it's refused here,
-    // saying why.
-    let strong = req.header("x-xenonet-window").is_some() || cfg!(target_os = "macos");
-    if !strong {
+    // As you, a start is signed by your device, which asks you: from the
+    // window alone. Never prompted for from a terminal or an agent.
+    let window = super::net::at_window(ctx, req).await;
+    if !window {
         return Err(Reply::coded(403, "weak", AS_YOU));
     }
-    Ok((json!({ "kind": "you", "id": xenonet_model::ids::YOU, "title": "you" }), strong))
+    Ok((json!({ "kind": "you", "id": xenonet_model::ids::YOU, "title": "you" }), window))
 }
 
 fn core_reply(r: Result<Value, crate::cores::CoreError>) -> Reply {
@@ -145,9 +144,9 @@ async fn asks(ctx: &Ctx, req: &Req) -> Reply {
     core_reply(ctx.cores.engine.asks().await)
 }
 
-/// Your Allow or Deny, from the window: one here is answered at once; one
-/// from another machine goes back there as an `operator` frame's `answer`,
-/// which only a window host sends.
+/// Your Allow or Deny, from the window: signed by your device with your
+/// presence (it asks you), then decided here for an ask here, or sent to
+/// the machine whose ask it is, which decides it (the engine does both).
 async fn answer(ctx: &Ctx, req: &mut Req) -> Reply {
     if let Some(why) = ctx.from_window(req).await {
         return Reply::coded(403, "yours", why);
@@ -162,17 +161,6 @@ async fn answer(ctx: &Ctx, req: &mut Req) -> Reply {
         Ok(r) => r,
         Err(e) => return core_reply(Err(e)),
     };
-    if let Some(host) = r.get("host").and_then(Value::as_str) {
-        let Some(svc) = ctx.net.get() else { return Reply::coded(503, "no-network", "the network isn't available in this XenoNet") };
-        // The ask stays on this console until its answer is on the way, so
-        // a send that fails can be answered again.
-        if let Err(e) = svc.node().operator(host, "answer", json!({ "ask": id, "decision": decision }), "window", true) {
-            return Reply::coded(e.status, e.code, e.message);
-        }
-        if let Err(e) = ctx.cores.engine.answer_sent(&id, &decision).await {
-            return core_reply(Err(e));
-        }
-    }
     Reply::json(200, json!({ "ok": true, "ask": id, "decision": decision, "host": r.get("host").cloned().unwrap_or(Value::Null) }))
 }
 

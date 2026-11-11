@@ -35,7 +35,7 @@ mod tests {
     #[test]
     fn envelopes_say_how_xenonet_knows() {
         let env = attest(Sender { id: "actor:you", kind: "you", name: Some("you".into()), product: None }, "window", &Value::Null, "/home/nova", 5.0, "darwin");
-        assert_eq!(env["auth"], json!({ "method": "window", "process": "n/a", "strength": "strong" }));
+        assert_eq!(env["auth"], json!({ "method": "window", "process": "n/a", "attestation": "n/a" }));
         assert_eq!(env["line"], "verified: you, at XenoNet's own window, by XenoNet's own window, with its key, on this machine. This says how XenoNet knows who sent it, not that what it says is true, and it approves nothing.");
         let v = json!({ "checked": true, "chain": [{ "exe": "/home/nova/bin/claude" }] });
         let env = attest(Sender { id: "claude:x", kind: "agent", name: None, product: None }, "session", &v, "/home/nova", 5.0, "linux");

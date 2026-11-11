@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/operator/v2.json",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
+  "title": "The person's answer from another machine",
+  "description": "Allow or deny for a run's permission prompt, given at another machine's console, signed by the person's device there with their presence.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "network/operator/v2"
+    },
+    "answer": {
+      "type": "object",
+      "properties": {
+        "ask": {
+          "type": "string",
+          "description": "The prompt's id on the machine it waits on",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "session": {
+          "type": "string",
+          "description": "The session whose run asked it",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "description": "allow or deny"
+        }
+      },
+      "required": [
+        "ask",
+        "session",
+        "decision"
+      ],
+      "additionalProperties": {}
+    },
+    "authority": {
+      "type": "object",
+      "properties": {
+        "person": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "person": {
+              "type": "string",
+              "pattern": "^prs_[a-z2-7]{32}$",
+              "description": "A person's id: prs_ and 32 base32 characters"
+            },
+            "device": {
+              "type": "string",
+              "pattern": "^xns1_[a-z2-7]{32}$",
+              "description": "The device that signed, by its key's id"
+            },
+            "sig": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$",
+              "description": "The device's signature over the act's hash (xenonet-authz's act_hash), base64url"
+            }
+          },
+          "required": [
+            "person",
+            "device",
+            "sig"
+          ],
+          "description": "For an act as the person: their device's signature over it",
+          "additionalProperties": {}
+        },
+        "presence": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "device": {
+              "type": "string",
+              "pattern": "^xns1_[a-z2-7]{32}$",
+              "description": "A signing key's id: xns1_ and 32 base32 characters"
+            },
+            "what": {
+              "type": "string",
+              "description": "What it approves: answer, admit, widen, publish, revoke or pair",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "act": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$",
+              "description": "The SHA-256 of the act, base64url"
+            },
+            "nonce": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$"
+            },
+            "at": {
+              "type": "number",
+              "description": "Epoch milliseconds"
+            },
+            "sig": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$"
+            }
+          },
+          "required": [
+            "device",
+            "what",
+            "act",
+            "nonce",
+            "at",
+            "sig"
+          ],
+          "description": "For an act that needs the person there: a presence block for it",
+          "additionalProperties": {}
+        },
+        "personHead": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "The head of the person's chain the sender held: a receiver with an older one asks for the rest"
+        }
+      },
+      "description": "The person's device signature over the answer, and their presence for it",
+      "additionalProperties": {}
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    }
+  },
+  "required": [
+    "schema",
+    "answer",
+    "authority",
+    "at"
+  ],
+  "additionalProperties": {}
+}

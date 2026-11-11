@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xenonet.dev/schemas/network/roster-entry/v2.json",
+  "$comment": "Written from crates/xenonet-model by cargo test -p xenonet-model. Change the type there, not this file.",
+  "title": "A roster entry",
+  "description": "One link in a network's chain of hosts: who joined, who left, who's the gateway, each one's settings, and which hosts signed it, with the person's presence where it admits or widens.",
+  "type": "object",
+  "properties": {
+    "n": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "prev": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "base64url SHA-256 of the previous entry's canonical bytes; empty for entry 0"
+    },
+    "network": {
+      "type": "string",
+      "pattern": "^net_[0-9a-f]{32}$"
+    },
+    "op": {
+      "type": "string",
+      "enum": [
+        "found",
+        "add",
+        "remove",
+        "window",
+        "gateway",
+        "settings"
+      ]
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "The host's id in the network, picked by the person: never the machine's own name"
+        },
+        "sign": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "Ed25519 public key"
+        },
+        "seal": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$",
+          "description": "X25519 public key"
+        },
+        "keyId": {
+          "type": "string",
+          "pattern": "^xnk1_[a-z2-7]{32}$",
+          "description": "What people compare: xnk1_ and the base32 of the first 20 bytes of the SHA-256 of both public keys"
+        },
+        "window": {
+          "type": "boolean",
+          "description": "An admin: a XenoNet window the person uses"
+        },
+        "device": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^xns1_[a-z2-7]{32}$",
+              "description": "A signing key's id: xns1_ and 32 base32 characters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The person's device key on it, by id; null on a machine with no way to ask them"
+        },
+        "machine": {
+          "type": "object",
+          "properties": {
+            "alg": {
+              "type": "string",
+              "enum": [
+                "ed25519",
+                "p256"
+              ]
+            },
+            "key": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]*$"
+            }
+          },
+          "required": [
+            "alg",
+            "key"
+          ],
+          "description": "Its machine signing key, which roots its tokens",
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "id",
+        "sign",
+        "seal",
+        "keyId",
+        "window",
+        "device",
+        "machine"
+      ],
+      "additionalProperties": {}
+    },
+    "gateway": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "address",
+            "version"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For op gateway: where the network's gateway is now"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^prs_[a-z2-7]{32}$",
+          "description": "A person's id: prs_ and 32 base32 characters"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For op found: the person the network is theirs"
+    },
+    "settings": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "start": {
+              "type": "string",
+              "enum": [
+                "off",
+                "you",
+                "network",
+                "delegate"
+              ],
+              "description": "Who may start sessions there: nobody, you (from a window host's console), the network (you, and the sessions and actors on window hosts), or delegate (the network, and what a session or actor starts there runs on your standing delegation, within its limits)"
+            },
+            "wake": {
+              "type": "string",
+              "enum": [
+                "consent",
+                "network"
+              ],
+              "description": "Who may wake its sessions for a message: your consent per session, or any sender in the network, within the budgets"
+            },
+            "grant": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "starts": {
+                      "type": "boolean",
+                      "description": "Runs may be started under it"
+                    },
+                    "answers": {
+                      "type": "boolean",
+                      "description": "It answers those runs' permission prompts, within its limits"
+                    },
+                    "requires": {
+                      "type": "string",
+                      "description": "The weakest check of an agent it covers: process-checked or harness-signed",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "limits": {
+                      "type": "string",
+                      "description": "What it allows: routine-in-folder, the delegation judge's rules",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "until": {
+                      "type": "number",
+                      "description": "Epoch milliseconds"
+                    }
+                  },
+                  "required": [
+                    "starts",
+                    "answers",
+                    "requires",
+                    "limits",
+                    "until"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exactly when start is delegate"
+            }
+          },
+          "required": [
+            "start",
+            "wake",
+            "grant"
+          ],
+          "additionalProperties": {}
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For op settings: the machine's settings from now"
+    },
+    "personHead": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The owner's person chain head the entry was made under"
+    },
+    "at": {
+      "type": "number",
+      "description": "Epoch milliseconds"
+    },
+    "signers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "description": "The host's id in the network, picked by the person: never the machine's own name",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$"
+          },
+          "sig": {
+            "description": "base64url, no padding",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "presence": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "device": {
+                "description": "A signing key's id: xns1_ and 32 base32 characters",
+                "type": "string",
+                "pattern": "^xns1_[a-z2-7]{32}$"
+              },
+              "what": {
+                "description": "What it approves: answer, admit, widen, publish, revoke or pair",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "act": {
+                "description": "The SHA-256 of the act, base64url",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]*$"
+              },
+              "nonce": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]*$"
+              },
+              "at": {
+                "description": "Epoch milliseconds",
+                "type": "number"
+              },
+              "sig": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]*$"
+              }
+            },
+            "required": [
+              "device",
+              "what",
+              "act",
+              "nonce",
+              "at",
+              "sig"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "host",
+          "sig"
+        ],
+        "additionalProperties": {}
+      },
+      "minItems": 1,
+      "maxItems": 4
+    }
+  },
+  "required": [
+    "n",
+    "prev",
+    "network",
+    "op",
+    "host",
+    "gateway",
+    "owner",
+    "settings",
+    "personHead",
+    "at",
+    "signers"
+  ],
+  "additionalProperties": {}
+}

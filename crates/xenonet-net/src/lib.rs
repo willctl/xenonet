@@ -15,8 +15,11 @@
 //!   offset, epochs and the long-poll fallback.
 //! - `node`: this machine in its network, behind
 //!   `xenonet_model::ops::Net`, calling a `Sink`.
-//! - `operator`: the person's actions from another host, and the rules
-//!   for changing who may start and wake sessions here.
+//! - `identity`: the person on this machine: their chain, device key,
+//!   sealed root, the people's chains it holds, the presence it took.
+//! - `ground`: the facts this machine decides incoming acts on
+//!   (`xenonet_authz::Ground`), and the `Governance` the engine reads them
+//!   through.
 //! - `svc`: services a host publishes to the network, and requests to
 //!   other hosts' services, in `svc` frames.
 //! - `doctor`: what the doctor says about the network, from its files.
@@ -26,12 +29,13 @@ pub mod doctor;
 pub mod files;
 pub mod frame;
 pub mod gateway;
+pub mod ground;
 pub mod gwstore;
 pub mod hoststore;
+pub mod identity;
 pub mod keys;
 pub mod link;
 pub mod node;
-pub mod operator;
 pub mod request;
 pub mod roster;
 pub mod sink;

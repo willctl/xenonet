@@ -1,6 +1,6 @@
 //! Signatures and what they're for. Every signature XenoNet makes covers
 //! a first line naming its purpose (`xenonet-net/1` for a frame's head,
-//! `xenonet-roster/1` for a network chain entry, and so on), so a
+//! `xenonet-roster/2` for a network chain entry, and so on), so a
 //! signature made for one thing can never be taken for another.
 //!
 //! A `VerifyingKey` checks a signature: Ed25519, which every software key
@@ -24,7 +24,7 @@ impl Purpose {
     /// A frame's head (`xenonet-net`'s frames).
     pub const FRAME: Purpose = Purpose("xenonet-net/1");
     /// An entry of a network's chain, the roster.
-    pub const ROSTER: Purpose = Purpose("xenonet-roster/1");
+    pub const ROSTER: Purpose = Purpose("xenonet-roster/2");
     /// An entry of a person's chain.
     pub const PERSON: Purpose = Purpose("xenonet-person/1");
     /// A presence block.

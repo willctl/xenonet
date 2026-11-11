@@ -5,7 +5,10 @@
 //! first bytes as choices.
 //!
 //! studio founded the network and is its gateway; desk is a window host;
-//! laptop isn't; gone was in it and was removed; spare never joined.
+//! laptop isn't; gone was in it and was removed; spare never joined. The
+//! network's owner is one person, from fixed seeds, whose devices are
+//! studio's and desk's: their presence blocks (fixed nonces) are what the
+//! roster's admits carry.
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -19,7 +22,10 @@ use xenonet_net::gateway::Gateway;
 use xenonet_net::gwstore::{Caps, GwStore};
 use xenonet_net::keys::{HostKey, PublicKeys};
 use xenonet_net::node::{Node, Options, Shared, Timing};
-use xenonet_net::roster::{found, HostRef, Op, Roster};
+use xenonet_net::roster::{found, HostRef, NetworkPolicy, Op, Roster};
+use xenonet_id::presence::PresenceBlock;
+use xenonet_id::sign::{KeyHome, Purpose, SeedSigner, Signer, VerifyingKey};
+use xenonet_log::person::{self, DeviceKind, NewDevice, PersonChain};
 use xenonet_net::sink::SinkSlot;
 
 pub const NET: &str = "net_0123456789abcdef0123456789abcdef";
@@ -65,20 +71,73 @@ pub fn index_of(host: &str) -> Option<usize> {
     HOSTS.iter().position(|h| *h == host)
 }
 
+/// Host `i`'s device key (studio's and desk's are the person's).
+pub fn device(i: usize) -> &'static SeedSigner {
+    static DEVICES: OnceLock<Vec<SeedSigner>> = OnceLock::new();
+    &DEVICES.get_or_init(|| (0..HOSTS.len()).map(|i| SeedSigner::from_seed(&secret(0x30 + i as u8), KeyHome::File).expect("a device key")).collect())[i]
+}
+
+/// Host `i`'s machine signing key.
+pub fn machine(i: usize) -> VerifyingKey {
+    SeedSigner::from_seed(&secret(0x50 + i as u8), KeyHome::File).expect("a machine key").public()
+}
+
+/// A presence block from host `i`'s device for `what` and `act`, with a
+/// fixed nonce.
+pub fn presence(i: usize, what: &str, act: [u8; 32], at: i64) -> PresenceBlock {
+    let d = device(i);
+    let mut b = PresenceBlock { device: d.public().id(), what: what.into(), act, nonce: [0x40 + i as u8; 16], at, sig: Vec::new() };
+    b.sig = d.sign(Purpose::PRESENCE, &b.signed_bytes()).expect("a signature");
+    b
+}
+
+/// The network's owner: a root key, with studio's and desk's devices.
+pub fn person() -> PersonChain {
+    static PERSON: OnceLock<PersonChain> = OnceLock::new();
+    PERSON
+        .get_or_init(|| {
+            let root = SeedSigner::from_seed(&secret(0x2f), KeyHome::File).expect("a root key");
+            let mut c = PersonChain::new();
+            c.offer(person::found(&root, T0 - 10).expect("entry 0")).expect("entry 0");
+            for i in [STUDIO, DESK] {
+                let mut e = c.next(person::Body { op: person::Op::AddDevice(NewDevice { key: device(i).public(), kind: DeviceKind::Weaker, label: HOSTS[i].into() }), at: T0 - 5 });
+                e.sign(&root.public().id(), &root, Some(presence(i, person::PAIR, e.digest(), T0 - 5))).expect("a signature");
+                c.offer(e).expect("a device");
+            }
+            c
+        })
+        .clone()
+}
+
+/// The roster's rules, checking presence against the owner's chain.
+pub fn policy() -> NetworkPolicy {
+    NetworkPolicy::with(Arc::new(person()))
+}
+
+/// The entry about host `i`, as the roster names it.
+pub fn host_ref(i: usize, window: bool) -> HostRef {
+    let device = [STUDIO, DESK].contains(&i).then(|| device(i).public().id());
+    HostRef { id: HOSTS[i].into(), keys: public(i), window, device, machine: machine(i) }
+}
+
 /// The roster: studio founds, adds desk (a window host), laptop and gone,
 /// then removes gone.
 pub fn roster() -> Roster {
     static ROSTER: OnceLock<Roster> = OnceLock::new();
     ROSTER
         .get_or_init(|| {
-            let mut r = Roster::new();
-            r.offer(found(NET, "studio", key(STUDIO), None, T0)).expect("entry 0");
+            let p = person();
+            let mut r = Roster::with_policy(policy());
+            r.offer(found(NET, host_ref(STUDIO, true), key(STUDIO), p.id().map(str::to_string), p.head(), None, T0)).expect("entry 0");
             for (i, window) in [(DESK, true), (LAPTOP, false), (GONE, false)] {
-                let mut e = r.draft(Op::Add, HostRef { id: HOSTS[i].into(), keys: public(i), window }, None, T0 + r.len() as i64);
-                e.sign_by("studio", key(STUDIO));
+                let mut e = r.draft(Op::Add, host_ref(i, window), None, T0 + r.len() as i64);
+                e.person_head = p.head();
+                let block = presence(STUDIO, xenonet_net::roster::ADMIT, e.digest(), T0);
+                e.sign_with("studio", key(STUDIO), Some(block));
                 r.offer(e).expect("an add");
             }
-            let mut e = r.draft(Op::Remove, HostRef { id: "gone".into(), keys: public(GONE), window: false }, None, T0 + r.len() as i64);
+            let mut e = r.draft(Op::Remove, host_ref(GONE, false), None, T0 + r.len() as i64);
+            e.person_head = p.head();
             e.sign_by("studio", key(STUDIO));
             r.offer(e).expect("a remove");
             r
@@ -357,9 +416,12 @@ impl Machine {
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!("xenonet-fuzz-net-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&dir);
-        let files = Dir::new(&dir);
+        let files = Dir::new(dir.join("network"));
         let (sign, seal) = secrets(host);
-        std::fs::create_dir_all(&dir).expect("a folder for the machine");
+        std::fs::create_dir_all(&files.path).expect("a folder for the machine");
+        // The owner's chain, which the roster's admits are checked against.
+        std::fs::create_dir_all(files.identity_dir()).expect("the identity's folder");
+        std::fs::write(files.identity_dir().join("person.json"), format!("{}\n", person().to_json())).expect("person.json");
         let k = json!({ "v": 1, "sign": b64(&sign), "seal": b64(&seal), "keyId": key(host).key_id() });
         std::fs::write(files.file(KEY), format!("{k}\n")).expect("the host key");
         let gw = public(STUDIO);
@@ -372,15 +434,12 @@ impl Machine {
             lan: None,
             titles_only: false,
             share_load: true,
-            start: "you".into(),
-            wake: "consent".into(),
-            delegated: None,
             joined: T0,
         };
         files.write_network(&net).expect("network.json");
         files.write_roster(&roster()).expect("roster.json");
         let caught = Arc::new(Caught::default());
-        let mut o = Options::new(&dir, "0.0.0", "linux", Arc::new(|_: &str, _: &str| {}));
+        let mut o = Options::new(&files.path, "0.0.0", "linux", Arc::new(|_: &str, _: &str| {}));
         let c = clock().clone();
         o.clock = Arc::new(move || c.load(Ordering::Relaxed) as f64);
         o.timing = timing();
@@ -462,11 +521,11 @@ pub fn body_for(kind: &str, c: &mut Choices<'_>) -> Value {
             json!({ "schema": "network/claims/v1", "full": c.bool(), "claims": [{ "repoKey": "github.com/acme/atlas", "path": "src/a.ts", "agent": "claude:aaaaaaaa-0001", "kind": "claim", "until": now + 60_000 }], "released": [] })
         }
         "message" => json!({
-            "schema": "network/message/v1",
+            "schema": "network/message/v2",
             "mid": format!("msg_{:08x}", c.u16()),
             "sender": "claude:aaaaaaaa-0001",
-            "senderKind": *c.pick(&["agent", "actor", "you"]),
-            "auth": { "method": "session", "strength": *c.pick(&["strong", "weak"]) },
+            "senderKind": *c.pick(&["agent", "actor", "person"]),
+            "authority": *c.pick(&[json!({}), json!({ "person": { "person": person().id(), "device": device(STUDIO).public().id(), "sig": b64(&[1u8; 64]) } })]),
             "target": "claude:bbbbbbbb-0001",
             "body": "hi",
             "kind": "message",
@@ -480,12 +539,9 @@ pub fn body_for(kind: &str, c: &mut Choices<'_>) -> Value {
             json!({ "schema": "network/handoff/v1", "id": format!("hof_{:08x}", c.u16()), "op": *c.pick(&["offer", "accept", "taken", "lapsed"]), "from": "claude:aaaaaaaa-0001", "to": { "agent": null, "repoKey": "github.com/acme/atlas", "host": null }, "goal": "finish refunds", "at": now })
         }
         "operator" => json!({
-            "schema": "network/operator/v1",
-            "action": *c.pick(&["message", "ticket", "remove", "replace", "shutdown"]),
-            "args": {},
-            "checked": *c.pick(&["window", "person", "session"]),
-            "strength": *c.pick(&["strong", "weak"]),
-            "nonce": format!("n{:04x}{:04x}", c.u16(), fresh_counter()),
+            "schema": "network/operator/v2",
+            "answer": { "ask": format!("ask_{:04x}{:04x}", c.u16(), fresh_counter()), "session": "claude:bbbbbbbb-0001", "decision": *c.pick(&["allow", "deny", "maybe"]) },
+            "authority": { "person": { "person": person().id(), "device": device(STUDIO).public().id(), "sig": b64(&[2u8; 64]) } },
             "at": now + i64::from(c.i16()) * 4,
         }),
         "hello" => {

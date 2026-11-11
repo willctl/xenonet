@@ -31,7 +31,7 @@ use crate::gwstore::{Dropped, GwStore, Item, TicketRow};
 use crate::keys::PublicKeys;
 use crate::node::Shared;
 use crate::request::{Signed, NONCE_MS, SKEW_MS};
-use crate::roster::{Entry, HostRef, Offered, Op};
+use crate::roster::{Entry, Offered, Op};
 use crate::ticket;
 use crate::{NetError, R};
 use bytes::Bytes;
@@ -864,7 +864,9 @@ impl Gateway {
         let from = req.query("from").and_then(|f| f.parse::<u64>().ok()).unwrap_or(0);
         let roster = n.roster();
         let entries: Vec<Value> = roster.since(from).iter().map(Entry::to_json).collect();
-        NetReply::json(200, &json!({ "entries": entries, "n": roster.len() }))
+        let n_len = roster.len();
+        drop(roster);
+        NetReply::json(200, &json!({ "entries": entries, "n": n_len, "person": n.person_json() }))
     }
 
     fn roster_post(&self, n: &Shared, req: &NetRequest) -> R<NetReply> {
@@ -873,10 +875,15 @@ impl Gateway {
             Err(reply) => return Ok(reply),
         };
         let body: Value = serde_json::from_slice(&req.body).map_err(|_| NetError::bad("the entry isn't JSON"))?;
+        // The person's chain the entry was made under, first.
+        if let Some(p) = body.get("person") {
+            n.offer_person(p);
+        }
         let mut entry = Entry::parse(body.get("entry").unwrap_or(&Value::Null))?;
         if !entry.signers.iter().any(|s| s.by == signed.host) {
             return Err(NetError::new(403, "roster-refused", "a host sends entries it signed"));
         }
+        n.fresh_person_head(&entry)?;
         let now = Self::now(n);
         // The same entry waiting for approval: their signatures add up.
         {
@@ -915,8 +922,11 @@ impl Gateway {
         n.note_proposals(vec![entry.clone()]);
         let view = n.roster().view();
         let caps = n.caps();
-        let body = json!({ "proposals": [entry.to_json()] });
-        for host in view.members.keys().filter(|h| **h != me.host && view.is_window(h) && !entry.signers.iter().any(|s| s.by == **h)) {
+        let body = json!({ "proposals": [entry.to_json()], "person": n.person_json() });
+        // The admins that haven't signed it, and the machine a settings
+        // entry is about, whose reach shows what waits for it.
+        let about = (entry.op == Op::Settings).then(|| entry.host.id.clone());
+        for host in view.members.keys().filter(|h| **h != me.host && (view.is_window(h) || about.as_deref() == Some(h.as_str())) && !entry.signers.iter().any(|s| s.by == **h)) {
             let f = Self::frame(&me, "roster", host, now as i64, &body)?;
             self.store()?.enqueue(Item { host, id: &f.id, kind: "roster", sender: "", line: f.line().trim_end() }, now as i64, &caps)?;
             self.wake(host);
@@ -936,7 +946,7 @@ impl Gateway {
         let now = Self::now(n);
         let view = n.roster().view();
         let caps = n.caps();
-        let body = json!({ "entries": [entry.to_json()] });
+        let body = json!({ "entries": [entry.to_json()], "person": n.person_json() });
         let mut to: Vec<String> = view.members.keys().filter(|h| **h != me.host).cloned().collect();
         if entry.op == Op::Remove {
             // What waited for the removed host goes, and it's told, signed,
@@ -1079,19 +1089,35 @@ impl Gateway {
             }
             Some(true) => {}
             None if t.maker == me.host => {
-                // Made here: the gateway's host signs the new host in.
-                if !self.store()?.use_ticket(&t.hash, now as i64)? {
-                    self.bad_ticket(source, now);
-                    return Err(NetError::new(404, "no-ticket", "not found"));
+                // Made here: the gateway's host signs the new host in, once;
+                // a window host added by an admin that isn't the founder
+                // waits for a second admin, and its join asks again.
+                if self.proposals.locked().iter().any(|(p, _)| p.op == Op::Add && p.host.id == t.host && p.host.keys == keys) {
+                    return Ok(self.waiting(n, &t, true));
                 }
-                let mut entry = n.roster().draft(Op::Add, HostRef { id: t.host.clone(), keys, window: t.window }, None, now as i64);
-                entry.sign_by(&me.host, &me.key);
-                self.append(n, entry)?;
+                let entry = n.sign_in(&t.host, keys, t.window, &body)?;
+                match self.append(n, entry.clone()) {
+                    Ok(_) => {}
+                    Err(e) if e.code == "needs-approval" => {
+                        self.propose(n, entry, now)?;
+                        return Ok(self.waiting(n, &t, true));
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             None => {
                 // Made on another window host, which signs the new host in:
                 // it's asked over its link, and the join waits a while.
-                let join = json!({ "sign": s("sign"), "seal": s("seal"), "nonce": nonce, "proof": proof, "makerProof": s("makerProof"), "sig": s("sig") });
+                let join = json!({
+                    "sign": s("sign"),
+                    "seal": s("seal"),
+                    "nonce": nonce,
+                    "proof": proof,
+                    "makerProof": s("makerProof"),
+                    "sig": s("sig"),
+                    "machine": body.get("machine").cloned().unwrap_or(Value::Null),
+                    "device": body.get("device").cloned().unwrap_or(Value::Null),
+                });
                 self.ask_maker(n, &me, &t, &join, now)?;
                 let wait = Duration::from_millis(n.timing().poll_ms * 4 / 5);
                 let deadline = tokio::time::Instant::now() + wait;
@@ -1122,7 +1148,8 @@ impl Gateway {
         self.store()?.set_host(&t.host, platform.as_deref(), version.as_deref(), desktop, now as i64)?;
         let hash = unb64(&t.hash).unwrap_or_default();
         let gw = me.key.public();
-        let roster = n.roster();
+        let person = n.person_json();
+        let roster = n.roster().to_json();
         let net = n.network().ok_or_else(|| NetError::internal("no network"))?;
         Ok(NetReply::json(
             200,
@@ -1131,7 +1158,8 @@ impl Gateway {
                 "host": t.host,
                 "window": t.window,
                 "founder": net.founder,
-                "roster": roster.to_json(),
+                "roster": roster,
+                "person": person,
                 "gateway": { "host": me.host, "keyId": gw.key_id(), "sign": gw.sign_b64(), "seal": gw.seal_b64(), "address": me.address },
                 "proof": ticket::gateway_proof(&hash, &gw.key_id(), &nonce),
                 "now": now as i64,

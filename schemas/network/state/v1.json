@@ -554,7 +554,8 @@
               "add",
               "remove",
               "window",
-              "gateway"
+              "gateway",
+              "settings"
             ]
           },
           "host": {

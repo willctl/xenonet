@@ -37,8 +37,18 @@ regex.workspace = true
 # The relay's scrubber, for the detail presence carries to other machines:
 # the home folder as ~, as the relay writes it.
 xenonet-hosts.workspace = true
+# Every act from another machine is decided here (xenonet-authz), on this
+# machine's copy of the chains and the person on it (xenonet-net's
+# governance), with the person's device signatures and presence
+# (xenonet-id, xenonet-log).
+xenonet-authz.workspace = true
+xenonet-id.workspace = true
+xenonet-log.workspace = true
+xenonet-net.workspace = true
 
 [dev-dependencies]
+# Fake keys for the tests' person and devices: never the machine's own.
+xenonet-keys.workspace = true
 # The real adapters, which the tests install as the binary does at start.
 xenonet-platforms.workspace = true
 # The demo's world, which tests/actors.rs names its nodes from.

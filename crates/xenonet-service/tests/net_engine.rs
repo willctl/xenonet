@@ -225,6 +225,8 @@ fn options(dir: &Path, who: &str) -> Options {
         }),
     );
     o.timing = timing();
+    // Fake keys: a test never touches the machine's own, or prompts.
+    o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = Caps::default();
     o
 }
@@ -294,7 +296,7 @@ impl Host {
         // As the binary's serve closure plugs it.
         let plugged = world.clone();
         cores.on_net = Some(Arc::new(move |svc: &dyn NetLink| {
-            svc.sinks().set(xenonet_runtime::network::plug(&plugged, svc.net()));
+            svc.sinks().set(xenonet_runtime::network::plug(&plugged, svc.net(), svc.governance()));
         }));
         cores.verify = Arc::new(You);
         let ctx = Arc::new(Ctx::new(config, "0.0.0-test".into(), cores, Log::new(None, "service", None, None, "/home/nova", 1 << 20)));
@@ -909,9 +911,13 @@ async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_
     let desk = || async { c.state().await };
 
     // laptop, a window host but not the founder, asks to let the network
-    // start sessions on desk: it waits there for a second window host.
+    // start sessions on desk: a settings entry, with the person's presence
+    // at laptop, which waits for a second window host.
     let (s, v) = b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
-    assert_eq!((s, v["sent"]["host"].clone()), (200, json!("desk")), "{v}");
+    assert_eq!((s, v["proposed"].clone()), (200, json!(true)), "{v}");
+    // Without the window's key it asks nobody, and widens nothing.
+    let (s, v) = b.call("PUT", "/api/net/settings", json!({ "host": "desk", "wake": "network" }), &[]).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("window")), "{v}");
     let widen = until_value("the widening waiting on desk", 10, || async {
         let st = desk().await;
         row_of(&st, "desk")["reach"]["pending"].as_array().and_then(|p| p.first().cloned())
@@ -938,14 +944,21 @@ async fn who_may_start_and_wake_is_narrowed_from_any_window_host_and_widened_by_
     // desk is no window host: it changes no other machine's settings.
     let (s, v) = c.window("PUT", "/api/net/settings", json!({ "host": "laptop", "start": "off" })).await;
     assert_eq!((s, v["code"].clone()), (403, json!("not-window")), "{v}");
-    // At its own keyboard, desk sets either, and what's set isn't a value.
-    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "start": "network", "wake": "consent" })).await;
-    assert_eq!((s, v["start"].clone(), v["wake"].clone()), (200, json!("network"), json!("consent")), "{v}");
+    // At its own keyboard desk narrows its own at once; widening it waits
+    // for the founder or two window hosts, as anyone's does; and what's set
+    // isn't a value.
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "wake": "consent" })).await;
+    assert_eq!((s, v["wake"].clone()), (200, json!("consent")), "{v}");
+    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "start": "network" })).await;
+    assert_eq!((s, v["proposed"].clone(), v["start"].clone()), (200, json!(true), json!("off")), "{v}");
     let (s, _) = c.window("PUT", "/api/net/settings", json!({ "start": "everyone" })).await;
     assert_eq!(s, 400);
-    // network.json keeps them.
+    // The chain keeps them, not network.json.
     let kept: Value = serde_json::from_str(&std::fs::read_to_string(c.dir.join("state").join("network").join("network.json")).unwrap()).unwrap();
-    assert_eq!((kept["start"].clone(), kept["wake"].clone()), (json!("network"), json!("consent")));
+    assert!(kept.get("start").is_none() && kept.get("wake").is_none(), "{kept}");
+    let roster: Value = serde_json::from_str(&std::fs::read_to_string(c.dir.join("state").join("network").join("roster.json")).unwrap()).unwrap();
+    let last = roster.as_array().unwrap().last().unwrap().clone();
+    assert_eq!((last["op"].clone(), last["host"]["id"].clone(), last["settings"]["wake"].clone()), (json!("settings"), json!("desk"), json!("consent")), "{last}");
     drop((a, b, c));
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1001,8 +1014,10 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     idle.live = json!({ "status": "idle", "lastEventAt": now_ms() - 200e3 });
     let [lan] = common::free_ports();
     let (a, b, c) = three(&root, lan, [vec![sess(S1, "Add partial refunds", &at("studio"))], vec![idle], vec![sess(D1, "Ledger fixtures", &at("desk"))]]).await;
-    let (s, v) = b.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
-    assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
+    // The founder lets the network wake laptop's sessions.
+    let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "laptop", "wake": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("laptop's wake is network", 10, || async { b.state().await["wake"] == "network" }).await;
     until("desk's reach at studio", 10, || async { row_of(&a.state().await, "desk")["can"] == json!(["start", "answer"]) }).await;
     until("laptop's reach at desk", 10, || async { row_of(&c.state().await, "laptop")["can"] == json!(["start", "answer"]) }).await;
     let mut studio = Stream::of(&a);
@@ -1037,32 +1052,29 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     c.window("POST", "/api/delivery/pause", json!({ "paused": false })).await;
     assert_eq!(fake_runs(&c).len(), 1);
 
-    // A start as you that studio couldn't check by its window key (from a
-    // terminal on Linux or Windows, had the route let it go) is refused by
-    // desk, which takes you only strongly checked.
+    // A start as you made away from the window: your device signs nothing
+    // there, so it's refused before anything is sent, on every system.
     let weak = xenonet_runtime::starts::ask(&a.world, json!({ "kind": "you", "id": "you", "title": "you" }), &json!({ "machine": "desk", "prompt": "Weak?" }), false);
-    assert_eq!(weak.map(|v| v["state"].clone()), Ok(json!("sent")));
-    let refused = studio.next("start", 15, |d| d["state"] == "refused").await;
-    assert_eq!(refused["reason"], "a start as you comes only from a window host's console, checked by its window key", "{refused}");
+    assert_eq!(weak.map_err(|(s, _)| s), Err(403));
     assert_eq!(fake_runs(&c).len(), 1);
-    // From a terminal, without the window's key: on a Mac its processes
-    // tell you from an agent; on Linux and Windows the route refuses at
-    // once, saying why, and sends nothing.
-    if !cfg!(target_os = "macos") {
-        let as_you = json!(xenonet_service::routes::runs::AS_YOU);
-        let (s, v) = a.call("POST", "/api/start", json!({ "machine": "desk", "prompt": "From a terminal" }), &[]).await;
-        assert_eq!((s, v["error"].clone()), (403, as_you.clone()), "{v}");
-        let (s, v) = a.call("PUT", "/api/net/settings", json!({ "host": "desk", "start": "off" }), &[]).await;
-        assert_eq!((s, v["error"].clone()), (403, as_you), "{v}");
-        assert_eq!(c.state().await["start"], "you");
-    }
+    // From a terminal, without the window's key: the route refuses at once,
+    // saying why, and sends nothing; nor does a widening go.
+    let as_you = json!(xenonet_service::routes::runs::AS_YOU);
+    let (s, v) = a.call("POST", "/api/start", json!({ "machine": "desk", "prompt": "From a terminal" }), &[]).await;
+    assert_eq!((s, v["error"].clone()), (403, as_you), "{v}");
+    let (s, v) = a.call("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" }), &[]).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("window")), "{v}");
+    assert_eq!(c.state().await["start"], "you");
 
-    // desk is no window host: whatever it says of who asks, nothing starts.
-    let mut desk = Stream::of(&c);
-    let (s, v) = c.window("POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hi" })).await;
-    assert_eq!(s, 200, "{v}");
-    let refused = desk.next("start", 15, |d| d["state"] == "refused").await;
-    assert_eq!(refused["reason"], "desk isn't a window host, and only window hosts start sessions", "{refused}");
+    // A session on desk asks laptop, whose start is you: only the person
+    // starts sessions there, whatever the session says of itself.
+    as_agent(&c, D1, "POST", "/api/start", json!({ "machine": "laptop", "prompt": "Hi" })).await;
+    let desk_engine = c.ctx.cores.engine.clone();
+    let got = until_value("desk's session hears laptop refused", 15, || async {
+        texts(&desk_engine.inbox(D1, Duration::ZERO).await.unwrap()).into_iter().find(|t| t.contains("No session was started")).map(Value::String)
+    })
+    .await;
+    assert_eq!(got, "[XenoNet] No session was started on laptop: only the person starts runs here: this machine's start setting is you.");
     assert_eq!(fake_runs(&b).len(), 0);
 
     // A session on laptop asks desk: refused while desk's start is you…
@@ -1086,7 +1098,7 @@ async fn sessions_start_on_other_machines_from_window_hosts_and_answer_with_rece
     let got =
         until_value("laptop's session hears desk refused", 15, || async { inbox(&b, ASKER).await.into_iter().find(|t| t.contains("No session was started")).map(Value::String) })
             .await;
-    assert_eq!(got, "[XenoNet] No session was started on desk: only you start sessions here: its start setting is you.");
+    assert_eq!(got, "[XenoNet] No session was started on desk: only the person starts runs here: this machine's start setting is you.");
     // …and started once the founder lets the network start sessions there.
     a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
     until("desk's start is network", 10, || async { c.state().await["start"] == "network" }).await;
@@ -1195,9 +1207,11 @@ async fn under_wake_network_a_message_from_another_machine_is_delivered_at_once(
     let [lan] = common::free_ports();
     let (a, b, c) = three(&root, lan, [vec![], vec![sess(L1, "Fix the login form", &root.to_string_lossy())], vec![ended, open]]).await;
     let mut desk = Stream::of(&c);
-    // desk lets the network wake its sessions: no allowance per session.
-    let (s, v) = c.window("PUT", "/api/net/settings", json!({ "wake": "network" })).await;
-    assert_eq!((s, v["wake"].clone()), (200, json!("network")), "{v}");
+    // The founder lets the network wake desk's sessions: no allowance per
+    // session.
+    let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "wake": "network" })).await;
+    assert_eq!(s, 200, "{v}");
+    until("desk's wake is network", 10, || async { c.state().await["wake"] == "network" }).await;
     until("desk's ended session among its agents at laptop", 15, || async { b.peers(L1).await.contains(&format!("@desk:{ENDED}")) }).await;
     // The one that ended is resumed for the message, at once.
     b.agent(L1, "send", json!({ "to": format!("@desk:{ENDED}"), "text": "The fixtures moved." })).await;
@@ -1365,8 +1379,8 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     let (s, v) = a.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "delegate" })).await;
     assert_eq!(s, 200, "{v}");
     until("desk is on delegate", 10, || async { c.state().await["start"] == "delegate" }).await;
-    let kept = |h: &Host| -> Value { serde_json::from_str(&std::fs::read_to_string(h.dir.join("state").join("network").join("network.json")).unwrap()).unwrap() };
-    assert_eq!((kept(&c)["start"].clone(), kept(&c)["delegated"]["by"].clone()), (json!("delegate"), json!("studio")), "{}", kept(&c));
+    let st = c.state().await;
+    assert_eq!((st["start"].clone(), st["delegated"]["by"].clone()), (json!("delegate"), json!("studio")), "{st}");
     until("studio sees who delegated desk", 10, || async { row_of(&a.state().await, "desk")["reach"]["delegated"]["by"] == "studio" }).await;
 
     // A session on laptop asks desk to do something: its first prompt says
@@ -1438,7 +1452,7 @@ async fn a_machine_on_delegate_allows_what_it_covers_and_asks_about_the_rest() {
     // start is told it came from an agent.
     b.window("PUT", "/api/net/settings", json!({ "host": "desk", "start": "network" })).await;
     until("desk is back on network", 10, || async { c.state().await["start"] == "network" }).await;
-    assert_eq!(kept(&c)["delegated"], Value::Null, "{}", kept(&c));
+    assert_eq!(c.state().await["delegated"], Value::Null);
     as_agent(&b, ASKER, "POST", "/api/start", json!({ "machine": "desk", "prompt": "hold-on: once more" })).await;
     let (_, prompt) = ran(&c, 2).await;
     assert!(prompt.contains("It came from an agent, not from your user.") && !prompt.contains("Your user delegated it"), "{prompt}");

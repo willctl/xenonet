@@ -14,7 +14,10 @@
 //
 // Nothing may panic. What another host says lands as that host's: its
 // agents and messages are qualified with its id, and a message from you
-// is taken only from a window host's console, checked strongly.
+// is taken only with the person's device signature, which no input here
+// can make: the engine decides each act on its own copy of the network's
+// chain and the person's (the fixed network's), never on what the body
+// says of itself.
 
 use async_trait::async_trait;
 use libfuzzer_sys::fuzz_target;
@@ -150,7 +153,32 @@ fn engine() -> Engine {
     let w = xenonet_runtime::runtime(&cores, setup, &env).expect("the engine's parts");
     let net = Arc::new(FakeNet::default());
     network::set_net(&w, net.clone());
+    // The fixed network's chain and its owner's, as studio holds them.
+    let identity_dir = dir.join("state").join("identity");
+    std::fs::create_dir_all(&identity_dir).expect("the identity's folder");
+    std::fs::write(identity_dir.join("person.json"), format!("{}\n", xenonet_fuzz::net::person().to_json())).expect("person.json");
+    let identity = xenonet_net::identity::Identity::open(identity_dir, None).expect("the identity");
+    xenonet_runtime::ground::set_governance(&w, Some(Arc::new(Gov(identity))));
     Engine { dir, w, net, runs: 0, last: 0.0 }
+}
+
+/// studio's governance: the fixed network's chain, its owner's.
+struct Gov(Arc<xenonet_net::identity::Identity>);
+
+impl xenonet_net::ground::Governance for Gov {
+    fn facts(&self) -> xenonet_net::ground::Facts {
+        xenonet_net::ground::Facts {
+            machine: xenonet_authz::MachineId::new("studio").expect("an id"),
+            view: Some(xenonet_fuzz::net::roster().view()),
+            identity: self.0.clone(),
+            synced_at: Some(now_ms() as i64),
+            now: now_ms() as i64,
+        }
+    }
+    fn identity(&self) -> Arc<xenonet_net::identity::Identity> {
+        self.0.clone()
+    }
+    fn want_person(&self, _host: &str, _person: &str) {}
 }
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
@@ -187,15 +215,14 @@ fn body(kind: Kind, c: &mut Choices<'_>) -> Value {
 }
 
 /// Every message stored after message `last`: a host's own are qualified
-/// with its id, and one as you came from a window host's console,
-/// strongly.
+/// with its id, and none is as you, since no input carries the person's
+/// device signature.
 fn landed_as_theirs(w: &Runtime, last: &mut f64, from: &str, window: bool, b: &Value) {
     while let Ok(Some(m)) = w.store.with(|s| s.message(*last + 1.0)) {
         *last += 1.0;
         let sender = m.text("sender").unwrap_or("").to_string();
         if sender == "actor:you" {
-            let strong = b["auth"]["strength"] == "strong";
-            assert!(window && strong && b["senderKind"] == "you", "a message as you was taken from {from} (window {window}, {b})");
+            panic!("a message as you was taken from {from}, with no device signature (window {window}, {b})");
         } else {
             assert!(sender.starts_with(&format!("@{from}:")), "a message from {from} landed as {sender}'s");
         }

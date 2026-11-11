@@ -1,10 +1,11 @@
 #![no_main]
 
-// The roster (network/roster-entry/v1): entries parsed and offered to a
+// The roster (network/roster-entry/v2): entries parsed and offered to a
 // Roster, one after another, from the fixed network's chain or from
 // nothing. Each step is an entry as it came, an entry built from the
 // fixed keys (any op, host, window choice and gateway, signed by any of
-// the hosts, with their own key or another's, at its index or not) and
+// the hosts, with their own key or another's, with or without their
+// device's presence, at its index or not) and
 // maybe changed in its JSON, two copies of one merged, or a whole chain.
 //
 // Nothing may panic. An entry is taken only when each of its signers
@@ -15,9 +16,9 @@
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use xenonet_fuzz::net::{self, Choices};
-use xenonet_net::roster::{Entry, GatewayAt, HostRef, Offered, Op, Roster};
+use xenonet_net::roster::{Entry, GatewayAt, Offered, Op, Roster, Settings, Start, Wake};
 
-const OPS: [Op; 5] = [Op::Found, Op::Add, Op::Remove, Op::Window, Op::Gateway];
+const OPS: [Op; 6] = [Op::Found, Op::Add, Op::Remove, Op::Window, Op::Gateway, Op::Settings];
 
 /// Whether `e`'s signers signed it as `r` (before `e`) has them.
 fn rightly_signed(r: &Roster, e: &Entry) -> bool {
@@ -39,7 +40,7 @@ fn holds(r: &Roster) {
     assert!(v.member(&v.founder).is_some(), "the founder left the network");
     assert!(v.is_window(&v.founder));
     assert!(v.member(&v.gateway).is_some(), "the gateway's host left the network");
-    let back = Roster::from_json(&r.to_json()).expect("a roster reads back from its own JSON");
+    let back = Roster::from_json_with(net::policy(), &r.to_json()).expect("a roster reads back from its own JSON");
     assert_eq!(back.view(), r.view());
     assert_eq!(back.head(), r.head());
     for e in r.entries() {
@@ -78,14 +79,23 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
     let op = *c.pick(&OPS);
     let host = c.below(net::HOSTS.len());
     // Sometimes another host's keys under this one's id.
-    let keys = if c.rarely(24) { net::public(c.below(net::HOSTS.len())) } else { net::public(host) };
     let window = c.bool();
+    let mut host_ref = net::host_ref(host, window);
+    if c.rarely(24) {
+        host_ref.keys = net::public(c.below(net::HOSTS.len()));
+    }
     let gateway = (op == Op::Gateway || c.rarely(16)).then(|| {
         let address = String::from_utf8_lossy(c.chunk()).into_owned();
         let version = r.view().gateway_version.saturating_add(u64::from(c.u8() % 3)).wrapping_sub(u64::from(c.u8() % 2));
         GatewayAt { address: if address.is_empty() { "gw2.example.net".into() } else { address }, version }
     });
-    let mut e = r.draft(op, HostRef { id: net::HOSTS[host].into(), keys, window }, gateway, net::T0 + i64::from(c.i16()));
+    let mut e = r.draft(op, host_ref, gateway, net::T0 + i64::from(c.i16()));
+    e.person_head = net::person().head();
+    if op == Op::Settings {
+        let start = *c.pick(&Start::ALL);
+        e.settings = Some(Settings { start, wake: *c.pick(&Wake::ALL), grant: (start == Start::Delegate).then(|| xenonet_net::roster::Grant::standard(net::T0 + 1_000_000)) });
+    }
+    let what = e.presence_for(&r.view());
     match c.below(8) {
         0 => e.n = e.n.wrapping_add(u64::from(c.u8() % 3)).wrapping_sub(1),
         1 => e.prev = String::from_utf8_lossy(c.chunk()).into_owned(),
@@ -95,7 +105,8 @@ fn built(r: &Roster, c: &mut Choices<'_>) -> Entry {
     for _ in 0..=c.below(4) {
         let signer = c.below(net::HOSTS.len());
         let with = if c.rarely(32) { c.below(net::HOSTS.len()) } else { signer };
-        e.sign_by(net::HOSTS[with], net::key(with));
+        let presence = what.filter(|_| c.bool()).map(|w| net::presence(with, w, e.digest(), net::T0));
+        e.sign_with(net::HOSTS[with], net::key(with), presence);
         // Named for one host, signed with another's key.
         if let Some(s) = e.signers.last_mut() {
             s.by = net::HOSTS[signer].into();
@@ -142,7 +153,7 @@ fn changed(e: &Entry, c: &mut Choices<'_>) -> Option<Entry> {
 fuzz_target!(|data: &[u8]| {
     let mut c = Choices::new(data);
     let start = c.u8();
-    let mut r = if start & 1 == 0 { net::roster() } else { Roster::new() };
+    let mut r = if start & 1 == 0 { net::roster() } else { Roster::with_policy(net::policy()) };
     holds(&r);
     for _ in 0..8 {
         match c.below(6) {
@@ -189,8 +200,8 @@ fuzz_target!(|data: &[u8]| {
                 } else {
                     c.value()
                 };
-                if let Ok(chain) = Roster::from_json(&v) {
-                    let mut again = Roster::new();
+                if let Ok(chain) = Roster::from_json_with(net::policy(), &v) {
+                    let mut again = Roster::with_policy(net::policy());
                     for e in chain.entries() {
                         assert!(rightly_signed(&again, e), "a chain was read with an entry that isn't rightly signed: {e:?}");
                         assert_eq!(again.offer(e.clone()).ok(), Some(Offered::Appended));

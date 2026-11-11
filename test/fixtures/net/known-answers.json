@@ -22,12 +22,12 @@
   "frame": {
     "ephemeralSecret": "SQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
     "body": {
-      "schema": "network/message/v1",
+      "schema": "network/message/v2",
       "mid": "msg_00000000-0000-4000-8000-000000000001",
       "body": "hello from studio"
     },
     "sealingHead": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1",
-    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1\nMRXcGdDLxeoh8JcF8SZSzy-W3T0QGU7KD_FhF5T0T-M",
+    "head": "xenonet-net/1\nnet_00112233445566778899aabbccddeeff\nfrm_00000000-0000-4000-8000-0000000000aa\nmessage\nstudio\nlaptop\n1792512345678\n1\n2uurTpan8CTlPsN5iJdTM5OlCIIh-qyDu-AS83s__-I",
     "frame": {
       "v": 1,
       "id": "frm_00000000-0000-4000-8000-0000000000aa",
@@ -36,8 +36,8 @@
       "to": "laptop",
       "at": 1792512345678,
       "sealed": true,
-      "body": "ONGtHtN_RYgcXi9LoskF9gCg5BNwLk0r63UuXzirk0uWXV-sdRPNkPca038H7ZtvrOeF7EY1nvEVT0jAFklaRD8FwAuWCmV-TTQD3GrSHcgHdezOvgj3SuZK82E5sjY5TTbu7DZRfGtkIw2ws2ZwKpf8oa4maBH1wlpkhrqfbTcC8xz2AkZNhtPJgfSdvr5kk2M50oKXaPBKg7c",
-      "sig": "Pc1W7JMZTCnRAL8ja_RlKxyZKsyXSa_59-BITrOw51ud8qWHh3iyMELT2GR8TX15FFCBuv4o-XPNbtZKbV6JAg"
+      "body": "ONGtHtN_RYgcXi9LoskF9gCg5BNwLk0r63UuXzirk0uWXV-sdRPNkPca038H7ZtvrOeF7EY1nvEVT0jAFUlaRD8FwAuWCmV-TTQD3GrSHcgHdezOvgj3SuZK82E5sjY5TTbu7DZRfGtkIw2ws2ZwKpf8oa4maBH1wlpkhrqfbTcC8xz2AkZNhtPJgXxgLhQT1qSVa0QmpCiels0",
+      "sig": "qV8Lfn98AVwTyvPo-m30rfCRv8boc9UYAiaFz-_2uv8A_Eo99wVnaFQsOIehtzJB_PNELCXizYMBKLtpFDpVAQ"
     }
   },
   "svcFrame": {
@@ -106,6 +106,59 @@
       "x-xenonet-net-sig": "CGWsh_YnphgPCKpJw0C4B5-a7uY8iDWcHUubjjh8On2vKUPNnkYiZ5YoU1QNhCOkSy3ONpPMNL87EH7S3QOxAw"
     }
   },
+  "person": {
+    "rootSeed": "RQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+    "deviceSeed": "RgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY",
+    "id": "prs_rrueqbvaursyjg5yutwocvylmqu4vxe3",
+    "chain": [
+      {
+        "n": 0,
+        "prev": "",
+        "op": "found",
+        "root": {
+          "alg": "ed25519",
+          "key": "xPxKOUIDFwP14Srbr9hiWYmtVnVF2TRn5XIvCKVRcEU"
+        },
+        "at": 1792511000000,
+        "signers": [
+          {
+            "key": "xns1_yrkobhrijbkcklerebc4v7kyd4uqootg",
+            "sig": "4tUm5OMeXqRcPbsPAyF1jYv2doy02Qv1PZohwReOKjYzXTGFIybotgInAp7DB1N-OjaR07X9yR87je6S2AY2CQ"
+          }
+        ]
+      },
+      {
+        "n": 1,
+        "prev": "jGhIBqCkZYSbuKTs4VcLZCnK3JsKTUEj2XD6ZKXLD_8",
+        "op": "add-device",
+        "device": {
+          "key": {
+            "alg": "ed25519",
+            "key": "NkIpiugndmehoOFTZVlVAkgRcUhZCTV0nRj6qZj3U_8"
+          },
+          "id": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
+          "kind": "weaker",
+          "label": "studio"
+        },
+        "at": 1792511000001,
+        "signers": [
+          {
+            "key": "xns1_yrkobhrijbkcklerebc4v7kyd4uqootg",
+            "sig": "PhrzRqsi4GFb9zyX-cxCLC-Xg9vnht7VOMAgpGnrlquNMzJzfYzcqNTt15kaWcYgXUHdOQtKbDuXgJHs9vV1Ag",
+            "presence": {
+              "device": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
+              "what": "pair",
+              "act": "B4qiSzL3LomHZ3Row53erC2K5w-BbvIk7FLuA4nSpU0",
+              "nonce": "EREREREREREREREREREREQ",
+              "at": 1792511000001,
+              "sig": "1sIvGTaPqhUXoud4qSDhXmbxQmaHPUWmVBnbaEXqWfDQHSJXKSbwDCA9GhuoBllSlpHv0lD2oL7EToKcL82HAQ"
+            }
+          }
+        ]
+      }
+    ],
+    "head": "Sqg_BjdOF75W_MbrpcHww4-wKNJvgZQlLGGDCr_6jEU"
+  },
   "roster": [
     {
       "n": 0,
@@ -117,20 +170,28 @@
         "sign": "2ph1Vn1J487bzyOp-aVkJbT1x4duQcNNE4BQbyABlN8",
         "seal": "UPCLiZB5wBQeYNSSuVGopVd6UxmMsQ72G1AIpmtt_FE",
         "keyId": "xnk1_nbfuzqjnx7kwkmuanszkrlbq5pstmg7e",
-        "window": true
+        "window": true,
+        "device": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
+        "machine": {
+          "alg": "ed25519",
+          "key": "-Ra_GGk3c7vmYXRnFlCCd6ZNOuB3rH3lfHeyVDdRM0E"
+        }
       },
       "gateway": null,
+      "owner": "prs_rrueqbvaursyjg5yutwocvylmqu4vxe3",
+      "settings": null,
+      "personHead": "Sqg_BjdOF75W_MbrpcHww4-wKNJvgZQlLGGDCr_6jEU",
       "at": 1792512000000,
       "signers": [
         {
           "host": "studio",
-          "sig": "Cw0xOpHzaz3ojlXJR2sVyFe3gO7Hbj5Cdo0HFy72CkL1agucjJvMd9k7DeUN4IVMHGjHfIJw3yasgRZsoeCnAQ"
+          "sig": "-Q5E5XHN1g31idfNiWSJuFEHc1aMsZYV0gFBCexvdPJZPJ7JHWi02KM3ABqzfdRoPk6Gu_O54t1KCEAsNlz8AA"
         }
       ]
     },
     {
       "n": 1,
-      "prev": "IqXFVtiJTbTBfCFyv_KZkkpu0bZD1KZc2jEdUhkkWMU",
+      "prev": "s6R-tit2aMJbsbCFdxaXE6sFVqt6kJgwyepcyFpn73M",
       "network": "net_00112233445566778899aabbccddeeff",
       "op": "add",
       "host": {
@@ -138,17 +199,33 @@
         "sign": "5otm9r4x51L-4YEuxduoCAOQlmJUnCKkel1aqX0_Uyk",
         "seal": "OBjoHjQEaAQZYxFn9ejjSjiIDwgR4o1z0hhQrghwQh8",
         "keyId": "xnk1_7u27fms2purut6skexnyjpeanykqq2s7",
-        "window": false
+        "window": false,
+        "device": null,
+        "machine": {
+          "alg": "ed25519",
+          "key": "5txsIj2QHz9gJwP55H1fXVgxU2E2DPcr_a3lU0Q3rUM"
+        }
       },
       "gateway": null,
+      "owner": null,
+      "settings": null,
+      "personHead": "Sqg_BjdOF75W_MbrpcHww4-wKNJvgZQlLGGDCr_6jEU",
       "at": 1792512100000,
       "signers": [
         {
           "host": "studio",
-          "sig": "bVAyWLMV9-xxVs8RXDQtvaALvwUkIvCWLjpbHp2ohzfPn8RZhl261Y8xLVHLK64xP7-Q4Y1plKAmh1efDPr9Aw"
+          "sig": "DFd7Ov_s3eyAjF73e-76uI8aJjGAP3NusBGM6NuMtiekv4w1yXfHWq1w27GzU2k38y4JP9tox9U-Huk-yAQuDw",
+          "presence": {
+            "device": "xns1_3t33jjgt7nsag3xvth4yd5r6wqzuxida",
+            "what": "admit",
+            "act": "seUg40-LP69xfoa2eJtrnlVVjWYWkFjBLVpwh1ozTho",
+            "nonce": "IiIiIiIiIiIiIiIiIiIiIg",
+            "at": 1792512100000,
+            "sig": "3TnD2ezgFonACmy-m4dOS5dVWRZjDwFXP-HIj--LpvENhVYTt6XH-t8IgzA9xVaWrqHUyJwFPZROb6qxUOqUDA"
+          }
         }
       ]
     }
   ],
-  "rosterHead": "MvYlpaEsIXaXz5V29x8xolCf5uCXVox8cikDE35E61Q"
+  "rosterHead": "BHI8N1sa4z2nE4BIEj8BbtW8m4IVGzcPVSRRurVbgco"
 }

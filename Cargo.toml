@@ -125,6 +125,11 @@ xenonet-id = { path = "crates/xenonet-id" }
 # Signed hash chains and their policies: the network's roster, a person's
 # device keys.
 xenonet-log = { path = "crates/xenonet-log" }
+# Who may do what, decided at the receiver.
+xenonet-authz = { path = "crates/xenonet-authz" }
+# The machine's own keys (the Secure Enclave, polkit), for the composition
+# root alone, and fakes of them.
+xenonet-keys = { path = "crates/xenonet-keys" }
 # Authority as Biscuit tokens (xenonet-authz): offline attenuation and a
 # Datalog authorizer. No PEM or full regex; 6.0.0 doesn't build without
 # its datalog-macro feature.

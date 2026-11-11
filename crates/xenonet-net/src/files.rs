@@ -3,8 +3,11 @@
 //! gateway's address and pinned key), `roster.json` (the chain),
 //! `link.json`, how the link last stood, which the doctor reads, and
 //! `services.json`, the services this host published to the network.
+//! Who may start and wake sessions here is the network's chain's (each
+//! member's `settings` entry), not this file's: a network.json from before
+//! it held them is read past them, and they're dropped when it's written.
 
-use crate::roster::Roster;
+use crate::roster::{NetworkPolicy, Roster};
 use crate::{NetError, R};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -46,24 +49,12 @@ pub struct NetFile {
     /// parts are) to the window hosts' consoles that watch its map. On
     /// unless the person turns it off.
     pub share_load: bool,
-    /// Who may start sessions here, and wake them for a message
-    /// (`xenonet_model::ops::STARTS`, `WAKES`): you and your consent
-    /// unless the person widens them.
-    pub start: String,
-    pub wake: String,
-    /// While `start` is delegate: the window host whose action set it
-    /// (this machine, for the person at its own keyboard) and when, which
-    /// a delegated session is told. None otherwise.
-    pub delegated: Option<Delegated>,
     pub joined: i64,
 }
 
-/// Who put this machine on delegate, and when (ms).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Delegated {
-    pub by: String,
-    pub at: i64,
-}
+/// The fields a network.json from before the chain held settings has, which
+/// this one drops.
+pub const DROPPED: [&str; 3] = ["start", "wake", "delegated"];
 
 impl NetFile {
     pub fn to_json(&self) -> Value {
@@ -82,9 +73,6 @@ impl NetFile {
             "lan": self.lan,
             "titlesOnly": self.titles_only,
             "shareLoad": self.share_load,
-            "start": self.start,
-            "wake": self.wake,
-            "delegated": self.delegated.as_ref().map(|d| json!({ "by": d.by, "at": d.at })),
             "joined": self.joined,
         })
     }
@@ -108,9 +96,6 @@ impl NetFile {
             lan: v.get("lan").and_then(Value::as_str).map(str::to_string),
             titles_only: v.get("titlesOnly").and_then(Value::as_bool).unwrap_or(false),
             share_load: v.get("shareLoad").and_then(Value::as_bool).unwrap_or(true),
-            start: v.get("start").and_then(Value::as_str).filter(|s| xenonet_model::ops::STARTS.contains(s)).unwrap_or("you").to_string(),
-            wake: v.get("wake").and_then(Value::as_str).filter(|s| xenonet_model::ops::WAKES.contains(s)).unwrap_or("consent").to_string(),
-            delegated: v.get("delegated").and_then(|d| Some(Delegated { by: d.get("by")?.as_str()?.to_string(), at: d.get("at")?.as_i64()? })),
             joined: v.get("joined").and_then(Value::as_i64).unwrap_or(0),
         })
     }
@@ -178,14 +163,26 @@ impl Dir {
         }
     }
 
+    /// Whether network.json still has the settings a network.json from
+    /// before the chain held them had: the node drops them, and logs it.
+    pub fn has_dropped_fields(&self) -> bool {
+        read_json(&self.file(NETWORK)).ok().flatten().is_some_and(|v| DROPPED.iter().any(|k| v.get(k).is_some()))
+    }
+
+    /// `<state>/identity`, beside this folder: the person on this machine.
+    pub fn identity_dir(&self) -> PathBuf {
+        self.path.parent().map_or_else(|| self.path.join("identity"), |p| p.join("identity"))
+    }
+
     pub fn write_network(&self, n: &NetFile) -> R<()> {
         write_json(&self.file(NETWORK), &n.to_json())
     }
 
-    pub fn read_roster(&self) -> R<Roster> {
+    /// The roster, checked whole under `policy`.
+    pub fn read_roster(&self, policy: NetworkPolicy) -> R<Roster> {
         match read_json(&self.file(ROSTER))? {
-            Some(v) => Ok(Roster::from_json(&v)?),
-            None => Ok(Roster::new()),
+            Some(v) => Ok(Roster::from_json_with(policy, &v)?),
+            None => Ok(Roster::with_policy(policy)),
         }
     }
 

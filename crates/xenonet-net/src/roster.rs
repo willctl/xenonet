@@ -1,12 +1,14 @@
 //! The roster (docs/design/network.md, section 3): the signed chain of a
-//! network's hosts and their keys (`network/roster-entry/v1`), and who may
+//! network's hosts and their keys (`network/roster-entry/v2`), and who may
 //! sign what. It is `xenonet-log`'s chain under the network's policy
 //! (`xenonet_log::network`, where the table of rules is); this module names
 //! it for the rest of the network, and its errors are `NetError`s through
 //! `From`.
 
 pub use xenonet_log::chain::{ChainError, Offered, Signature, MAX_SIGNERS};
-pub use xenonet_log::network::{found, needs_approval, Body, Entry, GatewayAt, HostRef, Member, NetworkPolicy, Op, Removal, Roster, View, ADDRESS_MAX, ROSTER_TAG};
+pub use xenonet_log::network::{
+    found, needs_approval, Body, Entry, GatewayAt, Grant, HostRef, Member, NetworkPolicy, Op, Removal, Roster, Settings, Start, View, Wake, ADDRESS_MAX, ADMIT, ROSTER_TAG, WIDEN,
+};
 
 #[cfg(test)]
 mod tests {

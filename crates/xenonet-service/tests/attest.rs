@@ -1,31 +1,26 @@
 //! A message's envelope, as the service's routes and the actor gateway
 //! make it (borrowed::attest, which hands their plain values to the
 //! engine's) and as the engine makes it: for every way a sender can prove
-//! who it is and every verdict on its process, both say the same, and how
-//! strong it is follows the one table.
+//! who it is and every verdict on its process, both say the same, and the
+//! attestation (how the agent was checked, as policy reads it) follows the
+//! one table: what XenoNet saw of the process, never how it was asked.
 
 use serde_json::json;
 use xenonet_engine::attest::{self, attest};
 use xenonet_service::borrowed::{self, Sender};
 
-/// What XenoNet saw of the process, and how strong each way of proving
-/// who sent it is with that.
+/// What XenoNet saw of the process, and the attestation it comes to.
 fn table(method: &str, seen: &str) -> (&'static str, &'static str) {
     match (method, seen) {
-        ("window", _) => ("n/a", "strong"),
-        ("gateway", _) => ("n/a", "weak"),
-        ("session", "signed") => ("signed", "strong"),
-        ("session", "checked") => ("checked", "partial"),
-        ("token" | "grant", "signed") => ("signed", "partial"),
-        ("token" | "grant", "checked") => ("checked", "partial"),
-        (_, "signed") => ("signed", "weak"),
-        (_, "checked") => ("checked", "weak"),
-        _ => ("unchecked", "weak"),
+        ("window" | "gateway", _) => ("n/a", "n/a"),
+        (_, "signed") => ("signed", "process-checked"),
+        (_, "checked") => ("checked", "process-checked"),
+        _ => ("unchecked", "unchecked"),
     }
 }
 
 #[test]
-fn every_way_of_proving_who_sent_it_is_as_strong_in_the_binary_as_in_the_engine() {
+fn every_way_of_proving_who_sent_it_attests_alike_in_the_binary_and_the_engine() {
     let chain = json!([{ "pid": 7, "exe": "/home/nova/.local/bin/claude" }]);
     let verdicts = [
         ("unchecked", json!({ "ok": true, "checked": false })),
@@ -51,8 +46,8 @@ fn every_way_of_proving_who_sent_it_is_as_strong_in_the_binary_as_in_the_engine(
                     for k in ["schema", "at", "sender", "auth", "client", "transport", "line"] {
                         assert_eq!(from_bin[k], from_engine[k], "{k}: {at}");
                     }
-                    let (process, strength) = table(method, seen);
-                    assert_eq!(from_bin["auth"], json!({ "method": method, "process": process, "strength": strength }), "{at}");
+                    let (process, attestation) = table(method, seen);
+                    assert_eq!(from_bin["auth"], json!({ "method": method, "process": process, "attestation": attestation }), "{at}");
                     assert_ne!(from_bin["mid"], from_engine["mid"], "each message has its own id");
                     let line = from_bin["line"].as_str().unwrap();
                     assert!(

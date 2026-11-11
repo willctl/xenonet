@@ -47,6 +47,11 @@ xenonet-engine.workspace = true
 # One network across machines: the gateway's routes behind the front door,
 # the link, and /api/net.
 xenonet-net.workspace = true
+# The machine's own keys (the Secure Enclave, polkit) for the installed and
+# dev instances, fakes for every other: given to the network's node as its
+# vault (compose/keys.rs).
+xenonet-keys.workspace = true
+xenonet-id.workspace = true
 # Ids, and the engine's seam to the network; the tray's status and a
 # made-up machine's load are checked as their types in the tests.
 xenonet-model.workspace = true
@@ -73,6 +78,8 @@ xenonet-sources.workspace = true
 [dev-dependencies]
 # Paused time, for the tunnel's waits between restarts.
 tokio = { workspace = true, features = ["test-util"] }
+# The network tests' person chain entries (a revocation, a new device).
+xenonet-log.workspace = true
 
 [lints]
 workspace = true

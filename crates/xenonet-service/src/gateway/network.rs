@@ -148,6 +148,10 @@ impl xenonet_api::cores::NetLink for NetService {
     fn sinks(&self) -> &Arc<SinkSlot> {
         NetService::sinks(self)
     }
+
+    fn governance(&self) -> Option<Arc<dyn xenonet_net::ground::Governance>> {
+        Some(self.node.shared().clone())
+    }
 }
 
 impl Drop for NetService {

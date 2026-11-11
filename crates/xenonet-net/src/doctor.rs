@@ -232,14 +232,21 @@ pub fn checks(dir: &Path, now: f64) -> Vec<Check> {
 pub fn standing(dir: &Path) -> Value {
     let d = Dir::new(dir);
     let Ok(Some(net)) = d.read_network() else { return Value::Null };
-    let gateway = d.read_roster().map_or(net.gateway.host == net.host, |r| r.view().gateway == net.host);
+    let gateway = read_roster(&d).map_or(net.gateway.host == net.host, |r| r.view().gateway == net.host);
     let address = net.gateway.address.filter(|a| !a.is_empty());
     let kind = address.as_deref().map(crate::files::address_kind);
     json!({ "gateway": gateway, "address": address, "kind": kind })
 }
 
+/// The roster, checked against the person chains in the identity folder
+/// beside it, which the doctor reads without opening any key.
+fn read_roster(d: &Dir) -> crate::R<crate::roster::Roster> {
+    let identity = crate::identity::Identity::open(d.identity_dir(), None)?;
+    d.read_roster(crate::roster::NetworkPolicy::with(identity))
+}
+
 fn files(d: &Dir, host: &str) -> Value {
-    let roster = match d.read_roster() {
+    let roster = match read_roster(d) {
         Ok(r) => r,
         Err(e) => return verdict("fail", format!("roster.json doesn't check: {}", e.message), Some("xenonet net leave, then join the network again")),
     };
@@ -291,9 +298,6 @@ mod tests {
             lan: None,
             titles_only: false,
             share_load: true,
-            start: "you".into(),
-            wake: "consent".into(),
-            delegated: None,
             joined: 0,
         };
         let address = |host: &str, a: &str| {

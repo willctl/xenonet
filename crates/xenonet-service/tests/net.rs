@@ -126,6 +126,8 @@ fn options(dir: &std::path::Path, shift: f64, caps: Caps) -> Options {
     );
     o.clock = Arc::new(move || now_ms() + shift);
     o.timing = timing();
+    // Fake keys: a test never touches the machine's own, or prompts.
+    o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = caps;
     o
 }
@@ -330,6 +332,100 @@ async fn three_hosts_join_message_both_ways_and_survive_a_gateway_restart() {
     let again = req.clone();
     assert_eq!(gw.handle(req).await.status, 200);
     assert_eq!(gw.handle(again).await.status, 409);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn admits_count_only_presence_for_them_from_a_live_device_at_a_fresh_head() {
+    use xenonet_log::person;
+    use xenonet_net::roster::{HostRef, Op, ADMIT};
+    let [port] = common::free_ports();
+    let (a, b, c) = network("presence", port, Caps::default(), [0.0; 3]).await;
+    let n = a.svc.node().shared().clone();
+    let id = n.identity().clone();
+    // One person on all three: studio founded it at its window and paired
+    // laptop's and desk's devices as they joined.
+    let person = id.person_id().unwrap();
+    for h in [&b, &c] {
+        let st = h.state().await;
+        assert_eq!((st["person"]["id"].as_str(), st["person"]["acts"].clone(), st["person"]["owner"].clone()), (Some(person.as_str()), json!(true), json!(true)), "{st}");
+    }
+    let key = |seed: u8| xenonet_id::sign::Signer::public(&xenonet_id::sign::SeedSigner::from_seed(&[seed; 32], xenonet_id::sign::KeyHome::File).unwrap());
+    let spare = || HostRef { id: "spare".into(), keys: *xenonet_net::keys::HostKey::generate().unwrap().public(), window: false, device: None, machine: key(9) };
+    let host_key = xenonet_net::keys::HostKey::load(&a.dir.join("state").join("network").join("host.key")).unwrap().unwrap();
+    let now = now_ms() as i64;
+    let admit = |e: &xenonet_net::roster::Entry| id.prove(true, ADMIT, &e.digest(), "", now).unwrap();
+    // With presence for it: taken. Without, or with a block lifted off
+    // another entry: refused, as presence.
+    let mut e = n.draft(Op::Add, spare(), None);
+    let block = admit(&e);
+    e.sign_with("studio", &host_key, Some(block.clone()));
+    n.roster().would_take(&e).unwrap();
+    let mut bare = n.draft(Op::Add, spare(), None);
+    bare.sign_by("studio", &host_key);
+    assert_eq!(n.roster().would_take(&bare).unwrap_err().code, "presence");
+    let mut lifted = n.draft(Op::Add, spare(), None);
+    lifted.sign_with("studio", &host_key, Some(block));
+    assert_eq!(n.roster().would_take(&lifted).unwrap_err().code, "presence", "a block lifted off another entry");
+    // Asking presence away from the window asks nobody.
+    assert_eq!(id.prove(false, ADMIT, &e.digest(), "", now).unwrap_err().code, "window");
+
+    // The person pairs another device: their chain's new head reaches
+    // laptop and desk, pushed; an entry made under the old head is stale
+    // to a live receiver, though the chain itself would take it.
+    let old = n.draft(Op::Add, spare(), None);
+    let tablet = xenonet_id::sign::SeedSigner::from_seed(&[11; 32], xenonet_id::sign::KeyHome::File).unwrap();
+    id.pair(true, person::NewDevice { key: xenonet_id::sign::Signer::public(&tablet), kind: person::DeviceKind::Weaker, label: "tablet".into() }, now).unwrap();
+    let head = id.head();
+    for h in [&b, &c] {
+        until("the new head pushed", 10, || h.svc.node().shared().identity().head() == head).await;
+    }
+    assert_eq!(n.fresh_person_head(&old).unwrap_err().code, "stale-person-head");
+    n.fresh_person_head(&n.draft(Op::Add, spare(), None)).unwrap();
+
+    // studio's own device is revoked: its presence counts for nothing made
+    // under that head, and it acts as the person no more.
+    let device = id.device_key().unwrap().unwrap();
+    let dev = device.signer.public().id();
+    let mut revoke = id.chain().next(person::Body { op: person::Op::Revoke(person::Revocation::Device(dev.clone())), at: now });
+    let block = id.prove(true, person::REVOKE, &revoke.digest(), "", now).unwrap();
+    revoke.sign(&dev, device.signer.as_ref(), Some(block)).unwrap();
+    id.offer(&person, &[revoke.to_json()]).unwrap();
+    assert!(!id.can_act());
+    let mut e = n.draft(Op::Add, spare(), None);
+    let block = xenonet_id::presence::prove(device.signer.as_ref(), device.check.as_deref(), ADMIT, &e.digest(), "", now).unwrap();
+    e.sign_with("studio", &host_key, Some(block));
+    assert_eq!(n.roster().would_take(&e).unwrap_err().code, "presence", "a revoked device's presence");
+    let (s, v) = a.call("POST", "/api/net/ticket", json!({ "host": "spare" }), true).await;
+    assert_eq!((s, v["code"].clone()), (409, json!("no-person")), "{v}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn adding_a_machine_is_the_windows_and_its_join_pairs_the_device() {
+    let [port] = common::free_ports();
+    let a = Host::new("window", "studio", 0.0, Caps::default()).await;
+    // Without the window's key: no network is made, since setting up the
+    // person asks them.
+    let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), false).await;
+    assert_eq!((s, v["code"].clone()), (403, json!("window")), "{v}");
+    let (s, v) = a.call("POST", "/api/net/create", json!({ "name": "home", "host": "studio", "lan": format!("127.0.0.1:{port}") }), true).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!((v["person"]["owner"].clone(), v["person"]["acts"].clone()), (json!(true), json!(true)), "{v}");
+    // A ticket only from the window.
+    let (s, v) = a.call("POST", "/api/net/ticket", json!({ "host": "laptop" }), false).await;
+    assert_eq!(s, 403, "{v}");
+    let (s, t) = a.call("POST", "/api/net/ticket", json!({ "host": "laptop" }), true).await;
+    assert_eq!(s, 200, "{t}");
+    let b = Host::new("window", "laptop", 0.0, Caps::default()).await;
+    let (s, v) = b.call("POST", "/api/net/join", json!({ "address": format!("127.0.0.1:{port}"), "ticket": t["ticket"] }), true).await;
+    assert_eq!(s, 200, "{v}");
+    // laptop's device is the person's now, and the roster names it.
+    let st = b.state().await;
+    assert_eq!(st["person"]["id"], a.state().await["person"]["id"]);
+    assert_eq!(st["person"]["acts"], true);
+    let roster: Value = serde_json::from_str(&std::fs::read_to_string(b.dir.join("state").join("network").join("roster.json")).unwrap()).unwrap();
+    let add = roster.as_array().unwrap().last().unwrap().clone();
+    assert_eq!((add["op"].clone(), add["host"]["device"].clone()), (json!("add"), st["person"]["device"].clone()), "{add}");
+    assert!(add["signers"][0]["presence"]["what"] == "admit", "{add}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -613,7 +709,9 @@ async fn the_lan_door_checks_its_host_and_bad_tickets_get_404() {
     let code = xenonet_net::ticket::normalize(&ticket).unwrap();
     let join = |code: &str, source: &str| {
         let key = xenonet_net::keys::HostKey::generate().unwrap();
-        let body = xenonet_net::gateway::join_body(&key, code, "bm9uY2Vub25jZW5vbmNlMTIz", "linux", "0", false);
+        let mut body = xenonet_net::gateway::join_body(&key, code, "bm9uY2Vub25jZW5vbmNlMTIz", "linux", "0", false);
+        // The joiner's machine signing key, as a node's join sends it.
+        body["machine"] = xenonet_id::sign::Signer::public(&xenonet_id::sign::SeedSigner::from_seed(&[4; 32], xenonet_id::sign::KeyHome::File).unwrap()).to_json();
         xenonet_net::gateway::NetRequest {
             method: "POST".into(),
             target: "/net/v1/join".into(),

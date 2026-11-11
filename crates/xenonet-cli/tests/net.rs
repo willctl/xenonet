@@ -1,11 +1,11 @@
 // xenonet net and xenonet svc, against the binary: a service of its own on
 // a loopback port the OS picks (its actor gateway on another) with a
 // temporary home and state folder, and the command talking to it. Making
-// a network and publishing a service are the person's, so where these
-// tests run under an agent on macOS the refusal is what's checked; where
-// process checks can't tell (Linux, Windows) or the person runs them, the
-// network is made, its LAN door checked, a service published and taken
-// off, and the network left.
+// a network and publishing a service are the person's, and making the
+// first network sets up their identity, which asks them, so from a
+// terminal it's refused, and the refusal is what's checked. (The network
+// made from the window, its LAN door and its services are the service's
+// own tests, crates/xenonet-service/tests/net*.rs.)
 
 #![cfg(unix)]
 #![expect(clippy::unwrap_used, reason = "a test fails where its helpers unwrap")]
@@ -134,7 +134,10 @@ fn net_makes_a_network_or_is_refused_from_under_an_agent() {
     assert_eq!(code, 2, "no paths: {err}");
     let (code, out, err) = s.run(&["net", "create", "--name", "home", "--host", "studio", "--lan", lan, "--json"]);
     if code != 0 {
-        assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex"), "refused for what it is: {err}");
+        // Under an agent, or (with no identity here yet, which making the
+        // first network sets up and which asks the person) from any
+        // terminal: that's XenoNet's window's.
+        assert!(err.contains("yours") || err.contains("agent") || err.contains("Claude Code") || err.contains("Codex") || err.contains("window"), "refused for what it is: {err}");
         assert_eq!(status(lan, "GET", "/net/v1/roster", &[]), 0, "nothing listens");
         let (code, _, err) = s.run(&["svc", "publish", "files", "http://127.0.0.1:9", "--paths", "/sync/v1/"]);
         assert_eq!(code, 1);

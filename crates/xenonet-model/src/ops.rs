@@ -71,9 +71,11 @@ impl Kind {
         !matches!(self, Self::Presence | Self::Claims | Self::Relay | Self::Svc)
     }
 
-    /// The schema of a body of this kind.
+    /// The schema of a body of this kind: a message and the person's
+    /// answer are at v2, which carry the act's authority.
     pub fn schema(self) -> String {
-        format!("network/{}/v1", self.as_str())
+        let v = if matches!(self, Self::Message | Self::Operator) { 2 } else { 1 };
+        format!("network/{}/v{v}", self.as_str())
     }
 }
 
@@ -95,14 +97,6 @@ pub struct Outgoing {
     pub body: Value,
 }
 
-/// How the person's action was checked on the host it came from
-/// (`network/operator/v1`). Only a strong one is acted on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Checked {
-    Window,
-    Person,
-}
-
 /// A body another host sent, after the network checked its signature
 /// against the roster and opened it.
 #[derive(Debug, Clone)]
@@ -113,8 +107,9 @@ pub struct Incoming {
     pub body: Value,
     /// When the sender made it, by the sender's clock shifted to ours.
     pub at: f64,
-    /// Whether the sending host is a window host, which may act for the
-    /// person (section 3).
+    /// For the map's relay: whether this machine decided the sender may
+    /// read what it relays (an admin's read). The engine decides every
+    /// other kind of act itself, on its own copy of the chains.
     pub from_window_host: bool,
 }
 
@@ -137,24 +132,24 @@ pub struct Host {
 }
 
 /// Who may start sessions on a machine (`start`) and wake its sessions
-/// for a message (`wake`), as its network.json keeps them: what
-/// `delivery::reach` decides by. `pending` lists the changes to `network`
-/// another window host asked for, which wait for the founder or a second
-/// window host (`network/presence/v1`'s reach.pending).
+/// for a message (`wake`), as the network's chain records them (each
+/// member's settings entry). `pending` lists the settings entries for it
+/// another admin signed, which wait for the founder or a second admin
+/// (`network/presence/v1`'s reach.pending).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reach {
     pub start: String,
     pub wake: String,
     pub pending: Vec<Value>,
-    /// While `start` is delegate: the window host whose action set it, and
-    /// when (epoch ms).
+    /// While `start` is delegate: the admins whose entry set it, and when
+    /// (epoch ms).
     pub delegated: Option<(String, i64)>,
 }
 
-/// `start`: nobody, you (from a window host's console), the network (you,
-/// and the sessions and actors on window hosts), or delegate: the network,
-/// and what a session or actor starts here runs on your standing
-/// delegation, within its limits (`delivery::delegation`).
+/// `start`: nobody, you, the network (you, and the network's sessions and
+/// actors), or delegate: the network, and what a session or actor starts
+/// here runs on your standing grant, within its limits
+/// (`delivery::delegation`).
 pub const STARTS: [&str; 4] = ["off", "you", "network", "delegate"];
 /// `wake`: your consent per session (`xenonet live allow`), or any sender
 /// in the network, within the budgets.

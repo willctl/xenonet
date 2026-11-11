@@ -32,7 +32,7 @@ use xenonet_net::gateway::{join_body, NetBody, NetReply, NetRequest};
 use xenonet_net::gwstore::TicketRow;
 use xenonet_net::link::{first_line, refusal, Refusal};
 use xenonet_net::request::{self, Signed, SKEW_MS};
-use xenonet_net::roster::{HostRef, Op, Roster};
+use xenonet_net::roster::{Op, Roster};
 use xenonet_net::ticket;
 
 static MACHINES: Mutex<(Kept, Kept)> = Mutex::new((Kept::new(STUDIO, 500), Kept::new(LAPTOP, 500)));
@@ -142,7 +142,8 @@ fn body_for(gw: &net::Machine, path: &str, signer: usize, c: &mut Choices<'_>) -
             let op = *c.pick(&[Op::Add, Op::Remove, Op::Window, Op::Gateway]);
             let host = c.below(net::HOSTS.len());
             let gateway = (op == Op::Gateway).then(|| xenonet_net::roster::GatewayAt { address: "gw2.example.net".into(), version: roster.view().gateway_version + 1 });
-            let mut e = roster.draft(op, HostRef { id: net::HOSTS[host].into(), keys: net::public(host), window: c.bool() }, gateway, net::now());
+            let mut e = roster.draft(op, net::host_ref(host, c.bool()), gateway, net::now());
+            e.person_head = net::person().head();
             for _ in 0..=c.below(3) {
                 let s = c.below(net::HOSTS.len());
                 e.sign_by(net::HOSTS[s], net::key(s));

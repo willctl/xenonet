@@ -68,6 +68,8 @@ mod made {
             "^[A-Za-z0-9_-]*$" => "AAAA",
             "^[0-9a-f]{32}$" => "0123456789abcdef0123456789abcdef",
             "^xnk1_[a-z2-7]{32}$" => "xnk1_abcdefghijklmnopqrstuvwxyz234567",
+            "^xns1_[a-z2-7]{32}$" => "xns1_abcdefghijklmnopqrstuvwxyz234567",
+            "^prs_[a-z2-7]{32}$" => "prs_abcdefghijklmnopqrstuvwxyz234567",
             "^net_[0-9a-f]{32}$" => "net_0123456789abcdef0123456789abcdef",
             "^sub_[0-9a-f]{32}$" => "sub_0123456789abcdef0123456789abcdef",
             "^svq_[0-9a-f]{32}$" => "svq_0123456789abcdef0123456789abcdef",
@@ -493,7 +495,7 @@ fn every_pattern_in_the_schemas_compiles_and_its_sample_matches() {
 // The network's known answers (test/fixtures/net, which crates/xenonet-net
 // writes and checks) are real frames, a service request and roster
 // entries: they read. (Its message body is a sketch, not a whole
-// network/message/v1.)
+// network/message/v2.)
 #[test]
 fn the_networks_known_answers_read_as_the_model_types() {
     use xenonet_model::network;

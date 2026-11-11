@@ -44,6 +44,10 @@ xenonet-hosts = { path = "../crates/xenonet-hosts" }
 xenonet-model = { path = "../crates/xenonet-model" }
 xenonet-integrations = { path = "../crates/xenonet-integrations" }
 xenonet-net = { path = "../crates/xenonet-net" }
+# The roster's owner and their devices' presence, for the network targets.
+xenonet-id = { path = "../crates/xenonet-id" }
+xenonet-log = { path = "../crates/xenonet-log" }
+xenonet-authz = { path = "../crates/xenonet-authz" }
 xenonet-schema = { path = "../crates/xenonet-schema" }
 xenonet-service = { path = "../crates/xenonet-service" }
 xenonet-sources = { path = "../crates/xenonet-sources" }

@@ -299,9 +299,14 @@ crate::open!(ProcessCheck of KnownProcessCheck {
     NotApplicable = "n/a",
 });
 
-// How strong a check came out: a known strength, or one this XenoNet
-// doesn't name.
-crate::open!(Strength of KnownStrength { Strong = "strong", Partial = "partial", Weak = "weak" });
+// How the machine that vouches for an agent checked it (xenonet-authz's
+// Attestation), or n/a for the person and for what isn't an agent's.
+crate::open!(Attestation of KnownAttestation {
+    Unchecked = "unchecked",
+    ProcessChecked = "process-checked",
+    HarnessSigned = "harness-signed",
+    NotApplicable = "n/a",
+});
 
 // How the envelope's sender was checked.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -310,7 +315,8 @@ pub struct EnvelopeAuth {
     pub method: AuthMethod,
     /// What XenoNet saw of the program that sent it
     pub process: ProcessCheck,
-    pub strength: Strength,
+    /// How the agent was checked, as policy reads it
+    pub attestation: Attestation,
 }
 
 // The program a message came from.
@@ -320,16 +326,15 @@ pub struct Client {
     pub name: String,
 }
 
-// Strong or weak, as another host's check came out, or a strength this
-// XenoNet doesn't name.
-crate::open!(OriginalStrength of KnownOriginalStrength { Strong = "strong", Weak = "weak" });
+// What a message from another host rests on, as this one decided it:
+// the person's device signature, or the sending machine's word.
+crate::open!(OriginalAuthority of KnownOriginalAuthority { Person = "person", Machine = "machine" });
 
-/// For transport network: how the host it came from checked the sender; a weak check stays weak
+/// For transport network: who sent it and what this host checked of it
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OriginalCheck {
     pub kind: String,
-    pub method: String,
-    pub strength: OriginalStrength,
+    pub authority: OriginalAuthority,
 }
 
 // How XenoNet knows who sent a message.
@@ -385,7 +390,7 @@ pub struct MessageEvent {
     #[serde(default, skip_serializing_if = "Opt::is_none")]
     pub verified: Opt<String>,
     #[serde(default, skip_serializing_if = "Opt::is_none")]
-    pub strength: Opt<Strength>,
+    pub attestation: Opt<Attestation>,
 }
 
 /// As engine.sqlite keeps it

@@ -15,6 +15,9 @@
 //! - `presence`: the person's OS check (`UserCheck`), the `PresenceBlock`
 //!   a device signs after it, and the receiver's `PresenceCheck`, which
 //!   takes each block once, for the one act it names, within 60 seconds.
+//! - `vault`: where a machine's own keys come from (`Vault`): its signing
+//!   key, the person's device key and its check, and sealing the person's
+//!   root seed to the device key.
 //! - `did`: a key as a did:key.
 
 pub mod codec;
@@ -23,6 +26,7 @@ pub mod keys;
 pub mod presence;
 pub mod sign;
 pub mod store;
+pub mod vault;
 
 use std::fmt;
 

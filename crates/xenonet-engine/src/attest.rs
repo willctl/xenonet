@@ -9,7 +9,9 @@
 //!              gateway
 //!   process    what XenoNet saw of the program that sent it: signed,
 //!              checked, unchecked, or n/a
-//!   strength   strong, partial or weak: how far the checks go
+//!   attestation how the agent was checked, as policy reads it
+//!              (xenonet-authz's Attestation): process-checked,
+//!              unchecked, or n/a for the person and the gateway's word
 //!   client     the program it came from, when XenoNet saw it (home as ~)
 //!   line       the same in a sentence, for people and agents
 //!
@@ -47,16 +49,14 @@ fn process_of(verdict: &Value, method: &str) -> &'static str {
     }
 }
 
-fn strength_of(method: &str, process: &str) -> &'static str {
-    match method {
-        "window" => "strong",
-        "session" => match process {
-            "signed" => "strong",
-            "checked" => "partial",
-            _ => "weak",
-        },
-        "token" | "grant" if matches!(process, "checked" | "signed") => "partial",
-        _ => "weak",
+/// The attestation a process check comes to: XenoNet saw the process (and
+/// maybe its app's signature), or it couldn't. Harness-signed agents come
+/// with harness signatures, which no app makes yet.
+fn attestation_of(process: &str) -> &'static str {
+    match process {
+        "signed" | "checked" => "process-checked",
+        "unchecked" => "unchecked",
+        _ => "n/a",
     }
 }
 
@@ -74,7 +74,7 @@ fn uuid() -> Result<String, Thrown> {
 /// It fails only when the system has no random numbers for the id.
 pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now: f64, platform: &str) -> Result<Value, Thrown> {
     let process = process_of(verdict, method);
-    let strength = strength_of(method, process);
+    let attestation = attestation_of(process);
     let exe = verdict.get("chain").and_then(Value::as_array).and_then(|l| l.first()).and_then(|f| f.get("exe")).filter(|e| truthy(Some(e)));
     let client = match exe {
         Some(exe) => {
@@ -94,7 +94,7 @@ pub fn attest(sender: Sender<'_>, method: &str, verdict: &Value, home: &str, now
         "mid": format!("msg_{}", uuid()?),
         "at": xenonet_text::json::number(now),
         "sender": { "id": sender.id, "kind": sender.kind, "name": sender.name, "product": sender.product },
-        "auth": { "method": method, "process": process, "strength": strength },
+        "auth": { "method": method, "process": process, "attestation": attestation },
         "client": client,
         "transport": transport,
     });
@@ -167,11 +167,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_signed_session_is_strong() {
+    fn a_checked_session_is_process_checked() {
         let verdict = json!({ "checked": true, "sure": true, "chain": [{ "exe": "/Users/me/bin/claude" }] });
         let sender = Sender { id: "claude:a", kind: "agent", name: Some("Docs"), product: None };
         let env = attest(sender, "session", &verdict, "/Users/me", 1.0, "darwin").unwrap();
-        assert_eq!(env["auth"]["strength"], "strong");
+        assert_eq!(env["auth"]["attestation"], "process-checked");
+        let unchecked = attest(sender, "session", &json!({ "checked": false }), "/Users/me", 1.0, "linux").unwrap();
+        assert_eq!(unchecked["auth"]["attestation"], "unchecked");
+        let window = attest(Sender { id: "you", kind: "you", name: None, product: None }, "window", &json!({}), "", 1.0, "linux").unwrap();
+        assert_eq!(window["auth"]["attestation"], "n/a");
         assert_eq!(env["client"]["exe"], "~/bin/claude");
         assert!(env["line"].as_str().unwrap().starts_with("verified: the session \"Docs\" (claude:a), by its own session's process; XenoNet checked its process"));
     }

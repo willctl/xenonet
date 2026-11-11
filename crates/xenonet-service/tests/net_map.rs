@@ -196,6 +196,8 @@ fn options(dir: &Path, who: &str) -> Options {
         }),
     );
     o.timing = timing();
+    // Fake keys: a test never touches the machine's own, or prompts.
+    o.vault = Some(Arc::new(xenonet_keys::Fake { allow: true }));
     o.caps = Caps::default();
     o
 }

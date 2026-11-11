@@ -1,9 +1,9 @@
 //! xenonet net (docs/design/network.md, "The wire"): one network across
 //! the person's machines, through the local service's /api/net routes.
 //! Creating, joining and leaving are the person's: the service refuses
-//! them from under an agent, as it does `xenonet service install`. A
-//! ticket from a terminal is macOS's alone, where process checks can tell
-//! the person from an agent; elsewhere it's made in XenoNet's window.
+//! them from under an agent, as it does `xenonet service install`. What
+//! asks the person (a ticket, a widening, setting up their identity with
+//! the first network) is made in XenoNet's window, never here.
 
 use crate::args::Flags;
 use crate::js::{list, num, on, str, t};
@@ -140,10 +140,10 @@ fn arg(args: &[String], i: usize, what: &str) -> Result<String, Fail> {
 
 pub fn run(args: &[String], flags: &Flags) -> Done {
     let what = args.first().map_or("status", String::as_str);
-    // Add a machine from a terminal is macOS's alone: refused here before
-    // anything is asked.
-    if what == "add-machine" && !cfg!(target_os = "macos") {
-        return Err(Fail::new("Add a machine is XenoNet's window's on this system: choose Add a machine in the palette", 1));
+    // Add a machine is the window's, since signing the machine in asks
+    // the person: refused here before anything is asked.
+    if what == "add-machine" {
+        return Err(Fail::new("Add a machine is XenoNet's window's, since it asks you: choose Add a machine in the palette", 1));
     }
     let s = need(flags)?;
     let out = |v: &Value, show: &dyn Fn(&Value)| {
@@ -280,7 +280,7 @@ pub fn run(args: &[String], flags: &Flags) -> Done {
             let st = call(&s, "PUT", "/api/net/settings", Some(&Value::Object(body)))?;
             if let Some(host) = on {
                 if !flags.on("json") {
-                    print(format!("{} sent to {host}, which checks it: a change to network or delegate waits for the founder or another window host", c::green("✓")));
+                    print(format!("{} set for {host}: a change to network or delegate waits for the founder or another window host", c::green("✓")));
                     return Ok(0);
                 }
             }

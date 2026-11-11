@@ -71,7 +71,10 @@ pub struct PresenceBlock {
 const WHAT_MAX: usize = 32;
 
 impl PresenceBlock {
-    fn message(&self) -> Vec<u8> {
+    /// What the device signs: device, what, act, nonce and time, one a
+    /// line. Public so a known-answer file can be written with a fixed
+    /// nonce; `prove` is how a block is made.
+    pub fn signed_bytes(&self) -> Vec<u8> {
         format!("{}\n{}\n{}\n{}\n{}", self.device, self.what, b64(&self.act), b64(&self.nonce), self.at).into_bytes()
     }
 
@@ -87,7 +90,7 @@ impl PresenceBlock {
         if &self.act != act {
             return Err(IdError::refused("that presence approves another act"));
         }
-        if !device.verify(Purpose::PRESENCE, &self.message(), &self.sig) {
+        if !device.verify(Purpose::PRESENCE, &self.signed_bytes(), &self.sig) {
             return Err(IdError::refused("that presence's signature doesn't check"));
         }
         Ok(())
@@ -130,7 +133,7 @@ pub fn prove(device: &dyn Signer, check: Option<&dyn UserCheck>, what: &str, act
         check.ok_or_else(|| IdError::refused("this device can't ask the person"))?.confirm(reason)?;
     }
     let mut block = PresenceBlock { device: device.public().id(), what: what.into(), act: *act, nonce: random::<16>()?, at: now, sig: Vec::new() };
-    block.sig = device.sign(Purpose::PRESENCE, &block.message())?;
+    block.sig = device.sign(Purpose::PRESENCE, &block.signed_bytes())?;
     Ok(block)
 }
 
