@@ -6,6 +6,8 @@ One machine is the network's **gateway**. The others keep one outbound HTTP(S) l
 
 Each machine keeps working on its own. Its map, messages, claims and warnings never wait on the gateway, and what it has for other machines waits in its outbox until the gateway answers.
 
+A new machine can also join straight from the machine that invited it, over iroh, without the gateway (see [Joining from an invite](#joining-from-an-invite)). Once joined, it links through the gateway like the rest. Replacing the gateway with iroh links between the machines is the rewrite's transport phase, and [direction.md](../design/direction.md) says what is left of it.
+
 The design is in [docs/design/network.md](../design/network.md).
 
 ## Words
@@ -59,6 +61,18 @@ A ticket can come from any window host, not only the gateway. If it was made on 
 
 Adding a window host gives it a say in the network, so it needs the founder, or two window hosts. A window host made by anyone else waits for a second approval: the founder or another window host sees it in the Network panel under **Waiting for approval**, with **Approve**, which asks you there. The join goes through once it's approved.
 
+### Joining from an invite
+
+`xenonet net invite laptop` makes an invite for a new machine called `laptop` and, apart from it, a code; add `--window` when you'll use a XenoNet window on it. Signing the machine in asks you, so this belongs to XenoNet's window on a window host, like **Add a machine**. Give the new machine the invite, and tell it the code some other way. On the new machine:
+
+```bash
+xenonet net join <invite> <code> --at <ip:port>
+```
+
+The new machine dials the machine that made the invite by the key the invite names: at its address (`--at`, such as its LAN or tailnet address), on your LAN (`--mdns` on both sides), or through the relay the network's chain lists. The invite holds no direct address and no secret. The code works once, for ten minutes, and five wrong codes retire the invite. The two machines prove the code to each other, the inviter signs the new machine in, which asks you there, and the new machine checks the network's chain from its first entry before it trusts it. It then links through the gateway at the address the inviter sends.
+
+### Limits on joining
+
 The join route answers only a valid ticket. Twenty bad tickets in an hour from one address shut it to that address for an hour, and two hundred from anywhere shut it for everyone, which the doctor says. Five wrong tries at one ticket retire it.
 
 ## What agents can do across machines
@@ -69,7 +83,7 @@ A session connected to XenoNet (see [Sessions working together](agents.md)) can 
 - **Message them.** Name one by its id, which for another machine's session is `@laptop:claude:…`, by words from its title, or with a selector: `machine:laptop` narrows to one machine. `repo` reaches the sessions in clones of the same remote on every machine. A message to many reaches 25 sessions at most across the network: this machine's first, then those in clones of the same repo, then the most recently active.
 - **Know it arrived.** The other machine sends receipts back: stored, then seen once the session reads it. XenoNet's state lists them with each message. A message stored there that nobody reads within a week shows as unread. The other machine refuses a message to an actor it only observes, such as one XenoNet reads from its records, and the receipt says why.
 - **Answer.** A reply goes back to the sender on its machine. A thread stops six messages deep, counted on every machine it crosses. To go on, send a message without `reply_to`, which starts a new thread.
-- **Hear of conflicting work.** Before a session edits a file that a session on another machine claimed or is changing in its clone of the same repo, XenoNet warns it, for example: "An agent on laptop (branch fix/login) is changing this file in its clone. Expect a merge conflict." Warnings never block.
+- **Hear of conflicting work.** Before a session edits a file that a session on another machine claimed or is changing in another checkout of the same project (for a repo, a clone of it), XenoNet warns it, for example: "An agent on laptop (branch fix/login) is changing this file in its clone. Expect a merge conflict." Warnings never block.
 - **Hand work off.** The `handoff` tool leaves work for another session: the goal, what's done, what's next, the files, the branch and commit. It goes to a session, or to the sessions in clones of the repo, on any machine, and the first to accept it gets it. The machine that made it decides, so it's taken once.
 
 Actors message each other across machines too. An actor names another machine's actor as `@laptop:actor:muse`, and needs a grant that names it on its own machine. Name the machine too: `by:muse machine:laptop` covers only muse on laptop, while `by:muse` alone covers an actor called muse on any machine (see [scopes](live-delivery.md#what-actors-may-see-scopes)). For muse to answer, its own machine grants it `by:<slug>` for the sender. The machine a message arrives at checks it before storing it, as [Who decides](live-delivery.md#who-decides) says.
@@ -121,7 +135,7 @@ The answers come back as receipts: started, with the new session's id, or refuse
 - **failed**, with why (a sign-in it lacked, the half hour a turn may run, its exit code);
 - **ended without a word**, when it sent no report and left no last message.
 
-The new session needn't be told to report back: XenoNet does, and tells you as soon as the turn ends, even while the session lingers listening for a reply. For you they're a line in the activity feed and a toast; a session that stops to ask or fails is marked as needing you. For a session or an actor, a message, and a session that is idle is woken for it (see [Delivering at once: wake](live-delivery.md#delivering-at-once-wake)). A start goes only to a machine that's online, and its XenoNet must be new enough to take starts: the answer says so at once otherwise, and nothing waits to start later. A machine whose run couldn't sign in to Claude Code says so, and Needs you shows which machine needs `xenonet runs sign-in` (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)). A machine on an older XenoNet reports only that the run ended and its exit code, and says it can't tell more.
+The new session needn't be told to report back: XenoNet does, and tells you as soon as the turn ends, even while the session lingers listening for a reply. For you they're a line in the activity feed and a toast; a session that stops to ask or fails is marked as needing you. For a session or an actor, a message, and a session that is idle is woken for it (see [Delivering at once: wake](live-delivery.md#delivering-at-once-wake)). A start goes only to a machine that's online: the answer says so at once otherwise, and nothing waits to start later. A machine whose run couldn't sign in to Claude Code says so, and Needs you shows which machine needs `xenonet runs sign-in` (see [Signing in for XenoNet's runs](live-delivery.md#signing-in-for-xenonets-runs)).
 
 ### Answering a question that stopped a session
 
@@ -152,7 +166,7 @@ Answers come only from XenoNet's window, never from a terminal or a session. An 
 
 ## Everything crosses through the gateway
 
-Messages, starts, their answers, permission prompts and your answers all cross between machines as signed, sealed frames through the network's gateway, as the map and messages always have. No machine opens a port to another, and no new kind of frame was added, so a machine running an older XenoNet refuses what it doesn't take rather than misreading it.
+Messages, claims, starts, their answers, permission prompts and your answers all cross between machines as signed, sealed frames through the network's gateway, and so do the maps. No machine opens a port to another. Only joining from an invite goes straight between two machines. XenoNet keeps no compatibility with networks, keys or files made by an earlier build: after an update that changes them, set each machine up again.
 
 ## A2A agents
 
@@ -253,7 +267,7 @@ Crosses, signed and sealed:
 - each machine's sessions: id, app, title, state, the line each says it's doing, the repo's remote and branch, its folder with the home folder as `~`, when it was last active, and whether it waits on you;
 - unless the machine shares titles only, each session's detail: the text of what waits on you (a question, or the permission it asks for), its last message (up to 280 characters) and why it seems stuck, with the home folder as `~`;
 - when you last worked at each machine's console, so the chime plays where you are;
-- claims and the files sessions are changing, as the repo's remote and the path inside the repo;
+- claims and the files sessions are changing, as the project and the path inside it;
 - messages, their receipts and handoffs;
 - each machine's start and wake settings, what waits to widen them, and what its XenoNet takes;
 - start requests, with their prompt, and their answers, to and from the machine they're for;
