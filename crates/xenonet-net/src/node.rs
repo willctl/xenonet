@@ -1599,14 +1599,6 @@ impl Node {
         let dir = Dir::new(opts.dir.clone());
         let identity = Identity::open(dir.identity_dir(), opts.vault.clone())?;
         let policy = NetworkPolicy::with(identity.clone());
-        // Who may start and wake sessions here moved into the chain: a
-        // network.json from before keeps them no longer.
-        if dir.has_dropped_fields() {
-            if let Some(n) = dir.read_network()? {
-                dir.write_network(&n)?;
-                (opts.log)("net.upgrade", "network.json's start, wake and delegation settings were dropped: they're the network chain's now, and start at you and your consent");
-            }
-        }
         let net = dir.read_network()?;
         let (key, roster, store) = match &net {
             Some(_) => {

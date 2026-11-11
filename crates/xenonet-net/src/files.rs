@@ -4,8 +4,7 @@
 //! `link.json`, how the link last stood, which the doctor reads, and
 //! `services.json`, the services this host published to the network.
 //! Who may start and wake sessions here is the network's chain's (each
-//! member's `settings` entry), not this file's: a network.json from before
-//! it held them is read past them, and they're dropped when it's written.
+//! member's `settings` entry), not this file's.
 
 use crate::roster::{NetworkPolicy, Roster};
 use crate::{NetError, R};
@@ -51,10 +50,6 @@ pub struct NetFile {
     pub share_load: bool,
     pub joined: i64,
 }
-
-/// The fields a network.json from before the chain held settings has, which
-/// this one drops.
-pub const DROPPED: [&str; 3] = ["start", "wake", "delegated"];
 
 impl NetFile {
     pub fn to_json(&self) -> Value {
@@ -161,12 +156,6 @@ impl Dir {
             Some(v) => NetFile::from_json(&v).map(Some),
             None => Ok(None),
         }
-    }
-
-    /// Whether network.json still has the settings a network.json from
-    /// before the chain held them had: the node drops them, and logs it.
-    pub fn has_dropped_fields(&self) -> bool {
-        read_json(&self.file(NETWORK)).ok().flatten().is_some_and(|v| DROPPED.iter().any(|k| v.get(k).is_some()))
     }
 
     /// `<state>/identity`, beside this folder: the person on this machine.

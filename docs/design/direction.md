@@ -271,10 +271,11 @@ Each stream kind declares its order and retention:
   is attenuation: offline, narrowing only, hop-capped.
 - **A human is proven** by a device signature made after an OS
   user-presence check, carried as a presence block that only a
-  presence-capable surface can mint. On macOS and Windows the check is
-  biometric (Touch ID, Windows Hello) with no passphrase fallback, so a
-  computer-use agent on the same account cannot pass it; Linux uses
-  polkit or a passphrase and is marked weaker. When the person has
+  presence-capable surface can mint. On macOS the check is Touch ID with
+  no passphrase fallback, so a computer-use agent on the same account
+  cannot pass it. Windows uses Windows Hello, PIN included, and Linux
+  polkit or a passphrase; an agent that can type could pass those, so
+  both are marked weaker, in the device's chain entry and in the doctor. When the person has
   enabled a hardware key, the widest acts (admit, widen, publish) also
   need its tap. The block signs the purpose, the hash of the one act it approves
   (or the receiver's nonce) and the time; the receiver accepts it once,
@@ -388,6 +389,12 @@ no one waits for it, and what it finds is fixed in the next commit.
 Releases are cut at the end of a phase, or when Will wants the installed
 XenoNet on a new build, not per change; between releases the installed
 service runs a local build.
+
+There is no backwards compatibility in the rewrite (Will, 2026-11-10):
+no migration or compatibility path for networks, chain entries, tokens or
+state files made by an earlier build. Old data is refused or ignored.
+Machines are set up again from scratch after a phase lands, which is
+Will's step on inix and NEO-REX.
 
 1. **The JS world goes. Done (2026-11-08).** The JS core and its napi
    twins are gone: `core/`, `server/`, the JS `cli/` and `mcp/`,
@@ -508,9 +515,10 @@ can wait for the phase that needs them.
    polkit), with a hardware-key tap added for the widest acts only when a
    hardware key is enabled. The chain policy table in the domain model
    stands. A computer-use agent on the same OS account is inside the
-   threat model: on macOS and Windows presence is biometric only, with no
-   passphrase fallback, so an agent that can type cannot pass it; Linux
-   uses polkit or a passphrase and the doctor says it is weaker.
+   threat model: on macOS presence is Touch ID only, with no passphrase
+   fallback, so an agent that can type cannot pass it. On Windows,
+   Windows Hello with its PIN fallback is accepted (Will, 2026-11-10), and
+   Linux uses polkit or a passphrase; both are marked weaker.
 2. **The machine signing key.** Decided by Will on 2026-11-08: hardened
    by default. On macOS the key lives in the Secure Enclave and on Windows
    in the TPM, non-exportable, signing only through the service; an agent
