@@ -134,6 +134,10 @@ struct Party {
     mail: crate::persist::Memory,
     caps: Mutex<crate::mailbox::Caps>,
     post: Mutex<crate::mailbox::Post>,
+    /// Its presence on link/2, and what it holds of each peer's: the last
+    /// version taken and the presence it adds up to.
+    presence: Mutex<crate::presence::Live>,
+    seen: Mutex<BTreeMap<PeerId, (u64, crate::presence::Own)>>,
     links: OnceLock<Arc<Links>>,
     /// What another host's task asks of this machine, done on its own
     /// simulated host: a socket is written only from the host it's on.
@@ -173,6 +177,8 @@ impl Party {
             mail: crate::persist::Memory::default(),
             caps: Mutex::new(crate::mailbox::Caps::default()),
             post: Mutex::new(crate::mailbox::Post::default()),
+            presence: Mutex::new(crate::presence::Live::default()),
+            seen: Mutex::new(BTreeMap::new()),
             links: OnceLock::new(),
             own: OnceLock::new(),
         })
@@ -225,6 +231,13 @@ impl Party {
                 for a in asks {
                     me.ask(a);
                 }
+                // A peer gone 30 s: its presence ends here.
+                let ended = me.presence.locked().theirs.expired(now);
+                for e in ended {
+                    if let Some(p) = [A, B, C, D].into_iter().find(|n| host_of(*n) == e.host) {
+                        me.seen.locked().remove(&peer(p));
+                    }
+                }
             }
         });
         Ok(links)
@@ -266,6 +279,22 @@ impl Party {
         let n = [A, B, C, D].into_iter().find(|n| peer(*n) == a.to).unwrap_or(0);
         self.asked.locked().push((n, a.from));
         let _ = self.links().send(a.to, Out::Control(Control::Want { network: a.network, author: a.author, inc: a.from.inc, from: a.from.seq }));
+    }
+
+    /// The engine says what this machine's presence is: what changed goes
+    /// to every peer connected now.
+    fn say(&self, network: &str, body: &Value) {
+        let peers: Vec<PeerId> = self.links().peers().into_keys().collect();
+        let out = self.presence.locked().changed(body, &peers);
+        for (p, b) in out {
+            let env = Envelope::live(network, &self.me(), "presence", self.now_ms(), &b).unwrap();
+            let _ = self.links().send(p, Out::Envelope(env));
+        }
+    }
+
+    /// The agents of `of`'s presence as this machine holds it.
+    fn view_of(&self, of: u8) -> Option<Value> {
+        self.seen.locked().get(&peer(of)).map(|(_, own)| own.snapshot()["agents"].clone())
     }
 
     /// Lists `n` as the mailbox of `network` in this machine's chain.
@@ -427,6 +456,10 @@ impl Machine for Party {
         self.hellos.locked().push(hello.network.clone());
         // As a mailbox: what it keeps for the peer, from the start.
         let mut out = Vec::new();
+        // Its presence, whole, on every new connection.
+        if let Some(snap) = self.presence.locked().connected(peer) {
+            out.push(Out::Envelope(Envelope::live(&hello.network, &self.me(), "presence", self.now_ms(), &snap).unwrap()));
+        }
         if let Some(m) = self.member_by_peer(&hello.network, peer) {
             let mail = self.post.locked().handing.start(&self.mail, &hello.network, &m.machine.id(), true).unwrap_or_default();
             out.extend(mail.into_iter().map(Out::Envelope));
@@ -454,7 +487,21 @@ impl Machine for Party {
         };
         if env.class == Class::Live {
             match env.open_live(&peer.0, &view) {
-                Ok(body) => self.live.locked().push((env.network.clone(), body)),
+                Ok(body) => {
+                    // Last writer wins: a version past the one held, on top
+                    // of it.
+                    let counter = body["counter"].as_u64().unwrap_or(0);
+                    let host = self.member_by_peer(&env.network, peer).map(|m| m.id).unwrap_or_default();
+                    self.presence.locked().theirs.took(peer, &host, &env.network, counter);
+                    let mut seen = self.seen.locked();
+                    let (had, own) = seen.entry(peer).or_default();
+                    if counter > *had {
+                        *had = counter;
+                        own.take(&body);
+                    }
+                    drop(seen);
+                    self.live.locked().push((env.network.clone(), body));
+                }
                 Err(_) => {
                     self.refused.fetch_add(1, Ordering::SeqCst);
                 }
@@ -544,6 +591,15 @@ impl Machine for Party {
         let out = crate::holder::serve(&view, at, peer, (network, author, from), held, &mut self.fetching.locked().limits, now);
         self.served.fetch_add(out.iter().filter(|o| matches!(o, Out::Envelope(_))).count() as u64, Ordering::SeqCst);
         out
+    }
+
+    fn up(&self, peer: PeerId, up: bool) {
+        let mut p = self.presence.locked();
+        if up {
+            p.theirs.up(peer);
+        } else {
+            p.disconnected(peer, self.now_ms());
+        }
     }
 
     fn ack_in(&self, peer: PeerId, network: &str, author: &str, at: Pos) {
@@ -1073,3 +1129,6 @@ mod holder;
 
 #[path = "mailbox_tests.rs"]
 mod mailboxes;
+
+#[path = "presence_tests.rs"]
+mod presence;

@@ -50,6 +50,7 @@ use crate::envelope::{Class as EnvClass, Envelope, Me as Recipient};
 use crate::holder::{self, Ask, Fetching};
 use crate::link2::{Control, Links, Machine, NetHello, Out};
 use crate::mailbox::{self, Post};
+use crate::presence::{self as live, Live};
 use crate::roster::Member;
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -123,6 +124,8 @@ pub struct Transport2 {
     /// What this machine owes and hands over as a mailbox, and what it
     /// handed mailboxes as an author.
     pub post: std::sync::Mutex<Post>,
+    /// This machine's presence, what each peer has of it, and the peers'.
+    pub presence: std::sync::Mutex<Live>,
 }
 
 /// This machine's clock, and how far its HLC is ahead of it.
@@ -150,9 +153,19 @@ impl Shared {
     /// The chain's members on link/2: admitted, and kept connected.
     pub fn members_changed(&self) {
         let (Some(t), Some(net)) = (self.link2(), self.network()) else { return };
-        let members: Vec<PeerId> = self.roster().view_ref().map(|v| v.members.values().map(|m| peer_id(&m.keys)).collect()).unwrap_or_default();
+        let (members, first): (Vec<PeerId>, Vec<(PeerId, bool)>) = self
+            .roster()
+            .view_ref()
+            .map(|v| {
+                let ms: Vec<PeerId> = v.members.values().map(|m| peer_id(&m.keys)).collect();
+                let first = v.members.values().map(|m| (peer_id(&m.keys), v.is_window(&m.id) || v.is_mailbox(&m.id))).collect();
+                (ms, first)
+            })
+            .unwrap_or_default();
         t.mesh.set_members(&net.id, members.iter().copied());
-        t.links.keep(members);
+        // Every member up to fifty machines: presence holds only while a
+        // connection is up.
+        t.links.keep(live::keep(&first, t.dial.me()));
     }
 
     /// Takes an entry another member's feed sent, which came `via`: once,
@@ -293,17 +306,69 @@ impl Shared {
         let _ = t.links.send(peer_id(&m.keys), Out::Control(c));
     }
 
-    /// This machine's presence on link/2 as well, to `host`: live, never
-    /// kept or forwarded.
-    pub(super) fn link2_presence(&self, net: &NetFile, host: &str, body: &Value) {
-        let (Some(t), Some(author)) = (self.link2(), self.machine_id()) else { return };
-        let Some(m) = self.roster().view_ref().and_then(|v| v.member(host).cloned()) else { return };
-        match Envelope::live(&net.id, &author, "presence", self.now().max(0.0) as u64, body) {
-            Ok(env) => {
-                let _ = t.links.send(peer_id(&m.keys), Out::Envelope(env));
+    /// This machine's presence on link/2, as the engine just said it: what
+    /// changed goes to each member connected now, shared down to what this
+    /// machine shares with it; nothing goes when nothing changed. Live:
+    /// never kept or forwarded.
+    pub(super) fn link2_presence(&self, net: &NetFile, body: &Value) {
+        let Some(t) = self.link2() else { return };
+        let peers: Vec<PeerId> = t.links.peers().into_iter().filter(|(_, s)| s.networks.contains(&net.id)).map(|(p, _)| p).collect();
+        let out = t.presence.locked().changed(body, &peers);
+        for (peer, b) in out {
+            if let Some(env) = self.live_for(net, peer, &b) {
+                let _ = t.links.send(peer, Out::Envelope(env));
             }
-            Err(e) => self.log("net.link2", &format!("presence for {host} didn't go on link/2: {}", e.message)),
         }
+    }
+
+    /// A presence body as the live envelope for `peer`, shared down to
+    /// what this machine shares with it.
+    fn live_for(&self, net: &NetFile, peer: PeerId, body: &Value) -> Option<Envelope> {
+        let author = self.machine_id()?;
+        let host = self.member_at(peer)?.id;
+        let shown = crate::share::presence_for(body, &self.sharings_with(&host));
+        match Envelope::live(&net.id, &author, "presence", self.now().max(0.0) as u64, &shown) {
+            Ok(env) => Some(env),
+            Err(e) => {
+                self.log("net.link2", &format!("presence for {host} didn't go on link/2: {}", e.message));
+                None
+            }
+        }
+    }
+
+    /// The peers whose connection has been gone 30 s: their presence ends
+    /// here. While the gateway's link is up, its path carries presence and
+    /// says who is online, so this is link/2's alone once it goes (phase 5's
+    /// commit 20). When to look again.
+    fn presence_due(&self) -> Option<u64> {
+        let t = self.link2()?;
+        let now = self.now().max(0.0) as u64;
+        let ended = t.presence.locked().theirs.expired(now);
+        let net = self.network();
+        for e in ended {
+            if self.is_live() {
+                continue;
+            }
+            let Some(net) = net.as_ref().filter(|n| n.id == e.network) else { continue };
+            if let Some(p) = self.peers.locked().get_mut(&e.host) {
+                p.online = false;
+            }
+            self.log("net.link2", &format!("{}'s presence ended: its link/2 connection has been gone 30 s", e.host));
+            let window = self.roster().view_ref().is_some_and(|v| v.is_window(&e.host));
+            xenonet_model::ops::Sink::receive(
+                self.sink.as_ref(),
+                xenonet_model::ops::Incoming {
+                    network: net.id.clone(),
+                    from: e.host,
+                    kind: xenonet_model::ops::Kind::Presence,
+                    body: e.body,
+                    at: self.now(),
+                    from_window_host: window,
+                },
+            );
+        }
+        let next = t.presence.locked().theirs.next_due();
+        next
     }
 
     /// This machine's address record in its network, signed by its machine
@@ -514,6 +579,10 @@ impl Machine for NodeMachine {
             let mail = t.post.locked().handing.start(n.opts.persist.as_ref(), &net.id, &peer_machine, true);
             out.extend(mail.unwrap_or_default().into_iter().map(Out::Envelope));
         }
+        // This machine's presence, whole, on every new connection.
+        if let Some(snap) = n.link2().and_then(|t| t.presence.locked().connected(peer)) {
+            out.extend(n.live_for(&net, peer, &snap).map(Out::Envelope));
+        }
         out.extend(n.resend_sealed(&net, &m, at));
         if let Some(record) = n.address_record() {
             out.push(Out::Control(Control::Address { network: net.id, record }));
@@ -529,7 +598,13 @@ impl Machine for NodeMachine {
         let window = view.is_window(&m.id);
         if env.class == EnvClass::Live {
             match env.open_live(&peer.0, &view) {
-                Ok(body) => n.presence_in(&net, &m.id, body, window),
+                Ok(body) => {
+                    let counter = body.get("counter").and_then(Value::as_f64).map_or(0, |c| c.max(0.0) as u64);
+                    if let Some(t) = n.link2() {
+                        t.presence.locked().theirs.took(peer, &m.id, &net.id, counter);
+                    }
+                    n.presence_in(&net, &m.id, body, window);
+                }
                 Err(e) => n.log("net.link2", &format!("presence from {} was dropped: {}", m.id, e.message)),
             }
             return Vec::new();
@@ -636,6 +711,14 @@ impl Machine for NodeMachine {
 
     fn up(&self, peer: PeerId, up: bool) {
         let Some(n) = self.shared() else { return };
+        if let Some(t) = n.link2() {
+            if up {
+                t.presence.locked().theirs.up(peer);
+            } else {
+                t.presence.locked().disconnected(peer, n.now().max(0.0) as u64);
+                t.fetch_due.notify_one();
+            }
+        }
         let who = n.member_at(peer).map_or_else(|| peer.to_string(), |m| m.id);
         n.log("net.link2", &format!("link/2 with {who} is {}", if up { "up" } else { "down" }));
     }
@@ -678,6 +761,7 @@ pub async fn run(n: Weak<Shared>) {
         fetching: std::sync::Mutex::default(),
         fetch_due: tokio::sync::Notify::new(),
         post: std::sync::Mutex::default(),
+        presence: std::sync::Mutex::default(),
     });
     *s.link2.writing() = Some(t);
     s.members_changed();
@@ -687,13 +771,15 @@ pub async fn run(n: Weak<Shared>) {
 }
 
 /// Moves fetches on when a holder runs out of time or a wait is over, and
-/// sleeps until the next, or until a fetch begins.
+/// ends the presence of peers gone 30 s; sleeps until the next of those,
+/// or until a fetch begins or a connection goes. Nothing here runs on a
+/// tick.
 async fn fetch_clock(n: Weak<Shared>) {
     loop {
         let (wait, t) = {
             let Some(s) = n.upgrade() else { return };
             let Some(t) = s.link2() else { return };
-            let next = s.link2_due();
+            let next = [s.link2_due(), s.presence_due()].into_iter().flatten().min();
             let now = s.now().max(0.0) as u64;
             (next.map(|at| Duration::from_millis(at.saturating_sub(now).max(10))), t)
         };

@@ -46,6 +46,13 @@
 //!   between machines on one connection per peer: a hello with each
 //!   shared network's heads, Want/Ack, kept, loose and live streams, every
 //!   record checked against the networks the connection carries.
+//! - `holder`: filling a feed's gap from any member that holds it, one
+//!   holder at a time; serving the entries this machine applied, to
+//!   current members only.
+//! - `mailbox`: keeping sealed envelopes for away members, Held receipts
+//!   signed by the mailbox, and the hand-off when they connect.
+//! - `presence`: presence as a snapshot on connect and deltas on change,
+//!   valid while the connection is up.
 //! - `join`: joining over `xenonet/join/2`: the invite, the code apart
 //!   from it, proofs both ways, the inviter's tickets, and the joiner's
 //!   check of the chain from its genesis. `ticket`'s gateway proofs stay
@@ -71,6 +78,7 @@ pub mod link2;
 pub mod mailbox;
 pub mod node;
 pub mod persist;
+pub mod presence;
 pub mod request;
 pub mod roots;
 pub mod roster;

@@ -2094,6 +2094,11 @@ impl Net for Shared {
                 To::All => v.members.values().filter(|m| m.id != net.host).map(|m| (m.id.clone(), m.keys)).collect(),
             }
         };
+        // On link/2, what changed, once for every member connected now; a
+        // member that connects later gets the whole of it on connect.
+        if out.kind == Kind::Presence {
+            self.link2_presence(&net, &body);
+        }
         let at = self.gateway_now() as i64;
         let now = self.now() as i64;
         for (to, keys) in targets {
@@ -2109,9 +2114,6 @@ impl Net for Shared {
             let id = frame_id().map_err(|e| e.message)?;
             let d = Draft { network: &net.id, id, kind: out.kind.as_str(), from: &net.host, to: &to, at };
             let f = host_frame(&d, &key, &keys, body, None).map_err(|e| e.message)?;
-            if out.kind == Kind::Presence {
-                self.link2_presence(&net, &to, body);
-            }
             if out.kind.queued() {
                 self.outbox.locked().push(&f, &to, now, &self.opts.outbox);
             } else if self.is_live() {
