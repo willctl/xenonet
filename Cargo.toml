@@ -128,6 +128,8 @@ xenonet-id = { path = "crates/xenonet-id" }
 xenonet-log = { path = "crates/xenonet-log" }
 # Who may do what, decided at the receiver.
 xenonet-authz = { path = "crates/xenonet-authz" }
+# The one store, <state>/xenonet.sqlite.
+xenonet-store = { path = "crates/xenonet-store" }
 # The machine's own keys (the Secure Enclave, polkit), for the composition
 # root alone, and fakes of them.
 xenonet-keys = { path = "crates/xenonet-keys" }

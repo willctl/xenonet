@@ -1,0 +1,26 @@
+[package]
+name = "xenonet-store"
+description = "The one store: <state>/xenonet.sqlite, with one writer, its schema's hash as its version, and one order every chain and feed entry is stored in."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# SQLite, kept behind the store's own types.
+rusqlite.workspace = true
+serde_json.workspace = true
+# The schema's hash, which is the database's version.
+sha2.workspace = true
+# The chains' entries the store keeps.
+xenonet-log.workspace = true
+
+[dev-dependencies]
+# Keys made from seeds, to sign the tests' chain entries.
+xenonet-id.workspace = true
+
+[lints]
+workspace = true
