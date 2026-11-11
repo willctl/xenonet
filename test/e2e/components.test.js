@@ -44,6 +44,13 @@ test("production Desktop restarts without losing its service, console connection
   const out = fs.openSync(path.join(dir, "desktop.log"), "a");
   const child = spawn(electron, process.env.XENONET_TEST_PACKAGED_EXE ? [] : [process.cwd(), "--prod"], { env, stdio: ["ignore", out, out], windowsHide: true });
   fs.closeSync(out);
+  // Every Desktop this test starts, the relaunched one included, is stopped
+  // when it ends, even on a timeout that cuts the finally short: a test
+  // instance left running holds the instance lock, and every later run's
+  // Desktop then quits at once.
+  const desktops = new Set([child.pid]);
+  const reap = () => { for (const pid of desktops) if (alive(pid)) try { process.kill(pid, "SIGKILL"); } catch {} };
+  process.once("exit", reap);
   const s = installedConsole({ env });
   let service;
   let mcp;
@@ -60,6 +67,7 @@ test("production Desktop restarts without losing its service, console connection
     assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, undefined);
     const before = await service.request("status");
     const desktop = await s.ping();
+    desktops.add(desktop.pid);
     await s.driver("terminal", "open");
     const tabs = await s.driver("terminal", "list");
     const id = tabs.tabs[0].id;
@@ -77,6 +85,7 @@ test("production Desktop restarts without losing its service, console connection
     assert.equal(mcp.proc.exitCode, null);
     await assert.rejects(service.request("console", { op: "ping" }), /closed or restarting/);
     await s.launch({ show: process.env.XENONET_E2E_SHOW ?? "hidden" });
+    desktops.add((await s.ping()).pid);
     assert.notEqual((await s.ping()).pid, desktop.pid);
     assert.equal((await mcp.call("terminal", { action: "list" })).result.isError, undefined);
     assert.equal(mcp.proc.exitCode, null);
@@ -130,8 +139,11 @@ test("production Desktop restarts without losing its service, console connection
     throw err;
   } finally {
     mcp?.close();
-    await s.quit().catch(() => {});
+    await Promise.race([s.quit().catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
     child.kill();
+    for (const end = Date.now() + 5000; [...desktops].some(alive) && Date.now() < end; ) await new Promise((r) => setTimeout(r, 100));
+    reap();
+    process.off("exit", reap);
     service ??= await connectService({ env }).catch(() => null);
     const pid = await service?.request("status").then((st) => st.pid).catch(() => null);
     await service?.request("stop", { force: true }).catch(() => {});
