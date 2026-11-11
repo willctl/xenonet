@@ -21,8 +21,8 @@ xenonet-text.workspace = true
 xenonet-schema.workspace = true
 # The runtime (src/runtime.rs): the Doctor and Diagnostics cores over the
 # other cores, the engine's process self-test, the network's
-# checks, state.json read as its type, whether git needs the developer
-# tools, and the checks' processes and timers.
+# checks, whether git needs the developer tools, and the checks'
+# processes and timers.
 tokio.workspace = true
 xenonet-api.workspace = true
 xenonet-engine.workspace = true

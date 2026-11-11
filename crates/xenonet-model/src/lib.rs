@@ -39,7 +39,6 @@ pub mod schema;
 pub mod selector;
 pub mod session;
 pub mod starts;
-pub mod state;
 pub mod system;
 pub mod theme;
 pub mod tray;
@@ -63,7 +62,6 @@ pub const DOCUMENTS: &[&[schema::Writer]] = &[
     network::DOCUMENTS,
     project::DOCUMENTS,
     session::DOCUMENTS,
-    state::DOCUMENTS,
     system::DOCUMENTS,
     theme::DOCUMENTS,
     tray::DOCUMENTS,

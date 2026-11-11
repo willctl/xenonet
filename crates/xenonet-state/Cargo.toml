@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-state"
-description = "The map's data and what XenoNet remembers: state.json and its versions, the graph, search and stats, the checks of what the decision model answers; and the map's runtime, which refreshes the map from the vendor files, tails them live and drives the demo's world."
+description = "The map's data: the graph, search and stats, the checks of what the decision model answers; and the map's runtime, which refreshes the map from the vendor files, tails them live and drives the demo's world."
 version.workspace = true
 edition.workspace = true
 # iroh, through xenonet-net, needs Rust 1.91.

@@ -47,7 +47,6 @@ Where the code is loose, the schema is too:
 | `engine/message/v1`, `engine/claim/v1`, `engine/contact/v1` | The engine's records, as the store keeps them and as the API and events send them | Each is a union of its forms |
 | `doctor/result/v1`, `doctor/run/v1` | The doctor's checks and runs | |
 | `theme/v1` | A theme file, or a theme resolved | Every field is optional, since a theme names only what it changes. The new tokens' values are open |
-| `state/v1`, `state/v2` | What XenoNet saves for you, in the shape the store's state core answers it (`state/v2`) | v1's parts are all optional |
 | `actor/*/v1`, `drift/record/v1` | As the contracts define them | The actors' enums are open |
 | `drift/log/v1` | drift.json: when you last looked, and the `drift/record/v1`s kept | |
 | `app/v1` | An entry of the app registry (`src/shared/apps.js`, embedded in `crates/xenonet-adapter` as `apps.json`): an app XenoNet knows sessions of, and what's fixed about it. `test/apps.test.js` checks every entry | The apps XenoNet only observes have their id, name and numbat's names only |
@@ -55,7 +54,7 @@ Where the code is loose, the schema is too:
 ## Versions
 
 - A schema's `$id` carries its major version: a `Document` whose `ID` is
-  `state/v2` is the file `https://xenonet.dev/schemas/state/v2.json`.
+  `graph/v1` is the file `https://xenonet.dev/schemas/graph/v1.json`.
 - Additive changes keep the major: a new optional field, a new value of
   an enum, a new variant of a union. Change the schema file in place.
 - Anything else makes a new major, defined beside the old one: removing,

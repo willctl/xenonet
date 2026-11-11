@@ -35,8 +35,8 @@ xenonet-api.workspace = true
 xenonet-os.workspace = true
 xenonet-text.workspace = true
 # The doctor's checks, run here when no XenoNet answers, and what they read
-# of this machine: the xenonet command, the launcher, state.json against its
-# schema, drift.json, git and the process lookups' self-test.
+# of this machine: the xenonet command, the launcher, drift.json, git and
+# the process lookups' self-test.
 xenonet-components.workspace = true
 xenonet-doctor.workspace = true
 xenonet-engine.workspace = true

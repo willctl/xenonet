@@ -29,7 +29,7 @@ test("a schema's $id and its short form, both ways", () => {
   assert.equal(SCHEMA_BASE, "https://xenonet.dev/schemas");
   assert.equal(shortId("actor/snapshot", 1), "actor/snapshot/v1");
   assert.equal(schemaId("actor/snapshot", 1), "https://xenonet.dev/schemas/actor/snapshot/v1.json");
-  assert.equal(schemaId("state/v2"), "https://xenonet.dev/schemas/state/v2.json", "from the short form");
+  assert.equal(schemaId("graph/v1"), "https://xenonet.dev/schemas/graph/v1.json", "from the short form");
   assert.equal(schemaUri("vendor/openai/codex/rollout-line/v3"), `${SCHEMA_BASE}/vendor/openai/codex/rollout-line/v3.json`);
   assert.deepEqual(parseSchemaId("drift/record/v1"), { id: "drift/record/v1", path: "drift/record", major: 1 });
   assert.deepEqual(parseSchemaId(`${SCHEMA_BASE}/live/snapshot/v12.json`), { id: "live/snapshot/v12", path: "live/snapshot", major: 12 });
