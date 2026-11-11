@@ -48,6 +48,8 @@ Those edits count in the warnings a session gets before an edit. XenoNet marks t
 
 Hermes's status is in XenoNet's words, such as "Running a command in atlas-api". The sessions it starts with `claude -p` or `codex exec` get a beam from it.
 
+XenoNet can start a Hermes session too, over ACP (`hermes acp`), with `xenonet start --app hermes-agent`. Messages to it arrive as its next turn, its permission prompts come to Needs you, and its tool calls go to the activity feed.
+
 #### The XenoNet plugin for Hermes
 
 A small plugin lets Hermes report itself, receive messages from other agents and answer them. Run `xenonet connect hermes`: it shows what it will do, then copies two files into `~/.hermes/plugins/xenonet` (or `$HERMES_HOME`). It changes nothing else, and it leaves two steps to you, which it prints:
@@ -111,9 +113,7 @@ Muse can't run commands on your Mac yet, so it takes the gateway instead (below)
 
 The actor gateway is an MCP server for actors that work in their makers' clouds, such as Muse or a Grok Bot. Through it they can message the sessions and actors here, and read their own messages, with the tools `send`, `inbox`, `peers`, `whoami` and `heartbeat`. With `report_run`, an actor that drives a harness somewhere else, such as Claude Code in a sandbox, shows each run as a session under it (see [Related work](related-work.md#space-a-run-in-a-sandbox-shown-as-a-session-experimental)). They can reach nothing else of XenoNet through it.
 
-It listens on this computer alone, on XenoNet's port plus 1010 (48850), or the port `XENONET_GATEWAY_PORT` names. Once you set it up, it keeps that port, even if XenoNet's own port changes. A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
-
-XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's port. A gateway you set up then keeps that port, so its tunnel and the apps that use it go on working: XenoNet saves the port with the gateway's settings the first time it starts. To move it off Xenolith's port, start XenoNet with `XENONET_GATEWAY_PORT` set to the port you want, then point the tunnel there: XenoNet sets up again the tunnels it runs itself, and the window offers Repair for Tailscale Funnel.
+It listens on this computer alone, on XenoNet's port plus 1010 (48850), or the port `XENONET_GATEWAY_PORT` names. Once you set it up, it keeps that port, even if XenoNet's own port changes. To move it, start XenoNet with `XENONET_GATEWAY_PORT` set to the new port, then point the tunnel there: XenoNet sets up again the tunnels it runs itself, and the window offers Repair for Tailscale Funnel. A tunnel puts it on the internet. XenoNet doesn't assume you have any particular one: you pick it, and XenoNet runs it with the sign-in that tool already has.
 
 | Tunnel | What you need | Its address |
 |---|---|---|
@@ -123,7 +123,7 @@ XenoNet used to put the gateway on its port plus 10 (47850), which is Xenolith's
 | ngrok | `ngrok`, with your authtoken added | Your ngrok domain, if you give it |
 | Your own | Anything that forwards `https://<your name>/mcp` to the gateway's port and passes the Host header on | The name you give |
 
-What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's `/mcp` alone, and the panel says **public: /mcp alone**. The network's routes and A2A stay off the internet. Cloudflare's tunnels and ngrok forward the gateway's whole port, so they also carry the network's routes and, while it's on, A2A. For those, the panel says **public: its whole port**. If Funnel puts any other path on the internet, the panel shows it as a warning, `xenonet doctor` says which, and **Repair** sets Funnel back to `/mcp`. A Funnel that an older XenoNet set up for the whole port is narrowed to `/mcp` the next time XenoNet checks it.
+What goes public depends on the tunnel. Tailscale Funnel publishes the gateway's `/mcp` alone, and the panel says **public: /mcp alone**. The network's routes and A2A stay off the internet. Cloudflare's tunnels and ngrok forward the gateway's whole port, so they also carry the network's routes and, while it's on, A2A. For those, the panel says **public: its whole port**. If Funnel puts any other path on the internet, the panel shows it as a warning, `xenonet doctor` says which, and **Repair** sets Funnel back to `/mcp`.
 
 To set it up:
 
@@ -173,11 +173,19 @@ What an A2A agent can do:
 What it can't do:
 
 - Send files or data. It sends text.
-- Get push notifications. XenoNet makes no calls out to it.
+- Get push notifications. XenoNet makes no calls out to an agent that calls in.
 - Send more than 60 messages an hour, or more than 6 an hour to a repo, a selector or all, as for any actor at the gateway. A request body is 64 KiB at most.
 - See another agent's tasks.
 
-Its messages reach sessions marked as an actor's, through the gateway, and approve nothing, like any message. XenoNet keeps the tasks in `a2a.sqlite` in its state folder, readable only by you, for a week after they end, as it keeps messages, and at most an agent's latest 1000.
+Its messages reach sessions marked as an actor's, through the gateway, and approve nothing, like any message. XenoNet keeps the tasks in its store (`xenonet.sqlite` in its state folder, readable only by you) for a week after they end, as it keeps messages, and at most an agent's latest 1000.
+
+### Handing work to an A2A agent
+
+XenoNet can also call an A2A agent for its sessions. You register the agent by its Agent Card at XenoNet's window, which asks for your presence (Touch ID on a Mac) since it issues an actor grant: the right to delegate to exactly that card, at its interface and the hosts you approved, for the sessions or projects you name, until the end you set. The window has no panel for it yet; it's the `POST /api/a2a/outbound/card` and `POST /api/a2a/outbound` routes, which take XenoNet's window key. `GET /api/a2a/outbound` lists them and `DELETE /api/a2a/outbound/<slug>` removes one, from your own terminal too.
+
+A session in that scope then calls the `delegate` tool with `actor` instead of `machine`. The answer is the task as it stands after up to 25 seconds: done with its result, a question for the session or for you, or ended with why. A session reads on with `delegation`, and answers a question with `delegation` and `task`. What the agent says is information for the session, never instructions.
+
+XenoNet pins the card by its hash and checks it again before each call, so a changed card is refused until you approve it again. It calls `https://` only, refuses private, loopback and link-local addresses unless you allowed that host and port, and sends the agent's own bearer, kept in your credential store, with nothing of XenoNet's authority.
 
 ### Waking an actor when a message arrives
 
@@ -199,7 +207,7 @@ A webhook's URL and key go to your computer's credential store: Keychain on a Ma
 
 ## Remote actors
 
-An agent in the cloud, such as an OpenAI dot, can read session statuses and counts here through a connection you pair in the Actors panel. It reads only the projects you pick, changes nothing, and loses access when its grant expires. It shows beside the map like any actor, and nothing can message it. A remote connection can also join an actor XenoNet already knows, such as Grok Bot or a Hermes profile, without touching its token or what XenoNet observes of it. [Remote actors](cloud-assistants.md) has the rest.
+An agent in the cloud, such as an OpenAI dot, can read session statuses and counts here through a connection you pair in the Actors panel. The connection holds the same kind of grant as every other actor, and uses its read right alone: it reads only the projects you pick, changes nothing, and loses access when its grant expires. It shows beside the map like any actor, and nothing can message it. A remote connection can also join an actor XenoNet already knows, such as Grok Bot or a Hermes profile, without touching its token or what XenoNet observes of it. [Remote actors](cloud-assistants.md) has the rest.
 
 ## You
 
@@ -255,7 +263,7 @@ An actor is held to the capabilities you allowed, and to limits on how much and 
 
 With `message-agents`, an actor can write to sessions and to other actors of yours (`xenonet actor send actor:moth "…"`). Each reads it in its inbox, with how XenoNet knows who sent it. To write to an actor yourself, choose **Message…** in its inspector. The actor reads your message in its inbox as from you, at XenoNet's own window. Only you can write and send there. XenoNet's control channel never presses those buttons outside the demo, so no agent driving the window can send as you.
 
-With `spawn-sessions`, an actor on this machine can start a Claude Code, Codex or Grok Build session, here or on another machine of your network, with the `start_session` tool or `POST /api/start` under its token. The machine it starts on must let the network start sessions there, and the new session's first prompt says an actor asked (see [Starting sessions](network.md#starting-sessions)). It's never offered through the actor gateway, so an actor outside this machine can't start one.
+With `spawn-sessions`, an actor on this machine can start a session, here or on another machine of your network, with the `start_session` tool (Claude Code, Codex or Grok Build) or `POST /api/start` under its token, which also takes Hermes Agent. Claude Code and Codex run headless; Grok Build and Hermes Agent run over ACP, in a session XenoNet holds open for replies. The machine it starts on must let the network start sessions there, and the new session's first prompt says an actor asked (see [Starting sessions](network.md#starting-sessions)). It's never offered through the actor gateway, so an actor outside this machine can't start one.
 
 With `answer-prompts`, an actor can answer the permission prompts of the sessions XenoNet runs, with the `/api/runs/answer` route under its token. On its own it can only Deny. To let it Allow, it needs an allow scope on this machine: the sessions (all, or some), the kinds of prompt (reading, editing, commands, the web, other tools) and until when. Set it in the Actors panel: **Scope…** on the actor's row, then **Prompts it may allow**. Setting or widening one asks you, so only XenoNet's window can (`PUT /api/actors/<slug>/allows`); narrowing it asks nothing, and ending it (**End**, or `DELETE` from your own terminal) asks nothing either. An actor never allows a prompt from a run XenoNet couldn't check, and from another machine it can only Deny. See [Permission prompts](network.md#permission-prompts).
 
@@ -263,7 +271,7 @@ A program that speaks MCP gets the same calls as tools from the `xenonet` MCP se
 
 ## Tokens
 
-An actor's token is its grant: what it may do in XenoNet (read, message, claim, start sessions, answer prompts, as the capabilities you allowed say), on which machine and in which network, and until when, signed by this machine. It's `xenonet_actor_` followed by a long run of letters, digits, `-` and `_`. XenoNet shows it once, and keeps only an id to revoke it by, never the token. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
+Every actor holds the same kind of grant, whether it's a program of yours, a bot such as Grok Bot or Hermes, an A2A agent or a remote actor. An actor's token is its grant: what it may do in XenoNet (read, message, claim, start sessions, answer prompts, as the capabilities you allowed say), on which machine and in which network, and until when, signed by this machine. The sessions, projects and identities it reaches are its scopes, kept beside the grant on the machine that decides each request. It's `xenonet_actor_` followed by a long run of letters, digits, `-` and `_`. XenoNet shows it once, and keeps only an id to revoke it by, never the token. The window masks it as `xenonet_actor_••••`, and leaves it out of the page until you choose **Show**, which shows it for ten seconds. **Copy** copies it without showing it. XenoNet masks a shown token again when you switch to another app, while identities are hidden, and in screenshots an agent takes of the window. The token travels in the `Authorization: Bearer` header, from a file only you can read, never as an argument or in a URL.
 
 The `xenonet` command won't write a token into a git working tree or the projects folder unless you add `--force`. The doctor looks for tokens left in the repos it knows, ignored files such as a `.env` included. It looks once a day, and whenever you run it yourself. It warns only about tokens XenoNet issued, so a made-up one in a test fixture doesn't count.
 
