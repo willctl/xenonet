@@ -22,6 +22,8 @@ xenonet-sources.workspace = true
 xenonet-claude-code.workspace = true
 
 [dev-dependencies]
+# A lister's environment names the service's runtime.
+tokio.workspace = true
 xenonet-adapter = { workspace = true, features = ["testing"] }
 
 [lints]

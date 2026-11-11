@@ -1,8 +1,9 @@
 //! Codex's adapter (docs/design/direction.md, "Adapters and surfaces"):
 //! its processes, its ways in for live delivery, its connect through
 //! Codex's hooks and MCP settings, and what opens its threads in the
-//! ChatGPT app.
+//! ChatGPT app, and where its sessions are written, for the watcher.
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
 use xenonet_adapter::connect::{Format, Shared};
@@ -10,6 +11,7 @@ use xenonet_adapter::delivery::{self, Finish, Start, Ways};
 use xenonet_adapter::open::Opener;
 use xenonet_adapter::processes::Rules;
 use xenonet_adapter::reader::{Lister, ListerEnv, Tailed};
+use xenonet_adapter::watch::{Cursor, SessionEvent, WatchSpec};
 use xenonet_adapter::{Check, Platform};
 
 /// A pattern compiled once.
@@ -98,6 +100,7 @@ pub mod connect;
 pub mod map;
 mod open;
 pub mod reader;
+pub mod watch;
 
 /// The adapter.
 pub struct Adapter(&'static App);
@@ -151,6 +154,14 @@ impl Platform for Adapter {
 
     fn lister(&self, env: &ListerEnv<'_>) -> Option<Box<dyn Lister>> {
         Some(Box::new(reader::app_server::Codex::new(env)))
+    }
+
+    fn watch(&self, env: &ListerEnv<'_>) -> Vec<WatchSpec> {
+        watch::specs(env)
+    }
+
+    fn changed(&self, paths: &[PathBuf], cursor: &mut Cursor) -> Vec<SessionEvent> {
+        watch::changed(paths, cursor)
     }
 
     fn ask(&self, a: &xenonet_adapter::platform::Ask<'_>) -> Option<(String, Vec<String>)> {

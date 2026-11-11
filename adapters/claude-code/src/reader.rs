@@ -75,6 +75,18 @@ fn subagent_file(norm: &str) -> Option<(String, String)> {
     (session.len() == 36 && session.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| (session.to_string(), agent.to_string()))
 }
 
+/// What a transcript is, by its path (with / for \): a session's own
+/// (`<session>.jsonl`) or a subagent's (`<session>/subagents/agent-<id>.jsonl`).
+pub fn classify(norm: &str) -> Option<Classified> {
+    if let Some((session, agent)) = subagent_file(norm) {
+        return Some(Classified { id: session, agent: Some(agent) });
+    }
+    let rest = norm.strip_suffix(".jsonl")?;
+    let slash = rest.rfind('/')?;
+    let id = &rest[slash + 1..];
+    (id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| Classified { id: id.to_string(), agent: None })
+}
+
 impl Tailed for Reader {
     fn id(&self) -> &'static str {
         "claude"
@@ -108,13 +120,7 @@ impl Tailed for Reader {
     }
 
     fn classify(&self, norm: &str, _root: Option<&str>) -> Option<Classified> {
-        if let Some((session, agent)) = subagent_file(norm) {
-            return Some(Classified { id: session, agent: Some(agent) });
-        }
-        let rest = norm.strip_suffix(".jsonl")?;
-        let slash = rest.rfind('/')?;
-        let id = &rest[slash + 1..];
-        (id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| Classified { id: id.to_string(), agent: None })
+        classify(norm)
     }
 
     fn line(&mut self, t: &mut dyn Tail, _vendor: &dyn VendorCheck, at: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {

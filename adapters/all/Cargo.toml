@@ -31,6 +31,8 @@ rusqlite.workspace = true
 xenonet-text.workspace = true
 xenonet-sources.workspace = true
 xenonet-adapter = { workspace = true, features = ["testing"] }
+# tests/watch.rs: a lister's environment names the service's runtime.
+tokio.workspace = true
 
 [lints]
 workspace = true

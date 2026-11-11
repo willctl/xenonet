@@ -43,6 +43,10 @@ xenonet-model = { path = "crates/xenonet-model" }
 # Names the field a document fails at, which serde's own errors don't.
 serde_path_to_error = "0.1"
 xenonet-adapter = { path = "crates/xenonet-adapter" }
+# What the adapters watch (xenonet_adapter::watch): FSEvents, inotify,
+# ReadDirectoryChangesW and kqueue behind one API, so sessions and repos are
+# pushed, not polled. CC0-1.0 (deny.toml says why that's allowed).
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 # The adapters (adapters/*): one crate per platform, and all of them.
 xenonet-claude-code = { path = "adapters/claude-code" }
 xenonet-codex = { path = "adapters/codex" }

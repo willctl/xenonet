@@ -6,7 +6,8 @@
 //! (`decode_hook`), brings its doctor rows (`checks`), observes its actor
 //! product (`observer`), and, as its code moves out of the core, watches
 //! and reconciles its sessions and offers ways to deliver to, start and
-//! connect its app.
+//! connect its app. `watch` and `changed` say where its sessions'
+//! files are and what a change to them means (`crate::watch`).
 
 use crate::apps::App;
 use crate::check::{Check, CheckCtx, CheckRow, Stop};
@@ -17,7 +18,9 @@ use crate::observe::Observer;
 use crate::open::Opener;
 use crate::processes::Rules;
 use crate::reader::{Lister, ListerEnv, Native, Tailed};
+use crate::watch::{Cursor, SessionEvent, WatchSpec};
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Arc;
 use xenonet_model::actions::HookEvent;
 use xenonet_os::paths::Zone;
@@ -109,6 +112,22 @@ pub trait Platform: Send + Sync {
     /// an app whose sessions the map lists.
     fn lister(&self, _env: &ListerEnv<'_>) -> Option<Box<dyn Lister>> {
         None
+    }
+
+    /// Where its sessions and transcripts are written, for the watcher
+    /// (`crate::watch`), under the folders `env` names. None for an app
+    /// whose sources can't be watched: its scan stays the way they're
+    /// read, at start and in each reconcile.
+    fn watch(&self, _env: &ListerEnv<'_>) -> Vec<WatchSpec> {
+        Vec::new()
+    }
+
+    /// What changed in its sessions, given paths under its specs that
+    /// changed (as the watcher names them: the cursor's specs say which
+    /// is which), reading only what was added since `cursor`, which it
+    /// moves on.
+    fn changed(&self, _paths: &[PathBuf], _cursor: &mut Cursor) -> Vec<SessionEvent> {
+        Vec::new()
     }
 
     /// What opens its sessions and projects in its desktop app, for an app
@@ -356,6 +375,13 @@ impl Registry {
     /// the reader's row, in order.
     pub fn native(&self) -> Vec<(&App, Box<dyn Native>)> {
         self.platforms.iter().filter_map(|p| Some((p.app(), p.native()?))).collect()
+    }
+
+    /// The adapters whose apps' files can be watched, with their specs, in
+    /// order, each under its app's own folders (`env`), for
+    /// `watch::Sessions::start`.
+    pub fn watches<'e>(&self, env: impl Fn(&App) -> ListerEnv<'e>) -> Vec<(Arc<dyn Platform>, Vec<WatchSpec>)> {
+        self.platforms.iter().map(|p| (p.clone(), p.watch(&env(p.app())))).filter(|(_, specs)| !specs.is_empty()).collect()
     }
 
     /// New listers of the apps whose sessions the map lists, in order,

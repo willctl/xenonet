@@ -18,6 +18,9 @@
 //!   the adapters and the core both look up.
 //! - `open`: the actions a node offers and the URLs they open, through
 //!   each app's `Opener`.
+//! - `watch`: where a platform's sessions and transcripts are written,
+//!   what a change to them means, and the watcher that pushes those
+//!   changes (`notify`, with a 100 ms debounce) instead of a poll.
 //! - `formats`: formats several crates read: Codex's apply_patch text
 //!   (`patch`) and OpenCode's ids (`opencode`).
 //!
@@ -36,6 +39,7 @@ pub mod platform;
 pub mod processes;
 pub mod products;
 pub mod reader;
+pub mod watch;
 
 pub use check::{Check, CheckCtx, CheckRow, Slot, Stop, Verdict};
 pub use platform::{install, platforms, Hook, Platform, Registry};

@@ -1,8 +1,11 @@
 //! Cursor's adapter (docs/design/direction.md, "Adapters and surfaces"):
-//! the reader of the runs its XenoNet hook reports.
+//! the reader of the runs its XenoNet hook reports, whose file the
+//! watcher watches.
+use std::path::PathBuf;
 use std::sync::Arc;
 use xenonet_adapter::apps::{app, App};
-use xenonet_adapter::reader::Native;
+use xenonet_adapter::reader::{ListerEnv, Native};
+use xenonet_adapter::watch::{self, Cursor, SessionEvent, WatchSpec};
 use xenonet_adapter::Platform;
 
 pub mod reader;
@@ -24,5 +27,14 @@ impl Platform for Adapter {
 
     fn native(&self) -> Option<Box<dyn Native>> {
         Some(Box::new(reader::Row))
+    }
+
+    /// The file XenoNet's Cursor hook appends each event to.
+    fn watch(&self, env: &ListerEnv<'_>) -> Vec<WatchSpec> {
+        WatchSpec::file("events", reader::Row.at(&env.paths()), &[]).into_iter().collect()
+    }
+
+    fn changed(&self, paths: &[PathBuf], cursor: &mut Cursor) -> Vec<SessionEvent> {
+        watch::whole_source(paths, cursor)
     }
 }

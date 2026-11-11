@@ -61,6 +61,13 @@ fn uuid_before(norm: &str) -> Option<String> {
     ok.then(|| id.to_string())
 }
 
+/// The thread a rollout is of, by its path: the uuid its name ends with,
+/// for a file named `rollout-…`.
+pub fn rollout_id(norm: &str) -> Option<String> {
+    let id = uuid_before(norm)?;
+    norm.contains("rollout-").then_some(id)
+}
+
 impl Reader {
     pub fn new() -> Reader {
         Reader { limits: Value::Null, ..Reader::default() }
@@ -449,8 +456,7 @@ impl Tailed for Reader {
         if root.is_none() && !norm.contains("/.codex/") {
             return None;
         }
-        let id = uuid_before(norm)?;
-        norm.contains("rollout-").then_some(Classified { id, agent: None })
+        rollout_id(norm).map(|id| Classified { id, agent: None })
     }
 
     fn line(&mut self, t: &mut dyn Tail, _vendor: &dyn VendorCheck, at: &Where, raw: Value, live: bool, now: f64, out: &mut Vec<Emit>) -> Result<(), TypeError> {

@@ -456,6 +456,11 @@ impl ListerEnv<'_> {
     pub fn var(&self, k: &str) -> Option<String> {
         self.env.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string)
     }
+
+    /// The folders a native reader reads from, as these name them.
+    pub fn paths(&self) -> Paths<'_> {
+        Paths { home_dir: self.home_dir, state_dir: self.state_dir, env: self.env }
+    }
 }
 
 /// A request of an app's own server that failed: its message, and the

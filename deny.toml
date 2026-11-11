@@ -39,6 +39,12 @@ allow = [
   # subtle, which rustls (the service's HTTPS client) uses for its
   # constant-time comparisons.
   "BSD-3-Clause",
+  # notify, the file watcher the adapters push sessions' changes from
+  # (FSEvents, inotify, ReadDirectoryChangesW behind one API), which no
+  # crate under the licenses above does across all three. CC0 is a public
+  # domain dedication with a fallback licence that asks less than MIT, so
+  # it fits XenoNet's MIT.
+  "CC0-1.0",
 ]
 
 [licenses.private]
