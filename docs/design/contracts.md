@@ -117,8 +117,8 @@ reason in the commit.
 - Kept in the cache folder (`drift.json`, a `drift/log/v1`: `{version,
   lookedAt, records}`; at most 500 records, oldest dropped first,
   `crates/xenonet-schema/src/drift.rs`). The doctor warns about drift seen
-  since you last looked. Only `xenonet drift` and the console mark drift
-  as looked at. `xenonet drift --exit-code` exits 1 when there's new
+  since you last looked. Only `xenonet drift` marks drift as looked at
+  (`POST /api/drift/seen`), never the doctor. `xenonet drift --exit-code` exits 1 when there's new
   drift and leaves it unmarked, so a script goes on exiting 1 until you
   look with plain `xenonet drift` or the console.
 
