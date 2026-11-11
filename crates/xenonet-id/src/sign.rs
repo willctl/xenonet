@@ -33,6 +33,8 @@ impl Purpose {
     pub const TOKEN_ROOT: Purpose = Purpose("xenonet-token-root/1");
     /// An act done as a person, signed by their device.
     pub const ACT: Purpose = Purpose("xenonet-act/1");
+    /// An entry of a machine's feed in a network (`xenonet-log`'s feeds).
+    pub const FEED: Purpose = Purpose("xenonet-feed/1");
 
     pub const fn tag(self) -> &'static str {
         self.0

@@ -239,6 +239,11 @@ seed("misc", "theme", 5, JSON.stringify({ midnight: { extends: "phosphor", color
   seed("misc", "tar", 0, Buffer.concat([header("cli/", "5", 0), header("PaxHeader", "x", pax.length), pad(pax), header("cli/xenonet.js", "0", body.length), pad(body), Buffer.alloc(1024)]));
 }
 
+// ---------- feeds ----------
+// A machine's feed entries, from their known answers.
+const feed = JSON.parse(fs.readFileSync(path.join(repo, "test", "fixtures", "log", "feed.json"), "utf8"));
+feed.entries.forEach((e, i) => seed("feed_decode", `entry-${i}`, JSON.stringify(e.entry)));
+
 // ---------- tools ----------
 seed("tools", "gh-hosts", 0, "github.com:\n    git_protocol: https\n    users:\n        nova-dev:\n        orbitworks:\n            oauth_token: gho_made_up\n    user: nova-dev\nghe.atlas.example:\n    user: nova\n");
 seed("tools", "ssh-config", 0, "Host gh-orbit\n  HostName github.com\n  User git\nHost *\n  AddKeysToAgent yes\ngit@gh-orbit:orbitworks/pathfinder.git\nhttps://github.com/atlas-co/atlas-api.git\n");

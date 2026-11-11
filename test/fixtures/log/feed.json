@@ -1,0 +1,91 @@
+{
+  "about": "Known answers for a machine's feed (crates/xenonet-log/src/feed.rs): written by crates/xenonet-log/tests/feed.rs. The seed is a test value, never a machine's.",
+  "network": "net_00112233445566778899aabbccddeeff",
+  "author": {
+    "seed": "TAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw",
+    "keyId": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4"
+  },
+  "entries": [
+    {
+      "what": "the feed's first entry",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"network\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":1,\"prev\":{\"inc\":0,\"seq\":0},\"kind\":\"claim\",\"at\":1792512345679,\"body\":{\"project\":\"prj_atlas\",\"path\":\"src/api.rs\",\"note\":\"the route\"}}",
+      "id": "Hn7QZ7mGcHLMdsohp8AO1Sanmo2pe6Z01b1o3mQ7zlQ",
+      "entry": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "network": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 1,
+        "prev": {
+          "inc": 0,
+          "seq": 0
+        },
+        "kind": "claim",
+        "at": 1792512345679,
+        "body": {
+          "project": "prj_atlas",
+          "path": "src/api.rs",
+          "note": "the route"
+        },
+        "sig": "7v0-t48W7lad58Jf6yHrFE0wMWdTfWG82nlVA5Q_gzGdF9rTHRTsQ7S-YLKPveyyXiWEz4AV7IMmy7sn2OC9Aw"
+      }
+    },
+    {
+      "what": "a second kept entry",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"network\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":2,\"kind\":\"intent\",\"at\":1792512345680,\"body\":{\"op\":\"make\",\"goal\":\"fix the build\"}}",
+      "id": "no9BPKEnI_10v2EfIiriR7FL7NwIcTMH6b0n2ao2zSA",
+      "entry": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "network": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 2,
+        "kind": "intent",
+        "at": 1792512345680,
+        "body": {
+          "op": "make",
+          "goal": "fix the build"
+        },
+        "sig": "TQKV1nSYmEBSwpAxIcPvVU7lfHip_O1aTpDoIo9EOS3gmZvveWC1Wd_iYPYphkY15ftrVivNze-xz7d1K3UFBA"
+      }
+    },
+    {
+      "what": "a loose entry",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"network\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345678,\"seq\":1,\"kind\":\"message\",\"at\":1792512345681,\"body\":{\"to\":\"laptop\",\"text\":\"héllo \\\"there\\\"\"}}",
+      "id": "NeFZGAOXlw7hEAem9TEHxa66FiUqMFLYWXcmu8xP5ZI",
+      "entry": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "network": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345678,
+        "seq": 1,
+        "kind": "message",
+        "at": 1792512345681,
+        "body": {
+          "to": "laptop",
+          "text": "héllo \"there\""
+        },
+        "sig": "Q0tog-xJA0eiHSorY40SOqy4s97PwYW5L7QffGxZS-gSrs23O0ltIjGPfbxDfpIsXXKpLzdmXcodFpXtBPrKBA"
+      }
+    },
+    {
+      "what": "the first after a restore",
+      "signingBytes": "xenonet-feed/1\n{\"author\":\"xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4\",\"network\":\"net_00112233445566778899aabbccddeeff\",\"inc\":1792512345688,\"seq\":1,\"prev\":{\"inc\":1792512345678,\"seq\":1},\"kind\":\"report\",\"at\":1792512345689,\"body\":{\"op\":\"note\",\"text\":\"back\"}}",
+      "id": "Ac8UT1eWTI4noDUoTgK03YUqneQZISkuC1UofjhvBr4",
+      "entry": {
+        "author": "xns1_gryayyol3wxxbjglgvrkp3mvllmkl5u4",
+        "network": "net_00112233445566778899aabbccddeeff",
+        "inc": 1792512345688,
+        "seq": 1,
+        "prev": {
+          "inc": 1792512345678,
+          "seq": 1
+        },
+        "kind": "report",
+        "at": 1792512345689,
+        "body": {
+          "op": "note",
+          "text": "back"
+        },
+        "sig": "l3Zo5NPxaY8dRSSiZdzIY7_XabyoOYlH_BMQwxUQQOsszjIlKL00fGhukenLK4jwzMBnNygEokOJvbED4Tw9BQ"
+      }
+    }
+  ]
+}

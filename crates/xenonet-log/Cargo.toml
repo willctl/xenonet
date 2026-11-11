@@ -1,6 +1,6 @@
 [package]
 name = "xenonet-log"
-description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster) and a person's chain of device keys. Usable alone."
+description = "Signed hash chains and the policies that say who may extend them: a network's chain of machines (the roster) and a person's chain of device keys; and the feeds a machine signs to its network. Usable alone."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,6 +17,8 @@ xenonet-id.workspace = true
 # A P-256 key standing in for a secure element's, in the person chain's
 # tests.
 ring.workspace = true
+# Random deliveries of a feed: reordered, repeated and dropped.
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true
