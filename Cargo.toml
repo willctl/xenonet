@@ -148,6 +148,19 @@ ring = "0.17"
 # X25519 with a key kept on disk, which ring's agreement can't load (it's
 # ephemeral only): pure Rust, no C.
 x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
+# The transport between machines (docs/design/network.md): QUIC with hole
+# punching, relays the person names and address lookup, the endpoint id
+# being host.key's Ed25519 key. TLS on ring, as rustls is here. Left out
+# with the defaults: portmapper (UPnP/NAT-PMP asks the router to open a
+# port, which the person hasn't chosen), metrics, and fast-apple-datapath,
+# which sends and receives UDP in batches through Apple's private
+# sendmsg_x/recvmsg_x calls: undocumented, so free to change or go in any
+# macOS release, and the plain path is fast enough for XenoNet's traffic.
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring"] }
+# Finds the other members on the LAN, behind a machine setting asked at
+# the first network setup. 0.x, so pinned exactly: a minor release may
+# break it.
+iroh-mdns-address-lookup = "=0.6.1"
 # base64url for the network's keys, signatures and sealed bodies (in the
 # lock already through reqwest).
 base64 = "0.23"

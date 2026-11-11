@@ -4,7 +4,8 @@ description = "XenoNet's MCP servers, on rmcp: the engine's tools for sessions a
 version.workspace = true
 edition.workspace = true
 # rmcp needs Rust 1.88 or later (rust-toolchain.toml pins the checkout's).
-rust-version = "1.88"
+# iroh, through xenonet-net, needs Rust 1.91.
+rust-version = "1.91"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

@@ -3,7 +3,8 @@ name = "xenonet-gemini-cli"
 description = "Gemini CLI's adapter: the reader of its chat records."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# iroh, through xenonet-net, needs Rust 1.91.
+rust-version = "1.91"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

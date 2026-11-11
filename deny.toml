@@ -26,6 +26,10 @@ ignore = [
   # proc-macro-error2 is unmaintained; biscuit-auth 6.0.0 needs its
   # datalog-macro feature to build at all, and the macro runs at build time.
   { id = "RUSTSEC-2026-0173", reason = "a build-time proc macro biscuit-auth 6.0.0 can't build without" },
+  # paste is unmaintained (archived, no known bug); netlink-packet-core
+  # 0.8 uses it, through netwatch (iroh's view of the network interfaces
+  # on Linux), and the macro runs at build time.
+  { id = "RUSTSEC-2024-0436", reason = "a build-time macro under iroh's netwatch, archived with no known bug" },
 ]
 
 [licenses]
@@ -39,13 +43,35 @@ allow = [
   # subtle, which rustls (the service's HTTPS client) uses for its
   # constant-time comparisons.
   "BSD-3-Clause",
-  # notify, the file watcher the adapters push sessions' changes from
-  # (FSEvents, inotify, ReadDirectoryChangesW behind one API), which no
-  # crate under the licenses above does across all three. CC0 is a public
-  # domain dedication with a fallback licence that asks less than MIT, so
-  # it fits XenoNet's MIT.
-  "CC0-1.0",
 ]
+
+# A licence the list above doesn't allow, for one crate alone, with why.
+# Another crate under the same licence fails the check until it's added
+# here with its own reason.
+[[licenses.exceptions]]
+# notify, the file watcher the adapters push sessions' changes from
+# (FSEvents, inotify, ReadDirectoryChangesW behind one API), which no
+# crate under the licenses above does across all three. CC0 is a public
+# domain dedication with a fallback licence that asks less than MIT, so
+# it fits XenoNet's MIT.
+crate = "notify"
+allow = ["CC0-1.0"]
+
+[[licenses.exceptions]]
+# webpki-roots, Mozilla's root certificates as data, which iroh-relay
+# always builds in to check a relay's TLS certificate (not optional
+# there). CDLA-Permissive-2.0 is a data licence: share the data freely,
+# keep its notice, no conditions on the code that uses it. That fits
+# XenoNet's MIT.
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
+[[licenses.exceptions]]
+# spez, a small macro crate n0-error (iroh's errors) builds on.
+# BSD-2-Clause asks for the notice to be kept, as MIT does, and less than
+# the BSD-3-Clause allowed above.
+crate = "spez"
+allow = ["BSD-2-Clause"]
 
 [licenses.private]
 # XenoNet's own crates aren't published.

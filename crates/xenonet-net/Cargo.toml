@@ -3,8 +3,8 @@ name = "xenonet-net"
 description = "One network across machines: a host's keys, signed and sealed frames, the roster chain, tickets, the gateway's routes and queues, and a host's link to its gateway."
 version.workspace = true
 edition.workspace = true
-# It runs on tokio beside the service (Rust 1.88+, as the service).
-rust-version = "1.88"
+# It runs on tokio beside the service, and iroh needs Rust 1.91.
+rust-version = "1.91"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -13,6 +13,9 @@ publish.workspace = true
 [dependencies]
 # A link's down stream, as the service's front door hands it to hyper.
 bytes.workspace = true
+# The transport between machines, and finding members on the LAN.
+iroh.workspace = true
+iroh-mdns-address-lookup.workspace = true
 ring.workspace = true
 rusqlite.workspace = true
 reqwest.workspace = true
@@ -35,3 +38,8 @@ xenonet-keys.workspace = true
 
 [lints]
 workspace = true
+
+# Used from the next commit, the Dial (feat(net): Dial, the iroh endpoint
+# and admission).
+[package.metadata.cargo-shear]
+ignored = ["iroh", "iroh-mdns-address-lookup"]

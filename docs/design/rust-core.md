@@ -39,7 +39,8 @@ command keeps its own copy of the units the page prints
 The root `Cargo.toml` takes every crate in `crates/*` and `adapters/*`,
 with cargo's resolver 3, which picks dependency versions that build on the
 declared `rust-version`. The crates are edition 2021 and declare Rust 1.88,
-the oldest that `rmcp` builds on. `fuzz/` is a workspace of its own, since
+the oldest that `rmcp` builds on, except `xenonet-net` and every crate
+that depends on it, which declare 1.91, the oldest that iroh builds on. `fuzz/` is a workspace of its own, since
 libFuzzer needs a nightly Rust.
 
 ### Crates
